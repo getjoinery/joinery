@@ -53,8 +53,8 @@ class ChatMemory {
      * new unsealed memory from sealed-context content (write).
      *
      *   Standard chat:  active on any model (same posture as notes/data access).
-     *   Private/Fortress: active only on a local-model turn. Fortress is pinned
-     *   local, so it always qualifies.
+     *   Private chat:   active only on a local-model turn. A chat with the
+     *   Local models only add-on is pinned local, so it always qualifies.
      */
     public static function activeFor(AiConversation $conversation, string $model): bool {
         if (!$conversation->get('aic_memory_access')) return false;

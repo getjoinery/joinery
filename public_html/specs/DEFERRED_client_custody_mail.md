@@ -7,15 +7,24 @@ as *deferred, not rejected* in `specs/mailbox_encryption_at_rest.md` (§ *Altern
 client-side key handling*) and `specs/mailbox_security_model_public.md` (§ *Why server-side
 decryption*). It builds on `specs/mailbox_hardened_ingest_relay.md` (edge-sealing) and
 `specs/implemented/sealed_vault_core.md`'s **client-custody** mode (already designed for drive/passwords).
+**Level:** this is mail's **Fortress** rung — end-to-end encrypted — per
+`specs/protection_levels_platform.md` (R4, 2026-09-23). Mail shows no Fortress card until
+this is built.
 
 ## What this is
 
-Take Fortress mail one step further: instead of the server decrypting in a bounded unlock
-window (server-custody), the **browser** decrypts and the **server never sees plaintext at
-any point in a message's life**. Fortress already seals each message at the relay edge before
-the main server holds it; moving decryption to the browser closes the last window. The result
-is a **true zero-knowledge mailbox** — the same guarantee Drive and passwords get, applied to
-mail.
+Take Private mail one step further: instead of the server decrypting in a bounded unlock
+window (server-custody), the **browser** decrypts, and each message is encrypted to a key only
+the member's devices hold **the moment it arrives**. After that instant the server can never
+read it again. The result is a **zero-knowledge mailbox** for everything stored — the same
+guarantee Drive and passwords get, applied to mail.
+
+**Arrival is the one moment this cannot cover.** Mail arrives over SMTP in plaintext, so
+whatever receives it holds plaintext for the instant before encrypting it — the same model
+Proton uses. Without the relay, that receiver is the main server. With the **Seal at the
+relay** add-on, it is the separate relay box, and the main server never holds plaintext at
+all. The relay is an add-on here exactly as on Private; Fortress does not require it
+(`specs/protection_levels_platform.md` § Arrival).
 
 It is the maximum posture, and it is a **large build** — essentially a Proton-class mail
 client for the mailboxes that opt in. That size, plus the feature loss below, is why it's
@@ -45,7 +54,7 @@ mailbox. That is the whole tradeoff.
   model). Full-text search still works — it just runs on the device. This replaces mail's
   server-side FTS5-in-tmpfs design for that mailbox.
 - **Compose / send.** The message body is composed and encrypted client-side; DKIM signing
-  (Fortress's in-app signer) either moves to the browser and the signed message is handed to
+  (the sending-lock add-on's in-app signer) either moves to the browser and the signed message is handed to
   the server purely to relay, or stays a server-side in-window step over a body the server
   sees only transiently at send. (Which, is an open question below.)
 - **Threading, sorting, listing** are unaffected — they already run on cleartext operational
@@ -62,7 +71,9 @@ mailbox. That is the whole tradeoff.
 - **Content in push notifications.** For Private today, notifications are generated at ingest
   while the server legitimately holds plaintext pre-seal (sender/subject available).
   Client-custody removes that moment, so notifications become **generic by construction** —
-  "New mail to `user@domain`" — exactly like Fortress already is.
+  "New mail to `user@domain`" — exactly like relay-sealed Private mail already is. (Without
+  the relay the server could read sender/subject at arrival; it must not use them, or the
+  notification becomes the leak.)
 - **New residual introduced:** a **decrypted search index cached in the browser's IndexedDB**
   on the user's device — governed by device security (OS sandbox, disk encryption, screen
   lock), like Drive's offline cache. Zero-knowledge against the *server*; plaintext-index at
@@ -70,12 +81,15 @@ mailbox. That is the whole tradeoff.
 
 ## Packaging (if un-deferred)
 
-Offer it as an **opt-in toggle on Fortress**, **not** a fourth named level (the levels spec
-argues three is the natural count) and **not** a default — most users want the AI triage and
-instant server-side search that require the server to read their mail. The framing: *"this
-mailbox must never be server-readable; I'll give up automatic AI and server-side search on it
-to get that."* It requires Fortress (the relay edge-seals before the server), so it's a
-sub-mode of the maximum tier, not a new axis.
+Offer it as mail's **Fortress card** — the third rung of the platform ladder
+(`specs/protection_levels_platform.md`), meaning end-to-end encrypted, the same promise a
+Fortress Drive folder makes. Never a default: most users want the AI triage and instant
+server-side search that require the server to read their mail. The card states the cost: *"No
+server-side AI or server search on this domain. The server can never read stored mail."* With
+the relay add-on off, the card also says: *"New mail is encrypted the moment it arrives; a
+server hacked while mail is arriving could read what arrives then."* Both mail add-ons (relay
+sealing, sending lock) are offered at Fortress and neither is required; how the sending lock
+works over browser-composed mail is the compose/DKIM question below.
 
 ## Build inventory (what un-deferring would require)
 
@@ -86,9 +100,11 @@ sub-mode of the maximum tier, not a new axis.
 3. **Client-side encrypted search index** — build/sync/query in the browser (WASM SQLite or a
    JS index), IndexedDB caching, incremental fold on new mail. This is the largest single
    piece and the divergent build.
-4. **Relay change: seal to the client-custody key.** The relay already seals at the edge;
-   here it seals to the mailbox's client-custody public key so the main server never holds a
-   decryptable form. Deferred ingest (parse/split/re-seal) would have to move client-side too
+4. **Arrival sealing to the client-custody key, in two places.** Without the relay, the main
+   server's ingest encrypts each message to the mailbox's client-custody public key on receipt
+   and keeps no plaintext copy (no plaintext spool, log or notification text). With the relay
+   add-on, the relay does the same at the edge, so the main server never holds a decryptable
+   form. One sealing format, two call sites. Deferred ingest (parse/split/re-seal) would have to move client-side too
    (the browser does the parse), which is a real re-architecture of the ingest pipeline.
 5. **Compose/DKIM handoff** — resolve where signing happens (open question below).
 6. **Feature gating** — the AI/spam/label surfaces detect a client-custody mailbox and

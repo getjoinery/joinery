@@ -142,8 +142,8 @@ try {
 		'and reports nothing when none does');
 
 	// -----------------------------------------------------------------------
-	// The quiet one: this drives the per-level unlock-window caps and the
-	// Fortress 2FA gate, so a domain-only answer would silently give a user a
+	// The quiet one: this drives the Private unlock-window cap, so a
+	// domain-only answer would silently give a user a
 	// Standard-length window over sealed mail.
 	section('maxSecurityLevelForUser sees an alias-only Private');
 

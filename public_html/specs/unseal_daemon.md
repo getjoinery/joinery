@@ -123,7 +123,7 @@ It holds **windows**. A window is a secret key plus the numbers that bound it,
 tagged with the user id and scope PHP gave at open, addressed by a random
 32-byte handle the daemon minted. PHP stores the handle where it stores the key
 today (`vault:{session_id}:{user_id}:{scope}` in APCu), so every piece of
-window policy PHP has, the session binding, the idle TTL, the Fortress caps,
+window policy PHP has, the session binding, the idle TTL, the hardened caps,
 the heartbeat staleness, the audit rows, keeps working unchanged. What changes
 is what the APCu slot is worth to a thief: a handle opens per-item keys only
 while the daemon still holds that window, and is worthless the moment the
@@ -206,7 +206,7 @@ window that PHP forgot, or whose APCu meta an attacker deleted, still dies on
 schedule in the only place the key exists.
 
 There is one idle clock, not two. Today `vault_unlock_idle_minutes` (the APCu
-TTL) and the Fortress idle cap both mean "no content decrypt for this long";
+TTL) and the hardened idle cap both mean "no content decrypt for this long";
 PHP folds them and passes the smaller. The APCu metadata shrinks to the arming
 time and the heartbeat stamp, the two things the daemon does not know. The
 daemon also carries its own ceiling on the absolute cap
@@ -533,7 +533,7 @@ in the doc.
   close were all folded (2026-09-12): each was two existing operations, a
   promise the window oracle already breaks, or (wrap) a hole.
 - **One idle clock, and a ceiling on every window.** The daemon takes the
-  smaller of the idle setting and the Fortress idle cap, and refuses an
+  smaller of the idle setting and the hardened idle cap, and refuses an
   absolute cap above seven days.
 - **The contacts index gets its own sealed key.** It fixes the hash drift
   every rotation causes today and removes the only HMAC the daemon would have

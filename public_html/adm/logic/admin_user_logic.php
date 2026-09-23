@@ -7,6 +7,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_user_logic — the user detail page.
  *
+ * @version 1.3 - the Security card carries no mail fact: no mail protection level or
+ *   add-on requires a second factor
  * @version 1.2 - the sign-in history reads through MultiLogin; the table is a model
  * @version 1.1 - group membership rows are read once and handed to the view with
  *                each group (specs/post_release_fleet_defects.md B4.2)
@@ -329,7 +331,6 @@ function admin_user_security_facts($user, $session) {
 		'backup_code_count'     => 0,
 		'passkeys'              => array(),
 		'is_self'               => (int)$session->get_user_id() === (int)$user->key,
-		'fortress'              => false,
 		'vault_count'           => 0,
 		'unused_recovery_codes' => 0,
 	);
@@ -346,21 +347,6 @@ function admin_user_security_facts($user, $session) {
 			'last_used'        => $passkey->get_local('pkc_last_used_time', 'M j, Y'),
 			'vault_capability' => $passkey->vault_capability(),
 		);
-	}
-
-	// The mailbox plugin owns the Fortress level and may be inactive - same
-	// availability guard SessionControl::must_enroll_2fa_for_fortress() uses.
-	$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php');
-	if (is_file($domain_class)) {
-		require_once($domain_class);
-		if (class_exists('InboundEmailDomain')) {
-			try {
-				$facts['fortress'] =
-					InboundEmailDomain::maxSecurityLevelForUser((int)$user->key) === 'fortress';
-			} catch (\Throwable $e) {
-				$facts['fortress'] = false;
-			}
-		}
 	}
 
 	// Vault posture, counted the way the unlocker floor counts it: unused

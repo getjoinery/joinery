@@ -5,7 +5,8 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.6.0 - A stored credential (passwordinput 'stored') draws locked with a Reset button (assets/js/stored-secret.js); 'rows' draws a multi-line credential as a textarea
+ * @version 2.7.0 - A checkbox with `switch` draws as an on/off switch (role="switch", .jy-switch)
+ * @changelog 2.6.0 - A stored credential (passwordinput 'stored') draws locked with a Reset button (assets/js/stored-secret.js); 'rows' draws a multi-line credential as a textarea
  * @changelog 2.5.0 - One editor for htmlmode and markdownmode (assets/js/joinery-editor.js): editor_view and editor_cleanup options, no jQuery
  * @changelog 2.4.1 - jQuery for the Trumbowyg editor is served from assets/vendor, not a CDN (CSP has no script CDN)
  * @changelog 2.4.0 - textbox markdownmode option: toolbar + server-rendered live preview (assets/js/markdown-editor.js)
@@ -267,9 +268,13 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $class = $data['class'];
         $id = $data['id'];
 
-        $html = '<div id="' . htmlspecialchars($data['name']) . '_container" class="form-check">';
+        $is_switch = !empty($data['switch']);
+        $html = '<div id="' . htmlspecialchars($data['name']) . '_container" class="form-check' . ($is_switch ? ' jy-switch' : '') . '">';
 
         $html .= '<input type="checkbox"';
+        if ($is_switch) {
+            $html .= ' role="switch"';
+        }
         $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="form-check-input' . ($class ? ' ' . htmlspecialchars($class) : '') . '"';
@@ -348,7 +353,7 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
 
             // In card mode each card carries an addressable id ({name}_{value}_card)
             // so a field-visibility rule on another control can show/hide a single
-            // option (e.g. hiding the Fortress card for an IMAP-source domain).
+            // option (e.g. hiding one level card where that level is not offered).
             $html .= '<div class="form-check' . ($is_card ? ' jy-radio-card' : '') . '"'
                 . ($is_card ? ' id="' . htmlspecialchars($id . '_card') . '"' : '') . '>';
             $html .= '<input type="radio"';

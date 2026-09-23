@@ -23,6 +23,7 @@
  * distinguisher, or a bounce, and reviewing a new kind means reviewing two pure
  * functions.
  *
+ * @version 1.1.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.1
  */
 
@@ -47,7 +48,7 @@ interface DirectKindHandler {
 	 * Does this recipient accept this kind from this sender? Nothing else.
 	 *
 	 * It never sees vault lock state, never composes a wire response, and at
-	 * Private and Fortress is NOT CALLED AT RECEIVE — the framework accepts
+	 * Private is NOT CALLED AT RECEIVE — the framework accepts
 	 * unconditionally there and defers the gate to the next unlock. A decline
 	 * becomes the wire's `declined` at Standard and a silent local filing
 	 * decision at the sealed tiers; the handler cannot tell which, and that is

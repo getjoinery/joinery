@@ -4,7 +4,7 @@
  *
  * Who can open a sealed conversation.
  *
- * A Private or Guarded conversation has one key of its own, and that key is
+ * A Private conversation has one key of its own, and that key is
  * wrapped separately to every participant's vault public key — one row here per
  * (conversation, member). The server reads a message only while at least one
  * participant is present with an open unlock window, because only a present

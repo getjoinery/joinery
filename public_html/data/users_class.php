@@ -767,7 +767,7 @@ private static function UcName($string) {
 	}
 
 	/**
-	 * True when the account has an active Sealed Vault (any Private/Fortress
+	 * True when the account has an active Sealed Vault (any Private
 	 * mailbox). The vault-holder branch of the password-reset authorizers keys
 	 * off this: reset re-issues the session, never the vault, so a vault holder's
 	 * passkey reset additionally demands the account's second factor

@@ -7,10 +7,10 @@
  * button calls this before re-reading the list, so "Refresh" means "go get my
  * mail", not just "re-ask the database". Two pull lanes, both covered:
  *
- *   - Relay spool (the Fortress topology): pull the relay's sealed spool
+ *   - Relay spool (the relay topology): pull the relay's sealed spool
  *     (RelaySpoolConsumer). Without this, arriving mail sits on the relay
  *     until the next cron pass — up to the whole cron interval. The parse of
- *     any Fortress pending rows is NOT done here: the list read that follows
+ *     any relay-sealed pending rows is NOT done here: the list read that follows
  *     drains it (MailboxService::listThreads -> drainRelayBacklog) while the
  *     viewer's vault is unlocked. On direct MX this lane is a fast no-op —
  *     mail is pushed at SMTP time.
@@ -33,6 +33,7 @@
  * later. The response says what was deferred and how long each lane took
  * (specs/mailbox_refresh_budget.md).
  *
+ * @version 1.2.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.2.0 - the click has a time budget; deferred work is handed to the poller
  * @version 1.1.0 - the IMAP lane: Refresh fetches the viewer's feeds too
  * @version 1.0.0

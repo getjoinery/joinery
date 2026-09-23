@@ -121,32 +121,34 @@ try {
 } catch (VaultLockedException $e) { $threw_locked = true; }
 check($threw_locked, 'reading a sealed field with no open window raises VaultLockedException, never ciphertext');
 
-// ---- Fortress local-only enforcement -------------------------------------
-section('Fortress local-only');
+// ---- Local models only add-on -------------------------------------------
+section('Local models only');
 $fort = new AiConversation(NULL);
 $fort->set('aic_owner_user_id', $uid);
-$fort->set('aic_security_level', AiConversation::LEVEL_FORTRESS);
+$fort->set('aic_security_level', AiConversation::LEVEL_PRIVATE);
+$fort->set('aic_local_models_only', true);
 $fort->set('aic_model', 'claude-haiku-4-5');   // a cloud model
 $fort->save();
 harness_register_row('aic_conversations', 'aic_conversation_id', (int)$fort->key);
-// Fortress is enforced by the RESOLVER, from the chat level rather than from a
-// column: the requirement carries a local trust floor, so nothing off the box
-// is even a candidate. That replaces a special case in the provider factory
-// that re-implemented "is this local?" as a second opinion.
+check(ChatSeal::levels() === [ChatSeal::LEVEL_STANDARD, ChatSeal::LEVEL_PRIVATE],
+	'chat offers exactly two levels, Standard and Private');
+check($fort->localModelsOnly(), 'a Private chat with the flag carries the Local models only add-on');
+// The add-on is enforced by the RESOLVER: the requirement carries a local
+// trust floor, so nothing off the box is even a candidate.
 harness_set_setting_mem('joinery_ai_local_model', 'qwen3:4b-instruct');
 AiEndpointRegistry::clearCache();
 $fort_req = AiModelRequirementBuilder::forConversation($fort);
 check($fort_req->trustFloor() === AiModelRequirement::TRUST_LOCAL,
-	'a Fortress chat carries a local trust floor, taken from its level');
+	'a local-only chat carries a local trust floor, taken from the add-on');
 
 $rejected = false;
 try {
 	$fort_res = AiModelResolver::resolve($fort_req);
-	// A cloud PIN on a Fortress chat must not simply be routed around: nothing
-	// it resolves to may leave the box, whatever the pin said.
+	// A cloud PIN on a local-only chat must not simply be routed around:
+	// nothing it resolves to may leave the box, whatever the pin said.
 	$rejected = !$fort_res->isLocal();
 } catch (LlmProviderException $e) { $rejected = false; }
-check(!$rejected, 'and a Fortress chat can never resolve onto a cloud model');
+check(!$rejected, 'and a local-only chat can never resolve onto a cloud model');
 
 $fort->set('aic_model', 'qwen3:4b-instruct');
 $ok_local = false;
@@ -154,7 +156,243 @@ try {
 	$ok_local = AiModelResolver::resolve(
 		AiModelRequirementBuilder::forConversation($fort))->isLocal();
 } catch (Throwable $e) {}
-check($ok_local, 'a Fortress chat on a local model resolves to the local endpoint');
+check($ok_local, 'a local-only chat on a local model resolves to the local endpoint');
+
+// Lowered to Standard the stored flag stays (one-way) but is inert.
+$inert = clone $fort;
+$inert->set('aic_security_level', AiConversation::LEVEL_STANDARD);
+check(!$inert->localModelsOnly()
+	&& AiModelRequirementBuilder::forConversation($inert)->trustFloor() !== AiModelRequirement::TRUST_LOCAL,
+	'on a Standard chat the stored flag is inert — no local floor');
+
+// An unconverted row (still stored as the legacy value until migration
+// aic_001 runs) reads exactly as before: protected, local-only, local floor.
+$unmigrated = new AiConversation(NULL);
+$unmigrated->set('aic_owner_user_id', $uid);
+$unmigrated->set('aic_security_level', AiConversation::LEVEL_PRIVATE);
+$unmigrated->set('aic_model', 'claude-haiku-4-5');
+$unmigrated->save();
+harness_register_row('aic_conversations', 'aic_conversation_id', (int)$unmigrated->key);
+AiConversation::updateColumns((int)$unmigrated->key,
+	['aic_security_level' => AiConversation::LEGACY_LEVEL_LOCAL_ONLY]);
+$unmigrated = new AiConversation((int)$unmigrated->key, TRUE);
+check($unmigrated->isProtected() && ChatSeal::isProtectedLevel($unmigrated->get('aic_security_level'))
+	&& $unmigrated->level() === AiConversation::LEVEL_PRIVATE,
+	'an unconverted legacy row is protected and reads as Private');
+check($unmigrated->localModelsOnly()
+	&& AiModelRequirementBuilder::forConversation($unmigrated)->trustFloor() === AiModelRequirement::TRUST_LOCAL,
+	'an unconverted legacy row is local-only and carries the local floor');
+check(MultiAiConversation::ownerHasProtected($uid), 'the protected-chat SQL still counts unconverted rows');
+
+// One-way: once on, turning it off is refused and the flag stays.
+$off = ChatLevel::setLocalModelsOnly($fort, false, $uid);
+$fort_row = new AiConversation((int)$fort->key, TRUE);
+check(!$off['ok'] && (bool)$fort_row->get('aic_local_models_only'),
+	'turning Local models only off once on is refused, and the flag stays on');
+
+// Turning it on for a Private chat pins the model to a local one.
+$plain = new AiConversation(NULL);
+$plain->set('aic_owner_user_id', $uid);
+$plain->set('aic_security_level', AiConversation::LEVEL_PRIVATE);
+$plain->set('aic_model', 'claude-haiku-4-5');
+$plain->save();
+harness_register_row('aic_conversations', 'aic_conversation_id', (int)$plain->key);
+$plain->load();
+$on = ChatLevel::setLocalModelsOnly($plain, true, $uid);
+$plain_row = new AiConversation((int)$plain->key, TRUE);
+check($on['ok'] && (bool)$plain_row->get('aic_local_models_only'),
+	'turning Local models only on for a Private chat stores the flag');
+check(ChatLevel::isLocalModel((string)$plain_row->get('aic_model')),
+	'and pins the chat model to a local one');
+
+// It lives under Private: a Standard chat is refused.
+$std = new AiConversation(NULL);
+$std->set('aic_owner_user_id', $uid);
+$std->set('aic_security_level', AiConversation::LEVEL_STANDARD);
+$std->save();
+harness_register_row('aic_conversations', 'aic_conversation_id', (int)$std->key);
+$std->load();
+$std_on = ChatLevel::setLocalModelsOnly($std, true, $uid);
+check(!$std_on['ok'], 'Local models only is refused on a Standard chat');
+
+// Refused without a local model: a catalog with no local endpoint.
+$scratch = harness_scratch_dir('no_local_catalog');
+$endpoints = json_decode(file_get_contents(PathHelper::getIncludePath('plugins/joinery_ai/ai_endpoints.json')), true);
+$endpoints['endpoints'] = array_values(array_filter($endpoints['endpoints'],
+	function ($e) { return ($e['trust'] ?? '') !== 'local'; }));
+file_put_contents($scratch . '/ai_endpoints.json', json_encode($endpoints));
+$prev_catalog = AiEndpointRegistry::useCatalogFiles($scratch . '/ai_endpoints.json', null);
+try {
+	check(!ChatLevel::localModelConfigured(), 'fixture: a catalog with no local endpoint serves no local model');
+	$nolocal = new AiConversation(NULL);
+	$nolocal->set('aic_owner_user_id', $uid);
+	$nolocal->set('aic_security_level', AiConversation::LEVEL_PRIVATE);
+	$nolocal->save();
+	harness_register_row('aic_conversations', 'aic_conversation_id', (int)$nolocal->key);
+	$nolocal->load();
+	$nl = ChatLevel::setLocalModelsOnly($nolocal, true, $uid);
+	$nolocal_row = new AiConversation((int)$nolocal->key, TRUE);
+	check(!$nl['ok'] && !(bool)$nolocal_row->get('aic_local_models_only'),
+		'Local models only is refused when no local model is configured');
+	check(ChatLevel::resolveLocalOnlyForNew('1', AiConversation::LEVEL_PRIVATE) === false,
+		'a new chat asking for Local models only without a local model starts without it');
+} finally {
+	AiEndpointRegistry::useCatalogFiles($prev_catalog[0] ?? null, $prev_catalog[1] ?? null);
+}
+check(ChatLevel::resolveLocalOnlyForNew('1', AiConversation::LEVEL_STANDARD) === false,
+	'a new Standard chat never starts with Local models only');
+
+// ---- New-chat level resolution -------------------------------------------
+section('New-chat level resolution');
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSend.php'));
+harness_set_setting_mem('joinery_ai_local_model', 'qwen3:4b-instruct');
+AiEndpointRegistry::clearCache();
+check(ChatLevel::localModelConfigured(), 'fixture: a local model is configured');
+
+// B4: a site default still stored under the legacy name (before aic_001 runs)
+// means Private pinned to a local model — not Standard with no pin.
+harness_set_setting_mem('joinery_ai_default_chat_level', AiConversation::LEGACY_LEVEL_LOCAL_ONLY);
+harness_set_setting_mem('joinery_ai_default_chat_local_only', '0');
+check(ChatLevel::defaultLevel() === AiConversation::LEVEL_PRIVATE,
+	'a legacy default level reads as Private');
+check(ChatLevel::defaultLocalOnly() === true,
+	'a legacy default level turns the Local models only default on, whatever the unseeded flag says');
+$lvl_new = ChatLevel::resolveForNew(null, $uid);
+check($lvl_new === AiConversation::LEVEL_PRIVATE
+	&& ChatLevel::resolveLocalOnlyForNew(null, $lvl_new) === true,
+	'under a legacy default a new chat starts Private with Local models only');
+harness_set_setting_mem('joinery_ai_default_chat_level', AiConversation::LEVEL_STANDARD);
+check(ChatLevel::defaultLocalOnly() === false, 'a current default level leaves the add-on default to its own setting');
+
+// B7: a level the caller ASKED for that chat doesn't offer is refused, not
+// silently replaced by the default.
+check(ChatLevel::resolveForNew('privat', $uid) === null, 'a mistyped requested level is refused');
+check(ChatLevel::resolveForNew(ProtectionLevel::FORTRESS . 'x', $uid) === null, 'an unknown requested level is refused');
+check(ChatLevel::resolveForNew('', $uid) === ChatLevel::defaultLevel(), 'no requested level takes the default');
+check(ChatLevel::resolveForNew('Private', $uid) === AiConversation::LEVEL_PRIVATE, 'a requested level is read case-insensitively');
+// An older page posts the retired name (and no add-on field) for "sealed +
+// pinned to a local model": read as Private with the add-on, not refused.
+$legacy_req = ChatLevel::resolveForNew('fortress', $uid);
+check($legacy_req === AiConversation::LEVEL_PRIVATE
+	&& ChatLevel::resolveLocalOnlyForNew(null, $legacy_req, 'fortress') === true,
+	'an older client\'s retired level name starts a Private, Local-models-only chat');
+$built_bad = ChatSend::buildNewConversation($uid, ['security_level' => 'bogus'], 'hello');
+check(isset($built_bad['error']) && !isset($built_bad['conversation']),
+	'building a new chat at an unknown level returns an error, builds nothing');
+$built_old = ChatSend::buildNewConversation($uid, ['security_level' => 'fortress'], 'hello');
+check(($built_old['level'] ?? '') === AiConversation::LEVEL_PRIVATE
+	&& isset($built_old['conversation']) && $built_old['conversation']->localModelsOnly()
+	&& ChatLevel::isLocalModel((string)$built_old['conversation']->get('aic_model')),
+	'a new chat from an older client\'s retired level is Private, local-only, on a local model');
+
+// ---- Chat control writes need the CSRF proof -----------------------------
+// The page sets controls through the /api/v1 action with the browser-session
+// credential; a request without X-Joinery-Csrf is refused, and no CSRF-less
+// web endpoint remains beside it.
+section('Chat control CSRF');
+require_once(PathHelper::getIncludePath('tests/lib/http.php'));
+$view_src = file_get_contents(PathHelper::getIncludePath('plugins/joinery_ai/includes/chat_view_body.php'));
+check(strpos($view_src, "'chat_set_capabilities'") === false
+	&& strpos($view_src, "joaiApiV1('joinery_ai/chat_set_capabilities'") !== false,
+	'the chat page sets controls only through the /api/v1 action');
+check(!file_exists(PathHelper::getIncludePath('plugins/joinery_ai/views/admin/chat_set_capabilities.php'))
+	&& !file_exists(PathHelper::getIncludePath('plugins/joinery_ai/views/profile/chat_set_capabilities.php')),
+	'no CSRF-less web endpoint for chat controls remains');
+
+$csrf_suffix = 'ChatCsrf' . substr(md5(uniqid('', true)), 0, 6);
+$csrf_user = make_user($csrf_suffix);
+$csrf_conv = new AiConversation(NULL);
+$csrf_conv->set('aic_owner_user_id', (int)$csrf_user->key);
+$csrf_conv->set('aic_security_level', AiConversation::LEVEL_STANDARD);
+$csrf_conv->set('aic_temperature', 0.7);
+$csrf_conv->save();
+harness_register_row('aic_conversations', 'aic_conversation_id', (int)$csrf_conv->key);
+$jar = harness_jar_new('jychat');
+$token = harness_web_login($jar, $csrf_user->get('usr_email'), 'TestPassword_' . $csrf_suffix);
+if ($token === null) {
+	harness_skip('web login unavailable for the test user — HTTP CSRF checks skipped');
+} else {
+	$url = '/api/v1/action/joinery_ai/chat_set_capabilities';
+	$temp_now = function () use ($db, $csrf_conv) {
+		return (float)$db->query('SELECT aic_temperature FROM aic_conversations WHERE aic_conversation_id = '
+			. (int)$csrf_conv->key)->fetchColumn();
+	};
+	$r = harness_request('POST', $url, ['jar' => $jar,
+		'body' => ['conversation_id' => (int)$csrf_conv->key, 'field' => 'temperature', 'value' => '0.3']]);
+	check($r['status'] === 403 && abs($temp_now() - 0.7) < 0.001,
+		'a control write without X-Joinery-Csrf is refused (403) and changes nothing', 'status ' . $r['status'] . ' ' . $r['raw']);
+	$r = harness_request('POST', $url, ['jar' => $jar, 'headers' => harness_csrf_header(str_repeat('0', 64)),
+		'body' => ['conversation_id' => (int)$csrf_conv->key, 'field' => 'temperature', 'value' => '0.3']]);
+	check($r['status'] === 403 && abs($temp_now() - 0.7) < 0.001,
+		'a control write with a wrong token is refused (403)', 'status ' . $r['status']);
+	$r = harness_request('POST', $url, ['jar' => $jar, 'headers' => harness_csrf_header($token),
+		'body' => ['conversation_id' => (int)$csrf_conv->key, 'field' => 'temperature', 'value' => '0.3']]);
+	check($r['status'] === 200 && abs($temp_now() - 0.3) < 0.001,
+		'the same write with the page\'s token succeeds', 'status ' . $r['status'] . ' ' . $r['raw']);
+	$r = harness_request('POST', '/profile/joinery_ai/chat_set_capabilities', ['jar' => $jar, 'encode' => 'form',
+		'body' => ['conversation_id' => (int)$csrf_conv->key, 'field' => 'temperature', 'value' => '0.9']]);
+	check(abs($temp_now() - 0.3) < 0.001 && empty($r['json']['success']),
+		'the old web endpoint path writes nothing', 'status ' . $r['status']);
+
+	// B7 surfaces as an ordinary error to the API caller, not a crash.
+	if ((string)Globalvars::get_instance()->get_setting('joinery_ai_chat_enabled')) {
+		$r = harness_request('POST', '/api/v1/action/joinery_ai/chat_send', ['jar' => $jar,
+			'headers' => harness_csrf_header($token),
+			'body' => ['message' => 'hello', 'security_level' => 'bogus']]);
+		check($r['status'] === 422 && stripos((string)($r['json']['error'] ?? ''), 'privacy level') !== false,
+			'chat_send at an unknown level answers a normal 422 error naming the level', 'status ' . $r['status'] . ' ' . $r['raw']);
+	} else {
+		harness_skip('chat disabled on this site — chat_send error-shape check skipped');
+	}
+}
+
+// ---- Migration: the retired third level folds into Private + add-on ------
+// Run inside a transaction that is rolled back, so neither the fixture row
+// nor the setting write outlives the check.
+section('Fold migration');
+$migration = null;
+foreach (require(PathHelper::getIncludePath('plugins/joinery_ai/migrations/migrations.php')) as $m) {
+	if (($m['id'] ?? '') === 'aic_001_fold_fortress_into_local_models_only') $migration = $m;
+}
+check($migration !== null, 'the fold migration is declared');
+if ($migration !== null) {
+	$db->beginTransaction();
+	try {
+		$legacy = new AiConversation(NULL);
+		$legacy->set('aic_owner_user_id', $uid);
+		$legacy->set('aic_security_level', AiConversation::LEVEL_PRIVATE);
+		$legacy->save();
+		AiConversation::updateColumns((int)$legacy->key, ['aic_security_level' => 'fortress']);
+		Setting::put('joinery_ai_default_chat_level', 'fortress');
+		Setting::put('joinery_ai_default_chat_local_only', '0');
+
+		ob_start();
+		$first = $migration['up'](DbConnector::get_instance());
+		$out1 = ob_get_clean();
+		$row = $db->query('SELECT aic_security_level, aic_local_models_only FROM aic_conversations WHERE aic_conversation_id = '
+			. (int)$legacy->key)->fetch(PDO::FETCH_ASSOC);
+		check($first !== 'defer' && $row['aic_security_level'] === 'private' && $row['aic_local_models_only'] === true,
+			'a stored fortress chat becomes Private with Local models only on');
+		$st = $db->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
+		$st->execute(['joinery_ai_default_chat_level']);
+		$lvl = (string)$st->fetchColumn();
+		$st->execute(['joinery_ai_default_chat_local_only']);
+		$lo = (string)$st->fetchColumn();
+		check($lvl === 'private' && $lo === '1',
+			'a fortress default level becomes private with the local-only default on');
+		check(strpos($out1, 'conversation(s) moved') !== false, 'the migration reports what it changed');
+
+		ob_start();
+		$migration['up'](DbConnector::get_instance());
+		$out2 = ob_get_clean();
+		$left = (int)$db->query("SELECT COUNT(*) FROM aic_conversations WHERE aic_security_level = 'fortress'")->fetchColumn();
+		check($left === 0 && strpos($out2, 'aic_conversations: 0 ') !== false
+			&& strpos($out2, 'no change') !== false,
+			'a second run changes nothing (idempotent)');
+	} finally {
+		$db->rollBack();
+	}
+}
 
 // ---- Rotation re-seals the chat DEKs -------------------------------------
 section('Rotation re-seal');

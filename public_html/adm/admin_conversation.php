@@ -89,7 +89,9 @@ if ($conversation->get('cnv_subject')) {
 	echo '<strong>Group name:</strong> ' . htmlspecialchars($conversation->get('cnv_subject'), ENT_QUOTES, 'UTF-8') . '<br>';
 }
 echo '<strong>Protection level:</strong> '
-	. htmlspecialchars(ProtectionLevel::label($conversation->get('cnv_protection_level')), ENT_QUOTES, 'UTF-8') . '<br>';
+	. htmlspecialchars(ProtectionLevelPicker::summary($conversation->protection_level(),
+		$conversation->sealed_exits_only() ? array(ProtectionLevelPicker::ADDON_SEALED_EXITS_ONLY) : array()),
+		ENT_QUOTES, 'UTF-8') . '<br>';
 if ($conversation->get('cnv_delete_time')) {
 	echo '<strong>Status:</strong> <span style="color:red;">Deleted</span> at ' . $conversation->get_local('cnv_delete_time') . '<br>';
 } else {

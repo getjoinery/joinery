@@ -16,7 +16,7 @@
  *  - empty/malformed recipient      → 'unroutable' (genuinely undeliverable, ack-drop)
  *  - disabled/missing domain, recent → 'hold'       (leave on relay for recovery)
  *  - disabled/missing domain, old    → 'aged_out'   (past grace window, ack-drop)
- *  - Fortress blob, no owner, recent → 'hold'       (Fix 7 — never an invisible row)
+ *  - relay-sealed blob, no owner, recent → 'hold'       (Fix 7 — never an invisible row)
  *
  * Plus the half-acked-entry outcomes (consumer 1.9): an entry whose .meta an
  * older joinery-ack deleted (it removed only .seal + .meta, so acked .direct
@@ -52,7 +52,7 @@ class RelaySpoolHoldTest {
 			$this->testUnroutable();
 			$this->testDisabledDomainHolds();
 			$this->testDisabledDomainAgesOut();
-			$this->testFortressOwnerlessHolds();
+			$this->testRelaySealedOwnerlessHolds();
 			$this->testStoredSealDedupsWithoutMeta();
 			$this->testDirectNeedsNoMeta();
 		} catch (\Throwable $e) {
@@ -127,8 +127,8 @@ class RelaySpoolHoldTest {
 		check($o === 'aged_out', "old blob past the grace window → 'aged_out' (got '$o')");
 	}
 
-	private function testFortressOwnerlessHolds() {
-		// Fortress blob (key_kind=user) at a domain with no matching alias and an
+	private function testRelaySealedOwnerlessHolds() {
+		// Relay-sealed blob (key_kind=user) at a domain with no matching alias and an
 		// empty seal public_key → no resolvable owner → hold (never a stored,
 		// invisible ownerless row). Use an ENABLED domain so the domain gate
 		// passes and we reach the owner-resolution branch.
@@ -144,13 +144,13 @@ class RelaySpoolHoldTest {
 			'public_key'   => '', // matches no vault
 			'received_utc' => gmdate('Y-m-d\TH:i:s\Z'),
 		));
-		check($o === 'hold', "ownerless Fortress blob, recent → 'hold' not stored (got '$o')");
+		check($o === 'hold', "ownerless relay-sealed blob, recent → 'hold' not stored (got '$o')");
 
 		// And it must NOT have created an (invisible) pending row.
 		$stmt = $this->db->prepare(
 			"SELECT COUNT(*) FROM iem_inbound_email_messages WHERE iem_recipient = ?");
 		$stmt->execute(array('ghost@rsh-on-' . $this->suffix . '.example'));
-		check(intval($stmt->fetchColumn()) === 0, 'ownerless Fortress hold stored NO row');
+		check(intval($stmt->fetchColumn()) === 0, 'ownerless relay-sealed hold stored NO row');
 	}
 
 	// ── half-acked entries (an older joinery-ack deleted only the .meta) ─────

@@ -19,7 +19,7 @@ class ChatSerializer {
      *  a `locked` flag stand in, so the list still renders/sorts (times, pinned,
      *  level are cleartext) and the client prompts unlock to read it. */
     public static function conversationSummary(AiConversation $c): array {
-        $level  = (string)$c->get('aic_security_level');
+        $level  = $c->level();
         $locked = ChatSeal::isLocked($c);
         if ($locked) {
             $title = ChatSeal::LOCKED_TITLE;
@@ -33,6 +33,8 @@ class ChatSerializer {
             'pinned'         => (bool)$c->get('aic_pinned'),
             'security_level' => $level ?: AiConversation::LEVEL_STANDARD,
             'protected'      => ChatSeal::isProtectedLevel($level),
+            // The active add-on shows with the level wherever the level shows.
+            'local_models_only' => $c->localModelsOnly(),
         ];
         if ($locked) $out['locked'] = true;
         return $out;

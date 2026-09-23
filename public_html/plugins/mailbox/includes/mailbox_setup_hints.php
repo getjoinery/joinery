@@ -11,8 +11,8 @@
  * Three signals, tiered by what they cost:
  *
  *  1. **Free** — half-finished ceremonies readable straight off the domain row
- *     the page already loaded. A Fortress domain whose protect ceremony never
- *     ran is invisible today and costs nothing to catch.
+ *     the page already loaded. A domain that asked for the sending lock and
+ *     never finished the protect ceremony costs nothing to catch.
  *  2. **One query** — has any mail ever arrived for this address. The strongest
  *     single signal that a mailbox works, answered for every alias at once.
  *  3. **Persisted** — the DNS verdict the CheckDomainSetup task last reached.
@@ -23,7 +23,7 @@
  * older than the staleness window is not shown at all — pointing at a domain
  * that was fixed last week wastes the attention this exists to buy.
  *
- * @version 1.0
+ * @version 1.1 - the half-finished signal is a requested, unfinished sending lock
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
@@ -104,8 +104,8 @@ function _mailbox_setup_domain_reason($domain): string {
 	$level = $domain->security_level();
 
 	// Free: half-finished protection ceremonies, straight off the loaded row.
-	if ($level === InboundEmailDomain::LEVEL_FORTRESS && !$domain->get('ied_is_protected_identity')) {
-		return 'Outbound protection was chosen for this domain but never activated.';
+	if ($domain->send_lock_outstanding()) {
+		return 'Only send while I\'m signed in was chosen for this domain but never finished.';
 	}
 	if ($level !== InboundEmailDomain::LEVEL_STANDARD
 			&& trim((string)$domain->get('ied_dkim_selector')) === '') {

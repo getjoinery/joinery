@@ -11,7 +11,8 @@ decision attached. The parent spec keeps the structural questions (unseal
 daemon, package signing, read-only webroot).
 
 **Declined, kept for reference:** none of these checks blocks raising a
-mailbox to Private or Fortress. The owner declined any such gate on
+mailbox to Private or Fortress (the level then called Fortress; now Private's
+mail add-ons). The owner declined any such gate on
 2026-09-07. `VaultHealth` stays advisory; the fixes below make its answers
 true and its remediation text actionable, and stop there.
 

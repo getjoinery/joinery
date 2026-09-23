@@ -189,7 +189,8 @@ are scheduled.
   before any of Phase 1.
 - **New-mail notifications (N9).** Nothing tells a grantee that mail arrived.
   The push content contract per security level is already written in the
-  overview (Standard full, Private sender + subject, Fortress generic) but
+  overview (Standard full, Private sender + subject, Private with Seal at the relay
+  generic) but
   no push package exists and ingest writes no `ntf_notifications` row.
   *Build-generally check:* the core notification system plus its preferences
   table is the home; ingest fires one notification per grantee, respecting a

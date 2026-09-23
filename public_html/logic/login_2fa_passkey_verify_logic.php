@@ -6,10 +6,10 @@
  * Verifies the step-up assertion against the pending-login user and, on success,
  * completes the login through the shared Login2fa helper — the same completion the
  * TOTP path uses. This is what makes a passkey a first-class alternative to TOTP
- * at sign-in, closing the quirk where a passkey-only Fortress user was never asked
- * a second factor.
+ * at sign-in, closing the quirk where a passkey-only user was never asked a second
+ * factor.
  *
- * @version 1.2
+ * @version 1.2.1 - comment wording
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 

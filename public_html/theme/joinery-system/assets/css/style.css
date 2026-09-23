@@ -780,6 +780,59 @@ select.form-control {
     color: var(--text-muted, #667085);
 }
 
+/* Protection add-ons — the "Extra protection" switches ProtectionLevelPicker
+   emits under the level cards (FormWriter checkboxinput `switch`). */
+.jy-level-addons {
+    margin: 0 0 0.75rem 1rem;
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--border, #d0d5dd);
+}
+.jy-level-addons-heading {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #667085);
+    margin-bottom: 0.5rem;
+}
+.jy-level-addons-note {
+    font-size: 0.875rem;
+    color: var(--text-muted, #667085);
+    margin: 0 0 0.5rem;
+}
+.jy-level-addon-link {
+    font-size: 0.875rem;
+    margin: 0 0 0.5rem;
+    padding-left: 38px;
+}
+.form-check.jy-switch { flex-wrap: wrap; }
+.form-check.jy-switch .form-help { flex-basis: 100%; padding-left: 38px; }
+.form-check.jy-switch input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    width: 30px;
+    height: 18px;
+    border-radius: 9px;
+    background: var(--border, #d0d5dd);
+    transition: background 0.15s ease;
+    cursor: pointer;
+}
+.form-check.jy-switch input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s ease;
+}
+.form-check.jy-switch input[type="checkbox"]:checked { background: var(--primary); }
+.form-check.jy-switch input[type="checkbox"]:checked::before { transform: translateX(12px); }
+.form-check.jy-switch input[type="checkbox"]:disabled { opacity: 0.55; cursor: not-allowed; }
+
 /* Input group */
 .input-group {
     display: flex;

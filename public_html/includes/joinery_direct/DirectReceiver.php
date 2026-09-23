@@ -16,8 +16,8 @@
  *   - **The sealed tiers accept unconditionally**, locked or unlocked, and
  *     return a key for every address, real or not. A Private box that answered
  *     live while unlocked and deferred while locked would turn its own answer
- *     into the lock-state oracle the design exists to close, so Private and
- *     Fortress share one posture and differ only in topology.
+ *     into the lock-state oracle the design exists to close, so Private takes
+ *     one posture, colocated or relay-fronted alike.
  *
  *   - **Nothing is ever bounced.** A rejection at unlock is a local filing
  *     decision. Returning mail to forged senders is backscatter, and delivery
@@ -31,6 +31,7 @@
  * signature over the ordered hashes of the SEALED bytes before anything is
  * ingested.
  *
+ * @version 1.2.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.2
  * @changelog 1.2 - the spool cap check carries the verified sending domain, so
  *   the per-sender bound applies (specs/security_inventory.md S21)
@@ -338,7 +339,7 @@ class DirectReceiver {
 	 * Redeem the session: verify the sender's signature over the ordered hashes
 	 * of the sealed bytes, check every delivered part against them, and then
 	 * either ingest (Standard, gate already passed) or leave the delivery held
-	 * for the recipient's next unlock (Private/Fortress).
+	 * for the recipient's next unlock (Private).
 	 *
 	 * Hashing the CIPHERTEXT is what makes this checkable without unsealing, so
 	 * a locked box rejects a substituted part at receive rather than discovering

@@ -13,13 +13,15 @@
  * allowlist and derives all Postfix map lines shard-side; nothing this side
  * emits can bypass that validation.
  *
- * The seal target per recipient follows the existing implicit sealing rule
- * (encryption-at-rest): a recipient whose single grantee holds a Sealed Vault is
- * Fortress → seal to that vault's public key (key_kind=user); everyone else seals
+ * The seal target per recipient: a recipient on a domain with the Seal at the
+ * relay add-on whose single grantee holds a Sealed Vault → seal to that vault's
+ * public key (key_kind=user); everyone else seals
  * to the relay's ambient transport key (key_kind=transport), which Joinery opens
  * at pull. Catch-all recipients have no single owner, so they are always
  * transport-sealed.
  *
+ * @version 2.2 - the owner-key seal target follows the Seal at the relay add-on
+ *                (ied_relay_seals_to_owner), not a level
  * @version 2.1 - the fragment carries Joinery Direct's served kinds, decoy secret,
  *                limits and caps, so the relay serves the channel as DATA
  * @version 2.0 - emits the tenancy-native fragment (fragment_format 1); the
@@ -80,8 +82,8 @@ class RelayMapExporter {
 			'domains'              => array(),
 		);
 
-		// Joinery Direct (docs/joinery_direct.md § The relay at Fortress). At
-		// Fortress the relay IS the endpoint, so everything it needs to answer a
+		// Joinery Direct (docs/joinery_direct.md § The relay as the endpoint).
+		// On a relay-fronted deployment the relay IS the endpoint, so everything it needs to answer a
 		// preflight travels here AS DATA: the served-kind list it compares as
 		// opaque strings, the domain secret behind decoy keys, and the limits and
 		// caps it enforces at the edge. That is what keeps a new payload kind a
@@ -215,17 +217,17 @@ class RelayMapExporter {
 	}
 
 	/**
-	 * The (public_key, key_kind) an alias's mail is sealed to. Only a Fortress
-	 * domain seals to the owner's vault key (key_kind=user → sealed-to-owner,
-	 * pending-parse at unlock); every other posture — including a Private domain
-	 * whose owner holds a vault — seals to the ambient transport key, which
-	 * Joinery opens at pull and re-seals at ingest per its own level
-	 * (specs/mailbox_security_levels.md § Level → mechanism-branch switch, point
-	 * 2). A key_kind=user blob therefore exists only for Fortress, so the
-	 * pending-parse path needs no level check of its own.
+	 * The (public_key, key_kind) an alias's mail is sealed to. Only a Private
+	 * domain with the Seal at the relay add-on seals to the owner's vault key
+	 * (key_kind=user → sealed-to-owner, pending-parse at unlock); every other
+	 * domain — including a plain Private domain whose owner holds a vault — seals
+	 * to the ambient transport key, which Joinery opens at pull and re-seals at
+	 * ingest per its own level (specs/mailbox_security_levels.md § Level →
+	 * mechanism-branch switch, point 2). A key_kind=user blob therefore exists
+	 * only under the add-on, so the pending-parse path needs no check of its own.
 	 */
 	private function sealTargetForAlias($alias, $domain): array {
-		if ($domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
+		if ($domain->relay_seals_to_owner()) {
 			$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
 			if ($owner_id !== null) {
 				$vault_pk = $this->vaultPublicKey($owner_id);

@@ -12,6 +12,13 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.2 - the Extra protection block states the short unlock window only; neither add-on
+ *   asks for a second factor
+ * @version 4.1 - the level cards and the Extra protection switches render
+ *   through ProtectionLevelPicker, so their copy is the catalog's
+ * @version 4.0 - two cards, Standard and Private, and an Extra protection block
+ *   under Private: Seal at the relay and Only send while I'm signed in
+ *   (specs/implemented/protection_levels_fold.md)
  * @version 3.9 - the AI travel consent shows at every security level: where
  *   mail may be sent to be read is a decision for Standard domains too
  *   (specs/security_inventory.md S19); the read switch stays sealed-only
@@ -72,8 +79,8 @@ if ($show_form) {
 	if (!$form_domain->key) {
 		$form_domain->set('ied_is_enabled', true);
 		$form_domain->set('ied_catch_all_mode', 'store');
-		// Pre-fill the domain name when arriving from the Fortress "add a Standard
-		// subdomain for automated mail" action (specs/mailbox_security_levels.md
+		// Pre-fill the domain name when arriving from the sending lock's "add a
+		// Standard subdomain for automated mail" action (specs/mailbox_security_levels.md
 		// Phase 3). Level defaults to Standard (the picker default), which is what
 		// an automated-mail subdomain wants.
 		if (!empty($_GET['prefill_domain'])) {
@@ -121,12 +128,15 @@ if ($show_form) {
 	// The AI consents go with the level too: the read switch only means
 	// something once mail is sealed, and the travel consent belongs to the
 	// domain that receives the mail.
-	$imap_only_hide = ['ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched',
-		'ied_security_level', 'ied_security_level_fortress_card',
-		'ied_ai_processing_enabled', 'ied_ai_processing_consent'];
+	// The add-ons go with the level: they are properties of a domain this
+	// deployment hosts, and a provider domain is not one. They render as one
+	// block, emitted by ProtectionLevelPicker under the level cards.
+	$addon_fields = ['ied_security_level_addons'];   // the picker's add-on block: {field}_addons
+	$imap_only_hide = array_merge(['ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched',
+		'ied_security_level',
+		'ied_ai_processing_enabled', 'ied_ai_processing_consent'], $addon_fields);
 	$imap_hide = array_merge(['ied_domain'], $imap_only_hide);
-	$hosted_show = ['ied_domain', 'ied_catch_all_mode', 'ied_security_level',
-		'ied_security_level_fortress_card'];
+	$hosted_show = ['ied_domain', 'ied_catch_all_mode', 'ied_security_level'];
 	$type_visibility = [
 		'custom'         => ['show' => $hosted_show, 'hide' => []],
 		'imap_gmail'     => ['show' => [], 'hide' => $imap_hide],
@@ -168,53 +178,60 @@ if ($show_form) {
 
 	$formwriter->checkboxinput('ied_is_enabled', 'Enabled', []);
 
-	// Security level — the per-domain protection posture. Outcome language only
-	// (no mechanism names at the point of choice); defaults to Standard. The
-	// Fortress card is hidden for IMAP-source domains via the domain_type
+	// Protection level — Standard or Private, plus the Extra protection add-ons
+	// under Private (specs/protection_levels_platform.md § Add-ons). Outcome
+	// language only (no mechanism names at the point of choice); defaults to
+	// Standard. The picker is hidden for IMAP-source domains via the domain_type
 	// visibility rule above.
-	// After a step-up round-trip the chosen level rides back as target_level —
-	// preselect it so the operator's intent survives the ceremony.
-	$level_value = $form_domain->get('ied_security_level') ?: InboundEmailDomain::LEVEL_STANDARD;
-	$valid_levels = [InboundEmailDomain::LEVEL_STANDARD, InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS];
-	if (!empty($_GET['target_level']) && in_array($_GET['target_level'], $valid_levels, true)) {
+	// After a step-up round-trip the choices ride back as target_level /
+	// target_relay / target_send — preselect them so the operator's intent
+	// survives the ceremony.
+	$level_value = $form_domain->key ? $form_domain->security_level() : InboundEmailDomain::LEVEL_STANDARD;
+	if (!empty($_GET['target_level']) && in_array($_GET['target_level'], InboundEmailDomain::SETTABLE_LEVELS, true)) {
 		$level_value = $_GET['target_level'];
 	}
+	$relay_value = $form_domain->key && $form_domain->addon_flag('ied_relay_seals_to_owner');
+	$send_value  = $form_domain->key && ($form_domain->addon_flag('ied_send_lock_requested')
+		|| $form_domain->is_protected_identity());
+	if (isset($_GET['target_relay'])) { $relay_value = ($_GET['target_relay'] === '1'); }
+	if (isset($_GET['target_send']))  { $send_value  = ($_GET['target_send'] === '1'); }
 
-	$formwriter->radioinput('ied_security_level', 'Security level', [
-		'card' => true,
-		'required' => true,
-		'value' => $level_value,
-		'options' => [
-			InboundEmailDomain::LEVEL_STANDARD => 'Standard',
-			InboundEmailDomain::LEVEL_PRIVATE  => 'Private',
-			InboundEmailDomain::LEVEL_FORTRESS => 'Fortress',
-		],
-		'descriptions' => [
-			InboundEmailDomain::LEVEL_STANDARD => [
-				'The server manages this mailbox for you.',
-				'Best for club signups, newsletters, and low-stakes addresses.',
-				'Nothing extra to set up. Stored mail is not protected at rest.',
-			],
-			InboundEmailDomain::LEVEL_PRIVATE => [
-				'Only you can read your stored mail.',
-				'Best for mail worth keeping private, where automation must keep working.',
-				'You unlock to read. Lose every unlocker and the mail is gone for good.',
-			],
-			InboundEmailDomain::LEVEL_FORTRESS => [
-				'Even a fully hacked server cannot read new mail or send as you.',
-				'Best for the address that is you — banking, identity, primary correspondence.',
-				'This domain can only send mail while you are signed in.',
-			],
-		],
+	// The cards and the Extra protection switches both come from
+	// ProtectionLevelPicker, so a mail domain states its levels and add-ons in
+	// the same words as every other service (specs/protection_levels_platform.md
+	// § Add-ons rule 3). Only what is particular to mail — where switching the
+	// sending lock on leads, and a relay that does not exist yet — is said here,
+	// through the picker's note and link.
+	$relay_offered = !empty($relay_available) || $relay_value;
+	$relay_addon = ['checked' => $relay_value && $relay_offered, 'disabled' => !$relay_offered];
+	if (!$relay_offered) {
+		$relay_addon['note'] = 'It needs a relay in front of this server first.';
+		$relay_addon['link'] = ['/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section', 'Set up a relay'];
+	}
+	ProtectionLevelPicker::render($formwriter, 'ied_security_level', [
+		'service' => ProtectionLevelPicker::SERVICE_MAIL,
+		'levels'  => InboundEmailDomain::SETTABLE_LEVELS,
+		'value'   => $level_value,
+		'label'   => 'Protection level',
 		// The AI READ switch only means something once mail is encrypted at
 		// rest: on Standard the server already reads it, so there is nothing to
 		// consent to (specs/in_window_deferred_work.md). The TRAVEL consent
 		// below it shows at every level — where mail may be sent to be read is
-		// a decision for a Standard domain too.
+		// a decision for a Standard domain too. The picker shows its add-on
+		// block only on Private: Standard has nothing sealed for them to guard.
 		'visibility_rules' => [
-			InboundEmailDomain::LEVEL_STANDARD => ['show' => ['ied_ai_processing_consent'], 'hide' => ['ied_ai_processing_enabled']],
-			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent'], 'hide' => []],
-			InboundEmailDomain::LEVEL_FORTRESS => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent'], 'hide' => []],
+			InboundEmailDomain::LEVEL_STANDARD => ['show' => ['ied_ai_processing_consent'],
+				'hide' => ['ied_ai_processing_enabled']],
+			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent']],
+		],
+		// Either add-on shortens the unlock window (§ Add-ons rule 5).
+		'addons_note' => 'Either one keeps your unlock window short (2 hours idle, 24 hours at most).',
+		'addons' => [
+			ProtectionLevelPicker::ADDON_RELAY_SEALS_TO_OWNER => $relay_addon,
+			ProtectionLevelPicker::ADDON_SEND_LOCK => [
+				'checked' => $send_value,
+				'note'    => 'Switching it on takes you through publishing its DNS records on the Setup tab.',
+			],
 		],
 	]);
 
@@ -299,11 +316,11 @@ if ($show_form) {
 
 	$formwriter->checkboxinput('ied_reject_unmatched', 'Reject Unmatched', []);
 
-	// Protection ceremony (specs/mailbox_protection_ceremony.md): choosing a
-	// card ABOVE the current level reveals the prerequisite checklist for that
-	// target and gates the submit until its required rows pass. The save
-	// re-verifies server-side regardless — this is the guided surface, not the
-	// enforcement.
+	// Protection ceremony (specs/mailbox_protection_ceremony.md): choosing
+	// Private above the current level, or switching an add-on on, reveals the
+	// prerequisite checklist for it and gates the submit until its required
+	// rows pass. The save re-verifies server-side regardless — this is the
+	// guided surface, not the enforcement.
 	if ($ceremony !== null) {
 		$urls = array(
 			'editor_url' => $ceremony['editor_url'],
@@ -311,8 +328,12 @@ if ($show_form) {
 		);
 		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-private"',
 			mailbox_protection_render($ceremony['rows_private'], $edit_domain, $urls, InboundEmailDomain::LEVEL_PRIVATE));
-		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-fortress"',
-			mailbox_protection_render($ceremony['rows_fortress'], $edit_domain, $urls, InboundEmailDomain::LEVEL_FORTRESS));
+		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-relay"',
+			mailbox_protection_render($ceremony['rows_relay'], $edit_domain, $urls, '', '',
+				'Before Seal at the relay can be on'));
+		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-send"',
+			mailbox_protection_render($ceremony['rows_send'], $edit_domain, $urls, '', '',
+				'Only send while I\'m signed in'));
 	}
 
 	$formwriter->submitbutton('btn_submit', $edit_domain ? 'Update Domain' : 'Add Domain');
@@ -423,7 +444,6 @@ if ($show_form) {
 		$current_rank = array(
 			InboundEmailDomain::LEVEL_STANDARD => 0,
 			InboundEmailDomain::LEVEL_PRIVATE  => 1,
-			InboundEmailDomain::LEVEL_FORTRESS => 2,
 		)[$edit_domain->security_level()] ?? 0;
 		?>
 		<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
@@ -431,36 +451,58 @@ if ($show_form) {
 		(function () {
 			var currentRank = <?php echo (int)$current_rank; ?>;
 			var currentLevel = <?php echo json_encode($edit_domain->security_level()); ?>;
-			var ranks = { standard: 0, private: 1, fortress: 2 };
+			// Add-ons already in force: switching one on is what shows its rows.
+			var currentRelay = <?php echo $edit_domain->relay_seals_to_owner() ? 'true' : 'false'; ?>;
+			var currentSend = <?php echo $edit_domain->send_lock_requested() ? 'true' : 'false'; ?>;
+			var ranks = { standard: 0, private: 1 };
+			// The add-on switches, as ProtectionLevelPicker names them.
+			var relayName = <?php echo json_encode(ProtectionLevelPicker::addonFieldName('ied_security_level',
+				ProtectionLevelPicker::ADDON_RELAY_SEALS_TO_OWNER)); ?>;
+			var sendName = <?php echo json_encode(ProtectionLevelPicker::addonFieldName('ied_security_level',
+				ProtectionLevelPicker::ADDON_SEND_LOCK)); ?>;
 			var form = document.querySelector('form[name="domain_form"], #domain_form') ||
 				(document.querySelector('input[name="ied_security_level"]') || {}).form;
 			if (!form) return;
 			var submit = form.querySelector('button[type="submit"], input[type="submit"]');
+			function ticked(name) {
+				var box = form.querySelector('input[type="checkbox"][name="' + name + '"]');
+				return !!(box && box.checked);
+			}
+			// Each checklist box is placed next to what it belongs to and shown
+			// only when something there needs attention.
+			function place(box, anchor, show) {
+				if (!box) return null;
+				box.classList.add('d-none');
+				if (!show) return null;
+				if (anchor && box.parentElement !== anchor) anchor.appendChild(box);
+				if (box.dataset.allGreen !== '1') box.classList.remove('d-none');
+				return box;
+			}
 			function refresh() {
 				var chosen = form.querySelector('input[name="ied_security_level"]:checked');
 				var level = chosen ? chosen.value : 'standard';
 				var raising = (ranks[level] || 0) > currentRank;
-				var privBox = document.getElementById('protection-ceremony-private');
-				var fortBox = document.getElementById('protection-ceremony-fortress');
-				var active = null;
-				if (privBox) privBox.classList.add('d-none');
-				if (fortBox) fortBox.classList.add('d-none');
-				if (raising) {
-					active = (level === 'fortress') ? fortBox : privBox;
-					if (active) {
-						// The checklist lives inside the chosen level's card,
-						// and only appears when something needs attention.
-						var card = document.getElementById('ied_security_level_' + level + '_card');
-						if (card && active.parentElement !== card) card.appendChild(active);
-						if (active.dataset.allGreen !== '1') active.classList.remove('d-none');
-					}
-				}
+				var isPrivate = (level === 'private');
+				var newRelay = isPrivate && ticked(relayName) && !currentRelay;
+				var newSend = isPrivate && ticked(sendName) && !currentSend;
+				var active = [
+					place(document.getElementById('protection-ceremony-private'),
+						document.getElementById('ied_security_level_' + level + '_card'), raising),
+					place(document.getElementById('protection-ceremony-relay'),
+						document.getElementById(relayName + '_container'), newRelay),
+					place(document.getElementById('protection-ceremony-send'),
+						document.getElementById(sendName + '_container'), newSend),
+				];
 				if (submit) {
-					submit.disabled = !!(active && active.dataset.requiredOk === '0');
+					submit.disabled = active.some(function (box) {
+						return box && box.dataset.requiredOk === '0';
+					});
 				}
 			}
 			form.addEventListener('change', function (e) {
-				if (e.target && e.target.name === 'ied_security_level') refresh();
+				if (e.target && (e.target.name === 'ied_security_level'
+						|| e.target.name === relayName
+						|| e.target.name === sendName)) refresh();
 			});
 			refresh();
 
@@ -477,7 +519,11 @@ if ($show_form) {
 				if (stepupDone) return;
 				var chosen = form.querySelector('input[name="ied_security_level"]:checked');
 				var level = chosen ? chosen.value : currentLevel;
-				if (level === currentLevel) return;
+				// An add-on change is as sensitive as a level change.
+				var sealing = (level === 'private');
+				var addonsChanged = (sealing && ticked(relayName)) !== currentRelay
+					|| (sealing && ticked(sendName)) !== currentSend;
+				if (level === currentLevel && !addonsChanged) return;
 				if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) {
 					// The helper is absent, so it cannot report this itself -
 					// record the fallthrough (keepalive survives the native
@@ -553,7 +599,7 @@ if ($show_form) {
 		<?php
 	}
 
-	// Protected sending identity — Fortress only.
+	// Protected sending identity — once the sending lock is asked for, or on.
 	//
 	// WHO THE KEY BELONGS TO IS DECIDED HERE. It is a property of the domain, not
 	// a step in setting one up: Setup is where you publish records, verify them
@@ -564,7 +610,7 @@ if ($show_form) {
 	// Turning protection on, replacing a key and lifting protection all stay on
 	// the Setup tab. This box states the fact and owns the one decision.
 	if ($edit_domain && $edit_domain->key && !$edit_domain->get('ied_is_imap_source')
-			&& $edit_domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
+			&& ($edit_domain->send_lock_requested() || $edit_domain->is_protected_identity())) {
 		$page->begin_box(array('title' => 'Protected sending identity'));
 		$dom_key = (int)$edit_domain->key;
 		$has_key = !empty($protect) && !empty($protect['has_key']);
@@ -573,8 +619,9 @@ if ($show_form) {
 			echo '<p class="alert alert-success">Send protection is on — while you are signed out, nothing on this server '
 				. 'can send mail as this domain that anyone will accept.</p>';
 		} else {
-			echo '<p>Arriving mail for this domain is sealed at the relay. Sending is not locked to your key — an '
-				. 'optional extra step, with its cost explained, under Sending identity on the Setup tab.</p>';
+			echo '<p>You asked for <strong>Only send while I\'m signed in</strong>. It is not on yet: finish it '
+				. 'under Sending identity on the Setup tab, or switch it off above and this domain is finished as '
+				. 'it is.</p>';
 		}
 
 		if ($has_key) {
@@ -584,9 +631,9 @@ if ($show_form) {
 		}
 
 		if (!empty($protect) && !$has_key) {
-			// The raise seals a key automatically and only fails to when it cannot
-			// guess: a domain whose mailboxes already have holders, where the admin
-			// raising the level need not be the person who reads the mail.
+			// Switching the lock on seals a key automatically and only fails to when
+			// it cannot guess: a domain whose mailboxes already have holders, where
+			// the admin switching it on need not be the person who reads the mail.
 			echo '<p class="mb-2">This domain has no signing key yet, because more than one person could own it '
 				. '— and only its owner will ever be able to send as this domain. That is not ours to guess.</p>';
 			$own_form = $page->getFormWriter('domain_owner_form');

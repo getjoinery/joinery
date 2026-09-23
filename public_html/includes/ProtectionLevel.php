@@ -8,25 +8,32 @@
  *   standard  the server manages this for you (plaintext)
  *   private   encrypted at rest, server custody, opened only inside the
  *             owner's unlock window
- *   guarded   private, plus service-specific hardening on the ingress/egress
- *             doors (mail guards the mail doors; chat pins the model local)
- *   fortress  client custody — plaintext never exists on the server
+ *   fortress  end-to-end, client custody — plaintext never exists on the
+ *             server (Drive and the password vault)
  *
- * A service shows only the rungs it implements: Drive offers standard /
- * private / fortress (it has no doors of its own to guard), the password vault
- * is fortress-only with no picker at all.
+ * A service shows only the rungs it implements: mail, chat and messenger offer
+ * standard / private; Drive offers standard / private / fortress; the password
+ * vault is fortress-only with no picker at all.
+ *
+ * Hardening a service applies at one of its own doors — where content comes
+ * in, where it goes out, or who may act in the member's name — is not a rung.
+ * It is an ADD-ON: a separate flag the service stores beside the level and
+ * offers on Private (and Fortress, where the door exists). An add-on never
+ * changes custody, and no level requires one. The picker renders them
+ * (ProtectionLevelPicker `addons`); the rules are in
+ * specs/protection_levels_platform.md § Add-ons.
  *
  * This class owns the ORDER and the spelling, nothing else. Card copy — the
  * promise wording a member reads when choosing — belongs with the shared level
  * picker component so it cannot drift between services.
  *
- * @version 1.0.0
+ * @version 1.2.0 - fromInput(): a requested level that is not a rung is refused, never downgraded
+ * @changelog 1.1.0 - three rungs; the old middle rung is Private plus add-ons
  */
 class ProtectionLevel {
 
 	const STANDARD = 'standard';
 	const PRIVATE_ = 'private';   // PRIVATE is a PHP reserved word
-	const GUARDED  = 'guarded';
 	const FORTRESS = 'fortress';
 
 	/**
@@ -34,7 +41,7 @@ class ProtectionLevel {
 	 * read from this one array, so adding a rung never means hunting for
 	 * hardcoded numbers.
 	 */
-	const ORDER = array(self::STANDARD, self::PRIVATE_, self::GUARDED, self::FORTRESS);
+	const ORDER = array(self::STANDARD, self::PRIVATE_, self::FORTRESS);
 
 	/** The subset Drive offers (docs/drive.md). */
 	const DRIVE_LEVELS = array(self::STANDARD, self::PRIVATE_, self::FORTRESS);
@@ -53,6 +60,20 @@ class ProtectionLevel {
 	public static function normalize($value, string $default = self::STANDARD): string {
 		$value = strtolower(trim((string)$value));
 		return self::isValid($value) ? $value : $default;
+	}
+
+	/**
+	 * Read a level a caller ASKED for. Unlike normalize(), an unrecognized
+	 * value is refused (null), never read as standard: someone who asked for a
+	 * protected level and mistyped it must hear so, not get an unprotected
+	 * resource. Absent or empty input yields $default.
+	 */
+	public static function fromInput($value, string $default = self::STANDARD): ?string {
+		if ($value === null || (is_string($value) && trim($value) === '')) {
+			return $default;
+		}
+		$value = strtolower(trim((string)$value));
+		return self::isValid($value) ? $value : null;
 	}
 
 	/** Position on the ladder; an unknown level ranks as standard. */
@@ -79,7 +100,6 @@ class ProtectionLevel {
 	public static function label($level): string {
 		switch (self::normalize($level)) {
 			case self::PRIVATE_: return 'Private';
-			case self::GUARDED:  return 'Guarded';
 			case self::FORTRESS: return 'Fortress';
 			default:             return 'Standard';
 		}

@@ -96,7 +96,7 @@ class ChatDirectHandler implements DirectKindHandler {
 			return;
 		}
 
-		// A conversation the local side raised to Private or Guarded stores
+		// A conversation the local side raised to Private stores
 		// nothing in the clear, and its key opens only while a participant has
 		// an open unlock window. Resolved BEFORE any attachment bytes touch the
 		// disk: with nobody present the whole delivery defers — held by the

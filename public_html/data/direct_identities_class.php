@@ -5,15 +5,16 @@
  * The instance signature is what a receiver checks a delivery against, so this
  * row is the private half of what the domain publishes in its `_joinery-key`
  * TXT record. Key custody deliberately mirrors DKIM's (docs/joinery_direct.md §
- * The relay at Fortress): a Standard/Private domain keeps the secret key at rest
+ * The relay as the endpoint): a Standard/Private domain keeps the secret key at rest
  * under SecretBox and the box unwraps it per send; a domain whose owner holds a
  * Sealed Vault keeps it sealed to that vault instead and unwraps it in-window,
- * so a locked Fortress box cannot sign in anyone's name.
+ * so a box whose owner's vault is locked cannot sign in anyone's name.
  *
  * `jdi_key_id` is what makes rotation a non-event: a new row supersedes the old
  * one, both TXT values are published for as long as the old key id may still be
  * quoted, and a receiver matches the id on the envelope rather than guessing.
  *
+ * @version 1.0.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.0
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -55,7 +56,7 @@ class DirectIdentity extends SystemBase {
 		'jdi_public_key'    => array('type'=>'text', 'is_nullable'=>false),   // base64 Ed25519 public key
 		// Exactly one of these two holds the secret half. SecretBox at rest for a
 		// box-custody domain; crypto_box_seal to the owner's vault public key when
-		// the domain's owner holds one (Fortress custody).
+		// the domain's owner holds one (vault custody).
 		'jdi_secret_key'        => array('type'=>'text', 'is_nullable'=>true),
 		'jdi_sealed_secret_key' => array('type'=>'text', 'is_nullable'=>true),
 		'jdi_owner_usr_user_id' => array('type'=>'int8', 'is_nullable'=>true),

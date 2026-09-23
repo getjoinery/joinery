@@ -62,7 +62,7 @@ function make_domain($name, $protected = false) {
 	return $d;
 }
 $parent    = make_domain('msc-parent.test');
-$prot      = make_domain('msc-fortress.test', true);
+$prot      = make_domain('msc-locked.test', true);
 $child     = make_domain('mail.msc-parent.test');
 
 $checker = new InboundEmailSetupCheck();
@@ -76,7 +76,7 @@ section('transactionalSendBlocker verdicts');
 check(EmailSender::transactionalSendBlocker('') !== null, 'empty address is blocked');
 check(EmailSender::transactionalSendBlocker('not-an-address') !== null, 'invalid address is blocked');
 check(EmailSender::transactionalSendBlocker('x@msc-parent.test') === null, 'unprotected domain is eligible');
-$blocker = EmailSender::transactionalSendBlocker('robot@msc-fortress.test');
+$blocker = EmailSender::transactionalSendBlocker('robot@msc-locked.test');
 check($blocker !== null, 'protected domain is blocked');
 check(stripos((string)$blocker, 'protected identity') !== false, 'blocker names the protected identity',
 	(string)$blocker);
@@ -88,7 +88,7 @@ check($checker->machineSenderDomainFor('msc-parent.test') === 'mail.msc-parent.t
 	'subdomain defaultemail turns the machine sender on');
 check($checker->machineSenderDomainFor('mail.msc-parent.test') === '',
 	'the machine domain itself is not its own parent');
-check($checker->machineSenderDomainFor('msc-fortress.test') === '',
+check($checker->machineSenderDomainFor('msc-locked.test') === '',
 	'an unrelated domain is off');
 harness_set_setting_mem('defaultemail', 'a@x.y.msc-parent.test');
 check($checker->machineSenderDomainFor('msc-parent.test') === 'x.y.msc-parent.test',
@@ -106,8 +106,8 @@ check(count($rows) === 1 && $rows[0]['status'] === InboundEmailSetupCheck::OPTIO
 	json_encode(array_map(function ($r) { return $r['id'] . ':' . $r['status']; }, $rows)));
 check($rows[0]['severity'] === InboundEmailSetupCheck::RECOMMENDED, 'off-state card never escalates');
 
-harness_set_setting_mem('defaultemail', 'robot@msc-fortress.test');
-$rows = $rows_of('msc-fortress.test', $prot);
+harness_set_setting_mem('defaultemail', 'robot@msc-locked.test');
+$rows = $rows_of('msc-locked.test', $prot);
 check(count($rows) === 1 && $rows[0]['status'] === InboundEmailSetupCheck::FAIL
 	&& $rows[0]['severity'] === InboundEmailSetupCheck::REQUIRED,
 	'a protected domain still carrying system mail renders RED even though the feature is off');
@@ -164,13 +164,13 @@ $count_refusals = function () {
 	$multi->load();
 	$n = 0;
 	foreach ($multi as $row) {
-		if (strpos((string)$row->get('evl_note'), 'from=cron@msc-fortress.test ') === 0) { $n++; }
+		if (strpos((string)$row->get('evl_note'), 'from=cron@msc-locked.test ') === 0) { $n++; }
 	}
 	return $n;
 };
 $send_refused = function () {
 	$msg = EmailMessage::create('nobody@example.com', 'Refusal test', 'plain body');
-	$msg->from('cron@msc-fortress.test');
+	$msg->from('cron@msc-locked.test');
 	try {
 		(new EmailSender())->send($msg);
 		return false;

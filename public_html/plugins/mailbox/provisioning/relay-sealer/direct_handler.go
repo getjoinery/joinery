@@ -2,7 +2,7 @@ package main
 
 // The Joinery Direct endpoint, served by the relay on behalf of its tenants.
 //
-// At Fortress the relay IS the endpoint, in both directions: publishing an SRV
+// On a relay-fronted deployment the relay IS the endpoint, in both directions: publishing an SRV
 // record pointing at the origin box would advertise in public DNS precisely the
 // address the relay exists to conceal. That splits the gate along the line it
 // was already split across two moments — THE RELAY AUTHENTICATES, THE BOX
@@ -113,7 +113,7 @@ func (h *directHandler) handlePreflight(w http.ResponseWriter, r *http.Request) 
 	// Which domain the recipient names — a local computation, no lookup yet.
 	// WHETHER this relay fronts it is deliberately NOT decided here: answering
 	// that before the signature would let an unauthenticated peer enumerate the
-	// tenants this relay fronts, which is the very address concealment a Fortress
+	// tenants this relay fronts, which is the very address concealment a fronting
 	// relay exists to provide. The check moves below, after authentication.
 	recipientDomain := domainOfAddress(env.Recipient)
 

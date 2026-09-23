@@ -14,8 +14,9 @@
  * with no gap between them.
  *
  * The table holds opaque nonces and expiries — nothing per-user, nothing sealed
- * — which is what lets a locked Fortress box deduplicate without unlocking.
+ * — which is what lets a box with a locked vault deduplicate without unlocking.
  *
+ * @version 1.0.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.0
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');

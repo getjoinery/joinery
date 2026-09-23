@@ -15,7 +15,7 @@
  *  - Caller scoping: only the caller's own rows converge; another holder's
  *    rows count in others_remaining and stay sealed.
  *  - Window gating: a closed window unseals nothing and answers locked.
- *  - Sealing-domain refusal: a Private/Fortress domain is never unsealed.
+ *  - Sealing-domain refusal: a Private domain is never unsealed.
  *  - Search key: aliasSealedContentActive() follows actual sealed content.
  *  - Lowering receipt render: progress/locked/completed/others variants.
  *  - mailbox/unseal_batch action refusals.

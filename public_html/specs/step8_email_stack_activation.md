@@ -6,7 +6,7 @@
 
 ## Goal
 
-The new VPS (node 176, `jeremytunnell-vps`, 45.79.204.178, bare-metal) owns its email stack: Postfix on port 25, DKIM signing, local mailboxes for the owner's addresses, all through the mailbox plugin. This is the live gate for the self-hosted mail path, and the staging ground for step 9 (Fortress verification against a real off-box relay).
+The new VPS (node 176, `jeremytunnell-vps`, 45.79.204.178, bare-metal) owns its email stack: Postfix on port 25, DKIM signing, local mailboxes for the owner's addresses, all through the mailbox plugin. This is the live gate for the self-hosted mail path, and the staging ground for step 9 (Fortress verification against a real off-box relay — the level then called Fortress; now Private with both mail add-ons).
 
 ## Findings — DNS and box posture (probed 2026-07-19, read-only)
 
@@ -35,7 +35,7 @@ The mail stack is **built**, not greenfield. Full detail in `plugins/mailbox/doc
 - **The account model:** a mailbox IS an alias (`iea_` row) on a domain (`ied_` row); a user gets it via a grant (`ieg_` row, synced from the alias editor's "Users with access"). Admin pages: Accounts tab (`/plugins/mailbox/admin/admin_mailbox_accounts`) for domains + mailboxes, Setup tab for DNS verification, member reader at `/profile/mailbox/mailbox`.
 - **Settings that switch it on** (per-deployment, so set on the jeremytunnell.com site, not dev): `mailbox_enabled`, `mailbox_provider` (postfix), `mailbox_mail_hostname`, `mailbox_public_ip`.
 - **Health checks already exist** for verification: `inbound_mail_server`, `domain_dns_records`, `outbound_transport_class`, etc. (`InboundEmailHealth`), surfaced on the plugins page.
-- **Fortress machinery is implemented** (edge-seal relay, sealed DKIM, deferred ingest, `admin_mailbox_protect` ceremony) but never proven against a real off-box shard — that is step 9, per `specs/fortress_live_verification_runbook.md`.
+- **Fortress machinery is implemented** (now the mail add-ons Seal at the relay and Only send while I'm signed in: edge-seal relay, sealed DKIM, deferred ingest, `admin_mailbox_protect` ceremony) but never proven against a real off-box shard — that is step 9, per `specs/fortress_live_verification_runbook.md`.
 
 ## Owner decisions (blocking, in order)
 
@@ -73,11 +73,11 @@ Also fixed while shipping these: CLI `upgrade.php` re-execs itself after a self-
    - Plumbing: `CloudComputeProvider::setReverseDns` + Linode driver (1.1), `NodeReverseDns` helper, `node_id` filter on MultiCustomerCloudProvision. Tests: customer_cloud_provisioning 41/41.
 3. From probe job #642: ufw 25/tcp allow missing + opendmarc missing (both converge when `install_email.sh` runs via item 1); public 5432 exposure (installer fixed v2.23; live box still needs the rule deleted — deferred_fixes 14); box FQDN is `localhost` (install_email.sh sets a fallback myhostname from `mailbox_mail_hostname`).
 
-## Step-9 readiness (Fortress) — sequenced after step 8
+## Step-9 readiness (hardened mail: Private + both mail add-ons) — sequenced after step 8
 
 The path is fully specified, and the one missing platform piece was found and built (2026-07-19 overnight):
 
 - **A relay shard hosts no Joinery site** — `build_provision_relay` is self-delivering (tarballs the sealer + installer from the management node's tree, pushes over SSH, runs `provision_relay.sh` on the host). But the cloud-birth pipeline always installed a site. The gap is closed: the Install New Node cloud target now offers install type **Bare instance** (admin-origin only; instance + SSH key + managed node with `mgn_skip_joinery_checks`, no web root/site URL/SSL flow; completion = passing `check_status` job). Tests 31/31, form behavior verified live.
 - **Topology:** dev is the fleet operator — VPS B is born bare on dev's server_manager, stood up as a shard via the Relay tab's provision action (`skeleton_only` for fleet mode), and jeremytunnell.com enrolls as a *tenant* through the fleet service (`fleet_enroll`, DNS TXT domain claim, MX → per-tenant hostname in the operator's `mailbox_fleet_mx_zone`). The tenant's own steady-state access (spool pull, map push) uses its relay pull key, not dev's admin key.
 
-Sequence: VPS B bare-birth → shard provision → operator fleet service on (`mailbox_fleet_service_enabled`, shard row, MX zone) → tenant enrollment from jeremytunnell.com → `specs/fortress_live_verification_runbook.md` phases (guided Fortress domain setup → edge-seal proof → protected-identity send) → `specs/mailbox_security_model_pentest_brief.md`. The N=2 multi-tenant proof (`specs/mailbox_relay_shared_fleet.md`) rides on the same shard.
+Sequence: VPS B bare-birth → shard provision → operator fleet service on (`mailbox_fleet_service_enabled`, shard row, MX zone) → tenant enrollment from jeremytunnell.com → `specs/fortress_live_verification_runbook.md` phases (guided hardened-domain setup → edge-seal proof → protected-identity send) → `specs/mailbox_security_model_pentest_brief.md`. The N=2 multi-tenant proof (`specs/mailbox_relay_shared_fleet.md`) rides on the same shard.

@@ -8,7 +8,9 @@
  * the realtime NOTIFY live here because messaging is core and several consumers
  * (the messenger UI, the iOS member app, the AI participant) share these rows.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - two levels (standard / private) plus the Nothing-leaves-
+ *   unsealed add-on (cnv_sealed_exits_only), one-way like the level.
  * @changelog 1.2 - review remediation: protection level one-way at the column
  *   (set() refuses lowering), the 1:1 lookup never matches a named group, and
  *   the group-size cap survives a missing setting.
@@ -49,6 +51,12 @@ class Conversation extends SystemBase {
 	/** The Postgres NOTIFY channel a future realtime service LISTENs on. */
 	const NOTIFY_CHANNEL = 'message_events';
 
+	// A level is a rung, not free text, and set() refuses anything else; the
+	// model suite gets a real one rather than generated filler.
+	public static $test_fixture = array(
+		'values' => array('cnv_protection_level' => 'standard', 'cnv_sealed_exits_only' => false),
+	);
+
 	public static $field_specifications = array(
 		'cnv_conversation_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
 		'cnv_subject'         => array('type' => 'varchar(255)'),
@@ -57,6 +65,10 @@ class Conversation extends SystemBase {
 		'cnv_guid'            => array('type' => 'varchar(36)', 'is_nullable' => true),
 		// The platform protection ladder (ProtectionLevel), per conversation.
 		'cnv_protection_level' => array('type' => 'varchar(20)', 'default' => 'standard'),
+		// The Nothing-leaves-unsealed add-on on a Private conversation: no
+		// message text in any notification, no unencrypted federation. One-way
+		// like the level (set() refuses turning it off).
+		'cnv_sealed_exits_only' => array('type' => 'bool', 'is_nullable' => false, 'default' => false),
 		'cnv_create_time'     => array('type' => 'timestamp(6)'),
 		'cnv_update_time'     => array('type' => 'timestamp(6)'),
 		'cnv_delete_time'     => array('type' => 'timestamp(6)'),
@@ -141,7 +153,12 @@ class Conversation extends SystemBase {
 		// ceremony — mint a key, hand it to every member, seal what is already
 		// there — and a create that quietly recorded "private" without doing any
 		// of it would leave a conversation wearing a promise it does not keep.
-		$level = ProtectionLevel::normalize($options['protection_level'] ?? ProtectionLevel::STANDARD);
+		// Read as a request, not as stored state: a value that is not one of a
+		// conversation's rungs is refused rather than read as Standard.
+		$level = ProtectionLevel::fromInput($options['protection_level'] ?? null);
+		if ($level === null || !in_array($level, self::LEVELS, true)) {
+			throw new ConversationException('That is not a protection level a conversation can have.');
+		}
 		if ($level !== ProtectionLevel::STANDARD) {
 			throw new ConversationException(
 				'Create the conversation, then raise() it — protection is a ceremony, not a column.');
@@ -389,10 +406,10 @@ class Conversation extends SystemBase {
 		$sender_label = $sender ? $sender->display_name()
 			: ($remote_sender_address ?: 'Someone');
 
-		// Guarded conversations keep message content out of every notification —
-		// the member is told there is something to read, never what it says.
-		$level = ProtectionLevel::normalize($this->get('cnv_protection_level'));
-		$content_ok = ($level !== ProtectionLevel::GUARDED);
+		// With Nothing leaves unsealed on, message content stays out of every
+		// notification — the member is told there is something to read, never
+		// what it says.
+		$content_ok = !$this->sealed_exits_only();
 		$preview = $content_ok ? substr($clean_body, 0, 100) : 'Open Messages to read it.';
 		if ($message_type === self::TYPE_SYSTEM) {
 			$preview = $content_ok ? substr($clean_body, 0, 100) : '';
@@ -577,36 +594,128 @@ class Conversation extends SystemBase {
 	//
 	// Standard is today's behaviour: plaintext rows the server manages. Private
 	// seals message bodies and attachment bytes at rest under one key per
-	// conversation, wrapped to each participant. Guarded is Private with the
-	// doors guarded — no message content in notifications, the AI pinned to
-	// local models, and no unsealed federation.
+	// conversation, wrapped to each participant. On Private, the Nothing leaves
+	// unsealed add-on (cnv_sealed_exits_only) closes the exits: no message
+	// content in notifications and no unsealed federation.
 	// ------------------------------------------------------------------
 
 	/** The rungs a conversation may sit on. Fortress is deliberately not one. */
-	const LEVELS = array(ProtectionLevel::STANDARD, ProtectionLevel::PRIVATE_, ProtectionLevel::GUARDED);
+	const LEVELS = array(ProtectionLevel::STANDARD, ProtectionLevel::PRIVATE_);
+
+	/**
+	 * The stored value an older release wrote for Private with Nothing leaves
+	 * unsealed. Read as exactly that until migration 199
+	 * (messenger_sealed_exits_only_fold.php) rewrites the row; never written.
+	 */
+	const LEGACY_SEALED_EXITS_LEVEL = 'guarded';
 
 	/** This conversation's level, always a real rung. */
 	public function protection_level(): string {
-		return ProtectionLevel::normalize($this->get('cnv_protection_level'));
+		return self::level_from_stored($this->get('cnv_protection_level'));
 	}
 
 	/**
-	 * Protection only tightens — enforced at the column itself, so no surface
-	 * (the generic REST PUT included) can lower a conversation below a rung it
-	 * has reached. raise() is the ceremony that moves it up; this is the lock
-	 * on the door, and it is what makes the one-way rule an invariant rather
-	 * than a convention raise() alone follows.
+	 * A stored level as a rung. A row still carrying the legacy value is
+	 * Private (its content is sealed), never Standard.
+	 */
+	public static function level_from_stored($stored): string {
+		if (self::is_legacy_sealed_exits_level($stored)) {
+			return ProtectionLevel::PRIVATE_;
+		}
+		return ProtectionLevel::normalize($stored);
+	}
+
+	/** Is this the legacy stored value (Private + Nothing leaves unsealed)? */
+	public static function is_legacy_sealed_exits_level($stored): bool {
+		return strtolower(trim((string)$stored)) === self::LEGACY_SEALED_EXITS_LEVEL;
+	}
+
+	/**
+	 * Open only while raise() or turn_on_sealed_exits_only() is writing. The
+	 * protection columns change through those ceremonies and nowhere else.
+	 */
+	private $protection_write_open = false;
+
+	/** Run $write with the protection columns writable, then close them again. */
+	private function write_protection(callable $write): void {
+		$this->protection_write_open = true;
+		try {
+			$write();
+		} finally {
+			$this->protection_write_open = false;
+		}
+	}
+
+	/**
+	 * The protection columns are written by their ceremonies only — enforced at
+	 * the column itself, so no surface (the generic REST PUT included) can
+	 * record a level or an add-on the conversation does not actually carry
+	 * (Private with no key and no grants), or lower a conversation below a rung
+	 * it has reached. raise() and turn_on_sealed_exits_only() are the
+	 * ceremonies; this is the lock on the door, and it is what makes those
+	 * rules invariants rather than conventions the ceremonies alone follow.
+	 *
+	 * A new record may be written at Standard with the add-on off — its
+	 * starting state. Writing a column its current value is not a change.
 	 */
 	function set($key, $value, $check_existance = TRUE) {
-		if ($key === 'cnv_protection_level' && $this->key !== NULL) {
-			$current = $this->protection_level();
-			if (!ProtectionLevel::isAtLeast(ProtectionLevel::normalize($value), $current)) {
+		// A row read from the table (load_from_data passes $check_existance
+		// FALSE) is stored state, not a request: it is taken as stored, so an
+		// unmigrated row still loads, and loads again.
+		if (!$check_existance) {
+			return parent::set($key, $value, $check_existance);
+		}
+
+		if ($key === 'cnv_protection_level') {
+			// Only a conversation's own rungs are ever written — never the
+			// legacy value, never Fortress. NULL is the column's "no level
+			// recorded", which reads as Standard.
+			if ($value !== NULL && !in_array($value, self::LEVELS, true)) {
+				throw new ConversationException('That is not a protection level a conversation can have.');
+			}
+			$stored = $this->get('cnv_protection_level');
+			$is_change = $this->key === NULL
+				? ($value !== NULL && $value !== ProtectionLevel::STANDARD)
+				: ((string)$value !== (string)$stored);
+			if ($is_change && !$this->protection_write_open) {
 				throw new ConversationException(
-					'Protection can be raised but not lowered. This conversation is already '
-					. ProtectionLevel::label($current) . '.');
+					'A conversation\'s protection level changes only by raising it, which seals its history and hands the key to every member.');
+			}
+			if ($this->key !== NULL) {
+				$current = $this->protection_level();
+				if (!ProtectionLevel::isAtLeast(self::level_from_stored($value), $current)) {
+					throw new ConversationException(
+						'Protection can be raised but not lowered. This conversation is already '
+						. ProtectionLevel::label($current) . '.');
+				}
+				// Rewriting a legacy row's level carries its add-on into the
+				// flag, so no write can quietly drop it.
+				if ($is_change && self::is_legacy_sealed_exits_level($stored)) {
+					parent::set('cnv_sealed_exits_only', true, $check_existance);
+				}
+			}
+		}
+
+		if ($key === 'cnv_sealed_exits_only') {
+			$was_on = self::truthy($this->get('cnv_sealed_exits_only'));
+			// The add-on is one-way for the same reason the level is: turning
+			// it off would let one member expose what everyone else was promised.
+			if ($this->key !== NULL && $was_on && !self::truthy($value)) {
+				throw new ConversationException(
+					'Nothing leaves unsealed can be turned on but not off.');
+			}
+			if (!$was_on && self::truthy($value) && !$this->protection_write_open) {
+				throw new ConversationException(
+					'Nothing leaves unsealed is turned on through the conversation\'s protection settings, which record who turned it on.');
 			}
 		}
 		return parent::set($key, $value, $check_existance);
+	}
+
+	/** A bool column value as PHP reads it back from Postgres or a form. */
+	protected static function truthy($value): bool {
+		return $value === true || $value === 1 || $value === '1' || $value === 't'
+			|| $value === 'true';
 	}
 
 	/** Is the content of this conversation ciphertext at rest? */
@@ -614,9 +723,55 @@ class Conversation extends SystemBase {
 		return ProtectionLevel::isAtLeast($this->protection_level(), ProtectionLevel::PRIVATE_);
 	}
 
-	/** Does this conversation keep message content out of notifications? */
-	public function is_guarded(): bool {
-		return $this->protection_level() === ProtectionLevel::GUARDED;
+	/**
+	 * Is the Nothing leaves unsealed add-on on? It keeps message content out of
+	 * notifications and refuses unsealed federation. The flag only means
+	 * something on a sealed conversation (add-ons ride on Private); on a
+	 * Standard row it is inert.
+	 */
+	public function sealed_exits_only(): bool {
+		// A row not yet migrated off the legacy value carries the add-on in
+		// its level (migration 199 moves it into the flag).
+		if (self::is_legacy_sealed_exits_level($this->get('cnv_protection_level'))) {
+			return true;
+		}
+		return $this->is_sealed() && self::truthy($this->get('cnv_sealed_exits_only'));
+	}
+
+	/**
+	 * Turn on Nothing leaves unsealed.
+	 *
+	 * The same authority as raise() — any participant may, nobody may undo it —
+	 * and the same record: a sealed system message saying who turned it on.
+	 * Only a Private conversation takes it; raise first.
+	 *
+	 * @throws ConversationException with something the member can act on
+	 */
+	public function turn_on_sealed_exits_only($actor_user_id): void {
+		if (!$this->has_participant($actor_user_id)) {
+			throw new ConversationException('You are not in this conversation.');
+		}
+		if (!$this->is_sealed()) {
+			throw new ConversationException(
+				'Set this conversation to Private first — Nothing leaves unsealed is extra protection on Private.');
+		}
+		if ($this->sealed_exits_only()) {
+			return;
+		}
+
+		// Resolved before the change so a locked session refuses up front
+		// rather than flipping the flag and failing on the announcement.
+		$dek = $this->change_key();
+
+		$this->write_protection(function () {
+			$this->set('cnv_sealed_exits_only', true);
+		});
+		$this->save();
+
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$actor = new User($actor_user_id, TRUE);
+		$this->add_system_message($actor->display_name()
+			. ' turned on Nothing leaves unsealed', $dek);
 	}
 
 	/**
@@ -657,7 +812,7 @@ class Conversation extends SystemBase {
 	 * for a shared room it also settles a consent problem: lowering would let
 	 * one member expose everyone else's history.
 	 *
-	 * Raising to Private or Guarded re-seals the whole history in one pass, so a
+	 * Raising to Private re-seals the whole history in one pass, so a
 	 * conversation is never half-protected — the promise is about what a stolen
 	 * disk yields, and a plaintext backlog would break it silently.
 	 *
@@ -666,8 +821,8 @@ class Conversation extends SystemBase {
 	 * @throws ConversationException with something the member can act on
 	 */
 	public function raise(string $level, $actor_user_id): void {
-		$level = ProtectionLevel::normalize($level);
-		if (!in_array($level, self::LEVELS, true)) {
+		$level = ProtectionLevel::fromInput($level, '');
+		if ($level === null || !in_array($level, self::LEVELS, true)) {
 			throw new ConversationException('That is not a protection level a conversation can have.');
 		}
 		if (!$this->has_participant($actor_user_id)) {
@@ -684,8 +839,7 @@ class Conversation extends SystemBase {
 				. ProtectionLevel::label($current) . '.');
 		}
 
-		// Guarded is Private plus door rules, so a Standard conversation going
-		// straight to Guarded still has to seal its history on the way.
+		// Any rung from Private up seals the history on the way.
 		$needs_sealing = ProtectionLevel::isAtLeast($level, ProtectionLevel::PRIVATE_)
 			&& !$this->is_sealed();
 
@@ -704,7 +858,9 @@ class Conversation extends SystemBase {
 			$dek = $this->change_key();
 		}
 
-		$this->set('cnv_protection_level', $level);
+		$this->write_protection(function () use ($level) {
+			$this->set('cnv_protection_level', $level);
+		});
 		$this->save();
 
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -1126,7 +1282,7 @@ class MultiConversation extends SystemMultiBase {
 		// LEFT JOIN LATERAL, not an inner one: a group that has just been created
 		// holds no message yet and must still appear in its members' inbox.
 		$sql = "SELECT cnv.cnv_conversation_id, cnv.cnv_subject, cnv.cnv_guid,
-				       cnv.cnv_protection_level, cnv.cnv_create_time,
+				       cnv.cnv_protection_level, cnv.cnv_sealed_exits_only, cnv.cnv_create_time,
 				       cnv.cnv_update_time, cnv.cnv_delete_time,
 				       latest.msg_sent_time AS latest_message_time,
 				       latest.msg_body AS latest_message_body,

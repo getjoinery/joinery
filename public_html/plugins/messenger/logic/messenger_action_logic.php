@@ -10,13 +10,16 @@
  *   to               for `open` — the member to start (or resume) a 1:1 with
  *   message_id       for react / delete_message
  *   emoji            for react
+ *   protection_level for protection — the rung to raise to
+ *   sealed_exits_only for protection — 1 turns on Nothing leaves unsealed
  *
  * `delete` is the member clearing a conversation out of their own inbox — the
  * conversation itself and everyone else's copy are untouched, and a new message
  * brings it back. Leaving a group is a membership change and lives in
  * messenger_group.
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - protection turns on the Nothing leaves unsealed add-on (sealed_exits_only)
  * @changelog 1.1.0 - Reachability spec: local addresses resolve internally (R1), `fresh` re-checks past the capability cache (rate-limited)
  */
 
@@ -309,33 +312,43 @@ function messenger_action_federate_control(Conversation $conversation, int $user
 }
 
 /**
- * Read or raise a conversation's protection level.
+ * Read or raise a conversation's protection.
  *
- * Without a `protection_level` this reports the current state and what would
- * stand in the way of raising — which is what the picker needs to show before
- * the member commits to something that cannot be undone.
+ * With neither `protection_level` nor `sealed_exits_only` this reports the
+ * current state and what would stand in the way of raising — which is what
+ * the picker needs to show before the member commits to something that cannot
+ * be undone.
  *
- * With one, it raises. Any participant may; nobody may lower.
+ * With a level, it raises; with `sealed_exits_only` set, it turns on Nothing
+ * leaves unsealed (after the raise, when both arrive together). Any participant
+ * may do either; nobody may lower the level or turn the add-on off.
  */
 function messenger_action_protection(Conversation $conversation, int $user_id, array $input): LogicResult {
 	$requested = isset($input['protection_level']) ? (string)$input['protection_level'] : '';
+	$addon_on  = !empty($input['sealed_exits_only']);
 
-	if ($requested === '') {
+	if ($requested === '' && !$addon_on) {
 		$missing = array_values($conversation->members_without_vault());
 		return LogicResult::render(array(
 			'action'           => 'protection',
 			'conversation_id'  => (int)$conversation->key,
 			'protection_level' => $conversation->protection_level(),
+			'sealed_exits_only' => $conversation->sealed_exits_only(),
 			'levels'           => Conversation::LEVELS,
-			// Raising to Private or Guarded needs everyone to hold a vault. Say
-			// who is missing one rather than refusing without a reason.
+			// Raising to Private needs everyone to hold a vault. Say who is
+			// missing one rather than refusing without a reason.
 			'members_without_protection' => $missing,
 			'can_seal'         => empty($missing),
 		));
 	}
 
 	try {
-		$conversation->raise($requested, $user_id);
+		if ($requested !== '') {
+			$conversation->raise($requested, $user_id);
+		}
+		if ($addon_on) {
+			$conversation->turn_on_sealed_exits_only($user_id);
+		}
 	} catch (ConversationException $e) {
 		return LogicResult::error($e->getMessage());
 	} catch (VaultLockedException $e) {
@@ -348,6 +361,7 @@ function messenger_action_protection(Conversation $conversation, int $user_id, a
 		'action'           => 'protection',
 		'conversation_id'  => (int)$conversation->key,
 		'protection_level' => $conversation->protection_level(),
+		'sealed_exits_only' => $conversation->sealed_exits_only(),
 		'conversation'     => Messenger::conversationPayload($conversation, $user_id),
 	));
 }
@@ -356,7 +370,7 @@ function messenger_action_logic_descriptor(): array {
 	return array(
 		'requires_session' => true,
 		'requires_setting' => 'messenger_active',
-		'description' => 'Open a 1:1, mute/unmute, remove a conversation from your own inbox, mark it read, react to a message, or delete your own message for everyone.',
+		'description' => 'Open a 1:1, mute/unmute, remove a conversation from your own inbox, mark it read, react to a message, delete your own message for everyone, or raise a conversation\'s protection (level, and the Nothing leaves unsealed add-on).',
 		'input' => array(
 			'action'          => array('type' => 'string', 'required' => true,  'label' => 'Action'),
 			'conversation_id' => array('type' => 'int',    'required' => false, 'label' => 'Conversation'),
@@ -364,6 +378,7 @@ function messenger_action_logic_descriptor(): array {
 			'message_id'      => array('type' => 'int',    'required' => false, 'label' => 'Message'),
 			'emoji'           => array('type' => 'string', 'required' => false, 'label' => 'Reaction emoji'),
 			'protection_level' => array('type' => 'string', 'required' => false, 'label' => 'Protection level to raise to'),
+			'sealed_exits_only' => array('type' => 'bool',  'required' => false, 'label' => 'Turn on Nothing leaves unsealed (Private only, cannot be turned off)'),
 			'address'         => array('type' => 'string', 'required' => false, 'label' => 'Address to reach (reachability / open_remote)'),
 			'fresh'           => array('type' => 'int',    'required' => false, 'label' => 'Re-check past the reachability cache (rate-limited)'),
 		),

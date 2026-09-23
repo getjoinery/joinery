@@ -143,7 +143,7 @@ document.addEventListener('DOMContentLoaded', function () {
 				<li><strong>Private mail</strong> — stored locked, unreadable to anyone with server or backup access.</li>
 				<li><strong>Private files</strong> — Drive folders only you can open.</li>
 				<li><strong>Saved passwords</strong> — every entry in the password manager.</li>
-				<li><strong>Encrypted chats</strong> — taking part in Private or Guarded conversations, here and on other Joinery sites.</li>
+				<li><strong>Encrypted chats</strong> — taking part in Private conversations, here and on other Joinery sites.</li>
 			</ul>
 		</div>
 		<!-- .jy-check is a flex row: the label text needs to be one element,

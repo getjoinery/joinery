@@ -19,7 +19,7 @@
  *     scoped per RECIPE, so triage/scan/schedule recipes on one mailbox never
  *     suppress each other. Item keys are message ids, unique across mailboxes,
  *     so the log needs no per-mailbox scoping;
- *   - PARSED. An unparsed Fortress row has empty content columns; judging one
+ *   - PARSED. An unparsed sealed row has empty content columns; judging one
  *     would produce a verdict on nothing AND log it as handled, so it would
  *     never be judged again once the mail was parsed. Mail parsing runs ahead
  *     of AI work in the same drain, so waiting costs nothing;
@@ -73,7 +73,7 @@ class EmailJobCandidates {
 
 	/**
 	 * The vault scope a job needs for this binding, or null when it needs none.
-	 * Any listed address on a sealed domain ('private', 'fortress') puts the
+	 * Any listed address on a sealed domain (level 'private') puts the
 	 * recipe's sealed subset behind the owner's window; a list of standard
 	 * addresses needs no window and keeps running unattended on its schedule.
 	 * Answered from the LISTED addresses (not the resolved set) so a revoked

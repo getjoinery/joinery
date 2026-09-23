@@ -13,11 +13,10 @@
  *
  *   The protected DNS shape tells the world to REJECT anything the sealed key
  *   did not sign. MailboxDkimSigner only signs with that key once
- *   ied_is_protected_identity is set. Branching the shape on the security LEVEL
- *   instead therefore handed a Fortress domain that had not opted in a record
- *   set that rejects its own outgoing mail — and a Fortress domain resting with
- *   send protection off is a legitimate, finished configuration, so that state
- *   is common rather than exotic.
+ *   ied_is_protected_identity is set. Branching the shape on anything else — the
+ *   protection level, or the sending lock merely being asked for — hands a
+ *   domain whose key signs nothing a record set that rejects its own outgoing
+ *   mail.
  *
  * Also asserted, because each was a surface that told the operator something
  * untrue:
@@ -33,7 +32,8 @@
  *
  * Run: php plugins/mailbox/tests/protect_optin_test.php
  *
- * @version 1.0
+ * @version 1.1 - the send-protection row and the finishing step follow the
+ *   sending-lock add-on (asked for, then finished), not a level
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -52,11 +52,12 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identi
 class PoFakeDomain extends InboundEmailDomain {
 	private $po_protected;
 	private $po_level;
-	public function __construct(bool $protected, string $level) {
+	public function __construct(bool $protected, string $level, bool $lock_requested = false) {
 		parent::__construct(NULL);
 		$this->po_protected = $protected;
 		$this->po_level = $level;
 		$this->set('ied_domain', 'example.com');
+		$this->set('ied_send_lock_requested', $lock_requested);
 	}
 	public function is_protected_identity() { return $this->po_protected; }
 	public function security_level() { return $this->po_level; }
@@ -66,7 +67,7 @@ class ProtectOptinTest {
 
 	public function run() {
 		$this->assertShapeFollowsTheFlag();
-		$this->assertFortressCompletionCard();
+		$this->assertSendLockCompletionCard();
 		$this->assertSigningStartsBeforeStrictRecords();
 		$this->assertProviderCapabilityIsMeasured();
 		$this->assertLiftingDoesNotStrandDns();
@@ -89,14 +90,14 @@ class ProtectOptinTest {
 		$applies = new ReflectionMethod('InboundEmailSetupCheck', 'protectedShapeApplies');
 		$check = new InboundEmailSetupCheck();
 
-		check($applies->invoke($check, new PoFakeDomain(true, 'fortress')) === true,
+		check($applies->invoke($check, new PoFakeDomain(true, 'private', true)) === true,
 			'a domain with send protection ON gets the protected shape');
 
-		// The one that matters. Before this, the shape was prescribed for any
-		// Fortress domain, so this returned true and the operator was told to
-		// publish records that reject their own mail.
-		check($applies->invoke($check, new PoFakeDomain(false, 'fortress')) === false,
-			'a Fortress domain WITHOUT send protection gets the ordinary shape, not the inverted one');
+		// The one that matters: asking for the sending lock is not enforcing it.
+		// Prescribing the shape on the request would tell the operator to publish
+		// records that reject their own mail.
+		check($applies->invoke($check, new PoFakeDomain(false, 'private', true)) === false,
+			'a domain that asked for the sending lock but is not signing gets the ordinary shape');
 
 		check($applies->invoke($check, new PoFakeDomain(false, 'private')) === false,
 			'a Private domain gets the ordinary shape');
@@ -111,26 +112,26 @@ class ProtectOptinTest {
 			'a GetByDomain miss (false, not null) is handled without fataling');
 
 		// Belt and braces against the exact edit that caused it: reintroducing
-		// `|| security_level() === LEVEL_FORTRESS` into the shape rule would pass
+		// `|| send_lock_requested()` or a level test into the shape rule would pass
 		// the checks above only if it also kept the flag — which is precisely what
 		// the broken version did.
 		//
 		// Scoped to the shape rule, not the whole file: the level IS legitimately
 		// consulted elsewhere, to decide whether to emit the send-protection row
-		// at all. Which shape to prescribe and whether Fortress is finished are
-		// different questions.
+		// at all. Which shape to prescribe and whether the sending lock is
+		// finished are different questions.
 		$src = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 		$rule = substr($src, strpos($src, 'private function protectedShapeApplies'));
 		$rule = substr($rule, 0, strpos($rule, "\n\t}"));
-		check(strpos($rule, 'LEVEL_FORTRESS') === false && strpos($rule, 'security_level') === false,
+		check(strpos($rule, 'send_lock') === false && strpos($rule, 'security_level') === false,
 			'the shape rule consults the enforcement flag and nothing else');
 		check(preg_match('/is_protected_identity\(\)\s*\|\|\s*\$model->security_level\(\)/', $src) === 0,
 			'the old level-or-flag disjunction is gone from the whole engine');
 	}
 
-	private function assertFortressCompletionCard() {
-		section('Fortress is not finished until sending is locked');
+	private function assertSendLockCompletionCard() {
+		section('A requested sending lock is not finished until sending is locked');
 
 		$m = new ReflectionMethod('InboundEmailSetupCheck', 'sendProtectionResult');
 
@@ -144,7 +145,7 @@ class ProtectOptinTest {
 				public function strictRecordsPublished(InboundEmailDomain $model): bool { return $this->strict; }
 			};
 			$mm = new ReflectionMethod($check, 'sendProtectionResult');
-			return $mm->invoke($check, 'example.com', new PoFakeDomain($signing, 'fortress'));
+			return $mm->invoke($check, 'example.com', new PoFakeDomain($signing, 'private', true));
 		};
 
 		$done = $row(true, true);
@@ -153,7 +154,7 @@ class ProtectOptinTest {
 
 		$unfinished = $row(false, false);
 		check($unfinished['status'] === InboundEmailSetupCheck::FAIL,
-			'not signing is a REQUIRED failure — Fortress is not finished');
+			'not signing is a REQUIRED failure — the requested lock is not finished');
 		check($unfinished['severity'] === InboundEmailSetupCheck::REQUIRED,
 			'so it turns the mailbox verdict to attention');
 
@@ -198,7 +199,7 @@ class ProtectOptinTest {
 		foreach (array($unfinished, $broken) as $r) {
 			$verdict = mailbox_setup_verdict(array('receiving' => array($r), 'forwarding' => array()));
 			check($verdict['status'] === 'attention',
-				'an unfinished Fortress domain reads attention', $verdict['status']);
+				'an unfinished sending lock reads attention', $verdict['status']);
 		}
 	}
 
@@ -564,14 +565,15 @@ class ProtectOptinTest {
 		check(strpos($guided, 'prefill_domain') === false,
 			'no Standard-subdomain offer among the guided steps');
 
-		// Fortress is a two-sided promise and the guided box says so — with a link,
-		// not a control. Gated on the arrival side working first.
-		check(strpos($guided, 'Finish Fortress') !== false,
-			'the guided box names Fortress as unfinished while sending is unlocked');
+		// A requested sending lock is a promise the member asked for, and the
+		// guided box says it is unfinished — with a link, not a control. Gated on
+		// mail arriving where it should first (the relay, when relay sealing is on).
+		check(strpos($guided, 'Finish Only send while I') !== false,
+			'the guided box names the requested sending lock as unfinished while sending is unlocked');
 		check(strpos($guided, '$setup_url') !== false,
 			'and links to the ceremony rather than reimplementing it');
-		check(preg_match('/!\$is_protected\s*&&\s*\$active_relay !== null\s*&&\s*_setup_domain_mx_is_cut_over/', $guided) === 1,
-			'rendering only when unprotected, with a live relay, and the MX cut over');
+		check(preg_match('/\$send_requested\s*&&\s*!\$is_protected\s*&&\s*\(!\$relay_addon_on \|\| \$active_relay !== null\)\s*&&\s*_setup_domain_mx_is_cut_over/', $guided) === 1,
+			'rendering only when asked for and unprotected, with the relay live if relay sealing is on, and the MX cut over');
 		check(strpos($view, 'function _setup_domain_mx_is_cut_over') !== false,
 			'the cutover test reads the domain.mx row the page already computed');
 
@@ -690,7 +692,7 @@ class ProtectOptinTest {
 			'it is called the sending route');
 
 		// "Protection" meant both arrival sealing and the sending identity. A
-		// Fortress domain already has the first, so the bare word read as an
+		// Private domain already has the first, so the bare word read as an
 		// instruction to redo what was done.
 		foreach (array('plugins/mailbox/includes/protect_identity.php',
 			'plugins/mailbox/admin/admin_mailbox_domains.php') as $file) {

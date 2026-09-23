@@ -8,7 +8,9 @@
  * message to the browser in exactly the same shape. Both live here so the
  * answers cannot drift between endpoints.
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - the Nothing leaves unsealed add-on: its default, its flag in the
+ *   conversation payload, and the level-plus-add-ons summary for the chip
  */
 
 /** A refusal with a message the member can read. */
@@ -95,9 +97,31 @@ class Messenger {
 			'max_group_size' => max(2, self::settingInt('messenger_max_group_size', 32)),
 			'max_attachment_mb' => self::settingInt('messenger_max_attachment_mb', 25),
 			'max_message_length' => Conversation::MAX_MESSAGE_LENGTH,
-			'default_level'  => ProtectionLevel::normalize(
-				Globalvars::get_instance()->get_setting('messenger_default_protection_level', true, true)),
+			'default_level'  => self::defaultLevel(),
+			'default_sealed_exits_only' => self::defaultSealedExitsOnly(),
 		);
+	}
+
+	/** The level a new conversation starts at when the member does not choose. */
+	public static function defaultLevel(): string {
+		// A stored legacy value reads as Private (with the add-on, below)
+		// until migration 199 rewrites the setting.
+		$level = Conversation::level_from_stored(
+			Globalvars::get_instance()->get_setting('messenger_default_protection_level', true, true));
+		return in_array($level, Conversation::LEVELS, true) ? $level : ProtectionLevel::STANDARD;
+	}
+
+	/**
+	 * Whether a new Private conversation starts with Nothing leaves unsealed on
+	 * when the member does not choose. Meaningless for a Standard start.
+	 */
+	public static function defaultSealedExitsOnly(): bool {
+		$settings = Globalvars::get_instance();
+		if (Conversation::is_legacy_sealed_exits_level(
+				$settings->get_setting('messenger_default_protection_level', true, true))) {
+			return true;
+		}
+		return (bool)(int)$settings->get_setting('messenger_default_sealed_exits_only', true, true);
 	}
 
 	// ------------------------------------------------------------------
@@ -213,8 +237,12 @@ class Messenger {
 			'is_group' => $conversation->is_group(),
 			'is_federated' => count($remote) > 0,
 			'remote_peers' => $remote,
-			'protection_level' => ProtectionLevel::normalize($conversation->get('cnv_protection_level')),
-			'protection_label' => ProtectionLevel::label($conversation->get('cnv_protection_level')),
+			'protection_level' => $conversation->protection_level(),
+			'protection_label' => ProtectionLevel::label($conversation->protection_level()),
+			'sealed_exits_only' => $conversation->sealed_exits_only(),
+			// The level with its active add-ons, the way every chip shows it.
+			'protection_summary' => ProtectionLevelPicker::summary($conversation->protection_level(),
+				$conversation->sealed_exits_only() ? array(ProtectionLevelPicker::ADDON_SEALED_EXITS_ONLY) : array()),
 			'avatar'  => self::conversationAvatar($conversation, $user_id),
 			'unread'  => $unread,
 			'is_muted' => $muted,

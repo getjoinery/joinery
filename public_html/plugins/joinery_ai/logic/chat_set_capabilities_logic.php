@@ -6,8 +6,8 @@
  *   or the legacy toggle form { conversation_id, capability, enabled }
  *
  * Validates and persists one control (model, temperature, top_p, max_tokens,
- * instructions, thinking_level, or a data_access / web_search toggle) on an
- * existing conversation through the same ChatControls validator the web status
+ * instructions, thinking_level, or a data_access / web_search toggle), the
+ * privacy level, or the Local models only add-on on an existing conversation through the same ChatControls validator the web status
  * strip uses. New chats seed their controls on the first chat_send instead.
  */
 function chat_set_capabilities_logic(array $input): LogicResult {
@@ -46,6 +46,13 @@ function chat_set_capabilities_logic(array $input): LogicResult {
         if (!$result['ok']) return LogicResult::error($result['error']);
         return LogicResult::render(['field' => $field, 'security_level' => $result['level']]);
     }
+    // The Local models only add-on — one-way, and turning it on pins the model.
+    if ($field === 'local_models_only') {
+        $on = in_array(strtolower(trim((string)$value)), ['1', 'true', 'on', 'yes'], true);
+        $result = ChatLevel::setLocalModelsOnly($conversation, $on, $uid);
+        if (!$result['ok']) return LogicResult::error($result['error']);
+        return LogicResult::render(['field' => $field, 'local_models_only' => $result['local_models_only']]);
+    }
 
     try {
         [$column, $stored] = ChatControls::validate($field, $value);
@@ -53,11 +60,11 @@ function chat_set_capabilities_logic(array $input): LogicResult {
         return LogicResult::error($e->getMessage());
     }
 
-    // A Fortress chat pins inference to a local model — refuse a cloud model.
-    if ($field === 'model' && (string)$conversation->get('aic_security_level') === AiConversation::LEVEL_FORTRESS
+    // A local-only chat pins inference to a local model — refuse a cloud model.
+    if ($field === 'model' && $conversation->localModelsOnly()
             && $stored !== '' && !ChatLevel::isLocalModel((string)$stored)) {
-        return LogicResult::error('This is a Fortress chat — it can only use a local model. '
-            . 'Choose a local model, or lower the chat to Private/Standard first.');
+        return LogicResult::error('This chat is set to Local models only — it can only use a model '
+            . 'running on your own hardware. Choose a local model.');
     }
 
     // aic_instructions is content (sealed on a protected chat); reseal it under the
@@ -82,7 +89,7 @@ function chat_set_capabilities_logic_descriptor() {
             'description' => 'Set one AI chat control (model, temperature, thinking level, or a capability toggle) on an existing conversation.',
             'input' => [
                 'conversation_id' => ['type' => 'int', 'required' => true, 'label' => 'Conversation ID'],
-                'field' => ['type' => 'string', 'required' => false, 'label' => 'Control to set (model, temperature, top_p, max_tokens, instructions, thinking_level, attachment_mode, security_level, or a capability)'],
+                'field' => ['type' => 'string', 'required' => false, 'label' => 'Control to set (model, temperature, top_p, max_tokens, instructions, thinking_level, attachment_mode, security_level, local_models_only, or a capability)'],
                 'value' => ['type' => 'string', 'required' => false, 'label' => 'New value'],
                 'capability' => ['type' => 'string', 'required' => false, 'label' => 'Capability toggle (legacy form)'],
                 'enabled' => ['type' => 'bool', 'required' => false, 'label' => 'Capability on/off (legacy form)'],

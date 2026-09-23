@@ -12,13 +12,14 @@ B6), a ranked account of how a stranger's email reaches the pool, and
 the ranked inventory now kept in `security_inventory.md`.
 
 **Declined, kept for reference (owner, 2026-09-07):** nothing in this spec or
-its child blocks raising a mailbox to Private or Fortress. Health checks and
+its child blocks raising a mailbox to Private or Fortress (the level then called
+Fortress; now Private's mail add-ons). Health checks and
 the "unsigned plugins present" finding are surfaced as information with a
 remediation, never as a gate on the protection ceremony.
 
 ## What this is about
 
-A Private or Fortress mailbox promises the stored mail cannot be read without
+A Private mailbox (with or without its add-ons) promises the stored mail cannot be read without
 the owner. That promise is about mail *at rest*. While the owner is signed in
 and their vault window is open, some of it is necessarily not at rest — and
 what that "some" turns out to be is wider than the sentence suggests.
@@ -330,8 +331,8 @@ The browser already heartbeats while a window is open; it could carry the key
 material on each request instead of the server caching it. No daemon, no
 resident key, no residue. Not recommended while CSP is off
 (`project_csp_phase1`, built, OFF): a script injected into the page steals the
-key outright, native apps need the same change, and the Fortress idle cap is
-designed around a server-side window. Revisit after CSP is on.
+key outright, native apps need the same change, and the hardened-domain idle
+cap is designed around a server-side window. Revisit after CSP is on.
 
 ### Rejected
 
@@ -344,7 +345,7 @@ path rather than merely reading memory — but it is worthless against the case
 that matters here, code running in the pool, and it should not be mistaken for a
 fix for it.
 
-**Gating Private/Fortress on any of this** — declined by the owner 2026-09-07.
+**Gating Private or its mail add-ons on any of this** — declined by the owner 2026-09-07.
 Kept above for reference only.
 
 **Out of scope, and worth saying once:** none of this survives root on the node

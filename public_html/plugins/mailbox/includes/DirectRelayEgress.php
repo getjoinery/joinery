@@ -2,7 +2,7 @@
 /**
  * DirectRelayEgress - sending Joinery Direct from behind a relay.
  *
- * A Fortress deployment hides its box's address. If the box opened the
+ * A relay-fronted deployment hides its box's address. If the box opened the
  * connection itself, the recipient's instance would see that address in its own
  * access log — which is precisely what the relay exists to prevent. So the box
  * builds and SIGNS the whole request, and the relay makes it: the recipient sees
@@ -20,6 +20,7 @@
  * identity (RelayClient). Nothing here adds a credential the relay could use to
  * act as this deployment.
  *
+ * @version 1.2.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.2 - the ssh era is over: the tunnel path is gone
  * @version 1.1 - the relay API path (specs/relay_without_a_shell.md)
  * @version 1.0

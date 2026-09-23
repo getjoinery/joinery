@@ -314,7 +314,10 @@ class MultiModelTester extends ModelTester {
         $test_data = [];
         
         $fields = $this->get_all_multi_testable_fields();
-        
+        // Values the model pins in its $test_fixture win over generated ones,
+        // exactly as in the single-record tester.
+        $fixture_values = $this->get_test_fixture_values();
+
         if ($verbose) {
             echo "    Generating data for record $index with " . count($fields) . " fields...<br>\n";
             flush();
@@ -331,6 +334,11 @@ class MultiModelTester extends ModelTester {
                 flush();
             }
             
+            if (array_key_exists($field, $fixture_values)) {
+                $test_data[$field] = $fixture_values[$field];
+                continue;
+            }
+
             try {
                 // Call parent's improved generate_field_value with index
                 $value = $this->generate_field_value($field, $index);

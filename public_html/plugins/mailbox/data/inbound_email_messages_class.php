@@ -87,7 +87,7 @@
  * content in miniature, so it is a $sealed_fields member like the body columns above.
  *
  * DEFERRED INGEST (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 5). On a
- * relay-fronted deployment, MX-path Fortress mail arrives sealed to the owner's vault public
+ * relay-fronted deployment, MX-path relay-sealed mail arrives sealed to the owner's vault public
  * key and is stored PENDING-PARSE (iem_pending_parse) with the sealed blob in
  * iem_relay_sealed_raw until the next unlock, when DeferredIngest parses and seals it under a
  * fresh DEK. iem_relay_spool_id is the pull dedup key.
@@ -103,6 +103,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.31.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.31 - iem_raw_sync_last_error: why the last offload attempt did not move the raw message
  * @version 1.30
  * @changelog 1.30 - iem_to / iem_cc: the To and Cc lists as the message carried
@@ -326,7 +327,7 @@ class InboundEmailMessage extends SystemBase {
 		// (InboundEmailRouter::persistRawAndManifest); getRawMessage() opens it.
 		'iem_raw_sealed'          => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Deferred ingest — hardened ingest relay (specs/inbound_email_hardened_ingest_relay_executor.md
-		// § Phase 5). For MX-path Fortress mail the relay seals the WHOLE raw message to the
+		// § Phase 5). For MX-path relay-sealed mail the relay seals the WHOLE raw message to the
 		// owner's vault public key (crypto_box_seal → SealedBox::openDek, NOT the per-message
 		// DEK). While the owner is logged out the pull consumer (the relay reconcile task) can only store
 		// operational metadata + this sealed blob in a PENDING-PARSE state: threading and unread
@@ -1017,7 +1018,7 @@ class InboundEmailMessage extends SystemBase {
 
 	/**
 	 * Seal an EXISTING plaintext row — the level-raise path (a Standard domain
-	 * promoted to Private/Fortress, whose stored mail must catch up).
+	 * promoted to Private, whose stored mail must catch up).
 	 *
 	 * Unlike sealAndPersistContent(), which is handed the values at ingest, this
 	 * reads the row and seals every $sealed_fields column that currently holds
@@ -1512,7 +1513,7 @@ class InboundEmailMessage extends SystemBase {
 	 * ever makes it final. Selection only — purgeSelected() does the reclaiming.
 	 *
 	 * Sealed mailboxes purge locked: permanent_delete() works on columns and
-	 * storage keys, never on plaintext, so a Fortress mailbox needs no vault
+	 * storage keys, never on plaintext, so a relay-sealed mailbox needs no vault
 	 * window here.
 	 *
 	 * @param int $days  Retention window from the setting

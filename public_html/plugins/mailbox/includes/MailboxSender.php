@@ -51,6 +51,7 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.19.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.19 - every send writes a MailboxSendAttempt row — sent, failed, or partly
  *   Direct-delivered — with the transport, the carrier's receipt and the error, so
  *   a refused send is no longer a toast nobody can find again
@@ -1385,7 +1386,7 @@ class MailboxSender {
 	 *
 	 * A sealing mailbox with no usable key throws rather than downgrading — the
 	 * same refusal delivery makes, surfaced here as a send/save failure, because
-	 * writing the composer's own words in the clear on a Private or Fortress
+	 * writing the composer's own words in the clear on a Private
 	 * mailbox is the one outcome that must never happen quietly.
 	 *
 	 * @return array{sealing:bool,vault:?UserEncryptionVault,owner_id:?int}

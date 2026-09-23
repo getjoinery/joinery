@@ -2,7 +2,8 @@
 
 Manual end-to-end UX review of the security-levels feature set: bring a real
 address into Joinery at Standard, live with it, upgrade to Private, live with
-it, upgrade to Fortress — exercising passkeys, TOTP 2FA, the sealed vault, and
+it, switch on the Extra protection add-ons (Seal at the relay, Only send while I'm
+signed in) — exercising passkeys, TOTP 2FA, the sealed vault, and
 every gate along the way.
 
 **Goal is UX review, not just correctness.** At the end of every phase, record
@@ -14,8 +15,8 @@ to guess. That output is the deliverable.
 ## Phase 0 — Fixtures and preconditions
 
 **P0.1 — Choose the test domain.** You need a real domain you control DNS for.
-Do **not** use the domain behind your primary personal address: the Fortress
-upgrade moves MX to the relay, strips the box from SPF, and publishes
+Do **not** use the domain behind your primary personal address: the Extra
+protection add-ons move MX to the relay, strips the box from SPF, and publishes
 `p=reject` DMARC — that affects all live mail on the domain. Use a real but
 sacrificial domain (or a dedicated subdomain) whose MX you can freely cut over.
 The "existing address" for the scenario is an address on that domain.
@@ -36,7 +37,7 @@ default (30) — you'll observe it in Phase 3.
 **P0.5 — Authenticators.** A real PRF-capable authenticator is mandatory:
 platform biometric (Touch ID / Windows Hello / iCloud Keychain passkey) or a
 hardware key. The CDP virtual authenticator cannot do PRF, so vault unlock,
-decrypt-on-view, and Fortress compose cannot be tested with it. Have a
+decrypt-on-view, and sending-lock compose cannot be tested with it. Have a
 **second** authenticator available (second device or hardware key) for the
 multi-passkey and lost-passkey scenarios.
 
@@ -107,7 +108,7 @@ confirm the `/verify-stepup` redirect fires and returns you to the editor.
 
 **2.2 Negative test — Private before vault.** While still vault-less, edit
 the domain and try to set **Private**. Expect refusal with the "set up your
-vault before choosing Private or Fortress" message. UX check: does the
+vault before choosing Private" message. UX check: does the
 refusal tell you *where* to go set up the vault? (Do this now — the
 opportunity disappears after Phase 3.)
 
@@ -233,17 +234,17 @@ in a sitting — note it as designed-only coverage.
 
 ---
 
-## Phase 5 — Upgrade to Fortress and live with it
+## Phase 5 — Switch on Extra protection and live with it
 
-**5.1 Prerequisite gate (optional negative).** Fortress requires a second
-factor independent of any single passkey; your TOTP from Phase 1 satisfies
-it. Optional: with a scratch user holding a vault + one passkey + no TOTP,
-observe `must_enroll_2fa_for_fortress` blocking every page behind a redirect
-to `/profile/security`.
+**5.1 No second-factor gate (optional).** Neither add-on asks for a second
+factor. Optional: with a scratch user holding a vault + one passkey + no TOTP,
+switch an add-on on and confirm every page stays reachable — no redirect to
+`/profile/security`.
 
-**5.2 The upgrade.** Domain editor → **Fortress**. Expect: step-up, then the
+**5.2 The switch.** Domain editor → **Private** → Extra protection → tick **Seal at
+the relay** and **Only send while I'm signed in**. Expect: step-up, then the
 cutover checklist — MX at the relay, SPF without the Joinery box, `p=reject`
-DMARC, forwarding-subdomain records, relay provisioning (first Fortress
+DMARC, forwarding-subdomain records, relay provisioning (first relay-sealed
 domain), and the confirm gate: *"this domain cannot send mail unless you are
 logged in."* Work the checklist to green. UX check: is the DNS instruction
 set complete enough to execute without guessing?
@@ -260,7 +261,7 @@ placeholder as any other (no visible "pending-parse" third state). Unlock:
 message parses and reads normally, attachments included.
 
 **5.5 Compose locked vs unlocked.** With the window closed, attempt compose/
-send from the Fortress mailbox. Expect: refused and surfaced as an unlock
+send from the mailbox. Expect: refused and surfaced as an unlock
 prompt (not a raw error). Unlock → send → DKIM=pass at Gmail.
 
 **5.6 Filters act at next login.** Create a filter (window open). Log out,
@@ -268,10 +269,10 @@ send a matching mail from Gmail, log back in + unlock. Expect: the filter's
 action applied at login, not at receive.
 
 **5.7 Automated sends refused.** Trigger any transactional/platform send that
-would go out as the Fortress domain identity. Expect: refused — only the
+would go out as the locked domain identity. Expect: refused — only the
 in-session compose path may send as that identity.
 
-**5.8 Window caps.** Fortress adds a 2h idle cap after last content decrypt
+**5.8 Window caps.** Either add-on brings a 2h idle cap after last content decrypt
 and a 24h absolute cap — observational only; note as designed-only coverage.
 
 **Phase 5 UX notes:** ______
@@ -299,7 +300,8 @@ UX-note every rough edge; this is the flow a stressed real user hits.
 
 ## Phase 7 — Downgrades
 
-**7.1 Fortress → Private.** Expect: warning; identity posture reverts
+**7.1 Extra protection off (untick both add-ons).** Expect: step-up; send
+protection lifts and the identity posture reverts
 (SPF/DKIM/DMARC instructions to undo the cutover), ambient sending capability
 returns, MX untouched. Confirm mail still reads (already sealed in the right
 form).
@@ -328,6 +330,6 @@ stays disabled — that's an account property now, not a domain one.
 
 ## Coverage that stays designed-only (not exercised here)
 
-- Private 7-day absolute backstop; Fortress 2h idle / 24h absolute caps (4.8, 5.8)
+- Private 7-day absolute backstop; hardened (add-on) 2h idle / 24h absolute caps (4.8, 5.8)
 - Group-collaboration domains locked to Standard; IMAP-source domains capped at Private (constraint tests, not part of this scenario's fixture)
 - Native app locked-flag behavior on `/api/v1` mailbox endpoints (separate mobile pass)

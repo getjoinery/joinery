@@ -7,7 +7,9 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.27.0 - passwordinput() takes `stored` (a stored credential draws
+ * @version 2.28.0 - checkboxinput() takes `switch` (drawn as an on/off switch,
+ *   role="switch") for the protection picker's add-ons
+ * @changelog 2.27.0 - passwordinput() takes `stored` (a stored credential draws
  *   locked, with a Reset button) and `rows` (a multi-line credential);
  *   process_secretinput() reads the submission as keep / clear / set; the bound
  *   value no longer infers "stored"; validate() passes a locked field that did
@@ -3881,6 +3883,7 @@ JS;
             'helptext' => $options['helptext'] ?? '',
             'visibility_rules' => $options['visibility_rules'] ?? null,
             'custom_script' => $options['custom_script'] ?? null,
+            'switch' => !empty($options['switch']),
         ];
     }
 

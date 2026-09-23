@@ -6,7 +6,7 @@ Let a hosted mailbox exchange end-to-end encrypted mail with the outside world u
 
 Strategic framing: we do not invent a federation protocol. OpenPGP + its modern discovery mechanisms (WKD, Autocrypt) already form a live federation that includes Proton Mail, Thunderbird, GnuPG, Delta Chat, and mailbox.org. By publishing keys and auto-encrypting on discovery, Joinery-to-Joinery mail becomes E2E automatically — and so does Joinery-to-Proton and Joinery-to-anyone-with-a-key, with zero coordination. We inherit an existing network instead of bootstrapping one.
 
-**Relationship to the existing security model.** `specs/mailbox_security_model_public.md` states PGP is a non-goal. That remains true *for the at-rest security story* — Private/Fortress sealing does not depend on correspondents adopting anything. This spec adds OpenPGP as an *interop* layer on top: opportunistic, automatic, and invisible when the correspondent has no key. The public security-model doc must be updated to draw this line explicitly (see Documentation to Update).
+**Relationship to the existing security model.** `specs/mailbox_security_model_public.md` states PGP is a non-goal. That remains true *for the at-rest security story* — Private sealing (with or without its add-ons) does not depend on correspondents adopting anything. This spec adds OpenPGP as an *interop* layer on top: opportunistic, automatic, and invisible when the correspondent has no key. The public security-model doc must be updated to draw this line explicitly (see Documentation to Update).
 
 ## Protocol Inventory
 
@@ -83,7 +83,7 @@ Complete inventory of the open standards in this space, each with what it does i
 
 **One OpenPGP keypair per hosted alias** (the alias *is* the identity — one email address, one key), generated server-side at enablement:
 
-- **Eligibility:** store-mode or forward_and_store alias with a single owner grant whose owner has a Sealed Vault (any server-custody scope). Same precondition as content sealing. Group/shared mailboxes are not E2E-eligible (no single custody root) — same rule as Fortress today.
+- **Eligibility:** store-mode or forward_and_store alias with a single owner grant whose owner has a Sealed Vault (any server-custody scope). Same precondition as content sealing. Group/shared mailboxes are not E2E-eligible (no single custody root) — same rule as the mail add-ons (Seal at the relay, Only send while I'm signed in) today.
 - **Custody:** exactly the protected-identity DKIM pattern (`ied_dkim_sealed_key` precedent): the OpenPGP secret key is generated in-session, sealed to the owner's vault public key via `SealedBox`, and exists in plaintext only inside an unlock window. Public key + fingerprint stored cleartext for publication.
 - **Algorithm:** v4, Ed25519 primary (certify+sign), Cv25519 encryption subkey, no expiry initially (rotation covered below). UID `<display name> <alias@domain>`.
 - **Rotation / revocation:** key generation counter per alias (mirrors `ied_dkim_key_generation`); a rotation generates a new pair, republishes WKD/Autocrypt, and keeps prior generations' sealed secret keys for decrypting old mail. A revocation certificate is generated at key creation and stored sealed alongside (needed if we later publish to keys.openpgp.org).
@@ -95,7 +95,7 @@ All in the single existing funnel `MailboxSender::send()`, immediately before th
 
 1. **Discovery, per recipient:** Autocrypt peer cache → WKD (advanced, then direct) → keys.openpgp.org VKS → (optional, DNSSEC domains only) OPENPGPKEY. First verified hit wins; disagreements between sources on the same address are logged and surfaced as a compose-time notice, not silently resolved.
 2. **Policy:** *opportunistic by default* — encrypt iff **every** recipient (To/Cc) resolved a key; otherwise send plaintext exactly as today. Per-message override in compose: "Require encryption" (fail the send listing unresolved recipients) and "Don't encrypt this message". Per-alias default setting later if usage warrants.
-3. **Sign-when-encrypting:** encrypted mail is also signed with the alias key — which requires an open unlock window. Practical consequence: E2E sends are session-gated like Fortress sends. Unsigned-but-encrypted is not offered (poor interop reputation, confusing UX).
+3. **Sign-when-encrypting:** encrypted mail is also signed with the alias key — which requires an open unlock window. Practical consequence: E2E sends are session-gated like sends from a domain with the Only send while I'm signed in add-on. Unsigned-but-encrypted is not offered (poor interop reputation, confusing UX).
 4. **Encrypt-to-self:** the stored outbound copy (and the wire message's Bcc-to-self behavior) is encrypted to the alias's own key too, so Sent mail remains readable in-window.
 5. **Autocrypt header** on every outbound from an E2E-enabled alias, encrypted or not.
 6. **Protected headers** (C7) applied whenever encrypting.
@@ -144,7 +144,7 @@ Settings (plugin.json): engine paths/flags (`mailbox_gpg_binary`), discovery tim
 2. **TLS certs for customer subdomains** (`openpgpkey.<domain>`, `mta-sts.<domain>` pointing at the box): per-domain ACME issuance on the box (http-01 works since the name resolves here) vs. instructing delegated/CNAME modes only. Decide once; it gates WKD direct hosting and MTA-STS policy serving.
 3. **Multi-generation decryption UX** — after key rotation, decrypting old mail needs the retired generation's key; confirm the unlock window unwraps all generations or lazily per message.
 4. **List-view subject for E2E mail** — placeholder-only vs. in-window decrypt-and-cache (RAM/`/dev/shm`, MailboxIndex-style) for usable threading; decide against real usage.
-5. **Encrypted inbound on Standard domains** — E2E-enabled alias on a Standard (plaintext-at-rest) domain stores OpenPGP ciphertext it can only read in-window; confirm this asymmetry is acceptable UX or gate E2E enablement to Private/Fortress domains.
+5. **Encrypted inbound on Standard domains** — E2E-enabled alias on a Standard (plaintext-at-rest) domain stores OpenPGP ciphertext it can only read in-window; confirm this asymmetry is acceptable UX or gate E2E enablement to Private domains.
 6. **DoH dependency for DNSSEC checks** — confirm using an external validating resolver (Cloudflare/Google DoH, AD flag) is acceptable vs. requiring a local validating resolver (unbound) in provisioning; affects T3 detect and any C6/T5 validation.
 7. **Delivery-mode edge:** forward-only aliases can't be E2E (nothing stored, key custody pointless) — confirm eligibility gating covers forward_and_store sanely (forwarded leg carries ciphertext the destination may not decrypt).
 8. **internet.nl target** — decide whether "100% on internet.nl mail test" is a formal acceptance criterion for the transport tier (it tests IPv6, DNSSEC, DKIM/SPF/DMARC, STARTTLS+DANE; some items are operator-level, not per-customer).

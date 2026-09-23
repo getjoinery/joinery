@@ -1,9 +1,11 @@
-# Fortress — live end-to-end verification runbook
+# Hardened mail domain — live end-to-end verification runbook
 
-Version: 1.0
+> File name predates the three-level model (`specs/protection_levels_platform.md` R4): "Fortress" here meant mail's hardened server-custody level, which is now **Private with both mail add-ons** (Seal at the relay + Only send while I'm signed in) — a "hardened domain". Fortress now means end-to-end only.
 
-Directions for an agent (Claude Code on the dev box) to prove the **Fortress**
-security level end to end on a real second deployment fronted by a real off-box
+Version: 1.1
+
+Directions for an agent (Claude Code on the dev box) to prove a **hardened mail
+domain** (Private + both mail add-ons) end to end on a real second deployment fronted by a real off-box
 relay shard — the topology dev cannot provide (dev is colocated, single tenant).
 This is the functional acceptance layer; the adversarial layer is
 `specs/mailbox_security_model_pentest_brief.md`, run after this is green. Parent
@@ -13,18 +15,19 @@ Everything here is a lookup or a verification — no design decisions. When a ga
 fails, STOP on that gate, diagnose, and report; do not improvise architecture
 changes.
 
-## What Fortress is (the claims under test)
+## What a hardened domain is (the claims under test)
 
-Fortress = Private (content sealed at rest, decrypted only in bounded unlock
-windows) **plus** two off-box guarantees:
+A hardened domain = Private (content sealed at rest, decrypted only in bounded
+unlock windows) **plus** its two mail add-ons, each an off-box guarantee:
 
-1. **Edge-sealed ingest.** A separate relay VPS runs Postfix + verify milters +
+1. **Edge-sealed ingest (add-on: Seal at the relay).** A separate relay VPS runs Postfix + verify milters +
    a Go sealer + WireGuard and no PHP/DB/web/accounts. It seals each inbound
    message to the recipient's key **before** it reaches the app box, so the app
-   box never holds inbound plaintext at rest. Mail to a Fortress recipient lands
+   box never holds inbound plaintext at rest. Mail to such a recipient lands
    **pending-parse** and only unseals+parses inside the owner's unlock window
    (deferred ingest).
-2. **Session-gated sending identity.** The Fortress domain's DKIM private key is
+2. **Session-gated sending identity (add-on: Only send while I'm signed in).**
+   The domain's DKIM private key is
    sealed to the owner's vault key and signed in-app at compose time. The domain
    publishes SPF that does **not** authorize the app box and `p=reject; aspf=s;
    adkim=s` DMARC, so **the only path to a DMARC-passing message from the domain
@@ -48,8 +51,8 @@ is rejected at merge.
   commands you print for the user to run (suggest the `! <command>` prefix). Root
   steps on the RELAY shard you run yourself over SSH with the provided key.
 - The live inbound domain `dev.getjoinery.com` stays untouched — its MX keeps
-  pointing at the dev box. Fortress receive tests use a dedicated Fortress domain
-  on the **new site** (below); the tenant-isolation gate additionally enrolls dev
+  pointing at the dev box. Receive tests use a dedicated hardened domain on the
+  **new site** (below); the tenant-isolation gate additionally enrolls dev
   as tenant A on the same shard using a throwaway test domain.
 - Use the Playwright browser MCP for admin/webmail UI steps; admin credentials
   are in Claude memory (`reference_credentials.md`). The new site has its own
@@ -57,7 +60,7 @@ is rejected at merge.
 - **Precondition:** items 1–4 of the parent plan are done — the new site is
   deployed and reachable, a real relay shard exists, and the new site is enrolled
   as a fleet tenant with its MX pointed at the shard. This runbook does NOT stand
-  up infrastructure; it verifies Fortress behavior on top of it. Relay standup
+  up infrastructure; it verifies hardened-domain behavior on top of it. Relay standup
   itself follows `specs/implemented/mailbox_relay_vps_test_runbook.md`.
 
 ## What the user provides (ask for all of it up front, once)
@@ -67,11 +70,11 @@ is rejected at merge.
    (dedicated throwaway key, `user1`-readable, mode 600 — never the main
    all-access key). Confirm the shard already fronts the new site as a tenant
    (parent-plan item 4).
-3. **Fortress DNS for the new site's test domain** (`fort.<newsite-zone>` — pick
+3. **Hardened-domain DNS for the new site's test domain** (`fort.<newsite-zone>` — pick
    a subdomain of a zone the user controls, DNS-only / grey cloud):
    - `MX fort.<zone> → <shard mail hostname>` (prio 10) — inbound rides the shard.
    - `TXT fort.<zone> → v=spf1 -all` — SPF authorizes **no** sender for the bare
-     identity domain (Fortress sends carry DKIM, not SPF; strict alignment).
+     identity domain (sending-locked sends carry DKIM, not SPF; strict alignment).
    - `TXT _dmarc.fort.<zone> → v=DMARC1; p=reject; aspf=s; adkim=s` — strict
      alignment is load-bearing (relaxed would let the forwarding subdomain's SPF
      re-arm ambient capability).
@@ -106,28 +109,32 @@ action, then re-check.
   (`/plugins/mailbox/admin/admin_mailbox_relay`) shows the shard enrolled, tunnel
   up (`ping -c2` the tunnel address from the app box), and the health battery
   green. If enrollment is incomplete this is a parent-plan item-4 gap, not a
-  Fortress finding — STOP and report.
+  hardened-domain finding — STOP and report.
 - **DNS live:** `dig +short MX fort.<zone>` returns the shard mail hostname;
   `dig +short TXT _dmarc.fort.<zone>` returns the strict-alignment policy.
 
-## Phase 1 — Fortress setup flow (guided, no SQL)
+## Phase 1 — hardened-domain setup flow (guided, no SQL)
 
 Drive the guided setup exactly as a real operator would; the point is to prove
 the flow, not to shortcut it.
 
-1. **Create the Fortress domain.** In the new site's mailbox admin, create
-   `fort.<zone>` and choose the **Fortress** level at the three-option card
-   choice. Confirm the choice presents outcome language only (no mechanism names)
-   and that Standard is the default the operator opted out of.
-2. **2FA enrollment gate.** Fortress mandates a second factor independent of any
-   single passkey. Confirm that adding the Fortress domain blocks at next action
-   until TOTP or a second passkey is enrolled; enroll one. Confirm the 2FA cadence
-   setting defaulted to `every_login` on the trigger.
+1. **Create the domain and turn on both add-ons.** In the new site's mailbox
+   admin, create `fort.<zone>`, choose the **Private** card at the two-card
+   choice (Standard / Private), then in the **Extra protection** block under it
+   turn on **Seal at the relay** and **Only send while I'm signed in** (the
+   latter starts the protect ceremony, steps 3–7). Confirm the cards and add-ons
+   present outcome language only (no mechanism names), each add-on states what
+   it protects and what it costs, and Standard is the default the operator
+   opted out of.
+2. **No 2FA enrollment gate.** Owner 2026-09-23: add-ons do not force a second
+   factor. Confirm that turning the add-ons on with a single passkey and no TOTP
+   leaves every page reachable (no redirect to `/profile/security`), and that the
+   unlock window is capped at 2 hours idle / 24 hours absolute.
 3. **Vault ceremony.** If this owner has no sealed vault, run the enroll ceremony
    (passkey with `userVerification: required`), print recovery codes, and confirm
    the flow **requires explicit acknowledgment** of the *lose every device and
    these codes and the mail is gone forever* warning before it dismisses.
-4. **Fortress DNS shape.** The setup tab must present, copy-ready: MX at the
+4. **Sending-lock DNS shape.** The setup tab must present, copy-ready: MX at the
    shard, SPF that does **not** authorize the app box, `p=reject; aspf=s; adkim=s`
    DMARC, the DKIM selector record (the sealed in-app key's public half), and the
    forwarding-subdomain records. Publish the DKIM selector TXT now.
@@ -136,8 +143,8 @@ the flow, not to shortcut it.
    (nothing leaves the domain while locked). Answer no for this test.
 6. **Confirm gate.** Confirm the one-line operational-consequence gate appears:
    *this domain cannot send mail unless you are logged in.*
-7. **Setup-tab verify green.** Run the Setup-tab checks. For a Fortress domain the
-   *correct* DNS shape inverts: SPF must NOT list the box, DMARC must be strict,
+7. **Setup-tab verify green.** Run the Setup-tab checks. For a sending-locked domain
+   the *correct* DNS shape inverts: SPF must NOT list the box, DMARC must be strict,
    the DKIM DNS record must match the sealed in-app key's public half, the
    forwarding subdomain's SPF must authorize the shard, and the domain must NOT be
    provider-verified. All green before proceeding.
@@ -147,7 +154,7 @@ the flow, not to shortcut it.
    tenant's recipients/routing map, with `me@`'s `key_kind = user` and its
    `public_key` differing from the tenant transport key.
 
-## Phase 2 — the Fortress gates
+## Phase 2 — the hardened-domain gates
 
 Send real external mail (from the Gmail) unless a leg says otherwise.
 
@@ -198,8 +205,8 @@ the new site's relay health battery: origin-hidden and map-freshness checks gree
 sender. The Gmail receives it; verify envelope/Return-Path is `SRS0=...@fwd.fort.
 <zone>` (hash case intact), `From:` preserves the original sender's DKIM (survives
 forwarding, carries DMARC at the destination), and the leg left the shard IP
-(SPF/PTR for `fwd.fort.<zone>` name the shard). This is the one Fortress sending
-surface that runs while the owner is logged out — and it never uses the owner's
+(SPF/PTR for `fwd.fort.<zone>` name the shard). This is the one sending surface of
+the hardened domain that runs while the owner is logged out — and it never uses the owner's
 identity.
 
 ## Phase 3 — fleet isolation (the N=2 gate)
@@ -209,14 +216,15 @@ each blind to the other's mail.
 
 **F8 — enroll dev as tenant A.** With the user's OK (Phase-0 provision item 5),
 enroll dev on the same shard as a second tenant using `fortiso.dev.getjoinery.com`
-(MX → shard, a single Fortress alias granted to a dev vault user). After a cron
+(MX → shard, a single alias on a Private domain with Seal at the relay on, granted to a dev
+vault user). After a cron
 pass both tenants appear on the shard with **separate spool directories, separate
 chrooted pull accounts, and separate WireGuard peers/tunnel addresses**.
 
 **F9 — spool isolation.** From tenant B's (new site's) pull account, attempt to
 list/read/ack tenant A's spool directory. It must be denied by the chroot/account
 scope — B cannot see A's `<id>.seal`/`.meta` at all. Send a marked message to each
-tenant's Fortress alias; confirm each message appears ONLY in its owner's spool
+tenant's hardened alias; confirm each message appears ONLY in its owner's spool
 namespace and each pull consumer ingests ONLY its own.
 
 **F10 — cross-claim rejected at merge.** Attempt to have tenant B push a map
@@ -244,7 +252,7 @@ per-tenant ownership and no exec bits. No accepted message is lost.
 **F12 — repoint to self-hosted, nothing else changes.** On the new site, follow
 the documented exit ramp: point `fort.<zone>`'s MX at a self-hosted relay (or the
 colocated stack) instead of the fleet hostname. Confirm that after DNS propagation
-inbound Fortress mail still edge-seals and delivers with **no app-side config
+inbound relay-sealed mail still edge-seals and delivers with **no app-side config
 change** beyond the relay target — same stack, same sealing, same guarantees. Mail
 queues at senders during the DNS change; nothing is lost. This proves the fleet is
 a convenience, not a lock-in.
@@ -257,11 +265,11 @@ a convenience, not a lock-in.
   user's OK.
 - Teardown (only after the user confirms the report): remove the tenant-A
   isolation fixtures from dev and the shard (`fortiso.dev.getjoinery.com` domain,
-  alias, tenant enrollment); on the new site leave the Fortress domain in place if
+  alias, tenant enrollment); on the new site leave the hardened domain in place if
   the user wants it as an ongoing fixture, else remove it; tell the user which DNS
   records to remove.
 - Do NOT move any spec to `specs/implemented/` — the main session/user does that.
-- If new live-tier tests were written during the run (relay/Fortress suites), note
+- If new live-tier tests were written during the run (relay/hardened-domain suites), note
   where they landed (`plugins/mailbox/tests/`, `tier: live`) so they enter the
   test estate rather than being one-off.
 
@@ -285,5 +293,5 @@ a convenience, not a lock-in.
   the verbose dev log.
 - **Provider outbound for compose (F5)** — the fleet is inbound-only, so compose
   leaves via the tenant's own configured outbound provider; if that provider isn't
-  configured on the new site, F5 fails for a provider reason, not a Fortress one —
+  configured on the new site, F5 fails for a provider reason, not a hardened-domain one —
   check the site's mail provider settings first.

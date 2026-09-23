@@ -10,7 +10,8 @@
  *
  * Applied to the classes whose state feeds RelayMapExporter::build():
  * InboundEmailAlias, InboundEmailDomain, and InboundEmailMailboxGrant (the
- * single-owner source that decides a Fortress seal target).
+ * single-owner source that decides an owner-key seal target under the Seal at
+ * the relay add-on).
  *
  * save() covers create, update, and soft_delete (which calls save() internally);
  * permanent_delete() covers the hard-delete path. RelayMapSync::onChange() no-ops
@@ -18,7 +19,7 @@
  * on saves that do not affect routing, and best-effort on network failure with the
  * SyncRelayMap reconcile as the backstop.
  *
- * @version 1.0
+ * @version 1.0.1 - comment wording: the Seal at the relay add-on
  */
 
 trait NotifiesRelayMapOnChange {

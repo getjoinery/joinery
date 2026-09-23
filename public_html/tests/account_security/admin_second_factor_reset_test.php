@@ -34,8 +34,8 @@
  * close standing open.
  *
  * Sections: callback plumbing; the stranding floor; the invariant bypass;
- * disable_totp's blast radius; the vault gate; the Fortress gate; and the
- * acting-admin gate the handler cannot delegate to the step-up.
+ * disable_totp's blast radius; the vault gate; hardened mail adds no factor
+ * gate; and the acting-admin gate the handler cannot delegate to the step-up.
  *
  * Run: php tests/account_security/admin_second_factor_reset_test.php
  */
@@ -280,18 +280,15 @@ check(!$session->must_enroll_2fa_for_vault(),
 	'switching the session to a vault-less user recomputes instead of reusing that yes');
 
 // And the switch itself drops every cached posture answer, so the arriving user
-// is never judged on the departing user's vault, Fortress level or password
-// flag. This is the path "log in as user" takes.
+// is never judged on the departing user's vault or password flag. This is the
+// path "log in as user" takes.
 $_SESSION['usr_user_id'] = $gated->key;
 unset($_SESSION['has_encryption_vault']);
 $session->must_enroll_2fa_for_vault();
-$_SESSION['max_security_level'] = 'fortress';
 $_SESSION['force_password_change'] = true;
 $session->store_session_variables($novault);
 check(!isset($_SESSION['has_encryption_vault']) && !isset($_SESSION['has_encryption_vault_uid']),
 	'switching identity drops the cached vault answer');
-check(!isset($_SESSION['max_security_level']),
-	'switching identity drops the cached Fortress posture');
 check(!isset($_SESSION['force_password_change']),
 	'switching identity drops the cached forced-password-change flag');
 
@@ -301,29 +298,49 @@ check(!$session->must_enroll_2fa_for_vault(),
 	'an anonymous visitor is not gated');
 
 // ---------------------------------------------------------------------------
-section('The Fortress gate still notices a factor removed by an admin');
+section('Hardened mail adds no second-factor gate');
 
-// Fortress demands a factor INDEPENDENT of any single passkey: TOTP, or two
-// passkeys. Two passkeys and no TOTP satisfies it; taking one away does not.
-$fortress = make_user('A2faFortress');
-$fortress_a = vault_fixture_passkey((int)$fortress->key, 'Fortress key A');
-$fortress_b = vault_fixture_passkey((int)$fortress->key, 'Fortress key B');
-
-$_SESSION['usr_user_id'] = $fortress->key;
+// Relay sealing and the sending lock shorten the unlock window; they do not
+// demand a second factor. A holder of a hardened domain with one passkey and no
+// TOTP walks every page like anyone else.
+$hardened = make_user('A2faHardened');
+vault_fixture_passkey((int)$hardened->key, 'Hardened key A');
+$_SESSION['usr_user_id'] = $hardened->key;
 $_SESSION['loggedin'] = true;
-// The posture lookup is the cached half; a Fortress domain fixture would need
-// the mailbox plugin, and the gate reads this value either way.
-$_SESSION['max_security_level'] = 'fortress';
+unset($_SESSION['has_encryption_vault'], $_SESSION['has_encryption_vault_uid']);
 
-check(!$session->must_enroll_2fa_for_fortress(),
-	'two passkeys satisfy the Fortress independent-factor requirement');
+if (class_exists('InboundEmailDomain')) {
+	$hardened_domain = new InboundEmailDomain(NULL);
+	$hardened_domain->set('ied_domain', 'harnesstest-a2fa-' . bin2hex(random_bytes(4)) . '.example');
+	$hardened_domain->set('ied_is_enabled', true);
+	$hardened_domain->set('ied_security_level', InboundEmailDomain::LEVEL_PRIVATE);
+	$hardened_domain->set('ied_relay_seals_to_owner', true);
+	$hardened_domain->set('ied_owner_usr_user_id', (int)$hardened->key);
+	$hardened_domain->save();
+	harness_register_row('ied_inbound_email_domains', 'ied_inbound_email_domain_id', intval($hardened_domain->key));
+	check(InboundEmailDomain::userHasHardenedDomain((int)$hardened->key),
+		'the fixture user holds a hardened domain');
+} else {
+	harness_skip('hardened domain fixture', 'the mailbox plugin is not active');
+}
 
-$service->adminRevoke((int)$fortress_b->key, $fortress, $admin);
+$hardened_keys = new MultiPasskey(array('user_id' => (int)$hardened->key));
+check(!$hardened->has_totp_enabled() && count($hardened_keys) === 1,
+	'the fixture holds a single passkey and no authenticator app');
+check(!$session->must_enable_totp_for_admin(),
+	'the admin factor gate does not hold a non-admin hardened-mail holder');
+check(!$session->must_enroll_2fa_for_vault(),
+	'the vault re-enrollment gate does not hold a hardened-mail holder without a vault');
 
-check($session->must_enroll_2fa_for_fortress(),
-	'removing one of them through the admin path flips the gate on, on the next call');
-
-unset($_SESSION['max_security_level']);
+$enroll_gates = array();
+foreach ((new ReflectionClass('SessionControl'))->getMethods() as $m) {
+	if (strpos($m->getName(), 'must_enroll_') === 0) {
+		$enroll_gates[] = $m->getName();
+	}
+}
+check($enroll_gates === array('must_enroll_2fa_for_vault'),
+	'the vault gate is the only enrollment gate SessionControl holds',
+	'found: ' . implode(', ', $enroll_gates));
 
 // ---------------------------------------------------------------------------
 section('The acting-admin gate the step-up cannot provide');

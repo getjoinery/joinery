@@ -65,6 +65,7 @@ function chat_send_logic(array $input): LogicResult {
         }
     } else {
         $built = ChatSend::buildNewConversation($uid, $input, $message);
+        if (isset($built['error'])) return LogicResult::error($built['error']);
         $conversation     = $built['conversation'];
         $new_title        = $built['title'];
         $new_instructions = $built['instructions'];

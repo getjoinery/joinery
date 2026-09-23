@@ -14,7 +14,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_c
  * Two rules shape it, both about privacy:
  *   - It only ever searches the calling user's own conversations (owner-scoped by
  *     $ctx->actingUserId()).
- *   - It respects the encryption boundary. A protected (Private/Fortress) chat's
+ *   - It respects the encryption boundary. A protected (Private) chat's
  *     decrypted content is surfaced ONLY when the current turn runs on a local
  *     model with the owner's vault open; on a remote model (or a locked vault) the
  *     response carries a fixed, query-independent, count-free note that protected

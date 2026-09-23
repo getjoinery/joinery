@@ -8,7 +8,8 @@
  * newest page, embedded as JSON — so the app draws immediately with no
  * round-trip. Everything after that arrives through messenger_poll.
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - both protection pickers offer the Nothing leaves unsealed add-on under Private
  * @changelog 1.1.0 - Unified picker (remote panel folded into the one search box); pick status line, standard-only note, admin not-set-up notice
  */
 
@@ -139,6 +140,11 @@ $boot = array(
 					'levels'  => Conversation::LEVELS,
 					'value'   => $client['default_level'],
 					'label'   => 'Protection',
+					'addons'  => array(
+						ProtectionLevelPicker::ADDON_SEALED_EXITS_ONLY => array(
+							'checked' => $client['default_sealed_exits_only'],
+						),
+					),
 				));
 				?>
 			</div>
@@ -185,12 +191,21 @@ $boot = array(
 			<p class="msgr-protect-note" id="msgr-protect-note"></p>
 			<div class="msgr-level-picker">
 				<?php
+				// The add-on is one-way like the level: once on, its switch is
+				// shown on and locked (messenger.js keeps that true per thread).
+				$open_sealed_exits = $open ? !empty($open['conversation']['sealed_exits_only']) : false;
 				ProtectionLevelPicker::render($page->getFormWriter('msgr_raise_level_form'), 'msgr_raise_level', array(
 					'service' => ProtectionLevelPicker::SERVICE_MESSAGING,
 					'levels'  => Conversation::LEVELS,
 					'value'   => $open ? $open['conversation']['protection_level'] : $client['default_level'],
 					'label'   => 'Protection for this conversation',
 					'helptext' => 'Protection can be raised but never lowered — everyone in the conversation keeps what they have already been promised.',
+					'addons'  => array(
+						ProtectionLevelPicker::ADDON_SEALED_EXITS_ONLY => array(
+							'checked'  => $open_sealed_exits,
+							'disabled' => $open_sealed_exits,
+						),
+					),
 				));
 				?>
 			</div>

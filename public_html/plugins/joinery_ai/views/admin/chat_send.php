@@ -67,6 +67,7 @@ if ($conversation_id > 0) {
     }
 } else {
     $built = ChatSend::buildNewConversation($uid, $_POST, $message);
+    if (isset($built['error'])) chat_send_fail($built['error']);
     $conversation     = $built['conversation'];
     $new_title        = $built['title'];
     $new_instructions = $built['instructions'];

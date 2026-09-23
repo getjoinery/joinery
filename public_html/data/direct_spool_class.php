@@ -3,7 +3,7 @@
  * DirectSpool - a delivery accepted at a sealed tier and held until the
  * recipient's next unlock.
  *
- * At Private and Fortress the receiver accepts unconditionally, so acceptance
+ * At Private the receiver accepts unconditionally, so acceptance
  * discloses nothing about whether an address exists, whether the sender is a
  * contact, or whether the vault is open. Authentication has already run at that
  * point — the instance signature and every sealed-byte hash are checkable
@@ -19,6 +19,7 @@
  * sender in either case — the sender was answered `accept` at receive, and the
  * no-bounce rule holds for every kind.
  *
+ * @version 1.1.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.1
  * @changelog 1.1 - bytesForSenderDomain(): the per-sending-domain counter
  *   behind the third spool cap (specs/security_inventory.md S21)

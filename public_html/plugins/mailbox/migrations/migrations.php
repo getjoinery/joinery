@@ -11,6 +11,8 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
+ * @version 1.32.0 - ied_003_private_with_addons: mail's top level becomes Private plus the
+ *                   relay-sealing and sending-lock add-ons
  * @version 1.31.1 - imi_002 logs one line on every node it runs on, including one where it
  *                   found nothing or the table is absent
  * @version 1.31.0 - imi_002_reclaim_search_index_files: delete every File the search index left behind
@@ -1101,6 +1103,84 @@ return [
 			}
 			error_log('mailbox imi_002_reclaim_search_index_files: ' . count($rows) . ' search-index File records found, '
 				. "{$deleted} deleted (" . round($bytes / 1048576) . " MiB), {$skipped} skipped, {$failed} failed");
+			return true;
+		},
+	],
+
+	[
+		// Mail folds to two levels plus add-ons (specs/implemented/protection_levels_fold.md).
+		// A domain stored at the old top level is exactly "Private with relay
+		// sealing and the sending lock", so it becomes that: the level to
+		// 'private' and both add-on flags on. ied_is_protected_identity is left
+		// as it is — whether the sending lock FINISHED is a fact, not a
+		// translation. A domain already enforcing send protection records the
+		// request too, so the two flags never disagree about an enforcing lock.
+		// A mailbox-level 'fortress' (nothing writes one; the resolver reads it)
+		// becomes 'private'. Until this runs, the model reads an unconverted row
+		// as Private with both add-ons (InboundEmailDomain::is_unconverted()).
+		//
+		// Guards the tables AND every column it names: an inactive plugin keeps
+		// a stale table that stops receiving columns. A missing add-on column
+		// defers (this same pass may create it), so the conversion is never
+		// recorded as done without having run. Idempotent: every UPDATE matches
+		// only rows still needing it.
+		'id' => 'ied_003_private_with_addons',
+		'version' => '1.121.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$table_exists = function ($table) use ($db) {
+				$q = $db->prepare("SELECT to_regclass(:t)");
+				$q->execute(array(':t' => 'public.' . $table));
+				return $q->fetchColumn() !== null;
+			};
+			$has_columns = function ($table, array $columns) use ($db) {
+				$q = $db->prepare(
+					"SELECT COUNT(*) FROM information_schema.columns
+					 WHERE table_schema = 'public' AND table_name = ? AND column_name = ?");
+				foreach ($columns as $column) {
+					$q->execute(array($table, $column));
+					if ((int)$q->fetchColumn() === 0) {
+						return false;
+					}
+				}
+				return true;
+			};
+
+			if (!$table_exists('ied_inbound_email_domains')) {
+				echo "ied_003: ied_inbound_email_domains absent, nothing to convert.\n";
+				return true;
+			}
+			if (!$has_columns('ied_inbound_email_domains', array('ied_security_level',
+					'ied_relay_seals_to_owner', 'ied_send_lock_requested', 'ied_is_protected_identity'))) {
+				echo "ied_003: the add-on columns are not on ied_inbound_email_domains yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+
+			$domains = $db->exec(
+				"UPDATE ied_inbound_email_domains
+				    SET ied_security_level = 'private',
+				        ied_relay_seals_to_owner = true
+				  WHERE LOWER(TRIM(ied_security_level)) = 'fortress'");
+			// The sending lock counts as asked for only where it is actually
+			// enforcing; a domain that never finished it converts without one
+			// (owner 2026-09-23) rather than showing it as unfinished.
+			$locked = $db->exec(
+				"UPDATE ied_inbound_email_domains
+				    SET ied_send_lock_requested = true
+				  WHERE ied_is_protected_identity = true
+				    AND ied_send_lock_requested = false");
+
+			$mailboxes = 0;
+			if ($table_exists('iea_inbound_email_aliases')
+					&& $has_columns('iea_inbound_email_aliases', array('iea_security_level'))) {
+				$mailboxes = $db->exec(
+					"UPDATE iea_inbound_email_aliases
+					    SET iea_security_level = 'private'
+					  WHERE LOWER(TRIM(iea_security_level)) = 'fortress'");
+			}
+
+			echo "ied_003: " . (int)$domains . " domain(s) converted to Private with Seal at the relay; " . (int)$locked . " enforcing domain(s) recorded the sending-lock "
+				. "request; " . (int)$mailboxes . " mailbox level(s) converted to Private.\n";
 			return true;
 		},
 	],

@@ -5,7 +5,7 @@
 
 ## 1. Summary
 
-The automatic-install checkout gains one question: **how should your mail be set up?** Buyers choose between a single server (everything on one box) or a server plus a private mail relay (the box that makes Fortress-level domains possible). Provisioning then builds either one Linode instance or two — both in the buyer's own Linode account — and hands over a site whose mailbox Setup tab already knows its topology, instead of landing every buyer on the undecided receive-mode gate card.
+The automatic-install checkout gains one question: **how should your mail be set up?** Buyers choose between a single server (everything on one box) or a server plus a private mail relay (the box that makes the **Seal at the relay** add-on possible). Provisioning then builds either one Linode instance or two — both in the buyer's own Linode account — and hands over a site whose mailbox Setup tab already knows its topology, instead of landing every buyer on the undecided receive-mode gate card.
 
 ## 2. Vocabulary discipline (the code's, not marketing's)
 
@@ -13,10 +13,10 @@ The mailbox plugin keeps four axes apart, and this spec must too:
 
 - **Receive topology** (deployment-wide, *derived* from whether a `MailboxRelay` row exists): `colocated` | `self_hosted` | `fleet`. This is what checkout actually configures.
 - **Receive mode** (the admin's recorded choice, setting `mailbox_receive_mode`): `direct` | `relay` | undecided. Today it is never seeded — every fresh install shows the choice card.
-- **Security level** (per-domain, `ied_security_level`): `standard` | `private` | `fortress`. **Fortress is not a topology.** It *requires* a fronted topology, plus a vault ceremony, 2FA, and owner-held keys — none of which can happen at checkout because the keys must be created by the owner on their own device, post-install.
+- **Security level** (per-domain, `ied_security_level`): `standard` | `private`, plus the Private add-ons **Seal at the relay** (`ied_relay_seals_to_owner`) and **Only send while I'm signed in** (`ied_send_lock_requested`). **An add-on is not a topology.** Seal at the relay *requires* a fronted topology, and either add-on requires a vault ceremony and owner-held keys — none of which can happen at checkout because the keys must be created by the owner on their own device, post-install.
 - **Delivery mode** (per-alias): forward / store / both. Out of scope here.
 
-So the checkout question sells the topology; Fortress remains a guided post-install upgrade that the relay topology unlocks. Copy must say "Fortress-ready," never "Fortress included."
+So the checkout question sells the topology; Seal at the relay remains a guided post-install add-on that the relay topology unlocks. Copy must say "ready for Seal at the relay," never "Seal at the relay included."
 
 ## 3. Buyer experience
 
@@ -26,7 +26,7 @@ One new required multiple-choice question on the automatic-install product, alon
 
 > **How should your email be set up?**
 > - **Single server** — email, calendar, and files all on one server. Simplest and cheapest. *(default)*
-> - **Server + private mail relay** — a second small server receives your mail and forwards it over an encrypted tunnel. Your main server never sits exposed to the internet, mail is held for you if it's ever down, and this is the setup required for Fortress-level domain security. Included in the setup price; adds a second instance to your Linode bill (~$5/mo).
+> - **Server + private mail relay** — a second small server receives your mail and forwards it over an encrypted tunnel. Your main server never sits exposed to the internet, mail is held for you if it's ever down, and this is the setup required to seal your mail at the relay, before your main server ever holds it. Included in the setup price; adds a second instance to your Linode bill (~$5/mo).
 
 **One price either way: $39.99 covers the complete setup of whichever topology is chosen** — the relay build costs the buyer nothing extra at setup; the only delta is the second instance on their own Linode bill, and that disclosure is mandatory (discovering it later reads as a trap). The pitch is "we set it all up up front for one price"; buyers who pick single-server can still add a relay themselves later (§8.3).
 
@@ -37,7 +37,7 @@ Both paths end at the buyer's own site with the mailbox Setup tab as the landing
 - **Single server:** `mailbox_receive_mode` seeded to `direct`, `mailbox_mail_hostname` set, mail stack configured on the box. Setup tab shows the colocated checklist (A/PTR/MX/SPF/DKIM/DMARC) — the remaining steps are the buyer's DNS acts, publishable in one authorized click via the existing DnsPublishBox when their DNS provider is one of the 15 driven ones.
 - **Server + relay:** `mailbox_receive_mode` seeded to `relay`, `MailboxRelay` row registered **in the buyer's site DB** and enabled, WireGuard tunnel peered, spool-pull and map-sync tasks activated. Setup tab shows the self-hosted-relay checklist with MX/SPF prescriptions already retargeted at the relay. The welcome email states the DNS records for their chosen topology.
 
-What stays manual, by existing design: the MX cutover and ownership TXT records (the platform deliberately holds no standing DNS credential — DnsPublishBox authorizes at write time), the outbound provider credential, and every Fortress ceremony.
+What stays manual, by existing design: the MX cutover and ownership TXT records (the platform deliberately holds no standing DNS credential — DnsPublishBox authorizes at write time), the outbound provider credential, and every add-on ceremony (Seal at the relay, Only send while I'm signed in).
 
 ## 4. Checkout plumbing
 
@@ -79,7 +79,7 @@ The site row runs the existing pipeline unchanged. The relay row and the mail wi
 
 ## 7. Explicitly out of scope
 
-- **Fortress at checkout.** The per-domain raise (vault ceremony, 2FA gate, sealed DKIM key, protected identity) is owner-interactive by design. The relay topology is its precondition; the Setup tab's existing Fortress checklist takes over post-install.
+- **Mail add-ons at checkout.** Turning on Seal at the relay / Only send while I'm signed in (vault ceremony, sealed DKIM key, protected identity) is owner-interactive by design. The relay topology is Seal at the relay's precondition; the Setup tab's existing add-on checklist takes over post-install.
 - **Hosted fleet slots.** `mailbox_hosted_relay_offered()` stays `false`; this spec covers the buyer-owned relay only. Offering hosted shards at checkout is a future spec on top of the same question.
 - **Zero-touch MX/DNS.** Deliberate platform doctrine (no stored DNS credential); DnsPublishBox already gives one-click attended publishing.
 - **Outbound provider setup.** Choosing/keying Mailgun etc. needs the buyer's credential and stays a Setup-tab step (`mailbox_provider`).

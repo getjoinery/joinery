@@ -18,6 +18,7 @@
  * The whole call is idempotent. Re-running it after a partial failure — or
  * after a reconnect — reuses what exists and finishes the rest.
  *
+ * @version 1.1.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.1
  * @changelog 1.1 - the provider domain is shaped in its creating save (retry
  *   after a partial failure finds it correct); the level only ever raises, and
@@ -179,8 +180,8 @@ class ImapFeedProvisioner {
 
 	/**
 	 * The level the intent asks for, or NULL to leave the mailbox inheriting.
-	 * Standard and Private only — Fortress is a sending-identity guarantee that
-	 * mail on somebody else's server cannot make.
+	 * Standard and Private only — the domain add-ons are sending-identity and
+	 * arrival guarantees that mail on somebody else's server cannot make.
 	 */
 	private static function wantedLevel(array $intent): ?string {
 		$level = strtolower(trim((string)($intent['security_level'] ?? '')));

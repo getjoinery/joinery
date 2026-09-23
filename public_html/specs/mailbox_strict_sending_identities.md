@@ -7,7 +7,8 @@ Every domain whose mail this platform touches should be able to publish
 pass. Relaxed alignment is not a design input: it papers over shared
 organizational domains and stops working the moment two systems send as the
 same bare domain with different signing identities. The doctrine that makes
-strict possible is the one the Fortress security level already mandates:
+strict possible is the one the **Only send while I'm signed in** add-on
+already mandates:
 
 > **The bare domain belongs to humans. Automated senders live on a subdomain.**
 
@@ -15,7 +16,8 @@ Under this doctrine every sender signs exactly as its own From domain — hosted
 mailbox mail as `d=<domain>` (per-domain provider registration + aligned
 submission, built by specs/implemented/mailbox_provider_dkim.md), site
 transactional mail as `d=<subdomain>` — and strict alignment holds for both.
-Raising a domain to Fortress later changes nothing about this layout.
+Turning on the Only send while I'm signed in add-on later changes nothing
+about this layout.
 
 ## Current state (the concrete instance: scrolldaddy.app)
 
@@ -145,9 +147,9 @@ The Setup tab's DMARC row currently prescribes
 provider outbound, exact alignment is guaranteed by doctrine, so the
 prescription should include `aspf=s; adkim=s` from the start — with row
 helptext noting that any *other* systems sending as the bare domain must be
-moved to subdomains first (this spec's doctrine). Fortress domains already
-get the strict inverted shape from `protectedShapeResults()`; this closes the
-gap for Standard/Private.
+moved to subdomains first (this spec's doctrine). Sending-locked domains
+already get the strict inverted shape from `protectedShapeResults()`; this closes the
+gap for Standard and plain Private.
 
 ## Later instances of the same pattern
 
@@ -162,5 +164,6 @@ gap for Standard/Private.
 
 - Relay smarthost DKIM signing (recorded in
   specs/implemented/mailbox_provider_dkim.md as deferred).
-- Fortress migration of scrolldaddy.app (separate ceremony; this layout is a
+- Turning on the sending lock (Only send while I'm signed in) for
+  scrolldaddy.app (separate ceremony; this layout is a
   prerequisite it will inherit unchanged).

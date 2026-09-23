@@ -19,10 +19,12 @@
  * the message DEKs on a vault key rotation.
  *
  * It also registers mail parsing as a deferred-work consumer
- * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
+ * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.16
+ * @version 1.17
+ * @changelog 1.17 - the short window caps follow the hardening add-ons
+ *   (userHasHardenedDomain), not a level
  * @changelog 1.16 - the To/Cc backfill consumers are retired (specs/implemented/mailbox_to_cc_lists.md § 6)
  * @changelog 1.15 - registers the TEMPORARY mailbox_address_lists_sweep consumer (§ 5a)
  * @changelog 1.14 - registers the mailbox_address_lists deferred-work consumer
@@ -73,35 +75,37 @@ MailIdentityGuard::registerDkimSigner(function (string $from_domain): ?array {
 	return MailboxDkimSigner::resolveFor($from_domain);
 });
 
-// --- Unlock-window caps (specs/mailbox_security_levels.md § The Unlock Window) ---
+// --- Unlock-window caps (specs/protection_levels_platform.md § Add-ons rule 5) ---
 // Mail's window policy, expressed as this consumer's opinion about the shared
-// server-custody window rather than as something core knows: a Fortress user's
-// window ends after 2h without a content decrypt and unconditionally 24h after
-// arming; a Private user gets the 7-day absolute backstop only. Core folds every
-// registered provider strictest-wins, so a member who set a tight window on any
-// consumer keeps it.
+// server-custody window rather than as something core knows. A member who holds
+// a hardened domain (relay sealing or the sending lock on a Private domain —
+// InboundEmailDomain::userHasHardenedDomain) gets the hardened caps: the window
+// ends after 2h without a content decrypt and unconditionally 24h after arming,
+// because those add-ons only protect while the window is closed. A member whose
+// protected mail is plain Private gets the 7-day absolute backstop only. Core
+// folds every registered provider strictest-wins, so a member who set a tight
+// window on any consumer keeps it.
 //
-// The fail-closed pair is the Fortress caps: an error resolving the level must
-// never grant an uncapped window to someone who may have configured the
-// strictest policy. A real Fortress user sees no difference; anyone else gets a
+// The fail-closed pair is the hardened caps: an error resolving the answer must
+// never grant an uncapped window to someone who may hold a hardened domain. A
+// member already under them sees no difference; anyone else gets a
 // tighter-than-usual window until the fault clears.
 VaultUnlock::onWindowCaps(
 	function (int $user_id): array {
-		$level = InboundEmailDomain::maxSecurityLevelForUser($user_id);
-		if ($level === 'fortress') {
+		if (InboundEmailDomain::userHasHardenedDomain($user_id)) {
 			return array(
-				'idle'     => VaultUnlock::FORTRESS_IDLE_CAP_SECONDS,
-				'absolute' => VaultUnlock::FORTRESS_ABSOLUTE_CAP_SECONDS,
+				'idle'     => VaultUnlock::HARDENED_IDLE_CAP_SECONDS,
+				'absolute' => VaultUnlock::HARDENED_ABSOLUTE_CAP_SECONDS,
 			);
 		}
-		if ($level === 'private') {
+		if (InboundEmailDomain::maxSecurityLevelForUser($user_id) === InboundEmailDomain::LEVEL_PRIVATE) {
 			return array('idle' => null, 'absolute' => VaultUnlock::PRIVATE_ABSOLUTE_CAP_SECONDS);
 		}
 		return array('idle' => null, 'absolute' => null);
 	},
 	array(
-		'idle'     => VaultUnlock::FORTRESS_IDLE_CAP_SECONDS,
-		'absolute' => VaultUnlock::FORTRESS_ABSOLUTE_CAP_SECONDS,
+		'idle'     => VaultUnlock::HARDENED_IDLE_CAP_SECONDS,
+		'absolute' => VaultUnlock::HARDENED_ABSOLUTE_CAP_SECONDS,
 	)
 );
 
@@ -253,8 +257,8 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 	}
 
 	// A Joinery Direct signing key under vault custody seals to the same public
-	// key, for the same reason (docs/joinery_direct.md § The relay at Fortress:
-	// custody mirrors DKIM). Losing it in a rotation would not lose mail — Direct
+	// key, for the same reason (docs/joinery_direct.md § The relay as the
+	// endpoint: custody mirrors DKIM). Losing it in a rotation would not lose mail — Direct
 	// would simply stop signing and every send would fall back to SMTP — but it
 	// would be a silent capability loss, so it re-seals here on the same
 	// fail-loud contract.
@@ -309,7 +313,7 @@ VaultUnlock::onWipe(function (int $user_id, ?string $scope) {
 });
 
 // --- Deferred work consumer (specs/in_window_deferred_work.md) ---
-// Fortress mail arrives sealed and unparsed while the owner is logged out; only
+// Relay-sealed mail arrives sealed and unparsed while the owner is logged out; only
 // their open window can turn it into readable fields. Registering here means the
 // backlog drains wherever the owner happens to be on the site, not only when
 // they open the mailbox. Mailbox registers FIRST (it declares a lower vaultConsumer

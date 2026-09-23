@@ -26,13 +26,14 @@
  * only answers hasWork(); the work happens in its own request.
  *
  * § Background work is not user activity. VaultUnlock::secretKey() normally
- * stamps the content-decrypt time the Fortress idle cap measures from. A drain
+ * stamps the content-decrypt time the hardened idle cap measures from. A drain
  * decrypting on every beat would hold a window open indefinitely for someone
  * who walked away from an open tab, silently removing the idle cap. Every
  * drain therefore runs inside withBackgroundWork(), which suppresses activity
  * stamping for the duration — including for consumer code that reaches
  * VaultUnlock::secretKey() on its own.
  *
+ * @version 1.1.1 - comment wording: the hardened idle cap
  * @version 1.1.0 - drain callbacks receive the window's VaultKey, not bytes
  * @version 1.0.0
  */

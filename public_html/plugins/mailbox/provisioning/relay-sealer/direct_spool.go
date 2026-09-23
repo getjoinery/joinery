@@ -182,7 +182,7 @@ func writeDirectSpoolEntry(spoolDir string, sess *directSession, parts [][]byte,
 // are absolute recipient-side bounds, so no number of cheap sending domains
 // raises the ceiling the way Sybil multiplies a per-instance rate limit. A cap
 // refusal costs a legitimate sender only the downgrade — for mail, SMTP, which
-// under Fortress is the edge-sealing ingest relay, so the message still
+// behind a relay is the edge-sealing ingest relay, so the message still
 // arrives.
 func directSpoolCapRefusal(spoolDir, recipient, domain string, declared int64, tc tenantConfig) string {
 	domainCap := tc.DirectSpoolDomainCap

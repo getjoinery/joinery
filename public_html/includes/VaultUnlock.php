@@ -27,7 +27,9 @@
  * is the only durable trace a window leaves — see docs/sealed_vault.md
  * § The audit log.
  *
- * @version 1.9
+ * @version 1.10
+ * @changelog 1.10 - the short caps are HARDENED_*_CAP_SECONDS: they ride with
+ *   an add-on (mail's sending lock or relay sealing), not with a level.
  * @changelog 1.9 - the seam: secretKey() returns a VaultKey (PoolVaultKey today),
  *   open() takes an unlocker plus a wrap list and is the ONLY producer of a
  *   wrapping (spec B1); openKey() is the same without arming a window, for a
@@ -42,8 +44,8 @@
  *   loader for every plugin's top-level `bootstrap` key; same call sites, same
  *   invariant, generalized beyond vault consumers.
  * @changelog 1.6 - window caps fail CLOSED end to end: a declared consumer
- *   bootstrap missing on disk folds the Fortress caps into capsForUser(), and
- *   onWindowCaps()'s fail-closed default is the Fortress caps rather than
+ *   bootstrap missing on disk folds the hardened caps into capsForUser(), and
+ *   onWindowCaps()'s fail-closed default is the hardened caps rather than
  *   "abstain".
  * @changelog 1.5 - lock() drops VaultCrypto's memoized item DEKs, so keys
  *   unwrapped under a window cannot outlive it.
@@ -81,13 +83,15 @@ class VaultUnlock {
 	// asymmetry is deliberate: presence is cheap to fake for a resident
 	// attacker and must never be what keeps a key in RAM.
 	const HEARTBEAT_MAX_STALE_SECONDS = 300;
-	// Per-level caps — the mail consumer's window policy, applied generically here
-	// as numbers passed to open(). Fortress: end after 2h without a content decrypt
-	// (idle) and unconditionally 24h after arming (absolute). Private: a 7-day
-	// absolute backstop only. Defaults in code; they become settings only if tuning
-	// is ever needed.
-	const FORTRESS_IDLE_CAP_SECONDS = 7200;      // 2 hours
-	const FORTRESS_ABSOLUTE_CAP_SECONDS = 86400; // 24 hours
+	// Window caps — the mail consumer's window policy, applied generically here
+	// as numbers passed to open(). Hardened (a member holds a resource with an
+	// add-on whose protection depends on the window being closed — mail's sending
+	// lock or relay sealing, docs/sealed_vault.md): end after 2h without a content
+	// decrypt (idle) and unconditionally 24h after arming (absolute). Private: a
+	// 7-day absolute backstop only. Defaults in code; they become settings only if
+	// tuning is ever needed.
+	const HARDENED_IDLE_CAP_SECONDS = 7200;      // 2 hours
+	const HARDENED_ABSOLUTE_CAP_SECONDS = 86400; // 24 hours
 	const PRIVATE_ABSOLUTE_CAP_SECONDS = 604800; // 7 days
 
 	/** @var callable[] consulted, in registration order, by the rotation ceremony. */
@@ -105,7 +109,7 @@ class VaultUnlock {
 	 *
 	 * Deferred work (VaultDeferredWork) decrypts on a timer the user did not
 	 * initiate. Left as ordinary activity it would hold a window open forever
-	 * for someone who walked away from an open tab, so the Fortress idle cap —
+	 * for someone who walked away from an open tab, so the hardened idle cap —
 	 * which measures from the last content decrypt — would stop existing. The
 	 * flag is set for the duration of a drain slice only, via
 	 * VaultDeferredWork::withBackgroundWork(). Every other policy check still
@@ -220,15 +224,15 @@ class VaultUnlock {
 	 *   Fail CLOSED is the rule: an error resolving a policy must never hand an
 	 *   uncapped window to someone who may have configured the strictest one, so a
 	 *   provider declares the caps its own failure should imply. The DEFAULT is
-	 *   therefore the Fortress caps — the strictest policy the platform knows — so
+	 *   therefore the hardened caps — the strictest policy the platform knows — so
 	 *   a consumer that registers without thinking about its failure mode gets the
 	 *   safe direction, not an uncapped window. A provider whose failure genuinely
 	 *   implies no cap must say so explicitly with array('idle' => null,
 	 *   'absolute' => null).
 	 */
 	public static function onWindowCaps(callable $provider, array $fail_closed_caps = array(
-			'idle' => self::FORTRESS_IDLE_CAP_SECONDS,
-			'absolute' => self::FORTRESS_ABSOLUTE_CAP_SECONDS)): void {
+			'idle' => self::HARDENED_IDLE_CAP_SECONDS,
+			'absolute' => self::HARDENED_ABSOLUTE_CAP_SECONDS)): void {
 		self::$window_cap_providers[] = array('provider' => $provider, 'fail_closed' => $fail_closed_caps);
 	}
 
@@ -245,8 +249,8 @@ class VaultUnlock {
 	 * answer for an instance whose consumers all have no window policy — but ONLY
 	 * when every declared bootstrap actually loaded. A declared bootstrap missing
 	 * on disk (a partial deploy) may have been the one carrying the strictest
-	 * policy, so its absence folds in the Fortress caps rather than silently
-	 * widening anyone's window: a real Fortress user sees no difference, anyone
+	 * policy, so its absence folds in the hardened caps rather than silently
+	 * widening anyone's window: a member already under them sees no difference, anyone
 	 * else gets a tighter-than-usual window until the deploy is fixed.
 	 *
 	 * @return array{idle:?int, absolute:?int}
@@ -257,8 +261,8 @@ class VaultUnlock {
 		$caps = array('idle' => null, 'absolute' => null);
 		if (!empty(PluginBootstraps::notLoaded())) {
 			$caps = array(
-				'idle'     => self::FORTRESS_IDLE_CAP_SECONDS,
-				'absolute' => self::FORTRESS_ABSOLUTE_CAP_SECONDS,
+				'idle'     => self::HARDENED_IDLE_CAP_SECONDS,
+				'absolute' => self::HARDENED_ABSOLUTE_CAP_SECONDS,
 			);
 		}
 		foreach (self::$window_cap_providers as $entry) {
@@ -302,7 +306,7 @@ class VaultUnlock {
 	 * The in-window vault key, or null when locked. Every content read calls
 	 * this and treats null as "locked" — a one-tap unlock prompt, never an
 	 * error. Re-stores on every fetch (activity extension) and stamps the
-	 * content-decrypt time the Fortress idle cap measures from.
+	 * content-decrypt time the hardened idle cap measures from.
 	 *
 	 * The key comes back as a VaultKey: hand it to VaultCrypto::openItemDek()
 	 * or read publicKey(); there is nothing else to do with it. Code that only
@@ -397,7 +401,7 @@ class VaultUnlock {
 	}
 
 	/**
-	 * True when a policy end-event (absolute cap, Fortress idle cap, or a stale
+	 * True when a policy end-event (absolute cap, hardened idle cap, or a stale
 	 * heartbeat) has fired for this window — a READ-TIME check, no cron. Wipes the
 	 * window when it fires so the caller sees it closed. No metadata → no policy
 	 * (a legacy window or a non-capped consumer is never force-ended here).

@@ -164,7 +164,7 @@ without a vault is missing, until it has one:
   a backup archive.
 - No private Drive folders (`logic/drive_folder_create_logic.php` refuses) and
   no saved passwords (the keyring is sealed under this key).
-- No encrypted chat. A conversation cannot be raised to Private or Guarded
+- No encrypted chat. A conversation cannot be raised to Private
   while any member holds no vault — `Conversation::members_without_vault()`
   names them, so one member without a key caps the whole conversation.
 
@@ -408,8 +408,8 @@ idiom holds everywhere with zero theme work.
 
 **The ceremony surface.** `window.JoineryVaultLock` is the one client-side
 unlock/lock ceremony: `unlock()` (resolves `true` on success), `lock()`, and
-`state()`. Consumer surfaces (the mail reader's unlock banners, a Fortress
-compose) delegate to it when present rather than calling the vault actions
+`state()`. Consumer surfaces (the mail reader's unlock banners, a
+sending-lock compose) delegate to it when present rather than calling the vault actions
 directly, so every ceremony updates the chip and announces itself.
 
 **The event contract.** Two document-level events keep every surface on the
@@ -532,7 +532,7 @@ class MailboxContact extends SystemBase {
 ### Sealing is per row, not per model
 
 The flag lives on the row because sensitivity does. The same table holds sealed
-and plaintext rows side by side — a Fortress domain's mail and a Standard
+and plaintext rows side by side — a Private domain's mail and a Standard
 domain's mail are the same model — and only the row knows which it is. A row
 with `{prefix}_content_sealed` false reads and writes as ordinary plaintext and
 costs nothing.
@@ -790,7 +790,7 @@ returns; an outer hot state survives, so nesting cannot launder a process cold.
 It is a boundary between units, never a wrapper around a write site.
 
 **One sanctioned non-arming open.** Mail held in transit for a protected
-domain — relay-fronted Fortress mail waiting, sealed to the owner's key, for
+domain — mail sealed at the relay waiting, sealed to the owner's key, for
 the owner to appear — is opened with `VaultCrypto::openHeldDeliveryBlob()`,
 which does not arm the rule. Opening it is first-time delivery arriving late:
 the plaintext is exactly what receive-time ingest holds, cold, for the same
@@ -1030,13 +1030,13 @@ window is uncapped.
 The second argument is the fail-closed pair: an error resolving a policy must
 never hand an uncapped window to someone who may have configured the strictest
 one, so a provider declares what its own failure should imply. Omitting it
-means the Fortress caps — abstaining on error must be said explicitly, with
+means the hardened caps (`VaultUnlock::HARDENED_*_CAP_SECONDS`) — abstaining on error must be said explicitly, with
 `['idle' => null, 'absolute' => null]`, never defaulted into.
 
 Fail-closed covers the load path too: a declared consumer bootstrap that is
 missing on disk (a partial deploy) never got to register its provider, so
-`capsForUser()` folds the Fortress caps in whenever any declared bootstrap
-failed to load. A real Fortress user sees no difference; everyone else gets a
+`capsForUser()` folds the hardened caps in whenever any declared bootstrap
+failed to load. A user already under them sees no difference; everyone else gets a
 tighter-than-usual window until the deploy is fixed.
 
 ## The audit log
@@ -1154,7 +1154,7 @@ skipped, not waited on. A consumer that throws is logged and skipped for that
 batch, and retried on the next.
 
 **Background work is not user activity.** `secretKey()` normally stamps the
-content-decrypt time the Fortress idle cap measures from. If a drain's reads
+content-decrypt time the hardened idle cap measures from. If a drain's reads
 counted, a tab left open at an empty desk would hold the window open forever and
 the idle cap would stop existing. Every batch therefore runs inside
 `VaultDeferredWork::withBackgroundWork()`, which sets

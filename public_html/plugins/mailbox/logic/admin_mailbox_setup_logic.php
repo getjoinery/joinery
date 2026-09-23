@@ -15,7 +15,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * A domain with no mailbox yet can be focused directly (?domain_id=). Its setup
  * is domain-level — the vault, outbound protection, the relay, the DNS shape —
  * so it renders the guided steps, the publish box and runDomainChecks(), and no
- * per-mailbox checks. For a Fortress domain those domain checks ARE the
+ * per-mailbox checks. For a domain with the sending lock those domain checks ARE the
  * protected-shape verification, so publishing can prove itself with no mailbox.
  *
  * Outbound send protection has no page of its own: mailbox_protect_handle_action()
@@ -25,6 +25,8 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
+ * @version 2.18 - the Sending identity box and guided steps follow the add-ons
+ *   (focus_relay_on, focus_send_requested)
  * @version 2.17 - wizard_provision is gone: the setup wizard's Email step
  *   provisions the mailbox itself (setup_logic) and posts nothing here.
  * @version 2.16 - wizard_provision: the setup wizard's one-go apply
@@ -64,7 +66,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$advanced = !empty($input['advanced']);
 
 	// The page focuses either a mailbox or a bare domain. A domain is registered
-	// before any mailbox exists on it, and a Fortress domain's setup — vault,
+	// before any mailbox exists on it, and a Private domain's setup — vault,
 	// protect ceremony, relay, DNS shape — is entirely domain-level, so a
 	// mailbox-only picker would leave a freshly added domain with no guided
 	// surface at all. The two states share one dropdown ('a<id>' / 'd<id>') but
@@ -92,12 +94,11 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// through it, and handed to the view as self_url: a form that posts anywhere
 	// but here drops the focus and dumps the operator back on the picker.
 	// Whether the operator has explicitly opened the send-protection ceremony
-	// for the focused domain. Pure view state, never stored: every Fortress
-	// domain already HAS a sealed key (the raise seals one), so "has a key but
-	// is not enforcing" is the resting state of a finished domain, not a job in
-	// progress. Only this flag distinguishes an operator who has asked to set
-	// send protection up from one who is simply looking at their domain — and
-	// nothing prescribes the protected DNS shape until they have asked.
+	// for the focused domain. Pure view state, never stored: a domain that
+	// asked for the sending lock already HAS a sealed key (switching it on seals
+	// one). Only this flag distinguishes an operator who has opened the ceremony
+	// from one who is simply looking at their domain — and nothing prescribes
+	// the protected DNS shape until they have.
 	$protect_setup = !empty($input['protect_setup']);
 
 	// Whether the machine sender ceremony is open for the focused domain
@@ -476,8 +477,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 
 	// --- Level-guided setup (specs/mailbox_security_levels.md § Phase 3) ---
 	// The chosen level drives the next steps shown below the checks: Private adds
-	// the one-time vault ceremony; Fortress adds the protect ceremony, the relay,
-	// and the session-gated-send confirmation. Reuse the built flows — link, never
+	// the one-time vault ceremony; the Seal at the relay add-on adds the relay,
+	// and the sending-lock add-on adds the protect ceremony. Reuse the built flows — link, never
 	// reimplement.
 	// A directly focused domain has no mailbox to resolve through, so name it
 	// here. Everything downstream — the guided box, the DNS plan, the Advanced
@@ -503,6 +504,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$security_level     = InboundEmailDomain::LEVEL_STANDARD;
 	$focus_domain_id    = 0;
 	$focus_is_protected = false;
+	$focus_relay_on     = false;
+	$focus_send_requested = false;
 	$acting_has_vault   = false;
 	$protect            = null;   // protection state, for the guided box + Advanced
 	if ($arrival !== 'imap' && $focus_domain !== '') {
@@ -512,7 +515,11 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 			$security_level     = $focus_domain_model->security_level();
 			$focus_domain_id    = (int)$focus_domain_model->key;
 			$focus_is_protected = $focus_domain_model->is_protected_identity();
-			if ($security_level === InboundEmailDomain::LEVEL_FORTRESS) {
+			$focus_relay_on       = $focus_domain_model->relay_seals_to_owner();
+			$focus_send_requested = $focus_domain_model->send_lock_requested();
+			// The Sending identity box exists once the sending lock has been asked
+			// for (or is on); a domain that never asked has nothing to set up.
+			if ($focus_send_requested || $focus_is_protected) {
 				$protect = mailbox_protect_state($focus_domain_model, $uid);
 			}
 		}
@@ -521,8 +528,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	}
 
 	// A focused domain has no mailbox to scope per-address checks to, but the
-	// domain-level DNS is exactly what its setup is about — and for a Fortress
-	// domain those rows ARE the protected-shape verification
+	// domain-level DNS is exactly what its setup is about — and for a domain
+	// with the sending lock those rows ARE the protected-shape verification
 	// (InboundEmailSetupCheck::protectedShapeResults, reached from checkDomain).
 	// Without them a domain focus would show records to publish and no way to
 	// see whether publishing worked.
@@ -636,8 +643,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 
 	// --- The send-protection ceremony, when the operator has opened it ---------
 	// Everything here costs DNS lookups, so none of it runs for the ordinary
-	// case: a Fortress domain resting with send protection off pays nothing and
-	// is told nothing.
+	// case: a domain with send protection off and its ceremony closed pays
+	// nothing and is told nothing.
 	$protect_preflight     = array();
 	$protect_dns_box       = null;
 	$protect_signing_ready = false;
@@ -714,6 +721,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'security_level'             => $security_level,
 		'focus_domain_id'            => $focus_domain_id,
 		'focus_is_protected'         => $focus_is_protected,
+		'focus_relay_on'             => $focus_relay_on,
+		'focus_send_requested'       => $focus_send_requested,
 		'acting_has_vault'           => $acting_has_vault,
 		'protect'                    => $protect,
 		'protect_setup'              => $protect_setup,

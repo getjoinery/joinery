@@ -15,13 +15,13 @@ in cleartext on hardware you operate. Every honest design question is
 downstream of that: *how long does plaintext exist, on which machine, and what
 can an attacker who owns that machine at a given moment actually do?*
 
-This system's answer is a per-domain choice of three postures. The strongest
-posture is designed against the assumption that **your server will eventually
+This system's answer is a per-domain choice of two levels, plus two add-ons
+that harden a Private domain. The hardened posture is designed against the assumption that **your server will eventually
 be compromised** — not that it won't be. The interesting property is not
 "encrypted," it is *bounded*: what a given attacker position yields, and for
 how long, is enumerated below. Where the bound is weak, this document says so.
 
-## Three levels, because there are three questions
+## Two levels and two add-ons, because there are three questions
 
 - **Standard** — the server manages this mailbox for you. Today's normal
   self-hosted behavior: plaintext at rest, automation works, zero ceremony.
@@ -29,14 +29,18 @@ how long, is enumerated below. Where the bound is weak, this document says so.
 - **Private** — *can a compromised server read my stored history?* No.
   Everything content-shaped — bodies, subjects, senders, attachments, the
   search index — is encrypted at rest to a key the server does not hold.
-- **Fortress** — *can a compromised server read my new mail, or send mail as
-  me, live?* No. Mail is encrypted at a separate minimal relay before the main
-  server ever holds it, and the ability to produce a DMARC-passing message
-  from the domain requires an unlock only the user can perform.
+- **Private + add-ons** — *can a compromised server read my new mail, or send
+  mail as me, live?* No, with both add-ons on. **Seal at the relay**: mail is
+  encrypted at a separate minimal relay before the main server ever holds it.
+  **Only send while I'm signed in**: the ability to produce a DMARC-passing
+  message from the domain requires an unlock only the user can perform. Each
+  add-on answers its half of the question independently.
 
-The level attaches to the **domain** (MX, SPF, DKIM, DMARC are domain-level
-facts), so one deployment can run a throwaway domain at Standard and a
-primary identity at Fortress.
+The level and its add-ons attach to the **domain** (MX, SPF, DKIM, DMARC are
+domain-level facts), so one deployment can run a throwaway domain at Standard
+and a primary identity at Private with both add-ons. (A third level,
+**Fortress**, is reserved for end-to-end encryption — only your devices can
+read it — and is not offered for mail today.)
 
 ## The key hierarchy (what the server never holds)
 
@@ -70,7 +74,7 @@ forces acknowledgment of this before it completes.
 ## The unlock window
 
 "Logged in" and "able to read mail" are different states. A web session may
-last days; keys do not. Reading, searching, and (on Fortress) sending require
+last days; keys do not. Reading, searching, and (with the sending add-on) sending require
 an **unlock** — one passkey tap — which holds the secret key in server RAM for
 a bounded idle window (default 30 minutes, activity-extended). Expiry, logout,
 or session end wipes the key and every decrypted artifact. Re-unlocking is a
@@ -143,7 +147,7 @@ there yet, and this document will not pretend otherwise.
 
 The nastier compromise is not reading your mail — it is **sending as you**.
 The usual controls (rate limits, audit logs) live on the box and die with
-root. Fortress moves enforcement off-box: the domain publishes
+root. The **Only send while I'm signed in** add-on moves enforcement off-box: the domain publishes
 `p=reject; aspf=s; adkim=s` DMARC; its SPF authorizes no ambient sender; its
 DKIM private key exists only sealed to the user's key and is used in-memory,
 per send, inside an unlock window. The verifier is **every receiving mail
@@ -152,7 +156,7 @@ attacker does not control. Root on your box can disable anything local; it
 cannot forge a signature it does not have, and it cannot make Gmail ignore
 `p=reject`.
 
-The honest costs: a Fortress domain cannot send while locked — mailing-list
+The honest costs: a sending-locked domain cannot send while locked — mailing-list
 confirmations and cron notifications move to a Standard subdomain, whose keys
 cannot sign as the bare domain under strict alignment. And a minority of
 receivers don't enforce DMARC; spoofed mail can still reach *them*.
@@ -162,7 +166,8 @@ receivers don't enforce DMARC; spoofed mail can still reach *them*.
 MX records cannot hide behind a CDN; they must name a real IP. Colocated mail
 therefore advertises exactly where your archive lives, and the plaintext-
 arrival moment runs on the same box as the web app, plugins, and database —
-the largest possible target. Fortress puts a **minimal, disposable relay** at
+the largest possible target. The **Seal at the relay** add-on puts a **minimal,
+disposable relay** at
 the MX instead: Postfix, verification milters, a small sealing program,
 WireGuard. No PHP, no web UI, no database, no user accounts. It seals each
 accepted message to the user's public key at the moment of acceptance and
@@ -191,7 +196,7 @@ reputation.)
 
 ## What each attacker position actually gets
 
-| Attacker position | Standard | Private | Fortress |
+| Attacker position | Standard | Private | Private + both add-ons |
 |---|---|---|---|
 | Stolen database / leaked backup | everything | metadata only¹ | metadata only¹ |
 | Main box, no unlock window open (incl. root) | everything | stored mail unreadable; **new arrivals readable at ingest**; can send as you | stored + new mail unreadable; cannot send as you |

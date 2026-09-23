@@ -10,7 +10,7 @@
  * exact fields (iem_recipient alone can't tell To from Cc). iem_message_id_header stays
  * NULL; iem_thread_key is the source thread's key for a reply/forward draft, NULL for a new.
  *
- * Sealing (Private/Fortress owner): content + recipient + bcc + draft_state seal under a
+ * Sealing (Private owner): content + recipient + bcc + draft_state seal under a
  * per-draft DEK. Autosave never blocks on the unlock window — a fresh DEK seals with only
  * the owner's public key. To keep already-persisted draft attachments (sealed under the
  * draft's DEK) readable across edits, an UPDATE to a sealed draft re-seals its content
@@ -22,6 +22,7 @@
  * mailbox they hold a grant for. Discard is a hard delete (row + ima_ manifest + Files) —
  * there is no draft trash.
  *
+ * @version 1.2.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.2 - the sealing posture comes from the mailbox (MailboxSender::sealTargetFor),
  *   not from whether its owner holds a vault, so a Standard mailbox's drafts stay plaintext
  *   like its mail (specs/bugfix_self_addressed_send.md).

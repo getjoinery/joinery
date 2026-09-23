@@ -24,6 +24,7 @@
  * local-id => filename), and `draft_id` (morph a saved draft into the Sent row). All
  * optional, so the mobile `mailbox/send` contract stays backward-compatible.
  *
+ * @version 1.3.2 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.3.1
  */
 
@@ -64,7 +65,7 @@ function send_logic(array $input): LogicResult {
 	try {
 		$result = $sender->send($params, $files);
 	} catch (MailboxLockedException $e) {
-		// Fortress compose while locked (specs/mailbox_security_levels.md § 4.2):
+		// sending-lock compose while locked (specs/mailbox_security_levels.md § 4.2):
 		// return locked instead of erroring so the native client runs the unlock
 		// ceremony and resumes the send, rather than showing a failure.
 		return LogicResult::render(array('locked' => true, 'message' => $e->getMessage()));

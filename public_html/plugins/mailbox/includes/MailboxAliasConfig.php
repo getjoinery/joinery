@@ -17,7 +17,7 @@
  * read a mailbox at all (specs/in_window_deferred_work.md): whether the mail is
  * sealed at rest, and whether the domain has consented to AI reading it.
  *
- * @version 1.3
+ * @version 1.4 - sealed at rest means Private (two levels)
  * @changelog 1.3 - aiProcessingConsent() answers from the domain's stored
  *   consent at every security level (specs/security_inventory.md S19); a
  *   Standard domain is no longer read as having consented to the cloud
@@ -160,16 +160,21 @@ class MailboxAliasConfig {
 	}
 
 	/**
-	 * The security level of the domain behind $address ('standard', 'private',
-	 * 'fortress'), or null when the address resolves to nothing.
+	 * The protection level of the domain behind $address ('standard' or
+	 * 'private'), or null when the address resolves to nothing.
 	 */
 	public static function securityLevelForAddress(string $address): ?string {
 		$row = self::domainPostureForAddress($address);
-		return $row === null ? null : (string)$row['ied_security_level'];
+		if ($row === null) {
+			return null;
+		}
+		$level = (string)$row['ied_security_level'];
+		// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
+		return $level === 'fortress' ? 'private' : $level;
 	}
 
 	/**
-	 * Is this address's mail sealed at rest? True for 'private' and 'fortress'.
+	 * Is this address's mail sealed at rest? True for 'private'.
 	 *
 	 * Callers use this to decide whether reading the mail needs the owner's
 	 * unlock window — on a sealed domain a cron job can never read it at all
@@ -177,6 +182,7 @@ class MailboxAliasConfig {
 	 */
 	public static function isSealedAtRest(string $address): bool {
 		$level = self::securityLevelForAddress($address);
+		// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
 		return $level === 'private' || $level === 'fortress';
 	}
 
@@ -194,6 +200,7 @@ class MailboxAliasConfig {
 			return false;
 		}
 		$level = (string)$row['ied_security_level'];
+		// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
 		if ($level !== 'private' && $level !== 'fortress') {
 			return true;
 		}

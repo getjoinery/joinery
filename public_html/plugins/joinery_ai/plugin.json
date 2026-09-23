@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.24.8",
+    "version": "0.24.10",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -280,8 +280,16 @@
             "group": "chat",
             "label": "Default privacy for new chats",
             "type": "select",
-            "options": {"standard": "Standard — the server manages the chat for you", "private": "Private — only you can read the stored chat (unlock required)", "fortress": "Fortress — chat content never leaves your hardware (local model only)"},
-            "helptext": "Applied to every new chat; each chat can override it. Private and Fortress seal the stored chat under your vault, so they need a set-up vault to unlock — a chat falls back to Standard when you have none. Fortress additionally pins a local model, so nothing is sent to a cloud AI provider."
+            "options": {"standard": "Standard — the server manages the chat for you", "private": "Private — only you can read the stored chat (unlock required)"},
+            "helptext": "Applied to every new chat; each chat can override it. Private seals the stored chat under your vault, so it needs a set-up vault to unlock — a chat falls back to Standard when you have none."
+        },
+        {
+            "name": "joinery_ai_default_chat_local_only",
+            "default": "0",
+            "group": "chat",
+            "label": "Local models only for new Private chats",
+            "type": "checkbox",
+            "helptext": "Extra protection for new Private chats: nothing in the chat is sent to an outside AI company, and only AI models running on your own hardware can answer. Applies only when a local model is configured; each chat can turn it on, and once a chat has it, it stays on."
         },
         {
             "name": "joinery_ai_default_temperature",

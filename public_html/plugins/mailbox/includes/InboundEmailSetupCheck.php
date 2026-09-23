@@ -25,6 +25,10 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.50 - the signing-stage records are prescribed only while the
+ *   sending lock is asked for or on
+ * @version 1.49 - the send-protection row follows the sending-lock add-on (asked
+ *   for or on), not a level
  * @version 1.48 - the "Deliverability reports" row sits beside the DMARC row
  *   (specs/deliverability_report_ingest.md § Surfaces): reports actually
  *   arriving are the only proof the published rua address is right
@@ -103,10 +107,9 @@ class InboundEmailSetupCheck {
 	 * (specs/mailbox_relay_surface_simplification.md). The protected shape tells
 	 * the world to reject anything the sealed key did not sign — but
 	 * MailboxDkimSigner only signs with that key once ied_is_protected_identity
-	 * is set. Prescribing the shape at the level instead would hand a Fortress
-	 * domain that has not opted in a DNS record set that rejects its own
-	 * outgoing mail, and send protection is a deliberate opt-in: a Fortress
-	 * domain resting with it off is a finished domain, not a half-done one.
+	 * is set. Prescribing the shape when the sending lock is merely asked for
+	 * would hand the domain a DNS record set that rejects its own outgoing mail
+	 * before anything signs with that key.
 	 *
 	 * So the inverted SPF, the strict DMARC, the sealed-key DKIM record and the
 	 * forwarding subdomain are prescribed together with enforcement or not at
@@ -619,7 +622,7 @@ class InboundEmailSetupCheck {
 	 * choice the MX record already makes, so it is made the same way: the mail
 	 * host on a colocated deployment (a DNS-only name for the box, never a CDN-
 	 * or proxy-fronted web host), and the RELAY on a relay-fronted one —
-	 * publishing an SRV record pointing at a Fortress box would advertise in
+	 * publishing an SRV record pointing at a relay-fronted box would advertise in
 	 * public DNS precisely the address the relay exists to conceal.
 	 *
 	 * Every publishable signing key gets a TXT record, not just the active one:
@@ -816,6 +819,14 @@ class InboundEmailSetupCheck {
 
 	private function signingStageRecords(DnsRecordPlan $plan, string $domain, $model,
 			bool $fronted, array $topology, string $mx_target): void {
+		// These records exist for the sending lock alone. A request that was
+		// cancelled leaves its sealed key and selector stored (a later request
+		// may reuse them), and nothing signs with that key — so publishing its
+		// record, or the forwarding subdomain beside it, would be prescribing
+		// DNS for a lock nobody has asked for.
+		if (!$model->send_lock_requested() && !$model->is_protected_identity()) {
+			return;
+		}
 		$selector = trim((string)$model->get('ied_dkim_selector'));
 		$public   = trim((string)$model->get('ied_dkim_public_dns'));
 		if ($selector !== '' && $public !== '') {
@@ -1683,8 +1694,8 @@ class InboundEmailSetupCheck {
 			// ever says it is there.
 			$out[] = $this->localSigningKeyResult($domain);
 		} else {
-			// A Fortress domain reaching the ambient branch is one that has not
-			// started signing. Its DNS is prescribed the ordinary way — its mail
+			// A domain that asked for the sending lock and reaches the ambient
+			// branch is one that has not started signing. Its DNS is prescribed the ordinary way — its mail
 			// must keep working while it finishes — but it is NOT finished, and
 			// sendProtectionResult() below is where that is said.
 			$plan = $this->spfPlan($domain);
@@ -1782,10 +1793,11 @@ class InboundEmailSetupCheck {
 			}
 		}
 
-		// Is Fortress actually finished? Emitted for every Fortress domain in both
-		// branches above, because the question is the same either way and the
-		// answer is what makes the level mean what it says.
-		if ($model && $model->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
+		// Is the sending lock actually finished? Emitted for every domain that
+		// asked for it (or has it on) in both branches above, because the
+		// question is the same either way and the answer is what makes the
+		// add-on mean what it says. A domain that never asked is not judged.
+		if ($model && ($model->send_lock_requested() || $model->is_protected_identity())) {
 			$out[] = $this->sendProtectionResult($domain, $model);
 		}
 
@@ -2970,13 +2982,12 @@ class InboundEmailSetupCheck {
 	// ===================================================================
 
 	/**
-	 * Is this Fortress domain finished?
+	 * Is this domain's sending lock finished?
 	 *
-	 * Fortress is a two-sided promise — nobody can read your mail, and nobody can
-	 * send as you. Arrival sealing delivers the first half at the moment of the
-	 * raise; send protection delivers the second, and until it does the domain is
-	 * one anybody can still impersonate. The raise ceremony has always said so
-	 * ("one step still remains"); this row is the same fact on the Setup tab
+	 * "Only send while I'm signed in" promises nobody can send as you. Asking
+	 * for it seals a key; send protection delivers the promise, and until it
+	 * does the domain is one anybody can still impersonate. The receipt card
+	 * says so ("one step left"); this row is the same fact on the Setup tab
 	 * (specs/mailbox_fortress_send_protection_completion.md).
 	 *
 	 * Four states, because they have four different fixes — and one of them is
@@ -3051,10 +3062,10 @@ class InboundEmailSetupCheck {
 
 		if (!$signing) {
 			return $this->r('domain.send_protection', $domain, 'domain', $label, self::REQUIRED, self::FAIL,
-				'Fortress is not finished for ' . $domain . ' — anyone can still send as this domain.',
-				'Arriving mail is sealed and unreadable without your vault, which is half of what Fortress '
-				. 'promises. The other half is that nobody can send mail claiming to be you — including someone '
-				. 'who has broken into this server. That is send protection, and it is not on yet.',
+				'Only send while I\'m signed in is not finished for ' . $domain
+					. ' — anyone can still send as this domain.',
+				'You asked for nobody to be able to send mail claiming to be you — including someone who has '
+				. 'broken into this server. That is send protection, and it is not on yet.',
 				array('text' => 'Finish it under Sending identity in Advanced. Nothing changes for your mail '
 					. 'until the last step, and you can stop at any point.'));
 		}

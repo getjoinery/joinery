@@ -24,6 +24,7 @@
  * one kind's deliverability into `exists` would silently unaddress the recipient
  * for every other kind.
  *
+ * @version 1.1.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.1
  * @changelog 1.1 - `stores_email` fact; `exists` is pure identity, per-kind
  *   deliverability moved to the kind's declared recipient requirement.
@@ -42,7 +43,7 @@ class DirectRecipients {
 	 *
 	 *   hosts_domain     bool   always true when non-null
 	 *   domain_id        int
-	 *   seals_content    bool   Private or Fortress — the posture switch
+	 *   seals_content    bool   Private — the posture switch
 	 *   exists           bool   is there an addressable recipient for this local
 	 *                           part — identity, regardless of email routing
 	 *   stores_email     bool   does email delivered here land in a local store

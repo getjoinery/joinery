@@ -10,6 +10,7 @@
  * mechanism — the values live here, the enforcement reuses the platform's
  * existing limiters and byte counters.
  *
+ * @version 1.2.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.2
  * @changelog 1.2 - spoolSenderCapBytes(): the per-sending-domain bound on
  *   held mail (specs/security_inventory.md S21)
@@ -96,8 +97,8 @@ class DirectSettings {
 	 *
 	 * A decoy must be DETERMINISTIC — a key that changed between probes of the
 	 * same address would itself be the tell — so the secret is minted once and
-	 * kept. It lives on the box at Private and travels in the relay map at
-	 * Fortress, where the relay answers preflights.
+	 * kept. It lives on the box, and on a relay-fronted deployment it also
+	 * travels in the relay map, because there the relay answers preflights.
 	 */
 	public static function decoySecret(): string {
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));

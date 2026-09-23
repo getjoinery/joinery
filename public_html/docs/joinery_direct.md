@@ -109,7 +109,7 @@ returns a **typed result**, never a behavior:
 
 **`require_sealed`** (option): the client's default is opportunistic sealing —
 parts cross plaintext-over-TLS when the far side publishes no key. A caller whose
-policy forbids that trade (a Guarded conversation) passes
+policy forbids that trade (a conversation with Nothing leaves unsealed on) passes
 `'require_sealed' => true` and gets `no_sealing` instead of a transfer. The
 refusal is final for as long as the far side has no vault: retrying asks the same
 instance the same question.
@@ -168,7 +168,7 @@ runs:
 
 The wire discipline holds for every kind because handlers cannot touch the wire:
 exactly two gate answers exist (`accept`/`declined`), request-level refusals are a
-separate indistinguishable bucket carried as HTTP statuses, a Private or Fortress
+separate indistinguishable bucket carried as HTTP statuses, a Private
 receiver accepts unconditionally (with a decoy key for addresses that do not
 exist), nothing is ever bounced, and rate limiting is per verified sending
 instance (a declared, tunable setting).
@@ -216,7 +216,7 @@ A handler is two pure functions — that is the entire surface:
 
 - **`gate(envelope): bool`** — "does this recipient accept this kind from this
   sender," nothing else. It never sees vault lock state and never composes a wire
-  response. Under Private and Fortress it is not called at receive at all; the
+  response. Under Private it is not called at receive at all; the
   framework accepts unconditionally and defers the gate to unlock.
 - **`ingest(envelope, parts, gate_accepted)`** — store the delivered payload in the
   kind's own model. It runs only after hash verification. On the live path it runs
@@ -271,8 +271,8 @@ the domain seals content), so the tiers behave as:
   anyway, and what lets ingest happen without an open unlock window. A stranger, a
   removed contact, a blocked sender and an address that does not exist all get one
   byte-identical `declined`.
-- **Private / Fortress** — contacts are sealed, and both tiers share one wire
-  posture, locked or unlocked: the receiver accepts unconditionally — never a live
+- **Private** — contacts are sealed, and the receiver takes one wire posture,
+  locked or unlocked, colocated or relay-fronted alike: the receiver accepts unconditionally — never a live
   `declined`, no lock-state oracle — and returns a key for every address that
   exists or not, with a deterministic decoy (reporting key generation 1) standing
   in for addresses that do not, so existence, contact membership, and block status
@@ -294,7 +294,7 @@ the domain seals content), so the tiers behave as:
   decline hands the message to the same classification ordinary mail gets — content
   spam scan and filter rules included. The decoy's domain secret is minted on first
   use and kept, because a key that changed between probes of one address would
-  itself be the tell. At Fortress the relay answers preflights, so that same
+  itself be the tell. On a relay-fronted deployment the relay answers preflights, so that same
   secret travels to it in the relay map — a decoy that differed between the box
   and its relay would be a distinguisher in itself.
 
@@ -324,9 +324,9 @@ Rotation is explicit (`DirectSigningIdentity::rotate`): a new key id is minted a
 the old row stays publishable until it is retired, because a sender that cached the
 capability record may still be quoting the old id.
 
-## The relay at Fortress
+## The relay as the endpoint
 
-A Fortress deployment's SRV record targets its **relay**, in both directions. An
+A relay-fronted deployment's SRV record targets its **relay**, in both directions. An
 SRV record pointing at the origin box would advertise in public DNS exactly the
 address the relay exists to conceal, so the target is the relay — the same
 posture MX already takes.

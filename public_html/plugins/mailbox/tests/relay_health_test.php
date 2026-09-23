@@ -324,7 +324,7 @@ class RelayHealthTest {
 		}
 
 		// ...but only for a mailbox whose domain needs a relay. A relay is only
-		// load-bearing at Fortress, so on a Standard or Private domain a broken
+		// load-bearing under the Seal at the relay add-on, so on a domain without it a broken
 		// scanner is not that mailbox's business at any status — one
 		// deployment-wide fault must not read as every mailbox being broken
 		// (specs/mailbox_relay_surface_simplification.md).

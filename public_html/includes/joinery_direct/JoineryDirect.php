@@ -34,6 +34,7 @@
  *     live. If the sender could look up "am I allowed to send Direct to bob@you"
  *     that would be an oracle leaking the recipient's contact and block lists.
  *
+ * @version 1.3.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.3
  * @changelog 1.3 - a vault-locked signing key is its own result (LOCKED), not a generic failure: nothing about the recipient or the network is wrong, so a caller with a retry queue can wait for the member instead of burning attempts nobody can make succeed
  * @changelog 1.2 - send() verifies the SENDER domain's own DNS publication before the wire — both halves of the handshake are checked, not just the recipient's
@@ -200,7 +201,7 @@ class JoineryDirect {
 		// deployment sends through the relay so the recipient never sees the
 		// box's address; everyone else connects directly through the SSRF-safe
 		// client. The steps below cannot tell which they got, which is what
-		// keeps the Fortress path from being a second implementation.
+		// keeps the relay path from being a second implementation.
 		$transport = self::egress();
 		$client = null;
 		if ($transport === null) {

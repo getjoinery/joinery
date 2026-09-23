@@ -12,7 +12,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_me
  * byte-for-byte, and the mint-vs-reuse DEK dance.
  *
  * The unit of protection is the CONVERSATION: its aic_security_level is 'private'
- * or 'fortress' (protected) or 'standard' (plaintext, unchanged). A protected
+ * (protected) or 'standard' (plaintext, unchanged). A protected
  * conversation seals its title/instructions under a per-conversation DEK
  * (aic_sealed_key) and each message seals content/tool-trace/error under a
  * per-message DEK (aim_sealed_key); attachments seal under the OWNING message's
@@ -32,7 +32,6 @@ class ChatSeal {
 
     const LEVEL_STANDARD = 'standard';
     const LEVEL_PRIVATE  = 'private';
-    const LEVEL_FORTRESS = 'fortress';
 
     /** A sealed AEAD blob always carries this prefix (SealedBox::aeadEncrypt); the
      *  decrypt paths key on it so an empty/not-yet-sealed field is returned as-is. */
@@ -42,11 +41,12 @@ class ChatSeal {
     const LOCKED_TITLE = 'Protected chat (locked)';
 
     public static function isProtectedLevel($level): bool {
-        return $level === self::LEVEL_PRIVATE || $level === self::LEVEL_FORTRESS;
+        // Normalized, so an unconverted legacy row still reads as protected.
+        return AiConversation::normalizeLevel($level) === self::LEVEL_PRIVATE;
     }
 
     public static function levels(): array {
-        return [self::LEVEL_STANDARD, self::LEVEL_PRIVATE, self::LEVEL_FORTRESS];
+        return [self::LEVEL_STANDARD, self::LEVEL_PRIVATE];
     }
 
     // ---------------------------------------------------------- AD conventions
