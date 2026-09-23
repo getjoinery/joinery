@@ -2420,3 +2420,46 @@ fn a_create_interrupted_by_a_kill_is_treated_as_the_retry_it_is() {
         "the device is the only thing in the world that thinks this folder exists: {live:?}"
     );
 }
+
+/// A file's rename refused in prose onto a name this device is itself
+/// renaming away waits for that rename, rather than stepping around it (the
+/// reset's C12, its second condition). The follower's move to `b.txt` runs
+/// first and is refused -- `b.txt` is still the holder's, and the holder's own
+/// move off it is queued behind. Stepped aside, the follower would take a
+/// conflict name on every device for a collision that clears in the same run.
+#[test]
+fn a_prose_refusal_of_a_name_this_device_is_vacating_waits() {
+    let (_clock, server, device) = world();
+    let holder = server.seed_file(None, "b.txt", b"the holder");
+    let follower = server.seed_file(None, "a.txt", b"the follower");
+    for (id, name) in [(holder, "b.txt"), (follower, "a.txt")] {
+        let mut e = fresh(EntityId::file(id), None, name, LocalStatus::Synced);
+        e.synced_placement = Some(Placement { parent: None, name: name.into() });
+        device.store.put_entry(&e).unwrap();
+    }
+    device
+        .store
+        .queue_op(
+            "move_remote",
+            EntityId::file(follower),
+            &serde_json::json!({ "from": { "name": "a.txt", "parent": null }, "name": "b.txt", "parent": null }).to_string(),
+            "follower-rename",
+        )
+        .unwrap();
+    device
+        .store
+        .queue_op(
+            "move_remote",
+            EntityId::file(holder),
+            &serde_json::json!({ "from": { "name": "b.txt", "parent": null }, "name": "c.txt", "parent": null }).to_string(),
+            "holder-rename",
+        )
+        .unwrap();
+    server.refuses_without_saying_why(true);
+    let now = device.now();
+    let report = run_queued(&env(&device, &now)).expect("run");
+    let tree = server.tree();
+    assert!(!tree.keys().any(|p| p.contains("conflicted copy")), "the follower stepped around a name that was about to clear: {tree:?}");
+    assert_eq!(report.retrying, 1, "the follower should have waited: {report:?}");
+    assert!(tree.contains_key("c.txt"), "the holder's own rename should have run: {tree:?}");
+}

@@ -352,6 +352,14 @@ pub fn apply_naming(
             if parked_locally(&entry) && busy.contains(&entry.id) {
                 continue;
             }
+            // Wearing a scratch name on the server and never placed here: a
+            // device is in the middle of renaming it, and a scratch name is
+            // not a name. Judged, it is "reserved" and unsyncable -- an
+            // alarm to the user about a rename that is a request away from
+            // finishing. It waits, with nothing to name, until the park ends.
+            if entry.waiting_on_a_park() {
+                continue;
+            }
             let (local_name, verdict) = match r.outcome {
                 LocalName::AsIs(name) => {
                     // Equal to the server's spelling in the common case. Not

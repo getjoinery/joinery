@@ -237,6 +237,22 @@ impl Entry {
             .unwrap_or(&self.local_placement().name)
     }
 
+    /// Wearing a scratch name on the server, with no agreed placement here to
+    /// read in its place.
+    ///
+    /// Some device is in the middle of renaming it, and a scratch name is not
+    /// a name: it cannot be judged (it would read as "reserved"), landed
+    /// (the local walk hides internal names, so the next pass reads the file
+    /// as deleted -- the reset's C11) or planned against. Every reader of
+    /// placement skips such an entry until the park ends. One with an
+    /// agreement reads the agreement instead (`pass::observed_remote`).
+    pub fn waiting_on_a_park(&self) -> bool {
+        self.remote.name.starts_with(crate::order::SWAP_PREFIX)
+            && self.synced_placement.is_none()
+            && self.stand_in.is_none()
+            && !self.remote_deleted
+    }
+
     /// Is this entry holding a file on this computer, or is it only recording
     /// where one would go?
     ///

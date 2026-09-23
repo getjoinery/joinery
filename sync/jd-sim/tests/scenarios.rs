@@ -10185,6 +10185,405 @@ fn a_peer_putting_a_park_back_does_not_break_the_parkers_finish() {
     }
 }
 
+/// A peer's park is the peer's: this device neither puts it back nor follows it.
+///
+/// a trades two files' names across two folders; the planner breaks the cycle
+/// by parking one on the server under a scratch name, and a dies the moment
+/// that park is answered. b then runs pass after pass while the park stands.
+/// Put back by b, the park is a cycle a peer reverted under the parker's feet
+/// (the reset's C10: two finishers then wait on each other for ever). Followed
+/// by b, the file leaves its real name on b's disk for a hidden scratch name,
+/// the local walk does not see it, and the round trashes it on the server
+/// (C11). Neither may happen: the server keeps the park, b's disk keeps the
+/// file at its real name with its bytes, nothing is trashed, nothing is said;
+/// and when a comes back the trade finishes on every side.
+#[test]
+fn a_peers_park_is_neither_put_back_nor_followed() {
+    let one = b"the contents of A";
+    let two = b"the contents of B";
+    let build = |die_after: u64| -> Option<World> {
+        let world = World::of(9_251, &[("a", jd_sim::Platform::MacOs), ("b", jd_sim::Platform::MacOs)]);
+        let a = world.device("a");
+        a.fs.user_mkdir("One");
+        a.fs.user_mkdir("Two");
+        a.fs.user_write("One/x.txt", one);
+        a.fs.user_write("Two/y.txt", two);
+        assert!(world.settle().is_some());
+        a.fs.user_rename("One/x.txt", "Two/held");
+        a.fs.user_rename("Two/y.txt", "One/X.txt");
+        a.fs.user_rename("Two/held", "Two/Y.txt");
+        a.net.arm_death(die_after);
+        world.pass(a);
+        let parked = world.server.tree().keys().any(|p| p.contains(".jd-swap-"));
+        let finishing = a.store.queued_ops().unwrap().iter().any(|o| o.kind == "move_remote");
+        (parked && finishing).then_some(world)
+    };
+    let world = (0..20u64).find_map(build).expect("no arming left a park standing with its finisher queued");
+    let a = world.device("a");
+    let b = world.device("b");
+    for n in 0..5 {
+        world.pass(b);
+        let tree = world.server.tree();
+        assert!(tree.keys().any(|p| p.contains(".jd-swap-")), "pass {n}: b put a's park back: {tree:?}");
+        let disk = disk_tree(b);
+        assert_eq!(disk.get("One/x.txt").cloned().flatten(), Some(jd_sim::sha256_hex(one)), "pass {n}: b's file left its real name: {disk:?}");
+        assert_eq!(disk.get("Two/y.txt").cloned().flatten(), Some(jd_sim::sha256_hex(two)), "pass {n}: {disk:?}");
+        assert!(!b.fs.all_paths().iter().any(|p| p.contains(".jd-")), "pass {n}: b followed the park: {:?}", b.fs.all_paths());
+        assert_eq!(tree.len(), 4, "pass {n}: something was trashed or minted: {tree:?}");
+        assert!(b.store.open_issues().unwrap().is_empty(), "pass {n}: {:?}", b.store.open_issues().unwrap());
+    }
+    assert!(world.settle().is_some(), "the trade never finished once a came back");
+    assert_converged(&world);
+    let tree = world.server.tree();
+    assert_eq!(tree.get("One/X.txt").cloned().flatten(), Some(jd_sim::sha256_hex(two)), "{tree:?}");
+    assert_eq!(tree.get("Two/Y.txt").cloned().flatten(), Some(jd_sim::sha256_hex(one)), "{tree:?}");
+    assert!(!tree.keys().any(|p| p.contains(".jd-")), "{tree:?}");
+    for d in [a, b] {
+        assert!(!d.fs.all_paths().iter().any(|p| p.contains(".jd-")), "{} kept a park: {:?}", d.name, d.fs.all_paths());
+    }
+}
+
+/// No scratch name and no conflict name anywhere: on the server, on any disk.
+fn no_scratch_and_no_conflict_names(world: &World) {
+    let tree = world.server.tree();
+    assert!(!tree.keys().any(|p| p.contains(".jd-") || p.contains("conflicted copy")), "{tree:?}");
+    for d in &world.devices {
+        assert!(!d.fs.all_paths().iter().any(|p| p.contains(".jd-") || p.contains("conflicted copy")), "{}: {:?}", d.name, d.fs.all_paths());
+    }
+}
+
+/// A peer's park on files this device has never had: nothing lands under the
+/// scratch name, nothing is trashed, and the files arrive under their real
+/// names once the park is finished. The peer has no agreed placement to read
+/// in the park's place, so the only right move is to wait.
+#[test]
+fn a_peers_park_on_files_this_device_never_had_is_waited_for() {
+    let one = b"the contents of A";
+    let two = b"the contents of B";
+    let build = |die_after: u64| -> Option<World> {
+        let world = World::of(9_256, &[("a", jd_sim::Platform::MacOs), ("b", jd_sim::Platform::MacOs)]);
+        let a = world.device("a");
+        a.fs.user_mkdir("One");
+        a.fs.user_mkdir("Two");
+        a.fs.user_write("One/x.txt", one);
+        a.fs.user_write("Two/y.txt", two);
+        // Up to the server from a alone; b has not run a single pass.
+        for _ in 0..6 {
+            world.pass(a);
+        }
+        if world.server.tree().len() != 4 {
+            return None;
+        }
+        a.fs.user_rename("One/x.txt", "Two/held");
+        a.fs.user_rename("Two/y.txt", "One/X.txt");
+        a.fs.user_rename("Two/held", "Two/Y.txt");
+        a.net.arm_death(die_after);
+        world.pass(a);
+        let parked = world.server.tree().keys().any(|p| p.contains(".jd-swap-"));
+        let finishing = a.store.queued_ops().unwrap().iter().any(|o| o.kind == "move_remote");
+        (parked && finishing).then_some(world)
+    };
+    let world = (0..20u64).find_map(build).expect("no arming left a park standing with its finisher queued");
+    let b = world.device("b");
+    for n in 0..5 {
+        world.pass(b);
+        let tree = world.server.tree();
+        assert!(tree.keys().any(|p| p.contains(".jd-swap-")), "pass {n}: b put a's park back: {tree:?}");
+        assert!(!b.fs.all_paths().iter().any(|p| p.contains(".jd-")), "pass {n}: b landed a file under the scratch name: {:?}", b.fs.all_paths());
+        assert_eq!(tree.len(), 4, "pass {n}: something was trashed or minted: {tree:?}");
+        assert!(b.store.open_issues().unwrap().is_empty(), "pass {n}: {:?}", b.store.open_issues().unwrap());
+    }
+    assert!(world.settle().is_some(), "the trade never finished once a came back");
+    assert_converged(&world);
+    let disk = disk_tree(b);
+    assert_eq!(disk.get("One/X.txt").cloned().flatten(), Some(jd_sim::sha256_hex(two)), "{disk:?}");
+    assert_eq!(disk.get("Two/Y.txt").cloned().flatten(), Some(jd_sim::sha256_hex(one)), "{disk:?}");
+    no_scratch_and_no_conflict_names(&world);
+}
+
+/// A peer's park on a vault folder this device holds only as a stand-in: the
+/// placeholder directory stays at its real name while the park stands, and
+/// follows the server once the park ends.
+#[test]
+fn a_peers_park_on_a_folder_held_here_only_as_a_stand_in_is_not_followed() {
+    let build = |die_after: u64| -> Option<World> {
+        let vault = SimVault::new(9_257);
+        let mut world = World::new(9_257, &["holder", "guest"]);
+        world.give_vault("holder", &vault);
+        world.server.set_vault_public_key(1, &vault.public_key_b64);
+        world.server.seed_encrypted_folder(None, "Vault A");
+        world.server.seed_encrypted_folder(None, "Vault B");
+        assert!(world.settle().is_some());
+        // Something in each, so the trade is visible to the holder at all:
+        // two empty directories exchanging names look like nothing happened.
+        let holder = world.device("holder");
+        holder.fs.user_write("Vault A/a.txt", b"sealed in A");
+        holder.fs.user_write("Vault B/b.txt", b"sealed in B");
+        assert!(world.settle().is_some());
+        let guest = world.device("guest");
+        guest.fs.user_mkdir("Vault A");
+        guest.fs.user_mkdir("Vault B");
+        assert!(world.settle().is_some());
+        let stand_ins = guest.store.every_entry().unwrap().iter().filter(|e| e.stand_in.is_some()).count();
+        assert_eq!(stand_ins, 2, "the guest's directories did not become stand-ins");
+        holder.fs.user_rename("Vault A", ".swap.tmp");
+        holder.fs.user_rename("Vault B", "Vault A");
+        holder.fs.user_rename(".swap.tmp", "Vault B");
+        holder.net.arm_death(die_after);
+        world.pass(holder);
+        let parked = world.server.folders().iter().any(|f| jd_vfs::is_internal(&f.name));
+        let finishing = holder.store.queued_ops().unwrap().iter().any(|o| o.kind == "move_remote");
+        (parked && finishing).then_some(world)
+    };
+    let world = (0..40u64).find_map(build).expect("no arming left a park standing with its finisher queued");
+    let guest = world.device("guest");
+    for n in 0..5 {
+        world.pass(guest);
+        let paths = guest.fs.all_paths();
+        assert!(!paths.iter().any(|p| p.contains(".jd-")), "pass {n}: the guest followed the park: {paths:?}");
+        assert!(guest.fs.exists("Vault A") && guest.fs.exists("Vault B"), "pass {n}: a placeholder went: {paths:?}");
+        let stand_ins = guest.store.every_entry().unwrap().iter().filter(|e| e.stand_in.is_some()).count();
+        assert_eq!(stand_ins, 2, "pass {n}: a stand-in lapsed");
+    }
+    assert!(world.settle().is_some(), "the trade never finished once the holder came back");
+    no_scratch_and_no_conflict_names(&world);
+}
+
+/// The same park, and the parked vault folder is trashed on the server while
+/// it still wears the scratch name: the guest takes the deletion as it would
+/// any other -- the scratch name does not hold its stand-in open for ever.
+#[test]
+fn a_folder_trashed_while_a_peer_has_it_parked_is_let_go_here() {
+    let build = |die_after: u64| -> Option<World> {
+        let vault = SimVault::new(9_258);
+        let mut world = World::new(9_258, &["holder", "guest"]);
+        world.give_vault("holder", &vault);
+        world.server.set_vault_public_key(1, &vault.public_key_b64);
+        world.server.seed_encrypted_folder(None, "Vault A");
+        world.server.seed_encrypted_folder(None, "Vault B");
+        assert!(world.settle().is_some());
+        let holder = world.device("holder");
+        holder.fs.user_write("Vault A/a.txt", b"sealed in A");
+        holder.fs.user_write("Vault B/b.txt", b"sealed in B");
+        assert!(world.settle().is_some());
+        let guest = world.device("guest");
+        guest.fs.user_mkdir("Vault A");
+        guest.fs.user_mkdir("Vault B");
+        assert!(world.settle().is_some());
+        holder.fs.user_rename("Vault A", ".swap.tmp");
+        holder.fs.user_rename("Vault B", "Vault A");
+        holder.fs.user_rename(".swap.tmp", "Vault B");
+        holder.net.arm_death(die_after);
+        world.pass(holder);
+        let parked = world.server.folders().iter().any(|f| jd_vfs::is_internal(&f.name));
+        let finishing = holder.store.queued_ops().unwrap().iter().any(|o| o.kind == "move_remote");
+        (parked && finishing).then_some(world)
+    };
+    let world = (0..40u64).find_map(build).expect("no arming left a park standing with its finisher queued");
+    let guest = world.device("guest");
+    world.pass(guest);
+    let parked = world
+        .server
+        .folders()
+        .into_iter()
+        .find(|f| jd_vfs::is_internal(&f.name))
+        .expect("the park is standing");
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": parked.id }))
+        .unwrap();
+    for _ in 0..3 {
+        world.pass(guest);
+    }
+    let held = guest
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.id.server_id == parked.id && !e.remote_deleted && e.stand_in.is_some());
+    assert!(held.is_none(), "the guest still holds a live stand-in for a trashed folder: {held:?}");
+    assert!(world.settle().is_some(), "never settled after the trash");
+    assert!(!world.server.tree().keys().any(|p| p.contains(".jd-")), "{:?}", world.server.tree());
+    for d in &world.devices {
+        assert!(!d.fs.all_paths().iter().any(|p| p.contains(".jd-")), "{}: {:?}", d.name, d.fs.all_paths());
+    }
+}
+
+/// A move the server refuses in prose alone lands beside the occupant under a
+/// conflict name, as a create and an upload do (the reset's C12).
+///
+/// pc makes `Shared/report.txt` and the server takes it; mac, not yet having
+/// heard, moves its own `draft.txt` to that very name. The server refuses the
+/// name -- and this server says only "Something with that name is already
+/// here", with no marker. Dropped, the move left mac's record at the old path
+/// with nothing queued, and a later scan could read whatever stood there as
+/// the file's edit. Landed beside, both files survive under their own
+/// histories and every disk agrees.
+#[test]
+fn a_move_refused_in_prose_lands_beside_the_occupant() {
+    let world = World::new(9_261, &["mac", "pc"]);
+    world.server.refuses_without_saying_why(true);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_mkdir("Shared");
+    mac.fs.user_write("draft.txt", b"mac's draft");
+    assert!(world.settle().is_some());
+    pc.fs.user_write("Shared/report.txt", b"pc's report");
+    for _ in 0..4 {
+        world.pass(pc);
+    }
+    mac.fs.user_rename("draft.txt", "Shared/report.txt");
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+    let tree = world.server.tree();
+    let bodies: Vec<Option<String>> = tree.values().cloned().collect();
+    assert!(bodies.contains(&Some(jd_sim::sha256_hex(b"mac's draft"))), "mac's file lost: {tree:?}");
+    assert!(bodies.contains(&Some(jd_sim::sha256_hex(b"pc's report"))), "pc's file lost: {tree:?}");
+    assert!(!tree.contains_key("draft.txt"), "the move was dropped, not landed: {tree:?}");
+    assert!(tree.keys().any(|p| p.starts_with("Shared/report") && p.contains("conflicted copy")), "{tree:?}");
+}
+
+/// A rename chain interrupted by a kill ends at the chain's names with no
+/// duplicate (the reset's D2 blocker 2). b.txt -> c.txt, then a.txt -> b.txt;
+/// the device dies after the server applied the first rename and before it
+/// heard so. Stood down as "moved since this was planned", the record kept
+/// b.txt while the second rename rightly took it; the next scan read the
+/// newcomer at b.txt as this file's edit and minted the file at c.txt as a new
+/// one beside itself. Every kill point, against a server that refuses in prose
+/// and one that marks its refusals.
+#[test]
+fn an_interrupted_rename_chain_ends_without_a_duplicate() {
+    for (prose, die_after) in [true, false].into_iter().flat_map(|p| (0..30u64).map(move |d| (p, d))) {
+        let world = World::new(9_262, &["a", "b"]);
+        world.server.refuses_without_saying_why(prose);
+        let a = world.device("a");
+        a.fs.user_write("a.txt", b"first");
+        a.fs.user_write("b.txt", b"second");
+        assert!(world.settle().is_some());
+        a.fs.user_rename("b.txt", "c.txt");
+        a.fs.user_rename("a.txt", "b.txt");
+        a.net.arm_death(die_after);
+        world.pass(a);
+        assert!(world.settle().is_some(), "prose={prose} die_after={die_after}: never settled");
+        assert_converged(&world);
+        let tree = world.server.tree();
+        assert_eq!(tree.get("b.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"first")), "prose={prose} die_after={die_after}: {tree:?}");
+        assert_eq!(tree.get("c.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"second")), "prose={prose} die_after={die_after}: {tree:?}");
+        no_scratch_and_no_conflict_names(&world);
+    }
+}
+
+
+/// The same chain, and the user edits the renamed file after the restart: the
+/// completed move is recognised by the file's inode, not its bytes, so the
+/// edit is read as an edit -- one c.txt carrying it, no conflict copy.
+#[test]
+fn an_interrupted_rename_chain_keeps_an_edit_made_after_the_restart() {
+    let edited = b"edited after the restart";
+    let mut armed = false;
+    for die_after in 0..30u64 {
+        let world = World::new(9_262, &["a", "b"]);
+        world.server.refuses_without_saying_why(true);
+        let a = world.device("a");
+        a.fs.user_write("a.txt", b"first");
+        a.fs.user_write("b.txt", b"second");
+        assert!(world.settle().is_some());
+        a.fs.user_rename("b.txt", "c.txt");
+        a.fs.user_rename("a.txt", "b.txt");
+        a.net.arm_death(die_after);
+        world.pass(a);
+        let completed_unheard = world.server.tree().contains_key("c.txt")
+            && a.store.queued_ops().unwrap().iter().any(|o| o.kind == "move_remote");
+        if !completed_unheard {
+            continue;
+        }
+        armed = true;
+        a.fs.user_write("c.txt", edited);
+        assert!(world.settle().is_some(), "die_after={die_after}: never settled");
+        assert_converged(&world);
+        let tree = world.server.tree();
+        assert_eq!(tree.get("c.txt").cloned().flatten(), Some(jd_sim::sha256_hex(edited)), "die_after={die_after}: {tree:?}");
+        assert_eq!(tree.get("b.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"first")), "die_after={die_after}: {tree:?}");
+        no_scratch_and_no_conflict_names(&world);
+    }
+    assert!(armed, "no kill point left the first rename completed and unheard");
+}
+
+/// The same interrupted chain inside a vault. A sealed file's server name is a
+/// placeholder, so the finished-move recognition cannot see the name it asked
+/// for and a completed move stays Overtaken; this pins what that costs.
+#[test]
+fn an_interrupted_rename_chain_inside_a_vault() {
+    for (prose, die_after) in [true, false].into_iter().flat_map(|p| (0..40u64).map(move |d| (p, d))) {
+        let vault = SimVault::new(9_263);
+        let mut world = World::new(9_263, &["a", "b"]);
+        world.give_vault("a", &vault);
+        world.give_vault("b", &vault);
+        world.server.set_vault_public_key(1, &vault.public_key_b64);
+        world.server.refuses_without_saying_why(prose);
+        world.server.seed_encrypted_folder(None, "Private");
+        assert!(world.settle().is_some());
+        let a = world.device("a");
+        a.fs.user_write("Private/a.txt", b"first");
+        a.fs.user_write("Private/b.txt", b"second");
+        assert!(world.settle().is_some());
+        a.fs.user_rename("Private/b.txt", "Private/c.txt");
+        a.fs.user_rename("Private/a.txt", "Private/b.txt");
+        a.net.arm_death(die_after);
+        world.pass(a);
+        assert!(world.settle().is_some(), "prose={prose} die_after={die_after}: never settled");
+        assert_converged(&world);
+        for d in &world.devices {
+            let disk = disk_tree(d);
+            assert_eq!(disk.get("Private/b.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"first")), "{} prose={prose} die_after={die_after}: {disk:?}", d.name);
+            assert_eq!(disk.get("Private/c.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"second")), "{} prose={prose} die_after={die_after}: {disk:?}", d.name);
+            assert_eq!(disk.keys().filter(|p| p.starts_with("Private/")).count(), 2, "{} prose={prose} die_after={die_after}: a duplicate: {disk:?}", d.name);
+        }
+    }
+}
+
+/// STATED RESIDUAL, pinned so the fix has something red to turn green: a park
+/// left by a device that comes back with a NEW store -- a reinstall, a wiped
+/// store, a new enrollment on the same machine -- is nobody's to put back. The
+/// new store mints a new park tag, so the old park reads as a peer's to it and
+/// to everyone else, and the entity keeps the scratch name on the server. No
+/// data is lost (the bytes are on the server and on every disk that had them)
+/// but the name is wrong until the server can say the old device is gone.
+///
+/// When that lands, this pin's assertion inverts: the park is put back.
+#[test]
+fn a_park_left_by_a_reinstalled_device_stays_until_the_server_can_say_it_is_gone() {
+    let one = b"the contents of A";
+    let two = b"the contents of B";
+    let build = |die_after: u64| -> Option<World> {
+        let world = World::of(9_252, &[("a", jd_sim::Platform::MacOs), ("b", jd_sim::Platform::MacOs)]);
+        let a = world.device("a");
+        a.fs.user_mkdir("One");
+        a.fs.user_mkdir("Two");
+        a.fs.user_write("One/x.txt", one);
+        a.fs.user_write("Two/y.txt", two);
+        assert!(world.settle().is_some());
+        a.fs.user_rename("One/x.txt", "Two/held");
+        a.fs.user_rename("Two/y.txt", "One/X.txt");
+        a.fs.user_rename("Two/held", "Two/Y.txt");
+        a.net.arm_death(die_after);
+        world.pass(a);
+        let parked = world.server.tree().keys().any(|p| p.contains(".jd-swap-"));
+        let finishing = a.store.queued_ops().unwrap().iter().any(|o| o.kind == "move_remote");
+        (parked && finishing).then_some(world)
+    };
+    let mut world = (0..20u64).find_map(build).expect("no arming left a park standing with its finisher queued");
+    world.reinstall("a");
+    let _ = world.settle();
+    let tree = world.server.tree();
+    assert!(
+        tree.keys().any(|p| p.contains(".jd-swap-")),
+        "the park was put back -- if the server now says a device is gone, invert this pin: {tree:?}"
+    );
+    let bodies: std::collections::BTreeSet<Option<String>> = tree.values().cloned().collect();
+    assert!(bodies.contains(&Some(jd_sim::sha256_hex(one))) && bodies.contains(&Some(jd_sim::sha256_hex(two))), "bytes lost: {tree:?}");
+}
+
 /// A vault root dragged into a plain folder is refused, once, with advice
 /// that fits a vault root: the server keeps it where it was, nothing is
 /// lost, and the user is not sent to change a protection level.
@@ -12334,3 +12733,4 @@ fn a_three_folder_name_rotation_from_the_server_is_applied() {
     );
     assert_converged(&world);
 }
+

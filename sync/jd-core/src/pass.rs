@@ -682,7 +682,30 @@ pub fn run_pass(
         // an index walk writes `remote` and leaves `synced_placement` alone — so
         // this restores the real name rather than inventing one. What is lost
         // with the operation is the journey it was making; the file is not.
+        //
+        // Only a park THIS device made. A peer's park is the peer's to finish
+        // or put back: with no op of its own for the entity this device cannot
+        // tell an abandoned park from one whose finisher is a request away,
+        // and putting it back reverts a cycle the peer is breaking (the
+        // reset's C10). It is left standing -- the entity keeps the scratch
+        // name here too, hidden as every internal name is -- until the
+        // parking device finishes it or rescues it itself. A park with no tag
+        // was minted before names were tagged and cannot say whose it is; it
+        // keeps the old reading (rescued by any device with no op for it),
+        // which still reverts a peer's live untagged park -- a window that
+        // closes once every device runs a tagging build.
+        //
+        // Stated residual: a device that parks and never returns with the
+        // same store -- uninstalled, a disk lost, a store reset or re-created,
+        // a new enrollment -- leaves the entity under the scratch name, and
+        // no peer will put it back. Closing that needs the server to say a
+        // device is gone, which is a separate piece of work.
+        let parked_by_this_device = match crate::order::park_tag_of(&entry.remote.name) {
+            Some(tag) => env.store.own_park_tag()?.as_deref() == Some(tag),
+            None => true,
+        };
         if jd_vfs::is_internal(&entry.remote.name)
+            && parked_by_this_device
             && !busy.contains(&entry.id)
             && !entry.remote_deleted
         {
@@ -779,6 +802,15 @@ pub fn run_pass(
             )?;
         }
         if matches!(entry.status, LocalStatus::Unsyncable(_)) && !entry.remote_deleted {
+            continue;
+        }
+        // Wearing a scratch name on the server, with no agreed placement here
+        // to read in its place (see `observed_remote`): some device is
+        // mid-rename, and the only thing that can be done with it is the
+        // wrong one -- landing it under the scratch name, where the local
+        // walk cannot see it and the next pass reads it as deleted (the
+        // reset's C11). It waits for the park to end.
+        if entry.waiting_on_a_park() {
             continue;
         }
         // An encrypted file with no key for it here. Same shape as above and for
@@ -1650,8 +1682,32 @@ pub(crate) fn open_metadata(env: &ExecEnv, entry: &mut Entry, state: &RemoteStat
 
 /// The remote state as currently recorded for an entry.
 fn observed_remote(entry: &Entry) -> RemoteState {
+    // A scratch name is not a placement. It is one step inside a rename some
+    // device is in the middle of -- this one's own park, or a peer's -- and
+    // the operation that made it is the only thing that will end it. Read as
+    // where the server has the entity, it is a remote move: this device
+    // followed a PEER's park onto its disk, the local walk (which hides
+    // internal names) then found the record's file missing, and the round
+    // trashed the server copy -- a park in flight turned into a delete on
+    // every device that followed it (the reset's C11). The file stays at its
+    // real name here while the park stands; a user's edit to it uploads as
+    // ever; the parker's finish arrives as an ordinary remote move from
+    // there. Only the placement: content, deletion and keys are read as the
+    // server has them. Everything that reasons about the park itself -- the
+    // stranded-park rescue, a finisher recognising its own park -- reads
+    // `entry.remote`, not this.
+    //
+    // Read in `local_placement`'s order: the agreement, else the directory
+    // standing in for a vault folder this device cannot open. An entry with
+    // a scratch name and neither never gets here: it is `waiting_on_a_park`,
+    // and the pass skips it before asking.
+    let placement = if entry.remote.name.starts_with(crate::order::SWAP_PREFIX) {
+        entry.local_placement().clone()
+    } else {
+        entry.remote.clone()
+    };
     RemoteState {
-        placement: entry.remote.clone(),
+        placement,
         content: entry.remote_content.clone(),
         head_change_id: entry.head_change_id,
         deleted: entry.remote_deleted,
@@ -2216,6 +2272,15 @@ fn placeholders_follow_the_server(env: &ExecEnv) -> Result<(), ExecError> {
             // and the tie is what keeps that directory from being adopted as
             // a plain folder; without them it is forgotten and the directory
             // is the user's own.
+            continue;
+        }
+        // Not deleted, and a peer is mid-rename: the server's name is its
+        // scratch name. A placeholder renamed after it would stand under an
+        // internal name the local walk does not see, and the tie would lapse
+        // as if the user had removed it (the reset's C11, for a stand-in). It
+        // waits where it is until the park ends. Checked after the deletion,
+        // so a folder trashed while parked is let go like any other.
+        if entry.remote.name.starts_with(crate::order::SWAP_PREFIX) {
             continue;
         }
         let Some(here) = relative_path(env, &entry)? else {

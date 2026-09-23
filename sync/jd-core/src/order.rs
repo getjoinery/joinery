@@ -97,6 +97,44 @@ pub fn swap_name(token: &str) -> String {
     format!("{SWAP_PREFIX}{token}")
 }
 
+/// A scratch name that says which device made it: `.jd-swap-{tag}-{token}`.
+///
+/// Whether a park is still wanted is a fact only the device that made it can
+/// answer -- it alone knows whether the operation that will finish it is
+/// still on its list. A peer that finds an entity wearing a scratch name and
+/// no operation of its OWN for it cannot tell a park that was abandoned from
+/// one whose finisher is a request away, and putting it back reverts a
+/// rename cycle another device is in the middle of breaking (the reset's
+/// C10: the laptop put back the desktop's park, and the desktop's two
+/// finishers then waited on each other for ever). The tag is how a device
+/// knows its own: a short value this device's store keeps (`Store::park_tag`),
+/// never the device's label and never read out of an idempotency key -- the
+/// real client's keys are random and say nothing about who minted them.
+///
+/// The name is on the server and is seen by everyone the folder is shared
+/// with, for as long as the park stands. The tag is random and identifies a
+/// device's store, not a person or a machine name.
+pub fn tagged_swap_name(tag: &str, token: &str) -> String {
+    format!("{SWAP_PREFIX}{tag}-{token}")
+}
+
+/// Length of a park tag, in lowercase hex.
+pub const PARK_TAG_LEN: usize = 8;
+
+/// The device tag a scratch name carries, if it carries one.
+///
+/// `None` for a name that is not a scratch name, and for a scratch name
+/// minted before names were tagged (`.jd-swap-{token}`): a real client's
+/// token is 32 hex characters with no dash, so the first nine characters
+/// are never eight hex digits and a dash.
+pub fn park_tag_of(name: &str) -> Option<&str> {
+    let rest = name.strip_prefix(SWAP_PREFIX)?;
+    let tag = rest.get(..PARK_TAG_LEN)?;
+    let tagged = tag.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && rest.as_bytes().get(PARK_TAG_LEN) == Some(&b'-');
+    tagged.then_some(tag)
+}
+
 /// The prefix [`swap_name`] mints, on its own.
 ///
 /// Narrower than `jd_vfs::INTERNAL_PREFIX` (`.jd-`) ON PURPOSE, and anything

@@ -157,6 +157,27 @@ fn sweep_world(
     chaos: bool,
     vault: Vault,
 ) -> World {
+    sweep_world_with(seed, devices, steps, chaos, vault, Swaps::On)
+}
+
+/// Whether the chaos arm swaps file names mid-upload. A parameter rather than
+/// an environment read, so a frozen seed can pin a world with swaps off
+/// without racing every other test in this binary for a process-wide
+/// variable; `scratch_arm_one` still reads NOSWAP=1 for ad-hoc runs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Swaps {
+    On,
+    Off,
+}
+
+fn sweep_world_with(
+    seed: u64,
+    devices: &[(&str, Platform)],
+    steps: usize,
+    chaos: bool,
+    vault: Vault,
+    swaps: Swaps,
+) -> World {
     let mut world = World::of(seed, devices);
     // One vault, every device holding its key, and the whole workload run
     // inside it. Encryption had only ever been tested by hand-written stories
@@ -285,9 +306,9 @@ fn sweep_world(
         // one's mtime, so it reaches the engine as a rename cycle rather than
         // an edit, with every fingerprint it cached now pointing at the wrong
         // content.
-        // NOSWAP=1 turns just this dial off, to test whether a swap CAUSED a
-        // wedge rather than merely coinciding with one.
-        if std::env::var("NOSWAP").is_err() {
+        // `Swaps::Off` turns just this dial off, to test whether a swap
+        // CAUSED a wedge rather than merely coinciding with one.
+        if swaps == Swaps::On {
             world.user_rearranges_names_during_uploads(1, (steps / 4).max(2) as u64);
         }
         // One machine renaming a folder while another is still building it. The
@@ -972,8 +993,22 @@ fn workload_core(
     kills: bool,
     names: Names,
 ) -> usize {
+    workload_core_with(seed, steps, devices, chaos, vault, kills, names, Swaps::On)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn workload_core_with(
+    seed: u64,
+    steps: usize,
+    devices: &[(&str, Platform)],
+    chaos: bool,
+    vault: Vault,
+    kills: bool,
+    names: Names,
+    swaps: Swaps,
+) -> usize {
     let root = sweep_root(vault);
-    let world = sweep_world(seed, devices, steps, chaos, vault);
+    let world = sweep_world_with(seed, devices, steps, chaos, vault, swaps);
     let committed = Committed::default();
     let mut custody = drive(&world, seed, steps, chaos, root, vault, kills, names);
     // Counted before settling, because settling is where a seed panics and a
@@ -1273,6 +1308,25 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
         sealed_names.len()
     );
     let tree = world.server.tree();
+    // Attribution, read without touching the world: which sealed bodies the
+    // workload's own swaps carried out of the vault, and by which route each
+    // leaked body reached the server -- as the first version of a file (a new
+    // upload: a conversion or a creation) or as a later version of a file
+    // that already held other bytes (a record reading the body as its edit).
+    let carried_out: std::collections::BTreeSet<String> = world
+        .swap_pairs()
+        .iter()
+        .filter(|p| p.source == "chaos")
+        .filter_map(|p| p.crossed_out.as_deref().map(jd_sim::sha256_hex))
+        .collect();
+    let versions = world.server.all_versions();
+    let first_change: std::collections::BTreeMap<i64, i64> =
+        versions.iter().fold(Default::default(), |mut m, v| {
+            let e = m.entry(v.file_id).or_insert(v.change_id);
+            *e = (*e).min(v.change_id);
+            m
+        });
+    let (mut by_chaos, mut by_engine, mut as_new_file, mut as_new_version) = (0usize, 0usize, 0usize, 0usize);
     let mut leaked = Vec::new();
     for (hash, written_at) in &sealed_bodies {
         if plain_bodies.contains_key(hash) || world.server.blob(hash).is_none() {
@@ -1283,8 +1337,39 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
             .filter(|(_, h)| h.as_deref() == Some(hash.as_str()))
             .map(|(p, _)| p)
             .collect();
-        leaked.push(format!("{} (written at {written_at}) now at {standing_at:?}", &hash[..8]));
+        let who = if carried_out.contains(hash) {
+            by_chaos += 1;
+            "carried-out-by-chaos"
+        } else {
+            by_engine += 1;
+            "not-carried-out"
+        };
+        let (mut new_file, mut new_version) = (false, false);
+        for v in versions.iter().filter(|v| &v.sha256 == hash) {
+            if first_change.get(&v.file_id) == Some(&v.change_id) {
+                new_file = true;
+            } else {
+                new_version = true;
+            }
+        }
+        as_new_file += new_file as usize;
+        as_new_version += new_version as usize;
+        let route = match (new_file, new_version) {
+            (true, true) => "new-file+new-version",
+            (true, false) => "new-file",
+            (false, true) => "new-version",
+            (false, false) => "no-version",
+        };
+        leaked.push(format!(
+            "{} (written at {written_at}) now at {standing_at:?} [{who}, {route}]",
+            &hash[..8]
+        ));
     }
+    eprintln!(
+        "SEALED-LEAKS seed={seed} leaked={} carried_out_by_chaos={by_chaos} not_carried_out={by_engine} \
+         as_new_file={as_new_file} as_new_version={as_new_version}",
+        leaked.len()
+    );
     assert!(
         leaked.is_empty(),
         "seed {seed}: the plaintext of {} file(s) the user sealed reached the server: {}",
@@ -1382,23 +1467,18 @@ fn the_sealed_oracle_sees_a_file_the_workload_sealed() {
     );
 }
 
-/// The chain oracle sees Defect AI: two files trade names and each file's
-/// history is no longer its own.
+/// Defect AI's regression pin: two files trading names keep two separate
+/// histories.
 ///
 /// No vault, no faults, one device: a person renames two files past each
 /// other through a scratch name, the way anyone swaps a draft for a final.
-/// The TREE ends correct, so every end-state oracle is green; what the chain
-/// oracle asks is whether either server entity now holds both bodies. On the
-/// engine as it stands both do (`scan::pair` rule 1 pairs by path without
-/// the inode and hands each record the other's bytes as an edit of itself),
-/// and this test asserts the oracle SAYS so, naming both entities and both
-/// bodies -- the instrument's own pin. It is the AI repro with the
-/// expectation inverted, and that is deliberate: the day AH's fix lands this
-/// test goes red with "the chain oracle did not fire", and that red is the
-/// signal to flip it into AI's regression pin, asserting green. It cannot
-/// pass silently in either world.
+/// The TREE ends correct either way; what this asks is whether either server
+/// entity now holds both bodies. Read by path alone, `scan::pair` rule 1 handed
+/// each record the other's bytes as an edit of itself and each history took
+/// the other file's past; read as a trade (the reset's D2), each record moves
+/// with its own file and no new version is written at all.
 #[test]
-fn the_chain_oracle_sees_two_files_trading_names() {
+fn two_files_trading_names_keep_two_separate_histories() {
     let seed = 9_950;
     let world = World::of(seed, &[("laptop", Platform::Linux)]);
     let laptop = world.device("laptop");
@@ -1408,25 +1488,22 @@ fn the_chain_oracle_sees_two_files_trading_names() {
     laptop.fs.user_write("b.txt", b);
     assert!(world.settle().is_some(), "both files go up");
     assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    let versions_before = world.server.all_versions().len();
     world.record_swap_pair(a, b, "slots", false);
     laptop.fs.user_rename("a.txt", ".swap.tmp");
     laptop.fs.user_rename("b.txt", "a.txt");
     laptop.fs.user_rename(".swap.tmp", "b.txt");
     assert!(world.settle().is_some(), "the swap settles");
-    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        assert_no_entity_holds_both_sides_of_a_swap(&world, seed)
-    }));
-    let why = match verdict {
-        Ok(()) => panic!(
-            "the chain oracle did not fire on two files trading names: either Defect AH is \
-             fixed (then flip this test into AI's regression pin) or the oracle is blind"
-        ),
-        Err(e) => e.downcast_ref::<String>().cloned().unwrap_or_default(),
-    };
-    assert!(
-        why.contains("file 901 holds") && why.contains("file 902 holds") && why.contains("belongs to A"),
-        "the oracle fired without naming both entities and the bodies: {why}"
+    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    assert_eq!(
+        world.server.all_versions().len(),
+        versions_before,
+        "a name trade wrote new versions: {:?}",
+        world.server.all_versions()
     );
+    let tree = world.server.tree();
+    assert_eq!(tree.get("a.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b)), "{tree:?}");
+    assert_eq!(tree.get("b.txt").cloned().flatten(), Some(jd_sim::sha256_hex(a)), "{tree:?}");
 }
 
 /// The custody oracle sees a file that keeps its bytes and loses its folder.
@@ -3015,16 +3092,23 @@ fn scratch_clean_one() {
 #[test]
 #[ignore]
 fn scratch_arm_one() {
-    // One seed of any ring arm, shaped by env: ARM=clean2|hostile2|clean3|kill2|plat3.
+    // One seed of any ring arm, shaped by env: ARM=clean2|hostile2|clean3|kill2|plat3,
+    // or plain2: the no-vault chaos arm the swap chain oracle was measured on
+    // (AI's baseline, held-out seeds 75200-75299), or frozen3: the world of
+    // frozen_contested_name_loop_seeds.
     let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
     let arm = std::env::var("ARM").unwrap_or_else(|_| "clean2".into());
+    let swaps = if std::env::var("NOSWAP").is_ok() { Swaps::Off } else { Swaps::On };
     std::panic::set_hook(Box::new(|_| {}));
     let r = std::panic::catch_unwind(move || match arm.as_str() {
-        "hostile2" => workload_core(seed, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary),
-        "clean3" => workload_core(seed, 40, &[("a", Platform::Linux), ("b", Platform::Linux), ("c", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary),
-        "kill2" => workload_core(seed, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary),
-        "plat3" => workload_core(seed, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary),
-        _ => workload_core(seed, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary),
+        "hostile2" => workload_core_with(seed, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary, swaps),
+        "plain2" => workload_core_with(seed, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::None, false, Names::Ordinary, swaps),
+        // The frozen contested-name-loop world: three platforms, 70 steps, no vault.
+        "frozen3" => workload_core_with(seed, 70, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::None, false, Names::Ordinary, swaps),
+        "clean3" => workload_core_with(seed, 40, &[("a", Platform::Linux), ("b", Platform::Linux), ("c", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, swaps),
+        "kill2" => workload_core_with(seed, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps),
+        "plat3" => workload_core_with(seed, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, swaps),
+        _ => workload_core_with(seed, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, swaps),
     });
     let _ = std::panic::take_hook();
     let why = match r {
@@ -3901,21 +3985,15 @@ fn frozen_park_onto_a_strangers_name_seed() {
 /// the park again a pass later, by which time the entity is free, the upload
 /// has run, and the copy on the disk is one the server holds.
 ///
-/// Red on the custody oracle since it landed (2026-09-13), and required to be:
-/// the seed also carries finding C1 of `specs/drive_sync_reset.md` WP1d -- a
-/// slot file the user kept in `Private/Shared` is published as a conflict
-/// copy in `Private`, beside the entity a name-swap made the scan pair it
-/// with. The day that is fixed this wrapper comes off.
+/// Green on every oracle. The seed also carried finding C1 of
+/// `specs/drive_sync_reset.md` WP1d -- a slot file the user kept in
+/// `Private/Shared` published as a conflict copy in `Private`, beside the
+/// entity a name-swap made the scan pair it with -- which the scan's reading
+/// of a name trade as a trade (the reset's D2) closes.
 #[test]
 fn frozen_park_standing_down_seed() {
     let refs: [(&str, Platform); 2] = [("mac", Platform::MacOs), ("pc", Platform::Windows)];
-    red_only_on(
-        &["every_file_in_a_folder_the_user_put_it_in"],
-        "the custody oracle did not fire on 3072116: finding C1 is fixed, remove red_only_on from this pin",
-        || {
-            workload_core(3_072_116, 40, &refs, false, Vault::Shared, false, Names::Ordinary);
-        },
-    );
+    workload_core(3_072_116, 40, &refs, false, Vault::Shared, false, Names::Ordinary);
 }
 
 /// The seed that proves an encrypted file keeps its own name across a retry.

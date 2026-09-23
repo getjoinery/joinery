@@ -146,6 +146,123 @@ pub fn pair(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
     //    be let go of. A live one is a naming problem, which naming already
     //    handles, so the scan says nothing changed rather than inventing a
     //    deletion that would take the file off the server.
+    // What rule 1 asks when the bytes at a record's path are not its own:
+    // who holds which inode, which agreed content, and which path.
+    let live = |k: &KnownLocal| !k.server_deleted;
+    let nonzero = |id: u64| id != 0;
+    let mut inode_owners: HashMap<u64, Vec<usize>> = HashMap::new();
+    let mut sha_owners: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut record_at: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (n, k) in known.iter().enumerate().filter(|(_, k)| live(k)) {
+        if let Some(id) = k.fingerprint.map(|f| f.file_id).filter(|id| nonzero(*id)) {
+            inode_owners.entry(id).or_default().push(n);
+        }
+        if let Some(sha) = k.sha256.as_deref() {
+            sha_owners.entry(sha).or_default().push(n);
+        }
+        record_at.entry(k.path.as_str()).or_default().push(n);
+    }
+    let mut observed_by_inode: HashMap<u64, Vec<&ObservedFile>> = HashMap::new();
+    let mut observed_by_sha: HashMap<&str, Vec<&ObservedFile>> = HashMap::new();
+    for o in observed {
+        if nonzero(o.fingerprint.file_id) {
+            observed_by_inode.entry(o.fingerprint.file_id).or_default().push(o);
+        }
+        observed_by_sha.entry(o.sha256.as_str()).or_default().push(o);
+    }
+    // A record is at home when the file standing at its own path is its own:
+    // its inode, or -- with no inode recorded -- its agreed bytes.
+    let at_home = |r: &KnownLocal| {
+        by_path.get(r.path.as_str()).is_some_and(|o| match r.fingerprint {
+            Some(f) if nonzero(f.file_id) => f.file_id == o.fingerprint.file_id,
+            _ => r.sha256.as_deref() == Some(o.sha256.as_str()),
+        })
+    };
+    // Is the file at this record's path another file that arrived by a name
+    // trade, rather than this record's own file saved again?
+    //
+    // Rule 1 reads a path without the inode because a save replaces the inode
+    // at a stable path. A name trade does too, and reading it the same way
+    // told each record the other's bytes were its edit: two new versions, and
+    // two version histories each holding the other file's past (Defect AI; in
+    // a vault, Defect AH). Three things together separate the trade from a
+    // save, and each alone does not:
+    //
+    // - the bytes here are not the ones this record agreed on;
+    // - this record's OWN file still stands on this disk under another name
+    //   (a write-temp-rename-over save leaves it gone); and
+    // - the file here is one the store already knows as ANOTHER record's that
+    //   is not at home -- or this record's own file now stands at another
+    //   record's path and that record is not at home.
+    //
+    // The third is what keeps a backup-by-rename save an edit. Emacs and vim
+    // rename the original to `notes.txt~` and write a new `notes.txt`: the
+    // original is still here, as in a trade, but what stands at the name is a
+    // never-seen inode with never-seen bytes, and the backup lands at a path
+    // no record holds. A hardlinked twin whose other name was safe-saved has
+    // its other record at home. Bytes equal to another record's content count
+    // only when non-empty, held by exactly one live record, and that record is
+    // not at home -- an empty file or a template matches files that never
+    // moved. A zero file id is no identity (a Windows handle that would not
+    // open) and never counts on either side.
+    //
+    // What a trade read this way costs, stated: a file edited and then traded
+    // has no agreed bytes left to be recognised by, and reads as deleted plus
+    // a creation -- the version chain lost, no bytes lost. What the careful
+    // form leaves: a trade whose file at this path the store cannot name
+    // still reads as an edit, because from one scan it is the same disk as a
+    // backup-by-rename save. So does a file renamed away with a NEW file
+    // saved at its old name, unless the leaver's own file stands at another
+    // record's path whose record is not at home -- then it is a move (a
+    // rotation whose member at this path is new), and the server may refuse
+    // the name while that record still holds it: the move then lands beside
+    // under a conflict name, never dropped (the reset's C12, frozen 111120).
+    // A hardlinked twin at home anywhere keeps the reading an edit (p8).
+    const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    let arrived_by_a_trade = |n: usize, k: &KnownLocal, obs: &ObservedFile| -> bool {
+        if k.sha256.as_deref() == Some(obs.sha256.as_str()) {
+            return false;
+        }
+        let standing = match k.fingerprint {
+            Some(f) if nonzero(f.file_id) => observed_by_inode.get(&f.file_id),
+            Some(_) => None,
+            None => k
+                .sha256
+                .as_deref()
+                .filter(|mine| *mine != EMPTY_SHA256)
+                .and_then(|mine| observed_by_sha.get(mine)),
+        };
+        let mine_elsewhere: Vec<&ObservedFile> = standing
+            .map(|os| os.iter().copied().filter(|o| o.path != k.path).collect())
+            .unwrap_or_default();
+        if mine_elsewhere.is_empty() {
+            return false;
+        }
+        let another_not_at_home = |r: usize| r != n && !at_home(&known[r]);
+        let by_inode = nonzero(obs.fingerprint.file_id)
+            && inode_owners
+                .get(&obs.fingerprint.file_id)
+                .is_some_and(|rs| rs.iter().any(|r| another_not_at_home(*r)));
+        let by_content = obs.sha256 != EMPTY_SHA256
+            && sha_owners
+                .get(obs.sha256.as_str())
+                .is_some_and(|rs| rs.len() == 1 && another_not_at_home(rs[0]));
+        // Not when my file also stands under a record at home with it: that
+        // is a hardlinked twin, an edit by p2 whatever else is true (p8).
+        let twin_at_home = mine_elsewhere.iter().any(|o| {
+            record_at
+                .get(o.path.as_str())
+                .is_some_and(|rs| rs.iter().any(|r| *r != n && at_home(&known[*r])))
+        });
+        let mine_on_anothers_path = !twin_at_home
+            && mine_elsewhere.iter().any(|o| {
+                record_at
+                    .get(o.path.as_str())
+                    .is_some_and(|rs| rs.iter().any(|r| another_not_at_home(*r)))
+            });
+        by_inode || by_content || mine_on_anothers_path
+    };
+
     let mut settled: Vec<bool> = vec![false; known.len()];
     for (n, k) in known.iter().enumerate() {
         let Some(obs) = by_path.get(k.path.as_str()) else {
@@ -161,6 +278,9 @@ pub fn pair(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
         // moving it -- has nothing to match and pairs by path with nobody;
         // the bytes brought back are still found by hash in the round below.
         if k.held && k.fingerprint.is_none_or(|fp| fp.file_id != obs.fingerprint.file_id) {
+            continue;
+        }
+        if arrived_by_a_trade(n, k, obs) {
             continue;
         }
         let i = index_of[obs.path.as_str()];
@@ -496,6 +616,139 @@ mod tests {
             Some(LocalChange::Edited { .. })
         ));
         assert!(out.created.is_empty());
+    }
+
+    // Two files trading names, and the saves that look like one from a
+    // single scan. The trade reads as two moves; every save still reads as an
+    // edit. p1-p7 are the reviewers' probes (0e 2026-09-11, 25 2026-09-22).
+
+    fn edited(out: &ScanOutcome, id: i64) -> bool {
+        matches!(out.change_for(EntityId::file(id)), Some(LocalChange::Edited { .. }))
+    }
+
+    #[test]
+    fn two_files_trading_names_are_two_moves_not_two_edits() {
+        // p6 (Defect AI). a.txt and b.txt exchange names through a temp name:
+        // each path now holds the other's inode and bytes. Read as edits, each
+        // file's version history took the other's bytes.
+        let out = pair(
+            &[known(1, "a.txt", 100, "sha-a"), known(2, "b.txt", 200, "sha-b")],
+            &[observed("a.txt", 200, "sha-b"), observed("b.txt", 100, "sha-a")],
+        );
+        assert_eq!(
+            out.change_for(EntityId::file(1)),
+            Some(&LocalChange::Moved { to_path: "b.txt".into(), fingerprint: fp(100, 10, 100) })
+        );
+        assert_eq!(
+            out.change_for(EntityId::file(2)),
+            Some(&LocalChange::Moved { to_path: "a.txt".into(), fingerprint: fp(200, 10, 100) })
+        );
+        assert!(out.created.is_empty());
+    }
+
+    #[test]
+    fn a_backup_by_rename_save_is_an_edit() {
+        // p1. Emacs, vim with backupcopy=no: the original is renamed to
+        // notes.txt~ and a new notes.txt is written. The original is still on
+        // the disk, as in a trade -- but what stands at the name is a new inode
+        // with new bytes, and the backup is at a path no record holds.
+        let out = pair(
+            &[known(1, "notes.txt", 100, "sha-old")],
+            &[observed("notes.txt~", 100, "sha-old"), observed("notes.txt", 101, "sha-new")],
+        );
+        assert!(edited(&out, 1), "{:?}", out.change_for(EntityId::file(1)));
+        // And the second save, which renames the first save over the backup.
+        let out = pair(
+            &[known(1, "notes.txt", 101, "sha-new")],
+            &[observed("notes.txt~", 101, "sha-new"), observed("notes.txt", 102, "sha-newer")],
+        );
+        assert!(edited(&out, 1), "{:?}", out.change_for(EntityId::file(1)));
+    }
+
+    #[test]
+    fn a_safe_save_of_one_name_of_a_hardlinked_file_is_an_edit() {
+        // p2. Two records on one inode; one name is safe-saved. Its inode still
+        // stands under the other name -- whose record is at home there.
+        let out = pair(
+            &[known(1, "a.txt", 100, "sha-x"), known(2, "b.txt", 100, "sha-x")],
+            &[observed("a.txt", 101, "sha-y"), observed("b.txt", 100, "sha-x")],
+        );
+        assert!(edited(&out, 1), "{:?}", out.change_for(EntityId::file(1)));
+        assert_eq!(out.change_for(EntityId::file(2)), Some(&LocalChange::Unchanged));
+    }
+
+    #[test]
+    fn a_zero_file_id_is_no_identity() {
+        // p3. A Windows handle that would not open records file id 0, so every
+        // such file "shares" an inode with every other.
+        let out = pair(
+            &[known(1, "a.txt", 0, "sha-x"), known(2, "b.txt", 0, "sha-y")],
+            &[observed("a.txt", 0, "sha-z"), observed("b.txt", 0, "sha-y")],
+        );
+        assert!(edited(&out, 1), "{:?}", out.change_for(EntityId::file(1)));
+    }
+
+    #[test]
+    fn an_edit_beside_a_copy_of_the_old_bytes_is_an_edit() {
+        // p4/p5. A record with no inode recorded (its upload finished mid-move)
+        // is edited while a copy of its old bytes exists: untracked (p4) or
+        // synced as another record at home (p5).
+        let bare = KnownLocal {
+            id: EntityId::file(1),
+            path: "a.txt".into(),
+            fingerprint: None,
+            sha256: Some("sha-x".into()),
+            server_deleted: false,
+            held: false,
+        };
+        let out = pair(
+            &[bare.clone()],
+            &[observed("a.txt", 101, "sha-y"), observed("copy.txt", 300, "sha-x")],
+        );
+        assert!(edited(&out, 1), "p4: {:?}", out.change_for(EntityId::file(1)));
+        let out = pair(
+            &[bare, known(2, "copy.txt", 300, "sha-x")],
+            &[observed("a.txt", 101, "sha-y"), observed("copy.txt", 300, "sha-x")],
+        );
+        assert!(edited(&out, 1), "p5: {:?}", out.change_for(EntityId::file(1)));
+    }
+
+    #[test]
+    fn a_backup_by_rename_save_matching_another_files_content_is_an_edit() {
+        // p7. The new notes.txt holds bytes another record also holds -- a
+        // template, a pasted copy -- and that record is at home. Equal bytes
+        // are not a trade.
+        let out = pair(
+            &[known(1, "notes.txt", 100, "sha-old"), known(2, "other.txt", 200, "sha-t")],
+            &[
+                observed("notes.txt~", 100, "sha-old"),
+                observed("notes.txt", 101, "sha-t"),
+                observed("other.txt", 200, "sha-t"),
+            ],
+        );
+        assert!(edited(&out, 1), "{:?}", out.change_for(EntityId::file(1)));
+        assert_eq!(out.change_for(EntityId::file(2)), Some(&LocalChange::Unchanged));
+    }
+
+    #[test]
+    fn a_twin_at_home_beside_a_record_not_at_home_is_still_an_edit() {
+        // p8. My inode stands under two other names: one whose record is at
+        // home with it (a hardlinked twin), one whose record is not at home.
+        // What stands at my path is a stranger. Nothing here is a trade.
+        let out = pair(
+            &[
+                known(1, "a.txt", 100, "sha-a"),
+                known(2, "b.txt", 100, "sha-a"),
+                known(3, "c.txt", 400, "sha-c"),
+            ],
+            &[
+                observed("a.txt", 300, "sha-new"),
+                observed("b.txt", 100, "sha-a"),
+                observed("c.txt", 100, "sha-a"),
+                observed("d.txt", 400, "sha-c"),
+            ],
+        );
+        assert!(edited(&out, 1), "{:?}", out.change_for(EntityId::file(1)));
     }
 
     #[test]

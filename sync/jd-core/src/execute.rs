@@ -206,12 +206,15 @@ pub fn journal(
                 _ => "park_remote",
             })
             .unwrap_or("park_remote");
-        let scratch = match finisher {
-            Some(i) => crate::order::swap_name(&keys[i]),
+        let token = match finisher {
+            Some(i) => keys[i].clone(),
             // Nothing planned to finish it. The planner does not produce this;
             // the name still has to be unique.
-            None => crate::order::swap_name(&key_for()),
+            None => key_for(),
         };
+        // Tagged with this device, so a peer never takes the park for one
+        // nobody is coming back for (see `order::tagged_swap_name`).
+        let scratch = crate::order::tagged_swap_name(&store.park_tag(&token)?, &token);
         ids.push(store.queue_op(
             side,
             *entity,
@@ -3070,6 +3073,19 @@ fn create_local_folder(
     Ok(OpOutcome::Done)
 }
 
+/// Is `name` the scratch name this op parks under, or was parked under by
+/// the planner on its behalf? Tagged with this device's park tag, or -- for
+/// an op journaled before names were tagged -- the untagged form.
+fn is_this_ops_park(env: &ExecEnv, op: &Op, name: &str) -> Result<bool, ExecError> {
+    if name == crate::order::swap_name(&op.idempotency_key) {
+        return Ok(true);
+    }
+    Ok(env
+        .store
+        .own_park_tag()?
+        .is_some_and(|tag| name == crate::order::tagged_swap_name(&tag, &op.idempotency_key)))
+}
+
 /// Apply this computer's move to the server.
 fn move_remote(
     env: &ExecEnv,
@@ -3135,13 +3151,47 @@ fn move_remote(
     // left to finish: proceeding would write the agreement here, blind to
     // what stands at the new path on this disk, which the ordinary path
     // looks at before it agrees to anything.
-    let ours_to_finish = entry.remote.name == crate::order::swap_name(&op.idempotency_key)
+    let ours_to_finish = is_this_ops_park(env, op, &entry.remote.name)?
         || (op.attempts > 0
             && entry.remote != to
             && from.as_ref().is_some_and(|f| {
                 entry.remote == Placement { parent: f.parent, name: to.name.clone() }
                     || entry.remote == Placement { parent: to.parent, name: f.name.clone() }
             }));
+    // And the same move WHOLE: the server completed it and the answer was
+    // lost. Left Overtaken, the record kept the old placement while the rest
+    // of the round -- the other half of a rename chain -- rightly took that
+    // path, and the next scan read the newcomer's file there as this file's
+    // edit and minted this file, standing at its new name, as a new one
+    // beside itself (the reset's D2 blocker 2). The objection in the comment
+    // above -- agreeing blind to what stands at the new path -- is answered
+    // by looking: this file's own inode (never its bytes: a user may have
+    // edited it since, and that is the scan's to read as an edit) standing
+    // at the new path on this disk. Only the placement is agreed.
+    //
+    // Files only: a folder's completed move is re-derived from its
+    // directory identity on the next pass. Not where the inode is unknown
+    // (zero, or no stable ids): nothing then says the file there is this
+    // one, and today's reading stands. Not for an encrypted file: the
+    // server records its name as a sealed placeholder, so `entry.remote`
+    // never equals the name this op asked for, and it stays Overtaken.
+    let completed_here = !ours_to_finish
+        && op.attempts > 0
+        && op.entity.entity_type == EntityType::File
+        && entry.remote == to
+        && from.as_ref().is_some_and(|f| entry.synced_placement.as_ref() == Some(f))
+        && match entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0) {
+            Some(mine) => match path_for(env, &to)? {
+                Placed::At(dest) => env.vfs.fingerprint(&dest)?.map(|fp| fp.file_id) == Some(mine),
+                Placed::Not(_) => false,
+            },
+            None => false,
+        };
+    if completed_here {
+        entry.synced_placement = Some(to.clone());
+        env.store.put_entry(&entry)?;
+        return Ok(OpOutcome::Done);
+    }
     if !ours_to_finish && from.is_some_and(|f| entry.remote != f) {
         return Ok(OpOutcome::Overtaken(
             "the server has moved it since this was planned".into(),
@@ -3274,12 +3324,15 @@ fn move_remote(
                 "an encrypted file cannot be parked under a scratch name".into(),
             ));
         }
-        let scratch = crate::order::swap_name(&op.idempotency_key);
         // Already standing aside under this op's own name: the planner's park,
         // being finished now. Asking the server for the name it has is noise.
-        if entry.remote.name == scratch {
+        if is_this_ops_park(env, op, &entry.remote.name)? {
             return Ok(());
         }
+        let scratch = crate::order::tagged_swap_name(
+            &env.store.park_tag(&op.idempotency_key)?,
+            &op.idempotency_key,
+        );
         env.api.action_idempotent(
             "drive_rename",
             json!({
@@ -3375,6 +3428,48 @@ fn move_remote(
         match orders(&wanted, attempt) {
             Ok(()) => break,
             Err(ExecError::Proto(p)) if p.name_taken() && !sealed_name && attempt < 1000 => {
+                if held_by_a_rename_this_device_owes(env, &wanted, to.parent)? {
+                    return Ok(OpOutcome::Retry(
+                        "the name is spoken for by something this device is renaming".into(),
+                    ));
+                }
+                attempt += 1;
+                wanted = (env.conflict_name)(&to.name, attempt);
+            }
+            // A refusal that would not say why. It may be the name; nothing
+            // here can tell. The create and the upload step aside under a
+            // conflict name on it, and the move did not: it was dropped, the
+            // record stayed at its old path with nothing queued, and the next
+            // scan -- the evidence for the move gone -- read a stranger's bytes
+            // at that path as the file's edit (the reset's C12, frozen 111120:
+            // a true move against a server that refuses in prose alone).
+            //
+            // Capped as the create caps it: a refusal really about something
+            // else costs two calls and ends where it did. The wait for a name
+            // this device is renaming away is asked first, as the marked arm
+            // asks it -- stepping around a collision that resolves itself mints
+            // a conflict name on every device for a trade that needed none.
+            //
+            // FILES only. A withdrawn FOLDER move loses nothing: the disk still
+            // wears the new name, and the next pass re-derives the rename from
+            // the folder's directory identity and completes it once the name
+            // frees up -- stepping aside would leave a permanent conflict name
+            // for a collision that clears (pinned by
+            // `a_rename_refused_onto_a_siblings_name_is_re_derived_once_the_name_frees_up`).
+            // A withdrawn FILE move loses the scan's evidence: nothing
+            // re-derives it by identity, and the stranger's bytes are read as
+            // the file's edit.
+            //
+            // Not for an encrypted file, as the marked arm is not: its name is
+            // sealed into the request and is `enc-{id}` on the server, which no
+            // sibling holds, so a refusal of it is not about a name and a
+            // conflict name would change nothing; it is withdrawn as before.
+            Err(ExecError::Proto(p))
+                if p.refused_without_saying_why()
+                    && op.entity.entity_type == EntityType::File
+                    && !sealed_name
+                    && attempt < 2 =>
+            {
                 if held_by_a_rename_this_device_owes(env, &wanted, to.parent)? {
                     return Ok(OpOutcome::Retry(
                         "the name is spoken for by something this device is renaming".into(),
