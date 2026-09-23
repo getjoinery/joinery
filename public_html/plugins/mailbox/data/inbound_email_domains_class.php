@@ -19,10 +19,9 @@
  * the live key keeps signing; cutover (pending → live) happens only after the
  * pending selector's DNS record verifies. Signing always reads the live columns.
  *
- * ied_security_level is the per-domain protection posture
- * (specs/mailbox_security_levels.md): 'standard' (server-managed plaintext),
- * 'private' (sealed at rest), or 'fortress' (sealed at the edge + session-gated
- * sending identity). It is the switch that selects each mechanism's
+ * ied_security_level is the per-domain protection level
+ * (specs/mailbox_security_levels.md): 'standard' (server-managed plaintext) or
+ * 'private' (sealed at rest). It is the switch that selects each mechanism's
  * plaintext-vs-sealed branch for every mailbox that inherits it — which is every
  * mailbox on a domain this deployment hosts. A mailbox pulled in over IMAP can
  * carry its own instead (iea_security_level), because gmail.com is not an
@@ -30,6 +29,24 @@
  * is what a content-sealing decision asks. Domain identity — DKIM, the protected
  * sending identity, the DNS shape, the relay map — stays this class's answer.
  *
+ * A Private domain may carry two add-ons (specs/protection_levels_platform.md
+ * § Add-ons), each its own flag and inert below Private:
+ *   ied_relay_seals_to_owner — Seal at the relay: the relay seals arriving mail
+ *     to the owner's vault key instead of the transport key, so a hacked server
+ *     cannot read mail that arrives while the owner is away.
+ *   ied_send_lock_requested — Only send while I'm signed in, asked for. The
+ *     finished state is ied_is_protected_identity, set by the verify-gated
+ *     protect ceremony; the request is what tells "has not asked" from "asked,
+ *     not finished yet".
+ * Either one hardens its holders (userHasHardenedDomain): short unlock-window
+ * caps.
+ *
+ * @version 1.12 - a write to an unconverted row converts it first (set()), and
+ *   addon_labels() carries the catalog names and shows an enforcing lock at any
+ *   level
+ * @version 1.11 - two protection levels plus the relay and sending-lock add-ons;
+ *   userHasHardenedDomain() and set_security_level() (refuses the reserved
+ *   end-to-end level)
  * @version 1.10 - is_imap_source()/is_authoritative(), and the hosted-address
  *   guards exclude IMAP-source domains (specs/imap_source_domain_boundaries.md)
  * @version 1.9 - maxSecurityLevelForUser() counts live mailboxes only, like
@@ -55,13 +72,18 @@ class InboundEmailDomain extends SystemBase {
 	const CATCHALL_FORWARD = 'forward';
 	const CATCHALL_STORE = 'store';
 
-	// Security levels (specs/mailbox_security_levels.md). The single source of
-	// truth for a domain's protection posture; every mailbox/alias inherits.
-	// Standard = server-managed plaintext; Private = sealed at rest; Fortress =
-	// sealed at the edge + session-gated sending identity.
+	// Protection levels (specs/mailbox_security_levels.md). The single source of
+	// truth for a domain's protection level; every mailbox/alias inherits.
+	// Standard = server-managed plaintext; Private = sealed at rest.
 	const LEVEL_STANDARD = 'standard';
 	const LEVEL_PRIVATE  = 'private';
+	// Reserved for end-to-end mail (specs/DEFERRED_client_custody_mail.md): the
+	// server holds nothing it can decrypt. Not built — set_security_level()
+	// refuses it, and nothing may store it.
 	const LEVEL_FORTRESS = 'fortress';
+
+	/** The levels a mail domain or mailbox can be set to today. */
+	const SETTABLE_LEVELS = array(self::LEVEL_STANDARD, self::LEVEL_PRIVATE);
 
 	// How far this domain's decrypted mail may travel to be read by an AI
 	// model, as the most permissive endpoint trust class it may reach. Same
@@ -91,12 +113,17 @@ class InboundEmailDomain extends SystemBase {
 		// is the only thing that claims a domain is correct or broken.
 		'ied_setup_status'       => array('type'=>'varchar(16)'),   // ok | attention | unknown; empty = never checked
 		'ied_setup_checked_time' => array('type'=>'timestamp(6)'),
-		'ied_security_level'    => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'standard'), // 'standard' | 'private' | 'fortress'
+		'ied_security_level'    => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'standard'), // 'standard' | 'private'
+		// Add-ons on a Private domain (specs/protection_levels_platform.md § Add-ons).
+		// Inert below Private: lowering leaves the flags stored, so raising again
+		// restores them.
+		'ied_relay_seals_to_owner' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'ied_send_lock_requested'  => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Consent for AI features to read this domain's mail
 		// (specs/in_window_deferred_work.md § Turning it on has to be a
 		// deliberate choice). Only consequential on a sealed level: at
 		// 'standard' the server already reads the mail, so there is nothing to
-		// consent to and the control is not shown. On 'private'/'fortress' this
+		// consent to and the control is not shown. On 'private' this
 		// is the difference between "the server cannot read my mail unless I am
 		// here" and "the server reads my mail while I am here, and sends it to
 		// the configured model host" — which must never become true silently.
@@ -135,6 +162,51 @@ class InboundEmailDomain extends SystemBase {
 		'ied_update_time'       => array('type'=>'timestamp(6)'),
 		'ied_delete_time'       => array('type'=>'timestamp(6)'),
 	);
+
+	/**
+	 * Every write to a stored row that still holds the reserved end-to-end value
+	 * (is_unconverted()) first makes the conversion the mailbox migration would
+	 * make — Private, Seal at the relay on, the sending lock asked for only
+	 * where it is already enforcing — and only then applies the caller's
+	 * change. The row already behaves that way when read (addon_flag()), so the
+	 * caller is editing what it sees; without this, a write clearing an add-on
+	 * flag would be read straight back as on, because the legacy value keeps
+	 * saying so, and nothing the caller turned off would stay off.
+	 *
+	 * Stored rows only: a fixture building an unconverted row in memory writes
+	 * the legacy value on purpose. Hydration is not a write either — a row being
+	 * filled from the database (load_from_data / load_from_object, which go
+	 * through set()) must arrive exactly as stored.
+	 */
+	private $hydrating = false;
+
+	function load_from_data($data, $fields) {
+		$this->hydrating = true;
+		try {
+			parent::load_from_data($data, $fields);
+		} finally {
+			$this->hydrating = false;
+		}
+	}
+
+	function load_from_object($other, $fields) {
+		$this->hydrating = true;
+		try {
+			parent::load_from_object($other, $fields);
+		} finally {
+			$this->hydrating = false;
+		}
+	}
+
+	function set($key, $value, $check_existance = TRUE) {
+		if (!$this->hydrating && $this->key && $this->data !== NULL && $this->is_unconverted()) {
+			parent::set('ied_security_level', self::LEVEL_PRIVATE);
+			parent::set('ied_relay_seals_to_owner', true);
+			parent::set('ied_send_lock_requested',
+				$this->stored_flag('ied_send_lock_requested') || $this->stored_flag('ied_is_protected_identity'));
+		}
+		parent::set($key, $value, $check_existance);
+	}
 
 	function prepare() {
 		// Normalize domain to lowercase
@@ -260,14 +332,131 @@ class InboundEmailDomain extends SystemBase {
 	/**
 	 * This domain's security level (specs/mailbox_security_levels.md) — the
 	 * single switch selecting each mechanism's plaintext-vs-sealed branch.
-	 * Falls back to Standard for any unrecognized or empty stored value.
+	 * Falls back to Standard for any unrecognized or empty stored value — except
+	 * the reserved end-to-end value, which reads as Private: it can only be a
+	 * row mailbox migration ied_003_private_with_addons has not converted yet,
+	 * and that mail is sealed (is_unconverted()).
 	 */
 	function security_level() {
 		$v = strtolower(trim((string)$this->get('ied_security_level')));
-		if (!in_array($v, array(self::LEVEL_STANDARD, self::LEVEL_PRIVATE, self::LEVEL_FORTRESS), true)) {
+		if ($v === self::LEVEL_FORTRESS) {
+			return self::LEVEL_PRIVATE;
+		}
+		if (!in_array($v, self::SETTABLE_LEVELS, true)) {
 			return self::LEVEL_STANDARD;
 		}
 		return $v;
+	}
+
+	/**
+	 * Set the protection level. Only the settable levels are accepted: the
+	 * end-to-end level is reserved until end-to-end mail exists, and storing it
+	 * would promise something nothing on the server delivers.
+	 *
+	 * @throws InboundEmailDomainException on any other value
+	 */
+	function set_security_level(string $level) {
+		$level = strtolower(trim($level));
+		if (!in_array($level, self::SETTABLE_LEVELS, true)) {
+			throw new InboundEmailDomainException('A mail domain can be Standard or Private.');
+		}
+		$this->set('ied_security_level', $level);
+	}
+
+	/** A stored bool column read the way every flag on this model is read —
+	 *  the stored value, whether or not the level puts it in force. */
+	function stored_flag(string $column): bool {
+		$v = $this->get($column);
+		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
+	}
+
+	/**
+	 * True for a row still holding the reserved end-to-end value — one mailbox
+	 * migration ied_003_private_with_addons has not converted yet. Until it
+	 * runs, such a row behaves exactly as the migration will leave it: Private
+	 * with Seal at the relay on, and the sending lock asked for only where it is
+	 * already enforcing. Nothing writes this value any more.
+	 */
+	function is_unconverted(): bool {
+		return strtolower(trim((string)$this->get('ied_security_level'))) === self::LEVEL_FORTRESS;
+	}
+
+	/**
+	 * An add-on's switch as the editor shows it: the stored flag, or on for an
+	 * unconverted row (is_unconverted()). Whether the level puts it in force is
+	 * a separate question — relay_seals_to_owner() / send_lock_requested().
+	 */
+	function addon_flag(string $column): bool {
+		if ($this->stored_flag($column)) {
+			return true;
+		}
+		if (!$this->is_unconverted()) {
+			return false;
+		}
+		// An unconverted row reads as ied_003 will leave it.
+		return $column === 'ied_send_lock_requested'
+			? $this->stored_flag('ied_is_protected_identity')
+			: true;
+	}
+
+	/** The Seal-at-the-relay add-on is on AND in force (the domain is Private). */
+	function relay_seals_to_owner() {
+		return $this->seals_content() && $this->addon_flag('ied_relay_seals_to_owner');
+	}
+
+	/** The Only-send-while-signed-in add-on was asked for AND is in force (Private). */
+	function send_lock_requested() {
+		return $this->seals_content() && $this->addon_flag('ied_send_lock_requested');
+	}
+
+	/**
+	 * The sending lock was asked for but the protect ceremony has not finished:
+	 * the one state the setup checklist holds open. A Private domain that never
+	 * asked is finished as it is.
+	 */
+	function send_lock_outstanding() {
+		return $this->send_lock_requested() && !$this->is_protected_identity();
+	}
+
+	/**
+	 * The add-ons in force, as the short labels a level chip or badge shows
+	 * beside the level (specs/protection_levels_platform.md § Add-ons rule 4):
+	 * a member never has to open settings to learn what the domain promises.
+	 * The labels are the add-on names from ProtectionLevelPicker's catalog, so a
+	 * chip says exactly what the switch that set it says. A sending lock that was
+	 * asked for but not finished says so.
+	 *
+	 * Agrees with is_hardened() by construction: every state that hardens the
+	 * domain has a label here. An enforcing sending lock shows at any level —
+	 * its signing key opens only in the window, whatever the level says — so
+	 * a lock that is enforcing is never invisible.
+	 *
+	 * @return string[]
+	 */
+	function addon_labels(): array {
+		$labels = array();
+		if ($this->relay_seals_to_owner()) {
+			$labels[] = ProtectionLevelPicker::addonCopy(ProtectionLevelPicker::ADDON_RELAY_SEALS_TO_OWNER)['label'];
+		}
+		$send = ProtectionLevelPicker::addonCopy(ProtectionLevelPicker::ADDON_SEND_LOCK)['label'];
+		if ($this->is_protected_identity()) {
+			$labels[] = $send;
+		} elseif ($this->send_lock_outstanding()) {
+			$labels[] = $send . ' (unfinished)';
+		}
+		return $labels;
+	}
+
+	/**
+	 * True when this domain carries an add-on whose protection depends on the
+	 * owner's unlock window being closed (specs/protection_levels_platform.md
+	 * § Add-ons rule 5): relay sealing, or the sending lock asked for on a
+	 * Private domain. Send protection that is actually enforcing counts at any
+	 * level — its signing key opens only in the window, whatever the level says.
+	 */
+	function is_hardened() {
+		return $this->relay_seals_to_owner() || $this->send_lock_requested()
+			|| $this->is_protected_identity();
 	}
 
 	/**
@@ -287,18 +476,18 @@ class InboundEmailDomain extends SystemBase {
 		return (($rank[$a] ?? 0) <= ($rank[$b] ?? 0)) ? $a : $b;
 	}
 
-	/** True when this domain seals stored content at rest (Private or Fortress). */
+	/** True when this domain seals stored content at rest (Private). */
 	function seals_content() {
-		return in_array($this->security_level(), array(self::LEVEL_PRIVATE, self::LEVEL_FORTRESS), true);
+		return $this->security_level() === self::LEVEL_PRIVATE;
 	}
 
 	/**
 	 * The highest security level across everything the user has a stake in — a
 	 * domain they own (ied_owner_usr_user_id) or a mailbox they hold a grant on.
-	 * Drives the per-level unlock-window caps
-	 * (specs/mailbox_security_levels.md § The Unlock Window) and the Fortress
-	 * mandatory-2FA enrollment gate. Returns 'standard' when the user touches
-	 * nothing protected.
+	 * Drives the Private unlock-window cap
+	 * (specs/mailbox_security_levels.md § The Unlock Window). Returns 'standard'
+	 * when the user touches nothing protected. The short caps and the mandatory
+	 * second factor ask userHasHardenedDomain() instead.
 	 *
 	 * A granted MAILBOX contributes its own level, not its domain's
 	 * (specs/mailbox_connect_flow.md § D). Asking the domain here would
@@ -307,7 +496,7 @@ class InboundEmailDomain extends SystemBase {
 	 * they would silently get a Standard-length unlock window over sealed mail.
 	 */
 	static function maxSecurityLevelForUser(int $user_id): string {
-		$rank = array(self::LEVEL_STANDARD => 0, self::LEVEL_PRIVATE => 1, self::LEVEL_FORTRESS => 2);
+		$rank = array(self::LEVEL_STANDARD => 0, self::LEVEL_PRIVATE => 1);
 		$best = self::LEVEL_STANDARD;
 
 		$consider = function($level) use (&$best, $rank) {
@@ -340,6 +529,51 @@ class InboundEmailDomain extends SystemBase {
 		}
 
 		return $best;
+	}
+
+	/**
+	 * True when anything the user has a stake in carries a hardening add-on — a
+	 * domain they own, or the domain of a live mailbox they hold a grant on, that
+	 * is Private with relay sealing or the sending lock on (is_hardened()).
+	 *
+	 * Drives the short unlock-window caps (specs/protection_levels_platform.md
+	 * § Add-ons rule 5): these add-ons only help while the window is closed, so a
+	 * long window would quietly undo them.
+	 *
+	 * A grant counts through the mailbox's DOMAIN, not the mailbox's own level:
+	 * the add-ons are properties of a domain this deployment hosts.
+	 */
+	static function userHasHardenedDomain(int $user_id): bool {
+		if ($user_id <= 0) {
+			return false;
+		}
+		$owned = new MultiInboundEmailDomain(array('owner_id' => $user_id, 'deleted' => false));
+		foreach ($owned as $d) {
+			if ($d && $d->key && $d->is_hardened()) {
+				return true;
+			}
+		}
+
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+		$seen = array();
+		foreach (InboundEmailMailboxGrant::alias_ids_for_user($user_id) as $alias_id) {
+			$alias = new InboundEmailAlias($alias_id, true);
+			// Live mailboxes only: grant rows survive a soft delete.
+			if (!$alias->key || $alias->get('iea_delete_time')) {
+				continue;
+			}
+			$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
+			if ($domain_id <= 0 || isset($seen[$domain_id])) {
+				continue;
+			}
+			$seen[$domain_id] = true;
+			$domain = new InboundEmailDomain($domain_id, true);
+			if ($domain->key && !$domain->get('ied_delete_time') && $domain->is_hardened()) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

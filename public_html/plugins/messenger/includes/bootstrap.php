@@ -25,7 +25,7 @@ require_once(PathHelper::getIncludePath('includes/ConversationSealing.php'));
 require_once(PathHelper::getIncludePath('data/conversation_key_grants_class.php'));
 
 // --- Streaming decrypt hook for sealed attachments -------------------------
-// A photo sent in a Private or Guarded conversation is a SealedFileContainer on
+// A photo sent in a Private conversation is a SealedFileContainer on
 // disk. File::serve_from_path() asks this opener for the plaintext size and
 // then for the span the client wanted; a closed unlock window becomes a 423,
 // never ciphertext with a 200 on it. A Standard conversation's attachment is

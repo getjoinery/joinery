@@ -26,26 +26,36 @@ class ChatSend {
 
     /**
      * Build a NEW (unsaved) conversation from composer input: owner, model,
-     * seeded controls, the resolved security level (Fortress additionally pins
-     * the model to a local one), and the held-out title/instructions — kept out
+     * seeded controls, the resolved security level and Local models only add-on
+     * (which pins the model to a local one), and the held-out title/instructions — kept out
      * of the first insert so no plaintext content lands at rest on a protected
      * chat. Returns ['conversation','level','title','instructions']; the caller
-     * persists it with persistNewConversation() after uploads validate.
+     * persists it with persistNewConversation() after uploads validate. A
+     * requested level chat doesn't offer returns ['error' => message] instead.
      */
     public static function buildNewConversation(int $uid, array $input, string $message): array {
+        // Security level: the composer's choice or the plugin default, downgraded
+        // when its prerequisites (vault / local model) are missing (Phase 1). A
+        // level asked for that chat doesn't offer is refused before anything is built.
+        $requested_level = $input['security_level'] ?? null;
+        $level = ChatLevel::resolveForNew($requested_level, $uid);
+        if ($level === null) {
+            return ['error' => 'Unknown privacy level — choose Standard or Private.'];
+        }
         $c = new AiConversation(NULL);
         $c->set('aic_owner_user_id', $uid);
         ChatControls::seedNewConversation($c, $input);
-        // Security level: the composer's choice or the plugin default, downgraded
-        // when its prerequisites (vault / local model) are missing (Phase 1).
-        $level = ChatLevel::resolveForNew($input['security_level'] ?? null, $uid);
         $c->set('aic_security_level', $level);
-        // The starting model follows the level: a Fortress chat's content never
-        // leaves the box, so it starts on something local. Asked once, of the
-        // level, rather than setting a default and then correcting it.
+        // The Local models only add-on: the composer's choice or the plugin
+        // default, kept only on a Private chat with a local model to pin to.
+        $local_only = ChatLevel::resolveLocalOnlyForNew($input['local_models_only'] ?? null, $level, $requested_level);
+        $c->set('aic_local_models_only', $local_only);
+        // The starting model follows the add-on: a local-only chat's content
+        // never leaves the box, so it starts on something local. Asked once, of
+        // the add-on, rather than setting a default and then correcting it.
         if ((string)$c->get('aic_model') === '') {
-            $c->set('aic_model', ChatRunner::defaultModelForLevel($level));
-        } elseif ($level === AiConversation::LEVEL_FORTRESS
+            $c->set('aic_model', ChatRunner::defaultModelFor($local_only));
+        } elseif ($local_only
                 && !ChatLevel::isLocalModel((string)$c->get('aic_model'))) {
             $c->set('aic_model', ChatLevel::localDefaultModel());
         }

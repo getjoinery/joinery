@@ -7,16 +7,16 @@
  */
 
 /**
- * The Fortress relay path, on the box's side of it.
+ * The relay path, on the box's side of it.
  *
- * At Fortress the wire terminates at the relay, so the box never sees a
+ * On a relay-fronted deployment the wire terminates at the relay, so the box never sees a
  * preflight. Two things cross the boundary instead, and both are checked here:
  *
  *   - **outbound**, the relay map fragment. Everything the relay needs to serve
  *     the channel travels as DATA — the served-kind list it compares as opaque
  *     strings, the decoy secret, the limits and caps. That is what makes a new
  *     payload kind a map update rather than a fleet upgrade, so a fragment that
- *     quietly stopped carrying it would strand every Fortress tenant on the
+ *     quietly stopped carrying it would strand every relay-fronted tenant on the
  *     next relay release.
  *   - **inbound**, the `.direct` container the relay writes to the spool and the
  *     pull brings across. It must land in the SAME Direct spool a locally
@@ -24,7 +24,7 @@
  *     no-bounce, held-plugin and decline-is-local rules live. Two deferred paths
  *     would mean two places to keep them.
  *
- * @version 1.0
+ * @version 1.0.1 - comment wording: relay-fronted, not a level
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -60,9 +60,9 @@ section('The relay never has to be taught a kind');
 // ---------------------------------------------------------------------------
 
 // The relay compares the envelope's kind against a list it was GIVEN. Nothing in
-// the Go binary interprets a kind, so a plugin shipping one reaches a Fortress
+// the Go binary interprets a kind, so a plugin shipping one reaches a relay-fronted
 // tenant through a map push. If this ever became code, every new kind would need
-// a relay release and a fleet upgrade before Fortress tenants could use it.
+// a relay release and a fleet upgrade before relay-fronted tenants could use it.
 $exporter_source = (string)file_get_contents(
 	PathHelper::getIncludePath('plugins/mailbox/includes/RelayMapExporter.php'));
 check(strpos($exporter_source, 'direct_kinds') !== false,

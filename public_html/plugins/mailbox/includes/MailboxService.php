@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.42 - each mailbox row carries protection_addons: the domain's add-ons
+ *   in force, shown beside the level chip
  * @version 1.41 - listThreads() rows carry label_ids: the custom labels any message
  *                 in the thread holds, so a selection's Labels panel can show what
  *                 the selected conversations already carry
@@ -261,7 +263,7 @@ class MailboxService {
 
 	/**
 	 * Neutral product placeholder shown wherever sealed content cannot be read
-	 * — a locked vault, or a Fortress pending-parse row still sealed to the
+	 * — a locked vault, or a relay-sealed pending-parse row still sealed to the
 	 * owner (specs/mailbox_security_levels.md § The Locked-State Surface
 	 * Contract). One string, no bracket syntax; the reader keys off the result's
 	 * `locked` flag to offer a one-tap unlock, never a third visible state.
@@ -548,8 +550,11 @@ class MailboxService {
 			$domains = new MultiInboundEmailDomain(array());
 			$domains->load();
 			$domain_map = array();
+			$domain_addons = array();
 			foreach ($domains as $d) {
 				$domain_map[intval($d->key)] = $d->get('ied_domain');
+				// The add-ons in force show beside the level, wherever it is shown.
+				$domain_addons[intval($d->key)] = $d->is_imap_source() ? array() : $d->addon_labels();
 			}
 			// A mailbox is `locked` for the switcher when its domain seals content
 			// and the viewer holds no open unlock window — the native switcher then
@@ -578,6 +583,9 @@ class MailboxService {
 					'address'        => $a->get('iea_alias') . '@' . $domain,
 					'domain'         => $domain,
 					'security_level' => $level,
+					// A hosted mailbox inherits its domain's add-ons; a pulled-in one
+					// has none (they belong to a domain this deployment hosts).
+					'protection_addons' => $seals ? ($domain_addons[$domain_id] ?? array()) : array(),
 					'locked'         => ($seals && !$viewer_unlocked),
 					'unread'         => $row ? intval($row['unread']) : 0,
 					'total'          => $row ? intval($row['total']) : 0,
@@ -987,7 +995,7 @@ class MailboxService {
 
 		// Deferred ingest (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 5):
 		// if this scope's owner holds an unlocked vault, parse any relay-sealed
-		// Fortress backlog before listing, so the mailbox view reflects fully-parsed
+		// relay-sealed backlog before listing, so the mailbox view reflects fully-parsed
 		// mail. No-op on colocated deployments (no pending rows ever exist).
 		$this->drainRelayBacklog($aliasId);
 
@@ -1367,7 +1375,7 @@ class MailboxService {
 		}
 		if ($this->content_locked) {
 			// At least one row rendered a sealed placeholder (locked window or a
-			// Fortress pending-parse row). The reader shows metadata now and turns
+			// relay-sealed pending-parse row). The reader shows metadata now and turns
 			// any content action into a one-tap unlock prompt.
 			$result['locked'] = true;
 		}
@@ -1419,7 +1427,7 @@ class MailboxService {
 		foreach ($rows as $row) {
 			$mid = intval($row['iem_inbound_email_message_id']);
 			$entry = array();
-			// A Fortress pending-parse row is sealed to the owner and not yet
+			// A relay-sealed pending-parse row is sealed to the owner and not yet
 			// parsed — its content columns are empty. It renders the SAME
 			// placeholder as a locked sealed row, never a visible third state.
 			$pending = $this->pgBool($row['iem_pending_parse'] ?? false);
@@ -1522,9 +1530,9 @@ class MailboxService {
 		// Resolve whose pending-parse backlog to drain. A single-alias scope drains
 		// that alias's single owner; the combined "all mailboxes" view ($aliasId
 		// null) is the primary reader surface (thread_list_logic + native apps), so
-		// it must drain too — the session user, whose own Fortress mail is what the
-		// relay pulled (specs/mailbox_relay_fix_pack.md § Fix 9). Without this, a
-		// Fortress owner's default inbox shows blank sender/subject/body forever.
+		// it must drain too — the session user, whose own relay-sealed mail is what the
+		// relay pulled (specs/mailbox_relay_fix_pack.md § Fix 9). Without this, the
+		// owner of relay-sealed mail sees a default inbox with blank sender/subject/body forever.
 		if ($aliasId !== null && $aliasId > 0) {
 			$owner_id = InboundEmailMessage::singleOwnerUserId($aliasId);
 		} else {
@@ -1755,7 +1763,7 @@ class MailboxService {
 				$fields[] = $col;
 			}
 		}
-		// A Fortress pending-parse row is sealed to the owner and not yet parsed —
+		// A relay-sealed pending-parse row is sealed to the owner and not yet parsed —
 		// its content columns are empty. Recipient stays cleartext metadata; the
 		// content fields render the same placeholder as a locked sealed row.
 		$pending = $this->pgBool($row['iem_pending_parse'] ?? false);

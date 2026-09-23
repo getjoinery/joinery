@@ -90,6 +90,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.4 - mail's protection level and hardening add-ons add no navigation gate: an account
+ *                holding a hardened mail domain needs no second factor beyond what it chooses to enroll
  * @version 1.3 - the page_probe session: a request from this machine carrying a one-time probe token runs as
  *                the probe's viewer for that request only (PageProbe), with no cookie and no PHP session
  * @version 1.2 - clear_return() empties the post-login destination; set_return() with nothing
@@ -659,7 +661,7 @@ class SessionControl{
 		// passkey), the cadence asks it at sign-in, and there is no valid
 		// trusted-device cookie, stash a pending state and redirect to /verify-totp
 		// instead of completing the cookie auto-login. Keying on user_has_second_factor
-		// (not has_totp_enabled) closes the passkey-only-Fortress quirk
+		// (not has_totp_enabled) closes the passkey-only-account quirk
 		// (specs/mailbox_security_levels.md § 5.4). Leave the 'tt' cookie alone so a
 		// successful factor completes the auto-login.
 		if ($this->user_has_second_factor($user_obj) && $user_obj->two_factor_cadence() === 'every_login'
@@ -1253,16 +1255,6 @@ class SessionControl{
 		return $this->_count_usable_factors($user, 1);
 	}
 
-	/** True when the user holds a second factor INDEPENDENT of any single
-	 *  passkey: TOTP, or at least two live passkeys. The Fortress enrollment
-	 *  gate keys on this — the vault-holder password reset excludes the passkey
-	 *  that authorized it and demands another factor, so enrollment must
-	 *  guarantee one credential is never both the authorizer and its own
-	 *  confirmation (specs/security_levels_review_fixes.md Fix 1). */
-	function user_has_independent_second_factor($user): bool {
-		return $this->_count_usable_factors($user, 2);
-	}
-
 	private function _count_usable_factors($user, int $passkeys_needed): bool {
 		if (!$user || !$user->key) {
 			return false;
@@ -1352,7 +1344,7 @@ class SessionControl{
 	 * LogicResult redirect to the step-up ceremony (which returns to $return_url)
 	 * when confirmation is needed, or NULL to proceed. A no-op for an account
 	 * with no second factor — there is nothing to step up with (2FA is optional
-	 * below Fortress); the action's own enrollment rules decide whether a factor
+	 * unless an enrollment gate says otherwise); the action's own enrollment rules decide whether a factor
 	 * must exist. When $force is true (e.g. recovery-code unlock) the gate fires
 	 * regardless of cadence but still only when a factor is enrolled.
 	 *
@@ -1632,25 +1624,9 @@ class SessionControl{
 				}
 			}
 
-			// Fortress mandatory-2FA enrollment (specs/mailbox_security_levels.md § 5.3):
-			// a user who owns or holds a grant on a Fortress domain is blocked until a
-			// second factor is enrolled. Same surface + exemptions as the admin gate
-			// (including the /api/v1/ exemption, so passkey/TOTP enrollment works).
-			if ($this->must_enroll_2fa_for_fortress()) {
-				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-				if ($current_path !== '/profile/security' && $current_path !== '/setup'
-						&& $current_path !== '/logout'
-						&& strpos((string)$current_path, '/api/v1/') !== 0) {
-					$msgtxt = urlencode('A domain on your account uses the Fortress level, which requires a second factor that is separate from any single passkey. Add an authenticator app or a second passkey to continue.');
-					header('Location: /profile/security?msgtext=' . $msgtxt);
-					exit();
-				}
-			}
-
 			// Vault re-enrollment gate: a vault holder left with zero second
 			// factors by an administrative reset is blocked until one is
-			// enrolled. Ordered after the Fortress gate so a user subject to
-			// both sees the stricter message. Same surface + exemptions.
+			// enrolled. Same surface + exemptions as the admin gate.
 			if ($this->must_enroll_2fa_for_vault()) {
 				$current_path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
 				if ($current_path !== '/profile/security' && $current_path !== '/setup'
@@ -1692,52 +1668,14 @@ class SessionControl{
 	}
 
 	/**
-	 * True when the current user touches a Fortress-level domain (owns one or
-	 * holds a grant on one) but has no INDEPENDENT second factor enrolled (TOTP
-	 * or a second passkey — one credential must never be both the reset
-	 * authorizer and its own confirmation) — the Fortress mandatory-2FA gate
-	 * (specs/mailbox_security_levels.md § 5.3). The heavy posture lookup is
-	 * cached in session; the factor check stays live so enrolling clears the
-	 * gate immediately without busting the cache.
-	 */
-	function must_enroll_2fa_for_fortress() {
-		if (!isset($_SESSION['usr_user_id'])) {
-			return false;
-		}
-		if (!isset($_SESSION['max_security_level'])) {
-			$_SESSION['max_security_level'] = 'standard';
-			$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php');
-			if (is_file($domain_class)) {
-				require_once($domain_class);
-				if (class_exists('InboundEmailDomain')) {
-					try {
-						$_SESSION['max_security_level'] =
-							InboundEmailDomain::maxSecurityLevelForUser((int)$_SESSION['usr_user_id']);
-					} catch (\Throwable $e) {
-						$_SESSION['max_security_level'] = 'standard';
-					}
-				}
-			}
-		}
-		if ($_SESSION['max_security_level'] !== 'fortress') {
-			return false;
-		}
-		require_once(PathHelper::getIncludePath('data/users_class.php'));
-		$user = new User($_SESSION['usr_user_id'], true);
-		return !$this->user_has_independent_second_factor($user);
-	}
-
-	/**
 	 * A vault holder with zero second factors is a state unreachable through
 	 * self-service (the possession-factor invariant refuses both removal
 	 * orders) - it exists only after an administrative factor reset. Gate
-	 * navigation until a factor is enrolled, mirroring
-	 * must_enroll_2fa_for_fortress(): vault existence is session-cached, the
-	 * factor check stays live so enrolling clears the gate immediately.
+	 * navigation until a factor is enrolled: vault existence is session-cached,
+	 * the factor check stays live so enrolling clears the gate immediately.
 	 *
-	 * The Fortress gate demands an INDEPENDENT factor; this one demands any
-	 * factor at all. The difference is intentional - this gate exists to undo
-	 * a zero-factor state, not to raise the account's posture.
+	 * Any factor at all satisfies it - this gate exists to undo a zero-factor
+	 * state, not to raise the account's posture.
 	 */
 	function must_enroll_2fa_for_vault() {
 		if (!isset($_SESSION['usr_user_id'])) {
@@ -1817,10 +1755,8 @@ class SessionControl{
 		// Cached per-user posture must not survive an identity switch: one
 		// session holds more than one user over its life ("log in as user", a
 		// second sign-in without a logout), and a stale answer here gates the
-		// arriving user on the departing user's Fortress level, vault or
-		// password flag.
-		unset($_SESSION['max_security_level'],
-			$_SESSION['has_encryption_vault'],
+		// arriving user on the departing user's vault or password flag.
+		unset($_SESSION['has_encryption_vault'],
 			$_SESSION['has_encryption_vault_uid'],
 			$_SESSION['force_password_change']);
 

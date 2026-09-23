@@ -16,7 +16,7 @@
  * ARF parser, and the D9 safety rules: DOCTYPE-carrying XML refused,
  * compression bombs capped, ordinary mail with a zip attachment untouched.
  *
- * Filing, dedup, discard of unhosted-domain reports and the deferred Fortress
+ * Filing, dedup, discard of unhosted-domain reports and the deferred relay-sealed
  * path are the db-tier suite (deliverability_report_ingest_test).
  *
  * Run: php plugins/mailbox/tests/deliverability_report_test.php

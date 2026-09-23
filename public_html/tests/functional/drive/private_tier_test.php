@@ -434,7 +434,7 @@ check(($inherit['json']['data']['folder']['syncable'] ?? true) === false,
 	'the folder export marks a Private tree as not synced');
 
 $bogus = api_request('POST', '/api/v1/action/drive_folder_create', $H, array(
-	'name' => 'Bogus_' . bin2hex(random_bytes(3)), 'protection_level' => 'guarded',
+	'name' => 'Bogus_' . bin2hex(random_bytes(3)), 'protection_level' => 'bogus',
 ));
 check(!empty($bogus['json']['error']), 'a level Drive does not offer is refused');
 

@@ -32,9 +32,9 @@
  * A declared bootstrap that cannot load is never fatal, but it is never
  * silent either: the consumer lands in notLoaded(), which
  * VaultUnlock::capsForUser() treats as "the strictest window policy may be
- * missing" and fails CLOSED to the Fortress caps.
+ * missing" and fails CLOSED to the hardened caps.
  *
- * @version 1.0
+ * @version 1.1 - the fail-closed caps are named the hardened caps
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultConsumers.php'));
@@ -62,7 +62,7 @@ class PluginBootstraps {
 			if ($path === '' || !file_exists($path)) {
 				error_log('[VaultConsumers] consumer "' . $name . '" declares a bootstrap that does not exist: '
 					. ($path === '' ? '(no top-level bootstrap key in plugin.json)' : $path)
-					. ' — unlock windows fail closed to the Fortress caps until it is restored.');
+					. ' — unlock windows fail closed to the hardened caps until it is restored.');
 				self::$not_loaded[] = $name;
 				continue;
 			}

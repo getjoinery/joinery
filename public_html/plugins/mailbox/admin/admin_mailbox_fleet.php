@@ -8,6 +8,7 @@
  * Reached from the Server Manager dashboard; tenant relay surfaces live on
  * the mailbox Setup/Settings tabs.
  *
+ * @version 1.4 - the fleet product box is Relay Hosting
  * @version 1.3 - shard relay version column + per-shard Rebuild
  */
 
@@ -152,10 +153,10 @@ if (!empty($fleet_service_on)) {
 
 	$page->end_box();
 
-	// --- Fortress hosting product (order-time auto-enrollment) ----------------
-	$page->begin_box(array('title' => 'Fortress hosting product'));
+	// --- Relay Hosting product (order-time auto-enrollment) -------------------
+	$page->begin_box(array('title' => 'Relay Hosting product'));
 	if (empty($store_active)) {
-		echo '<p>Selling fleet slots needs the store plugin. Activate it to create the Fortress hosting product.</p>';
+		echo '<p>Selling fleet slots needs the store plugin. Activate it to create the Relay Hosting product.</p>';
 	} elseif (!empty($fleet_products)) {
 		echo '<table class="table"><thead><tr>'
 			. '<th>Product</th><th>Fulfillment</th><th>Active</th><th></th>'
@@ -173,7 +174,7 @@ if (!empty($fleet_service_on)) {
 	} else {
 		echo '<form method="post">';
 		echo '<input type="hidden" name="action" value="fleet_create_product">';
-		echo '<button type="submit" class="btn btn-primary">Create Fortress hosting product</button>';
+		echo '<button type="submit" class="btn btn-primary">Create Relay Hosting product</button>';
 		echo '</form>';
 	}
 	$page->end_box();

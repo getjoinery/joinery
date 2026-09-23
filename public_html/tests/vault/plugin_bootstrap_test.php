@@ -88,9 +88,9 @@ $unmet = VaultConsumers::unmetObligations();
 check(isset($unmet['ghostly']), 'its reseal obligation reads unmet, so a rotation would refuse');
 
 $caps = VaultUnlock::capsForUser(1);
-check($caps['idle'] === VaultUnlock::FORTRESS_IDLE_CAP_SECONDS
-		&& $caps['absolute'] === VaultUnlock::FORTRESS_ABSOLUTE_CAP_SECONDS,
-	'and unlock windows fail closed to the Fortress caps while it is missing');
+check($caps['idle'] === VaultUnlock::HARDENED_IDLE_CAP_SECONDS
+		&& $caps['absolute'] === VaultUnlock::HARDENED_ABSOLUTE_CAP_SECONDS,
+	'and unlock windows fail closed to the hardened caps while it is missing');
 
 // ---------------------------------------------------------------------------
 section('A vaultConsumer without a top-level bootstrap keeps its obligations');

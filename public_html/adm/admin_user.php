@@ -1,4 +1,5 @@
 <?php
+// @version 1.2 - the Security card's notes follow the vault alone: no mail protection level or add-on requires a second factor
 // @version 1.1 - a Remove button only for a group with a membership row, read once by the logic (specs/post_release_fleet_defects.md B4.2)
 // NO need to require PathHelper - admin pages are accessed through serve.php
 // PathHelper, Globalvars, SessionControl, DbConnector, ThemeHelper, PluginHelper are ALWAYS available
@@ -259,13 +260,10 @@ array(
 			</div>
 			<div class="card-body">
 				<div class="fs-10 text-600 mb-3">
-					<?php if($security['fortress']): ?>
-						<p class="mb-1">This user holds a Fortress domain: an independent second factor is mandatory. Removing factors locks them to the enrollment page until they enroll a replacement.</p>
-					<?php endif; ?>
 					<?php if($security['vault_count'] > 0): ?>
 						<p class="mb-1">This user has an encrypted vault; <?php echo (int)$security['unused_recovery_codes']; ?> unused recovery code<?php echo $security['unused_recovery_codes'] == 1 ? '' : 's'; ?> remain<?php echo $security['unused_recovery_codes'] == 1 ? 's' : ''; ?>. Removing the last unlocker is refused outright - that would destroy their encrypted data.</p>
 					<?php endif; ?>
-					<?php if(!$security['fortress'] && $security['vault_count'] == 0): ?>
+					<?php if($security['vault_count'] == 0): ?>
 						<p class="mb-1">No feature on this account requires a second factor.</p>
 					<?php endif; ?>
 				</div>

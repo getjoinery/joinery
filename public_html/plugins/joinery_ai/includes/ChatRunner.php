@@ -87,16 +87,16 @@ class ChatRunner {
     }
 
     /**
-     * The default model for a new conversation at $level.
+     * The default model for a new conversation, $local_only when it carries the
+     * Local models only add-on.
      *
-     * Fortress content never leaves the box, so a Fortress chat starts on a
-     * local model whatever the site default says — enforced by the resolver
-     * from the level rather than by a second definition of "local" kept in step
-     * by hand.
+     * A local-only chat's content never leaves the box, so it starts on a local
+     * model whatever the site default says — enforced by the resolver from the
+     * add-on rather than by a second definition of "local" kept in step by hand.
      */
-    public static function defaultModelForLevel(string $level): string {
-        if ($level !== AiConversation::LEVEL_FORTRESS) return self::defaultModel();
-        $req = AiModelRequirementBuilder::forPurpose('a Fortress chat')
+    public static function defaultModelFor(bool $local_only): string {
+        if (!$local_only) return self::defaultModel();
+        $req = AiModelRequirementBuilder::forPurpose('a local-only chat')
             ->withTools(true)
             ->withTrustFloor(AiModelRequirement::TRUST_LOCAL);
         $resolution = AiModelResolver::tryResolve($req);
@@ -139,9 +139,9 @@ class ChatRunner {
     private static function drive(AiConversation $conversation, ChatTurnContext $ctx, array $messages): array {
         $settings = Globalvars::get_instance();
 
-        // The turn's ONE model decision. The Fortress local-only pin is part of
-        // the requirement (from the chat LEVEL, not from a column), so a
-        // Fortress conversation cannot resolve onto anything off the box —
+        // The turn's ONE model decision. The Local models only pin is part of
+        // the requirement (from the conversation's add-on), so a local-only
+        // conversation cannot resolve onto anything off the box —
         // which is the same guarantee the old special case in the provider
         // factory made, expressed once instead of twice.
         $resolution = AiModelResolver::resolve(

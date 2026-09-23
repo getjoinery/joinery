@@ -233,8 +233,8 @@ class RecipeVaultScope {
 	 *
 	 * This is sink zero: it precedes every storage sink, and no storage-side
 	 * guard can see it, because the plaintext leaves over HTTPS rather than into
-	 * a column. The recipe analogue of the Fortress chat pin — chat pins a
-	 * Fortress conversation to local hardware outright; a recipe may use an
+	 * a column. The recipe analogue of the chat Local models only pin — chat
+	 * pins such a conversation to local hardware outright; a recipe may use an
 	 * off-box model, but only as far as the domain it reads has consented
 	 * (specs/implemented/sealed_content_egress.md, resolved decision 5).
 	 *

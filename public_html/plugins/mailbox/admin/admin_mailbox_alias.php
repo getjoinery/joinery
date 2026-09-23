@@ -2,6 +2,7 @@
 /**
  * Inbound Email - Create/Edit Alias
  *
+ * @version 1.10 - the protection badge carries the domain's add-ons in force
  * @version 1.9
  * @changelog 1.9 - the protection badge states the MAILBOX's level and links to
  *   wherever that level is decided
@@ -84,8 +85,16 @@ if ($is_edit && $alias->get('iea_ied_inbound_email_domain_id')) {
 			. '<a class="iea-badge iea-badge-level iea-badge-level-' . htmlspecialchars($alias_level)
 			. '" href="' . htmlspecialchars($level_url) . '" title="Mail protection level — set on '
 			. ($level_is_own ? 'this mailbox' : 'the domain') . '">'
-			. htmlspecialchars(ucfirst($alias_level)) . '</a>'
-			. '</p>';
+			. htmlspecialchars(ucfirst($alias_level)) . '</a>';
+		// The domain's add-ons in force show with the level (a pulled-in mailbox
+		// has none: they belong to a domain this deployment hosts).
+		if (!$level_is_own && $alias->seals_content()) {
+			foreach ($alias_domain->addon_labels() as $addon_label) {
+				echo ' <span class="iea-badge iea-badge-addon" title="Extra protection — set on the domain">'
+					. htmlspecialchars($addon_label) . '</span>';
+			}
+		}
+		echo '</p>';
 	}
 }
 

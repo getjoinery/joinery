@@ -6,7 +6,8 @@
  * arrangement: a conversation rail beside an open thread on a wide screen, one
  * pane at a time on a narrow one.
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - level chip marks an active add-on (.msgr-level-chip--sealed-exits)
  */
 
 /* A self-scrolling app component: flex-basis 0 plus an explicit min-height is
@@ -206,11 +207,15 @@
     font-size: var(--jy-text-xs);
     color: var(--jy-color-text-muted);
 }
-.msgr-level-chip--private,
-.msgr-level-chip--guarded {
+.msgr-level-chip--private {
     border-color: var(--jy-color-success);
     color: var(--jy-color-success);
     background: var(--jy-color-success-bg);
+}
+/* An add-on is on: the chip text names it, and the heavier border marks it. */
+.msgr-level-chip--sealed-exits {
+    border-width: 2px;
+    font-weight: 600;
 }
 
 .msgr-log { flex: 1 1 auto; min-height: 0; }

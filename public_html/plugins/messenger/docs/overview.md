@@ -10,8 +10,13 @@ Two people whose accounts live on **different Joinery instances** can also
 message each other. The message travels over Joinery Direct — the signed
 instance-to-instance channel — not through any third party.
 
-Conversations carry a protection level from the platform ladder: **Standard**,
-**Private** (sealed at rest) and **Guarded** (Private with the doors guarded).
+Conversations carry a protection level from the platform ladder: **Standard**
+or **Private** (sealed at rest). A Private conversation can also turn on one
+piece of extra protection, **Nothing leaves unsealed**: no message text appears
+in notifications or crosses to another server unencrypted — at the cost that
+notifications don't show the message, and people on servers without encryption
+can't be reached. Like the level, it can be turned on but never off, and the
+thread's level chip shows it ("Private · Nothing leaves unsealed").
 
 ## Where things are
 
@@ -92,7 +97,8 @@ reachability reports whether, never why.
 | Setting | Default | What it does |
 |---|---|---|
 | `messenger_active` | on | The app and its actions |
-| `messenger_default_protection_level` | `standard` | What a new conversation starts at |
+| `messenger_default_protection_level` | `standard` | What a new conversation starts at (`standard` / `private`) |
+| `messenger_default_sealed_exits_only` | off | Whether a new Private conversation starts with Nothing leaves unsealed on |
 | `messenger_max_group_size` | 32 | People per group |
 | `messenger_max_attachment_mb` | 25 | Per file |
 | `messenger_poll_thread_seconds` | 3 | How often an open conversation asks for new messages |
@@ -123,6 +129,6 @@ is exactly what it should get.
 
 ```
 php tests/run.php db --filter=messenger_core        # groups, cursor, reactions, receipts, legacy actions
-php tests/run.php db --filter=messenger_sealed      # protection: grants, raise, locked reads, rotation
+php tests/run.php db --filter=messenger_sealed      # protection: grants, raise, locked reads, rotation, Nothing leaves unsealed
 php tests/run.php db --filter=messenger_federation  # the chat kind: ingest, dedup, control payloads
 ```

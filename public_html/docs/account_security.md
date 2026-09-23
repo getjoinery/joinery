@@ -109,39 +109,19 @@ yours" to a viewer who is one of them, and offers a superadmin a one-button
 that switches the setting on). It is information, never a gate, and silent
 when every admin holds a factor.
 
-## Fortress mandatory two-factor enrollment
-
-A user who owns or holds a grant on a **Fortress**-level domain
-(`InboundEmailDomain::maxSecurityLevelForUser()`) must have a second factor
-enrolled that is **independent of any single passkey**: TOTP, or at least two
-passkeys (`SessionControl::user_has_independent_second_factor()`). One passkey
-alone does not satisfy it — the vault-holder password reset excludes the
-passkey that authorized it and demands another factor, so enrollment must
-guarantee that a lone stolen authenticator can never be both the reset
-authorizer and its own confirmation. Until a qualifying factor exists,
-`SessionControl::must_enroll_2fa_for_fortress()` blocks every page behind a
-redirect to `/profile/security` (the same session-cached, enrollment-surface
-pattern the admin-2FA requirement uses) — exempting only that page and
-`/logout` to avoid a loop. Enrolling a qualifying factor clears the gate
-immediately. The posture lookup is cached per session and dropped when the
-acting user changes a domain's level.
-
 ## Vault re-enrollment after an administrative reset
 
 An account that holds an encrypted vault but has no second factor at all is
 blocked from every page until one is enrolled
 (`SessionControl::must_enroll_2fa_for_vault()`), redirected to
-`/profile/security` with the same surface and exemptions as the Fortress gate —
+`/profile/security` with the same surface and exemptions as the admin gate —
 that page, `/setup`, `/logout`, and every `/api/v1/` request, the last being what
 lets the enrollment ceremonies on that page actually run. Vault existence is
 cached per session and per user; the factor check is a live read, so enrolling
-clears the gate on the next page load rather than the next sign-in. The gate is
-ordered after the Fortress gate, so a user subject to both is shown the stricter
-Fortress message.
+clears the gate on the next page load rather than the next sign-in.
 
-Where the Fortress gate demands a factor *independent* of any single passkey,
-this one accepts any factor at all. The difference is deliberate: this gate
-exists to undo a zero-factor state, not to raise the account's posture.
+The gate accepts any factor at all: it exists to undo a zero-factor state, not
+to raise the account's posture.
 
 ## Administrative factor reset
 
@@ -271,7 +251,7 @@ be able to quietly enroll their own key:
 wizard's sign-in and encryption-key steps drive the identical API actions
 (`passkey_register_*`, the TOTP enrollment actions, `vault_setup_*`), so every
 guard above applies there unchanged. `/setup` is exempt from the admin and
-Fortress 2FA navigation gates for the same reason `/profile/security` is: it
+vault 2FA navigation gates for the same reason `/profile/security` is: it
 is a place where the required factor gets enrolled.
 
 **Possession-factor invariant:** a vault holder must always retain a second
@@ -309,11 +289,13 @@ One unlocker ceremony opens the vault for a bounded window
   that is genuinely gone (closed, asleep, machine off) goes stale.
 - **Network identity change.** The existing IP-change guard that zeroes elevated
   permissions on a major address jump also ends that session's window.
-- **Per-level caps.** Beyond the idle timeout, a window carries caps by the
-  user's highest mail level (`VaultUnlock::capsForUser()`, recorded with the
-  window and checked at read time): **Fortress** ends 2h after the last content
-  decrypt (idle) and unconditionally 24h after arming (absolute); **Private**
-  carries a 7-day absolute backstop.
+- **Mail caps.** Beyond the idle timeout, a window carries caps from what the
+  user's mail holds (`VaultUnlock::capsForUser()`, recorded with the window and
+  checked at read time): a user with a **hardened** domain (relay sealing or the
+  sending lock on) gets `VaultUnlock::HARDENED_*_CAP_SECONDS` — the window ends
+  2h after the last content decrypt (idle) and unconditionally 24h after arming
+  (absolute); a user whose protected mail is plain **Private** carries a 7-day
+  absolute backstop.
 - **Credential events end every window everywhere** (`lockAll()`) — the remote
   kill switch. A password change, a 2FA method change (disabling TOTP),
   app-session revocation, and a recovery-code unlock all wipe every session's

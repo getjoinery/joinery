@@ -260,7 +260,7 @@ class AiEndpointRegistry {
      * resolver asks it separately.
      *
      * Null for an id nothing declares — which every caller reads as "not local",
-     * the safe direction. It is what makes a Fortress chat refuse a model
+     * the safe direction. It is what makes a local-only chat refuse a model
      * nothing classifies rather than assume the best of it.
      */
     public static function trustForModel(string $id): ?string {

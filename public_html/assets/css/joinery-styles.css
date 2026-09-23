@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.15.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.16.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -1082,6 +1082,61 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
   font-weight: 400;
   font-size: var(--jy-text-xs);
   color: var(--jy-color-text-muted);
+}
+
+/* Protection add-ons — the "Extra protection" switches ProtectionLevelPicker
+   emits under the level cards (FormWriter checkboxinput `switch`). */
+.jy-ui .jy-level-addons {
+  margin: 0 0 var(--jy-space-3) var(--jy-space-4);
+  padding-left: var(--jy-space-3);
+  border-left: 2px solid var(--jy-color-border);
+}
+.jy-ui .jy-level-addons-heading {
+  font-size: var(--jy-text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--jy-color-text-muted);
+  margin-bottom: var(--jy-space-2);
+}
+.jy-ui .jy-level-addons-note {
+  font-size: var(--jy-text-sm);
+  color: var(--jy-color-text-muted);
+  margin: 0 0 var(--jy-space-2);
+}
+.jy-ui .jy-level-addon-link {
+  font-size: var(--jy-text-sm);
+  margin: 0 0 var(--jy-space-2);
+  padding-left: 38px;
+}
+.jy-ui .form-check.jy-switch { flex-wrap: wrap; }
+.jy-ui .form-check.jy-switch .form-help { flex-basis: 100%; padding-left: 38px; }
+.jy-ui .form-check.jy-switch input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--jy-color-border-strong);
+  transition: background 0.15s ease;
+}
+.jy-ui .form-check.jy-switch input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--jy-color-bg);
+  transition: transform 0.15s ease;
+}
+.jy-ui .form-check.jy-switch input[type="checkbox"]:checked { background: var(--jy-color-primary); }
+.jy-ui .form-check.jy-switch input[type="checkbox"]:checked::before { transform: translateX(12px); }
+.jy-ui .form-check.jy-switch input[type="checkbox"]:disabled { opacity: 0.55; cursor: not-allowed; }
+.jy-ui .form-check.jy-switch input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--jy-color-primary);
+  outline-offset: 2px;
 }
 
 /* ─── Cards ───────────────────────────────────────────────────── */

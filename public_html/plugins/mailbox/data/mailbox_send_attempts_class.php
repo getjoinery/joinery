@@ -18,13 +18,14 @@
  * timeline last asked (A4), never a value the send itself writes: a send knows
  * acceptance, not arrival.
  *
- * On a Private or Fortress mailbox the recipient list and the carrier's error
+ * On a Private mailbox the recipient list and the carrier's error
  * text can name correspondents, so they seal to the mailbox owner's vault like
  * the message's own content. Message-ID, transport, outcome and timing carry no
  * content and stay plain. Sealing needs only the owner's public key, so a row
  * seals from any process; a sealing mailbox whose owner has no vault gets a row
  * WITHOUT those two fields rather than a plaintext one (see record()).
  *
+ * @version 1.0.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));

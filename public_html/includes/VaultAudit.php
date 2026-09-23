@@ -24,7 +24,7 @@
  * is enough to tie an open to its close and useless to anyone reading the log.
  * No secret key, no wrapping, and no sealed content passes through here.
  *
- * @version 1.0
+ * @version 1.0.1 - comment wording: the hardened idle cap
  */
 
 class VaultAudit {
@@ -43,7 +43,7 @@ class VaultAudit {
 
 	// Why a window ended. The first four are policy end-events the platform
 	// decided on; the last three are things that happened to the session.
-	const REASON_IDLE_CAP         = 'idle_cap';          // Fortress: no content decrypt for too long
+	const REASON_IDLE_CAP         = 'idle_cap';          // hardened caps: no content decrypt for too long
 	const REASON_ABSOLUTE_CAP     = 'absolute_cap';      // armed too long ago, regardless of use
 	const REASON_HEARTBEAT_STALE  = 'heartbeat_stale';   // the browser stopped answering
 	const REASON_IDLE_EXPIRED     = 'idle_expired';      // the key aged out of APCu (vault_unlock_idle_minutes)

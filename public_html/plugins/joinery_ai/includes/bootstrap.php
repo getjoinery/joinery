@@ -153,6 +153,7 @@ VaultUnlock::onWipe(function (int $user_id, ?string $scope) {
         return;
     }
     $db = DbConnector::get_instance()->get_db_link();
+    // 'fortress' = rows not yet converted by migration aic_001, which retires it.
     $q = $db->prepare(
         "SELECT m.aim_conversation_message_id FROM aim_conversation_messages m
          JOIN aic_conversations c ON c.aic_conversation_id = m.aim_aic_conversation_id

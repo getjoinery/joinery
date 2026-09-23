@@ -946,7 +946,7 @@ echo "  Authserv-id       : ${AUTHSERV_ID}"
 echo "  Relay public IP   : ${PUBLIC_IP}"
 echo "  Identity pin      : ${IDENTITY_FINGERPRINT}"
 echo "  Relay API         : https://${PUBLIC_IP}/relay/ (signed; pinned identity)"
-echo "  Joinery Direct    : https://${MAIL_HOSTNAME}:443 (SRV target for Fortress tenants)"
+echo "  Joinery Direct    : https://${MAIL_HOSTNAME}:443 (SRV target for relay-fronted tenants)"
 echo "  Tenants           : $(find "${TENANTS_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)"
 echo "  Shell             : $([[ "${KEEP_SSHD}" -eq 1 ]] && echo 'KEPT (--keep-sshd, hand run)' || echo 'none - the first-boot script removes sshd')"
 echo

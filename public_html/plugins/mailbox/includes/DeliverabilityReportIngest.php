@@ -13,7 +13,7 @@
  *     branch (Postfix pipe + provider webhooks), and RelaySpoolConsumer for
  *     mail pulled from the hardened relay
  *   - deferred parse: InboundEmailRouter::parsePendingMessage(), where a
- *     Fortress relay message's content first exists (at the owner's unlock)
+ *     relay-sealed message's content first exists (at the owner's unlock)
  *
  * A recognised report is FILED, never delivered (D3): its per-source lines
  * are written to dvs_deliverability_report_sources — the sender inventory —
@@ -31,6 +31,7 @@
  * live there. A failure of any kind is recorded rather than ever aborting
  * ingest of the carrying message.
  *
+ * @version 1.1.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.1 - the parse moves behind the jail; this class detects and files
  * @version 1.0
  */

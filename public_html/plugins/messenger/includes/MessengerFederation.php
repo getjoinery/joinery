@@ -16,7 +16,8 @@
  * that signed the request. A stranger cannot open a conversation with you, for
  * exactly the reason a stranger cannot send you direct mail.
  *
- * @version 1.2.3 - localDomain() answers for authoritative domains only, so an
+ * @version 1.3.0 - require_sealed follows the Nothing leaves unsealed add-on
+ * @changelog 1.2.3 - localDomain() answers for authoritative domains only, so an
  *   IMAP-source anchor no longer swallows chat to its provider's addresses
  * @version 1.2.2
  * @changelog 1.2.2 - a LOCKED send (vault-sealed signing key, owner absent) defers until presence like a sealed body read, instead of burning the retry budget on attempts nobody can make succeed
@@ -377,42 +378,50 @@ class MessengerFederation {
 	}
 
 	/**
+	 * The Direct send options for a message in this conversation: signed as the
+	 * sender, and sealed-or-nothing when Nothing leaves unsealed is on.
+	 */
+	public static function sendOptions(Conversation $conversation, string $sender): array {
+		return array('sender' => $sender, 'require_sealed' => $conversation->sealed_exits_only());
+	}
+
+	/**
 	 * The transfer itself, plus the state the sender's ticks read.
 	 *
-	 * A Guarded conversation refuses to send unless the recipient's instance
-	 * returned a key to seal to. Direct permits an opportunistic plaintext-over-
-	 * TLS delivery when the far side has no vault; at Guarded that trade is not
-	 * on offer, so the send carries `require_sealed` and Direct refuses between
-	 * preflight and transfer — no content byte crosses the wire. The refusal is
+	 * A conversation with Nothing leaves unsealed on refuses to send unless the
+	 * recipient's instance returned a key to seal to. Direct permits an
+	 * opportunistic plaintext-over-TLS delivery when the far side has no vault;
+	 * with the add-on on that trade is not on offer, so the send carries
+	 * `require_sealed` and Direct refuses between preflight and transfer — no content byte crosses the wire. The refusal is
 	 * final: a keyless instance is a posture, not a blip, and the member can
 	 * resend once the far side has a vault.
 	 */
 	protected static function deliver(Conversation $conversation, Message $message, string $sender,
 			array $peers, array $header, string $body, array $attachments): string {
 		$parts = self::buildParts($header, $body, $attachments);
-		$guarded = $conversation->is_guarded();
+		$send_options = self::sendOptions($conversation, $sender);
+		$sealed_only = $send_options['require_sealed'];
 
 		$all_delivered = true;
 		$any_declined = false;
 		$any_unsealable = false;
 
 		foreach (array_keys($peers) as $address) {
-			$result = JoineryDirect::send($address, self::KIND, $parts,
-				array('sender' => $sender, 'require_sealed' => $guarded));
+			$result = JoineryDirect::send($address, self::KIND, $parts, $send_options);
 
 			if ($result->status === DirectSendResult::NO_SEALING) {
-				error_log('[MessengerFederation] Guarded conversation ' . $conversation->key
+				error_log('[MessengerFederation] Nothing-leaves-unsealed conversation ' . $conversation->key
 					. ' refused to send to ' . $address . ' — the recipient published no key.');
 				$all_delivered = false;
 				$any_unsealable = true;
 				continue;
 			}
-			if ($result->delivered() && $guarded && !$result->sealed) {
+			if ($result->delivered() && $sealed_only && !$result->sealed) {
 				// Unreachable while require_sealed holds; kept as a tripwire in
 				// case a transport ever stops honoring it. Recorded loudly: the
-				// operator surface should show a Guarded conversation failing
-				// this way.
-				error_log('[MessengerFederation] Guarded conversation ' . $conversation->key
+				// operator surface should show a Nothing-leaves-unsealed
+				// conversation failing this way.
+				error_log('[MessengerFederation] Nothing-leaves-unsealed conversation ' . $conversation->key
 					. ' delivered unsealed to ' . $address . ' — the recipient published no key.');
 				$all_delivered = false;
 				$any_unsealable = true;

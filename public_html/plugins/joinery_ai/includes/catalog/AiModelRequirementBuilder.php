@@ -101,8 +101,7 @@ class AiModelRequirementBuilder {
      *
      * Chat inherits nothing and carries no floor — the user picks a model, or
      * the site's chat default applies. The only constraint chat carries is the
-     * Fortress trust floor, which is a property of the security level rather
-     * than anything stored per conversation.
+     * local trust floor of the Local models only add-on (on a Private chat).
      */
     public static function forConversation(AiConversation $conversation): AiModelRequirement {
         $settings = Globalvars::get_instance();
@@ -120,10 +119,10 @@ class AiModelRequirementBuilder {
             ->withPolicy(self::sitePolicy())
             ->withPurpose('this chat');
 
-        if ((string)$conversation->get('aic_security_level') === AiConversation::LEVEL_FORTRESS) {
-            // Fortress content never leaves the box. Enforced by the resolver
-            // from the level, so there is no per-conversation column to keep in
-            // step and no second definition of "local" to drift.
+        if ($conversation->localModelsOnly()) {
+            // A local-only chat's content never leaves the box. Enforced by the
+            // resolver from the add-on, so there is no second definition of
+            // "local" to drift and a cloud pin cannot be routed around.
             $req = $req->tightenTrustFloor(AiModelRequirement::TRUST_LOCAL);
         }
         return $req;

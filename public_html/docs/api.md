@@ -105,20 +105,23 @@ Stored outcomes live in `aik_api_idempotency_keys` (the raw key is never stored,
 
 ### Locked state (sealed mailboxes)
 
-Mailbox actions over a protected (Private/Fortress) domain follow the
+Mailbox actions over a protected (Private) domain follow the
 locked-state contract (`plugins/mailbox/docs/overview.md` § Security levels):
 they return **cleartext metadata plus a `locked` flag**, never an error, so a
 client renders sealed placeholders and triggers the native unlock ceremony
 rather than a failure state.
 
 - `mailbox/thread_list` and `mailbox/thread` include `locked: true` when any row
-  in the payload is sealed-and-unreadable (a locked window or a Fortress
+  in the payload is sealed-and-unreadable (a locked window or a relay-sealed
   pending-parse row). Threading, unread, labels, folders, times, and sizes stay
   populated; sender/subject/body render a neutral placeholder.
-- `mailbox/mailboxes` carries each mailbox's `security_level` and current
-  `locked` state for the switcher.
-- `mailbox/send` returns `locked: true` instead of sending when a Fortress
-  compose has no open window — run the unlock ceremony, then resend.
+- `mailbox/mailboxes` carries each mailbox's `security_level`, its
+  `protection_addons` (the names of the domain's add-ons in force, as the picker
+  words them — "Seal at the relay", "Only send while I'm signed in", or "Only
+  send while I'm signed in (unfinished)" — shown beside the level), and
+  current `locked` state for the switcher.
+- `mailbox/send` returns `locked: true` instead of sending when a compose from
+  a domain with send protection on has no open window — run the unlock ceremony, then resend.
 - `mailbox/thread_action` (mark/star/delete) operates on cleartext metadata and
   keeps working while locked.
 - `mailbox/message_timeline` (`message_id`, optional `refresh_delivery=1`)

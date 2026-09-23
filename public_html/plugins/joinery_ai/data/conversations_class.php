@@ -22,12 +22,16 @@ class AiConversation extends SystemBase {
 
     // Per-conversation encryption posture (specs/joinery_ai_chat_encryption.md).
     // 'standard' = server-managed plaintext; 'private' = title/instructions and
-    // every turn sealed at rest, unlock required to read; 'fortress' = private +
-    // inference pinned to a local model (nothing leaves the box). The level is
+    // every turn sealed at rest, unlock required to read. The level is
     // cleartext operational metadata so the list renders/sorts while locked.
+    // Private carries one add-on, Local models only (aic_local_models_only).
     const LEVEL_STANDARD = 'standard';
     const LEVEL_PRIVATE  = 'private';
-    const LEVEL_FORTRESS = 'fortress';
+    // A stored value no code writes: rows not yet converted by the joinery_ai
+    // migration aic_001 (Private + Local models only under the old name). Read
+    // as exactly that through normalizeLevel()/localModelsOnlyFlag(), so an
+    // unconverted row keeps its seal and its local pin. aic_001 retires it.
+    const LEGACY_LEVEL_LOCAL_ONLY = 'fortress';
 
     // Sealed Vault generic read hook (docs/sealed_vault.md): decrypted
     // transparently by SystemBase::get() for a loaded model. aic_title is derived
@@ -59,6 +63,12 @@ class AiConversation extends SystemBase {
         'aic_model'              => array('type'=>'varchar(100)'),
         // Encryption posture — cleartext operational metadata (see the level consts).
         'aic_security_level'     => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'standard'),
+        // The Local models only add-on: inference pinned to a model on the
+        // operator's own hardware, so nothing in the chat reaches an outside AI
+        // company. One-way — once on it never clears. It takes effect on a
+        // Private chat only; lowered to Standard it stays stored but inert, and
+        // raising again restores it. Read through localModelsOnly().
+        'aic_local_models_only'  => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
         // Sealed Vault consumer columns (docs/sealed_vault.md § consumer contract).
         // aic_sealed_key is the per-conversation DEK sealed to the owner's vault
         // public key (title + instructions seal under it); aic_key_generation
@@ -124,10 +134,36 @@ class AiConversation extends SystemBase {
     // write to a protected conversation — token rollups, pin, rename, control
     // edits, seal/reseal — goes through SystemBase::updateColumns() instead.
 
-    /** Whether this conversation seals its content at rest (private or fortress). */
+    /** A stored level read as a current one: the legacy value is Private. */
+    public static function normalizeLevel($stored): string {
+        $stored = (string)$stored;
+        return $stored === self::LEGACY_LEVEL_LOCAL_ONLY ? self::LEVEL_PRIVATE : $stored;
+    }
+
+    /** This conversation's level (standard|private) — the one read of aic_security_level. */
+    public function level(): string {
+        return self::normalizeLevel($this->get('aic_security_level')) ?: self::LEVEL_STANDARD;
+    }
+
+    /** The stored Local models only flag, counting an unconverted legacy row as on. */
+    public function localModelsOnlyFlag(): bool {
+        return (bool)$this->get('aic_local_models_only')
+            || (string)$this->get('aic_security_level') === self::LEGACY_LEVEL_LOCAL_ONLY;
+    }
+
+    /** Whether this conversation seals its content at rest (Private). */
     public function isProtected(): bool {
-        $level = (string)$this->get('aic_security_level');
-        return $level === self::LEVEL_PRIVATE || $level === self::LEVEL_FORTRESS;
+        return $this->level() === self::LEVEL_PRIVATE;
+    }
+
+    /**
+     * Whether this conversation's inference is pinned to a local model — the
+     * Local models only add-on, in effect only on a Private chat. The stored
+     * flag alone is not the answer: a chat lowered to Standard keeps the flag
+     * (one-way) but no longer carries the add-on.
+     */
+    public function localModelsOnly(): bool {
+        return $this->isProtected() && $this->localModelsOnlyFlag();
     }
 
     /**
@@ -254,6 +290,7 @@ class MultiAiConversation extends SystemMultiBase {
         if ($owner_id && ChatSeal::windowOpenFor($owner_id)) {
             $psql = 'SELECT aic_conversation_id FROM aic_conversations WHERE aic_delete_time ' . $del_sql
                   . ' AND aic_owner_user_id = :powner'
+                  // 'fortress' = rows not yet converted by migration aic_001, which retires it.
                   . " AND aic_security_level IN ('private','fortress')";
             $pq = DbConnector::GetPreparedStatement($psql);
             $pq->bindValue(':powner', $owner_id, PDO::PARAM_INT);
@@ -325,6 +362,7 @@ class MultiAiConversation extends SystemMultiBase {
         if ($owner_id <= 0) return false;
         $q = DbConnector::get_instance()->get_db_link()->prepare(
             'SELECT 1 FROM aic_conversations WHERE aic_owner_user_id = ? AND aic_delete_time IS NULL '
+            // 'fortress' = rows not yet converted by migration aic_001, which retires it.
             . "AND aic_security_level IN ('private','fortress') LIMIT 1");
         $q->execute([$owner_id]);
         return (bool)$q->fetchColumn();
@@ -416,7 +454,8 @@ class MultiAiConversation extends SystemMultiBase {
             // bounded by the candidate cap so an owner with many protected chats
             // can't turn one tool call into an unbounded decrypt loop. Collect every
             // match (not stopping at $limit) so the merge below can rank a recent
-            // protected chat above older standard ones.
+            // protected chat above older standard ones. 'fortress' = rows not yet
+            // converted by migration aic_001, which retires it.
             $psql = "SELECT aic_conversation_id FROM aic_conversations
                       WHERE aic_owner_user_id = :owner AND aic_delete_time IS NULL
                         AND aic_security_level IN ('private','fortress')$excl
@@ -439,7 +478,7 @@ class MultiAiConversation extends SystemMultiBase {
                 if ($hit !== null) {
                     $out['matches'][] = [
                         'id'      => $pid,
-                        'level'   => (string)$c->get('aic_security_level'),
+                        'level'   => $c->level(),
                         'title'   => $hit['title'],
                         'snippet' => $hit['snippet'],
                         'date'    => (string)($c->get('aic_update_time') ?: $c->get('aic_create_time')),

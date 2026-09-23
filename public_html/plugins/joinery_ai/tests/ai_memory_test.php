@@ -26,7 +26,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/recipe_tools/ForgetT
 // A locally-served model id and a cloud one. "Local" is now a lookup in the
 // shipped catalog rather than a guess from the id's shape, so the local one has
 // to actually be served — an id nothing declares is deliberately NOT classified
-// local, which is what stops a Fortress chat trusting a name nobody recognises.
+// local, which is what stops a local-only chat trusting a name nobody recognises.
 $LOCAL_MODEL  = 'qwen3:4b-instruct';
 $REMOTE_MODEL = 'claude-haiku-4-5';
 harness_set_setting_mem('joinery_ai_local_model', $LOCAL_MODEL);
@@ -263,8 +263,10 @@ $convA->set('aic_memory_access', true);
 $convPriv = $make_conversation($uidA, AiConversation::LEVEL_PRIVATE, $REMOTE_MODEL);
 check(!ChatMemory::activeFor($convPriv, $REMOTE_MODEL), 'private chat + remote model: inactive');
 check(ChatMemory::activeFor($convPriv, $LOCAL_MODEL), 'private chat + local model: active');
-$convFort = $make_conversation($uidA, AiConversation::LEVEL_FORTRESS, $LOCAL_MODEL);
-check(ChatMemory::activeFor($convFort, $LOCAL_MODEL), 'fortress chat (pinned local): active');
+$convLocal = $make_conversation($uidA, AiConversation::LEVEL_PRIVATE, $LOCAL_MODEL);
+$convLocal->set('aic_local_models_only', true);
+check($convLocal->localModelsOnly() && ChatMemory::activeFor($convLocal, $LOCAL_MODEL),
+    'private chat with Local models only (pinned local): active');
 
 // ==========================================================================
 section('ChatControls: memory_access validates and seeds');

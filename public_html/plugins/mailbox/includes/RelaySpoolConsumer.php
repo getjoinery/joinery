@@ -13,7 +13,7 @@
  *        - key_kind=transport (Standard/Private): open the blob with the ambient
  *          transport secret and run today's store ingest (no re-forwarding — the
  *          relay already forwarded forward-mode aliases).
- *        - key_kind=user (Fortress): store a pending-parse row with the sealed
+ *        - key_kind=user (Seal at the relay): store a pending-parse row with the sealed
  *          blob; DeferredIngest parses it at the next unlock.
  *   3. Acks the entries it durably stored (POST /relay/spool/ack) — the
  *      delete-after-store IS the ack. A crash between store and ack just
@@ -27,6 +27,7 @@
  * pinned to the relay's identity, and the relay scopes every path to this
  * tenant's own spool: ids only, no paths, no root.
  *
+ * @version 1.13.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.13 - a relay row without an identity pin is an ERROR, not a skip: its mail
  *                 is accumulating on a machine this server cannot reach
  * @version 1.12 - the ssh era is over: the API is the only pull path
@@ -159,7 +160,7 @@ class RelaySpoolConsumer {
 					if ($outcome === 'stored')  { $stored++; }
 					if ($outcome === 'pending') { $pending++; }
 					// 'hold' is recoverable mail we deliberately leave on the relay
-					// (domain disabled/unconfigured, or Fortress owner not yet
+					// (domain disabled/unconfigured, or relay-sealed mail's owner not yet
 					// resolvable) — do NOT ack it, so a later pull stores it once the
 					// domain returns or the owner resolves. It is NOT an error, so it
 					// does not inflate the error count or log per pass; the aggregate
@@ -184,7 +185,7 @@ class RelaySpoolConsumer {
 				// One aggregate line per pass — never per-blob (the pull runs every
 				// cron pass and held blobs persist across passes).
 				error_log('RelaySpoolConsumer: ' . $held . ' blob(s) HELD on the relay '
-					. '(domain disabled/unconfigured, Fortress owner unresolved, or a protected '
+					. '(domain disabled/unconfigured, owner of relay-sealed mail unresolved, or a protected '
 					. 'mailbox with no key to seal to) — recoverable; the Setup tab names a '
 					. 'sealing mailbox that needs repair.');
 			}
@@ -213,7 +214,7 @@ class RelaySpoolConsumer {
 	 *   'unroutable' — genuinely undeliverable (no/malformed recipient) → ack-drop
 	 *                  with a loud log;
 	 *   'hold'       — recoverable mail whose domain is disabled/unconfigured or
-	 *                  whose Fortress owner is not yet resolvable → do NOT ack,
+	 *                  whose relay-sealed mail's owner is not yet resolvable → do NOT ack,
 	 *                  leave on the relay for a later pull (Fixes 6/7);
 	 *   'aged_out'   — a held blob past the grace window → ack-drop with a loud log.
 	 * Throws only on a real failure (so the caller leaves it un-acked to retry).
@@ -341,7 +342,7 @@ class RelaySpoolConsumer {
 				// vault lets a later pull resolve the owner and store it correctly;
 				// otherwise it ages out loudly rather than sitting invisibly stuck.
 				return $this->holdOrAgeOut($meta, $spool_id,
-					'Fortress blob for ' . $recipient . ' has no resolvable owner (no single grantee and no vault matches the seal key)');
+					'relay-sealed blob for ' . $recipient . ' has no resolvable owner (no single grantee and no vault matches the seal key)');
 			}
 			$result = $this->router->storeRelayPending($meta, $sealed_raw, $domain, $alias,
 				intval($owner_id), $this->relayAuthservId());
@@ -413,7 +414,7 @@ class RelaySpoolConsumer {
 
 	/**
 	 * The user whose vault public key the blob was sealed to (from .meta), or
-	 * null. Fallback owner resolution for Fortress blobs whose alias grants
+	 * null. Fallback owner resolution for relay-sealed blobs whose alias grants
 	 * changed between seal and pull.
 	 */
 	private function ownerByPublicKey(string $public_key): ?int {

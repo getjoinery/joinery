@@ -22,7 +22,7 @@
  * supplied on every call.
  *
  * A step-up is also a no-op for an account with no second factor, which is not
- * an oversight: 2FA is optional below Fortress, and a gate that cannot be
+ * an oversight: 2FA is optional unless an enrollment gate requires it, and a gate that cannot be
  * satisfied would lock such an account out of its own settings. Enrollment
  * rules, not this gate, decide whether a factor must exist.
  *
@@ -100,8 +100,6 @@ check(!$session->user_has_second_factor($plain),
 	'an account with no factor holds no second factor');
 check($session->user_has_second_factor($totp_user),
 	'an account with TOTP holds a second factor');
-check($session->user_has_independent_second_factor($totp_user),
-	'TOTP counts as a factor independent of any single passkey');
 check(!$session->user_has_second_factor(null),
 	'a null user holds no second factor (an anonymous visitor cannot step up)');
 

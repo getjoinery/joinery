@@ -16,7 +16,7 @@
  * identity pin, the alias-map sync bookkeeping the health checks read, the last
  * health answer, and the AMBIENT TRANSPORT KEYPAIR:
  *
- *   - Fortress mail is sealed at the relay to the owner's own vault public key -
+ *   - relay-sealed mail is sealed at the relay to the owner's own vault public key -
  *     only a session opens it.
  *   - Standard/Private mail is sealed at the relay to this transport keypair,
  *     whose secret Joinery holds ambiently (sealed at rest under SecretBox). The
@@ -35,6 +35,7 @@
  * coordinates the fleet service returned at enrollment. Either way this row
  * remains the deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.7.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.7 - mrl_pickup_alarm_time and pickupTransition(): the reconcile pass announces
  *                once when mail stops being picked up off the relay, and once when it resumes
  * @version 1.6 - the ssh era is over: the tunnel and ssh columns and helpers are gone; a
@@ -124,7 +125,7 @@ class MailboxRelay extends SystemBase {
 		// that reaches the relay, so a relay that stays broken is not re-announced.
 		'mrl_pickup_alarm_time'  => array('type'=>'timestamp(6)'),
 		// Held blobs from the last pull: recoverable mail left on the relay
-		// because its domain is disabled/unconfigured or its Fortress owner is
+		// because its domain is disabled/unconfigured or its relay-sealed mail's owner is
 		// not yet resolvable (specs/mailbox_data_loss_fixes.md, Fixes 6/7). A
 		// live gauge — held blobs are re-counted each pull until the domain
 		// returns / the owner resolves, or they age out past the grace window.

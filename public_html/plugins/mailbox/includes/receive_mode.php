@@ -9,8 +9,8 @@
  * IT IS A SETTING, NOT A GATE (specs/mailbox_relay_surface_simplification.md).
  * An undecided deployment receives directly and works; the choice lives in the
  * Setup tab's Advanced section and can be changed at any time. A relay is only
- * load-bearing at the Fortress security level, so demanding the answer before
- * any domain has a level asked the operator to decide about infrastructure they
+ * load-bearing under the Seal at the relay add-on, so demanding the answer
+ * before any domain has asked for it asked the operator to decide about infrastructure they
  * may never need, in front of every mailbox page.
  *
  * The choice belongs to the admin: a relay provisioned as part of setup does
@@ -20,6 +20,7 @@
  *      actually doing (relay row => 'relay', else 'direct').
  *   3. Otherwise '' — undecided, which every consumer treats as direct.
  *
+ * @version 1.6 - the relay row names the Seal at the relay add-on
  * @version 1.5 - IMAP-source domains do not decide the receive topology
  * @version 1.4 - a settled deployment reads its state in a sentence; the
  *                comparison is a decision aid and waits behind a disclosure
@@ -207,9 +208,10 @@ function mailbox_receive_mode_comparison(): string {
 		array('Your server\'s address',
 			'Public. DNS names this server and the internet connects to it directly.',
 			'Hidden. DNS names the relay; mail is passed along over a private tunnel.'),
-		array('Fortress email security',
+		array('Seal at the relay',
 			'Not available.',
-			'Required — the Fortress security level needs a relay in front.'),
+			'Available — a Private domain can have arriving mail sealed at the relay, so a hacked '
+				. 'server can\'t read mail that arrives while you\'re away.'),
 	);
 
 	$h = '<div class="iem-receive-gate" style="max-width:900px;">'

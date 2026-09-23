@@ -17,7 +17,7 @@ const (
 )
 
 // keyKind tells the pull consumer whether the blob was sealed to a single
-// user's vault key (Fortress — open only in-session, store pending-parse) or to
+// user's vault key (Seal at the relay — open only in-session, store pending-parse) or to
 // the ambient transport key Joinery holds (Standard/Private — open at pull and
 // run today's ingest). The sealer copies it verbatim into the .meta sidecar.
 const (
@@ -82,7 +82,7 @@ type tenantConfig struct {
 	FragmentVersion int64 `json:"fragment_version"`
 
 	// --- Joinery Direct (docs/joinery_direct.md) --------------------------
-	// At Fortress the relay IS the Direct endpoint, because publishing an SRV
+	// On a relay-fronted deployment the relay IS the Direct endpoint, because publishing an SRV
 	// record pointing at the origin box would advertise in public DNS exactly
 	// the address the relay exists to conceal. Everything the relay needs to
 	// serve that endpoint arrives here as DATA, so the relay's code stays

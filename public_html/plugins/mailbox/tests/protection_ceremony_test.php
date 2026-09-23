@@ -7,12 +7,13 @@
  */
 /**
  * Protection ceremony (specs/mailbox_protection_ceremony.md): the guided path
- * to Private/Fortress.
+ * to Private and its add-ons.
  *
  *  - Row evaluation matrix (pure — hand-built facts): single-reader rows with
  *    inline remove actions, holderless mailboxes, holder-vault rows (self vs
  *    named-other), the passkeys kill-switch blocker, recommended PRF rows,
- *    Fortress relay/DNS rows, required_ok gating.
+ *    the add-ons' relay / next-step rows and the absence of any second-factor
+ *    row, required_ok gating.
  *  - Mutation-point refusal: grant-list changes on a protected domain refuse
  *    a second member or none at all.
  *  - Backlog sealing: a raise converges earlier plaintext rows — sealed to the
@@ -21,7 +22,9 @@
  *
  * Run: php tests/run.php db --filter=protection_ceremony
  *
- * @version 1.2
+ * @version 1.4
+ * @changelog 1.4 - neither add-on raises a second-factor row
+ * @changelog 1.3 - the relay rows belong to the add-ons, not a level
  * @changelog 1.2 - a member with no vault is refused too: the vault is the key
  *   the mail seals to, so "has a member" was never the whole rule
  */
@@ -113,69 +116,56 @@ try {
 	check(mailbox_protection_required_ok($rows), 'a recommended row never blocks the raise');
 
 	// -----------------------------------------------------------------------
-	section('row evaluation: fortress');
+	section('row evaluation: the Seal at the relay add-on');
 
 	$facts_ok = pc_facts(array(pc_alias(1, array(pc_holder(ACTING)))), true, false);
 	$rows = mailbox_protection_rows($facts_ok, InboundEmailDomain::LEVEL_PRIVATE, ACTING);
-	check(pc_row($rows, 'relay_fronted') === null, 'private target never asks for a relay');
+	check(pc_row($rows, 'relay_fronted') === null, 'plain Private never asks for a relay');
 
-	$rows = mailbox_protection_rows($facts_ok, InboundEmailDomain::LEVEL_FORTRESS, ACTING);
+	$rows = mailbox_protection_rows($facts_ok, InboundEmailDomain::LEVEL_PRIVATE, ACTING,
+		array('relay_seal' => true));
 	check(pc_row($rows, 'relay_fronted') !== null && pc_row($rows, 'relay_fronted')['status'] === 'fail',
-		'fortress without a relay is a required failure');
-	check(!mailbox_protection_required_ok($rows), 'no relay blocks a fortress raise');
+		'relay sealing without a relay is a required failure');
+	check(!mailbox_protection_required_ok($rows), 'no relay blocks switching relay sealing on');
 
 	$rows = mailbox_protection_rows(pc_facts(array(pc_alias(1, array(pc_holder(ACTING)))), true, true),
-		InboundEmailDomain::LEVEL_FORTRESS, ACTING);
+		InboundEmailDomain::LEVEL_PRIVATE, ACTING, array('relay_seal' => true));
 	check(pc_row($rows, 'relay_fronted')['status'] === 'pass', 'a fronted deployment passes the relay row');
-	check(pc_row($rows, 'fortress_dns') !== null && pc_row($rows, 'fortress_dns')['status'] === 'info',
-		'the DNS/protect stage is announced as the next step, not a blocker');
-	check(mailbox_protection_required_ok($rows), 'fronted + clean facts clears a fortress raise');
+	check(mailbox_protection_required_ok($rows), 'fronted + clean facts clears relay sealing');
+
+	$addon_only = mailbox_protection_addon_rows($facts_ok, array('relay_seal' => true));
+	check(count($addon_only) === 1 && $addon_only[0]['id'] === 'relay_fronted',
+		'the add-on rows are only the add-on\'s own, never the level\'s');
 
 	// -----------------------------------------------------------------------
-	// Owning a Fortress domain locks the account out of every page but
-	// /profile/security until a second factor exists, and the raise seals the
-	// signing key to whoever performs it — so the requirement has to block the
-	// raise rather than ambush the operator immediately after it.
-	section('row evaluation: the acting user needs a second factor for fortress');
+	section('row evaluation: the Only send while I\'m signed in add-on');
+
+	$rows = mailbox_protection_rows($facts_ok, InboundEmailDomain::LEVEL_PRIVATE, ACTING,
+		array('send_lock' => true));
+	check(pc_row($rows, 'relay_fronted') === null, 'the sending lock is independent of the relay');
+	check(pc_row($rows, 'send_lock_next') !== null && pc_row($rows, 'send_lock_next')['status'] === 'info',
+		'the DNS/protect stage is announced as the next step, not a blocker');
+	check(mailbox_protection_required_ok($rows), 'clean facts clear the sending lock');
+
+	// -----------------------------------------------------------------------
+	// Neither add-on asks anything of the person switching it on beyond what
+	// the domain itself needs: the rows are about the domain and its readers.
+	section('row evaluation: neither add-on asks for a second factor');
 
 	$facts_2fa = pc_facts(array(pc_alias(1, array(pc_holder(ACTING)))), true, true);
 
-	$rows = mailbox_protection_rows($facts_2fa, InboundEmailDomain::LEVEL_FORTRESS, ACTING);
-	check(pc_row($rows, 'second_factor_self') === null,
-		'facts that never mention the acting second factor raise no row');
-	check(mailbox_protection_required_ok($rows), 'and do not block the raise');
-
-	$rows = mailbox_protection_rows($facts_2fa + array('acting_has_second_factor' => true),
-		InboundEmailDomain::LEVEL_FORTRESS, ACTING);
-	check(pc_row($rows, 'second_factor_self') === null, 'an enrolled second factor raises no row');
-	check(mailbox_protection_required_ok($rows), 'and clears the fortress raise');
-
-	$rows = mailbox_protection_rows($facts_2fa + array('acting_has_second_factor' => false),
-		InboundEmailDomain::LEVEL_FORTRESS, ACTING);
-	$sf = pc_row($rows, 'second_factor_self');
-	check($sf !== null && $sf['status'] === 'fail' && $sf['severity'] === 'required',
-		'a missing second factor is a required failure');
-	check(!mailbox_protection_required_ok($rows), 'and blocks the fortress raise');
-	check($sf !== null && isset($sf['actions'][0]['type'])
-		&& $sf['actions'][0]['type'] === 'second_factor_self',
-		'the row carries the enrollment action');
-
-	$rows = mailbox_protection_rows($facts_2fa + array('acting_has_second_factor' => false),
-		InboundEmailDomain::LEVEL_PRIVATE, ACTING);
-	check(pc_row($rows, 'second_factor_self') === null,
-		'private never asks for it — only fortress makes you the signing owner');
-
-	// The rendered row must offer the way out, or the block is a dead end.
-	// An unsaved domain is enough — render only reads it for the backlog wording.
-	$sf_dom = new InboundEmailDomain(NULL);
-	$sf_dom->set('ied_domain', 'pc-2fa.example');
-	$sf_html = mailbox_protection_render(
-		mailbox_protection_rows($facts_2fa + array('acting_has_second_factor' => false),
-			InboundEmailDomain::LEVEL_FORTRESS, ACTING),
-		$sf_dom, array('editor_url' => '/x', 'alias_url' => '/y'),
-		InboundEmailDomain::LEVEL_FORTRESS);
-	check(strpos($sf_html, 'Add a second factor') !== false, 'the rendered row links to enrollment');
-	check(strpos($sf_html, '/profile/security') !== false, 'and points at the security page');
+	foreach (array('relay_seal', 'send_lock') as $addon) {
+		$rows = mailbox_protection_rows($facts_2fa, InboundEmailDomain::LEVEL_PRIVATE, ACTING,
+			array($addon => true));
+		$factor_rows = array_filter($rows, function ($r) {
+			return stripos($r['label'] . ' ' . $r['summary'], 'second factor') !== false;
+		});
+		check(count($factor_rows) === 0 && mailbox_protection_required_ok($rows),
+			$addon . ': no second-factor row, and clean facts clear the switch');
+		check(count(array_filter(mailbox_protection_addon_rows($facts_2fa, array($addon => true)),
+				function ($r) { return stripos($r['label'] . ' ' . $r['summary'], 'second factor') !== false; })) === 0,
+			$addon . ': the add-on\'s own rows carry no second-factor row either');
+	}
 
 	// -----------------------------------------------------------------------
 	section('mutation-point refusal: grants on a protected domain');

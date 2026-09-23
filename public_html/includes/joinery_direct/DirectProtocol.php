@@ -15,7 +15,7 @@
  *     recipient's key arrives in the `accept`.
  *
  * Hashing the ciphertext rather than the plaintext is deliberate: a receiver can
- * then verify without unsealing, so even a locked Fortress box rejects a
+ * then verify without unsealing, so even a box with a locked vault rejects a
  * substituted part at receive instead of discovering it at unlock — which is
  * exactly the case that matters, because the relay forwarding those bytes is the
  * untrusted machine.
@@ -26,6 +26,7 @@
  * signature, so version skew across a federation converges on the caller's
  * fallback and never breaks anything.
  *
+ * @version 1.0.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.0
  */
 

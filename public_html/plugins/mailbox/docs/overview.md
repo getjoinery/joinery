@@ -53,13 +53,13 @@ hidden?
 
 **It is a setting, not a gate.** An undecided deployment receives directly and
 works; the choice lives in the Setup tab's Advanced section and can be changed at
-any time. A relay is only load-bearing at the Fortress security level, so the
-answer is asked for where it becomes true — raising a domain to Fortress — rather
+any time. A relay is only load-bearing under the **Seal at the relay** add-on, so
+the answer is asked for where it becomes true — switching that add-on on — rather
 than in front of every mailbox page before any domain has a level.
 
 The control is a brief pros/cons comparison (setup effort, whether the server's
-address is public or hidden, and that a relay is **required for the Fortress
-email security level**) with one choose button per column. The choice belongs to
+address is public or hidden, and that a relay is what makes **Seal at the relay**
+available) with one choose button per column. The choice belongs to
 the admin: a relay provisioned as part of setup does not decide it.
 
 `mailbox_receive_mode()` (`includes/receive_mode.php`) resolves the mode:
@@ -764,7 +764,7 @@ preserves attachments and MIME structure exactly like the alias forward.
 
 ### Forwarding off a protected domain
 
-A domain at Private or Fortress promises its mail cannot be read without the
+A domain at Private promises its mail cannot be read without the
 owner's key. A forwarding filter breaks that promise by design: the copy leaves
 over SMTP in clear text, permanently out of the vault's reach. That is allowed,
 but only as an informed choice.
@@ -777,7 +777,7 @@ fresh consent rather than inheriting the old one.
 
 **Raising the domain's security level revokes every acknowledgment on it.**
 Agreeing to send a Standard domain's mail out in clear text is not agreement for
-what Fortress promises. Affected filters keep matching, labelling, starring and
+what Private promises. Affected filters keep matching, labelling, starring and
 filing — only the forward stops, and the address stays in the box so
 re-acknowledging is one tick. Each suppressed forward is logged, naming the
 filter and the address.
@@ -873,7 +873,7 @@ Three signals feed it, tiered by cost, assembled in
 
 | Tier | Signal | Cost |
 |---|---|---|
-| Free | Fortress domain whose protect ceremony never ran; protected domain with no sealed signing key; domain switched off | Already on the loaded row |
+| Free | domain that asked for the sending lock and never finished the protect ceremony; protected domain with no sealed signing key; domain switched off | Already on the loaded row |
 | One query | No mail has ever arrived at this address | Two lookups bounded by the mailboxes on screen |
 | Persisted | A required DNS record was missing when last checked | A column read |
 
@@ -965,7 +965,7 @@ agent without the platform's untrusted-input markers (see
 
 **Settings:**
 - `mailbox_max_per_window` (default `0`, which disables the cap) — max non-deleted stored messages per domain inside the forwarding rate-limit window. A store above the cap is deferred, not dropped: the delivery is temp-failed (Postfix retry / webhook 503) so the sender redelivers once the window rolls, and it is logged once as `store_capped`.
-- `mailbox_relay_orphan_grace_days` (default `30`) — how long the relay pull *holds* recoverable-but-not-yet-storable mail on the relay before aging it out. A blob whose domain is disabled/unconfigured, or whose Fortress owner is not yet resolvable, is held (not deleted) so re-enabling the domain or restoring the grant lets the next pull store it; past the grace window it is dropped with a loud log. The held count surfaces on the relay health as "No mail held on relay".
+- `mailbox_relay_orphan_grace_days` (default `30`) — how long the relay pull *holds* recoverable-but-not-yet-storable mail on the relay before aging it out. A blob whose domain is disabled/unconfigured, or whose relay-sealed mail has no resolvable owner yet, is held (not deleted) so re-enabling the domain or restoring the grant lets the next pull store it; past the grace window it is dropped with a loud log. The held count surfaces on the relay health as "No mail held on relay".
 
 A `store`-only deployment does not need the outbound forwarding relay
 provisioner — the `outbound_forwarding_relay` check may legitimately
@@ -1233,8 +1233,9 @@ row is recoverable).
 
 For **hosted mail** that identity is the domain: MX, SPF, DMARC and DKIM are
 domain-level facts, so the level lives on the domain (`ied_security_level`) and every
-mailbox under it inherits. It is chosen on the domain editor as a required three-card
-picker (outcome language only, default **Standard**).
+mailbox under it inherits. It is chosen on the domain editor as a required two-card
+picker, **Standard** or **Private** (outcome language only, default **Standard**), with
+an **Extra protection** block of add-ons under Private (below).
 
 For **pulled-in mail** — a mailbox collected over IMAP — that identity is the mailbox.
 `gmail.com` is not an identity this deployment holds; it is somebody else's domain that
@@ -1242,9 +1243,9 @@ we hold one account on, and two people pulling their own Gmail into one site hav
 nothing in common to share a setting with. So a pulled-in mailbox carries its own level
 (`iea_security_level`), chosen in the mailbox editor, and its provider domain carries
 none at all: it is forced Standard, its picker is hidden, and the Accounts tree shows no
-badge on it. **Fortress is domain-only** — it is an identity guarantee (relay-side
-sealing, inverted DNS, in-app signing), and none of it exists for mail on somebody
-else's server; a pulled-in mailbox offers Standard and Private.
+badge on it. **The add-ons are domain-only** — they are identity and arrival
+guarantees (relay-side sealing, inverted DNS, in-app signing), and none of them exists
+for mail on somebody else's server; a pulled-in mailbox offers Standard and Private.
 
 This is deliberately *not* a general per-mailbox override. A hosted domain keeps exactly
 one answer, because its DNS-shaped guarantees cannot vary per mailbox.
@@ -1260,15 +1261,58 @@ lowering a pulled-in mailbox runs the checklist, the server-side re-verification
 receipt card and the backlog sealing that a domain does, scoped to that one mailbox.
 There is no second ceremony.
 
-| | **Standard** | **Private** | **Fortress** |
+| | **Standard** | **Private** |
+|---|---|---|
+| Meaning | The server manages this mailbox for you | Only you can read stored mail |
+| Stored bodies/subjects/attachments/search index | plaintext | sealed at rest |
+| Search | SQL | in-window FTS |
+| Best for | club signups, newsletters | mail worth keeping private, automation still runs |
+
+**Extra protection — the add-ons on a Private domain**
+(specs/protection_levels_platform.md § Add-ons). The domain editor renders the level
+cards and the add-on switches through `ProtectionLevelPicker` (mail flavour, add-on
+keys `relay_seals_to_owner` and `send_lock`, submitted as
+`ied_security_level_relay_seals_to_owner` / `ied_security_level_send_lock`), so the
+card and add-on copy is the catalog's; the editor adds only mail-specific notes (where
+the sending lock leads, and a link to set up a relay when none exists — the relay
+switch is disabled until one does). Each add-on is inert below Private: a save at
+Standard ignores the switches and leaves the stored flags as they are, so raising
+again restores them. Lowering to Standard is refused while the sending lock is
+enforcing (`ied_is_protected_identity`) — switching the lock off comes first, because
+it has its own DNS consequences.
+
+| Add-on | Flag | Protects | Costs |
 |---|---|---|---|
-| Meaning | The server manages this mailbox for you | Only you can read stored mail | Even a fully hacked server can't read new mail or send as you |
-| Stored bodies/subjects/attachments/search index | plaintext | sealed at rest | sealed at rest |
-| Fresh inbound sealed before reaching Joinery (relay) | — | — | ✓ (pending-parse until unlock) |
-| Outbound signing | ambient (opendkim) | ambient | in-app, session-gated |
-| Automated sends (no login) | ✓ | ✓ | ✗ — sending is session-gated |
-| Search | SQL | in-window FTS | in-window FTS |
-| Best for | club signups, newsletters | mail worth keeping private, automation still runs | the address that *is* you |
+| **Seal at the relay** | `ied_relay_seals_to_owner` | A hacked server can't read mail that arrives while you're away — the relay seals fresh mail to the owner's vault key (pending-parse until unlock). Offered once a relay fronts the deployment. | New mail waits to be processed until you sign in. |
+| **Only send while I'm signed in** | `ied_send_lock_requested` (asked for); `ied_is_protected_identity` (finished) | Nobody can send mail as you, even from a hacked server — in-app, session-gated signing with strict DMARC. | This domain can only send while you're signed in; automated mail moves to a Standard subdomain. |
+
+Either add-on **hardens** its holders (`InboundEmailDomain::userHasHardenedDomain()` —
+a domain they own, or the domain of a live mailbox they hold a grant on): the unlock
+window is capped at 2 hours idle / 24 hours absolute
+(`VaultUnlock::HARDENED_*_CAP_SECONDS`, registered by the plugin bootstrap's window-cap
+provider). Neither add-on asks for a second factor. Plain Private keeps the 7-day
+absolute cap. Wherever the level is shown — the reader's level chip, the Accounts and
+mailbox badges (`InboundEmailDomain::addon_labels()`, `protection_addons` on
+`mailbox/mailboxes`) — the add-ons in force show with it, by their catalog names, with
+" (unfinished)" on a sending lock asked for but not finished. An enforcing sending lock
+is labelled at any level, so the labels and `is_hardened()` always agree.
+
+The key-owner candidates for the sending lock (`mailbox_protect_candidate_owners()`)
+are the domain's stored owner and every mailbox holder. A key is sealed without asking
+only when the acting user is the sole candidate — the domain has no stored owner or is
+already theirs — so a stored owner is never replaced by a guess. Making the key
+(`protect_generate`) and switching the lock on (`protect_activate`) need a Private
+domain; lifting it works at any level. The signing-stage DNS records (the sealed key's
+DKIM record and the forwarding subdomain) are prescribed only while the lock is asked
+for or on — a cancelled request's stored key publishes nothing.
+
+`LEVEL_FORTRESS` stays defined and reserved for end-to-end mail
+(specs/DEFERRED_client_custody_mail.md); `set_security_level()` refuses it. A row still
+holding it from before mailbox migration `ied_003_private_with_addons` reads as Private
+with both add-ons on (`is_unconverted()`), and the raw SQL sealing predicates keep
+matching it until that migration has run. The first write to such a row stores that
+conversion before applying the caller's change, so a flag the caller clears stays
+cleared.
 
 **Where the level switches behavior:**
 
@@ -1283,23 +1327,24 @@ There is no second ceremony.
   `MailboxSender::sealTargetFor()` — used by the send and by the draft autosave, so
   a draft and the message it becomes can never disagree about being sealed.
 - **Relay seal target** — `RelayMapExporter::sealTargetForAlias()` seals to the owner's
-  vault key (`key_kind=user`, producing Fortress pending-parse rows) **only** for a
-  Fortress domain; every other posture seals to the ambient transport key, which
-  Joinery opens at pull and re-seals per the domain's own level.
+  vault key (`key_kind=user`, producing pending-parse rows) **only** for a domain with
+  the Seal at the relay add-on in force (`relay_seals_to_owner()`); every other domain
+  seals to the ambient transport key, which Joinery opens at pull and re-seals per the
+  domain's own level.
 - **Setup/health DNS shape** — `InboundEmailSetupCheck` expects the inverted protected
   shape (SPF without the box, `p=reject; aspf=s; adkim=s`, DKIM matching the sealed
   key) for a domain whose `ied_is_protected_identity` flag is set, and for that
   domain only. The **enforcement flag is the branching key, not the security
   level**: the shape instructs the world to reject anything the sealed key did not
   sign, and `MailboxDkimSigner` signs with that key only once the flag is on, so
-  prescribing it at the level would hand a Fortress domain without send protection
-  a record set that rejects its own outgoing mail. The ceremony asks for the shape
+  prescribing it when the sending lock is merely asked for would hand the domain a
+  record set that rejects its own outgoing mail. The ceremony asks for the shape
   explicitly while it runs (`dnsPlan($domain, true)`), which is the one exception.
 
-**Raising a level runs the protection ceremony**
+**Raising a level or switching an add-on on runs the protection ceremony**
 (specs/mailbox_protection_ceremony.md, `includes/protection_ceremony.php`).
-Choosing a card above the current level reveals a prerequisite checklist on the
-domain editor — every row a verdict with an in-place fix — and the save is
+Choosing Private above the current level, or ticking an add-on, reveals a
+prerequisite checklist beside it on the domain editor — every row a verdict with an in-place fix — and the save is
 refused server-side until every required row passes (the button state is a
 convenience, `mailbox_protection_rows()` re-verification at save is the
 enforcement):
@@ -1315,10 +1360,14 @@ enforcement):
 - **Unlock by touch** (recommended) — a PRF-capable passkey per holder.
 - With the `passkeys_enabled` kill switch off, one required blocker row says
   so — vault setup itself runs through a PRF passkey.
-- **Fortress adds** a relay-fronted required row and an info row announcing
-  the DNS/protect stage; activation saves the level (relay-side sealing and
-  the inverted-DNS prescriptions start immediately) and routes into the
-  verify-gated protect ceremony exactly as before.
+- **Seal at the relay** adds a relay-fronted required row;
+  **Only send while I'm signed in** adds an info row announcing the DNS/protect
+  stage. `mailbox_protection_addon_rows()` gives each add-on's rows on their own
+  (the editor renders them beside the switch); `mailbox_protection_rows($facts,
+  $target, $acting, $addons)` folds them into the level's list for the save-time
+  gate. Switching the sending lock on records the request, seals the key when the
+  owner is unambiguous, and routes into the verify-gated protect ceremony on the
+  Setup tab. Any change of level or add-on asks for a recent second factor.
 
 **A raise lands on the receipt card** (specs/mailbox_raise_receipt.md,
 `mailbox_protection_receipt_render()`), the same surface that guided the raise
@@ -1333,8 +1382,8 @@ drives it), counting the progress row down until the backlog is empty, then
 resolves it into the sealed-count fact. A batch that seals nothing while rows
 remain (a holder's vault deleted after the raise) stops the loop with a red
 row pointing at the Setup tab; without JS a noscript form runs the same
-batches one page load at a time. A Fortress raise before outbound protection
-is activated renders the card as a handoff — the title stays honest
+batches one page load at a time. A raise on a domain that asked for the sending
+lock, before send protection is on, renders the card as a handoff — the title stays honest
 ("Earlier messages sealed — one step left") and the button continues into the
 protect ceremony. The Setup tab carries a per-domain **Mail sealed at rest**
 row, which separates the two states that wear the same not-sealed-yet flag.
@@ -1360,8 +1409,8 @@ action; the lowering save's vault-open gate guarantees the acting user's own
 rows can converge immediately). Rows sealed to other holders wait for those
 holders: the reader mount quietly runs the same batches for any signed-in
 user with sealed rows on non-sealing domains, so each holder's next unlocked
-visit finishes their share. Pending-parse rows (a lowered Fortress domain's
-relay blobs) drain through `DeferredIngest` first and unseal on a later pass.
+visit finishes their share. Pending-parse rows (a lowered relay-sealed domain's
+blobs) drain through `DeferredIngest` first and unseal on a later pass.
 `unsealAndPersistContent()` is recovery-safe: plaintext writes back
 per-file/per-flag and the key wrapping clears last, so an interrupted pass
 always leaves a still-sealed row for the next pass, never a stranded
@@ -1424,17 +1473,17 @@ so it is seen well inside the shortest sender retry window rather than after it.
 
 There is no sweep and no janitor: with the invariant enforced there is nothing to sweep.
 
-**Automated mail on a Fortress domain** uses the subdomain pattern: put the automated
-senders on `mail.<domain>` at Standard. Under Fortress's strict DMARC alignment the
+**Automated mail on a domain with send protection** uses the subdomain pattern: put the
+automated senders on `mail.<domain>` at Standard. Under the strict DMARC alignment the
 Standard subdomain's keys cannot sign as the bare domain, so the split is safe by
 construction.
 
 ### The locked-state surface contract
 
-Logged in but locked is the state a Private/Fortress user sees most often, so it is
+Logged in but locked is the state a Private user sees most often, so it is
 defined once for every surface: **every surface shows cleartext metadata; every content
 action becomes a one-tap unlock prompt, and the original action resumes after unlock
-without re-navigation.** A sealed or Fortress-pending row renders the neutral
+without re-navigation.** A sealed or relay-sealed pending row renders the neutral
 placeholder `Sealed message` (`MailboxService::SEALED_PLACEHOLDER`) — never a visible
 third state — while threading, unread, labels, folders, times, and sizes render
 normally.
@@ -1448,8 +1497,9 @@ normally.
   events, so a lock or unlock from the chip re-seals or reveals content in place.
 - **Native `/api/v1`** — `mailbox/thread_list`, `mailbox/thread`, and `mailbox/mailboxes`
   return metadata plus `locked` (per-mailbox on the switcher, with each mailbox's
-  `security_level`); `mailbox/send` returns `locked: true` instead of sending when a
-  Fortress compose has no open window (`MailboxLockedException`); `mailbox/thread_action`
+  `security_level` and `protection_addons`); `mailbox/send` returns `locked: true`
+  instead of sending when a compose from a domain with send protection on has no open
+  window (`MailboxLockedException`); `mailbox/thread_action`
   (mark/star/delete) is cleartext metadata and keeps working while locked.
 
 ### AI processing
@@ -1464,13 +1514,13 @@ knows the result set is partial. The LLM provider is a disclosure, not a level g
 
 Push content is set by when plaintext legally exists: Standard = full (sender/subject/
 snippet); Private = sender + subject (generated at the ingest moment, pre-seal), with an
-optional per-mailbox generic-notifications toggle; Fortress = generic by construction
-("New mail to `user@domain`"). Native offline cache defaults on for Standard/Private and
-off for Fortress. (These ride the native app + push packages.)
+optional per-mailbox generic-notifications toggle; Seal at the relay = generic by
+construction ("New mail to `user@domain`"). Native offline cache defaults on for
+Standard/Private and off under Seal at the relay. (These ride the native app + push packages.)
 
 ## Encryption at rest
 
-A mailbox seals when its **posture** says so — Private or Fortress, resolved per
+A mailbox seals when its **posture** says so — Private, resolved per
 mailbox — *and* its **single owner** (the alias's one grantee — a shared or
 catch-all mailbox is never sealed) holds a Sealed Vault (`docs/sealed_vault.md`, the
 platform's per-user X25519 key hierarchy and unlock window). Mail is the vault's first
@@ -1746,7 +1796,7 @@ hand someone else's mail to a third party.
 
 Two consequences worth knowing. Only the domain owner can read unmatched mail —
 other all-access admins still see the rows but cannot decrypt them. And a domain
-cannot sit at Private or Fortress without an owner who holds a vault: the
+cannot sit at Private without an owner who holds a vault: the
 protection ceremony makes it a required prerequisite, with an inline control for
 the acting admin to claim ownership.
 
@@ -1757,7 +1807,7 @@ mail that is encrypted at rest unless the owner is signed in with their vault
 open — and even then, only if the domain has been set to allow it.
 
 `ied_ai_processing_enabled` is that switch. It is off by default, appears on the
-domain form only for Private and Fortress domains (at Standard the server
+domain form only for Private domains (at Standard the server
 already reads the mail, so there is nothing to consent to), and turning it on
 requires a recent identity confirmation. Turning it off never does — withdrawing
 consent must not be harder than giving it.
@@ -1784,7 +1834,7 @@ after the owner opens their mail, never before they arrive.
 
 ### Parsing the backlog
 
-Fortress mail that arrived while the owner was logged out is stored unparsed.
+Mail sealed at the relay that arrived while the owner was logged out is stored unparsed.
 `DeferredIngest` turns it into readable fields, and is registered as a
 [deferred-work consumer](../../../docs/sealed_vault.md#deferred-work-in-the-window),
 so the backlog drains wherever the owner is on the site with their vault open —
@@ -1859,31 +1909,32 @@ forwarding subdomain included — is published. One assembly
 (`InboundEmailSetupCheck::protectedShapeResults()`) feeds both the Setup tab and
 the ceremony's pre-activation verify, so they can never disagree.
 
-**Fortress is a two-sided promise, and send protection is the second side.**
-Nobody can read your mail (*arrival sealing*), and nobody can send as you (*send
-protection*). Raising a domain to Fortress delivers the first half immediately
-and seals a DKIM key (`mailbox_protect_seal_new_key()`), defaulting
-`ied_forwarding_subdomain` to `fwd.<domain>`. **A Fortress domain without send
-protection is not finished** — it is one anyone can still impersonate — and both
-the raise receipt (*one step left*) and the `domain.send_protection` check row
-say so. That row is REQUIRED, so an unfinished domain reads `attention`.
+**Send protection is the *Only send while I'm signed in* add-on, and it has two
+states.** Asked for (`ied_send_lock_requested`) and finished
+(`ied_is_protected_identity`). A Private domain that never asked is finished as it
+is; nothing nags it. Switching the add-on on in the domain editor records the
+request and seals a DKIM key (`mailbox_protect_seal_new_key()`, when the owner is
+unambiguous), defaulting `ied_forwarding_subdomain` to `fwd.<domain>`. **A domain
+that asked and has not finished** is one anyone can still impersonate, and the raise
+receipt (*one step left*), the `domain.send_protection` check row and the Accounts
+hint (`send_lock_outstanding()`) all say so. That row is REQUIRED, so an unfinished
+lock reads `attention`. Switching the add-on off runs the one deactivation path,
+`mailbox_protect_lift()`, which clears both flags and takes the strict records down.
 
 Unfinished is a **transit** state, never a resting one. It cannot be made
-simultaneous with the raise — the switch needs published DNS and a vault unlock —
-so the interface declares the domain in progress rather than pretending either
-that it is done or that the remaining step is optional.
+simultaneous with the switch — finishing needs published DNS and a vault unlock —
+so the interface declares the lock in progress rather than pretending either that
+it is done or that the remaining step is optional.
 
-The step is not in the general setup path. It is the completion of the Fortress
-raise, and the raise is already the advanced, gated ceremony. The guided box
-carries a single *Finish Fortress* entry, gated on the relay being live and the
-domain's MX cut over — offering the sending half before mail arrives through the
-relay would ask an operator to finish what has not started — and it disappears
-the moment protection is on.
+The guided box carries a single *Finish Only send while I'm signed in* entry for a
+domain that asked, gated on the domain's MX being where it should be (and, with Seal
+at the relay on, on the relay being live) — offering the sending half before mail is
+arriving would ask an operator to finish what has not started — and it disappears the
+moment protection is on.
 
 The cost is real and is stated where the offer is made: every interactive send
 needs an unlock, and automated mail must move to a Standard subdomain. Those are
-reasons not to choose Fortress for a domain, not reasons to run Fortress
-half-on.
+reasons not to switch the add-on on, not reasons to leave it half-on.
 
 **Send protection has no page of its own — the Setup tab's Advanced section is
 its whole surface.** `includes/protect_identity.php` owns the state transitions
@@ -1918,7 +1969,7 @@ This is why `protectedShapeApplies()` branches on the enforcement flag: the flag
 means *signing*, and the strict shape is prescribed exactly once signing is live.
 
 **`domain.send_protection` reports the whole state in one row** — finished
-(PASS); not signing (FAIL, Fortress unfinished); signing without the strict
+(PASS); not signing (FAIL, the requested lock is unfinished); signing without the strict
 records (WARN, forgeries not rejected yet); and strict records without signing
 (FAIL), which is not a gap but an outage: the domain is rejecting its own mail.
 
@@ -1956,21 +2007,12 @@ changes no mail, so `generate` and `rotate` run without an unlock window.
 `activate` and `activate_rotation` require one: those decide what the rest of
 the world will accept as this domain.
 
-**A Fortress raise requires the acting user's own second factor.** Sealing the
-key makes them `ied_owner_usr_user_id`, and
-`SessionControl::must_enroll_2fa_for_fortress()` holds any owner of a Fortress
-domain on `/profile/security` until they have a factor independent of any single
-passkey. The ceremony carries that as a required row (`second_factor_self`,
-Fortress-only) fed by `mailbox_protection_facts($domain, $acting_user_id)`, so
-the raise is refused with an enrollment link rather than completing and
-stranding the operator. Callers that omit `$acting_user_id` omit the fact, and
-the row is skipped rather than failed.
-
 The **Setup tab is that ceremony's parent surface**. Its *Still to set up* box
-lists what a Private or Fortress domain cannot be complete without — the vault,
-at Fortress the relay, and once those are in place the *Finish Fortress* step —
+lists what a Private domain cannot be complete without — the vault, under Seal at
+the relay the relay, and once those are in place a requested sending lock's
+*Finish* step —
 and the ceremony page's breadcrumb and footer link return there. The box carries
-outstanding work only and does not render at all when there is none. Saving a domain at Fortress lands on
+outstanding work only and does not render at all when there is none. Switching the sending lock on lands on
 Setup focused on that domain, not on the ceremony. The ceremony keeps its own
 page rather than becoming a Setup card because it holds destructive actions
 (rotate, disable, re-generate) that do not belong on a diagnostics surface.
@@ -2061,8 +2103,8 @@ A relay is **a relay without a shell** (`provision_relay.sh`,
   relay API, every consumer reports it as such (`no_identity`), and the remedy
   is to create a new relay and delete the row.
 
-**It also serves Joinery Direct** for its tenants, from the same binary. At
-Fortress the relay has to: an SRV record pointing at the origin box would
+**It also serves Joinery Direct** for its tenants, from the same binary. On a
+relay-fronted deployment the relay has to: an SRV record pointing at the origin box would
 advertise the address the relay exists to conceal. It terminates the public
 endpoint on 443 (with an ACME certificate obtained in-process — still no web
 server), writes verified deliveries into the same spool as `.direct` entries,
@@ -2108,8 +2150,8 @@ For each accepted message it:
   shard-policy limits (per-tenant forward rate limit and spool quota — over
   quota temp-fails, so senders queue instead of one tenant filling the disk).
 - Seals the **entire raw message** with `crypto_box_seal` (libsodium wire format,
-  `SealedBox::openDek`-compatible) to that public key — Fortress recipients to the
-  owner's vault key, Standard/Private to the ambient transport key Joinery holds.
+  `SealedBox::openDek`-compatible) to that public key — recipients on a domain with
+  Seal at the relay to the owner's vault key, Standard/Private to the ambient transport key Joinery holds.
 - Writes `<spoolid>.seal` (ciphertext) + `<spoolid>.meta` (cleartext operational
   metadata only — recipient, Message-ID, thread inputs, size, the milter-stamped
   Authentication-Results; never subject or body) via write-tempfile → fsync →
@@ -2182,7 +2224,7 @@ and acks the entries it stored (`POST /relay/spool/ack`; ids only — the relay
 resolves them inside the tenant's spool and rejects anything with a path
 separator) — the delete-after-store is the ack. Standard/Private
 blobs are opened at pull with the ambient transport key and run through today's
-ingest. Fortress blobs cannot be opened while the owner is logged out, so they
+ingest. Owner-sealed blobs cannot be opened while the owner is logged out, so they
 land as **pending-parse** rows: operational metadata + the sealed blob, so
 threading and unread counts work while subject/sender/body/attachments do not
 exist yet. At the next unlock, `DeferredIngest` unseals each blob, runs the
@@ -2262,7 +2304,7 @@ is offered: `sendOriginProbe()` sends a marked message from the first enabled
 store-mode alias on a Standard or Private domain to itself — a listed alias
 because the relay's SMTP-time recipient validation rejects anything else,
 store-mode so the delivered copy lands in `iem_inbound_email_messages`, and
-non-Fortress so that copy is server-readable — out via the provider, back via
+on a domain without Seal at the relay so that copy is server-readable — out via the provider, back via
 the relay MX, and `checkOutboundOriginLeak` scans the delivered headers for the
 box IP or hostname on token boundaries. A clean probe within the freshness
 window (`ORIGIN_PROBE_FRESH_DAYS`) is what clears an SMTP path.
@@ -2382,10 +2424,10 @@ this relay predates the current relay — so the scanner row names the same
 
 **Relay findings reach only mailboxes whose domain needs a relay.** A WARN or FAIL
 scanner is promoted from Advanced to a Receiving card, and the relay's two state
-cards render, only for a mailbox on a **Fortress** domain — the level the relay is
-load-bearing for. A deployment may run a relay at any level, and the Relay section
-stays available to set one up, but on a Standard or Private domain the relay does
-nothing for that mailbox, so its health is not that mailbox's verdict. Promoting it
+cards render, only for a mailbox on a domain with **Seal at the relay** on — the
+add-on the relay is load-bearing for. A deployment may run a relay at any level, and
+the Relay section stays available to set one up, but on a domain without the add-on
+the relay does nothing for that mailbox, so its health is not that mailbox's verdict. Promoting it
 unconditionally turned one deployment-wide fault into an `attention` banner on every
 mailbox on the deployment.
 
@@ -2472,7 +2514,7 @@ wherever they are:
   nothing otherwise. It never pings or probes.
 - **The reader's setup banner** (*This mailbox needs attention*) is the Setup
   tab's verdict for the open mailbox, and the relay's *Receiving* card is part
-  of it for a Fortress domain. Both reader mounts show it to an operator: the
+  of it for a domain with Seal at the relay. Both reader mounts show it to an operator: the
   admin reader always, and the profile reader
   (`/profile/mailbox/mailbox`) for a viewer at permission 5 or above, since
   that is where operators read mail too. Members never see it.
@@ -2675,8 +2717,9 @@ each shard's A record and PTR expectation, and one A record per live slot MX
 hostname — with a live resolution verdict and copy fields. (PTR records are
 set where the shard's IP is hosted, not in the DNS zone.)
 
-**Selling slots — order-time auto-enrollment.** The fleet console's *Fortress
-hosting product* box creates the sellable product in one click (store +
+**Selling slots — order-time auto-enrollment.** The fleet console's *Relay
+Hosting product* box creates the sellable product — *Relay Hosting*, linked
+`relay-hosting`, on a tier named *Relay* when it has to make one — in one click (store +
 server_manager required): a subscription tier whose features grant
 `mailbox_fleet_slot` (an existing slot-granting tier is reused) and an
 inactive `customer_cloud`-fulfilled product on it — pricing and activating it
@@ -3351,7 +3394,7 @@ row (`compose`), whether the carrier took the message or refused it; every
 forward the router relays for a message that has a stored copy writes one
 (`forward`). The row records the transport and its label, the outcome (`sent`,
 `failed`, `partial`), the carrier's error text, its receipt, the recipients,
-and — asked later — the delivery status. On a Private or Fortress mailbox the
+and — asked later — the delivery status. On a Private mailbox the
 recipients and the error seal to the owner's vault with the rest of the mail;
 a sealing mailbox with nobody to seal to records the attempt without them.
 Writing the record never fails or delays a send: both writers run after the
@@ -3475,7 +3518,7 @@ archive imports, and Direct). It does **not** clear the auth rule. A contact who
 domain fails authentication still files as spam, because a DMARC failure means the
 `From` is unattested: contact membership is then a claim about an address nobody
 verified, and honouring it would hand the inbox to whoever spoofs that address.
-The lookup reads the mailbox's shared, unencrypted book, so a Private/Fortress
+The lookup reads the mailbox's shared, unencrypted book, so a Private
 mailbox — whose contacts are sealed per grantee and unreadable to keyless ingest —
 gets no automatic elevation. The content score is still recorded on an elevated
 message.
@@ -3685,7 +3728,7 @@ recognised by its `multipart/report; report-type=feedback-report` content
 type. Detection runs at every moment the pipeline holds plaintext: receive
 time (`InboundEmailRouter::processEmail`, before the alias branch, and the
 relay pull path in `RelaySpoolConsumer`), and deferred parse at unlock
-(`parsePendingMessage`) for Fortress relay mail — sealed domains get the same
+(`parsePendingMessage`) for relay-sealed mail — sealed domains get the same
 inventory as everyone else because extraction happens while content is in
 hand, never against stored sealed rows.
 
@@ -3749,7 +3792,7 @@ which frees the file-backed attachment `fil_` Files and the stored raw object (l
 or cloud object). A bulk `DELETE` would drop the row in one statement and leak both. Each
 id is queued for refold first, so the owner's sealed search index drops the entry at their
 next fold. Sealed mailboxes purge **locked**: `permanent_delete()` works on columns and
-storage keys, never on plaintext, so a Fortress mailbox needs no unlock window.
+storage keys, never on plaintext, so a sealed mailbox needs no unlock window.
 
 **The window.** `InboundEmailMessage::purgeExpiredTrash()` is declared in that class's
 `$retention_policy` and runs in the platform's daily retention sweep, purging what was

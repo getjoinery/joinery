@@ -125,25 +125,42 @@ if (!function_exists('joai_pin_svg')) {
 
                     <?php
                     // Privacy level. Standard is always offered; Private needs a
-                    // set-up vault; Fortress needs a vault + a configured local
-                    // model. A level the current chat already sits at stays
+                    // set-up vault. A level the current chat already sits at stays
                     // selectable even if a prerequisite later changed.
                     $level_opts = ['standard' => 'Standard — server-managed'];
-                    if (!empty($private_available) || in_array($security_level, ['private', 'fortress'], true)) {
+                    if (!empty($private_available) || $security_level === 'private') {
                         $level_opts['private'] = 'Private — sealed, unlock to read';
                     }
-                    if (!empty($fortress_available) || $security_level === 'fortress') {
-                        $level_opts['fortress'] = 'Fortress — sealed + local model only';
-                    }
+                    // Extra protection under Private: the Local models only add-on,
+                    // offered when a local model is configured. One-way — once a
+                    // chat carries it the switch shows checked and locked.
+                    $local_only_on    = !empty($local_models_only);
+                    $local_only_fixed = $local_only_on && !empty($selected);
+                    $show_local_only  = !empty($local_only_available) || $local_only_fixed;
                     ?>
                     <label>Privacy
                         <select id="joai-security-level" class="joai-chat-control" data-field="security_level"
-                                title="How private this chat is (sealing + local-only inference)">
+                                title="How private this chat is">
                             <?php foreach ($level_opts as $lv => $lbl): ?>
                                 <option value="<?php echo $lv; ?>" <?php echo $lv === $security_level ? 'selected' : ''; ?>><?php echo htmlspecialchars($lbl, ENT_QUOTES, 'UTF-8'); ?></option>
                             <?php endforeach; ?>
                         </select>
                     </label>
+                    <?php if ($show_local_only): ?>
+                    <div class="joai-chat-addons" id="joai-local-only-wrap"
+                         <?php echo $security_level === 'private' ? '' : 'hidden'; ?>>
+                        <span class="joai-chat-addons-heading">Extra protection</span>
+                        <label class="joai-chat-toggle<?php echo $local_only_fixed ? ' is-disabled' : ''; ?>"
+                               title="<?php echo $local_only_fixed ? 'Local models only stays on once it is on.' : 'Only AI models running on your own hardware can answer.'; ?>">
+                            <input type="checkbox" id="joai-toggle-local-only" data-field="local_models_only"
+                                   <?php echo $local_only_on ? 'checked' : ''; ?>
+                                   <?php echo $local_only_fixed ? 'disabled' : ''; ?>>
+                            Local models only
+                        </label>
+                        <p class="joai-chat-addon-note">Nothing in this chat is sent to an outside AI company.
+                            Only AI models running on your own hardware can answer.</p>
+                    </div>
+                    <?php endif; ?>
 
                     <div class="joai-chat-settings-toggles">
                         <label class="joai-chat-toggle">
@@ -334,6 +351,16 @@ if (!function_exists('joai_pin_svg')) {
             body: JSON.stringify(payload || {})
         }).then(function (r) { return r.json(); });
     }
+    // Set one control on an existing chat through the /api/v1 action (session
+    // cookie + X-Joinery-Csrf). Resolves to {success, locked, message}.
+    function joaiSetControl(payload) {
+        payload.conversation_id = currentConversationId;
+        return joaiApiV1('joinery_ai/chat_set_capabilities', payload).then(function (d) {
+            var data = (d && d.data) || {};
+            return { success: !(d && d.error), locked: !!data.locked,
+                     message: (d && d.error) || data.message || '' };
+        });
+    }
     // Runs the passkey PRF unlock ceremony. Resolves to true on success.
     function unlockVault() {
         if (!window.JoineryPasskeys) { alert('Unlock is unavailable on this page.'); return Promise.resolve(false); }
@@ -427,6 +454,7 @@ if (!function_exists('joai_pin_svg')) {
     var DEFAULT_THINKING = <?php echo json_encode($default_thinking_level); ?>;
     var DEFAULT_WEB = <?php echo $default_web_search ? 'true' : 'false'; ?>;
     var DEFAULT_MEMORY = <?php echo $default_memory_access ? 'true' : 'false'; ?>;
+    var DEFAULT_LOCAL_ONLY = <?php echo ChatLevel::defaultLocalOnly() ? 'true' : 'false'; ?>;
     var DEFAULT_ATTACH_MODE = <?php echo json_encode($default_attachment_mode); ?>;
 
     // Attachment composer config: how many files a message accepts. Type/size and
@@ -538,12 +566,7 @@ if (!function_exists('joai_pin_svg')) {
         if (!el) return;
         el.addEventListener('change', function () {
             if (!currentConversationId) return;
-            var body = new FormData();
-            body.append('conversation_id', currentConversationId);
-            body.append('capability', el.getAttribute('data-capability'));
-            body.append('enabled', el.checked ? '1' : '0');
-            fetch(JOAI_BASE + 'chat_set_capabilities', { method: 'POST', body: body })
-                .then(function (r) { return r.json(); })
+            joaiSetControl({ capability: el.getAttribute('data-capability'), enabled: el.checked })
                 .then(function (data) { if (!data.success) { alert(data.message || 'Could not update.'); el.checked = !el.checked; } })
                 .catch(function () { el.checked = !el.checked; });
         });
@@ -562,12 +585,7 @@ if (!function_exists('joai_pin_svg')) {
             if (!currentConversationId) return; // new chat: seeded on first send
             var field = el.getAttribute('data-field');
             function send(retried) {
-                var body = new FormData();
-                body.append('conversation_id', currentConversationId);
-                body.append('field', field);
-                body.append('value', el.value);
-                fetch(JOAI_BASE + 'chat_set_capabilities', { method: 'POST', body: body })
-                    .then(function (r) { return r.json(); })
+                joaiSetControl({ field: field, value: el.value })
                     .then(function (data) {
                         // Locked vault (a protected chat's instructions are sealed
                         // content): one-tap unlock, then retry the same change.
@@ -597,28 +615,53 @@ if (!function_exists('joai_pin_svg')) {
     }
     controls.forEach(wireField);
 
-    // ----- Fortress model gate -----
-    // A Fortress chat pins inference to a local model: disable the cloud options
-    // in the picker when Privacy = Fortress, and switch off a cloud selection.
+    // ----- Local models only -----
+    // The add-on lives under Private: its switch shows only while Privacy =
+    // Private. A local-only chat pins inference to a local model, so while the
+    // add-on is in effect the picker's cloud options are disabled and a cloud
+    // selection moves to the first local model. On an existing chat switching it
+    // on persists immediately (one-way — the server refuses turning it off); on
+    // a new chat it rides the first send.
     var levelSelect = document.getElementById('joai-security-level');
-    function applyFortressModelGate() {
-        if (!modelSelect || !levelSelect) return;
-        var fortress = levelSelect.value === 'fortress';
+    var localOnlyWrap = document.getElementById('joai-local-only-wrap');
+    var localOnlyToggle = document.getElementById('joai-toggle-local-only');
+    function localOnlyInEffect() {
+        return !!(levelSelect && levelSelect.value === 'private'
+            && localOnlyToggle && localOnlyToggle.checked);
+    }
+    function applyLocalOnlyModelGate() {
+        if (localOnlyWrap && levelSelect) localOnlyWrap.hidden = levelSelect.value !== 'private';
+        if (!modelSelect) { updateSettingsSummary(); return; }
+        var localOnly = localOnlyInEffect();
         var firstLocal = null;
         Array.prototype.forEach.call(modelSelect.options, function (opt) {
             var isLocal = opt.getAttribute('data-local') === '1';
-            opt.disabled = fortress && !isLocal;
+            opt.disabled = localOnly && !isLocal;
             if (isLocal && firstLocal === null) firstLocal = opt.value;
         });
-        if (fortress && modelSelect.selectedOptions[0]
+        if (localOnly && modelSelect.selectedOptions[0]
                 && modelSelect.selectedOptions[0].getAttribute('data-local') !== '1'
                 && firstLocal !== null) {
             modelSelect.value = firstLocal;
         }
         updateSettingsSummary();
     }
-    if (levelSelect) levelSelect.addEventListener('change', applyFortressModelGate);
-    applyFortressModelGate();
+    if (levelSelect) levelSelect.addEventListener('change', applyLocalOnlyModelGate);
+    if (localOnlyToggle) {
+        localOnlyToggle.addEventListener('change', function () {
+            applyLocalOnlyModelGate();
+            if (!currentConversationId || !localOnlyToggle.checked) return;
+            joaiSetControl({ field: 'local_models_only', value: '1' })
+                .then(function (data) {
+                    if (!data.success) alert(data.message || 'Could not update.');
+                    // Turning it on pins the model and locks the switch — reload
+                    // so the whole page reflects the stored state.
+                    location.reload();
+                })
+                .catch(function () { location.reload(); });
+        });
+    }
+    applyLocalOnlyModelGate();
 
     // --- File attachments ---------------------------------------------------
     // Files chosen in the composer, held client-side until send() posts them as
@@ -834,6 +877,7 @@ if (!function_exists('joai_pin_svg')) {
         if (webToggle && webToggle.checked) parts.push('Web search');
         if (historyToggle && historyToggle.checked) parts.push('History search');
         if (memoryToggle && memoryToggle.checked) parts.push('Memory');
+        if (localOnlyInEffect()) parts.push('Local models only');
         if (thinkingSelect && thinkingSelect.value && thinkingSelect.value !== 'off') {
             parts.push('Thinking: ' + thinkingSelect.selectedOptions[0].textContent.trim());
         }
@@ -908,6 +952,7 @@ if (!function_exists('joai_pin_svg')) {
             if (webToggle && webToggle.checked) body.append('web_search', '1');
             if (historyToggle && historyToggle.checked) body.append('history_access', '1');
             if (memoryToggle) body.append('memory_access', memoryToggle.checked ? '1' : '0');
+            if (localOnlyToggle) body.append('local_models_only', localOnlyInEffect() ? '1' : '0');
             controls.forEach(function (el) {
                 var f = el.getAttribute('data-field');
                 if (f === 'model' || f === 'thinking_level' || f === 'attachment_mode') body.append(f, el.value);
@@ -1531,6 +1576,14 @@ if (!function_exists('joai_pin_svg')) {
         if (webToggle && !webToggle.disabled) webToggle.checked = DEFAULT_WEB;
         if (historyToggle) historyToggle.checked = false;
         if (memoryToggle) memoryToggle.checked = DEFAULT_MEMORY;
+        // A new chat's add-on switch is free again (the one-way lock belongs to
+        // the chat that carried it) and starts at the configured default.
+        if (localOnlyToggle) {
+            localOnlyToggle.disabled = false;
+            localOnlyToggle.checked = DEFAULT_LOCAL_ONLY;
+            if (localOnlyToggle.parentNode) localOnlyToggle.parentNode.classList.remove('is-disabled');
+            applyLocalOnlyModelGate();
+        }
         if (modelSelect) modelSelect.value = DEFAULT_MODEL;
         if (thinkingSelect) thinkingSelect.value = DEFAULT_THINKING;
         controls.forEach(function (el) {

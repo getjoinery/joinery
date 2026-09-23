@@ -73,7 +73,7 @@ const decoyGeneration = 1
 
 // decoyPublicKey is the key handed back for an address that does not exist.
 //
-// The relay accepts unconditionally at Fortress so that acceptance discloses
+// The relay accepts unconditionally so that acceptance discloses
 // nothing — but a key-bearing accept would reopen exactly what that closed,
 // because a real key coming back would tell a prober the address exists. So a
 // key comes back either way. Two properties make it hold up, and both are load

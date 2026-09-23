@@ -17,9 +17,10 @@
  *     error, because an error would be a distinguishable answer.
  *
  *   - **Whose vault seals this domain's Direct signing key?** — the same custody
- *     question DKIM already asks, answered the same way, so a Fortress domain
- *     cannot sign in anyone's name from a locked box.
+ *     question DKIM already asks, answered the same way, so a domain with the
+ *     sending lock cannot sign in anyone's name from a locked box.
  *
+ * @version 1.3.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.3 - resolveAddress() refuses IMAP-source domains — not hosted here
  * @version 1.2
  * @changelog 1.2 - a resolved mailbox answers with its OWN protection posture;

@@ -37,7 +37,10 @@ function drive_level_change_logic(array $input): LogicResult {
 	}
 
 	$folder_id = (int)($input['folder_id'] ?? 0);
-	$target    = ProtectionLevel::normalize($input['protection_level'] ?? null);
+	$target    = ProtectionLevel::fromInput($input['protection_level'] ?? null);
+	if ($target === null) {
+		return LogicResult::error('That is not a protection level Drive offers.');
+	}
 
 	$folder = DriveHelper::load_folder($folder_id);
 	if (!$folder) {

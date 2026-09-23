@@ -4,17 +4,19 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
 
 /**
  * The per-conversation security level's prerequisites and resolution
- * (specs/joinery_ai_chat_encryption.md § levels). Standard is always available;
- * Private needs the owner to hold a Sealed Vault (nothing to seal to without one);
- * Fortress needs a vault AND a configured local model (its whole point is pinning
- * inference to a local model). This is the one place those rules live, shared by
- * the create path, the level selector, and the Fortress provider gate.
+ * (specs/joinery_ai_chat_encryption.md § levels), and of the one add-on Private
+ * carries. Standard is always available; Private needs the owner to hold a
+ * Sealed Vault (nothing to seal to without one). The Local models only add-on
+ * (aic_local_models_only) needs a Private chat AND a configured local model
+ * (its whole point is pinning inference to one); it is one-way — once on, it
+ * stays on. This is the one place those rules live, shared by the create path,
+ * the level selector, the add-on switch, and the local-only provider gate.
  */
 class ChatLevel {
 
     /**
      * Is there a model this install can reach that stays on the operator's own
-     * hardware? Fortress's whole point, so it is asked of the catalog rather
+     * hardware? The Local models only add-on's whole point, so it is asked of the catalog rather
      * than of one setting — an endpoint declared `local` qualifies whether it
      * is Ollama on this box or the operator's own LAN host.
      */
@@ -39,7 +41,7 @@ class ChatLevel {
      * copy recognised was classified as local, which is to say safe.
      *
      * An unknown id is now NOT local, which is the correct direction to be
-     * wrong in: it is what makes a Fortress chat refuse a model nothing
+     * wrong in: it is what makes a local-only chat refuse a model nothing
      * classifies rather than assume the best of it.
      */
     public static function isLocalModel(string $model): bool {
@@ -52,11 +54,11 @@ class ChatLevel {
         }
     }
 
-    /** A local model a Fortress chat can start on, or '' when the operator
+    /** A local model a local-only chat can start on, or '' when the operator
      *  serves none. Resolved rather than guessed, so it honours the same
      *  selection policy every other choice does. */
     public static function localDefaultModel(): string {
-        return ChatRunner::defaultModelForLevel(AiConversation::LEVEL_FORTRESS);
+        return ChatRunner::defaultModelFor(true);
     }
 
     public static function privateAvailable(int $owner_id): bool {
@@ -64,32 +66,105 @@ class ChatLevel {
         return ChatSeal::ownerHasVault($owner_id);
     }
 
-    public static function fortressAvailable(int $owner_id): bool {
+    /** Whether this owner can have the Local models only add-on: a Private chat
+     *  (so a vault) and a model on the operator's own hardware to pin to. */
+    public static function localOnlyAvailable(int $owner_id): bool {
         return self::privateAvailable($owner_id) && self::localModelConfigured();
     }
 
-    /** The configured plugin-wide default level (falls back to standard). */
+    /** The configured plugin-wide default level (falls back to standard). A
+     *  default still stored under the legacy name (before migration aic_001
+     *  runs) reads as Private, the way a legacy conversation row does. */
     public static function defaultLevel(): string {
-        $lvl = (string)Globalvars::get_instance()->get_setting('joinery_ai_default_chat_level');
+        $lvl = AiConversation::normalizeLevel(
+            Globalvars::get_instance()->get_setting('joinery_ai_default_chat_level'));
         return in_array($lvl, ChatSeal::levels(), true) ? $lvl : ChatSeal::LEVEL_STANDARD;
     }
 
-    /**
-     * The effective level for a NEW conversation: the composer's explicit choice
-     * when valid, else the plugin default — then downgraded when its prerequisites
-     * are missing (Fortress → Private without a local model, Private → Standard
-     * without a vault) so a new chat never claims a protection it can't deliver.
-     */
-    public static function resolveForNew($requested, int $owner_id): string {
-        $level = in_array($requested, ChatSeal::levels(), true) ? (string)$requested : self::defaultLevel();
-
-        if ($level === ChatSeal::LEVEL_FORTRESS && !self::fortressAvailable($owner_id)) {
-            $level = self::privateAvailable($owner_id) ? ChatSeal::LEVEL_PRIVATE : ChatSeal::LEVEL_STANDARD;
+    /** The configured plugin-wide default for the Local models only add-on. A
+     *  default level still stored under the legacy name meant Private pinned to
+     *  a local model, so it is on whatever the (not yet seeded) flag says. */
+    public static function defaultLocalOnly(): bool {
+        $settings = Globalvars::get_instance();
+        if ((string)$settings->get_setting('joinery_ai_default_chat_level') === AiConversation::LEGACY_LEVEL_LOCAL_ONLY) {
+            return true;
         }
+        return (bool)$settings->get_setting('joinery_ai_default_chat_local_only');
+    }
+
+    /**
+     * The effective level for a NEW conversation: the composer's explicit choice,
+     * else the plugin default — then downgraded to Standard when the owner has
+     * no vault, so a new chat never claims a protection it can't deliver.
+     *
+     * A level the caller asked for that is not one of chat's rungs is refused
+     * (null), never quietly swapped for the default: someone who asked for a
+     * protected level and mistyped it must hear so.
+     */
+    public static function resolveForNew($requested, int $owner_id): ?string {
+        // A page loaded before the fold posts the retired name (and no add-on
+        // field) for "sealed + pinned to a local model": read it as Private here;
+        // resolveLocalOnlyForNew() turns the pin on for it.
+        if (self::isLegacyLocalOnlyRequest($requested)) $requested = ChatSeal::LEVEL_PRIVATE;
+
+        $level = ProtectionLevel::fromInput($requested, self::defaultLevel());
+        if ($level === null || !in_array($level, ChatSeal::levels(), true)) return null;
+
         if ($level === ChatSeal::LEVEL_PRIVATE && !self::privateAvailable($owner_id)) {
             $level = ChatSeal::LEVEL_STANDARD;
         }
         return $level;
+    }
+
+    /** Whether a requested level is the retired name an older client sends. */
+    public static function isLegacyLocalOnlyRequest($requested): bool {
+        return is_string($requested)
+            && strtolower(trim($requested)) === AiConversation::LEGACY_LEVEL_LOCAL_ONLY;
+    }
+
+    /**
+     * Whether a NEW conversation at $level (already resolved) starts with the
+     * Local models only add-on: the composer's explicit choice when given, else
+     * the plugin default — and only on a Private chat with a local model to pin
+     * to, so a new chat never claims a protection it can't deliver. An older
+     * client's retired level name ($requested_level) carries the add-on itself.
+     */
+    public static function resolveLocalOnlyForNew($requested, string $level, $requested_level = null): bool {
+        $on = ($requested === null || $requested === '')
+            ? (self::isLegacyLocalOnlyRequest($requested_level) || self::defaultLocalOnly())
+            : in_array(strtolower(trim((string)$requested)), ['1', 'true', 'on', 'yes'], true);
+        return $on && $level === ChatSeal::LEVEL_PRIVATE && self::localModelConfigured();
+    }
+
+    /**
+     * Switch the Local models only add-on on an existing conversation. One-way:
+     * turning it on pins the chat's model to a local one; asking to turn it off
+     * once on is refused. It lives under Private, so a Standard chat is refused
+     * (make it Private first), and it needs a configured local model. Returns
+     * ['ok'=>bool, 'error'=>?string, 'local_models_only'=>bool].
+     */
+    public static function setLocalModelsOnly(AiConversation $c, bool $on, int $uid): array {
+        if ((int)$c->get('aic_owner_user_id') !== $uid) return ['ok' => false, 'error' => 'Not your chat.'];
+        $stored = $c->localModelsOnlyFlag();
+
+        if (!$on) {
+            if ($stored) {
+                return ['ok' => false, 'error' => 'Local models only can’t be turned off once it’s on — start a new chat to use other models.'];
+            }
+            return ['ok' => true, 'local_models_only' => false];
+        }
+        if (!$c->isProtected()) {
+            return ['ok' => false, 'error' => 'Make this chat Private first — Local models only is an extra protection for Private chats.'];
+        }
+        if (!self::localModelConfigured()) {
+            return ['ok' => false, 'error' => 'Configure a local model in Joinery AI settings to use Local models only.'];
+        }
+        $cols = [];
+        if (!(bool)$c->get('aic_local_models_only')) $cols['aic_local_models_only'] = true;
+        if ((string)$c->get('aic_security_level') !== $c->level()) $cols['aic_security_level'] = $c->level();
+        if (!self::isLocalModel((string)$c->get('aic_model'))) $cols['aic_model'] = self::localDefaultModel();
+        if ($cols) AiConversation::updateColumns((int)$c->key, $cols);
+        return ['ok' => true, 'local_models_only' => true];
     }
 
     /**
@@ -98,8 +173,10 @@ class ChatLevel {
      * protected level seals title/instructions + every message + attachment under
      * fresh DEKs (idempotent — already-sealed rows are skipped); sealing needs
      * only the public key. Lowering to Standard decrypts everything back to
-     * plaintext and so requires an open window. Fortress additionally requires a
-     * local model and pins the chat's model to one. Returns
+     * plaintext and so requires an open window. Raising to Private restores a
+     * Local models only add-on the chat already carries (the flag is one-way and
+     * stays stored while the chat is Standard), so that raise also requires a
+     * local model and re-pins the chat's model to one. Returns
      * ['ok'=>bool, 'error'=>?string, 'level'=>string].
      */
     public static function changeLevel(AiConversation $c, string $target, int $uid): array {
@@ -112,7 +189,11 @@ class ChatLevel {
         $owner = (int)$c->get('aic_owner_user_id');
         if ($owner !== $uid) return ['ok' => false, 'error' => 'Not your chat.'];
 
-        $current = (string)$c->get('aic_security_level') ?: ChatSeal::LEVEL_STANDARD;
+        $current = $c->level();
+        // An unconverted legacy row is rewritten in the current shape on any
+        // level write, so the flag it implied is never lost.
+        $legacy_cols = ((string)$c->get('aic_security_level') === AiConversation::LEGACY_LEVEL_LOCAL_ONLY)
+            ? ['aic_local_models_only' => true] : [];
         $target_protected  = ChatSeal::isProtectedLevel($target);
         $current_protected = ChatSeal::isProtectedLevel($current);
 
@@ -120,8 +201,9 @@ class ChatLevel {
         if ($target_protected && !ChatSeal::ownerHasVault($owner)) {
             return ['ok' => false, 'error' => 'Set up your encryption vault first (in your security settings) to make a chat private.'];
         }
-        if ($target === ChatSeal::LEVEL_FORTRESS && !self::localModelConfigured()) {
-            return ['ok' => false, 'error' => 'Configure a local model in Joinery AI settings to use Fortress.'];
+        $pin_local = $target_protected && $c->localModelsOnlyFlag();
+        if ($pin_local && !self::localModelConfigured()) {
+            return ['ok' => false, 'error' => 'This chat is set to Local models only — configure a local model in Joinery AI settings to make it Private again.'];
         }
         // Reading sealed content to unseal (or to reseal a locked protected chat)
         // needs the window.
@@ -138,10 +220,12 @@ class ChatLevel {
         }
 
         if ($current === $target) {
-            // No content transition; a to-Fortress no-op still ensures the model pin.
-            if ($target === ChatSeal::LEVEL_FORTRESS && !self::isLocalModel((string)$c->get('aic_model'))) {
-                AiConversation::updateColumns((int)$c->key, ['aic_model' => self::localDefaultModel()]);
+            // No content transition; a local-only no-op still ensures the model pin.
+            $cols = $legacy_cols ? $legacy_cols + ['aic_security_level' => $target] : [];
+            if ($pin_local && !self::isLocalModel((string)$c->get('aic_model'))) {
+                $cols['aic_model'] = self::localDefaultModel();
             }
+            if ($cols) AiConversation::updateColumns((int)$c->key, $cols);
             return ['ok' => true, 'level' => $target];
         }
 
@@ -151,11 +235,9 @@ class ChatLevel {
             } elseif ($current_protected && !$target_protected) {
                 self::unsealConversationBackfill($c);
             }
-            // protected↔protected (Private↔Fortress): content stays sealed under the
-            // same DEKs; only the level and (for Fortress) the model pin change.
 
-            $final = ['aic_security_level' => $target];
-            if ($target === ChatSeal::LEVEL_FORTRESS && !self::isLocalModel((string)$c->get('aic_model'))) {
+            $final = ['aic_security_level' => $target] + $legacy_cols;
+            if ($pin_local && !self::isLocalModel((string)$c->get('aic_model'))) {
                 $final['aic_model'] = self::localDefaultModel();
             }
             AiConversation::updateColumns((int)$c->key, $final);

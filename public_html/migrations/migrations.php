@@ -1563,3 +1563,14 @@
 	$migration['migration_file'] = 'backup_retention_by_days.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Messenger's three rungs fold to two plus an add-on: a conversation at the
+	// old middle rung becomes Private with Nothing leaves unsealed on, and so
+	// does a site default set to it (specs/implemented/protection_levels_fold.md). The
+	// table is core, so this runs whether or not the messenger plugin is active.
+	$migration = array();
+	$migration['database_version'] = '199';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'messenger_sealed_exits_only_fold.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

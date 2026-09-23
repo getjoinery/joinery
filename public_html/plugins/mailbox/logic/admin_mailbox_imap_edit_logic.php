@@ -15,6 +15,7 @@
  * Connection details for a known provider come from the preset catalog; the
  * app/basic password is a non-model field stored encrypted via setPassword().
  *
+ * @version 2.8 - two levels, Standard and Private
  * @version 2.7 - the password goes through FormWriterV2Base::process_secretinput(): Reset and save blank removes it
  * @changelog 2.6 - edit-only, enforced: any arrival that resolves no existing
  *   feed is handed to the connect wizard, POSTs included; the ceremony actions
@@ -383,10 +384,8 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 				$alias_row = new InboundEmailAlias($resolved_alias_id, TRUE);
 				$old_level = $alias_row->security_level();
 				$new_level = _imap_edit_submitted_level($input, $domain, $old_level);
-				$old_seals = in_array($old_level, array(InboundEmailDomain::LEVEL_PRIVATE,
-					InboundEmailDomain::LEVEL_FORTRESS), true);
-				$new_seals = in_array($new_level, array(InboundEmailDomain::LEVEL_PRIVATE,
-					InboundEmailDomain::LEVEL_FORTRESS), true);
+				$old_seals = ($old_level === InboundEmailDomain::LEVEL_PRIVATE);
+				$new_seals = ($new_level === InboundEmailDomain::LEVEL_PRIVATE);
 
 				// Changing a mailbox's protection is the same sensitive action the
 				// domain editor gates — re-confirm the account's second factor first.
@@ -427,7 +426,7 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 					// written, judges exactly the state the raise would seal into.
 					$acting_user_id = intval($session->get_user_id());
 					$rows = mailbox_protection_rows(
-						mailbox_protection_facts($domain, $acting_user_id, $resolved_alias_id),
+						mailbox_protection_facts($domain, $resolved_alias_id),
 						$new_level, $acting_user_id);
 					if (!mailbox_protection_required_ok($rows)) {
 						throw new InboundEmailAliasException(mailbox_protection_first_failure($rows));
@@ -435,10 +434,7 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 					_imap_edit_write_level($alias_row, $new_level);
 				}
 
-				// A level change may alter the acting user's max posture — drop the
-				// session cache so the unlock-window caps re-evaluate.
 				if ($new_level !== $old_level) {
-					unset($_SESSION['max_security_level']);
 					// The raise seals history, the lowering unseals it: either way the
 					// receipt card on this page carries the convergence to done.
 					$receipt = $new_seals ? 'sealed_now=1' : ($old_seals ? 'unsealed_now=1' : '');
@@ -551,9 +547,9 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
  * (specs/mailbox_connect_flow.md § D), falling back to what it already has.
  *
  * Only Standard and Private are offered, and only on an IMAP-source domain.
- * Fortress is an identity guarantee — relay-side sealing, inverted DNS, in-app
- * signing — and none of it exists for mail pulled from somebody else's server,
- * so a stale POST cannot smuggle it in. A hosted mailbox has no level of its
+ * The domain add-ons — relay-side sealing, the sending lock with its inverted
+ * DNS and in-app signing — are identity guarantees, and none of them exists for
+ * mail pulled from somebody else's server. A hosted mailbox has no level of its
  * own at all: it inherits its domain's, which is where MX, SPF, DMARC and DKIM
  * are decided.
  */
@@ -611,7 +607,7 @@ function _imap_edit_ceremony_state($domain, int $alias_id, $session, array $inpu
 		return null;
 	}
 	$acting_user_id = intval($session->get_user_id());
-	$facts = mailbox_protection_facts($domain, $acting_user_id, $alias_id);
+	$facts = mailbox_protection_facts($domain, $alias_id);
 	$backlog = mailbox_protection_backlog_count(intval($domain->key), $alias_id);
 	$seals = $alias->seals_content();
 

@@ -19,7 +19,7 @@
  *  - getThread: opens under the Trash scope, refused under the read scope
  *  - purge: the row, the attachment File and the refold queue entry
  *  - purge dates: computed from the retention setting, absent when it is 0
- *  - a sealed (Fortress-shaped) message purges with no unlock window
+ *  - a sealed (relay-sealed, pending-parse) message purges with no unlock window
  *  - the retention rule: the declared policy, the window, and 0 = never purge
  *  - the search index holds trashed mail and the read scope decides (Change 2a),
  *    including the restore-then-search regression that change exists to fix

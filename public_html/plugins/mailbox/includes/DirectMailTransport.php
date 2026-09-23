@@ -15,10 +15,11 @@
  * not go direct goes exactly where it goes today, and no other kind's `declined`
  * or `failed` ever produces an SMTP send.
  *
- * Worst case is still the old email system — and under Fortress that is the MOST
+ * Worst case is still the old email system — and on a relay-fronted deployment that is the MOST
  * sealed path, because SMTP there is the edge-sealing ingest relay. Falling back
  * never drops to a less-protected path; at worst it drops to a more-sealed one.
  *
+ * @version 1.0.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.0
  */
 

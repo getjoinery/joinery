@@ -138,7 +138,8 @@ the `messenger_*` actions, the polling, the assets.
 | `cnv_conversation_id` | int8, serial, PK | |
 | `cnv_subject` | varchar(255) | The group's name; null for an unnamed thread |
 | `cnv_guid` | varchar(36) | Stable identity across instances — both sides of a federated conversation carry the same one |
-| `cnv_protection_level` | varchar(20) | `standard` / `private` / `guarded` (see Protection levels) |
+| `cnv_protection_level` | varchar(20) | `standard` / `private` (see Protection levels) |
+| `cnv_sealed_exits_only` | bool | The **Nothing leaves unsealed** add-on on a Private conversation; one-way (default false) |
 | `cnv_create_time` | timestamp | |
 | `cnv_update_time` | timestamp | Moves with every message; the inbox delta reads it |
 | `cnv_delete_time` | timestamp | Soft delete |
@@ -269,7 +270,26 @@ A conversation sits on one rung of the platform ladder (`ProtectionLevel`):
 |---|---|
 | `standard` | The server manages the conversation. Plaintext rows, content-ful notifications. |
 | `private` | Message bodies and attachment bytes are ciphertext at rest. The server reads them only while a participant is present with an open unlock window. |
-| `guarded` | Private, plus no message content in any notification, the AI participant pinned to local models, and no unsealed federation. |
+
+**Add-on: Nothing leaves unsealed** (`cnv_sealed_exits_only`). Extra protection
+on a Private conversation, offered as a switch under the Private card: "No
+message text appears in notifications or crosses to another server
+unencrypted." Its cost: "Notifications don't show the message, and people on
+servers without encryption can't be reached." With it on, `Conversation::add_message()` writes notifications that
+say only that there is something new, and federation sends with Direct's
+`require_sealed` (see Cross-instance messaging). `Conversation::sealed_exits_only()`
+answers it; the flag is inert on a Standard row.
+
+```php
+$conversation->turn_on_sealed_exits_only($actor_user_id);
+```
+
+It takes the same authority as a raise — any participant, and only on a Private
+conversation — writes a sealed system message ("Alice turned on Nothing leaves
+unsealed"), and is one-way: `Conversation::set()` refuses turning the flag off,
+for the same consent reason levels only tighten. Wherever the level is shown —
+the thread chip, the admin conversation list — the active add-on shows with it
+(`ProtectionLevelPicker::summary()`: "Private · Nothing leaves unsealed").
 
 **Fortress is deliberately not offered.** Client custody for a multi-party thread
 is a different key-management problem — per-participant browser ceremonies,
@@ -324,7 +344,16 @@ names, group photos and message counts are operational metadata. Sealing covers
 bodies and attachment content, not the social graph.
 
 The picker a member chooses with is the shared `ProtectionLevelPicker`, which
-owns the card copy for every service on the platform.
+owns the card copy — and the add-on copy — for every service on the platform. A
+consumer passes `addons => [key => [checked, disabled]]`; each renders as a
+FormWriter switch under an **Extra protection** heading, submitted as
+`{field}_{key}` and shown only while Private is selected (FormWriter
+`visibility_rules`), and the selected card lists the add-ons that are on. What
+only one service needs to say about an add-on goes in its `note` (a sentence
+after the catalog's two) and `link` (`[url, label]`, shown under the switch);
+`addons_note` puts one sentence under the heading, and a consumer's own
+`visibility_rules` are merged into the picker's so fields outside it can follow
+the level.
 
 ### Near-realtime delivery
 
@@ -426,15 +455,15 @@ instead. A refusal, a missing capability record and an instance too old to
 understand the chat kind are indistinguishable by design — all of them read as
 not-chat-reachable.
 
-**Guarded refuses to send unsealed.** Direct permits an opportunistic
-plaintext-over-TLS delivery when the far side published no key; at Guarded that
-trade is not on offer. The send carries Direct's `require_sealed` option, so the
+**Nothing leaves unsealed refuses to send unsealed.** Direct permits an
+opportunistic plaintext-over-TLS delivery when the far side published no key;
+with the add-on on that trade is not on offer. The send carries Direct's `require_sealed` option, so the
 refusal happens **between preflight and transfer** — no content byte crosses the
 wire — and it is final: a keyless instance is a posture, not a blip, and the
 member resends once the far side has a vault.
 
 **Arriving into a raised conversation waits for a key.** A message landing in a
-conversation the local member raised to Private or Guarded can only be stored
+conversation the local member raised to Private can only be stored
 sealed, and the key opens only while a participant has an open window. With
 nobody present the handler throws `DirectDeferIngest` before any attachment byte
 touches the disk; the framework holds the delivery and re-ingests it at the
@@ -458,8 +487,8 @@ session and re-checking participation on every call:
 | `messenger/messenger_poll` | see Near-realtime delivery | New messages, reaction/tombstone updates, read positions, typists, inbox delta, unread total |
 | `messenger/messenger_thread` | `conversation_id`, `before_message_id`, `mark_read` | A page of messages; opening also returns the thread header |
 | `messenger/messenger_send` | `conversation_id` OR `to`; `body`, `reply_to_message_id`, `attachment_ids` | The stored message, in the same shape the poll uses |
-| `messenger/messenger_action` | `action`: `open` / `open_remote` / `reachability` / `mute` / `unmute` / `delete` / `mark_read` / `react` / `delete_message` / `protection` | Per action |
-| `messenger/messenger_group` | `action`: `create` / `rename` / `add_member` / `remove_member` / `leave` / `set_admin` / `set_photo` / `remove_photo` | The updated conversation |
+| `messenger/messenger_action` | `action`: `open` / `open_remote` / `reachability` / `mute` / `unmute` / `delete` / `mark_read` / `react` / `delete_message` / `protection` (with `protection_level` to raise and/or `sealed_exits_only` to turn on Nothing leaves unsealed; neither reads the current state) | Per action |
+| `messenger/messenger_group` | `action`: `create` / `rename` / `add_member` / `remove_member` / `leave` / `set_admin` / `set_photo` / `remove_photo`; `create` takes `protection_level` and `sealed_exits_only` | The updated conversation |
 | `messenger/messenger_upload` | multipart, one `file` field | An attachment id for `messenger_send` to claim |
 | `messenger/messenger_people` | `q`, `exclude_conversation_id` | Members matching by name — names and pictures only, never addresses |
 
@@ -532,7 +561,8 @@ a participant is present.
 |---------|------|---------|-------------|
 | `messaging_active` | bool | true | The platform switch for member messaging |
 | `messenger_active` | bool | true | The Messages app itself |
-| `messenger_default_protection_level` | select | `standard` | What a new conversation starts at |
+| `messenger_default_protection_level` | select | `standard` | What a new conversation starts at (`standard` / `private`) |
+| `messenger_default_sealed_exits_only` | bool | false | Whether a new Private conversation starts with Nothing leaves unsealed on |
 | `messenger_max_group_size` | number | 32 | People per group |
 | `messenger_max_attachment_mb` | number | 25 | Per file |
 | `messenger_poll_thread_seconds` | number | 3 | Refresh rate with a conversation open |

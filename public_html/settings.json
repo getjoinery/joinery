@@ -1492,7 +1492,7 @@
       "group": "joinery_direct",
       "label": "Held-mail limit per domain (bytes)",
       "type": "number",
-      "helptext": "On a Private or Fortress domain a direct message is accepted and held sealed until its recipient next unlocks, because only they can say whether the sender is welcome. This caps how much can be waiting at once for the whole domain. Past it, further deliveries are refused and the sender's message comes by ordinary email instead — nothing is lost."
+      "helptext": "On a Private domain a direct message is accepted and held sealed until its recipient next unlocks, because only they can say whether the sender is welcome. This caps how much can be waiting at once for the whole domain. Past it, further deliveries are refused and the sender's message comes by ordinary email instead — nothing is lost."
     },
     {
       "name": "joinery_direct_spool_address_cap_bytes",
@@ -1508,7 +1508,7 @@
       "group": "joinery_direct",
       "label": "Held-mail limit per sending domain (bytes)",
       "type": "number",
-      "helptext": "How much one sending domain may have waiting across this whole deployment. A stranger's mail on a Private or Fortress domain is held sealed until the recipient unlocks and decides, so without this one sender could fill an address's or the domain's entire allowance by itself. Counted per sending domain, not per sending address, because addresses under a domain are free to invent."
+      "helptext": "How much one sending domain may have waiting across this whole deployment. A stranger's mail on a Private domain is held sealed until the recipient unlocks and decides, so without this one sender could fill an address's or the domain's entire allowance by itself. Counted per sending domain, not per sending address, because addresses under a domain are free to invent."
     },
     {
       "name": "joinery_direct_spool_retention_days",
@@ -1562,7 +1562,7 @@
       "name": "joinery_direct_decoy_secret",
       "default": "",
       "managed": true,
-      "helptext": "The per-domain secret behind the stand-in key a Private or Fortress box hands back for an address that does not exist, so that answering a delivery attempt never reveals which of your addresses are real. Minted on first use and never displayed."
+      "helptext": "The per-domain secret behind the stand-in key a Private box hands back for an address that does not exist, so that answering a delivery attempt never reveals which of your addresses are real. Minted on first use and never displayed."
     },
     {
       "name": "logo_link",

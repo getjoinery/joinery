@@ -10,6 +10,7 @@
  * When no mailboxes (store-mode aliases) exist yet, the editor shows a callout
  * linking to the alias editor so the bound-mailbox requirement isn't a dead-end.
  *
+ * @version 1.6.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.6
  * @changelog 1.6 - a stored password is a locked field with Reset
  * @changelog 1.5 - a pulled-in mailbox picks its own protection level here, with
@@ -236,8 +237,8 @@ if (!empty($folder_options)) {
 // Mail protection for a PULLED-IN mailbox is this mailbox's own choice
 // (specs/mailbox_connect_flow.md § D): gmail.com is not an identity this
 // deployment holds, so two people pulling their own Gmail here can differ.
-// Standard and Private only — Fortress is a sending-identity guarantee that
-// mail on somebody else's server cannot make.
+// Standard and Private only — the domain add-ons are sending-identity and
+// arrival guarantees that mail on somebody else's server cannot make.
 $mailbox_level = InboundEmailDomain::LEVEL_STANDARD;
 if ($combined && $domain->get('ied_is_imap_source')) {
 	$mailbox_level = ($ceremony !== null)

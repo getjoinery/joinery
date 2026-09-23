@@ -11,7 +11,8 @@
  * with a conversation open, slow on the list alone, paused while the tab is
  * hidden, and poked immediately after the member does something.
  *
- * @version 1.2.0
+ * @version 1.3.0
+ * @changelog 1.3.0 - Nothing leaves unsealed add-on: chip shows level plus add-on; both pickers send it (sealed_exits_only)
  * @changelog 1.2.0 - Unified picker: one search box resolves members, contacts and typed addresses inline (chat / email-only / local member); remote panel removed; Enter picks instead of closing; 1:1 rule enforced at the click; Check again resolves past the cache
  * @changelog 1.1.0 - People picker offers the member's own mailbox contacts
  */
@@ -352,9 +353,12 @@
 			: '';
 
 		if (payload.protection_level && payload.protection_level !== 'standard') {
+			// The level with its active add-ons — what the conversation
+			// actually promises, without opening the dialog.
 			el.level.hidden = false;
-			el.level.textContent = payload.protection_label;
-			el.level.className = 'msgr-level-chip msgr-level-chip--' + payload.protection_level;
+			el.level.textContent = payload.protection_summary || payload.protection_label;
+			el.level.className = 'msgr-level-chip msgr-level-chip--' + payload.protection_level
+				+ (payload.sealed_exits_only ? ' msgr-level-chip--sealed-exits' : '');
 		} else {
 			el.level.hidden = true;
 		}
@@ -833,7 +837,10 @@
 		// choose its protection — that is a raise, and it lives in its own
 		// dialog with its own warning.
 		el.newLevelPicker.hidden = (mode === 'add');
-		if (mode !== 'add') { setPickedLevel('msgr_new_level', state.settings.default_level); }
+		if (mode !== 'add') {
+			setPickedLevel('msgr_new_level', state.settings.default_level);
+			setAddon('msgr_new_level', !!state.settings.default_sealed_exits_only, false);
+		}
 		el.peopleDialog.showModal();
 		el.peopleSearch.focus();
 	}
@@ -1072,6 +1079,8 @@
 		}
 
 		var level = pickedLevel('msgr_new_level');
+		// The add-on rides on Private; with Standard picked it is not sent.
+		var sealedExits = level !== 'standard' && addonOn('msgr_new_level');
 
 		if (ids.length === 1 && !el.groupName.value.trim()) {
 			// A 1:1 may already exist, so it is opened rather than created —
@@ -1085,7 +1094,8 @@
 					return api('messenger_action', {
 						action: 'protection',
 						conversation_id: data.conversation_id,
-						protection_level: level
+						protection_level: level,
+						sealed_exits_only: sealedExits ? 1 : 0
 					}).then(function () { reopenThread(); });
 				}
 			}).catch(fail);
@@ -1096,7 +1106,8 @@
 			action: 'create',
 			member_ids: ids,
 			name: el.groupName.value.trim(),
-			protection_level: level
+			protection_level: level,
+			sealed_exits_only: sealedExits ? 1 : 0
 		}).then(function (data) {
 			el.peopleDialog.close();
 			mergeConversations([data.conversation], false);
@@ -1162,6 +1173,24 @@
 		}
 	}
 
+	/** The Nothing leaves unsealed switch under a picker's Private card. */
+	function addonInput(field) {
+		return document.querySelector('input[name="' + field + '_sealed_exits_only"]');
+	}
+
+	function addonOn(field) {
+		var input = addonInput(field);
+		return !!(input && input.checked);
+	}
+
+	function setAddon(field, on, locked) {
+		var input = addonInput(field);
+		if (input) {
+			input.checked = on;
+			input.disabled = locked;
+		}
+	}
+
 	/**
 	 * The protection dialog.
 	 *
@@ -1174,6 +1203,8 @@
 		api('messenger_action', { action: 'protection', conversation_id: state.openId })
 			.then(function (data) {
 				setPickedLevel('msgr_raise_level', data.protection_level);
+				// One-way like the level: once on, shown on and locked.
+				setAddon('msgr_raise_level', !!data.sealed_exits_only, !!data.sealed_exits_only);
 
 				var blockers = data.members_without_protection || [];
 				el.protectNote.textContent = blockers.length
@@ -1187,6 +1218,9 @@
 				document.querySelectorAll('input[name="msgr_raise_level"]').forEach(function (input) {
 					input.disabled = blockers.length > 0 && input.value !== 'standard';
 				});
+				if (blockers.length > 0 && data.protection_level === 'standard') {
+					setAddon('msgr_raise_level', false, true);
+				}
 
 				el.protectDialog.showModal();
 			}).catch(fail);
@@ -1194,14 +1228,20 @@
 
 	function saveProtection() {
 		var level = pickedLevel('msgr_raise_level');
-		if (!window.confirm('Set this conversation to ' + level + '? Protection cannot be lowered afterwards.')) {
+		var input = addonInput('msgr_raise_level');
+		// Only a switch the member just turned on is a change; a locked one
+		// is already on.
+		var sealedExits = level !== 'standard' && !!(input && input.checked && !input.disabled);
+		var what = level + (sealedExits ? ' with Nothing leaves unsealed' : '');
+		if (!window.confirm('Set this conversation to ' + what + '? Protection cannot be lowered afterwards.')) {
 			return;
 		}
 		el.protectSave.disabled = true;
 		api('messenger_action', {
 			action: 'protection',
 			conversation_id: state.openId,
-			protection_level: level
+			protection_level: level,
+			sealed_exits_only: sealedExits ? 1 : 0
 		}).then(function (data) {
 			el.protectSave.disabled = false;
 			el.protectDialog.close();

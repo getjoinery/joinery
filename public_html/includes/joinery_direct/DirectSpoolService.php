@@ -5,7 +5,7 @@
  *
  * One staging store serves both tiers, on purpose. At Standard the row is opened
  * at accept, filled as parts arrive, ingested at commit, and marked done in the
- * same request. At Private and Fortress the identical row is left HELD after
+ * same request. At Private the identical row is left HELD after
  * commit, because the contact list is sealed and the gate cannot run until the
  * recipient's next unlock. Having one path means the byte accounting has one
  * home, and it is what lets a decoy delivery — whose parts are discarded — still
@@ -23,6 +23,7 @@
  * was considered and rejected: it could lose a legitimate contact's sealed mail,
  * where a request-level refusal loses nothing.
  *
+ * @version 1.3.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.3
  * @changelog 1.3 - capRefusal() also bounds the held bytes per SENDING domain
  *   (specs/security_inventory.md S21): the recipient-side caps say how much a
@@ -363,8 +364,8 @@ class DirectSpoolService {
 	/**
 	 * Store one part of a delivery the RELAY already verified.
 	 *
-	 * Separate from storePart() because there is no session here: at Fortress
-	 * the wire terminated at the relay, so the box receives a complete,
+	 * Separate from storePart() because there is no session here: on a
+	 * relay-fronted deployment the wire terminated at the relay, so the box receives a complete,
 	 * hash-verified delivery rather than a transfer in progress. The bytes and
 	 * the hash the relay recorded are carried through unchanged, so the part
 	 * reads identically to one this box took itself.

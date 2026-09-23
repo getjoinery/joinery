@@ -142,7 +142,7 @@ try {
 	$other = make_user('UmOther');
 	$other_id = intval($other->key);
 
-	$dom = um_domain(InboundEmailDomain::LEVEL_FORTRESS, $owner_id);
+	$dom = um_domain(InboundEmailDomain::LEVEL_PRIVATE, $owner_id);
 	$dom_id = intval($dom->key);
 	$mine = um_alias($dom_id, 'mine', array($owner_id));
 	$shared = um_alias($dom_id, 'shared', array($owner_id, $other_id));
@@ -159,7 +159,7 @@ try {
 	check(InboundEmailMessage::domainOwnerUserId($dom_id) === $owner_id,
 		'the domain owner resolves');
 
-	$ownerless_domain = um_domain(InboundEmailDomain::LEVEL_FORTRESS, null);
+	$ownerless_domain = um_domain(InboundEmailDomain::LEVEL_PRIVATE, null);
 	check(InboundEmailMessage::sealOwnerUserId(null, intval($ownerless_domain->key)) === null,
 		'with no domain owner there is nobody to seal alias-less mail to');
 
@@ -182,8 +182,8 @@ try {
 	section('a sealing domain must have an owner with a vault');
 
 	// No owner at all.
-	$facts = mailbox_protection_facts($ownerless_domain, $owner_id);
-	$rows = mailbox_protection_rows($facts, InboundEmailDomain::LEVEL_FORTRESS, $owner_id);
+	$facts = mailbox_protection_facts($ownerless_domain);
+	$rows = mailbox_protection_rows($facts, InboundEmailDomain::LEVEL_PRIVATE, $owner_id);
 	$row = um_ceremony_row($rows, 'domain_owner');
 	check($row !== null && $row['status'] === 'fail' && $row['severity'] === 'required',
 		'a domain with no owner fails a required row');
@@ -193,17 +193,17 @@ try {
 
 	// An owner who has no vault.
 	$novault_owner = make_user('UmNoVault');
-	$novault_domain = um_domain(InboundEmailDomain::LEVEL_FORTRESS, intval($novault_owner->key));
-	$facts2 = mailbox_protection_facts($novault_domain, $owner_id);
-	$rows2 = mailbox_protection_rows($facts2, InboundEmailDomain::LEVEL_FORTRESS, $owner_id);
+	$novault_domain = um_domain(InboundEmailDomain::LEVEL_PRIVATE, intval($novault_owner->key));
+	$facts2 = mailbox_protection_facts($novault_domain);
+	$rows2 = mailbox_protection_rows($facts2, InboundEmailDomain::LEVEL_PRIVATE, $owner_id);
 	$row2 = um_ceremony_row($rows2, 'domain_owner_vault');
 	check($row2 !== null && $row2['status'] === 'fail',
 		'an owner without a vault fails a required row');
 	check(!mailbox_protection_required_ok($rows2), 'and blocks the raise too');
 
 	// The healthy domain passes.
-	$facts3 = mailbox_protection_facts($dom, $owner_id);
-	$rows3 = mailbox_protection_rows($facts3, InboundEmailDomain::LEVEL_FORTRESS, $owner_id);
+	$facts3 = mailbox_protection_facts($dom);
+	$rows3 = mailbox_protection_rows($facts3, InboundEmailDomain::LEVEL_PRIVATE, $owner_id);
 	$row3 = um_ceremony_row($rows3, 'domain_owner');
 	check($row3 !== null && $row3['status'] === 'pass',
 		'a domain whose owner holds a vault passes');

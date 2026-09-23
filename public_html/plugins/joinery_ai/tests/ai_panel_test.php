@@ -223,9 +223,9 @@ check($empty_ok, 'an empty list is legal — the recipe simply covers nothing');
 // -----------------------------------------------------------------------------
 section('The scheduling split: sealed-only refuses cron, mixed does not');
 
-$fortress = aip_domain(InboundEmailDomain::LEVEL_FORTRESS, true);
-$sealed_alias = aip_alias(intval($fortress->key), 'sealed', $member_id);
-$sealed_addr = 'sealed@' . $fortress->get('ied_domain');
+$sealed_domain = aip_domain(InboundEmailDomain::LEVEL_PRIVATE, true);
+$sealed_alias = aip_alias(intval($sealed_domain->key), 'sealed', $member_id);
+$sealed_addr = 'sealed@' . $sealed_domain->get('ied_domain');
 MailboxAliasConfig::clearPostureCache();
 
 $sealed_only = aip_recipe($member_id, array($sealed_addr));

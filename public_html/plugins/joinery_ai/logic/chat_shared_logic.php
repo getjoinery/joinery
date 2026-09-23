@@ -135,13 +135,19 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         'instructions'   => $selected_locked ? '' : $g('aic_instructions'),
         'thinking_level' => $thinking_level,
         // Per-conversation encryption level (cleartext) + the locked flag, and the
-        // levels the composer may offer for a NEW chat (gated by vault / local model).
+        // levels the composer may offer for a NEW chat (gated by the vault).
         'selected_locked'  => $selected_locked,
         'security_level'   => $selected
-            ? ((string)$selected->get('aic_security_level') ?: AiConversation::LEVEL_STANDARD)
+            ? $selected->level()
             : ChatLevel::defaultLevel(),
         'private_available'  => ChatLevel::privateAvailable($uid),
-        'fortress_available' => ChatLevel::fortressAvailable($uid),
+        // The Local models only add-on: the selected chat's stored flag (one-way,
+        // so an existing chat shows it checked and locked), or the default for a
+        // new chat; offered when the owner can have it.
+        'local_models_only'    => $selected
+            ? $selected->localModelsOnlyFlag()
+            : ChatLevel::defaultLocalOnly(),
+        'local_only_available' => ChatLevel::localOnlyAvailable($uid),
         'default_chat_level' => ChatLevel::defaultLevel(),
         'default_model'  => $default_model,
         'default_thinking_level' => $default_thinking_level,

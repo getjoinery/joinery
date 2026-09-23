@@ -20,7 +20,7 @@
  * InboundEmailRouter resolves at store time). Sealing an address book while the mail it describes sits
  * in plaintext would protect nothing: every correspondent is already visible in that plaintext
  * mail. So both hang off one posture switch — a Standard mailbox is server-readable end to end,
- * a Private/Fortress mailbox seals end to end — and there is no "plaintext mail, sealed
+ * a Private mailbox seals end to end — and there is no "plaintext mail, sealed
  * contacts" mixed state.
  *
  * That is what makes the live contact gate possible at Standard: contacts are genuinely
@@ -35,6 +35,7 @@
  * sealed to their vault (MailboxContactIndexKey) and opened in-window like any row DEK, so
  * a vault rotation moves its wrapping and every hash survives.
  *
+ * @version 2.4.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 2.4
  * @changelog 2.4 - the blind index is keyed by the user's sealed index key
  *   (MailboxContactIndexKey), opened through the VaultKey; nothing here ever
@@ -68,7 +69,7 @@ class MailboxContacts {
 	 * here are plaintext.
 	 *
 	 * Two conditions, and both are required: the user must HOLD a vault, and the
-	 * mailbox's domain must be one that seals content (Private or Fortress).
+	 * mailbox's domain must be one that seals content (Private).
 	 * Vault possession alone is not enough — a vault holder reading a Standard
 	 * mailbox stores contacts exactly as a user with no vault does, because the
 	 * mail beside them is plaintext and sealing the address book would secure

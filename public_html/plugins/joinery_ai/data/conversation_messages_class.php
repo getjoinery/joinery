@@ -60,7 +60,7 @@ class AiConversationMessage extends SystemBase {
         'aim_content'             => array('type'=>'text'),
         // 'text' (not jsonb) so a sealed turn can hold ciphertext, which is not
         // valid JSON — removed from $json_vars accordingly. A Standard turn stores
-        // plain JSON text; a Private/Fortress turn stores an AEAD blob. The seal/
+        // plain JSON text; a Private turn stores an AEAD blob. The seal/
         // unseal path does the json_encode/json_decode around the ciphertext, and
         // every reader already tolerates a string (json_decodes it).
         'aim_tool_calls'          => array('type'=>'text'),

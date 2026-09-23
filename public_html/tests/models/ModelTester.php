@@ -1877,8 +1877,15 @@ class ModelTester {
         
         // Test with string that's too long (override the field being tested)
         $too_long_string = str_repeat('a', $max_length + 1);
-        $model->set($field, $too_long_string);
-        
+        // A model that validates the value itself refuses it at set() — the
+        // same prevention, one step earlier (a level column only takes rungs).
+        try {
+            $model->set($field, $too_long_string);
+        } catch (Exception $e) {
+            $this->test_pass("Field $field validation prevented the value at set(): " . $e->getMessage());
+            return;
+        }
+
         try {
             $save_result = $model->save();
             

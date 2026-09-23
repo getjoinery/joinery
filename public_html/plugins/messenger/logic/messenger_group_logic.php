@@ -12,13 +12,15 @@
  *   is_admin         for set_admin
  *   file_id          for set_photo — an id from messenger_upload
  *   protection_level for `create`
+ *   sealed_exits_only for `create` — Nothing leaves unsealed on a Private group
  *
  * Membership rules live on the Conversation model (core), not here: the creator
  * is the first admin, only admins manage membership and the name, anyone may
  * leave, and every change writes a system message so the group can see its own
  * history.
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - create takes sealed_exits_only (Nothing leaves unsealed)
  */
 
 
@@ -115,13 +117,16 @@ function messenger_group_create(int $user_id, array $input): LogicResult {
 		$name = mb_substr($name, 0, 255);
 	}
 
-	$level = ProtectionLevel::normalize(
-		$input['protection_level'] ?? Messenger::clientSettings()['default_level']);
+	$level = ProtectionLevel::fromInput($input['protection_level'] ?? null, Messenger::defaultLevel());
 	// Only the rungs the messenger offers (Fortress is deliberately not one of
-	// them — a multi-party room cannot honestly promise client custody).
-	if (!in_array($level, array(ProtectionLevel::STANDARD, ProtectionLevel::PRIVATE_, ProtectionLevel::GUARDED), true)) {
-		$level = ProtectionLevel::STANDARD;
+	// them — a multi-party room cannot honestly promise client custody). A
+	// level asked for and not offered is refused, never quietly made Standard.
+	if ($level === null || !in_array($level, Conversation::LEVELS, true)) {
+		return LogicResult::error('That is not a protection level a conversation can have.');
 	}
+	$sealed_exits_only = array_key_exists('sealed_exits_only', $input) && $input['sealed_exits_only'] !== null
+		? !empty($input['sealed_exits_only'])
+		: Messenger::defaultSealedExitsOnly();
 
 	try {
 		// Created plain, then raised: protecting a conversation is a ceremony
@@ -138,6 +143,9 @@ function messenger_group_create(int $user_id, array $input): LogicResult {
 
 		if ($level !== ProtectionLevel::STANDARD) {
 			$conversation->raise($level, $user_id);
+			if ($sealed_exits_only) {
+				$conversation->turn_on_sealed_exits_only($user_id);
+			}
 		}
 	} catch (ConversationException $e) {
 		return LogicResult::error($e->getMessage());
@@ -237,6 +245,7 @@ function messenger_group_logic_descriptor(): array {
 			'is_admin'         => array('type' => 'bool',   'required' => false, 'label' => 'Admin rights'),
 			'file_id'          => array('type' => 'int',    'required' => false, 'label' => 'Uploaded picture'),
 			'protection_level' => array('type' => 'string', 'required' => false, 'label' => 'Protection level'),
+			'sealed_exits_only' => array('type' => 'bool',  'required' => false, 'label' => 'Nothing leaves unsealed (Private only)'),
 		),
 	);
 }

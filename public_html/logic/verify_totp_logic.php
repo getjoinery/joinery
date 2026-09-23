@@ -23,8 +23,8 @@ function verify_totp_logic(array $input): LogicResult{
 	}
 
 	// Which factors this pending user can present (specs/mailbox_security_levels.md
-	// § 5.4): TOTP and/or a passkey step-up. A passkey-only user (Fortress enrolled
-	// via a step-up passkey, no TOTP) sees only the passkey button — the whole point
+	// § 5.4): TOTP and/or a passkey step-up. A passkey-only user (enrolled via a
+	// step-up passkey, no TOTP) sees only the passkey button — the whole point
 	// of keying the login divert on user_has_second_factor rather than TOTP alone.
 	$pending_user = new User($_SESSION['totp_pending_user_id'], TRUE);
 	if (!$pending_user || !$pending_user->key) {

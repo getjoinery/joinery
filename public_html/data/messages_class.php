@@ -86,7 +86,7 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	    'msg_delivery_next_try' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 
 	    // --- Sealed Vault (docs/sealed_vault.md) ---------------------------
-	    // A message in a Private or Guarded conversation stores its body as
+	    // A message in a Private conversation stores its body as
 	    // ciphertext. Unlike every other sealed model, the key is NOT wrapped
 	    // onto this row: a conversation has many readers, so the one key is
 	    // wrapped once per participant in ckg_conversation_key_grants and

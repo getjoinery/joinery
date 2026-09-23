@@ -3,7 +3,7 @@
  * DirectSpoolDrain - the deferred half of a sealed-tier delivery, run at the
  * recipient's next unlock.
  *
- * At Private and Fortress the receiver accepted before it could judge: the
+ * At Private the receiver accepted before it could judge: the
  * contact list is sealed, so authorization had to wait while authentication —
  * the instance signature and every sealed-byte hash — ran at receive on a locked
  * box. This is where the waiting ends. For each held delivery it runs the kind's
@@ -35,6 +35,7 @@
  * re-seal the bytes themselves or retire the only keypair that can ever open
  * them — and a spooled delivery can wait for months.
  *
+ * @version 1.2.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.2
  * @changelog 1.2 - DirectDeferIngest from a kind's ingest leaves the delivery
  *   held quietly for a future unlock instead of logging it as a drain failure.

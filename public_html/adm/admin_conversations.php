@@ -104,9 +104,12 @@ foreach ($conversations as $cnv) {
 	$kind = $cnv->get('cnv_subject')
 		? 'Group: ' . htmlspecialchars($cnv->get('cnv_subject'), ENT_QUOTES, 'UTF-8')
 		: ($participants->count() > 2 ? 'Group' : 'Direct');
-	$level = ProtectionLevel::normalize($cnv->get('cnv_protection_level'));
+	$level = $cnv->protection_level();
 	if ($level !== ProtectionLevel::STANDARD) {
-		$kind .= ' &middot; ' . htmlspecialchars(ProtectionLevel::label($level), ENT_QUOTES, 'UTF-8');
+		// The level with its active add-ons, as members see it.
+		$kind .= ' &middot; ' . htmlspecialchars(ProtectionLevelPicker::summary($level,
+			$cnv->sealed_exits_only() ? array(ProtectionLevelPicker::ADDON_SEALED_EXITS_ONLY) : array()),
+			ENT_QUOTES, 'UTF-8');
 	}
 
 	$rowvalues = array();

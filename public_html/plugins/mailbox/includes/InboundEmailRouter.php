@@ -90,6 +90,7 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.41.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.41
  * @changelog 1.41 - relay() names the transport for the attempt row only when the
  *   relay is an EmailServiceProvider; RawMessageRelay promises no getKey(), and a
@@ -114,7 +115,7 @@
  *   detected and filed during ingest instead of delivered
  *   (specs/deliverability_report_ingest.md): processEmail intercepts before
  *   the alias branch, and parsePendingMessage intercepts at unlock — the
- *   Fortress relay path's first plaintext moment — removing the pending row
+ *   relay-sealed path's first plaintext moment — removing the pending row
  *   once the report's derived rows are written
  * @version 1.37
  * @changelog 1.37 - forward loop guard (specs/security_inventory.md S14): every
@@ -843,7 +844,7 @@ class InboundEmailRouter {
 	/**
 	 * Deferred ingest (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 5).
 	 *
-	 * A Fortress message from the hardened relay lands PENDING-PARSE: the pull
+	 * A relay-sealed message from the hardened relay lands PENDING-PARSE: the pull
 	 * consumer stored operational metadata + the whole raw message sealed to the
 	 * owner's vault public key (iem_relay_sealed_raw, a crypto_box_seal blob),
 	 * but subject/sender/body/attachments do not exist yet. This runs at the next
@@ -883,7 +884,7 @@ class InboundEmailRouter {
 		$parsed = $this->parseEmail($raw);
 
 		// Deliverability report? (specs/deliverability_report_ingest.md § D2)
-		// This is the second plaintext moment — a Fortress relay message's
+		// This is the second plaintext moment — a relay-sealed message's
 		// content first exists here, at unlock — so the same detector that
 		// receive-time ingest runs must run too, or protected domains would
 		// silently get no sender inventory. A recognised report is filed as
@@ -917,7 +918,7 @@ class InboundEmailRouter {
 		$owner_id = intval($msg->get('iem_sealed_owner_user_id'));
 		$vault = ($owner_id > 0) ? $this->loadOwnerVault($owner_id) : null;
 		if ($vault === null) {
-			// A Fortress row must have a vault owner; without one there is no key
+			// A relay-sealed row must have a vault owner; without one there is no key
 			// to seal to. Leave pending — the owner may still be enrolling.
 			throw new \RuntimeException('parsePendingMessage: no vault for owner ' . $owner_id . ' on message ' . $msg->key);
 		}
@@ -989,7 +990,7 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Store a pulled Fortress blob as a PENDING-PARSE row (specs/…hardened_ingest_relay §
+	 * Store a pulled relay-sealed blob as a PENDING-PARSE row (specs/…hardened_ingest_relay §
 	 * Phase 5.1). The raw is sealed to the owner's vault and cannot be opened while
 	 * logged out, so only operational metadata + the sealed blob are stored now;
 	 * threading and unread counts work, and DeferredIngest fills in the content at the
@@ -3053,7 +3054,7 @@ class InboundEmailRouter {
 	 *
 	 * The lookup is the shared, unencrypted book (aliasHasContact): ingest is
 	 * keyless, so per-grantee contacts sealed under a closed vault are invisible
-	 * here and a Private/Fortress mailbox gets no bypass. That is fail-closed and
+	 * here and a Private mailbox gets no bypass. That is fail-closed and
 	 * matches the Direct gate's own reading of the same store.
 	 *
 	 * @param InboundEmailAlias|null $alias        recipient mailbox; null (catch-all) never elevates

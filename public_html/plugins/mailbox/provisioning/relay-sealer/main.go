@@ -79,7 +79,7 @@ func main() {
 		os.Exit(runMerge())
 	}
 	// The relay API (specs/relay_without_a_shell.md): one listener on 443 that
-	// serves Joinery Direct (docs/joinery_direct.md - at Fortress the relay IS
+	// serves Joinery Direct (docs/joinery_direct.md - on a relay-fronted deployment the relay IS
 	// the Direct endpoint, because an SRV record pointing at the origin box would
 	// advertise the address the relay exists to conceal) AND the signed /relay/
 	// routes the plane pulls, pushes and pings through, plus the root-side verbs

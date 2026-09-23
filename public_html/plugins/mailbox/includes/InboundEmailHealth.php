@@ -20,6 +20,8 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.21 - the origin probe skips relay-sealed domains (the Seal at the
+ *   relay add-on); the sealing-holders check counts Private only
  * @version 1.20 - checkSearchIndexStorage() also counts the File era's index bytes no File
  *                 holds any more (a leaked blob, or a file no row names), and the check is
  *                 reported to a management node (fleet_report in plugin.json)
@@ -140,6 +142,7 @@ class InboundEmailHealth {
                  WHERE a.iea_delete_time IS NULL AND d.ied_delete_time IS NULL
                    AND " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " IN ('"
                        . InboundEmailDomain::LEVEL_PRIVATE . "','"
+                       // 'fortress' until mailbox migration ied_003_private_with_addons converts it.
                        . InboundEmailDomain::LEVEL_FORTRESS . "')";
         $rows = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
@@ -524,7 +527,7 @@ class InboundEmailHealth {
 
     /**
      * No recoverable mail is stranded on the relay. The pull HOLDS (does not
-     * delete) blobs whose domain is disabled/unconfigured or whose Fortress
+     * delete) blobs whose domain is disabled/unconfigured or whose relay-sealed
      * owner is not yet resolvable, so an operator needs to see when mail is
      * waiting — re-enabling the domain (or restoring the grant/vault) drains it
      * on the next pull; left alone it ages out past the grace window. No-op on
@@ -645,7 +648,7 @@ class InboundEmailHealth {
      * Deployment-wide origin-hiding check: once a relay exists, the main box's
      * public IP must not appear in ANY hosted domain's mail DNS (MX or the mail
      * hostname A record) — a single leak defeats the hidden origin. Not
-     * Fortress-only. No-op on colocated deployments.
+     * limited to relay-sealed domains. No-op on colocated deployments.
      */
     public static function checkOriginHidden() {
         $relay = self::activeRelay();
@@ -926,8 +929,8 @@ class InboundEmailHealth {
         // address would bounce under reject_unmatched and the round trip would
         // silently never complete), and only a stored delivery lands in
         // iem_inbound_email_messages where checkOutboundOriginLeak can find it.
-        // Fortress domains are skipped — their delivered raw is sealed to the
-        // owner's key, so the server could never scan it.
+        // Relay-sealed domains are skipped — their delivered raw is sealed to
+        // the owner's key, so the server could never scan it.
         $address = self::originProbeTarget();
         if ($address === '') {
             return array('ok' => false, 'message' => 'No enabled store-mode alias on a Standard or Private domain to '
@@ -967,8 +970,8 @@ class InboundEmailHealth {
     /**
      * The full address of the alias an origin-leak probe is sent to (and from):
      * the first enabled store-capable alias (store or forward_and_store) on an
-     * enabled non-Fortress domain, or '' when none exists. Non-Fortress because
-     * the delivered copy must be server-readable for the header scan; a listed
+     * enabled domain without the Seal at the relay add-on, or '' when none
+     * exists. Without it because the delivered copy must be server-readable for the header scan; a listed
      * alias because the relay's recipient validation rejects anything else.
      */
     private static function originProbeTarget(): string {
@@ -976,7 +979,7 @@ class InboundEmailHealth {
         $domains->load();
         require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
         foreach ($domains as $domain) {
-            if ($domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
+            if ($domain->relay_seals_to_owner()) {
                 continue;
             }
             $aliases = new MultiInboundEmailAlias(

@@ -14,6 +14,8 @@
  * expected to cache (see the reader's setup_status action); this file always
  * answers live.
  *
+ * @version 1.7 - a mailbox needs the relay when its domain has the Seal at the
+ *   relay add-on on
  * @version 1.6 - an IMAP-pull mailbox gets a Sending row of its own — the
  *                connected account is its only way out, so a paused, unauthorized
  *                or SMTP-less feed stops the verdict reading green
@@ -72,13 +74,13 @@ function mailbox_setup_scoped_rows(int $alias_id, string $relay_advanced_url = '
 	$address      = strtolower($alias->get('iea_alias') . '@' . $domain->get('ied_domain'));
 	$focus_domain = strtolower((string)$domain->get('ied_domain'));
 
-	// A RELAY IS ONLY THIS MAILBOX'S BUSINESS AT FORTRESS
+	// A RELAY IS ONLY THIS MAILBOX'S BUSINESS UNDER THE SEAL AT THE RELAY ADD-ON
 	// (specs/mailbox_relay_surface_simplification.md). The relay is what seals
-	// arriving mail, and only Fortress requires that. A deployment may run one
+	// arriving mail to the owner, and only that add-on requires it. A deployment may run one
 	// for its own reasons at any level — that stays possible, and it stays
 	// visible in the Setup tab's Relay section — but it must not surface as a
 	// card, a warning or a verdict on a mailbox whose domain does not need it.
-	$needs_relay = ($domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS);
+	$needs_relay = $domain->relay_seals_to_owner();
 
 	$provider = InboundProviderRegistry::active();
 	$arrival  = $is_imap ? 'imap' : ($provider::isWebhook() ? 'webhook' : 'postfix');

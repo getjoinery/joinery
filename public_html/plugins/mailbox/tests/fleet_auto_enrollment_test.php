@@ -9,14 +9,14 @@
  * Order-time fleet auto-enrollment (specs/mailbox_relay_shared_fleet.md
  * § Follow-up): the seeding gate (FleetProvisionSeeding::applies), the buyer
  * credential mint, the remote seeding command (secret stays out of it), and
- * the operator console's one-click Fortress product creation.
+ * the operator console's one-click Relay Hosting product creation.
  *
  * Creates scratch tier/group/member, api-key, and product rows; all deleted
  * LIFO. No mailbox tables are touched.
  *
  * Run: php tests/run.php db --filter=fleet_auto_enrollment
  *
- * @version 1.0
+ * @version 1.1 - the created product is Relay Hosting
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -216,8 +216,8 @@ $unpaired->save();
 check(FleetProvisionSeeding::seededElsewhere($paired, $buyer->key) === 'harnesstest-fleet-holder.example.com',
 	'and holds it again once its node is live');
 
-// ── D. The operator console's Fortress product ──────────────────────────────
-section('Fortress product creation');
+// ── D. The operator console's Relay Hosting product ─────────────────────────
+section('Relay Hosting product creation');
 
 if (!PluginHelper::isPluginActive('store') || !PluginHelper::isPluginActive('server_manager')) {
 	harness_skip('store/server_manager inactive', 'product creation needs both plugins');
@@ -237,6 +237,9 @@ if (!PluginHelper::isPluginActive('store') || !PluginHelper::isPluginActive('ser
 			harness_register_row('pro_products', 'pro_product_id', $product->key);
 			check((bool)$product->get('pro_is_active') === false,
 				'the product is born inactive — pricing/publishing is the operator\'s act');
+			check((string)$product->get('pro_name') === 'Relay Hosting'
+					&& strpos((string)$product->get('pro_link'), 'relay-hosting') === 0,
+				'a new fleet product is named Relay Hosting, linked relay-hosting');
 			check($product->get('pro_fulfillment_provider') === 'customer_cloud',
 				'the product fulfills onto a customer-cloud server');
 			$linked_tier = new SubscriptionTier((int)$product->get('pro_sbt_subscription_tier_id'), TRUE);
@@ -247,7 +250,7 @@ if (!PluginHelper::isPluginActive('store') || !PluginHelper::isPluginActive('ser
 			// satisfies this — either way, creation must not have minted a
 			// SECOND slot tier.
 			check(strpos($created['message'], 'Reused tier') !== false
-					|| strpos($created['message'], 'Tier "Fortress" created') !== false,
+					|| strpos($created['message'], 'Tier "Relay" created') !== false,
 				'creation reports what it did about the tier');
 
 			$again = admin_mailbox_relay_create_fleet_product();

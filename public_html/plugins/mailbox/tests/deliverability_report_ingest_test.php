@@ -15,7 +15,7 @@
  * (D9); an unreadable report keeps its raw for diagnosis (D6); ordinary mail
  * still stores; the D7 notice fires once for a new unaligned source, stays
  * silent for a known one, and fires once more on a sharp volume jump; and the
- * deferred Fortress path (D2's second plaintext moment) files at unlock and
+ * deferred relay-sealed path (D2's second plaintext moment) files at unlock and
  * removes its pending row.
  *
  * Run: php tests/run.php db --filter=deliverability_report_ingest
@@ -38,11 +38,12 @@ require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 $db = DbConnector::get_instance()->get_db_link();
 $router = new InboundEmailRouter();
 
-function dvi_domain(string $level = 'standard'): InboundEmailDomain {
+function dvi_domain(string $level = 'standard', bool $relay_seal = false): InboundEmailDomain {
 	$dom = new InboundEmailDomain(NULL);
 	$dom->set('ied_domain', 'dvi-' . bin2hex(random_bytes(4)) . '.example');
 	$dom->set('ied_is_enabled', true);
 	$dom->set('ied_security_level', $level);
+	$dom->set('ied_relay_seals_to_owner', $relay_seal);
 	$dom->set('ied_catch_all_mode', 'store');
 	$dom->save();
 	$dom->load();
@@ -234,16 +235,16 @@ foreach ($q->fetchAll(PDO::FETCH_COLUMN, 0) as $id) {
 	}
 }
 
-section('D2: the deferred Fortress path files at unlock');
+section('D2: the deferred relay-sealed path files at unlock');
 
-$fdom = dvi_domain('fortress');
+$fdom = dvi_domain('private', true);
 $fname = strtolower($fdom->get('ied_domain'));
 $kp = (new SealedBox())->generateKeypair();
-$fraw = dvi_carrier($fname, 'reporter.example', 'rpt-fortress', dvi_xml($fname, 'reporter.example', 'rpt-fortress', '203.0.113.70', 9));
+$fraw = dvi_carrier($fname, 'reporter.example', 'rpt-relay-sealed', dvi_xml($fname, 'reporter.example', 'rpt-relay-sealed', '203.0.113.70', 9));
 $sealed = (new SealedBox())->sealDek($fraw, $kp['public']);
 
 $result = $router->storeRelayPending(
-	array('recipient' => 'postmaster@' . $fname, 'message_id' => '<fortress-' . bin2hex(random_bytes(6)) . '@reporter.example>',
+	array('recipient' => 'postmaster@' . $fname, 'message_id' => '<relay-sealed-' . bin2hex(random_bytes(6)) . '@reporter.example>',
 		'size' => strlen($fraw), 'received_utc' => gmdate('Y-m-d H:i:s'), 'spool_id' => 'dvi-' . bin2hex(random_bytes(8))),
 	$sealed, $fdom, null, User::USER_SYSTEM);
 check($result['message'] !== null, 'the pending row stored');
@@ -255,7 +256,7 @@ $done = $router->parsePendingMessage($msg, vault_fixture_key($kp['secret']));
 check($done === true, 'deferred parse reports the row handled');
 
 $freports = dvi_register_reports($db, intval($fdom->key));
-check(count($freports) === 1, 'the report filed for the Fortress domain — the case a post-hoc parser cannot serve');
+check(count($freports) === 1, 'the report filed for the relay-sealed domain — the case a post-hoc parser cannot serve');
 $q = $db->prepare("SELECT COUNT(*) FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?");
 $q->execute(array($pending_id));
 check((int)$q->fetchColumn() === 0, 'and the pending message row is gone');

@@ -13,6 +13,7 @@
  * every Edit jump to the existing per-object editors with context pre-filled.
  * DNS/host diagnostics live on the Setup tab.
  *
+ * @version 1.11 - the level badges carry the domain's add-ons in force
  * @version 1.10 - the To/Cc catch-up card is retired with the backfill
  * @version 1.9 - the To/Cc catch-up card (specs/mailbox_to_cc_lists.md § 6): one
  *   call, TEMPORARY, removed with the backfill
@@ -145,6 +146,11 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 				echo ' <a class="iea-badge iea-badge-level iea-badge-level-' . htmlspecialchars($level)
 					. '" href="' . $domain_base . '?ied_inbound_email_domain_id=' . (int)$domain->key . '"'
 					. ' title="Mail protection level — click to change">' . htmlspecialchars(ucfirst($level)) . '</a>';
+				// The add-ons in force show with the level.
+				foreach ($domain->addon_labels() as $addon_label) {
+					echo ' <span class="iea-badge iea-badge-addon" title="Extra protection">'
+						. htmlspecialchars($addon_label) . '</span>';
+				}
 			}
 			?>
 			<span class="iea-spacer"></span>
@@ -208,6 +214,9 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 							<a class="iea-badge iea-badge-level iea-badge-level-<?php echo htmlspecialchars($mb_level); ?>"
 							   href="<?php echo $mb_level_url; ?>"
 							   title="<?php echo htmlspecialchars($mb_level_title); ?>"><?php echo htmlspecialchars(ucfirst($mb_level)); ?></a>
+							<?php if (!$is_imap_src) { foreach ($domain->addon_labels() as $addon_label): ?>
+								<span class="iea-badge iea-badge-addon" title="Extra protection — set on the domain"><?php echo htmlspecialchars($addon_label); ?></span>
+							<?php endforeach; } ?>
 						<?php endif; ?>
 					</div>
 					<div class="iea-mb-route"><?php echo $mode_label($alias); ?></div>

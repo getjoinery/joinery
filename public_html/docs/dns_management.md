@@ -128,7 +128,7 @@ The two plans that ship:
 
 | Consumer | Method | Records |
 |---|---|---|
-| Mailbox domain setup | `InboundEmailSetupCheck::dnsPlan($domain)` | MX, SPF, DKIM, DMARC, the mail host's A record, the fleet ownership proof, and the inverted protected shape for a Fortress domain — which also requires any foreign signing key to be absent |
+| Mailbox domain setup | `InboundEmailSetupCheck::dnsPlan($domain)` | MX, SPF, DKIM, DMARC, the mail host's A record, the fleet ownership proof, and the inverted protected shape for a domain whose send protection is on — which also requires any foreign signing key to be absent |
 | Node provisioning | `NodeDnsPlan::forNode($node)` | The node's site A (or AAAA) record — the one certificate issuance waits on |
 
 `InboundEmailSetupCheck::dnsPlan()` computes desired state from the same

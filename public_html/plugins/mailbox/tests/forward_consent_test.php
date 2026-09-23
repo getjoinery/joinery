@@ -80,7 +80,7 @@ try {
 	// =====================================================================
 	section('a protected domain will not forward without one');
 
-	$sealed = fc_domain(InboundEmailDomain::LEVEL_FORTRESS, 'seal');
+	$sealed = fc_domain(InboundEmailDomain::LEVEL_PRIVATE, 'seal');
 	check($sealed->seals_content(), 'the fixture domain really does seal its content');
 
 	$filter = fc_filter((int)$sealed->key, $destination);

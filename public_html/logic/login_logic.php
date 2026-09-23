@@ -154,7 +154,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		// passkey) and has no valid trusted-device cookie, stash a pending state and
 		// redirect to /verify-totp instead of completing login. Keying on
 		// user_has_second_factor (not has_totp_enabled) closes the quirk where a
-		// passkey-only Fortress user was never asked a second factor at sign-in
+		// passkey-only user was never asked a second factor at sign-in
 		// (specs/mailbox_security_levels.md § 5.4). The 2FA cadence (§ 5.2) decides
 		// whether the factor is asked at sign-in: 'every_login' asks it here;
 		// 'sensitive_only' signs in password-only and defers the factor to sensitive

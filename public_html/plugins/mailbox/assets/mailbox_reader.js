@@ -212,7 +212,7 @@
 	// ---- vault unlock (locked-state contract) ----
 	// A locked/pending row arrives with cleartext metadata and a neutral "Sealed
 	// message" placeholder; any content action (open a thread, search, download,
-	// Fortress compose) runs the built passkey ceremony and then re-runs the
+	// sending-lock compose) runs the built passkey ceremony and then re-runs the
 	// original request without navigation (specs/mailbox_security_levels.md § 4).
 	function apiV1(action, payload) {
 		return joineryApi.post(action, payload || {});
@@ -430,19 +430,26 @@
 		var chip = $('#mbx-level-chip');
 		if (!chip) return;
 		var level = '';
+		var addons = [];
 		// Only a single open mailbox has a level to state. The all-mail view spans
 		// mailboxes that may differ, and a Drafts folder holds compose scratch rather
 		// than delivered mail.
 		if (!state.draftsView && state.aliasId != null) {
 			state.mailboxes.forEach(function (m) {
 				if (String(m.alias_id) !== String(state.aliasId)) return;
-				if (m.security_level && m.security_level !== 'standard') { level = m.security_level; }
+				if (m.security_level && m.security_level !== 'standard') {
+					level = m.security_level;
+					addons = m.protection_addons || [];
+				}
 			});
 		}
+		// The active add-ons show with the level, so the chip states what this
+		// mailbox actually promises.
 		chip.hidden = !level;
-		chip.textContent = level ? (level.charAt(0).toUpperCase() + level.slice(1)) : '';
+		chip.textContent = level
+			? [level.charAt(0).toUpperCase() + level.slice(1)].concat(addons).join(' · ') : '';
 		chip.className = 'mbx-level-badge' + (level ? ' mbx-level-' + level : '');
-		chip.title = level ? 'Mail protection level (set on the domain)' : '';
+		chip.title = level ? 'Mail protection level and extra protection (set on the domain)' : '';
 	}
 
 	// True for a real mailbox id (a positive serial) as opposed to a pseudo-box such as
@@ -4207,7 +4214,7 @@
 				}
 				refreshMailboxes();
 			} else if (data.locked) {
-				// Fortress compose while locked: one-tap unlock, then resubmit the
+				// sending-lock compose while locked: one-tap unlock, then resubmit the
 				// same draft without re-navigation (specs/mailbox_security_levels.md § 4.1).
 				showComposeError('Your vault is locked. Unlocking…');
 				if (await unlockVault()) { hideComposeError(); submitCompose(e); }
@@ -4353,7 +4360,7 @@
 			// Refresh means "go get my mail": first activate the delivery chain's
 			// pull lanes (relay spool pull + IMAP feed fetch), THEN re-read. On a
 			// relay-fronted deployment the re-read also parses any pulled
-			// Fortress rows (drainRelayBacklog), so new mail lands in this paint.
+			// relay-sealed rows (drainRelayBacklog), so new mail lands in this paint.
 			// A failed or cooled-down check still re-reads — refresh never breaks.
 			var checkMail = CFG.checkMailUrl
 				? joineryApi.post(CFG.checkMailUrl, {}).catch(function () {})

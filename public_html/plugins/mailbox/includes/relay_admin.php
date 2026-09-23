@@ -13,6 +13,7 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.3 - a new fleet product is named Relay Hosting (tier Relay, link relay-hosting)
  * @version 2.1 - the health battery carries a pending grade
  *                (ProvisioningCheckPending): a converging alias map renders as
  *                an amber wait on the relay card, not a red failure
@@ -499,7 +500,7 @@ function admin_mailbox_relay_operator_actions(array $input, $session, string $se
 
 /**
  * Products whose tier carries the fleet-slot feature — what makes an order a
- * Fortress order. Derived by query, no marker setting to drift. Returns rows
+ * relay-hosting order. Derived by query, no marker setting to drift. Returns rows
  * of ['id','name','is_active','fulfillment'].
  */
 function admin_mailbox_relay_fleet_products(): array {
@@ -530,7 +531,7 @@ function admin_mailbox_relay_fleet_products(): array {
 }
 
 /**
- * One-click Fortress hosting product: reuse (or create) a tier whose features
+ * One-click Relay Hosting product: reuse (or create) a tier whose features
  * grant the fleet slot, then create an INACTIVE customer-cloud hosting product
  * on it — the operator prices and activates it deliberately on the product
  * edit page. Idempotent: an existing fleet product means nothing to do.
@@ -563,23 +564,23 @@ function admin_mailbox_relay_create_fleet_product(): array {
 	$tier_created = false;
 	if ($tier === null) {
 		$tier = new SubscriptionTier(NULL);
-		$tier->set('sbt_name', 'fortress');
-		$tier->set('sbt_display_name', 'Fortress');
+		$tier->set('sbt_name', 'relay');
+		$tier->set('sbt_display_name', 'Relay');
 		$tier->set('sbt_tier_level', $top_level + 10);
-		$tier->set('sbt_description', 'Fortress hosting: a dedicated server with a hosted relay slot on the shared fleet.');
+		$tier->set('sbt_description', 'Relay hosting: a dedicated server with a hosted relay slot on the shared fleet.');
 		$tier->setFeatures(array('mailbox_fleet_slot' => true, 'mailbox_fleet_max_domains' => 5));
 		$tier->save();
 		$tier->load();
 		$tier_created = true;
 	}
 
-	$link = 'fortress-hosting';
+	$link = 'relay-hosting';
 	$link_taken = new MultiProduct(array('link' => $link));
 	if ($link_taken->count_all() > 0) {
 		$link .= '-' . substr(md5(uniqid('', true)), 0, 6);
 	}
 	$product = new Product(NULL);
-	$product->set('pro_name', 'Fortress Hosting');
+	$product->set('pro_name', 'Relay Hosting');
 	$product->set('pro_link', $link);
 	$product->set('pro_description',
 		'A dedicated server in your own cloud account, built automatically, with a hosted relay slot on the shared fleet.');
@@ -594,9 +595,9 @@ function admin_mailbox_relay_create_fleet_product(): array {
 
 	return array('title' => 'Product created',
 		'message' => ($tier_created
-			? 'Tier "Fortress" created (level ' . $tier->get('sbt_tier_level') . ') with the fleet-slot feature. '
+			? 'Tier "Relay" created (level ' . $tier->get('sbt_tier_level') . ') with the fleet-slot feature. '
 			: 'Reused tier "' . $tier->get('sbt_display_name') . '" (it already grants the fleet slot). ')
-			. 'Product "Fortress Hosting" created inactive — set its price and activate it on the product edit page. '
+			. 'Product "Relay Hosting" created inactive — set its price and activate it on the product edit page. '
 			. 'Orders then provision the buyer\'s server and pre-seed its relay enrollment automatically.');
 }
 

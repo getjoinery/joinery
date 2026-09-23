@@ -387,7 +387,7 @@ section('H. One trust class answers the warning and the gate');
 
 with_catalog($FIXTURE, $REFERENCE, function () {
 	// Three surfaces used to ask three different questions about a model: the
-	// composer asked the provider about its training policy, the Fortress pin
+	// composer asked the provider about its training policy, the local-only pin
 	// re-implemented the routing regex, and the sealed gate asked whether the
 	// bytes left the box. Fireworks came out "private" and "cloud" at once. All
 	// three now read one value, so the only property worth asserting is that
@@ -396,13 +396,13 @@ with_catalog($FIXTURE, $REFERENCE, function () {
 	foreach (array_keys(AiEndpointRegistry::catalog()) as $id) {
 		$trust = (string)AiEndpointRegistry::trustForModel($id);
 
-		$is_local = ChatLevel::isLocalModel($id);            // the Fortress pin
+		$is_local = ChatLevel::isLocalModel($id);            // the local-only pin
 		$warns    = ($trust === 'cloud');                     // the composer warning
 		$sealed_local_refuses = !AiModelRequirement::trustSatisfies(  // the egress gate
 			AiModelRequirement::TRUST_LOCAL, $trust);
 
 		if ($is_local !== ($trust === 'local')) {
-			$disagreements[] = "$id: Fortress pin disagrees with trust '$trust'";
+			$disagreements[] = "$id: local-only pin disagrees with trust '$trust'";
 		}
 		if ($warns !== ($trust === 'cloud')) {
 			$disagreements[] = "$id: composer warning disagrees with trust '$trust'";
@@ -412,7 +412,7 @@ with_catalog($FIXTURE, $REFERENCE, function () {
 		}
 	}
 	check(count($disagreements) === 0,
-		'the chat warning, the Fortress pin and the sealed gate read one trust value',
+		'the chat warning, the local-only pin and the sealed gate read one trust value',
 		implode('; ', $disagreements));
 
 	// The distinction the old boolean could not express: a trusted vendor is

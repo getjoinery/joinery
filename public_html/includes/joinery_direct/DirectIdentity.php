@@ -26,6 +26,7 @@
  * reference, so core never names a plugin symbol (the discipline
  * `MailIdentityGuard` already sets).
  *
+ * @version 1.1.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.1 - mint() refuses a domain the deployment is not authoritative
  *   for, via a registered resolver (specs/imap_source_domain_boundaries.md)
  * @version 1.0
@@ -203,8 +204,8 @@ class DirectSigningIdentity {
 	 *
 	 * A vault-custody domain with no open unlock window throws
 	 * VaultLockedException rather than signing — the send path treats that as a
-	 * failure and, for mail, falls back to SMTP, which under Fortress is the
-	 * edge-sealing ingest relay. Falling back never drops to a less-protected
+	 * failure and, for mail, falls back to SMTP, which on a relay-fronted
+	 * deployment is the edge-sealing ingest relay. Falling back never drops to a less-protected
 	 * path.
 	 *
 	 * @return array{key_id:string,signature:string}

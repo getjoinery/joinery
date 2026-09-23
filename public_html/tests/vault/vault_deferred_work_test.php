@@ -121,7 +121,7 @@ check($broken['turns'] > 0, 'the broken consumer was given a turn');
 check($healthy['done'] === 2, 'and the healthy one still completed its work');
 
 section('Background work is not user activity');
-// The Fortress idle cap measures from the last content decrypt. If a drain's
+// The hardened idle cap measures from the last content decrypt. If a drain's
 // reads counted as activity, an abandoned tab would hold a window open for
 // ever and the cap would stop existing.
 //

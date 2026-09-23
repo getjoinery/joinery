@@ -83,9 +83,9 @@ VaultUnlock::onWindowCaps(function (int $user_id): array {
 	throw new RuntimeException('exploded, and declared nothing');
 });
 $caps = VaultUnlock::capsForUser(1);
-check($caps['idle'] === VaultUnlock::FORTRESS_IDLE_CAP_SECONDS
-		&& $caps['absolute'] === VaultUnlock::FORTRESS_ABSOLUTE_CAP_SECONDS,
-	'a provider that never declared its failure mode fails closed to the Fortress caps — '
+check($caps['idle'] === VaultUnlock::HARDENED_IDLE_CAP_SECONDS
+		&& $caps['absolute'] === VaultUnlock::HARDENED_ABSOLUTE_CAP_SECONDS,
+	'a provider that never declared its failure mode fails closed to the hardened caps — '
 	. 'abstaining on error must be said explicitly, never defaulted into');
 
 // ---------------------------------------------------------------------------
@@ -98,9 +98,9 @@ $reflect = new ReflectionProperty('PluginBootstraps', 'not_loaded');
 $reflect->setAccessible(true);
 $reflect->setValue(null, array('mailbox'));
 $caps = VaultUnlock::capsForUser(1);
-check($caps['idle'] === VaultUnlock::FORTRESS_IDLE_CAP_SECONDS
-		&& $caps['absolute'] === VaultUnlock::FORTRESS_ABSOLUTE_CAP_SECONDS,
-	'an unloadable consumer bootstrap arms the Fortress caps instead of an uncapped window');
+check($caps['idle'] === VaultUnlock::HARDENED_IDLE_CAP_SECONDS
+		&& $caps['absolute'] === VaultUnlock::HARDENED_ABSOLUTE_CAP_SECONDS,
+	'an unloadable consumer bootstrap arms the hardened caps instead of an uncapped window');
 
 caps_reset();
 $reflect->setValue(null, array('mailbox'));
@@ -108,7 +108,7 @@ VaultUnlock::onWindowCaps(function (int $user_id): array {
 	return array('idle' => 900, 'absolute' => null);
 });
 $caps = VaultUnlock::capsForUser(1);
-check($caps['idle'] === 900 && $caps['absolute'] === VaultUnlock::FORTRESS_ABSOLUTE_CAP_SECONDS,
+check($caps['idle'] === 900 && $caps['absolute'] === VaultUnlock::HARDENED_ABSOLUTE_CAP_SECONDS,
 	'a surviving provider can still tighten further — the fail-closed floor folds like any other opinion');
 
 // ---------------------------------------------------------------------------

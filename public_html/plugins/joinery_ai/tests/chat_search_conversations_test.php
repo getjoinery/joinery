@@ -32,7 +32,7 @@ $has_session = vault_ensure_session();
 // A locally-served model id and a cloud one. "Local" is now a lookup in the
 // shipped catalog rather than a guess from the id's shape, so the local one has
 // to actually be served — an id nothing declares is deliberately NOT classified
-// local, which is what stops a Fortress chat trusting a name nobody recognises.
+// local, which is what stops a local-only chat trusting a name nobody recognises.
 $LOCAL_MODEL  = 'qwen3:4b-instruct';
 $REMOTE_MODEL = 'claude-haiku-4-5';
 harness_set_setting_mem('joinery_ai_local_model', $LOCAL_MODEL);

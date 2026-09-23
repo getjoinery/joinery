@@ -13,7 +13,8 @@
  *  - Receipt render: working state (live sealing row, hidden button, noscript
  *    batch form), completed state (sealed-count fact, visible button),
  *    zero-backlog wording, unlock fact naming (self vs other holder).
- *  - Fortress handoff variant: honest title, continue-to-protect button.
+ *  - Sending-lock handoff variant: honest title, continue-to-protect button;
+ *    a Private domain that never asked for the lock does not hand off.
  *  - Sealed/backlog counters over real rows.
  *  - Stuck-batch contract: a backlog with no sealable holder returns
  *    sealed=0 with rows remaining — the shape the editor's JS loop stops on.
@@ -21,7 +22,7 @@
  *
  * Run: php tests/run.php db --filter=raise_receipt
  *
- * @version 1.0
+ * @version 1.1 - the handoff follows a requested sending lock, not a level
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -60,9 +61,10 @@ try {
 	$html = mailbox_protection_render($rows, $dom, $urls, InboundEmailDomain::LEVEL_PRIVATE);
 	check(strpos($html, 'Before this domain can be Private') !== false,
 		'the Private checklist heading names Private');
-	$html = mailbox_protection_render($rows, $dom, $urls, InboundEmailDomain::LEVEL_FORTRESS);
-	check(strpos($html, 'Before this domain can be Fortress') !== false,
-		'the Fortress checklist heading names Fortress');
+	$html = mailbox_protection_render($rows, $dom, $urls, '', '', 'Before Seal at the relay can be on');
+	check(strpos($html, 'Before Seal at the relay can be on') !== false
+		&& strpos($html, 'Before this domain can be') === false,
+		'an add-on checklist carries its own heading instead of a level');
 	$html = mailbox_protection_render($rows, $dom, $urls);
 	check(strpos($html, 'Before this domain can be protected') !== false,
 		'no target falls back to the generic heading');
@@ -118,12 +120,19 @@ try {
 	check(strpos($html, '1 earlier message sealed') !== false, 'the singular count reads singular');
 
 	// -----------------------------------------------------------------------
-	section('receipt render: fortress handoff');
+	section('receipt render: sending-lock handoff');
+
+	$state = array('backlog' => 0, 'sealed_total' => 5, 'acting_user_id' => RR_ACTING,
+		'editor_url' => $urls['editor_url']);
+	$html = mailbox_protection_receipt_render($dom, rr_facts_one_holder(RR_ACTING, 'Robin'), $state);
+	check(strpos($html, 'one step left') === false && strpos($html, 'This domain is now Private') !== false,
+		'a Private domain that never asked for the sending lock is finished — no handoff');
 
 	$fort = new InboundEmailDomain(NULL);
-	$fort->set('ied_domain', 'rr-fort-' . bin2hex(random_bytes(3)) . '.example');
+	$fort->set('ied_domain', 'rr-lock-' . bin2hex(random_bytes(3)) . '.example');
 	$fort->set('ied_is_enabled', true);
-	$fort->set('ied_security_level', InboundEmailDomain::LEVEL_FORTRESS);
+	$fort->set('ied_security_level', InboundEmailDomain::LEVEL_PRIVATE);
+	$fort->set('ied_send_lock_requested', true);
 	$fort->save();
 	$fort->load();
 	harness_register_row('ied_inbound_email_domains', 'ied_inbound_email_domain_id', intval($fort->key));
@@ -132,12 +141,12 @@ try {
 		'editor_url' => $urls['editor_url']);
 	$html = mailbox_protection_receipt_render($fort, rr_facts_one_holder(RR_ACTING, 'Robin'), $state);
 	check(strpos($html, 'Earlier messages sealed — one step left') !== false,
-		'the pre-protect Fortress receipt never claims Fortress');
-	check(strpos($html, 'activate outbound protection') !== false
+		'a requested, unfinished sending lock says one step is left');
+	check(strpos($html, 'turn on send protection') !== false
 		&& strpos($html, 'admin_mailbox_setup') !== false,
 		'the handoff button continues into the protect ceremony');
-	check(strpos($html, 'This domain is now Fortress') === false,
-		'no premature Fortress claim anywhere in the card');
+	check(strpos($html, 'This domain is now Private') === false,
+		'no premature finished claim anywhere in the card');
 
 	$state['backlog'] = 7;
 	$html = mailbox_protection_receipt_render($fort, rr_facts_one_holder(RR_ACTING, 'Robin'), $state);

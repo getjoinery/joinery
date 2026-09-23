@@ -3,7 +3,7 @@
  * DirectDecoyKeys - the key a sealed-tier receiver hands back for an address
  * that does not exist.
  *
- * At Private and Fortress the receiver accepts unconditionally so that
+ * At Private the receiver accepts unconditionally so that
  * acceptance discloses nothing — but a key-bearing `accept` would reopen exactly
  * what that closed. Verifying an instance signature proves a sender is who it
  * claims, never that it is welcome, so any instance could preflight a guessed
@@ -46,6 +46,7 @@
  * recipient's contacts — who knows the address exists. There is no oracle to
  * close at Standard, and a decoy path there would be dead code.
  *
+ * @version 1.0.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.0
  */
 

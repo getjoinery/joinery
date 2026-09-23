@@ -10,12 +10,16 @@
  *   key sealed → publish DNS → verify (protected shape) → activate (flip the
  *   flag) → remove opendkim signing.
  *
- * The key is sealed by the Fortress raise itself (admin_mailbox_domains_logic),
- * so the operator never asks for one: the return address defaults to
- * fwd.<domain>, and the owner is the person doing the raise. The only case that
- * cannot be guessed is a domain whose mailboxes already have holders — the
- * admin raising the level need not be the person who reads the mail — so the
- * Setup tab asks there, and mailbox_protect_handle_action() takes the answer.
+ * This is the "Only send while I'm signed in" add-on on a Private domain
+ * (specs/protection_levels_platform.md § Add-ons). Switching it on in the
+ * domain editor records the request (ied_send_lock_requested) and seals the key
+ * (admin_mailbox_domains_logic), so the operator never asks for one: the return
+ * address defaults to fwd.<domain>, and the owner is the person switching it
+ * on. The only case that cannot be guessed is a domain whose mailboxes already
+ * have holders — the admin switching it on need not be the person who reads the
+ * mail — so the editor asks there, and mailbox_protect_handle_action() takes the
+ * answer. Activation here sets the finished state (ied_is_protected_identity);
+ * mailbox_protect_lift() clears both.
  *
  * THIS FILE OWNS THE STATE TRANSITIONS, NOT A PAGE. Every surface that drives
  * protection posts an action here and is redirected back to itself; the Setup
@@ -26,10 +30,10 @@
  * THE SHAPE IS PRESCRIBED ONLY ONCE PROTECTION IS ON, or inside the ceremony
  * that turns it on. It tells the world to reject anything the sealed key did not
  * sign, and nothing signs with that key until ied_is_protected_identity is set —
- * so prescribing it at the security level would hand a Fortress domain that has
- * not opted in a record set that rejects its own outgoing mail. Send protection
- * is a deliberate opt-in; a Fortress domain resting without it is finished
- * (specs/mailbox_relay_surface_simplification.md).
+ * so prescribing it when the lock is merely asked for would hand the domain a
+ * record set that rejects its own outgoing mail. A Private domain that never
+ * asked for the lock is finished as it is; only one that asked and has not
+ * finished is outstanding (specs/mailbox_relay_surface_simplification.md).
  *
  * PROOF OF PRESENCE SITS ON ENFORCEMENT, NOT ON KEY CREATION. Sealing needs
  * only the owner's public key, and a key that exists publishes nothing and
@@ -43,6 +47,10 @@
  * live key is never overwritten or destroyed until its replacement is proven in
  * DNS.
  *
+ * @version 1.4 - the stored owner is always a candidate and never replaced
+ *                without a choice; generate and activate need a Private domain
+ * @version 1.3 - the sending lock is an add-on: mailbox_protect_lift() is the one
+ *                deactivation path and clears the request with the finished state
  * @version 1.2 - the whole ceremony is an opt-in that lives in Advanced, and the
  *                old on-disk key is a checked state rather than a remembered
  *                command (specs/mailbox_relay_surface_simplification.md)
@@ -54,8 +62,13 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_doma
  * Who could own this domain's signing key, as user_id => display label.
  *
  * The owner is the only person who can ever sign as the domain, so guessing is
- * only safe when there is nothing to guess between. A domain with no mailbox
- * holders has exactly one sensible answer — the person setting it up.
+ * only safe when there is nothing to guess between. The candidates are the
+ * domain's stored owner, when it has one, and every mailbox holder. A domain
+ * with neither has exactly one sensible answer — the person setting it up.
+ *
+ * The stored owner is always a candidate: it is who the domain already
+ * belongs to, and leaving them out would let a key made by somebody else
+ * quietly take the domain from them.
  *
  * @return array<int,string> Never empty: falls back to the acting user.
  */
@@ -65,16 +78,21 @@ function mailbox_protect_candidate_owners(InboundEmailDomain $domain, int $actin
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$out = array();
+	$add = function (int $uid) use (&$out, $acting_user_id) {
+		if ($uid <= 0 || isset($out[$uid])) { return; }
+		$user = new User($uid, TRUE);
+		if (!$user->key) { return; }
+		$name = trim((string)$user->get('usr_first_name') . ' ' . (string)$user->get('usr_last_name'));
+		if ($name === '') { $name = (string)$user->get('usr_email'); }
+		$out[$uid] = ($uid === $acting_user_id) ? $name . ' (you)' : $name;
+	};
+
+	$add(intval($domain->get('ied_owner_usr_user_id')));
 	$aliases = new MultiInboundEmailAlias(array('domain_id' => intval($domain->key), 'deleted' => false));
 	$aliases->load();
 	foreach ($aliases as $alias) {
 		foreach (InboundEmailMailboxGrant::user_ids_for_alias(intval($alias->key)) as $uid) {
-			$uid = intval($uid);
-			if ($uid <= 0 || isset($out[$uid])) { continue; }
-			$user = new User($uid, TRUE);
-			$name = trim((string)$user->get('usr_first_name') . ' ' . (string)$user->get('usr_last_name'));
-			if ($name === '') { $name = (string)$user->get('usr_email'); }
-			$out[$uid] = ($uid === $acting_user_id) ? $name . ' (you)' : $name;
+			$add(intval($uid));
 		}
 	}
 	if (empty($out) && $acting_user_id > 0) {
@@ -84,10 +102,16 @@ function mailbox_protect_candidate_owners(InboundEmailDomain $domain, int $actin
 }
 
 /**
- * True when the key can be sealed without asking anything — no mailbox holders,
- * so the person setting the domain up is the only candidate owner.
+ * True when the key can be sealed without asking anything: the acting user is
+ * the only candidate — the domain has no stored owner or is already theirs,
+ * and no one else holds a mailbox on it. Anything else is somebody's decision,
+ * and a stored owner is never replaced without one.
  */
 function mailbox_protect_owner_is_unambiguous(InboundEmailDomain $domain, int $acting_user_id): bool {
+	$stored_owner = intval($domain->get('ied_owner_usr_user_id'));
+	if ($stored_owner > 0 && $stored_owner !== $acting_user_id) {
+		return false;
+	}
 	$candidates = mailbox_protect_candidate_owners($domain, $acting_user_id);
 	return count($candidates) === 1 && array_key_exists($acting_user_id, $candidates);
 }
@@ -156,7 +180,7 @@ function mailbox_protect_save_return_address(InboundEmailDomain $domain, string 
 
 /**
  * The protection facts a surface needs to decide what to offer, for a hosted
- * domain at Private or Fortress. Cheap — column reads plus the owner scan.
+ * domain at Private. Cheap — column reads plus the owner scan.
  */
 function mailbox_protect_state(InboundEmailDomain $domain, int $acting_user_id): array {
 	$owner_options = mailbox_protect_candidate_owners($domain, $acting_user_id);
@@ -165,6 +189,7 @@ function mailbox_protect_state(InboundEmailDomain $domain, int $acting_user_id):
 	// sender, so an envelope under it fails SPF everywhere. Until a key seals
 	// and writes the column, show what sealing would write.
 	$stored = trim((string)$domain->get('ied_forwarding_subdomain'));
+	$stored_owner = intval($domain->get('ied_owner_usr_user_id'));
 	return array(
 		'is_protected'        => $domain->is_protected_identity(),
 		'has_key'             => ((string)$domain->get('ied_dkim_sealed_key') !== ''),
@@ -173,7 +198,9 @@ function mailbox_protect_state(InboundEmailDomain $domain, int $acting_user_id):
 		'return_address'      => $stored !== '' ? $stored
 			: 'fwd.' . strtolower((string)$domain->get('ied_domain')),
 		'owner_options'       => $owner_options,
-		'default_owner_id'    => isset($owner_options[$acting_user_id]) ? $acting_user_id : key($owner_options),
+		// The stored owner first: the domain is already theirs.
+		'default_owner_id'    => isset($owner_options[$stored_owner]) ? $stored_owner
+			: (isset($owner_options[$acting_user_id]) ? $acting_user_id : key($owner_options)),
 	);
 }
 
@@ -209,6 +236,16 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 		return $say('An IMAP-source domain is not a sending identity and cannot be protected.', 'Not applicable');
 	}
 	$user_id = intval($session->get_user_id());
+
+	// The sending lock is an add-on on a Private domain
+	// (specs/protection_levels_platform.md § Add-ons): making its key or
+	// switching it on for a Standard domain would enforce something the domain's
+	// level says it does not have. Lifting, rotating and the return address stay
+	// open at any level, so a lock left on can always be taken off or kept alive.
+	if (in_array($action, array('protect_generate', 'protect_activate'), true) && !$domain->seals_content()) {
+		return $say('Only send while I\'m signed in is extra protection for a Private domain. Set this domain to '
+			. 'Private first.', 'Not available at Standard');
+	}
 
 	// ── seal the first key (only reached when the owner was ambiguous) ───────
 	if ($action === 'protect_generate') {
@@ -278,6 +315,7 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 		}
 
 		$domain->set('ied_is_protected_identity', true);
+		$domain->set('ied_send_lock_requested', true);
 		$domain->save();
 
 		// Neither remaining step is named as a command to remember: both are
@@ -378,40 +416,55 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 	// exactly what must change and the send-protection row holds at FAIL until it
 	// does (specs/mailbox_fortress_send_protection_completion.md).
 	if ($action === 'protect_disable') {
-		$name = strtolower(trim((string)$domain->get('ied_domain')));
-		$domain->set('ied_is_protected_identity', false);
-		$domain->save();
-
-		// Recomputed AFTER the flag is cleared, so dnsPlan() yields the ordinary
-		// shape — the records this domain now needs, not the ones it is leaving.
-		$reverted = mailbox_protect_restore_ambient_dns($domain);
-
-		// ok means nothing was STRANDED, not that anything was written — this
-		// deployment cannot write DNS in the background. Saying records were put
-		// back would be a claim about work nobody did.
-		$tail = $reverted['ok']
-			? ' Your DNS never demanded the sealed signature, so there is nothing to undo there and mail from '
-				. 'this domain keeps flowing the ordinary way.'
-			: ' ' . $reverted['message'];
-
+		$lifted = mailbox_protect_lift($domain);
 		// Land on the DNS difference when records are stranded: the operator is
 		// standing right here, and the records rejecting their mail are one press
 		// away rather than a thing to go and find.
 		$land = $return_url;
-		if (!$reverted['ok']) {
+		if ($lifted['land_dns']) {
 			require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
 			$land = DnsPublishBox::urlWith($return_url, array('dns_show' => '1'));
 		}
-
-		return $say('Send protection is off. This server can send as ' . $name . ' again without you signed in — '
-			. 'and so can anyone who breaks into it. Arriving mail is still sealed and still needs your vault; '
-			. 'this only affected sending.' . $tail
-			. ' Nothing on this server is signing for ' . $name . ' until you re-run provision_dkim.sh to put an '
-			. 'ordinary signing key back on disk.',
-			'Send protection is off', $land);
+		return $say($lifted['message'], 'Send protection is off', $land);
 	}
 
 	return $say('Unknown protection action.', 'Not done');
+}
+
+/**
+ * Switch the sending lock off: clear both the request and the finished state,
+ * then say what the DNS needs. The one deactivation path — the Setup tab's
+ * protect_disable and the domain editor's switch both come here.
+ *
+ * Returns ['message' => string, 'land_dns' => bool]; land_dns is true when
+ * strict records are stranded and the operator should land on the DNS
+ * difference.
+ */
+function mailbox_protect_lift(InboundEmailDomain $domain): array {
+	$name = strtolower(trim((string)$domain->get('ied_domain')));
+	$domain->set('ied_is_protected_identity', false);
+	$domain->set('ied_send_lock_requested', false);
+	$domain->save();
+
+	// Recomputed AFTER the flag is cleared, so dnsPlan() yields the ordinary
+	// shape — the records this domain now needs, not the ones it is leaving.
+	$reverted = mailbox_protect_restore_ambient_dns($domain);
+
+	// ok means nothing was STRANDED, not that anything was written — this
+	// deployment cannot write DNS in the background. Saying records were put
+	// back would be a claim about work nobody did.
+	$tail = $reverted['ok']
+		? ' Your DNS never demanded the sealed signature, so there is nothing to undo there and mail from '
+			. 'this domain keeps flowing the ordinary way.'
+		: ' ' . $reverted['message'];
+
+	$message = 'Send protection is off. This server can send as ' . $name . ' again without you signed in — '
+		. 'and so can anyone who breaks into it. Arriving mail is still sealed and still needs your vault; '
+		. 'this only affected sending.' . $tail
+		. ' Nothing on this server is signing for ' . $name . ' until you re-run provision_dkim.sh to put an '
+		. 'ordinary signing key back on disk.';
+
+	return array('message' => $message, 'land_dns' => !$reverted['ok']);
 }
 
 /**

@@ -1,10 +1,13 @@
 <?php
 /**
- * protection_ceremony.php — the guided path to Private and Fortress
- * (specs/mailbox_protection_ceremony.md).
+ * protection_ceremony.php — the guided path to Private and its add-ons
+ * (specs/mailbox_protection_ceremony.md, specs/protection_levels_platform.md
+ * § Add-ons).
  *
- * Raising a domain's security level has prerequisites scattered across the
- * platform (the holder's vault, the single-reader rule, a relay for Fortress).
+ * Raising a domain's protection level, or switching on an add-on, has
+ * prerequisites scattered across the platform (the holder's vault, the
+ * single-reader rule, a relay for relay sealing, a second factor for either
+ * add-on).
  * This include turns them into a checklist the domain editor renders: every
  * row is a verdict with an in-place fix, and the raise is refused server-side
  * until every required row passes — the button state is a convenience, the
@@ -27,7 +30,12 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
- * @version 1.9
+ * @version 2.1
+ * @changelog 2.1 - neither add-on asks for a second factor: the rows are about
+ *   the domain and its readers, and mailbox_protection_facts() takes no acting user
+ * @changelog 2.0 - add-ons instead of a third level: mailbox_protection_rows()
+ *   takes the add-ons being switched on (relay_seal, send_lock), and
+ *   mailbox_protection_addon_rows() gives the editor each add-on's own rows
  * @changelog 1.9 - every pass takes an optional MAILBOX scope, so one pulled-in
  *   mailbox raises and lowers through this same ceremony, and the sealing
  *   predicate asks the mailbox rather than its domain
@@ -47,14 +55,8 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  *   relay_fronted             — bool (a MailboxRelay row fronts this deployment)
  *   aliases                   — [{alias_id, address, holders: [{user_id, name,
  *                                has_vault, has_prf_passkey}]}] for live aliases
- *   acting_has_second_factor  — bool, only when $acting_user_id is given
- *
- * $acting_user_id is optional because most facts are about the domain, not the
- * person looking at it. Omit it and the second-factor row is skipped rather
- * than failed: an unknown actor must not manufacture a blocker.
  */
-function mailbox_protection_facts(InboundEmailDomain $domain, int $acting_user_id = 0,
-		int $alias_scope_id = 0): array {
+function mailbox_protection_facts(InboundEmailDomain $domain, int $alias_scope_id = 0): array {
 	$settings = Globalvars::get_instance();
 
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
@@ -143,51 +145,24 @@ function mailbox_protection_facts(InboundEmailDomain $domain, int $acting_user_i
 		$facts['domain_owner_has_vault'] = $owner_has_vault;
 	}
 
-	// Whether the person doing the raise already satisfies the Fortress posture
-	// gate (SessionControl::must_enroll_2fa_for_fortress). Owning a Fortress
-	// domain locks that account out of every page but /profile/security until a
-	// second factor exists, and sealing the signing key makes them the owner —
-	// so this has to be a prerequisite of the raise, not a surprise after it.
-	if ($acting_user_id > 0) {
-		$acting = new User($acting_user_id, TRUE);
-		$facts['acting_has_second_factor'] = $acting->key
-			? SessionControl::get_instance()->user_has_independent_second_factor($acting)
-			: true;
-	}
-
 	return $facts;
 }
 
 /**
- * Evaluate the ceremony rows for a target level. Pure — facts in, rows out.
+ * Evaluate the ceremony rows for a target level plus the add-ons being switched
+ * on. Pure — facts in, rows out. $addons: ['relay_seal' => bool,
+ * 'send_lock' => bool]; an add-on absent or false contributes nothing.
  * Each row: {id, severity: required|recommended|info, status: pass|fail|warn|info,
  * label, summary, actions: [{type, ...}]}. Action types:
  *   remove_grant {alias_id, user_id, name}  — inline one-reader fix
  *   add_reader   {alias_id}                 — holderless mailbox fix
  *   vault_self   {}                         — session user sets up their vault
  *   passkey_self {}                         — session user enrolls a passkey
- *   second_factor_self {}                   — session user enrolls a 2nd factor
  *   set_domain_owner {}                     — choose who owns the domain
  */
-function mailbox_protection_rows(array $facts, string $target, int $acting_user_id): array {
+function mailbox_protection_rows(array $facts, string $target, int $acting_user_id,
+		array $addons = array()): array {
 	$rows = array();
-	$fortress = ($target === InboundEmailDomain::LEVEL_FORTRESS);
-
-	// Fortress locks its owner out of the admin UI until they hold a second
-	// factor independent of any one passkey, and the raise makes the person
-	// doing it the owner. Refuse here, where it is still a choice, instead of
-	// letting the save through and bouncing them to /profile/security with no
-	// idea what they did. Absent from $facts means the caller never named an
-	// acting user — skip rather than block.
-	if ($fortress && array_key_exists('acting_has_second_factor', $facts)
-			&& !$facts['acting_has_second_factor']) {
-		$rows[] = array('id' => 'second_factor_self', 'severity' => 'required', 'status' => 'fail',
-			'label' => 'Your second factor',
-			'summary' => 'Fortress makes this domain yours to sign for, and an account that can sign for a Fortress '
-				. 'domain needs a second way to prove it is you — an authenticator app, or a second passkey. '
-				. 'Until you add one you will be held on the security page, so set it up before raising the level.',
-			'actions' => array(array('type' => 'second_factor_self')));
-	}
 
 	// Platform kill switch: vault setup itself runs through a PRF passkey, so
 	// with passkeys off nothing below can be fixed. One loud required row.
@@ -330,24 +305,41 @@ function mailbox_protection_rows(array $facts, string $target, int $acting_user_
 		}
 	}
 
-	if ($fortress) {
-		$rows[] = $facts['relay_fronted']
+	foreach (mailbox_protection_addon_rows($facts, $addons) as $r) {
+		$rows[] = $r;
+	}
+
+	return $rows;
+}
+
+/**
+ * The rows an add-on adds on top of its level's rows — only those. The domain
+ * editor renders each add-on's rows beside its switch; mailbox_protection_rows()
+ * folds them into the level's list for the server-side gate.
+ */
+function mailbox_protection_addon_rows(array $facts, array $addons): array {
+	$relay = !empty($addons['relay_seal']);
+	$send  = !empty($addons['send_lock']);
+	$rows = array();
+	if ($relay) {
+		$rows[] = !empty($facts['relay_fronted'])
 			? array('id' => 'relay_fronted', 'severity' => 'required', 'status' => 'pass',
 				'label' => 'Relay in front',
 				'summary' => 'Mail arrives through your relay, so it can be sealed before it reaches this server.',
 				'actions' => array())
 			: array('id' => 'relay_fronted', 'severity' => 'required', 'status' => 'fail',
 				'label' => 'Relay in front',
-				'summary' => 'Fortress seals mail before it ever reaches this server, which needs a relay in '
-					. 'front. Set one up in the Setup tab\'s Relay section first.',
+				'summary' => 'Sealing at the relay needs a relay in front of this server. Set one up in the '
+					. 'Setup tab\'s Relay section first.',
 				'actions' => array());
-		$rows[] = array('id' => 'fortress_dns', 'severity' => 'info', 'status' => 'info',
+	}
+	if ($send) {
+		$rows[] = array('id' => 'send_lock_next', 'severity' => 'info', 'status' => 'info',
 			'label' => 'What happens next',
-			'summary' => 'After the level saves, you\'ll publish the protected DNS shape and activate outbound '
-				. 'protection — the next screen walks through it. Mail keeps flowing throughout.',
+			'summary' => 'After you save, you\'ll publish the protected DNS records and turn on send protection '
+				. '— the next screen walks through it. Mail keeps flowing throughout.',
 			'actions' => array());
 	}
-
 	return $rows;
 }
 
@@ -430,6 +422,7 @@ function mailbox_protection_posture_join(): string {
 /** True-when-sealing predicate for a query carrying the posture join above. */
 function mailbox_protection_seals_sql(): string {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+	// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
 	return InboundEmailAlias::effectiveLevelSql('a', 'd') . " IN ('"
 		. InboundEmailDomain::LEVEL_PRIVATE . "','" . InboundEmailDomain::LEVEL_FORTRESS . "')";
 }
@@ -544,7 +537,7 @@ function mailbox_protection_seal_batch(InboundEmailDomain $domain, int $limit = 
  * neighbours converge. $alias_scope_id narrows a domain pass to one mailbox,
  * which is what a single-mailbox lowering converges.
  *
- * Each pass first drains the caller's pending-parse rows (a lowered Fortress
+ * Each pass first drains the caller's pending-parse rows (a lowered relay-sealed
  * domain's relay blobs — DeferredIngest parses and re-seals them, and a later
  * pass unseals the result), then unseals up to $limit rows. Batches are small
  * ($limit 25, not sealing's 200) because unsealing rewrites attachment bytes.
@@ -633,10 +626,12 @@ function mailbox_protection_unseal_batch(?InboundEmailDomain $domain, int $calle
  * $target names the destination level so the heading reads as the sentence the
  * receipt later resolves ("Before this domain can be Private"). $scope_label
  * replaces "this domain" when the checklist is for ONE mailbox — saying the
- * domain there would promise something the raise does not do.
+ * domain there would promise something the raise does not do. $heading, when
+ * given, replaces the whole heading — an add-on's rows are headed by the add-on
+ * ("Before Seal at the relay can be on"), not by a level.
  */
 function mailbox_protection_render(array $rows, InboundEmailDomain $domain, array $urls,
-		string $target = '', string $scope_label = ''): string {
+		string $target = '', string $scope_label = '', string $heading = ''): string {
 	$dot = function ($status) {
 		$color = array('pass' => '#28a745', 'fail' => '#dc3545', 'warn' => '#ffc107', 'info' => '#6c757d');
 		return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
@@ -657,8 +652,8 @@ function mailbox_protection_render(array $rows, InboundEmailDomain $domain, arra
 	$html .= '" data-all-green="' . ($all_green ? '1' : '0') . '">';
 	$destination = $target !== '' ? ucfirst($target) : 'protected';
 	$subject = ($scope_label !== '') ? $scope_label : 'this domain';
-	$html .= '<h4 style="margin-top:1rem;">Before ' . htmlspecialchars($subject) . ' can be '
-		. htmlspecialchars($destination) . '</h4>';
+	$html .= '<h4 style="margin-top:1rem;">' . ($heading !== '' ? htmlspecialchars($heading)
+		: 'Before ' . htmlspecialchars($subject) . ' can be ' . htmlspecialchars($destination)) . '</h4>';
 	$html .= '<ul style="list-style:none;padding:0;margin:0;">';
 	foreach ($rows as $row) {
 		$html .= '<li style="display:flex;align-items:baseline;margin:.5rem 0;" data-row-id="'
@@ -684,7 +679,7 @@ function mailbox_protection_render(array $rows, InboundEmailDomain $domain, arra
 					. htmlspecialchars($urls['alias_url'] . '?iea_inbound_email_alias_id=' . intval($action['alias_id']))
 					. '">Add its owner</a>';
 			} elseif ($action['type'] === 'set_domain_owner') {
-				// No owner picker exists, and the Fortress outbound ceremony
+				// No owner picker exists, and the sending-lock ceremony
 				// already establishes "the person doing this becomes the owner".
 				// Make that explicit and deliberate rather than a side effect.
 				$html .= '<form method="post" style="display:inline;margin-left:.5rem;">'
@@ -698,11 +693,6 @@ function mailbox_protection_render(array $rows, InboundEmailDomain $domain, arra
 			} elseif ($action['type'] === 'passkey_self') {
 				$html .= ' <a class="btn btn-sm btn-outline-primary" style="margin-left:.5rem;" href="'
 					. htmlspecialchars($security_url) . '#passkeys-panel">Add a passkey</a>';
-			} elseif ($action['type'] === 'second_factor_self') {
-				// Either an authenticator app or a second passkey satisfies this,
-				// and both live on the security page — land on the page, not a panel.
-				$html .= ' <a class="btn btn-sm btn-primary" style="margin-left:.5rem;" href="'
-					. htmlspecialchars($security_url) . '">Add a second factor</a>';
 			}
 		}
 		$html .= '</div></li>';
@@ -727,8 +717,8 @@ function mailbox_protection_render(array $rows, InboundEmailDomain $domain, arra
  *
  * With a backlog the card renders the receipt layout with the sealing row
  * live; the editor's JS drives mailbox/seal_batch and resolves the row in
- * place (no-JS falls back to the ceremony_seal_batch POST loop). Fortress
- * before outbound protection is a HANDOFF, not a terminus: the title stays
+ * place (no-JS falls back to the ceremony_seal_batch POST loop). A raise
+ * that asked for the sending lock, before send protection is on, is a HANDOFF, not a terminus: the title stays
  * honest and the button continues into the protect ceremony.
  *
  * The SAME card serves a single mailbox raised on its own
@@ -742,9 +732,10 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 	$alias_scope_id = intval($state['alias_scope_id'] ?? 0);
 	$level = ($alias_scope_id > 0 && !empty($state['scope_level']))
 		? (string)$state['scope_level'] : $domain->security_level();
-	// Fortress is domain-only, so a mailbox-scoped raise never hands off.
-	$handoff = ($alias_scope_id <= 0 && $level === InboundEmailDomain::LEVEL_FORTRESS
-		&& !$domain->is_protected_identity());
+	// The sending lock is a domain add-on, so a mailbox-scoped raise never
+	// hands off. A domain that asked for it and has not finished continues
+	// into the protect ceremony; one that never asked is finished here.
+	$handoff = ($alias_scope_id <= 0 && $domain->send_lock_outstanding());
 
 	// $live marks the one dot the shared batch loop recolors as it works
 	// (data-ceremony-dot); the rest are static facts.
@@ -755,8 +746,8 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 			. ($color[$status] ?? '#6c757d') . ';margin-right:8px;flex:none;"></span>';
 	};
 
-	// Titles: the event, stated once. A Fortress raise before outbound
-	// protection never claims Fortress — one step still remains.
+	// Titles: the event, stated once. A raise that asked for the sending lock
+	// says one step remains until send protection is on.
 	if ($handoff) {
 		$title = ($backlog > 0) ? 'Sealing earlier messages — one step left after this'
 			: 'Earlier messages sealed — one step left';
@@ -803,7 +794,7 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 	}
 
 	if ($handoff) {
-		$button_label = 'Continue: activate outbound protection';
+		$button_label = 'Continue: turn on send protection';
 		$button_url = '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . intval($domain->key);
 	} else {
 		$button_label = 'Open mailbox';

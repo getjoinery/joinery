@@ -1,9 +1,9 @@
 <?php
 /**
- * DeferredIngest - parse the backlog of relay-sealed Fortress mail at unlock.
+ * DeferredIngest - parse the backlog of relay-sealed mail at unlock.
  *
  * On a relay-fronted deployment (specs/inbound_email_hardened_ingest_relay_executor.md),
- * MX-path Fortress mail arrives sealed to the owner's vault public key. While the
+ * MX-path relay-sealed mail arrives sealed to the owner's vault public key. While the
  * owner is logged out the pull consumer (the relay reconcile task) can only store operational
  * metadata + the sealed raw blob in a PENDING-PARSE state — threading and unread
  * counts work, but the subject/sender/body/attachments do not exist as fields yet.
@@ -20,6 +20,7 @@
  * (specs/in_window_deferred_work.md), so the backlog also drains while the
  * owner is anywhere else on the site with their vault open.
  *
+ * @version 1.2.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.2
  */
 

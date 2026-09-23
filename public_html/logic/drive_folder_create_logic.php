@@ -35,11 +35,11 @@ function drive_folder_create_logic(array $input): LogicResult {
 	// whole subtree, and matches the move-boundary rule in drive_move.
 	//
 	// `encrypted` is the Fortress spelling the browser client uses.
-	$level = ProtectionLevel::normalize($input['protection_level'] ?? null);
+	$level = ProtectionLevel::fromInput($input['protection_level'] ?? null);
 	if (!empty($input['encrypted'])) {
 		$level = ProtectionLevel::FORTRESS;
 	}
-	if (!in_array($level, ProtectionLevel::DRIVE_LEVELS, true)) {
+	if ($level === null || !in_array($level, ProtectionLevel::DRIVE_LEVELS, true)) {
 		return LogicResult::error('That is not a protection level Drive offers.');
 	}
 

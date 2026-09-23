@@ -1,6 +1,6 @@
 {
     "name": "Joinery Messenger",
-    "version": "1.0.15",
+    "version": "1.0.16",
     "description": "WhatsApp-style messaging in the member area: conversations and groups with near-realtime delivery, read receipts, typing indicators, replies, reactions and attachments.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -66,10 +66,17 @@
             "type": "select",
             "options": {
                 "standard": "Standard - the server manages messages for you",
-                "private": "Private - sealed at rest, readable only while a participant is present",
-                "guarded": "Guarded - Private, plus no message content leaves in notifications"
+                "private": "Private - sealed at rest, readable only while a participant is present"
             },
             "helptext": "What a new conversation starts at when the member does not choose. A conversation can be raised afterwards but never lowered."
+        },
+        {
+            "name": "messenger_default_sealed_exits_only",
+            "default": "0",
+            "group": "messenger",
+            "label": "New Private conversations start with Nothing leaves unsealed",
+            "type": "checkbox",
+            "helptext": "Extra protection on Private: no message text appears in notifications or crosses to another server unencrypted. Notifications don't show the message, and people on servers without encryption can't be reached. Once on in a conversation it cannot be turned off."
         },
         {
             "name": "messenger_max_group_size",

@@ -9,7 +9,7 @@
  * The AI email jobs against a real sealed domain
  * (specs/in_window_deferred_work.md § Feature 2).
  *
- * Everything here turns on one fact: mail on a Fortress domain is encrypted to
+ * Everything here turns on one fact: mail on a Private domain is encrypted to
  * the owner, so it is readable only while their unlock window is open. What the
  * test pins down:
  *
@@ -148,7 +148,7 @@ function iw_recipe(int $owner_id, string $job_id, string $address): Recipe {
 try {
 
 	// -----------------------------------------------------------------------
-	section('fixtures: a Fortress domain with sealed mail');
+	section('fixtures: a Private domain with sealed mail');
 
 	$owner = make_user('IwOwner');
 	$owner_id = intval($owner->key);
@@ -156,16 +156,16 @@ try {
 	$secret = SealedBox::b64url(sodium_crypto_box_secretkey($kp));
 	$owner_vault = iw_vault($owner_id, SealedBox::b64url(sodium_crypto_box_publickey($kp)));
 
-	$fortress = iw_domain(InboundEmailDomain::LEVEL_FORTRESS, true);
-	$alias = iw_alias(intval($fortress->key), 'me', $owner_id);
-	$address = 'me@' . $fortress->get('ied_domain');
+	$sealed_domain = iw_domain(InboundEmailDomain::LEVEL_PRIVATE, true);
+	$alias = iw_alias(intval($sealed_domain->key), 'me', $owner_id);
+	$address = 'me@' . $sealed_domain->get('ied_domain');
 
-	$older = iw_message(intval($fortress->key), intval($alias->key),
+	$older = iw_message(intval($sealed_domain->key), intval($alias->key),
 		'Older note', 'An ordinary older message.', $address, '-30');
-	$newer = iw_message(intval($fortress->key), intval($alias->key),
+	$newer = iw_message(intval($sealed_domain->key), intval($alias->key),
 		'Newer note', 'An ordinary newer message.', $address, '-5');
 
-	$sealed = mailbox_protection_seal_batch($fortress, 200);
+	$sealed = mailbox_protection_seal_batch($sealed_domain, 200);
 	check($sealed['sealed'] === 2 && $sealed['remaining'] === 0,
 		'both messages seal at rest', json_encode($sealed));
 
@@ -519,7 +519,7 @@ try {
 		));
 	});
 
-	$late->set('ied_security_level', InboundEmailDomain::LEVEL_FORTRESS);
+	$late->set('ied_security_level', InboundEmailDomain::LEVEL_PRIVATE);
 	$late->save();
 	$late_sealed = mailbox_protection_seal_batch($late, 200);
 	check($late_sealed['sealed'] === 1 && $late_sealed['remaining'] === 0,
@@ -567,7 +567,7 @@ try {
 		return $run;
 	}
 
-	// What the runner writes for one item of a Fortress mailbox: the subject as
+	// What the runner writes for one item of a sealed mailbox: the subject as
 	// the label, and a model summary of the body. Both came out of the vault.
 	$leaky_subject = 'Older note';
 	$leaky_summary = 'A description of the encrypted body, written by the model.';
@@ -682,7 +682,7 @@ try {
 	// touching rcr_content_sealed runs against a table that has not got it yet.
 	require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RunContentPurge.php'));
 
-	$legacy = iw_run($recipe);              // $recipe reads the Fortress mailbox
+	$legacy = iw_run($recipe);              // $recipe reads the sealed mailbox
 	// Reconstructing a pre-sealing row is a fixture, not a derivation, so it
 	// gets its own unit of work — the rule would otherwise refuse the very
 	// state this section exists to purge.
@@ -805,8 +805,8 @@ try {
 	check($local_ok, 'the same recipe on a local model is allowed', $local_why);
 
 	// Three-valued consent: the distinction a boolean could not express.
-	$fortress->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_TRUSTED);
-	$fortress->save();
+	$sealed_domain->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_TRUSTED);
+	$sealed_domain->save();
 	MailboxAliasConfig::clearPostureCache();
 	check(RecipeVaultScope::consentTrustFloor($recipe) === AiModelRequirement::TRUST_TRUSTED,
 		'a domain consenting to trusted processing floors the recipe at trusted');
@@ -820,8 +820,8 @@ try {
 	check($trusted_refuses_cloud, 'and still refuses a cloud model');
 
 	// Granting full consent lets the cloud model through...
-	$fortress->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_CLOUD);
-	$fortress->save();
+	$sealed_domain->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_CLOUD);
+	$sealed_domain->save();
 	MailboxAliasConfig::clearPostureCache();
 	check(RecipeVaultScope::consentTrustFloor($recipe) === AiModelRequirement::TRUST_ANY,
 		'full consent imposes no floor at all');
@@ -829,8 +829,8 @@ try {
 	// ...and withdrawing it stops the recipe again, without the recipe changing.
 	// This is the whole point of re-checking at run start rather than only at
 	// save: the recipe row is identical either side of this.
-	$fortress->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_LOCAL);
-	$fortress->save();
+	$sealed_domain->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_LOCAL);
+	$sealed_domain->save();
 	MailboxAliasConfig::clearPostureCache();
 	$stopped_again = false;
 	try {
@@ -872,8 +872,8 @@ try {
 	// falls back and lands somewhere the domain permits.
 	harness_set_setting_mem('joinery_ai_anthropic_api_key', '');
 	AiEndpointRegistry::clearCache();
-	$fortress->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_LOCAL);
-	$fortress->save();
+	$sealed_domain->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_LOCAL);
+	$sealed_domain->save();
 	MailboxAliasConfig::clearPostureCache();
 	$recipe->set('rcp_model', 'claude-haiku-4-5');
 	$fell_back = null;
@@ -893,7 +893,7 @@ try {
 	// -----------------------------------------------------------------------
 	section('consent is required to bind a recipe to a sealed mailbox');
 
-	$closed = iw_domain(InboundEmailDomain::LEVEL_FORTRESS, false);
+	$closed = iw_domain(InboundEmailDomain::LEVEL_PRIVATE, false);
 	$closed_alias = iw_alias(intval($closed->key), 'shut', $owner_id);
 	$closed_address = 'shut@' . $closed->get('ied_domain');
 	MailboxAliasConfig::clearPostureCache();

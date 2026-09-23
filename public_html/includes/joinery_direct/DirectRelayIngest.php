@@ -2,7 +2,7 @@
 /**
  * DirectRelayIngest - a delivery the relay accepted, landing on the box.
  *
- * At Fortress the wire terminates at the relay, so the box never sees a
+ * On a relay-fronted deployment the wire terminates at the relay, so the box never sees a
  * preflight. What it sees is a container the relay wrote to the tenant's spool
  * and the pull brought across: the signed envelope, the sender's own signatures,
  * and the parts exactly as they arrived — sealed by the sender, so nothing between
@@ -22,6 +22,7 @@
  * the no-bounce, held-plugin and decline-is-a-local-disposition rules live in one
  * place.
  *
+ * @version 1.1.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.1 - relayed delivery to an unencrypted mailbox is gated at commit and
  *                ingested, not held for an unlock that never comes; recipient
  *                alias/domain identity now rides the row for the gate

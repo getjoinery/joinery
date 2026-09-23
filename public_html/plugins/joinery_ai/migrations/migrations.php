@@ -5,7 +5,7 @@
  * Tables and columns come from the data classes; settings come from
  * plugin.json. These are data changes only.
  *
- * @version 0.20.0
+ * @version 0.24.10
  */
 return [
 	[
@@ -102,6 +102,59 @@ return [
 			$q = $dblink->prepare("DELETE FROM stg_settings WHERE stg_name = ?");
 			$q->execute(['joinery_ai_local_vision']);
 			echo "joinery_ai_local_vision: " . $q->rowCount() . " row(s) removed.\n";
+		},
+	],
+
+	[
+		/**
+		 * Chat protection is two levels, Standard and Private, plus the Local
+		 * models only add-on under Private. A conversation stored at the
+		 * retired third level ('fortress': sealed + pinned to a local model)
+		 * becomes Private with aic_local_models_only on — the same seal and the
+		 * same pin, under the new shape. The default-level setting follows:
+		 * 'fortress' becomes 'private' with joinery_ai_default_chat_local_only on.
+		 *
+		 * Guards the table AND both columns: an installed-but-inactive plugin
+		 * can keep a stale aic_conversations that never received the new
+		 * column. Missing pieces DEFER (nothing recorded) so the migration runs
+		 * for real on the pass that has them. Idempotent — a second run finds
+		 * no 'fortress' rows and no 'fortress' setting.
+		 */
+		'id' => 'aic_001_fold_fortress_into_local_models_only',
+		'version' => '0.24.10',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+
+			$table = $dblink->query("SELECT to_regclass('public.aic_conversations')")->fetchColumn();
+			if (!$table) {
+				echo "aic_conversations not present - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+			$cols = $dblink->query(
+				"SELECT column_name FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'aic_conversations'
+				   AND column_name IN ('aic_security_level', 'aic_local_models_only')")
+				->fetchAll(PDO::FETCH_COLUMN);
+			if (count($cols) < 2) {
+				echo "aic_local_models_only not present yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+
+			$q = $dblink->query(
+				"UPDATE aic_conversations
+				    SET aic_security_level = 'private', aic_local_models_only = true
+				  WHERE aic_security_level = 'fortress'");
+			echo "aic_conversations: " . $q->rowCount() . " conversation(s) moved to Private + Local models only.\n";
+
+			$q = $dblink->prepare("SELECT stg_value FROM stg_settings WHERE stg_name = ?");
+			$q->execute(['joinery_ai_default_chat_level']);
+			if ((string)$q->fetchColumn() === 'fortress') {
+				Setting::put('joinery_ai_default_chat_level', 'private');
+				Setting::put('joinery_ai_default_chat_local_only', '1');
+				echo "joinery_ai_default_chat_level: fortress -> private, joinery_ai_default_chat_local_only on.\n";
+			} else {
+				echo "joinery_ai_default_chat_level: no change.\n";
+			}
 		},
 	],
 ];

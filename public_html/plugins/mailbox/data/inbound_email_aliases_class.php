@@ -18,6 +18,8 @@
  * decision asks the alias; domain identity (DKIM, protected identity, DNS shape,
  * relay export) keeps asking the domain.
  *
+ * @version 1.6 - two settable levels, Standard and Private; the reserved
+ *   end-to-end value reads as Private, like the domain's resolver
  * @version 1.5 - the SQL level helpers normalise case exactly as the PHP
  *   resolver does, so the two can never disagree on a stored value
  * @version 1.4
@@ -193,18 +195,21 @@ class InboundEmailAlias extends SystemBase {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 		$own = strtolower(trim((string)$this->get('iea_security_level')));
 		if ($own !== '') {
-			return in_array($own, array(InboundEmailDomain::LEVEL_STANDARD,
-				InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS), true)
+			if ($own === InboundEmailDomain::LEVEL_FORTRESS) {
+				// Unconverted until mailbox migration ied_003_private_with_addons
+				// runs: its mail is sealed, so it reads as Private.
+				return InboundEmailDomain::LEVEL_PRIVATE;
+			}
+			return in_array($own, InboundEmailDomain::SETTABLE_LEVELS, true)
 				? $own : InboundEmailDomain::LEVEL_STANDARD;
 		}
 		return self::domainLevel(intval($this->get('iea_ied_inbound_email_domain_id')));
 	}
 
-	/** True when this mailbox seals stored content at rest (Private or Fortress). */
+	/** True when this mailbox seals stored content at rest (Private). */
 	function seals_content() {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
-		return in_array($this->security_level(),
-			array(InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS), true);
+		return $this->security_level() === InboundEmailDomain::LEVEL_PRIVATE;
 	}
 
 	/** True when this mailbox carries a level of its own rather than inheriting. */
@@ -246,6 +251,7 @@ class InboundEmailAlias extends SystemBase {
 			'SELECT 1 FROM iea_inbound_email_aliases
 			 WHERE iea_ied_inbound_email_domain_id = ? AND iea_delete_time IS NULL
 			   AND LOWER(TRIM(iea_security_level)) IN (?, ?) LIMIT 1');
+		// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
 		$stmt->execute(array($domain_id, InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS));
 		return (bool)$stmt->fetchColumn();
 	}

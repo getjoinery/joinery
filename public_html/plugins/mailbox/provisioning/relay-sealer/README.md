@@ -189,7 +189,7 @@ For each sealed message, two files committed atomically into the spool:
   not exist as fields until deferred ingest unseals the blob in-session.
 
 `key_kind` tells the pull consumer whether the blob was sealed to a single
-user's vault (`user` → Fortress, store pending-parse) or the ambient transport
+user's vault (`user` → Seal at the relay, store pending-parse) or the ambient transport
 key (`transport` → Standard/Private, open at pull and run today's ingest).
 
 ## Routing map
@@ -218,12 +218,12 @@ transport key, shard-policy limits) lives in `tenants`:
     }
   },
   "recipients": {
-    "alice@fortress.example.com": {
+    "alice@example.com": {
       "public_key": "<base64url X25519>",
       "key_kind": "user",
       "mode": "store",
       "destinations": [],
-      "forwarding_domain": "fortress.example.com",
+      "forwarding_domain": "fwd.example.com",
       "tenant": "main"
     }
   },

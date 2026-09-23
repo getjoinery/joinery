@@ -6,10 +6,12 @@
  * (start_enable / confirm_enable). Included by views/setup.php with $page,
  * $page_vars, $viewer, $settings, $next_key in scope.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - The authenticator-app copy names extra mail protection as
+ *   what requires it.
  * @changelog 1.4 - Renders once the step is green too: an existing passkey shows
  *   as done and points at the security page for more; the authenticator app
- *   stays offered as an optional extra (Fortress needs it).
+ *   stays offered as an optional extra (extra mail protection needs it).
  * @changelog 1.3 - The authenticator-app section says what it is for; the
  *   password prompt says why a signed-in browser is not enough.
  * @changelog 1.2 - The insecure-context hint names the Secure connection step
@@ -117,7 +119,7 @@ $totp_backup_codes = $page_vars['totp_backup_codes'] ?? array();
 		$formwriter->end_form();
 ?>
 <?php } else { ?>
-		<p class="jy-muted">A second way to sign in, using 6-digit codes from an app such as Google Authenticator, Authy or 1Password. Codes work in any browser, and they get you back in if you lose the device that holds your passkey. Not required now — you can turn them on later from your security page — but a Fortress-level account has to have them.</p>
+		<p class="jy-muted">A second way to sign in, using 6-digit codes from an app such as Google Authenticator, Authy or 1Password. Codes work in any browser, and they get you back in if you lose the device that holds your passkey. Not required now — you can turn them on later from your security page — but an account with extra mail protection needs them, or a second passkey.</p>
 		<form method="POST" action="/setup">
 			<input type="hidden" name="action" value="start_enable">
 			<input type="hidden" name="step" value="signin_security">
