@@ -2593,11 +2593,26 @@ fn detect_folder_moves(
                         tracked.insert(path, entry.id);
                     } else if evict_newcomer && !evict_holder {
                         evicted.push((path, entry.id));
+                    } else if !mine && !holder_owns && elsewhere(holder_id) && elsewhere(own_id) {
+                        // Neither is here, and both are known to stand
+                        // somewhere else: neither takes the path, and both go
+                        // to the pool, where each is found by its own
+                        // directory. Left to "the later takes the path", the
+                        // earlier record fell out of the scan entirely -- in
+                        // no pool, never claimed, read as deleted -- and a
+                        // VAULT so dropped was re-created while its real
+                        // directory was minted plain and its sealed file went
+                        // up in the clear (the reset's C8, kill2 75110).
+                        evicted.push((path.clone(), holder));
+                        evicted.push((path.clone(), entry.id));
+                        tracked.remove(&path);
                     } else {
                         // Identity cannot say (neither knows its directory, or
                         // both claim it): today's reading, the later record
-                        // takes the path and the earlier one is left to the
-                        // pools by whatever else the scan finds.
+                        // takes the path. The earlier one goes to the pool
+                        // rather than nowhere: no record leaves the scan
+                        // without a pool to be found from.
+                        evicted.push((path.clone(), holder));
                         tracked.insert(path, entry.id);
                     }
                 }
@@ -2863,7 +2878,7 @@ fn detect_folder_moves(
             .iter()
             .any(|o| o.path.starts_with(&prefix) && known_file_ids.contains(&o.fingerprint.file_id))
     };
-    let displaced: Vec<(String, EntityId)> = tracked
+    let mut displaced: Vec<(String, EntityId)> = tracked
         .iter()
         .filter(|(path, _)| {
             dirs_on_disk.contains(*path) && !corroborated(path) && holds_nothing_known(path)
@@ -3150,6 +3165,9 @@ fn detect_folder_moves(
     // publishes nothing; the alternative is a hold on every rename of an
     // empty vault. Plain folders never claim: their id corroborates a
     // proposal the contents make, below, and does nothing on its own.
+    // Records the claim below takes a path from, by identity: the path map
+    // gave them the candidate, but their own directory stands elsewhere.
+    let mut lost_to_identity: Vec<(String, EntityId)> = Vec::new();
     for (old_path, id) in missing.iter().chain(displaced.iter()).chain(contested.iter()) {
         if !encrypted.contains(id) || claimed.contains(id) {
             continue;
@@ -3169,8 +3187,25 @@ fn detect_folder_moves(
             .transpose()?
             .flatten()
             .is_some_and(|e| e.synced_placement.is_none() && e.stand_in.is_none());
+        // The record the path map gives the candidate to stands between the
+        // vault and its directory only if it can be the directory's owner.
+        // The candidate is where the vault's OWN id stands; a holder whose own
+        // id is known to stand at ANOTHER path is not at the candidate, and
+        // waiting for it to leave the map waits for a record that has nothing
+        // to leave -- in a rotation, the vault was read as deleted within the
+        // pass and its directory minted plain (the reset's C8b, plat3 75400).
+        // Such a holder loses the path to identity and goes to the contested
+        // pool, where the record whose path holds somebody else's directory
+        // belongs. A holder whose identity is unknown still blocks: with no id
+        // there is nothing to say it is not the owner (decision 2A).
+        let holder_stands_elsewhere = folder_ids.get(*candidate).is_some_and(|sid| {
+            record_identity
+                .get(&EntityId::folder(*sid))
+                .and_then(|rid| where_id_stands.get(rid))
+                .is_some_and(|at| *at != *candidate)
+        });
         if taken.contains(candidate)
-            || (folder_ids.contains_key(*candidate) && !named_only)
+            || (folder_ids.contains_key(*candidate) && !named_only && !holder_stands_elsewhere)
             || scan.held.contains(*candidate)
             || *candidate == old_path
         {
@@ -3184,6 +3219,15 @@ fn detect_folder_moves(
         // wherever the room-making put it.
         if remote_wants.get(*candidate).is_some_and(|w| w != id && !named_only) {
             continue;
+        }
+        if holder_stands_elsewhere && !named_only {
+            if let Some(sid) = folder_ids.get(*candidate) {
+                let lost = EntityId::folder(*sid);
+                // It is not at the path it held: present there, it would be a
+                // second record on the vault's directory (the reset's C8b-4).
+                scan.present.remove(&lost);
+                lost_to_identity.push(((*candidate).clone(), lost));
+            }
         }
         claimed.push(*id);
         taken.insert(candidate);
@@ -3206,6 +3250,28 @@ fn detect_folder_moves(
             None => scan.deferred.push((*id, (*candidate).clone())),
         }
     }
+    // A record that lost its path to identity is matched as a contested one
+    // from here on: its path holds a directory that is somebody else's.
+    let mut contested_after_claims: Vec<(String, EntityId)> = contested.clone();
+    for (path, lost) in lost_to_identity {
+        displaced.retain(|(_, e)| *e != lost);
+        if !contested_after_claims.iter().any(|(_, e)| *e == lost) {
+            contested_after_claims.push((path, lost));
+        }
+    }
+
+    // A record that lost its path to a claim is searched for as a contested
+    // one, and where neither its contents place it nor anything else does, it
+    // takes today's reading. Stated residual (plat3 75412, rooted in T1): it
+    // can be re-created at its server name while a directory it names still
+    // stands. A stand-down there (row 5) was built and livelocked -- a hold
+    // does not suspend the held record's server move, and deferring that move
+    // has no clearing event that is not a guess. Placing it where the server
+    // has it, when its own directory stands there, was built too and did not
+    // land: dropping the record's presence at the lost path fixes every seed
+    // that needs it, and no seed needed the placement
+    // (specs/drive_sync_reset_c9a_unlanded.diff, with the same placement for
+    // any contested folder, C9(a)).
 
     // `contested` differs from `displaced` in ONE respect: what the folder's OLD
     // path holds. That is evidence about somebody else, never about where MY
@@ -3220,7 +3286,7 @@ fn detect_folder_moves(
     // see -- one of them a 2000-pass livelock that the seed count called an
     // improvement.
     for (pool, whole_only, contested_pool) in
-        [(&missing, false, false), (&displaced, true, false), (&contested, true, true)]
+        [(&missing, false, false), (&displaced, true, false), (&contested_after_claims, true, true)]
     {
         for candidate in candidates.iter() {
             if taken.contains(candidate) {

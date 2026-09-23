@@ -1,0 +1,118 @@
+--- a/sync/jd-core/src/pass.rs
++++ b/sync/jd-core/src/pass.rs
+@@ -3253,6 +3253,7 @@
+     // A record that lost its path to identity is matched as a contested one
+     // from here on: its path holds a directory that is somebody else's.
+     let mut contested_after_claims: Vec<(String, EntityId)> = contested.clone();
++    let lost_holders: Vec<(String, EntityId)> = lost_to_identity.clone();
+     for (path, lost) in lost_to_identity {
+         displaced.retain(|(_, e)| *e != lost);
+         if !contested_after_claims.iter().any(|(_, e)| *e == lost) {
+@@ -3260,18 +3261,95 @@
+         }
+     }
+ 
+-    // A record that lost its path to a claim is searched for as a contested
+-    // one, and where neither its contents place it nor anything else does, it
+-    // takes today's reading. Stated residual (plat3 75412, rooted in T1): it
+-    // can be re-created at its server name while a directory it names still
+-    // stands. A stand-down there (row 5) was built and livelocked -- a hold
+-    // does not suspend the held record's server move, and deferring that move
+-    // has no clearing event that is not a guess. Placing it where the server
+-    // has it, when its own directory stands there, was built too and did not
+-    // land: dropping the record's presence at the lost path fixes every seed
+-    // that needs it, and no seed needed the placement
+-    // (specs/drive_sync_reset_c9a_unlanded.diff, with the same placement for
+-    // any contested folder, C9(a)).
++    // A plain folder whose own directory stands exactly where the SERVER
++    // places it is there: two independent sources agree -- the server's
++    // placement proposes the path, the directory's identity confirms it (row 4
++    // of the reset's WP2 table, with the server as the proposer). Only the
++    // record lags. Left unplaced -- its path taken by a vault's claim (C8b),
++    // or contested in a rotation the disk has already completed (C9(a),
++    // hostile2 74424) -- the server's move was re-planned from a path the
++    // folder does not own and refused every pass. Not an id proposing a
++    // place on its own (2A): the server proposes, the id only confirms.
++    // Plain folders only; an encrypted record's claim is above and this does
++    // not touch it. Known, nonzero ids only. A record the path map gave that
++    // path to leaves it for the contested pool and is searched by contents
++    // below, never left present beside this one.
++    //
++    // A record that lost its path to a claim and that neither its contents nor
++    // the server place takes today's reading. Stated residual (plat3 75412,
++    // rooted in T1): it can be re-created at its server name while a directory
++    // it names still stands. A stand-down there (row 5) was built and
++    // livelocked -- a hold does not suspend the held record's server move, and
++    // deferring that move has no clearing event that is not a guess.
++    // Another live record names the same directory as its own (the T1 twin):
++    // identity cannot say whose it is, and the placement below does not act
++    // on it.
++    let named_by_another = |id: &EntityId, own: u64| record_identity.iter().any(|(other, rid)| other != id && *rid == own);
++    let mut agreed_by_server: Vec<EntityId> = Vec::new();
++    let server_corroborated: Vec<EntityId> = lost_holders
++        .iter()
++        .chain(contested_after_claims.iter())
++        .map(|(_, id)| *id)
++        .collect();
++    for id in server_corroborated {
++        if encrypted.contains(&id)
++            || claimed.contains(&id)
++            || scan.moves.contains_key(&id)
++            || agreed_by_server.contains(&id)
++        {
++            continue;
++        }
++        let Some(own) = record_identity.get(&id).copied().filter(|x| *x != 0) else {
++            continue;
++        };
++        if named_by_another(&id, own) {
++            continue;
++        }
++        let Some(e) = env.store.get_entry(id)? else { continue };
++        if e.remote_deleted {
++            continue;
++        }
++        let server_path = match e.remote.parent {
++            None => Some(e.remote.name.clone()),
++            Some(pid) => match env.store.get_entry(EntityId::folder(pid))? {
++                Some(parent) => relative_path(env, &parent)?.map(|pp| format!("{pp}/{}", e.remote.name)),
++                None => None,
++            },
++        };
++        let Some(server_path) = server_path else { continue };
++        if dir_identity.get(server_path.as_str()).copied() != Some(own) {
++            continue;
++        }
++        // Any directory on the disk, tracked by path or not: a path the map
++        // gives another record is exactly the case where that record loses it.
++        let Some(candidate) = dirs_on_disk.iter().find(|d| **d == server_path) else {
++            continue;
++        };
++        if taken.contains(candidate) || scan.held.contains(candidate) {
++            continue;
++        }
++        if let Some(other) = folder_ids.get(candidate).copied().filter(|sid| *sid != id.server_id) {
++            let other = EntityId::folder(other);
++            scan.present.remove(&other);
++            displaced.retain(|(_, x)| *x != other);
++            if !contested_after_claims.iter().any(|(_, x)| *x == other) {
++                contested_after_claims.push((candidate.clone(), other));
++            }
++        }
++        agreed_by_server.push(id);
++        claimed.push(id);
++        taken.insert(candidate);
++        scan.present.insert(id);
++        folder_ids.insert(candidate.clone(), id.server_id);
++        match placement_of(candidate, folder_ids) {
++            Some(placement) => {
++                if e.synced_placement.as_ref() != Some(&placement) {
++                    scan.moves.insert(id, placement);
++                }
++            }
++            None => scan.deferred.push((id, candidate.clone())),
++        }
++    }
+ 
+     // `contested` differs from `displaced` in ONE respect: what the folder's OLD
+     // path holds. That is evidence about somebody else, never about where MY

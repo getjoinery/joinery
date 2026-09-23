@@ -1820,12 +1820,48 @@ belt in, before the belt lands.** B1 is what happens without this.
   (kill2 75123, swap-off), so it did not land. The unlanded patch and its
   three pins (which never armed it) are kept in
   `specs/drive_sync_reset_c6_unlanded.diff`.
-- **C8 re-opened.** Neither variant of the park's disown arm (keep the
-  identity when the directory here is another's; stand down untouched)
-  changes kill2 75110 or plat3 75400 on today's engine, so the disown arm
-  is not C8's cause here. Untraced; with the four other engine-made leaks
-  (hostile2 74424, kill2 75101, plat3 75401, 75412) it is the sealed-leak
-  queue.
+- **C8, C8b, C8b-4 (2026-09-23), NEEDED and VALID (public-html-25).**
+  - **C8:** when two folder records resolve to one path and identity cannot
+    pick an owner, the record that does not take the path goes to the
+    contested pool; when both are known to stand elsewhere, both go. Before,
+    the earlier record fell out of the scan, read as deleted, and a vault so
+    dropped was re-created while its real directory was minted plain with its
+    sealed file in the clear (kill2 75110). Pin:
+    `frozen_vault_dropped_from_a_shared_path_seed` (75110, swaps off).
+  - **C8b:** a vault's claim on its own directory is not blocked by a plain
+    record the path map gives that path to when that record's own directory
+    is known to stand elsewhere; the displaced record goes to the contested
+    pool. Closes plat3 75400 and hostile2 74412 with swaps off.
+  - **C8b-4:** that displaced record leaves the scan's present set at the
+    path it lost, so it never stands beside the vault on one path. Pin:
+    `frozen_holder_gives_up_the_path_it_lost_seed` (75400, swaps on).
+  - Placing such a record where the server has it (when its own directory
+    stands there) was built and did not land: no seed needed it beyond the
+    presence fix. The same placement for any contested folder (C9(a)) settled
+    plat3 75415 but added name-trade pairs on hostile2 74401, 74404, 74409,
+    plat3 75407 and 75427, and a custody fire on 75407; not landed, traced
+    inside T1. Both are in `specs/drive_sync_reset_c9a_unlanded.diff`.
+- **Residual of C8b-4 (plat3 75412, rooted in T1):** a record that lost its
+  path to a claim and that nothing places takes today's reading -- it can be
+  re-created at its server name while a directory it names still stands, a
+  named breach of the rule that a record with a known directory is never
+  re-created while that directory stands. T1's trace ends with 75412 obeying
+  the rule or the rule amended with the owner's say.
+- **Open finding R5-HOLD:** a row-5 hold does not suspend the held record's
+  server move, so a hold on a record the server is moving livelocks. The only
+  construction (a row-5 stand-down for C8b-4's displaced record, 75412) has no
+  clearing event: deferring the move leaves a hold nothing but the user can
+  lift. No pin yet; the design waits for T1, whose twin makes "its own
+  directory" ambiguous there.
+- **plat3 75415 never settles** (swaps off; swaps on it now reports), in the
+  C9/T1 queue.
+- **Sealed-leak queue** (engine-made, not carried out by the chaos user):
+  kill2 75112; hostile2 74412's b5ed7579 and fb003484, seen only once C8b let
+  that world settle (they were uploaded on the earlier engine too, hidden by
+  its never-settle); kill2 75101, plat3 75401, 75412 from reading 18.
+- The C8b-4 constructed pin (a displaced plain folder that loses a path to a
+  vault's claim, searched by contents, no two records on one path) is owed:
+  a hand-built rotation is resolved by the ring walk before the claim runs.
 - **T1, open: a second record for a live identity.** Conflict-copy rescue
   mints a record for an inode or directory another live record still names
   (files: plain2 75221, 905 and 909 on inode 1003; folders: hostile2 74412,

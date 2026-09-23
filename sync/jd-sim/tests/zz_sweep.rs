@@ -4146,6 +4146,76 @@ fn red_only_on_the_chain_oracle(run: impl FnOnce() + std::panic::UnwindSafe) {
     );
 }
 
+/// A frozen seed never fires these oracles, whatever else it does: the pin is
+/// the invariant, not the rest of the world's verdict.
+fn never_fires(invariant: &[&str], run: impl FnOnce() + std::panic::UnwindSafe) {
+    if let Err(e) = std::panic::catch_unwind(run) {
+        let why = e
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default();
+        let fired = why
+            .split_once("fired [")
+            .map(|(_, rest)| rest.split(']').next().unwrap_or_default().to_string())
+            .unwrap_or_default();
+        for name in invariant {
+            assert!(!fired.split(", ").any(|f| f == *name), "{name} fired on a frozen seed: {why}");
+        }
+        assert!(why.contains("oracle(s) fired"), "the seed failed before its oracles ran: {why}");
+    }
+}
+
+/// kill2 75110 with the name swapper off -- the world the reset's C8 was found
+/// in, pinned as a witness of that world, not of the shape: the user trades
+/// the vault's ring name with a plain ring's, the kills lose the trade's ops,
+/// the server has already taken the vault's rename, and the user then rotates
+/// the other two rings. Two records came to resolve to one path holding a
+/// third folder's directory with both of their own directories known to
+/// stand elsewhere; the scan kept one and dropped the other -- the vault --
+/// which read as deleted, was re-created empty, and had its real directory
+/// minted plain with the sealed file inside sent up in the clear. The
+/// invariant is all that is asserted: nothing sealed reaches the server in
+/// the clear, and nothing in the vault is readable there. A constructed pin
+/// for the shape itself is still owed (see the reset spec).
+#[test]
+fn frozen_vault_dropped_from_a_shared_path_seed() {
+    never_fires(&["sealed_never_in_the_clear", "vault_unreadable"], || {
+        workload_core_with(
+            75_110,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::Off,
+        );
+    });
+}
+
+/// plat3 75400 with swaps on -- the world the reset's C8b-4 was found in,
+/// pinned as a witness of that world: the vault claims its own directory from
+/// a path the map gave a plain ring, and that ring is no longer read as
+/// present at the path it lost. Left there, it stood beside the vault on one
+/// path and a file of the user's ended in a folder the user never put it in.
+/// The invariant is all that is asserted.
+#[test]
+fn frozen_holder_gives_up_the_path_it_lost_seed() {
+    never_fires(&["every_file_in_a_folder_the_user_put_it_in"], || {
+        workload_core_with(
+            75_400,
+            40,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+}
+
 /// A frozen seed is red on exactly these oracles and no other, asserted both
 /// ways: a name missing from the list is the regression the seed pins, and
 /// the list going quiet is the named finding fixed, at which point the
