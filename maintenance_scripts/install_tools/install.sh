@@ -1,4 +1,25 @@
 #!/usr/bin/env bash
+#VERSION 2.81 - No user1 on a new server: server setup creates no account, copies no key and
+#              grants no sudo. Root SSH login after hardening: keys only when root
+#              already holds keys, off when the install runs under sudo from an ordinary
+#              account (that account keeps its access), left as it was when root has
+#              only its password. A container image's PostgreSQL admits loopback only;
+#              host_housekeeping.sh adds the Docker host at container start and keeps
+#              every site's database answering only locally.
+#VERSION 2.80 - A clone's export key is read from JOINERY_CLONE_KEY and never reaches a
+#              command line: it crosses to the container in the 0600 env file with the
+#              other _site_init.sh inputs, to _site_init.sh on bare metal in the
+#              environment, and to the manifest request in a 0600 header file. It was
+#              an argument to docker run, to _site_init.sh and to curl, where any process
+#              on the machine could read it. --clone-key is still accepted from a person
+#              and moved into the environment at once.
+#VERSION 2.79 - A site container carries its agent's identity on a volume (`_agent`, at
+#              /etc/joinery-agent): the credential lived in the writable layer, so any
+#              rebuild brought the agent back unpaired. A rebuild of a container that
+#              predates the volume seeds it from the old container before removing it.
+#              A rebuild whose database volume holds another PostgreSQL major than the
+#              image carries is refused before the old container is touched: the image
+#              would mount a cluster its server cannot open, and the site would not start.
 #VERSION 2.78 - mpm_event.conf, the journal cap and the php.ini tuning come from _host_files.sh,
 #              the one definition host_housekeeping.sh also uses (writing each when absent), so
 #              install day and repair day run the same code (specs/agent_recipes_and_vocabulary.md).
@@ -421,7 +442,7 @@
 #   --themes               Download themes/plugins from distribution server
 #   --upgrade-server=URL   Override default distribution server
 #   --clone-from=URL       Clone database and uploads from existing site
-#   --clone-key=KEY        Authentication key for clone source
+#   --clone-key=KEY        Discouraged (argv is readable); set JOINERY_CLONE_KEY instead
 #
 # Password Handling:
 #   If no password is provided, a secure 24-character password is auto-generated.
@@ -501,6 +522,7 @@ SITE_INIT_ENV_INPUTS=(
     JOINERY_MAIL_API_KEY JOINERY_MAIL_PROVIDER JOINERY_MAIL_FROM
     JOINERY_BACKUP_BUCKET JOINERY_BACKUP_KEY_ID JOINERY_BACKUP_KEY
     JOINERY_BACKUP_PROVIDER JOINERY_BACKUP_REGION JOINERY_BACKUP_ENDPOINT
+    JOINERY_CLONE_KEY
 )
 
 # This script's own version, read from the newest #VERSION header above rather
@@ -519,7 +541,7 @@ ALLOW_DOWNGRADE=0 # --allow-downgrade: Rebuild a site even when the archive's co
 QUIET_MODE=0      # -q/--quiet: Suppress most output
 CLOUDFLARE_PROXY=0  # Set to 1 if domain is behind Cloudflare proxy
 SSL_DEFERRED=0      # Set to 1 when DNS wasn't ready, so the closing summary can say so
-SSH_ROOT_LOGIN_SAFE=0    # Set by derive_ssh_access: 1 when disabling root SSH orphans nobody
+SSH_ROOT_LOGIN=""        # Set by derive_ssh_access: prohibit-password, no, or empty (leave as is)
 SSH_REACHABLE_ACCOUNT="" # Set by derive_ssh_access: the account that keeps access
 
 # --memory=SIZE: the memory budget for a site container, in Docker's own syntax
@@ -698,58 +720,42 @@ print_email_setup_notice() {
 # SSH ACCESS DERIVATION
 #==============================================================================
 
-# Work out which account will still be able to reach this box once root SSH
-# login is disabled, and make one true where we can. Sets:
+# Work out what root SSH login can safely become once the server is hardened,
+# without creating any account. Sets:
 #
-#   SSH_ROOT_LOGIN_SAFE     1 when disabling root login orphans nobody
-#   SSH_REACHABLE_ACCOUNT   the account that keeps access (informational)
+#   SSH_ROOT_LOGIN         prohibit-password | no | "" (leave it as it is)
+#   SSH_REACHABLE_ACCOUNT  who keeps access (informational)
 #
 # Three cases:
 #
-#   1. Running as root with keys in /root/.ssh/authorized_keys — copy them to
-#      user1 and grant it passwordless sudo. Root login can then be disabled.
-#   2. Running under sudo from a normal account — that account already holds a
-#      credential and sudo, so root login can be disabled with nothing to do.
-#   3. Neither (root reached by password, no key) — the only way in is root.
-#      Leave root login alone and print the remedy.
-#
-# This is the same pre-stage the management node performs before running
-# `install.sh server` on a managed node (JobCommandBuilder::build_install_node,
-# "Pre-stage user1 for managed access"). Doing it here means a hand-run install
-# gets the same protection instead of relying on the operator knowing the trap.
+#   1. Running as root with keys in /root/.ssh/authorized_keys - root keeps
+#      key login and loses password login (prohibit-password).
+#   2. Running under sudo from an ordinary account - that account already holds
+#      a credential and sudo, so root login is turned off.
+#   3. Neither (root reached by password, no key) - the password is the only
+#      way in. Leave root login alone; on a machine a management node
+#      provisioned, the management node retires that password itself once the
+#      machine's agents are admitted.
 derive_ssh_access() {
-    SSH_ROOT_LOGIN_SAFE=0
+    SSH_ROOT_LOGIN=""
     SSH_REACHABLE_ACCOUNT=""
 
     if [ -s /root/.ssh/authorized_keys ]; then
-        print_info "Root has authorized SSH keys — mirroring them to user1"
-
-        id user1 >/dev/null 2>&1 || useradd -m -s /bin/bash user1
-        install -d -m 700 -o user1 -g user1 /home/user1/.ssh
-        touch /home/user1/.ssh/authorized_keys
-        cat /root/.ssh/authorized_keys >> /home/user1/.ssh/authorized_keys
-        sort -u /home/user1/.ssh/authorized_keys -o /home/user1/.ssh/authorized_keys
-        chmod 600 /home/user1/.ssh/authorized_keys
-        chown user1:user1 /home/user1/.ssh/authorized_keys
-
-        echo 'user1 ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/user1
-        chmod 440 /etc/sudoers.d/user1
-
-        SSH_ROOT_LOGIN_SAFE=1
-        SSH_REACHABLE_ACCOUNT="user1"
-        print_success "user1 holds root's SSH key(s) and has passwordless sudo"
+        SSH_ROOT_LOGIN="prohibit-password"
+        SSH_REACHABLE_ACCOUNT="root (its SSH keys)"
+        print_info "Root holds SSH keys - root keeps key login, password login is turned off"
         return 0
     fi
 
     if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-        SSH_ROOT_LOGIN_SAFE=1
+        SSH_ROOT_LOGIN="no"
         SSH_REACHABLE_ACCOUNT="$SUDO_USER"
-        print_info "Running under sudo as '$SUDO_USER' — that account keeps its own SSH access"
+        print_info "Running under sudo as '$SUDO_USER' - that account keeps its own SSH access"
         return 0
     fi
 
     echo ""
-    print_warning "This run is not from a sudo account, so root password login is the only way into this server."
+    print_warning "This run is not from a sudo account and root holds no SSH key, so root password login is the only way into this server."
     print_warning "It is being left enabled; fail2ban limits guessing."
     echo ""
     return 0
@@ -2625,24 +2631,6 @@ do_server_setup() {
     print_step "Installing essential packages..."
     apt install -y curl wget git unzip rsync software-properties-common apt-transport-https ca-certificates gnupg lsb-release build-essential fail2ban cron
 
-    # Create and configure user1
-    print_step "Setting up user1..."
-
-    if ! id "user1" &>/dev/null; then
-        print_info "Creating user1..."
-        useradd -m -s /bin/bash user1
-        print_success "user1 created"
-    fi
-
-    # Configure user1's SSH directory
-    mkdir -p /home/user1/.ssh
-    chmod 700 /home/user1/.ssh
-    chown user1:user1 /home/user1/.ssh
-    touch /home/user1/.ssh/authorized_keys
-    chmod 600 /home/user1/.ssh/authorized_keys
-    chown user1:user1 /home/user1/.ssh/authorized_keys
-
-    print_success "user1 configured successfully"
 
     # Prevent service auto-start during package installation (Docker safety)
     if is_docker; then
@@ -2869,10 +2857,10 @@ EOF
     # arrives over SSH (bare metal) or docker exec (containers).
     #
     # The container image build (--skip-postgres-password) is the one shape
-    # that needs network listening: the docker published-port path delivers
-    # connections to the container's eth0 from the host's bridge, so it
-    # listens on '*' with the bridge subnet allowed in pg_hba. The exposure
-    # boundary for containers is the docker -p binding, which is loopback-only.
+    # that listens beyond loopback: the docker published-port path delivers the
+    # host's connections to the container's eth0, from the bridge gateway. Who
+    # may log in is pg_hba's decision, not the -p binding's: loopback here, and
+    # host_housekeeping.sh adds the gateway (the host) at container start.
     print_info "Configuring PostgreSQL authentication..."
 
     # One variable, used by the rules written below and by the restore after the
@@ -2886,9 +2874,13 @@ EOF
     local PG_AUTH_METHOD="scram-sha-256"
 
     if [ "$SKIP_POSTGRES_PASSWORD" -eq 1 ]; then
-        # Container image: allow loopback + the docker bridge subnets.
-        PG_HOST_RULES="host    all             all             127.0.0.1/32            ${PG_AUTH_METHOD}
-host    all             all             172.16.0.0/12           ${PG_AUTH_METHOD}"
+        # Container image: loopback only, like bare metal. It listens on its
+        # own interface because the Docker host reaches the site's database
+        # through the loopback-published port, and host_housekeeping.sh admits
+        # exactly that host (the container's gateway) at every start, plus any
+        # line the site declares in config/postgres_access.conf. Every other
+        # container on the host is refused.
+        PG_HOST_RULES="host    all             all             127.0.0.1/32            ${PG_AUTH_METHOD}"
         PG_LISTEN="*"
     else
         # Bare metal: loopback only.
@@ -3128,17 +3120,35 @@ EOF
         sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 2/' /etc/ssh/sshd_config
 
         # The one directive that can lock the operator out. Everything above is
-        # applied unconditionally; this is applied only when another account can
-        # still reach the box.
-        if [ "$SSH_ROOT_LOGIN_SAFE" -eq 1 ]; then
-            sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
-            sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+        # applied unconditionally; this follows what derive_ssh_access found,
+        # and is left alone when root's password is the only way in.
+        #
+        # sshd takes the FIRST value it reads for a keyword, and Ubuntu's
+        # sshd_config includes sshd_config.d/*.conf at its top, so a provider's
+        # drop-in outranks anything written in the main file. The setting goes
+        # in a drop-in that sorts first; sshd -t checks it before the restart,
+        # and a file sshd refuses is removed rather than left to lock anyone out.
+        if [ -n "$SSH_ROOT_LOGIN" ]; then
+            ROOT_LOGIN_DROPIN=/etc/ssh/sshd_config.d/00-joinery-root-login.conf
+            if grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' /etc/ssh/sshd_config; then
+                printf '# Written by install.sh server: root SSH login after hardening.\nPermitRootLogin %s\n' \
+                    "$SSH_ROOT_LOGIN" > "$ROOT_LOGIN_DROPIN"
+                chmod 644 "$ROOT_LOGIN_DROPIN"
+            else
+                sed -i -E "s/^#?PermitRootLogin .*/PermitRootLogin ${SSH_ROOT_LOGIN}/" /etc/ssh/sshd_config
+                grep -q '^PermitRootLogin ' /etc/ssh/sshd_config || echo "PermitRootLogin ${SSH_ROOT_LOGIN}" >> /etc/ssh/sshd_config
+            fi
+            if ! sshd -t 2>/dev/null; then
+                rm -f "$ROOT_LOGIN_DROPIN"
+                print_warning "sshd refused the root-login setting; root login is left as it was"
+                SSH_ROOT_LOGIN=""
+            fi
         fi
 
         service_restart ssh
 
-        if [ "$SSH_ROOT_LOGIN_SAFE" -eq 1 ]; then
-            print_success "SSH security configured (root login disabled; ${SSH_REACHABLE_ACCOUNT} retains access)"
+        if [ -n "$SSH_ROOT_LOGIN" ]; then
+            print_success "SSH security configured (PermitRootLogin ${SSH_ROOT_LOGIN}; ${SSH_REACHABLE_ACCOUNT} keeps access)"
         else
             print_success "SSH security configured (root login left enabled — see the warning above)"
         fi
@@ -3258,9 +3268,6 @@ EOF
     chown root:root /var/www/
     chmod 755 /var/www/
 
-    # Add user1 to www-data group for web development
-    usermod -aG www-data user1
-
     # Restart services
     print_step "Restarting services..."
     service_restart apache2
@@ -3275,7 +3282,6 @@ EOF
     local OS_PRETTY
     OS_PRETTY=$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d'"' -f2)
     echo -e "${GREEN}✓${NC} ${OS_PRETTY:-System} updated"
-    echo -e "${GREEN}✓${NC} user1 configured"
     echo -e "${GREEN}✓${NC} PHP ${PHP_VERSION} with required extensions installed"
     echo -e "${GREEN}✓${NC} Composer installed globally"
     echo -e "${GREEN}✓${NC} Apache web server configured"
@@ -3290,8 +3296,7 @@ EOF
     fi
     echo ""
     print_warning "=== NEXT STEPS ==="
-    print_info "1. Add your SSH public key to /home/user1/.ssh/authorized_keys"
-    print_info "2. Create sites using: ./install.sh site SITENAME DOMAIN"
+    print_info "1. Create sites using: ./install.sh site SITENAME DOMAIN"
     print_info "   (the database password is generated for you; --password-file to choose one)"
     # Say where the password is, not what it is. This summary is the last thing
     # an unattended install writes to its log, and installer logs get tailed,
@@ -3467,6 +3472,7 @@ do_site_create() {
                 echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
                 echo "  Environment (optional, secrets never on argv):"
                 echo "    JOINERY_ADMIN_PASSWORD   the admin password the owner chose (else generated)"
+                echo "    JOINERY_CLONE_KEY        the clone source's export key, with --clone-from"
                 echo "    JOINERY_INSTALL_BUNDLE   plugin bundle, default personal; none skips it"
                 echo "    JOINERY_MAIL_API_KEY     sending key: email is set up during the install"
                 echo "    JOINERY_MAIL_PROVIDER    which provider the key is for (blank: detected from the key)"
@@ -3487,7 +3493,7 @@ do_site_create() {
                 echo ""
                 echo "Clone Options:"
                 echo "  --clone-from=URL       Clone database and uploads from existing site"
-                echo "  --clone-key=KEY        Authentication key for clone source"
+                echo "  --clone-key=KEY        Discouraged: argv is readable by any process; set JOINERY_CLONE_KEY"
                 echo ""
                 echo "Automation:"
                 echo "  -y / --yes     Auto-accept: remove existing container, keep volumes"
@@ -3744,12 +3750,21 @@ do_site_create() {
         fi
     fi
 
+    # The clone key lives in JOINERY_CLONE_KEY from here on: every child of this
+    # script reads it there, so it is never on a command line any process can
+    # read. --clone-key, from a person typing it, is moved there at once.
+    if [ -n "$CLONE_KEY" ]; then
+        export JOINERY_CLONE_KEY="$CLONE_KEY"
+    elif [ -n "${JOINERY_CLONE_KEY:-}" ]; then
+        CLONE_KEY="$JOINERY_CLONE_KEY"
+    fi
+
     # Clone source verification
     if [ -n "$CLONE_FROM" ]; then
         print_step "Verifying clone source..."
 
         if [ -z "$CLONE_KEY" ]; then
-            print_error "--clone-key is required when using --clone-from"
+            print_error "--clone-from needs the source's export key in JOINERY_CLONE_KEY"
             exit 1
         fi
 
@@ -3757,8 +3772,13 @@ do_site_create() {
         # set -e a failing command substitution ends the script on the spot,
         # so the diagnosis below never printed — a clone died with a bare
         # "exited 22" and nothing said which side refused, or why.
-        local MANIFEST_CODE
-        MANIFEST=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_FROM}/utils/clone_export?action=manifest" 2>/dev/null) || MANIFEST=""
+        # The bearer header comes from a 0600 file (curl -H @FILE), not argv.
+        local MANIFEST_CODE CLONE_AUTH
+        CLONE_AUTH="$(mktemp)"
+        chmod 600 "$CLONE_AUTH"
+        printf 'Authorization: Bearer %s\n' "$CLONE_KEY" > "$CLONE_AUTH"
+        MANIFEST=$(curl -s -w '\n%{http_code}' -H @"$CLONE_AUTH" "${CLONE_FROM}/utils/clone_export?action=manifest" 2>/dev/null) || MANIFEST=""
+        rm -f "$CLONE_AUTH"
         MANIFEST_CODE="${MANIFEST##*$'\n'}"
         MANIFEST="${MANIFEST%$'\n'*}"
 
@@ -3837,7 +3857,7 @@ CODE_VOLUMES=(
 ALL_SITE_VOLUMES=(
     code vendor scripts
     postgres uploads storage config backups static
-    logs cache sessions apache_logs pg_logs
+    logs cache sessions apache_logs pg_logs agent
 )
 
 # Delete every volume belonging to a site. Irreversible: this is the database,
@@ -3849,6 +3869,72 @@ remove_site_volumes() {
     for vol in "${ALL_SITE_VOLUMES[@]}"; do
         docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
     done
+}
+
+# The PostgreSQL major a site's database volume holds, read straight off the
+# host filesystem like the code check below: the version of each cluster under
+# it (/var/lib/postgresql/<major>/main/PG_VERSION inside the container). Empty
+# when there is no volume or no cluster in it — a fresh site.
+site_database_majors() {
+    local SITENAME="$1"
+    local MOUNTPOINT f
+    MOUNTPOINT=$(docker volume inspect -f '{{ .Mountpoint }}' "${SITENAME}_postgres" 2>/dev/null) || return 0
+    [ -n "$MOUNTPOINT" ] || return 0
+    for f in "${MOUNTPOINT}"/*/main/PG_VERSION; do
+        [ -f "$f" ] && tr -cd '0-9' < "$f" && echo
+    done | sort -n | tr '\n' ' ' | sed 's/ *$//'
+}
+
+# The PostgreSQL major an image carries: the one server installed in it.
+image_postgres_major() {
+    docker run --rm --entrypoint ls "$1" /usr/lib/postgresql 2>/dev/null | sort -n | tail -1
+}
+
+# Refuse a rebuild that would mount the site's database under a server that
+# cannot open it. The volume keeps a cluster per major under
+# /var/lib/postgresql/<major>/main; an image whose PostgreSQL is another major
+# looks for its own directory, finds none, and the container never starts. The
+# data is untouched either way — this says so while the old container still
+# runs, instead of after it has been removed.
+refuse_database_major_mismatch() {
+    local SITENAME="$1" IMAGE="$2"
+    local HAVE WANT
+    HAVE="$(site_database_majors "$SITENAME")"
+    [ -n "$HAVE" ] || return 0
+    WANT="$(image_postgres_major "$IMAGE")"
+    if [ -z "$WANT" ]; then
+        print_warning "Could not read the PostgreSQL version inside ${IMAGE}; the database volume check is skipped."
+        return 0
+    fi
+    case " $HAVE " in
+        *" $WANT "*) return 0 ;;
+    esac
+    print_error "The database of '${SITENAME}' is PostgreSQL ${HAVE} and ${IMAGE} carries ${WANT}."
+    print_error "A rebuild would leave the site unable to start. Nothing was changed."
+    print_error "Move the database with maintenance_scripts/sysadmin_tools/rebase_site_container.sh."
+    exit 1
+}
+
+# Carry the agent's identity from a container that predates the _agent volume.
+# The credential it paired with lives in /etc/joinery-agent; in a container
+# built before the volume existed that is the writable layer, which `docker rm`
+# destroys. Copied into the volume while the old container still exists, the
+# rebuilt one comes back paired. A site whose volume already exists carries it
+# already; one whose container has no such directory has nothing to carry.
+seed_agent_volume() {
+    local SITENAME="$1"
+    local VOL="${SITENAME}_agent" IMAGE
+    docker volume inspect "$VOL" > /dev/null 2>&1 && return 0
+    docker cp "${SITENAME}:/etc/joinery-agent" - > /dev/null 2>&1 || return 0
+    IMAGE="$(docker inspect -f '{{.Config.Image}}' "$SITENAME" 2>/dev/null)"
+    docker volume create "$VOL" > /dev/null
+    if docker cp "${SITENAME}:/etc/joinery-agent" - \
+        | docker run --rm -i -v "${VOL}:/dst" --entrypoint tar "$IMAGE" -x -p -C /dst --strip-components=1; then
+        print_info "Carried the agent's identity into ${VOL}"
+    else
+        docker volume rm "$VOL" > /dev/null 2>&1 || true
+        print_warning "Could not carry the agent's identity across; the rebuilt site's agent will ask to be paired again."
+    fi
 }
 
 # True when the site's code volume already holds a release. Read straight off
@@ -4143,6 +4229,11 @@ do_site_docker() {
 
     print_success "Archive structure verified"
 
+    # A kept database volume must be one this image's PostgreSQL can open.
+    if [ "$WIPE_DATA" -ne 1 ]; then
+        refuse_database_major_mismatch "$SITENAME" "joinery-base:${BASE_IMAGE_VERSION}"
+    fi
+
     # Check for existing container
     print_step "Checking for existing container named '$SITENAME'..."
 
@@ -4161,6 +4252,7 @@ do_site_docker() {
                 # Safe rebuild: remove only the container; volumes survive and reattach
                 print_info "Auto-removing existing container (-y flag); data volumes preserved"
                 print_info "Add --wipe-data to also delete volumes (irreversible)"
+                seed_agent_volume "$SITENAME"
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
                 print_success "Existing container removed (volumes intact)"
@@ -4195,6 +4287,7 @@ do_site_docker() {
                     exit 1
                 fi
                 print_info "Stopping and removing existing container..."
+                seed_agent_volume "$SITENAME"
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
                 print_success "Existing container removed (volumes intact)"
@@ -4350,7 +4443,9 @@ EOF
     # Build clone environment options (passed at runtime, not baked into image)
     CLONE_ENV_OPTS=""
     if [ -n "$CLONE_FROM" ] && [ -n "$CLONE_KEY" ]; then
-        CLONE_ENV_OPTS="-e CLONE_FROM=${CLONE_FROM} -e CLONE_KEY=${CLONE_KEY}"
+        # The key itself crosses in the 0600 env file (SITE_INIT_ENV_INPUTS),
+        # never as an argument to docker run.
+        CLONE_ENV_OPTS="-e CLONE_FROM=${CLONE_FROM}"
     fi
 
     # --memory bounds the container, and it is also the only way the container
@@ -4419,6 +4514,7 @@ EOF
             -v "${SITENAME}_sessions":/var/lib/php/sessions \
             -v "${SITENAME}_apache_logs":/var/log/apache2 \
             -v "${SITENAME}_pg_logs":/var/log/postgresql \
+            -v "${SITENAME}_agent":/etc/joinery-agent \
             "joinery-$SITENAME" > /dev/null
     else
         docker run -d \
@@ -4444,6 +4540,7 @@ EOF
             -v "${SITENAME}_sessions":/var/lib/php/sessions \
             -v "${SITENAME}_apache_logs":/var/log/apache2 \
             -v "${SITENAME}_pg_logs":/var/log/postgresql \
+            -v "${SITENAME}_agent":/etc/joinery-agent \
             "joinery-$SITENAME"
     fi
 
@@ -4705,7 +4802,8 @@ do_site_baremetal() {
         INIT_ARGS+=(-q)
     fi
     if [ -n "$CLONE_FROM" ] && [ -n "$CLONE_KEY" ]; then
-        INIT_ARGS+=("--clone-from=${CLONE_FROM}" "--clone-key=${CLONE_KEY}")
+        # _site_init.sh reads the key from JOINERY_CLONE_KEY, exported above.
+        INIT_ARGS+=("--clone-from=${CLONE_FROM}")
     fi
 
     # Call _site_init.sh for shared setup
@@ -4956,7 +5054,7 @@ show_help() {
     echo "  --docker               Force Docker mode"
     echo "  --bare-metal           Force bare-metal mode"
     echo "  --clone-from=URL       Clone database and uploads from existing site"
-    echo "  --clone-key=KEY        Authentication key for clone source"
+    echo "  --clone-key=KEY        Discouraged: argv is readable by any process; set JOINERY_CLONE_KEY"
     echo ""
     echo "SSL (Automatic):"
     echo "  When a domain name is provided (not localhost/IP), SSL is automatically"
@@ -4975,7 +5073,7 @@ show_help() {
     echo ""
     echo "  # Clone an existing site"
     echo "  sudo ./install.sh site newsite example.com 8080 \\"
-    echo "      --clone-from=https://source.example.com --clone-key=SecretKey123"
+    echo "      --clone-from=https://source.example.com   (with JOINERY_CLONE_KEY=... in the environment)"
     echo ""
     echo "  # Set up bare-metal server (once)"
     echo "  sudo ./install.sh server"

@@ -22,6 +22,8 @@
  * Reads what BackupObjectsStatus reads: the blob table, one stat per cloud
  * row, held.json, history. Never a network call.
  *
+ * @version 1.1 - WAITING_BYTES is 2 GB in the decimal units every backup size is shown in
+ *                (BackupRunner::human()), so the threshold is the number the notice says
  * @version 1.0
  */
 
@@ -30,7 +32,7 @@ require_once(PathHelper::getIncludePath('includes/BackupObjectsStatus.php'));
 class BackupObjectsNotice {
 
 	/** Waiting bytes above which the notice stands whatever the run dates say. */
-	const WAITING_BYTES = 2147483648;
+	const WAITING_BYTES = 2000000000;
 
 	/** Days since a backup's last success after which anything waiting on it is a notice. */
 	const STALE_DAYS = 7;

@@ -1,4 +1,5 @@
 #!/bin/bash
+#VERSION 2.0 - The handoff honours no SSH key: JOINERY_SSH_KEY is gone from every path.
 #VERSION 1.9 - The sending key field names no provider: the installer tells
 #              which provider issued the key (SMTP2GO, Mailgun and the other
 #              single-key providers) and asks it.

@@ -60,7 +60,7 @@ The deploy form asks for as little as it can — every field is a chance for som
 | Email sending API key | No | Sets email up during the install, so the setup wizard's Email step opens on the delivery proof (or a DNS wait) instead of an empty form. The provider is told from the key: every provider one key configures declares the shape of its keys (`SingleKeyProvider`: SMTP2GO, Mailgun, SendGrid, Resend, Brevo, Postmark), and a key no shape matches is tried live against each. `utils/install_mail_provider.php` then runs the wizard's own ceremony: the From address is derived from the admin address on the site's domain, the owner's mailbox is provisioned for it, the domain is registered at the provider where its API allows, its mail records are published through the kept Linode token, and the provider is asked to verify. A key every provider rejects leaves nothing configured and the wizard asks again; the closing summary says which happened. Never printed. |
 | Backblaze B2 bucket, key ID, key | No | Three fields that together point backups at a bucket during the install. `utils/install_backup_target.php` creates the target, fills the region and endpoint from Backblaze's own answer, tests the connection, and makes it the scheduled target — the same as the wizard's "Save and test". A bucket that cannot be reached is removed again and the wizard asks for one. The recovery key that turns nightly backups on is a secret shown once to a human and stays the wizard's. The key is never printed. |
 
-The form declares no SSH key field. Root access is left as Linode configured it, and an operator who wants a key mirrored to `user1` with root login disabled installs by hand with `JOINERY_SSH_KEY` in the environment, which the handoff script still honours. Region, plan and firewall are the deployer's own Create-form choices; a StackScript cannot preset or hide them, and every field it declares is shown.
+The form declares no SSH key field, and the install places no key and creates no account: root keeps the password the deployer set in Linode. Region, plan and firewall are the deployer's own Create-form choices; a StackScript cannot preset or hide them, and every field it declares is shown.
 
 Neither optional service is a condition of the install. The StackScript only passes these fields on: `_site_init.sh` does the work, so a hand-run `install.sh site` takes the same inputs (see "Services set up at install" below).
 
@@ -253,13 +253,15 @@ Installs and configures PHP 8.3, Apache (with `mod_rewrite`), PostgreSQL, Compos
 
 #### How SSH hardening picks its account
 
-Turning off root SSH login is the one hardening step that can lock an operator out, so the installer works out who will still be able to reach the box before it does that. Everything else — `MaxAuthTries 3`, empty passwords refused, idle-session timeouts, fail2ban, UFW — is applied unconditionally.
+Turning off root SSH login is the one hardening step that can lock an operator out, so the installer works out who will still be able to reach the box before it does that. It creates no account and copies no key. Everything else — `MaxAuthTries 3`, empty passwords refused, idle-session timeouts, fail2ban, UFW — is applied unconditionally.
 
 | What the installer finds | What it does |
 |---|---|
-| Running as root, and `/root/.ssh/authorized_keys` has keys | Copies those keys to `user1`, grants it passwordless sudo, then sets `PermitRootLogin no`. |
-| Running under `sudo` from an ordinary account | That account already has its own key and sudo, so it sets `PermitRootLogin no` and does nothing else. |
+| Running as root, and `/root/.ssh/authorized_keys` has keys | Sets `PermitRootLogin prohibit-password`: root keeps its key login and loses password login. |
+| Running under `sudo` from an ordinary account | That account already has its own key and sudo, so it sets `PermitRootLogin no`. |
 | Neither — root reached by password, no key installed | Leaves `PermitRootLogin` alone and says so. Disabling it here would leave nothing able to log in. |
+
+The setting is written to `/etc/ssh/sshd_config.d/00-joinery-root-login.conf`. sshd takes the first value it reads, and Ubuntu's `sshd_config` includes that directory first, so a file there is what takes effect; `sshd -t` checks it before SSH restarts.
 
 The third case is the only one that finishes with root password login still enabled. It is what you get on a provider that boots you a machine with a root password and no SSH key attached. On a self-hosted machine that password is the owner's only way in, so the installer leaves it on and relies on the fail2ban jail (three failures in ten minutes, banned for an hour) to limit guessing. On a machine a management node provisioned, the management node turns password login off itself once the machine's agents are admitted; see the Server Manager plugin's `retire_install_password` job.
 
@@ -483,16 +485,18 @@ Use a strong random key (32+ chars, letters, digits, `_` and `-`). HTTPS is requ
 
 ### Run the clone
 
+The installer reads the key from `JOINERY_CLONE_KEY`. A command-line argument is readable by every process on the machine, so the key is kept in the environment instead: `read -rs` takes it without echoing it or writing it to shell history, and `sudo --preserve-env` passes it through.
+
 ```bash
+read -rs -p 'Clone key: ' JOINERY_CLONE_KEY && export JOINERY_CLONE_KEY
+
 # Docker
-sudo ./install.sh site newsite newdomain.com 8080 \
-    --clone-from=https://sourcesite.com \
-    --clone-key=YourSecureRandomKey123
+sudo --preserve-env=JOINERY_CLONE_KEY ./install.sh site newsite newdomain.com 8080 \
+    --clone-from=https://sourcesite.com
 
 # Bare-metal
-sudo ./install.sh site newsite newdomain.com \
-    --clone-from=https://sourcesite.com \
-    --clone-key=YourSecureRandomKey123
+sudo --preserve-env=JOINERY_CLONE_KEY ./install.sh site newsite newdomain.com \
+    --clone-from=https://sourcesite.com
 ```
 
 ### What gets cloned
@@ -600,10 +604,13 @@ sudo apache2ctl configtest
 
 ### PostgreSQL access
 
+A site's database answers only on its own machine. On a standalone server PostgreSQL listens on `localhost`, and `pg_hba.conf` admits local and loopback connections only. In a Docker site the container's PostgreSQL admits its own loopback and the Docker host, which reaches it through the site's database port published on the host's `127.0.0.1`; every other container on the host is refused. `host_housekeeping.sh` holds this on every converge and at every container start: any rule admitting another address is removed (the first rewrite keeps the original as `pg_hba.conf.pre-local-only`), and a standalone server's `listen_addresses` is pinned by `conf.d/99-joinery-local-only.conf`.
+
+A Docker site that must be read from another machine declares it in `config/postgres_access.conf` on its config volume, one `pg_hba.conf` line each. A line must name one database and one role that is not `postgres`, from an address no wider than a /24 (IPv6 /64), with `md5` or `scram-sha-256`; any other line is named in the housekeeping output and left out. A standalone server ignores the file. Publishing the database port where that machine can reach it is a separate step on the host.
+
 ```bash
-# Docker
-docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" mysite \
-    psql -h 127.0.0.1 -U postgres -d mysite
+# Docker (the password is read inside the container, never on the host's command line)
+docker exec -it mysite bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U postgres -d mysite'
 
 # Bare-metal
 psql -U postgres -d mysite
@@ -704,11 +711,7 @@ docker exec mysite service apache2 start
 ### Permission errors (bare-metal)
 
 ```bash
-sudo chown -R www-data:user1 /var/www/html/mysite
-sudo chmod -R 775 /var/www/html/mysite
-
-# Or:
-./fix_permissions.sh mysite --production
+sudo ./fix_permissions.sh mysite --production
 ```
 
 ### Database load failure during install
@@ -777,8 +780,7 @@ install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME [DOMAIN] [PORT] [OPTI
   --with-test-site       Create a companion test site (bare-metal only)
   --themes               Download stock themes/plugins from upgrade server
   --no-ssl               Skip automatic SSL setup
-  --clone-from=URL       Clone DB + uploads from an existing site
-  --clone-key=KEY        Authentication key for clone source
+  --clone-from=URL       Clone DB + uploads from an existing site (key in JOINERY_CLONE_KEY)
 ```
 
 If no password is given (and no `--password-file`), the installer auto-generates a 24-character password.

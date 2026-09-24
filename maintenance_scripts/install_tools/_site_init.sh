@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.6 - A clone's export key is read from JOINERY_CLONE_KEY, and reaches curl in a
+#                0600 header file and openssl in a 0600 key file, both removed on exit. It
+#                was an argument to this script, to every curl and to openssl, where any
+#                process on the machine could read it. --clone-key is still accepted.
+# VERSION: 3.5 - A clone's database load stops at the first SQL error (ON_ERROR_STOP) and says
+#                what psql said: it ran without it, with stderr discarded, so a load that
+#                half-applied logged "Database cloned successfully". A dump from a newer
+#                PostgreSQL than this server is refused before any of it is loaded.
 # VERSION: 3.4 - The logrotate file and the cron entry come from site_housekeeping.sh, the core
 #                installer the host timer also runs (specs/agent_recipes_and_vocabulary.md).
 # VERSION: 3.3 - The sending provider is detected from the key when none is named.
@@ -66,7 +74,7 @@
 #   --activate THEME       Set active theme
 #   --docker-mode          Running inside Docker container (skips virtualhost, serve.php)
 #   --clone-from=URL       Clone database and uploads from URL
-#   --clone-key=KEY        Authentication key for clone source
+#   --clone-key=KEY        Discouraged (argv is readable); set JOINERY_CLONE_KEY instead
 #   --skip-db-validation   Skip default admin/settings validation
 #   -q, --quiet            Suppress most output
 #
@@ -121,7 +129,8 @@ DOCKER_MODE=false
 ACTIVATE_THEME=""
 QUIET=false
 CLONE_FROM=""
-CLONE_KEY=""
+# The export key comes from the environment; --clone-key below still overrides.
+CLONE_KEY="${JOINERY_CLONE_KEY:-}"
 SKIP_DB_VALIDATION=false
 
 # Parse options
@@ -314,13 +323,52 @@ if [ -n "$CLONE_FROM" ]; then
 
     CLONE_URL="${CLONE_FROM}/utils/clone_export"
 
-    curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=database" | \
-        openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:${CLONE_KEY} | \
+    # The key reaches curl as a header file and openssl as a key file, both
+    # 0600 in a private directory removed on exit - never an argument, which
+    # every process on the machine can read.
+    CLONE_SECRETS="$(mktemp -d)"
+    chmod 700 "$CLONE_SECRETS"
+    trap 'rm -rf "$CLONE_SECRETS"' EXIT
+    printf 'Authorization: Bearer %s\n' "$CLONE_KEY" > "$CLONE_SECRETS/auth"
+    printf '%s\n' "$CLONE_KEY" > "$CLONE_SECRETS/key"
+    chmod 600 "$CLONE_SECRETS/auth" "$CLONE_SECRETS/key"
+
+    # A dump carries the syntax of the server that wrote it, so one from a newer
+    # PostgreSQL cannot load here. Its header names that version before any SQL,
+    # so the check reads the first lines, refuses before a statement reaches
+    # psql, and otherwise passes the stream through untouched.
+    TARGET_PG_MAJOR=$(( $(psql -U postgres -XtAc 'SHOW server_version_num' 2>/dev/null | tr -cd '0-9') / 10000 ))
+    refuse_newer_dump() {
+        local line n=0
+        while IFS= read -r line; do
+            printf '%s\n' "$line"
+            n=$((n + 1))
+            if [[ "$line" =~ ^--\ Dumped\ from\ database\ version\ ([0-9]+) ]]; then
+                if (( TARGET_PG_MAJOR > 0 && BASH_REMATCH[1] > TARGET_PG_MAJOR )); then
+                    echo "The clone source runs PostgreSQL ${BASH_REMATCH[1]} and this server runs ${TARGET_PG_MAJOR}; a newer dump cannot load into an older server." >&2
+                    return 3
+                fi
+                break
+            fi
+            (( n >= 40 )) && break
+        done
+        cat
+    }
+
+    LOAD_ERR=$(mktemp)
+    curl -sf -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=database" | \
+        openssl enc -d -aes-256-cbc -pbkdf2 -pass file:"$CLONE_SECRETS/key" | \
         gunzip | \
-        psql -U postgres -d "$SITENAME" -q 2>/dev/null || {
+        refuse_newer_dump 2>>"$LOAD_ERR" | \
+        psql -U postgres -d "$SITENAME" -q -v ON_ERROR_STOP=1 >/dev/null 2>>"$LOAD_ERR" || {
             log_error "Failed to load database from clone source"
+            # What psql (or the version check) said is the reason; without it
+            # the failure is a line with nothing to act on.
+            tail -5 "$LOAD_ERR" | while IFS= read -r line; do log_error "  $line"; done
+            rm -f "$LOAD_ERR"
             exit 1
         }
+    rm -f "$LOAD_ERR"
 
     log "Database cloned successfully"
 
@@ -328,7 +376,7 @@ if [ -n "$CLONE_FROM" ]; then
     log "Downloading uploads from clone source..."
 
     # Check Content-Type to determine if there are uploads to transfer
-    CONTENT_TYPE=$(curl -sI -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=uploads" 2>/dev/null | grep -i "^content-type:" | head -1)
+    CONTENT_TYPE=$(curl -sI -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=uploads" 2>/dev/null | grep -i "^content-type:" | head -1)
 
     if echo "$CONTENT_TYPE" | grep -qi "application/json"; then
         # JSON response - no uploads to transfer
@@ -336,7 +384,7 @@ if [ -n "$CLONE_FROM" ]; then
     else
         # Binary response - download to temp file then extract (avoids pipe truncation issues)
         TEMP_UPLOADS=$(mktemp)
-        if curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=uploads" -o "$TEMP_UPLOADS"; then
+        if curl -sf -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=uploads" -o "$TEMP_UPLOADS"; then
             tar -xzf "$TEMP_UPLOADS" -C "$SITE_ROOT/" || {
                 rm -f "$TEMP_UPLOADS"
                 log_error "Failed to extract uploads from clone source"
@@ -355,7 +403,7 @@ if [ -n "$CLONE_FROM" ]; then
     log "Downloading static_files from clone source..."
 
     # Check Content-Type to determine if there are static_files to transfer
-    CONTENT_TYPE=$(curl -sI -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=static_files" 2>/dev/null | grep -i "^content-type:" | head -1)
+    CONTENT_TYPE=$(curl -sI -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=static_files" 2>/dev/null | grep -i "^content-type:" | head -1)
 
     if echo "$CONTENT_TYPE" | grep -qi "application/json"; then
         # JSON response - no static_files to transfer
@@ -363,7 +411,7 @@ if [ -n "$CLONE_FROM" ]; then
     else
         # Binary response - download to temp file then extract (avoids pipe truncation issues)
         TEMP_STATIC=$(mktemp)
-        if curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=static_files" -o "$TEMP_STATIC"; then
+        if curl -sf -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=static_files" -o "$TEMP_STATIC"; then
             tar -xzf "$TEMP_STATIC" -C "$SITE_ROOT/" || {
                 rm -f "$TEMP_STATIC"
                 log_error "Failed to extract static_files from clone source"

@@ -28,18 +28,25 @@
  *     and no step addressed to another machine (specs/ssh_single_bootstrap.md).
  *   - The password is unsealed only in memory and handed to ssh through the
  *     SSHPASS environment variable, never on a command line.
- *   - A step may declare `stdin` => 'admin_password'. That is a NAME, not a
- *     value: the executor unseals the site admin account's first password from
- *     the provision row and writes it to that session's stdin, where the
- *     bootstrap's first line reads it into JOINERY_ADMIN_PASSWORD. Same reason
- *     as SSHPASS — mjb_commands is readable on the plane and job output is
- *     logged, so the one place a secret may travel is a pipe. A step that asks
- *     for it and cannot get it FAILS: an install that was meant to carry the
- *     buyer's password must not silently fall back to one nobody holds.
+ *   - A step may declare `stdin` => a list of NAMES, not values:
+ *     'admin_password' (the site admin account's first password, unsealed from
+ *     the provision row) and 'clone_key' (the export key a clone pulls its
+ *     source with, from the job's own parameters). The executor writes one line
+ *     per name, in the order named, to that session's stdin, where the
+ *     bootstrap's first lines read them into JOINERY_ADMIN_PASSWORD and
+ *     JOINERY_CLONE_KEY. Same reason as SSHPASS — mjb_commands is readable on
+ *     the plane and job output is logged, and a command line is readable by
+ *     every process on the target, so the one place a secret may travel is a
+ *     pipe. A single name as a string is the same as a list of one. A step that
+ *     asks for a value and cannot get it FAILS: an install that was meant to
+ *     carry the buyer's password must not silently fall back to one nobody
+ *     holds, and a clone with no key has no source.
  *
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.8 - a step's stdin names a list: 'clone_key' joins 'admin_password', so a clone's export
+ *                key reaches the bootstrap on its stdin and never on a command line (B7)
  * @version 1.7 - a retire_install_password job whose target refuses the install password before the script runs completes as
  *                 retired: the refusal is the proof, and a record that still says held can be re-run to catch up
  * @version 1.6 - a step may ask for the site admin password on stdin, unsealed from the provision row
@@ -155,6 +162,9 @@ class InstallJobExecutor {
 			// Unsealed once, for the length of this job, and only used by a step
 			// that declared it needs it. Absent is the ordinary case.
 			'admin_password' => $this->resolve_admin_password($node),
+			// A clone's export key, from the job's own parameters (blanked there
+			// once the provision finishes). Only a step that names it reads it.
+			'clone_key' => self::job_clone_key($job),
 		);
 		if ($ctx['host'] === '') {
 			$this->finish($job, false, 'The target node has no host address.');
@@ -370,21 +380,12 @@ class InstallJobExecutor {
 		}
 
 		if ($type === 'ssh') {
-			// A step that named a secret for its stdin gets it, or fails. The
-			// only name is the admin password; anything else is a builder defect
-			// and is refused rather than run without what it asked for.
-			$stdin = null;
-			$wants = (string)($step['stdin'] ?? '');
-			if ($wants !== '') {
-				if ($wants !== 'admin_password') {
-					return array('', 1, "unknown stdin source '{$wants}'");
-				}
-				if (trim((string)($ctx['admin_password'] ?? '')) === '') {
-					return array('', 1, 'this install asks for the site admin password on stdin, and the '
-						. 'provision row holds none that can be read back — the site would be born with a '
-						. 'password nobody has');
-				}
-				$stdin = $ctx['admin_password'] . "\n";
+			// A step that named secrets for its stdin gets each of them, one line
+			// apiece in the order named, or fails. An unknown name is a builder
+			// defect and is refused rather than run without what it asked for.
+			list($stdin, $refusal) = self::step_stdin($step['stdin'] ?? null, $ctx);
+			if ($refusal !== '') {
+				return array('', 1, $refusal);
 			}
 			$ssh = 'sshpass -e ssh'
 				. ' -o StrictHostKeyChecking=accept-new'
@@ -449,6 +450,48 @@ class InstallJobExecutor {
 	 * provision holds none — a bare instance, a provision that predates the
 	 * column, or one whose buyer already revealed it (the reveal erases it).
 	 */
+	/**
+	 * The stdin a step asked for: one line per named secret, in the order
+	 * named, or the refusal when a name is unknown or its value is absent.
+	 * Pure over the context, so the rules test without a machine.
+	 *
+	 * @return array{0: ?string, 1: string} [stdin or null for none, refusal or '']
+	 */
+	public static function step_stdin($wants, array $ctx): array {
+		if ($wants === null || $wants === '' || $wants === array()) {
+			return array(null, '');
+		}
+		$names = is_array($wants) ? array_values($wants) : array((string)$wants);
+		$lines = '';
+		foreach ($names as $name) {
+			$name = (string)$name;
+			if ($name === 'admin_password') {
+				if (trim((string)($ctx['admin_password'] ?? '')) === '') {
+					return array(null, 'this install asks for the site admin password on stdin, and the '
+						. 'provision row holds none that can be read back — the site would be born with a '
+						. 'password nobody has');
+				}
+				$lines .= $ctx['admin_password'] . "\n";
+			} elseif ($name === 'clone_key') {
+				if (trim((string)($ctx['clone_key'] ?? '')) === '') {
+					return array(null, 'this install is a clone and asks for its export key on stdin, and the job '
+						. 'holds none — it was released when the provision finished; provision a new clone');
+				}
+				$lines .= $ctx['clone_key'] . "\n";
+			} else {
+				return array(null, "unknown stdin source '{$name}'");
+			}
+		}
+		return array($lines, '');
+	}
+
+	/** A clone's export key from the job's parameters; '' for any other job. */
+	private static function job_clone_key($job): string {
+		$params = $job->get('mjb_parameters');
+		if (is_string($params)) { $params = json_decode($params, true); }
+		return is_array($params) ? (string)($params['clone_key'] ?? '') : '';
+	}
+
 	private function resolve_admin_password($node) {
 		return $this->unseal_provision_column($node, 'cvp_admin_pass_sealed');
 	}

@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.40 - a backup run's BACKUP_BYTES figure is the run's whole size (BackupRunner 1.22)
  * @version 1.39 - specs/agent_recipes_and_vocabulary.md: process_restart_unit / _container, process_run_installer,
  *                 process_file_head, process_schema_probe; sanitise_host_report keeps sshd's widened
  *                 settings, answers, served_certificates and containers (absent = not reported).
@@ -1237,7 +1238,7 @@ class JobResultProcessor {
 			$warning = trim($m[1]);
 		}
 
-		// The files artifact's level and size, as the run printed them. Absent
+		// The run's level and whole size, as the run printed them. Absent
 		// on a failed run and from a runner that predates the lines.
 		$figures = [];
 		if (preg_match('/^BACKUP_LEVEL=(\d{1,2})$/m', $output, $m)) {

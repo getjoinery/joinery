@@ -3,6 +3,11 @@
 # converge, and the repair of reclaim_managed_file). Functions only; sourcing
 # it runs nothing.
 #
+# Version: 1.1 - host_files_tune_php_ini() no longer enables pdo_pgsql and pgsql in
+#                php.ini. Ubuntu's php-pgsql package loads both from conf.d, so the
+#                php.ini lines loaded pgsql twice and pdo_pgsql before PDO itself:
+#                two startup warnings on every PHP start, the modules working only
+#                because conf.d loaded them again.
 # Version: 1.0 - specs/agent_recipes_and_vocabulary.md, "Host files": the files
 #                install.sh wrote once move into a re-runnable installer, so
 #                install day and repair day run the same code (requirement 5).
@@ -35,8 +40,10 @@ JOURNAL
 }
 
 # The platform's PHP-FPM settings, applied to a php.ini in place: upload and
-# post limits, execution time, memory, UTC (every stored time is UTC; display
-# conversion is per user), and the PostgreSQL extensions.
+# post limits, execution time, memory, and UTC (every stored time is UTC;
+# display conversion is per user). The PostgreSQL extensions are not enabled
+# here: the php-pgsql package loads them from conf.d, and naming them in php.ini
+# as well loads pgsql twice and pdo_pgsql before PDO.
 host_files_tune_php_ini() {
     local ini="$1"
     sed -i 's/upload_max_filesize = .*/upload_max_filesize = 32M/' "$ini"
@@ -44,6 +51,4 @@ host_files_tune_php_ini() {
     sed -i 's/max_execution_time = .*/max_execution_time = 300/' "$ini"
     sed -i 's/memory_limit = .*/memory_limit = 128M/' "$ini"
     sed -i 's/;date.timezone =/date.timezone = UTC/' "$ini"
-    sed -i 's/^;extension=pdo_pgsql/extension=pdo_pgsql/' "$ini"
-    sed -i 's/^;extension=pgsql/extension=pgsql/' "$ini"
 }

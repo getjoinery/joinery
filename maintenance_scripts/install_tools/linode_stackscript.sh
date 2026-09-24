@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 2.0 - No SSH key is honoured any more (JOINERY_SSH_KEY is gone): a server this
+#              installs holds no key, and root keeps the password Linode set until the
+#              owner changes it.
 #VERSION 1.9 - The sending key names no provider; the installer detects it.
 #VERSION 1.8 - Nothing here sets a service up any more: the DNS token, the
 #               sending key and the bucket are handed to install.sh in the
@@ -59,10 +62,6 @@
 #                           account is recoverable by email from the start.
 #   JOINERY_DOMAIN          optional — blank means the site comes up on the
 #                           instance's IP, which install.sh detects on its own.
-#   JOINERY_SSH_KEY         optional — placed in root's authorized_keys before
-#                           server setup, which then mirrors it to user1 with
-#                           sudo and hardens root login off. Blank leaves root
-#                           access exactly as the provider configured it.
 #   JOINERY_LINODE_TOKEN    optional — a Linode API token with the Domains
 #                           Read/Write scope, used to create the zone (when
 #                           the account holds none) and the A record, so the
@@ -127,7 +126,6 @@ fail() { echo ""; echo "ERROR: $*" >&2; echo "Install stopped. Nothing further w
 ADMIN_PASSWORD="${JOINERY_ADMIN_PASSWORD:-}"
 ADMIN_EMAIL="${JOINERY_ADMIN_EMAIL:-}"
 DOMAIN="${JOINERY_DOMAIN:-}"
-SSH_KEY="${JOINERY_SSH_KEY:-}"
 LINODE_TOKEN="${JOINERY_LINODE_TOKEN:-}"
 TOKEN_USABLE=false
 # How the DNS step ended, for the closing summary and for install.sh's own.
@@ -194,27 +192,6 @@ if [ -n "$MAIL_API_KEY" ]; then
 fi
 if [ -n "$BACKUP_BUCKET" ]; then
     echo "Backup: $BACKUP_PROVIDER bucket $BACKUP_BUCKET"
-fi
-
-# ---------------------------------------------------------------------------
-# SSH key
-# ---------------------------------------------------------------------------
-#
-# Placed before server setup, because derive_ssh_access reads it: with a key
-# here, install.sh mirrors it to user1 with passwordless sudo and then disables
-# root SSH login. Without one it leaves root login alone, so omitting the field
-# cannot lock anybody out.
-
-if [ -n "$SSH_KEY" ]; then
-    say "Installing the supplied SSH key"
-    mkdir -p /root/.ssh
-    chmod 700 /root/.ssh
-    touch /root/.ssh/authorized_keys
-    chmod 600 /root/.ssh/authorized_keys
-    if ! grep -qF "$SSH_KEY" /root/.ssh/authorized_keys 2>/dev/null; then
-        printf '%s\n' "$SSH_KEY" >> /root/.ssh/authorized_keys
-    fi
-    echo "Key installed for root; server setup will mirror it to user1."
 fi
 
 # ---------------------------------------------------------------------------

@@ -350,7 +350,9 @@ class CustomerCloudProvisioningTest {
 			'a re-run of ready for the same provision arms once and boots');
 
 		// booting waits for the source to report armed, then the bootstrap
-		// carries --clone-from (the source\'s web address) and --clone-key.
+		// carries --clone-from (the source\'s web address); the armed key rides
+		// the session's stdin, named in the step, and is held in the job's
+		// parameters until the provision finishes.
 		$clone_ip = '198.51.100.' . random_int(20, 240);
 		$fake->getInstanceResult = ['id' => '77002', 'ip' => $clone_ip, 'status' => 'running'];
 		check($probe->probeBooting($clone) === 0 && $clone->get('cvp_status') === 'booting',
@@ -363,12 +365,17 @@ class CustomerCloudProvisioningTest {
 			(string)$probe->lastFailReason . ' ' . (string)$clone->get('cvp_error'));
 		$clone_node_id = (int)$clone->get('cvp_mgn_managed_node_id');
 		$clone_job = ManagementJob::latestForNode($clone_node_id, 'install_node');
-		$clone_boot = '';
+		$clone_boot = ''; $clone_stdin = null;
 		foreach ((json_decode((string)$clone_job->get('mjb_commands'), true)['steps'] ?? []) as $st) {
-			if (($st['type'] ?? '') === 'ssh') { $clone_boot = $st['cmd']; }
+			if (($st['type'] ?? '') === 'ssh') { $clone_boot = $st['cmd']; $clone_stdin = $st['stdin'] ?? null; }
 		}
-		check(strpos($clone_boot, "--clone-from='https://clonesrc-" . $suffix . ".example.com' --clone-key='" . $sealed_key['value'] . "'") !== false,
-			'the bootstrap pulls from the source over HTTPS with the armed key', $clone_boot);
+		$clone_params = json_decode((string)$clone_job->get('mjb_parameters'), true);
+		check(strpos($clone_boot, "--clone-from='https://clonesrc-" . $suffix . ".example.com'") !== false
+			&& strpos($clone_boot, $sealed_key['value']) === false,
+			'the bootstrap pulls from the source over HTTPS, and its command never carries the key', $clone_boot);
+		check(is_array($clone_stdin) && in_array('clone_key', $clone_stdin, true)
+			&& ($clone_params['clone_key'] ?? '') === $sealed_key['value'],
+			'the armed key is named for the session\'s stdin and held in the job\'s parameters', json_encode($clone_stdin));
 		check(strpos($clone_boot, "'clone-" . $suffix . ".example.com'") !== false,
 			'and the domain on the site command is the clone\'s own');
 

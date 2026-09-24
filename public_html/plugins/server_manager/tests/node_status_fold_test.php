@@ -518,7 +518,7 @@ check(!array_key_exists('level', $v) && !array_key_exists('bytes', $v),
 $v = JobResultProcessor::parse_backup_run_verdict("BACKUP_RESULT=success\nBACKUP_LEVEL=zero\nBACKUP_BYTES=-5\n", 'completed');
 check(!array_key_exists('level', $v) && !array_key_exists('bytes', $v),
 	'a non-numeric level or a negative size is not taken');
-check(NodeMonitorHealth::backup_run_figures(['level' => 0, 'bytes' => 17230000000]) === 'Full, 16 GB',
+check(NodeMonitorHealth::backup_run_figures(['level' => 0, 'bytes' => 17230000000]) === 'Full, 17.2 GB',
 	'the run list words a full and its size', NodeMonitorHealth::backup_run_figures(['level' => 0, 'bytes' => 17230000000]));
 check(NodeMonitorHealth::backup_run_figures(['level' => 3, 'bytes' => null]) === 'Incremental',
 	'an incremental with no size says only that');

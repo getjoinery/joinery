@@ -46,8 +46,8 @@ register_shutdown_function(function () use ($tmp) {
 	@rmdir($tmp);
 });
 
-$GB = 1073741824;
-$MB = 1048576;
+$GB = 1000000000;
+$MB = 1000000;
 
 // Three files on disk (a, b, c — the stat decides their waiting bytes), two
 // gone (d, e — the row's size decides what a catch-up would copy). a.jpg's

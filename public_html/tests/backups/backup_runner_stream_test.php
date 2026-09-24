@@ -134,8 +134,16 @@ check($object !== null, 'the files object is in backup storage under the chain k
 check($object !== null && (int)$files0['bytes'] === strlen($object), 'the manifest\'s bytes equal the object\'s', ($files0['bytes'] ?? '?') . ' vs ' . strlen((string)$object));
 check($object !== null && $files0['sha256'] === hash('sha256', $object), 'the manifest\'s sha256 equals the object\'s');
 check((int)$run0['level'] === 0, 'the first run is a full');
-check(($result['level'] ?? null) === 0 && ($result['bytes'] ?? null) === (int)($files0['bytes'] ?? -1),
-	'the run\'s result carries its level and the files artifact\'s size as numbers', json_encode($result));
+$run0_total = 0;
+foreach (($run0['artifacts'] ?? array()) as $a) { $run0_total += (int)($a['bytes'] ?? 0); }
+check(($result['level'] ?? null) === 0 && ($result['bytes'] ?? null) === $run0_total && $run0_total > (int)($files0['bytes'] ?? 0),
+	'the run\'s result carries its level and its whole size — every artifact, not the files alone', json_encode($result));
+$db0_bytes = (int)($run0['artifacts']['db']['bytes'] ?? 0);
+check(strpos((string)$result['message'], 'Full backup ' . BackupRunner::human($run0_total)
+		. ' (files ' . BackupRunner::human($files0['bytes'] ?? 0) . ', database ' . BackupRunner::human($db0_bytes) . ')') === 0,
+	'the run message states the whole size and names the files and database parts', (string)$result['message']);
+check(BackupRunner::human(4658000000) === '4.7 GB' && BackupRunner::human(999) === '999 B' && BackupRunner::human(81400000) === '81.4 MB',
+	'sizes read in decimal units, as backup storage bills them');
 $db_object = s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/db-0000.sql.gz.enc');
 check($db_object !== null, 'the database dump is in backup storage');
 check(!is_file($chain_d . '/db-0000.sql.gz.enc') && !glob($chain_d . '/*.sql.gz.enc'), 'and no dump is on disk',

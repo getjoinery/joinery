@@ -111,8 +111,8 @@ check(strpos($ssh['cmd'], 'IFS= read -r JOINERY_ADMIN_PASSWORD') !== false,
 check(strpos($ssh['cmd'], 'test -n "$JOINERY_ADMIN_PASSWORD"') !== false,
 	'and refuses to continue without one — a missing password must fail loudly, '
 	. 'not fall back to one nobody holds');
-check(($ssh['stdin'] ?? '') === 'admin_password',
-	'the step names WHAT it needs on stdin, so the executor looks it up');
+check(($ssh['stdin'] ?? null) === array('admin_password'),
+	'the step names WHAT it needs on stdin, so the executor looks it up', json_encode($ssh['stdin'] ?? null));
 
 // The whole point: nothing in the stored job is the password itself.
 $whole = json_encode($steps);

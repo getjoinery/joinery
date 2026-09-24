@@ -365,7 +365,7 @@ check($p['want'] === array('ok.jpg', 'fine_1.bin'), 'a name that is not a bare n
 $page_r = array('result' => 'ok', 'mode' => 'all', 'run' => 'r', 'indexed' => 3, 'not_stored' => 0, 'restored' => 36, 'bytes' => 432013312, 'kept' => 2, 'skipped' => 0, 'duration' => 1);
 $text = BackupObjectRestore::format_contract($page_r);
 check(preg_match('/^RESTORE_OBJECTS_RESTORED=36$/m', $text) === 1 && strpos($text, 'RESTORE_OBJECTS_WANT') === false, 'a page prints what it placed and no survey lines');
-check(BackupObjectRestore::describe($page_r) === 'Brought 36 offloaded files home (412 MB) (2 already on disk)', 'in words', BackupObjectRestore::describe($page_r));
+check(BackupObjectRestore::describe($page_r) === 'Brought 36 offloaded files home (432 MB) (2 already on disk)', 'in words', BackupObjectRestore::describe($page_r));
 check(BackupObjectRestore::describe($survey_r) === '2 offloaded files to bring home (1 offloaded file never reached backup storage; 1 need nothing: served by the file store, or already here; the first 2 named)',
 	'a survey in words', BackupObjectRestore::describe($survey_r));
 check(BackupObjectRestore::parse_contract('nothing')['result'] === 'fail' && strpos(BackupObjectRestore::describe(array('result' => 'fail', 'reason' => 'x')), 'Could not bring') === 0,
