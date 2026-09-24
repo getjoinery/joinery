@@ -736,12 +736,22 @@ function run_one_finish(array $h, $exit = null) {
 		$note = 'no result contract emitted' . ($exit !== 0 ? '; exit=' . $exit : '');
 	}
 	$tail = trim(substr($stderr !== '' ? $stderr : $stdout, -400));
+	// A shell gate names each failed check on a "FAIL:" line. Carried with the
+	// result, so a failure says which check it was: a publish refused by a gate
+	// once reported only "exit=1", and nothing recorded what had failed.
+	$fail_lines = array();
+	if ($is_sh && $status === 'fail') {
+		foreach (preg_split('/\R/', $stdout) as $l) {
+			if (preg_match('/^\s*FAIL:\s*(.+)$/', $l, $fm)) $fail_lines[] = trim($fm[1]);
+			if (count($fail_lines) === 5) break;
+		}
+	}
 	return array(
 		'name' => $d['meta']['name'], 'path' => harness_rel($path, $root),
 		'tier' => $d['meta']['tier'], 'env' => $d['meta']['env'],
 		'status' => $status, 'stats' => array('total' => 0, 'passed' => 0, 'failed' => $status === 'fail' ? 1 : 0, 'skipped' => 0),
 		'sections' => array(), 'duration_ms' => $ms, 'exit' => $exit,
-		'note' => $note, 'output_tail' => $tail,
+		'note' => $note, 'output_tail' => $tail, 'fail_lines' => $fail_lines,
 		'files' => array(), 'covers' => $d['meta']['covers'] ?? array(),
 	);
 }
@@ -765,6 +775,7 @@ function print_human_line($r, $root, $tag = '') {
 	if ($tag !== '') $line .= "  [$tag]";
 	echo $line . "\n";
 	if ($r['status'] === 'fail' && !empty($r['note'])) echo "         ↳ " . $r['note'] . "\n";
+	if ($r['status'] === 'fail') foreach ($r['fail_lines'] ?? array() as $fl) echo "         ✗ " . $fl . "\n";
 	if ($r['status'] === 'fail' && !empty($r['sections'])) {
 		foreach ($r['sections'] as $sec) foreach ($sec['checks'] as $c) {
 			if (isset($c['passed']) && $c['passed'] === false) {
@@ -826,6 +837,7 @@ if ($tests_failed > 0) {
 		if ($r['status'] !== 'fail') continue;
 		echo "  - " . $r['name'] . "  (" . $r['path'] . ")\n";
 		if (!empty($r['note'])) echo "      ↳ " . $r['note'] . "\n";
+		foreach ($r['fail_lines'] ?? array() as $fl) echo "      ✗ " . $fl . "\n";
 	}
 }
 
