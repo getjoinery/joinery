@@ -10,7 +10,7 @@
  * obligations). A plugin's LOAD POINT is the top-level `bootstrap` key in its
  * plugin.json — every plugin gets one, vault consumer or not (see
  * PluginBootstraps) — and `vaultConsumer` carries only the vault obligations
- * riding on that bootstrap:
+ * riding on that bootstrap (`client_reseals` too, see § Obligations):
  *
  *   "bootstrap": "includes/bootstrap.php",
  *   "vaultConsumer": {
@@ -37,6 +37,10 @@
  *   - `reseals` — this consumer stores sealed content and must register an
  *     onReseal callback. Declared-and-missing REFUSES a key rotation, because
  *     rotating past it destroys member content.
+ *   - `client_reseals` — a list of client-custody scopes this consumer holds
+ *     keys under, e.g. ["passwords"]. It must register VaultUnlock::clientReseal()
+ *     for each; declared-and-missing REFUSES that scope's rotation, as `reseals`
+ *     does for the server scope.
  *   - `caches` — this consumer keeps disposable in-window plaintext outside the
  *     sealed columns (a search index, a streaming scratch) and must register an
  *     onWipe callback. Declared-and-missing LOGS. It can never refuse, because
@@ -54,7 +58,9 @@
  * get_included_files() so a violation logs its real cause rather than surfacing
  * later as a rotation refused for the wrong reason.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - `client_reseals`: the client-custody scopes a consumer holds keys
+ *   under, and unmetClientReseals() for a client-custody rotation's guard.
  * @changelog 1.2 - a plugin's load point is the top-level plugin.json
  *   `bootstrap` key (see PluginBootstraps); vaultConsumer carries only the
  *   obligations, and a bootstrap-only plugin registers as a load point with
@@ -232,6 +238,38 @@ class VaultConsumers {
 	 * which is the honest answer rather than crediting it to whoever happened to
 	 * load last.
 	 */
+	/** Record that the consumer loading now registered a client-custody resealer for $scope. */
+	public static function noteClientReseal(string $scope): void {
+		self::noteRegistration('client_reseals:' . $scope);
+	}
+
+	/**
+	 * Consumers that declare `client_reseals` for $scope but registered no
+	 * VaultUnlock::clientReseal() for it, with whether each is an
+	 * installed-but-inactive plugin. A plugin never activated here holds nothing
+	 * under the scope and is left out, as the server rotation guard does.
+	 * Callers load the bootstraps first.
+	 *
+	 * @return array<string,bool> consumer => is an inactive plugin
+	 */
+	public static function unmetClientReseals(string $scope): array {
+		$unmet = array();
+		foreach (self::allDeclarations() as $name => $declaration) {
+			if (!in_array($scope, $declaration['client_reseals'] ?? array(), true)) {
+				continue;
+			}
+			if ((self::$registrations[$name]['client_reseals:' . $scope] ?? 0) > 0) {
+				continue;
+			}
+			$inactive = ($declaration['plugin'] !== '' && !$declaration['active']);
+			if ($inactive && !self::pluginEverActivated($declaration['plugin'])) {
+				continue;
+			}
+			$unmet[$name] = $inactive;
+		}
+		return $unmet;
+	}
+
 	public static function noteRegistration(string $obligation): void {
 		if (self::$loading === null) {
 			return;
@@ -401,7 +439,7 @@ class VaultConsumers {
 			if (is_string($declaration)) {
 				error_log('[VaultConsumers] plugin "' . $plugin . '" declares vaultConsumer as a string; '
 					. 'a plugin\'s load point is the top-level "bootstrap" key in plugin.json, and '
-					. 'vaultConsumer carries only order/reseals/caches. The block is ignored.');
+					. 'vaultConsumer carries only order/reseals/caches/client_reseals. The block is ignored.');
 				return null;   // the top-level bootstrap key, if any, still yields a load point
 			}
 			if (!is_array($declaration)) {
@@ -429,9 +467,21 @@ class VaultConsumers {
 			'order'     => $order,
 			'reseals'   => !empty($declaration[self::OBLIGATION_RESEAL]),
 			'caches'    => !empty($declaration[self::OBLIGATION_CACHES]),
+			'client_reseals' => self::scopeList($declaration['client_reseals'] ?? array()),
 			'plugin'    => $plugin,
 			'active'    => $active,
 		);
+	}
+
+	/** A declared list of client-custody scope names, cleaned; anything else is dropped. */
+	private static function scopeList($raw): array {
+		$out = array();
+		foreach (is_array($raw) ? $raw : array() as $scope) {
+			if (is_string($scope) && preg_match('/^[a-z0-9_]{1,32}$/', $scope)) {
+				$out[] = $scope;
+			}
+		}
+		return array_values(array_unique($out));
 	}
 
 	/**
@@ -454,6 +504,7 @@ class VaultConsumers {
 			'order'     => self::DEFAULT_ORDER,
 			'reseals'   => false,
 			'caches'    => false,
+			'client_reseals' => array(),
 			'plugin'    => $plugin,
 			'active'    => $active,
 		);

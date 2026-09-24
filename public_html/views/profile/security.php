@@ -7,7 +7,7 @@
 	$page_vars = process_logic(security_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 	$page = new PublicPage();
-	$page->needs_vault_client();
+	$page->needs_vault_rotation();
 	$page->public_header([
 		'title' => 'Security Settings',
 	]);
@@ -1036,7 +1036,7 @@
                             <th>Device</th>
                             <th>Linked</th>
                             <th>Last synced</th>
-                            <th>Encrypted folders</th>
+                            <th>Vaults</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -1060,7 +1060,12 @@
                             <td><?php echo $seen
                                 ? htmlspecialchars(LibraryFunctions::convert_time($seen, 'UTC', $tz, 'M j, Y g:i A'))
                                 : 'Not yet'; ?></td>
-                            <td><?php echo $sync_device->get('sde_device_pubkey') ? 'Yes' : 'No'; ?></td>
+                            <td><?php
+                                $held = array_map(function ($scope) {
+                                    return htmlspecialchars(VaultScopes::labelFor($scope));
+                                }, $sync_device->vault_scopes());
+                                echo $held ? implode('<br>', $held) : 'None';
+                            ?></td>
                             <td class="text-end">
                                 <form action="/profile/security" method="POST" class="jy-inline"
                                       data-jy-confirm="Unlink this device? It will stop syncing straight away.">
@@ -1174,6 +1179,19 @@
                                 <input type="hidden" name="passed" value="">
                             </form>
                         </div>
+                        <?php
+                        $rr_vault = UserEncryptionVault::loadForUser((int)$user->key, $rr_item['scope']);
+                        $rr_pending = $rr_vault && $rr_vault->get('uev_pending_key_generation') !== null;
+                        ?>
+                        <div class="jy-mt-3" data-vault-rotate="<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>">
+                            <?php if ($rr_pending): ?>
+                                <div class="jy-alert jy-alert-warning">A rotation of this vault's key stopped part way. What it already moved to the new key will not open until the rotation is finished, so finish it now.</div>
+                            <?php else: ?>
+                                <p class="jy-text-muted">Rotating makes a new key for this vault and moves everything onto it, in this browser. It costs new recovery codes, your passphrase again, one tap for each passkey, and linking your computers again.</p>
+                            <?php endif; ?>
+                            <button type="button" class="btn btn-secondary" data-vault-rotate-btn><?php echo $rr_pending ? 'Finish rotating this vault\'s key' : 'Rotate this vault\'s key'; ?></button>
+                            <div class="jy-mt-1" data-vault-rotate-status role="status"></div>
+                        </div>
                     <?php else: ?>
                         <form action="/profile/security" method="POST">
                             <input type="hidden" name="action" value="vault_code_check">
@@ -1195,6 +1213,33 @@
                     window.recoveryReadiness.attachClientChecks();
                     window.recoveryReadiness.attachStepUp(window.rrStepup);
                 }
+                // Rotating a browser-held vault's key runs here, in the browser.
+                document.querySelectorAll('[data-vault-rotate]').forEach(function (card) {
+                    var scope = card.getAttribute('data-vault-rotate');
+                    var btn = card.querySelector('[data-vault-rotate-btn]');
+                    var status = card.querySelector('[data-vault-rotate-status]');
+                    btn.addEventListener('click', function () {
+                        if (!window.JoinerySealed) { status.textContent = 'Rotating is unavailable on this page.'; return; }
+                        btn.disabled = true;
+                        status.textContent = '';
+                        JoinerySealed.resealScope(scope, { progress: function (t) { status.textContent = t; } })
+                            .then(function (r) {
+                                var skipped = (r && r.skipped) || [];
+                                status.textContent = 'Done. The vault is on its new key' + (r && r.key_generation ? ' (generation ' + r.key_generation + ')' : '') + '. Link your computers again to give them the new key.'
+                                    + (skipped.length ? ' ' + skipped.length + ' item' + (skipped.length === 1 ? '' : 's') + ' could not be opened with the old key either and ' + (skipped.length === 1 ? 'was' : 'were') + ' left as ' + (skipped.length === 1 ? 'it was' : 'they were') + ' (' + skipped.slice(0, 5).join(', ') + (skipped.length > 5 ? ', …' : '') + ').' : '');
+                                if (!skipped.length) setTimeout(function () { window.location.reload(); }, 2500);
+                            })
+                            .catch(function (e) {
+                                btn.disabled = false;
+                                if (e && e.data && e.data.requires_stepup) {
+                                    window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                                    return;
+                                }
+                                var msg = (e && e.message) || 'The rotation stopped.';
+                                status.textContent = /cancel/i.test(msg) ? '' : msg;
+                            });
+                    });
+                });
             });
             </script>
             <?php endif; ?>

@@ -98,3 +98,7 @@
 })();
 </script>
 <?php } ?>
+
+<?php
+    $page->public_footer(['header_only' => true]);
+?>

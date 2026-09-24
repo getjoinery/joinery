@@ -387,24 +387,32 @@ temp file private before the first decrypted byte lands.
 
 ## The lock chip
 
-The platform-wide "you're locked" idiom: every signed-in page for a user with
-a set-up server-custody vault carries a padlock in a fixed place — closed
-while the vault is locked, open (success-colored) while an unlock window is
-live. Clicking the closed padlock runs the unlock ceremony in place, offering
-what the vault has — a passkey, the bypass phrase or a recovery code; clicking
-the open padlock opens a small popover with the idle-timeout note and a
-**Lock now** button — the walk-away affordance. Users without a
-vault never see the chip or load its assets.
+The platform-wide "what is unlocked" idiom: one padlock in a fixed place on
+every signed-in page for a user with any vault. It reads **open**
+(success-colored) while the server unlock window is live **or** any vault this
+browser holds is open (see [Client-custody scopes](#client-custody-scopes)),
+and closed otherwise. Clicking the closed padlock runs the unlock ceremony in
+place, offering what the server vault has — a passkey, the bypass phrase or a
+recovery code. Clicking the open padlock opens a popover
+listing each vault by name — "Mail & messages vault", "Password vault", "Drive
+vault" — with its own **Lock now** (or **Unlock** for a server vault that is
+locked). A user with no server vault sees the chip only while a browser-held
+vault is open. Users with no vault at all, on pages that open none, never load
+any of it.
 
-`PublicPageBase` drives it: for a signed-in user whose vault exists it emits
-`<meta name="joinery-vault" content="locked|open" data-idle-minutes="N">` and
-includes `assets/js/vault-lock.js` + `assets/css/vault-lock.css` (plus
-`passkeys.js` for the ceremony). The chip mounts into the page's
-`[data-vault-lock-slot]` element — the core page classes emit one from their
-header icon cluster via `PublicPageBase::render_vault_lock_slot()` (which
-emits nothing for chip-less users, so headers never carry an empty gap) — and
-falls back to a fixed bottom-right chip on any theme without a slot, so the
-idiom holds everywhere with zero theme work.
+`PublicPageBase` drives it: for a signed-in user with any vault row, or on a
+page that declared `needs_vault_client()`, it emits
+`<meta name="joinery-vault" content="locked|open" data-idle-minutes="N"
+data-client-idle-minutes="M" data-server-vault="0|1" data-server-label="…">`
+(`content` and `data-idle-minutes` are the server window's; the client idle time
+is `vault_client_autolock_minutes`) and includes `assets/js/vault-lock.js` +
+`assets/css/vault-lock.css` (plus `passkeys.js` for the ceremony). The chip
+mounts into the page's `[data-vault-lock-slot]` element — the core page classes
+emit one from their header icon cluster via
+`PublicPageBase::render_vault_lock_slot()` (which emits nothing for chip-less
+users, so headers never carry an empty gap) — and falls back to a fixed
+bottom-right chip on any theme without a slot, so the idiom holds everywhere
+with zero theme work.
 
 **The ceremony surface.** `window.JoineryVaultLock` is the one client-side
 unlock/lock ceremony: `unlock()` (resolves `true` on success), `lock()`, and
@@ -423,6 +431,8 @@ page — chip, presence beacon, consumer UIs — in one state:
   ended elsewhere — another session's lock, a credential event, a cap). The
   chip flips closed, the beacon stops, and consumer surfaces re-seal their
   content to placeholders.
+- `joinery:vault-scope-unlocked` / `joinery:vault-scope-locked` (`detail.scope`)
+  — the same for a vault this browser holds; the chip follows them.
 
 ## The unlocker floor + revocation veto
 
@@ -925,6 +935,11 @@ The bootstrap is where the consumer's hooks register: `File` decrypt hooks,
 - **`caches`** — this consumer keeps disposable in-window plaintext outside the
   sealed columns and must register an `onWipe` callback. Declared and missing
   **logs**.
+- **`client_reseals`** — a list of client-custody scopes this consumer keeps
+  keys under (`["passwords"]`). It must register `VaultUnlock::clientReseal()`
+  for each; declared and missing **refuses that scope's rotation**, the way
+  `reseals` does for the server scope, including for a deactivated plugin that
+  was ever used. See [Rotating a client-custody key](#rotating-a-client-custody-key).
 
 The two obligations read symmetrically and deliberately do not behave
 symmetrically. Rotation is an operation the platform may refuse; locking is not.
@@ -1210,8 +1225,13 @@ window suite exercises APCu and skips under plain CLI — run it directly with
 
 ## Settings
 
-- `vault_unlock_idle_minutes` (default `30`) — the unlock window's idle
+- `vault_unlock_idle_minutes` (default `30`) — the server unlock window's idle
   timeout.
+- `vault_client_autolock_minutes` (default `15`) — how long a vault the browser
+  holds (the password vault, Fortress folders) stays unlocked without activity.
+  A person can choose a shorter or longer time for their own browser (the
+  password manager's select; stored in `localStorage` as
+  `jy_vault_client_autolock`).
 
 No RP-ID, origin, or PRF-context setting here — see [Passkeys](passkeys.md)
 for those (the vault uses the `vault-kek` PRF context).
@@ -1219,23 +1239,25 @@ for those (the vault uses the `vault-kek` PRF context).
 ## Client-custody scopes
 
 A client-custody scope (`uev_custody = 'client'`) is unwrapped **only in the
-browser** — the server never holds the secret key and never sees plaintext. The
-shared client-custody layer lives in **core** so every consumer reuses it:
+browser** — the server never holds the secret key and never sees plaintext.
+Everything a consumer needs lives in **core**, so a consumer writes no crypto,
+no ceremony and no session code:
 
 - **`assets/js/vault-crypto.js`** — the browser crypto module: WebCrypto
-  AES-GCM/X25519, the vendored hash-pinned Argon2id WASM for the
-  passphrase-fallback KDF, KEK derivation (passkey PRF / recovery / passphrase),
-  wrap/unwrap of the vault secret key, ECIES seal/open of a data key, and the
-  `encrypt()→blob` / `blob→decrypt()` content contract.
-- **`assets/js/vault-keyring.js`** — the scope-parameterized enrollment, unlock,
-  and recovery ceremony, driving the crypto module against the server actions.
+  AES-GCM/X25519, the vendored hash-pinned Argon2id WASM for the passphrase KDF,
+  KEK derivation (passkey PRF / recovery / passphrase), wrap/unwrap of the vault
+  secret key, ECIES seal/open of a data key, and `encrypt(str, key, ad?)` /
+  `decrypt(blob, key, ad?)`. `selfCheck()` proves this engine and the server
+  agree on the bytes (the shared vector in `tests/vault/fixtures/edge_vector.json`).
+- **`assets/js/vault-keyring.js`** — `VaultKeyring.ensureUnlocked(scope, opts)`,
+  the one ceremony: setup (then the recovery codes), unlock, or nothing.
+- **`assets/js/joinery-sealed.js`** — `JoinerySealed`: opening and sealing rows,
+  the per-scope session and its lock, and key rotation.
 - **`includes/VaultClientCustody.php`** + the core `logic/vault_client_*`
-  actions — custody-agnostic **opaque-blob storage**: create the keypair record,
-  return the keyring view (public key, KDF salt/params, wrapped-secret blobs),
+  actions — opaque-blob storage: the keypair record, the keyring view,
   add/remove/replace unlocker wrappings, consume a one-time recovery key (which
   emails the account — the server can't verify code knowledge, so visibility is
-  the defense against a session-rider burning codes). The secret key is never
-  unwrapped server-side.
+  the defense against a session-rider burning codes).
 
 Each client scope has its **own** keypair and its **own** PRF context, so
 unlocking one never opens another. The context is DERIVED from the scope name
@@ -1262,5 +1284,200 @@ restores access.
 
 The built consumers are the [password manager](../plugins/vault/docs/overview.md)
 (scope `passwords`) and [Drive encryption](drive_encryption.md) (scope `drive`,
-reusing this same layer and adding per-file content encryption and multi-user key
-sharing on top).
+adding per-file content encryption and multi-user key sharing on top).
+
+### One row shape for both custodies
+
+A `$sealed_fields` model seals to a client-custody scope with the same four
+columns server custody uses. **Custody is per row**, chosen by one write-side
+hook, because one table can hold a Private mailbox's rows beside a Fortress
+mailbox's:
+
+```php
+protected static function sealScopeForWrite(array $row): string {
+    return $row['acn_end_to_end'] ? 'acme_notes' : 'user';
+}
+```
+
+The default is `user`, so a model that never overrides it is server custody. A
+scope nothing registers throws on first use, naming it.
+
+The sealed key is **self-describing**, which is how a reader knows the custody
+with no extra column:
+
+| Blob | Server custody | Client custody |
+|---|---|---|
+| sealed DEK | `v1.seal.` + libsodium sealed box | `v1.edgeseal.{scope}.` + base64(ephPub ‖ IV ‖ ct), `vault-crypto.js` ECIES to the scope's public key |
+| field | `v1.aead.` + XChaCha20-Poly1305 | `v1.edge.` + base64(IV ‖ ct ‖ tag), AES-256-GCM under the DEK, AD = the model's `sealAd($row_id, $field)` |
+
+The prefixes belong to the row layer (`SystemBase`, `joinery-sealed.js`); the
+primitives (`SealedBox::sealEdge`/`openEdge`/`aeadEncryptGcm`/`aeadDecryptGcm`,
+`vault-crypto.js`) emit raw bytes. `VaultCrypto::openItemDek()`/`openField()`
+open whichever prefix they find (`VaultKey::unsealEdge()` for a DEK sealed in
+the browser format to a key the server holds); writers emit the format their
+custody dictates.
+
+**Reading on the server.** `get()` — and `decryptSealedFieldStatic()`, which the
+AI surface uses — throws `VaultSealedForBrowserException` for a sealed field of
+a client-custody row. Not "wait for the window": no server code reads that row,
+open window or not. The one place it is caught is the API export.
+
+**The API representation.** `export_for_api()` hands such a row to the browser
+as stored: every plain column normally, each sealed field as its ciphertext,
+plus three derived keys — `sealed_scope`, `sealed_dek` (the key column's value;
+the column itself ends in `_key`, so the credential floor keeps it out under its
+own name) and `sealed_ad_prefix` (`sealedAdPrefix()`: the part of `sealAd()`
+before the row id, so a legacy literal works too). The AD of each field is
+`{sealed_ad_prefix}{key}:{field}`.
+
+**Writing from the server** (ingest, a webhook) is unchanged for the caller:
+`save()` and `sealColumns()` seal plaintext, in the browser format when the row's
+scope is client custody, to the owner's vault of that scope (no such vault: the
+row stays plaintext, as for a member with no vault). A server writer never holds
+the client secret, so it cannot reuse a row's DEK: an update of a sealed field
+on a client-sealed row must supply **every** sealed field, and mints a new DEK;
+a partial update throws `VaultSealedForBrowserException`. The same holds for a
+row changing scope.
+
+**Writing from the browser** is two steps, because the AD needs the row id:
+create the row with its sealed columns empty, then post the ciphertext. The
+ciphertext enters only through `SystemBase::acceptBrowserSealed($row_id,
+$sealed_dek, $fields)`, which checks the `v1.edgeseal.{scope}.` prefix, that the
+scope is the row's `sealScopeForWrite()` and client custody, that `shouldSeal()`
+does not keep the row plaintext, that every field is declared and carries
+`v1.edge.`, and that no populated sealed field is left behind, then writes the
+four columns and the fields in one statement. **Authorization is the caller's**:
+the consumer's save logic proves the caller owns the row first. `save()` refuses
+a `v1.edge.` value, so ciphertext cannot be stored as though it were plaintext.
+
+### The browser side
+
+```js
+const note = await JoinerySealed.open(rowFromApi, refetch);   // plaintext fields, or an unlock prompt
+await JoinerySealed.save('acme/note_save', values, { scope: 'acme_notes', sealedFields: ['acn_title', 'acn_body'] });
+```
+
+- `open(row, refetch, opts)` — a plain row resolves as is; a server-custody row
+  with `content_locked` runs `JoineryVaultLock.unlock()` then resolves
+  `refetch()`; a row with `sealed_scope` opens `sealed_dek` with the scope's
+  session and decrypts every `v1.edge.` field. Opened values are cached per
+  scope session and dropped on lock.
+- `seal(scope, id, adPrefix, values)` — mints a DEK, seals it to the scope's
+  public key (no unlock needed; a scope not set up runs setup) and each field
+  under its AD. Empty values stay bare.
+- `save(action, values, opts)` — the two-step write as one call: posts `values`
+  minus `opts.sealedFields` to `action`, reads `id` and `sealed_ad_prefix` from
+  the reply, seals, and posts `{id, sealed_dek, fields}` to the same action.
+
+A page that uses any of this calls `$page->needs_vault_client()` before its
+header; the head then carries `passkeys.js`, `vault-crypto.js`,
+`vault-keyring.js` and `joinery-sealed.js` (`joinery-api.js` is on every page).
+`AdminPage` has the same method. A page that rotates keys calls
+`needs_vault_rotation()` instead, which adds every consumer's re-seal hook.
+
+### The ceremony
+
+`VaultKeyring.ensureUnlocked(scope, opts)` reads `vault_client_status` and runs,
+as steps inside one `JoineryModal`:
+
+- **not set up** → setup: the permanent-loss acknowledgment, a passkey (or a
+  passphrase only), then the recovery codes, proven kept by typing the last one
+  back or downloading them. While the codes are on screen the modal cannot be
+  dismissed — setup is already saved and the codes are the only copy. With
+  `passkeys_enabled` off the server refuses every setup, so the modal says why
+  and offers nothing. A factorless account is told up front that a vault needs
+  a second factor (the [re-enrollment gate](account_security.md) asks for one
+  from the next page).
+- **set up, no session** → unlock, offering only what the keyring has (passkey,
+  passphrase, recovery code behind a link).
+
+`opts.reason` reads in the prompt ("You need it to open this file"). The label
+comes from the scope registry.
+
+### Sessions and the lock
+
+`JoinerySealed` holds one session per scope per tab (`session(scope)` runs the
+ceremony on a miss) and never hands out key bytes: a session opens and seals,
+it cannot reveal. Every open scope locks together after
+`vault_client_autolock_minutes` without keyboard or pointer activity (a
+person's own choice for this browser overrides it), on `pagehide`, and on a
+back/forward-cache restore (`pageshow` with `persisted`) — a restored page must
+never show plaintext with a live key.
+
+`JoinerySealed.lock(scope)` / `lockAll()` are the explicit entries;
+`onLock(scope, fn)` registers a callback and `document` receives
+`joinery:vault-scope-locked`. Core drops the session and its cache of opened
+values. **The consumer owns wiping its own DOM and caches**: decrypted names
+written into elements, raw key bytes it kept, inputs and detail panes, object
+URLs.
+
+### Rotating a client-custody key
+
+Only the browser holds the secret, so only the browser can rotate it, and it
+costs: **new recovery codes** (the browser never held the old ones), the
+**passphrase again** if there is one, **one passkey tap per enrolled passkey**,
+and every **linked device must re-link** (it holds the old secret). The
+security page's card for each browser-held vault offers it
+(`JoinerySealed.resealScope(scope)`):
+
+1. `vault_client_rotate_begin` stores the new public key and its wrappings as
+   generation N+1, **pending**. The key in use and all its unlockers keep
+   working; changing its unlockers is refused meanwhile. It needs a recent
+   step-up; the browser asks first with `dry_run`, before collecting any
+   passkey tap or the passphrase.
+2. The batch moves every sealed DEK onto the new key: rows of the models a
+   consumer registered through `vault_client_reseal_rows` (only rows still on
+   generation N) and `vault_row_reseal` (key column and generation only, the
+   caller's own rows, the blob's scope must be the row's), then each consumer's
+   `JoinerySealed.onReseal(scope, fn)` hook for keys kept elsewhere.
+3. `vault_client_rotate_commit` — refused while any registered row is left on
+   generation N — retires generation N's wrappings, makes the pending key the
+   key, and takes the scope off every linked device (`sde_vault_scopes`). Any
+   key a hook skipped is named in the result.
+
+What gets re-sealed is a registry. A consumer registers in its bootstrap:
+
+```php
+VaultUnlock::clientReseal('acme_notes', array(AcmeNote::class));                  // models
+VaultUnlock::clientReseal('passwords', array(), array('plugins/vault/assets/js/vault-reseal.js'));  // a hook
+```
+
+and declares `"client_reseals": ["acme_notes"]` in its `vaultConsumer` block. A
+hook script registers `JoinerySealed.onReseal(scope, async ctx => …)`, receiving
+`{oldSession, newSession, newPublicKey, progress, skip}`; it must be safe to run
+twice (a key the new session opens was moved already), and a key neither
+session opens — unreadable before the rotation too — is left and reported with
+`ctx.skip()` rather than holding the rotation back. Drive re-seals its `FileKeyGrant` rows through `drive_key_grants_reseal`
+(the member's own grants only, only while a rotation is pending); the password
+manager its store key through `vault/keyring_replace` (accepted only while a
+rotation is pending; `keyring_save` stays create-only).
+
+**While a rotation is pending, new material seals to the pending key**
+(`UserEncryptionVault::sealingPublicKey()`): the server sealer, the keys
+`drive_public_keys` hands out, and `JoinerySealed.seal()` all use it, and a
+browser write names the key it sealed to (`acceptBrowserSealed(..., $public_key)`)
+so the row is stamped with that key's generation. Nothing sealed during the
+rotation is left on the key the commit retires.
+
+A rotation that stops part way is **finished, never discarded**: what it moved
+opens only with the new key, and keys a consumer's hook moved (Drive's grants,
+the password store key) carry no generation the server could count, so there is
+no telling "nothing moved" from "everything moved". The card then says that
+what moved will not open until the rotation is finished and offers "Finish
+rotating", which unlocks both keys (the new one with the unlockers it was given)
+and runs the batch again — everything in it resumes. A new begin is refused
+while one is pending. The status payload lists the key in use's wrappings in
+`wrappings` and the pending ones apart in `pending_wrappings`.
+
+### Handing a vault to a device
+
+The device-link page (`/profile/devices/link`) offers a checkbox for each
+browser-held vault the user has set up: Drive's (`enable_vault`, its key in
+`sealed_vault_key`, the field the shipped sync client reads) and one per other
+scope (its key in `sealed_vault_keys`, `{scope: blob}`). Each chosen vault is
+unlocked and its secret sealed to the device's public key in the browser
+(`session.sealSecretKeyTo()`), one unlock per vault. The device collects both
+fields once on its claim, and `sde_vault_scopes` records what it holds. A
+native client learns a scope's public key and key generation — and so notices a
+rotation — from `vault_client_probe` (any registered client scope, session-key
+reachable, no unlock material).

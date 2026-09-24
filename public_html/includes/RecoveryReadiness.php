@@ -28,6 +28,7 @@
  * The ledger (RecoveryVerification) stores pass/fail + when, per user — never
  * the secret. Staleness = newest passed row older than STALE_DAYS (or none).
  *
+ * @version 1.1.0 - counts and checks only the unlockers of the key generation in use
  * @version 1.0.0
  */
 
@@ -241,8 +242,9 @@ class RecoveryReadiness {
 			"SELECT uew_wrapped_secret_key, uew_salt
 			   FROM uew_user_encryption_wrappings
 			  WHERE uew_uev_user_encryption_vault_id = ?
-			    AND uew_unlocker_type = 'recovery' AND uew_is_used = false AND uew_delete_time IS NULL");
-		$q->execute(array((int)$vault->key));
+			    AND uew_unlocker_type = 'recovery' AND uew_is_used = false AND uew_delete_time IS NULL
+			    AND uew_key_generation = ?");
+		$q->execute(array((int)$vault->key, (int)$vault->get('uev_key_generation')));
 		$rows = array();
 		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 			$salt = (string)$row['uew_salt'];
@@ -266,7 +268,10 @@ class RecoveryReadiness {
 			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'passkey' AND uew_delete_time IS NULL) AS passkey,
 			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'passphrase' AND uew_delete_time IS NULL) AS passphrase
 			   FROM uew_user_encryption_wrappings
-			  WHERE uew_uev_user_encryption_vault_id = ?");
+			  WHERE uew_uev_user_encryption_vault_id = ?
+			    -- the key in use; a client-custody rotation's pending unlockers do not count yet
+			    AND uew_key_generation = (SELECT uev_key_generation FROM uev_user_encryption_vaults
+			                               WHERE uev_user_encryption_vault_id = uew_uev_user_encryption_vault_id)");
 		$q->execute(array($vault_id));
 		$row = $q->fetch(PDO::FETCH_ASSOC) ?: array();
 		return array(

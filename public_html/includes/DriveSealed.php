@@ -18,7 +18,9 @@
  * mail and chat use. The 'drive' scope is CLIENT custody and belongs to Fortress
  * folders, whose keys the server must never hold.
  *
- * @version 1.2.0
+ * @version 1.3.0
+ * @changelog 1.3.0 - registers the drive scope's client-custody resealer
+ *   (VaultUnlock::clientReseal, assets/js/drive-reseal.js)
  * @changelog 1.2.0 - DriveSealedStream::prepare() honors a redeemed serve
  *   grant (includes/FileServeGrant.php), so a cookie-less signed fetch can
  *   stream a sealed file (specs/bugfix_sealed_inline_images.md). No grant →
@@ -799,6 +801,11 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 			. 'the old key generation must not be retired.');
 	}
 });
+
+// A Fortress file's key is a FileKeyGrant sealed to the reader's drive vault
+// key — the client-custody scope — so rotating that key re-seals the grants in
+// the browser (assets/js/drive-reseal.js, through drive_key_grants_reseal).
+VaultUnlock::clientReseal('drive', array(), array('assets/js/drive-reseal.js'));
 
 // No onWipe callback: a Private file keeps no in-window plaintext working copy —
 // every read streams from the container and nothing is cached. When content

@@ -140,7 +140,7 @@ check(strpos($disc_body, 'use ($settings)') !== false,
 section('Every Drive action declares the gate');
 
 $drive_files = glob(PathHelper::getIncludePath('logic') . '/drive_*_logic.php');
-check(count($drive_files) >= 30,
+check(count($drive_files) >= 29,   // a floor, so a broken glob cannot pass as 'none ungated'
 	'Found the Drive logic files (' . count($drive_files) . ')');
 
 $ungated = array();
@@ -159,7 +159,7 @@ check(empty($ungated),
 	'Every API-exposed Drive action is gated on drive_active',
 	$ungated ? 'ungated: ' . implode(', ', $ungated) : '');
 
-section('The seven that were open are closed');
+section('The Drive actions that were open are closed');
 
 // Named individually: these are the actions that were callable with Drive off,
 // and a regression in any one of them is worth its own failing line.
@@ -170,7 +170,6 @@ $was_open = array(
 	'drive_device_rename'       => 'renamed a linked device',
 	'drive_device_revoke'       => 'unlinked a device and revoked its key',
 	'drive_devices'             => 'listed the caller linked computers',
-	'drive_vault_status'        => 'reported vault key material',
 );
 
 foreach ($was_open as $action => $what_it_did) {

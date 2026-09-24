@@ -32,6 +32,7 @@ class UserEncryptionVaultException extends SystemBaseException {}
  * will become) while every sealed DEK is re-sealed to it, and the commit makes
  * it current.
  *
+ * @version 1.2 - sealingPublicKey()/sealingKeyGeneration(): new material seals to a pending rotation's key
  * @version 1.1 - uev_pending_public_key / uev_pending_key_generation: a client-custody rotation in progress
  * @version 1.0
  */
@@ -82,6 +83,24 @@ class UserEncryptionVault extends SystemBase {
 		$multi = new MultiUserEncryptionVault(['user_id' => $user_id, 'scope' => $scope]);
 		$multi->load();
 		return $multi->count() > 0 ? $multi->get(0) : null;
+	}
+
+	/**
+	 * The public key new material is sealed to: the pending key while a
+	 * client-custody rotation is under way, else the key in use. Once anything
+	 * moved, the pending key is certain to become current, so material sealed
+	 * during the rotation is never left on the key the commit retires.
+	 */
+	public function sealingPublicKey(): string {
+		$pending = $this->get('uev_pending_public_key');
+		return ($this->get('uev_pending_key_generation') !== null && (string)$pending !== '')
+			? (string)$pending : (string)$this->get('uev_public_key');
+	}
+
+	/** The key generation that goes with sealingPublicKey(). */
+	public function sealingKeyGeneration(): int {
+		return $this->get('uev_pending_key_generation') !== null
+			? (int)$this->get('uev_pending_key_generation') : (int)$this->get('uev_key_generation');
 	}
 }
 

@@ -1,6 +1,15 @@
 # Client custody as a declared consumer
 
-**Status: ACTIVE 2026-09-24 — reviewed and prepared for an executor the same day; no build started.**
+**Status: IMPLEMENTED 2026-09-24 — WP0–WP9 built and walked on dev. As built, where it departs from the text below:**
+
+- **WP7 page gate.** The device-link page stays on `drive_active`: every `drive_*` device-link action is gated on it (`tests/unit/api_action_feature_gate_test.php`), so a page open with Drive off could not approve. Other vaults ride beside Drive's checkbox.
+- **WP8 Drive hook.** Drive's grants re-seal through a new `drive_key_grants_reseal` (own grants only, only while a rotation is pending), not `drive_key_grants_sync`, which is owner-only and replaces a file's whole grantee set.
+- **WP8 hooks load by registration.** `VaultUnlock::clientReseal($scope, $classes, $scripts)` takes hook scripts; the rotation page (`needs_vault_rotation()`) loads them, since Drive's and the password manager's page scripts are not on the security page.
+- **WP8 pending rotations are finished, never discarded.** There is no `vault_client_rotate_abandon`: keys a hook moved carry no generation, so the server cannot tell "nothing moved" (review B18). `begin` refuses while one is pending; `ensureUnlocked({pending})` opens the new key to finish. While pending, new material seals to the pending key (`UserEncryptionVault::sealingPublicKey()`, review B19).
+- **WP8 progress.** The batch reports in the security card, not through `ceremony-batch.js`, which drives a server action and cannot do per-row browser crypto.
+- **WP8 `vault_row_reseal`** also takes `rows: [...]` so a page is one request.
+- **VaultConsumers had no unknown-key warning** (Facts list); none was added.
+- Bugs found and fixed along the way: B5–B24 (memory `project_running_todos.md`; B18–B24 from the second review).
 
 Origin: the developer-surface review of `specs/DEFERRED_client_custody_mail.md`
 (its § Developer surface 2026-09-24 points here). Nothing in this spec depends

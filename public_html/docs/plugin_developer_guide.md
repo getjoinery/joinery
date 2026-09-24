@@ -1424,16 +1424,18 @@ complete consumer in the tree.
 
 ### Path 2 — encrypt it to the edge
 
-The browser generates the keypair, wraps it to each unlocker, encrypts every
-value, and sends the server opaque blobs. The whole client-side layer is core —
-you do not write crypto either.
+A scope declaration, the same sealed-field declaration path 1 uses plus one hook
+that names the scope, a save action shaped for the two-step browser write, and
+two browser calls. There is no crypto, no ceremony and no session code in your
+plugin: the setup and unlock modal, the per-scope session, its idle lock, the
+device handoff and the script tags are all core.
 
 **1. Declare a scope** in `plugin.json`. A scope is one keypair with its own
 unlockers and its own unlock:
 
 ```json
 "vaultScopes": {
-  "acme_secrets": { "custody": "client", "label": "Acme secrets vault" }
+  "acme_notes": { "custody": "client", "label": "Acme notes vault" }
 }
 ```
 
@@ -1442,19 +1444,70 @@ impossible for two scopes to share one by accident. A scope a plugin declares is
 always client custody — `custody: server` is refused, because server custody is
 what you get from path 1 by declaring no scope at all.
 
-**2. Store blobs** through the core `vault_client_*` actions
-(`includes/VaultClientCustody.php`): create the keypair record, fetch the keyring
-view, add and remove unlocker wrappings, consume a recovery key. The server
-stores and returns ciphertext byte-for-byte and never inspects it.
+**2. Seal a model to it, per row.** The four sealing columns and
+`$sealed_fields` exactly as in path 1, plus the hook that says which rows go to
+your scope:
 
-**3. Drive the crypto in the browser** with `assets/js/vault-crypto.js` and
-`assets/js/vault-keyring.js`, both core and both scope-parameterized.
+```php
+class AcmeNote extends SystemBase {
+    public static $sealed_fields = array('acn_title', 'acn_body');
+    // the four sealing columns, exactly as for server custody
+    protected static function sealScopeForWrite(array $row): string {
+        return $row['acn_end_to_end'] ? 'acme_notes' : 'user';
+    }
+}
+```
 
-The reference implementation is the [password manager](../plugins/vault/docs/overview.md)
-— its entire server footprint is four logic files, because everything that
-matters happens in the browser. [Drive's Fortress folders](drive_encryption.md)
-reuse the same layer for a completely different content type and add no keyring
-or identity surface at all.
+A row sealed to your scope never opens on the server: `get()` throws
+`VaultSealedForBrowserException`, and the model's API representation carries the
+ciphertext with `sealed_scope`, `sealed_dek` and `sealed_ad_prefix` for the
+browser. Server code can still write such rows (`save()` seals plaintext to the
+scope's public key), which is how an ingest path adds content nobody present can
+read.
+
+**3. Write a save action for the two-step write.** The browser cannot know the
+row id, and so the AD, before the row exists, so it posts twice: the plain
+values (your action creates the row and replies with `id` and
+`sealed_ad_prefix`), then `{id, sealed_dek, fields}`. Your action checks the
+caller may write that row, then hands the second post to
+`AcmeNote::acceptBrowserSealed($id, $sealed_dek, $fields)`, which validates the
+ciphertext's shape and custody and stores it. Authorization stays yours.
+
+**4. Call it from the page.** `$page->needs_vault_client()` before the header,
+then:
+
+```js
+const note = await JoinerySealed.open(rowFromApi, refetch);   // plaintext fields, or an unlock prompt
+await JoinerySealed.save('acme/note_save', values, { scope: 'acme_notes', sealedFields: ['acn_title', 'acn_body'] });
+```
+
+`open()` answers for server-custody rows too (a locked window prompts, then
+refetches), so a reader never asks which rung a row is on. Register
+`JoinerySealed.onLock('acme_notes', fn)` to wipe what your page decrypted into
+its DOM and caches — core drops the key, the page is yours.
+
+**5. Let the key rotate.** Register your models in your bootstrap and declare the
+obligation, or rotation of the scope is refused:
+
+```php
+VaultUnlock::clientReseal('acme_notes', array(AcmeNote::class));
+```
+
+```json
+"vaultConsumer": { "client_reseals": ["acme_notes"] }
+```
+
+Keys you keep outside `$sealed_fields` models re-seal through a browser hook: a
+script passed as the third argument of `clientReseal()` that registers
+`JoinerySealed.onReseal('acme_notes', fn)`.
+
+The reference implementations: the [password manager](../plugins/vault/docs/overview.md)
+for storage — one store key sealed to the scope and one blob per entry, with its
+rotation hook re-sealing that one key — and [Drive's Fortress folders](drive_encryption.md)
+for many-reader keys, where each file key is sealed to every reader's scope key
+(`FileKeyGrant`). See [Client-custody scopes](sealed_vault.md#client-custody-scopes)
+for the formats, the ceremony, the lock contract, rotation and the device
+handoff.
 
 ## Declaring Host Provisioners
 

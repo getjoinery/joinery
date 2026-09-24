@@ -2,7 +2,8 @@
     "drive_sealed": {
         "bootstrap": "includes/DriveSealed.php",
         "order": 60,
-        "reseals": true
+        "reseals": true,
+        "client_reseals": ["drive"]
     },
     "direct_spool": {
         "bootstrap": "includes/joinery_direct/DirectSpoolDrain.php",

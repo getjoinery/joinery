@@ -263,11 +263,11 @@ files (`File::is_encrypted()` is the gate):
     encryption boundary; `drive_upload_init` gates a vault destination against
     the ciphertext size ceiling; `drive_list` accepts `offset` for complete
     subtree enumeration.
-  - `drive_vault_status` — `{scope: 'drive'}` → `{set_up, public_key,
-    key_generation}`, reachable with a session key. The lean probe a native sync
-    client needs to seal file keys and to notice a rotation; it carries no
-    wrappings, salts, or KDF parameters, because those are unlock material and
-    unlocking stays in the browser.
+  - `vault_client_probe` — `{scope}` (default `drive`, any registered
+    client-custody scope) → `{set_up, public_key, key_generation}`, reachable
+    with a session key. The lean probe a native client needs to seal file keys
+    and to notice a rotation; it carries no wrappings, salts, or KDF parameters,
+    because those are unlock material and unlocking stays in the browser.
 
 ## Device custody — encrypted folders on a sync client
 
@@ -277,10 +277,15 @@ during the device-link ceremony (`docs/drive.md` § Device linking).
 
 The device generates an X25519 keypair at first launch and sends only the public
 half. In the approving browser — the one place the vault can be unlocked — the
-unlocked `VaultKeyring` session seals the vault **secret** key to that public
-key (`session.sealSecretKeyTo(devicePublicKey)`, the standard sealed-box
-primitive) and posts the result. The server stores ciphertext it has no key for,
-holds it until the device polls once, and scrubs it.
+drive session (`JoinerySealed.session('drive')`, through the core unlock
+ceremony) seals the vault **secret** key to that public key
+(`session.sealSecretKeyTo(devicePublicKey)`, the standard sealed-box primitive)
+and posts the result as `sealed_vault_key`. Any other browser-held vault the
+user chose rides beside it in `sealed_vault_keys` (`{scope: blob}`), each with
+its own unlock (`docs/sealed_vault.md` § Handing a vault to a device). The
+server stores ciphertext it has no key for, holds it until the device polls
+once, and scrubs it. The device row records the scopes it holds
+(`sde_vault_scopes`), shown on the security page's Sync Devices list.
 
 The sealing lives inside the session closure deliberately: a consumer can hand
 the vault key to a device it names, and cannot read the raw bytes itself. On the
@@ -297,6 +302,14 @@ synced to that computer are already on that computer.
 Sharing the key is per device and opt-in — the checkbox on the approval page.
 Decline it and the device syncs everything else and simply skips encrypted
 folders. A device that never offered a public key is not offered the choice.
+
+Rotating the drive vault key (`docs/sealed_vault.md` § Rotating a
+client-custody key) takes `drive` off every linked device: each holds the
+retired secret, and must be linked again to receive the new one. A sync client
+notices through `vault_client_probe`, whose key generation moves on. The
+rotation re-seals every `FileKeyGrant` the member holds — on their own files and
+on files shared with them — to the new key in the browser
+(`assets/js/drive-reseal.js`, through `drive_key_grants_reseal`).
 
 ### Timestamps
 
@@ -412,10 +425,17 @@ callback: a Private read streams from the container and caches no plaintext.
   file key to a vault public key. The ciphertext container is self-delimiting
   (`uint32 blockLen || IV || ciphertext` per chunk), so decryption needs no size
   metadata.
-- `assets/js/drive.js` — the Drive UI: on-demand vault unlock (enroll or unlock
-  via the shared `VaultKeyring`), encrypted-folder upload with reader-set key
-  sealing, decrypt-download, progressive name/thumbnail decryption in listings,
-  rename via re-encrypted metadata, and the share-dialog key wrapping.
+- `assets/js/drive.js` — the Drive UI: the drive session through
+  `JoinerySealed.session('drive')` (setup and unlock are the core ceremony;
+  the page has no dialog of its own), encrypted-folder upload with reader-set
+  key sealing, decrypt-download, progressive name/thumbnail decryption in
+  listings, rename via re-encrypted metadata, and the share-dialog key
+  wrapping. Its `onLock` handler zeroes the cached file keys, drops decrypted
+  names, revokes thumbnail object URLs and redraws the listing as locked
+  placeholders. A Private file's locked open goes through
+  `JoinerySealed.open()` too.
+- `assets/js/drive-reseal.js` — the drive scope's rotation hook
+  (`JoinerySealed.onReseal('drive', …)`), loaded on the page that rotates.
 - `assets/js/share-decrypt.js` — the anonymous `/s/{token}` fragment-key decrypt
   page.
 

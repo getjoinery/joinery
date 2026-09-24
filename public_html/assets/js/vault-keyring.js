@@ -23,6 +23,8 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.3 - rotationPlan()/showRecoveryCodes()/sessionFrom() for a key rotation;
+ *   ensureUnlocked({pending}) opens a rotation's new key; buildWrappings() shared with setup
  * @version 1.2 - a close during the recovery-codes step re-opens it (setup is already
  *   committed, so the ceremony never rejects after it); has_second_factor note at setup
  * @version 1.1 - ensureUnlocked(): the setup / recovery / unlock ceremony in core
@@ -126,6 +128,38 @@ window.VaultKeyring = (function () {
 	 * }
 	 * Returns { session, recoveryCodes:[...], publicKey }.
 	 */
+	/**
+	 * Wrap a secret key under every unlocker a vault gets: passkeys (each a
+	 * {kek, credentialId}), fresh recovery codes, and an optional passphrase.
+	 * Setup and a key rotation both build the same set.
+	 * Returns { wrappings, recoveryCodes }.
+	 */
+	async function buildWrappings(scope, secretKeyBytes, opts) {
+		var wrappings = [];
+		var passkeys = opts.passkeys || [];
+		for (var p = 0; p < passkeys.length; p++) {
+			var pkBlob = await VaultCrypto.wrapSecretKey(secretKeyBytes, passkeys[p].kek, adFor(scope, 'passkey', passkeys[p].credentialId));
+			wrappings.push({ unlocker_type: 'passkey', credential_id: passkeys[p].credentialId, wrapped_secret_key: pkBlob });
+		}
+
+		var count = opts.recoveryCount || DEFAULT_RECOVERY_COUNT;
+		var recoveryCodes = [];
+		for (var i = 0; i < count; i++) {
+			var code = generateRecoveryCode();
+			recoveryCodes.push(code);
+			var rkek = await VaultCrypto.kekFromRecoveryCode(code, opts.salt);
+			var rblob = await VaultCrypto.wrapSecretKey(secretKeyBytes, rkek, adFor(scope, 'recovery'));
+			wrappings.push({ unlocker_type: 'recovery', wrapped_secret_key: rblob, salt: opts.salt });
+		}
+
+		if (opts.passphrase) {
+			var ppkek = await VaultCrypto.kekFromPassphrase(opts.passphrase, opts.salt, opts.kdfParams);
+			var ppblob = await VaultCrypto.wrapSecretKey(secretKeyBytes, ppkek, adFor(scope, 'passphrase'));
+			wrappings.push({ unlocker_type: 'passphrase', wrapped_secret_key: ppblob, salt: opts.salt });
+		}
+		return { wrappings: wrappings, recoveryCodes: recoveryCodes };
+	}
+
 	async function setup(scope, opts) {
 		opts = opts || {};
 		if (!opts.passkey && !opts.passphrase) {
@@ -135,28 +169,15 @@ window.VaultKeyring = (function () {
 		var pair = await VaultCrypto.generateVaultKeypair();
 		var saltB64 = VaultCrypto.b64encode(VaultCrypto.randomBytes(16));
 		var kdfParams = VaultCrypto.DEFAULT_KDF_PARAMS;
-		var wrappings = [];
-
-		if (opts.passkey) {
-			var pkBlob = await VaultCrypto.wrapSecretKey(pair.secretKeyBytes, opts.passkey.kek, adFor(scope, 'passkey', opts.passkey.credentialId));
-			wrappings.push({ unlocker_type: 'passkey', credential_id: opts.passkey.credentialId, wrapped_secret_key: pkBlob });
-		}
-
-		var count = opts.recoveryCount || DEFAULT_RECOVERY_COUNT;
-		var recoveryCodes = [];
-		for (var i = 0; i < count; i++) {
-			var code = generateRecoveryCode();
-			recoveryCodes.push(code);
-			var rkek = await VaultCrypto.kekFromRecoveryCode(code, saltB64);
-			var rblob = await VaultCrypto.wrapSecretKey(pair.secretKeyBytes, rkek, adFor(scope, 'recovery'));
-			wrappings.push({ unlocker_type: 'recovery', wrapped_secret_key: rblob, salt: saltB64 });
-		}
-
-		if (opts.passphrase) {
-			var ppkek = await VaultCrypto.kekFromPassphrase(opts.passphrase, saltB64, kdfParams);
-			var ppblob = await VaultCrypto.wrapSecretKey(pair.secretKeyBytes, ppkek, adFor(scope, 'passphrase'));
-			wrappings.push({ unlocker_type: 'passphrase', wrapped_secret_key: ppblob, salt: saltB64 });
-		}
+		var built = await buildWrappings(scope, pair.secretKeyBytes, {
+			passkeys: opts.passkey ? [opts.passkey] : [],
+			passphrase: opts.passphrase || null,
+			recoveryCount: opts.recoveryCount,
+			salt: saltB64,
+			kdfParams: kdfParams,
+		});
+		var wrappings = built.wrappings;
+		var recoveryCodes = built.recoveryCodes;
 
 		await api('vault_client_setup', {
 			scope: scope,
@@ -178,8 +199,8 @@ window.VaultKeyring = (function () {
 	}
 
 	// Unlock via passkey PRF. Needs a { kek, credentialId } from derivePasskeyKek.
-	async function unlockWithPasskey(scope, kek, credentialId) {
-		var st = await status(scope);
+	async function unlockWithPasskey(scope, kek, credentialId, st) {
+		st = st || await status(scope);
 		if (!st.set_up) throw new Error('Your vault is not set up.');
 		var wrap = st.wrappings.find(function (w) {
 			return w.unlocker_type === 'passkey' && w.credential_id === credentialId;
@@ -190,8 +211,8 @@ window.VaultKeyring = (function () {
 	}
 
 	// Unlock via the optional passphrase.
-	async function unlockWithPassphrase(scope, passphrase) {
-		var st = await status(scope);
+	async function unlockWithPassphrase(scope, passphrase, st) {
+		st = st || await status(scope);
 		if (!st.set_up) throw new Error('Your vault is not set up.');
 		var kek = await VaultCrypto.kekFromPassphrase(passphrase, st.salt, st.kdf_params);
 		var ad = adFor(scope, 'passphrase');
@@ -206,8 +227,8 @@ window.VaultKeyring = (function () {
 	}
 
 	// Unlock via a one-time recovery key. On success, marks it used server-side.
-	async function unlockWithRecovery(scope, code) {
-		var st = await status(scope);
+	async function unlockWithRecovery(scope, code, st) {
+		st = st || await status(scope);
 		if (!st.set_up) throw new Error('Your vault is not set up.');
 		var ad = adFor(scope, 'recovery');
 		var candidates = st.wrappings.filter(function (w) { return w.unlocker_type === 'recovery' && !w.is_used; });
@@ -223,6 +244,21 @@ window.VaultKeyring = (function () {
 			} catch (e) { /* wrong code for this row - try next */ }
 		}
 		throw new Error('Invalid or already-used recovery key.');
+	}
+
+	// The keyring view of a rotation's PENDING key: its own wrappings and public
+	// key, the vault's salt and KDF parameters. Unlocking with it yields the new
+	// key, for the browser finishing a rotation that stopped.
+	function pendingStatus(st) {
+		var list = st.pending_wrappings || [];
+		return {
+			set_up: true, scope: st.scope, label: st.label, passkeys_enabled: st.passkeys_enabled,
+			public_key: st.pending_public_key, salt: st.salt, kdf_params: st.kdf_params,
+			wrappings: list,
+			passkey_wrapping_count: list.filter(function (w) { return w.unlocker_type === 'passkey'; }).length,
+			has_passphrase: list.some(function (w) { return w.unlocker_type === 'passphrase'; }),
+			unused_recovery_code_count: list.filter(function (w) { return w.unlocker_type === 'recovery' && !w.is_used; }).length,
+		};
 	}
 
 	// ---- the ceremony ---------------------------------------------------------
@@ -270,6 +306,216 @@ window.VaultKeyring = (function () {
 		return String(s).toUpperCase().replace(/O/g, '0').replace(/[IL]/g, '1').replace(/[^A-Z0-9]/g, '');
 	}
 
+	// JoineryModal is one <dialog> reused by every flow, and a close event is
+	// delivered after the call that caused it. A flow that opens straight after
+	// another closed would take that stale event as its own close; so a close
+	// counts only when the dialog is really shut, and the watcher stays until it
+	// has seen one.
+	function watchClose(dialog, fn) {
+		var handler = function () {
+			if (dialog.open) return;
+			dialog.removeEventListener('close', handler);
+			fn();
+		};
+		dialog.addEventListener('close', handler);
+	}
+
+	// The recovery codes, shown once, and the proof they were kept: the last code
+	// typed back, or the download. onDone runs on Done, once proven.
+	function fillRecoveryCodes(root, scope, label, codes, intro, onDone) {
+		root.appendChild(el('p', null, intro));
+		var list = el('ol', 'jy-vault-ceremony-codes');
+		codes.forEach(function (c) { list.appendChild(el('li', null, c)); });
+		root.appendChild(list);
+		var last = codes[codes.length - 1];
+		var proven = false;
+		var done = button('Done', 'primary', function () {
+			if (!proven) return;
+			list.innerHTML = '';
+			onDone();
+		});
+		done.disabled = true;
+		var dl = button('Download codes', 'secondary', function () {
+			var text = 'Recovery codes for your ' + label + ' (' + location.host + ')\n'
+				+ 'Keep these somewhere safe and private. Each one opens the vault once if you lose your passkey and passphrase.\n\n'
+				+ codes.join('\n') + '\n';
+			var a = document.createElement('a');
+			a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+			a.download = 'recovery-codes-' + scope + '.txt';
+			document.body.appendChild(a); a.click(); a.remove();
+			setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+			proven = true; done.disabled = false;
+		});
+		var proofLabel = el('label', 'jy-vault-ceremony-label', 'Type the last code to confirm you saved them');
+		var proof = input('text', last.replace(/[A-Z0-9]/g, '•'), 'off');
+		proof.spellcheck = false;
+		proof.addEventListener('input', function () {
+			proven = proven || (normalizeCode(proof.value) !== '' && normalizeCode(proof.value) === normalizeCode(last));
+			done.disabled = !proven;
+		});
+		onEnter(proof, function () { done.click(); });
+		root.appendChild(proofLabel);
+		root.appendChild(proof);
+		var row = el('div', 'jy-vault-ceremony-actions');
+		row.appendChild(dl);
+		row.appendChild(done);
+		root.appendChild(row);
+	}
+
+	/**
+	 * Show recovery codes in their own modal until they are proven kept. They are
+	 * the only copy, so the modal cannot be dismissed: a close re-opens it.
+	 */
+	function showRecoveryCodes(scope, label, codes, intro) {
+		return new Promise(function (resolve) {
+			var root = el('div', 'jy-vault-ceremony');
+			var finished = false;
+			var handle = JoineryModal.open(root, { buttons: [] });
+			var dialog = handle.dialog;
+			var onCancel = function (e) { if (!finished) e.preventDefault(); };
+			dialog.addEventListener('cancel', onCancel);
+			function onClose() {
+				if (finished) { dialog.removeEventListener('cancel', onCancel); return; }
+				try { dialog.showModal(); watchClose(dialog, onClose); }
+				catch (e) { finished = true; resolve(false); }
+			}
+			watchClose(dialog, onClose);
+			root.appendChild(el('h3', 'jy-vault-ceremony-title', 'Save your new recovery codes'));
+			fillRecoveryCodes(root, scope, label, codes, intro, function () {
+				finished = true;
+				dialog.close();
+				resolve(true);
+			});
+		});
+	}
+
+	/**
+	 * The person's side of rotating a client-custody vault's key: say what it
+	 * costs, then collect what the new key is wrapped under — one tap for each
+	 * enrolled passkey and the passphrase again if there is one — and mint new
+	 * recovery codes. Nothing is sent: resolves { wrappings, recoveryCodes } for
+	 * the new secret, or rejects 'Rotation cancelled.'.
+	 */
+	function rotationPlan(scope, st, secretKeyBytes) {
+		var label = st.label || 'vault';
+		var enrolled = {};
+		(st.wrappings || []).forEach(function (w) {
+			if (w.unlocker_type === 'passkey' && w.credential_id) enrolled[w.credential_id] = w.label || 'Passkey';
+		});
+		var passkeyIds = Object.keys(enrolled);
+		return new Promise(function (resolve, reject) {
+			var root = el('div', 'jy-vault-ceremony');
+			var settled = false;
+			var handle = JoineryModal.open(root, { buttons: [{ label: 'Cancel', style: 'secondary' }] });
+			var dialog = handle.dialog;
+			watchClose(dialog, function () {
+				if (!settled) { settled = true; reject(new Error('Rotation cancelled.')); }
+			});
+			var passkeys = [];   // [{kek, credentialId}]
+			var phrase = null;
+
+			function frame(title) {
+				root.innerHTML = '';
+				root.appendChild(el('h3', 'jy-vault-ceremony-title', title));
+				var err = el('p', 'jy-vault-ceremony-error');
+				err.hidden = true;
+				err.setAttribute('role', 'alert');
+				return function (msg) { err.textContent = msg || ''; err.hidden = !msg; if (!err.parentNode) root.appendChild(err); };
+			}
+
+			function renderCost() {
+				frame('Rotate the key of your ' + label);
+				root.appendChild(el('p', null, 'This makes a new key for this vault and moves everything in it onto the new key, in this browser. What it costs:'));
+				var ul = el('ul');
+				ul.appendChild(el('li', null, 'New recovery codes. The ones you have stop working.'));
+				if (st.has_passphrase) ul.appendChild(el('li', null, 'Your passphrase again (or a new one).'));
+				if (passkeyIds.length) ul.appendChild(el('li', null, 'One tap for each of your ' + passkeyIds.length + ' passkey' + (passkeyIds.length === 1 ? '' : 's') + '.'));
+				ul.appendChild(el('li', null, 'Every computer linked to this vault must be linked again.'));
+				root.appendChild(ul);
+				var row = el('div', 'jy-vault-ceremony-actions');
+				row.appendChild(button('Continue', 'primary', function () { passkeyIds.length ? renderPasskeys() : renderPassphrase(); }));
+				root.appendChild(row);
+			}
+
+			function renderPasskeys() {
+				var showError = frame('Tap each passkey');
+				var left = passkeyIds.filter(function (id) { return !passkeys.some(function (p) { return p.credentialId === id; }); });
+				if (!left.length) { renderPassphrase(); return; }
+				root.appendChild(el('p', null, 'Each passkey that opens this vault opens the new key only after it is tapped here. '
+					+ (passkeyIds.length - left.length) + ' of ' + passkeyIds.length + ' done.'));
+				var busy = false;
+				var row = el('div', 'jy-vault-ceremony-actions');
+				row.appendChild(button('Tap a passkey', 'primary', async function () {
+					if (busy) return;
+					busy = true;
+					showError('');
+					try {
+						var d = await derivePasskeyKek(scope);
+						if (left.indexOf(d.credentialId) < 0) {
+							showError('That passkey is already done, or does not open this vault. Tap another.');
+						} else {
+							passkeys.push(d);
+							renderPasskeys();
+						}
+					} catch (e) { showError(friendly(e, true)); }
+					finally { busy = false; }
+				}));
+				var skip = button('Skip the rest', 'link', function () {
+					if (!st.has_passphrase && !passkeys.length) {
+						showError('The new key needs a passkey or a passphrase. Tap at least one passkey.');
+						return;
+					}
+					renderPassphrase();
+				});
+				row.appendChild(skip);
+				root.appendChild(row);
+				root.appendChild(el('p', 'jy-vault-ceremony-reason', 'A passkey you skip keeps signing you in, but no longer opens this vault.'));
+				showError('');
+			}
+
+			function renderPassphrase() {
+				if (!st.has_passphrase) { finishPlan(); return; }
+				var showError = frame('Your passphrase');
+				root.appendChild(el('p', null, 'Enter your passphrase, or a new one. It will open the new key.'));
+				var pp = input('password', 'Passphrase (at least ' + MIN_PASSPHRASE + ' characters)', 'new-password');
+				var pp2 = input('password', 'Type it again', 'new-password');
+				var fields = el('div', 'jy-vault-ceremony-fields');
+				fields.appendChild(pp);
+				fields.appendChild(pp2);
+				root.appendChild(fields);
+				var go = function () {
+					if ((pp.value || '').length < MIN_PASSPHRASE) { showError('Use a passphrase of at least ' + MIN_PASSPHRASE + ' characters.'); return; }
+					if (pp.value !== pp2.value) { showError('The passphrases don\'t match.'); return; }
+					phrase = pp.value;
+					pp.value = pp2.value = '';
+					finishPlan();
+				};
+				onEnter(pp2, go);
+				var row = el('div', 'jy-vault-ceremony-actions');
+				row.appendChild(button('Continue', 'primary', go));
+				root.appendChild(row);
+				showError('');
+				pp.focus();
+			}
+
+			async function finishPlan() {
+				var showError = frame('Preparing the new key…');
+				try {
+					var built = await buildWrappings(scope, secretKeyBytes, {
+						passkeys: passkeys, passphrase: phrase, salt: st.salt, kdfParams: st.kdf_params,
+					});
+					settled = true;
+					dialog.close();
+					resolve(built);
+				} catch (e) {
+					showError((e && e.message) || 'Could not prepare the new key.');
+				}
+			}
+
+			renderCost();
+		});
+	}
+
 	/**
 	 * Resolve an unlocked session for `scope`, running whatever the scope needs:
 	 * setup (then the recovery codes, which must be proven saved), or unlock
@@ -286,6 +532,10 @@ window.VaultKeyring = (function () {
 		}
 		var st = await status(scope);
 		var label = st.label || 'vault';
+		if (opts.pending) {
+			if (!st.pending_key_generation) throw new Error('No key rotation is under way for your ' + label + '.');
+			st = pendingStatus(st);
+		}
 
 		return new Promise(function (resolve, reject) {
 			var root = el('div', 'jy-vault-ceremony');
@@ -312,7 +562,7 @@ window.VaultKeyring = (function () {
 				if (holdOpen && recoverySession) {
 					try {
 						dialog.showModal();
-						dialog.addEventListener('close', onClose, { once: true });
+						watchClose(dialog, onClose);
 						return;
 					} catch (e) {
 						settled = true;
@@ -331,7 +581,7 @@ window.VaultKeyring = (function () {
 				settled = true;
 				reject(new Error('Unlock cancelled.'));
 			}
-			dialog.addEventListener('close', onClose, { once: true });
+			watchClose(dialog, onClose);
 
 			function finish(session) {
 				session.label = label;
@@ -425,51 +675,18 @@ window.VaultKeyring = (function () {
 				recoverySession = session;
 				if (actions) actions.hidden = true;
 				var showError = frame('Save your recovery codes');
-				root.appendChild(el('p', null, 'Each code opens your ' + label + ' once if you lose your passkey and passphrase. '
-					+ 'This is the only time they are shown. Download them, or copy them somewhere safe and type the last one below.'));
-				var list = el('ol', 'jy-vault-ceremony-codes');
-				codes.forEach(function (c) { list.appendChild(el('li', null, c)); });
-				root.appendChild(list);
-				var proven = false;
-				var done = button('Done', 'primary', function () {
-					if (!proven) return;
-					list.innerHTML = '';
-					codes = null;
-					holdOpen = false;
-					finish(session);
-				});
-				done.disabled = true;
-				var dl = button('Download codes', 'secondary', function () {
-					var text = 'Recovery codes for your ' + label + ' (' + location.host + ')\n'
-						+ 'Keep these somewhere safe and private. Each one opens the vault once if you lose your passkey and passphrase.\n\n'
-						+ codes.join('\n') + '\n';
-					var a = document.createElement('a');
-					a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-					a.download = 'recovery-codes-' + scope + '.txt';
-					document.body.appendChild(a); a.click(); a.remove();
-					setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-					proven = true; done.disabled = false;
-				});
-				var proofLabel = el('label', 'jy-vault-ceremony-label', 'Type the last code to confirm you saved them');
-				var proof = input('text', codes[codes.length - 1].replace(/[A-Z0-9]/g, '•'), 'off');
-				proof.spellcheck = false;
-				proof.addEventListener('input', function () {
-					proven = proven || (normalizeCode(proof.value) !== '' && normalizeCode(proof.value) === normalizeCode(codes[codes.length - 1]));
-					done.disabled = !proven;
-				});
-				onEnter(proof, function () { done.click(); });
-				root.appendChild(proofLabel);
-				root.appendChild(proof);
-				var row = el('div', 'jy-vault-ceremony-actions');
-				row.appendChild(dl);
-				row.appendChild(done);
-				root.appendChild(row);
+				fillRecoveryCodes(root, scope, label, codes, 'Each code opens your ' + label + ' once if you lose your passkey and passphrase. '
+					+ 'This is the only time they are shown. Download them, or copy them somewhere safe and type the last one below.',
+					function () { holdOpen = false; finish(session); });
 				showError('');
 			}
 
 			// ---- unlock ----
 			function renderUnlock() {
-				var showError = frame('Unlock your ' + label);
+				var showError = frame(opts.pending ? 'Unlock the new key of your ' + label : 'Unlock your ' + label);
+				if (opts.pending) {
+					root.appendChild(el('p', null, 'A rotation of this vault\'s key stopped part way. Unlock the new key with what you set up for it: its passphrase, a passkey, or one of the new recovery codes.'));
+				}
 				var canPasskey = st.passkeys_enabled && st.passkey_wrapping_count > 0;
 				var busy = false;
 				async function attempt(fn, usingPasskey) {
@@ -485,7 +702,7 @@ window.VaultKeyring = (function () {
 					row.appendChild(button('Unlock with a passkey', 'primary', function () {
 						attempt(async function () {
 							var d = await derivePasskeyKek(scope);
-							return unlockWithPasskey(scope, d.kek, d.credentialId);
+							return unlockWithPasskey(scope, d.kek, d.credentialId, st);
 						}, true);
 					}));
 					root.appendChild(row);
@@ -494,7 +711,7 @@ window.VaultKeyring = (function () {
 					var pp = input('password', 'Passphrase', 'current-password');
 					var go = function () {
 						attempt(async function () {
-							var s = await unlockWithPassphrase(scope, pp.value || '');
+							var s = await unlockWithPassphrase(scope, pp.value || '', st);
 							pp.value = '';
 							return s;
 						}, false);
@@ -510,7 +727,7 @@ window.VaultKeyring = (function () {
 				rec.spellcheck = false;
 				var goRec = function () {
 					attempt(async function () {
-						var r = await unlockWithRecovery(scope, rec.value || '');
+						var r = await unlockWithRecovery(scope, rec.value || '', st);
 						rec.value = '';
 						return r.session;
 					}, false);
@@ -534,6 +751,9 @@ window.VaultKeyring = (function () {
 	return {
 		DEFAULT_RECOVERY_COUNT: DEFAULT_RECOVERY_COUNT,
 		ensureUnlocked: ensureUnlocked,
+		rotationPlan: rotationPlan,
+		showRecoveryCodes: showRecoveryCodes,
+		sessionFrom: function (scope, secretKeyBytes, publicKeyB64) { return makeSession(scope, secretKeyBytes, publicKeyB64); },
 		adFor: adFor,
 		isSupported: function () { return VaultCrypto.isSupported(); },
 		status: status,

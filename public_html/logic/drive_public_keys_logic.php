@@ -64,7 +64,9 @@ function drive_public_keys_logic(array $input): LogicResult {
 		if ($uid > 0) {
 			$vault = UserEncryptionVault::loadForUser($uid, 'drive');
 			if ($vault && $vault->key) {
-				$public_key = (string)$vault->get('uev_public_key');
+				// The pending key while that reader's drive key is being rotated,
+				// so a grant made now is not left on the key the commit retires.
+				$public_key = $vault->sealingPublicKey();
 			}
 		}
 		$out[] = array(

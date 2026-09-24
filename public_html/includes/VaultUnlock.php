@@ -27,7 +27,9 @@
  * is the only durable trace a window leaves — see docs/sealed_vault.md
  * § The audit log.
  *
- * @version 1.12
+ * @version 1.13
+ * @changelog 1.13 - clientReseal()/clientResealsFor(): what a client-custody
+ *   scope's browser-run rotation re-seals.
  * @changelog 1.12 - the last-passkey refusal names what the rule guards: sign-in to
  *   an account holding a vault. No second factor opens a vault.
  * @changelog 1.11 - VaultSealedForBrowserException: a row sealed to a
@@ -686,6 +688,45 @@ class VaultUnlock {
 					. 'must not be retired.');
 			}
 		};
+	}
+
+	/** @var array<string,array{classes:string[],scripts:string[]}> client-custody resealers by scope */
+	private static $client_reseals = array();
+
+	/**
+	 * Register what a CLIENT-custody scope's rotation must re-seal for this
+	 * consumer. Only the browser holds that scope's secret, so the server cannot
+	 * re-seal anything itself; this tells the rotation ceremony what to do:
+	 *
+	 *   - $model_classes: SystemBase models whose rows seal to the scope
+	 *     (sealScopeForWrite). vault_client_reseal_rows pages their rows and the
+	 *     browser re-seals each DEK through vault_row_reseal.
+	 *   - $scripts: browser modules (public_html-relative) that register a
+	 *     JoinerySealed.onReseal(scope, fn) hook for keys kept outside those
+	 *     models. The page running the rotation loads them.
+	 *
+	 * Satisfies the consumer's `client_reseals` obligation for $scope.
+	 *
+	 *   VaultUnlock::clientReseal('acme_notes', array(AcmeNote::class));
+	 */
+	public static function clientReseal(string $scope, array $model_classes, array $scripts = array()): void {
+		$entry = self::$client_reseals[$scope] ?? array('classes' => array(), 'scripts' => array());
+		$entry['classes'] = array_values(array_unique(array_merge($entry['classes'], $model_classes)));
+		$entry['scripts'] = array_values(array_unique(array_merge($entry['scripts'], $scripts)));
+		self::$client_reseals[$scope] = $entry;
+		require_once(PathHelper::getIncludePath('includes/VaultConsumers.php'));
+		VaultConsumers::noteClientReseal($scope);
+	}
+
+	/** What a client-custody scope's rotation re-seals, from every loaded consumer. */
+	public static function clientResealsFor(string $scope): array {
+		self::loadConsumerBootstraps();
+		return self::$client_reseals[$scope] ?? array('classes' => array(), 'scripts' => array());
+	}
+
+	/** Forget test-registered client resealers. Tests only. */
+	public static function resetClientResealsForTests(): void {
+		self::$client_reseals = array();
 	}
 
 	/** @return callable[] */

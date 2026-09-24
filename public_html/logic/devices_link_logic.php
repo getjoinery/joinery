@@ -10,8 +10,14 @@
  * mean two ways to approve a device instead of one.
  *
  * So this only settles what the page needs before it can draw itself: is the
- * user signed in, do they have encrypted folders at all, and what code (if any)
- * did they arrive with.
+ * user signed in, which vaults could they hand to a device (Drive's encrypted
+ * folders, and any other client-custody vault they have set up), and what code
+ * (if any) did they arrive with.
+ *
+ * The page answers to drive_active like every device-link action: a linked
+ * computer is a Drive sync client, and its other vaults ride along with it.
+ *
+ * @version 1.1 - lists every set-up client-custody vault beside Drive's
  */
 
 function devices_link_logic(array $input): LogicResult {
@@ -38,10 +44,26 @@ function devices_link_logic(array $input): LogicResult {
 		$has_vault = false;
 	}
 
+	// Every other client-custody vault the user has set up can ride along,
+	// each with its own checkbox and its own unlock.
+	$client_scopes = array();
+	foreach (VaultScopes::clientScopes() as $scope) {
+		if ($scope === 'drive') {
+			continue;
+		}
+		try {
+			if (VaultClientCustody::loadVault($user_id, $scope)) {
+				$client_scopes[] = array('scope' => $scope, 'label' => VaultScopes::labelFor($scope));
+			}
+		} catch (Exception $e) {
+			// an unregistered scope has no vault to offer
+		}
+	}
+
 	return LogicResult::render(array(
-		'code'      => trim((string)($input['code'] ?? '')),
-		'has_vault' => $has_vault,
-		'passkeys_enabled' => (bool)$settings->get_setting('passkeys_enabled'),
+		'code'          => trim((string)($input['code'] ?? '')),
+		'has_vault'     => $has_vault,
+		'client_scopes' => $client_scopes,
 	));
 }
 
@@ -59,6 +81,13 @@ function devices_link_logic_form($formwriter, $page_vars = array(), $input = arr
 	if (!empty($page_vars['has_vault'])) {
 		$formwriter->checkboxinput('enable_vault', 'Let this device open my encrypted folders', array(
 			'helptext' => 'You will be asked to unlock your vault. Your key is sealed to this device in your browser — the server never sees it. Leave this off and the device syncs everything except encrypted folders.',
+		));
+	}
+
+	// One per other vault, named vault_scope_{scope}; each is its own unlock.
+	foreach (($page_vars['client_scopes'] ?? array()) as $cs) {
+		$formwriter->checkboxinput('vault_scope_' . $cs['scope'], 'Let this device open my ' . lcfirst($cs['label']), array(
+			'helptext' => 'You will be asked to unlock this vault too. Its key is sealed to this device in your browser, the same way.',
 		));
 	}
 

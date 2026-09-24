@@ -11,6 +11,11 @@
  * secret to the device's public key without handing the bytes to this page,
  * and the server stores a blob it has no way to read.
  *
+ * Every other client-custody vault the user has set up has its own checkbox
+ * (vault_scope_{scope}); each chosen one is unlocked and sealed the same way,
+ * one unlock per vault, and travels in sealed_vault_keys.
+ *
+ * @version 1.3 - a checkbox, an unlock and a sealed key per vault beyond Drive
  * @version 1.2 - the unlock is the core ceremony; no dialog of its own
  * @version 1.1
  * @changelog 1.1 - The approval takes the FormWriter validator's submitHandler
@@ -37,6 +42,11 @@
 
 	function codeField() { return document.querySelector('[name="code"]'); }
 	function vaultCheckbox() { return document.querySelector('[name="enable_vault"]'); }
+	// The other vaults' checkboxes: [{scope, box}].
+	function scopeCheckboxes() {
+		return Array.prototype.slice.call(document.querySelectorAll('input[type="checkbox"][name^="vault_scope_"]'))
+			.map(function (box) { return { scope: box.name.slice('vault_scope_'.length), box: box }; });
+	}
 
 	// ---- showing what is asking ---------------------------------------------
 
@@ -58,15 +68,14 @@
 			$('dlkDetails').hidden = false;
 			alertBox('');
 
-			// A device that never offered a public key cannot be handed the vault
-			// key, so do not offer to.
-			var cb = vaultCheckbox();
-			if (cb && !info.supports_vault) {
-				cb.checked = false;
-				cb.disabled = true;
-			} else if (cb) {
-				cb.disabled = false;
-			}
+			// A device that never offered a public key cannot be handed any
+			// vault key, so do not offer to.
+			var boxes = scopeCheckboxes().map(function (s) { return s.box; });
+			if (vaultCheckbox()) { boxes.push(vaultCheckbox()); }
+			boxes.forEach(function (cb) {
+				if (!info.supports_vault) { cb.checked = false; }
+				cb.disabled = !info.supports_vault;
+			});
 		} catch (e) {
 			alertBox(e.message || 'That code could not be checked.', 'danger');
 		}
@@ -81,13 +90,13 @@
 	 * want. A vault this page had to unlock for the handoff is locked again
 	 * straight after it.
 	 */
-	async function sealVaultKeyFor(devicePublicKey) {
-		var wasOpen = JoinerySealed.isOpen(SCOPE);
-		var session = await JoinerySealed.session(SCOPE, { reason: 'to give this device your encrypted folders' });
+	async function sealVaultKeyFor(devicePublicKey, scope, reason) {
+		var wasOpen = JoinerySealed.isOpen(scope);
+		var session = await JoinerySealed.session(scope, { reason: reason });
 		try {
 			return await session.sealSecretKeyTo(devicePublicKey);
 		} finally {
-			if (!wasOpen) { JoinerySealed.lock(SCOPE); }
+			if (!wasOpen) { JoinerySealed.lock(scope); }
 		}
 	}
 
@@ -101,24 +110,36 @@
 
 		var cb = vaultCheckbox();
 		var wantVault = !!(cb && cb.checked && !cb.disabled);
+		var wantScopes = scopeCheckboxes().filter(function (s) { return s.box.checked && !s.box.disabled; });
 
 		try {
 			var body = { code: code };
-			if (wantVault) {
+			if (wantVault || wantScopes.length) {
 				if (!resolved || !resolved.device_pubkey) {
 					await resolveCode();
 				}
 				if (!resolved || !resolved.device_pubkey) {
-					alertBox('This device cannot receive your encrypted folders.', 'danger');
+					alertBox('This device cannot receive your vaults.', 'danger');
 					return;
 				}
+			}
+			if (wantVault) {
 				body.enable_vault = true;
-				body.sealed_vault_key = await sealVaultKeyFor(resolved.device_pubkey);
+				body.sealed_vault_key = await sealVaultKeyFor(resolved.device_pubkey, SCOPE,
+					'to give this device your encrypted folders');
+			}
+			// Each vault is its own keypair and its own unlock.
+			if (wantScopes.length) {
+				body.sealed_vault_keys = {};
+				for (var i = 0; i < wantScopes.length; i++) {
+					body.sealed_vault_keys[wantScopes[i].scope] = await sealVaultKeyFor(resolved.device_pubkey,
+						wantScopes[i].scope, 'to give this device this vault');
+				}
 			}
 
 			var res = await api.post('drive_device_link_approve', body);
 			alertBox(res.device_name + ' is linked. It will start syncing in a few seconds — you can close this page.', 'success');
-			document.querySelectorAll('#dlkAlert ~ form button, [name="code"], [name="enable_vault"]').forEach(function (el) {
+			document.querySelectorAll('#dlkAlert ~ form button, [name="code"], [name="enable_vault"], [name^="vault_scope_"]').forEach(function (el) {
 				el.disabled = true;
 			});
 		} catch (e) {

@@ -36,6 +36,14 @@
  *
  * Depends on VaultCrypto, VaultKeyring and joineryApi (at call time).
  *
+ * Rotating a scope's key (resealScope) moves every DEK sealed to it onto a new
+ * keypair: the registered models' rows through vault_client_reseal_rows /
+ * vault_row_reseal, and every other key through the consumers' onReseal hooks.
+ *
+ * @version 1.4 - seals to a pending rotation's key and names the key it used; the
+ *   rotation checks it may begin before collecting unlockers; hooks skip and
+ *   report keys neither key opens
+ * @version 1.3 - onReseal() and resealScope(): a client-custody key rotation
  * @version 1.2 - sessions come only from the core ceremony
  * @version 1.1 - idle lock, pagehide/pageshow lock, the per-browser override
  * @version 1.0
@@ -227,12 +235,14 @@ window.JoinerySealed = (function () {
 
 	// ---- sealing -------------------------------------------------------------
 
-	// The scope's public key. Sealing needs no unlock; a scope that is not set
-	// up yet runs setup through the session ceremony first.
+	// The key new material seals to: the pending key while the scope's key is
+	// being rotated (the commit makes it current), else the key in use. Asked
+	// of the server each time, so a tab opened before a rotation began does not
+	// seal to the key it will retire. Sealing needs no unlock; a scope not set up
+	// yet runs setup through the session ceremony first.
 	async function publicKeyFor(scope) {
-		if (isOpen(scope)) return sessions[scope].publicKey;
 		var st = await VaultKeyring.status(scope);
-		if (st && st.set_up && st.public_key) return st.public_key;
+		if (st && st.set_up) return st.pending_public_key || st.public_key;
 		return (await session(scope)).publicKey;
 	}
 
@@ -249,13 +259,17 @@ window.JoinerySealed = (function () {
 				if (v === '') { fields[names[i]] = ''; continue; }
 				fields[names[i]] = EDGE_FIELD + await VaultCrypto.encrypt(String(v), d.dekKey, String(adPrefix) + id + ':' + names[i]);
 			}
-			return { sealed_dek: sealedDek, fields: fields };
+			return { sealed_dek: sealedDek, fields: fields, public_key: publicKeyB64 };
 		} finally {
 			d.dekBytes.fill(0);
 		}
 	}
 
-	/** Seal `values` for row `id` of a model whose AD prefix is `adPrefix`. */
+	/**
+	 * Seal `values` for row `id` of a model whose AD prefix is `adPrefix`.
+	 * Resolves { sealed_dek, fields, public_key }: public_key names the key it
+	 * sealed to, which the server stamps the row's key generation from.
+	 */
 	async function seal(scope, id, adPrefix, values) {
 		return sealWith(await publicKeyFor(scope), scope, id, adPrefix, values);
 	}
@@ -263,8 +277,10 @@ window.JoinerySealed = (function () {
 	/**
 	 * The two-step browser write, as one call. Posts `values` minus the sealed
 	 * fields to `action`, reads `id` and `sealed_ad_prefix` from the reply,
-	 * seals the rest, and posts { id, sealed_dek, fields } to the same action.
-	 * opts: { scope, sealedFields: [names] }. Resolves the second reply.
+	 * seals the rest, and posts { id, sealed_dek, fields, public_key } to the
+	 * same action — public_key names the key it sealed to; pass it on to
+	 * acceptBrowserSealed(). opts: { scope, sealedFields: [names] }. Resolves
+	 * the second reply.
 	 */
 	async function save(action, values, opts) {
 		opts = opts || {};
@@ -280,7 +296,104 @@ window.JoinerySealed = (function () {
 			throw new Error(action + ' must reply with id and sealed_ad_prefix.');
 		}
 		var sealed = await seal(opts.scope, id, first.sealed_ad_prefix, secret);
-		return joineryApi.post(action, { id: id, sealed_dek: sealed.sealed_dek, fields: sealed.fields });
+		return joineryApi.post(action, { id: id, sealed_dek: sealed.sealed_dek, fields: sealed.fields, public_key: sealed.public_key });
+	}
+
+	// ---- key rotation --------------------------------------------------------
+
+	var resealHooks = {};   // scope -> [fn(ctx)]
+
+	/**
+	 * Register how a consumer re-seals keys it keeps OUTSIDE sealed models when
+	 * `scope`'s key rotates. fn(ctx) gets { oldSession, newSession, newPublicKey,
+	 * progress(text), skip(description) }: open each key with ctx.oldSession,
+	 * seal it to ctx.newPublicKey, store it. It must be safe to run twice: a
+	 * rotation that stopped runs every hook again, and a key already moved opens
+	 * with ctx.newSession instead (leave it). A key neither opens was unreadable
+	 * before the rotation too: leave it and report it with ctx.skip().
+	 */
+	function onReseal(scope, fn) {
+		(resealHooks[scope] = resealHooks[scope] || []).push(fn);
+	}
+
+	function stripEdgeSeal(sealed) {
+		var parsed = parseSealedDek(sealed);
+		if (!parsed) throw new Error('A sealed key is not a browser-sealed key.');
+		return parsed.blob;
+	}
+
+	/**
+	 * Rotate `scope`'s keypair, or finish a rotation that stopped. Needs the old
+	 * key (the ceremony unlocks it) and, to finish, the new one (its own
+	 * passphrase, passkey or new recovery code). Moves every sealed DEK of the
+	 * registered models and runs every onReseal hook, then commits. Resolves
+	 * { key_generation }; rejects 'Rotation cancelled.' when stopped before
+	 * anything was written. opts.progress(text) reports as it goes.
+	 */
+	async function resealScope(scope, opts) {
+		opts = opts || {};
+		var report = opts.progress || function () {};
+		var st = await VaultKeyring.status(scope);
+		if (!st.set_up) throw new Error('This vault is not set up.');
+		var oldSession = await session(scope, { reason: 'to rotate its key' });
+		var newSession, newPublicKey;
+
+		if (st.pending_key_generation == null) {
+			// Refusals (a step-up due, a consumer unable to re-seal) come before the
+			// passkey taps and the passphrase, not after them.
+			await joineryApi.post('vault_client_rotate_begin', { scope: scope, dry_run: 1 });
+			var pair = await VaultCrypto.generateVaultKeypair();
+			var plan = await VaultKeyring.rotationPlan(scope, st, pair.secretKeyBytes);
+			report('Saving the new key…');
+			await joineryApi.post('vault_client_rotate_begin', { scope: scope, public_key: pair.publicKeyB64, wrappings: plan.wrappings });
+			await VaultKeyring.showRecoveryCodes(scope, st.label || 'vault', plan.recoveryCodes,
+				'These open the new key of your ' + (st.label || 'vault') + ' once each, if you lose your passkey and passphrase. '
+				+ 'Your old codes stop working when the rotation finishes. This is the only time they are shown.');
+			newSession = VaultKeyring.sessionFrom(scope, pair.secretKeyBytes, pair.publicKeyB64);
+			newPublicKey = pair.publicKeyB64;
+		} else {
+			newSession = await VaultKeyring.ensureUnlocked(scope, { pending: true, reason: 'to finish rotating its key' });
+			newPublicKey = st.pending_public_key;
+		}
+
+		try {
+			// Rows of the registered models: the server lists only rows still on
+			// the old key, so a walk that stopped picks up where it was.
+			var moved = 0, cursor = { model: '', after_id: 0 };
+			for (;;) {
+				var page = await joineryApi.post('vault_client_reseal_rows', { scope: scope, model: cursor.model, after_id: cursor.after_id, limit: 100 });
+				if (page.rows && page.rows.length) {
+					var out = [];
+					for (var i = 0; i < page.rows.length; i++) {
+						var r = page.rows[i];
+						var dek = await oldSession.openSealed(stripEdgeSeal(r.sealed_dek));
+						out.push({ model: r.model, id: r.id, sealed_dek: EDGE_SEAL + scope + '.' + await oldSession.sealTo(dek, newPublicKey) });
+						dek.fill(0);
+					}
+					await joineryApi.post('vault_row_reseal', { rows: out });
+					moved += out.length;
+					report('Re-sealed ' + moved + ' of ' + (moved + Math.max(0, page.remaining - out.length)) + '…');
+				}
+				if (!page.next) break;
+				cursor = page.next;
+			}
+			// Keys kept outside those models. A key neither key opens was unreadable
+			// before the rotation too; a hook skips it and says so, rather than
+			// holding the rotation back for something it cannot change.
+			var skipped = [];
+			var hooks = resealHooks[scope] || [];
+			for (var h = 0; h < hooks.length; h++) {
+				await hooks[h]({ oldSession: oldSession, newSession: newSession, newPublicKey: newPublicKey, progress: report,
+					skip: function (what) { skipped.push(what); } });
+			}
+			report('Finishing…');
+			var result = await joineryApi.post('vault_client_rotate_commit', { scope: scope });
+			result.skipped = skipped;
+			return result;
+		} finally {
+			newSession.lock();
+			lock(scope);
+		}
 	}
 
 	// ---- self-check ----------------------------------------------------------
@@ -317,6 +430,8 @@ window.JoinerySealed = (function () {
 		labelFor: labelFor,
 		idleMinutes: idleMinutes,
 		setIdleMinutes: setIdleMinutes,
+		onReseal: onReseal,
+		resealScope: resealScope,
 		onLock: onLock,
 		lock: lock,
 		lockAll: lockAll,
