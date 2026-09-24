@@ -906,9 +906,6 @@
                     var code = await JoineryModal.promptAsync('Enter a recovery code:', { confirmLabel: 'Unlock' });
                     if (!code) return;
                     try {
-                        // A second_factor_required render (§ 5.6, recovery-code unlock)
-                        // is handled centrally by apiFetch (redirects to the step-up
-                        // ceremony), so it never resolves here.
                         var result = await apiFetch('/api/v1/action/vault_unlock_recovery', { method: 'POST', body: JSON.stringify({ code: code }) });
                         if (result.data && result.data.regenerate_recommended) {
                             JoineryModal.alert('Unlocked. Fewer than 3 unused recovery codes remain - consider regenerating them.');

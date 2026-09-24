@@ -159,9 +159,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		// whether the factor is asked at sign-in: 'every_login' asks it here;
 		// 'sensitive_only' signs in password-only and defers the factor to sensitive
 		// actions (step-up). That is sound because every escalation from a bare
-		// session — password/email change, 2FA changes, recovery-code use,
-		// protected-mail routing — is independently gated; a phished password on
-		// 'sensitive_only' sees the mailbox's shape and opens nothing.
+		// session — password/email change, 2FA changes, protected-mail routing,
+		// sealed content (a vault unlocker) — is independently gated; a phished
+		// password on 'sensitive_only' sees the mailbox's shape and opens nothing.
 		if ($session->user_has_second_factor($user) && $user->two_factor_cadence() === 'every_login'
 				&& !$session->has_valid_trusted_device_cookie($user)) {
 			session_regenerate_id(true);

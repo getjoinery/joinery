@@ -218,10 +218,9 @@ passkey must:
 - `logic/vault_setup_passphrase_logic.php` is the only action that reaches
   this path.
 
-Accepted trade: such a vault is openable with memorized secrets alone (the
-phrase, or a recovery code), which is exactly what the possession-factor
-invariant avoids elsewhere. It is the best available on hardware that cannot do
-better, and it is temporary by design — `vault_add_passkey_*` wraps the same
+Accepted trade: no passkey opens such a vault — only the phrase or a recovery
+code, both memorized or written-down secrets. It is the best available on
+hardware that cannot do better, and it is temporary by design — `vault_add_passkey_*` wraps the same
 key under a real passkey once the holder has a capable device, after which the
 phrase can be removed.
 
@@ -335,10 +334,10 @@ Unlock endpoints (`logic/vault_unlock_options_logic.php` and its
 `vault_unlock_passkey` / `vault_unlock_recovery` / `vault_unlock_passphrase`
 siblings, plus `vault_lock`) mint the WebAuthn PRF assertion options with
 `userVerification: required` (`PasskeyService::getDerivationOptions()`) —
-every vault unlock demands device user verification, not merely preferred.
-The two knowledge-factor unlocks (recovery code, bypass phrase) additionally
-demand the account's second factor regardless of the 2FA cadence setting: a
-remote attacker must hold a possession factor, never just stolen strings.
+every passkey unlock demands device user verification, not merely preferred.
+The recovery code and the bypass phrase each open the vault on their own. The
+account's sign-in second factor never takes part in opening a vault: an
+authenticator code confirms sign-ins and sensitive changes, and opens nothing.
 
 ### Host hardening
 
@@ -392,10 +391,9 @@ The platform-wide "you're locked" idiom: every signed-in page for a user with
 a set-up server-custody vault carries a padlock in a fixed place — closed
 while the vault is locked, open (success-colored) while an unlock window is
 live. Clicking the closed padlock runs the unlock ceremony in place, offering
-what the vault has — a passkey, the bypass phrase or a recovery code (a knowledge
-factor on an account with a second factor passes through the step-up page
-first); clicking the open padlock opens a small popover with the idle-timeout
-note and a **Lock now** button — the walk-away affordance. Users without a
+what the vault has — a passkey, the bypass phrase or a recovery code; clicking
+the open padlock opens a small popover with the idle-timeout note and a
+**Lock now** button — the walk-away affordance. Users without a
 vault never see the chip or load its assets.
 
 `PublicPageBase` drives it: for a signed-in user whose vault exists it emits

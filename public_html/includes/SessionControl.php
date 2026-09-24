@@ -90,6 +90,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.6 - the vault re-enrollment gate's message says what the factor is for: signing
+ *                in to an account that holds a vault, never opening the vault
  * @version 1.5 - the vault re-enrollment gate's message states the rule (a vault needs a
  *                second factor) instead of claiming an administrator reset;
  *                forget_vault_posture() for a vault created mid-session;
@@ -1658,7 +1660,7 @@ class SessionControl{
 			if ($current_path !== '/profile/security' && $current_path !== '/setup'
 					&& $current_path !== '/logout'
 					&& strpos((string)$current_path, '/api/v1/') !== 0) {
-				$msgtxt = urlencode('Your account has no second factor, and your encrypted vault needs one - add a passkey or an authenticator app to continue.');
+				$msgtxt = urlencode('Your account holds an encrypted vault, so it needs a second way to sign in - add a passkey or an authenticator app to continue.');
 				header('Location: /profile/security?msgtext=' . $msgtxt);
 				exit();
 			}

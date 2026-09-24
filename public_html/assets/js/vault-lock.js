@@ -38,6 +38,7 @@
  * shows only while a browser-held vault is open. It follows
  * 'joinery:vault-scope-unlocked' / 'joinery:vault-scope-locked' for those.
  *
+ * @version 1.5 - a bypass phrase or recovery code opens the vault on its own, with no step-up page
  * @version 1.4 - unlock() offers every method the vault has, not only a passkey
  * @version 1.3 - one chip for the server window and browser-held vaults
  * @version 1.2 - collectUnlocker(): the shared "confirm it's you" step for enrolments
@@ -105,12 +106,6 @@
 					{ confirmLabel: 'Unlock', confirmStyle: 'primary' });
 				if (!code) { return false; }
 				res = await api('vault_unlock_recovery', { code: code });
-			}
-			// A knowledge factor on an account that has a second factor needs a
-			// fresh confirmation first: go through the step-up page and come back.
-			if (res && res.second_factor_required) {
-				window.location = '/verify-stepup?return=' + encodeURIComponent(window.location.pathname + window.location.search);
-				return false;
 			}
 			if (res && res.success === false) { throw new Error(res.message || 'Unlock failed.'); }
 			setState('open');

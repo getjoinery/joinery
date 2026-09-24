@@ -1,4 +1,5 @@
 <?php
+// @version 1.3 - the last-factor removal warning names the cost as password-only sign-in, not a weaker vault
 // @version 1.2 - the Security card's notes follow the vault alone: no mail protection level or add-on requires a second factor
 // @version 1.1 - a Remove button only for a group with a membership row, read once by the logic (specs/post_release_fleet_defects.md B4.2)
 // NO need to require PathHelper - admin pages are accessed through serve.php
@@ -251,7 +252,7 @@ array(
 			// factor at all is confirmed by typed phrase, not by an OK button.
 			$last_factor_passkey = $security['vault_count'] > 0 && !$security['totp_enabled'] && $live_passkeys === 1;
 			$last_factor_totp    = $security['vault_count'] > 0 && $live_passkeys === 0;
-			$zero_factor_message = 'This user\'s vault will be protected by memorized secrets only until they '
+			$zero_factor_message = 'This user holds an encrypted vault and will sign in with a password alone until they '
 				. 'enroll a new factor. They will be required to enroll one at their next sign-in.';
 		?>
 		<div class="card mt-3">
