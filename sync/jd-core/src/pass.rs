@@ -2975,6 +2975,26 @@ fn detect_folder_moves(
     // path resolved. An ordinary single file moved between two folders answers
     // yes as well and pays for the evidence below; that is a scan where
     // something really did move, not the settled case this exit is here for.
+    //
+    // Files answer only for files the engine agreed on. Two folders with none
+    // in them -- or whose files went back to the names they had while the
+    // directories traded -- trade without a file changing folders, and the
+    // exit took the records' word for where each folder is. The directories
+    // say otherwise, and they are asked first: a tracked path standing on a
+    // directory another live folder knows as its own is a trade, whatever the
+    // files say. Left to the exit, the server's next rename of either folder
+    // was refused by that directory's identity on every pass (the reset's C9;
+    // plat3 75424). One lookup per tracked folder, and exact: both sides know
+    // the identity.
+    let crossed = || -> bool {
+        tracked.iter().any(|(path, id)| {
+            dir_identity
+                .get(path)
+                .copied()
+                .filter(|d| *d != 0)
+                .is_some_and(|here| owned.get(&here).is_some_and(|o| o != id))
+        })
+    };
     let a_file_changed_folders = || -> bool {
         for file in observed {
             let Some(believed) = believed_parent.get(&file.fingerprint.file_id) else {
@@ -2993,7 +3013,7 @@ fn detect_folder_moves(
         }
         false
     };
-    if missing.is_empty() && !unaccounted && !a_file_changed_folders() {
+    if missing.is_empty() && !unaccounted && !crossed() && !a_file_changed_folders() {
         return Ok(scan);
     }
 
@@ -3954,6 +3974,14 @@ fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
         let Some(path) = relative_path(env, &entry)? else {
             continue;
         };
+        // A sealed file held outside its vault is kept away from where the
+        // server keeps it on purpose; its own file back in that slot is the
+        // file come home (scan, `arrived_by_a_trade`).
+        let server_home = if held_outside_its_vault(env, &entry)? {
+            server_path(env, &entry)?
+        } else {
+            None
+        };
         let known = KnownLocal {
             id: entry.id,
             path,
@@ -3961,6 +3989,7 @@ fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
             sha256: entry.synced_content.as_ref().map(|c| c.sha256.clone()),
             server_deleted: entry.remote_deleted,
             held: held.contains(&entry.id),
+            server_home,
         };
         if entry.remote_deleted {
             deleted.push(known);
@@ -4589,6 +4618,20 @@ pub(crate) fn relative_path(env: &ExecEnv, entry: &Entry) -> Result<Option<Strin
     }
     parts.reverse();
     Ok(Some(parts.join("/")))
+}
+
+/// Where an entry's SERVER placement puts it on this disk, relative to the
+/// sync root: its folders as this device holds them, and its name as this
+/// volume would write it (the executor's `path_for` derives it the same way).
+fn server_path(env: &ExecEnv, entry: &Entry) -> Result<Option<String>, ExecError> {
+    let mut there = entry.clone();
+    there.synced_placement = None;
+    there.stand_in = None;
+    there.local_name = match jd_vfs::to_local_name(&entry.remote.name, &env.vfs.personality()) {
+        jd_vfs::LocalName::Escaped { local, .. } => Some(local),
+        jd_vfs::LocalName::AsIs(_) | jd_vfs::LocalName::Unsyncable(_) => None,
+    };
+    relative_path(env, &there)
 }
 
 /// Split a relative path into the folder that holds it and the name.

@@ -448,7 +448,10 @@ own name is plaintext on the server and renames normally.
 turn plaintext into ciphertext or back again, and it refuses an in-place
 crossing with `reason: protection_boundary`. Nothing on the platform turns an
 encrypted file back into plaintext — not the server, not the browser. The client
-crosses only into a vault, by uploading the file again.
+crosses only into a vault, by uploading the file again. A copy of a vault file
+made outside the vault is a new file and goes up with the protection of the
+folder it stands in; so does an editor's backup or save written outside the
+vault.
 
 **Into a vault, a file or folder is converted.** The source is trashed, its
 record forgotten, and the next scan finds the bytes at their new path as an
@@ -469,7 +472,11 @@ While it is held:
   to another plain folder — is this disk's side alone; the server is asked
   nothing.
 - Moving it back into a vault lands it on the server's placement, a move within
-  the vault when it goes to a different folder there.
+  the vault when it goes to a different folder there. Its own file standing in
+  the slot the server keeps it in is the file come home even when another file
+  now stands at the path it was held at: the hold releases, and a new file
+  standing at the path it was held at goes up as a new file with that folder's
+  protection.
 - Deleting it trashes the sealed copy on the server.
 - Edits wait on both sides: nothing edited here is sent, and a change made on
   another device is not written over the copy here. If the copy here is gone

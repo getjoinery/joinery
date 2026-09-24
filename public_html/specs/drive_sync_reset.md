@@ -1735,7 +1735,9 @@ belt in, before the belt lands.** B1 is what happens without this.
 ## Open
 
 - **D1 (2026-09-24), a sealed file dragged out of a vault is held, not
-  converted. Built; awaiting NEEDED/VALID on the tree copy (public-html-25).**
+  converted. NEEDED and VALID (public-html-25), landed 0c66212d.** Post-commit
+  reading 181843af -> 0c66212d: identical, seed for seed, to the reviewed
+  build (the numbers below).
   Owner decision 2026-09-22 (held, not converted; the sealed oracle stays
   strict), wording 2026-09-24 (honest text, no unencrypt feature, no revert).
   Nothing on the platform takes a file out of a Fortress vault:
@@ -1905,7 +1907,8 @@ belt in, before the belt lands.** B1 is what happens without this.
     tell those apart). not_carried_out 1: kill2 75112, folder T1 / C9
     (written into a ring directory while it was the vault, set aside there
     after the path map gave it to a plain folder).
-  - **Held-path edit readings join the copy-out line.** On the build before
+  - **Held-path edit readings: closed by the copy-out decision (upload it,
+    2026-09-24).** On the build before
     the follow fix, kill2 75102 and 75118 lost a held record's file to the
     scan's edit reading. Both strangers at the held path were files with no
     record (75102: never minted on that device; 75118: the leftover bytes of a
@@ -1913,7 +1916,7 @@ belt in, before the belt lands.** B1 is what happens without this.
     as edits by design: the backup-save shape. Inode-first pairing for held
     records was rejected (it overrides mine4 for one class and only changes
     which copy goes up plain on a real editor save), and so was a content-hash
-    do-not-mint rule (a guard, and the copy-out line in disguise).
+    do-not-mint rule (a guard, and a copy-out refusal in disguise).
 - **Owner decision D2 (2026-09-22): scan rule 1 takes the careful form
   (`mine4`).** A record refuses bytes at its path as an edit only when its own
   file still stands elsewhere and the thing at its path is one the store
@@ -2079,6 +2082,63 @@ belt in, before the belt lands.** B1 is what happens without this.
     under folder 503 because the path map gives `ring-1` to 503, while the
     directory there carries identity 1004, held by 504 alone, after a
     two-device folder-ring rename.
+- **D1 return (2026-09-24), a held file dragged home while a new file takes
+  its held name. NEEDED and VALID on the tree copy (public-html-25); one
+  commit with the C9 fast exit (next entry), both editing `pass.rs`.** Found tracing T1-C (plat3 75423, kill2 75118); reachable
+  on 697654c3. A held record's own file stands back in the vault slot the
+  server keeps it in, and a new file stands at the path it was held at -- an
+  editor that still had it open, saving to the path it knew, or (in the
+  sweeps) a download's set-aside that the owner followed out, then the chaos
+  swap undone. `arrived_by_a_trade` needed the record's own file on another
+  RECORD's path, and the vault slot has no record, so rule 1 read the new
+  file as the held file's edit: the hold never released, the new file was
+  never sent, and the file at home was minted as a W1 waiter and folded back
+  into the held record by `merge_duplicate_files` on every pass (400+ mints
+  in 75423). The fix: a held record's own file standing at its SERVER
+  placement is a trade (`KnownLocal::server_home`, set only for a record held
+  outside its vault). Inert for every other record; no backup made by
+  renaming lands there (the held path and the slot are in different folders),
+  so the owner's mine4 choice is untouched. Unedited, the scan reads the move
+  home and D1's release takes it; edited, it is D1's existing move-and-edit
+  (a delete and a creation, rule 4's price). Pins:
+  `a_held_file_dragged_home_as_a_new_file_takes_its_held_name_releases_the_hold`
+  (the whole end state: hold released, the record at home, no new version,
+  the new file up once, no waiter, one mint, converged), RED on 697654c3;
+  scan unit test
+  `a_held_files_own_file_back_where_the_server_keeps_it_is_the_file_come_home`.
+  Measured alone vs 0c66212d: swaps on leaked 157 -> 154, chain 33 -> 32,
+  custody 8 -> 7, R->G 0, G->R 1; never_settled 1 -> 2; swaps off and
+  held-out plain2 identical. Traced:
+  - G->R kill2 75118 (sealed): the file came home edited, so D1's
+    move-and-edit path runs; a plain provisional minted from other bytes then
+    uploads the sealed file a chaos swap put at its path (the P1 road). T1-C's
+    upload identity check closes that road.
+  - never_settled plat3 75424: C9, the crossed-directory loop. With the C9
+    fast-exit as well it settles, firing what it fired under D1.
+- **C9 fast exit (2026-09-24), a crossing the folder scan's fast exit never
+  looked at. NEEDED and VALID on the tree copy (public-html-25); one commit
+  with the D1 return.** Two
+  folders' directories cross under unchanged paths -- the directories traded
+  names and each file went back to the name it had, or neither folder holds a
+  synced file. Nothing is missing, nothing is unaccounted, and no synced file
+  changed folders, so `detect_folder_moves` returned before asking identity,
+  and the server's next rename of either folder was refused by the other's
+  directory on every pass (plat3 75424 under T1-C and under the D1 return;
+  reachable on 697654c3). The exit also asks whether any tracked path stands
+  on a directory another live folder knows as its own; if one does, the full
+  pairing runs. It adds no placement rule: the unlanded C9a diff
+  (`specs/drive_sync_reset_c9a_unlanded.diff`, a placement rule inside the
+  pairing, for 74424) is a different mechanism and stays. Pin:
+  `two_folders_whose_directories_crossed_under_unchanged_paths_follow_them`,
+  RED on 697654c3. Measured alone vs 0c66212d: swaps on, every aggregate
+  identical and 156 of 160 verdicts byte-identical (the other four fire the
+  same oracles; kill2 75125 custody 4 -> 2 misplaced files); swaps off 160 of
+  160 and held-out 100 of 100 byte-identical; the unlanded diff's regressions
+  (chain 74401, 74404, 74407, 74409; custody 75407) unchanged.
+  The commit, D1 return and fast exit together, vs 0c66212d: swaps on,
+  leaked 157 -> 158, sealed seeds 77 -> 78, chain 33 -> 33, custody 8 -> 8,
+  never_settled 1 -> 1, R->G 0, G->R 1 (kill2 75118, the P1 road above, which
+  T1-C closes); swaps off 160 of 160 and held-out 100 of 100 byte-identical.
 - **T1-C, open: a record for a file never uploaded carries no inode.** An
   engine-rescued provisional (rescue_unsynced out of a trashed folder) is
   swapped with a synced file; no clause can name it, and the trade reads as
@@ -2120,12 +2180,19 @@ belt in, before the belt lands.** B1 is what happens without this.
   only at a new upload; a move sends `drive_move` alone and nothing calls
   `drive_key_grants_sync`, so a sealed file moved from vault A to vault B
   stays readable by A's readers and not by B's (the owner apart).
-- **Owner line owed: copying a file out of a vault uploads it plain.** Not
-  covered by D1. The same line now carries the backup-save shape on a held
-  file (kill2 75102, 75118 above): an editor that saves by rename on a held
-  file leaves one of its two files minted plain in the plain folder, whichever
-  pairing the scan uses. And a hard link of a held file made in a plain folder
-  is a copy out of the vault: under D1 it waits, unsent, until the user acts.
+- **Owner decision, copy-out (2026-09-24): upload it.** A new file in a plain
+  folder goes up plain whatever it contains. Closed for every shape this reset
+  met: a copy of a vault file made outside the vault; an editor's backup
+  (save by rename) of a held file, one of whose two files is minted plain in
+  the plain folder whichever pairing the scan uses (kill2 75102, 75118); an
+  editor save to the held path after the file went home (the D1 return), where
+  the file in the vault is the held record again and the save at the plain
+  path -- very likely the held file's content, edited -- goes up plain as a new
+  file; and the same backup-save shape on a sealed file held unsent (T1-C,
+  hostile2 74418 on the laptop). `docs/drive_sync.md` says so in the crossing
+  section. Not a copy-out: a hard link of a held file made in a plain folder
+  carries the held file's own disk identity, so D1 keeps it waiting, unsent,
+  until the user acts.
 - **Finding, the folder make_room rule:** `the_owner_follows_its_directory`
   sets the agreed NAME only, so a directory the user moved across folders
   onto a destination gets a wrong agreed parent, and it undoes the user's
@@ -2143,7 +2210,37 @@ belt in, before the belt lands.** B1 is what happens without this.
   pass: (a) an all-contested ring whose disk already matches the server
   (hostile2 74424 on D2's world); (b) a twin record holds the directory
   (T1). Before its approach: why the contested-ring claim does not fire on
-  74424 (Q5), and plat3 75424's class.
+  74424 (Q5). plat3 75424's class is a crossing the fast exit skipped, closed
+  by the C9 fast exit above.
+  Part 2, a crossing the pairing reaches and cannot place (kill2 75109; kill2
+  75101 with a vault in it; reachable on 697654c3 with the fast exit): one
+  folder's files went back to its path while its directory stands at the
+  other's path, which holds nothing known, so no round places either one and
+  the server's rename is refused by identity on every pass. Approach YES
+  (public-html-25): after the pairing, a tracked folder present at a path
+  whose directory another live folder knows as its own, while its own known
+  directory stands elsewhere here, is held as DIRECTORY_DISAGREES holds a
+  folder whose directory and files went different ways -- present, unmoved,
+  its directory not adopted, its server placement not applied here (zero
+  requests per pass), said once per folder -- and lifts by the existing rule.
+  Conditions: V1 whether the vault claim (1A) resolves a vault in the
+  crossing first; V2 an issue sentence of its own naming both folders; V3 a
+  per-entity converged declaration counted on the ARM line
+  (`dir_disagrees_held=`), covering kill2 75123; V4 pins both ways (the hold,
+  and its lift); V5 measured on top of the fast exit, its own commit after
+  it.
+- **C13, open: an agreement on this device's own scratch name gives the file
+  up.** Found tracing T1-C (plain2 75208, held-out; a timing T1-C's trajectory
+  reached, not T1-C). The laptop parks 903 under its own tagged scratch name
+  for a name trade; the finishing move is retried on network faults ("the
+  server is unavailable", then "connection reset while reading the
+  response"), and its partner is refused ("the name is spoken for by
+  something this device is renaming"). A later pass finds the record AGREED
+  at the scratch name, and naming reads that agreement, finds the reserved
+  prefix and parks the file `Unsyncable(ReservedPrefix)`: the file is given up
+  here and the server keeps the scratch name for good. C10's area. Four lines
+  and a pin (a device's own park agreed after a failed second leg is finished
+  or undone, never given up) owed to public-html-25; does not block T1-C.
 - The AH owner decision (crossing + `mine4`, or nothing) is outside this
   reset and blocks nothing in it; it is named so the hostile arm's residue
   after WP2 is read correctly.

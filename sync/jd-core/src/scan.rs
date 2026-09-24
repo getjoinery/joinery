@@ -64,6 +64,11 @@ pub struct KnownLocal {
     /// the source only if it is the same inode brought back, and otherwise
     /// a stranger the user saved under the old name.
     pub held: bool,
+    /// Where the server keeps this record, for one this device keeps
+    /// somewhere else on purpose: a sealed file held outside its vault
+    /// (owner decision D1). Its own file standing there is the file come
+    /// home, whatever now stands at the path it was held at.
+    pub server_home: Option<String>,
 }
 
 /// What the scan concluded about one tracked file.
@@ -282,7 +287,19 @@ pub fn pair_with(
                     .is_some_and(|rs| rs.iter().any(|r| another_not_at_home(*r)))
                     || awaiting_bytes.contains(o.path.as_str())
             });
-        by_inode || by_content || mine_on_anothers_path
+        // A held record's own file back in the slot the server keeps it in:
+        // the file dragged home, and whatever stands at the held path now is
+        // another file -- an editor that still had it open, saving to the
+        // path it knew. Read as an edit, the hold never released, the new
+        // file was never sent, and the file at home was minted again as a
+        // waiter on every pass (the reset's D1 return). No backup made by
+        // renaming lands there: the held path and that slot are in
+        // different folders.
+        let home_again = !twin_at_home
+            && k.server_home
+                .as_deref()
+                .is_some_and(|home| mine_elsewhere.iter().any(|o| o.path == home));
+        by_inode || by_content || mine_on_anothers_path || home_again
     };
 
     let mut settled: Vec<bool> = vec![false; known.len()];
@@ -445,7 +462,7 @@ mod tests {
             path: path.into(),
             fingerprint: Some(fp(file_id, 10, 100)),
             sha256: Some(sha.into()),
-            server_deleted: false, held: false,
+            server_deleted: false, held: false, server_home: None,
         }
     }
 
@@ -722,6 +739,7 @@ mod tests {
             sha256: Some("sha-x".into()),
             server_deleted: false,
             held: false,
+            server_home: None,
         };
         let out = pair(
             &[bare.clone()],
@@ -774,6 +792,27 @@ mod tests {
     }
 
     #[test]
+    fn a_held_files_own_file_back_where_the_server_keeps_it_is_the_file_come_home() {
+        // A held record's own file stands in the slot the server keeps it in,
+        // and a stranger stands at the path it was held at. Its file came home:
+        // a move, and the stranger is new. Without the server's slot the same
+        // disk reads as an edit (the backup-by-rename reading).
+        let held = KnownLocal {
+            server_home: Some("Private/out.txt".into()),
+            ..known(1, "Plain/out.txt", 100, "sha-held")
+        };
+        let disk = [observed("Plain/out.txt", 300, "sha-new"), observed("Private/out.txt", 100, "sha-held")];
+        let out = pair(&[held.clone()], &disk);
+        assert_eq!(
+            out.change_for(EntityId::file(1)),
+            Some(&LocalChange::Moved { to_path: "Private/out.txt".into(), fingerprint: fp(100, 10, 100) })
+        );
+        assert_eq!(out.created.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(), vec!["Plain/out.txt"]);
+        let out = pair(&[KnownLocal { server_home: None, ..held }], &disk);
+        assert!(edited(&out, 1), "{:?}", out.change_for(EntityId::file(1)));
+    }
+
+    #[test]
     fn a_move_the_scan_cannot_confirm_reads_as_a_delete_plus_a_create() {
         // The price of refusing to pair on a bare inode, recorded rather than
         // discovered. A file renamed AND edited between two scans has neither
@@ -805,7 +844,7 @@ mod tests {
                 path: "a.txt".into(),
                 fingerprint: None,
                 sha256: None,
-                server_deleted: false, held: false,
+                server_deleted: false, held: false, server_home: None,
             }],
             &[observed("elsewhere.txt", 900, "sha-x")],
         );
