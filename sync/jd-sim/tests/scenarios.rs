@@ -2708,6 +2708,66 @@ fn a_held_file_moved_back_into_its_vault_is_released() {
     assert_converged(&world);
 }
 
+/// A held file dragged back into its vault while a new file is saved under
+/// the name it was held at -- an editor that still had it open, saving to the
+/// path it knew. The held file is home: the hold releases, the record is the
+/// file in the vault again, and the sealed copy is untouched. The new file is
+/// a new plain file and goes up as one, minted once. RED before: the held
+/// record read the new file at its held path as its own edit, so the hold
+/// never released and the new file was never sent, and the file back in the
+/// vault was minted as a waiter and folded into the held record by name on
+/// every pass (plat3 75423, kill2 75118).
+#[test]
+fn a_held_file_dragged_home_as_a_new_file_takes_its_held_name_releases_the_hold() {
+    let (world, private, out) = a_vault_of_two(9_941, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    assert_eq!(held_issues(holder).len(), 1);
+    let versions_of_out = |world: &World| world.server.all_versions().into_iter().filter(|v| v.file_id == out).count();
+    let versions = versions_of_out(&world);
+    let minted = |device: &jd_sim::engine::Device| -> i64 {
+        -device.store.get_meta("last_provisional_id").unwrap().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)
+    };
+    let minted_before = minted(holder);
+
+    let fresh = b"a new file saved where the held one stood";
+    holder.fs.user_rename("Plain/out.txt", "Private/out.txt");
+    holder.fs.user_write("Plain/out.txt", fresh);
+    assert!(world.settle().is_some(), "the device never went quiet");
+
+    no_plaintext_of(&world, HELD_BODY);
+    assert!(held_issues(holder).is_empty(), "the hold did not release: {:?}", holder.store.open_issues().unwrap());
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)), "the sealed copy left the vault");
+    assert_eq!(versions_of_out(&world), versions, "the file came home unedited and a version went up");
+    let record = holder.store.get_entry(jd_core::model::EntityId::file(out)).unwrap().expect("the held record is gone");
+    assert_eq!(
+        record.synced_placement,
+        Some(jd_core::model::Placement { parent: Some(private), name: "out.txt".into() }),
+        "the record is not the file at home"
+    );
+    let new_file = world
+        .server
+        .files()
+        .into_iter()
+        .find(|f| !f.trashed && f.id != out && f.folder != Some(private))
+        .expect("the new file did not go up");
+    assert_eq!(
+        world.server.tree().get("Plain/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(fresh)),
+        "the new file is not at the name it was saved under: {:?} {new_file:?}",
+        world.server.tree()
+    );
+    assert!(
+        holder.store.every_entry().unwrap().iter().all(|e| !e.id.is_provisional()),
+        "a record is still waiting: {:?}",
+        holder.store.every_entry().unwrap().iter().filter(|e| e.id.is_provisional()).collect::<Vec<_>>()
+    );
+    assert_eq!(minted(holder) - minted_before, 1, "minted more than the one new file");
+    assert_converged(&world);
+}
+
 /// Deleting a held file is the user deleting it: the server copy goes to the
 /// trash, and nothing is published on the way.
 #[test]
@@ -12676,6 +12736,41 @@ fn two_folders_trading_names_keep_their_identities() {
         Some(fa),
         "deep-a belongs to the folder it was always in, whatever that folder is called now"
     );
+    assert_converged(&world);
+}
+
+/// Two folders trade names on one device and each file is moved back to the
+/// name it had, so every path holds the file it held and only the
+/// directories have crossed. A peer then renames one folder. The device's
+/// records follow their directories and the world settles (the reset's C9;
+/// plat3 75424 under T1-C). RED before: with nothing missing, nothing new and
+/// no file standing under a folder other than its record's, the scan read no
+/// move, and the peer's rename was refused every pass by the other folder's
+/// directory standing at the stale path.
+#[test]
+fn two_folders_whose_directories_crossed_under_unchanged_paths_follow_them() {
+    let world = World::new(9_940, &["mac", "pc"]);
+    let a = world.server.seed_folder(None, "ring-1");
+    let b = world.server.seed_folder(None, "ring-3");
+    world.server.seed_file(Some(a), "a.txt", b"in the first folder");
+    world.server.seed_file(Some(b), "b.txt", b"in the second folder");
+    assert!(world.settle().is_some());
+    let mut committed = Committed::default();
+    committed.note("a.txt", b"in the first folder");
+    committed.note("b.txt", b"in the second folder");
+    let pc = world.device("pc");
+    pc.fs.user_rename("ring-1", "renamed");
+    world.pass(pc);
+    let mac = world.device("mac");
+    mac.fs.user_rename("ring-1", ".swap.tmp");
+    mac.fs.user_rename("ring-3", "ring-1");
+    mac.fs.user_rename(".swap.tmp", "ring-3");
+    mac.fs.user_rename("ring-1/b.txt", "ring-3/b.txt");
+    mac.fs.user_rename("ring-3/a.txt", "ring-1/a.txt");
+    assert!(world.settle().is_some(), "the device never went quiet");
+    let folders = world.server.folders();
+    assert!(folders.iter().all(|f| !f.trashed), "a folder was trashed: {folders:?}");
+    assert_nothing_lost(&world, &committed);
     assert_converged(&world);
 }
 
