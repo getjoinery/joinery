@@ -1,6 +1,9 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.71 — every address in a message header carries a
+ * No framework. @version 2.72 — a send whose Sent copy could not be stored closes
+ * the compose as sent and shows the server's warning; the send no longer posts
+ * a form token (the API call carries X-Joinery-Csrf).
+ * @version 2.71 — every address in a message header carries a
  * small add-to-contacts icon, shown only while that address is not a contact.
  * @version 2.70 — a message gone from its source server says so
  * above its attachments (source_gone).
@@ -4337,10 +4340,9 @@
 
 	function sendComposeNow(e, btn) {
 		// The shared compose payload (rich HTML + plaintext + attachments + inline
-		// manifest), plus the reader token and draft_id (a saved draft morphs into
-		// the Sent row, reusing its already-uploaded attachments).
+		// manifest), plus draft_id (a saved draft morphs into the Sent row, reusing
+		// its already-uploaded attachments).
 		var body = buildComposeBody(true).body;
-		body.append('_csrf_token', document.getElementById('mbx_csrf').value);
 		if (state.draftId) body.append('draft_id', String(state.draftId));
 
 		// Multipart send (attachments) — joineryApi.post is JSON-only, so this
@@ -4353,7 +4355,10 @@
 		}).then(function (r) { return r.json(); }).then(async function (env) {
 			if (btn) btn.disabled = false;
 			var data = (env && env.data) ? env.data : {};
-			if (!(env && env.errortype) && data.outbound_id) {
+			// sent: the carrier took it. A warning rides along when its Sent copy
+			// could not be stored — still a success, so the compose closes and
+			// nothing invites a second send.
+			if (!(env && env.errortype) && (data.sent || data.outbound_id)) {
 				// The draft (if any) was morphed into the Sent row server-side — drop
 				// our handle without a save-and-close.
 				var wasDrafts = state.draftsView;
@@ -4372,6 +4377,7 @@
 					refreshThreads();
 				}
 				refreshMailboxes();
+				if (data.warning) alert(data.warning);
 			} else if (data.locked) {
 				// sending-lock compose while locked: one-tap unlock, then resubmit the
 				// same draft without re-navigation (specs/mailbox_security_levels.md § 4.1).

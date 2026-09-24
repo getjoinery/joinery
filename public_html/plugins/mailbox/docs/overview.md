@@ -3013,7 +3013,7 @@ cookie + `X-Joinery-Csrf`). The reader consumes the response envelope's `data`.
 | `mailbox/thread_list` | thread list (`alias_id`, filters, `page`) |
 | `mailbox/thread` | messages in a `thread_key` (with bodies) |
 | `mailbox/thread_action` | mark read/unread, star/unstar, delete — accepts `ids[]`, a `thread_key`, or a whole selection as `thread_keys[]` — each expanded server-side |
-| `mailbox/send` | multipart: send a reply / reply-all / forward / new message AS the mailbox; stores the sent copy |
+| `mailbox/send` | multipart: send a reply / reply-all / forward / new message AS the mailbox; stores the sent copy (`sent`, `outbound_id`, optional `warning`) |
 | `mailbox/message_source` | the original RFC822 source of one message, for **Show original** |
 | `mailbox/message_timeline` | everything recorded about one message as an ordered event list, for **Show logs** (`refresh_delivery=1` re-asks the carrier) |
 
@@ -3155,7 +3155,19 @@ see "New message" below for what differs.
   `iem_direction = 'outbound'` row (sender = mailbox address, recipient = the
   To/Cc list, `iem_is_read = true`) so the conversation renders from the local
   row immediately — no poll needed. A failed send stores **no** row and surfaces
-  the error inline; the draft stays in the panel to fix and resend.
+  the error inline; the draft stays in the panel to fix and resend. On a
+  sealing mailbox the row is inserted with empty content, sealed, and only then
+  given its Message-ID and thread key: a reply or forward has opened the sealed
+  original by then, and `SealedEgressGuard` refuses a long plain string on an
+  INSERT but accepts it on a row sealed to the same owner.
+- **The result.** `mailbox/send` answers `sent: true` with the row's
+  `outbound_id`. Once the carrier has taken the message nothing fails the send:
+  a Sent copy that cannot be stored comes back as `sent: true`, `outbound_id: 0`
+  and a `warning` the reader shows (the message has left; the copy is in the
+  account's Sent folder and arrives with the next sync, or there is no copy and
+  the person is told not to send again). A failure before the hand-off says the
+  message was not sent. Both name a short reference (`mbx-` plus six hex digits)
+  that appears beside the cause in the error log.
 
 ### New message
 
@@ -3407,6 +3419,9 @@ forward the router relays for a message that has a stored copy writes one
 and — asked later — the delivery status. On a Private mailbox the
 recipients and the error seal to the owner's vault with the rest of the mail;
 a sealing mailbox with nobody to seal to records the attempt without them.
+The long plain facts — Message-ID, From, transport label, receipt, the Direct
+list — are written onto the row after it is inserted and sealed, the order
+`SealedEgressGuard` accepts from a send that has opened sealed mail.
 Writing the record never fails or delays a send: both writers run after the
 transport has answered and swallow their own errors. An attempt on a message
 that was never stored (a pure-forward alias) is not written — no timeline could

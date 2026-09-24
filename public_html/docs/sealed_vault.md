@@ -728,6 +728,15 @@ store a reference instead of a copy, give the destination the Layer 0 sealing
 columns and seal the value, or do not write the content. There is deliberately
 no way to declare a table exempt.
 
+**A new row from a hot process** follows the Layer 0 order all the way through:
+insert it with its content empty and its long plain metadata left out, seal it,
+then write that metadata onto the now-sealed row, where the third allowance
+covers it. An INSERT never qualifies for that allowance — the row has to exist
+before anything can be sealed into it. Metadata that is not content but runs
+long, such as a Message-ID or a carrier's receipt, is where this bites: the
+Sent copy of a reply (`MailboxSender::storeOutboundRow()`) and its send attempt
+(`MailboxSendAttempt::record()`) are both written this way.
+
 The rule anchors at the PDO statement layer (`includes/GuardedPdo.php`), under
 models, Multi collections, hand-written SQL and plugins alike, because there is
 no single write path above it. Owner attribution comes from

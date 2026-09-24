@@ -16,7 +16,9 @@
  *
  * Failure is synchronous (queue_on_failure = false): a failed send stores NO row
  * and returns an error the reader shows inline; the draft stays in the compose
- * panel for "fix and Send again" (spec §10).
+ * panel for "fix and Send again" (spec §10). Once the carrier has taken the
+ * message it has left, so nothing after that point fails the send: a Sent copy
+ * that cannot be stored comes back as sent, with a warning saying so.
  *
  * Forward re-attach is ONE manifest-driven loop dispatching each row on where its
  * bytes live (specs/implemented/inbound_email_attachment_storage.md): a file-backed row
@@ -51,6 +53,11 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.20 - the Sent row takes its Message-ID and thread key after it is sealed:
+ *   a reply has opened the sealed original, and SealedEgressGuard refuses a long
+ *   plain string on an INSERT, so a reply sent before any draft was saved lost its
+ *   Sent row. A Sent copy that cannot be stored no longer fails a send the carrier
+ *   already took — send() returns it as sent, with a warning and a log reference
  * @version 1.19.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.19 - every send writes a MailboxSendAttempt row — sent, failed, or partly
  *   Direct-delivered — with the transport, the carrier's receipt and the error, so
@@ -128,14 +135,12 @@ class MailboxSender {
 		$this->viewer = $viewer;
 	}
 
-	private function db() {
-		return DbConnector::get_instance()->get_db_link();
-	}
-
 	/**
-	 * Compose and send. Returns ['ok'=>true, 'outbound_id'=>int] on success.
-	 * Throws MailboxSenderException with a user-facing message on any failure
-	 * (validation, transport, original-no-longer-available, send failure).
+	 * Compose and send. Returns ['ok'=>true, 'outbound_id'=>int] on success —
+	 * outbound_id 0 plus a 'warning' when the message left but its Sent copy
+	 * could not be stored. Throws MailboxSenderException with a user-facing
+	 * message on any failure before the message left (validation, transport,
+	 * original-no-longer-available, send failure).
 	 *
 	 * @param array $params  mode, source_id (reply/reply_all/forward) or
 	 *                       alias_id (new), to, cc, subject, body
@@ -336,8 +341,12 @@ class MailboxSender {
 		} catch (Throwable $e) {
 			// The message LEFT; the local copy failed to store. The attempt says so,
 			// on the draft when there was one, so the send is not a mystery later.
+			// Reporting it as a failure would invite the person to send it again.
 			$attempt(MailboxSendAttempt::OUTCOME_SENT, null, $draft_row_id, $sent_copy);
-			throw $e;
+			$ref = self::errorReference();
+			error_log('MailboxSender [' . $ref . ']: sent for alias ' . $alias_id . ', but the Sent copy could not be stored: '
+				. get_class($e) . ': ' . $e->getMessage());
+			return array('ok' => true, 'outbound_id' => 0, 'warning' => self::unsavedCopyWarning($sent_copy, $ref));
 		}
 		$attempt(MailboxSendAttempt::OUTCOME_SENT, null, intval($stored['id']), $sent_copy);
 		if (!empty($uploads['regular'])) {
@@ -360,6 +369,30 @@ class MailboxSender {
 		// effect of traffic, in either direction.
 
 		return array('ok' => true, 'outbound_id' => $stored['id']);
+	}
+
+	/**
+	 * A short tag written into the error log beside a send problem and shown to
+	 * the person with it, so the one line that explains their message can be
+	 * found again without a timestamp hunt.
+	 */
+	public static function errorReference(): string {
+		return 'mbx-' . bin2hex(random_bytes(3));
+	}
+
+	/**
+	 * What to tell the person when the message left but its Sent copy could not
+	 * be stored. Where the account's own Sent folder holds a copy, the next sync
+	 * brings it into the conversation; otherwise there is no copy here at all,
+	 * and the thing to prevent is a second send.
+	 */
+	private static function unsavedCopyWarning(string $sent_copy, string $ref): string {
+		if ($sent_copy === MailboxSendAttempt::SENT_COPY_PROVIDER || $sent_copy === MailboxSendAttempt::SENT_COPY_APPENDED) {
+			return 'Your message was sent. Its copy could not be saved here, but your Sent folder has one, and it '
+				. 'appears in this conversation after the next mail check. (Reference ' . $ref . ')';
+		}
+		return 'Your message was sent, but its copy could not be saved to Sent. Do not send it again. '
+			. '(Reference ' . $ref . ')';
 	}
 
 	// ── source + identity ──────────────────────────────────────────────────
@@ -1239,6 +1272,13 @@ class MailboxSender {
 	 * including iem_recipient, which on an outbound row is real content (who
 	 * you emailed), unlike an inbound row's routing-only alias address.
 	 *
+	 * The Message-ID and thread key are written last, onto the row once it is
+	 * sealed. They are threading metadata, not content, but they are long plain
+	 * strings (a Message-ID passes 64 characters on four messages in ten), and a
+	 * reply or forward has opened the sealed original by now, so
+	 * SealedEgressGuard refuses them on the INSERT and accepts them on a row
+	 * already sealed to the same owner. The whole sequence is one transaction.
+	 *
 	 * @return array{id:int,dek:?string} the row id, and the per-message DEK
 	 *         (raw bytes) when sealed — persistOutboundUploads() reuses it to
 	 *         seal any re-uploaded attachments under the same key.
@@ -1282,8 +1322,6 @@ class MailboxSender {
 			'iem_body_plain'   => $sealing ? '' : $body_plain,
 			'iem_body_html'    => $sealing ? '' : $body_html,
 			'iem_raw_message'  => '',
-			'iem_message_id_header' => substr($message_id, 0, 255),
-			'iem_thread_key'   => $thread_key,
 			'iem_is_read'      => true,
 			'iem_is_starred'   => false,
 			'iem_dkim_result'  => 'unverified',
@@ -1291,6 +1329,12 @@ class MailboxSender {
 			'iem_dmarc_result' => 'unverified',
 			'iem_auth_source'  => 'none',
 			'iem_received_time' => gmdate('Y-m-d H:i:s'),
+		);
+
+		// Written last, onto the row once it is sealed (see the method comment).
+		$threading = array(
+			'iem_message_id_header' => substr($message_id, 0, 255),
+			'iem_thread_key'        => $thread_key,
 		);
 
 		// Draft-morph (§ Phase 2): reuse the draft row and its attachments in place —
@@ -1301,7 +1345,7 @@ class MailboxSender {
 		// is a targeted UPDATE, never $morph->save() — a full-row save would try to
 		// decrypt the loaded draft's sealed columns.
 		$reuse_dek = null;
-		$db = ($sealing) ? DbConnector::get_instance()->get_db_link() : null;
+		$db = DbConnector::get_instance()->get_db_link();
 		$dek = null;
 
 		if ($morph !== null) {
@@ -1330,24 +1374,25 @@ class MailboxSender {
 				$cols['iem_content_sealed'] = false;
 			}
 			try {
-				if ($db !== null) { $db->beginTransaction(); }
+				$db->beginTransaction();
 				InboundEmailMessage::updateColumns($message_id_row, $cols);
 				if ($sealing) {
 					$dek = InboundEmailMessage::sealAndPersistContent($message_id_row, $vault,
 						substr($from_address, 0, 500), $recipient_str, $subject_trunc, $body_plain, $body_html,
 						true, $bcc_str, null, $reuse_dek, null, $to_str, $cc_str);
-					$db->commit();
 				}
+				InboundEmailMessage::updateColumns($message_id_row, $threading);
+				$db->commit();
 			} catch (\Throwable $e) {
-				if ($db !== null && $db->inTransaction()) { $db->rollBack(); }
+				if ($db->inTransaction()) { $db->rollBack(); }
 				throw $e;
 			}
 			return array('id' => $message_id_row, 'dek' => $dek);
 		}
 
-		// A fresh Sent row. The empty-content insert and its seal UPDATE are one
-		// transaction — the hollow row must never survive a seal failure (mirrors
-		// InboundEmailRouter::storeMessage; the mail is already on the wire).
+		// A fresh Sent row. The empty-content insert, its seal UPDATE and its threading
+		// metadata are one transaction — the hollow row must never survive a seal
+		// failure (mirrors InboundEmailRouter::storeMessage; the mail is already on the wire).
 		$row = new InboundEmailMessage(NULL);
 		$row->set('iem_ied_inbound_email_domain_id', $source !== null
 			? $source->get('iem_ied_inbound_email_domain_id')
@@ -1358,16 +1403,17 @@ class MailboxSender {
 			$row->set($col, $val);
 		}
 		try {
-			if ($db !== null) { $db->beginTransaction(); }
+			$db->beginTransaction();
 			$row->save();
 			if ($sealing) {
 				$dek = InboundEmailMessage::sealAndPersistContent(intval($row->key), $vault,
 					substr($from_address, 0, 500), $recipient_str, $subject_trunc, $body_plain, $body_html,
 					true, $bcc_str, null, $reuse_dek, null, $to_str, $cc_str);
-				$db->commit();
 			}
+			InboundEmailMessage::updateColumns(intval($row->key), $threading);
+			$db->commit();
 		} catch (\Throwable $e) {
-			if ($db !== null && $db->inTransaction()) { $db->rollBack(); }
+			if ($db->inTransaction()) { $db->rollBack(); }
 			throw $e;
 		}
 
@@ -1419,11 +1465,11 @@ class MailboxSender {
 		}
 		$root = substr($root, 0, 255);
 
-		$stmt = $this->db()->prepare(
-			"UPDATE iem_inbound_email_messages SET iem_thread_key = ?
-			 WHERE iem_inbound_email_message_id = ?
-			 AND (iem_thread_key IS NULL OR iem_thread_key = '')");
-		$stmt->execute(array($root, intval($source->key)));
+		// By primary key alone, $tk having just been read empty. The source is the
+		// row this reply opened, sealed to the same owner, so SealedEgressGuard lets a
+		// long key onto it — but only through a single-row UPDATE it can recognise;
+		// any further WHERE condition reads as a write it cannot place, and is refused.
+		InboundEmailMessage::updateColumns(intval($source->key), array('iem_thread_key' => $root));
 		return $root;
 	}
 

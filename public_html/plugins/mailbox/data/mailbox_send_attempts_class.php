@@ -25,6 +25,14 @@
  * seals from any process; a sealing mailbox whose owner has no vault gets a row
  * WITHOUT those two fields rather than a plaintext one (see record()).
  *
+ * The Message-ID, the From address, the transport label, the carrier's receipt
+ * and the Direct list are written onto the row after it exists (record()): a
+ * reply or forward has opened the sealed original, and SealedEgressGuard refuses
+ * a long plain string on an INSERT but accepts it on a row sealed to the same
+ * owner.
+ *
+ * @version 1.1 - record() writes the long plain facts after the row is sealed, so a
+ *   reply on a Private mailbox records its attempt instead of being refused
  * @version 1.0.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.0
  */
@@ -50,6 +58,10 @@ class MailboxSendAttempt extends SystemBase {
 	const SENT_COPY_NOT_APPLICABLE = 'not_applicable'; // hosted alias / forward: there is no remote Sent
 
 	public static $sealed_fields = array('mst_recipients', 'mst_error');
+
+	/** Plain columns that can run long, written onto the row once it exists (record()). */
+	const WRITTEN_AFTER_INSERT = array('mst_message_id_header', 'mst_from_address', 'mst_transport_label',
+		'mst_receipt', 'mst_direct_delivered');
 
 	protected static $foreign_key_actions = array(
 		// A mailbox going away takes its send history with it.
@@ -143,6 +155,11 @@ class MailboxSendAttempt extends SystemBase {
 	 * On a sealing mailbox whose owner has no vault, the two content fields are
 	 * dropped rather than written in the clear.
 	 *
+	 * The row is inserted with its short facts and its sealed pair, then given
+	 * WRITTEN_AFTER_INSERT — the order SealedEgressGuard accepts from a process
+	 * that has opened sealed mail. Should that second write be refused, the row
+	 * still records that the attempt happened.
+	 *
 	 * @return ?int the new row's id
 	 */
 	public static function record(array $fields): ?int {
@@ -155,6 +172,7 @@ class MailboxSendAttempt extends SystemBase {
 				? self::$sealed_fields : array();
 
 			$row = new MailboxSendAttempt(NULL);
+			$after = array();
 			foreach ($fields as $col => $value) {
 				if (in_array($col, $drop, true)) {
 					continue;
@@ -165,14 +183,24 @@ class MailboxSendAttempt extends SystemBase {
 				if ($value === null || $value === '') {
 					continue;
 				}
+				if (in_array($col, self::WRITTEN_AFTER_INSERT, true)) {
+					$after[$col] = $value;
+					continue;
+				}
 				$row->set($col, $value);
 			}
 			$row->save();
-			return intval($row->key);
 		} catch (\Throwable $e) {
 			error_log('MailboxSendAttempt: could not record a send attempt: ' . $e->getMessage());
 			return null;
 		}
+		try {
+			self::updateColumns(intval($row->key), $after);
+		} catch (\Throwable $e) {
+			error_log('MailboxSendAttempt: attempt ' . intval($row->key) . ' recorded without its Message-ID and receipt: '
+				. $e->getMessage());
+		}
+		return intval($row->key);
 	}
 
 	/**

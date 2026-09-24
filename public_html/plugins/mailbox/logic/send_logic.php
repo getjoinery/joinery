@@ -24,6 +24,15 @@
  * local-id => filename), and `draft_id` (morph a saved draft into the Sent row). All
  * optional, so the mobile `mailbox/send` contract stays backward-compatible.
  *
+ * A success always carries `sent: true`. When the carrier took the message but
+ * its Sent copy could not be stored, it also carries `warning` (and
+ * outbound_id 0): the message has left, so this is not an error, and a client
+ * that showed one would invite a second send. An unexpected failure is
+ * reported as not sent — everything after the hand-off comes back as a
+ * result — with a reference that finds its line in the error log.
+ *
+ * @version 1.4 - `sent` and `warning` on success; an unexpected failure says the message was
+ *   not sent and names a log reference
  * @version 1.3.2 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.3.1
  */
@@ -72,13 +81,20 @@ function send_logic(array $input): LogicResult {
 	} catch (MailboxSenderException $e) {
 		return LogicResult::error($e->getMessage());
 	} catch (Throwable $e) {
-		error_log('mailbox/send: ' . $e->getMessage());
-		return LogicResult::error('An unexpected error prevented sending.');
+		$ref = MailboxSender::errorReference();
+		error_log('mailbox/send [' . $ref . ']: ' . get_class($e) . ': ' . $e->getMessage());
+		return LogicResult::error('Your message was not sent: the server hit an unexpected error. It is safe to '
+			. 'try again. If it keeps happening, give your administrator this reference: ' . $ref . '.');
 	}
 
-	return LogicResult::render(array(
+	$out = array(
+		'sent'        => true,
 		'outbound_id' => intval($result['outbound_id']),
-	));
+	);
+	if (!empty($result['warning'])) {
+		$out['warning'] = (string)$result['warning'];
+	}
+	return LogicResult::render($out);
 }
 
 function send_logic_descriptor() {
