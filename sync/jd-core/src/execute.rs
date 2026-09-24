@@ -1008,7 +1008,7 @@ fn nothing_at(env: &ExecEnv, path: &std::path::Path) -> Result<bool, ExecError> 
     Ok(env.vfs.fingerprint(path)?.is_none() && env.vfs.read_dir(path).is_err())
 }
 
-fn free_conflict_path(
+pub(crate) fn free_conflict_path(
     env: &ExecEnv,
     beside: &std::path::Path,
     name: &str,
@@ -1275,9 +1275,17 @@ fn the_owner_follows_its_file(
     // loser is re-mapped), not the user's move, and following it would push a
     // conflict name to the server for a file nobody touched. Asked of the
     // disk by identity, so a folded spelling of the agreed path counts.
-    if let Placed::At(home) = local_path(env, &owner)? {
-        if env.vfs.fingerprint(&home)?.is_some_and(|fp| fp.file_id == file_id) {
-            return Ok(());
+    //
+    // Except for a file held outside its vault (owner decision D1): nothing
+    // is pushed for it, and the slot it stands in is only ever its own on
+    // this disk. Left behind, the aside is minted a new PLAIN file and the
+    // held record reads its absence as a delete of the sealed copy (kill2
+    // 75100: a download of the record the user traded it with landed there).
+    if !crate::pass::held_outside_its_vault(env, &owner)? {
+        if let Placed::At(home) = local_path(env, &owner)? {
+            if env.vfs.fingerprint(&home)?.is_some_and(|fp| fp.file_id == file_id) {
+                return Ok(());
+            }
         }
     }
     let (Some(root), Some(dir)) = (env.vfs.root(), aside.parent()) else {
@@ -1302,6 +1310,14 @@ fn the_owner_follows_its_file(
     let to = Placement { parent, name };
     owner.synced_placement = Some(to.clone());
     owner.local_name = None;
+    // A sealed file whose file now stands outside its vault is HELD there, not
+    // moved: the server refuses a sealed file in a plain folder, and a move
+    // owed for ever is the loop the hold exists to end (owner decision D1).
+    if crate::pass::held_outside_its_vault(env, &owner)? {
+        env.store.put_entry(&owner)?;
+        crate::pass::say_it_is_held(env, &owner)?;
+        return Ok(());
+    }
     // Keyed on everything the request says. One op can make room more than
     // once -- a download retried after its rename failed, with something new
     // standing at the first aside name, or another owner's file in the way --
@@ -1866,13 +1882,23 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     // is not trashed. Nothing of its is at that path. Counting its claim
     // vetoed every upload of a stranger the user saved under the old name:
     // minted by one scan, dropped here, minted again by the next, for ever.
+    //
+    // And a file held outside its vault whose own file no longer stands at
+    // its agreed path -- waiting while a file carrying its identity stands
+    // elsewhere (owner decision D1) -- holds nothing there either. A stranger
+    // saved at that path is the user's new file and goes up as one.
     let mine = |p: &Placement| -> Result<bool, ExecError> {
         let all = env.store.every_entry()?;
-        let held: std::collections::HashSet<EntityId> = all
+        let mut held: std::collections::HashSet<EntityId> = all
             .iter()
             .filter(|c| c.id.is_provisional())
             .filter_map(|c| c.replaces)
             .collect();
+        for e in &all {
+            if e.local_placement() == p && crate::pass::held_and_away(env, e)? {
+                held.insert(e.id);
+            }
+        }
         Ok(!all.into_iter().any(|e| {
             e.id != op.entity
                 && !e.remote_deleted
@@ -4770,6 +4796,16 @@ fn is_on_the_server(
     let Some(fp) = child.fingerprint else {
         return Ok(false);
     };
+    // A file held outside its vault is on the server only sealed, in the
+    // vault -- never at this path. Trashed with this folder, the user's copy
+    // would go and the scan would then read its absence as a delete of the
+    // sealed copy too. It is carried out like anything unsent, and stays held
+    // where it lands.
+    for holder in env.store.live_holders_of(EntityType::File, fp.file_id)? {
+        if crate::pass::held_outside_its_vault(env, &holder)? {
+            return Ok(false);
+        }
+    }
     // What the caller knows from the RECORDS, asked first.
     //
     // The index below is built by the scan, and a folder given up in the same
@@ -4885,6 +4921,39 @@ fn rescue_unsynced(
                     free_conflict_path(env, &plain, &child.name, &[])?
                 };
                 env.vfs.rename(&path, &to)?;
+                // A file held outside its vault keeps its record: the record
+                // follows it out and stays held where it lands. Left behind,
+                // the scan would mint these bytes as a new PLAIN file.
+                if let Some(fp) = child.fingerprint {
+                    let mut held = None;
+                    for h in env.store.live_holders_of(EntityType::File, fp.file_id)? {
+                        if crate::pass::held_outside_its_vault(env, &h)? {
+                            held = Some(h.id);
+                        }
+                    }
+                    if let Some(id) = held {
+                        the_owner_follows_its_file(env, fp.file_id, &to, "rescue")?;
+                        let name = to
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        let where_to = match env.vfs.root().and_then(|r| into.strip_prefix(&r).ok().map(PathBuf::from)) {
+                            Some(rel) if !rel.as_os_str().is_empty() => rel.display().to_string(),
+                            _ => "the top of your drive".to_string(),
+                        };
+                        env.store.raise_issue(
+                            Some(id),
+                            "rescued_from_trash",
+                            &format!(
+                                "The folder {name} was in was deleted on the server, so it was \
+                                 moved to {where_to}. It is still encrypted on the server and kept \
+                                 only on this device until you move it back into the vault."
+                            ),
+                            (env.now_ms)() as i64,
+                        )?;
+                        continue;
+                    }
+                }
                 rescued.push(child.name.clone());
             }
             _ => {}
@@ -5153,6 +5222,12 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 continue;
             }
             if sits_under(env, e.id, op.entity.server_id)? {
+                continue;
+            }
+            // Held outside its vault: its server copy lives elsewhere for good,
+            // and nothing will ever move it here. The rescue below carries it
+            // out instead.
+            if crate::pass::held_outside_its_vault(env, &e)? {
                 continue;
             }
             // A child that can move on its own -- a park being put back, a

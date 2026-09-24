@@ -893,7 +893,24 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
     let (mut checked, mut unknown, mut sealed_unopened, mut multi, mut skipped_unresolved) = (0, 0, 0, 0, 0);
     let mut rescued = Vec::new();
     let mut reminted = Vec::new();
+    let mut held = Vec::new();
     let mut misplaced = Vec::new();
+    // Files some device holds outside their vault (owner decision D1): the
+    // server keeps each sealed where it was while the user's move stands on
+    // that disk. Only while the hold is open; with none, a file here is judged.
+    let held_ids: BTreeSet<(i64, Option<i64>)> = world
+        .devices
+        .iter()
+        .flat_map(|d| {
+            let ids = jd_sim::scenario::held_outside_the_vault(d);
+            d.store
+                .every_entry()
+                .unwrap()
+                .into_iter()
+                .filter(move |e| ids.contains(&e.id))
+                .map(|e| (e.id.server_id, e.remote.parent))
+        })
+        .collect();
     for f in world.server.files().into_iter().filter(|f| !f.trashed) {
         let (name, hash) = if f.encrypted {
             match vault_files.get(&f.id).and_then(|vf| jd_sim::scenario::open_as_the_owner(world, vf)) {
@@ -956,6 +973,12 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
             reminted.push(line);
             continue;
         }
+        // Class 3: held outside its vault on some device, and standing where
+        // that device's record says the server keeps it.
+        if held_ids.contains(&(f.id, stands_in)) {
+            held.push(line);
+            continue;
+        }
         misplaced.push(line);
     }
     let net_fires_outside_a_user_delete = rescues_from_folders_the_user_never_deleted(world, custody);
@@ -963,7 +986,7 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
     eprintln!(
         "CUSTODY-ORACLE seed={seed} files_checked={checked} multi_candidate={multi} bodies_unknown={unknown} \
          sealed_unopened={sealed_unopened} unresolved={skipped_unresolved} folders={} learned={learned} late={} \
-         deferred={} undecided={} rescued={} reminted={} misplaced={} user_removed_folders={} removal_unattributed={} \
+         deferred={} undecided={} rescued={} reminted={} held={} misplaced={} held_records_converged_skips={} held_waiting={} user_removed_folders={} removal_unattributed={} \
          net_fires_outside_a_user_delete={} rescued_lines={rescued:?} reminted_lines={reminted:?} net_lines={net_fires_outside_a_user_delete:?}",
         custody.handles.len(),
         custody.late.len(),
@@ -971,7 +994,10 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
         custody.undecided.len(),
         rescued.len(),
         reminted.len(),
+        held.len(),
         misplaced.len(),
+        world.devices.iter().map(|d| jd_sim::scenario::held_outside_the_vault(d).len()).sum::<usize>(),
+        world.devices.iter().map(|d| jd_sim::scenario::held_waiting(d).len()).sum::<usize>(),
         custody.user_removed_folders.len(),
         custody.removal_unattributed,
         net_fires_outside_a_user_delete.len(),
@@ -1327,6 +1353,41 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
             m
         });
     let (mut by_chaos, mut by_engine, mut as_new_file, mut as_new_version) = (0usize, 0usize, 0usize, 0usize);
+    // Which bodies the server ever held SEALED, and which it still holds
+    // sealed in a live file -- read by opening what the server stores, so a
+    // leak can be sorted by the road it took without asking the engine:
+    // never sealed (a file that never uploaded, T1-C), a later version of
+    // another file (a record reading the body as its edit, AH / rule 1), a new
+    // file beside a sealed copy that still stands (the same bytes minted
+    // twice: rule 1's pairing, or a copy out of the vault), a new file whose
+    // sealed copy is gone (the conversion shape).
+    let mut ever_sealed: std::collections::BTreeSet<String> = Default::default();
+    for vault in &world.vaults {
+        for held in world.server.encrypted_contents() {
+            let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
+                &held.wrapped_file_key,
+                &vault.secret_key_pkcs8,
+                &vault.public_key_b64,
+            ) else {
+                continue;
+            };
+            for ciphertext in &held.ciphertexts {
+                if let Ok(plain) = jd_crypto::drive::decrypt_content(ciphertext, &file_key, &held.content_id) {
+                    ever_sealed.insert(jd_sim::sha256_hex(&plain));
+                }
+            }
+        }
+    }
+    let live_ids: std::collections::BTreeSet<i64> =
+        world.server.files().into_iter().filter(|f| !f.trashed && f.encrypted).map(|f| f.id).collect();
+    let live_sealed: std::collections::BTreeSet<String> = world
+        .server
+        .vault_files()
+        .into_iter()
+        .filter(|f| live_ids.contains(&f.id))
+        .filter_map(|f| jd_sim::scenario::open_as_the_owner(world, &f).and_then(|(_, h)| h))
+        .collect();
+    let mut roads: std::collections::BTreeMap<&str, usize> = Default::default();
     let mut leaked = Vec::new();
     for (hash, written_at) in &sealed_bodies {
         if plain_bodies.contains_key(hash) || world.server.blob(hash).is_none() {
@@ -1360,15 +1421,30 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
             (false, true) => "new-version",
             (false, false) => "no-version",
         };
+        let road = if !ever_sealed.contains(hash) {
+            "never_sealed"
+        } else if new_version {
+            "as_an_edit"
+        } else if live_sealed.contains(hash) {
+            "beside_a_live_sealed_copy"
+        } else {
+            "sealed_copy_gone"
+        };
+        *roads.entry(road).or_default() += 1;
         leaked.push(format!(
-            "{} (written at {written_at}) now at {standing_at:?} [{who}, {route}]",
+            "{} (written at {written_at}) now at {standing_at:?} [{who}, {route}, {road}]",
             &hash[..8]
         ));
     }
     eprintln!(
         "SEALED-LEAKS seed={seed} leaked={} carried_out_by_chaos={by_chaos} not_carried_out={by_engine} \
-         as_new_file={as_new_file} as_new_version={as_new_version}",
-        leaked.len()
+         as_new_file={as_new_file} as_new_version={as_new_version} never_sealed={} as_an_edit={} \
+         beside_a_live_sealed_copy={} sealed_copy_gone={}",
+        leaked.len(),
+        roads.get("never_sealed").copied().unwrap_or(0),
+        roads.get("as_an_edit").copied().unwrap_or(0),
+        roads.get("beside_a_live_sealed_copy").copied().unwrap_or(0),
+        roads.get("sealed_copy_gone").copied().unwrap_or(0),
     );
     assert!(
         leaked.is_empty(),

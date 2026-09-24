@@ -1450,8 +1450,39 @@ pub fn assert_converged(world: &World) {
             }
             expected.insert(q, (p.clone(), h.clone()));
         }
-        let server: BTreeMap<String, Option<String>> =
+        let mut server: BTreeMap<String, Option<String>> =
             expected.into_iter().map(|(q, (_, h))| (q, h)).collect();
+        // A file held outside its vault stands where the user put it, and the
+        // server keeps it sealed where it was: declared per entity (see
+        // `held_outside_the_vault`), and still required to BE at its path here.
+        let mut disk = disk;
+        let held = held_outside_the_vault(device);
+        let waiting = held_waiting(device);
+        for e in entries.iter().filter(|e| held.contains(&e.id)) {
+            if let Some((_, path)) = waiting.iter().find(|(id, _)| *id == e.id) {
+                if let Some(q) = server_path_of(&entries, e).and_then(|p| expected_path(&p)) {
+                    server.remove(&q);
+                }
+                assert!(disk.remove(path).is_some(), "{}: the waiting file {path:?} is not on the disk", device.name);
+                continue;
+            }
+            if let Some(q) = server_path_of(&entries, e).and_then(|p| expected_path(&p)) {
+                server.remove(&q);
+            }
+            let agreed = e.synced_placement.as_ref().expect("a held record has an agreement");
+            let here = match agreed.parent {
+                None => Some(agreed.name.clone()),
+                Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{}", agreed.name)),
+            };
+            let here = here.unwrap_or_default();
+            assert!(
+                disk.remove(&here).is_some(),
+                "{}: {:?} {} is held outside its vault at {here:?}, and nothing stands there",
+                device.name,
+                e.id.entity_type,
+                e.id.server_id
+            );
+        }
         if disk != server {
             let only_disk: Vec<_> = disk.keys().filter(|k| !server.contains_key(*k)).collect();
             let only_server: Vec<_> = server.keys().filter(|k| !disk.contains_key(*k)).collect();
@@ -1480,10 +1511,94 @@ pub fn assert_converged(world: &World) {
 ///
 /// Checked only once a device has settled, where a difference can no longer be
 /// work in progress.
+/// Records on a device that stand outside their vault here while the server
+/// keeps them sealed inside it: sealed, carrying an open
+/// `held_outside_the_vault` issue, the server's parent a vault and the agreed
+/// parent a plain folder or the root. The one divergence between a record and
+/// the server that is a resting place, declared by entity.
+pub fn held_outside_the_vault(device: &Device) -> Vec<jd_core::model::EntityId> {
+    let open: std::collections::HashSet<jd_core::model::EntityId> = device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "held_outside_the_vault")
+        .filter_map(|i| i.entity)
+        .collect();
+    let sealed = |parent: Option<i64>| {
+        parent.is_some_and(|id| {
+            device
+                .store
+                .get_entry(jd_core::model::EntityId::folder(id))
+                .unwrap()
+                .is_some_and(|f| f.is_encrypted)
+        })
+    };
+    device
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|e| open.contains(&e.id) && e.is_encrypted && !e.remote_deleted)
+        .filter(|e| {
+            e.synced_placement
+                .as_ref()
+                .is_some_and(|agreed| sealed(e.remote.parent) && !sealed(agreed.parent))
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
+/// Held records whose file waits under another record: nothing stands at the
+/// held record's agreed path, and exactly one provisional record's file on this
+/// disk carries the held record's agreed disk identity -- the engine's W-state
+/// (a held file moved and edited in one pass reads as a creation, and neither
+/// side acts). The held id and the waiting file's path. Declared by entity,
+/// counted on the custody line.
+pub fn held_waiting(device: &Device) -> Vec<(jd_core::model::EntityId, String)> {
+    let held = held_outside_the_vault(device);
+    let entries = device.store.every_entry().unwrap();
+    let root = match jd_vfs::Vfs::root(&device.fs) {
+        Some(r) => r,
+        None => return Vec::new(),
+    };
+    let inode_at = |path: &str| {
+        jd_vfs::Vfs::fingerprint(&device.fs, &root.join(path)).ok().flatten().map(|f| f.file_id)
+    };
+    let path_of = |e: &jd_core::model::Entry| -> Option<String> {
+        let placement = e.synced_placement.as_ref().unwrap_or(&e.remote);
+        match placement.parent {
+            None => Some(placement.name.clone()),
+            Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{}", placement.name)),
+        }
+    };
+    let mut out = Vec::new();
+    for e in entries.iter().filter(|e| held.contains(&e.id)) {
+        let Some(inode) = e.synced_fingerprint.map(|f| f.file_id).filter(|i| *i != 0) else { continue };
+        if path_of(e).and_then(|p| inode_at(&p)) == Some(inode) {
+            continue;
+        }
+        let carriers: Vec<String> = entries
+            .iter()
+            .filter(|p| p.id.is_provisional() && p.id.entity_type == jd_core::model::EntityType::File)
+            .filter_map(|p| path_of(p))
+            .filter(|p| inode_at(p) == Some(inode))
+            .collect();
+        if carriers.len() == 1 {
+            out.push((e.id, carriers[0].clone()));
+        }
+    }
+    out
+}
+
 pub fn assert_records_agree_with_the_server(world: &World) {
     for device in &world.devices {
+        let held = held_outside_the_vault(device);
         let mut stale = Vec::new();
         for e in device.store.every_entry().unwrap() {
+            if held.contains(&e.id) {
+                continue;
+            }
             if e.remote_deleted || e.id.is_provisional() {
                 continue;
             }

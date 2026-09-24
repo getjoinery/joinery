@@ -446,20 +446,53 @@ own name is plaintext on the server and renames normally.
 
 **Crossing the boundary is not a move.** The server holds no key, so it cannot
 turn plaintext into ciphertext or back again, and it refuses an in-place
-crossing with `reason: protection_boundary`. A file the user drags across is
-converted instead: the source is trashed, its record forgotten, and the next
-scan finds the bytes at their new path as an ordinary local creation and uploads
-them with the destination folder's protection. A plaintext folder dragged into a
-vault is converted the same way, contents and all — until it is, the user is
-looking at a folder they believe is private while the server holds every file in
-it in the clear at the old path.
+crossing with `reason: protection_boundary`. Nothing on the platform turns an
+encrypted file back into plaintext — not the server, not the browser. The client
+crosses only into a vault, by uploading the file again.
+
+**Into a vault, a file or folder is converted.** The source is trashed, its
+record forgotten, and the next scan finds the bytes at their new path as an
+ordinary local creation and uploads them with the destination folder's
+protection. A plaintext folder is converted contents and all — until it is, the
+user is looking at a folder they believe is private while the server holds every
+file in it in the clear at the old path.
+
+**Out of a vault, a sealed file is held.** It stays where the user put it on
+this disk, the server keeps the sealed copy where it was, and one issue names
+the file and the two ways out: move it back into the vault, or download it in
+the browser and upload it where it is wanted. The hold is read from the record
+itself — a sealed file whose agreed folder here is plain while the server keeps
+it in a vault — so it survives a restart and needs no bookkeeping beside it.
+While it is held:
+
+- Moving it again outside any vault — renaming it where it stands, or moving it
+  to another plain folder — is this disk's side alone; the server is asked
+  nothing.
+- Moving it back into a vault lands it on the server's placement, a move within
+  the vault when it goes to a different folder there.
+- Deleting it trashes the sealed copy on the server.
+- Edits wait on both sides: nothing edited here is sent, and a change made on
+  another device is not written over the copy here. If the copy here is gone
+  when the server's copy changes, the server's copy comes back into the vault.
+- The server trashing the sealed copy removes an unedited copy here; an edited
+  one is kept on this device only and never uploaded.
+- A new file carrying the held file's disk identity — very likely the held file
+  renamed and edited between two scans, which the scan reads as a delete plus a
+  creation — waits, unsent, and so does the held record's delete; the issue says
+  the file may be the vault file under a new name. In a vault it goes up sealed
+  once the held record's delete has landed.
+- A file from the server that wants the held file's name here waits for it, and
+  says so; a new file saved into the vault under the name the held file still
+  holds there takes a conflict name.
 
 A vault folder dragged *out* is not converted: that would publish its contents
 in the clear on the strength of a drag. The client leaves the server's copy
 encrypted where it is, and raises an issue naming the folder. A folder inside a
-vault is asked to have its protection level changed first; a vault root is told
-that a vault sits only at the drive root or inside another vault, which is the
-server's rule (`protection_boundary`). The two sides then disagree about where
+vault is told it stays in its vault on the server and is kept only on this
+device, and that it can be moved back into the vault, or its files downloaded in
+the browser and uploaded where they are wanted; a vault root is told that a
+vault sits only at the drive root or inside another vault, which is the server's
+rule (`protection_boundary`). The two sides then disagree about where
 that folder lives until the user acts — deliberately, and visibly, rather than
 by a conversion nobody asked for. A device holding no vault key converts
 nothing in either direction — the entry waits in `pending_key` rather than
