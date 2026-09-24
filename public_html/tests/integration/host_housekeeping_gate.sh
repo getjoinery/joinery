@@ -306,7 +306,7 @@ chk "and PostgreSQL is restarted onto localhost" "$(printf '%s\n' "$out" | grep 
 PG="$T/pg-ctr"; mkpg "$PG" '*' 'local   all             postgres                                md5\nlocal   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             0.0.0.0/0               md5\nhost    all             all             ::1/128                 md5\n'
 touch "$PG/.dockerenv"; mkdir -p "$PG/proc/net" "$T/pg-ctr-site/config"
 printf 'Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\neth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n' > "$PG/proc/net/route"
-printf '# declared\nhost scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\nhost all all 10.0.0.5/32 md5\nhost scrolldaddy postgres 10.0.0.5/32 md5\nhost scrolldaddy reader 10.0.0.0/8 md5\nhost scrolldaddy reader 10.0.0.5/32 trust\n' > "$T/pg-ctr-site/config/postgres_access.conf"
+printf '# declared\nhost scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\nhost all all 10.0.0.5/32 md5\nhost scrolldaddy postgres 10.0.0.5/32 md5\nhost scrolldaddy reader 10.0.0.0/8 md5\nhost scrolldaddy reader 10.0.0.5/32 trust\npublish 192.168.206.198\n' > "$T/pg-ctr-site/config/postgres_access.conf"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-ctr-site" 2>&1)"
 HBA="$PG/etc/postgresql/16/main/pg_hba.conf"
 chk "a container loses the network-wide rule" "$(grep -c '0\.0\.0\.0/0' "$HBA")" "0"
@@ -316,6 +316,7 @@ chk "a declared line naming all databases is left out, by line" "$(printf '%s\n'
 chk "one naming postgres is left out" "$(printf '%s\n' "$out" | grep -c "line 4 left out: role 'postgres'")" "1"
 chk "one wider than a /24 is left out" "$(printf '%s\n' "$out" | grep -c 'line 5 left out: address 10.0.0.0/8 is wider')" "1"
 chk "one asking for trust is left out" "$(printf '%s\n' "$out" | grep -c "line 6 left out: method 'trust'")" "1"
+chk "the publish line is the host's: passed over, not refused, not in pg_hba" "$(printf '%s\n' "$out" | grep -c 'line 7 left out'):$(grep -c '^publish' "$HBA")" "0:0"
 chk "the container keeps listening on its interface (how the host reaches it)" "$([ -e "$PG/etc/postgresql/16/main/conf.d/99-joinery-local-only.conf" ] && echo pinned || echo untouched)" "untouched"
 before="$(tree_sum "$PG")"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-ctr-site" 2>&1)"

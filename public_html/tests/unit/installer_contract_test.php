@@ -3378,4 +3378,124 @@ check(strpos($hk_pg, '--- 5. PostgreSQL answers only locally') !== false
 check((bool)preg_match('/^CORE_INSTALLERS="[^"]*\bhost_housekeeping\.sh\b/m', $runner_pg),
 	'and it runs on every converge and at every container start');
 
+section('A proxied site\'s web port and every database port answer only on this host, unless declared (specs/fleet_ubuntu_2604_postgres_upgrade.md B10, B8)');
+
+$install_b10 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
+$rebase_b10  = (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/rebase_site_container.sh');
+check(substr_count($install_b10, '-p "${WEB_PUBLISH}${PORT}":80') === 2 && strpos($install_b10, '-p "$PORT":80') === false,
+	'both docker run forms publish the web port through WEB_PUBLISH',
+	'-p "$PORT":80 publishes on every interface, a plain-HTTP way in around the host proxy');
+check((bool)preg_match('/if should_setup_ssl "\$DOMAIN_NAME" "\$NO_SSL"; then\s+WEB_PUBLISH="127\.0\.0\.1:"/', $install_b10),
+	'a site the host proxy fronts publishes its web port on 127.0.0.1 only');
+check(substr_count($install_b10, '-p "${DB_PUBLISH}:${DB_PORT}":5432') === 2,
+	'both docker run forms publish the database port on DB_PUBLISH');
+$existing_b10 = strpos($install_b10, "print_step \"Checking for existing container named '\$SITENAME'...\"");
+$resolve_b10  = strpos($install_b10, '        resolve_database_publish_address "$SITENAME"');
+check($resolve_b10 !== false && $existing_b10 !== false && $resolve_b10 < $existing_b10,
+	'the declared publish address is checked before the old container is touched');
+check(strpos($install_b10, 'grep -q ":${port}->"') !== false,
+	'a port published on any address counts as in use');
+check(strpos($install_b10, '"http://127.0.0.1:$PORT/"') !== false && strpos($install_b10, '"http://localhost:$PORT/"') === false,
+	'the post-start probe asks 127.0.0.1, where the port is published');
+check(strpos($rebase_b10, '"80:127.0.0.1:${PORT}"') !== false && strpos($rebase_b10, '"5432:${DB_PUBLISH}:$((PORT + 1000))"') !== false,
+	'the rebase accepts the bindings install.sh now makes, so it does not refuse every rebuilt site');
+
+// The resolver itself, run against stubbed docker and ip: the config volume's
+// mountpoint is a directory here, and this host holds 192.168.206.198.
+$pub_dir = sys_get_temp_dir() . '/joinery_pub_' . getmypid();
+@mkdir($pub_dir . '/vol', 0700, true);
+file_put_contents($pub_dir . '/run.sh', <<<'SH'
+#!/usr/bin/env bash
+SRC="$1"; MP="$2"
+print_info() { :; }; print_error() { echo "ERR: $*"; }
+docker() { [ -n "$MP" ] && echo "$MP"; }
+ip() { printf '1: lo    inet 127.0.0.1/8 scope host lo\n2: eth0    inet 192.168.206.198/17 brd 192.168.255.255 scope global eth0\n'; }
+eval "$(awk '/^resolve_database_publish_address\(\) \{/,/^}$/' "$SRC")"
+resolve_database_publish_address site
+echo "PUBLISH=$DB_PUBLISH"
+SH
+);
+$publish = function (?string $file) use ($pub_dir, $site_root): string {
+	@unlink($pub_dir . '/vol/postgres_access.conf');
+	if ($file !== null) file_put_contents($pub_dir . '/vol/postgres_access.conf', $file);
+	$cmd = 'bash ' . escapeshellarg($pub_dir . '/run.sh') . ' '
+		. escapeshellarg($site_root . '/maintenance_scripts/install_tools/install.sh') . ' '
+		. escapeshellarg($pub_dir . '/vol') . ' 2>&1';
+	$out = (string)shell_exec($cmd);
+	if (preg_match('/^PUBLISH=(\S+)$/m', $out, $m)) return $m[1];
+	return strpos($out, 'ERR: ') !== false ? 'REFUSED' : 'NONE';
+};
+check($publish(null) === '127.0.0.1', 'no declaration: the database port stays on 127.0.0.1');
+check($publish("host scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\n") === '127.0.0.1',
+	'access lines alone do not publish the port');
+check($publish("host scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\npublish 192.168.206.198\n") === '192.168.206.198',
+	'a publish line naming one of this host\'s addresses is used');
+check($publish("publish 0.0.0.0\n") === 'REFUSED', 'every interface is refused');
+check($publish("publish 10.9.9.9\n") === 'REFUSED', 'an address this host does not hold is refused');
+check($publish("publish db.example.com\n") === 'REFUSED', 'a name instead of an address is refused');
+exec('rm -rf ' . escapeshellarg($pub_dir));
+
+// The rebase names pg_hba lines the declaration does not cover: the Docker
+// host and loopback are expected, the declared resolver matches whatever its
+// spacing, and the one undeclared line is what a rebuild would drop.
+$hba_dir = sys_get_temp_dir() . '/joinery_hba_' . getmypid();
+@mkdir($hba_dir, 0700, true);
+file_put_contents($hba_dir . '/pg_hba.conf', "local all postgres md5\nhost all all 127.0.0.1/32 md5\nhost all all ::1/128 md5\n"
+	. "host    all             all             172.17.0.1/32           md5\n"
+	. "host    scrolldaddy     scrolldaddy_reader  192.168.206.21/32       md5\n"
+	. "host all all 10.0.0.5/32 md5\n");
+file_put_contents($hba_dir . '/postgres_access.conf', "# declared\nhost scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\npublish 192.168.206.198\n");
+file_put_contents($hba_dir . '/run.sh', <<<'SH'
+#!/usr/bin/env bash
+SRC="$1"; D="$2"; SITE=site
+docker() { case "$1" in inspect) echo 172.17.0.1 ;; exec) cat "$D/pg_hba.conf" ;; esac; }
+eval "$(awk '/^hba_undeclared\(\) \{/,/^}$/' "$SRC")"
+hba_undeclared 16 "$D/postgres_access.conf"
+SH
+);
+$undeclared = trim((string)shell_exec('bash ' . escapeshellarg($hba_dir . '/run.sh') . ' '
+	. escapeshellarg($site_root . '/maintenance_scripts/sysadmin_tools/rebase_site_container.sh') . ' '
+	. escapeshellarg($hba_dir) . ' 2>&1'));
+check($undeclared === 'host all all 10.0.0.5/32 md5',
+	'the rebase names exactly the undeclared network line', 'got: ' . $undeclared);
+exec('rm -rf ' . escapeshellarg($hba_dir));
+
+// A declared database port gets past the DOCKER-USER rule install.sh docker
+// adds, and that rule is placed below the exemption, once.
+check((bool)preg_match('/elif iptables -C DOCKER-USER -i "\$PUBLIC_IFACE" -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP.*?iptables -I DOCKER-USER \$\(\(EXEMPT \+ 1\)\) -i "\$PUBLIC_IFACE"/s', $install_b10),
+	'install.sh docker adds the database-port block once, below any declared exemption',
+	'inserted on top, a re-run of install.sh docker would cut off a declared reader');
+check((bool)preg_match('/print_success "Container started"\n.*?\n    fi\n    \[ "\$DB_PUBLISH" = "127\.0\.0\.1" \] \|\| allow_declared_database_publish "\$DB_PUBLISH" "\$DB_PORT"/s', $install_b10),
+	'a site that publishes its database on a declared address exempts exactly that address and port');
+$fw_dir = sys_get_temp_dir() . '/joinery_fw_' . getmypid();
+@mkdir($fw_dir, 0700, true);
+file_put_contents($fw_dir . '/run.sh', <<<'SH'
+#!/usr/bin/env bash
+SRC="$1"; CHAIN="$2"; LOG="$3"
+print_info() { :; }; print_warning() { echo "WARN: $*"; }
+netfilter-persistent() { echo "SAVE" >> "$LOG"; }
+iptables() {
+    case "$1" in
+        -S) [ "$CHAIN" = yes ] || return 1; echo '-A DOCKER-USER -i eth0 -p tcp -j DROP' ;;
+        -C) return 1 ;;
+        -I) echo "$*" >> "$LOG" ;;
+    esac
+}
+eval "$(awk '/^allow_declared_database_publish\(\) \{/,/^}$/' "$SRC")"
+allow_declared_database_publish 192.168.206.198 9087
+SH
+);
+$fw = function (string $chain) use ($fw_dir, $site_root): string {
+	@unlink($fw_dir . '/log');
+	touch($fw_dir . '/log');
+	shell_exec('bash ' . escapeshellarg($fw_dir . '/run.sh') . ' '
+		. escapeshellarg($site_root . '/maintenance_scripts/install_tools/install.sh') . ' '
+		. $chain . ' ' . escapeshellarg($fw_dir . '/log') . ' 2>&1');
+	return trim((string)file_get_contents($fw_dir . '/log'));
+};
+check($fw('yes') === "-I DOCKER-USER 1 -p tcp -m conntrack --ctorigdst 192.168.206.198 --ctorigdstport 9087 -m comment --comment joinery-declared-db-publish -j RETURN\nSAVE",
+	'the exemption goes first in DOCKER-USER, names one address and one port, and is saved');
+check($fw('no') === '', 'a host without the DOCKER-USER chain is left alone');
+exec('rm -rf ' . escapeshellarg($fw_dir));
+
 harness_finish();

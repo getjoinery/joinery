@@ -893,6 +893,17 @@ the dump header and refuses before replacing the schema when the target is
 older, reporting `RESTORE_SERVER_TOO_OLD` with the database untouched. Restoring
 onto a newer PostgreSQL is ordinary and needs nothing.
 
+A dump carries each object's owner and grants but not the roles they name, since
+roles belong to the server rather than to one database. Before replacing the
+schema, the restore reads every role the dump names and creates any the target
+lacks, unable to log in: the role gets exactly what the dump grants it. The log
+names each one created. A dump holds no password, so something that logged in as
+such a role on the source (ScrollDaddy's DNS resolvers read as
+`scrolldaddy_reader`) needs its login and password set again on the target. The
+mailbox plugin's installer does this for its own `iemap_*` role on every run. A
+`--db-user` that may not create roles is refused as `RESTORE_ROLE_MISSING`, with
+the database untouched.
+
 A restore lands on an **installed** site. A backup carries the whole site tree,
 `config/` included, encrypted with everything else — so the source machine's
 `config/Globalvars_site.php` (its database password and `secret_box_key`) and its

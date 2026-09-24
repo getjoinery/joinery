@@ -2,6 +2,12 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.2 - The web port on 127.0.0.1 (install.sh 2.82 publishes a proxied site there) and a
+#                database port on the address config/postgres_access.conf declares are
+#                bindings install.sh recreates, so neither is refused. pg_hba lines are no
+#                longer carried across: host_housekeeping.sh rebuilds pg_hba from that
+#                file at every container start, so prepare names any network line the
+#                file does not declare, which a rebuild drops.
 # Version: 1.1 - prepare refuses a container that publishes a port install.sh will not recreate
 #                (scrolldaddy publishes its database on the private network for its DNS
 #                resolvers; a rebuild would put it back on loopback and cut them off), and
@@ -27,14 +33,15 @@
 #
 # prepare records what the move will need and refuses anything it cannot do:
 # the database's name, encoding and locale (refused when the new image lacks
-# the locale), every table's row count, the roles and pg_hba lines the
-# container carries beyond its image, the old container's exact run arguments
+# the locale), every table's row count, the roles the container carries beyond
+# its image, pg_hba lines its config/postgres_access.conf does not declare (a
+# rebuild drops them), the old container's exact run arguments
 # (for rollback), and a trial dump's size against the disk free here.
 #
 # swap stops the site's writes, dumps the database, keeps a copy of the old
 # database volume and the old image, rebuilds the container with install.sh
 # on a fresh database volume, sets the postgres password from the site's own
-# environment, restores roles, database and pg_hba lines, and restarts the site
+# environment, restores roles and database, and restarts the site
 # with its data in place. It then compares every table's row count with the
 # count taken after writes stopped, and prints the rollback command on any
 # difference.
@@ -130,11 +137,18 @@ save_run_args() {
 # added them by hand (a resolver reading this database over the network, say).
 # The rebuilt container starts from the new image's file, so these are what
 # must be carried across.
-hba_extras() {  # $1 image the container was built from, $2 major
-    local f="/etc/postgresql/$2/main/pg_hba.conf"
+hba_undeclared() {  # $1 major, $2 the site's postgres_access.conf
+    # The container's pg_hba lines admitting a network address, other than the
+    # Docker host, that the site's config/postgres_access.conf does not
+    # declare. host_housekeeping.sh rebuilds pg_hba from that file at every
+    # container start, so a rebuild keeps none of these.
+    local f="/etc/postgresql/$1/main/pg_hba.conf" gw
+    gw="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' "$SITE")"
     comm -23 \
-        <(docker exec "$SITE" cat "$f" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' | sed 's/[[:space:]]\+/ /g' | sort -u) \
-        <(docker run --rm --entrypoint cat "$1" "$f" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' | sed 's/[[:space:]]\+/ /g' | sort -u)
+        <(docker exec "$SITE" cat "$f" \
+            | awk -v gw="${gw}/32" '$1 ~ /^host/ && $4 !~ /^(127\.0\.0\.1|::1)(\/|$)/ && $4 != "localhost" && $4 != "samehost" && $4 != gw' \
+            | sed -E 's/[[:space:]]+/ /g; s/ $//' | sort -u) \
+        <({ [ -f "$2" ] && grep -E '^[[:space:]]*host' "$2"; } | sed -E 's/^[[:space:]]+//; s/[[:space:]]+/ /g; s/ $//' | sort -u)
 }
 
 # Set the postgres role's password to the one the site's config uses. A fresh
@@ -206,20 +220,27 @@ if [ "$STAGE" = "prepare" ]; then
     PORT="$(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{if eq $p "80/tcp"}}{{range $conf}}{{.HostPort}}{{end}}{{end}}{{end}}' "$SITE")"
     [ -n "$PORT" ] || die "could not read ${SITE}'s web port"
 
-    # install.sh recreates exactly two bindings: the web port on every
-    # interface and the database port (web + 1000) on loopback. Anything else
-    # was added by hand for something outside this machine, and the rebuild
-    # would silently drop it.
+    # install.sh recreates exactly two bindings: the web port (127.0.0.1 behind
+    # the host proxy, every interface for a site with no domain) and the
+    # database port (web + 1000) on 127.0.0.1, or on the address the site's
+    # config/postgres_access.conf publishes it on. Anything else was added by
+    # hand for something outside this machine, and the rebuild would silently
+    # drop it.
+    ACCESS_FILE="$(vol_mp "${SITE}_config")/postgres_access.conf"
+    DB_PUBLISH="$(awk '$1 == "publish" { print $2; exit }' "$ACCESS_FILE" 2>/dev/null || true)"
+    DB_PUBLISH="${DB_PUBLISH:-127.0.0.1}"
     EXTRA_PORTS=""
     while IFS='|' read -r hip hport cport; do
         [ -z "$cport" ] && continue
         case "${cport%%/*}:${hip}:${hport}" in
-            "80::${PORT}"|"80:0.0.0.0:${PORT}") ;;
-            "5432:127.0.0.1:$((PORT + 1000))") ;;
+            "80::${PORT}"|"80:0.0.0.0:${PORT}"|"80:127.0.0.1:${PORT}") ;;
+            "5432:${DB_PUBLISH}:$((PORT + 1000))") ;;
             *) EXTRA_PORTS="${EXTRA_PORTS} ${hip:-0.0.0.0}:${hport}->${cport}" ;;
         esac
     done < <(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$SITE")
-    [ -z "$EXTRA_PORTS" ] || die "${SITE} publishes${EXTRA_PORTS}, which install.sh does not recreate — the rebuild would drop it and whatever depends on it (scrolldaddy's DNS resolvers read its database this way). Carry it deliberately first (spec B8); nothing was changed."
+    UNDECLARED_HBA="$(hba_undeclared "$HAVE" "$ACCESS_FILE")"
+    [ -z "$UNDECLARED_HBA" ] || die "${SITE}'s pg_hba admits from the network: $(printf '%s\n' "$UNDECLARED_HBA" | paste -sd ';' - | sed 's/;/; /g'). Its config/postgres_access.conf does not declare these, so the rebuild drops them. Declare the ones still needed, and remove the rest; nothing was changed."
+    [ -z "$EXTRA_PORTS" ] || die "${SITE} publishes${EXTRA_PORTS}, which install.sh does not recreate — the rebuild would drop it and whatever depends on it. A database read from another machine is declared with a publish line in config/postgres_access.conf; nothing was changed."
     EXTRA_ENV="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE" | cut -d= -f1 \
         | grep -vxE 'PATH|DEBIAN_FRONTEND|SITENAME|DOMAIN_NAME|POSTGRES_PASSWORD|UPGRADE_SERVER|CLONE_FROM|CLONE_KEY|JOINERY_[A-Z_]+|BASE_IMAGE_VERSION|LANG|LC_ALL|TZ' || true)"
     OLD_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$SITE")"
@@ -233,7 +254,6 @@ if [ "$STAGE" = "prepare" ]; then
     save_run_args "${WORK}/run_args"
     docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
         | grep -vE '^(CREATE|ALTER) ROLE postgres[ ;]' > "${WORK}/roles.sql"; chmod 600 "${WORK}/roles.sql"
-    hba_extras "$OLD_IMAGE" "$HAVE" > "${WORK}/hba_extra.conf"
     docker diff "$SITE" 2>/dev/null | grep -E ' /etc/(postgresql|cron\.d)|/var/spool/cron' > "${WORK}/layer_changes.txt" || true
     docker exec "$SITE" bash -c "dpkg -l 'php[0-9]*-*' 2>/dev/null | grep '^ii' | tr -s ' ' | cut -d' ' -f2 | sort" > "${WORK}/php_packages.txt" || true
     count_rows "$DB" > "${WORK}/counts.prepare.tsv"
@@ -252,14 +272,14 @@ if [ "$STAGE" = "prepare" ]; then
     echo "  domain ${DOMAIN:-?}, web port ${PORT}, image ${OLD_IMAGE} kept for rollback"
     echo "  $(wc -l < "${WORK}/counts.prepare.tsv") tables; trial dump $((DUMP_BYTES / 1000000)) MB in $((T1 - T0)) s"
     echo "  roles beyond postgres: $(grep -c '^CREATE ROLE' "${WORK}/roles.sql" || true)"
-    echo "  pg_hba lines beyond the image: $(wc -l < "${WORK}/hba_extra.conf")"
-    [ -s "${WORK}/hba_extra.conf" ] && sed 's/^/    /' "${WORK}/hba_extra.conf"
+    DECLARED_HBA="$(grep -cE '^[[:space:]]*host' "$ACCESS_FILE" 2>/dev/null || true)"
+    echo "  database published on ${DB_PUBLISH}; ${DECLARED_HBA:-0} pg_hba line(s) declared in config/postgres_access.conf"
     if [ -n "$EXTRA_ENV" ]; then
         echo "  environment install.sh does not set (review; the rebuild drops it):"
         printf '%s\n' "$EXTRA_ENV" | sed 's/^/    /'
     fi
     if [ -s "${WORK}/layer_changes.txt" ]; then
-        echo "  changed in the container's own layer (review; pg_hba lines are carried, the rest is not):"
+        echo "  changed in the container's own layer (review; the rebuild carries none of it):"
         sed 's/^/    /' "${WORK}/layer_changes.txt"
     fi
     echo "  disk: needs about $((NEED / 1000000)) MB here, $((FREE / 1000000)) MB free"
@@ -337,12 +357,6 @@ if [ "$STAGE" = "swap" ]; then
     docker exec -i "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U postgres --create --exit-on-error -d postgres' \
         < "${WORK}/${DB}.dump" || die "the restore failed. Roll back with: $0 ${SITE} rollback"
     docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" vacuumdb -U postgres --analyze-only -q "$1"' _ "$DB" || true
-
-    if [ -s "${WORK}/hba_extra.conf" ]; then
-        say "Carrying $(wc -l < "${WORK}/hba_extra.conf") pg_hba line(s) across"
-        docker exec -i "$SITE" bash -c 'cat >> "$(ls -1d /etc/postgresql/*/main/pg_hba.conf | sort -V | tail -1)" && service postgresql reload > /dev/null' \
-            < "${WORK}/hba_extra.conf"
-    fi
 
     count_rows "$DB" > "${WORK}/counts.after.tsv"
     if ! diff -q "${WORK}/counts.before.tsv" "${WORK}/counts.after.tsv" > /dev/null; then
