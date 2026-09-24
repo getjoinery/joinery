@@ -103,6 +103,53 @@ check($q->fetchColumn() === 'false', 'the code was NOT consumed by the dry run')
 $outcome = RecoveryReadiness::dryRunVaultCode($fixture_user_id, UserEncryptionVault::SCOPE_USER, $code);
 check($outcome['ok'] === true, 'the same code still passes a second dry run (still unconsumed)');
 
+// ── Staleness follows the codes, not only the clock ─────────────────────
+section('A check older than the codes is stale');
+
+// The member-facing items for the fixture user: one card per vault. Read the
+// ledger's view of it through the same path the security page uses.
+$rr_items = function () use ($fixture_user_id) {
+	$m = new ReflectionMethod('RecoveryReadiness', 'attachLedger');
+	$m->setAccessible(true);
+	$v = new ReflectionMethod('RecoveryReadiness', 'vaultItems');
+	$v->setAccessible(true);
+	$out = array();
+	foreach ($m->invoke(null, $v->invoke(null, $fixture_user_id), $fixture_user_id) as $item) {
+		$out[$item['key']] = $item;
+	}
+	return $out;
+};
+$item_key = 'vault_codes_' . UserEncryptionVault::SCOPE_USER;
+
+$item = $rr_items()[$item_key] ?? null;
+check($item !== null && $item['codes_since'] !== null, 'a vault item says when its newest live recovery code was made');
+check($item !== null && $item['last_verified'] === null && $item['stale'], 'never checked reads as stale');
+
+RecoveryVerification::record($item_key, RecoveryVerification::METHOD_DRY_RUN, $fixture_user_id, true);
+$item = $rr_items()[$item_key];
+check($item['last_verified'] !== null && !$item['stale'] && !$item['codes_changed'],
+	'a check made after the codes were made is current');
+
+// The codes are regenerated (or retired by a key rotation): the old wrapping
+// goes, a new one arrives, and the check that proved the old one is stale.
+$db->prepare('UPDATE uew_user_encryption_wrappings SET uew_delete_time = now() WHERE uew_user_encryption_wrapping_id = ?')
+	->execute(array((int)$wrapping->key));
+$db->prepare("INSERT INTO uew_user_encryption_wrappings (uew_uev_user_encryption_vault_id, uew_unlocker_type, uew_wrapped_secret_key, uew_salt, uew_is_used, uew_key_generation, uew_create_time)
+	VALUES (?, 'recovery', 'newer-placeholder', ?, false, 1, now() + interval '2 seconds')")->execute(array((int)$vault->key, $salt));
+$item = $rr_items()[$item_key];
+check($item['codes_changed'] && $item['stale'], 'after the codes change, the earlier check is stale');
+
+RecoveryVerification::record($item_key, RecoveryVerification::METHOD_DRY_RUN, $fixture_user_id, true);
+$db->prepare("UPDATE rcv_recovery_verifications SET rcv_verify_time = now() + interval '5 seconds' WHERE rcv_item_key = ? AND rcv_usr_user_id = ? AND rcv_passed = true")
+	->execute(array($item_key, $fixture_user_id));
+$item = $rr_items()[$item_key];
+check(!$item['codes_changed'] && !$item['stale'], 'a fresh check of the new codes is current again');
+
+// Put the fixture wrapping back for the failure-path section below.
+$db->prepare("DELETE FROM uew_user_encryption_wrappings WHERE uew_wrapped_secret_key = 'newer-placeholder' AND uew_uev_user_encryption_vault_id = ?")->execute(array((int)$vault->key));
+$db->prepare('UPDATE uew_user_encryption_wrappings SET uew_delete_time = NULL WHERE uew_user_encryption_wrapping_id = ?')->execute(array((int)$wrapping->key));
+$db->prepare('DELETE FROM rcv_recovery_verifications WHERE rcv_item_key = ? AND rcv_usr_user_id = ?')->execute(array($item_key, $fixture_user_id));
+
 section('Vault-code dry run: failure paths');
 
 $outcome = RecoveryReadiness::dryRunVaultCode($fixture_user_id, UserEncryptionVault::SCOPE_USER, 'WRONG-CODE');

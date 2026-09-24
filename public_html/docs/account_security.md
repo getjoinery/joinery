@@ -385,9 +385,11 @@ Verify tools, by kind:
 
 Every attempt appends to the verification ledger
 (`rcv_recovery_verifications` — pass/fail, method, user, time; never the
-secret). Items warn when never verified or last verified more than
-`RecoveryReadiness::STALE_DAYS` (180) days ago, when unused recovery codes run
-low, or when a vault scope has content but no passkey. The server_manager
+secret). Items warn when never verified, when last verified more than
+`RecoveryReadiness::STALE_DAYS` (180) days ago, when the last check predates the
+newest live recovery code (regenerated codes, or a client-custody key rotation,
+retire the codes a check proved), when unused recovery codes run low, or when a
+vault scope has content but no passkey. The server_manager
 dashboard shows a one-line attention summary linking here. Verify actions are
 step-up gated and rate-limited so no verify tool is a better guessing oracle
 than the recovery flow it mirrors.

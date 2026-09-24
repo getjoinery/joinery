@@ -1152,7 +1152,7 @@
                     <h3><?php echo htmlspecialchars($rr_item['title']); ?></h3>
                     <?php if ($rr_item['last_verified']): ?>
                         <?php if ($rr_item['stale']): ?>
-                            <div class="jy-alert jy-alert-warning">Last checked <?php echo htmlspecialchars(LibraryFunctions::convert_time($rr_item['last_verified'], 'UTC', $session->get_timezone(), 'M j, Y')); ?> — check a code again.</div>
+                            <div class="jy-alert jy-alert-warning">Last checked <?php echo htmlspecialchars(LibraryFunctions::convert_time($rr_item['last_verified'], 'UTC', $session->get_timezone(), 'M j, Y')); ?><?php echo !empty($rr_item['codes_changed']) ? ', before these codes were made' : ''; ?> — check a code again.</div>
                         <?php endif; ?>
                     <?php else: ?>
                         <div class="jy-alert jy-alert-warning">Never checked — confirm you still have these codes saved.</div>
