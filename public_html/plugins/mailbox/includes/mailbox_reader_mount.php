@@ -37,6 +37,8 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.22.1 - the compose form carries no _csrf_token field: the send is an
+ *                  /api/v1 call authenticated by the X-Joinery-Csrf header
  * @version 1.22.0 - messageTimelineUrl: the ⋮ menu's Show logs panel
  *                  (specs/mailbox_message_timeline.md)
  * @version 1.21.0 - phone layout (specs/mailbox_reader_phone_layout.md): the
@@ -170,7 +172,6 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			$compose->begin_form();
 			$compose->hiddeninput('mode', '', array('value' => '', 'id' => 'mbx_mode'));
 			$compose->hiddeninput('source_id', '', array('value' => '', 'id' => 'mbx_source_id'));
-			$compose->hiddeninput('_csrf_token', '', array('value' => $csrf_token, 'id' => 'mbx_csrf'));
 			// No FormWriter validation rules: the reader submits this form by fetch,
 			// and FormWriter's client validator does a native (full-page) submit when
 			// it passes — which would break the SPA. Validation is the reader JS (To
