@@ -291,10 +291,10 @@ function security_logic(array $input): LogicResult{
 	}
 
 	if ($action === 'disable' && $page_vars['totp_enabled']) {
-		// Possession-factor invariant: a vault holder must always retain a
-		// second factor beyond memorized secrets — TOTP or a live passkey.
-		// Without this, disabling 2FA after revoking every passkey would
-		// leave the vault openable with a phished password + recovery code.
+		// Possession-factor invariant: an account holding a vault always keeps a
+		// second way to sign in — TOTP or a live passkey. Turning TOTP off with no
+		// live passkey would leave it signing in with a password alone. This
+		// guards sign-in; no second factor ever opens the vault.
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
 		$vaults = new MultiUserEncryptionVault(['user_id' => $user->key]);
@@ -303,9 +303,9 @@ function security_logic(array $input): LogicResult{
 			$live_passkeys = new MultiPasskey(['user_id' => $user->key, 'deleted' => false]);
 			$live_passkeys->load();
 			if ($live_passkeys->count() === 0) {
-				$msgtxt = 'Your encrypted vault needs a second factor that is not just a memorized code. '
+				$msgtxt = 'An account with an encrypted vault needs a second way to sign in. '
 					. 'Add a passkey first, then disable two-factor authentication.';
-				$message = new DisplayMessage($msgtxt, 'Vault protection', '/\/profile\/security.*/',
+				$message = new DisplayMessage($msgtxt, 'Sign-in protection', '/\/profile\/security.*/',
 					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
 				$session->save_message($message);
 				return LogicResult::redirect('/profile/security');

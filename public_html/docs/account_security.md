@@ -172,11 +172,10 @@ behind that vault cannot be recreated.
 
 **The possession-factor invariant is warned, not refused.** Removing a vault
 holder's final factor is allowed, behind a typed-phrase confirmation
-(`RESET`) that says what it costs: the vault is protected by memorized secrets
-alone until the user enrolls a replacement, and they are required to enroll one
+(`RESET`) that says what it costs: the account signs in with a password alone
+until the user enrolls a replacement, and they are required to enroll one
 before reaching anything else. The exposure closes at their next page load
-through the vault re-enrollment gate above, and a recovery-code unlock still
-demands a step-up that only a newly enrolled factor can satisfy.
+through the vault re-enrollment gate above.
 
 **Every action emails the account holder** — naming what was removed, and
 telling them to change their password if they did not request it. It is sent
@@ -272,13 +271,11 @@ guard above applies there unchanged. `/setup` is exempt from the admin and
 vault 2FA navigation gates for the same reason `/profile/security` is: it
 is a place where the required factor gets enrolled.
 
-**Possession-factor invariant:** a vault holder must always retain a second
-factor beyond memorized secrets — TOTP or at least one live passkey. Both
-mutation points enforce it: disabling TOTP is refused when no live passkey
-remains, and revoking the last passkey is refused while TOTP is off. Without
-it, the vault's knowledge-factor unlocks (recovery code, bypass phrase) would
-lose their step-up gate and a phished password + recovery code would open the
-vault remotely.
+**Possession-factor invariant:** an account holding a vault always keeps a
+second way to sign in — TOTP or at least one live passkey; a passkey alone
+satisfies it. It guards sign-in, not the vault: no second factor opens a vault.
+Both mutation points enforce it: disabling TOTP is refused when no live passkey
+remains, and revoking the last passkey is refused while TOTP is off.
 
 ## The unlock window
 
@@ -329,31 +326,30 @@ One account setting, two values (`usr_2fa_cadence`, `User::two_factor_cadence()`
 - **`sensitive_only`** — sign-in is password-only; the factor is asked at
   sensitive actions instead (the step-up gate above). Sound, not a loophole,
   because every escalation from a bare session is independently gated: sealed
-  content needs the vault; password/email/2FA changes and recovery-code use
-  need a step-up; routing changes need an open window. A phished password on
-  this posture sees the mailbox's shape — counts, times, labels, placeholders —
-  and opens nothing. The setting's own change is a step-up action, and choosing
-  it carries the one-line consequence.
+  content needs a vault unlocker (a passkey, the bypass phrase or a recovery
+  code); password/email/2FA changes need a step-up; routing changes need an
+  open window. A phished password on this posture sees the mailbox's shape —
+  counts, times, labels, placeholders — and opens nothing; a phished password
+  together with a phished bypass phrase or recovery code opens the vault. The
+  setting's own change is a step-up action, and choosing it carries the
+  one-line consequence.
 
 ## Unlockers, ranked
 
 - **Passkey** — the everyday unlocker: one tap, user verification required.
-- **Recovery codes** — one-time, for disasters, so the strictest path: when the
-  account has a second factor, a recovery-code unlock requires a recent step-up
-  **regardless of the 2FA cadence** (the API returns a `second_factor_required`
-  flag that routes the user through `/verify-stepup` first). On use it **ends
+- **Recovery codes** — one-time, for disasters: a code is what someone who
+  lost their passkey holds, so it opens the vault on its own. On use it **ends
   every open window everywhere** (`VaultUnlock::lockAll()`) and then opens one
   only for the recovering session, and emails a security alert to the account —
-  so a *stolen* code lands the thief in a re-locked vault while the owner is
-  notified. Consuming one drops the vault into a *regenerate recommended* state
-  once fewer than 3 remain unused. **Recovery codes are vault-only**: they
+  so a *stolen* code is announced to the owner the moment it is used.
+  Consuming one drops the vault into a *regenerate recommended* state once
+  fewer than 3 remain unused. **Recovery codes are vault-only**: they
   answer "give me my data," never "log me in."
 - **Bypass phrase** — optional fallback (Argon2id-derived, internally `passphrase`), for accounts that
   want a memorized unlocker alongside hardware. Never offered during vault
   setup — added deliberately from unlocker management, behind a warning that
-  it lowers the vault's strength to the strength of the phrase. Like a
-  recovery code, unlocking with it requires a recent step-up **regardless of
-  the 2FA cadence** when the account has a second factor.
+  it lowers the vault's strength to the strength of the phrase. It opens the
+  vault on its own, like a passkey or a recovery code.
 
 **The unlocker floor:** any change that would leave a vault with fewer than 1
 passkey wrapping *and* fewer than 3 unused recovery codes is refused at the
@@ -559,8 +555,9 @@ core dependency on any one plugin.
 | Regenerate 2FA backup codes | Session + recent step-up |
 | Change 2FA cadence | Session + recent step-up |
 | Change a domain's security level | Session + recent second-factor step-up |
-| Unlock the vault with a recovery code | Session + recent step-up (if a factor is enrolled); ends all other windows + alerts |
-| Unlock the vault with a bypass phrase | Session + recent step-up (if a factor is enrolled) |
+| Unlock the vault with a recovery code | Session + the code; ends all other windows + alerts. No sign-in second factor |
+| Unlock the vault with a bypass phrase | Session + the phrase. No sign-in second factor |
+| Open a browser-held vault (Drive's Fortress folders, the password vault) | Session + a passkey, its passphrase or a recovery code, in the browser. No sign-in second factor |
 | Change a sealed mailbox's filters or alias routing | Session + open unlock window (the owner's own) |
 | Send as a protected identity domain | Open unlock window, via the mailbox compose path only — ambient/transactional senders are refused outright |
 | Protect a domain / stage or cut over a DKIM rotation | Admin session + open unlock window (the key seals to the owner's vault) |

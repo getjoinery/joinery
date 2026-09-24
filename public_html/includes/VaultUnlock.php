@@ -27,7 +27,9 @@
  * is the only durable trace a window leaves — see docs/sealed_vault.md
  * § The audit log.
  *
- * @version 1.11
+ * @version 1.12
+ * @changelog 1.12 - the last-passkey refusal names what the rule guards: sign-in to
+ *   an account holding a vault. No second factor opens a vault.
  * @changelog 1.11 - VaultSealedForBrowserException: a row sealed to a
  *   client-custody scope, which no server code reads.
  * @changelog 1.10 - the short caps are HARDENED_*_CAP_SECONDS: they ride with
@@ -840,10 +842,10 @@ class VaultUnlock {
 		}
 
 		// Possession-factor invariant (the other edge is the disable-2FA gate
-		// in security_logic): a vault holder must always retain a second
-		// factor beyond memorized secrets. Revoking the last live passkey
-		// while TOTP is off would leave the vault openable with a phished
-		// password + recovery code alone. Skipped on the administrative reset
+		// in security_logic): an account holding a vault always keeps a second
+		// way to sign in. Revoking the last live passkey while TOTP is off would
+		// leave it signing in with a password alone. This guards sign-in; no
+		// second factor ever opens the vault. Skipped on the administrative reset
 		// path: kept strictly there it deadlocks a user who lost every factor,
 		// and the re-enrollment gate closes the exposure at their next page load.
 		if ($vaults->count() && empty($context['admin_reset'])) {
@@ -862,8 +864,9 @@ class VaultUnlock {
 				if ($remaining === 0) {
 					throw new PasskeyRevocationVetoException(
 						'This is your last passkey and two-factor authentication is off - revoking it '
-						. 'would leave your encrypted vault protected by memorized secrets alone. Enable '
-						. 'two-factor authentication or add another passkey first.'
+						. 'would leave you signing in with a password alone, and an account with an '
+						. 'encrypted vault needs a second way to sign in. Enable two-factor '
+						. 'authentication or add another passkey first.'
 					);
 				}
 			}

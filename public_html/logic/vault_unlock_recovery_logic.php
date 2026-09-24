@@ -26,18 +26,10 @@ function vault_unlock_recovery_logic(array $input): LogicResult {
 		return LogicResult::error('Your vault is not set up yet.');
 	}
 
-	// Recovery-code unlock is the everything-bypass, so it gets the strictest path
-	// (specs/mailbox_security_levels.md § 5.6): the account's second factor is
-	// required REGARDLESS of the 2FA cadence setting whenever one is enrolled. As
-	// an API action this can't redirect, so it rejects with a flag the client uses
-	// to run the step-up ceremony first, then retry.
-	if ($session->user_has_second_factor($user) && !$session->has_recent_second_factor()) {
-		return LogicResult::render([
-			'second_factor_required' => true,
-			'error' => 'Confirm your identity with your second factor, then retry your recovery code.',
-		]);
-	}
-
+	// The code opens the vault on its own: it is what someone who lost their
+	// passkey holds, and the account's sign-in second factor (an authenticator
+	// code) never takes part in opening a vault. What guards a used code is
+	// below: it ends every other open window and alerts the account by email.
 	$code = isset($input['code']) ? (string)$input['code'] : '';
 
 	try {

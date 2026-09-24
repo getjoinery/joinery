@@ -25,19 +25,9 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 		return LogicResult::error('Your vault is not set up yet.');
 	}
 
-	// A passphrase is a phishable knowledge factor, so like the recovery-code
-	// path it demands the account's second factor regardless of the 2FA
-	// cadence setting: a remote attacker must hold a possession factor, not
-	// just two stolen strings. As an API action this can't redirect, so it
-	// rejects with a flag the client uses to run the step-up ceremony first,
-	// then retry.
-	if ($session->user_has_second_factor($user) && !$session->has_recent_second_factor()) {
-		return LogicResult::render([
-			'second_factor_required' => true,
-			'error' => 'Confirm your identity with your second factor, then retry your bypass phrase.',
-		]);
-	}
-
+	// The phrase opens the vault on its own. A vault opens with a passkey, its
+	// bypass phrase or a recovery code; the account's sign-in second factor
+	// (an authenticator code) never takes part in opening one.
 	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
 
 	try {
