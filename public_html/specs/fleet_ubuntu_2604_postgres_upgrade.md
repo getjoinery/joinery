@@ -1,9 +1,13 @@
 # Fleet Move to Ubuntu 26.04 / PostgreSQL 18
 
-**Status:** Stage 1 committed 2026-09-24 (71277d44): WP1–WP5, WP3b/B7, B1, B9, B11, B12,
-Postgres local-only, and WP7 (the move script). Not yet in a release. B8's remainder and
-B10 are built and in the tree 2026-09-24, uncommitted (§ Progress). Both rehearsals wait on
-the owner.
+**Status:** Stage 1 is released in 0.8.424 (published 2026-09-24; commit 71277d44): WP1–WP5,
+WP3b/B7, B1, B9, B11, B12, Postgres local-only, and WP7 (the move script). The docker-prod
+sites still run 0.8.423. B8's remainder and B10 are built and in the tree 2026-09-24,
+uncommitted. B13–B16, found by rehearsal R1, are fixed and in the tree, uncommitted.
+WP6 (base 2.0) and B17 (fresh installs lost their plugin bundle) are built, gated and in
+the tree, uncommitted.
+R1 passed on the owner's test box; two of its gates wait on approving its agent on dev
+(§ Progress). R2 waits on the owner.
 Two owner decisions open (D3, D4; D1 and D2 are in `specs/backup_database_incrementals.md`).
 **Date:** 2026-09-24 (rewritten from the 2026-08-01 draft after a fleet investigation;
 the code-side cutover items of `php_85_pg18_stack_cutover.md` are folded in here).
@@ -322,6 +326,96 @@ to `/login`). `docker ps` shows every container's web port on `0.0.0.0` and `[::
   domain over HTTPS and on the host's loopback. Both resolvers reconnected to the
   database through the new exemption and report `db_connected`.
 
+**B13 — a new Docker host cannot build its base image** (found 2026-09-24 in rehearsal R1).
+`install.sh server` loads `_host_files.sh` from its own directory (since `install.sh` 2.78,
+release 0.8.422), and the base image build runs `install.sh server`. But `do_build_base`
+put only `install.sh` in the build context, and `Dockerfile.base` copied only `install.sh`.
+The build stops at "Configuring Apache" with `/tmp/_host_files.sh: No such file or
+directory`. So a Docker host without `joinery-base` cannot install its first site: a new
+customer Docker host, or any host's first install. docker-prod and test380s built their
+base before 0.8.422.
+- **Fix** (in the tree 2026-09-24, landed with the converger stopped): `install.sh` 2.83 copies `_host_files.sh` into the build context, and
+  `Dockerfile.base` 1.2 copies it beside `install.sh` and removes both after. No base
+  version bump: the image's contents do not change.
+- **Contract:** for every file `install.sh` loads from its own directory, `do_build_base`
+  and `Dockerfile.base` both carry it (3 checks; 2 fail on the current tree).
+- **Recorded, not changed:** the base image's drift label hashes only `do_server_setup`,
+  so an edit to `_host_files.sh` does not warn that the base is stale. WP6's version bump
+  rebuilds every base anyway.
+
+**B14 — one bad answer from an Ubuntu mirror fails an install** (found 2026-09-24 in R1).
+The site image's dependency step ran `apt-get update` once. It failed with `File has
+unexpected size … Mirror sync in progress?` on noble-security, and the whole site build
+stopped. The same single attempt sat in four places in `install.sh`.
+- **Fix** (landed with B13): `install.sh` 2.83 `apt_update` tries up
+  to four times, 30 seconds apart, and every index update in `install.sh` goes through it.
+  `Dockerfile.template` 5.4 runs the same loop in `/bin/sh`. Both were exercised against a
+  failing `apt-get` stub: success on the third call proceeds, four failures stop.
+- **Contract:** 3 checks. The grub-order check now anchors on `apt_update && apt upgrade -y`.
+  The full contract passes 738/738.
+- **Side effect:** `do_server_setup` changed, so a host whose base predates this release
+  prints the advisory "do_server_setup has changed since joinery-base was built" until
+  WP6's base 2.0 replaces it. Warning only.
+
+**B15 — PostgreSQL would not start on a kept volume from an older image** (found 2026-09-24
+in R1). Images give `postgres` different ids: `joinery-base:1.2` has 101/104, and 2.0 has
+100/103. A rebuilt site keeps its `_pg_logs` volume, which the old `postgres` group owned,
+so PostgreSQL 18 could not create `postgresql-18-main.log` and never started. The same
+drift would stop a kept data volume between two images of one major.
+- **Fix** (in the tree): `Dockerfile.template` 5.5's start command hands
+  `/var/lib/postgresql` and `/var/log/postgresql` to the image's `postgres` user when
+  another owns them. It runs after the foreign-major refusal and before PostgreSQL starts.
+  Contract: 3 checks.
+
+**B16 — the move script could lose its way back** (found 2026-09-24 in R1; all fixed in
+`rebase_site_container.sh`, in the tree):
+- **Stopping writes stopped the container (1.3).** `service apache2 stop` ended it, because
+  Apache is its main process; the restart policy started it again, and swap died silently.
+  `stop_site_writes` now stops PHP-FPM, cron, the agent and Postfix, and checks the
+  container is still up with no PHP-FPM left.
+- **Silent failures (1.3):** an error trap names the failing line. swap and rollback wait
+  for the site to finish starting before reporting its front page; it read 000 and 502
+  while the installers ran.
+- **The rollback image was kept by name (1.4).** `install.sh` rebuilds under
+  `joinery-<site>`, so after one swap the name meant the new image. A second swap on stale
+  prepare data tagged that as the rollback image, and rollback then started PostgreSQL 16
+  data on an 18 image. The old image is now recorded by id.
+  - rollback ends at `rolled_back`, so another swap needs a fresh prepare.
+  - prepare refuses while a move is in flight.
+  - swap refuses a container whose image changed since prepare, or a rollback tag that
+    already names another image.
+- **Rollback could not start the old server (1.4).** The new image's start command (B15)
+  had handed the log directory to its own `postgres`, so rollback hands it back to the old
+  image's ids first.
+- **Cosmetic:** the trial dump shows to a tenth of a MB (a 0.7 MB dump read "0 MB").
+- Contract: 6 checks, which fail on the staged 1.2.
+
+**B17 — every fresh install came up without its default plugins** (found 2026-09-24 in the
+WP6 gate). `_site_init.sh` installs the `personal` bundle (mailbox, joinery_ai) on a fresh
+site. Every bundle package is verified against `config/release_verify_keys`, and nothing
+had written that file yet:
+- **Docker:** the container's host installers write it after first boot.
+- **Standalone:** `install.sh` called its writer after `_site_init.sh`, and that writer
+  defers to the host installers whenever the tree ships an agent bundle.
+
+Both packages were refused with `no_keys`, and the site came up bare with one warning line.
+This has been so since package signing (S9, 2026-09-12), for Docker and standalone alike;
+the quick-deploy customer install is standalone. Proven on the test box: with the key in
+place, the same bundle installs cleanly.
+- **Fix** (in the tree 2026-09-24, landed with WP6): the converger's key
+  writer moves into `_host_files.sh` 1.2 as `host_files_write_release_verify_keys`. The
+  runner (2.19) calls it every tick, as before, and `_site_init.sh` 3.7 calls it just
+  before the bundle. `install.sh` writes its upgrade-server fallback before `_site_init.sh`.
+- **Proven:** a fresh site built from the fixed installers logged "release key … carries
+  the agent bundle's signing key", then "mailbox: installed and activated, joinery_ai:
+  installed and activated, Plugin bundle installed" on first boot.
+- **Tests:** the converger gate's key cases run against the shared writer (112/112). The
+  contract's package-signing checks read `_host_files.sh`, and two ordering checks pin
+  key-before-bundle on both paths (7 fail on today's tree; the full contract passes
+  752/752 against the fix).
+- **Sites already installed** without the bundle get their plugins from the admin Plugins
+  page; nothing installs them after the fact.
+
 **B9 — the platform's PHP tuning loaded the PostgreSQL extensions twice** (fixed
 2026-09-24). `host_files_tune_php_ini()` enabled `extension=pdo_pgsql` and `extension=pgsql`
 in `php.ini`, but Ubuntu's php-pgsql package already loads both from `conf.d`. Every PHP
@@ -336,7 +430,15 @@ pdo_parse_params` (it loaded before PDO) and `Module "pgsql" is already loaded`.
 ## Stage 2 — The 26.04 container image (dev tree)
 
 **WP6 — Land `joinery-base:2.0`.** This was proven and deliberately held back in
-August.
+August. **In the tree 2026-09-24** (uncommitted; landed with the converger stopped): `install.sh` 2.84 (`BASE_IMAGE_VERSION` 2.0), `Dockerfile.base` 1.3
+(`FROM ubuntu:26.04`), `Dockerfile.template` 5.6 (default 2.0). Contract: 3 checks, one
+pinning the template's default to `install.sh`'s version. Docs: `deploy_and_upgrade.md`
+§ Docker Shared Base Image. **Gates run on the owner's test box:**
+- Base 2.0 built: Ubuntu 26.04.1, PostgreSQL 18, PHP 8.5.4.
+- A fresh site on it passes the deploy tier (4/4).
+- A routine `install.sh site` rebuild of that site keeps the agent's identity: same
+  fingerprint and identity file, new container, no duplicate join request on dev.
+- Not run, because it buys a Linode: the quick-deploy live gates with a customer provision.
 - `Dockerfile.base:17` becomes `FROM ubuntu:26.04`; `BASE_IMAGE_VERSION` goes `1.2` → `2.0`
   (`install.sh:477`).
 - The first site install on each Docker host builds the new image (`install.sh:4103`–`:4108`).
@@ -377,8 +479,9 @@ recreate it exactly.
   dump plus a copy of the old volume.
 
 `swap` — the site is down from here until the gates pass:
-- Stop Apache and cron inside the container (PostgreSQL stays up), then take the real
-  `pg_dump -Fc`. Nothing writes after it.
+- Stop PHP-FPM, cron, the agent and Postfix inside the container; PostgreSQL and Apache
+  stay up, and Apache answers 503. Apache is the container's main process, so stopping it
+  would end the container. Then take the real `pg_dump -Fc`. Nothing writes after it.
 - Copy the `_postgres` volume to `<site>_postgres_pg16` (the rollback copy), stop and
   remove the container, and remove `_postgres`.
 - Recreate the container on the new image with the old container's ports, environment,
@@ -485,7 +588,7 @@ database-incrementals integration tests run in the ordinary gate.
 
 ## Progress (2026-09-24)
 
-- **Committed in 71277d44** (not yet released):
+- **Released in 0.8.424** (commit 71277d44):
   - B1: `BackupRunner.php`, `BackupFetch.php`, `BackupChainListHelper.php`,
     `BackupListHelper.php`, `targets.php`, `run_backup.php`, the `JobResultProcessor.php`
     comment, `BackupObjectsNotice.php`, and eight tests that pinned binary-unit sizes.
@@ -510,7 +613,39 @@ database-incrementals integration tests run in the ordinary gate.
     the docs.
   - Landed with the converger stopped: `install.sh` 2.82, `host_housekeeping.sh` 1.8, the
     housekeeping gate (105/105), and the contract section (18; contract 732/732).
-- **Rehearsal R1 (container move) — blocked.** It needs a scratch Docker host. Creating
+- **Rehearsal R1 (container move) — passed 2026-09-24** on the owner's test box
+  45.79.180.75 (Ubuntu 24.04.4, 1 vCPU, 1 GB, our key on it). The order was the real one:
+  - Site `rehearsal` built from 0.8.423: web port on every interface, the agent in the
+    writable layer, domain `reh.example.test` behind the host proxy.
+  - Upgraded to 0.8.424 from dev (deploy tier passed).
+  - Moved with 0.8.424 plus the uncommitted B8/B10/B13–B16 scripts and WP6 (base 2.0 on
+    Ubuntu 26.04.1: PostgreSQL 18, PHP 8.5.4).
+  - A reader role with 203 grants and a declared `postgres_access.conf`
+    (`publish 45.79.180.75`) stood in for scrolldaddy.
+  - **Found and fixed on the way:** B13, B14, B15 and B16, plus the move script refusing a
+    loopback database binding beside a publish line.
+  - **Final clean cycle, all exit 0:** prepare → swap (203/203 tables match, 302) →
+    rollback (PostgreSQL 16, 302) → prepare → swap (203/203, 302) → finish.
+  - **Timings on 1 vCPU:** the 26.04 base build took about 9 minutes, a swap 2½ minutes
+    (mostly the site image build; the dump and restore took seconds on 0.7 MB), a
+    rollback 30 seconds.
+  - **Proven on the moved site:**
+    - the web port is on `127.0.0.1` only, and from dev it is closed on IPv4 and IPv6;
+    - the database is published on the declared address, with the tagged firewall
+      exemption above the block;
+    - from dev, the reader reaches the password check and `postgres` gets
+      "no pg_hba.conf entry";
+    - the reader role kept its login and all 203 grants;
+    - the agent's fingerprint `80fe16726c9cadce` matches its pending join request on dev;
+    - the deploy tier passes (the read-only gate needed the fake domain in the container's
+      `/etc/hosts`).
+  - **Not run:** a `check_status` round trip, and one backup with a level-2 verification.
+    Both need the agent's join request on dev (request 1787) approved.
+  - **For Stage 3:** a site takes the release carrying the new scripts first, then moves.
+    Until it does, its container runs the scripts on its scripts volume, which is why
+    housekeeping 1.7 there still refused the `publish` line.
+  - The disk reached 11 of 25 GB with both base images; `prepare`'s disk check covers only
+    the dump and the volume copy.
   a Linode is a purchase and needs the owner's explicit approval. Docker is not on dev.
 - **Rehearsal R2 (jeremytunnell clone) — owner.** jeremytunnell is not in the account the
   dev Linode token reaches (that account holds only the test boxes). The clone,

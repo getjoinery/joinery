@@ -334,7 +334,7 @@ chk "the queue phase is skipped on a machine" "$(sed -n '/^run_root_requests() {
 chk "and the certificate summary" "$(sed -n '/^write_certificate_summary() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
 chk "and the permissions pass" "$(sed -n '/^apply_tree_permissions() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
 chk "and the ownership assertion" "$(sed -n '/^assert_tree_ownership() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
-chk "and the release key" "$(sed -n '/^write_release_verify_keys() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
+chk "and the release key" "$(grep -B4 'host_files_write_release_verify_keys "\${SITE_ROOT}"' "$RUNNER" | grep -c 'if \[\[ "\${MACHINE}" == "0" \]\]; then')" "1"
 chk "a site run still finds a plugins directory before it does anything" "$(grep -c '^if \[\[ "\${MACHINE}" == "0" \]\] && \[\[ ! -d "\${PUBLIC_HTML}/plugins" \]\]; then$' "$RUNNER")" "1"
 
 echo

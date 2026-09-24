@@ -1783,22 +1783,36 @@ section('Root holds the key it verifies packages against (specs/package_signing.
 // refuses every install, which is safe and useless, and nobody sees that until
 // a stranger's node cannot take a plugin.
 $runner_wp1 = (string)file_get_contents($plugin_start);
-check(strpos($runner_wp1, 'write_release_verify_keys() {') !== false
-    && preg_match('/^write_release_verify_keys$/m', $runner_wp1) === 1,
-    'the converger writes the key file on every tick');
-check(strpos($runner_wp1, 'agent_dist/manifest.json') !== false
-    && strpos($runner_wp1, 'signing_public_key') !== false,
+$hostfiles_wp1 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_host_files.sh');
+check(strpos($runner_wp1, '. "${TOOLS_DIR}/_host_files.sh"') !== false
+    && strpos($runner_wp1, 'host_files_write_release_verify_keys "${SITE_ROOT}"') !== false,
+    'the converger writes the key file on every tick, with the writer _site_init.sh shares');
+$wrk = substr($hostfiles_wp1, (int)strpos($hostfiles_wp1, 'host_files_write_release_verify_keys() {'));
+$wrk = substr($wrk, 0, (int)strpos($wrk, "\n}\n"));
+check(strpos($wrk, 'agent_dist/manifest.json') !== false
+    && strpos($wrk, 'signing_public_key') !== false,
     'from the agent bundle\'s manifest in the tree',
     'root-owned, installed by root, and the key the agent binary was built to verify against');
-check(strpos($runner_wp1, 'grep -qxF "${key}" "${keys_file}"') !== false
-    && strpos($runner_wp1, '>> "${keys_file}"') !== false,
+check(strpos($wrk, 'grep -qxF "${key}" "${keys_file}"') !== false
+    && strpos($wrk, '>> "${keys_file}"') !== false,
     'appending a key the file lacks, never replacing one',
     'a key from an earlier bundle survives a channel change');
-$wrk = substr($runner_wp1, strpos($runner_wp1, 'write_release_verify_keys() {'));
-$wrk = substr($wrk, 0, strpos($wrk, "\n}\n"));
 check(strpos($wrk, '[[ "$(id -u)" == "0" ]] || return 0') !== false, 'and only as root');
 check(strpos($wrk, 'chown root:root "${keys_file}"') !== false && strpos($wrk, 'chmod 644 "${keys_file}"') !== false,
     'root:root 0644: the pool reads it, only root changes which keys count');
+
+// B17: a fresh site installs its plugin bundle before the converger first
+// runs, so the key has to be there already, or every package is refused.
+$init_b17 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_init.sh');
+$key_at_b17 = strpos($init_b17, 'host_files_write_release_verify_keys "$SITE_ROOT"');
+$bundle_at_b17 = strpos($init_b17, 'php "$BUNDLE_TOOL" --bundle=');
+check($key_at_b17 !== false && $bundle_at_b17 !== false && $key_at_b17 < $bundle_at_b17,
+    'a fresh site writes the release key before it installs its plugin bundle (fleet spec B17)',
+    'first boot installed the bundle before anything wrote the key; every package was refused');
+$bm_key_b17  = strpos($install_src, 'write_release_verify_key "/var/www/html/${SITENAME}"');
+$bm_init_b17 = strpos($install_src, '"$SCRIPT_DIR/_site_init.sh" "${INIT_ARGS[@]}"');
+check($bm_key_b17 !== false && $bm_init_b17 !== false && $bm_key_b17 < $bm_init_b17,
+    'a bare-metal install fetches a bundle-less tree\'s key before _site_init.sh');
 
 check(strpos($install_src, 'write_release_verify_key() {') !== false
     && strpos($install_src, 'write_release_verify_key "/var/www/html/${SITENAME}"') !== false,
@@ -2497,7 +2511,7 @@ section('A package prompt cannot kill an unattended install');
 // fails, and aborts the whole install. DEBIAN_FRONTEND=noninteractive does not
 // help: it suppresses the prompt, it does not supply the answer.
 $grub_pos   = strpos($install_src, "grub-pc/install_devices");
-$upgrade_pos = strpos($install_src, 'apt update && apt upgrade -y');
+$upgrade_pos = strpos($install_src, 'apt_update && apt upgrade -y');
 check($grub_pos !== false, 'install.sh handles the grub-pc device answer');
 check($grub_pos !== false && $upgrade_pos !== false && $grub_pos < $upgrade_pos,
     'and does so before the upgrade that would trip over it',
@@ -3397,7 +3411,8 @@ check(strpos($install_b10, 'grep -q ":${port}->"') !== false,
 	'a port published on any address counts as in use');
 check(strpos($install_b10, '"http://127.0.0.1:$PORT/"') !== false && strpos($install_b10, '"http://localhost:$PORT/"') === false,
 	'the post-start probe asks 127.0.0.1, where the port is published');
-check(strpos($rebase_b10, '"80:127.0.0.1:${PORT}"') !== false && strpos($rebase_b10, '"5432:${DB_PUBLISH}:$((PORT + 1000))"') !== false,
+check(strpos($rebase_b10, '"80:127.0.0.1:${PORT}"') !== false
+	&& strpos($rebase_b10, '"5432:127.0.0.1:$((PORT + 1000))"|"5432:${DB_PUBLISH}:$((PORT + 1000))"') !== false,
 	'the rebase accepts the bindings install.sh now makes, so it does not refuse every rebuilt site');
 
 // The resolver itself, run against stubbed docker and ip: the config volume's
@@ -3497,5 +3512,85 @@ check($fw('yes') === "-I DOCKER-USER 1 -p tcp -m conntrack --ctorigdst 192.168.2
 	'the exemption goes first in DOCKER-USER, names one address and one port, and is saved');
 check($fw('no') === '', 'a host without the DOCKER-USER chain is left alone');
 exec('rm -rf ' . escapeshellarg($fw_dir));
+
+section('The base image build carries every file install.sh loads (specs/fleet_ubuntu_2604_postgres_upgrade.md B13)');
+
+$install_b13 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
+$base_b13    = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.base');
+preg_match_all('#^\s*\.\s+"\$SCRIPT_DIR/([A-Za-z0-9_.-]+)"#m', $install_b13, $m_b13);
+$loaded_b13 = array_values(array_unique($m_b13[1]));
+check(in_array('_host_files.sh', $loaded_b13, true), 'install.sh loads _host_files.sh (so the check below has something to hold)');
+$build_fn_b13 = '';
+if (preg_match('/^do_build_base\(\) \{.*?^\}$/ms', $install_b13, $fm)) $build_fn_b13 = $fm[0];
+$copy_b13 = '';
+if (preg_match('/^COPY (.+) \/tmp\/?\S*$/m', $base_b13, $cm)) $copy_b13 = ' ' . $cm[1] . ' ';
+foreach ($loaded_b13 as $file_b13) {
+	check(strpos($build_fn_b13, 'cp "$SCRIPT_DIR/' . $file_b13 . '" "$BUILD_DIR/install_tools/' . $file_b13 . '"') !== false,
+		"do_build_base puts {$file_b13} in the build context",
+		'install.sh server runs inside the base build and loads it; without it no new Docker host can build joinery-base');
+	check(strpos($copy_b13, ' ' . $file_b13 . ' ') !== false, "Dockerfile.base copies {$file_b13} in beside install.sh");
+}
+
+section('An apt index update survives a mirror mid-sync (specs/fleet_ubuntu_2604_postgres_upgrade.md B14)');
+
+$tpl_b14 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
+$apt_fn_b14 = '';
+if (preg_match('/^apt_update\(\) \{.*?^\}$/ms', $install_b13, $am)) $apt_fn_b14 = $am[0];
+check(strpos($apt_fn_b14, 'for attempt in 1 2 3 4; do') !== false && strpos($apt_fn_b14, 'sleep 30') !== false,
+	'install.sh has one apt index update that retries');
+$raw_b14 = array_filter(explode("\n", str_replace($apt_fn_b14, '', $install_b13)), function ($l) {
+	return strpos(ltrim($l), '#') !== 0 && preg_match('/\bapt(-get)? (-\S+ )*update\b/', $l);
+});
+check(count($raw_b14) === 0, 'every other apt index update in install.sh goes through apt_update',
+	'found: ' . implode(' | ', array_map('trim', $raw_b14)));
+check((bool)preg_match('/for attempt in 1 2 3 4; do \\\\\n\s+apt-get update -qq && break; \\\\/', $tpl_b14),
+	'the site image\'s dependency step retries its apt index update');
+
+section('PostgreSQL starts on volumes another image\'s postgres user owns (specs/fleet_ubuntu_2604_postgres_upgrade.md B15)');
+
+$tpl_b15 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
+$owner_at_b15 = strpos($tpl_b15, 'PG_OWNER="$(id -u postgres):$(id -g postgres)"');
+$start_at_b15 = strpos($tpl_b15, "    service postgresql start && \\\n");
+$guard_at_b15 = strpos($tpl_b15, 'FATAL: the database on this volume is PostgreSQL');
+check($owner_at_b15 !== false && $start_at_b15 !== false && $owner_at_b15 < $start_at_b15,
+	'the start command hands PostgreSQL its directories before starting it',
+	'images give postgres different ids; a kept _pg_logs volume left PostgreSQL 18 unable to write its log');
+check($guard_at_b15 !== false && $owner_at_b15 !== false && $guard_at_b15 < $owner_at_b15,
+	'and only after refusing a foreign-major database, which it never touches');
+check(strpos($tpl_b15, 'chown -R postgres:postgres /var/lib/postgresql') !== false
+	&& strpos($tpl_b15, 'chown root:postgres /var/log/postgresql && chmod 1775 /var/log/postgresql') !== false,
+	'both the data volume and the log directory are covered');
+
+section('The move script keeps its way back (specs/fleet_ubuntu_2604_postgres_upgrade.md B16)');
+
+$rebase_b16 = (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/rebase_site_container.sh');
+check(strpos($rebase_b16, "OLD_IMAGE=\"\$(docker inspect -f '{{.Image}}' \"\$SITE\")\"") !== false
+	&& strpos($rebase_b16, "OLD_IMAGE=\"\$(docker inspect -f '{{.Config.Image}}'") === false,
+	'the old image is recorded by id, not by the name install.sh rebuilds under',
+	'by name, a second swap tagged the new image as the rollback image');
+check(strpos($rebase_b16, 'state_set stage rolled_back') !== false
+	&& preg_match('/\[ "\$\(state_get stage\)" = "prepared" \] \|\| die/', $rebase_b16) === 1,
+	'after a rollback, a swap needs a fresh prepare');
+check(strpos($rebase_b16, 'already names another image') !== false,
+	'a swap refuses to move a rollback tag that names another image');
+check((bool)preg_match('/swapping\|swapped\) die "\$\{SITE\} is at stage/', $rebase_b16),
+	'prepare refuses while a move is in flight');
+$rebase_code_b16 = implode("\n", array_filter(explode("\n", $rebase_b16), function ($l) { return strpos(ltrim($l), '#') !== 0; }));
+check(strpos($rebase_code_b16, 'stop_site_writes || die') !== false && strpos($rebase_code_b16, 'service apache2 stop') === false,
+	'writes stop without stopping Apache, the container\'s main process');
+check(strpos($rebase_b16, ':/var/log/postgresql$#') !== false,
+	'rollback hands PostgreSQL\'s log directory back to the old image\'s postgres user');
+
+section('New Docker sites are born on Ubuntu 26.04 with PostgreSQL 18 (specs/fleet_ubuntu_2604_postgres_upgrade.md WP6)');
+
+$install_wp6 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
+$base_wp6    = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.base');
+$tpl_wp6     = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
+preg_match('/^BASE_IMAGE_VERSION="([0-9.]+)"$/m', $install_wp6, $vi_wp6);
+preg_match('/^ARG BASE_IMAGE_VERSION=([0-9.]+)$/m', $tpl_wp6, $vt_wp6);
+check(($vi_wp6[1] ?? '') === '2.0', 'install.sh builds sites on joinery-base 2.0');
+check(($vi_wp6[1] ?? 'a') === ($vt_wp6[1] ?? 'b'), 'Dockerfile.template\'s default base version is install.sh\'s',
+	'the default exists for BuildKit\'s static check; a stale one names an image the host may not have');
+check((bool)preg_match('/^FROM ubuntu:26\.04$/m', $base_wp6), 'the base image is built FROM ubuntu:26.04');
 
 harness_finish();

@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+#VERSION 2.84 - The Docker base image is 2.0: Ubuntu 26.04, PHP 8.5, PostgreSQL 18. New sites are
+#              born on it. An existing site's rebuild is refused while its database is
+#              PostgreSQL 16, and rebase_site_container.sh moves it (rehearsed 2026-09-24).
+#              A bare-metal install writes the release verification key before
+#              _site_init.sh, which installs the plugin bundle that key verifies.
+#VERSION 2.83 - The base image build carries _host_files.sh beside install.sh. install.sh server
+#              loads it, so since 2.78 building joinery-base failed on any host that had
+#              none: a new Docker host could not install its first site. Every apt index
+#              update goes through apt_update, which retries: a mirror mid-sync serves an
+#              index whose size its Release file disagrees with, and one such answer
+#              failed the whole install.
 #VERSION 2.82 - A Docker site the host proxy fronts publishes its web port on 127.0.0.1, which
 #              is all the proxy uses: on every interface it was a plain-HTTP way in from the
 #              internet around HTTPS and the host's fail2ban (Docker's published ports bypass
@@ -504,7 +515,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # joinery-base image tag. Bump when Dockerfile.base or do_server_setup changes
 # (Ubuntu version, PHP version, new apt packages, new system config, etc.).
 # After bumping: run './install.sh build-base' on each host, then rebuild sites.
-BASE_IMAGE_VERSION="1.2"
+BASE_IMAGE_VERSION="2.0"
 
 # Where `install.sh server` records the postgres role password it generated, and
 # where `install.sh site` looks for it on bare metal. One constant, because the
@@ -608,6 +619,20 @@ print_info() {
 print_warning() {
     # Warnings always shown (even in quiet mode)
     echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+# apt-get update, tried up to four times 30 seconds apart. A mirror mid-sync
+# serves an index whose size does not match its Release file ("Mirror sync in
+# progress?"), apt fails the whole update, and it clears within minutes.
+apt_update() {
+    local attempt
+    for attempt in 1 2 3 4; do
+        apt-get update "$@" && return 0
+        [ "$attempt" -lt 4 ] || break
+        print_warning "apt-get update failed (attempt ${attempt} of 4); retrying in 30 seconds"
+        sleep 30
+    done
+    return 1
 }
 
 print_error() {
@@ -1412,7 +1437,7 @@ setup_ssl_docker_proxy() {
     # Ensure Apache + required modules are installed/enabled.
     if ! command -v apache2 &> /dev/null; then
         print_info "Installing Apache..."
-        apt-get update -qq
+        apt_update -qq
         apt-get install -y -qq apache2
     fi
     a2enmod proxy proxy_http ssl headers rewrite > /dev/null 2>&1 || true
@@ -2149,7 +2174,7 @@ do_docker_install() {
     print_step "Installing Docker..."
 
     # Update packages
-    apt-get update
+    apt_update
 
     # Install prerequisites
     apt-get install -y ca-certificates curl gnupg lsb-release
@@ -2162,7 +2187,7 @@ do_docker_install() {
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
     # Install Docker
-    apt-get update
+    apt_update
     apt-get install -y docker-ce docker-ce-cli containerd.io
 
     # Verify installation
@@ -2401,11 +2426,12 @@ do_build_base() {
         exit 1
     fi
 
-    # Build context: just install.sh at the context root (matches
-    # Dockerfile.base's `COPY install.sh /tmp/install.sh`).
+    # Build context: install.sh and the helper install.sh server loads, at the
+    # context root (matches Dockerfile.base's COPY).
     BUILD_DIR=$(mktemp -d)
     mkdir -p "$BUILD_DIR/install_tools"
     cp "$SCRIPT_DIR/install.sh" "$BUILD_DIR/install_tools/install.sh"
+    cp "$SCRIPT_DIR/_host_files.sh" "$BUILD_DIR/install_tools/_host_files.sh"
     cp "$SCRIPT_DIR/Dockerfile.base" "$BUILD_DIR/install_tools/Dockerfile.base"
 
     INSTALL_SH_HASH=$(compute_install_sh_hash)
@@ -2642,7 +2668,7 @@ do_server_setup() {
         fi
     fi
 
-    apt update && apt upgrade -y
+    apt_update && apt upgrade -y
 
     # Install essential packages
     print_step "Installing essential packages..."
@@ -4860,6 +4886,11 @@ do_site_baremetal() {
     # Install PHP extensions the deployed source declares
     install_declared_dependencies "/var/www/html/$SITENAME/public_html"
 
+    # The key root verifies packages against, before _site_init.sh installs the
+    # plugin bundle: a tree that ships no agent bundle takes it from the upgrade
+    # server here; one that does gets it from _site_init.sh, out of the bundle.
+    write_release_verify_key "/var/www/html/${SITENAME}"
+
     # Verify _site_init.sh exists
     if [ ! -f "${SCRIPT_DIR}/_site_init.sh" ]; then
         print_error "Cannot find _site_init.sh in $SCRIPT_DIR"
@@ -4914,10 +4945,6 @@ do_site_baremetal() {
             print_warning "Could not enable the agent; the site is installed and it can be turned on from Admin → System → Management Node"
         fi
     fi
-
-    # The key root verifies packages against, before the converger's first
-    # run: it writes the same file from the bundle when the tree ships one.
-    write_release_verify_key "/var/www/html/${SITENAME}"
 
     # Run core and active plugins' declared host installers (idempotent; the
     # agent installer is the core one, and matters when cloning from a site with

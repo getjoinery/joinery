@@ -3,6 +3,10 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.19 - The release verification key is written by host_files_write_release_verify_keys
+#                 in _host_files.sh, the definition _site_init.sh shares: a fresh site
+#                 installs its plugin bundle before this runner first runs, and every
+#                 bundle package was refused for want of the key (fleet spec B17).
 # Version: 2.18 - site_housekeeping.sh joins CORE_INSTALLERS: the site's logrotate
 #                 file and cron entry, written when absent (they were
 #                 _site_init.sh's alone). --only-plugin=NAME runs one active
@@ -862,47 +866,18 @@ else
 fi
 
 # --- The release verification key (specs/package_signing.md WP1) -------------
-# Root puts code on this box only after PackageSignature has matched the
-# package against the keys in config/release_verify_keys. The key comes from
-# the agent bundle's manifest in the tree: root-owned, installed by root, and
-# the same key the agent binary was built to verify against. Written when
-# absent, appended when the bundle carries a key the file lacks, never
-# replaced - a key from an earlier bundle survives a channel change, so the
-# packages signed under it keep verifying. Every tick, because it is one file
-# read; root:root 0644 so the pool can read it and nobody but root can write
-# it (PackageSignature refuses a key file anyone else could have written).
-write_release_verify_keys() {
-    [[ "$(id -u)" == "0" ]] || return 0
-    [[ "${MACHINE}" == "0" ]] || return 0            # no config/ on a machine; the agent holds the key
-    local manifest="${PUBLIC_HTML}/agent_dist/manifest.json"
-    local keys_file="${SITE_ROOT}/config/release_verify_keys"
-    [[ -f "${manifest}" ]] || return 0
-    command -v php >/dev/null 2>&1 || return 0
-    local key
-    key="$(php -r '
-        $m = json_decode((string)@file_get_contents($argv[1]), true);
-        $k = is_array($m) ? trim((string)($m["signing_public_key"] ?? "")) : "";
-        $raw = $k !== "" ? base64_decode($k, true) : false;
-        echo ($raw !== false && strlen($raw) === 32) ? base64_encode($raw) : "";
-    ' "${manifest}" 2>/dev/null || true)"
-    [[ -n "${key}" ]] || return 0
-    if [[ -f "${keys_file}" ]] && grep -qxF "${key}" "${keys_file}" 2>/dev/null; then
-        # Already carried. Only the mode is asserted, so a sweep that loosened
-        # it is undone here rather than at the next converge.
-        chown root:root "${keys_file}" 2>/dev/null || true
-        chmod 644 "${keys_file}" 2>/dev/null || true
-        return 0
-    fi
-    [[ -d "${SITE_ROOT}/config" ]] || return 0
-    if printf '%s\n' "${key}" >> "${keys_file}" 2>/dev/null; then
-        chown root:root "${keys_file}" 2>/dev/null || true
-        chmod 644 "${keys_file}" 2>/dev/null || true
-        echo "release key: config/release_verify_keys carries the agent bundle's signing key"
+# Every tick, because it is one file read. The writer is shared with
+# _site_init.sh, which needs the key before a fresh site installs its plugin
+# bundle. A machine has no config/; the agent holds the key there.
+if [[ "${MACHINE}" == "0" ]]; then
+    if [[ -f "${TOOLS_DIR}/_host_files.sh" ]]; then
+        # shellcheck source=_host_files.sh
+        . "${TOOLS_DIR}/_host_files.sh"
+        host_files_write_release_verify_keys "${SITE_ROOT}"
     else
-        echo "release key: WARNING - could not write ${keys_file}" >&2
+        echo "release key: _host_files.sh missing from ${TOOLS_DIR} - config/release_verify_keys not checked" >&2
     fi
-}
-write_release_verify_keys
+fi
 
 # Only here, below installer_is_trusted() and below TREE_OWNER (both defined
 # directly after the ownership assertion). Bash resolves a function at CALL

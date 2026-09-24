@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.7 - The release verification key is written before the plugin bundle installs:
+#               every package in it is verified against that key, and on a fresh site
+#               nothing had written it yet, so the bundle was refused on every install.
 # VERSION: 3.6 - A clone's export key is read from JOINERY_CLONE_KEY, and reaches curl in a
 #                0600 header file and openssl in a 0600 key file, both removed on exit. It
 #                was an argument to this script, to every curl and to openssl, where any
@@ -749,6 +752,13 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ] && [ "$BUNDLE_NAME" != "none
     if [ ! -f "$BUNDLE_TOOL" ]; then
         log_error "Warning: $BUNDLE_TOOL not found — no plugins were installed."
     else
+        # Its packages are verified against config/release_verify_keys, which
+        # the host installers write only after first boot; without this every
+        # bundle package was refused ("no_keys").
+        if [ -f "$SCRIPT_DIR/_host_files.sh" ]; then
+            . "$SCRIPT_DIR/_host_files.sh"
+            host_files_write_release_verify_keys "$SITE_ROOT"
+        fi
         log "Installing the '$BUNDLE_NAME' plugin bundle..."
         # Non-fatal. A site with no plugins is a working site; the operator can
         # install them from /admin/admin_plugins. Losing the whole install over

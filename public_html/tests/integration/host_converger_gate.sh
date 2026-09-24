@@ -290,6 +290,9 @@ KEY_B="$(php -r 'echo base64_encode(sodium_crypto_sign_publickey(sodium_crypto_s
 KEYS="$T/config/release_verify_keys"
 rm -f "$KEYS"
 printf '{"version":"1.0","signing_public_key":"%s"}\n' "$KEY_A" > "$T/public_html/agent_dist/manifest.json"
+# The writer lives in _host_files.sh, shared with _site_init.sh; its root gate
+# is stripped the same way as the runner's.
+sed -i 's/\[\[ "$(id -u)" == "0" \]\] || return 0//' "$T/maintenance_scripts/install_tools/_host_files.sh"
 out=$(JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" 2>&1)
 chk "the run says it wrote the key" "$(echo "$out" | grep -c "release key: config/release_verify_keys carries")" "1"
 chk "the file holds the bundle's key" "$(cat "$KEYS" 2>/dev/null)" "$KEY_A"
@@ -307,6 +310,7 @@ printf '{"version":"1.2","signing_public_key":"not-a-key"}\n' > "$T/public_html/
 JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" >/dev/null 2>&1
 chk "a malformed bundle key is not written" "$(wc -l < "$KEYS")" "2"
 # The runner as it really runs, without root: it must not write the file.
+cp "$TOOLS/_host_files.sh" "$T/maintenance_scripts/install_tools/_host_files.sh"
 rm -f "$KEYS"
 printf '{"version":"1.0","signing_public_key":"%s"}\n' "$KEY_A" > "$T/public_html/agent_dist/manifest.json"
 bash "$RUNNER" --site-root="$T" >/dev/null 2>&1
