@@ -779,7 +779,7 @@ $vpass = "fetching files-0000.tar.gz.enc\nVERIFY_RESULT=pass\nVERIFY_LEVEL=2\nVE
 $v = JobResultProcessor::parse_verify_backup_result($vpass, 'completed');
 check($v['result'] === 'pass' && $v['level'] === 2 && $v['artifacts'] === 3 && $v['bytes'] === 751829197 && $v['files'] === 1842,
 	'a pass reads back with its counts', var_export($v, true));
-check($v['message'] === 'Opened and read the backup of 2026-09-13 04:45 UTC: 3 archives, 717 MB, 1,842 files.',
+check($v['message'] === 'Opened and read the backup of 2026-09-13 04:45 UTC: 3 archives, 751.8 MB, 1,842 files.',
 	'and its message is the plain-words sentence', $v['message']);
 
 // The primitive transport wraps the text in the API envelope, newlines escaped.
@@ -799,7 +799,7 @@ $vskip = "VERIFY_RESULT=skipped\nVERIFY_LEVEL=3\nVERIFY_RUN=chain-20260912_04452
 	. "VERIFY_NEEDS_BYTES=2600000000\nVERIFY_FREE_BYTES=900000000\n";
 $v = JobResultProcessor::parse_verify_backup_result($vskip, 'completed');
 check($v['result'] === 'skipped' && $v['needs_bytes'] === 2600000000 && $v['free_bytes'] === 900000000, 'a disk skip reads back with both numbers');
-check($v['message'] === 'Could not verify the backup of 2026-09-13 04:45 UTC: needs 2.4 GB free, has 858.3 MB.',
+check($v['message'] === 'Could not verify the backup of 2026-09-13 04:45 UTC: needs 2.6 GB free, has 900 MB.',
 	'and says them for a person', $v['message']);
 
 // A rehearsal that proved the run's offloaded files: the three object lines
@@ -809,7 +809,7 @@ $vobjects = "VERIFY_RESULT=pass\nVERIFY_LEVEL=3\nVERIFY_RUN=chain-20260912_04452
 	. "VERIFY_OBJECTS_SAMPLED=20\nVERIFY_TABLES=214\nVERIFY_ROWS=usr_users:12\nVERIFY_DURATION=600\n";
 $v = JobResultProcessor::parse_verify_backup_result($vobjects, 'completed');
 check($v['objects'] === 1204 && $v['object_bytes'] === 3435973836 && $v['objects_sampled'] === 20, 'the offloaded-files counters read back as integers', var_export($v, true));
-check(strpos($v['message'], '1,204 offloaded files (3.2 GB), 20 of them opened') !== false, 'and the message says how many were proven and opened', $v['message']);
+check(strpos($v['message'], '1,204 offloaded files (3.4 GB), 20 of them opened') !== false, 'and the message says how many were proven and opened', $v['message']);
 $v = JobResultProcessor::parse_verify_backup_result("VERIFY_RESULT=fail\nVERIFY_LEVEL=2\nVERIFY_RUN=chain-20260912_044520/3\nVERIFY_RUN_TIME=2026-09-13 04:45:20\n"
 	. "VERIFY_ARTIFACTS=4\nVERIFY_BYTES=100\nVERIFY_FILES=10\nVERIFY_OBJECTS=0\nVERIFY_OBJECT_BYTES=0\nVERIFY_DURATION=2\n"
 	. "VERIFY_REASON=gone: objects/epoch-20260901_000000/beach.jpg.enc is no longer in backup storage (HTTP 404 from storage)\n", 'failed');
@@ -973,7 +973,7 @@ $page_out = "fetching objects/epoch-20260801_000000/beach.jpg.enc\nrestored beac
 	. "RESTORE_OBJECTS_RUN=chain-20260901_040000/1\nRESTORE_OBJECTS_INDEXED=3\nRESTORE_OBJECTS_NOT_ON_SHELF=1\nRESTORE_OBJECTS_RESTORED=2\n"
 	. "RESTORE_OBJECTS_BYTES=5200\nRESTORE_OBJECTS_KEPT=0\nRESTORE_OBJECTS_SKIPPED=0\nRESTORE_OBJECTS_DURATION=9\n";
 $r = JobResultProcessor::parse_restore_objects_result($page_out, 'completed');
-check($r['restored'] === 2 && $r['bytes'] === 5200 && strpos($r['message'], 'Brought 2 offloaded files home (5.1 KB)') === 0, 'a page reads back with its counts', $r['message']);
+check($r['restored'] === 2 && $r['bytes'] === 5200 && strpos($r['message'], 'Brought 2 offloaded files home (5.2 KB)') === 0, 'a page reads back with its counts', $r['message']);
 $r = JobResultProcessor::parse_restore_objects_result("noise\n", 'failed', 'Refused by the node: out of vocabulary');
 check($r['result'] === 'fail' && strpos($r['reason'], 'Refused by the node') === 0 && strpos($r['message'], 'Could not bring') === 0,
 	'a job that died before printing is a failed step with the job\'s own error', var_export($r, true));

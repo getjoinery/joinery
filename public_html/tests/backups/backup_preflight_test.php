@@ -24,7 +24,7 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-$GiB = 1073741824;
+$GB = 1000000000;
 
 section('The rule, pure');
 $need = BackupRunner::PREFLIGHT_LOCAL_OVERHEAD;
@@ -33,13 +33,13 @@ check(BackupRunner::preflight_refusal($need, $required, 0) === '', 'exactly the 
 $msg = BackupRunner::preflight_refusal($need, $required - 1, 0);
 check($msg !== '', 'one byte less is refused');
 check(BackupRunner::preflight_refusal($need, null, 0) === '', 'unknowable free space is not a refusal');
-check(BackupRunner::preflight_refusal($need, 40 * $GiB, 17 * $GiB) === '',
+check(BackupRunner::preflight_refusal($need, 40 * $GB, 17 * $GB) === '',
 	'a streaming run on a disk with room is not refused, however big its archive');
 
-$msg = BackupRunner::preflight_refusal(12 * $GiB, (int)(14.6 * $GiB), 0);
-check(strpos($msg, 'needs about 15.4 GB on disk') !== false && strpos($msg, '14.6 GB is free') !== false,
+$msg = BackupRunner::preflight_refusal(12 * $GB, (int)(14.6 * $GB), 0);
+check(strpos($msg, 'needs about 15.5 GB on disk') !== false && strpos($msg, '14.6 GB is free') !== false,
 	'the refusal names both figures', $msg);
-$msg = BackupRunner::preflight_refusal($need, 500 * 1048576, (int)(16 * $GiB));
+$msg = BackupRunner::preflight_refusal($need, 500 * 1000000, (int)(16 * $GB));
 check(strpos($msg, '500 MB is free') !== false, 'a small free figure is worded in its own unit', $msg);
 check(strpos($msg, 'about 16 GB last time') !== false && strpos($msg, 'streams to backup storage') !== false,
 	'and says the archive itself does not land here', $msg);

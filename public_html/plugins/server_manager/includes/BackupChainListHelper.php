@@ -11,6 +11,7 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.4 - format_size() is BackupRunner::human(): decimal units, one format for every backup size
  * @version 1.3 - the listing is this node's own prefix, every page of it (S3Signer::list), not the first
  *                2000 keys of the whole target: ten thousand offloaded-file objects under one node's
  *                objects/ would otherwise push another node's chain manifests off the end and empty its
@@ -177,12 +178,8 @@ class BackupChainListHelper {
 		return ['chains' => $chains, 'objects' => $objects, 'error' => null];
 	}
 
-	/** Bytes as a short human string, matching the flat file listing's style. */
+	/** Bytes as a short human string — BackupRunner::human(), the one backup-size format. */
 	public static function format_size($bytes) {
-		$bytes = (int)$bytes;
-		$units = ['B', 'KB', 'MB', 'GB', 'TB'];
-		$i = 0;
-		while ($bytes >= 1024 && $i < count($units) - 1) { $bytes /= 1024; $i++; }
-		return round($bytes, ($i > 1 ? 1 : 0)) . ' ' . $units[$i];
+		return BackupRunner::human((int)$bytes);
 	}
 }

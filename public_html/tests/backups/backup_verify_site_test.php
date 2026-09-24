@@ -118,7 +118,7 @@ check(!$d['due'] && strpos($d['reason'], 'switched off') !== false, '0 is never'
 
 $r = $task->dryRun(array());
 check($r['status'] === 'skipped' && strpos($r['message'], 'the backup of 2026-09-12 04:00 UTC') !== false
-	&& strpos($r['message'], '12.1 KB') !== false,
+	&& strpos($r['message'], '12.3 KB') !== false,
 	'a dry run names the run it would open and how big it is', $r['message']);
 
 // A never-verified history is due at once, however new the backup: the

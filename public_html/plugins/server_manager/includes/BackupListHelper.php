@@ -10,6 +10,7 @@
  * Chain artifacts are deliberately absent: a chain is one restore point made of
  * many files, and BackupChainListHelper lists those as chains.
  *
+ * @version 1.3 - format_size() is BackupRunner::human(): decimal units, one format for every backup size
  * @version 1.2 - cloud listing resolves backup storage via JobCommandBuilder::get_target(), so a node that
  *                names no target still has its remote backups listed (from the sole enabled backup storage)
  *                instead of showing local files only
@@ -133,10 +134,7 @@ class BackupListHelper {
 	}
 
 	private static function format_size($bytes) {
-		if ($bytes < 1024) return $bytes . ' B';
-		if ($bytes < 1024 * 1024) return round($bytes / 1024, 1) . ' KB';
-		if ($bytes < 1024 * 1024 * 1024) return round($bytes / 1024 / 1024, 1) . ' MB';
-		return round($bytes / 1024 / 1024 / 1024, 2) . ' GB';
+		return BackupRunner::human((int)$bytes);
 	}
 }
 ?>

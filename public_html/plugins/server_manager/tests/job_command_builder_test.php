@@ -335,17 +335,42 @@ $clone_ssh = jcb_ssh_steps($clone_steps);
 check(count($clone_ssh) === 1 && !in_array('scp', jcb_step_types($clone_steps), true),
 	'a clone is the same single session: no scp, nothing addressed to the source');
 $clone_cmd = $clone_ssh[0]['cmd'];
-check(strpos($clone_cmd, "--clone-from='https://source.example.com' --clone-key='" . $clone_key . "'") !== false,
-	'the site command carries --clone-from and --clone-key', $clone_cmd);
+check(strpos($clone_cmd, "--clone-from='https://source.example.com'") !== false,
+	'the site command carries --clone-from', $clone_cmd);
+check(strpos($clone_cmd, $clone_key) === false && strpos($clone_cmd, '--clone-key') === false,
+	'and never the export key: the stored command and the target\'s process list stay free of it');
+check(($clone_ssh[0]['stdin'] ?? null) === array('clone_key'),
+	'the key is named for the session\'s stdin instead', json_encode($clone_ssh[0]['stdin'] ?? null));
+$read_at = strpos($clone_cmd, 'IFS= read -r JOINERY_CLONE_KEY');
+check($read_at !== false && $read_at < strpos($clone_cmd, 'install.sh')
+	&& strpos($clone_cmd, 'test -n "$JOINERY_CLONE_KEY"') !== false && strpos($clone_cmd, 'export JOINERY_CLONE_KEY') !== false,
+	'the session reads it before anything runs, fails without it, and hands it to install.sh in the environment');
+$clone_pw_steps = jcb_ssh_steps(JobCommandBuilder::build_install_node($clone_target, array(
+	'mode' => 'from_backup', 'sitename' => 'clonesite', 'domain' => 'clone.example.com', 'admin_password_stdin' => true,
+	'docker_mode' => 'docker', 'clone_from' => 'https://source.example.com', 'clone_key' => $clone_key)));
+$pw_cmd = $clone_pw_steps[0]['cmd'];
+check(($clone_pw_steps[0]['stdin'] ?? null) === array('admin_password', 'clone_key')
+	&& strpos($pw_cmd, 'read -r JOINERY_ADMIN_PASSWORD') < strpos($pw_cmd, 'read -r JOINERY_CLONE_KEY'),
+	'with an admin password too, the names are in the order the session reads them');
+list($in, $why_not) = InstallJobExecutor::step_stdin(array('admin_password', 'clone_key'),
+	array('admin_password' => 'pw-1', 'clone_key' => $clone_key));
+check($why_not === '' && $in === "pw-1\n" . $clone_key . "\n", 'the executor writes one line per name, in order');
+list($in, $why_not) = InstallJobExecutor::step_stdin(array('clone_key'), array('clone_key' => ''));
+check($in === null && strpos($why_not, 'export key') !== false, 'a clone whose key was released is refused, not run with none');
+list($in, $why_not) = InstallJobExecutor::step_stdin('admin_password', array('admin_password' => 'pw-2'));
+check($why_not === '' && $in === "pw-2\n", 'a single name as a string still works (jobs stored before the list)');
+list($in, $why_not) = InstallJobExecutor::step_stdin(array('root_password'), array());
+check($in === null && strpos($why_not, "unknown stdin source 'root_password'") !== false, 'an unknown name is refused by name');
 check(strpos($clone_cmd, "'clone.example.com'") !== false,
 	'the domain on the command is the NEW site\'s own, not the source\'s');
 foreach ($clone_steps as $st) {
 	check(empty($st['node_id']), 'no step names another node');
 }
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmSecretRedactor.php'));
-$shown = SmSecretRedactor::redact($clone_cmd);
+$old_style = "./install.sh -y -q site --docker 'clonesite' - 'clone.example.com' --clone-key='" . $clone_key . "'";
+$shown = SmSecretRedactor::redact($old_style);
 check(strpos($shown, $clone_key) === false && strpos($shown, '--clone-key=') !== false,
-	'the export key is redacted on display', substr($shown, strpos($shown, '--clone-key='), 40));
+	'a command stored before the key moved to stdin is still redacted on display', substr($shown, strpos($shown, '--clone-key='), 40));
 
 foreach (array(
 	'no clone_from'   => array('clone_key' => $clone_key),

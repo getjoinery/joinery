@@ -97,28 +97,33 @@ check(stripos($quickstart_md, '## Step') === false,
 	'the quick start has one copy, on getjoinery.com');
 
 
-section('Server hardening keeps someone able to log in');
+section('Server hardening keeps someone able to log in, and creates no account');
 
-// `install.sh server` used to set PermitRootLogin no while user1 held no
-// password, no key and no sudo. On a key-only box that ends the operator's
-// session partway through the run.
+// Nothing is created for access. Root that holds keys keeps key login; an
+// install run under sudo leaves that account the way in; root reached only by
+// password is left as it is (the management node retires that password itself).
 check(strpos($install_src, 'derive_ssh_access()') !== false,
-	'install.sh derives which account survives hardening');
+	'install.sh derives what root login may become');
 check(strpos($install_src, 'SUDO_USER') !== false,
 	'the sudo-from-a-normal-account branch is present');
-check(strpos($install_src, '/root/.ssh/authorized_keys') !== false,
-	'the root-with-a-key branch is present');
-check(strpos($install_src, 'sudoers.d/user1') !== false,
-	'user1 is granted sudo when it inherits root\'s keys');
+check(strpos($install_src, '/root/.ssh/authorized_keys') !== false && strpos($install_src, 'SSH_ROOT_LOGIN="prohibit-password"') !== false,
+	'root that holds keys keeps key login and loses password login');
+check(preg_match('/^[^#\n]*(useradd[^\n]*user1|sudoers\.d\/user1|usermod[^\n]*user1)/m', $install_src) === 0,
+	'server setup creates no user1, grants it no sudo, and adds it to no group');
 
 // Only PermitRootLogin is conditional. If this assertion ever needs relaxing,
 // the question to ask is whether the directive being skipped can lock anyone
 // out — most cannot, and those always apply.
-check(preg_match('/if \[ "\$SSH_ROOT_LOGIN_SAFE" -eq 1 \][^}]*?PermitRootLogin no/s', $install_src) === 1,
-	'PermitRootLogin no is gated on an account that survives it');
+check(preg_match('/if \[ -n "\$SSH_ROOT_LOGIN" \][^}]*?PermitRootLogin/s', $install_src) === 1,
+	'PermitRootLogin changes only when derive_ssh_access found who keeps access');
+check(strpos($install_src, '00-joinery-root-login.conf') !== false && strpos($install_src, 'sshd -t') !== false,
+	'the setting goes in an sshd drop-in that sorts first, checked before the restart');
 check(preg_match('/^\s*sed -i .s\/#?PasswordAuthentication yes\/PasswordAuthentication yes\//m', $install_src) === 0,
 	'install.sh does not turn password authentication on',
 	'it was enabling password auth while leaving no account able to use it');
+$handoff_b = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/linode_stackscript.sh');
+check(strpos($handoff_b, '${JOINERY_SSH_KEY') === false && strpos($handoff_b, '/root/.ssh/authorized_keys') === false,
+	'the Linode handoff places no SSH key');
 
 
 section('No shared admin credential ships with a release');
@@ -3316,5 +3321,61 @@ check(strpos($converger_src, "stat -c '%U' \"\${SITE_ROOT}/public_html\"") !== f
 check(strpos($converger_src, '"${TREE_OWNER}" == "www-data"') !== false,
     'but never to www-data',
     'this can run on its own, and on a tree the pool still owns that is the attacker');
+
+section('A rebuilt container keeps its agent and never starts PostgreSQL on the wrong data (specs/fleet_ubuntu_2604_postgres_upgrade.md WP1, WP2)');
+
+$install_b56 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
+$template_b56 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
+check(substr_count($install_b56, '-v "${SITENAME}_agent":/etc/joinery-agent') === 2,
+    'both docker run forms mount the agent\'s identity on the _agent volume',
+    'the credential lives in /etc/joinery-agent; in the writable layer every rebuild unpairs the agent');
+check((bool)preg_match('/ALL_SITE_VOLUMES=\([^)]*\bagent\b[^)]*\)/s', $install_b56),
+    'the _agent volume is in the one list --wipe-data removes');
+$existing_at = strpos($install_b56, "print_step \"Checking for existing container named '\$SITENAME'...\"");
+$refuse_at = strpos($install_b56, 'refuse_database_major_mismatch "$SITENAME" "joinery-base:${BASE_IMAGE_VERSION}"');
+check($refuse_at !== false && $existing_at !== false && $refuse_at < $existing_at,
+    'a kept database volume is checked against the image\'s PostgreSQL before the old container is touched');
+check(substr_count($install_b56, "seed_agent_volume \"\$SITENAME\"\n                docker stop \"\$SITENAME\"") === 2,
+    'both kept-volume rebuild branches carry the agent\'s identity across before stopping the old container');
+check(strpos($install_b56, 'MOUNTPOINT}"/*/main/PG_VERSION') !== false,
+    'the database volume\'s version is read off the volume itself, per cluster');
+$guard_at = strpos($template_b56, 'FATAL: the database on this volume is PostgreSQL');
+$pg_start_at = strpos($template_b56, "    service postgresql start && \\\n");
+check($guard_at !== false && $pg_start_at !== false && $guard_at < $pg_start_at,
+    'the start command refuses a foreign-major database before it starts PostgreSQL');
+
+section('A clone\'s export key and the source\'s database password never reach a command line (specs/fleet_ubuntu_2604_postgres_upgrade.md WP3b, B7)');
+
+$install_b7  = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
+$template_b7 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
+$export_b7   = (string)file_get_contents($site_root . '/public_html/utils/clone_export.php');
+check(strpos($install_b7, '-e CLONE_KEY=') === false,
+    'docker run is never handed the key as an argument');
+check((bool)preg_match('/SITE_INIT_ENV_INPUTS=\([^)]*\bJOINERY_CLONE_KEY\b[^)]*\)/s', $install_b7),
+    'the key crosses to the container in the 0600 env file with the other _site_init.sh inputs');
+check(strpos($install_b7, '"--clone-key=${CLONE_KEY}"') === false && strpos($install_b7, 'export JOINERY_CLONE_KEY="$CLONE_KEY"') !== false,
+    'bare metal hands _site_init.sh the key in its environment, and a typed --clone-key is moved there at once');
+check(strpos($install_b7, 'Authorization: Bearer ${CLONE_KEY}"') === false && strpos($install_b7, '-H @"$CLONE_AUTH"') !== false,
+    'the manifest request reads its bearer header from a 0600 file');
+check(strpos($template_b7, '--clone-key=${') === false && strpos($template_b7, '-n "${JOINERY_CLONE_KEY}"') !== false,
+    'the container start command passes _site_init.sh no key argument');
+check(strpos($export_b7, '-pass pass:') === false && strpos($export_b7, 'PGPASSWORD=%s') === false
+    && strpos($export_b7, '-pass env:JOINERY_CLONE_KEY') !== false && strpos($export_b7, "'PGPASSWORD'        => (string)\$db_password") !== false,
+    'the source\'s export hands its pipeline the database password and the key in the environment, not a shell string');
+
+section('PostgreSQL answers only locally, on every install (specs/fleet_ubuntu_2604_postgres_upgrade.md B8)');
+
+$install_pg = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
+$hk_pg      = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/host_housekeeping.sh');
+$runner_pg  = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
+check(preg_match('/PG_HOST_RULES="[^"]*(172\.16\.0\.0\/12|0\.0\.0\.0\/0)/', $install_pg) === 0,
+	'neither shape\'s pg_hba admits a network range: loopback only');
+check(strpos($install_pg, 'PG_LISTEN="localhost"') !== false,
+	'a standalone server listens on localhost');
+check(strpos($hk_pg, '--- 5. PostgreSQL answers only locally') !== false
+	&& strpos($hk_pg, 'postgres_access.conf') !== false && strpos($hk_pg, '99-joinery-local-only.conf') !== false,
+	'host_housekeeping.sh enforces it: network rules removed, the Docker host and declared lines only in a container, listen pinned on a standalone server');
+check((bool)preg_match('/^CORE_INSTALLERS="[^"]*\bhost_housekeeping\.sh\b/m', $runner_pg),
+	'and it runs on every converge and at every container start');
 
 harness_finish();

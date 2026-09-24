@@ -33,6 +33,10 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.22 - a chain run states its whole size with its parts named — "Full backup 4.7 GB (files
+ *                3.0 GB, database 1.7 GB)" — and its `bytes` figure is that total; it stated the files
+ *                archive alone, which hid the database. human() counts in decimal units, as backup
+ *                storage bills, and every backup size shown anywhere is formatted by it
  * @version 1.21 - retention keeps days of history (backup_retention_days), not a count of restore
  *                points: surplus() keeps every point started inside the window and the newest one
  *                started before it. A manager-profile run carries the site's own window and removes
@@ -937,14 +941,20 @@ class BackupRunner {
 		$objects_pruned = self::enforce_object_retention($plan, $pruned_indexes);
 		$swept  = self::sweep_local($plan);
 
-		$msg = ($level === 0 ? 'Full backup' : 'Incremental backup') . ' (' . self::human($artifacts['files']['bytes']) . ' of files)'
+		// The size a person reads is the whole run — every artifact it put in
+		// backup storage — with the two parts that make it up named beside it.
+		$total = 0;
+		foreach ($artifacts as $a) { $total += (int)($a['bytes'] ?? 0); }
+		$msg = ($level === 0 ? 'Full backup ' : 'Incremental backup ') . self::human($total)
+			. ' (files ' . self::human($artifacts['files']['bytes'])
+			. ', database ' . self::human($artifacts['db']['bytes'] ?? 0) . ')'
 			. ' in ' . $chain_id . ' to ' . $plan['target']->get('bkt_name');
 		if ($objects) { $msg .= self::objects_message($objects, $released); }
 		if ($pruned) { $msg .= "; pruned {$pruned} old backup" . ($pruned === 1 ? '' : 's'); }
 		if ($objects_pruned) { $msg .= "; removed {$objects_pruned} offloaded file" . ($objects_pruned === 1 ? '' : 's') . ' no kept backup names'; }
 		if ($swept)  { $msg .= "; swept {$swept} local file" . ($swept === 1 ? '' : 's'); }
 
-		$figures = array('level' => $level, 'bytes' => (int)$artifacts['files']['bytes']);
+		$figures = array('level' => $level, 'bytes' => $total);
 		if ($warning !== '') {
 			return array('status' => 'success', 'message' => 'WARNING: ' . $warning . ' — ' . $msg, 'warning' => $warning) + $figures;
 		}
@@ -2433,11 +2443,17 @@ class BackupRunner {
 		return trim(implode(' | ', $parts));
 	}
 
+	/**
+	 * A byte count as backup pages state it. Decimal units — a GB is 10^9
+	 * bytes — because that is how backup storage measures and bills what it
+	 * holds, so a size read here matches the provider's own console. Every
+	 * page that shows a backup's size formats it here.
+	 */
 	public static function human($bytes) {
 		$units = array('B', 'KB', 'MB', 'GB', 'TB');
 		$i = 0;
 		$bytes = (float)$bytes;
-		while ($bytes >= 1024 && $i < count($units) - 1) { $bytes /= 1024; $i++; }
+		while ($bytes >= 1000 && $i < count($units) - 1) { $bytes /= 1000; $i++; }
 		return round($bytes, $i ? 1 : 0) . ' ' . $units[$i];
 	}
 }

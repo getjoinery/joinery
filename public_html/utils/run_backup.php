@@ -33,6 +33,7 @@
  * Concurrency is handled by the runner itself: a run that finds another in
  * progress — either profile — reports itself skipped rather than racing it.
  *
+ * @version 1.6 - BACKUP_BYTES is the run's whole size, every artifact it put in backup storage
  * @version 1.5 - BACKUP_KEEP_DAYS line on a manager-profile run: this site's retention window, which the
  *                management node prunes its copies by
  * @version 1.4 - BACKUP_LEVEL / BACKUP_BYTES lines: a successful run's files-artifact level and byte

@@ -18,6 +18,9 @@
  * - themes: Streams tar.gz archive of themes directory
  * - plugins: Streams tar.gz archive of plugins directory
  *
+ * @version 1.6 - the database export passes the database password and the clone key to its pipeline
+ *                in the environment (openssl -pass env:), never in a command string any process
+ *                could read; pg_dump's error is logged instead of discarded (B7)
  * @version 1.5 - the upgrade staging directory (uploads/upgrades) is neither counted nor exported,
  *                and an entry the web user cannot read is skipped instead of ending the request
  *                with a 500 (an agent-run upgrade had left staging root-owned); the request log
@@ -257,18 +260,40 @@ function handle_database_export($settings, $client_ip, $clone_key) {
         ob_end_clean();
     }
 
-    // Stream encrypted pg_dump output directly (same format as backup_database.sh)
-    // Clone key serves as both authentication and encryption key
-    $cmd = sprintf(
-        "PGPASSWORD=%s pg_dump -h %s -U %s %s 2>/dev/null | gzip | openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:%s",
-        escapeshellarg($db_password),
-        escapeshellarg($db_host),
-        escapeshellarg($db_user),
-        escapeshellarg($db_name),
-        escapeshellarg($clone_key)
+    // Stream encrypted pg_dump output directly (same format as backup_database.sh).
+    // The clone key serves as both authentication and encryption key.
+    //
+    // The database password and the key reach the pipeline in its environment,
+    // never in a command string: a command line is readable by every process on
+    // this machine for as long as the dump runs. The script itself carries no
+    // value, only the names it reads.
+    $env = array(
+        'PATH'              => getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin',
+        'PGPASSWORD'        => (string)$db_password,
+        'JOINERY_CLONE_KEY' => (string)$clone_key,
     );
-
-    passthru($cmd);
+    $script = 'set -o pipefail; pg_dump -h "$1" -U "$2" "$3" | gzip'
+        . ' | openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:JOINERY_CLONE_KEY';
+    $err_file = tempnam(sys_get_temp_dir(), 'clone_export_err_');
+    $proc = proc_open(array('bash', '-c', $script, 'clone_export', $db_host, $db_user, $db_name),
+        array(0 => array('file', '/dev/null', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $err_file, 'w')),
+        $pipes, null, $env);
+    if (!is_resource($proc)) {
+        @unlink($err_file);
+        error_log('clone_export: the database export could not be started');
+        exit;
+    }
+    fpassthru($pipes[1]);
+    fclose($pipes[1]);
+    $rc = proc_close($proc);
+    if ($rc !== 0) {
+        // The body has already gone out, so the destination sees a truncated
+        // stream and fails its own load; the reason is kept here.
+        $err = trim((string)@file_get_contents($err_file));
+        error_log('clone_export: the database export failed (exit ' . $rc . ')'
+            . ($err !== '' ? ': ' . substr($err, -500) : ''));
+    }
+    @unlink($err_file);
     exit;
 }
 

@@ -617,22 +617,26 @@ DELETE FROM stg_settings WHERE stg_name = 'clone_export_key';
 - Remove or rotate the key after cloning
 - Clone requests are logged on the source site
 
+The installer reads the source's export key from `JOINERY_CLONE_KEY`, never from the
+command line, where every process on the machine could read it. `read -rs` takes it
+without echoing it or writing it to shell history.
+
 ### Cloning to Docker
 
 ```bash
 # On target server
+read -rs -p 'Clone key: ' JOINERY_CLONE_KEY && export JOINERY_CLONE_KEY
 ./install.sh site newsite newdomain.com 8080 \
-    --clone-from=https://sourcesite.com \
-    --clone-key=YourSecureRandomKey123
+    --clone-from=https://sourcesite.com
 ```
 
 ### Cloning to Bare-Metal
 
 ```bash
 # On target server
+read -rs -p 'Clone key: ' JOINERY_CLONE_KEY && export JOINERY_CLONE_KEY
 ./install.sh site newsite newdomain.com \
-    --clone-from=https://sourcesite.com \
-    --clone-key=YourSecureRandomKey123
+    --clone-from=https://sourcesite.com
 ```
 
 ### What Gets Cloned
@@ -661,21 +665,21 @@ DELETE FROM stg_settings WHERE stg_name = 'clone_export_key';
 ### Clone Examples
 
 ```bash
+# Every example reads the key from the environment
+read -rs -p 'Clone key: ' JOINERY_CLONE_KEY && export JOINERY_CLONE_KEY
+
 # Basic clone
 ./install.sh site clientsite newclient.com 8080 \
-    --clone-from=https://template.joinerysite.com \
-    --clone-key=abc123
+    --clone-from=https://template.joinerysite.com
 
 # Clone with theme activation
 ./install.sh site clientsite newclient.com 8080 \
     --clone-from=https://template.joinerysite.com \
-    --clone-key=abc123 \
     --activate customtheme
 
 # Non-interactive clone (for scripts)
 ./install.sh -y site clientsite newclient.com 8080 \
-    --clone-from=https://template.joinerysite.com \
-    --clone-key=abc123
+    --clone-from=https://template.joinerysite.com
 ```
 
 ---
@@ -890,12 +894,7 @@ docker ps -a --filter "name=joinery" --format "table {{.Names}}\t{{.Status}}\t{{
 ### Permission Errors (Bare-metal)
 
 ```bash
-# Fix web directory permissions
-sudo chown -R www-data:user1 /var/www/html/$SITENAME
-sudo chmod -R 775 /var/www/html/$SITENAME
-
-# Use the fix_permissions script
-./fix_permissions.sh $SITENAME --production
+sudo ./fix_permissions.sh $SITENAME --production
 ```
 
 ### Port Conflict Handling
@@ -1044,8 +1043,7 @@ Options:
   --with-test-site      Create companion test site (bare-metal only)
   --themes              Download stock themes/plugins from upgrade server
   --no-ssl              Skip automatic SSL certificate setup
-  --clone-from=URL      Clone database and uploads from existing site
-  --clone-key=KEY       Authentication key for clone source
+  --clone-from=URL      Clone database and uploads from existing site (key in JOINERY_CLONE_KEY)
 
 Note: If no password is provided, a secure 24-character password is auto-generated.
 ```
@@ -1063,9 +1061,9 @@ rm /tmp/pass.txt
 # Non-interactive with auto-generated password
 ./install.sh -y site mysite mysite.com 8080
 
-# Clone an existing site
+# Clone an existing site (the source's export key in JOINERY_CLONE_KEY)
 ./install.sh site newsite newdomain.com 8080 \
-    --clone-from=https://source.example.com --clone-key=SecretKey123
+    --clone-from=https://source.example.com
 
 # With theme activation
 ./install.sh site mysite mysite.com --activate falcon

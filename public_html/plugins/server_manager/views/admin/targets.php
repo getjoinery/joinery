@@ -5,6 +5,7 @@
  *
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
+ * @version 2.9 - the Stored Backups sizes use BackupRunner::human() (decimal units, as the provider bills)
  * @version 2.8 - stored secrets are locked fields with Reset (FormWriter 'stored' +
  *                process_secretinput()); Reset and save blank removes the node credential, and
  *                the Remove node credential box is gone
@@ -661,12 +662,7 @@ if ($target !== null) {
 
 	// ── Stored Backups (management-node view of the bucket) ──
 	if ($is_edit) {
-		$fmt_bytes = function ($b) {
-			if ($b >= 1073741824) return round($b / 1073741824, 1) . ' GB';
-			if ($b >= 1048576)    return round($b / 1048576, 1) . ' MB';
-			if ($b >= 1024)       return round($b / 1024, 1) . ' KB';
-			return $b . ' B';
-		};
+		$fmt_bytes = function ($b) { return BackupRunner::human((int)$b); };
 		$badge_for = ['live' => 'success', 'decommissioned' => 'warning', 'orphaned' => 'secondary'];
 
 		$page->begin_box(['title' => 'Stored Backups']);

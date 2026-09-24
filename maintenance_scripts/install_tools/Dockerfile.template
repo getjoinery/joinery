@@ -1,4 +1,13 @@
 # Joinery Docker Template
+# VERSION 5.3 - A clone's export key reaches _site_init.sh in its environment
+#               (JOINERY_CLONE_KEY, from the 0600 env file), not as --clone-key on its
+#               command line, where any process in the container could read it.
+# VERSION 5.2 - The start command refuses to start PostgreSQL on a database volume that
+#               holds only another major's cluster (the volume keeps one per major under
+#               /var/lib/postgresql). The image's server would find no cluster of its own
+#               and the container would restart in a loop without saying why; it now
+#               names both versions and the script that moves the data, which it leaves
+#               untouched.
 # VERSION 5.1 - The remoteip baseline is a baseline: host_housekeeping.sh
 #               completes it at every start with the edge ranges the host proxy
 #               now forwards (specs/post_release_fleet_defects.md B2).
@@ -141,7 +150,8 @@
 #                       docker inspect and docker history long after the
 #                       container is gone.
 #   CLONE_FROM        - URL to clone database and uploads from (optional)
-#   CLONE_KEY         - Authentication key for clone source (optional)
+#   JOINERY_CLONE_KEY - The clone source's export key (optional; read by _site_init.sh
+#                       from the environment, never passed as an argument)
 #   JOINERY_ADMIN_EMAIL    - Address for the site's admin account (optional;
 #                            the seeded admin@example.com stays without it)
 #   JOINERY_ADMIN_PASSWORD - Owner-chosen admin password (optional; one is
@@ -253,6 +263,14 @@ CMD set +H && \
         echo "       archive, or reinstall this site with install.sh."; \
         exit 1; \
     fi && \
+    PG_IMAGE_MAJOR="$(ls -1 /usr/lib/postgresql 2>/dev/null | sort -n | tail -1)" && \
+    PG_DATA_MAJORS="$(for v in /var/lib/postgresql/*/main/PG_VERSION; do [ -f "$v" ] && tr -cd '0-9' < "$v" && echo; done | sort -n | tr '\n' ' ')" && \
+    if [ -n "${PG_DATA_MAJORS// /}" ] && [[ " ${PG_DATA_MAJORS}" != *" ${PG_IMAGE_MAJOR} "* ]]; then \
+        echo "FATAL: the database on this volume is PostgreSQL ${PG_DATA_MAJORS% } and this image carries ${PG_IMAGE_MAJOR}."; \
+        echo "       PostgreSQL was not started and the data is untouched. Move it with"; \
+        echo "       maintenance_scripts/sysadmin_tools/rebase_site_container.sh on the host."; \
+        exit 1; \
+    fi && \
     (bash "/var/www/html/${SITENAME}/maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh" --no-restart --container || true) && \
     service postgresql start && \
     sleep 3 && \
@@ -275,8 +293,8 @@ CMD set +H && \
         service postgresql reload; \
     fi && \
     CLONE_OPTS="" && \
-    if [ -n "${CLONE_FROM}" ] && [ -n "${CLONE_KEY}" ]; then \
-        CLONE_OPTS="--clone-from=${CLONE_FROM} --clone-key=${CLONE_KEY}"; \
+    if [ -n "${CLONE_FROM}" ] && [ -n "${JOINERY_CLONE_KEY}" ]; then \
+        CLONE_OPTS="--clone-from=${CLONE_FROM}"; \
     fi && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \

@@ -4,6 +4,23 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.7 - PostgreSQL answers only locally, enforced on every converge and at every
+#                container start. pg_hba.conf keeps its local and loopback rules and
+#                loses every rule admitting a network address. A container adds one
+#                rule for the Docker host (its gateway, which reaches the site's
+#                loopback-published port) and the lines its site declares in
+#                config/postgres_access.conf, each checked. A standalone server's
+#                listen_addresses is pinned to localhost by a conf.d drop-in.
+# Version: 1.6 - An FPM php.ini that enables pdo_pgsql or pgsql while its conf.d already
+#                loads that module has the line commented back out. The platform's
+#                tuning wrote those lines on every install until _host_files.sh 1.1;
+#                each loaded a module twice (pdo_pgsql before PDO), a startup warning
+#                on every PHP start. Only those two lines, only when conf.d loads the
+#                module; the rest of the file is left as it is.
+# Version: 1.5 - a php.ini byte-identical to its php.ini-production is tuned too:
+#                it is the untouched copy a PHP package installs, so a new PHP
+#                version on the box gets the platform's settings. Any php.ini that
+#                differs from the template is still never touched.
 # Version: 1.4 - review 2026-09-23: the journal cap counts as present when any
 #                drop-in already sets SystemMaxUse (B7); a PHP directory with no
 #                php.ini-production is named and no longer fails the run.
@@ -497,13 +514,53 @@ if [[ -f "${SCRIPT_DIR}/_host_files.sh" ]]; then
     # php.ini: rebuilt from the distribution's own production template, then
     # tuned. A version whose fpm directory exists and holds no php.ini is one
     # somebody moved aside; one with no template to rebuild from is named.
+    #
+    # A php.ini byte-identical to that template is tuned too. It is the
+    # untouched copy a PHP package installs, which is what a new PHP version
+    # on this box has - an in-place PHP upgrade would otherwise keep the
+    # packaged 2M upload limit and no timezone for good. Any php.ini that
+    # differs from the template, tuned by us or edited by its owner, is left
+    # alone, as it always was.
     for fpm_dir in "${FS_ROOT}"/etc/php/*/fpm; do
         [[ -d "${fpm_dir}" ]] || continue
         php_ver="$(basename "$(dirname "${fpm_dir}")")"
         [[ "${php_ver}" =~ ^[0-9]+\.[0-9]+$ ]] || continue
         php_ini="${fpm_dir}/php.ini"
-        [[ -e "${php_ini}" ]] && continue
         production="${FS_ROOT}/usr/lib/php/${php_ver}/php.ini-production"
+        # The two extension lines the platform's tuning once wrote. They are the
+        # only lines of an existing php.ini this ever changes, and only while
+        # conf.d loads the same module - which is what makes them a duplicate.
+        if [[ -f "${php_ini}" ]]; then
+            repaired=0
+            for ext in pdo_pgsql pgsql; do
+                if grep -qx "extension=${ext}" "${php_ini}" \
+                    && compgen -G "${fpm_dir}/conf.d/*-${ext}.ini" > /dev/null; then
+                    sed -i "s/^extension=${ext}\$/;extension=${ext}/" "${php_ini}"
+                    repaired=1
+                fi
+            done
+            if [[ "${repaired}" == 1 ]]; then
+                say "${php_ini}: stopped loading pdo_pgsql/pgsql a second time (conf.d loads them)"
+                if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
+                    systemctl restart "php${php_ver}-fpm" >/dev/null 2>&1 || warn "php${php_ver}-fpm could not be restarted - the change applies at its next start"
+                fi
+            fi
+        fi
+        if [[ -e "${php_ini}" ]]; then
+            if [[ -f "${production}" ]] && cmp -s "${php_ini}" "${production}"; then
+                host_files_tune_php_ini "${php_ini}"
+                # A template the tuning finds nothing to change in stays
+                # identical to it; restarting FPM for that on every converge
+                # would be a restart a minute for nothing.
+                if ! cmp -s "${php_ini}" "${production}"; then
+                    say "tuned ${php_ini}: it was the packaged php.ini-production, untouched"
+                    if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
+                        systemctl restart "php${php_ver}-fpm" >/dev/null 2>&1 || warn "php${php_ver}-fpm could not be restarted - the settings apply at its next start"
+                    fi
+                fi
+            fi
+            continue
+        fi
         if [[ ! -f "${production}" ]]; then
             # A leftover directory of a PHP version no longer installed:
             # named, and not a failure of every converge. A reclaim of a
@@ -522,6 +579,172 @@ if [[ -f "${SCRIPT_DIR}/_host_files.sh" ]]; then
 else
     warn "_host_files.sh is missing from ${SCRIPT_DIR} - host files not checked"
 fi
+
+# --- 5. PostgreSQL answers only locally ----------------------------------------
+# A Joinery site's database is used by the site on the same machine and by
+# nothing else, so nothing beyond the machine may log in to it. Enforced here
+# in the configuration itself, not left to a firewall or a port binding:
+#
+#   - pg_hba.conf keeps its "local" rules and its loopback "host" rules and
+#     loses every other "host" rule (and any include directive). On a
+#     standalone server that is the whole policy.
+#   - In a container, one rule is added for the Docker host: its gateway,
+#     the address the host's connections to the site's loopback-published
+#     database port arrive from. Other containers on the same host are
+#     refused. Then the lines the site declares in config/postgres_access.conf
+#     (a volume, so they survive a rebuild) are added, each checked: one
+#     named database, one named role that is not postgres, one address no
+#     wider than a /24 (IPv6 /64), md5 or scram-sha-256. A line that fails
+#     the check is named and left out.
+#   - A standalone server's listen_addresses is pinned to localhost by a
+#     conf.d drop-in, restarting PostgreSQL only when the setting it was
+#     running with was something else. A container keeps listening on its
+#     own interface: that is how the host reaches it, and pg_hba decides who
+#     gets in.
+#
+# The first rewrite keeps the original beside it as pg_hba.conf.pre-local-only.
+pg_is_loopback_rule() {  # $1 address field, $2 the field after it
+    case "$1" in
+        127.0.0.1/32|::1/128|localhost|samehost) return 0 ;;
+        127.0.0.1) [[ "$2" == "255.255.255.255" ]] && return 0 ;;
+        ::1) [[ "$2" == "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff" ]] && return 0 ;;
+    esac
+    return 1
+}
+pg_container_gateway() {
+    local hex
+    hex="$(awk 'NR > 1 && $2 == "00000000" { print $3; exit }' "${FS_ROOT}/proc/net/route" 2>/dev/null)"
+    [[ "${hex}" =~ ^[0-9A-Fa-f]{8}$ ]] || return 1
+    printf '%d.%d.%d.%d' "0x${hex:6:2}" "0x${hex:4:2}" "0x${hex:2:2}" "0x${hex:0:2}"
+}
+pg_access_line_ok() {  # prints why a declared line is refused, or nothing
+    local t="$1" d="$2" u="$3" a="$4" m="$5" extra="$6" prefix
+    [[ -z "${extra}" ]] || { echo "more than five fields"; return; }
+    [[ "${t}" == "host" || "${t}" == "hostssl" ]] || { echo "type '${t}' is not host or hostssl"; return; }
+    [[ "${d}" =~ ^[A-Za-z0-9_]+$ ]] || { echo "database '${d}' is not one plain name"; return; }
+    case "${d}" in all|replication|sameuser|samerole) echo "database '${d}' is not one database"; return ;; esac
+    [[ "${u}" =~ ^[A-Za-z0-9_]+$ ]] || { echo "role '${u}' is not one plain name"; return; }
+    case "${u}" in all|postgres) echo "role '${u}' may not be admitted from the network"; return ;; esac
+    if [[ "${a}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})$ ]]; then
+        prefix="${BASH_REMATCH[2]}"; (( prefix >= 24 && prefix <= 32 )) || { echo "address ${a} is wider than a /24"; return; }
+    elif [[ "${a}" =~ ^[0-9A-Fa-f:]+/([0-9]{1,3})$ ]]; then
+        prefix="${BASH_REMATCH[1]}"; (( prefix >= 64 && prefix <= 128 )) || { echo "address ${a} is wider than a /64"; return; }
+    else
+        echo "address '${a}' is not an address/prefix"; return
+    fi
+    [[ "${m}" == "md5" || "${m}" == "scram-sha-256" ]] || { echo "method '${m}' is not md5 or scram-sha-256"; return; }
+}
+
+PG_ACCESS_FILE="${SITE_ROOT}/config/postgres_access.conf"
+for pg_dir in "${FS_ROOT}"/etc/postgresql/*/main; do
+    [[ -f "${pg_dir}/pg_hba.conf" ]] || continue
+    hba="${pg_dir}/pg_hba.conf"
+    pg_ver="$(basename "$(dirname "${pg_dir}")")"
+
+    # The rules this cluster may keep: every local line, every loopback host
+    # line, comments and blanks - minus the lines this section writes itself,
+    # which are rebuilt below so they never accumulate.
+    kept="$(mktemp)"; removed=0; method=""
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        [[ "${line}" == "# joinery-local-only:"* ]] && continue
+        read -r f1 f2 f3 f4 f5 _ <<< "${line}"
+        case "${f1}" in
+            host|hostssl|hostnossl|hostgssenc|hostnogssenc)
+                if pg_is_loopback_rule "${f4}" "${f5}"; then
+                    printf '%s\n' "${line}" >> "${kept}"
+                    if [[ -z "${method}" && "${f2}" == "all" && "${f3}" == "all" && "${f4}" == 127.0.0.1* ]]; then
+                        method="$([[ "${f4}" == */* ]] && echo "${f5}" || awk '{print $6}' <<< "${line}")"
+                    fi
+                else
+                    removed=$((removed + 1))
+                fi ;;
+            include|include_if_exists|include_dir)
+                removed=$((removed + 1)) ;;
+            *)
+                printf '%s\n' "${line}" >> "${kept}" ;;
+        esac
+    done < "${hba}"
+    [[ "${method}" == "md5" || "${method}" == "scram-sha-256" ]] || method="scram-sha-256"
+
+    if [[ "${IN_CONTAINER}" == 1 ]]; then
+        if gw="$(pg_container_gateway)"; then
+            printf '# joinery-local-only: the Docker host, through the site'"'"'s loopback-published port\n' >> "${kept}"
+            printf 'host    all             all             %-23s %s\n' "${gw}/32" "${method}" >> "${kept}"
+        else
+            warn "PostgreSQL ${pg_ver}: no default route in ${FS_ROOT}/proc/net/route, so the Docker host is not admitted"
+        fi
+        if [[ -f "${PG_ACCESS_FILE}" ]]; then
+            n=0
+            while IFS= read -r line || [[ -n "${line}" ]]; do
+                n=$((n + 1))
+                [[ "${line}" =~ ^[[:space:]]*(#|$) ]] && continue
+                read -r f1 f2 f3 f4 f5 f6 <<< "${line}"
+                why="$(pg_access_line_ok "${f1}" "${f2}" "${f3}" "${f4}" "${f5}" "${f6}")"
+                if [[ -n "${why}" ]]; then
+                    warn "postgres_access.conf line ${n} left out: ${why}"
+                    continue
+                fi
+                printf '# joinery-local-only: declared in config/postgres_access.conf\n' >> "${kept}"
+                printf '%-7s %-15s %-15s %-23s %s\n' "${f1}" "${f2}" "${f3}" "${f4}" "${f5}" >> "${kept}"
+            done < "${PG_ACCESS_FILE}"
+        fi
+    elif [[ -f "${PG_ACCESS_FILE}" ]]; then
+        warn "${PG_ACCESS_FILE} is ignored here: a standalone server's database answers only locally"
+    fi
+
+    if ! cmp -s "${kept}" "${hba}"; then
+        [[ -e "${hba}.pre-local-only" ]] || cp -p "${hba}" "${hba}.pre-local-only"
+        cat "${kept}" > "${hba}"
+        say "PostgreSQL ${pg_ver}: pg_hba.conf answers only locally now ($removed network rule(s) removed); the original is ${hba}.pre-local-only"
+        if [[ "${RUN_SYSTEM}" == 1 ]]; then
+            if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
+                systemctl reload postgresql >/dev/null 2>&1 || warn "PostgreSQL could not be reloaded - the rules apply at its next start"
+            else
+                service postgresql reload >/dev/null 2>&1 || warn "PostgreSQL could not be reloaded - the rules apply at its next start"
+            fi
+        fi
+    fi
+    rm -f "${kept}"
+
+    # listen_addresses: a standalone server listens on localhost only.
+    if [[ "${IN_CONTAINER}" == 0 ]]; then
+        conf="${pg_dir}/postgresql.conf"
+        dropin="${pg_dir}/conf.d/99-joinery-local-only.conf"
+        want="listen_addresses = 'localhost'"
+        if [[ -f "${conf}" ]] && grep -qE "^[[:space:]]*include_dir[[:space:]]*=[[:space:]]*'conf\.d'" "${conf}"; then
+            # What it runs with today: the last assignment, in the order
+            # PostgreSQL reads them - postgresql.conf, then conf.d, then
+            # postgresql.auto.conf in the data directory (ALTER SYSTEM), which
+            # is read last and so outranks the drop-in written here.
+            listen_of() { sed -nE "s/^[[:space:]]*listen_addresses[[:space:]]*=[[:space:]]*'([^']*)'.*/\1/p" "$@" 2>/dev/null | tail -1; }
+            data_dir="$(sed -nE "s/^[[:space:]]*data_directory[[:space:]]*=[[:space:]]*'([^']*)'.*/\1/p" "${conf}" | tail -1)"
+            auto="${FS_ROOT}${data_dir}/postgresql.auto.conf"
+            auto_listen=""
+            [[ -n "${data_dir}" && -r "${auto}" ]] && auto_listen="$(listen_of "${auto}")"
+            current="$(listen_of "${conf}" $(ls -1 "${pg_dir}"/conf.d/*.conf 2>/dev/null | sort))"
+            [[ -n "${auto_listen}" ]] && current="${auto_listen}"
+            is_local() { case "$1" in ""|localhost|127.0.0.1|"localhost,::1"|"127.0.0.1,::1"|"::1") return 0 ;; esac; return 1; }
+            if [[ "$(cat "${dropin}" 2>/dev/null)" != "# Managed by host_housekeeping.sh: PostgreSQL answers only locally."$'\n'"${want}" ]]; then
+                mkdir -p "${pg_dir}/conf.d"
+                printf '# Managed by host_housekeeping.sh: PostgreSQL answers only locally.\n%s\n' "${want}" > "${dropin}"
+                chmod 644 "${dropin}"
+                say "PostgreSQL ${pg_ver}: wrote ${dropin}"
+                if ! is_local "${current}" && [[ -z "${auto_listen}" ]]; then
+                    say "PostgreSQL ${pg_ver} was listening on '${current}': restarting it on localhost only"
+                    if [[ "${RUN_SYSTEM}" == 1 && "${HAVE_SYSTEMD}" == 1 ]]; then
+                        systemctl restart postgresql >/dev/null 2>&1 || { warn "PostgreSQL could not be restarted"; FAILED=1; }
+                    fi
+                fi
+            fi
+            if [[ -n "${auto_listen}" ]] && ! is_local "${auto_listen}"; then
+                warn "PostgreSQL ${pg_ver}: ALTER SYSTEM set listen_addresses = '${auto_listen}' (${auto}), which outranks ${dropin} - run ALTER SYSTEM RESET listen_addresses and restart it"
+                FAILED=1
+            fi
+        else
+            warn "PostgreSQL ${pg_ver}: ${conf} does not include conf.d, so listen_addresses is not pinned - check it by hand"
+        fi
+    fi
+done
 
 if [[ "${FAILED}" == 1 ]]; then
     exit 1

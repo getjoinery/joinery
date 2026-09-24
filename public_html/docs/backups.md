@@ -893,9 +893,15 @@ the dump header and refuses before replacing the schema when the target is
 older, reporting `RESTORE_SERVER_TOO_OLD` with the database untouched. Restoring
 onto a newer PostgreSQL is ordinary and needs nothing.
 
-A restore lands on an **installed** site. The config that carries this machine's
-database password and `secret_box_key` is never in a backup, so the sequence for
-new hardware is: install the site, then restore onto it. See
+A restore lands on an **installed** site. A backup carries the whole site tree,
+`config/` included, encrypted with everything else — so the source machine's
+`config/Globalvars_site.php` (its database password and `secret_box_key`) and its
+`config/backup_site_key` are inside it. A restore puts the target machine's own
+copies of those two files back over what the backup brought, because they belong
+to the machine rather than to the site's history: one is the password its
+PostgreSQL accepts and the key its secrets at rest are sealed under, the other is
+its identity as a recipient of its own backups. So the sequence for new hardware
+is: install the site, then restore onto it. See
 [Deploy and Upgrade](deploy_and_upgrade.md#rebuilding-a-site-on-new-hardware).
 
 Bucket credentials plus the password-manager private key are sufficient to
@@ -1277,7 +1283,8 @@ so first. When the filesystem cannot report its free space the run proceeds.
 **A run says its level and size as numbers.** `utils/run_backup.php` prints a
 small contract after its human line: `BACKUP_RESULT`, `BACKUP_TIME`, and — on a
 success — `BACKUP_LEVEL` (0 for a full, 1 for an incremental; always 0 for a
-standalone archive) and `BACKUP_BYTES` (the files archive's byte count), then
+standalone archive) and `BACKUP_BYTES` (the run's whole size — every artifact it put
+in backup storage, the database included), then
 `BACKUP_WARNING` when there is one. A management node stores the level and
 size on the job result, so a run's size is a field and never prose to parse.
 

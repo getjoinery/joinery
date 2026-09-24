@@ -39,6 +39,7 @@
  * The ledger already knows the exact size, so the transfer carries that as a
  * ceiling and aborts the moment it is passed.
  *
+ * @version 1.2 - human() counts in decimal units, matching BackupRunner::human()
  * @version 1.1 - the transfer is capped at the size the ledger recorded, the sink is CREATED
  *                0600 rather than created-then-chmod'd, and an error response's body is no
  *                longer copied into the job transcript
@@ -287,16 +288,16 @@ class BackupFetch {
 	}
 
 	/**
-	 * Byte count for a human. A local copy rather than BackupRunner::human()
-	 * because a fetch should not have to boot the backup engine to say how big
-	 * something is.
+	 * Byte count for a human, in the decimal units BackupRunner::human() uses. A
+	 * local copy rather than a call to it because a fetch should not have to boot
+	 * the backup engine to say how big something is.
 	 */
 	public static function human($bytes) {
 		$bytes = (float)$bytes;
 		$units = array('B', 'KB', 'MB', 'GB', 'TB');
 		$i = 0;
-		while ($bytes >= 1024 && $i < count($units) - 1) {
-			$bytes /= 1024;
+		while ($bytes >= 1000 && $i < count($units) - 1) {
+			$bytes /= 1000;
 			$i++;
 		}
 		return round($bytes, ($i === 0) ? 0 : 1) . ' ' . $units[$i];

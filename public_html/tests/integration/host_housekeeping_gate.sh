@@ -17,6 +17,10 @@
 # ONLY when that configuration is in place (a jail on a log naming the peer
 # would ban the edge), and a second run changes no file. Where fail2ban-client
 # is installed, the drop-ins are also parsed by fail2ban itself.
+#
+# PostgreSQL answers only locally: a standalone server's pg_hba keeps its local
+# and loopback rules and gains the listen drop-in; a container admits its
+# gateway (the Docker host) and the lines its site declares, each checked.
 
 set -u
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -230,8 +234,41 @@ printf 'memory_limit = 999M\n' > "$RH/etc/php/8.1/fpm/php.ini"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
 chk "mpm_event.conf absent: written" "$(grep -c '^MaxRequestWorkers       50$' "$RH/etc/apache2/mods-available/mpm_event.conf" 2>/dev/null)" "1"
 chk "the journal cap absent: written" "$(grep -c '^SystemMaxUse=100M$' "$RH/etc/systemd/journald.conf.d/size-limit.conf" 2>/dev/null)" "1"
-chk "php.ini absent: rebuilt from php.ini-production and tuned" "$(grep -cE '^(upload_max_filesize = 32M|date.timezone = UTC|extension=pdo_pgsql)$' "$RH/etc/php/8.3/fpm/php.ini" 2>/dev/null)" "3"
+chk "php.ini absent: rebuilt from php.ini-production and tuned" "$(grep -cE '^(upload_max_filesize = 32M|date.timezone = UTC)$' "$RH/etc/php/8.3/fpm/php.ini" 2>/dev/null)" "2"
+chk "the tuning leaves the PostgreSQL extensions to conf.d" "$(grep -c '^;extension=pdo_pgsql$' "$RH/etc/php/8.3/fpm/php.ini" 2>/dev/null)" "1"
 chk "a php.ini that exists is never touched" "$(cat "$RH/etc/php/8.1/fpm/php.ini")" "memory_limit = 999M"
+# A new PHP version arrives with its php.ini an untouched copy of the template.
+mkdir -p "$RH/etc/php/8.5/fpm" "$RH/usr/lib/php/8.5"
+printf 'upload_max_filesize = 2M\nmemory_limit = 128M\n;date.timezone =\n;extension=pdo_pgsql\n' > "$RH/usr/lib/php/8.5/php.ini-production"
+cp "$RH/usr/lib/php/8.5/php.ini-production" "$RH/etc/php/8.5/fpm/php.ini"
+# An owner's edit on a version that has a template must survive.
+printf 'upload_max_filesize = 64M\nmemory_limit = 128M\n;date.timezone =\n;extension=pdo_pgsql\n' > "$RH/etc/php/8.3/fpm/php.ini"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
+chk "a php.ini identical to the packaged template is tuned" "$(grep -cE '^(upload_max_filesize = 32M|date.timezone = UTC)$' "$RH/etc/php/8.5/fpm/php.ini" 2>/dev/null)" "2"
+chk "and says so" "$(printf '%s\n' "$out" | grep -c 'tuned .*8.5/fpm/php.ini: it was the packaged php.ini-production')" "1"
+chk "an owner's edit beside a template is never touched" "$(grep -c '^upload_max_filesize = 64M$' "$RH/etc/php/8.3/fpm/php.ini")" "1"
+before="$(tree_sum "$RH")"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
+chk "a second converge changes no php.ini and says nothing about one" "$( [ "$(tree_sum "$RH")" = "$before" ] && echo same):$(printf '%s\n' "$out" | grep -c 'php.ini')" "same:0"
+printf 'nothing the tuning names\n' > "$RH/usr/lib/php/8.5/php.ini-production"
+cp "$RH/usr/lib/php/8.5/php.ini-production" "$RH/etc/php/8.5/fpm/php.ini"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
+chk "a template the tuning cannot change is not announced as tuned (no restart a minute)" "$(printf '%s\n' "$out" | grep -c 'tuned .*8.5')" "0"
+rm -rf "$RH/etc/php/8.5" "$RH/usr/lib/php/8.5"
+# The extension lines the tuning used to write: commented back out only where
+# conf.d loads the same module, and nothing else in the file moves.
+mkdir -p "$RH/etc/php/8.3/fpm/conf.d"
+printf 'upload_max_filesize = 64M\nextension=pdo_pgsql\nextension=pgsql\n' > "$RH/etc/php/8.3/fpm/php.ini"
+: > "$RH/etc/php/8.3/fpm/conf.d/20-pdo_pgsql.ini"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
+chk "a php.ini loading pdo_pgsql that conf.d also loads has the line commented out" "$(grep -c '^;extension=pdo_pgsql$' "$RH/etc/php/8.3/fpm/php.ini")" "1"
+chk "pgsql, which conf.d does not load here, is left enabled" "$(grep -c '^extension=pgsql$' "$RH/etc/php/8.3/fpm/php.ini")" "1"
+chk "and the owner's own setting beside it is untouched" "$(grep -c '^upload_max_filesize = 64M$' "$RH/etc/php/8.3/fpm/php.ini")" "1"
+chk "and it says so" "$(printf '%s\n' "$out" | grep -c 'stopped loading pdo_pgsql/pgsql a second time')" "1"
+before="$(tree_sum "$RH")"
+JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" >/dev/null 2>&1
+chk "a second converge changes nothing" "$( [ "$(tree_sum "$RH")" = "$before" ] && echo same)" "same"
+rm -rf "$RH/etc/php/8.3/fpm/conf.d"
 printf 'MaxRequestWorkers 400\n' > "$RH/etc/apache2/mods-available/mpm_event.conf"
 printf '[Journal]\nSystemMaxUse=2G\n' > "$RH/etc/systemd/journald.conf.d/size-limit.conf"
 JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" >/dev/null 2>&1
@@ -245,6 +282,63 @@ printf '[Journal]\nSystemMaxUse=200M\n' > "$RJ/etc/systemd/journald.conf.d/size-
 JOINERY_HOUSEKEEPING_ROOT="$RJ" bash "$SCRIPT" >/dev/null 2>&1
 chk "an owner's own journal cap under another name is respected: ours is not added" "$([ -e "$RJ/etc/systemd/journald.conf.d/size-limit.conf" ] && echo added || echo absent)" "absent"
 chk "install.sh uses the same definitions" "$(grep -c 'host_files_write_mpm_event\|host_files_write_journald_limit\|host_files_tune_php_ini' "$SITE_ROOT/maintenance_scripts/install_tools/install.sh")" "3"
+
+echo "=== PostgreSQL answers only locally ==="
+mkpg() {  # $1 root, $2 listen_addresses, $3 pg_hba body
+    mkdir -p "$1/etc/postgresql/16/main/conf.d"
+    printf "data_directory = '/var/lib/postgresql/16/main'\nlisten_addresses = '%s'\ninclude_dir = 'conf.d'\n" "$2" > "$1/etc/postgresql/16/main/postgresql.conf"
+    printf '%b' "$3" > "$1/etc/postgresql/16/main/pg_hba.conf"
+}
+LOCAL_HBA='local   all             postgres                                scram-sha-256\nlocal   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             ::1/128                 md5\nlocal   replication     all                                     peer\nhost    replication     all             127.0.0.1/32            md5\n'
+PG="$T/pg-local"; mkpg "$PG" localhost "$LOCAL_HBA"; cp "$PG/etc/postgresql/16/main/pg_hba.conf" "$T/pg-local.hba"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-local-site" 2>&1)"
+chk "a standalone server already local keeps its rules byte for byte" "$(cmp -s "$T/pg-local.hba" "$PG/etc/postgresql/16/main/pg_hba.conf" && echo same)" "same"
+chk "and gains the listen drop-in" "$(cat "$PG/etc/postgresql/16/main/conf.d/99-joinery-local-only.conf" 2>/dev/null | tail -1)" "listen_addresses = 'localhost'"
+chk "without a restart, since it was already listening on localhost" "$(printf '%s\n' "$out" | grep -c 'restarting it')" "0"
+
+PG="$T/pg-open"; mkpg "$PG" '*' 'local   all             postgres                                md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             0.0.0.0/0               md5\nhost    all             all             ::/0                    md5\ninclude_dir extra.d\n'
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-open-site" 2>&1)"
+chk "an open standalone server loses every network rule and include" "$(grep -cE '0\.0\.0\.0/0|::/0|include_dir' "$PG/etc/postgresql/16/main/pg_hba.conf")" "0"
+chk "and keeps its local and loopback rules" "$(grep -cE '^(local|host +all +all +127\.0\.0\.1/32)' "$PG/etc/postgresql/16/main/pg_hba.conf")" "2"
+chk "the original is kept beside it" "$(grep -c '0\.0\.0\.0/0' "$PG/etc/postgresql/16/main/pg_hba.conf.pre-local-only")" "1"
+chk "and PostgreSQL is restarted onto localhost" "$(printf '%s\n' "$out" | grep -c "was listening on '\*': restarting it on localhost only")" "1"
+
+PG="$T/pg-ctr"; mkpg "$PG" '*' 'local   all             postgres                                md5\nlocal   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             0.0.0.0/0               md5\nhost    all             all             ::1/128                 md5\n'
+touch "$PG/.dockerenv"; mkdir -p "$PG/proc/net" "$T/pg-ctr-site/config"
+printf 'Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\neth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n' > "$PG/proc/net/route"
+printf '# declared\nhost scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\nhost all all 10.0.0.5/32 md5\nhost scrolldaddy postgres 10.0.0.5/32 md5\nhost scrolldaddy reader 10.0.0.0/8 md5\nhost scrolldaddy reader 10.0.0.5/32 trust\n' > "$T/pg-ctr-site/config/postgres_access.conf"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-ctr-site" 2>&1)"
+HBA="$PG/etc/postgresql/16/main/pg_hba.conf"
+chk "a container loses the network-wide rule" "$(grep -c '0\.0\.0\.0/0' "$HBA")" "0"
+chk "and admits the Docker host, its gateway, with the image's own method" "$(grep -cE '^host +all +all +172\.17\.0\.1/32 +md5$' "$HBA")" "1"
+chk "and the declared resolver line" "$(grep -cE '^host +scrolldaddy +scrolldaddy_reader +192\.168\.206\.21/32 +md5$' "$HBA")" "1"
+chk "a declared line naming all databases is left out, by line" "$(printf '%s\n' "$out" | grep -c "line 3 left out: database 'all'")" "1"
+chk "one naming postgres is left out" "$(printf '%s\n' "$out" | grep -c "line 4 left out: role 'postgres'")" "1"
+chk "one wider than a /24 is left out" "$(printf '%s\n' "$out" | grep -c 'line 5 left out: address 10.0.0.0/8 is wider')" "1"
+chk "one asking for trust is left out" "$(printf '%s\n' "$out" | grep -c "line 6 left out: method 'trust'")" "1"
+chk "the container keeps listening on its interface (how the host reaches it)" "$([ -e "$PG/etc/postgresql/16/main/conf.d/99-joinery-local-only.conf" ] && echo pinned || echo untouched)" "untouched"
+before="$(tree_sum "$PG")"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-ctr-site" 2>&1)"
+chk "a second start changes nothing" "$( [ "$(tree_sum "$PG")" = "$before" ] && echo same):$(printf '%s\n' "$out" | grep -c 'answers only locally now')" "same:0"
+rm -f "$PG/proc/net/route"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-ctr-site" 2>&1)"
+chk "no default route: the host is not admitted, and says so" "$(grep -c '172\.17\.0\.1' "$HBA"):$(printf '%s\n' "$out" | grep -c 'so the Docker host is not admitted')" "0:1"
+
+# Dev's own shape: postgresql.conf says '*', ALTER SYSTEM says localhost - the
+# running server is local already, so nothing restarts.
+PG="$T/pg-auto-local"; mkpg "$PG" '*' "$LOCAL_HBA"; mkdir -p "$PG/var/lib/postgresql/16/main"
+printf "listen_addresses = 'localhost'\n" > "$PG/var/lib/postgresql/16/main/postgresql.auto.conf"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-auto-local-site" 2>&1)"
+chk "ALTER SYSTEM already saying localhost: drop-in written, no restart, no warning" "$([ -f "$PG/etc/postgresql/16/main/conf.d/99-joinery-local-only.conf" ] && echo written):$(printf '%s\n' "$out" | grep -c 'restarting it'):$(printf '%s\n' "$out" | grep -c 'ALTER SYSTEM set')" "written:0:0"
+PG="$T/pg-auto-open"; mkpg "$PG" localhost "$LOCAL_HBA"; mkdir -p "$PG/var/lib/postgresql/16/main"
+printf "listen_addresses = '*'\n" > "$PG/var/lib/postgresql/16/main/postgresql.auto.conf"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-auto-open-site" 2>&1)"; rc=$?
+chk "ALTER SYSTEM saying '*' outranks the drop-in: named, and the run fails" "$rc:$(printf '%s\n' "$out" | grep -c "ALTER SYSTEM set listen_addresses = '\*'")" "1:1"
+
+PG="$T/pg-bm-access"; mkpg "$PG" localhost "$LOCAL_HBA"; mkdir -p "$T/pg-bm-site/config"
+printf 'host scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\n' > "$T/pg-bm-site/config/postgres_access.conf"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-bm-site" 2>&1)"
+chk "a standalone server ignores a declared access file, and says so" "$(grep -c scrolldaddy_reader "$PG/etc/postgresql/16/main/pg_hba.conf"):$(printf '%s\n' "$out" | grep -c 'answers only locally$')" "0:1"
 
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"

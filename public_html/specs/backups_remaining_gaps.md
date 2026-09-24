@@ -67,8 +67,9 @@ Takeout import and B2 refused the PUT. Specced as
 Recorded so they are not mistaken for gaps:
 
 - **PG 17+ incremental database backups** (`pg_basebackup --incremental` +
-  `pg_combinebackup`) once the fleet's PostgreSQL allows. Gated on the OS
-  campaign — see `specs/fleet_ubuntu_2604_postgres_upgrade.md`.
+  `pg_combinebackup`) — specced in `specs/backup_database_incrementals.md`;
+  reaches a node once the OS campaign
+  (`specs/fleet_ubuntu_2604_postgres_upgrade.md`) moves it to PostgreSQL 17+.
 - **Per-table logical incrementals** — rejected. Change detection via stats
   counters is not crash-safe; audit-trigger approaches cost more than they save.
 - **restic/borg** — rejected for now. Replaces the archive format, key custody,

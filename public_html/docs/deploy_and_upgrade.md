@@ -834,7 +834,7 @@ A node guarantees this to an owner who flips Cloudflare to Full (Strict), with n
 
 ## Rebuilding a site on new hardware
 
-A backup does not carry `config/Globalvars_site.php` — that file holds the machine's database password and its `secret_box_key`, and both belong to the machine. So a rebuild is **install, then restore onto the installed site**:
+A backup carries the whole site tree, `config/` included, but a restore keeps the target machine's own `config/Globalvars_site.php` and `config/backup_site_key` over the copies inside the backup: the first holds the machine's database password and its `secret_box_key`, the second its identity as a recipient of its own backups, and all of that belongs to the machine. So a rebuild is **install, then restore onto the installed site**:
 
 ```bash
 # 1. On the new box: server prerequisites, then the site

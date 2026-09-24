@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.77 - build_install_node: a clone's export key rides the bootstrap's stdin (step stdin names
+ *                'clone_key' after 'admin_password') into JOINERY_CLONE_KEY; the command carries only
+ *                --clone-from (B7)
  * @version 1.76 - WP6 of specs/agent_recipes_and_vocabulary.md: PRIMITIVE_MIN_AGENT_VERSION and the
  *                 no-vocabulary fallback are deleted; AgentVocabulary::FLOOR decides, a node below it is
  *                 offered apply_update only, and every refusal for a missing word is the one standard
@@ -3995,7 +3998,11 @@ class JobCommandBuilder {
 			if (!preg_match('/^[A-Za-z0-9_-]{16,128}$/', $clone_key)) {
 				throw new Exception('A clone needs the export key the source was armed with (clone_key).');
 			}
-			$clone_flags = ' --clone-from=' . escapeshellarg($clone_from) . ' --clone-key=' . escapeshellarg($clone_key);
+			// The key itself never enters the command: mjb_commands is readable
+			// on the plane, and a command line is readable by every process on
+			// the target. It rides the session's stdin like the admin password
+			// (below), into JOINERY_CLONE_KEY, where install.sh looks for it.
+			$clone_flags = ' --clone-from=' . escapeshellarg($clone_from);
 		}
 
 		$sitename_esc = escapeshellarg($sitename);
@@ -4039,6 +4046,13 @@ class JobCommandBuilder {
 			$lines[] = 'IFS= read -r JOINERY_ADMIN_PASSWORD';
 			$lines[] = 'test -n "$JOINERY_ADMIN_PASSWORD"';
 			$lines[] = 'export JOINERY_ADMIN_PASSWORD';
+		}
+		// A clone's export key, the next line of stdin, for the same reason and
+		// with the same rule: absent is a failed job, never a clone with no source.
+		if ($mode === 'from_backup') {
+			$lines[] = 'IFS= read -r JOINERY_CLONE_KEY';
+			$lines[] = 'test -n "$JOINERY_CLONE_KEY"';
+			$lines[] = 'export JOINERY_CLONE_KEY';
 		}
 		$lines[] = 'command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl; }';
 		$lines[] = "rm -rf {$remote_install_dir} && mkdir -p {$remote_install_dir}";
@@ -4105,11 +4119,15 @@ class JobCommandBuilder {
 		// setup, in one run: ninety minutes is a ceiling on a wedged install.
 		$step = ['type' => 'ssh', 'label' => 'Bootstrap: install, then the agent asks to join',
 			'cmd' => implode("\n", $lines), 'timeout' => 5400];
-		if ($admin_password_stdin) {
-			// A NAME, not the value: the executor looks the password up from the
-			// provision row and writes it to this session's stdin. The stored
-			// step therefore carries no secret.
-			$step['stdin'] = 'admin_password';
+		// NAMES, not values, in the order the session reads them: the executor
+		// looks each up (the password from the provision row, the clone key from
+		// the job's parameters) and writes them to this session's stdin. The
+		// stored step therefore carries no secret.
+		$stdin_names = array();
+		if ($admin_password_stdin) { $stdin_names[] = 'admin_password'; }
+		if ($mode === 'from_backup') { $stdin_names[] = 'clone_key'; }
+		if ($stdin_names) {
+			$step['stdin'] = $stdin_names;
 		}
 		$steps[] = $step;
 

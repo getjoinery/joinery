@@ -115,14 +115,14 @@ section('The result in plain words');
 
 $words = BackupVerifier::describe(array('result' => 'pass', 'level' => 2, 'run_time' => '2026-09-13 04:45:20',
 	'artifacts' => 3, 'bytes' => 751829197, 'files' => 1842));
-check($words === 'Opened and read the backup of 2026-09-13 04:45 UTC: 3 archives, 717 MB, 1,842 files.',
+check($words === 'Opened and read the backup of 2026-09-13 04:45 UTC: 3 archives, 751.8 MB, 1,842 files.',
 	'a level 2 pass says what was opened, when, and how much', $words);
 $words = BackupVerifier::describe($pass);
 check(strpos($words, 'Rehearsed a restore of the backup of 2026-09-03 04:00 UTC') === 0
 	&& strpos($words, '214 tables') !== false && strpos($words, '12 users') !== false,
 	'a level 3 pass says rehearsed, with tables and users', $words);
 $words = BackupVerifier::describe($skip);
-check($words === 'Could not verify the backup of 2026-09-03 04:00 UTC: needs 2.4 GB free, has 858.3 MB.',
+check($words === 'Could not verify the backup of 2026-09-03 04:00 UTC: needs 2.6 GB free, has 900 MB.',
 	'a disk skip says both numbers', $words);
 $words = BackupVerifier::describe($fail);
 check(strpos($words, 'failed: files-0001.tar.gz.enc') !== false, 'a failure carries the reason', $words);
@@ -150,7 +150,7 @@ check(preg_match('/^VERIFY_OBJECTS=7$/m', $text) === 1 && strpos($text, 'VERIFY_
 check(preg_match('/^VERIFY_OBJECTS=0$/m', BackupVerifier::format_contract($pass)) === 1,
 	'a result with no offloaded files says 0, so the plane never reads an absent line as unknown');
 $words = BackupVerifier::describe($with_objects);
-check(strpos($words, '1,204 offloaded files (3.2 GB), 20 of them opened') !== false, 'a rehearsal says how many were proven and how many opened', $words);
+check(strpos($words, '1,204 offloaded files (3.4 GB), 20 of them opened') !== false, 'a rehearsal says how many were proven and how many opened', $words);
 $words = BackupVerifier::describe(array('result' => 'pass', 'level' => 2, 'run_time' => '2026-09-13 04:45:20',
 	'artifacts' => 4, 'bytes' => 751829197, 'files' => 1842, 'objects' => 1, 'object_bytes' => 2048));
 check(strpos($words, '1 offloaded file (2 KB).') !== false && strpos($words, 'opened') === false,
@@ -396,7 +396,7 @@ $n = BackupVerifier::stamp_history(array('result' => 'skipped', 'level' => 2, 'r
 $row1 = new BackupHistory($r1->key, TRUE);
 check($n === 1 && $row1->get('bkh_verify_outcome') === 'pass' && strpos((string)$row1->get('bkh_verify_time'), '2026-09-13 10:00:00') === 0,
 	'a skip leaves the pass and its time standing');
-check($row1->get('bkh_verify_message') === 'Could not verify the backup of 2026-09-02 04:00 UTC: needs 2.4 GB free, has 858.3 MB.',
+check($row1->get('bkh_verify_message') === 'Could not verify the backup of 2026-09-02 04:00 UTC: needs 2.6 GB free, has 900 MB.',
 	'and puts its reason in the message, dating the backup from the row when the skip came before the manifest was read',
 	(string)$row1->get('bkh_verify_message'));
 check(BackupVerifier::is_attempt_message((string)$row1->get('bkh_verify_message')), 'which reads as an attempt, not a result');
