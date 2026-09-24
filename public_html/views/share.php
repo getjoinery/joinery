@@ -2,7 +2,7 @@
 /**
  * Public share page for /s/{token}. Anonymous-safe.
  *
- * @version 1.1
+ * @version 1.2 - a Fortress share declares needs_vault_client() instead of pasting vault-crypto.js
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('share_logic.php', 'logic'));
@@ -11,6 +11,11 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 $page_vars = process_logic(share_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 $page = new PublicPage();
+// A Fortress share decrypts in the visitor's browser.
+if (($page_vars['entity_type'] ?? '') === 'file' && !empty($page_vars['file']['encrypted'])
+		&& empty($page_vars['share_error']) && empty($page_vars['need_password'])) {
+	$page->needs_vault_client();
+}
 $page->public_header(array('title' => $page_vars['title'] ?? 'Shared'));
 
 function share_human_bytes($n) {
@@ -59,7 +64,6 @@ function share_human_bytes($n) {
 				size: <?php echo (int)$f['size']; ?>
 			};
 			</script>
-			<script defer src="/assets/js/vault-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-crypto.js')) ?: '1'; ?>"></script>
 			<script defer src="/assets/js/drive-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-crypto.js')) ?: '1'; ?>"></script>
 			<script defer src="/assets/js/share-decrypt.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/share-decrypt.js')) ?: '1'; ?>"></script>
 

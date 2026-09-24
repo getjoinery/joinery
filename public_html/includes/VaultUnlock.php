@@ -27,7 +27,9 @@
  * is the only durable trace a window leaves — see docs/sealed_vault.md
  * § The audit log.
  *
- * @version 1.10
+ * @version 1.11
+ * @changelog 1.11 - VaultSealedForBrowserException: a row sealed to a
+ *   client-custody scope, which no server code reads.
  * @changelog 1.10 - the short caps are HARDENED_*_CAP_SECONDS: they ride with
  *   an add-on (mail's sending lock or relay sealing), not with a level.
  * @changelog 1.9 - the seam: secretKey() returns a VaultKey (PoolVaultKey today),
@@ -57,6 +59,13 @@
  *  window is closed. Generic hooks (the File decrypt hook, the sealed-field
  *  model hook) catch this and surface "locked", never an error. */
 class VaultLockedException extends Exception {}
+
+/** Thrown by a server read of a row sealed to a CLIENT-custody scope
+ *  (a `v1.edgeseal.{scope}.` key). Not "wait for the window": no server code
+ *  reads this row, ever — only the browser holding the scope's secret does.
+ *  The API export is the one place that catches it, to hand the stored
+ *  ciphertext to that browser (SystemBase::export_for_api()). */
+class VaultSealedForBrowserException extends RuntimeException {}
 
 require_once(PathHelper::getIncludePath('includes/VaultKey.php'));
 require_once(PathHelper::getIncludePath('includes/PoolVaultKey.php'));

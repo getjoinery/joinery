@@ -20,6 +20,8 @@
  * itself under any KEK would be a key-export door for anything resident in
  * the pool during a window.
  *
+ * @version 1.1 - unsealEdge(): the browser-format open, for a DEK a browser
+ *   sealed to this key (vault-crypto.js ECIES, `v1.edgeseal.`)
  * @version 1.0
  */
 interface VaultKey {
@@ -47,5 +49,18 @@ interface VaultKey {
 	 *   or sealed to another key); nothing is returned partially
 	 */
 	public function unseal(array $sealed): array;
+
+	/**
+	 * Open browser-format ciphertexts sealed to this key's public half — the
+	 * X25519 ECIES of vault-crypto.js (SealedBox openEdge). Same contract
+	 * as unseal(): a list in, the plaintexts under the same keys out, nothing
+	 * returned partially.
+	 *
+	 * @param string[] $sealed base64 blobs, the `v1.edgeseal.{scope}.` framing
+	 *   already stripped (VaultCrypto does that)
+	 * @return string[]
+	 * @throws RuntimeException when any one of them does not open
+	 */
+	public function unsealEdge(array $sealed): array;
 }
 ?>

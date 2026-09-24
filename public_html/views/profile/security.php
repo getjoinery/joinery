@@ -7,6 +7,7 @@
 	$page_vars = process_logic(security_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 	$page = new PublicPage();
+	$page->needs_vault_client();
 	$page->public_header([
 		'title' => 'Security Settings',
 	]);
@@ -282,7 +283,6 @@
                 <p class="jy-auth-hint jy-mt-2 d-none" id="passkey-flow-hint"></p>
             </div>
 
-            <script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
             <script defer>
             document.addEventListener('DOMContentLoaded', function () {
                 var panel = document.getElementById('passkeys-panel');
@@ -745,7 +745,6 @@
                 </div>
             </div>
 
-            <script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
             <script defer>
             document.addEventListener('DOMContentLoaded', function () {
                 var panel = document.getElementById('vault-panel');
@@ -1190,13 +1189,6 @@
                 </div>
                 <?php endforeach; ?>
             </div>
-            <?php if (count($rr_client_configs)): ?>
-            <script src="/assets/js/vault-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-crypto.js')) ?: '1'; ?>"></script>
-            <?php endif; ?>
-            <?php if (!empty($recovery_stepup['needed']) && !empty($recovery_stepup['passkey'])): ?>
-            <script src="/assets/js/joinery-api.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/joinery-api.js')) ?: '1'; ?>"></script>
-            <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-            <?php endif; ?>
             <script defer src="/assets/js/recovery-readiness.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1'; ?>"></script>
             <script>
             window.rrClientConfigs = <?php echo json_encode($rr_client_configs); ?>;

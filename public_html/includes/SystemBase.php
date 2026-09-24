@@ -728,6 +728,48 @@ abstract class SystemBase {
 	}
 
 	/**
+	 * The part of sealAd() before the row id, for a reader that must rebuild the
+	 * AD itself: the browser opening a client-custody row gets this in the API
+	 * export as `sealed_ad_prefix` and builds `{prefix}{id}:{field}`, so a
+	 * model's legacy literal works there too. A model whose AD is not that shape
+	 * cannot hold client-custody rows, and this says so rather than letting the
+	 * browser fail every open.
+	 */
+	public static function sealedAdPrefix(): string {
+		$probe = static::sealAd(0, '');
+		$prefix = substr($probe, 0, -2);
+		if (substr($probe, -2) !== '0:' || static::sealAd(4242, 'f') !== $prefix . '4242:f') {
+			throw new RuntimeException(get_called_class() . '::sealAd() is not of the form '
+				. '{prefix}{id}:{field}, so a browser cannot rebuild it for a client-custody row.');
+		}
+		return $prefix;
+	}
+
+	/**
+	 * Which vault scope a row being WRITTEN seals to. Per row, not per model:
+	 * one table can hold a Private mailbox's rows (server custody, scope `user`)
+	 * beside a Fortress one's (a client-custody scope, whose secret only the
+	 * browser holds). The default is server custody, and a model that never
+	 * overrides this behaves exactly as server custody always has.
+	 *
+	 * $row is the row as it stands, plaintext included, keyed by column name.
+	 * Return a scope vault_scopes.json or a plugin's `vaultScopes` declares.
+	 */
+	protected static function sealScopeForWrite(array $row): string {
+		return 'user';
+	}
+
+	/** sealScopeForWrite(), refusing a scope nothing registers so a typo fails on first use. */
+	protected static function resolveSealScope(array $row): string {
+		$scope = static::sealScopeForWrite($row);
+		if (!VaultScopes::isRegistered($scope)) {
+			throw new RuntimeException(get_called_class() . '::sealScopeForWrite() named vault scope "'
+				. $scope . '", which neither vault_scopes.json nor any active plugin\'s vaultScopes declares.');
+		}
+		return $scope;
+	}
+
+	/**
 	 * Does $field actually hold sealed content on THIS row? Default yes for
 	 * every declared column. Overridden where a column is content on some rows
 	 * and metadata on others — an inbound mail row's recipient is the routing
@@ -824,14 +866,23 @@ abstract class SystemBase {
 		if ($ciphertext === null || $ciphertext === '') {
 			return $ciphertext;
 		}
-		if (!is_string($ciphertext) || strpos($ciphertext, 'v1.aead.') !== 0) {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		if (!is_string($ciphertext)
+				|| (strpos($ciphertext, 'v1.aead.') !== 0 && !VaultCrypto::isEdgeField($ciphertext))) {
 			throw new RuntimeException(
 				get_called_class() . '.' . $field . ' holds plaintext on a sealed row — '
 				. 'something wrote it without sealColumns().'
 			);
 		}
-		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		// A row sealed to a client-custody scope is the browser's to read. Not
+		// "wait for the window": no server code holds that secret, so this is
+		// the same answer with the window open or closed.
+		$scope = VaultCrypto::parseEdgeScope((string)($row[static::sealedKeyColumn()] ?? ''));
+		if ($scope !== null) {
+			throw new VaultSealedForBrowserException(get_called_class() . '.' . $field
+				. ' is sealed to the "' . $scope . '" vault, which only the browser opens.');
+		}
 
 		$owner_id = static::sealedOwnerUserIdFor($row);
 		if ($owner_id === null) {
@@ -891,6 +942,9 @@ abstract class SystemBase {
 		$crypto = new VaultCrypto();
 		$mint = ($reuse_dek === null);
 		$dek  = $mint ? $crypto->newItemDek() : $reuse_dek;
+		// A client-custody vault gets the browser's format; the caller chose the
+		// vault (planSealOnSave() by the row's scope), so this only follows it.
+		$for_browser = static::vaultIsClientCustody($vault);
 
 		$sets = array();
 		$params = array();
@@ -912,7 +966,9 @@ abstract class SystemBase {
 				$params[] = $plaintext;
 				continue;
 			}
-			$params[] = $crypto->sealField((string)$plaintext, $dek, static::sealAd($row_id, $col));
+			$params[] = $for_browser
+				? $crypto->sealFieldForBrowser((string)$plaintext, $dek, static::sealAd($row_id, $col))
+				: $crypto->sealField((string)$plaintext, $dek, static::sealAd($row_id, $col));
 		}
 		// Only a freshly-minted DEK writes the wrapping; a reused one leaves the
 		// existing key/generation/owner in place so the old ciphertext still opens.
@@ -986,11 +1042,28 @@ abstract class SystemBase {
 	 * shape, so the two writers cannot drift.
 	 */
 	protected static function sealWrappingAssignments($crypto, $vault, $dek) {
+		$sealed = static::vaultIsClientCustody($vault)
+			? $crypto->sealItemDekToBrowserKey($dek, (string)$vault->get('uev_public_key'), (string)$vault->get('uev_scope'))
+			: $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
+		return static::sealKeyAssignments($sealed, $vault);
+	}
+
+	/** Is this the row of a client-custody vault (the browser holds its secret)? */
+	protected static function vaultIsClientCustody($vault): bool {
+		return is_object($vault) && (string)$vault->get('uev_custody') === 'client';
+	}
+
+	/**
+	 * The SET assignments for an already-sealed key: the key itself, and the
+	 * generation and owner of the vault it is sealed to. Shared by the server
+	 * sealer and acceptBrowserSealed(), which stores a key the browser sealed.
+	 */
+	protected static function sealKeyAssignments(string $sealed_key, $vault) {
 		$sets = array();
 		$params = array();
 
 		$sets[] = static::sealedKeyColumn() . ' = ?';
-		$params[] = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
+		$params[] = $sealed_key;
 
 		$generation = static::sealedGenerationColumn();
 		if ($generation !== '' && array_key_exists($generation, static::$field_specifications)) {
@@ -1066,7 +1139,20 @@ abstract class SystemBase {
 	 * @return array{values:array<string,string>, vault:object, reuse_dek:?string}|null
 	 */
 	protected function planSealOnSave(): ?array {
-		if (!static::$seal_on_save || empty(static::$sealed_fields) || empty($this->sealed_dirty)) {
+		if (empty(static::$sealed_fields) || empty($this->sealed_dirty)) {
+			return null;
+		}
+		// Ciphertext a browser sealed has one way in. Through save() it would be
+		// sealed a second time (seal-on-save) or stored as though it were
+		// plaintext (an opted-out model) — unreadable either way.
+		foreach (array_keys($this->sealed_dirty) as $field) {
+			$value = $this->data->$field ?? null;
+			if (is_string($value) && VaultCrypto::isEdgeField($value)) {
+				throw new SystemBaseException(get_called_class() . '.' . $field
+					. ' is already sealed; use acceptBrowserSealed() to store browser ciphertext.');
+			}
+		}
+		if (!static::$seal_on_save) {
 			return null;
 		}
 		$row = get_object_vars($this->data);
@@ -1096,6 +1182,7 @@ abstract class SystemBase {
 		if (empty($values)) {
 			return null;
 		}
+		$scope = static::resolveSealScope($row);
 
 		if (!static::shouldSeal($row)) {
 			return null;   // policy says plaintext; save() writes the columns normally
@@ -1107,9 +1194,9 @@ abstract class SystemBase {
 		}
 
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-		$vault = UserEncryptionVault::loadForUser($owner_id);
+		$vault = UserEncryptionVault::loadForUser($owner_id, $scope);
 		if (!$vault || !$vault->key) {
-			return null;   // no vault: this member's content is stored in the clear
+			return null;   // no vault for this scope: the row is stored in the clear
 		}
 
 		// An already-sealed row keeps its DEK. Minting a fresh one would rewrite
@@ -1118,9 +1205,27 @@ abstract class SystemBase {
 		// the old DEK through by hand. Sealed-ness is the DATABASE's answer, not
 		// this instance's: a stale instance that trusted its own flag here would
 		// mint over a live wrapping (see rowIsSealedInDb()).
+		//
+		// That holds only for a server-format row staying in server custody. A
+		// row sealed for the browser has a DEK the server cannot open, and a row
+		// changing scope must not carry its old key along, so either one mints a
+		// fresh DEK — which is safe only when this save rewrites every sealed
+		// field the row has. A partial update would leave the rest under a key
+		// nothing records any more, so it is refused.
 		$reuse_dek = null;
 		if ($this->key !== NULL && $this->rowIsSealedInDb()) {
-			$reuse_dek = $this->existingRowDek($owner_id);
+			$stored_scope = VaultCrypto::parseEdgeScope($this->storedSealedKey());
+			if ($stored_scope === null && !static::vaultIsClientCustody($vault)) {
+				$reuse_dek = $this->existingRowDek($owner_id);
+			} else {
+				foreach (static::$sealed_fields as $field) {
+					if (static::sealedFieldIsActive($field, $row) && !array_key_exists($field, $values)) {
+						throw new VaultSealedForBrowserException($stored_scope !== null
+							? 'This row is sealed for the browser; the server can only rewrite all of its sealed fields at once.'
+							: 'This row is moving to the "' . $scope . '" vault; the server can only rewrite all of its sealed fields at once.');
+					}
+				}
+			}
 		}
 
 		// A FIRST-TIME seal of an existing row seals the whole row, not the dirty
@@ -1154,11 +1259,7 @@ abstract class SystemBase {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 
-		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
-			'SELECT ' . static::sealedKeyColumn() . ' FROM ' . static::$tablename
-			. ' WHERE ' . static::$pkey_column . ' = ?');
-		$stmt->execute(array($this->key));
-		$sealed = (string)$stmt->fetchColumn();
+		$sealed = $this->storedSealedKey();
 		if ($sealed === '') {
 			throw new RuntimeException(get_called_class() . ': row ' . $this->key
 				. ' is flagged sealed but carries no wrapped key.');
@@ -1169,6 +1270,111 @@ abstract class SystemBase {
 		}
 		$crypto = new VaultCrypto();
 		return $crypto->openItemDek($sealed, $key);
+	}
+
+	/** This row's sealed key as the DATABASE holds it ('' when none). */
+	protected function storedSealedKey(): string {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT ' . static::sealedKeyColumn() . ' FROM ' . static::$tablename
+			. ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute(array($this->key));
+		return (string)$stmt->fetchColumn();
+	}
+
+	/**
+	 * Store what a browser sealed for a client-custody row: its sealed DEK and
+	 * the sealed fields, verbatim, with the flag, owner and generation, in one
+	 * statement — the same shape sealColumns() writes. This is the ONLY way
+	 * ciphertext enters a $sealed_fields column (save() refuses a `v1.edge.`
+	 * value), and it is the second step of a browser write: the row exists
+	 * first, because the AD binds each field to the row id.
+	 *
+	 * Checks, each refusing with its own reason: the key is `v1.edgeseal.{scope}.`
+	 * for the scope sealScopeForWrite() gives this row, and that scope is client
+	 * custody; shouldSeal() does not keep the row in plaintext; every field is declared in $sealed_fields, holds content on this
+	 * row, and carries `v1.edge.` (or is empty); no sealed field that holds a
+	 * value is left out, since it would stay under a key nothing records; the
+	 * owner has a vault of that scope.
+	 *
+	 * AUTHORIZATION IS THE CALLER'S. This checks shape and custody, not who is
+	 * asking: the consumer's save logic proves the caller owns the row before it
+	 * delegates the write here.
+	 */
+	public static function acceptBrowserSealed(int $row_id, string $sealed_dek, array $fields): void {
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		$cls = get_called_class();
+		if ($row_id <= 0) {
+			throw new RuntimeException($cls . '::acceptBrowserSealed() needs a persisted row id.');
+		}
+		static::assertSealingDeclared(static::$sealed_fields[0] ?? '');
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute(array($row_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			throw new RuntimeException($cls . ': refused browser ciphertext for row ' . $row_id . ': no such row.');
+		}
+
+		$scope = VaultCrypto::parseEdgeScope($sealed_dek);
+		if ($scope === null) {
+			throw new RuntimeException($cls . ': refused browser ciphertext: the key is not a browser-sealed key (v1.edgeseal.{scope}.).');
+		}
+		$row_scope = static::resolveSealScope($row);
+		if ($scope !== $row_scope) {
+			throw new RuntimeException($cls . ': refused browser ciphertext: the key is sealed to the "' . $scope
+				. '" vault, and this row belongs to the "' . $row_scope . '" vault.');
+		}
+		if (!VaultScopes::isClientCustody($scope)) {
+			throw new RuntimeException($cls . ': refused browser ciphertext: the "' . $scope
+				. '" vault is server custody; the server seals its rows.');
+		}
+		// The same policy the server write path asks first: a row the model
+		// keeps in plaintext does not become sealed because a browser posted.
+		if (!static::shouldSeal($row)) {
+			throw new RuntimeException($cls . ': refused browser ciphertext: this row is kept in plaintext (shouldSeal() says no).');
+		}
+
+		foreach ($fields as $col => $value) {
+			if (!in_array($col, static::$sealed_fields, true)) {
+				throw new RuntimeException($cls . ': refused browser ciphertext: "' . $col . '" is not in $sealed_fields.');
+			}
+			if (!static::sealedFieldIsActive($col, $row)) {
+				throw new RuntimeException($cls . ': refused browser ciphertext: "' . $col . '" is not sealed content on this row.');
+			}
+			if ($value !== null && $value !== '' && (!is_string($value) || !VaultCrypto::isEdgeField($value))) {
+				throw new RuntimeException($cls . ': refused browser ciphertext: "' . $col . '" is not v1.edge. ciphertext.');
+			}
+		}
+		foreach (static::$sealed_fields as $col) {
+			$existing = $row[$col] ?? null;
+			if (!array_key_exists($col, $fields) && static::sealedFieldIsActive($col, $row)
+					&& $existing !== null && $existing !== '') {
+				throw new RuntimeException($cls . ': refused browser ciphertext: "' . $col
+					. '" holds a value the post leaves out, which would stay under a key nothing records.');
+			}
+		}
+
+		$owner_id = static::sealOwnerForWrite($row);
+		$vault = ($owner_id === null) ? null : UserEncryptionVault::loadForUser($owner_id, $scope);
+		if (!$vault || !$vault->key) {
+			throw new RuntimeException($cls . ': refused browser ciphertext: the row\'s owner has no "' . $scope . '" vault.');
+		}
+
+		$sets = array();
+		$params = array();
+		foreach ($fields as $col => $value) {
+			$sets[] = $col . ' = ?';
+			$params[] = $value;
+		}
+		$wrap = static::sealKeyAssignments($sealed_dek, $vault);
+		$sets = array_merge($sets, $wrap['sets']);
+		$params = array_merge($params, $wrap['params']);
+		$sets[] = static::sealFlagColumn() . ' = true';
+		$params[] = $row_id;
+		$db->prepare('UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
+			. ' WHERE ' . static::$pkey_column . ' = ?')->execute($params);
 	}
 
 	/**
@@ -1590,7 +1796,11 @@ abstract class SystemBase {
 	 * regex did not anticipate.
 	 */
 	function export_for_api() {
-		$full = $this->export_as_array();
+		try {
+			$full = $this->export_as_array();
+		} catch (VaultSealedForBrowserException $e) {
+			return $this->export_for_api_sealed_for_browser();
+		}
 		$out = array();
 		foreach (array_keys(static::$field_specifications) as $field) {
 			if (array_key_exists($field, $full) && !static::is_unreadable_field($field)) {
@@ -1644,6 +1854,51 @@ abstract class SystemBase {
 		}
 		$out['key'] = $this->key;
 		$out['content_locked'] = true;
+		return $out;
+	}
+
+	/**
+	 * The API shape of a row sealed to a client-custody scope — the one place
+	 * the server hands out that ciphertext, and only to the API, where the
+	 * browser holding the scope's secret opens it (joinery-sealed.js).
+	 *
+	 * The sibling of export_for_api_locked(): every readable plain column
+	 * exports normally, and each sealed field exports as stored. Three derived
+	 * keys let the browser open them without guessing: `sealed_scope` (parsed
+	 * from the key), `sealed_dek` (the key column's value — the column itself
+	 * ends in `_key`, so the credential floor keeps it out under its own name)
+	 * and `sealed_ad_prefix` (sealedAdPrefix(), so the AD of each field is
+	 * `{sealed_ad_prefix}{key}:{field}`). Other derived fields are left out, as
+	 * in the locked export: any of them may read sealed content.
+	 */
+	function export_for_api_sealed_for_browser() {
+		$sealed_dek = (string)($this->data->{static::sealedKeyColumn()} ?? '');
+		$scope = VaultCrypto::parseEdgeScope($sealed_dek);
+		if ($scope === null) {
+			throw new RuntimeException(get_called_class() . ' row ' . $this->key . ' is not sealed for the browser.');
+		}
+		$out = array();
+		foreach (array_keys(static::$field_specifications) as $field) {
+			if (static::is_unreadable_field($field)) {
+				continue;
+			}
+			try {
+				$value = $this->get($field);
+			} catch (VaultSealedForBrowserException $e) {
+				$value = $this->data->$field ?? null;
+			}
+			if ($value !== null && $this->is_timestamp_field($field) && is_string($value)) {
+				// The same wire format export_for_api() gives a timestamp; an SQL
+				// function default like 'now()' is not a date.
+				$value = preg_match('/^\w+\(\)$/', $value) ? null
+					: (new DateTime($value, new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
+			}
+			$out[$field] = $value;
+		}
+		$out['key'] = $this->key;
+		$out['sealed_scope'] = $scope;
+		$out['sealed_dek'] = $sealed_dek;
+		$out['sealed_ad_prefix'] = static::sealedAdPrefix();
 		return $out;
 	}
 

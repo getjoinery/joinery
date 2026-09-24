@@ -2,6 +2,7 @@
 /**
  * Conversations inbox logic
  *
+ * @version 1.1 - sign-in through check_permission(0), so the navigation gates apply
  * @version 1.0
  */
 
@@ -14,9 +15,11 @@ function conversations_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
-	if (!$session->is_logged_in()) {
-		return LogicResult::redirect('/login');
-	}
+	// check_permission, not a bare is_logged_in(): it is what applies the
+	// navigation gates (terms, a forced password change, the setup interrupt,
+	// the second-factor gates), and it sends a signed-out visitor to /login
+	// with this page kept as the return.
+	$session->check_permission(0);
 
 	// Check if messaging is active
 	$settings = Globalvars::get_instance();

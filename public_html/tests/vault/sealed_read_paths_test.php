@@ -13,7 +13,9 @@
  * one place: VaultCrypto::openField(). That only protects anything if code
  * cannot quietly decrypt sealed content some other way, so this test walks the
  * whole tree and asserts that the low-level SealedBox decrypt primitives
- * (openDek / openBinary / aeadDecrypt / openStreamFile) are called from a
+ * (openDek / openBinary / openEdge / aeadDecrypt / aeadDecryptGcm /
+ * openStreamFile; openEdge and aeadDecryptGcm are the browser format) are
+ * called from a
  * closed, named set of files:
  *
  *  - includes/SealedBox.php      — defines the primitives, uses them internally;
@@ -39,7 +41,7 @@
  *
  * A second, narrower pin covers the vault SECRET (specs/unseal_daemon.md § The
  * PHP seam): the primitives that take or produce it — SealedBox::openDek,
- * openBinary, unwrapKey, wrapKey and generateKeypair — are called from
+ * openBinary, openEdge, unwrapKey, wrapKey and generateKeypair — are called from
  * PoolVaultKey (the one class that holds the bytes), SealedBox itself, and
  * the two places that use SealedBox with a key that is NOT a vault key (the
  * relay transport keypair). VaultCrypto opens through VaultKey::unseal() and
@@ -51,6 +53,8 @@
  *
  * Run: php tests/run.php safe --filter=sealed_read_paths
  *
+ * @version 1.4 - VaultSealedForBrowserException is caught only by the API export
+ * @version 1.3 - the browser-format opens (openEdge, aeadDecryptGcm) join both pins
  * @version 1.2 - the vault-secret pin (openDek/openBinary/unwrapKey/wrapKey/generateKeypair)
  * @version 1.1
  */
@@ -60,7 +64,7 @@ harness_boot();
 
 /** Call-shaped uses only: `->openDek(` / `::aeadDecrypt(` etc. A mention in
  *  prose or a docblock without the call parenthesis does not count. */
-const SRP_PATTERN = '/(?:->|::)\s*(?:openDek|openBinary|aeadDecrypt|openStreamFile)\s*\(/';
+const SRP_PATTERN = '/(?:->|::)\s*(?:openDek|openBinary|openEdge|aeadDecrypt|aeadDecryptGcm|openStreamFile)\s*\(/';
 
 /** The closed set, relative to public_html. */
 $allowed = array(
@@ -73,7 +77,7 @@ $allowed = array(
 /** Instance calls only (`->openDek(`): every SealedBox primitive is an instance
  *  method, and the instance shape keeps MailboxDkimSigner::generateKeypair()
  *  (RSA, a static of another class) out of the match. */
-const SRP_SECRET_PATTERN = '/->\s*(?:openDek|openBinary|unwrapKey|wrapKey|generateKeypair)\s*\(/';
+const SRP_SECRET_PATTERN = '/->\s*(?:openDek|openBinary|openEdge|unwrapKey|wrapKey|generateKeypair)\s*\(/';
 
 /** Where the vault secret may be unwrapped, wrapped, minted or used to open. */
 $secret_allowed = array(
@@ -156,6 +160,24 @@ foreach ($secret_allowed as $expected) {
 		$expected . ' still uses the secret-taking primitives it is allowlisted for',
 		in_array($expected, $secret_callers, true) ? '' : 'it no longer matches — prune the allowlist');
 }
+
+section('only the API export turns a browser-sealed row into output');
+
+// A row sealed to a client-custody scope throws VaultSealedForBrowserException
+// on every server read. SystemBase's API export catches it to hand the stored
+// ciphertext to the browser; anywhere else, catching it is how server code
+// would start quietly returning that row's content (or its absence) as data.
+$browser_catchers = array();
+foreach (srp_php_files($root) as $file) {
+	$source = @file_get_contents($file->getPathname());
+	if ($source !== false && preg_match('/catch\s*\([^)]*\bVaultSealedForBrowserException\b/', $source)) {
+		$browser_catchers[] = str_replace($root . '/', '', $file->getPathname());
+	}
+}
+sort($browser_catchers);
+check($browser_catchers === array('includes/SystemBase.php'),
+	'VaultSealedForBrowserException is caught only by the API export in SystemBase',
+	'catchers: ' . implode(', ', $browser_catchers));
 
 check(!file_exists($root . '/includes/VaultKey.php')
 		|| !preg_match('/function\s+(?:secret|bytes|export|wrap)\w*\s*\(/i', (string)file_get_contents($root . '/includes/VaultKey.php')),

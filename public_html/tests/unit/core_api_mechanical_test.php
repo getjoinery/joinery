@@ -270,8 +270,11 @@ foreach ($scan as $file) {
 	if ($rel === 'includes/SystemBase.php') continue;   // where it is defined
 
 	$src = file_get_contents($file->getPathname());
+	// A writer calls server_initiated_write() or SETS the flag by hand. Reading
+	// the flag (GuardedPdo lets the server's own writes through with it) grants
+	// nothing, so it is not a caller.
 	if (strpos($src, 'server_initiated_write(') !== false
-		|| strpos($src, '$allow_get_mutation') !== false) {
+		|| preg_match('/\$allow_get_mutation\s*=(?!=)/', $src)) {
 		$found[] = $rel;
 	}
 }

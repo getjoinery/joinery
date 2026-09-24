@@ -5,6 +5,7 @@
  * (or floats bottom-right on themes without a slot). Colors ride the .jy-ui
  * kit tokens with plain fallbacks so the chip reads correctly on any theme.
  *
+ * @version 1.1 - popover rows: one per open vault, each with its own action
  * @version 1.0
  */
 
@@ -115,4 +116,31 @@
 .jy-vault-lock-pop-btn:disabled {
 	opacity: 0.6;
 	cursor: default;
+}
+
+/* One row per vault in the popover: its name, then Lock now (or Unlock). */
+.jy-vault-lock-pop-row {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin-bottom: 0.5rem;
+}
+
+.jy-vault-lock-pop-name {
+	flex: 1;
+	font-size: 0.8125rem;
+	color: var(--jy-color-text, #1e1f21);
+}
+
+.jy-vault-lock-pop-note {
+	color: var(--jy-color-text-muted, #6c6e71);
+}
+
+.jy-vault-lock-pop-row .jy-vault-lock-pop-btn {
+	width: auto;
+	flex: none;
+}
+
+.jy-vault-lock[hidden] {
+	display: none;
 }

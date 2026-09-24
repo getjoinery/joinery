@@ -16,9 +16,11 @@ function drive_logic(array $input): LogicResult {
 	if (!$settings->get_setting('drive_active')) {
 		return LogicResult::error('Drive is not available.');
 	}
-	if (!$session->is_logged_in()) {
-		return LogicResult::redirect('/login?return=/drive');
-	}
+	// check_permission, not a bare is_logged_in(): it is what applies the
+	// navigation gates (terms, a forced password change, the setup interrupt,
+	// the second-factor gates), and it sends a signed-out visitor to /login
+	// with this page kept as the return.
+	$session->check_permission(0);
 
 	$user_id = (int)$session->get_user_id();
 
@@ -38,7 +40,6 @@ function drive_logic(array $input): LogicResult {
 	$page_vars['max_file_bytes']     = (int)SubscriptionTier::getUserFeature($user_id, 'drive_max_file_bytes', 0);
 	$page_vars['quota_bytes']        = (int)SubscriptionTier::getUserFeature($user_id, 'drive_storage_bytes', 0);
 	$page_vars['chunk_bytes']        = (int)$settings->get_setting('drive_upload_chunk_bytes');
-	$page_vars['passkeys_enabled']   = (bool)$settings->get_setting('passkeys_enabled');
 	$page_vars['session']            = $session;
 
 	return LogicResult::render($page_vars);

@@ -1568,7 +1568,31 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 }
 /* Buttons are kit .btn / .btn-* (built by JoineryModal). The action row owns
    only layout. */
-.jy-ui .dialog-actions { display: flex; justify-content: flex-end; gap: var(--jy-space-2); }
+.jy-ui .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--jy-space-2); }
+
+/* The vault ceremony (VaultKeyring.ensureUnlocked): setup, recovery codes and
+   unlock as steps inside the one modal. */
+.jy-ui .jy-vault-ceremony { max-width: 30rem; }
+.jy-ui .jy-vault-ceremony-title { margin: 0 0 var(--jy-space-3); }
+.jy-ui .jy-vault-ceremony p { margin: 0 0 var(--jy-space-3); line-height: 1.5; }
+.jy-ui .jy-vault-ceremony-reason { color: var(--jy-color-text-muted); }
+.jy-ui .jy-vault-ceremony-error { color: var(--jy-color-danger); }
+.jy-ui .jy-vault-ceremony-note { padding: var(--jy-space-2) var(--jy-space-3); background: var(--jy-color-surface-alt); border-radius: var(--jy-radius-md); }
+.jy-ui .jy-vault-ceremony-check { display: flex; align-items: center; gap: var(--jy-space-2); margin-bottom: var(--jy-space-3); }
+.jy-ui .jy-vault-ceremony-fields { display: flex; flex-direction: column; gap: var(--jy-space-2); margin-bottom: var(--jy-space-3); }
+.jy-ui .jy-vault-ceremony-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--jy-space-2); margin-bottom: var(--jy-space-3); }
+.jy-ui .jy-vault-ceremony-label { display: block; margin-bottom: var(--jy-space-1); }
+.jy-ui .jy-vault-ceremony .btn-link { background: none; border: none; padding: 0; color: var(--jy-color-primary); text-decoration: underline; cursor: pointer; }
+.jy-ui .jy-vault-ceremony-codes {
+  margin: 0 0 var(--jy-space-3);
+  padding: var(--jy-space-3) var(--jy-space-3) var(--jy-space-3) 2.2rem;
+  background: var(--jy-color-surface-alt);
+  border-radius: var(--jy-radius-md);
+  font-family: var(--jy-font-mono);
+  columns: 2 14rem;
+  column-gap: var(--jy-space-5);
+}
+.jy-ui .jy-vault-ceremony-codes li { break-inside: avoid; padding: 1px 0; }
 
 /* A field help guide rendered inside the modal (FormWriter help_modal). Steps
    are the content; the copy rows and the provider link are the two things the

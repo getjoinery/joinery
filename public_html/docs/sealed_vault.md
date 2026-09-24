@@ -391,8 +391,10 @@ temp file private before the first decrypted byte lands.
 The platform-wide "you're locked" idiom: every signed-in page for a user with
 a set-up server-custody vault carries a padlock in a fixed place — closed
 while the vault is locked, open (success-colored) while an unlock window is
-live. Clicking the closed padlock runs the one-tap passkey unlock ceremony in
-place; clicking the open padlock opens a small popover with the idle-timeout
+live. Clicking the closed padlock runs the unlock ceremony in place, offering
+what the vault has — a passkey, the bypass phrase or a recovery code (a knowledge
+factor on an account with a second factor passes through the step-up page
+first); clicking the open padlock opens a small popover with the idle-timeout
 note and a **Lock now** button — the walk-away affordance. Users without a
 vault never see the chip or load its assets.
 

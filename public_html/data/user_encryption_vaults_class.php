@@ -27,6 +27,12 @@ class UserEncryptionVaultException extends SystemBaseException {}
  * server able to read while the member is present. Every other scope is client
  * custody, one keypair each.
  *
+ * A client-custody scope's keypair is rotated by the browser in two steps: the
+ * new public key waits in `uev_pending_public_key` (with the generation it
+ * will become) while every sealed DEK is re-sealed to it, and the commit makes
+ * it current.
+ *
+ * @version 1.1 - uev_pending_public_key / uev_pending_key_generation: a client-custody rotation in progress
  * @version 1.0
  */
 class UserEncryptionVault extends SystemBase {
@@ -65,6 +71,8 @@ class UserEncryptionVault extends SystemBase {
 		'uev_salt'           => array('type'=>'text', 'is_nullable'=>false),
 		'uev_kdf_params'     => array('type'=>'text', 'is_nullable'=>true),
 		'uev_key_generation' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
+		'uev_pending_public_key'     => array('type'=>'text', 'is_nullable'=>true),
+		'uev_pending_key_generation' => array('type'=>'int4', 'is_nullable'=>true),
 		'uev_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'uev_update_time'   => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);

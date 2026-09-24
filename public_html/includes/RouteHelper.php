@@ -946,6 +946,20 @@ class RouteHelper {
      * @param string $request_path The request path from $_REQUEST['path']
      * @return void Exits on successful route match, or stores result in $match_only_result if $match_only_mode is true
      */
+    /**
+     * Is this a page someone navigates to, as opposed to a JSON endpoint (the
+     * /api/ family and legacy /ajax/), a file download (/uploads/) or an asset?
+     * The navigation gates apply only to the first.
+     */
+    public static function isNavigationPath($path) {
+        foreach (array('/api/', '/ajax/', '/uploads/', '/assets/', '/theme/', '/static_files/') as $prefix) {
+            if (strpos((string)$path, $prefix) === 0) {
+                return false;
+            }
+        }
+        return !preg_match('#^/plugins/[^/]+/assets/#', (string)$path);
+    }
+
     public static function processRoutes($routes, $request_path) {
 
         // __route is routing metadata injected by the Apache rewrite
@@ -1067,6 +1081,16 @@ class RouteHelper {
         // the recording is a no-op once the answer has not changed.
         require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
         LibraryFunctions::observe_protocol();
+
+        // Navigation gates (docs/account_security.md): a signed-in person who
+        // owes a password change, terms, setup or a second factor is held on the
+        // page that settles it. Run here for every signed-in page request, so a
+        // page whose logic checks only is_logged_in() cannot step around them.
+        // JSON and file surfaces keep their own rules and are left alone.
+        if (!self::$match_only_mode && self::isNavigationPath($full_path)
+                && SessionControl::get_instance()->is_logged_in()) {
+            SessionControl::get_instance()->enforce_navigation_gates();
+        }
 
         // STATIC PAGE CACHE CHECK - For non-authenticated users only
         $cache_status = null;

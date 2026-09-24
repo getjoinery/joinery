@@ -7,6 +7,7 @@
 	$page_vars = process_logic(devices_link_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 	$page = new PublicPage();
+	$page->needs_vault_client();
 	$page->public_header([
 		'title' => 'Link a device',
 	]);
@@ -53,27 +54,6 @@
                 ?>
             </div>
 
-            <!-- Vault unlock. Only ever shown when the user asked to give this
-                 device their encrypted folders. -->
-            <dialog id="dlkVaultDialog" class="jy-dialog">
-                <h2>Unlock your vault</h2>
-                <p>Your encrypted-folder key is unwrapped here, in your browser, and sealed to the device. It does not pass through the server in a form the server could read.</p>
-                <div id="dlkVaultError" class="jy-alert jy-alert-danger" hidden></div>
-                <?php
-                $vaultform = $page->getFormWriter('vaultform');
-                $vaultform->begin_form();
-                if (!empty($page_vars['passkeys_enabled'])) {
-                    echo '<button type="button" id="dlkUnlockPasskey" class="btn btn-primary">Unlock with a passkey</button>';
-                }
-                $vaultform->passwordinput('dlk_passphrase', 'Or use your vault passphrase', [
-                    'required' => false,
-                ]);
-                echo '<button type="button" id="dlkUnlockPp" class="btn btn-secondary">Unlock with passphrase</button>';
-                echo '<button type="button" class="btn btn-secondary" data-dlk-close>Cancel</button>';
-                $vaultform->end_form();
-                ?>
-            </dialog>
-
             <?php echo PublicPage::settings_layout_end(); ?>
         </div>
     </div>
@@ -82,11 +62,7 @@
 <script>window.DEVICE_LINK_CFG = <?php echo json_encode([
     'code'            => $page_vars['code'] ?? '',
     'hasVault'        => (bool)($page_vars['has_vault'] ?? false),
-    'passkeysEnabled' => (bool)($page_vars['passkeys_enabled'] ?? false),
 ]); ?>;</script>
-<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<script defer src="/assets/js/vault-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-crypto.js')) ?: '1'; ?>"></script>
-<script defer src="/assets/js/vault-keyring.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-keyring.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/device-link.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/device-link.js')) ?: '1'; ?>"></script>
 <?php
 $page->public_footer(['track' => TRUE]);

@@ -87,7 +87,7 @@ entry, soft-deleted for trash/restore).
 
 ## The first-run ceremony
 
-A guided, full-screen setup on first visit:
+A guided setup in a centered card on first visit:
 
 1. **Choose an unlocker.** A passkey is the everyday unlocker (with a PRF
    capability check); if the authenticator lacks PRF, a master passphrase is the
@@ -105,8 +105,7 @@ the vault — stated up front and acknowledged before setup proceeds.
 One deliberate act opens the password vault — its own unlock, separate from
 Drive and from mail/chat (separate keypair). The unlock screen offers the
 passkey (primary), the passphrase (if enrolled), and a recovery key (last). A
-consumed recovery key is one-time: the browser marks it used server-side and the
-manager suggests regenerating keys once fewer than three remain.
+consumed recovery key is one-time: the browser marks it used server-side.
 
 **Locking discards all plaintext**, including unsaved edits — idle auto-lock
 (15 minutes by default, user-configurable), a manual "Lock now", and closing the

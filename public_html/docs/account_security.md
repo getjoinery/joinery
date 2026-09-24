@@ -88,6 +88,18 @@ straight back, and no amount of confirming will satisfy it. Ask
 administration.** Domain security-level changes are gated this way today; the
 same helper is how the remaining sensitive-administration actions adopt the gate.
 
+## Navigation gates
+
+A signed-in person who owes something is held on the page that settles it: a
+forced password change (`/change-password-required`), terms acceptance
+(`/terms-accept`), the first-login setup wizard (`/setup`), and the two
+second-factor gates below. `SessionControl::enforce_navigation_gates()` holds
+them all, each naming the paths it leaves alone. The router runs it for every
+signed-in page request, and `check_permission()` runs it too, so a page whose
+logic checks only `is_logged_in()` cannot step around a gate. JSON and file
+surfaces (`/api/`, `/ajax/`, `/uploads/`, assets) are not navigation and keep
+their own rules; a CLI run has no request and meets no gate.
+
 ## Admin second-factor requirement
 
 `totp_require_admins` sends every admin (permission 5 and above) who holds no
@@ -119,6 +131,12 @@ that page, `/setup`, `/logout`, and every `/api/v1/` request, the last being wha
 lets the enrollment ceremonies on that page actually run. Vault existence is
 cached per session and per user; the factor check is a live read, so enrolling
 clears the gate on the next page load rather than the next sign-in.
+
+The same state follows setting up a browser-held vault (Drive's Fortress
+folders, the password vault) with a passphrase on an account that has no second
+factor. The setup ceremony says so before it runs, and the setup action drops the
+cached vault answer (`SessionControl::forget_vault_posture()`), so the gate takes
+the account from its next page.
 
 The gate accepts any factor at all: it exists to undo a zero-factor state, not
 to raise the account's posture.

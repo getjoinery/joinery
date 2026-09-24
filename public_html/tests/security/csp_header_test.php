@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php safe --filter=csp_header
  *
+ * @version 1.2 - 'wasm-unsafe-eval' in script-src, never 'unsafe-eval'
  * @version 1.1 - no CDN, hosts not schemes, and the tree sweep that keeps the inventory current
  */
 
@@ -54,6 +55,8 @@ foreach (array('default-src', 'script-src', 'style-src', 'img-src', 'font-src', 
 }
 check($has('default-src', "'self'"), "default-src 'self'");
 check($has('script-src', "'unsafe-inline'") && $has('style-src', "'unsafe-inline'"), "Phase 1 keeps 'unsafe-inline' for scripts and styles");
+check($has('script-src', "'wasm-unsafe-eval'") && !$has('script-src', "'unsafe-eval'"),
+	"script-src allows compiling WebAssembly (the vault passphrase's Argon2id) and still refuses eval()");
 check($has('script-src', 'https://js.stripe.com') && $has('frame-src', 'https://js.stripe.com') && $has('frame-src', 'https://hooks.stripe.com'),
 	'Stripe: script and its frames');
 check($has('script-src', 'https://www.paypal.com') && $has('frame-src', 'https://www.paypal.com') && $has('form-action', 'https://www.paypal.com'),

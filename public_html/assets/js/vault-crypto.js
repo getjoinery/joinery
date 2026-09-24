@@ -31,6 +31,15 @@
  * used ONLY for the low-entropy passphrase-fallback KDF. Recovery codes carry
  * >=128 bits of entropy, so their KEK is a fast SHA-256, never Argon2id.
  *
+ * Every content blob and sealed DEK here is raw: the `v1.edge.` /
+ * `v1.edgeseal.{scope}.` framing a sealed row carries belongs to the row layer
+ * (joinery-sealed.js, SystemBase), and the server's SealedBox::sealEdge /
+ * aeadEncryptGcm produce these same bytes. selfCheck() proves that against the
+ * shared vector in tests/vault/fixtures/edge_vector.json.
+ *
+ * @version 1.1 - encrypt()/decrypt() take an optional AD; selfCheck() opens the
+ *   shared edge-format vector; a passphrase KDF that never settles rejects
+ *   after a minute instead of hanging the unlock
  * @version 1.0
  */
 window.VaultCrypto = (function () {
@@ -112,10 +121,22 @@ window.VaultCrypto = (function () {
 	// The low-entropy passphrase fallback: memory-hard Argon2id via the vendored
 	// WASM. The strongest defense for an offline brute-force of the passphrase
 	// against a stolen wrapped key.
+	// The WASM module aborts without settling its promise when it cannot run
+	// (a Content-Security-Policy that forbids compiling WebAssembly, a browser
+	// out of memory), which would leave an unlock spinning forever. Argon2id at
+	// these parameters takes seconds; a minute means it is not coming back.
+	var ARGON2_TIMEOUT_MS = 60000;
+
 	async function kekFromPassphrase(passphrase, saltB64, kdfParams) {
 		var params = kdfParams || DEFAULT_KDF_PARAMS;
 		await loadArgon2();
-		var result = await window.argon2.hash({
+		var timer;
+		var gaveUp = new Promise(function (resolve, reject) {
+			timer = setTimeout(function () {
+				reject(new Error('This browser could not check the passphrase (the Argon2 module did not run).'));
+			}, ARGON2_TIMEOUT_MS);
+		});
+		var result = await Promise.race([gaveUp, window.argon2.hash({
 			pass: passphrase,
 			salt: b64decode(saltB64),
 			time: params.time,
@@ -123,7 +144,7 @@ window.VaultCrypto = (function () {
 			parallelism: params.parallelism,
 			hashLen: params.hashLen || 32,
 			type: window.argon2.ArgonType.Argon2id,
-		});
+		})]).finally(function () { clearTimeout(timer); });
 		return importAesKek(result.hash);
 	}
 
@@ -246,18 +267,74 @@ window.VaultCrypto = (function () {
 
 	// The encrypt()->blob / blob->decrypt() contract the spec names. Each blob is
 	// self-describing: base64( IV[12] || ciphertext ). Content is an opaque
-	// string (the consumer JSON-encodes its own record).
-	async function encrypt(plaintextString, dekKey) {
+	// string (the consumer JSON-encodes its own record). `ad` (optional, bytes or
+	// a string) binds the blob to its row - a sealed model field passes
+	// `{prefix}:{id}:{field}` so a ciphertext spliced onto another row fails.
+	function gcmParams(iv, ad) {
+		var params = { name: 'AES-GCM', iv: iv };
+		if (ad !== undefined && ad !== null) params.additionalData = typeof ad === 'string' ? utf8(ad) : ad;
+		return params;
+	}
+
+	async function encrypt(plaintextString, dekKey, ad) {
 		var iv = randomBytes(12);
-		var ct = await subtle.encrypt({ name: 'AES-GCM', iv: iv }, dekKey, utf8(plaintextString));
+		var ct = await subtle.encrypt(gcmParams(iv, ad), dekKey, utf8(plaintextString));
 		return b64encode(concat(iv, new Uint8Array(ct)));
 	}
 
-	async function decrypt(blob, dekKey) {
+	async function decrypt(blob, dekKey, ad) {
 		var raw = b64decode(blob);
 		var iv = raw.slice(0, 12), ct = raw.slice(12);
-		var pt = await subtle.decrypt({ name: 'AES-GCM', iv: iv }, dekKey, ct);
+		var pt = await subtle.decrypt(gcmParams(iv, ad), dekKey, ct);
 		return fromUtf8(new Uint8Array(pt));
+	}
+
+	// ---- self-check: the shared edge-format vector ----------------------------
+
+	// The same vector tests/vault/fixtures/edge_vector.json holds and the PHP
+	// suite reproduces byte for byte. Opening it here proves this engine and the
+	// server agree on the sealed-DEK and field formats. Test material only.
+	var EDGE_VECTOR = {
+		recipientSecretHex: 'b8e67311ce5fc36fbea57ba23b44b7bd96f3a05386aaa808754e46a470cd4b64',
+		recipientPublicB64: 'YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY=',
+		dekHex: 'a915e4d16fe838501138950a7aa00d509abd1416d68c069425cf44e0fab44ea3',
+		sealedDekB64: 'oYPrrXh6/HP7O/wBfmEjulnEr/TB/73xZKOGT1Bib1xN+CQ1a6AGgnOrKRin5mqZICXeL60kdnhYxr/h5FYNKC6F+d1tyW8/49UZifhpB2n13vjmXLhWtVyUd58=',
+		fieldAd: 'acn:42:acn_body',
+		fieldPlaintext: 'Edge vector: the same bytes on both sides. ✓',
+		fieldBlobB64: 'xPz/lc6huSNav/Tp2wox1T2zaBUxtkEVSUojPW+KZjNNwy4RtEMvEDIil5nXGNSR+LCPdKwkVsFTCBMNJ7rWIzGrFZWOrPe0sYM=',
+	};
+
+	function fromHex(h) {
+		var out = new Uint8Array(h.length / 2);
+		for (var i = 0; i < out.length; i++) out[i] = parseInt(h.substr(i * 2, 2), 16);
+		return out;
+	}
+	function sameBytes(a, b) {
+		if (a.length !== b.length) return false;
+		for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+		return true;
+	}
+
+	// Resolves true when this engine opens the vector (DEK and field, the field
+	// refusing another row's AD) and a fresh seal round-trips; false otherwise.
+	async function selfCheck() {
+		try {
+			var v = EDGE_VECTOR;
+			var pkcs8 = concat(fromHex('302e020100300506032b656e04220420'), fromHex(v.recipientSecretHex));
+			var dek = await openFromSecretKey(v.sealedDekB64, pkcs8, v.recipientPublicB64);
+			if (!sameBytes(dek, fromHex(v.dekHex))) return false;
+			var dekKey = await importDek(dek);
+			if (await decrypt(v.fieldBlobB64, dekKey, v.fieldAd) !== v.fieldPlaintext) return false;
+			var refused = false;
+			try { await decrypt(v.fieldBlobB64, dekKey, v.fieldAd + 'x'); } catch (e) { refused = true; }
+			if (!refused) return false;
+			var pair = await generateVaultKeypair();
+			var fresh = randomBytes(32);
+			var reopened = await openFromSecretKey(await sealToPublicKey(fresh, pair.publicKeyB64), pair.secretKeyBytes, pair.publicKeyB64);
+			return sameBytes(reopened, fresh);
+		} catch (e) {
+			return false;
+		}
 	}
 
 	// ---- feature probe --------------------------------------------------------
@@ -293,5 +370,6 @@ window.VaultCrypto = (function () {
 		encrypt: encrypt,
 		decrypt: decrypt,
 		isSupported: isSupported,
+		selfCheck: selfCheck,
 	};
 })();

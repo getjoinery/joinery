@@ -1585,3 +1585,14 @@
 	$migration['migration_file'] = 'imap_feeds_no_plaintext.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// How long a browser-held vault stays unlocked is core's
+	// vault_client_autolock_minutes (specs/client_custody_declared_consumer.md
+	// R5). The password vault plugin's own vault_autolock_minutes row is left
+	// behind: a changed value carries over, then the row goes.
+	$migration = array();
+	$migration['database_version'] = '201';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'vault_client_autolock_setting.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

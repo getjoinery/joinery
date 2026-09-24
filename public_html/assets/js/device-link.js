@@ -6,10 +6,12 @@
  * do the one thing that can only happen in a browser: unwrap their
  * encrypted-folder key and seal it to that specific device.
  *
- * The key never crosses the wire in the open. VaultKeyring unwraps it here from
- * a wrapping only the user's own unlocker opens, VaultCrypto seals it to the
- * device's public key, and the server stores a blob it has no way to read.
+ * The key never crosses the wire in the open. The vault is unlocked here
+ * through the core ceremony (JoinerySealed.session), the session seals its
+ * secret to the device's public key without handing the bytes to this page,
+ * and the server stores a blob it has no way to read.
  *
+ * @version 1.2 - the unlock is the core ceremony; no dialog of its own
  * @version 1.1
  * @changelog 1.1 - The approval takes the FormWriter validator's submitHandler
  *   instead of adding a second submit listener, which ran it twice per click.
@@ -19,27 +21,17 @@
 
 	var CFG = window.DEVICE_LINK_CFG || {};
 	var api = window.joineryApi;
-	var VK = window.VaultKeyring;
 	var SCOPE = 'drive';
 
 	var $ = function (id) { return document.getElementById(id); };
 
 	var resolved = null;      // the device details for the code currently entered
-	var vaultResolve = null;  // pending unlock promise handlers
-	var vaultReject = null;
 
 	function alertBox(message, kind) {
 		var box = $('dlkAlert');
 		if (!box) { return; }
 		box.className = 'jy-alert jy-alert-' + (kind || 'info');
 		box.textContent = message;
-		box.hidden = !message;
-	}
-
-	function vaultError(message) {
-		var box = $('dlkVaultError');
-		if (!box) { return; }
-		box.textContent = message || '';
 		box.hidden = !message;
 	}
 
@@ -82,54 +74,20 @@
 
 	// ---- the vault handoff ---------------------------------------------------
 
-	function openVaultDialog() {
-		return new Promise(function (resolve, reject) {
-			vaultResolve = resolve;
-			vaultReject = reject;
-			vaultError('');
-			$('dlkVaultDialog').showModal();
-		});
-	}
-
-	function closeVaultDialog(session) {
-		var dlg = $('dlkVaultDialog');
-		if (dlg.open) { dlg.close(); }
-		var resolveFn = vaultResolve, rejectFn = vaultReject;
-		vaultResolve = null; vaultReject = null;
-		if (session) { if (resolveFn) { resolveFn(session); } }
-		else if (rejectFn) { rejectFn(new Error('Unlock cancelled.')); }
-	}
-
-	async function unlock(method) {
-		vaultError('');
-		try {
-			var session;
-			if (method === 'passkey') {
-				var d = await VK.derivePasskeyKek(SCOPE);
-				session = await VK.unlockWithPasskey(SCOPE, d.kek, d.credentialId);
-			} else {
-				var field = document.querySelector('[name="dlk_passphrase"]');
-				session = await VK.unlockWithPassphrase(SCOPE, field ? (field.value || '') : '');
-				if (field) { field.value = ''; }
-			}
-			closeVaultDialog(session);
-		} catch (e) {
-			vaultError(e.message || 'Unlock failed.');
-		}
-	}
-
 	/**
-	 * The vault secret key, sealed to this device. VaultKeyring hands back a
-	 * session that can seal to an arbitrary public key but deliberately will not
-	 * expose the raw secret — so the sealing happens inside the session, which
-	 * is exactly the boundary we want.
+	 * The vault secret key, sealed to this device. The session can seal to an
+	 * arbitrary public key but deliberately will not expose the raw secret — so
+	 * the sealing happens inside the session, which is exactly the boundary we
+	 * want. A vault this page had to unlock for the handoff is locked again
+	 * straight after it.
 	 */
 	async function sealVaultKeyFor(devicePublicKey) {
-		var session = await openVaultDialog();
+		var wasOpen = JoinerySealed.isOpen(SCOPE);
+		var session = await JoinerySealed.session(SCOPE, { reason: 'to give this device your encrypted folders' });
 		try {
 			return await session.sealSecretKeyTo(devicePublicKey);
 		} finally {
-			session.lock();
+			if (!wasOpen) { JoinerySealed.lock(SCOPE); }
 		}
 	}
 
@@ -238,15 +196,6 @@
 		var form = field ? field.closest('form') : null;
 		interceptSubmit(form, approve);
 		if ($('dlkDeny')) { $('dlkDeny').onclick = deny; }
-		if ($('dlkUnlockPasskey')) { $('dlkUnlockPasskey').onclick = function () { unlock('passkey'); }; }
-		if ($('dlkUnlockPp')) { $('dlkUnlockPp').onclick = function () { unlock('passphrase'); }; }
-		var dlg = $('dlkVaultDialog');
-		if (dlg) {
-			dlg.addEventListener('cancel', function () { closeVaultDialog(null); });
-			dlg.querySelectorAll('[data-dlk-close]').forEach(function (b) {
-				b.onclick = function () { closeVaultDialog(null); };
-			});
-		}
 
 		// Arriving with ?code= in the URL is the normal path — resolve it at once
 		// so the user sees what is asking without typing anything.

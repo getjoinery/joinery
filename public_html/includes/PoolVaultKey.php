@@ -18,6 +18,7 @@
  * become when the window store is APCu rather than a process — VaultUnlock is
  * their only caller.
  *
+ * @version 1.1 - unsealEdge() through SealedBox::openEdge()
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/VaultKey.php'));
@@ -96,6 +97,15 @@ final class PoolVaultKey implements VaultKey {
 		$out = array();
 		foreach ($sealed as $slot => $ciphertext) {
 			$out[$slot] = $box->openBinary((string)$ciphertext, $this->secret);
+		}
+		return $out;
+	}
+
+	public function unsealEdge(array $sealed): array {
+		$box = new SealedBox();
+		$out = array();
+		foreach ($sealed as $slot => $blob) {
+			$out[$slot] = $box->openEdge((string)$blob, $this->secret, $this->public);
 		}
 		return $out;
 	}
