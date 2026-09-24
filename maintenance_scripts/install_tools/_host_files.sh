@@ -3,6 +3,8 @@
 # converge, and the repair of reclaim_managed_file). Functions only; sourcing
 # it runs nothing.
 #
+# Version: 1.2 - host_files_write_release_verify_keys(), the converger's release-key writer,
+#                shared with _site_init.sh so a fresh site's plugin bundle can verify.
 # Version: 1.1 - host_files_tune_php_ini() no longer enables pdo_pgsql and pgsql in
 #                php.ini. Ubuntu's php-pgsql package loads both from conf.d, so the
 #                php.ini lines loaded pgsql twice and pdo_pgsql before PDO itself:
@@ -51,4 +53,47 @@ host_files_tune_php_ini() {
     sed -i 's/max_execution_time = .*/max_execution_time = 300/' "$ini"
     sed -i 's/memory_limit = .*/memory_limit = 128M/' "$ini"
     sed -i 's/;date.timezone =/date.timezone = UTC/' "$ini"
+}
+
+# The release verification key (specs/package_signing.md WP1). Root puts code on
+# a box only after PackageSignature has matched the package against the keys in
+# config/release_verify_keys. The key comes from the agent bundle's manifest in
+# the tree: root-owned, installed by root, and the same key the agent binary was
+# built to verify against. Written when absent, appended when the bundle carries
+# a key the file lacks, never replaced - a key from an earlier bundle survives a
+# channel change, so the packages signed under it keep verifying. root:root 0644
+# so the pool can read it and nobody but root can write it (PackageSignature
+# refuses a key file anyone else could have written). The converger calls it on
+# every tick; _site_init.sh calls it before a fresh site installs its plugin
+# bundle, whose packages are verified against it.
+host_files_write_release_verify_keys() {  # $1 the site root
+    local site_root="$1"
+    [[ "$(id -u)" == "0" ]] || return 0
+    local manifest="${site_root}/public_html/agent_dist/manifest.json"
+    local keys_file="${site_root}/config/release_verify_keys"
+    [[ -f "${manifest}" ]] || return 0
+    command -v php >/dev/null 2>&1 || return 0
+    local key
+    key="$(php -r '
+        $m = json_decode((string)@file_get_contents($argv[1]), true);
+        $k = is_array($m) ? trim((string)($m["signing_public_key"] ?? "")) : "";
+        $raw = $k !== "" ? base64_decode($k, true) : false;
+        echo ($raw !== false && strlen($raw) === 32) ? base64_encode($raw) : "";
+    ' "${manifest}" 2>/dev/null || true)"
+    [[ -n "${key}" ]] || return 0
+    if [[ -f "${keys_file}" ]] && grep -qxF "${key}" "${keys_file}" 2>/dev/null; then
+        # Already carried. Only the mode is asserted, so a sweep that loosened
+        # it is undone here rather than at the next converge.
+        chown root:root "${keys_file}" 2>/dev/null || true
+        chmod 644 "${keys_file}" 2>/dev/null || true
+        return 0
+    fi
+    [[ -d "${site_root}/config" ]] || return 0
+    if printf '%s\n' "${key}" >> "${keys_file}" 2>/dev/null; then
+        chown root:root "${keys_file}" 2>/dev/null || true
+        chmod 644 "${keys_file}" 2>/dev/null || true
+        echo "release key: config/release_verify_keys carries the agent bundle's signing key"
+    else
+        echo "release key: WARNING - could not write ${keys_file}" >&2
+    fi
 }

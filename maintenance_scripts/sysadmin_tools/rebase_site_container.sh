@@ -2,12 +2,33 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.4 - The old image is kept by its id, not its name. install.sh rebuilds under the
+#                same name (joinery-<site>), so after one swap the name meant the new image;
+#                a second swap then tagged that as the rollback image, and rollback started
+#                PostgreSQL 16 data on an 18 image (found in rehearsal R1). rollback ends at
+#                'rolled_back', so another swap needs a fresh prepare; prepare refuses while
+#                a move is in flight; swap refuses a container whose image changed since
+#                prepare, or a rollback tag that already names another image. rollback hands
+#                PostgreSQL's log directory back to the old image's postgres user first: the
+#                new image's start command gave it to its own, whose ids differ.
+# Version: 1.3 - Writes stop without stopping the container. Apache is the container's main
+#                process, so "service apache2 stop" ended the container, its restart
+#                policy started it again, and swap died on the next command (found in
+#                rehearsal R1). stop_site_writes stops PHP-FPM, cron, the agent and
+#                Postfix instead, and refuses to go on unless the container is still
+#                up with no PHP-FPM left. A command that fails outside a die names its line
+#                (it ended the run with no message). swap and rollback end by waiting up to
+#                three minutes for the site to answer: a container spends its first minute
+#                or two running its installers, and the front page read 000 (swap) or 502
+#                (rollback) while it did, and a prepare run then saw the image's own
+#                pg_hba before housekeeping had replaced it.
 # Version: 1.2 - The web port on 127.0.0.1 (install.sh 2.82 publishes a proxied site there) and a
-#                database port on the address config/postgres_access.conf declares are
-#                bindings install.sh recreates, so neither is refused. pg_hba lines are no
+#                database port on 127.0.0.1 or on the address config/postgres_access.conf
+#                declares are bindings install.sh recreates, so none is refused. pg_hba lines are no
 #                longer carried across: host_housekeeping.sh rebuilds pg_hba from that
 #                file at every container start, so prepare names any network line the
-#                file does not declare, which a rebuild drops.
+#                file does not declare, which a rebuild drops. The trial dump's size is
+#                shown to a tenth of a MB; a small site read as "0 MB".
 # Version: 1.1 - prepare refuses a container that publishes a port install.sh will not recreate
 #                (scrolldaddy publishes its database on the private network for its DNS
 #                resolvers; a rebuild would put it back on loopback and cut them off), and
@@ -50,6 +71,8 @@
 # the container from its own environment, so it is never on a host command line.
 
 set -euo pipefail
+# A command that fails outside a die names itself instead of ending the run silently.
+trap 'echo "FATAL: line ${LINENO} failed (exit $?); the stage recorded in /root/rebase/<site>/state says where the move stands" >&2' ERR
 
 SITE="${1:-}"
 STAGE="${2:-}"
@@ -151,6 +174,26 @@ hba_undeclared() {  # $1 major, $2 the site's postgres_access.conf
         <({ [ -f "$2" ] && grep -E '^[[:space:]]*host' "$2"; } | sed -E 's/^[[:space:]]+//; s/[[:space:]]+/ /g; s/ $//' | sort -u)
 }
 
+# Stop everything in the container that writes to the site's database, and
+# leave the container running: Apache is its main process, so stopping Apache
+# ends the container, and the restart policy starts it again with every writer
+# back. PHP-FPM (every web request), cron (the site's tasks, and the agent's
+# supervisor), the agent, and Postfix (inbound mail is delivered into the
+# database) are what write. With PHP-FPM down, Apache answers 503.
+stop_site_writes() {
+    local started
+    started="$(docker inspect -f '{{.State.StartedAt}}' "$SITE")"
+    docker exec "$SITE" bash -c '
+        for s in /etc/init.d/php*-fpm; do [ -e "$s" ] && service "$(basename "$s")" stop; done
+        service cron stop; service postfix stop; pkill -x joinery-agent; true' > /dev/null 2>&1 || true
+    if [ "$(docker inspect -f '{{.State.Running}} {{.State.StartedAt}}' "$SITE")" != "true ${started}" ]; then
+        echo "${SITE} stopped or restarted while its writes were being stopped" >&2; return 1
+    fi
+    if docker exec "$SITE" pgrep -f '^php-fpm' > /dev/null 2>&1; then
+        echo "PHP-FPM is still running in ${SITE}" >&2; return 1
+    fi
+}
+
 # Set the postgres role's password to the one the site's config uses. A fresh
 # cluster under an existing config has the image's own password; the start
 # command sets it only when there is no config yet. Same trust swap as
@@ -178,6 +221,18 @@ exit $rc
 EOS
 }
 
+# The front page's status once the container has finished starting: it runs
+# its installers before Apache serves PHP, which takes a minute or two, and
+# answers 000, 502 or 503 until then. Prints the last code seen.
+wait_for_site() {
+    local i code=000
+    for i in $(seq 1 36); do
+        code="$(curl -s -o /dev/null -m 10 -w '%{http_code}' -H "Host: $(state_get domain)" "http://127.0.0.1:$(state_get port)/" || true)"
+        case "$code" in 000|502|503) sleep 5 ;; *) break ;; esac
+    done
+    echo "$code"
+}
+
 wait_for_postgres() {
     local i
     for i in $(seq 1 60); do
@@ -193,6 +248,9 @@ mkdir -p "$WORK"; chmod 700 /root/rebase "$WORK"
 if [ "$STAGE" = "prepare" ]; then
     [ -f "$INSTALL_SH" ] || die "no install.sh at ${INSTALL_SH} — run this from the extracted release that carries the new base image"
     [ "$(docker inspect -f '{{.State.Status}}' "$SITE" 2>/dev/null)" = "running" ] || die "container ${SITE} is not running"
+    case "$(state_get stage)" in
+        swapping|swapped) die "${SITE} is at stage '$(state_get stage)': a move is in flight. Roll it back, or finish it, first" ;;
+    esac
 
     BASE="$(target_base)"
     if ! docker image inspect "$BASE" > /dev/null 2>&1; then
@@ -234,7 +292,7 @@ if [ "$STAGE" = "prepare" ]; then
         [ -z "$cport" ] && continue
         case "${cport%%/*}:${hip}:${hport}" in
             "80::${PORT}"|"80:0.0.0.0:${PORT}"|"80:127.0.0.1:${PORT}") ;;
-            "5432:${DB_PUBLISH}:$((PORT + 1000))") ;;
+            "5432:127.0.0.1:$((PORT + 1000))"|"5432:${DB_PUBLISH}:$((PORT + 1000))") ;;
             *) EXTRA_PORTS="${EXTRA_PORTS} ${hip:-0.0.0.0}:${hport}->${cport}" ;;
         esac
     done < <(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$SITE")
@@ -243,7 +301,9 @@ if [ "$STAGE" = "prepare" ]; then
     [ -z "$EXTRA_PORTS" ] || die "${SITE} publishes${EXTRA_PORTS}, which install.sh does not recreate — the rebuild would drop it and whatever depends on it. A database read from another machine is declared with a publish line in config/postgres_access.conf; nothing was changed."
     EXTRA_ENV="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE" | cut -d= -f1 \
         | grep -vxE 'PATH|DEBIAN_FRONTEND|SITENAME|DOMAIN_NAME|POSTGRES_PASSWORD|UPGRADE_SERVER|CLONE_FROM|CLONE_KEY|JOINERY_[A-Z_]+|BASE_IMAGE_VERSION|LANG|LC_ALL|TZ' || true)"
-    OLD_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$SITE")"
+    # By id: install.sh rebuilds under the same name, so the name stops meaning
+    # this image the moment the swap rebuilds.
+    OLD_IMAGE="$(docker inspect -f '{{.Image}}' "$SITE")"
 
     : > "$STATE"; chmod 600 "$STATE"
     state_set stage prepared
@@ -269,8 +329,8 @@ if [ "$STAGE" = "prepare" ]; then
 
     say "Plan for ${SITE}:"
     echo "  PostgreSQL ${HAVE} -> ${WANT} (${BASE}), database ${DB} (${ENC}, ${COLL})"
-    echo "  domain ${DOMAIN:-?}, web port ${PORT}, image ${OLD_IMAGE} kept for rollback"
-    echo "  $(wc -l < "${WORK}/counts.prepare.tsv") tables; trial dump $((DUMP_BYTES / 1000000)) MB in $((T1 - T0)) s"
+    echo "  domain ${DOMAIN:-?}, web port ${PORT}, image $(docker inspect -f '{{.Config.Image}}' "$SITE") (${OLD_IMAGE:7:12}) kept for rollback"
+    echo "  $(wc -l < "${WORK}/counts.prepare.tsv") tables; trial dump $(awk -v b="$DUMP_BYTES" 'BEGIN { printf "%.1f", b / 1000000 }') MB in $((T1 - T0)) s"
     echo "  roles beyond postgres: $(grep -c '^CREATE ROLE' "${WORK}/roles.sql" || true)"
     DECLARED_HBA="$(grep -cE '^[[:space:]]*host' "$ACCESS_FILE" 2>/dev/null || true)"
     echo "  database published on ${DB_PUBLISH}; ${DECLARED_HBA:-0} pg_hba line(s) declared in config/postgres_access.conf"
@@ -298,10 +358,13 @@ if [ "$STAGE" = "swap" ]; then
     [ "$(state_get stage)" = "prepared" ] || die "${SITE} is at stage '$(state_get stage)', not prepared"
     [ -f "$INSTALL_SH" ] || die "no install.sh at ${INSTALL_SH}"
     [ "$(db_major)" = "$FROM" ] || die "${SITE}'s database is no longer PostgreSQL ${FROM}; prepare again"
+    [ "$(docker inspect -f '{{.Image}}' "$SITE")" = "$OLD_IMAGE" ] || die "${SITE} runs another image than it did at prepare; prepare again"
+    KEPT="$(docker image inspect -f '{{.Id}}' "$KEEP_IMAGE" 2>/dev/null || true)"
+    [ -z "$KEPT" ] || [ "$KEPT" = "$OLD_IMAGE" ] || die "${KEEP_IMAGE} already names another image (${KEPT:7:12}); it may be the only copy of an earlier rollback image. Nothing was changed"
     ! docker volume inspect "$BACKUP_VOL" > /dev/null 2>&1 || die "${BACKUP_VOL} already exists — a previous swap was not finished or rolled back"
 
-    say "Stopping the site's writes (Apache, cron)"
-    docker exec "$SITE" bash -c 'service apache2 stop; service cron stop' > /dev/null 2>&1 || true
+    say "Stopping the site's writes (PHP-FPM, cron, the agent, Postfix)"
+    stop_site_writes || die "the site's writes could not be stopped; nothing was moved. Restart it with: docker restart ${SITE}"
     count_rows "$DB" > "${WORK}/counts.before.tsv"
     say "Dumping ${DB}"
     docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U postgres -Fc --create "$1"' _ "$DB" > "${WORK}/${DB}.dump"
@@ -343,7 +406,7 @@ if [ "$STAGE" = "swap" ]; then
 
     wait_for_postgres || die "PostgreSQL did not start in the rebuilt container. Roll back with: $0 ${SITE} rollback"
     [ "$(db_major)" = "$TO" ] || die "the rebuilt container runs PostgreSQL $(db_major), not ${TO}. Roll back with: $0 ${SITE} rollback"
-    docker exec "$SITE" bash -c 'service apache2 stop; service cron stop' > /dev/null 2>&1 || true
+    stop_site_writes || die "the rebuilt site's writes could not be stopped. Roll back with: $0 ${SITE} rollback"
 
     say "Setting the postgres password from the site's environment"
     set_postgres_password || die "could not set the postgres password. Roll back with: $0 ${SITE} rollback"
@@ -368,9 +431,9 @@ if [ "$STAGE" = "swap" ]; then
     say "Restarting ${SITE} with its data in place"
     docker restart "$SITE" > /dev/null
     wait_for_postgres || die "PostgreSQL did not come back after the restart. Roll back with: $0 ${SITE} rollback"
-    sleep 5
-    CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $(state_get domain)" "http://127.0.0.1:$(state_get port)/" || true)"
+    CODE="$(wait_for_site)"
     say "Front page through the container's port: HTTP ${CODE}"
+    case "$CODE" in 000|5*) say "WARNING: the site is not answering. Roll back with: $0 ${SITE} rollback" ;; esac
     state_set stage swapped
     say "Swapped. Check the site, its login and admin, its agent on the management node,"
     say "and one backup. Roll back with: $0 ${SITE} rollback   Finish (after a week): $0 ${SITE} finish"
@@ -392,6 +455,16 @@ if [ "$STAGE" = "rollback" ]; then
     if docker volume inspect "${SITE}_agent" > /dev/null 2>&1 && ! printf '%s\n' "${ARGS[@]}" | grep -q ':/etc/joinery-agent$'; then
         ARGS+=(-v "${SITE}_agent:/etc/joinery-agent")
     fi
+    # The new image's start command handed PostgreSQL's log directory to its own
+    # postgres user; the old image's has other ids and predates that handoff, so
+    # its server could not write its log and would not start. Hand it back.
+    LOG_VOL="$(tr '\0' '\n' < "${WORK}/run_args" | sed -n 's#^\([^:]*\):/var/log/postgresql$#\1#p' | head -1)"
+    if [ -n "$LOG_VOL" ]; then
+        OLD_UID="$(docker run --rm --entrypoint id "$KEEP_IMAGE" -u postgres)"
+        OLD_GID="$(docker run --rm --entrypoint id "$KEEP_IMAGE" -g postgres)"
+        chown "0:${OLD_GID}" "$(vol_mp "$LOG_VOL")" && chmod 1775 "$(vol_mp "$LOG_VOL")"
+        find "$(vol_mp "$LOG_VOL")" -maxdepth 1 -type f -name '*.log' -exec chown "${OLD_UID}:4" {} +
+    fi
     say "Recreating ${SITE} on ${KEEP_IMAGE} with its old arguments"
     docker run -d "${ARGS[@]}" "$KEEP_IMAGE" > /dev/null
     wait_for_postgres || die "PostgreSQL did not start on the old image; the copy is still in ${BACKUP_VOL}"
@@ -399,7 +472,8 @@ if [ "$STAGE" = "rollback" ]; then
     # The data is back in ${SITE}_postgres and running; the copy has done its job,
     # and leaving it would block the next swap.
     docker volume rm "$BACKUP_VOL" > /dev/null
-    state_set stage prepared
+    state_set stage rolled_back
+    say "Front page through the container's port: HTTP $(wait_for_site)"
     say "Rolled back: ${SITE} runs PostgreSQL ${FROM} on ${KEEP_IMAGE} again. Prepare again before another swap."
     exit 0
 fi

@@ -1,10 +1,14 @@
 # Joinery Base Image
+# VERSION 1.3 - Ubuntu 26.04: PHP 8.5 and PostgreSQL 18 (joinery-base 2.0).
+# VERSION 1.2 - _host_files.sh is copied in beside install.sh: install.sh server loads it
+#               (the shared php.ini, mpm_event and journal definitions), and without it
+#               every base build since install.sh 2.78 failed on a host that had none.
 # VERSION 1.1 - do_server_setup now bakes in the inbound mail stack (postfix,
 #               postfix-pgsql, opendkim, opendkim-tools). Contents change only
 #               via install.sh server. See spec mail_stack_container_persistence.
 #
 # Builds the shared OS/runtime layer used by all site images.
-# Contains: Ubuntu 24.04 + Apache + PHP 8.3 + PostgreSQL + Composer + Cron
+# Contains: Ubuntu 26.04 + Apache + PHP 8.5 + PostgreSQL 18 + Composer + Cron
 # Does NOT contain site code or site-specific config.
 #
 # Build:
@@ -14,14 +18,14 @@
 #
 # After building, all `install.sh site` runs use this image automatically.
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Copy only the install script - site code is NOT included in the base.
-# Build context is the prepared install_tools/ directory (see do_build_base),
-# so install.sh is at the context root.
-COPY install.sh /tmp/install.sh
+# Copy only the install script and the helper it loads - site code is NOT
+# included in the base. Build context is the prepared install_tools/ directory
+# (see do_build_base), so both are at the context root.
+COPY install.sh _host_files.sh /tmp/
 
 # Install all system dependencies.
 # --skip-postgres-password tells install.sh server not to set a postgres user
@@ -30,7 +34,7 @@ COPY install.sh /tmp/install.sh
 # (not even a placeholder) into the shared base image.
 RUN chmod +x /tmp/install.sh && \
     /tmp/install.sh server --skip-postgres-password && \
-    rm /tmp/install.sh
+    rm /tmp/install.sh /tmp/_host_files.sh
 
 # Label the image with a hash of the install.sh server code path so
 # do_site_docker can detect drift between the base and the current install.sh.

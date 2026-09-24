@@ -1,4 +1,12 @@
 # Joinery Docker Template
+# VERSION 5.6 - BASE_IMAGE_VERSION's default follows install.sh to 2.0.
+# VERSION 5.5 - PostgreSQL's data and log directories are handed to this image's postgres user
+#               before it starts. Images give postgres different ids (1.2: 101/104,
+#               2.0: 100/103), and a kept _pg_logs volume from an older image left
+#               PostgreSQL 18 unable to create its log file, so it never started
+#               (found in rehearsal R1).
+# VERSION 5.4 - The dependency step's apt index update is tried up to four times 30 seconds
+#               apart: a mirror mid-sync failed the whole site build.
 # VERSION 5.3 - A clone's export key reaches _site_init.sh in its environment
 #               (JOINERY_CLONE_KEY, from the 0600 env file), not as --clone-key on its
 #               command line, where any process in the container could read it.
@@ -130,7 +138,7 @@
 #
 # Usage:
 #   docker build \
-#     --build-arg BASE_IMAGE_VERSION=1.2 \
+#     --build-arg BASE_IMAGE_VERSION=2.0 \
 #     --build-arg SITENAME=clientsite \
 #     --build-arg DOMAIN_NAME=client.example.com \
 #     -t joinery-clientsite .
@@ -163,7 +171,7 @@
 # BASE_IMAGE_VERSION must be declared before FROM so it can be used in FROM.
 # Default matches the version install.sh always passes via --build-arg; the
 # default only exists to satisfy BuildKit's static-evaluation check.
-ARG BASE_IMAGE_VERSION=1.2
+ARG BASE_IMAGE_VERSION=2.0
 FROM joinery-base:${BASE_IMAGE_VERSION}
 
 # Build arguments (customizable per deployment)
@@ -204,7 +212,11 @@ RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/install_tools/*.sh
 # package pairs; a missing package is a warning, not a build failure - the
 # plugin activation gate is the runtime backstop.
 RUN if [ -f "/var/www/html/${SITENAME}/public_html/utils/list_dependencies.php" ]; then \
-        apt-get update -qq && \
+        for attempt in 1 2 3 4; do \
+            apt-get update -qq && break; \
+            [ "$attempt" -lt 4 ] || exit 1; \
+            echo "apt-get update failed (attempt $attempt of 4); retrying in 30 seconds"; sleep 30; \
+        done && \
         for spec in $(php "/var/www/html/${SITENAME}/public_html/utils/list_dependencies.php" --apt); do \
             primary="${spec%%|*}"; fallback="${spec##*|}"; \
             apt-get install -y "$primary" 2>/dev/null || apt-get install -y "$fallback" || \
@@ -270,6 +282,15 @@ CMD set +H && \
         echo "       PostgreSQL was not started and the data is untouched. Move it with"; \
         echo "       maintenance_scripts/sysadmin_tools/rebase_site_container.sh on the host."; \
         exit 1; \
+    fi && \
+    PG_OWNER="$(id -u postgres):$(id -g postgres)" && \
+    if [ "$(stat -c %u:%g /var/lib/postgresql)" != "${PG_OWNER}" ]; then \
+        echo "The database volume belongs to another image's postgres user; handing it to this image's (${PG_OWNER})"; \
+        chown -R postgres:postgres /var/lib/postgresql; \
+    fi && \
+    if [ "$(stat -c %g /var/log/postgresql)" != "$(id -g postgres)" ]; then \
+        chown root:postgres /var/log/postgresql && chmod 1775 /var/log/postgresql && \
+        find /var/log/postgresql -maxdepth 1 -type f -name '*.log' -exec chown postgres:adm {} +; \
     fi && \
     (bash "/var/www/html/${SITENAME}/maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh" --no-restart --container || true) && \
     service postgresql start && \

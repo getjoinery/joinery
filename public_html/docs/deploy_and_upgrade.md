@@ -16,19 +16,19 @@ For Docker and bare-metal deployments, see **[Installation Guide](../../maintena
 
 ### Docker Shared Base Image
 
-Docker site images build `FROM joinery-base:VERSION` rather than from a stock Ubuntu image. The base image contains Ubuntu + Apache + PHP + PostgreSQL + Composer + cron and is shared across all site containers on a host. Per-site images only layer the site code, config, and VirtualHost on top.
+Docker site images build `FROM joinery-base:VERSION` rather than from a stock Ubuntu image. The base image contains Ubuntu + Apache + PHP + PostgreSQL + Composer + cron and is shared across all site containers on a host. Per-site images only layer the site code, config, and VirtualHost on top. `joinery-base:2.0` is Ubuntu 26.04 with PHP 8.5 and PostgreSQL 18.
 
 **Two-step build on a Docker host:**
 
 ```bash
-# 1. One-time per host — build the shared base image (~5-10 minutes, ~2.3 GB).
+# 1. One-time per host — build the shared base image (~5-10 minutes, ~1.6 GB).
 ./install.sh build-base
 
 # 2. Create sites normally — each site image builds in seconds and is ~500 MB.
 ./install.sh site mysite mysite.com 8080
 ```
 
-`install.sh site` refuses to run if `joinery-base:VERSION` is missing and tells you to run `build-base` first.
+`install.sh site` builds `joinery-base:VERSION` itself when the host does not have it, so the first site on a new Docker host takes the extra minutes.
 
 Site image builds also install every PHP extension the site's source declares (root `composer.json` `ext-*` plus each plugin's `requires.extensions`): a `Dockerfile.template` build step runs `utils/list_dependencies.php --apt` against the copied source and apt-installs the result. The base image carries the heavy shared stack; declared extensions ride the site layer, so they can never drift from the code.
 
@@ -39,7 +39,7 @@ Site image builds also install every PHP extension the site's source declares (r
 - New apt packages or PHP extensions added to `do_server_setup`
 - Any other change to `Dockerfile.base`
 
-Existing containers keep running on their old base image until they are rebuilt — no disruption. Site rebuilds fire a **drift warning** if the current `install.sh do_server_setup` hash differs from the hash baked into the base image (stored as the `joinery.install_sh_hash` label). That's the signal to bump `BASE_IMAGE_VERSION` and rebuild the base.
+Existing containers keep running on their old base image until they are rebuilt — no disruption. A base carries one PostgreSQL major, and a site's database volume holds the major it was created on. A rebuild whose base carries another major is refused before the old container is touched, by `install.sh` and again by the container's start command, because the server could not open the data. Such a site moves with `maintenance_scripts/sysadmin_tools/rebase_site_container.sh <site> prepare|swap|rollback|finish`, run as root on the Docker host from the release that carries the new base. `prepare` checks and records without changing anything. `swap` stops the site's writes, dumps the database, rebuilds the container on the new base with `install.sh`, restores the roles and the database, and compares every table's row count. `rollback` puts the old image and the old database back. `finish`, after a week, removes the kept copies. Site rebuilds fire a **drift warning** if the current `install.sh do_server_setup` hash differs from the hash baked into the base image (stored as the `joinery.install_sh_hash` label). That's the signal to bump `BASE_IMAGE_VERSION` and rebuild the base.
 
 #### Two-tier Apache: real client IP
 
