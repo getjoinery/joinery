@@ -164,6 +164,23 @@ pub fn run_pass(
     if !still_stranded {
         env.store.withdraw_issues("store_inconsistent")?;
     }
+    // A file held outside its vault says so while it is: gone, or back where
+    // the server keeps it, and the sentence is false.
+    for issue in env.store.open_issues()? {
+        if issue.kind != HELD_OUTSIDE_THE_VAULT {
+            continue;
+        }
+        let stands = match issue.entity {
+            Some(id) => match env.store.get_entry(id)? {
+                Some(e) => held_outside_its_vault(env, &e)?,
+                None => false,
+            },
+            None => false,
+        };
+        if !stands {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
     // A folder trash that was waiting on a parked child says so with a state
     // issue, withdrawn by the trash itself when it proceeds. The folder can
     // also stop being trashable without that trash ever running again --
@@ -202,7 +219,25 @@ pub fn run_pass(
         .map(|r| r.as_os_str().len())
         .unwrap_or_default();
     out.naming = crate::naming::apply_naming(env, &env.vfs.personality(), root_prefix)?;
+    // A file from the server refused a name here because a file held outside
+    // its vault stands at that name on this disk. Said in its own words, and
+    // re-derived every pass: the sentence is true exactly while the refusal
+    // and the hold both stand.
+    let waiting = waiting_for_a_held_file(env)?;
+    for issue in env.store.open_issues()? {
+        if issue.kind == WAITS_FOR_A_HELD_FILE
+            && !waiting.iter().any(|(id, d)| issue.entity == Some(*id) && issue.detail == *d)
+        {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    for (id, detail) in &waiting {
+        env.store.raise_issue(Some(*id), WAITS_FOR_A_HELD_FILE, detail, (env.now_ms)() as i64)?;
+    }
     for (id, reason) in &out.naming.unsyncable {
+        if waiting.iter().any(|(w, _)| w == id) {
+            continue;
+        }
         env.store.raise_issue(
             Some(*id),
             "unsyncable",
@@ -449,6 +484,23 @@ pub fn run_pass(
             // Its folder is not tracked yet. Nothing is lost: the folder gets an
             // identity above on this pass or the next, and the file follows.
             continue;
+        };
+        // A new file saved in a vault under the name a held file still holds
+        // there goes up beside the held copy, never under that name.
+        //
+        // Unless this is the held file itself, back under a new record: moved
+        // and edited in one pass, it reads as a creation (scan rule 4). Its
+        // disk identity is the held record's own, and that buys a WAIT, never
+        // a name: nothing is decided for it here, and it is not sent while the
+        // hold stands (below).
+        let coming_home = match held_owner_of_inode(env, file.fingerprint.file_id)? {
+            Some(held) => !held_file_stands(env, &held, file.fingerprint.file_id, &observed)?,
+            None => false,
+        };
+        let placement = if coming_home {
+            placement
+        } else {
+            clear_of_a_held_name(env, &file.path, &placement, None)?
         };
         let id = EntityId::file(env.store.next_provisional_id()?);
         let mut entry = blank(id, &placement);
@@ -898,6 +950,29 @@ pub fn run_pass(
             let Some(path) = relative_path(env, &entry)? else {
                 continue;
             };
+            // Carrying a held record's disk identity: very likely that held
+            // file, moved and edited in one pass (scan rule 4 reads it as a
+            // creation). Sent, it would publish a sealed file's bytes; so it is
+            // not sent while the hold stands. In a vault the hold ends as soon
+            // as the held record's delete lands, and it goes up sealed then; in
+            // a plain folder it waits with the held record (see there). An
+            // inode funds this wait and nothing else.
+            //
+            // A hard link is the one other way to carry that identity: the held
+            // file still standing where it agrees. In a vault that second file
+            // goes up sealed at once -- harmless -- and only waits while the
+            // held record is going (its delete in flight); in a plain folder it
+            // is a copy out of the vault and waits like any other.
+            if let Some(o) = observed.iter().find(|o| o.path == path) {
+                if let Some(held) = held_owner_of_inode(env, o.fingerprint.file_id)? {
+                    let in_a_vault = parent_is_encrypted(env, entry.remote.parent)?;
+                    let going = !held_file_stands(env, &held, o.fingerprint.file_id, &observed)?
+                        || env.store.entities_with_open_ops()?.contains(&held.id);
+                    if !in_a_vault || going {
+                        continue;
+                    }
+                }
+            }
             let content = observed.iter().find(|o| o.path == path).map(|o| ContentId {
                 sha256: o.sha256.clone(),
                 size: o.fingerprint.size,
@@ -913,12 +988,24 @@ pub fn run_pass(
             continue;
         }
 
-        let local = match scan.change_for(entry.id) {
+        let mut local = match scan.change_for(entry.id) {
             Some(change) => local_delta(change, resolve),
             // Folders are absent from the file scan, so what happened to one
             // locally is worked out separately.
             None => folder_delta(&entry, &folders),
         };
+        // A file moved INTO a vault slot a held file still holds on the
+        // server goes there under a conflict name (`clear_of_a_held_name`).
+        if entry.id.entity_type == EntityType::File {
+            let to_path = match scan.change_for(entry.id) {
+                Some(crate::scan::LocalChange::Moved { to_path, .. })
+                | Some(crate::scan::LocalChange::MovedAndEdited { to_path, .. }) => Some(to_path.clone()),
+                _ => None,
+            };
+            if let (Some(to_path), Delta::Moved { to } | Delta::MovedAndEdited { to, .. }) = (to_path, &mut local) {
+                *to = clear_of_a_held_name(env, &to_path, to, Some(entry.id))?;
+            }
+        }
         // A move that arrives at the slot the agreement already puts it in is
         // not a move. Three ways that happens, and what the record needs from
         // each is different.
@@ -1028,6 +1115,24 @@ pub fn run_pass(
                 )?;
                 continue;
             }
+            // A sealed FILE on its way out is held (owner decision D1): the
+            // user's move stands on this disk -- the record's agreed placement
+            // is where the file now is -- and nothing is asked of the server,
+            // which keeps the sealed copy where it was. The two sides of the
+            // record now disagree across the vault's edge, which is what
+            // `held_outside_its_vault` reads from here on.
+            if crossing == Crossing::OutOfReach && entry.id.entity_type == EntityType::File {
+                let to = match &local {
+                    Delta::Moved { to } | Delta::MovedAndEdited { to, .. } => to.clone(),
+                    _ => continue,
+                };
+                let mut held = entry.clone();
+                held.synced_placement = Some(to);
+                held.local_name = None;
+                env.store.put_entry(&held)?;
+                say_it_is_held(env, &held)?;
+                continue;
+            }
             if crossing == Crossing::OutOfReach {
                 // A vault folder on its way out. Say so, once, and do not plan
                 // the move: the server refuses it, and asking again next pass
@@ -1035,25 +1140,46 @@ pub fn run_pass(
                 // exists to end. Nothing is undone -- the folder stays where
                 // the user dragged it, and the server keeps its encrypted copy
                 // exactly where it was.
-                // Two folders come this way and want different advice. A
-                // folder INSIDE a vault can leave it by a level change, which
-                // is the server's operation. A vault's own root cannot go into
-                // a plain folder at all -- the server keeps a vault at the
-                // drive root or inside another vault -- and telling its owner
-                // to change a protection level sends them somewhere useless.
+                // Two folders come this way and want different words. A
+                // folder INSIDE a vault is kept here, and the only ways out
+                // are real ones: back into the vault, or its files downloaded
+                // in the browser and uploaded elsewhere -- nothing on the
+                // platform turns an encrypted folder back into plaintext, so
+                // no protection-level change is offered. A vault's own root
+                // cannot go into a plain folder at all -- the server keeps a
+                // vault at the drive root or inside another vault.
                 let agreed_parent = entry
                     .synced_placement
                     .as_ref()
                     .map(|p| p.parent)
                     .unwrap_or(entry.remote.parent);
                 let detail = if parent_is_encrypted(env, agreed_parent)? {
-                    "this folder is protected and cannot be moved out of the vault from here; \
-                     change its protection level first, then move it"
+                    let name = match &local {
+                        Delta::Moved { to } | Delta::MovedAndEdited { to, .. } => to.name.clone(),
+                        _ => entry.effective_local_name().to_string(),
+                    };
+                    format!(
+                        "{name} is encrypted and stays in its vault on the server. It is kept only on \
+                         this device. Move it back into the vault to sync it again, or download its \
+                         files in the browser and upload them where you want them."
+                    )
                 } else {
                     "this folder is a vault, and a vault can sit only at the drive root or \
                      inside another vault; it stays on the server where it was"
+                        .to_string()
                 };
-                env.store.raise_issue(Some(entry.id), "withdrawn", detail, (env.now_ms)() as i64)?;
+                // One sentence per folder: renamed again while held, the new
+                // name replaces the old one.
+                for issue in env.store.open_issues()? {
+                    if issue.kind == "withdrawn"
+                        && issue.entity == Some(entry.id)
+                        && issue.detail != detail
+                        && issue.detail.contains("is encrypted and stays in its vault on the server.")
+                    {
+                        env.store.dismiss_issue(issue.issue_id)?;
+                    }
+                }
+                env.store.raise_issue(Some(entry.id), "withdrawn", &detail, (env.now_ms)() as i64)?;
                 continue;
             }
             if env.vault.is_none() {
@@ -1085,21 +1211,12 @@ pub fn run_pass(
                     Delta::Moved { to } | Delta::MovedAndEdited { to, .. } => to,
                     _ => continue,
                 };
-                // Only a PLAINTEXT entry can get here, and nothing at this
-                // site says so. `crossing_a_vault_edge` answers Convert for a
-                // file in BOTH directions, and a locked vault is also
-                // `env.vault.is_none()` -- so on paper an encrypted file being
-                // dragged OUT reaches this branch, where the mint would be
-                // wrong twice over: `is_encrypted` hardcoded true at a
-                // plaintext destination, and a wait for a key the conversion
-                // does not need.
-                //
-                // What actually prevents it is ordering in two other functions:
-                // `apply_naming` runs at the top of this same pass and
-                // `no_key_for` parks every encrypted entry `PendingKey` while
-                // there is no key, so the skip above drops it long before this.
-                // That is a real guarantee and an invisible one, so it is
-                // asserted here rather than assumed.
+                // Only a PLAINTEXT entry can get here: `crossing_a_vault_edge`
+                // answers Convert only for a move INTO a vault, and an
+                // encrypted entry is never moving into one across an edge. The
+                // mint below would be wrong for one twice over -- `is_encrypted`
+                // hardcoded true, and a wait for a key the move does not need
+                // -- so it is asserted rather than assumed.
                 debug_assert!(
                     !entry.is_encrypted,
                     "an encrypted entry reached the keyless crossing mint; the \
@@ -1139,6 +1256,105 @@ pub fn run_pass(
         // For an entity the feed did not mention this pass that is what we
         // recorded last time — which still reports an unfinished change, and is
         // the entire reason this is not measured from the last observation.
+        // A file held outside its vault: the server's side waits. Its placement
+        // there is not a move for this disk to follow, so the remote delta is
+        // measured as though the agreement stood where the server keeps it --
+        // content and deletion only. Edits wait on both sides: a local edit
+        // is never sent (the server would take it into the vault, or refuse
+        // the plain folder) and a server edit is not written over the copy
+        // here; the agreed contents are untouched, so both are still seen when
+        // the file goes back. What does go through: the user moving it again
+        // (into a vault, planned from where the server keeps it) or deleting
+        // it, and the server deleting it -- unedited here, an ordinary delete;
+        // edited here, the copy is kept on this device only and never sent.
+        // Back at exactly the server's placement, it is agreed and done.
+        if entry.id.entity_type == EntityType::File {
+            let held = held_outside_its_vault(env, &entry)?;
+            if held {
+                // Moved again outside any vault -- renamed where it stands, or
+                // into another plain folder -- is this disk's side alone: the
+                // record follows the file, the issue follows the name, and the
+                // server is asked nothing (planned, it was a move across the
+                // edge the server refuses on every pass).
+                if let Delta::Moved { to } = &local {
+                    if !parent_is_encrypted(env, to.parent)? {
+                        let mut moved = entry.clone();
+                        moved.synced_placement = Some(to.clone());
+                        moved.local_name = None;
+                        env.store.put_entry(&moved)?;
+                        say_it_is_held(env, &moved)?;
+                        continue;
+                    }
+                }
+                // Read as deleted while a new file carrying this record's disk
+                // identity stands outside any vault: very likely the held file
+                // itself, moved and edited in one pass. The sealed copy is not
+                // trashed for it, and that file is not sent (see the
+                // provisional branch): both wait, the user told what the file
+                // is now called. In a vault, or with no such file, the delete
+                // goes through as any other.
+                if matches!(local, Delta::Deleted) {
+                    if let Some(inode) = entry.synced_fingerprint.map(|f| f.file_id).filter(|id| *id != 0) {
+                        if let Some(o) = observed.iter().find(|o| o.fingerprint.file_id == inode) {
+                            let in_a_vault = match placement_of(&o.path, &folder_ids) {
+                                Some(p) => parent_is_encrypted(env, p.parent)?,
+                                None => false,
+                            };
+                            if !in_a_vault {
+                                let name = o.path.rsplit('/').next().unwrap_or(&o.path).to_string();
+                                if entry.remote_deleted {
+                                    say_it_was_deleted_on_the_server(env, &entry, &name)?;
+                                } else {
+                                    say_it_waits(env, &entry, &name)?;
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if let Delta::Moved { to } = &local {
+                    if *to == entry.remote {
+                        let mut home = entry.clone();
+                        home.synced_placement = Some(entry.remote.clone());
+                        env.store.put_entry(&home)?;
+                        continue;
+                    }
+                }
+                let mut agreed_there = entry.clone();
+                agreed_there.synced_placement = Some(entry.remote.clone());
+                let remote = remote_delta(&agreed_there, &observed_remote(&entry));
+                let go = match (&local, &remote) {
+                    (Delta::Moved { .. } | Delta::MovedAndEdited { .. } | Delta::Deleted, _) => true,
+                    (Delta::None, Delta::Deleted) => true,
+                    (_, Delta::Deleted) => {
+                        say_it_was_deleted_on_the_server(env, &entry, entry.effective_local_name())?;
+                        false
+                    }
+                    _ => false,
+                };
+                if go {
+                    // Gone from this disk while the server's copy has changed:
+                    // the ordinary answer restores the server's copy, and it is
+                    // restored where the server keeps it -- in the vault. The
+                    // hold is over; written down first, because the download
+                    // lands wherever the record says the file lives, and a
+                    // sealed file's new contents must not land in a plain
+                    // folder.
+                    if matches!(local, Delta::Deleted)
+                        && matches!(remote, Delta::Edited { .. } | Delta::MovedAndEdited { .. })
+                    {
+                        let mut released = agreed_there.clone();
+                        released.local_name = None;
+                        env.store.put_entry(&released)?;
+                    }
+                    // Planned from where the server keeps it: that is the copy
+                    // any move or trash acts on.
+                    let depth = depth_for(env, &entry)?;
+                    inputs.push(RoundInput { entry: agreed_there, local, remote, depth });
+                }
+                continue;
+            }
+        }
         let remote = remote_delta(&entry, &observed_remote(&entry));
         if local.is_none() && remote.is_none() {
             continue;
@@ -2454,6 +2670,61 @@ impl FolderScan {
 /// hold; dismissed, the hold is lifted.
 pub(crate) const DIRECTORY_DISAGREES: &str = "directory_disagrees";
 
+/// The issue a sealed file carries while it stands outside its vault here.
+pub(crate) const HELD_OUTSIDE_THE_VAULT: &str = "held_outside_the_vault";
+
+/// The issue a file from the server carries while a held file keeps its name.
+pub(crate) const WAITS_FOR_A_HELD_FILE: &str = "waits_for_a_held_file";
+
+/// Every file refused a name here only because a file held outside its vault
+/// stands at that name, with the sentence that says so.
+fn waiting_for_a_held_file(env: &ExecEnv) -> Result<Vec<(EntityId, String)>, ExecError> {
+    let personality = env.vfs.personality();
+    let all = all_entries(env)?;
+    let mut out = Vec::new();
+    for refused in &all {
+        let with = match &refused.status {
+            LocalStatus::Unsyncable(
+                jd_vfs::UnsyncableReason::DuplicateName { with } | jd_vfs::UnsyncableReason::CaseClash { with },
+            ) => with,
+            _ => continue,
+        };
+        let key = jd_vfs::comparison_key(with, &personality);
+        let parent = refused.remote.parent;
+        for held in &all {
+            if held.id == refused.id
+                || held.local_placement().parent != parent
+                || jd_vfs::comparison_key(held.effective_local_name(), &personality) != key
+                || !held_outside_its_vault(env, held)?
+            {
+                continue;
+            }
+            let folder = match parent {
+                None => "at the top of your drive".to_string(),
+                Some(id) => format!(
+                    "in {}",
+                    env.store
+                        .get_entry(EntityId::folder(id))?
+                        .map(|f| f.effective_local_name().to_string())
+                        .unwrap_or_default()
+                ),
+            };
+            out.push((
+                refused.id,
+                format!(
+                    "{} from the server was not put {folder}: the vault file {} is being kept there \
+                     on this device. It will appear once that file goes back into its vault or is \
+                     deleted.",
+                    refused.remote.name,
+                    held.effective_local_name()
+                ),
+            ));
+            break;
+        }
+    }
+    Ok(out)
+}
+
 fn detect_folder_moves(
     env: &ExecEnv,
     observed: &[ObservedFile],
@@ -3707,9 +3978,11 @@ fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Crossing {
-    /// Re-upload at the destination and trash the source. The conversion.
+    /// Re-upload at the destination and trash the source. The conversion,
+    /// into a vault only.
     Convert,
-    /// Refused by the server and not something this client can do instead.
+    /// Refused by the server and not something this client can do instead:
+    /// a vault folder stays where it was on the server, a sealed file is held.
     OutOfReach,
     /// The file is standing in the very directory its folder record owns:
     /// nothing was dragged, the FOLDER was misread. Not converted -- a
@@ -3727,18 +4000,19 @@ enum Crossing {
 /// compared against the entry's OWN protection rather than the agreement's
 /// parent, because that is what the server compares against when it refuses.
 ///
-/// **A folder only on the way IN.** Dragging a plaintext folder into a vault is
-/// not merely a stuck move: until it is converted the user is looking at a
-/// folder they believe is private while the server holds every file in it in the
-/// clear, live, at the old path. Converting is the only thing that makes the
-/// picture true.
+/// **Only on the way IN, for files and folders alike.** Dragging plaintext into
+/// a vault is not merely a stuck move: until it is converted the user is looking
+/// at something they believe is private while the server holds it in the clear,
+/// live, at the old path. Converting is the only thing that makes the picture
+/// true.
 ///
 /// Out of a vault is the mirror image and is NOT done here. It would publish a
-/// vault's contents in the clear on the strength of a drag, and the platform's
-/// own answer is to change the folder's protection level first and move it
-/// afterwards -- a verb this client does not have. Such a move is still refused
-/// by the server and still says so as a `withdrawn` issue naming the folder;
-/// what it does not yet get is an end to re-deriving it.
+/// vault's contents in the clear on the strength of a drag, and nothing on the
+/// platform converts across a Fortress edge -- not the server, not the browser.
+/// A folder dragged out is refused by the server and says so as a `withdrawn`
+/// issue; a FILE dragged out is held (owner decision D1): the file stays where
+/// the user put it on this disk, the server keeps it sealed where it was, and
+/// `held_outside_its_vault` reads the two sides from then on.
 ///
 /// **Only when the destination's protection is actually known.** The drive root
 /// is plaintext and says so; a folder is only an answer if this store holds it.
@@ -3827,7 +4101,7 @@ fn crossing_a_vault_edge(
             }
         }
     }
-    if entry.id.entity_type == EntityType::File || destination {
+    if destination {
         Ok(Some(Crossing::Convert))
     } else {
         Ok(Some(Crossing::OutOfReach))
@@ -3861,6 +4135,189 @@ fn plaintext_source_of(
             _ => false,
         })
         .map(|e| e.id))
+}
+
+/// A file held outside its vault still holds its name in the vault folder on
+/// the server, though nothing stands at that path here. A file arriving at
+/// that slot on this disk -- saved there, or moved there -- is a different
+/// file, and it goes up beside the held copy under a conflict name: never
+/// under the held name, which would put two sealed files with one real name
+/// in one vault folder, and never as a version of the held file. Returns the
+/// placement the arriving file now has.
+fn clear_of_a_held_name(
+    env: &ExecEnv,
+    rel_path: &str,
+    placement: &Placement,
+    arriving: Option<EntityId>,
+) -> Result<Placement, ExecError> {
+    if !parent_is_encrypted(env, placement.parent)? {
+        return Ok(placement.clone());
+    }
+    let personality = env.vfs.personality();
+    let key = jd_vfs::comparison_key(&placement.name, &personality);
+    let mut held_name = false;
+    for e in all_entries(env)? {
+        if Some(e.id) != arriving
+            && e.remote.parent == placement.parent
+            && jd_vfs::comparison_key(&e.remote.name, &personality) == key
+            && held_outside_its_vault(env, &e)?
+        {
+            held_name = true;
+            break;
+        }
+    }
+    let Some(root) = env.vfs.root().filter(|_| held_name) else {
+        return Ok(placement.clone());
+    };
+    let here = root.join(rel_path);
+    let aside = crate::execute::free_conflict_path(env, &here, &placement.name, &[])?;
+    env.vfs.rename(&here, &aside)?;
+    let name = aside
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    env.store.raise_issue(
+        None,
+        "kept_aside",
+        &format!(
+            "{} is still the name of a protected file you moved out of the vault, so this file is {name}",
+            placement.name
+        ),
+        (env.now_ms)() as i64,
+    )?;
+    Ok(Placement { parent: placement.parent, name })
+}
+
+/// Tell the user a file is held outside its vault, by the name it has here.
+///
+/// There is no way to take a file out of a Fortress vault on the server -- no
+/// level change, no conversion in the browser -- so the sentence names the two
+/// things the user can do. One open issue per file: a rename while held
+/// replaces the old sentence rather than adding a second. Not for a file the
+/// server has deleted meanwhile, which says something else (below).
+pub(crate) fn say_it_is_held(env: &ExecEnv, held: &Entry) -> Result<(), ExecError> {
+    if held.remote_deleted {
+        return Ok(());
+    }
+    let detail = format!(
+        "{} is encrypted and stays in its vault on the server. The copy here is kept only on \
+         this device. Move it back into the vault to sync it again, or download it in the \
+         browser and upload it where you want it.",
+        held.effective_local_name()
+    );
+    for issue in env.store.open_issues()? {
+        if issue.kind == HELD_OUTSIDE_THE_VAULT && issue.entity == Some(held.id) && issue.detail != detail {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    env.store.raise_issue(Some(held.id), HELD_OUTSIDE_THE_VAULT, &detail, (env.now_ms)() as i64)?;
+    Ok(())
+}
+
+/// Is this a sealed file the user has taken out of its vault on this disk,
+/// which the server keeps sealed where it was (owner decision D1)?
+///
+/// Derived from the record, never remembered beside it: the agreed placement
+/// is where the user put the file here, the server's placement is still inside
+/// a vault, and nothing else makes those two sides of one sealed FILE disagree
+/// across a vault's edge. A folder never reads this -- a vault's own root
+/// stands in a plain parent by definition -- and a plain file never does. The
+/// agreed parent has to be a folder this store KNOWS to be plain (live or in
+/// the server's trash) or the drive root: an unknown one is no evidence. A
+/// peer moving the sealed copy between vault folders changes the server's
+/// placement and leaves the hold standing; the file moving back into a vault,
+/// or the server deleting it, ends it by the ordinary paths.
+/// A file held outside its vault whose own file does not stand at its agreed
+/// path: waiting while a file carrying its identity stands elsewhere, or gone.
+/// It holds nothing at that path -- no name for naming, no claim for an
+/// upload. Asked of the disk by the record's own identity at its own path,
+/// the same test the scan's at-home rule makes.
+pub(crate) fn held_and_away(env: &ExecEnv, entry: &Entry) -> Result<bool, ExecError> {
+    if !held_outside_its_vault(env, entry)? {
+        return Ok(false);
+    }
+    let Some(root) = env.vfs.root() else {
+        return Ok(false);
+    };
+    let here = match relative_path(env, entry)? {
+        Some(p) => env.vfs.fingerprint(&root.join(p))?.map(|fp| fp.file_id),
+        None => None,
+    };
+    Ok(here.is_none() || here != entry.synced_fingerprint.map(|f| f.file_id))
+}
+
+/// The held record whose disk identity this is, if any.
+fn held_owner_of_inode(env: &ExecEnv, inode: u64) -> Result<Option<Entry>, ExecError> {
+    if inode == 0 {
+        return Ok(None);
+    }
+    for e in env.store.every_holder_of(EntityType::File, inode)? {
+        if held_outside_its_vault(env, &e)? {
+            return Ok(Some(e));
+        }
+    }
+    Ok(None)
+}
+
+/// Does the held record's own file still stand where it agrees it does? Then a
+/// second file carrying its identity is a hard link, not the file moved.
+fn held_file_stands(env: &ExecEnv, held: &Entry, inode: u64, observed: &[ObservedFile]) -> Result<bool, ExecError> {
+    Ok(relative_path(env, held)?
+        .is_some_and(|home| observed.iter().any(|o| o.path == home && o.fingerprint.file_id == inode)))
+}
+
+/// The held record's issue once the server has deleted its sealed copy while an
+/// edited copy stands here: kept on this device only, never sent. `name` is
+/// what that copy is called here now.
+fn say_it_was_deleted_on_the_server(env: &ExecEnv, held: &Entry, name: &str) -> Result<(), ExecError> {
+    let detail = format!(
+        "{name} was deleted on the server while it was kept outside its vault on this device. \
+         The edited copy here is kept only on this device and is not uploaded."
+    );
+    for issue in env.store.open_issues()? {
+        if issue.kind == HELD_OUTSIDE_THE_VAULT && issue.entity == Some(held.id) && issue.detail != detail {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    env.store.raise_issue(Some(held.id), HELD_OUTSIDE_THE_VAULT, &detail, (env.now_ms)() as i64)?;
+    Ok(())
+}
+
+/// The held record's issue while a new file carrying its disk identity waits
+/// outside any vault. True whichever that file is -- the held file under a new
+/// name, or an unrelated file the disk gave a recycled identity.
+fn say_it_waits(env: &ExecEnv, held: &Entry, name: &str) -> Result<(), ExecError> {
+    let detail = format!(
+        "{name} may be the vault file {} under a new name, so it is kept only on this \
+         device and not uploaded. Move it into the vault to sync it encrypted, or delete it.",
+        held.effective_local_name()
+    );
+    for issue in env.store.open_issues()? {
+        if issue.kind == HELD_OUTSIDE_THE_VAULT && issue.entity == Some(held.id) && issue.detail != detail {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    env.store.raise_issue(Some(held.id), HELD_OUTSIDE_THE_VAULT, &detail, (env.now_ms)() as i64)?;
+    Ok(())
+}
+
+pub(crate) fn held_outside_its_vault(env: &ExecEnv, entry: &Entry) -> Result<bool, ExecError> {
+    if entry.id.entity_type != EntityType::File || !entry.is_encrypted {
+        return Ok(false);
+    }
+    let Some(agreed) = entry.synced_placement.as_ref() else {
+        return Ok(false);
+    };
+    if agreed.parent == entry.remote.parent || !parent_is_encrypted(env, entry.remote.parent)? {
+        return Ok(false);
+    }
+    Ok(match agreed.parent {
+        None => true,
+        Some(id) => env
+            .store
+            .get_entry(EntityId::folder(id))?
+            .is_some_and(|f| !f.is_encrypted),
+    })
 }
 
 /// Does this folder hold encrypted content? `None` is the drive root, which is

@@ -1734,21 +1734,186 @@ belt in, before the belt lands.** B1 is what happens without this.
 
 ## Open
 
-- **Owner decision D1 (2026-09-22): a file leaving a vault is held, not
-  converted.** Reading 18 (HEAD f86a033e vs engine df2f5c88 on one harness):
-  with swaps on, 209 sealed files leak; with the chaos swap kept to one side of
-  the vault edge (scratch dial), 4. The rest are the swapper moving a sealed
-  file out of the vault by the user's hand, which the file drag-out rule
-  converts to plaintext. The owner chose to treat a file like a folder: the
-  server copy stays sealed and an issue asks the user to unencrypt it. The
-  sealed oracle stays strict. Not built; approach to the reviewer first (R5).
-  Its measurement starts from the D2 package's numbers: swap-on leaks labelled
-  carried-out-by-chaos, among them plat3 75412 at 6 (3 before the package).
-  T1's scan rule (below) reads more of the swapper's cross-edge drags as the
-  moves they are, so the drag-out rule converts them: hostile2 74405 and
-  74418 newly fire the sealed oracle under T1, both carried out by chaos
-  (not_carried_out=0). Accepted as D1's, not guarded; D1's four lines are
-  the next item after T1.
+- **D1 (2026-09-24), a sealed file dragged out of a vault is held, not
+  converted. Built; awaiting NEEDED/VALID on the tree copy (public-html-25).**
+  Owner decision 2026-09-22 (held, not converted; the sealed oracle stays
+  strict), wording 2026-09-24 (honest text, no unencrypt feature, no revert).
+  Nothing on the platform takes a file out of a Fortress vault:
+  `drive_level_change` refuses Fortress both ways and the browser converts
+  nothing, so the words name the two real exits (move it back, or download
+  and upload it).
+  - **Rule.** `crossing_a_vault_edge` answers Convert only into a vault. A
+    sealed FILE leaving one is held: its agreed placement becomes where the
+    user put it, `local_name` clears, and nothing is asked of the server,
+    which keeps the sealed copy where it was. `held_outside_its_vault`
+    derives the hold from the record, never remembered beside it: a sealed
+    file whose agreed parent is the root or a KNOWN plain folder (live or in
+    the server's trash) while the server's parent is a vault. A folder never
+    reads it (a vault root stands in a plain parent); an unknown agreed parent
+    is no evidence; a peer moving the sealed copy between vault folders leaves
+    it standing.
+  - **While held.** Moved again outside any vault -- renamed where it
+    stands, or into another plain folder -- is this disk's side alone: the
+    record follows, the issue takes the new name, the server is asked nothing
+    (review B1: a rename in place was planned as a move across the edge and
+    refused on every pass). The remote delta is content and deletion only. Edits wait
+    on both sides, and the agreed contents are untouched, so both are still
+    seen when the file goes back. A move back into a vault is planned from the
+    server's placement (from the agreed one it was overtaken for ever: hostile2
+    74401, kill2 75101 never settled); exactly at it, agreed with no op. A
+    server trash of an unedited copy is an ordinary delete; of an edited one,
+    the copy is kept here only and never sent.
+  - **Where the rest of the engine meets a hold.** `rekey_entry` and
+    `merge_folder` re-point agreed parents: a hold into a brand-new folder
+    names a provisional parent, and without it the file re-minted plain.
+    Naming neither counts a held file as leaving nor judges it at its server
+    destination (judged there, a case clash on a folding disk gave up its only
+    copy here). A file saved or moved into a vault slot whose real name a held
+    file still holds on the server takes a conflict name (else two sealed files
+    with one real name in one vault folder, kill2 75101).
+  - **Moved and edited in one pass (review B2, B3, Ca, Cb).** The scan reads
+    a file both moved and edited between two scans as a delete plus a creation
+    (scan.rs rule 4: a bare inode may fund ORDER, never IDENTITY). A held
+    file so treated shows up as a new file carrying the held record's disk
+    identity, and that identity buys a wait and nothing else. W1: that new
+    file is not sent while the hold stands -- in a plain folder it waits with
+    the held record; in a vault it waits until the held record's delete has
+    landed, then goes up sealed under its own name, and no held-name aside is
+    decided for it. W2: a held record reading deleted while such a file stands
+    outside any vault is not trashed -- both wait, and the issue says "{new}
+    may be the vault file {old} under a new name, so it is kept only on this
+    device and not uploaded. Move it into the vault to sync it encrypted, or
+    delete it." (true whichever file it is; review-approved, with the owner).
+    The held identity is read including records the server has deleted, so a
+    server trash in that state keeps the wait and says H3's text naming the
+    file (Ca: the wait ended and the file went up plain). A hard link -- the
+    held file still standing where it agrees -- in a vault goes up sealed at
+    once; in a plain folder it is a copy out of the vault and waits (Cb; the
+    simulator has no hard links, so this has no pin). A recycled identity
+    costs a wait until the user acts, never a name or bytes: in a plain folder
+    an unrelated new file that got a deleted held file's inode is not
+    uploaded, and the held record's delete does not reach the server, until
+    one of them is moved or deleted. End states: renamed and edited in a
+    plain folder, one file here, nothing sent, the sealed copy intact, one
+    issue; moved home and edited, the held record trashed and the file back
+    as a NEW sealed record (rule 4's price), no aside, nothing in the clear.
+    A held record whose own file does not stand at its agreed path holds
+    nothing there -- no name for naming, no claim for an upload -- so a new
+    file saved at that path goes up as the user's new file. Without it, on
+    the first W build the stranger's upload was refused for the held record's
+    claim on every pass (hostile2 74400, kill2 75112, 75118, plat3 75410,
+    75413 never settled), and naming parked the held record against the
+    stranger's name, dropping the hold and with it the wait, so the waiting
+    file went up plain.
+  - **A held file gone from this disk while the server's copy changed** is
+    restored where the server keeps it: the hold is released toward the
+    server before the restore, so the download lands in the vault (it landed
+    in the plain folder and was minted plain -- the both-sides pin, RED on the
+    first W build). `make_room`'s owner
+    follow that lands a sealed file outside its vault makes a hold and owes no
+    `move_remote` (kill2 75127), and a held owner follows even at its own
+    agreed path, since the case-twin guard's reason (a conflict name pushed to
+    the server) cannot hold for it (kill2 75100: the aside was minted plain and
+    the sealed copy trashed). A folder trash does not wait on a held child,
+    `is_on_the_server` is false for its inode, and the rescue carries its
+    record with it (C1(a): a peer trashing the plain folder re-dragged the file
+    into the vault on disk, then, with that fixed, uploaded it plain).
+  - **Words (owner-approved).** Held: "{name} is encrypted and stays in its
+    vault on the server. The copy here is kept only on this device. Move it
+    back into the vault to sync it again, or download it in the browser and
+    upload it where you want it." (one open issue per file, re-raised on
+    rename). A server file refused a name by a held file: its own state kind
+    `waits_for_a_held_file`, re-derived each pass, in place of the generic
+    `unsyncable` (whose detail must stay `{reason:?}` for its reconciler),
+    naming both files; it lifts when the held file goes back or goes. Rescue
+    out of a trashed folder: "The folder {name} was in was deleted on the
+    server, so it was moved to {where}. It is still encrypted on the server
+    and kept only on this device until you move it back into the vault." H3:
+    "{name} was deleted on the server while it was kept outside its vault on
+    this device. The edited copy here is kept only on this device and is not
+    uploaded." Server: `drive_move_logic.php`'s Fortress refusal split by
+    direction -- out: "A Fortress file cannot be moved out of its vault.
+    Download it and upload it where you want it."; in: "A file cannot be moved
+    into a Fortress vault. Download it and upload it into the vault." A vault
+    folder dragged out, inside a vault: "{folder} is encrypted and stays in its
+    vault on the server. It is kept only on this device. Move it back into the
+    vault to sync it again, or download its files in the browser and upload
+    them where you want them." (review E2: it offered a protection-level
+    change, which does not exist for Fortress; the vault-root sentence was
+    true and stays).
+  - **Harness.** `assert_converged` declares held entities by entity
+    (`scenario::held_outside_the_vault`: open issue, sealed server parent,
+    plain agreed parent) in the records-agree check and the tree comparison,
+    and the file must stand at its agreed local path. Custody sorts a `held`
+    class beside rescued and reminted, on an open hold's (id, server parent).
+    Both counted on the custody line (`held=`, `held_records_converged_skips=`).
+    The sealed line splits leaks by road from server facts alone:
+    `never_sealed`, `as_an_edit`, `beside_a_live_sealed_copy`,
+    `sealed_copy_gone`.
+  - **Pins.** New: `a_sealed_file_dragged_out_of_a_vault_is_held_not_published`,
+    `a_held_file_moved_back_into_its_vault_is_released`,
+    `a_held_file_deleted_here_is_deleted_on_the_server`,
+    `a_file_saved_where_a_held_file_was_is_a_new_sealed_file`,
+    `a_file_moved_to_where_a_held_file_was_is_set_aside`,
+    `a_held_file_edited_on_both_sides_keeps_both_edits_when_it_returns`,
+    `a_peer_file_arriving_at_a_held_files_path_waits_for_the_name`,
+    `a_hold_survives_a_restart`,
+    `the_server_trashing_an_unedited_held_file_deletes_it_here`,
+    `the_server_trashing_an_edited_held_file_keeps_the_edit_here_unsent`,
+    `a_held_file_moved_between_vault_folders_by_a_peer_stays_where_the_user_put_it`,
+    `a_held_file_whose_plain_folder_is_trashed_stays_held_where_it_is_carried`,
+    `a_held_files_plain_folder_dragged_into_a_vault_duplicates_it_sealed`,
+    `a_held_file_renamed_where_it_stands_stays_held`,
+    `a_held_file_moved_to_another_plain_folder_stays_held`,
+    `a_held_file_moved_back_into_a_vault_subfolder_is_released_there`,
+    `a_held_file_moved_back_and_edited_in_one_pass_comes_home`,
+    `a_held_file_renamed_and_edited_in_one_pass_is_not_published`,
+    `a_held_file_renamed_and_edited_then_trashed_on_the_server_is_not_published`,
+    `a_file_saved_where_a_waiting_held_file_was_goes_up_as_a_new_file`,
+    `a_sealed_file_moved_and_edited_in_one_pass_is_a_delete_and_a_creation`
+    (rule 4's price, pinned as it is),
+    `a_sealed_file_moved_from_one_vault_to_another_is_an_ordinary_move`
+    (keeper), executor `a_held_file_set_aside_by_a_download_on_its_own_path_keeps_its_record`.
+    Rewritten from "converts" to "is held": the brand-new-folder pin, the
+    unreadable-ids pin, P3 (both provenances), AG (both provenances), and the
+    vault-edge swap (`a_swap_across_a_vault_edge_converts_in_and_holds_out`).
+    Every pin asserting the hold is RED on 181843af; the stranger pin is RED on
+    a hold that leaves the record's local side in the vault; the move-aside and
+    follow pins are RED with their own part off.
+  - **Measured vs 181843af** (final build, W1/W2 included). 160 swaps on:
+    sealed seeds 84 -> 77, leaked files 197 -> 157, chain 34 -> 33, custody
+    8 -> 8, converged 0 -> 0, never_settled 1 -> 1, R->G 6 (hostile2 74403,
+    74418, kill2 75102, 75118, 75129, plat3 75429), G->R 0. Held-out plain2:
+    identical. Swaps off: custody 1 -> 0, otherwise identical. Custody line:
+    held=2, held_records_converged_skips=55, held_waiting=3. Every new
+    per-oracle fire, traced: sealed kill2 75116, plat3 75406: T1-C; chain 6
+    in, 7 out, none a held entity -- T1-D x5 (hostile2 74409, kill2 75122,
+    plat3 75403, 75419, 75425), T1-C family x1 (plat3 75406: a record whose
+    inode the conflict rescue cleared); custody kill2 75101, plat3 75426,
+    75410: folder T1 / C9 (a ring directory minted under a plain folder on
+    one device and the vault on another); kill2 75124 sorts `held`. Against
+    the build before W1/W2: hostile2 74400 fires sealed again (red on
+    181843af too) -- four bodies, all T1-C (sealed provisionals with no inode,
+    carried into a plain folder and minted there).
+  - **Leaks left (157), by road.** never_sealed 116 (T1-C). sealed_copy_gone
+    25: no crossing op or Convert on any; on the build before W1/W2 its 28
+    split by the route that published each body into T1-C 19 (an inode-less
+    provisional took a swapped-in body, or lost its file) and T1-D 9 (a
+    sealed record's version upload read a stranger's inode at its agreed
+    path, and its own inode was minted plain elsewhere). beside_a_live_sealed_copy
+    13, as_an_edit 3 (AH / rule 1 pairing, or a copy-out; the harness cannot
+    tell those apart). not_carried_out 1: kill2 75112, folder T1 / C9
+    (written into a ring directory while it was the vault, set aside there
+    after the path map gave it to a plain folder).
+  - **Held-path edit readings join the copy-out line.** On the build before
+    the follow fix, kill2 75102 and 75118 lost a held record's file to the
+    scan's edit reading. Both strangers at the held path were files with no
+    record (75102: never minted on that device; 75118: the leftover bytes of a
+    plain record the trade had converted, swapped back), so mine4 reads them
+    as edits by design: the backup-save shape. Inode-first pairing for held
+    records was rejected (it overrides mine4 for one class and only changes
+    which copy goes up plain on a real editor save), and so was a content-hash
+    do-not-mint rule (a guard, and the copy-out line in disguise).
 - **Owner decision D2 (2026-09-22): scan rule 1 takes the careful form
   (`mine4`).** A record refuses bytes at its path as an edit only when its own
   file still stands elsewhere and the thing at its path is one the store
@@ -1865,8 +2030,8 @@ belt in, before the belt lands.** B1 is what happens without this.
 - The C8b-4 constructed pin (a displaced plain folder that loses a path to a
   vault's claim, searched by contents, no two records on one path) is owed:
   a hand-built rotation is resolved by the ring walk before the claim runs.
-- **T1 (2026-09-23), files, NEEDED and VALID (public-html-25), awaiting the
-  owner's commit: one file, two records.** Traced with a probe on every
+- **T1 (2026-09-23), files, NEEDED and VALID (public-html-25), landed
+  181843af: one file, two records.** Traced with a probe on every
   record written with a disk identity another live record holds. A file's
   identity was given to a second record in three ways, each landed:
   - **B, scan rule 1:** a path held by a live file record with nothing of
@@ -1918,14 +2083,49 @@ belt in, before the belt lands.** B1 is what happens without this.
   engine-rescued provisional (rescue_unsynced out of a trashed folder) is
   swapped with a synced file; no clause can name it, and the trade reads as
   an edit (held-out plain2 75212). Folders learn their directory at mint;
-  files do not. Four lines after D1's.
+  files do not. The largest leak road left after D1: never_sealed 116 and
+  most of sealed_copy_gone. The fix (an inode on every record) has to cover a
+  second path too: the conflict rescue clears the ORIGINAL record's
+  `synced_fingerprint` when it renames a file aside, and that record then
+  takes whatever stands at its path (chain plat3 75406, 75429; kill2 75114's
+  sealed provisionals). Four lines after D1's.
 - **T1-D, open: executor ops act on whatever file stands at the path.**
   `move_local` checks a folder's directory identity at `from` but not a
   file's inode, and a queued version upload sends the bytes at the agreed
   path, while the record's own inode is known and stands elsewhere (hostile2
   74401: a stranger the swapper put at 907's from path moved as 907;
   74413, plat3 75418, plain2 75236: a set-aside stranger swapped onto a
-  record's path mid-pass, sent as its version). After T1-C.
+  record's path mid-pass, sent as its version). Under D1: 9 of the 28
+  sealed_copy_gone leaks are this inside a vault (a sealed record's version
+  reads a stranger at its agreed path; its own inode is minted plain
+  elsewhere), and 5 of the chain fires. After T1-C.
+- **Open: a record the server trashes drops out of the scan's inode owners
+  in the same pass.** Its still-standing file then reads as nobody's: the
+  record is Forgotten and the file minted new, plain when its folder is plain
+  (plat3 75409, the held form), or a trade partner reads the sealed bytes at
+  its path as its own edit (no hold involved). Not D1's, and not generic AH.
+  Pin, ignored with that reason:
+  `a_file_traded_across_the_vault_edge_as_the_server_trashes_it_is_not_published`.
+  D1's own H3 pins do not share the path: with no second record on the slot,
+  a trashed held record still pairs with its file (local None or Edited).
+- **The chosen price, not a defect: a file moved and edited in one pass
+  reads as a delete and a creation** (scan.rs, rule 4). Sealed and plain
+  alike: the record is trashed on the server and the edited bytes go up as a
+  new file; the version chain is lost and no bytes are. A bare inode may fund
+  order, never identity: a recycled inode once bound entries to strangers.
+  Pinned as it is: `a_sealed_file_moved_and_edited_in_one_pass_is_a_delete_and_a_creation`.
+  D1 builds its waits on this (above), never a name.
+- **Open, pre-existing, not D1: a sealed move between vaults never re-grants
+  the file key.** The client wraps a file key to the destination's readers
+  only at a new upload; a move sends `drive_move` alone and nothing calls
+  `drive_key_grants_sync`, so a sealed file moved from vault A to vault B
+  stays readable by A's readers and not by B's (the owner apart).
+- **Owner line owed: copying a file out of a vault uploads it plain.** Not
+  covered by D1. The same line now carries the backup-save shape on a held
+  file (kill2 75102, 75118 above): an editor that saves by rename on a held
+  file leaves one of its two files minted plain in the plain folder, whichever
+  pairing the scan uses. And a hard link of a held file made in a plain folder
+  is a copy out of the vault: under D1 it waits, unsent, until the user acts.
 - **Finding, the folder make_room rule:** `the_owner_follows_its_directory`
   sets the agreed NAME only, so a directory the user moved across folders
   onto a destination gets a wrong agreed parent, and it undoes the user's

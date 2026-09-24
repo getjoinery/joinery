@@ -2463,3 +2463,81 @@ fn a_prose_refusal_of_a_name_this_device_is_vacating_waits() {
     assert_eq!(report.retrying, 1, "the follower should have waited: {report:?}");
     assert!(tree.contains_key("c.txt"), "the holder's own rename should have run: {tree:?}");
 }
+
+/// A file held outside its vault (owner decision D1) follows its file when a
+/// download sets it aside, even though the download lands on the very path
+/// the held record agrees it stands at -- and owes the server nothing for it.
+///
+/// The case-twin guard in `the_owner_follows_its_file` skips a record whose
+/// file stands at its own agreed path: following there would push a conflict
+/// name to the server for a file nobody moved. A held record pushes nothing,
+/// and its slot on this disk is only its own. Left behind, the aside was
+/// minted a new PLAIN file and the held record read its absence as a delete of
+/// the sealed copy (kill2 75100: the swapper traded the held file with the
+/// plain record whose download then landed there). RED without the held
+/// exception to that guard.
+#[test]
+fn a_held_file_set_aside_by_a_download_on_its_own_path_keeps_its_record() {
+    let (_clock, server, device) = world();
+    let private = server.seed_encrypted_folder(None, "Private");
+    let plain = server.seed_folder(None, "Plain");
+    let incoming = b"the plain file the server has at this name";
+    let arriving = server.seed_file(Some(plain), "doc.txt", incoming);
+
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    for (id, name, encrypted) in [(private, "Private", true), (plain, "Plain", false)] {
+        device.fs.user_mkdir(name);
+        let mut folder = fresh(EntityId::folder(id), None, name, LocalStatus::Synced);
+        folder.is_encrypted = encrypted;
+        folder.synced_placement = Some(folder.remote.clone());
+        // Its own directory, as the folder scan records it.
+        let dir = jd_vfs::Vfs::directory_id(&device.fs, &root.join(name)).unwrap().unwrap();
+        folder.synced_fingerprint = Some(jd_vfs::Fingerprint { size: 0, mtime_ns: 0, file_id: dir });
+        device.store.put_entry(&folder).unwrap();
+    }
+    let held_body = b"sealed on the server, held here outside its vault";
+    device.fs.user_write("Plain/doc.txt", held_body);
+    let fingerprint = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("Plain/doc.txt")).unwrap();
+    let held_id = EntityId::file(9_901);
+    let mut held = fresh(held_id, Some(private), "out.txt", LocalStatus::Synced);
+    held.is_encrypted = true;
+    held.synced_placement = Some(Placement { parent: Some(plain), name: "doc.txt".into() });
+    held.synced_fingerprint = fingerprint;
+    held.synced_content = Some(ContentId { sha256: sha256_hex(held_body), size: held_body.len() as u64 });
+    device.store.put_entry(&held).unwrap();
+
+    let id = EntityId::file(arriving);
+    let mut entry = fresh(id, Some(plain), "doc.txt", LocalStatus::PendingDownload);
+    entry.remote_content = Some(ContentId { sha256: sha256_hex(incoming), size: incoming.len() as u64 });
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(&device, id, Action::Download);
+    assert_eq!(report.done, 1, "the download should land");
+    assert_eq!(device.fs.peek("Plain/doc.txt").unwrap(), incoming);
+
+    let after = device.store.get_entry(held_id).unwrap().unwrap();
+    let agreed = after.synced_placement.clone().expect("the held record keeps an agreement");
+    assert!(
+        agreed.parent == Some(plain) && agreed.name != "doc.txt",
+        "the held record did not follow its file aside: {agreed:?}"
+    );
+    assert_eq!(
+        device.fs.peek(&format!("Plain/{}", agreed.name)).as_deref(),
+        Some(&held_body[..]),
+        "the held record does not name where its file now is"
+    );
+    assert_eq!(after.remote, held.remote, "the held record's server side moved");
+    let owed: Vec<_> = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .filter(|op| op.entity == held_id || op.idempotency_key.contains("-owner-9901-"))
+        .collect();
+    assert!(owed.is_empty(), "a held record owes the server a move: {owed:?}");
+    assert!(
+        device.store.open_issues().unwrap().iter().any(|i| i.kind == "held_outside_the_vault" && i.entity == Some(held_id)),
+        "the hold is not said: {:?}",
+        device.store.open_issues().unwrap()
+    );
+}

@@ -119,8 +119,15 @@ function drive_move_logic(array $input): LogicResult {
 
 	if ($entity_type === DriveHelper::ENTITY_FILE) {
 		if ($item_level !== $dest_level) {
-			if ($item_level === ProtectionLevel::FORTRESS || $dest_level === ProtectionLevel::FORTRESS) {
-				return LogicResult::error('Move a Fortress file by re-uploading it; only your browser can convert it.',
+			// Nothing converts a file across a Fortress edge -- not the server, which
+			// never holds a Fortress key, and not the browser. The user's own route
+			// is a download and an upload, so that is what the refusal names.
+			if ($item_level === ProtectionLevel::FORTRESS) {
+				return LogicResult::error('A Fortress file cannot be moved out of its vault. Download it and upload it where you want it.',
+					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id));
+			}
+			if ($dest_level === ProtectionLevel::FORTRESS) {
+				return LogicResult::error('A file cannot be moved into a Fortress vault. Download it and upload it into the vault.',
 					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id));
 			}
 			$plain_bytes = $entity->plain_size_bytes();

@@ -509,8 +509,9 @@ impl Store {
     /// be different things.
     ///
     /// What happens to each thing the provisional owned:
-    /// - **children** are re-pointed at the real folder — they are the same
-    ///   files, and orphaning them would re-upload the whole subtree;
+    /// - **children** are re-pointed at the real folder, on the server's side
+    ///   and in their agreement — they are the same files, and orphaning them
+    ///   would re-upload the whole subtree;
     /// - **local_index rows** move, so the hash cache is not thrown away and a
     ///   rescan does not re-read every byte;
     /// - **queued operations are dropped**, not moved. They were planned against
@@ -525,6 +526,10 @@ impl Store {
         let result = (|| -> StoreResult<()> {
             self.conn.execute(
                 "UPDATE entries SET parent_folder_id = ?2 WHERE parent_folder_id = ?1",
+                params![from.server_id, to.server_id],
+            )?;
+            self.conn.execute(
+                "UPDATE entries SET synced_parent_id = ?2 WHERE synced_parent_id = ?1",
                 params![from.server_id, to.server_id],
             )?;
             self.conn.execute(
@@ -852,6 +857,13 @@ impl Store {
             if from.entity_type == EntityType::Folder {
                 self.conn.execute(
                     "UPDATE entries SET parent_folder_id = ?2 WHERE parent_folder_id = ?1",
+                    params![from.server_id, to.server_id],
+                )?;
+                // An agreement can name a folder that has no server id yet: a
+                // file held outside its vault agrees on the user's folder,
+                // which may be brand new. It follows the folder to its id.
+                self.conn.execute(
+                    "UPDATE entries SET synced_parent_id = ?2 WHERE synced_parent_id = ?1",
                     params![from.server_id, to.server_id],
                 )?;
             }
@@ -1272,6 +1284,28 @@ impl Store {
     /// with the newest row, so it cannot say that exactly one record holds an
     /// identity. This reads the agreement itself. Zero is no identity and
     /// holds nothing.
+    /// Every record holding this disk identity, the ones the server has
+    /// deleted included -- a file held outside its vault goes on holding its
+    /// identity after the server trashes its sealed copy.
+    pub fn every_holder_of(&self, entity_type: EntityType, file_id: u64) -> StoreResult<Vec<Entry>> {
+        if file_id == 0 {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT entity_type, server_id, parent_folder_id, remote_name, local_name,
+                    is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
+                    head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
+                    synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
+                    local_status, unsyncable_reason, wrapped_file_key,
+                    content_id, synced_remote_sha256, synced_remote_size,
+                    replaces_type, replaces_id, stand_in_parent_id, stand_in_name
+               FROM entries
+              WHERE entity_type = ?1 AND synced_fp_file_id = ?2",
+        )?;
+        let rows = stmt.query_map(params![entity_type.to_string(), file_id as i64], row_to_entry)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     pub fn live_holders_of(&self, entity_type: EntityType, file_id: u64) -> StoreResult<Vec<Entry>> {
         if file_id == 0 {
             return Ok(Vec::new());

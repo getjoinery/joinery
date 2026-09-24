@@ -288,6 +288,14 @@ pub fn apply_naming(
         if held.contains(&entry.id) {
             continue;
         }
+        // The same for a file held outside its vault whose own file is not at
+        // its agreed path (owner decision D1): it holds no name there. Judged
+        // there, a new file saved at that path won the name, the held record
+        // gave up its agreement, and the hold -- and every wait resting on it
+        // -- was gone.
+        if crate::pass::held_and_away(env, &entry)? {
+            continue;
+        }
         by_parent
             .entry(competing_placement(&entry).parent)
             .or_default()
@@ -324,9 +332,20 @@ pub fn apply_naming(
         // wait on each other for ever. The round orders them: the leaver
         // steps aside under a scratch name, the newcomer is created, the
         // leaver moves in. Estate seed 22081285.
+        // Files held outside their vault (owner decision D1) stand here and
+        // are going nowhere: their server placement, in a vault, is not a
+        // move this disk will make, so they are neither leaving this folder
+        // nor judged at that destination.
+        let mut held_here = std::collections::HashSet::new();
+        for (e, _) in &pairs {
+            if crate::pass::held_outside_its_vault(env, e)? {
+                held_here.insert(e.id);
+            }
+        }
         let leaving: std::collections::HashSet<String> = pairs
             .iter()
             .filter(|(e, _)| e.holds_a_local_file())
+            .filter(|(e, _)| !held_here.contains(&e.id))
             .filter(|(e, _)| {
                 let competing = competing_placement(e);
                 e.remote.parent != competing.parent
@@ -578,6 +597,7 @@ pub fn apply_naming(
                 // (the peer-put-back kill sweep, die_after=3).
                 if updated.holds_a_local_file()
                     && updated.remote != *updated.local_placement()
+                    && !held_here.contains(&updated.id)
                     && !busy.contains(&updated.id)
                     && !parked_locally(&updated)
                     && !jd_vfs::is_internal(&updated.remote.name)
@@ -671,6 +691,11 @@ fn judge_destinations(
         // one folder reaches the same clash with nothing reparented, and a
         // trigger watching only the parent would sail straight past it.
         if entry.remote == *entry.local_placement() {
+            continue;
+        }
+        // Not moving there at all (see `held_here` above). Judged there, a
+        // case twin at its server name made it give up its only copy here.
+        if crate::pass::held_outside_its_vault(env, &entry)? {
             continue;
         }
         let mut names: Vec<String> = settled

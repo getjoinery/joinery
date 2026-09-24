@@ -2270,12 +2270,14 @@ fn a_rescued_copy_is_recorded_under_the_name_it_actually_landed_on() {
     assert_invariants(&world, &committed);
 }
 
-/// A sealed file dragged into a folder the user has JUST made must still
-/// leave the vault (the designed drag-out) -- the new folder reaches the server
-/// and the file goes up in the clear under it. B1 (c6, 2026-09-12): the mint
-/// guard read the new folder as a renamed vault directory and held it for ever.
+/// A sealed file dragged into a folder the user has JUST made is held like
+/// any other drag out of a vault (owner decision D1), and the new folder still
+/// reaches the server. B1 (c6, 2026-09-12): the mint guard read the new folder
+/// as a renamed vault directory and held the FOLDER for ever. The new folder
+/// has no server id when the hold is recorded, so this is also the pin for a
+/// held record's agreed parent following that folder to its real id.
 #[test]
-fn a_sealed_file_dragged_into_a_brand_new_folder_still_converts() {
+fn a_sealed_file_dragged_into_a_brand_new_folder_is_held() {
     let vault = SimVault::new(9_950);
     let mut world = World::new(9_950, &["holder"]);
     world.give_vault("holder", &vault);
@@ -2293,12 +2295,14 @@ fn a_sealed_file_dragged_into_a_brand_new_folder_still_converts() {
 
     let tree = world.server.tree();
     assert!(tree.contains_key("New"), "the new folder never reached the server: {:?}", tree.keys().collect::<Vec<_>>());
-    let sha = jd_sim::sha256_hex(body);
-    assert!(
-        tree.get("New/out.txt").and_then(|h| h.as_deref()) == Some(sha.as_str()),
-        "the dragged-out file is not on the server in the clear under New: {:?}",
-        tree.iter().collect::<Vec<_>>()
+    no_plaintext_of(&world, body);
+    assert_eq!(held_issues(holder).len(), 1, "{:?}", holder.store.open_issues().unwrap());
+    assert_eq!(
+        disk_tree(holder).get("New/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the file is not where the user put it"
     );
+    assert_converged(&world);
 }
 
 /// Defect AG: dragging the ONLY file out of a vault must not rename the vault
@@ -2318,8 +2322,9 @@ fn a_sealed_file_dragged_into_a_brand_new_folder_still_converts() {
 ///
 /// Asked by ID, never by tree: the tree after AG is byte-identical to the
 /// correct one. The folder the server seeded as the vault must still wear
-/// `Private` and its protection; the new folder is plain; the file is on the
-/// server in the clear under `Plain`. RED on `df2f5c88` (501 renamed onto
+/// `Private` and its protection; the new folder is plain; the file itself is
+/// held (owner decision D1): sealed in the vault on the server, under `Plain`
+/// on this disk. RED on `df2f5c88` (501 renamed onto
 /// `Plain`, a plain 502 wearing `Private`); green since the folder scan
 /// corroborates by identity.
 ///
@@ -2357,12 +2362,9 @@ fn a_vault_keeps_its_name_when_its_only_file_is_dragged_out(written_locally: boo
         !folders.iter().any(|f| f.id != private && f.name == "Private" && !f.trashed),
         "a second folder wears the vault's name: {folders:?}"
     );
-    let sha = jd_sim::sha256_hex(body);
-    assert!(
-        world.server.tree().get("Plain/y.txt").and_then(|h| h.as_deref()) == Some(sha.as_str()),
-        "the dragged-out file is not on the server in the clear under Plain: {:?}",
-        world.server.tree()
-    );
+    no_plaintext_of(&world, body);
+    assert_eq!(held_issues(holder).len(), 1, "{:?}", holder.store.open_issues().unwrap());
+    assert_converged(&world);
 }
 
 #[test]
@@ -2515,10 +2517,10 @@ fn a_restored_disk_with_fresh_ids_drags_nothing_out_of_the_vault() {
 /// every directory reports 0 (`MemFs::directory_ids_unreadable`). Two
 /// directories both reporting 0 must not
 /// read as "the same" or as "unchanged" across a real drag; 0 on either
-/// side is unknown, and the drag converts exactly as today's rules convert
-/// it, by contents and path, with no stall. Green today; must stay green.
+/// side is unknown, and the drag is read as a drag, by contents and path:
+/// held (owner decision D1), never taken for a misread folder.
 #[test]
-fn unreadable_directory_ids_do_not_stop_a_drag_out_from_converting() {
+fn unreadable_directory_ids_do_not_stop_a_drag_out_from_being_held() {
     let vault = SimVault::new(9_955);
     let mut world = World::of(9_955, &[("pc", jd_sim::Platform::Windows)]);
     world.give_vault("pc", &vault);
@@ -2535,36 +2537,35 @@ fn unreadable_directory_ids_do_not_stop_a_drag_out_from_converting() {
     pc.fs.user_rename("Private/out.txt", "Plain/out.txt");
     assert!(world.settle().is_some(), "the drag-out has to settle, not stall");
 
-    let tree = world.server.tree();
-    assert_eq!(
-        tree.get("Plain/out.txt").cloned().flatten(),
-        Some(jd_sim::sha256_hex(body)),
-        "the drag-out did not convert: {tree:?}"
-    );
+    no_plaintext_of(&world, body);
     let folders = world.server.folders();
     let the_vault = folders.iter().find(|f| f.id == private).unwrap();
     assert!(the_vault.name == "Private" && the_vault.encrypted, "{folders:?}");
-    assert!(pc.store.open_issues().unwrap().is_empty(), "a stall: {:?}", pc.store.open_issues().unwrap());
+    let issues = pc.store.open_issues().unwrap();
+    assert!(
+        issues.len() == 1 && issues[0].kind == "held_outside_the_vault",
+        "the drag was not read as a drag: {issues:?}"
+    );
+    assert_converged(&world);
 }
 
-/// P3 of the reset's WP2: a move the engine makes for the server is not a
-/// user drag.
+/// P3 of the reset's WP2, under owner decision D1: a drag out of the vault on
+/// one device is held there, and the other device sees nothing move.
 ///
-/// Device A drags a file out of the vault and converts it. Device B's
-/// executor then moves ITS copy from `Private` to `Plain`, so on B the
-/// file's parent directory changed with no user action on B. B's next scan
-/// must read the file against the folder record it is NOW under (Plain, as
-/// the server says), never against a snapshot from before the executor
-/// moved it; read wrongly, B reports a second crossing and re-converts or
-/// re-seals. Both provenances of the file. Green today; must stay green.
-fn a_drag_out_on_one_device_is_not_a_second_crossing_on_the_other(written_locally: bool) {
+/// Before D1 device A converted the drag and device B's executor then moved
+/// its own copy from `Private` to `Plain` -- a move no user made on B, which
+/// B had to read against the folder the file was then under, never as a
+/// second crossing. D1 removes the conversion, so nothing moves on B at all:
+/// the server keeps the file sealed where it was, B keeps its copy there, and
+/// both devices stay quiet. Both provenances of the file.
+fn a_drag_out_held_on_one_device_changes_nothing_on_the_other(written_locally: bool) {
     let vault = SimVault::new(9_956);
     let mut world = World::new(9_956, &["a", "b"]);
     world.give_vault("a", &vault);
     world.give_vault("b", &vault);
     world.server.set_vault_public_key(1, &vault.public_key_b64);
     let private = world.server.seed_encrypted_folder(None, "Private");
-    let body = b"dragged out on a, moved for the server on b";
+    let body = b"dragged out on a, held there";
     if written_locally {
         assert!(world.settle().is_some());
         world.device("a").fs.user_write("Private/out.txt", body);
@@ -2573,28 +2574,24 @@ fn a_drag_out_on_one_device_is_not_a_second_crossing_on_the_other(written_locall
     }
     world.server.seed_vault_file(Some(private), "stays.txt", b"stays sealed", &vault.public_key_b64);
     assert!(world.settle().is_some(), "both devices hold the vault");
+    let versions = world.server.all_versions().len();
 
     let a = world.device("a");
     a.fs.user_mkdir("Plain");
     a.fs.user_rename("Private/out.txt", "Plain/out.txt");
     assert!(world.settle().is_some(), "the drag-out has to settle on both devices");
 
-    let tree = world.server.tree();
-    assert_eq!(tree.get("Plain/out.txt").cloned().flatten(), Some(jd_sim::sha256_hex(body)), "{tree:?}");
-    let versions = world
-        .server
-        .all_versions()
-        .into_iter()
-        .filter(|v| v.sha256 == jd_sim::sha256_hex(body))
-        .count();
-    assert_eq!(versions, 1, "the plaintext went up more than once -- a second crossing: {:?}", world.server.all_versions());
-    for d in [a, world.device("b")] {
-        let disk = disk_tree(d);
-        assert_eq!(disk.get("Plain/out.txt").cloned().flatten(), Some(jd_sim::sha256_hex(body)), "{} {disk:?}", d.name);
-        assert!(!disk.contains_key("Private/out.txt"), "{} still has the sealed copy: {disk:?}", d.name);
-        assert!(d.store.open_issues().unwrap().is_empty(), "{}: {:?}", d.name, d.store.open_issues().unwrap());
-    }
-    // Six more rounds: a second crossing would show up as churn.
+    no_plaintext_of(&world, body);
+    assert_eq!(world.server.all_versions().len(), versions, "something went up for a held file");
+    assert_eq!(held_issues(a).len(), 1);
+    let b = world.device("b");
+    assert_eq!(
+        disk_tree(b).get("Private/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the other device lost its sealed copy"
+    );
+    assert!(b.store.open_issues().unwrap().is_empty(), "{:?}", b.store.open_issues().unwrap());
+    assert_converged(&world);
     for _ in 0..6 {
         for d in &world.devices {
             world.clock.advance_secs(20 * 60);
@@ -2604,13 +2601,712 @@ fn a_drag_out_on_one_device_is_not_a_second_crossing_on_the_other(written_locall
 }
 
 #[test]
-fn a_downloaded_files_drag_out_on_one_device_is_not_a_second_crossing_on_the_other() {
-    a_drag_out_on_one_device_is_not_a_second_crossing_on_the_other(false);
+fn a_downloaded_files_drag_out_held_on_one_device_changes_nothing_on_the_other() {
+    a_drag_out_held_on_one_device_changes_nothing_on_the_other(false);
 }
 
 #[test]
-fn a_locally_written_files_drag_out_on_one_device_is_not_a_second_crossing_on_the_other() {
-    a_drag_out_on_one_device_is_not_a_second_crossing_on_the_other(true);
+fn a_locally_written_files_drag_out_held_on_one_device_changes_nothing_on_the_other() {
+    a_drag_out_held_on_one_device_changes_nothing_on_the_other(true);
+}
+
+/// A vault with two sealed files, on every named device, each holding the key.
+/// Returns the world, the vault folder's id, and the id of `out.txt`.
+fn a_vault_of_two(seed: u64, devices: &[&str]) -> (World, i64, i64) {
+    let vault = SimVault::new(seed);
+    let mut world = World::new(seed, devices);
+    for d in devices {
+        world.give_vault(d, &vault);
+    }
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let out = world.server.seed_vault_file(Some(private), "out.txt", HELD_BODY, &vault.public_key_b64);
+    world.server.seed_vault_file(Some(private), "stays.txt", b"the one that stays sealed", &vault.public_key_b64);
+    assert!(world.settle().is_some(), "the vault comes down");
+    (world, private, out)
+}
+
+const HELD_BODY: &[u8] = b"sealed, and dragged out of the vault by hand";
+
+/// Where the server keeps a file, by id.
+fn server_folder_of(world: &World, file: i64) -> Option<Option<i64>> {
+    world.server.files().into_iter().find(|f| f.id == file && !f.trashed).map(|f| f.folder)
+}
+
+fn held_issues(device: &jd_sim::engine::Device) -> Vec<String> {
+    device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "held_outside_the_vault")
+        .map(|i| i.detail)
+        .collect()
+}
+
+fn no_plaintext_of(world: &World, body: &[u8]) {
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(body)).is_none(),
+        "the plaintext of a sealed file reached the server: {:?}",
+        world.server.tree()
+    );
+}
+
+/// Owner decision D1: a sealed file dragged out of its vault is HELD, not
+/// converted. The file stays where the user put it on this disk; the server
+/// keeps its sealed copy exactly where it was; the user is told once; the
+/// device goes quiet. Converting here would publish the vault's contents on
+/// the strength of a drag -- the same reason a vault FOLDER dragged out is
+/// held. RED before D1: the drag converted and the plaintext went up.
+#[test]
+fn a_sealed_file_dragged_out_of_a_vault_is_held_not_published() {
+    let (world, private, out) = a_vault_of_two(9_960, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some(), "a held file must leave the device quiet");
+
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)), "the sealed copy left the vault");
+    assert_eq!(
+        disk_tree(holder).get("Plain/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(HELD_BODY)),
+        "the file is not where the user put it"
+    );
+    let told = held_issues(holder);
+    assert_eq!(told.len(), 1, "told exactly once: {:?}", holder.store.open_issues().unwrap());
+    // Owner-approved wording: no promise of an unencrypt the platform does
+    // not have, and the two things the user can actually do.
+    assert!(
+        told[0].starts_with("out.txt is encrypted and stays in its vault on the server.")
+            && told[0].contains("Move it back into the vault")
+            && told[0].contains("download it in the browser")
+            && !told[0].contains("unencrypt"),
+        "{told:?}"
+    );
+    assert_converged(&world);
+}
+
+/// Moving a held file back into its vault releases it: the issue goes, the
+/// server copy is where it always was, and nothing new went up.
+#[test]
+fn a_held_file_moved_back_into_its_vault_is_released() {
+    let (world, private, out) = a_vault_of_two(9_961, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    assert_eq!(held_issues(holder).len(), 1);
+    let versions = world.server.all_versions().len();
+
+    holder.fs.user_rename("Plain/out.txt", "Private/out.txt");
+    assert!(world.settle().is_some(), "the way back has to settle");
+    assert!(held_issues(holder).is_empty(), "the hold outlived the file's return");
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)));
+    assert_eq!(world.server.all_versions().len(), versions, "moving back sent something");
+    no_plaintext_of(&world, HELD_BODY);
+    assert_converged(&world);
+}
+
+/// Deleting a held file is the user deleting it: the server copy goes to the
+/// trash, and nothing is published on the way.
+#[test]
+fn a_held_file_deleted_here_is_deleted_on_the_server() {
+    let (world, _, out) = a_vault_of_two(9_962, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    holder.fs.user_remove("Plain/out.txt");
+    assert!(world.settle().is_some());
+    assert_eq!(server_folder_of(&world, out), None, "the deleted file is still live on the server");
+    no_plaintext_of(&world, HELD_BODY);
+    assert!(held_issues(holder).is_empty(), "{:?}", held_issues(holder));
+    assert_converged(&world);
+}
+
+/// A file saved at the vault path a held file left is a NEW sealed file, never
+/// a version of the held one. The held record's own file stands where the
+/// user dragged it, so the stranger stands on no record's path. RED on a hold
+/// that leaves the record's local placement in the vault: the stranger read as
+/// the held record edited, and the held bytes minted plain (plat3 75400).
+#[test]
+fn a_file_saved_where_a_held_file_was_is_a_new_sealed_file() {
+    let (world, private, out) = a_vault_of_two(9_963, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    world.pass(holder);
+    world.pass(holder);
+    let stranger = b"a new file saved where the held one was";
+    holder.fs.user_write("Private/out.txt", stranger);
+    assert!(world.settle().is_some());
+
+    let versions_of_out = world.server.all_versions().into_iter().filter(|v| v.file_id == out).count();
+    assert_eq!(versions_of_out, 1, "the held file took a new version: {:?}", world.server.all_versions());
+    no_plaintext_of(&world, HELD_BODY);
+    no_plaintext_of(&world, stranger);
+    let in_vault = world.server.files().into_iter().filter(|f| !f.trashed && f.folder == Some(private)).count();
+    assert_eq!(in_vault, 3, "the stranger is not in the vault beside the held file: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// The same for a file MOVED to the held name, from another vault: it
+/// arrives under a conflict name, sealed, and the server never holds two
+/// sealed files with one real name in one vault folder (kill2 75101, where the
+/// arrival was a second held file coming home).
+#[test]
+fn a_file_moved_to_where_a_held_file_was_is_set_aside() {
+    let vault = SimVault::new(9_970);
+    let (world, _, out) = a_vault_of_two(9_970, &["holder"]);
+    let other = world.server.seed_encrypted_folder(None, "Other");
+    let mover = b"a sealed file from another vault";
+    world.server.seed_vault_file(Some(other), "x.txt", mover, &vault.public_key_b64);
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    holder.fs.user_rename("Other/x.txt", "Private/out.txt");
+    assert!(world.settle().is_some());
+
+    let versions_of_out = world.server.all_versions().into_iter().filter(|v| v.file_id == out).count();
+    assert_eq!(versions_of_out, 1, "the held file took a new version");
+    let named_out = world
+        .server
+        .vault_files()
+        .into_iter()
+        .filter(|f| f.folder_path == "Private")
+        .filter_map(|f| jd_sim::scenario::open_as_the_owner(&world, &f))
+        .filter(|(name, _)| name == "out.txt")
+        .count();
+    assert_eq!(named_out, 1, "two sealed files are named out.txt in the vault: {:?}", world.server.tree());
+    no_plaintext_of(&world, HELD_BODY);
+    no_plaintext_of(&world, mover);
+    assert_converged(&world);
+}
+
+/// The plain folder a held file stands in is trashed by a peer (C1a of the D1
+/// review). The held file is carried out of the folder like anything unsent,
+/// its record follows it, and it stays held where it lands: never uploaded
+/// plain, never put back into the vault on this disk behind the user's back,
+/// and the sealed copy is untouched.
+#[test]
+fn a_held_file_whose_plain_folder_is_trashed_stays_held_where_it_is_carried() {
+    let (world, private, out) = a_vault_of_two(9_971, &["holder", "peer"]);
+    let plain = world.server.seed_folder(None, "Plain");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": plain }))
+        .expect("the trash should be accepted");
+    assert!(world.settle().is_some());
+
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)), "the sealed copy moved");
+    let disk = disk_tree(holder);
+    assert!(!disk.contains_key("Private/out.txt"), "the held file was put back into the vault: {disk:?}");
+    assert_eq!(disk.get("out.txt").cloned().flatten(), Some(jd_sim::sha256_hex(HELD_BODY)), "{disk:?}");
+    assert_eq!(held_issues(holder).len(), 1, "{:?}", holder.store.open_issues().unwrap());
+    let rescue: Vec<String> = holder
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "rescued_from_trash")
+        .map(|i| i.detail)
+        .collect();
+    assert!(
+        rescue.len() == 1
+            && rescue[0].starts_with("The folder out.txt was in was deleted on the server, so it was moved to the top of your drive.")
+            && !rescue[0].contains("had not reached the server"),
+        "{rescue:?}"
+    );
+    assert_converged(&world);
+}
+
+/// The user drags the plain folder a held file stands in INTO a vault (C1b).
+/// The folder converts, and its contents go up sealed -- the held file among
+/// them, as a second sealed copy beside the original. A duplicate, stated and
+/// counted, and nothing in the clear.
+#[test]
+fn a_held_files_plain_folder_dragged_into_a_vault_duplicates_it_sealed() {
+    let (world, _, _) = a_vault_of_two(9_972, &["holder"]);
+    world.server.seed_folder(None, "Plain");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    holder.fs.user_rename("Plain", "Private/Plain");
+    assert!(world.settle().is_some());
+
+    no_plaintext_of(&world, HELD_BODY);
+    let copies = world
+        .server
+        .vault_files()
+        .into_iter()
+        .filter_map(|f| jd_sim::scenario::open_as_the_owner(&world, &f))
+        .filter(|(_, h)| h.as_deref() == Some(jd_sim::sha256_hex(HELD_BODY).as_str()))
+        .count();
+    assert_eq!(copies, 2, "the held file is not sealed twice: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// A record the server trashes drops out of the scan's inode owners in the
+/// same pass, so its still-standing file is read as nobody's. Here a vault
+/// file and a plain file trade places, and a peer trashes the vault file
+/// before this device has seen the trade: the plain partner reads the sealed
+/// bytes now standing at its path as its own edit and sends them up as its
+/// version, in the clear. Not D1's -- it reproduces with no hold involved --
+/// and not generic AH either: the mechanism is the trashed record's ownership
+/// vanishing mid-pass (plat3 75409 is the held form: the trashed record is
+/// Forgotten, its standing file minted new and plain). Its own open item in
+/// the reset spec; RED today.
+#[test]
+#[ignore = "open: a record the server trashes drops out of the scan's inode owners in the same pass (reset spec, plat3 75409)"]
+fn a_file_traded_across_the_vault_edge_as_the_server_trashes_it_is_not_published() {
+    let vault = SimVault::new(9_981);
+    let mut world = World::new(9_981, &["holder", "peer"]);
+    world.give_vault("holder", &vault);
+    world.give_vault("peer", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let out = world.server.seed_vault_file(Some(private), "out.txt", HELD_BODY, &vault.public_key_b64);
+    world.server.seed_vault_file(Some(private), "stays.txt", b"stays", &vault.public_key_b64);
+    let plain = world.server.seed_folder(None, "Plain");
+    world.server.seed_file(Some(plain), "doc.txt", b"plain doc body");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private/out.txt", "Private/tmp");
+    holder.fs.user_rename("Plain/doc.txt", "Private/out.txt");
+    holder.fs.user_rename("Private/tmp", "Plain/doc.txt");
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": out }))
+        .expect("the trash should be accepted");
+    assert!(world.settle().is_some());
+    no_plaintext_of(&world, HELD_BODY);
+}
+
+/// Renaming a held file where it stands is the local side only: the record
+/// takes the new name, the issue names it, and nothing is asked of the server
+/// (review B1: planned as a move across the edge, refused by the server on
+/// every pass for ever).
+#[test]
+fn a_held_file_renamed_where_it_stands_stays_held() {
+    let (world, private, out) = a_vault_of_two(9_973, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    holder.fs.user_rename("Plain/out.txt", "Plain/renamed.txt");
+    assert!(world.settle().is_some(), "a rename of a held file must leave the device quiet");
+
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)), "the sealed copy moved");
+    let told = held_issues(holder);
+    assert!(told.len() == 1 && told[0].starts_with("renamed.txt is encrypted"), "{told:?}");
+    let others: Vec<_> = holder.store.open_issues().unwrap().into_iter().filter(|i| i.kind != "held_outside_the_vault").collect();
+    assert!(others.is_empty(), "{others:?}");
+    assert_converged(&world);
+}
+
+/// Moved on into another plain folder, a held file stays held there, with
+/// one issue and the sealed copy unmoved.
+#[test]
+fn a_held_file_moved_to_another_plain_folder_stays_held() {
+    let (world, private, out) = a_vault_of_two(9_977, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_mkdir("Other");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    holder.fs.user_rename("Plain/out.txt", "Other/out.txt");
+    assert!(world.settle().is_some());
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)));
+    assert_eq!(disk_tree(holder).get("Other/out.txt").cloned().flatten(), Some(jd_sim::sha256_hex(HELD_BODY)));
+    assert_eq!(held_issues(holder).len(), 1, "{:?}", holder.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// Moved back into a DIFFERENT folder of its vault, a held file is released
+/// there: the sealed copy follows it, still sealed, and the issue goes.
+#[test]
+fn a_held_file_moved_back_into_a_vault_subfolder_is_released_there() {
+    let (world, private, out) = a_vault_of_two(9_978, &["holder"]);
+    let sub = world.server.seed_encrypted_folder(Some(private), "Sub");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    holder.fs.user_rename("Plain/out.txt", "Private/Sub/out.txt");
+    assert!(world.settle().is_some());
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(server_folder_of(&world, out), Some(Some(sub)), "the sealed copy did not follow");
+    assert!(held_issues(holder).is_empty(), "{:?}", holder.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// Renamed and edited in one pass, a held file is not published (review B3).
+/// The scan reads a file both moved and edited as a delete plus a creation
+/// (scan.rs, rule 4), so the held record's file seems gone and a new plain
+/// file seems to stand at the new name. Neither may act: the new file carries
+/// the held record's disk identity, which funds a WAIT, never a name -- it is
+/// not sent, and the held record's delete of the sealed copy waits with it.
+/// One file here, nothing sent, the sealed copy intact, one issue naming the
+/// file by the name it now has -- in words true whichever file it is (the
+/// held file renamed, or a stranger the disk gave a recycled identity).
+#[test]
+fn a_held_file_renamed_and_edited_in_one_pass_is_not_published() {
+    let (world, private, out) = a_vault_of_two(9_979, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    let edited = b"renamed and edited while held outside the vault";
+    holder.fs.user_rename("Plain/out.txt", "Plain/r.txt");
+    holder.fs.user_write("Plain/r.txt", edited);
+    assert!(world.settle().is_some(), "the wait must leave the device quiet");
+
+    no_plaintext_of(&world, edited);
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)), "the sealed copy is gone from the vault");
+    assert_eq!(disk_tree(holder).get("Plain/r.txt").cloned().flatten(), Some(jd_sim::sha256_hex(edited)));
+    let issues = holder.store.open_issues().unwrap();
+    assert!(
+        issues.len() == 1
+            && issues[0].kind == "held_outside_the_vault"
+            && issues[0].detail.starts_with("r.txt may be the vault file out.txt under a new name, so it is kept only on this device and not uploaded."),
+        "{issues:?}"
+    );
+    assert_converged(&world);
+}
+
+/// While a held file waits under a new name (moved and edited in one pass), a
+/// new file saved at its old path is the user's new file: it goes up as one,
+/// and the wait stands. The held record, whose own file is not at that path,
+/// holds nothing there (hostile2 74400, kill2 75112, 75118, plat3 75410,
+/// 75413: that upload was refused for the held record's claim on every pass,
+/// for ever).
+#[test]
+fn a_file_saved_where_a_waiting_held_file_was_goes_up_as_a_new_file() {
+    let (world, private, out) = a_vault_of_two(9_983, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    let edited = b"renamed and edited while held outside the vault";
+    holder.fs.user_rename("Plain/out.txt", "Plain/r.txt");
+    holder.fs.user_write("Plain/r.txt", edited);
+    let fresh = b"a new plain file saved where the held file was";
+    holder.fs.user_write("Plain/out.txt", fresh);
+    assert!(world.settle().is_some(), "the device must go quiet");
+
+    no_plaintext_of(&world, edited);
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)), "the sealed copy moved");
+    assert_eq!(
+        world.server.tree().get("Plain/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(fresh)),
+        "the new file did not go up: {:?}",
+        world.server.tree()
+    );
+    let told = held_issues(holder);
+    assert!(told.len() == 1 && told[0].starts_with("r.txt may be the vault file"), "{told:?}");
+}
+
+/// The same, and then the server trashes the sealed copy (review Ca). The held
+/// record is not forgotten while a file carrying its disk identity stands
+/// outside any vault: that is H3's edited case, so the copy is kept here only
+/// and never sent -- forgetting it would end the wait and send the file plain.
+#[test]
+fn a_held_file_renamed_and_edited_then_trashed_on_the_server_is_not_published() {
+    let (world, _, out) = a_vault_of_two(9_980, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    let edited = b"renamed and edited, then trashed on the server";
+    holder.fs.user_rename("Plain/out.txt", "Plain/r.txt");
+    holder.fs.user_write("Plain/r.txt", edited);
+    assert!(world.settle().is_some());
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": out }))
+        .expect("the trash should be accepted");
+    assert!(world.settle().is_some(), "the wait must stay quiet");
+
+    no_plaintext_of(&world, edited);
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(disk_tree(holder).get("Plain/r.txt").cloned().flatten(), Some(jd_sim::sha256_hex(edited)));
+    let told = held_issues(holder);
+    assert!(
+        told.len() == 1 && told[0].starts_with("r.txt was deleted on the server") && told[0].contains("not uploaded"),
+        "{told:?}"
+    );
+}
+
+/// A held file moved back into its vault and edited in the same pass comes
+/// home: it is the held file, not a stranger at the held name, so it takes no
+/// conflict name and nobody is told otherwise; the edit goes up sealed, once
+/// (review B2). The record it comes home under is a new one: a file moved and
+/// edited in one pass reads as a delete and a creation (scan.rs, rule 4), and
+/// its disk identity only makes it wait until the held record's delete has
+/// landed -- it names nothing.
+#[test]
+fn a_held_file_moved_back_and_edited_in_one_pass_comes_home() {
+    let (world, _, _) = a_vault_of_two(9_974, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    let edited = b"edited on the way back into the vault";
+    holder.fs.user_rename("Plain/out.txt", "Private/out.txt");
+    holder.fs.user_write("Private/out.txt", edited);
+    assert!(world.settle().is_some());
+
+    assert_eq!(
+        disk_tree(holder).get("Private/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(edited)),
+        "the file did not come home under its own name: {:?}",
+        disk_tree(holder)
+    );
+    let issues = holder.store.open_issues().unwrap();
+    assert!(!issues.iter().any(|i| i.kind == "kept_aside" || i.kind == "held_outside_the_vault"), "{issues:?}");
+    let sealed_edit = world
+        .server
+        .vault_files()
+        .into_iter()
+        .filter(|f| world.server.files().iter().any(|g| g.id == f.id && !g.trashed))
+        .filter_map(|f| jd_sim::scenario::open_as_the_owner(&world, &f))
+        .filter(|(name, h)| name == "out.txt" && h.as_deref() == Some(jd_sim::sha256_hex(edited).as_str()))
+        .count();
+    assert_eq!(sealed_edit, 1, "the edit is not on the server sealed exactly once: {:?}", world.server.tree());
+    no_plaintext_of(&world, edited);
+    no_plaintext_of(&world, HELD_BODY);
+    assert_converged(&world);
+}
+
+/// The price scan.rs's rule 4 chose, pinned as it is: a sealed file moved
+/// within its vault and edited in one pass reads as a delete and a creation.
+/// Its record is trashed on the server and the edited bytes go up sealed as a
+/// new file beside where it was. The version chain is lost; no bytes are, and
+/// nothing is published.
+#[test]
+fn a_sealed_file_moved_and_edited_in_one_pass_is_a_delete_and_a_creation() {
+    let (world, private, out) = a_vault_of_two(9_975, &["holder"]);
+    let sub = world.server.seed_encrypted_folder(Some(private), "Sub");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    let edited = b"moved within the vault and edited in the same breath";
+    holder.fs.user_rename("Private/out.txt", "Private/Sub/out.txt");
+    holder.fs.user_write("Private/Sub/out.txt", edited);
+    assert!(world.settle().is_some());
+    assert_eq!(server_folder_of(&world, out), None, "the old record was not trashed: {:?}", world.server.tree());
+    let in_sub = world
+        .server
+        .vault_files()
+        .into_iter()
+        .filter(|f| f.folder_path == "Private/Sub" && world.server.files().iter().any(|g| g.id == f.id && !g.trashed))
+        .filter_map(|f| jd_sim::scenario::open_as_the_owner(&world, &f))
+        .filter(|(_, h)| h.as_deref() == Some(jd_sim::sha256_hex(edited).as_str()))
+        .count();
+    assert_eq!(in_sub, 1, "the edit is not in Sub, sealed, once: {:?}", world.server.tree());
+    let _ = sub;
+    no_plaintext_of(&world, edited);
+    no_plaintext_of(&world, HELD_BODY);
+    assert_converged(&world);
+}
+
+/// Edited on both sides while held, then moved back: both edits survive.
+#[test]
+fn a_held_file_edited_on_both_sides_keeps_both_edits_when_it_returns() {
+    let (world, _, _) = a_vault_of_two(9_964, &["holder", "peer"]);
+    let mut committed = Committed::default();
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    let here = b"edited here while it stood outside the vault";
+    let there = b"edited on the peer, inside the vault";
+    holder.fs.user_write("Plain/out.txt", here);
+    world.device("peer").fs.user_write("Private/out.txt", there);
+    committed.note("Plain/out.txt", here);
+    committed.note("Private/out.txt", there);
+    assert!(world.settle().is_some(), "edits while held must not wedge anything");
+    no_plaintext_of(&world, here);
+
+    holder.fs.user_rename("Plain/out.txt", "Private/out.txt");
+    assert!(world.settle().is_some());
+    no_plaintext_of(&world, here);
+    no_plaintext_of(&world, there);
+    assert_nothing_lost(&world, &committed);
+    assert_converged(&world);
+}
+
+/// A plain file a peer puts at a held file's local path never lands over it.
+/// The two are one name in one folder on this disk, and the standing rule for
+/// that is to refuse the newcomer and say so -- never to invent a name for it.
+/// When the held file goes back into its vault the name is free, and the
+/// peer's file lands.
+#[test]
+fn a_peer_file_arriving_at_a_held_files_path_waits_for_the_name() {
+    let (world, _, _) = a_vault_of_two(9_965, &["holder", "peer"]);
+    let mut committed = Committed::default();
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    assert!(world.settle().is_some());
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    let peers = b"the peer's own plain out.txt";
+    world.device("peer").fs.user_write("Plain/out.txt", peers);
+    committed.note("Plain/out.txt", peers);
+    assert!(world.settle().is_some());
+
+    assert_eq!(
+        disk_tree(holder).get("Plain/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(HELD_BODY)),
+        "the held file was written over"
+    );
+    let issues = holder.store.open_issues().unwrap();
+    let waiting: Vec<&String> = issues.iter().filter(|i| i.kind == "waits_for_a_held_file").map(|i| &i.detail).collect();
+    assert_eq!(waiting.len(), 1, "the user was not told: {issues:?}");
+    assert!(
+        waiting[0].starts_with("out.txt from the server was not put in Plain: the vault file out.txt is being kept there"),
+        "the refusal does not name both files: {waiting:?}"
+    );
+    assert!(!issues.iter().any(|i| i.kind == "unsyncable"), "told twice: {issues:?}");
+    no_plaintext_of(&world, HELD_BODY);
+
+    holder.fs.user_rename("Plain/out.txt", "Private/out.txt");
+    assert!(world.settle().is_some());
+    assert_eq!(
+        disk_tree(holder).get("Plain/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(peers)),
+        "the peer's file never landed once the name was free"
+    );
+    assert!(
+        !holder.store.open_issues().unwrap().iter().any(|i| i.kind == "waits_for_a_held_file"),
+        "the refusal outlived the hold: {:?}",
+        holder.store.open_issues().unwrap()
+    );
+    no_plaintext_of(&world, HELD_BODY);
+    assert_nothing_lost(&world, &committed);
+    assert_converged(&world);
+}
+
+/// The hold is the record, so it survives the device dying, and nothing plain
+/// goes up when it comes back.
+#[test]
+fn a_hold_survives_a_restart() {
+    let (world, private, out) = a_vault_of_two(9_966, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    world.pass(holder);
+    world.power_cycle(holder);
+    assert!(world.settle().is_some());
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)));
+    assert_eq!(held_issues(holder).len(), 1);
+    assert_converged(&world);
+}
+
+/// The server trashes the sealed copy while it is held. Unedited here, that is
+/// an ordinary remote delete. Edited here, the copy stays on this device only,
+/// with an issue, and is NEVER uploaded plain -- that would be the conversion
+/// on a drag the hold exists to refuse.
+fn the_server_trashes_a_held_file(edited: bool) {
+    let (world, _, out) = a_vault_of_two(9_967, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    let edit = b"edited here after the drag";
+    if edited {
+        holder.fs.user_write("Plain/out.txt", edit);
+    }
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": out }))
+        .expect("the trash should be accepted");
+    assert!(world.settle().is_some());
+    no_plaintext_of(&world, HELD_BODY);
+    no_plaintext_of(&world, edit);
+    let disk = disk_tree(holder);
+    if edited {
+        assert_eq!(
+            disk.get("Plain/out.txt").cloned().flatten(),
+            Some(jd_sim::sha256_hex(edit)),
+            "the edited copy was lost: {disk:?}"
+        );
+        let told = held_issues(holder);
+        assert!(
+            told.len() == 1 && told[0].contains("was deleted on the server") && told[0].contains("not uploaded"),
+            "the user was not told: {told:?}"
+        );
+    } else {
+        assert!(!disk.contains_key("Plain/out.txt"), "a remote delete did not land: {disk:?}");
+    }
+}
+
+#[test]
+fn the_server_trashing_an_unedited_held_file_deletes_it_here() {
+    the_server_trashes_a_held_file(false);
+}
+
+#[test]
+fn the_server_trashing_an_edited_held_file_keeps_the_edit_here_unsent() {
+    the_server_trashes_a_held_file(true);
+}
+
+/// A peer moves the sealed copy to another vault folder while it is held
+/// here. The record learns the new server placement and does not follow it on
+/// this disk: the file stays where the user put it, still held.
+#[test]
+fn a_held_file_moved_between_vault_folders_by_a_peer_stays_where_the_user_put_it() {
+    let (world, private, out) = a_vault_of_two(9_968, &["holder", "peer"]);
+    let sub = world.server.seed_encrypted_folder(Some(private), "Sub");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    world
+        .server
+        .action("drive_move", &serde_json::json!({ "entity_type": "file", "entity_id": out, "parent_id": sub }))
+        .expect("the move should be accepted");
+    assert!(world.settle().is_some());
+    assert_eq!(server_folder_of(&world, out), Some(Some(sub)));
+    assert_eq!(
+        disk_tree(holder).get("Plain/out.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(HELD_BODY)),
+        "the held file followed the server"
+    );
+    assert_eq!(held_issues(holder).len(), 1);
+    no_plaintext_of(&world, HELD_BODY);
+    assert_converged(&world);
+}
+
+/// From one vault to another is not a crossing: an ordinary move, sealed the
+/// whole way (Q3 of the D1 review).
+#[test]
+fn a_sealed_file_moved_from_one_vault_to_another_is_an_ordinary_move() {
+    let (world, _, out) = a_vault_of_two(9_969, &["holder"]);
+    let other = world.server.seed_encrypted_folder(None, "Other");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private/out.txt", "Other/out.txt");
+    assert!(world.settle().is_some());
+    assert_eq!(server_folder_of(&world, out), Some(Some(other)), "the move did not go up");
+    no_plaintext_of(&world, HELD_BODY);
+    assert!(held_issues(holder).is_empty());
+    assert_converged(&world);
 }
 
 /// A folder record knows which directory is its own (WP2 part b).
@@ -8071,10 +8767,16 @@ fn a_vault_folder_dragged_out_is_not_published_in_the_clear() {
         1,
         "the refusal has to be surfaced exactly once: {withdrawn:?}"
     );
+    // What the user can actually do, and nothing the platform cannot: there
+    // is no way to turn an encrypted folder back into plaintext, so no
+    // protection-level change is offered.
     assert!(
-        withdrawn[0].contains("change its protection level"),
+        withdrawn[0].starts_with("Sub is encrypted and stays in its vault on the server.")
+            && withdrawn[0].contains("Move it back into the vault")
+            && withdrawn[0].contains("download its files in the browser"),
         "and it has to say what the user can do about it: {withdrawn:?}"
     );
+    assert!(!withdrawn[0].contains("protection level"), "sent to a level change that does not exist: {withdrawn:?}");
 }
 
 
@@ -10083,13 +10785,18 @@ fn a_parent_left_empty_by_its_child_leaving_is_not_paired_with_a_new_folder() {
 }
 
 /// The cycle shape with one leg inside a vault: a plain file and a private
-/// file swap places across the vault edge, on a folding disk. Crossing the
-/// edge is a conversion -- trash on one side, upload on the other -- not a
-/// rename, so there is no cycle to park; this pins that the swap converges
-/// with the right bytes on each side and the plain bytes never sit in the
-/// vault in the clear.
+/// file swap places across the vault edge, on a folding disk. Neither leg is
+/// a rename, so there is no cycle to park. The plain file going IN is
+/// converted -- trashed outside, uploaded sealed inside. The private file
+/// coming OUT is held (owner decision D1): sealed where it was on the server,
+/// at `Plain/X.txt` here. This pins that the swap settles with the right
+/// bytes on each side of this disk, the plain bytes never sit in the vault in
+/// the clear, and the private bytes never go up at all. The held file still
+/// holds `y.txt` in the vault on the server, and on this folding disk `Y.txt`
+/// is that name, so the plain file arrives in the vault set aside under a
+/// conflict name, sealed -- the name a folding peer could not show twice.
 #[test]
-fn a_swap_across_a_vault_edge_converts_both_ways() {
+fn a_swap_across_a_vault_edge_converts_in_and_holds_out() {
     let vault = SimVault::new(9_247);
     let mut world = World::of(9_247, &[("laptop", jd_sim::Platform::MacOs)]);
     world.give_vault("laptop", &vault);
@@ -10119,17 +10826,17 @@ fn a_swap_across_a_vault_edge_converts_both_ways() {
     assert_nothing_lost(&world, &committed);
     let tree = world.server.tree();
     assert!(!tree.keys().any(|p| p.contains(".jd-")), "park never finished: {tree:?}");
-    assert_eq!(
-        tree.get("Plain/X.txt").cloned().flatten(),
-        Some(jd_sim::sha256_hex(b)),
-        "Plain/X.txt should now hold the former private bytes, in the clear: {tree:?}"
-    );
-    assert!(!tree.contains_key("Private/Y.txt"), "the plain bytes went into the vault in the clear: {tree:?}");
-    assert_eq!(tree.keys().filter(|p| p.starts_with("Private/")).count(), 1, "{tree:?}");
+    no_plaintext_of(&world, b);
+    assert!(!tree.contains_key("Plain/x.txt"), "the plain file was not taken out of Plain: {tree:?}");
+    assert_eq!(tree.keys().filter(|p| p.starts_with("Private/")).count(), 2, "{tree:?}");
     let disk = disk_tree(laptop);
     assert_eq!(disk.get("Plain/X.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b)), "{disk:?}");
-    assert_eq!(disk.get("Private/Y.txt").cloned().flatten(), Some(jd_sim::sha256_hex(a)), "{disk:?}");
-    assert!(laptop.store.open_issues().unwrap().is_empty(), "{:?}", laptop.store.open_issues().unwrap());
+    let set_aside: Vec<_> = disk
+        .iter()
+        .filter(|(p, h)| p.starts_with("Private/Y (") && h.as_deref() == Some(jd_sim::sha256_hex(a).as_str()))
+        .collect();
+    assert_eq!(set_aside.len(), 1, "the plain file did not arrive in the vault under a conflict name: {disk:?}");
+    assert_eq!(held_issues(laptop).len(), 1, "{:?}", laptop.store.open_issues().unwrap());
 }
 
 /// The device that parked dies before finishing, the peer passes and puts the
