@@ -121,6 +121,20 @@ class SyncDevice extends SystemBase {
 		}
 	}
 
+	/**
+	 * The client-custody vault scopes this device was handed, e.g.
+	 * array('drive', 'passwords'). A device whose row names none but holds a
+	 * device key was handed Drive's: before other vaults could be handed over,
+	 * the key was stored only when Drive's was.
+	 */
+	public function vault_scopes(): array {
+		$raw = (string)$this->get('sde_vault_scopes');
+		if ($raw !== '') {
+			return array_values(array_filter(explode(',', $raw), 'strlen'));
+		}
+		return ((string)$this->get('sde_device_pubkey') !== '') ? array('drive') : array();
+	}
+
 	/** The user-facing view of this device. */
 	public function export() {
 		return array(
@@ -132,6 +146,7 @@ class SyncDevice extends SystemBase {
 			'last_cursor'    => $this->get('sde_last_cursor') !== null ? (int)$this->get('sde_last_cursor') : null,
 			'linked_time'    => $this->get('sde_create_time'),
 			'has_vault_key'  => ($this->get('sde_device_pubkey') !== null && $this->get('sde_device_pubkey') !== ''),
+			'vault_scopes'   => $this->vault_scopes(),
 		);
 	}
 }

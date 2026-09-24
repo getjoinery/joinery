@@ -28,6 +28,7 @@ function vault_client_remove_wrapping_logic(array $input): LogicResult {
 		if (!$vault) {
 			return LogicResult::error('Your vault is not set up.');
 		}
+		VaultClientCustody::assertNoPendingRotation($vault);
 
 		if ($session->step_up_outstanding(null, 300)) {
 			return LogicResult::error('Confirm with your passkey before changing your vault unlockers.', ['requires_stepup' => true]);

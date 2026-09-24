@@ -25,12 +25,14 @@ require_once(PathHelper::getIncludePath('logic/drive_trash_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_changes_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_stat_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_index_logic.php'));
-require_once(PathHelper::getIncludePath('logic/drive_vault_status_logic.php'));
+require_once(PathHelper::getIncludePath('logic/vault_client_probe_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_devices_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_device_rename_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_device_revoke_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_device_link_info_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_device_link_deny_logic.php'));
+require_once(PathHelper::getIncludePath('logic/drive_device_link_approve_logic.php'));
+require_once(PathHelper::getIncludePath('tests/lib/vault_fixtures.php'));
 
 $made_files = array(); $made_folders = array(); $made_links = array(); $made_devices = array();
 harness_defer(function () use (&$made_files, &$made_folders, &$made_links, &$made_devices) {
@@ -211,20 +213,29 @@ check(drive_index_logic(array('after_id' => 'garbage'))->error !== null,
 	'an unparseable cursor is refused rather than silently restarting the walk');
 
 // ---------------------------------------------------------------------------
-section('drive_vault_status is lean');
+section('vault_client_probe is lean');
 
-$vault = drive_vault_status_logic(array('scope' => 'drive'));
-check(!$vault->error, 'drive_vault_status succeeds', (string)$vault->error);
+$vault = vault_client_probe_logic(array('scope' => 'drive'));
+check(!$vault->error, 'vault_client_probe succeeds', (string)$vault->error);
 check(array_key_exists('set_up', $vault->data)
 	&& array_key_exists('public_key', $vault->data)
 	&& array_key_exists('key_generation', $vault->data),
-	'drive_vault_status answers the three facts');
+	'vault_client_probe answers the three facts');
 foreach (array('wrappings', 'salt', 'kdf_params', 'prf_context') as $forbidden) {
 	check(!array_key_exists($forbidden, $vault->data),
-		"drive_vault_status withholds $forbidden");
+		"vault_client_probe withholds $forbidden");
 }
-check(drive_vault_status_logic(array('scope' => 'passwords'))->error !== null,
-	'drive_vault_status refuses a non-drive scope');
+check(vault_client_probe_logic(array())->data['scope'] === 'drive',
+	'with no scope named it answers for the drive vault, as the sync client asks');
+if (VaultScopes::isClientCustody('passwords')) {
+	$pw = vault_client_probe_logic(array('scope' => 'passwords'));
+	check(!$pw->error && array_key_exists('key_generation', $pw->data),
+		'it answers for any registered client-custody scope');
+}
+check(vault_client_probe_logic(array('scope' => 'user'))->error !== null,
+	'it refuses the server-custody scope: that key is never a native client\'s');
+check(vault_client_probe_logic(array('scope' => 'no_such_scope'))->error !== null,
+	'it refuses a scope nothing registers');
 
 // ---------------------------------------------------------------------------
 section('device link ceremony state machine');
@@ -271,6 +282,7 @@ $reloaded->scrub_secrets();
 $after_scrub = new DeviceLink((int)$link->key, true);
 check($after_scrub->open_secret() === null, 'scrubbing removes the secret');
 check($after_scrub->get('dlk_sealed_vault_key') === null, 'scrubbing removes the sealed vault key');
+check($after_scrub->get('dlk_sealed_vault_keys') === null, 'and every other vault\'s sealed key');
 
 // Expiry closes the door without any sweep having to run.
 $link->set('dlk_expires_time', gmdate('Y-m-d H:i:s', time() - 60));
@@ -285,6 +297,86 @@ $link->save();
 $deny = drive_device_link_deny_logic(array('code' => $code));
 check(!$deny->error && !empty($deny->data['denied']), 'a ceremony can be refused', (string)$deny->error);
 check(DeviceLink::load_open_by_code($code) === null, 'a refused ceremony is closed');
+
+// ---------------------------------------------------------------------------
+section('device link hands over each chosen vault');
+
+// Approval names the vaults a device receives: Drive's in sealed_vault_key,
+// the rest in sealed_vault_keys. The owner holds no second factor, so the
+// step-up has nothing to ask for (the approve logic's own rule).
+vault_fixture_client_vault((int)$owner->key, base64_encode(random_bytes(32)), 'drive');
+$other_scope = null;
+foreach (VaultScopes::clientScopes() as $cs) {
+	if ($cs !== 'drive') { $other_scope = $cs; break; }
+}
+if ($other_scope !== null) {
+	vault_fixture_client_vault((int)$owner->key, base64_encode(random_bytes(32)), $other_scope);
+}
+
+$open_link = function () use (&$made_links) {
+	$c = DeviceLink::generate_code();
+	$l = new DeviceLink(NULL);
+	$l->set('dlk_code_hash', DeviceLink::hash_code($c));
+	$l->set('dlk_poll_token_hash', DeviceLink::hash_token(bin2hex(random_bytes(32))));
+	$l->set('dlk_device_name', 'Vault Workstation');
+	$l->set('dlk_platform', SyncDevice::PLATFORM_LINUX);
+	$l->set('dlk_device_pubkey', base64_encode(random_bytes(32)));
+	$l->set('dlk_request_ip', '198.51.100.8');
+	$l->set('dlk_status', DeviceLink::STATUS_PENDING);
+	$l->set('dlk_expires_time', gmdate('Y-m-d H:i:s', time() + DeviceLink::TTL_SECONDS));
+	$l->save();
+	$made_links[] = $l->key;
+	return array($c, $l);
+};
+$register_minted = function ($result) {
+	if (!$result->error && !empty($result->data['device_id'])) {
+		$dev = new SyncDevice((int)$result->data['device_id'], true);
+		harness_register_row('sde_sync_devices', 'sde_sync_device_id', (int)$dev->key);
+		harness_register_row('apk_api_keys', 'apk_api_key_id', (int)$dev->get('sde_apk_api_key_id'));
+	}
+};
+
+list($c1, $l1) = $open_link();
+check(drive_device_link_approve_logic(array('code' => $c1, 'sealed_vault_keys' => array('drive' => 'x')))->error !== null,
+	'Drive\'s key is refused in sealed_vault_keys: it has its own field, the one the sync client reads');
+check(drive_device_link_approve_logic(array('code' => $c1, 'sealed_vault_keys' => array('no_such_scope' => 'x')))->error !== null,
+	'an unregistered vault is refused');
+check(drive_device_link_approve_logic(array('code' => $c1, 'sealed_vault_keys' => array('user' => 'x')))->error !== null,
+	'the server-custody vault is refused: its key is never a device\'s');
+check(DeviceLink::load_open_by_code($c1) !== null, 'and no refusal closed the ceremony');
+
+if ($other_scope !== null) {
+	$session->set_api_user($grantee->key);
+	list($cg, $lg) = $open_link();
+	check(drive_device_link_approve_logic(array('code' => $cg, 'sealed_vault_keys' => array($other_scope => 'x')))->error !== null,
+		'a vault the user has not set up is refused');
+	$session->set_api_user($owner->key);
+
+	$approved = drive_device_link_approve_logic(array(
+		'code' => $c1,
+		'enable_vault' => true,
+		'sealed_vault_key' => 'drive-sealed-blob',
+		'sealed_vault_keys' => array($other_scope => 'other-sealed-blob'),
+	));
+	$register_minted($approved);
+	check(!$approved->error, 'a device receives Drive and another vault in one approval', (string)$approved->error);
+	check(($approved->data['vault_scopes'] ?? null) === array('drive', $other_scope), 'the reply names both vaults');
+	$l1r = new DeviceLink((int)$l1->key, true);
+	check($l1r->get('dlk_sealed_vault_key') === 'drive-sealed-blob', 'Drive\'s key is stored where the sync client collects it');
+	check(json_decode((string)$l1r->get('dlk_sealed_vault_keys'), true) === array($other_scope => 'other-sealed-blob'),
+		'the other vault\'s key is stored by scope');
+	$dev = new SyncDevice((int)$approved->data['device_id'], true);
+	check($dev->vault_scopes() === array('drive', $other_scope), 'the device records which vaults it holds');
+	check(($dev->export()['vault_scopes'] ?? null) === array('drive', $other_scope), 'and says so in its export');
+} else {
+	harness_skip('multi-vault handoff', 'no client-custody scope beyond drive is registered here');
+}
+
+list($c2, $l2) = $open_link();
+$plain = drive_device_link_approve_logic(array('code' => $c2));
+$register_minted($plain);
+check(!$plain->error && ($plain->data['vault_scopes'] ?? null) === array(), 'a device given no vault holds none');
+check((new SyncDevice((int)$plain->data['device_id'], true))->vault_scopes() === array(), 'and records none');
 
 // ---------------------------------------------------------------------------
 section('sync devices: listing, rename, revoke, check-in');

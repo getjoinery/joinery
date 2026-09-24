@@ -639,10 +639,10 @@ the granted entity it hangs off — so the client can mount it under the right
 that could not see the trash would read a trashed file as vanished and delete
 the local copy, and would never recognize a restore.
 
-### `drive_vault_status` — lean vault probe
+### `vault_client_probe` — lean vault probe
 
-`{scope: 'drive'}` → `{set_up, public_key, key_generation}`, reachable with a
-session key. Enough to seal file keys for uploads and to notice a key rotation.
+`{scope}` (default `drive`; any registered client-custody scope) →
+`{set_up, public_key, key_generation}`, reachable with a session key. Enough to seal file keys for uploads and to notice a key rotation.
 Wrappings, salts, and KDF parameters are unlock material and stay on the
 browser-only `vault_client_status`.
 
@@ -658,14 +658,17 @@ user approves in the browser they are already signed into.
 2. The user opens `/profile/devices/link?code=…`, which requires a signed-in
    session and a recent step-up, and shows what is asking — name, platform, and
    the address the request came from. If they have encrypted folders they may
-   tick a box to give this device access: the browser unlocks the vault and
-   seals the vault secret key to the device's public key
-   (`VaultKeyring` session `sealSecretKeyTo()`). Approval calls
-   `drive_device_link_approve`, which mints the session `ApiKey`, creates the
-   `SyncDevice`, and parks the sealed key and the encrypted one-time secret on
-   the ceremony row.
+   tick a box to give this device access, and one more box for each other
+   browser-held vault they have set up (the password vault, say): for each
+   ticked vault the browser unlocks it and seals its secret key to the device's
+   public key (`session.sealSecretKeyTo()`). Approval calls
+   `drive_device_link_approve` (Drive's key in `sealed_vault_key`, the others in
+   `sealed_vault_keys`), which mints the session `ApiKey`, creates the
+   `SyncDevice` with the scopes it was handed (`sde_vault_scopes`), and parks
+   the sealed keys and the encrypted one-time secret on the ceremony row.
 3. The client polls `GET /api/v1/auth/device_link/{poll_token}` and collects the
-   credential exactly once; the row is scrubbed immediately after.
+   credential exactly once — with `sealed_vault_key` and `sealed_vault_keys`
+   when it was given vaults; the row is scrubbed immediately after.
 
 **Data model.** `SyncDevice` (`sde_sync_devices`) is the device identity, paired
 1:1 with the session key it authenticates with, holding the device public key,

@@ -22,7 +22,8 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
- * @version 1.3.1
+ * @version 1.4.0
+ * @changelog 1.4.0 - a device-link claim carries sealed_vault_keys ({scope: blob}) beside sealed_vault_key
  * @changelog 1.3.1 - device-link 429s say the count, the limit and when to retry (api_rate_limited)
  * @changelog 1.3.0 - auth/web_session: mints an AppBridgeToken for session keys
  *   so the app webview can derive a web session from the API credential.
@@ -304,6 +305,12 @@ class ApiAuthEndpoint {
 		$sealed = $link->get('dlk_sealed_vault_key');
 		if ($sealed !== null && $sealed !== '') {
 			$payload['sealed_vault_key'] = $sealed;
+		}
+		// Any other vault the user handed over, {scope: blob}. Drive's stays in
+		// sealed_vault_key above, where the shipped sync client reads it.
+		$sealed_many = json_decode((string)$link->get('dlk_sealed_vault_keys'), true);
+		if (is_array($sealed_many) && $sealed_many) {
+			$payload['sealed_vault_keys'] = $sealed_many;
 		}
 
 		$link->scrub_secrets();

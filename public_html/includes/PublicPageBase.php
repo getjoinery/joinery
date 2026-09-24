@@ -37,6 +37,20 @@ abstract class PublicPageBase {
 		$this->vault_client_needed = true;
 	}
 
+	/** Set by needs_vault_rotation(). */
+	protected $vault_rotation_needed = false;
+
+	/**
+	 * Declare that this page can rotate a client-custody vault's key. Besides the
+	 * client modules, the head then carries every consumer's re-seal hook
+	 * (VaultUnlock::clientReseal() scripts), which register
+	 * JoinerySealed.onReseal() for keys kept outside sealed models.
+	 */
+	public function needs_vault_rotation(): void {
+		$this->vault_client_needed = true;
+		$this->vault_rotation_needed = true;
+	}
+
 	/**
 	 * Header-menu providers, keyed by the $menu_data key they populate (e.g.
 	 * 'cart'). A provider is `function(SessionControl $session): ?array` and is
@@ -884,6 +898,13 @@ abstract class PublicPageBase {
 		$this->render_vault_script('assets/js/vault-crypto.js');
 		$this->render_vault_script('assets/js/vault-keyring.js');
 		$this->render_vault_script('assets/js/joinery-sealed.js');
+		if ($this->vault_rotation_needed) {
+			foreach (VaultScopes::clientScopes() as $scope) {
+				foreach (VaultUnlock::clientResealsFor($scope)['scripts'] as $script) {
+					$this->render_vault_script(ltrim($script, '/'));
+				}
+			}
+		}
 	}
 
 	/**

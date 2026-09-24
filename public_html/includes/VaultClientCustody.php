@@ -16,6 +16,8 @@
  * Each client-custody scope is its own X25519 keypair with its own per-scope
  * PRF context, so a KEK derived for one scope can never open another's key.
  *
+ * @version 1.1 - wrappings carry a key generation; the status lists the one in use and,
+ *   apart, a pending rotation's; assertNoPendingRotation()
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
@@ -80,7 +82,7 @@ class VaultClientCustody {
 	 * it. Client-custody wrappings tag their own generation (always the current
 	 * one at enrollment) via createWrapped()'s null default.
 	 */
-	public static function persistWrappings(int $user_id, UserEncryptionVault $vault, array $wrappings): void {
+	public static function persistWrappings(int $user_id, UserEncryptionVault $vault, array $wrappings, ?int $key_generation = null): void {
 		foreach ($wrappings as $w) {
 			$type = isset($w['unlocker_type']) ? (string)$w['unlocker_type'] : '';
 			$blob = isset($w['wrapped_secret_key']) ? (string)$w['wrapped_secret_key'] : '';
@@ -103,7 +105,7 @@ class VaultClientCustody {
 				throw new VaultClientCustodyException('Unknown unlocker type in a wrapping.');
 			}
 
-			self::insertOpaqueWrapping((int)$vault->key, $type, $blob, $credential_internal_id, $label, $salt);
+			self::insertOpaqueWrapping((int)$vault->key, $type, $blob, $credential_internal_id, $label, $salt, $key_generation);
 		}
 	}
 
@@ -115,7 +117,7 @@ class VaultClientCustody {
 	 * stable string the browser reconstructs from scope + unlocker (it does not
 	 * depend on the row id).
 	 */
-	private static function insertOpaqueWrapping(int $vault_id, string $type, string $blob, ?int $credential_id, ?string $label, ?string $salt): UserEncryptionWrapping {
+	private static function insertOpaqueWrapping(int $vault_id, string $type, string $blob, ?int $credential_id, ?string $label, ?string $salt, ?int $key_generation = null): UserEncryptionWrapping {
 		$wrapping = new UserEncryptionWrapping(NULL);
 		$wrapping->set('uew_uev_user_encryption_vault_id', $vault_id);
 		$wrapping->set('uew_unlocker_type', $type);
@@ -128,7 +130,8 @@ class VaultClientCustody {
 		if ($salt !== null && $salt !== '') {
 			$wrapping->set('uew_salt', $salt);
 		}
-		$wrapping->set('uew_key_generation', (int)(new UserEncryptionVault($vault_id, TRUE))->get('uev_key_generation'));
+		$wrapping->set('uew_key_generation', $key_generation
+			?? (int)(new UserEncryptionVault($vault_id, TRUE))->get('uev_key_generation'));
 		$wrapping->set('uew_wrapped_secret_key', $blob);
 		$wrapping->save();
 		return $wrapping;
@@ -149,11 +152,23 @@ class VaultClientCustody {
 		$wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault->key]);
 		$wrappings->load();
 		$list = [];
+		$pending_list = [];
 		$passkey_count = 0;
 		$unused_recovery = 0;
 		$has_passphrase = false;
+		$generation = (int)$vault->get('uev_key_generation');
+		$pending_generation = $vault->get('uev_pending_key_generation') !== null ? (int)$vault->get('uev_pending_key_generation') : null;
 		foreach ($wrappings as $w) {
 			$type = $w->get('uew_unlocker_type');
+			// The key in use unlocks with its own generation's wrappings only. A
+			// pending rotation's wrappings open the NEW key; they are listed
+			// apart, for the browser finishing that rotation.
+			if ((int)$w->get('uew_key_generation') !== $generation) {
+				if ($pending_generation !== null && (int)$w->get('uew_key_generation') === $pending_generation) {
+					$pending_list[] = self::wrappingView($w);
+				}
+				continue;
+			}
 			if ($type === UserEncryptionWrapping::TYPE_PASSKEY) {
 				$passkey_count++;
 			}
@@ -163,15 +178,7 @@ class VaultClientCustody {
 			if ($type === UserEncryptionWrapping::TYPE_PASSPHRASE) {
 				$has_passphrase = true;
 			}
-			$list[] = [
-				'id'                 => (int)$w->key,
-				'unlocker_type'      => $type,
-				'credential_id'      => self::credentialB64ForWrapping($w),
-				'wrapped_secret_key' => $w->get('uew_wrapped_secret_key'),
-				'salt'               => $w->get('uew_salt'),
-				'label'              => $w->get('uew_label'),
-				'is_used'            => (bool)$w->get('uew_is_used'),
-			];
+			$list[] = self::wrappingView($w);
 		}
 
 		return [
@@ -187,7 +194,34 @@ class VaultClientCustody {
 			'has_passphrase'             => $has_passphrase,
 			'regenerate_recommended'     => $unused_recovery < 3,
 			'wrappings'                  => $list,
+			'pending_key_generation'     => $pending_generation,
+			'pending_public_key'         => $pending_generation !== null ? $vault->get('uev_pending_public_key') : null,
+			'pending_wrappings'          => $pending_list,
 		];
+	}
+
+	/** One wrapping as the browser sees it. */
+	private static function wrappingView(UserEncryptionWrapping $w): array {
+		return [
+			'id'                 => (int)$w->key,
+			'unlocker_type'      => $w->get('uew_unlocker_type'),
+			'credential_id'      => self::credentialB64ForWrapping($w),
+			'wrapped_secret_key' => $w->get('uew_wrapped_secret_key'),
+			'salt'               => $w->get('uew_salt'),
+			'label'              => $w->get('uew_label'),
+			'is_used'            => (bool)$w->get('uew_is_used'),
+		];
+	}
+
+	/**
+	 * Refuse a change to a vault's unlockers while its key is being rotated:
+	 * they wrap the key the commit retires, so whatever was added would be lost
+	 * and whatever was removed would no longer matter.
+	 */
+	public static function assertNoPendingRotation(UserEncryptionVault $vault): void {
+		if ($vault->get('uev_pending_key_generation') !== null) {
+			throw new VaultClientCustodyException('This vault\'s key is being rotated. Finish the rotation on your security page first.');
+		}
 	}
 
 	/** Map a passkey wrapping's internal pkc id back to the WebAuthn b64url the

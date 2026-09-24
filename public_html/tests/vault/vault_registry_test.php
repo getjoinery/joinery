@@ -33,6 +33,9 @@ check($core['drive_sealed']['reseals'] === true, 'Drive declares that it stores 
 check($core['api_idempotency']['reseals'] === true, 'the idempotency store declares that it stores sealed content');
 check($core['direct_spool']['reseals'] === true,
 	'the spool declares the reseal obligation — held deliveries carry parts sealed straight to the vault keypair');
+check($core['drive_sealed']['client_reseals'] === array('drive'),
+	'Drive declares that it keeps keys under the drive client-custody scope');
+check($core['api_idempotency']['client_reseals'] === array(), 'a consumer declaring none holds none');
 check($core['drive_sealed']['plugin'] === '', 'a core consumer records no owning plugin');
 check(is_file($core['drive_sealed']['path']), "a core consumer's bootstrap path resolves to a real file");
 
@@ -132,6 +135,33 @@ check(isset($unmet['nothing']) && in_array('reseals', $unmet['nothing'], true)
 	'a consumer that declared both and registered neither is reported for both, by name');
 check(!isset($unmet['drive_sealed']) || in_array('reseals', $unmet['drive_sealed'], true),
 	'core consumers are checked on the same terms as plugins');
+
+// ---------------------------------------------------------------------------
+section('Consumer registry: client-custody resealers');
+// ---------------------------------------------------------------------------
+VaultConsumers::resetForTests();
+VaultConsumers::setPluginDeclarationsForTests(array(
+	'notes'    => array('declaration' => array('client_reseals' => array('acme_notes', 'Bad Scope!')), 'active' => true, 'bootstrap' => 'b.php'),
+	'silent'   => array('declaration' => array('client_reseals' => array('acme_notes')), 'active' => true, 'bootstrap' => 'b.php'),
+	'sleeping' => array('declaration' => array('client_reseals' => array('acme_notes')), 'active' => false, 'bootstrap' => 'b.php'),
+));
+VaultConsumers::setPluginEverActivatedForTests(array('sleeping' => true));
+check(VaultConsumers::allDeclarations()['notes']['client_reseals'] === array('acme_notes'),
+	'a declared scope list keeps the scope names and drops anything malformed');
+
+VaultConsumers::beginLoading('notes');
+VaultConsumers::noteClientReseal('acme_notes');
+VaultConsumers::endLoading();
+
+$unmet_client = VaultConsumers::unmetClientReseals('acme_notes');
+check(!isset($unmet_client['notes']), 'a consumer that registered its resealer is not reported');
+check(($unmet_client['silent'] ?? null) === false, 'an active consumer that registered nothing refuses the rotation');
+check(($unmet_client['sleeping'] ?? null) === true, 'so does a switched-off one that was ever used');
+check(VaultConsumers::unmetClientReseals('other_scope') === array(), 'a scope nobody declares has nothing unmet');
+VaultConsumers::setPluginEverActivatedForTests(array());
+check(!isset(VaultConsumers::unmetClientReseals('acme_notes')['sleeping']),
+	'a plugin never activated here holds nothing under the scope and does not block it');
+VaultConsumers::setPluginEverActivatedForTests(null);
 
 VaultConsumers::resetForTests();
 

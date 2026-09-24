@@ -15,6 +15,13 @@
  * device's public key. That sealed blob passes through here untouched — the
  * server stores ciphertext it cannot open, exactly as it does everywhere else
  * in the client-custody design.
+ *
+ * Drive's key rides in `sealed_vault_key` (with `enable_vault`), the field the
+ * shipped sync client reads. Every other client-custody scope the user chose
+ * rides in `sealed_vault_keys` ({scope: blob}), each sealed to the same device
+ * key in its own unlock. The device records which scopes it was handed.
+ *
+ * @version 1.1 - sealed_vault_keys for scopes beyond Drive; sde_vault_scopes recorded
  */
 
 function drive_device_link_approve_logic(array $input): LogicResult {
@@ -64,6 +71,39 @@ function drive_device_link_approve_logic(array $input): LogicResult {
 		}
 	}
 
+	// Any other vault the user chose to hand over. Each must be a registered
+	// client-custody scope the user has set up; Drive has its own field above.
+	$sealed_vault_keys = array();
+	$posted_keys = $input['sealed_vault_keys'] ?? array();
+	if (!is_array($posted_keys)) {
+		return LogicResult::error('sealed_vault_keys must map each vault to its sealed key.');
+	}
+	if ($posted_keys && $device_pubkey === '') {
+		return LogicResult::error('This device did not offer a key to receive your vaults, so it cannot be given them.');
+	}
+	require_once(PathHelper::getIncludePath('includes/VaultClientCustody.php'));
+	foreach ($posted_keys as $scope => $blob) {
+		$scope = (string)$scope;
+		$blob = is_string($blob) ? trim($blob) : '';
+		if ($scope === 'drive') {
+			return LogicResult::error('Drive\'s key travels in sealed_vault_key, not sealed_vault_keys.');
+		}
+		if (!VaultScopes::isClientCustody($scope)) {
+			return LogicResult::error('Unknown vault: ' . $scope . '.');
+		}
+		if (!VaultClientCustody::loadVault($user_id, $scope)) {
+			return LogicResult::error('You have not set up ' . lcfirst(VaultScopes::labelFor($scope)) . ', so there is no key to hand over.');
+		}
+		if ($blob === '' || strlen($blob) > 4096) {
+			return LogicResult::error('The sealed key for ' . lcfirst(VaultScopes::labelFor($scope)) . ' is missing or malformed. Unlock it and try again.');
+		}
+		$sealed_vault_keys[$scope] = $blob;
+	}
+	$handed_scopes = array_keys($sealed_vault_keys);
+	if ($enable_vault && $sealed_vault_key !== '') {
+		array_unshift($handed_scopes, 'drive');
+	}
+
 	$device_name = (string)$link->get('dlk_device_name');
 
 	// Mint the credential, then the identity that owns it. The key is labelled
@@ -76,8 +116,9 @@ function drive_device_link_approve_logic(array $input): LogicResult {
 	$device->set('sde_apk_api_key_id', (int)$api_key->key);
 	$device->set('sde_device_name', substr($device_name, 0, 64));
 	$device->set('sde_platform', (string)$link->get('dlk_platform'));
-	if ($enable_vault && $device_pubkey !== '') {
+	if ($handed_scopes && $device_pubkey !== '') {
 		$device->set('sde_device_pubkey', $device_pubkey);
+		$device->set('sde_vault_scopes', implode(',', $handed_scopes));
 	}
 	$device->save();
 
@@ -88,6 +129,9 @@ function drive_device_link_approve_logic(array $input): LogicResult {
 	if ($enable_vault && $sealed_vault_key !== '') {
 		$link->set('dlk_sealed_vault_key', $sealed_vault_key);
 	}
+	if ($sealed_vault_keys) {
+		$link->set('dlk_sealed_vault_keys', json_encode($sealed_vault_keys));
+	}
 	$link->seal_secret($minted['secret_key']);
 	$link->save();
 
@@ -97,12 +141,13 @@ function drive_device_link_approve_logic(array $input): LogicResult {
 		'device_id'   => (int)$device->key,
 		'device_name' => $device_name,
 		'vault_shared' => (bool)($enable_vault && $sealed_vault_key !== ''),
+		'vault_scopes' => $handed_scopes,
 	));
 }
 
 function drive_device_link_approve_logic_descriptor(): array {
 	return array(
-		'description'      => 'Approve a pending device-link ceremony: mints the device\'s session credential, creates its SyncDevice identity, and (optionally) stores the browser-sealed drive vault key for the device to collect. Requires a signed-in browser session and a recent step-up. `sealed_vault_key` is opaque ciphertext produced in the browser — the server cannot open it.',
+		'description'      => 'Approve a pending device-link ceremony: mints the device\'s session credential, creates its SyncDevice identity, and (optionally) stores browser-sealed vault keys for the device to collect: the drive key in `sealed_vault_key`, any other client-custody vault in `sealed_vault_keys` ({scope: blob}). Requires a signed-in browser session and a recent step-up. Every sealed key is opaque ciphertext produced in the browser — the server cannot open it.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => true,
@@ -111,6 +156,7 @@ function drive_device_link_approve_logic_descriptor(): array {
 			'code'             => array('type' => 'string', 'required' => true, 'max_length' => 32, 'label' => 'Link code'),
 			'enable_vault'     => array('type' => 'bool', 'required' => false, 'label' => 'Give this device your encrypted folders'),
 			'sealed_vault_key' => array('type' => 'string', 'required' => false, 'max_length' => 4096, 'label' => 'Drive vault secret key sealed to the device public key'),
+			'sealed_vault_keys' => array('type' => 'object', 'required' => false, 'label' => 'Other client-custody vault secret keys sealed to the device public key, by scope'),
 		),
 	);
 }

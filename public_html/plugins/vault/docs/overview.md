@@ -77,41 +77,49 @@ contents. Two layers:
   helper.
 - **Password-specific (this plugin).** `/api/v1/action/vault/*`: `keyring_get`,
   `keyring_save` (the sealed store DEK — create-only: the blob is the sole copy
-  of the store key, so an existing row is never overwritten), `entries_list`, `entry_save`,
-  `entry_delete` (trash), `entry_restore`. Every action is
-  `requires_browser_session`.
+  of the store key, so an existing row is never overwritten), `keyring_replace`
+  (the one overwrite: accepted only while the passwords vault key is being
+  rotated, see below), `entries_list`, `entry_save`, `entry_delete` (trash),
+  `entry_restore`. Every action is `requires_browser_session`.
 
 Data classes: **`VaultKeyring`** (`vlk_vault_keyring`, one row per user — the
 sealed store DEK) and **`VaultEntry`** (`vle_vault_entries`, one opaque blob per
 entry, soft-deleted for trash/restore).
 
-## The first-run ceremony
+## Setup, unlock and lock
 
-A guided setup in a centered card on first visit:
-
-1. **Choose an unlocker.** A passkey is the everyday unlocker (with a PRF
-   capability check); if the authenticator lacks PRF, a master passphrase is the
-   primary unlocker instead.
-2. **Save the recovery key.** Recovery keys are shown once; setup requires
-   **proof of custody** — download the file or re-type the last key — before
-   continuing. A bare "I saved it" checkbox is not enough.
-3. Optionally set a master passphrase fallback (offered alongside the passkey).
-
-Losing every unlocker (passkey, recovery key, and passphrase) permanently loses
-the vault — stated up front and acknowledged before setup proceeds.
-
-## Unlock and lock
+The page opens the vault through core: `JoinerySealed.session('passwords')` runs
+the [shared ceremony](../../../docs/sealed_vault.md#the-ceremony) in a modal on
+load — setup on a first visit, unlock after — and the page keeps no setup or
+unlock screen of its own. Setup offers a passkey (with a PRF capability check)
+or a passphrase, states that losing every unlocker loses the vault, and shows
+the recovery codes once, proven kept by re-typing the last one or downloading
+the file. A first visit then mints the store DEK and opens the editor for the
+first entry. Closing the modal leaves a small "Your password vault is closed"
+card with an **Open your vault** button.
 
 One deliberate act opens the password vault — its own unlock, separate from
-Drive and from mail/chat (separate keypair). The unlock screen offers the
-passkey (primary), the passphrase (if enrolled), and a recovery key (last). A
-consumed recovery key is one-time: the browser marks it used server-side.
+Drive and from mail/chat (separate keypair). The unlock offers the passkey, the
+passphrase (if enrolled), and a recovery code (last). A consumed recovery code is
+one-time: the browser marks it used server-side.
 
-**Locking discards all plaintext**, including unsaved edits — idle auto-lock
-(15 minutes by default, user-configurable), a manual "Lock now", and closing the
-tab. Keyboard and pointer activity defer the idle timer so the lock never fires
-mid-keystroke. The store DEK (a non-extractable `CryptoKey`) and the vault secret
-key are dropped on lock; relocking shows the unlock screen in place.
+**Locking discards all plaintext**, including unsaved edits. Core locks the
+session — after `vault_client_autolock_minutes` of no keyboard or pointer
+activity (a core setting, 15 by default; the Auto-lock select sets this
+browser's own choice for every vault it holds), on **Lock now**, when the tab is
+left, and when a back/forward-cache restore brings the page back — and the page's
+`onLock` handler drops the store DEK and every decrypted entry, empties the
+editor inputs, the list and the detail pane, and clears the clipboard if it still
+holds a value the page copied.
+
+**Rotating the vault key** runs from the security page (the Password vault
+card) and costs new recovery codes, the passphrase again, and a tap per passkey
+(`docs/sealed_vault.md` § Rotating a client-custody key). The entries are not
+touched — they are encrypted under the store DEK, which does not change — only
+the store DEK's sealed copy moves to the new key, through
+`assets/js/vault-reseal.js` and `vault/keyring_replace`. The plugin's bootstrap
+registers that hook (`VaultUnlock::clientReseal()`) and `plugin.json` declares
+`"client_reseals": ["passwords"]`, so a rotation cannot run without it.
 
 ## Entry types and field handling
 

@@ -1042,9 +1042,13 @@ abstract class SystemBase {
 	 * shape, so the two writers cannot drift.
 	 */
 	protected static function sealWrappingAssignments($crypto, $vault, $dek) {
-		$sealed = static::vaultIsClientCustody($vault)
-			? $crypto->sealItemDekToBrowserKey($dek, (string)$vault->get('uev_public_key'), (string)$vault->get('uev_scope'))
-			: $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
+		if (static::vaultIsClientCustody($vault)) {
+			// While a rotation is pending, new material seals to the pending key,
+			// which the commit makes current (UserEncryptionVault::sealingPublicKey()).
+			$sealed = $crypto->sealItemDekToBrowserKey($dek, $vault->sealingPublicKey(), (string)$vault->get('uev_scope'));
+			return static::sealKeyAssignments($sealed, $vault, $vault->sealingKeyGeneration());
+		}
+		$sealed = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
 		return static::sealKeyAssignments($sealed, $vault);
 	}
 
@@ -1058,7 +1062,7 @@ abstract class SystemBase {
 	 * generation and owner of the vault it is sealed to. Shared by the server
 	 * sealer and acceptBrowserSealed(), which stores a key the browser sealed.
 	 */
-	protected static function sealKeyAssignments(string $sealed_key, $vault) {
+	protected static function sealKeyAssignments(string $sealed_key, $vault, ?int $key_generation = null) {
 		$sets = array();
 		$params = array();
 
@@ -1068,7 +1072,7 @@ abstract class SystemBase {
 		$generation = static::sealedGenerationColumn();
 		if ($generation !== '' && array_key_exists($generation, static::$field_specifications)) {
 			$sets[] = $generation . ' = ?';
-			$params[] = intval($vault->get('uev_key_generation'));
+			$params[] = $key_generation ?? intval($vault->get('uev_key_generation'));
 		}
 		$owner = static::sealedOwnerColumn();
 		if ($owner !== '' && array_key_exists($owner, static::$field_specifications)) {
@@ -1296,11 +1300,16 @@ abstract class SystemBase {
 	 * value is left out, since it would stay under a key nothing records; the
 	 * owner has a vault of that scope.
 	 *
+	 * $public_key names the key the browser sealed to (JoinerySealed.seal()
+	 * returns it). During a rotation that is the pending key, and the row is
+	 * stamped with the generation of whichever key it names; a key that is
+	 * neither is refused. Omitted, the vault's sealing key is assumed.
+	 *
 	 * AUTHORIZATION IS THE CALLER'S. This checks shape and custody, not who is
 	 * asking: the consumer's save logic proves the caller owns the row before it
 	 * delegates the write here.
 	 */
-	public static function acceptBrowserSealed(int $row_id, string $sealed_dek, array $fields): void {
+	public static function acceptBrowserSealed(int $row_id, string $sealed_dek, array $fields, ?string $public_key = null): void {
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 		$cls = get_called_class();
@@ -1362,19 +1371,117 @@ abstract class SystemBase {
 			throw new RuntimeException($cls . ': refused browser ciphertext: the row\'s owner has no "' . $scope . '" vault.');
 		}
 
+		if ($public_key === null || $public_key === '') {
+			$generation = $vault->sealingKeyGeneration();
+		} elseif ($public_key === (string)$vault->get('uev_public_key')) {
+			$generation = (int)$vault->get('uev_key_generation');
+		} elseif ($vault->get('uev_pending_key_generation') !== null && $public_key === (string)$vault->get('uev_pending_public_key')) {
+			$generation = (int)$vault->get('uev_pending_key_generation');
+		} else {
+			throw new RuntimeException($cls . ': refused browser ciphertext: it is sealed to a key this vault does not have.');
+		}
+
 		$sets = array();
 		$params = array();
 		foreach ($fields as $col => $value) {
 			$sets[] = $col . ' = ?';
 			$params[] = $value;
 		}
-		$wrap = static::sealKeyAssignments($sealed_dek, $vault);
+		$wrap = static::sealKeyAssignments($sealed_dek, $vault, $generation);
 		$sets = array_merge($sets, $wrap['sets']);
 		$params = array_merge($params, $wrap['params']);
 		$sets[] = static::sealFlagColumn() . ' = true';
 		$params[] = $row_id;
 		$db->prepare('UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
 			. ' WHERE ' . static::$pkey_column . ' = ?')->execute($params);
+	}
+
+	/**
+	 * One page of this model's rows sealed to client-custody $scope on the key
+	 * generation being rotated away from, for $user_id: what a browser-run
+	 * rotation re-seals (VaultClientRotation). Rows already moved to the new
+	 * generation are not listed, so the walk can stop and resume.
+	 *
+	 * @return array{rows: array<int,array{id:int,sealed_dek:string}>, last_id:int, remaining:int}
+	 */
+	public static function browserResealPage(int $user_id, string $scope, int $generation, int $after_id, int $limit): array {
+		$cls = get_called_class();
+		$key_col   = static::sealedKeyColumn();
+		$gen_col   = static::sealedGenerationColumn();
+		$owner_col = static::sealedOwnerColumn();
+		foreach (array($key_col, $gen_col, $owner_col) as $col) {
+			if ($col === '' || !array_key_exists($col, static::$field_specifications)) {
+				throw new RuntimeException($cls . ' cannot take part in a client-custody rotation: it needs '
+					. '{prefix}_sealed_key, {prefix}_key_generation and {prefix}_sealed_owner_user_id columns.');
+			}
+		}
+		// A scope name may hold '_', which LIKE reads as "any one character": a
+		// sibling scope's rows would match. Escape it (and '%', and the escape).
+		$like = 'v1.edgeseal.' . str_replace(array('\\', '%', '_'), array('\\\\', '\\%', '\\_'), $scope) . '.%';
+		$where = $key_col . " LIKE ? ESCAPE '\\' AND " . $gen_col . ' = ? AND ' . $owner_col . ' = ?';
+		$params = array($like, $generation, $user_id);
+		$db = DbConnector::get_instance()->get_db_link();
+
+		$count = $db->prepare('SELECT COUNT(*) FROM ' . static::$tablename . ' WHERE ' . $where);
+		$count->execute($params);
+		$remaining = (int)$count->fetchColumn();
+
+		$page = $db->prepare('SELECT ' . static::$pkey_column . ' AS id, ' . $key_col . ' AS sealed_dek FROM '
+			. static::$tablename . ' WHERE ' . $where . ' AND ' . static::$pkey_column . ' > ? ORDER BY '
+			. static::$pkey_column . ' LIMIT ' . max(1, min(500, $limit)));
+		$page->execute(array_merge($params, array($after_id)));
+		$rows = array();
+		$last = $after_id;
+		foreach ($page->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			$rows[] = array('id' => (int)$r['id'], 'sealed_dek' => (string)$r['sealed_dek']);
+			$last = (int)$r['id'];
+		}
+		return array('rows' => $rows, 'last_id' => $last, 'remaining' => $remaining);
+	}
+
+	/**
+	 * Store a DEK the browser re-sealed to a client-custody scope's NEW key
+	 * during a rotation: the key column and the generation, nothing else. The
+	 * content stays exactly as it was — its DEK did not change, only whose key
+	 * wraps it.
+	 *
+	 * Refuses a row that is not $user_id's, a blob for another scope than the
+	 * row's key, and anything but a move from the rotating generation to the
+	 * pending one (a row already moved may be written again — the walk resumes).
+	 */
+	public static function acceptBrowserReseal(int $user_id, int $row_id, string $sealed_dek, int $from_generation, int $to_generation): void {
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		$cls = get_called_class();
+		$key_col = static::sealedKeyColumn();
+		$gen_col = static::sealedGenerationColumn();
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute(array($row_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			throw new RuntimeException($cls . ': no row ' . $row_id . ' to re-seal.');
+		}
+		if (static::sealedOwnerUserIdFor($row) !== $user_id) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' is not yours to re-seal.');
+		}
+		$scope = VaultCrypto::parseEdgeScope($sealed_dek);
+		$stored_scope = VaultCrypto::parseEdgeScope((string)($row[$key_col] ?? ''));
+		if ($scope === null || $scope !== $stored_scope) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' is sealed to the "' . (string)$stored_scope
+				. '" vault; this key is for another.');
+		}
+		$generation = (int)($row[$gen_col] ?? 0);
+		if ($generation !== $from_generation && $generation !== $to_generation) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' is on key generation ' . $generation
+				. ', which this rotation does not move.');
+		}
+		$db->prepare('UPDATE ' . static::$tablename . ' SET ' . $key_col . ' = ?, ' . $gen_col . ' = ? WHERE '
+			. static::$pkey_column . ' = ?')->execute(array($sealed_dek, $to_generation, $row_id));
+	}
+
+	/** How many of $user_id's rows sit on $generation of client-custody $scope. */
+	public static function browserSealedRowCount(int $user_id, string $scope, int $generation): int {
+		return static::browserResealPage($user_id, $scope, $generation, PHP_INT_MAX, 1)['remaining'];
 	}
 
 	/**
