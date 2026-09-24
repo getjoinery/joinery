@@ -60,7 +60,9 @@ foreach ($items as $i => $item) {
 		$when = LibraryFunctions::convert_time($item['last_verified'], 'UTC', $session->get_timezone(), 'M j, Y g:i A');
 		if ($item['stale']) {
 			echo '<div class="alert alert-warning mb-2">Last verified ' . htmlspecialchars($when)
-				. ' — more than ' . (int)$stale_days . ' days ago. Verify it again below.</div>';
+				. (!empty($item['codes_changed'])
+					? ' — before the codes it holds now were made. Verify it again below.</div>'
+					: ' — more than ' . (int)$stale_days . ' days ago. Verify it again below.</div>');
 		} else {
 			echo '<div class="alert alert-success mb-2">Verified ' . htmlspecialchars($when) . '.</div>';
 		}

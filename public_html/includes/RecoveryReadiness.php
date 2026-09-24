@@ -26,8 +26,12 @@
  *   scope       (verify=dry_run) vault scope; custody 'server'|'client'
  *
  * The ledger (RecoveryVerification) stores pass/fail + when, per user — never
- * the secret. Staleness = newest passed row older than STALE_DAYS (or none).
+ * the secret. Staleness = newest passed row older than STALE_DAYS, or none, or
+ * older than the codes themselves: a vault item carries `codes_since`, when its
+ * newest live recovery code was made, and a check that predates it proved codes
+ * that no longer exist (regenerated, or retired by a key rotation).
  *
+ * @version 1.2.0 - a check older than the newest live recovery code is stale (codes_since)
  * @version 1.1.0 - counts and checks only the unlockers of the key generation in use
  * @version 1.0.0
  */
@@ -75,8 +79,16 @@ class RecoveryReadiness {
 		$stale_before = gmdate('Y-m-d H:i:s', time() - self::STALE_DAYS * 86400);
 		foreach ($items as &$item) {
 			$item['last_verified'] = isset($latest[$item['key']]) ? $latest[$item['key']] : null;
+			// A check that predates the newest live code proved codes that are
+			// gone (regenerated, or retired by a key rotation): it says nothing
+			// about the ones the member holds now.
+			// Both compared to the second: the ledger records whole seconds,
+			// the wrapping's creation time carries microseconds.
+			$codes_since = isset($item['codes_since']) ? substr((string)$item['codes_since'], 0, 19) : '';
+			$item['codes_changed'] = $item['last_verified'] !== null && $codes_since !== ''
+				&& substr((string)$item['last_verified'], 0, 19) < $codes_since;
 			$item['stale'] = ($item['state'] === 'ready')
-				&& ($item['last_verified'] === null || $item['last_verified'] < $stale_before);
+				&& ($item['last_verified'] === null || $item['last_verified'] < $stale_before || $item['codes_changed']);
 		}
 		unset($item);
 		return $items;
@@ -223,6 +235,7 @@ class RecoveryReadiness {
 				'verify'   => 'dry_run',
 				'scope'    => $scope,
 				'custody'  => $custody,
+				'codes_since' => $counts['codes_since'],
 				'client_wrappings' => $client_wrappings,
 				'warnings' => $warnings,
 			));
@@ -266,7 +279,8 @@ class RecoveryReadiness {
 			"SELECT
 			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'recovery' AND uew_is_used = false AND uew_delete_time IS NULL) AS recovery,
 			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'passkey' AND uew_delete_time IS NULL) AS passkey,
-			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'passphrase' AND uew_delete_time IS NULL) AS passphrase
+			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'passphrase' AND uew_delete_time IS NULL) AS passphrase,
+			    MAX(uew_create_time) FILTER (WHERE uew_unlocker_type = 'recovery' AND uew_delete_time IS NULL) AS codes_since
 			   FROM uew_user_encryption_wrappings
 			  WHERE uew_uev_user_encryption_vault_id = ?
 			    -- the key in use; a client-custody rotation's pending unlockers do not count yet
@@ -278,6 +292,9 @@ class RecoveryReadiness {
 			'recovery'   => (int)($row['recovery'] ?? 0),
 			'passkey'    => (int)($row['passkey'] ?? 0),
 			'passphrase' => (int)($row['passphrase'] ?? 0),
+			// When the newest live recovery code was made (UTC); a verification
+			// older than this proved codes that no longer exist.
+			'codes_since' => isset($row['codes_since']) && $row['codes_since'] !== null ? (string)$row['codes_since'] : null,
 		);
 	}
 
