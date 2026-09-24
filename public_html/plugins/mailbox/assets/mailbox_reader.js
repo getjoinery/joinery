@@ -1,6 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.70 — a message gone from its source server says so
+ * No framework. @version 2.71 — every address in a message header carries a
+ * small add-to-contacts icon, shown only while that address is not a contact.
+ * @version 2.70 — a message gone from its source server says so
  * above its attachments (source_gone).
  * @version 2.69 — the selection's Labels panel shows what the
  * ticked conversations already carry (ticked / mixed / clear per label) and
@@ -92,7 +94,10 @@
 		folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
 		tag: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>'
 			+ '<line x1="7" y1="7" x2="7.01" y2="7"/>',
-		restore: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>'
+		restore: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+		addContact: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/>'
+			+ '<line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>',
+		added: '<polyline points="20 6 9 17 4 12"/>'
 	};
 
 	function iconSvg(name) {
@@ -1642,6 +1647,7 @@
 			header.appendChild(actions);
 			pane.appendChild(header);
 			renderThreadMessages(pane, t, messages);
+			syncContactIcons();
 			return;
 		}
 		// The same controls the list toolbar offers, drawn with the same icons and
@@ -1703,6 +1709,7 @@
 		messages.forEach(function (m, idx) {
 			pane.appendChild(messageBlock(m, idx === messages.length - 1, t.thread_key));
 		});
+		syncContactIcons();
 
 		// Gmail-style: Reply / Reply All / Forward chips at the bottom of the
 		// conversation. They act on the latest message and only show for a real
@@ -2134,6 +2141,7 @@
 		var head = el('div', 'mbx-message-head');
 		var left = el('div', 'mbx-message-left');
 		var from = el('div', 'mbx-message-from', senderFull(m.sender));
+		appendContactIcon(from, m.sender || '', m.alias_id);
 		if (outbound) from.appendChild(el('span', 'mbx-sent-tag', 'Sent'));
 		left.appendChild(from);
 		// A subtle accent and one plain-language line, never a loud coloured
@@ -2149,10 +2157,10 @@
 		// To / Cc as the message carried them (iem_to / iem_cc). A row stored
 		// before those existed and without a retained header block falls back
 		// to the one routing address it has.
-		left.appendChild(addressLine('to', m.to || m.recipient || ''));
-		if (m.cc) left.appendChild(addressLine('Cc:', m.cc));
+		left.appendChild(addressLine('to', m.to || m.recipient || '', m.alias_id));
+		if (m.cc) left.appendChild(addressLine('Cc:', m.cc, m.alias_id));
 		// Bcc line: only your own Sent copy carries it (its own sealed column).
-		if (outbound && m.bcc) left.appendChild(el('div', 'mbx-message-meta', 'Bcc: ' + m.bcc));
+		if (outbound && m.bcc) left.appendChild(addressLine('Bcc:', m.bcc, m.alias_id));
 		if (!outbound) {
 			var authLine = el('div',
 				'mbx-message-meta mbx-auth mbx-auth-' + ((m.auth && m.auth.state) || 'unchecked'),
@@ -3247,7 +3255,7 @@
 	// "Not in Contacts" plus the one-click Add that keeps {address, display_name}
 	// in the mailbox's store and re-reads the panel from the server's answer.
 	// One row serves the counterparty card and every "also on this message" card.
-	function addContactRow(person, aliasId, messageId) {
+	function addContactRow(person, aliasId) {
 		var row = el('div', 'mbx-context-addrow');
 		row.appendChild(el('span', 'mbx-context-note', 'Not in Contacts'));
 		var add = el('button', 'mbx-context-add', '+ Add');
@@ -3258,15 +3266,146 @@
 			add.textContent = 'Adding…';   // the round trip can take a moment; say so
 			joineryApi.post(CFG.contactsImportUrl,
 					{ address: contactToken(person), alias_id: String(aliasId) })
-				.then(function () {
-					delete contextCache[messageId];
-					loadContacts(aliasId);          // keep compose autocomplete current
-					fetchSenderContext(messageId);  // re-render from the server's truth
-				})
+				.then(function () { contactAdded(aliasId); })
 				.catch(function () { add.disabled = false; add.textContent = 'Could not add'; });
 		});
 		row.appendChild(add);
 		return row;
+	}
+
+	// A contact was just saved from the open conversation — by the panel's Add or
+	// by an address icon in a message header. Everything that says who is and is
+	// not a contact re-reads from the server: the header icons, compose
+	// autocomplete, and this panel.
+	function contactAdded(aliasId) {
+		forgetContactSet(aliasId);
+		syncContactIcons();
+		loadContacts(aliasId);
+		contextCache = {};
+		loadSenderContext(state.messages);
+	}
+
+	// ---- add-to-contacts icons in message headers ----
+	//
+	// Every address a message header names (From, To, Cc, Bcc) carries a small
+	// icon that saves it to the contacts of the mailbox the message belongs to —
+	// the same add the panel's + Add makes. An icon starts hidden and shows only
+	// once that mailbox's contact list has said the address is not in it; a
+	// locked store answers for no one, so its icons stay hidden rather than
+	// offering adds that cannot land. The viewer's own mailbox addresses never
+	// get one, and neither does mail belonging to no mailbox: there is no store
+	// to add it to.
+	var contactSets = {}; // alias id -> promise of {address: true}, or of null when unreadable
+
+	function contactSet(aliasId) {
+		var key = String(aliasId);
+		if (contactSets[key]) return contactSets[key];
+		var p = joineryApi.post(CFG.contactsUrl, { alias_id: key }).then(function (data) {
+			data = data || {};
+			if (data.locked || !data.contacts) { dropContactSet(key, p); return null; }
+			var set = {};
+			data.contacts.forEach(function (c) { set[String(c.address).toLowerCase()] = true; });
+			return set;
+		}).catch(function () { dropContactSet(key, p); return null; });
+		contactSets[key] = p;
+		return p;
+	}
+
+	// A locked or failed answer is not kept, so the next render (after an
+	// unlock, say) asks again — unless a newer request has already replaced it.
+	function dropContactSet(key, p) {
+		if (contactSets[key] === p) delete contactSets[key];
+	}
+
+	/** This mailbox's contacts changed here; the next read of them goes to the server. */
+	function forgetContactSet(aliasId) {
+		delete contactSets[String(aliasId)];
+	}
+
+	// Show or hide every icon in the open conversation against its mailbox's list.
+	function syncContactIcons() {
+		var pane = $('#mbx-thread');
+		if (!pane) return;
+		var byAlias = {};
+		Array.prototype.forEach.call(pane.querySelectorAll('.mbx-addcontact'), function (b) {
+			(byAlias[b.dataset.alias] = byAlias[b.dataset.alias] || []).push(b);
+		});
+		Object.keys(byAlias).forEach(function (aliasId) {
+			contactSet(aliasId).then(function (set) {
+				byAlias[aliasId].forEach(function (b) {
+					// The one just clicked shows its check until it fades on its own.
+					if (b.classList.contains('mbx-addcontact-done')) return;
+					b.hidden = !set || !!set[b.dataset.address];
+				});
+			});
+		});
+	}
+
+	function isOwnAddress(address) {
+		return state.mailboxes.some(function (m) { return (m.address || '').toLowerCase() === address; });
+	}
+
+	// The display name an address entry carries ('"Ann Lee" <ann@example.com>'
+	// gives 'Ann Lee'), or '' for a bare address.
+	function entryName(entry) {
+		var m = /<[^>]+>/.exec(entry || '');
+		if (!m) return '';
+		return entry.slice(0, m.index).trim().replace(/^"|"$/g, '').replace(/\\(.)/g, '$1').trim();
+	}
+
+	// Put an address's icon at the end of it. The address's last character and
+	// the icon share one unbreakable span, so a wrapping line never leaves the
+	// icon alone on the next line, while the address itself can still wrap
+	// anywhere on a narrow screen. (A word joiner would not do: Chrome breaks
+	// before a button regardless.)
+	function appendContactIcon(parent, entry, aliasId) {
+		var add = addContactIcon(entry, aliasId);
+		if (!add) return;
+		var tail = el('span', 'mbx-addcontact-tail');
+		var last = parent.lastChild;
+		if (last && last.nodeType === 3 && last.textContent.length > 1) {
+			tail.textContent = last.textContent.slice(-1);
+			last.textContent = last.textContent.slice(0, -1);
+		}
+		tail.appendChild(add);
+		parent.appendChild(tail);
+	}
+
+	// The icon for one address entry, or null when that address gets none.
+	function addContactIcon(entry, aliasId) {
+		var address = extractEmail(entry);
+		var key = address.toLowerCase();
+		if (!isRealMailbox(aliasId) || key.indexOf('@') < 1 || isOwnAddress(key)) return null;
+		var b = el('button', 'mbx-addcontact');
+		b.type = 'button';
+		b.hidden = true;
+		b.dataset.alias = String(aliasId);
+		b.dataset.address = key;
+		b.title = 'Add ' + address + ' to contacts';
+		b.setAttribute('aria-label', b.title);
+		b.innerHTML = iconSvg('addContact');
+		b.addEventListener('click', function (e) {
+			e.stopPropagation();   // the header behind it collapses the message
+			b.disabled = true;
+			b.classList.remove('mbx-addcontact-failed');
+			joineryApi.post(CFG.contactsImportUrl, {
+				address: contactToken({ address: address, display_name: entryName(entry) }),
+				alias_id: String(aliasId)
+			}).then(function () {
+				b.classList.add('mbx-addcontact-done');
+				b.innerHTML = iconSvg('added');
+				b.title = address + ' added to contacts';
+				b.setAttribute('aria-label', b.title);
+				setTimeout(function () { b.hidden = true; }, 1500);
+				contactAdded(aliasId);
+			}).catch(function (err) {
+				b.disabled = false;
+				b.classList.add('mbx-addcontact-failed');
+				b.title = (err && err.message) || 'Could not add to contacts';
+				b.setAttribute('aria-label', b.title);
+			});
+		});
+		return b;
 	}
 
 	// Put an address in the search box and run it — the panel's "all mail" link.
@@ -3328,7 +3467,7 @@
 			// Saving needs a mailbox to save INTO, and contacts are per-mailbox. Mail
 			// that belongs to no mailbox (unmatched) has no store to add to, so the
 			// control is absent rather than offering a save that cannot land.
-			card.appendChild(addContactRow(data, data.alias_id, data.message_id));
+			card.appendChild(addContactRow(data, data.alias_id));
 		}
 
 		if (contact && !contact.locked && contact.added_time) {
@@ -3358,7 +3497,7 @@
 				var line = el('div', 'mbx-context-email', o.address + ' ');
 				line.appendChild(el('span', 'mbx-context-field', o.field === 'cc' ? 'Cc' : 'To'));
 				oc.appendChild(line);
-				oc.appendChild(addContactRow(o, data.alias_id, data.message_id));
+				oc.appendChild(addContactRow(o, data.alias_id));
 				panel.appendChild(oc);
 			});
 		}
@@ -3620,8 +3759,15 @@
 				if (!v) return;
 				addBtn.disabled = true;
 				joineryApi.post(CFG.contactsImportUrl, { address: v, alias_id: String(aliasId) })
-					.then(function () { addInput.value = ''; addBtn.disabled = false; renderContactsPanel(); })
-					.catch(function () { addBtn.disabled = false; alert('That is not a valid email address.'); });
+					.then(function () {
+						addInput.value = ''; addBtn.disabled = false;
+						forgetContactSet(aliasId);
+						renderContactsPanel();
+					})
+					.catch(function (err) {
+						addBtn.disabled = false;
+						alert((err && err.message) || 'The contact could not be added.');
+					});
 			};
 			addBtn.addEventListener('click', doAdd);
 			addInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
@@ -3643,6 +3789,7 @@
 					.then(function (r) { return r.json(); }).then(function (env) {
 						var d = (env && env.data) ? env.data : {};
 						alert('Imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0) + '.');
+						forgetContactSet(aliasId);
 						renderContactsPanel();
 					}).catch(function () { alert('Import failed.'); });
 			});
@@ -3664,7 +3811,7 @@
 				var del = el('button', 'mbx-contact-del', '×'); del.type = 'button'; del.title = 'Delete';
 				del.addEventListener('click', function () {
 					joineryApi.post(CFG.contactDeleteUrl, { contact_id: String(c.id) })
-						.then(function () { rowEl.parentNode.removeChild(rowEl); })
+						.then(function () { rowEl.parentNode.removeChild(rowEl); forgetContactSet(aliasId); })
 						.catch(function () {});
 				});
 				rowEl.appendChild(del);
@@ -3716,14 +3863,16 @@
 		return splitEntries(s).map(extractEmail).filter(Boolean);
 	}
 
-	// One "to" / "Cc" meta line: each entry in its own span so a name that
-	// contains a comma still reads as one person.
-	function addressLine(label, list) {
+	// One "to" / "Cc" / "Bcc" meta line: each entry in its own span so a name
+	// that contains a comma still reads as one person. The add-to-contacts icon
+	// sits inside the span, so it wraps with the address it belongs to.
+	function addressLine(label, list, aliasId) {
 		var line = el('div', 'mbx-message-meta mbx-address-line', label + ' ');
 		splitEntries(list).forEach(function (entry, i) {
 			if (i > 0) line.appendChild(document.createTextNode(', '));
 			var span = el('span', 'mbx-address', senderFull(entry));
 			span.title = extractEmail(entry);
+			appendContactIcon(span, entry, aliasId);
 			line.appendChild(span);
 		});
 		return line;

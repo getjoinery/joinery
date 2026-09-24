@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.42 — .mbx-attachments-note (source-gone note)
+ * Vanilla CSS, no framework. @version 2.43 — .mbx-addcontact (header add-to-contacts icon)
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -616,6 +616,22 @@
 .mbx-message-left { flex: 1 1 auto; min-width: 0; }
 .mbx-message-from { font-weight: 600; color: #1f2933; overflow-wrap: anywhere; }
 .mbx-message-meta { color: #6b7280; font-size: var(--mbx-text-sm); overflow-wrap: anywhere; }
+
+/* The add-to-contacts icon beside each header address: small and muted so a
+ * header naming many people stays readable; it takes colour only on hover. */
+.mbx-addcontact {
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 18px; height: 18px; padding: 0; margin-left: 3px;
+	border: 0; border-radius: 4px; background: transparent;
+	color: #9097a1; cursor: pointer; vertical-align: -4px;
+}
+.mbx-addcontact[hidden] { display: none; }
+.mbx-addcontact-tail { white-space: nowrap; }
+.mbx-addcontact svg { width: 13px; height: 13px; }
+.mbx-addcontact:hover { color: #2563eb; background: #e5edfb; }
+.mbx-addcontact[disabled] { cursor: default; opacity: .6; }
+.mbx-addcontact.mbx-addcontact-done { color: #3f7c53; background: transparent; opacity: 1; }
+.mbx-addcontact.mbx-addcontact-failed { color: #b23c3c; }
 
 /* Authentication line. A message nothing checked is the ordinary case for
    imported and IMAP-collected mail, so it stays neutral grey — only a verdict

@@ -10,7 +10,7 @@
  * Both upsert through the same contact-store path (source 'import' / 'manual'). A file
  * import returns {imported, skipped}; a manual add returns {added: bool}.
  *
- * @version 1.1.1
+ * @version 1.1.2 - a valid address that fails to save says so, instead of calling the address invalid
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -42,9 +42,13 @@ function contacts_import_logic(array $input): LogicResult {
 	// Manual single add.
 	$address = trim((string)($input['address'] ?? ''));
 	if ($address !== '' && empty($_FILES['file'])) {
-		$added = $contacts->manualAdd(intval($uid), $address, $alias_id);
-		if (!$added) {
+		if (MailboxContacts::parseAddress($address) === null) {
 			return LogicResult::error('That is not a valid email address.');
+		}
+		// A valid address that still did not land: a sealed store with the vault
+		// window closed has nowhere to put it, or the write failed.
+		if (!$contacts->manualAdd(intval($uid), $address, $alias_id)) {
+			return LogicResult::error('The contact could not be saved. If your vault is locked, unlock it and try again.');
 		}
 		return LogicResult::render(array('added' => true));
 	}
