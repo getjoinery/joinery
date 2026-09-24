@@ -613,6 +613,14 @@ database-incrementals integration tests run in the ordinary gate.
     the docs.
   - Landed with the converger stopped: `install.sh` 2.82, `host_housekeeping.sh` 1.8, the
     housekeeping gate (105/105), and the contract section (18; contract 732/732).
+- **Publish of 0.8.425 refused 2026-09-24 18:34** by its own deploy tier: `read_only_tree`
+  exited 1, and the log named no check. Every section passes by hand afterwards. The likely
+  cause, and fixed: `plugin_uninstall_test` (1.1) wrote its fixture plugins into the live
+  `plugins/` with group-writable modes, the exact state that gate refuses; any session
+  running the test-db tier during a publish made it fail. The fixtures now take the tree's
+  modes (watched through a run: present three times, never group-writable). `tests/run.php`
+  now prints a failing shell gate's `FAIL:` lines under it and in the summary, so a refused
+  publish names its check.
 - **Rehearsal R1 (container move) — passed 2026-09-24** on the owner's test box
   45.79.180.75 (Ubuntu 24.04.4, 1 vCPU, 1 GB, our key on it). The order was the real one:
   - Site `rehearsal` built from 0.8.423: web port on every interface, the agent in the

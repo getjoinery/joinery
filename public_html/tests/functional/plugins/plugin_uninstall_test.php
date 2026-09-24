@@ -27,7 +27,7 @@
  *
  * Run:  php tests/functional/plugins/plugin_uninstall_test.php
  *
- * @version 1.0
+ * @version 1.1 - fixture plugins are written with the tree's modes (755/644), not group-writable
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -45,10 +45,17 @@ $NAME = 'zzuninstallfix';
 $SYS  = 'zzuninstallsys';
 $TABLE = 'zuf_fixture_rows';
 
-/** Write a fixture plugin under plugins/. */
+/**
+ * Write a fixture plugin under plugins/, with the modes the rest of the tree
+ * has (directories 755, files 644). It sits in the live code tree while this
+ * test runs, and a group-writable directory there is what the publish gate
+ * (read_only_tree) refuses: a publish that ran beside this test was refused.
+ */
 $write_plugin = function (string $name, array $manifest_extra = array(), bool $with_table = true) use ($TABLE) {
     $dir = PathHelper::getIncludePath('plugins/' . $name);
-    @mkdir($dir . '/data', 0777, true);
+    @mkdir($dir . '/data', 0755, true);
+    @chmod($dir, 0755);
+    @chmod($dir . '/data', 0755);
     $manifest = array_merge(array(
         'name' => 'Uninstall fixture ' . $name,
         'version' => '1.0.0',
@@ -67,6 +74,9 @@ $write_plugin = function (string $name, array $manifest_extra = array(), bool $w
             . "\t\t'zuf_label' => array('type'=>'varchar(64)'),\n"
             . "\t);\n"
             . "}\n");
+    }
+    foreach (glob($dir . '/{,data/}*', GLOB_BRACE) as $path) {
+        if (is_file($path)) { @chmod($path, 0644); }
     }
     return $dir;
 };
