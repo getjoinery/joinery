@@ -3357,6 +3357,16 @@ To/Cc marker. The server returns every such person as `others`, with each one's
 contact-store answer; the client lists only those with no entry, since someone already
 kept needs nothing from the panel, and a locked store lists no one.
 
+The message headers carry the same add in place: every address a header names — From, To,
+Cc, and a Sent copy's Bcc — has a small add-to-contacts icon beside it that posts the address
+(with its display name) to `mailbox/contacts_import` for the mailbox the message belongs to.
+An icon starts hidden and shows only once that mailbox's `mailbox/contacts` list says the
+address is not in it; the reader keeps that list per mailbox for the session and re-reads it
+after any add, delete or import made in the reader. A locked store answers for no one, so its
+icons stay hidden. The viewer's own mailbox addresses never get an icon, and neither does mail
+belonging to no mailbox. An add from an icon or from the panel refreshes both, along with
+compose autocomplete.
+
 Below the card, a **Site account** section is **admin-only** (permission 5+), because member
 records, orders and registrations are operator data: it resolves the address with
 `User::GetByEmail` and shows the joined date and a link to the admin edit page, or "No
