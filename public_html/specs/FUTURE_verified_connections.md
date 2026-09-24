@@ -125,7 +125,7 @@ One ceremony, compounding utility — all keyed off the same vault keypair:
   for minting a constrained local user row for an external credential.
 - `specs/mailbox_compose_maturity.md` (Phase 4) — the contact cache this funnels
   from.
-- `specs/DEFERRED_client_custody_mail.md` — orthogonal (key custody, not identity).
+- `specs/client_custody_mail.md` — orthogonal (key custody, not identity).
 - `specs/chat_plugin.md` — lists federation as a non-goal; if that plugin is built
   first, the federated-guest path lands later without changing its user-id keying
   (the bright line is what makes that true).

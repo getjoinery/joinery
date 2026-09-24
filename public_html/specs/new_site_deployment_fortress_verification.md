@@ -193,4 +193,4 @@ tests in as items 4–6 execute rather than deferring them again.
   provable later; the second tenant proves the isolation boundary, which is the
   security-critical part.
 - The multi-distro install refactor — deferred; Docker-on-Ubuntu is the path.
-- Client-custody mail (`DEFERRED_client_custody_mail.md`) — parked.
+- Client-custody mail (`client_custody_mail.md`) — active build spec, 2026-09-24.
