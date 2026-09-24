@@ -1,9 +1,10 @@
 # Fleet Move to Ubuntu 26.04 / PostgreSQL 18
 
-**Status:** Stage 1 built and in the tree 2026-09-24, uncommitted (WP1–WP5, WP3b/B7, B1, B9).
-B8 is recorded, not started. WP7 (the move script) is built. Both rehearsals wait on the
-owner (§ Progress). Two owner decisions open (D3, D4; D1 and D2 are in
-`specs/backup_database_incrementals.md`).
+**Status:** Stage 1 committed 2026-09-24 (71277d44): WP1–WP5, WP3b/B7, B1, B9, B11, B12,
+Postgres local-only, and WP7 (the move script). Not yet in a release. B8's remainder and
+B10 are built and in the tree 2026-09-24, uncommitted (§ Progress). Both rehearsals wait on
+the owner.
+Two owner decisions open (D3, D4; D1 and D2 are in `specs/backup_database_incrementals.md`).
 **Date:** 2026-09-24 (rewritten from the 2026-08-01 draft after a fleet investigation;
 the code-side cutover items of `php_85_pg18_stack_cutover.md` are folded in here).
 **Related:** `specs/backup_database_incrementals.md` — the main payoff. It needs
@@ -133,7 +134,7 @@ lines.** Any process on either machine can read them while a clone runs:
   - **Tests:** `job_command_builder` (the command never holds the key; stdin order; the
     executor's rules), `customer_cloud_provisioning`, `site_init_clone_load_gate`
     (17 checks), and six contract checks, one per hop.
-- **All in the tree 2026-09-24**, uncommitted. The installer files went in while the dev
+- **Committed 2026-09-24** (71277d44). The installer files went in while the dev
   converger was stopped. `installer_contract` 708/708, and green on five straight runner
   runs. Its first two runs after landing each failed 3–4 checks and could not be
   reproduced; the timing-bound agent-keepalive section is the likely cause under load.
@@ -196,22 +197,37 @@ Consequences:
 - **WP7 would have cut the resolvers off.** Fixed: `rebase_site_container.sh` 1.1 refuses
   a container with any port binding `install.sh` does not recreate, and names each one.
 
-**Proposed fix, one declared home for each piece:**
-- **Port and access rules:** a file on the config volume (e.g. `config/postgres_network.conf`)
-  names the address to publish the database on and the access lines to admit. For
-  scrolldaddy that is `scrolldaddy_reader` on database `scrolldaddy` from the two resolver
-  addresses, with scram, and never the superuser. `install.sh` publishes there instead of
-  loopback when the file exists, and the image's `pg_hba.conf` ends with `include_if_exists`
-  of it (PostgreSQL 16+). A rebuild then keeps both, and the superuser stops being
-  reachable from the network.
-- **The role:** a backup carries the non-superuser roles the database's grants name
-  (`pg_dumpall --roles-only`, filtered to them). A restore creates any that are missing
-  before it loads. Owner decision: whether a restored login role keeps its password hash
-  or is created without one, to be set again from the resolvers' configuration.
-- **Stopgap, owner decision:** narrow scrolldaddy's live access rules now to
-  `scrolldaddy_reader` from the two resolver addresses, in the container and reloaded.
-  It lives in the image layer, so a rebuild undoes it, but a rebuild breaks the resolvers
-  today anyway.
+**Fixed 2026-09-24, one declared home for each piece** (uncommitted):
+- **Roles:** `restore_database.sh` 3.8 reads every role the dump names (owners, grantees,
+  default privileges; COPY data skipped) before it drops anything, and creates any the
+  server lacks, unable to log in. A role it may not create is refused as
+  `RESTORE_ROLE_MISSING`, database untouched. Nothing new goes into backups, so every
+  backup already stored restores too. The owner decision on password hashes falls away: a
+  dump holds none, so a login is set again on the target, where the resolvers need
+  repointing anyway. Wider than scrolldaddy: dev's own dump names `iemap_joinerytest`,
+  the mailbox plugin's role, so every mailbox site had the same failure. That installer
+  re-creates its role with login and password on every run.
+  Gate: `restore_roundtrip` 37 checks (11 new; 7 fail on the old engine, which dropped the
+  schema and then failed the load).
+- **Port:** a `publish <address>` line in `config/postgres_access.conf` names the host
+  address for the database port. `install.sh` 2.82 reads it at every rebuild and refuses
+  an address the host does not hold, or `0.0.0.0`, before touching the old container. It
+  also exempts exactly that address and port from `install.sh docker`'s `DOCKER-USER`
+  block of 9080–9099. On a Linode the private address is on the public interface, so
+  without the exemption the block would cut the resolvers off. `install.sh docker` now
+  adds that block once, below any exemption. docker-prod carries a hand-made version
+  (checked 2026-09-24): ACCEPT 9080–9099 from 97.107.131.227 and from all of
+  192.168.128.0/17 (every Linode on that private network), then DROP 9080–9087. A re-run of
+  `install.sh docker` there would insert its DROP above those ACCEPTs and cut the
+  resolvers off, unless the tagged exemption is already in place.
+  `host_housekeeping.sh` 1.8 passes over the `publish` line.
+- **The move script:** `rebase_site_container.sh` 1.2 accepts the declared binding and the
+  loopback web port. It no longer carries `pg_hba` lines itself, because housekeeping
+  rebuilds `pg_hba` from the declaration at every container start. `prepare` refuses a
+  network line the file does not declare, naming it.
+- **Stopgap:** done live on 2026-09-24 (next section).
+- **After the release, on docker-prod:** add `publish 192.168.206.198` to scrolldaddy's
+  `config/postgres_access.conf` before anything rebuilds it.
 
 **PostgreSQL answers only locally — every box, and every new install** (owner, 2026-09-24:
 "Postgres should be completely shut off to any remote access and only work locally").
@@ -231,7 +247,7 @@ Consequences:
     dns-primary the reader reaches the password check and `postgres` is refused. Both
     resolvers are active and reconnecting, with no database errors.
   - Its exception is declared in `config/postgres_access.conf` on its config volume.
-- **Built in, in the tree 2026-09-24** (uncommitted; landed with the converger stopped):
+- **Built in, committed 2026-09-24** (71277d44; landed with the converger stopped):
   - `host_housekeeping.sh` 1.7 section 5 enforces it on every converge and at every
     container start. It removes any rule admitting a network address, or an include
     directive, and keeps the original once.
@@ -245,15 +261,14 @@ Consequences:
   - `install.sh` 2.81: a container image's rules are loopback only.
   - Gate: 104 checks. Contract: 12 checks, which fail on the old tree.
   - Docs: `installation.md` § PostgreSQL access.
-- **B8 after this:** the access rules are declared and survive a rebuild. Still open: the
-  port binding (`install.sh` publishes on loopback; scrolldaddy's is hand-made), and the
-  role in backups (a restore to a fresh server fails on the 143 grants).
+- **B8 after this:** the access rules are declared and survive a rebuild. The port binding
+  and the role were fixed next (above).
 
 **B11 — a new server got a `user1` account** (owner, 2026-09-24: "for new installs, I don't
 want user1 with logins turned on either"). `install.sh server` always created `user1`
 and added it to `www-data`. When root held SSH keys it also copied them to `user1` with
 `NOPASSWD: ALL` sudo. Nothing a production site runs depends on it; only dev-box tooling
-names it. Fixed (in the tree):
+names it. Fixed (committed 71277d44):
 - `install.sh` 2.81 creates no account, copies no key and grants no sudo.
 - Root login becomes keys-only when root holds keys, off under `sudo` from an ordinary
   account, and is left as it is when root has only a password (the management node
@@ -263,7 +278,7 @@ names it. Fixed (in the tree):
 
 **B12 — the root-login hardening never took effect on Ubuntu.** It replaced
 `#PermitRootLogin yes`, but Ubuntu ships `#PermitRootLogin prohibit-password`, and sshd
-takes the first value it reads — `sshd_config.d/*.conf` is included first. Fixed (in the tree):
+takes the first value it reads — `sshd_config.d/*.conf` is included first. Fixed (committed 71277d44):
 the setting goes in `sshd_config.d/00-joinery-root-login.conf`, and `sshd -t`
 checks it before SSH restarts.
 
@@ -277,10 +292,35 @@ to `/login`). `docker ps` shows every container's web port on `0.0.0.0` and `[::
 - **What it skips:** the host Apache proxy is the intended way in. A request to IP:port
   skips HTTPS, skips Cloudflare, and is logged only inside the container, where the
   host's fail2ban does not read — so a login form can be brute-forced over plain HTTP.
-- **Likely fix:** publish on loopback (`-p 127.0.0.1:$PORT:80`), which is all the host
-  proxy uses (`ProxyPass 127.0.0.1:<port>`). First confirm nothing reaches a container
-  by IP:port: the management node's probes, the SSL probe, a customer's own setup.
-  Existing containers keep their binding until rebuilt. Not started.
+- **Nothing reaches a container's web port from off the host** (searched 2026-09-24): every
+  management-node probe, the SSL and certificate checks, Cloudflare and the agent use the
+  domain through the proxy, which targets `127.0.0.1:<port>`. The exception is a site with
+  no domain (or `--no-ssl`), which gets no proxy: its port is its only way in.
+- **Fixed in the tree 2026-09-24** (uncommitted):
+  - `install.sh` 2.82 publishes a proxied site's web port on `127.0.0.1`. A site with no
+    domain keeps every interface, and says so. The post-start probe asks `127.0.0.1`. The
+    port checks and the container list read a binding on any address.
+  - `manage_domain.sh` 1.2 warns when a domain is set on a container whose port still
+    answers on every interface. On clearing a domain from a loopback-bound one, it says
+    nothing off the host reaches the site now.
+  - Docs: `installation.md` (Docker trust bullet), `INSTALL_README.md`, Server Manager
+    overview.
+  - Contract: 18 checks (15 fail on the current installers), including the publish-address
+    resolver and the firewall exemption run against stubs. The live container gate asserts
+    both bindings.
+- **IPv6 too** (confirmed 2026-09-24 from dev: 200 at `[2600:3c03::2000:d1ff:fef0:1ec5]:8087`).
+  Docker publishes `-p PORT:80` on `[::]` through docker-proxy on the host, so IPv6 ends in
+  INPUT, where a `DOCKER-USER` rule never sees it. `-p 127.0.0.1:PORT:80` publishes on
+  IPv4 loopback only, which closes both.
+- **Existing containers keep `0.0.0.0` and `[::]` until rebuilt.** Stage 3 rebuilds all
+  eight through `install.sh`. The owner approved closing it now on docker-prod (Q1,
+  2026-09-24): `DOCKER-USER` DROP 8080–8180 on eth0 (IPv4), `ip6tables INPUT` DROP
+  8080–8180 on eth0 (IPv6), and the tagged `joinery-declared-db-publish` RETURN for
+  192.168.206.198:9087, saved with `netfilter-persistent` (originals kept as
+  `/etc/iptables/rules.v{4,6}.pre-web-ports`). **Applied and verified 2026-09-24:** from
+  dev every port 8080–8088 is dropped over IPv4 and IPv6. All eight sites answer by
+  domain over HTTPS and on the host's loopback. Both resolvers reconnected to the
+  database through the new exemption and report `db_connected`.
 
 **B9 — the platform's PHP tuning loaded the PostgreSQL extensions twice** (fixed
 2026-09-24). `host_files_tune_php_ini()` enabled `extension=pdo_pgsql` and `extension=pgsql`
@@ -326,8 +366,8 @@ recreate it exactly.
   is missing and cannot be built.
 - Read the site's database name and password from its `_config` volume.
 - Inventory the container's writable layer: roles other than `postgres`
-  (`pg_dumpall --roles-only`); `pg_hba.conf` lines and PostgreSQL settings the image does
-  not ship; the `/etc/joinery-agent` directory; `/etc/cron.d` and crontabs; installed PHP
+  (`pg_dumpall --roles-only`); refuse any `pg_hba.conf` network line the site's
+  `config/postgres_access.conf` does not declare; the `/etc/joinery-agent` directory; `/etc/cron.d` and crontabs; installed PHP
   packages. Everything is written to `/root/rebase/<site>/` and printed, so an unexpected
   customization is seen before anything moves.
 - Record the source database's encoding and locale, and refuse if the new image lacks
@@ -349,8 +389,9 @@ recreate it exactly.
 - Recreate the inventoried roles, `createdb` with the recorded encoding and locale,
   then `pg_restore --exit-on-error`. The restore rebuilds every index under 26.04's
   collation, which is why this moves data by dump rather than by `pg_upgrade`.
-- Re-apply the inventoried `pg_hba.conf` lines and settings. Install the declared PHP
-  extensions (`utils/list_dependencies.php --apt`, as `utils/upgrade.php:1644` does).
+- `pg_hba.conf` comes from the site's `config/postgres_access.conf` (B8), rebuilt by
+  housekeeping at every start. Install the declared PHP extensions
+  (`utils/list_dependencies.php --apt`, as `utils/upgrade.php:1644` does).
 - Start Apache and cron.
 - Gates (§ Per-site gates). A failure prints the rollback command and stops.
 
@@ -372,11 +413,11 @@ returns to `prepared`, so a retry needs a fresh `prepare`.
 7. getjoinery-developers
 8. getjoinery — the production management node, so dispatch nothing from it while it moves.
 9. **scrolldaddy last.** Its DNS resolvers read its database over the network as
-   `scrolldaddy_dns`. `/home/user1/scrolldaddy-dns/README.md:389` adds a `pg_hba` line
-   per resolver. That role and those lines live in the container, where a dump does not
-   carry them; `prepare`'s inventory is what brings them across. Confirm both resolvers
-   serve during and after the move. Unverified: whether the resolvers keep answering
-   from memory while the database is down.
+   `scrolldaddy_reader`. Their access lines and the publish address are declared in its
+   `config/postgres_access.conf` (B8), which the rebuild keeps. The role is carried by
+   `prepare`'s `pg_dumpall --roles-only`. Confirm both resolvers serve during and after
+   the move. Unverified: whether the resolvers keep answering from memory while the
+   database is down.
 
 ## Stage 4 — The two standalone boxes (owner, by hand)
 
@@ -444,7 +485,7 @@ database-incrementals integration tests run in the ordinary gate.
 
 ## Progress (2026-09-24)
 
-- **Landed in the tree:**
+- **Committed in 71277d44** (not yet released):
   - B1: `BackupRunner.php`, `BackupFetch.php`, `BackupChainListHelper.php`,
     `BackupListHelper.php`, `targets.php`, `run_backup.php`, the `JobResultProcessor.php`
     comment, `BackupObjectsNotice.php`, and eight tests that pinned binary-unit sizes.
@@ -463,6 +504,12 @@ database-incrementals integration tests run in the ordinary gate.
 - **Dev's own PHP gets B3's fix at the converger's next run.** Its PHP 8.3 `php.ini` is
   the untouched packaged file (2 MB uploads, 30 s, no timezone). The next converge tunes
   it and restarts php8.3-fpm.
+- **B8 remainder + B10, built 2026-09-24, uncommitted:**
+  - In the tree: `restore_database.sh` 3.8, `rebase_site_container.sh` 1.2,
+    `manage_domain.sh` 1.2, `restore_roundtrip_gate.sh`, `install_container_gate.sh`, and
+    the docs.
+  - Landed with the converger stopped: `install.sh` 2.82, `host_housekeeping.sh` 1.8, the
+    housekeeping gate (105/105), and the contract section (18; contract 732/732).
 - **Rehearsal R1 (container move) — blocked.** It needs a scratch Docker host. Creating
   a Linode is a purchase and needs the owner's explicit approval. Docker is not on dev.
 - **Rehearsal R2 (jeremytunnell clone) — owner.** jeremytunnell is not in the account the

@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.8 - A `publish <address>` line in config/postgres_access.conf is passed over: it
+#                tells install.sh where the host publishes the database port, and is no
+#                pg_hba line.
 # Version: 1.7 - PostgreSQL answers only locally, enforced on every converge and at every
 #                container start. pg_hba.conf keeps its local and loopback rules and
 #                loses every rule admitting a network address. A container adds one
@@ -595,7 +598,8 @@ fi
 #     (a volume, so they survive a rebuild) are added, each checked: one
 #     named database, one named role that is not postgres, one address no
 #     wider than a /24 (IPv6 /64), md5 or scram-sha-256. A line that fails
-#     the check is named and left out.
+#     the check is named and left out. A `publish <address>` line is the
+#     host's (install.sh publishes the database port there) and is passed over.
 #   - A standalone server's listen_addresses is pinned to localhost by a
 #     conf.d drop-in, restarting PostgreSQL only when the setting it was
 #     running with was something else. A container keeps listening on its
@@ -679,6 +683,7 @@ for pg_dir in "${FS_ROOT}"/etc/postgresql/*/main; do
                 n=$((n + 1))
                 [[ "${line}" =~ ^[[:space:]]*(#|$) ]] && continue
                 read -r f1 f2 f3 f4 f5 f6 <<< "${line}"
+                [[ "${f1}" == "publish" ]] && continue
                 why="$(pg_access_line_ok "${f1}" "${f2}" "${f3}" "${f4}" "${f5}" "${f6}")"
                 if [[ -n "${why}" ]]; then
                     warn "postgres_access.conf line ${n} left out: ${why}"

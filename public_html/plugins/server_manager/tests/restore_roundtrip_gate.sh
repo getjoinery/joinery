@@ -20,6 +20,9 @@
 #   * mid-load failure AFTER the schema drop -> RESTORE_LOAD_FAILED + exit 6
 #     (the one path allowed to modify the database and then fail)
 #   * dump from a newer PostgreSQL -> RESTORE_SERVER_TOO_OLD, target UNTOUCHED
+#   * dump granting to roles the server lacks -> each created without login
+#     before the drop, grants loaded; one that cannot be created ->
+#     RESTORE_ROLE_MISSING, target UNTOUCHED
 #   * target database absent -> created and loaded
 #   * an unattended restore keeps NOTHING of what it destroys, and the two flags
 #     that used to control that are refused rather than ignored
@@ -66,9 +69,12 @@ WORK=$(mktemp -d)
 KEYF="$WORK/key"; openssl rand -base64 32 > "$KEYF"
 BADKEY="$WORK/badkey"; openssl rand -base64 32 > "$BADKEY"
 
+ROLE_A="jt_rt_role_$SUF"
+ROLE_B="Jt Rt Role $SUF"
 cleanup() {
     dropdb -U postgres --if-exists "$SRC" >/dev/null 2>&1
     dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1
+    psql -U postgres -q -c "DROP ROLE IF EXISTS \"$ROLE_A\"; DROP ROLE IF EXISTS \"$ROLE_B\";" >/dev/null 2>&1
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -173,6 +179,50 @@ M=$(bash "$ENGINE" "$DST" "$TOONEW" --non-interactive --db-user postgres 2>/dev/
 chk "newer-dump marker is RESTORE_SERVER_TOO_OLD" "${M%% *}" "RESTORE_SERVER_TOO_OLD"
 chk "newer-dump left the target untouched" \
     "$(psql -U postgres -d "$DST" -XtAc "SELECT count(*) FROM t WHERE id=99997" 2>/dev/null)" "1"
+
+# --- 7c: roles the dump names that this server lacks -------------------------
+# A dump carries GRANT ... TO a role but never the role. scrolldaddy's grants
+# its DNS resolvers' reader role 143 times, so a restore onto a fresh server
+# failed on the first GRANT, after the schema drop. The roles are made here on
+# the source, granted, dumped, then dropped, so the target server lacks them.
+psql -U postgres -q -c "CREATE ROLE \"$ROLE_A\" NOLOGIN; CREATE ROLE \"$ROLE_B\" NOLOGIN;" >/dev/null 2>&1
+psql -U postgres -d "$SRC" -q -c "GRANT SELECT ON t TO \"$ROLE_A\", \"$ROLE_B\";" >/dev/null 2>&1
+ROLESQL="$WORK/roles.sql"; pg_dump -U postgres "$SRC" > "$ROLESQL"
+psql -U postgres -d "$SRC" -q -c "REVOKE SELECT ON t FROM \"$ROLE_A\", \"$ROLE_B\";" >/dev/null 2>&1
+psql -U postgres -q -c "DROP ROLE \"$ROLE_A\"; DROP ROLE \"$ROLE_B\";" >/dev/null 2>&1
+chk "the roles are absent before the restore" \
+    "$(psql -U postgres -XtAc "SELECT count(*) FROM pg_roles WHERE rolname IN ('$ROLE_A', '$ROLE_B')")" "0"
+dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1; createdb -U postgres "$DST"
+M=$(bash "$ENGINE" "$DST" "$ROLESQL" --non-interactive --db-user postgres 2>"$WORK/roles.err")
+chk "a dump naming absent roles restores" "$M" "RESTORE_OK"
+chk "restored row count" \
+    "$(psql -U postgres -d "$DST" -XtAc "SELECT count(*) FROM t" 2>/dev/null)" "500"
+chk "both roles were created, neither may log in" \
+    "$(psql -U postgres -XtAc "SELECT count(*) FROM pg_roles WHERE rolname IN ('$ROLE_A', '$ROLE_B') AND NOT rolcanlogin")" "2"
+chk "the dump's grant reached the quoted role" \
+    "$(psql -U postgres -d "$DST" -XtAc "SELECT has_table_privilege('$ROLE_B', 't', 'SELECT')")" "t"
+chk "the log names each role created" \
+    "$(grep -c "Created role '\($ROLE_A\|$ROLE_B\)' without login" "$WORK/roles.err")" "2"
+M=$(bash "$ENGINE" "$DST" "$ROLESQL" --non-interactive --db-user postgres 2>"$WORK/roles2.err")
+chk "a second restore finds the roles and creates none" \
+    "$M/$(grep -c 'Created role' "$WORK/roles2.err")" "RESTORE_OK/0"
+
+# A role this server cannot create (the pg_ prefix is reserved) is refused
+# before the drop, with the target as it was.
+psql -U postgres -d "$DST" -q -c "INSERT INTO t VALUES (99996,'sentinel4');" >/dev/null 2>&1
+NOROLE="$WORK/norole.sql"
+{
+    echo "-- Dumped by pg_dump version 16.0"
+    echo "CREATE TABLE t(id int primary key, v text);"
+    echo "GRANT SELECT ON TABLE public.t TO pg_jt_rt_reserved_$SUF;"
+} > "$NOROLE"
+M=$(bash "$ENGINE" "$DST" "$NOROLE" --non-interactive --db-user postgres 2>/dev/null)
+RC=$?
+chk "an uncreatable role is RESTORE_ROLE_MISSING, exit 9" "$M/$RC" "RESTORE_ROLE_MISSING/9"
+chk "an uncreatable role left the target untouched" \
+    "$(psql -U postgres -d "$DST" -XtAc "SELECT count(*) FROM t WHERE id=99996" 2>/dev/null)" "1"
+dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1
+psql -U postgres -q -c "DROP ROLE IF EXISTS \"$ROLE_A\"; DROP ROLE IF EXISTS \"$ROLE_B\";" >/dev/null 2>&1
 
 # --- 8: target database absent -> created and loaded ---------------------------
 dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1

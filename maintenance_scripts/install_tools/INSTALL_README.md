@@ -152,7 +152,7 @@ sudo ./install.sh -y -q site mysite SecurePass@123 mysite.com 8080
 
 # Output in quiet mode is minimal:
 # Installation Complete!
-# Site: mysite | URL: http://mysite.com:8080/
+# Site: mysite | URL: http://mysite.com/
 ```
 
 Without `-y`, a run with no terminal still completes: each prompt takes its default. Proposals (install Docker, use the suggested port) proceed; destructive choices (overwrite an existing site, delete data volumes) refuse unless their explicit flags say otherwise.

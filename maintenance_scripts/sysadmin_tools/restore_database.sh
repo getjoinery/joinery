@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#Version 3.8 - Every role the dump names exists before the schema is dropped. A missing one is
+#              created without login; one that cannot be created is refused as
+#              RESTORE_ROLE_MISSING with the database untouched. A dump that grants to a role the
+#              target lacks (scrolldaddy_reader) used to fail its load after the drop
 #Version 3.7 - The pre-restore safety dump is GONE, with its two flags. A restore happens
 #              because the current state is wrong; dumping it first preserved the thing being
 #              discarded and kept a full copy of the database per restore, for ever. Owner
@@ -40,9 +44,11 @@
 #     marker so callers (JobResultProcessor) can parse the outcome:
 #         RESTORE_OK | BACKUP_KEY_MISSING | DECRYPT_FAILED
 #         ARCHIVE_CORRUPT | RESTORE_LOAD_FAILED | DB_UNREACHABLE
-#         RESTORE_USAGE_ERROR | RESTORE_SERVER_TOO_OLD
+#         RESTORE_USAGE_ERROR | RESTORE_SERVER_TOO_OLD | RESTORE_ROLE_MISSING
 #     Only RESTORE_LOAD_FAILED can leave the database modified; every other
 #     failure exits with it untouched.
+#   * Roles: a role the dump names and the server lacks is created without
+#     login before anything is dropped (stage 1c).
 #   * Key resolution order: --key-file -> the envelope sidecar beside the
 #     archive (opened with this machine's own config/backup_site_key) ->
 #     $BACKUP_ENCRYPTION_KEY -> ~/.joinery_backup_key -> interactive prompt
@@ -80,7 +86,7 @@ while [[ $# -gt 0 ]]; do
             info "Usage: $0 DB_NAME FILE [--non-interactive] [--key-file PATH] [--db-user USER]"
             info ""
             info "Supported formats: .sql  .sql.gz  .sql.gz.enc"
-            info "Markers (stdout): RESTORE_OK BACKUP_KEY_MISSING DECRYPT_FAILED ARCHIVE_CORRUPT RESTORE_LOAD_FAILED DB_UNREACHABLE RESTORE_USAGE_ERROR"
+            info "Markers (stdout): RESTORE_OK BACKUP_KEY_MISSING DECRYPT_FAILED ARCHIVE_CORRUPT RESTORE_LOAD_FAILED DB_UNREACHABLE RESTORE_USAGE_ERROR RESTORE_SERVER_TOO_OLD RESTORE_ROLE_MISSING"
             exit 0
             ;;
         -*) info "✗ Unknown option: $1"; exit 1 ;;
@@ -343,6 +349,94 @@ if [ -n "$DUMP_PG_MAJOR" ] && [ -n "$TARGET_VERSION_NUM" ]; then
         exit 8
     fi
 fi
+
+# --- Stage 1c: every role the dump names exists before anything is dropped -----
+# A dump carries each object's owner and privileges (ALTER ... OWNER TO,
+# GRANT ... TO) but never the roles they name: roles belong to the server, not
+# to one database. On a server that lacks one, the first statement naming it
+# stops the load under ON_ERROR_STOP, after the schema drop. scrolldaddy's dump
+# names scrolldaddy_reader 143 times, so without this it restores only onto the
+# server it came from.
+#
+# The names are read out of the staged dump now, with nothing touched yet, and
+# each role this server lacks is created unable to log in. It receives exactly
+# what the dump grants it. A dump holds no password, so anything that logged in
+# as the role (ScrollDaddy's DNS resolvers read as scrolldaddy_reader) needs its
+# login set again by the operator; the log names each role created. A --db-user
+# that may not create roles is refused here, with the database untouched.
+dump_role_names() {
+    local line list tok name
+    local re_owner='^ALTER .* OWNER TO (.+)$'
+    local re_grant='^(ALTER DEFAULT PRIVILEGES .* )?GRANT .* TO (.+)$'
+    local re_revoke='^(ALTER DEFAULT PRIVILEGES .* )?REVOKE .* FROM (.+)$'
+    local re_for_role='^ALTER DEFAULT PRIVILEGES FOR ROLE ("([^"]|"")+"|[^ ]+) '
+    local re_session="^SET SESSION AUTHORIZATION '(([^']|'')+)'$"
+    local re_tok='^[[:space:]]*("([^"]|"")+"|[^,[:space:]]+)[[:space:]]*(,(.*))?$'
+    # COPY data is skipped: a row's text can read like a statement.
+    LC_ALL=C awk '
+        copy { if ($0 == "\\.") copy = 0; next }
+        /^COPY .* FROM stdin;$/ { copy = 1; next }
+        /^(GRANT|REVOKE|ALTER DEFAULT PRIVILEGES|SET SESSION AUTHORIZATION) / || / OWNER TO / { print }
+    ' "$1" | while IFS= read -r line; do
+        line="${line%;}"
+        local lists=()
+        [[ $line =~ $re_owner ]]    && lists+=("${BASH_REMATCH[1]}")
+        [[ $line =~ $re_for_role ]] && lists+=("${BASH_REMATCH[1]}")
+        if [[ $line =~ $re_grant ]]; then
+            list="${BASH_REMATCH[2]}"
+            list="${list% WITH GRANT OPTION*}"
+            lists+=("${list% GRANTED BY *}")
+        fi
+        if [[ $line =~ $re_revoke ]]; then
+            list="${BASH_REMATCH[2]}"
+            lists+=("${list% CASCADE}")
+        fi
+        if [[ $line =~ $re_session ]]; then
+            name="${BASH_REMATCH[1]}"
+            printf '%s\n' "${name//\'\'/\'}"
+        fi
+        for list in "${lists[@]}"; do
+            while [[ $list =~ $re_tok ]]; do
+                tok="${BASH_REMATCH[1]}"
+                list="${BASH_REMATCH[4]}"
+                if [[ $tok == \"*\" ]]; then
+                    name="${tok:1:${#tok}-2}"
+                    printf '%s\n' "${name//\"\"/\"}"
+                else
+                    name="${tok,,}"
+                    case "$name" in public|current_user|current_role|session_user) continue ;; esac
+                    printf '%s\n' "$name"
+                fi
+            done
+        done
+    done | LC_ALL=C sort -u
+}
+
+ROLES_CREATED=()
+while IFS= read -r ROLE; do
+    [ -n "$ROLE" ] || continue
+    if ! ROLE_EXISTS=$(printf "SELECT 1 FROM pg_roles WHERE rolname = :'r';\n" \
+            | psql -U "$DB_USER" -d postgres -XtA -v ON_ERROR_STOP=1 -v r="$ROLE" 2>&1); then
+        info "✗ Could not query PostgreSQL: $ROLE_EXISTS"
+        echo "DB_UNREACHABLE"
+        exit 7
+    fi
+    [ "$ROLE_EXISTS" = "1" ] && continue
+    if ! printf 'CREATE ROLE :"r" NOLOGIN;\n' \
+            | psql -U "$DB_USER" -d postgres -XqA -v ON_ERROR_STOP=1 -v r="$ROLE" 1>&2; then
+        info "✗ The dump names the role '$ROLE', which this server lacks, and '$DB_USER'"
+        info "  may not create it. Nothing has been changed — the database is untouched."
+        info "  Create the role (CREATE ROLE ... NOLOGIN) or restore as a user that may."
+        echo "RESTORE_ROLE_MISSING"
+        exit 9
+    fi
+    ROLES_CREATED+=("$ROLE")
+done < <(dump_role_names "$SQL_TMP")
+for ROLE in "${ROLES_CREATED[@]}"; do
+    info "⚠️  Created role '$ROLE' without login: the dump grants it privileges and this"
+    info "   server lacked it. If something logs in as it, set that again:"
+    info "   ALTER ROLE \"$ROLE\" LOGIN PASSWORD '...';"
+done
 
 # --- Stage 2: (removed) ---------------------------------------------------------
 #

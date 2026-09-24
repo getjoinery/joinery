@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # manage_domain.sh - Manage domain assignments for Joinery sites
+# VERSION: 1.2 - says when a container's web port answers around the proxy (published on every
+#                interface) or cannot be reached once the domain is cleared (published on
+#                127.0.0.1, as install.sh publishes a site with a domain)
 # VERSION: 1.1 - the proxy vhost appends to X-Forwarded-For rather than
 #                replacing it, so the chain Cloudflare started reaches the
 #                container and mod_remoteip there can resolve the real client
@@ -66,6 +69,13 @@ is_docker_site() {
 get_container_port() {
     local sitename="$1"
     docker port "$sitename" 80 2>/dev/null | head -1 | sed 's/.*://'
+}
+
+# The host address the container's web port is published on: 127.0.0.1 when
+# only this machine (its proxy) reaches it, 0.0.0.0 when every interface does.
+get_container_bind() {
+    local sitename="$1"
+    docker port "$sitename" 80 2>/dev/null | head -1 | sed 's/:[0-9]*$//'
 }
 
 # Check if an IP belongs to Cloudflare
@@ -370,6 +380,9 @@ EOF
     fi
 
     print_success "Domain $domain configured for $sitename"
+    if [ "$(get_container_bind "$sitename")" != "127.0.0.1" ]; then
+        print_warning "Port $port still answers on every interface, around this proxy, until the site is rebuilt with install.sh, which publishes a site with a domain on 127.0.0.1 only."
+    fi
 }
 
 set_domain_baremetal() {
@@ -500,7 +513,11 @@ clear_domain_docker() {
     systemctl reload apache2
 
     local port=$(get_container_port "$sitename")
-    print_success "Domain cleared. Site accessible at http://${server_ip}:${port}/"
+    if [ "$(get_container_bind "$sitename")" = "127.0.0.1" ]; then
+        print_warning "Domain cleared. Port $port is published on 127.0.0.1 only, so nothing off this machine reaches the site now. Set a domain again, or rebuild the site with install.sh without one to publish it on every interface."
+    else
+        print_success "Domain cleared. Site accessible at http://${server_ip}:${port}/"
+    fi
 }
 
 clear_domain_baremetal() {

@@ -91,7 +91,7 @@ trap cleanup EXIT
 probe() {
     # http_code for a request carrying the configured domain — the request a
     # visitor's browser makes, not the one that flatters a dead vhost.
-    curl -s -o /dev/null -w "%{http_code}" -H "Host: $DOMAIN" "http://localhost:$PORT/" 2>/dev/null || true
+    curl -s -o /dev/null -w "%{http_code}" -H "Host: $DOMAIN" "http://127.0.0.1:$PORT/" 2>/dev/null || true
 }
 
 assert_installed_state() {
@@ -105,6 +105,13 @@ assert_installed_state() {
         sleep 5
     done
     chk "[$phase] site answers 200 for Host: $DOMAIN" "$code" "200"
+
+    # --no-ssl means no host proxy, so the web port is the only way in and is
+    # published on every interface. The database port never is.
+    chk "[$phase] no proxy: the web port is published on every interface" \
+        "$(docker port "$SITENAME" 80/tcp 2>/dev/null | grep -c '^0\.0\.0\.0:')" "1"
+    chk "[$phase] the database port is published on 127.0.0.1 only" \
+        "$(docker port "$SITENAME" 5432/tcp 2>/dev/null | paste -sd ' ' -)" "127.0.0.1:$((PORT + 1000))"
 
     # Ten requests, then the error log must be empty. The cache-permission
     # defect wrote one line per request; anything here is a defect surfacing.
