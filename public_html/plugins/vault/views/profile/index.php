@@ -49,31 +49,13 @@ $entry_html = $capture(function ($fw) {
 	$fw->textarea('entry_notes', 'Notes', ['rows' => 4]);
 });
 
-$setup_html = $capture(function ($fw) {
-	$fw->checkboxinput('ack_loss', 'I understand that if I lose every unlocker (passkey, recovery key, and passphrase), everything in my vault is permanently gone - there is no support-desk recovery.', ['required' => true]);
-});
-
-$setup_pp_html = $capture(function ($fw) {
-	$fw->passwordinput('setup_passphrase', 'Passphrase', ['autocomplete' => 'new-password', 'validation' => ['minlength' => 10]]);
-	$fw->passwordinput('setup_passphrase_confirm', 'Confirm passphrase', ['autocomplete' => 'new-password']);
-});
-
-$unlock_pp_html = $capture(function ($fw) {
-	$fw->passwordinput('unlock_passphrase', 'Passphrase', ['autocomplete' => 'current-password']);
-});
-
-$unlock_rec_html = $capture(function ($fw) {
-	$fw->textinput('recovery_code', 'Recovery key', ['placeholder' => 'XXXX-XXXX-XXXX-...', 'autocomplete' => 'off']);
-});
-
 $config = [
-	'passkeysEnabled'        => (bool)$passkeys_enabled,
-	'autolockMinutes'        => (int)$autolock_minutes,
 	'clipboardClearSeconds'  => (int)$clipboard_clear_seconds,
 	'scope'                  => 'passwords',
 ];
 
 $page = new PublicPage();
+$page->needs_vault_client();
 $hoptions = ['title' => 'Passwords', 'breadcrumbs' => ['Passwords' => '']];
 $page->public_header($hoptions, NULL);
 echo PublicPage::BeginPage('Passwords', $hoptions);
@@ -91,78 +73,15 @@ echo PublicPage::BeginPage('Passwords', $hoptions);
 		WebCrypto (including X25519). Please use an up-to-date browser.</p>
 	</div>
 
-	<!-- First-run ceremony -->
-	<section id="jy-vault-ceremony" class="jy-vault-ceremony" hidden>
-		<div class="jy-vault-ceremony-inner">
-			<ol class="jy-vault-steps" aria-hidden="true">
-				<li data-step="method" class="is-active">Unlock method</li>
-				<li data-step="recovery">Recovery key</li>
-				<li data-step="done">Done</li>
-			</ol>
-
-			<div class="jy-vault-step" data-step="method">
-				<h1>Set up your password vault</h1>
-				<p>Your vault is protected by a key only your devices ever see. Choose how you'll unlock it.</p>
-				<?php echo $setup_html; ?>
-				<div id="jy-vault-setup-passphrase-fields" hidden><?php echo $setup_pp_html; ?></div>
-				<div class="jy-vault-actions">
-					<button type="button" id="jy-vault-setup-passkey" class="jy-btn jy-btn-primary">Set up with a passkey</button>
-					<button type="button" id="jy-vault-setup-passphrase-toggle" class="jy-btn jy-btn-link">Use a passphrase instead</button>
-					<button type="button" id="jy-vault-setup-passphrase" class="jy-btn jy-btn-primary" hidden>Set up with a passphrase</button>
-				</div>
-				<p class="jy-vault-error" id="jy-vault-setup-error" role="alert" hidden></p>
-			</div>
-
-			<div class="jy-vault-step" data-step="recovery" hidden>
-				<h1>Save your recovery key</h1>
-				<p>If you ever lose your passkey and passphrase, a recovery key is the <strong>only</strong>
-				way back in. We show these once and never again.</p>
-				<div id="jy-vault-recovery-codes" class="jy-vault-recovery-codes" aria-label="Recovery keys"></div>
-				<div class="jy-vault-actions">
-					<button type="button" id="jy-vault-download-recovery" class="jy-btn">Download recovery file</button>
-				</div>
-				<label class="jy-vault-proof">
-					<span>To confirm you've saved it, re-type the <strong>last</strong> recovery key:</span>
-					<input type="text" id="jy-vault-recovery-proof" class="jy-input" autocomplete="off" spellcheck="false">
-				</label>
-				<div class="jy-vault-actions">
-					<button type="button" id="jy-vault-recovery-finish" class="jy-btn jy-btn-primary" disabled>Continue</button>
-				</div>
-				<p class="jy-vault-error" id="jy-vault-recovery-error" role="alert" hidden></p>
-			</div>
-
-			<div class="jy-vault-step" data-step="done" hidden>
-				<h1>Your vault is ready</h1>
-				<p>Add your first password, and it'll be encrypted before it ever leaves this device.</p>
-				<div class="jy-vault-actions">
-					<button type="button" id="jy-vault-ceremony-add" class="jy-btn jy-btn-primary">Add your first entry</button>
-				</div>
-			</div>
+	<!-- Closed: setup and unlock are the core vault ceremony (a modal); this is
+	     what shows when the person closed it, or after the vault locks. -->
+	<section id="jy-vault-locked" class="jy-vault-centered" hidden>
+		<h2>Your password vault is closed</h2>
+		<p>Open it to see and add passwords. It closes again on its own after a while away.</p>
+		<div class="jy-vault-actions" style="justify-content:center">
+			<button type="button" id="jy-vault-open" class="jy-btn jy-btn-primary">Open your vault</button>
 		</div>
-	</section>
-
-	<!-- Locked -->
-	<section id="jy-vault-unlock" class="jy-vault-unlock" hidden>
-		<div class="jy-vault-unlock-inner">
-			<h1>Unlock your vault</h1>
-			<button type="button" id="jy-vault-unlock-passkey" class="jy-btn jy-btn-primary jy-btn-block">Unlock with a passkey</button>
-
-			<div id="jy-vault-unlock-passphrase-wrap" class="jy-vault-unlock-alt" hidden>
-				<div class="jy-vault-or">or</div>
-				<?php echo $unlock_pp_html; ?>
-				<button type="button" id="jy-vault-unlock-passphrase-btn" class="jy-btn jy-btn-block">Unlock</button>
-			</div>
-
-			<div id="jy-vault-unlock-recovery-wrap" class="jy-vault-unlock-alt" hidden>
-				<?php echo $unlock_rec_html; ?>
-				<button type="button" id="jy-vault-unlock-recovery-btn" class="jy-btn jy-btn-block">Unlock</button>
-			</div>
-
-			<div class="jy-vault-unlock-links">
-				<button type="button" id="jy-vault-show-recovery" class="jy-btn jy-btn-link">Use a recovery key</button>
-			</div>
-			<p class="jy-vault-error" id="jy-vault-unlock-error" role="alert" hidden></p>
-		</div>
+		<p class="jy-vault-error" id="jy-vault-locked-error" role="alert" hidden></p>
 	</section>
 
 	<!-- Unlocked manager -->
@@ -211,9 +130,6 @@ echo PublicPage::BeginPage('Passwords', $hoptions);
 	<div id="jy-vault-toast" class="jy-vault-toast" role="status" aria-live="polite" hidden></div>
 </div>
 
-<script defer src="/assets/js/passkeys.js?v=<?php echo filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')); ?>"></script>
-<script defer src="/assets/js/vault-crypto.js?v=<?php echo filemtime(PathHelper::getIncludePath('assets/js/vault-crypto.js')); ?>"></script>
-<script defer src="/assets/js/vault-keyring.js?v=<?php echo filemtime(PathHelper::getIncludePath('assets/js/vault-keyring.js')); ?>"></script>
 <script defer src="<?php echo htmlspecialchars($asset('js/vault-manager.js')); ?>"></script>
 <?php
 echo PublicPage::EndPage($hoptions);

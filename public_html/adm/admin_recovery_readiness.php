@@ -14,6 +14,7 @@ $items = $page_vars['items'];
 $stale_days = $page_vars['stale_days'];
 
 $page = new AdminPage();
+$page->needs_vault_client();
 $page->admin_header(array(
 	'menu-id' => 'recovery-readiness',
 	'page_title' => 'Recovery Readiness',
@@ -226,13 +227,7 @@ if (count($vault_aggregate)) {
 ?>
 <?php
 $stepup = isset($page_vars['stepup']) ? $page_vars['stepup'] : array('needed' => false, 'passkey' => false);
-if (count($client_configs)) { ?>
-<script src="/assets/js/vault-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-crypto.js')) ?: '1'; ?>"></script>
-<?php }
-if (!empty($stepup['needed']) && !empty($stepup['passkey'])) { ?>
-<script src="/assets/js/joinery-api.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/joinery-api.js')) ?: '1'; ?>"></script>
-<script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<?php } ?>
+?>
 <script defer src="/assets/js/recovery-readiness.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1'; ?>"></script>
 <script>
 window.rrCeremonyConfigs = <?php echo json_encode($ceremony_configs); ?>;

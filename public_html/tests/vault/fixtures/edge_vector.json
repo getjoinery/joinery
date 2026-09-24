@@ -1,0 +1,14 @@
+{
+	"_about": "Shared test vector for the browser-format seal (v1.edgeseal.) and field (v1.edge.). Produced by WebCrypto; PHP (tests/vault/edge_format_test.php) and vault-crypto.js selfCheck() must both reproduce and open exactly these bytes.",
+	"recipient_secret_hex": "b8e67311ce5fc36fbea57ba23b44b7bd96f3a05386aaa808754e46a470cd4b64",
+	"recipient_public_b64": "YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY=",
+	"eph_secret_hex": "7f7b1cbbba3e4bbaa7603fe5fdba6f59bce2e841104a6b5ee9b4e81ab899d355",
+	"eph_public_hex": "a183ebad787afc73fb3bfc017e6123ba59c4aff4c1ffbdf164a3864f50626f5c",
+	"seal_iv_hex": "4df824356ba0068273ab2918",
+	"dek_hex": "a915e4d16fe838501138950a7aa00d509abd1416d68c069425cf44e0fab44ea3",
+	"sealed_dek_b64": "oYPrrXh6/HP7O/wBfmEjulnEr/TB/73xZKOGT1Bib1xN+CQ1a6AGgnOrKRin5mqZICXeL60kdnhYxr/h5FYNKC6F+d1tyW8/49UZifhpB2n13vjmXLhWtVyUd58=",
+	"field_iv_hex": "c4fcff95cea1b9235abff4e9",
+	"field_ad": "acn:42:acn_body",
+	"field_plaintext": "Edge vector: the same bytes on both sides. ✓",
+	"field_blob_b64": "xPz/lc6huSNav/Tp2wox1T2zaBUxtkEVSUojPW+KZjNNwy4RtEMvEDIil5nXGNSR+LCPdKwkVsFTCBMNJ7rWIzGrFZWOrPe0sYM="
+}

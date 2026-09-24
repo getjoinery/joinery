@@ -15,11 +15,27 @@ abstract class PublicPageBase {
 
 	/**
 	 * Whether this render includes the vault lock chip (set during
-	 * global_includes_top for signed-in users with a set-up vault). Header
-	 * renderers consult it via render_vault_lock_slot() so no slot markup is
-	 * emitted for users who will never mount a chip.
+	 * global_includes_top for signed-in users with any vault, or on a page that
+	 * declared needs_vault_client()). Header renderers consult it via
+	 * render_vault_lock_slot() so no slot markup is emitted for users who will
+	 * never mount a chip.
 	 */
 	protected $vault_lock_enabled = false;
+
+	/** Set by needs_vault_client(): this page opens or seals client-custody content. */
+	protected $vault_client_needed = false;
+
+	/**
+	 * Declare that this page reads or writes browser-sealed content, before
+	 * public_header() / admin_header(). The head then carries the client
+	 * modules (passkeys.js, vault-crypto.js, vault-keyring.js,
+	 * joinery-sealed.js; joinery-api.js is on every page), cache-busted, beside
+	 * the lock chip, so the page's own script can call JoinerySealed and
+	 * VaultKeyring with no script tags of its own.
+	 */
+	public function needs_vault_client(): void {
+		$this->vault_client_needed = true;
+	}
 
 	/**
 	 * Header-menu providers, keyed by the $menu_data key they populate (e.g.
@@ -787,24 +803,46 @@ abstract class PublicPageBase {
 				. $this->asset_mtime('assets/js/vault-presence.js') . '"></script>' . "\n";
 
 			// Vault lock chip (docs/sealed_vault.md § The lock chip): a user
-			// with a set-up server-custody vault gets the padlock on every
-			// page — a fixed place to see the locked/unlocked state and to run
-			// the unlock or lock ceremony from anywhere. Users without a vault
-			// never load any of it.
+			// with any vault gets the padlock on every page — a fixed place to
+			// see what is unlocked and to lock it, whether that is the server
+			// window or a vault this browser holds. A page that can open a
+			// browser-held vault carries it too, so a vault set up there shows
+			// at once. data-server-vault says whether a server window exists
+			// at all: without one, the chip shows only while a browser-held
+			// vault is open. Everyone else never loads any of it.
 			require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-			if (UserEncryptionVault::loadForUser((int)$session->get_user_id())) {
+			$user_id = (int)$session->get_user_id();
+			// One query answers both questions: a member holds a handful of
+			// vault rows at most, one per scope.
+			$has_any_vault = false;
+			$has_server_vault = false;
+			foreach (new MultiUserEncryptionVault(array('user_id' => $user_id)) as $vault_row) {
+				$has_any_vault = true;
+				if ($vault_row->get('uev_scope') === UserEncryptionVault::SCOPE_USER) {
+					$has_server_vault = true;
+				}
+			}
+			if ($has_any_vault || $this->vault_client_needed) {
 				$this->vault_lock_enabled = true;
 				$idle_minutes = (int)$settings->get_setting('vault_unlock_idle_minutes');
 				if ($idle_minutes <= 0) { $idle_minutes = 30; }
+				$client_idle_minutes = (int)$settings->get_setting('vault_client_autolock_minutes');
+				if ($client_idle_minutes <= 0) { $client_idle_minutes = 15; }
 				echo '<meta name="joinery-vault" content="' . ($vault_window_open ? 'open' : 'locked')
-					. '" data-idle-minutes="' . $idle_minutes . '" />' . "\n";
+					. '" data-idle-minutes="' . $idle_minutes . '"'
+					. ' data-client-idle-minutes="' . $client_idle_minutes . '"'
+					. ' data-server-vault="' . ($has_server_vault ? '1' : '0') . '"'
+					. ' data-server-label="' . htmlspecialchars(VaultScopes::labelFor(UserEncryptionVault::SCOPE_USER), ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 				echo '<link rel="stylesheet" href="/assets/css/vault-lock.css?v='
 					. $this->asset_mtime('assets/css/vault-lock.css') . '">' . "\n";
-				echo '<script src="/assets/js/passkeys.js?v='
-					. $this->asset_mtime('assets/js/passkeys.js') . '"></script>' . "\n";
-				echo '<script src="/assets/js/vault-lock.js?v='
-					. $this->asset_mtime('assets/js/vault-lock.js') . '"></script>' . "\n";
+				$this->render_vault_script('assets/js/passkeys.js', false);
+				$this->render_vault_script('assets/js/vault-lock.js', false);
 			}
+		}
+		// The client modules answer to the page, not the viewer: a signed-out
+		// visitor to a Fortress share link decrypts in the browser too.
+		if ($this->vault_client_needed) {
+			$this->render_vault_client_scripts();
 		}
 
 		$this->render_base_assets();
@@ -823,6 +861,29 @@ abstract class PublicPageBase {
 
 		// Render cookie consent banner (if enabled) - JS waits for DOMContentLoaded
 		echo $this->renderConsentBanner();
+	}
+
+	/** @var array<string,bool> vault scripts already emitted on this page */
+	protected $vault_scripts_emitted = array();
+
+	/** Emit one vault script tag once per page, cache-busted by mtime. */
+	protected function render_vault_script(string $relative_path, bool $defer = true): void {
+		if (isset($this->vault_scripts_emitted[$relative_path])) { return; }
+		$this->vault_scripts_emitted[$relative_path] = true;
+		echo '<script' . ($defer ? ' defer' : '') . ' src="/' . $relative_path . '?v='
+			. $this->asset_mtime($relative_path) . '"></script>' . "\n";
+	}
+
+	/**
+	 * The client-custody modules, in dependency order (deferred scripts run in
+	 * document order, before DOMContentLoaded and before any page script at the
+	 * foot). The one emitter behind needs_vault_client() on every page class.
+	 */
+	protected function render_vault_client_scripts(): void {
+		$this->render_vault_script('assets/js/passkeys.js');
+		$this->render_vault_script('assets/js/vault-crypto.js');
+		$this->render_vault_script('assets/js/vault-keyring.js');
+		$this->render_vault_script('assets/js/joinery-sealed.js');
 	}
 
 	/**
@@ -997,6 +1058,10 @@ abstract class PublicPageBase {
 		return array(
 			'default-src'     => array("'self'"),
 			'script-src'      => array("'self'", "'unsafe-inline'",
+				// Compiling WebAssembly, and nothing else: JS eval() stays
+				// blocked. The vendored Argon2id (assets/vendor/argon2) is WASM,
+				// and a client-custody vault's passphrase runs through it.
+				"'wasm-unsafe-eval'",
 				'https://js.stripe.com',
 				'https://www.paypal.com', 'https://www.paypalobjects.com',
 				'https://hcaptcha.com', 'https://*.hcaptcha.com',

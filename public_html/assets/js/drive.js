@@ -10,7 +10,6 @@
 	var api = window.joineryApi;
 	var CFG = window.DRIVE_CONFIG || {};
 	var DC = window.DriveCrypto;
-	var VK = window.VaultKeyring;
 	var SCOPE = CFG.vaultScope || 'drive';
 	var state = {
 		view: 'mine',
@@ -25,11 +24,11 @@
 		usage: null
 	};
 
-	// The unlocked drive vault session (VaultKeyring makeSession), held only in
-	// this tab's memory for the page lifetime — client-custody has no server
-	// unlock window. Per-file keys/metadata are cached after first decrypt.
-	var driveSession = null;
+	// The unlocked drive vault session is held by JoinerySealed (one per scope
+	// per tab) — client custody has no server unlock window. Per-file
+	// keys/metadata are cached here after first decrypt.
 	var fkCache = {}; // fileId -> { fkKey, fkBytes, meta }
+	var thumbUrls = []; // object URLs of decrypted thumbnails, revoked on lock
 
 	// ---- tiny DOM helpers --------------------------------------------------
 	function $(id) { return document.getElementById(id); }
@@ -70,111 +69,11 @@
 	}
 
 	// ---- vault unlock (client-custody, scope 'drive') ----------------------
-	// One tab-lifetime unlocked session gates every encrypt/decrypt. The modal
-	// runs enrollment (first time) or unlock (locked) via the shared VaultKeyring.
-	var vaultError = function (msg) { var e = $('drvVaultError'); if (e) { e.textContent = msg || ''; e.hidden = !msg; } };
-
+	// JoinerySealed holds the one drive session for this tab and runs the core
+	// ceremony (setup, recovery codes, unlock) when there is none.
 	function ensureUnlocked() {
-		if (driveSession && !driveSession.locked()) return Promise.resolve(driveSession);
-		if (!DC || !VK) return Promise.reject(new Error('Encryption is unavailable in this browser.'));
-		return DC.isSupported().then(function (ok) {
-			if (!ok) throw new Error('This browser cannot open encrypted files (needs modern WebCrypto).');
-			return VK.status(SCOPE);
-		}).then(function (st) {
-			return new Promise(function (resolve, reject) {
-				openVaultDialog(st, resolve, reject);
-			});
-		});
-	}
-
-	var vaultResolve = null, vaultReject = null, pendingRecovery = null;
-	function openVaultDialog(st, resolve, reject) {
-		vaultResolve = resolve; vaultReject = reject; vaultError('');
-		var dlg = $('drvVaultDialog');
-		var setUp = st && st.set_up;
-		$('drvVaultSetup').hidden = setUp;
-		$('drvVaultUnlock').hidden = !setUp;
-		$('drvVaultRecovery').hidden = true;
-		$('drvVaultSetupPpWrap').hidden = true;
-		$('drvVaultSetupPpGo').hidden = true;
-		// Hide passkey buttons when passkeys aren't enabled on the instance.
-		$('drvVaultSetupPasskey').hidden = !CFG.passkeysEnabled;
-		$('drvVaultUnlockPasskey').hidden = !CFG.passkeysEnabled;
-		dlg.returnValue = '';
-		dlg.showModal();
-	}
-	function closeVaultDialog(ok) {
-		var dlg = $('drvVaultDialog');
-		if (dlg.open) dlg.close();
-		if (!ok && vaultReject) { vaultReject(new Error('Unlock cancelled.')); }
-		vaultResolve = null; vaultReject = null;
-	}
-	function vaultUnlocked(session) {
-		driveSession = session;
-		var r = vaultResolve; vaultResolve = null; vaultReject = null;
-		if ($('drvVaultDialog').open) $('drvVaultDialog').close();
-		if (r) r(session);
-	}
-
-	function wireVaultDialog() {
-		var g = function (id) { return $(id); };
-		if (g('drvVaultSetupPpToggle')) g('drvVaultSetupPpToggle').onclick = function () {
-			$('drvVaultSetupPpWrap').hidden = false; $('drvVaultSetupPpGo').hidden = false;
-		};
-		if (g('drvVaultSetupPasskey')) g('drvVaultSetupPasskey').onclick = function () { doSetup('passkey'); };
-		if (g('drvVaultSetupPpGo')) g('drvVaultSetupPpGo').onclick = function () { doSetup('passphrase'); };
-		if (g('drvVaultRecoveryDone')) g('drvVaultRecoveryDone').onclick = function () {
-			if (pendingRecovery) { vaultUnlocked(pendingRecovery.session); pendingRecovery = null; }
-		};
-		if (g('drvVaultUnlockPasskey')) g('drvVaultUnlockPasskey').onclick = function () { doUnlock('passkey'); };
-		if (g('drvVaultUnlockPpGo')) g('drvVaultUnlockPpGo').onclick = function () { doUnlock('passphrase'); };
-		if (g('drvVaultUnlockRecGo')) g('drvVaultUnlockRecGo').onclick = function () { doUnlock('recovery'); };
-		var dlg = $('drvVaultDialog');
-		if (dlg) dlg.addEventListener('cancel', function () { closeVaultDialog(false); });
-		dlg.querySelectorAll('[data-close]').forEach(function (b) { b.onclick = function () { closeVaultDialog(false); }; });
-	}
-
-	async function doSetup(method) {
-		vaultError('');
-		if (!$('drvVaultAck').checked) { vaultError('Please confirm you understand the recovery warning.'); return; }
-		try {
-			var opts = { acknowledged: true };
-			if (method === 'passkey') {
-				opts.passkey = await VK.derivePasskeyKek(SCOPE);
-			} else {
-				var pp = $('drvVaultSetupPp').value || '';
-				if (pp.length < 10) { vaultError('Use a passphrase of at least 10 characters.'); return; }
-				opts.passphrase = pp;
-			}
-			var res = await VK.setup(SCOPE, opts);
-			$('drvVaultSetupPp').value = '';
-			// Show recovery codes once, then finish.
-			pendingRecovery = res;
-			$('drvVaultRecoveryCodes').textContent = (res.recoveryCodes || []).join('\n');
-			$('drvVaultRecovery').hidden = false;
-			$('drvVaultSetup').querySelectorAll('button').forEach(function (b) {
-				if (b.id !== 'drvVaultRecoveryDone') b.disabled = true;
-			});
-		} catch (e) { vaultError(e.message || 'Setup failed.'); }
-	}
-
-	async function doUnlock(method) {
-		vaultError('');
-		try {
-			var session;
-			if (method === 'passkey') {
-				var d = await VK.derivePasskeyKek(SCOPE);
-				session = await VK.unlockWithPasskey(SCOPE, d.kek, d.credentialId);
-			} else if (method === 'passphrase') {
-				session = await VK.unlockWithPassphrase(SCOPE, $('drvVaultUnlockPp').value || '');
-				$('drvVaultUnlockPp').value = '';
-			} else {
-				var r = await VK.unlockWithRecovery(SCOPE, $('drvVaultUnlockRec').value || '');
-				session = r.session;
-				$('drvVaultUnlockRec').value = '';
-			}
-			vaultUnlocked(session);
-		} catch (e) { vaultError(e.message || 'Unlock failed.'); }
+		return window.JoinerySealed ? JoinerySealed.session(SCOPE, { reason: 'to open your encrypted files' })
+			: Promise.reject(new Error('Encryption is unavailable on this page.'));
 	}
 
 	// ---- encrypted-file helpers --------------------------------------------
@@ -296,7 +195,7 @@
 	}
 	function maybeDecryptVisible() {
 		if (!hasEncryptedItems()) return;
-		if (driveSession && !driveSession.locked()) { decryptVisible(); return; }
+		if (window.JoinerySealed && JoinerySealed.isOpen(SCOPE)) { decryptVisible(); return; }
 		if (state.folderEncrypted) {
 			ensureUnlocked().then(decryptVisible).catch(function () {/* left locked */});
 		}
@@ -323,6 +222,26 @@
 			}).catch(function () {/* stays as a locked placeholder */});
 		});
 	}
+	// JoinerySealed dropped the drive session (idle, leaving the page, Lock
+	// now). What this page made with it is this page's to wipe: the file keys
+	// (zeroed), the decrypted names and thumbnails. The list redraws as the
+	// locked placeholders it started as, without asking to unlock again.
+	function wipeDecrypted() {
+		Object.keys(fkCache).forEach(function (id) {
+			var e = fkCache[id];
+			if (e && e.fkBytes && e.fkBytes.fill) e.fkBytes.fill(0);
+		});
+		fkCache = {};
+		thumbUrls.forEach(function (u) { URL.revokeObjectURL(u); });
+		thumbUrls = [];
+		state.items.forEach(function (it) { delete it._name; delete it._mime; });
+		var wrap = $('drvItems');
+		if (wrap && state.items.length) {
+			wrap.innerHTML = '';
+			state.items.forEach(function (it) { wrap.appendChild(renderItem(it)); });
+		}
+	}
+
 	function loadEncryptedThumb(it, entry, icon) {
 		fetch(it.thumb_url).then(function (r) { return r.ok ? r.arrayBuffer() : null; }).then(function (buf) {
 			if (!buf) return;
@@ -333,6 +252,7 @@
 			img.className = 'drv-item-thumb';
 			img.alt = '';
 			img.src = URL.createObjectURL(blob);
+			thumbUrls.push(img.src);
 			icon.innerHTML = '';
 			icon.appendChild(img);
 		}).catch(function () {/* keep the type icon */});
@@ -488,25 +408,19 @@
 
 	// A Private file's bytes are opened by the SERVER, inside the owner's unlock
 	// window — so there is nothing to decrypt here. The only thing this has to
-	// get right is the locked case: ask for the window, then re-run the original
-	// request. Same contract as the mail reader; the shared ceremony
-	// (assets/js/vault-lock.js) keeps the header chip and the presence beacon in
-	// step with an unlock started from here.
+	// get right is the locked case: a 423 is the locked shape, and JoinerySealed
+	// runs the shared unlock (assets/js/vault-lock.js, which keeps the header
+	// chip and the presence beacon in step) and then re-runs the request.
 	function openSealed(it) {
 		if (!it.download_url) return;
+		var follow = function () { window.open(it.download_url, '_blank'); };
 		fetch(it.download_url, { method: 'HEAD' }).then(function (r) {
-			if (r.status !== 423) {
-				window.open(it.download_url, '_blank');
-				return;
-			}
-			if (!window.JoineryVaultLock) {
-				toast('Unlock your vault to open this file.');
-				return;
-			}
-			return JoineryVaultLock.unlock().then(function (ok) {
-				if (ok) window.open(it.download_url, '_blank');
+			if (r.status !== 423) { follow(); return; }
+			if (!window.JoinerySealed) { toast('Unlock your vault to open this file.'); return; }
+			return JoinerySealed.open({ content_locked: true }, follow).catch(function (e) {
+				if (!/cancel/i.test(e.message || '')) toast(e.message || 'Unlock your vault to open this file.');
 			});
-		}).catch(function () {
+		}, function () {
 			// A HEAD that cannot be made is not a reason to refuse the download;
 			// let the browser follow the link and show whatever comes back.
 			window.open(it.download_url, '_blank');
@@ -671,10 +585,13 @@
 				.then(function () { $('drvNewFolderDialog').close(); load(); })
 				.catch(function (e) { toast(e.message || 'Could not create folder.'); });
 		};
-		// Either protected level needs the owner's vault to exist first — Fortress
-		// so the browser has a key, Private so the server has one to seal to.
-		if (body.protection_level !== 'standard') {
-			ensureUnlocked().then(proceed).catch(function (e) { toast(e.message || 'Vault unlock needed.'); });
+		// Fortress needs the Drive vault this browser holds (set up here if it is
+		// not yet). Private seals to the server-custody vault instead, which the
+		// server checks for itself and names in its refusal.
+		if (body.protection_level === 'fortress') {
+			ensureUnlocked().then(proceed).catch(function (e) {
+				if (!/cancel/i.test((e && e.message) || '')) toast(e.message || 'Vault unlock needed.');
+			});
 		} else {
 			proceed();
 		}
@@ -1248,7 +1165,7 @@
 	function init() {
 		if (!api) { console.error('joineryApi missing'); return; }
 		wire();
-		wireVaultDialog();
+		if (window.JoinerySealed) JoinerySealed.onLock(SCOPE, wipeDecrypted);
 		if (window.DRIVE_INITIAL && window.DRIVE_INITIAL.items) {
 			render(window.DRIVE_INITIAL);
 		} else {

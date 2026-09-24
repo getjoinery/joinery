@@ -90,6 +90,11 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.5 - the vault re-enrollment gate's message states the rule (a vault needs a
+ *                second factor) instead of claiming an administrator reset;
+ *                forget_vault_posture() for a vault created mid-session;
+ *                enforce_navigation_gates(), which RouteHelper also runs for every
+ *                signed-in page, so no page skips the gates
  * @version 1.4 - mail's protection level and hardening add-ons add no navigation gate: an account
  *                holding a hardened mail domain needs no second factor beyond what it chooses to enroll
  * @version 1.3 - the page_probe session: a request from this machine carrying a one-time probe token runs as
@@ -1555,93 +1560,107 @@ class SessionControl{
 
 		}
 		else{
-			// Both checks below end in a browser redirect, and on the CLI there is
-			// no browser and no REQUEST_URI. Unguarded, a scheduled task or
-			// maintenance script running as a user who still owes a password change
-			// or a terms acceptance read an undefined REQUEST_URI, called header()
-			// into the void, and then exit()ed mid-run — the script died with
-			// nothing said about why. A fresh install reaches this immediately: the
-			// admin account the installer creates carries force_password_change
-			// from birth, so on a newly built node it was every CLI entry point,
-			// not an edge case.
-			//
-			// Resolved once, so the two checks cannot disagree about what page is
-			// being viewed. NULL means "not a request", which is not the same as a
-			// request whose path happens to be empty.
-			$current_path = (PHP_SAPI === 'cli')
-				? NULL
-				: parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
-
-			// Check if user must change password before accessing any other page
-			if ($current_path !== NULL && $this->must_change_password()) {
-				// Don't redirect if already on the password change page or logging out
-				if ($current_path !== '/change-password-required' && $current_path !== '/logout') {
-					header('Location: /change-password-required');
-					exit();
-				}
-			}
-
-			// Check if user must accept terms before accessing any other page
-			if ($current_path !== NULL && $this->must_accept_terms()) {
-				if ($current_path !== '/terms-accept' && $current_path !== '/logout') {
-					header('Location: /terms-accept');
-					exit();
-				}
-			}
-
-			// First-login setup wizard (specs/setup_wizard.md): an account that
-			// has never dismissed the wizard and has outstanding setup steps is
-			// taken to /setup. Sits BEFORE the 2FA gates on purpose — the wizard
-			// mounts the same enrollment ceremonies, so a fresh admin enrolls
-			// there; dismissing without enrolling lands on the stricter gates
-			// below. SetupSteps::interruptExempt() lists the paths left alone.
-			if ($current_path !== NULL) {
-				require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
-				if (!SetupSteps::interruptExempt((string)$current_path) && SetupSteps::shouldInterrupt()) {
-					header('Location: /setup');
-					exit();
-				}
-			}
-
-			// Enforce a second factor on admin accounts when totp_require_admins
-			// is set (security_inventory S4: on by default on a managed node).
-			// Exempt /profile/security (where they enable it), /setup (which
-			// mounts the same enrollment) and /logout to avoid loops, and ALL
-			// /api/v1/ requests: the gate governs page navigation, but the
-			// security page does its enrollment through /api/v1 fetches
-			// (passkey_register_*, TOTP setup) that call check_permission()
-			// themselves — an HTML redirect inside a JSON fetch would make
-			// enrollment impossible. Protected content over the API is already
-			// independently vault-gated.
-			if ($this->must_enable_totp_for_admin()) {
-				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-				if ($current_path !== '/profile/security' && $current_path !== '/setup'
-						&& $current_path !== '/logout'
-						&& strpos((string)$current_path, '/api/v1/') !== 0) {
-					$msgtxt = urlencode('Your administrator account requires a second factor: an authenticator app or a passkey.');
-					header('Location: /profile/security?msgtext=' . $msgtxt);
-					exit();
-				}
-			}
-
-			// Vault re-enrollment gate: a vault holder left with zero second
-			// factors by an administrative reset is blocked until one is
-			// enrolled. Same surface + exemptions as the admin gate.
-			if ($this->must_enroll_2fa_for_vault()) {
-				$current_path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
-				if ($current_path !== '/profile/security' && $current_path !== '/setup'
-						&& $current_path !== '/logout'
-						&& strpos((string)$current_path, '/api/v1/') !== 0) {
-					$msgtxt = urlencode('An administrator reset your two-factor sign-in. Your encrypted vault requires a second factor - add a passkey or an authenticator app to continue.');
-					header('Location: /profile/security?msgtext=' . $msgtxt);
-					exit();
-				}
-			}
+			$this->enforce_navigation_gates();
 
 			if(!isset($_SESSION['permission']) || $_SESSION['permission'] < $level){
 				header("HTTP/1.1 401 Unauthorized");
 				throw new SystemAuthenticationError(
 					'Sorry, you do not have the needed permissions to view this page.');
+			}
+		}
+	}
+
+	/**
+	 * The navigation gates: a signed-in person who owes a password change,
+	 * terms, the setup wizard or a second factor is held on the page that
+	 * settles it. check_permission() runs these for the pages that call it, and
+	 * RouteHelper runs them for every signed-in page request, so a page whose
+	 * logic only asks is_logged_in() cannot step around them. Each gate names
+	 * the paths it leaves alone (its own page, /logout, /api/v1/ for the
+	 * enrollment calls). No web request, no gate.
+	 */
+	public function enforce_navigation_gates(): void {
+		if (!isset($_SESSION['loggedin'])) {
+			return;
+		}
+		// Every gate ends in a browser redirect, and on the CLI there is no
+		// browser and no REQUEST_URI. Unguarded, a scheduled task or maintenance
+		// script running as a user who still owes a password change (the admin
+		// account the installer creates carries force_password_change from
+		// birth) called header() into the void and exit()ed mid-run, with
+		// nothing said about why. So no request, no gates.
+		//
+		// Resolved once, so the gates cannot disagree about what page is being
+		// viewed. NULL means "not a request", which is not the same as a request
+		// whose path happens to be empty.
+		$current_path = (PHP_SAPI === 'cli')
+			? NULL
+			: parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+		if ($current_path === NULL) {
+			return;
+		}
+
+		// Check if user must change password before accessing any other page
+		if ($this->must_change_password()) {
+			// Don't redirect if already on the password change page or logging out
+			if ($current_path !== '/change-password-required' && $current_path !== '/logout') {
+				header('Location: /change-password-required');
+				exit();
+			}
+		}
+
+		// Check if user must accept terms before accessing any other page
+		if ($this->must_accept_terms()) {
+			if ($current_path !== '/terms-accept' && $current_path !== '/logout') {
+				header('Location: /terms-accept');
+				exit();
+			}
+		}
+
+		// First-login setup wizard (specs/setup_wizard.md): an account that
+		// has never dismissed the wizard and has outstanding setup steps is
+		// taken to /setup. Sits BEFORE the 2FA gates on purpose — the wizard
+		// mounts the same enrollment ceremonies, so a fresh admin enrolls
+		// there; dismissing without enrolling lands on the stricter gates
+		// below. SetupSteps::interruptExempt() lists the paths left alone.
+		require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
+		if (!SetupSteps::interruptExempt((string)$current_path) && SetupSteps::shouldInterrupt()) {
+			header('Location: /setup');
+			exit();
+		}
+
+		// Enforce a second factor on admin accounts when totp_require_admins
+		// is set (security_inventory S4: on by default on a managed node).
+		// Exempt /profile/security (where they enable it), /setup (which
+		// mounts the same enrollment) and /logout to avoid loops, and ALL
+		// /api/v1/ requests: the gate governs page navigation, but the
+		// security page does its enrollment through /api/v1 fetches
+		// (passkey_register_*, TOTP setup) that call check_permission()
+		// themselves — an HTML redirect inside a JSON fetch would make
+		// enrollment impossible. Protected content over the API is already
+		// independently vault-gated.
+		if ($this->must_enable_totp_for_admin()) {
+			if ($current_path !== '/profile/security' && $current_path !== '/setup'
+					&& $current_path !== '/logout'
+					&& strpos((string)$current_path, '/api/v1/') !== 0) {
+				$msgtxt = urlencode('Your administrator account requires a second factor: an authenticator app or a passkey.');
+				header('Location: /profile/security?msgtext=' . $msgtxt);
+				exit();
+			}
+		}
+
+		// Vault re-enrollment gate: a vault holder left with zero second
+		// factors is blocked until one is enrolled — after an administrative
+		// reset, or after setting up a browser-held vault by passphrase
+		// alone (the setup ceremony says so up front). Same surface +
+		// exemptions as the admin gate.
+		if ($this->must_enroll_2fa_for_vault()) {
+			if ($current_path !== '/profile/security' && $current_path !== '/setup'
+					&& $current_path !== '/logout'
+					&& strpos((string)$current_path, '/api/v1/') !== 0) {
+				$msgtxt = urlencode('Your account has no second factor, and your encrypted vault needs one - add a passkey or an authenticator app to continue.');
+				header('Location: /profile/security?msgtext=' . $msgtxt);
+				exit();
 			}
 		}
 	}
@@ -1677,6 +1696,27 @@ class SessionControl{
 	 * Any factor at all satisfies it - this gate exists to undo a zero-factor
 	 * state, not to raise the account's posture.
 	 */
+	/**
+	 * Drop the cached "does this user hold a vault" answer, so the vault
+	 * re-enrollment gate asks again on the next page. Called when a vault is
+	 * created mid-session: a factorless account that just set one up is held
+	 * to the rule from its next page, not from its next sign-in.
+	 *
+	 * Safe from an API action: the browser credential releases the session
+	 * lock right after reading identity, so this re-opens it for the one write
+	 * and releases it again.
+	 */
+	function forget_vault_posture(): void {
+		$was_active = session_status() === PHP_SESSION_ACTIVE;
+		if (!$was_active) {
+			$this->reopen();
+		}
+		unset($_SESSION['has_encryption_vault'], $_SESSION['has_encryption_vault_uid']);
+		if (!$was_active && php_sapi_name() !== 'cli' && session_status() === PHP_SESSION_ACTIVE) {
+			session_write_close();
+		}
+	}
+
 	function must_enroll_2fa_for_vault() {
 		if (!isset($_SESSION['usr_user_id'])) {
 			return false;

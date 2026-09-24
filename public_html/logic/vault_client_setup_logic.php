@@ -89,6 +89,11 @@ function vault_client_setup_logic(array $input): LogicResult {
 		return LogicResult::error('Could not create your vault - nothing was saved. Try again.');
 	}
 
+	// A vault needs a second factor on the account. One set up by passphrase
+	// alone leaves a factorless account holding a vault: the re-enrollment gate
+	// takes it from the next page (the setup ceremony said so beforehand).
+	$session->forget_vault_posture();
+
 	return LogicResult::render(['set_up' => true, 'scope' => $scope, 'vault_id' => (int)$vault->key]);
 }
 

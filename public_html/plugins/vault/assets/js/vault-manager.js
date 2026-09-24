@@ -1,12 +1,16 @@
 /**
  * vault-manager.js - the password manager UI at /profile/vault.
  *
- * The consumer half of the client-custody Sealed Vault: it drives the shared
- * core modules (VaultCrypto, VaultKeyring) to unlock the vault identity, then
- * manages its own store DEK and encrypted entries. Every plaintext lives only
- * in this tab's memory; a lock (idle, manual, or closing the tab) discards it.
+ * The consumer half of the client-custody Sealed Vault. Core does the vault
+ * identity: JoinerySealed.session('passwords') runs the setup or unlock
+ * ceremony (VaultKeyring.ensureUnlocked, a modal) and holds the session, and
+ * core locks it — after the idle time, on Lock now, when the page is left or
+ * restored from the back/forward cache. This file manages the store DEK and
+ * the encrypted entries, and wipes them in its onLock handler: every
+ * plaintext lives only in this tab's memory and the lock discards it.
  *
- * @version 1.0
+ * @version 2.0 - the ceremony, the session and the idle lock are core's
+ * @version 1.1 - lock() clears the clipboard it filled; a bfcache restore locks.
  */
 (function () {
 	'use strict';
@@ -17,7 +21,7 @@
 	var SCOPE = CONFIG.scope || 'passwords';
 
 	// ---- in-memory session state (all discarded on lock) ----------------------
-	var session = null;      // VaultKeyring unlocked session (holds the secret key)
+	var session = null;      // the scope session JoinerySealed holds (it keeps the secret key)
 	var dekKey = null;       // non-extractable AES-GCM CryptoKey for entry content
 	var entries = [];        // [{ id, record }] decrypted in memory
 	var undecryptableCount = 0;   // stored blobs the current key could not open
@@ -25,14 +29,12 @@
 	var trashEntries = [];   // decrypted trashed entries (only while in trash mode)
 	var trashUndecryptable = 0;
 	var selectedId = null;
-	var idleTimer = null;
-	var lastRecoveryCode = null;
-	var recoveryProven = false;
 	var clipboardTimer = null;
+	var lastCopied = null;   // the value this page last put on the clipboard
 
 	var $ = function (id) { return document.getElementById(id); };
 	function showSection(id) {
-		['jy-vault-loading', 'jy-vault-unsupported', 'jy-vault-ceremony', 'jy-vault-unlock', 'jy-vault-manager']
+		['jy-vault-loading', 'jy-vault-unsupported', 'jy-vault-locked', 'jy-vault-manager']
 			.forEach(function (s) { var el = $(s); if (el) el.hidden = (s !== id); });
 	}
 	function setError(id, msg) {
@@ -48,144 +50,33 @@
 	}
 
 	// ==========================================================================
-	// Boot
+	// Boot: open the vault through core, then the store DEK and entries
 	// ==========================================================================
 	async function boot() {
 		if (!(await VaultKeyring.isSupported())) { showSection('jy-vault-unsupported'); return; }
-		var st;
-		try { st = await VaultKeyring.status(SCOPE); }
-		catch (e) { showSection('jy-vault-unsupported'); return; }
-
-		if (!st.set_up) { startCeremony(); return; }
-		startUnlock(st);
+		JoinerySealed.onLock(SCOPE, wipe);
+		$('jy-vault-open').addEventListener('click', open);
+		open();
 	}
 
-	// ==========================================================================
-	// First-run ceremony
-	// ==========================================================================
-	function ceremonyStep(step) {
-		document.querySelectorAll('#jy-vault-ceremony .jy-vault-step').forEach(function (el) {
-			el.hidden = (el.getAttribute('data-step') !== step);
-		});
-		document.querySelectorAll('#jy-vault-ceremony .jy-vault-steps li').forEach(function (li) {
-			li.classList.toggle('is-active', li.getAttribute('data-step') === step);
-		});
-	}
-
-	function startCeremony() {
-		showSection('jy-vault-ceremony');
-		ceremonyStep('method');
-
-		$('jy-vault-setup-passphrase-toggle').addEventListener('click', function () {
-			$('jy-vault-setup-passphrase-fields').hidden = false;
-			this.hidden = true;
-			$('jy-vault-setup-passkey').hidden = !CONFIG.passkeysEnabled ? true : false;
-			$('jy-vault-setup-passphrase').hidden = false;
-		});
-		if (!CONFIG.passkeysEnabled) {
-			// No passkeys on this instance: passphrase is the only primary unlocker.
-			$('jy-vault-setup-passkey').hidden = true;
-			$('jy-vault-setup-passphrase-fields').hidden = false;
-			$('jy-vault-setup-passphrase-toggle').hidden = true;
-			$('jy-vault-setup-passphrase').hidden = false;
-		}
-
-		$('jy-vault-setup-passkey').addEventListener('click', function () { doSetup(true); });
-		$('jy-vault-setup-passphrase').addEventListener('click', function () { doSetup(false); });
-
-		$('jy-vault-recovery-proof').addEventListener('input', checkRecoveryProof);
-		$('jy-vault-download-recovery').addEventListener('click', downloadRecovery);
-		$('jy-vault-recovery-finish').addEventListener('click', function () {
-			// The ceremony is over: no plaintext recovery code survives past it.
-			app._recoveryCodes = null;
-			lastRecoveryCode = null;
-			$('jy-vault-recovery-codes').innerHTML = '';
-			$('jy-vault-recovery-proof').value = '';
-			ceremonyStep('done');
-		});
-		$('jy-vault-ceremony-add').addEventListener('click', function () { enterManager(); openEditor(null); });
-	}
-
-	function readOptionalPassphrase(errId) {
-		var p = $('setup_passphrase').value || '';
-		var c = $('setup_passphrase_confirm').value || '';
-		if (p === '' && c === '') return '';
-		if (p.length < 10) { setError(errId, 'Your passphrase must be at least 10 characters.'); return false; }
-		if (p !== c) { setError(errId, 'The passphrases don\'t match.'); return false; }
-		return p;
-	}
-
-	async function doSetup(usePasskey) {
-		setError('jy-vault-setup-error', '');
-		if (!$('ack_loss').checked) { setError('jy-vault-setup-error', 'Please acknowledge the recovery warning to continue.'); return; }
-
-		var passphrase = readOptionalPassphrase('jy-vault-setup-error');
-		if (passphrase === false) return;
-		if (!usePasskey && passphrase === '') { setError('jy-vault-setup-error', 'Enter a passphrase to continue.'); return; }
-
-		var opts = { acknowledged: true, passphrase: passphrase || null };
-		var btn = usePasskey ? $('jy-vault-setup-passkey') : $('jy-vault-setup-passphrase');
-		btn.disabled = true;
+	// First run or not, one call: core runs setup (recovery codes and their
+	// proof included) or unlock. A first run mints the store DEK here.
+	async function open() {
+		setError('jy-vault-locked-error', '');
+		showSection('jy-vault-loading');
 		try {
-			if (usePasskey) {
-				opts.passkey = await VaultKeyring.derivePasskeyKek(SCOPE);
-			}
-			var result = await VaultKeyring.setup(SCOPE, opts);
-			session = result.session;
-			await initStoreDek(session);
-			showRecovery(result.recoveryCodes);
+			var st = await VaultKeyring.status(SCOPE);
+			session = await JoinerySealed.session(SCOPE, { reason: 'to open your passwords' });
+			await loadStoreDek(session);
+			await loadEntries();
+			enterManager();
+			if (!st.set_up && !entries.length) openEditor(null);
 		} catch (e) {
-			setError('jy-vault-setup-error', friendly(e, usePasskey));
-		} finally {
-			btn.disabled = false;
+			session = null;
+			showSection('jy-vault-locked');
+			var msg = (e && e.message) || '';
+			if (!/cancel/i.test(msg)) setError('jy-vault-locked-error', msg || 'Could not open your vault.');
 		}
-	}
-
-	function friendly(e, usePasskey) {
-		var msg = (e && e.message) || String(e);
-		if (usePasskey && /PRF|derived secret|PRF-capable/i.test(msg)) {
-			return 'This device\'s passkey can\'t derive an encryption key. Add a passkey that supports it, or use a passphrase instead.';
-		}
-		return msg;
-	}
-
-	function showRecovery(codes) {
-		lastRecoveryCode = codes[codes.length - 1];
-		recoveryProven = false;
-		var box = $('jy-vault-recovery-codes');
-		box.innerHTML = '';
-		codes.forEach(function (c) {
-			var d = document.createElement('div');
-			d.className = 'jy-vault-recovery-code';
-			d.textContent = c;
-			box.appendChild(d);
-		});
-		$('jy-vault-recovery-proof').value = '';
-		$('jy-vault-recovery-finish').disabled = true;
-		app._recoveryCodes = codes;
-		ceremonyStep('recovery');
-	}
-
-	function normalizeCode(s) { return String(s).toUpperCase().replace(/O/g, '0').replace(/[IL]/g, '1').replace(/[^A-Z0-9]/g, ''); }
-	function checkRecoveryProof() {
-		var typed = normalizeCode($('jy-vault-recovery-proof').value);
-		var target = normalizeCode(lastRecoveryCode || '');
-		recoveryProven = recoveryProven || (typed.length > 0 && typed === target);
-		$('jy-vault-recovery-finish').disabled = !recoveryProven;
-		setError('jy-vault-recovery-error', '');
-	}
-	function downloadRecovery() {
-		var text = 'Joinery password vault - recovery keys\n' +
-			'Keep these somewhere safe and private. Any one of them can unlock your vault if you lose your passkey and passphrase.\n\n' +
-			(app._recoveryCodes || []).join('\n') + '\n';
-		var blob = new Blob([text], { type: 'text/plain' });
-		var a = document.createElement('a');
-		a.href = URL.createObjectURL(blob);
-		a.download = 'joinery-vault-recovery-keys.txt';
-		document.body.appendChild(a); a.click(); document.body.removeChild(a);
-		setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-		recoveryProven = true;
-		$('jy-vault-recovery-finish').disabled = false;
 	}
 
 	// ==========================================================================
@@ -216,72 +107,6 @@
 		var kr = await joineryApi.post('vault/keyring_get', {});
 		if (!kr.set_up || !kr.wrapped_dek) { await initStoreDek(sess); return; }
 		await openStoreDek(sess, kr.wrapped_dek);
-	}
-
-	// ==========================================================================
-	// Unlock
-	// ==========================================================================
-	function startUnlock(st) {
-		showSection('jy-vault-unlock');
-		$('jy-vault-unlock-passkey').hidden = !(CONFIG.passkeysEnabled && st.passkey_wrapping_count > 0);
-		$('jy-vault-unlock-passphrase-wrap').hidden = !st.has_passphrase;
-
-		bindOnce($('jy-vault-unlock-passkey'), 'click', unlockPasskey);
-		bindOnce($('jy-vault-unlock-passphrase-btn'), 'click', unlockPassphrase);
-		bindOnce($('jy-vault-unlock-recovery-btn'), 'click', unlockRecovery);
-		bindOnce($('unlock_passphrase'), 'keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); unlockPassphrase(); } });
-		bindOnce($('recovery_code'), 'keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); unlockRecovery(); } });
-		bindOnce($('jy-vault-show-recovery'), 'click', function () {
-			$('jy-vault-unlock-recovery-wrap').hidden = false;
-			this.hidden = true;
-		});
-
-		// If neither passkey nor passphrase is available, recovery is the way in.
-		if ($('jy-vault-unlock-passkey').hidden && $('jy-vault-unlock-passphrase-wrap').hidden) {
-			$('jy-vault-unlock-recovery-wrap').hidden = false;
-			$('jy-vault-show-recovery').hidden = true;
-		}
-	}
-	function bindOnce(el, evt, fn) {
-		if (!el || el['_bound_' + evt]) return;
-		el['_bound_' + evt] = true;
-		el.addEventListener(evt, fn);
-	}
-
-	async function unlockPasskey() {
-		setError('jy-vault-unlock-error', '');
-		var btn = $('jy-vault-unlock-passkey'); btn.disabled = true;
-		try {
-			var pk = await VaultKeyring.derivePasskeyKek(SCOPE);
-			var sess = await VaultKeyring.unlockWithPasskey(SCOPE, pk.kek, pk.credentialId);
-			await postUnlock(sess);
-		} catch (e) { setError('jy-vault-unlock-error', (e && e.message) || 'Could not unlock.'); }
-		finally { btn.disabled = false; }
-	}
-	async function unlockPassphrase() {
-		setError('jy-vault-unlock-error', '');
-		try {
-			var sess = await VaultKeyring.unlockWithPassphrase(SCOPE, $('unlock_passphrase').value || '');
-			$('unlock_passphrase').value = '';
-			await postUnlock(sess);
-		} catch (e) { setError('jy-vault-unlock-error', (e && e.message) || 'Could not unlock.'); }
-	}
-	async function unlockRecovery() {
-		setError('jy-vault-unlock-error', '');
-		try {
-			var res = await VaultKeyring.unlockWithRecovery(SCOPE, $('recovery_code').value || '');
-			$('recovery_code').value = '';
-			await postUnlock(res.session);
-			toast('Recovery key used - consider regenerating your recovery keys.');
-		} catch (e) { setError('jy-vault-unlock-error', (e && e.message) || 'Could not unlock.'); }
-	}
-
-	async function postUnlock(sess) {
-		session = sess;
-		await loadStoreDek(sess);
-		await loadEntries();
-		enterManager();
-		resetIdle();
 	}
 
 	// ==========================================================================
@@ -339,10 +164,6 @@
 		$('jy-vault-export').addEventListener('click', doExport);
 		$('jy-vault-import').addEventListener('click', function () { $('jy-vault-import-file').click(); });
 		$('jy-vault-import-file').addEventListener('change', doImport);
-		// idle-defer on any activity in the manager
-		['keydown', 'pointerdown', 'pointermove'].forEach(function (evt) {
-			$('jy-vault-manager').addEventListener(evt, resetIdle, { passive: true });
-		});
 	}
 
 	function byTitle(a, b) { return (a.record.title || '').localeCompare(b.record.title || ''); }
@@ -674,6 +495,7 @@
 		navigator.clipboard.writeText(value).then(function () {
 			toast((label || 'Value') + ' copied');
 			if (clipboardTimer) clearTimeout(clipboardTimer);
+			lastCopied = value;
 			var secs = CONFIG.clipboardClearSeconds || 30;
 			clipboardTimer = setTimeout(function () { clearClipboard(value); }, secs * 1000);
 		}).catch(function () { toast('Copy failed'); });
@@ -832,36 +654,36 @@
 	}
 
 	// ==========================================================================
-	// User-configurable auto-lock (Phase 3), remembered per scope in localStorage
+	// Auto-lock: the select is this browser's choice for every vault it holds
+	// (core's JoinerySealed.setIdleMinutes); the site sets the default.
 	// ==========================================================================
-	function autolockStorageKey() { return 'jy_vault_autolock_' + SCOPE; }
 	function initAutolockControl() {
 		var sel = $('jy-vault-autolock-select');
 		if (!sel) return;
-		var stored = null;
-		try { stored = localStorage.getItem(autolockStorageKey()); } catch (e) {}
-		if (stored) { CONFIG.autolockMinutes = parseInt(stored, 10) || CONFIG.autolockMinutes; }
-		sel.value = String(CONFIG.autolockMinutes);
-		if (sel.value === '') { sel.value = '15'; CONFIG.autolockMinutes = 15; }
+		var current = String(JoinerySealed.idleMinutes());
+		if (!sel.querySelector('option[value="' + current + '"]')) {
+			var opt = document.createElement('option');
+			opt.value = current;
+			opt.textContent = current + ' min';
+			sel.appendChild(opt);
+		}
+		sel.value = current;
 		sel.addEventListener('change', function () {
-			CONFIG.autolockMinutes = parseInt(sel.value, 10) || 15;
-			try { localStorage.setItem(autolockStorageKey(), String(CONFIG.autolockMinutes)); } catch (e) {}
-			resetIdle();
+			JoinerySealed.setIdleMinutes(parseInt(sel.value, 10) || null);
 		});
 	}
 
 	// ==========================================================================
-	// Locking - idle, manual, tab-close. Discards ALL plaintext.
+	// Locking. Core locks (idle, Lock now, leaving the page, a back/forward
+	// cache restore) and calls wipe(); what wipe() discards is ours: the store
+	// DEK, every decrypted entry, the DOM, the clipboard we filled.
 	// ==========================================================================
-	function resetIdle() {
-		if (idleTimer) clearTimeout(idleTimer);
-		var mins = CONFIG.autolockMinutes || 15;
-		idleTimer = setTimeout(lock, mins * 60 * 1000);
-	}
-	function lock() {
-		if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+	function lock() { JoinerySealed.lock(SCOPE); }
+
+	function wipe() {
 		if (clipboardTimer) { clearTimeout(clipboardTimer); clipboardTimer = null; }
-		if (session) { session.lock(); session = null; }
+		if (lastCopied !== null) { clearClipboard(lastCopied); lastCopied = null; }
+		session = null;
 		dekKey = null;
 		entries = [];
 		undecryptableCount = 0;
@@ -876,14 +698,12 @@
 			.forEach(function (id) { var el = $(id); if (el) el.value = ''; });
 		$('jy-vault-list').innerHTML = '';
 		$('jy-vault-detail-view').innerHTML = '';
-		VaultKeyring.status(SCOPE).then(startUnlock).catch(function () { showSection('jy-vault-unlock'); });
+		showSection('jy-vault-locked');
 	}
-	// closing/hiding the tab: memory is discarded by the browser; also proactively lock
-	window.addEventListener('pagehide', function () { if (session) session.lock(); });
 
 	// Kick off once the deferred core modules are present.
 	function ready() {
-		if (window.VaultCrypto && window.VaultKeyring && window.JoineryPasskeys && window.joineryApi) { boot(); }
+		if (window.VaultCrypto && window.VaultKeyring && window.JoinerySealed && window.joineryApi) { boot(); }
 		else setTimeout(ready, 30);
 	}
 	ready();

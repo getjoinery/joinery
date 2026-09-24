@@ -19,6 +19,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * that address is shut out.
  * Nothing here survives the ceremony — the retention sweep removes the row (see $retention_policy).
  *
+ * @version 1.1.0 - dlk_sealed_vault_keys: one sealed secret per client-custody scope
  * @version 1.0.0
  */
 class DeviceLink extends SystemBase {
@@ -81,6 +82,10 @@ class DeviceLink extends SystemBase {
 		// The drive vault secret key sealed to dlk_device_pubkey in the approving
 		// browser. Opaque here — the server never held the key that opens it.
 		'dlk_sealed_vault_key'   => array('type' => 'text', 'is_nullable' => true),
+		// Every other client-custody scope the user chose to hand over, as JSON
+		// {scope: blob}, each sealed to dlk_device_pubkey the same way. Drive
+		// keeps its own column above because the shipped sync client reads it.
+		'dlk_sealed_vault_keys'  => array('type' => 'text', 'is_nullable' => true),
 		// The minted session secret, SecretBox-encrypted at rest and scrubbed the
 		// moment the device collects it. It exists here only to bridge the gap
 		// between the browser that approved and the device that is polling.
@@ -179,6 +184,7 @@ class DeviceLink extends SystemBase {
 	public function scrub_secrets() {
 		$this->set('dlk_secret_once', null);
 		$this->set('dlk_sealed_vault_key', null);
+		$this->set('dlk_sealed_vault_keys', null);
 		$this->save();
 	}
 

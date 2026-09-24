@@ -19,6 +19,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * Soft delete means unlinked. Revoking a device also revokes its key — see
  * drive_device_revoke.
  *
+ * @version 1.1.0 - sde_vault_scopes: which vault secrets this device was handed
  * @version 1.0.0
  */
 class SyncDevice extends SystemBase {
@@ -49,6 +50,10 @@ class SyncDevice extends SystemBase {
 		// to this during approval, and the device opens it with the private half
 		// it never sent anywhere.
 		'sde_device_pubkey'   => array('type' => 'text', 'is_nullable' => true),
+		// The client-custody scopes whose secret key this device was handed at
+		// approval, comma-separated ('drive,passwords'). A key rotation takes
+		// its scope back out, since the device holds the retired key.
+		'sde_vault_scopes'    => array('type' => 'varchar(255)', 'is_nullable' => true),
 		'sde_last_seen_time'  => array('type' => 'timestamp(6)', 'is_nullable' => true),
 		'sde_last_cursor'     => array('type' => 'int8', 'is_nullable' => true),
 		'sde_create_time'     => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),

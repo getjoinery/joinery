@@ -279,6 +279,9 @@ const JoineryModal = (() => {
 
     return { confirm, confirmTyped, alert, prompt, open, alertAsync, confirmAsync, promptAsync };
 })();
+// A top-level const is not a window property; modules that feature-test for
+// the modal (vault-lock.js, vault-keyring.js) read it from window.
+window.JoineryModal = JoineryModal;
 
 // Actions dropdowns (<details class="jy-actions-dropdown">): close any open
 // menu when the click lands outside it, and after a menu item is clicked.

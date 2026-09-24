@@ -22,6 +22,17 @@
  * memory bounded by one chunk — for content too large to ever hold as a
  * string, such as the sealed mailbox search index.
  *
+ * Beside the libsodium forms sits the BROWSER format (sealEdge/openEdge,
+ * aeadEncryptGcm/aeadDecryptGcm): the exact bytes vault-crypto.js produces —
+ * X25519 ECIES with HKDF-SHA256 and AES-256-GCM for a DEK, AES-256-GCM with an
+ * AD for content, standard base64 of raw bytes. It exists so the server can
+ * seal to a client-custody scope's key and open what a browser sealed to a
+ * server key. These are raw primitives like the rest; the `v1.edgeseal.` /
+ * `v1.edge.` framing belongs to the row layer (VaultCrypto).
+ *
+ * @version 1.6 - the browser format: sealEdge()/openEdge() and
+ *                aeadEncryptGcm()/aeadDecryptGcm(), byte-compatible with
+ *                vault-crypto.js (tests/vault/edge_format_test.php)
  * @version 1.5 - unframeSeal() splits the `v1.seal.` text form from the raw
  *                crypto_box_seal bytes, so a VaultKey (which opens raw bytes
  *                only) can be handed a stored DEK; openDek() is that plus
@@ -182,6 +193,153 @@ class SealedBox {
 			throw new RuntimeException('SealedBox: AEAD decryption failed (tampered, wrong key, or AD mismatch).');
 		}
 		return $plain;
+	}
+
+	// ------------------------------------------------------------------
+	// The browser format — byte-compatible with assets/js/vault-crypto.js.
+	//
+	// sealed DEK : base64( ephPub[32] ‖ IV[12] ‖ AES-256-GCM(ct ‖ tag[16]) ),
+	//              the AES key = HKDF-SHA256(X25519(eph, recipient), salt = empty,
+	//              info = 'sealed-vault:dek' ‖ ephPub ‖ recipientPub)
+	// field      : base64( IV[12] ‖ AES-256-GCM(ct ‖ tag[16]) ), AD = the caller's
+	//
+	// WebCrypto appends the tag to the ciphertext; OpenSSL hands it back apart,
+	// so these glue it on and split it off. A public key is accepted in either
+	// base64 alphabet: a browser stores standard base64, a server vault base64url.
+	// ------------------------------------------------------------------
+
+	const EDGE_KDF_LABEL = 'sealed-vault:dek';
+	const EDGE_IV_BYTES  = 12;
+	const EDGE_TAG_BYTES = 16;
+
+	/** Seal bytes (a DEK) to an X25519 public key in the browser's ECIES format. */
+	public function sealEdge(string $bytes, string $recipient_pub_b64): string {
+		return self::sealEdgeWith($bytes, $recipient_pub_b64, random_bytes(SODIUM_CRYPTO_SCALARMULT_SCALARBYTES), random_bytes(self::EDGE_IV_BYTES));
+	}
+
+	/**
+	 * Open a sealEdge() blob (or a vault-crypto.js sealToPublicKey() one) with
+	 * the recipient's secret. The recipient's public half is part of the KDF
+	 * input, so it is DERIVED from the secret and checked against the one the
+	 * caller names: a mismatched pair is refused rather than silently failing
+	 * the tag.
+	 */
+	public function openEdge(string $blob_b64, string $secret_b64url, string $recipient_pub_b64): string {
+		$secret_raw = self::b64url_decode($secret_b64url);
+		if ($secret_raw === false || strlen($secret_raw) !== SODIUM_CRYPTO_SCALARMULT_SCALARBYTES) {
+			throw new RuntimeException('SealedBox: malformed secret key.');
+		}
+		$recipient_raw = self::edgePublicKey($recipient_pub_b64);
+		if (!hash_equals(sodium_crypto_scalarmult_base($secret_raw), $recipient_raw)) {
+			throw new RuntimeException('SealedBox: the public key named is not this secret key\'s.');
+		}
+		$raw = self::b64any_decode($blob_b64);
+		if ($raw === false || strlen($raw) < 32 + self::EDGE_IV_BYTES + self::EDGE_TAG_BYTES) {
+			throw new RuntimeException('SealedBox: malformed edge-sealed blob.');
+		}
+		$eph_pub = substr($raw, 0, 32);
+		$iv = substr($raw, 32, self::EDGE_IV_BYTES);
+		$ct = substr($raw, 32 + self::EDGE_IV_BYTES);
+		$aes = self::edgeKdf($secret_raw, $eph_pub, $eph_pub, $recipient_raw);
+		sodium_memzero($secret_raw);
+		$plain = self::gcmDecrypt($ct, $aes, $iv, '');
+		sodium_memzero($aes);
+		if ($plain === null) {
+			throw new RuntimeException('SealedBox: edge unseal failed (tampered or wrong keypair).');
+		}
+		return $plain;
+	}
+
+	/** AES-256-GCM of content under a 32-byte key, bound to $ad: base64(IV ‖ ct ‖ tag). */
+	public function aeadEncryptGcm(string $plaintext, string $key, string $ad): string {
+		return self::aeadEncryptGcmWith($plaintext, $key, $ad, random_bytes(self::EDGE_IV_BYTES));
+	}
+
+	/** Open an aeadEncryptGcm() blob (or a vault-crypto.js encrypt() one). Throws on tamper or an AD mismatch. */
+	public function aeadDecryptGcm(string $blob_b64, string $key, string $ad): string {
+		self::assertGcmKey($key);
+		$raw = self::b64any_decode($blob_b64);
+		if ($raw === false || strlen($raw) < self::EDGE_IV_BYTES + self::EDGE_TAG_BYTES) {
+			throw new RuntimeException('SealedBox: malformed GCM blob.');
+		}
+		$plain = self::gcmDecrypt(substr($raw, self::EDGE_IV_BYTES), $key, substr($raw, 0, self::EDGE_IV_BYTES), $ad);
+		if ($plain === null) {
+			throw new RuntimeException('SealedBox: GCM decryption failed (tampered, wrong key, or AD mismatch).');
+		}
+		return $plain;
+	}
+
+	/** sealEdge() with its randomness supplied — private so only the test vector can fix it. */
+	private static function sealEdgeWith(string $bytes, string $recipient_pub_b64, string $eph_secret, string $iv): string {
+		$recipient_raw = self::edgePublicKey($recipient_pub_b64);
+		$eph_pub = sodium_crypto_scalarmult_base($eph_secret);
+		$aes = self::edgeKdf($eph_secret, $recipient_raw, $eph_pub, $recipient_raw);
+		sodium_memzero($eph_secret);
+		$ct = self::gcmEncrypt($bytes, $aes, $iv, '');
+		sodium_memzero($aes);
+		return base64_encode($eph_pub . $iv . $ct);
+	}
+
+	/** aeadEncryptGcm() with its IV supplied — private so only the test vector can fix it. */
+	private static function aeadEncryptGcmWith(string $plaintext, string $key, string $ad, string $iv): string {
+		self::assertGcmKey($key);
+		return base64_encode($iv . self::gcmEncrypt($plaintext, $key, $iv, $ad));
+	}
+
+	/** The ECIES AES key: HKDF-SHA256 over the X25519 shared secret, both public keys in the info. */
+	private static function edgeKdf(string $own_secret, string $peer_public, string $eph_pub, string $recipient_pub): string {
+		try {
+			$shared = sodium_crypto_scalarmult($own_secret, $peer_public);
+		} catch (SodiumException $e) {
+			throw new RuntimeException('SealedBox: X25519 refused the key (a low-order point).');
+		}
+		$aes = hash_hkdf('sha256', $shared, 32, self::EDGE_KDF_LABEL . $eph_pub . $recipient_pub, '');
+		sodium_memzero($shared);
+		return $aes;
+	}
+
+	private static function edgePublicKey(string $b64): string {
+		$raw = self::b64any_decode($b64);
+		if ($raw === false || strlen($raw) !== SODIUM_CRYPTO_SCALARMULT_BYTES) {
+			throw new RuntimeException('SealedBox: malformed public key.');
+		}
+		return $raw;
+	}
+
+	private static function assertGcmKey(string $key): void {
+		if (strlen($key) !== 32) {
+			throw new RuntimeException('SealedBox: AES-256-GCM key must be exactly 32 bytes.');
+		}
+	}
+
+	private static function gcmEncrypt(string $plaintext, string $key, string $iv, string $ad): string {
+		$tag = '';
+		$ct = openssl_encrypt($plaintext, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, $ad, self::EDGE_TAG_BYTES);
+		if ($ct === false) {
+			throw new RuntimeException('SealedBox: AES-256-GCM encryption failed.');
+		}
+		return $ct . $tag;
+	}
+
+	/** null on any authentication failure; the callers word the refusal. */
+	private static function gcmDecrypt(string $ct_and_tag, string $key, string $iv, string $ad): ?string {
+		if (strlen($ct_and_tag) < self::EDGE_TAG_BYTES) {
+			return null;
+		}
+		$tag = substr($ct_and_tag, -self::EDGE_TAG_BYTES);
+		$ct = substr($ct_and_tag, 0, -self::EDGE_TAG_BYTES);
+		$plain = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, $ad);
+		return $plain === false ? null : $plain;
+	}
+
+	/** Strict base64 in either alphabet, padding optional. */
+	private static function b64any_decode(string $s) {
+		$s = strtr($s, '-_', '+/');
+		$pad = strlen($s) % 4;
+		if ($pad) {
+			$s .= str_repeat('=', 4 - $pad);
+		}
+		return base64_decode($s, true);
 	}
 
 	// ------------------------------------------------------------------

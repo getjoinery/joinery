@@ -292,6 +292,16 @@ check(!isset($_SESSION['has_encryption_vault']) && !isset($_SESSION['has_encrypt
 check(!isset($_SESSION['force_password_change']),
 	'switching identity drops the cached forced-password-change flag');
 
+// A vault set up mid-session (a browser-held vault, by passphrase) is judged on
+// the next page, not the next sign-in: the setup action forgets the cached no.
+$_SESSION['usr_user_id'] = $novault->key;
+unset($_SESSION['has_encryption_vault']);
+check(!$session->must_enroll_2fa_for_vault(), 'before setup the factorless account is not gated');
+vault_fixture_client_vault((int)$novault->key, base64_encode(random_bytes(32)), 'passwords');
+$session->forget_vault_posture();
+check($session->must_enroll_2fa_for_vault(),
+	'after forget_vault_posture() the same account, now holding a vault, is gated at once');
+
 unset($_SESSION['usr_user_id']);
 unset($_SESSION['has_encryption_vault']);
 check(!$session->must_enroll_2fa_for_vault(),

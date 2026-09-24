@@ -24,6 +24,16 @@
  * hot-turn accounting. The DEK memo keys on VaultKey::id(), so a row is still
  * unwrapped once per request however many times the window is fetched.
  *
+ * Two formats, told apart by prefix at the row layer. Server custody writes
+ * libsodium (`v1.seal.` DEK, `v1.aead.` field). A client-custody scope writes
+ * the browser's format (`v1.edgeseal.{scope}.` DEK, `v1.edge.` field), because
+ * only the browser holds that scope's secret and it opens what it can read.
+ * Writers emit the format their custody dictates; readers here open whichever
+ * prefix they find.
+ *
+ * @version 1.6 - the browser format: sealItemDekToBrowserKey(),
+ *   sealFieldForBrowser(), parseEdgeScope(); openItemDek(s)() and openField()
+ *   open either prefix
  * @version 1.5 - openItemDek()/openBulkDelivery()/openHeldDeliveryBlob() take a
  *   VaultKey; openItemDeks() opens a whole batch in one VaultKey::unseal()
  *   call (one daemon round trip once the key lives there); the memo keys on
@@ -37,6 +47,12 @@ require_once(PathHelper::getIncludePath('includes/VaultKey.php'));
 class VaultCrypto {
 
 	const DEK_BYTES = 32;
+
+	/** The browser-format DEK frame: `v1.edgeseal.{scope}.` + base64(ephPub ‖ IV ‖ ct). */
+	const EDGE_SEAL_PREFIX = 'v1.edgeseal.';
+
+	/** The browser-format field frame: `v1.edge.` + base64(IV ‖ ct ‖ tag). */
+	const EDGE_FIELD_PREFIX = 'v1.edge.';
 
 	/** Cap on the memo below — see openItemDek(). */
 	const DEK_MEMO_MAX = 2000;
@@ -59,6 +75,43 @@ class VaultCrypto {
 	/** Seal a per-item DEK to the vault's public key — stored on the consumer's own row. */
 	public function sealItemDek(string $dek, string $public_key): string {
 		return $this->box->sealDek($dek, $public_key);
+	}
+
+	/**
+	 * Seal a per-item DEK to a client-custody scope's public key, in the format
+	 * the browser opens (vault-crypto.js openFromSecretKey). The scope rides in
+	 * the frame, which is what lets a reader know a row is sealed for the
+	 * browser without another column.
+	 */
+	public function sealItemDekToBrowserKey(string $dek, string $public_key_b64, string $scope): string {
+		if (!preg_match('/^[a-z0-9_]{1,32}$/', $scope)) {
+			throw new RuntimeException('VaultCrypto: malformed scope name for an edge seal.');
+		}
+		return self::EDGE_SEAL_PREFIX . $scope . '.' . $this->box->sealEdge($dek, $public_key_b64);
+	}
+
+	/** Seal content under a per-item DEK in the browser's field format, bound to the row's AD. */
+	public function sealFieldForBrowser(string $plaintext, string $dek, string $ad): string {
+		return self::EDGE_FIELD_PREFIX . $this->box->aeadEncryptGcm($plaintext, $dek, $ad);
+	}
+
+	/** The scope a `v1.edgeseal.` blob names, or null for anything else. */
+	public static function parseEdgeScope(string $sealed): ?string {
+		if (strncmp($sealed, self::EDGE_SEAL_PREFIX, strlen(self::EDGE_SEAL_PREFIX)) !== 0) {
+			return null;
+		}
+		$rest = substr($sealed, strlen(self::EDGE_SEAL_PREFIX));
+		$dot = strpos($rest, '.');
+		if ($dot === false) {
+			return null;
+		}
+		$scope = substr($rest, 0, $dot);
+		return preg_match('/^[a-z0-9_]{1,32}$/', $scope) ? $scope : null;
+	}
+
+	/** Is this a browser-format field value (`v1.edge.`)? */
+	public static function isEdgeField(string $value): bool {
+		return strncmp($value, self::EDGE_FIELD_PREFIX, strlen(self::EDGE_FIELD_PREFIX)) === 0;
 	}
 
 	/**
@@ -107,7 +160,7 @@ class VaultCrypto {
 	 * resealer, a deferred-work drain) uses this so the per-row opens that
 	 * follow all hit the memo.
 	 *
-	 * @param string[] $sealed `v1.seal.` blobs under any keys
+	 * @param string[] $sealed `v1.seal.` or `v1.edgeseal.` blobs under any keys
 	 * @return string[] the DEKs under the same keys
 	 * @throws RuntimeException when any blob is malformed or does not open
 	 */
@@ -122,10 +175,21 @@ class VaultCrypto {
 				$out[$slot] = self::$dek_memo[$ck];
 				continue;
 			}
-			$pending[$slot] = array('ck' => $ck, 'raw' => SealedBox::unframeSeal($blob));
+			$scope = self::parseEdgeScope($blob);
+			if ($scope !== null) {
+				$pending[$slot] = array('ck' => $ck, 'edge' => true,
+					'raw' => substr($blob, strlen(self::EDGE_SEAL_PREFIX) + strlen($scope) + 1));
+			} else {
+				$pending[$slot] = array('ck' => $ck, 'edge' => false, 'raw' => SealedBox::unframeSeal($blob));
+			}
 		}
 		if ($pending) {
-			$opened = $key->unseal(array_map(function ($p) { return $p['raw']; }, $pending));
+			// One unseal call per format, so a batch is still one round trip each.
+			$raw_of = function ($p) { return $p['raw']; };
+			$edge = array_filter($pending, function ($p) { return $p['edge']; });
+			$classic = array_filter($pending, function ($p) { return !$p['edge']; });
+			$opened = ($classic ? $key->unseal(array_map($raw_of, $classic)) : array())
+				+ ($edge ? $key->unsealEdge(array_map($raw_of, $edge)) : array());
 			// Bounded so a bulk export cannot grow this without limit. Dropping the
 			// whole map rather than evicting one entry keeps it simple: the reader
 			// pages this exists for hold far fewer rows than the cap.
@@ -200,9 +264,11 @@ class VaultCrypto {
 		return $key->unseal(array(SealedBox::unframeSeal($sealed)))[0];
 	}
 
-	/** Open content sealed by sealField(). Throws on tamper or an AD mismatch. */
+	/** Open content sealed by sealField() or sealFieldForBrowser(). Throws on tamper or an AD mismatch. */
 	public function openField(string $blob, string $dek, string $ad): string {
-		$plaintext = $this->box->aeadDecrypt($blob, $dek, $ad);
+		$plaintext = self::isEdgeField($blob)
+			? $this->box->aeadDecryptGcm(substr($blob, strlen(self::EDGE_FIELD_PREFIX)), $dek, $ad)
+			: $this->box->aeadDecrypt($blob, $dek, $ad);
 		// This is the one line every server-side read of sealed content passes
 		// through — model columns, attachment bytes, raw messages, the search
 		// index — so it is where the process becomes hot. From here on the

@@ -1,6 +1,6 @@
 {
     "name": "vault",
-    "version": "1.1.7",
+    "version": "1.1.9",
     "description": "Zero-knowledge password manager - a client-custody consumer of the Sealed Vault. Passwords are encrypted and decrypted only in the browser; the server stores opaque ciphertext and never holds the key.",
     "author": "System Developer",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -24,7 +24,6 @@
         "vault": "Password vault"
     },
     "settings": [
-        { "name": "vault_autolock_minutes", "default": "15", "group": "vault", "label": "Auto-lock after (minutes)", "type": "number", "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}}, "helptext": "How long the password vault stays unlocked without activity." },
         { "name": "vault_clipboard_clear_seconds", "default": "30", "group": "vault", "label": "Clear clipboard after (seconds)", "type": "number", "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}}, "helptext": "A copied password is wiped from the clipboard after this long." }
     ],
     "profileMenu": [
