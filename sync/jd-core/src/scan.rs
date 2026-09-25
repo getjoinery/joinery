@@ -69,6 +69,10 @@ pub struct KnownLocal {
     /// (owner decision D1). Its own file standing there is the file come
     /// home, whatever now stands at the path it was held at.
     pub server_home: Option<String>,
+    /// The file on this disk that is this record's own
+    /// (`Entry::own_file`). Recorded; the pairing does not read it yet
+    /// (`specs/drive_file_identity.md`, commit 1).
+    pub own_file: Option<jd_vfs::FileIdentity>,
 }
 
 /// What the scan concluded about one tracked file.
@@ -445,6 +449,7 @@ mod tests {
             size,
             mtime_ns,
             file_id,
+            birth_ns: 0,
         }
     }
 
@@ -462,7 +467,7 @@ mod tests {
             path: path.into(),
             fingerprint: Some(fp(file_id, 10, 100)),
             sha256: Some(sha.into()),
-            server_deleted: false, held: false, server_home: None,
+            server_deleted: false, held: false, server_home: None, own_file: None,
         }
     }
 
@@ -740,6 +745,7 @@ mod tests {
             server_deleted: false,
             held: false,
             server_home: None,
+            own_file: None,
         };
         let out = pair(
             &[bare.clone()],
@@ -844,7 +850,7 @@ mod tests {
                 path: "a.txt".into(),
                 fingerprint: None,
                 sha256: None,
-                server_deleted: false, held: false, server_home: None,
+                server_deleted: false, held: false, server_home: None, own_file: None,
             }],
             &[observed("elsewhere.txt", 900, "sha-x")],
         );

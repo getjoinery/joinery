@@ -752,6 +752,7 @@ fn path_for(env: &ExecEnv, p: &Placement) -> Result<Placed, ExecError> {
         wrapped_file_key: None,
         replaces: None,
         stand_in: None,
+        own_file: None,
     };
     local_path(env, &probe)
 }
@@ -1763,6 +1764,8 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             if agreed == Some(here.as_str()) {
                 let mut entry = entry.clone();
                 entry.synced_fingerprint = Some(fp);
+                // The rewrite is a new file: the same bytes, its own identity.
+                entry.own_file = Some(fp.identity());
                 env.store.put_entry(&entry)?;
                 return Ok(OpOutcome::Retry(
                     "the file was rewritten with the same content".into(),
@@ -2200,6 +2203,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                     size: fingerprint.size,
                 });
                 adopted.synced_fingerprint = Some(fingerprint);
+                adopted.own_file = Some(fingerprint.identity());
                 adopted.status = LocalStatus::Synced;
                 // The disk has to follow here as well, and the crash window is
                 // why. An upload that lands beside under a conflict name and
@@ -2744,6 +2748,10 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         wrapped_file_key: None,
         replaces: None,
         stand_in: None,
+        // The file renamed aside is the one this copy stands for: its own
+        // file, handed over, never copied -- two records owning one file is
+        // not a hard link, and nothing could tell them apart.
+        own_file: entry.own_file,
     };
     env.store.put_entry(&rescued)?;
 
@@ -2751,6 +2759,7 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
     // content is a separate op in the same round.
     let mut entry = entry;
     entry.synced_fingerprint = None;
+    entry.own_file = None;
     entry.status = LocalStatus::PendingDownload;
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
@@ -3920,6 +3929,8 @@ fn move_local(
                 if op.entity.entity_type == EntityType::File {
                     entry.synced_placement = None;
                     entry.synced_fingerprint = None;
+                    // No known place here means no file here to call its own.
+                    entry.own_file = None;
                     entry.synced_content = None;
                     entry.synced_remote_content = None;
                     entry.status = LocalStatus::PendingDownload;
@@ -4456,6 +4467,7 @@ fn unmaterialize_and_park(
         if disown {
             entry.synced_placement = None;
             entry.synced_fingerprint = None;
+            entry.own_file = None;
             entry.synced_content = None;
             entry.synced_remote_content = None;
             entry.local_name = None;
@@ -4607,6 +4619,7 @@ fn unmaterialize_and_park(
             }
             child.synced_placement = None;
             child.synced_fingerprint = None;
+            child.own_file = None;
             child.synced_content = None;
             child.synced_remote_content = None;
             child.local_name = None;
@@ -4645,6 +4658,7 @@ fn unmaterialize_and_park(
             if the_file_here_is_another_entrys(env, &entry, &path)? {
                 entry.synced_placement = None;
                 entry.synced_fingerprint = None;
+                entry.own_file = None;
                 entry.synced_content = None;
                 entry.synced_remote_content = None;
                 entry.local_name = None;
@@ -4700,6 +4714,7 @@ fn unmaterialize_and_park(
     // bytes again under whatever name it is then allowed.
     entry.synced_placement = None;
     entry.synced_fingerprint = None;
+    entry.own_file = None;
     entry.synced_content = None;
     entry.synced_remote_content = None;
     entry.local_name = None;
@@ -5620,6 +5635,12 @@ fn agree(entry: &mut Entry, content: Option<ContentId>, fingerprint: Option<jd_v
     }
     if fingerprint.is_some() {
         entry.synced_fingerprint = fingerprint;
+    }
+    // The file both sides now agree on is this record's own: the one an
+    // upload sent, or the one a download placed (read at the committed
+    // target, never from the spool, which is somewhere else).
+    if let Some(fp) = fingerprint.filter(|_| entry.id.entity_type == EntityType::File) {
+        entry.own_file = Some(fp.identity());
     }
     entry.status = LocalStatus::Synced;
 }

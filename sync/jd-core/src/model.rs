@@ -207,6 +207,19 @@ pub struct Entry {
     /// and the tie lapses with nothing said to anyone. Cleared the moment the
     /// folder is materialized for real, when the agreement takes over.
     pub stand_in: Option<Placement>,
+    /// Which file on this disk is this record's own (a file record only).
+    ///
+    /// Not the agreement: `synced_fingerprint` is what both sides last agreed
+    /// on, for spotting a change, and it is reset whenever the agreement is.
+    /// This is the file itself, from the moment the record has one here --
+    /// minted from a scanned file, placed by a download, or taken over from a
+    /// safe-save -- and it stays through every move of that file, the
+    /// agreement's resets and the server deleting the record. It changes hands
+    /// when the engine hands the file to another record (a conflict rescue, a
+    /// crossing claimant, a merge), and is dropped when the engine gives the
+    /// file up (a park, a disowning, a placement dropped). See
+    /// `specs/drive_file_identity.md`.
+    pub own_file: Option<jd_vfs::FileIdentity>,
 }
 
 impl Entry {

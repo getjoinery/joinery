@@ -97,6 +97,7 @@ fn fresh(id: EntityId, parent: Option<i64>, name: &str, status: LocalStatus) -> 
         wrapped_file_key: None,
         replaces: None,
         stand_in: None,
+        own_file: None,
     }
 }
 
@@ -2492,7 +2493,7 @@ fn a_held_file_set_aside_by_a_download_on_its_own_path_keeps_its_record() {
         folder.synced_placement = Some(folder.remote.clone());
         // Its own directory, as the folder scan records it.
         let dir = jd_vfs::Vfs::directory_id(&device.fs, &root.join(name)).unwrap().unwrap();
-        folder.synced_fingerprint = Some(jd_vfs::Fingerprint { size: 0, mtime_ns: 0, file_id: dir });
+        folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir));
         device.store.put_entry(&folder).unwrap();
     }
     let held_body = b"sealed on the server, held here outside its vault";

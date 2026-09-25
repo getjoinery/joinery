@@ -102,6 +102,18 @@ struct MemFsState {
     /// with it. Carried by a rename like the id, dropped by a remove.
     births: BTreeMap<String, u64>,
     next_birth: u64,
+    /// Path -> the FILE's birth, which unlike a directory's is a disk fact:
+    /// it is what `statx` btime, `st_birthtime` and an NTFS creation time
+    /// report, and the engine reads it (`Fingerprint::birth_ns`). Handed out
+    /// once, never again -- so under `reuse_file_ids` a recycled id arrives
+    /// with a new birth, as on a real disk -- carried by a rename like the id,
+    /// dropped by a remove. Kept apart from `births` so a directory's number
+    /// is the same with or without files beside it.
+    file_births: BTreeMap<String, u64>,
+    next_file_birth: u64,
+    /// Report every file's birth as 0: the volume with no birth time, where
+    /// every file's identity is weak.
+    births_hidden: bool,
     /// Ids released by deletes, handed out again when id reuse is enabled.
     freed_ids: Vec<u64>,
     reuse_file_ids: bool,
@@ -203,6 +215,9 @@ impl MemFs {
                 next_file_id: 1000,
                 births,
                 next_birth: 1,
+                file_births: BTreeMap::new(),
+                next_file_birth: 0,
+                births_hidden: false,
                 freed_ids: Vec::new(),
                 reuse_file_ids: false,
                 trash: Vec::new(),
@@ -263,6 +278,12 @@ impl MemFs {
         self.state.lock().unwrap().reuse_file_ids = on;
     }
 
+    /// Report no file's birth: the volume with no birth time, where the engine
+    /// reads the disk by its older rules.
+    pub fn hide_births(&self, on: bool) {
+        self.state.lock().unwrap().births_hidden = on;
+    }
+
     /// Report every directory's identity as 0 -- the Windows world where the
     /// handle a file index needs will not open. A reader that treats 0 as an
     /// id would pair every directory with every other; the scenario that
@@ -281,6 +302,10 @@ impl MemFs {
         let keys: Vec<String> = st.file_ids.keys().cloned().collect();
         for k in keys {
             let id = Self::alloc_id(&mut st);
+            if st.file_births.contains_key(&k) {
+                let birth = Self::new_file_birth(&mut st);
+                st.file_births.insert(k.clone(), birth);
+            }
             st.file_ids.insert(k, id);
         }
     }
@@ -342,6 +367,8 @@ impl MemFs {
         if !st.file_ids.contains_key(&key) {
             let id = Self::alloc_id(&mut st);
             st.file_ids.insert(key.clone(), id);
+            let birth = Self::new_file_birth(&mut st);
+            st.file_births.insert(key.clone(), birth);
         }
         Self::watch_loss(&st, &key, "the user saving over it");
         let in_sealed_dir = Self::under_a_sealed_dir(&st, &key);
@@ -420,6 +447,7 @@ impl MemFs {
             st.nodes.remove(&v);
             st.sealed_dirs.remove(&v);
             st.births.remove(&v);
+            st.file_births.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
                 st.freed_ids.push(id);
             }
@@ -639,6 +667,12 @@ impl MemFs {
         (self.clock.now_ns() / g) * g
     }
 
+    /// A file's birth: never handed out twice.
+    fn new_file_birth(st: &mut MemFsState) -> u64 {
+        st.next_file_birth += 1;
+        st.next_file_birth
+    }
+
     fn alloc_id(st: &mut MemFsState) -> u64 {
         if st.reuse_file_ids {
             if let Some(id) = st.freed_ids.pop() {
@@ -761,6 +795,9 @@ impl MemFs {
             if let Some(birth) = st.births.remove(&old) {
                 st.births.insert(new.clone(), birth);
             }
+            if let Some(birth) = st.file_births.remove(&old) {
+                st.file_births.insert(new.clone(), birth);
+            }
             if st.sealed_dirs.remove(&old) {
                 st.sealed_dirs.insert(new);
             }
@@ -808,6 +845,11 @@ impl MemFs {
                 size: bytes.len() as u64,
                 mtime_ns: *mtime_ns,
                 file_id: st.file_ids.get(key).copied().unwrap_or(0),
+                birth_ns: if st.births_hidden {
+                    0
+                } else {
+                    st.file_births.get(key).copied().unwrap_or(0)
+                },
             }),
             _ => None,
         }
@@ -1047,6 +1089,7 @@ impl Vfs for MemFs {
             }
             st.sealed_dirs.remove(&v);
             st.births.remove(&v);
+            st.file_births.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
                 st.freed_ids.push(id);
             }
@@ -1239,6 +1282,13 @@ impl SpoolFile for MemSpool {
                 id
             }
         };
+        // The birth goes with the id: kept where the id is kept, new where
+        // the id is new.
+        if !st.file_births.contains_key(&key) {
+            let birth = MemFs::new_file_birth(&mut st);
+            st.file_births.insert(key.clone(), birth);
+        }
+        let birth_ns = if st.births_hidden { 0 } else { st.file_births[&key] };
         let size = self.buf.len() as u64;
         st.nodes.insert(
             key,
@@ -1251,6 +1301,7 @@ impl SpoolFile for MemSpool {
             size,
             mtime_ns: mtime,
             file_id: id,
+            birth_ns,
         })
     }
 
@@ -1309,6 +1360,31 @@ mod tests {
         f.reuse_file_ids(true);
         f.user_mkdir("three");
         assert_eq!(f.directory_id(&p("three")).unwrap(), Some(two));
+    }
+
+    #[test]
+    fn a_files_birth_goes_where_its_id_goes_and_never_comes_back() {
+        let f = fs();
+        f.user_write("a.txt", b"x");
+        let a = f.fingerprint(&p("a.txt")).unwrap().unwrap().identity();
+        assert!(a.is_strong(), "a written file has an id and a birth: {a:?}");
+        // A rename keeps both halves.
+        f.user_rename("a.txt", "b.txt");
+        assert_eq!(f.fingerprint(&p("b.txt")).unwrap().unwrap().identity(), a);
+        // Written again in place: the same file.
+        f.user_write("b.txt", b"xy");
+        assert_eq!(f.fingerprint(&p("b.txt")).unwrap().unwrap().identity(), a);
+        // Removed, and with reuse on the next file gets its number back --
+        // with a birth of its own, so the pair is not the dead file's.
+        f.reuse_file_ids(true);
+        f.user_remove("b.txt");
+        f.user_write("c.txt", b"z");
+        let c = f.fingerprint(&p("c.txt")).unwrap().unwrap().identity();
+        assert_eq!(c.file_id, a.file_id, "the id was recycled");
+        assert_ne!(c.birth_ns, a.birth_ns, "the birth was not");
+        // Hidden, no file has a birth to give.
+        f.hide_births(true);
+        assert_eq!(f.fingerprint(&p("c.txt")).unwrap().unwrap().birth_ns, 0);
     }
 
     #[test]

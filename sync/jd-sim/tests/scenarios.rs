@@ -277,6 +277,91 @@ fn a_file_written_on_one_computer_appears_on_the_other() {
 }
 
 #[test]
+fn every_file_record_knows_which_file_on_its_disk_is_its_own() {
+    // `specs/drive_file_identity.md`, commit 1. The own file is set wherever a
+    // record gets a file here -- minted from a scan, sent by an upload, placed
+    // by a download -- kept through a rename, and handed over by a conflict
+    // rescue to the copy it sets aside. Nothing reads it yet; this is what
+    // makes it true before anything does.
+    let world = World::new(9_950, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    let identity = |d: &jd_sim::Device, path: &str| {
+        let root = jd_vfs::Vfs::root(&d.fs).unwrap();
+        jd_vfs::Vfs::fingerprint(&d.fs, &root.join(path)).unwrap().map(|f| f.identity())
+    };
+
+    // Minted before anything can be sent: the provisional knows its file.
+    laptop.net.set_faults(NetFaults {
+        refuse_before: Some("drive_upload_init".into()),
+        ..NetFaults::none()
+    });
+    laptop.fs.user_write("a.txt", b"first");
+    world.pass(laptop);
+    let minted: Vec<_> = laptop
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.id.is_provisional() && e.id.entity_type == jd_core::model::EntityType::File)
+        .collect();
+    assert_eq!(minted.len(), 1, "{minted:?}");
+    let first = identity(laptop, "a.txt");
+    assert!(first.is_some_and(|i| i.is_strong()));
+    assert_eq!(minted[0].own_file, first);
+
+    // Sent, and placed on the other computer: each record's own file is the
+    // one on its own disk.
+    laptop.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some());
+    for d in [laptop, desktop] {
+        assert_eq!(jd_sim::scenario::own_files_astray(d), Vec::<String>::new(), "{}", d.name);
+    }
+    assert!(identity(desktop, "a.txt").is_some());
+
+    // Renamed: the same file, so the same own file.
+    laptop.fs.user_rename("a.txt", "b.txt");
+    assert!(world.settle().is_some());
+    let moved: Vec<_> = laptop
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.id.entity_type == jd_core::model::EntityType::File && !e.remote_deleted)
+        .collect();
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    assert_eq!(moved[0].own_file, first, "a rename keeps the file");
+
+    // Both edit. The laptop's version lands first, so the desktop sets its
+    // own aside as a conflicted copy and downloads the laptop's. With that
+    // download held off, the moment in between is visible: the copy's record
+    // owns the file set aside, and the original owns nothing until the
+    // download places one.
+    laptop.fs.user_write("b.txt", b"the laptop's version");
+    desktop.fs.user_write("b.txt", b"the desktop's version");
+    world.pass(laptop);
+    desktop.fs.fail_next(FsOp::Commit, Some("b.txt"), FailureKind::Io, 1);
+    world.pass(desktop);
+    let aside: Vec<String> = disk_tree(desktop)
+        .into_keys()
+        .filter(|p| p.contains("conflicted copy"))
+        .collect();
+    assert_eq!(aside.len(), 1, "the scenario reached the conflict rescue: {aside:?}");
+    let set_aside = identity(desktop, &aside[0]);
+    let records = desktop.store.every_entry().unwrap();
+    let owners: Vec<_> = records.iter().filter(|e| e.own_file.is_some() && e.own_file == set_aside).collect();
+    assert_eq!(owners.len(), 1, "one record owns the file set aside: {owners:?}");
+    let original = records.iter().find(|e| e.id == moved[0].id).unwrap();
+    assert_ne!(owners[0].id, original.id);
+    assert_eq!(original.own_file, None, "handed over, not copied");
+    assert!(world.settle().is_some());
+    for d in &world.devices {
+        assert_eq!(jd_sim::scenario::own_files_astray(d), Vec::<String>::new(), "{}", d.name);
+    }
+    assert_converged(&world);
+}
+
+#[test]
 fn two_computers_making_the_same_folder_both_end_up_with_it() {
     // A guard, not a reproduction — and the distinction is the point.
     //
@@ -419,6 +504,7 @@ fn a_folder_that_lost_a_creation_race_still_converges() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            own_file: None,
         })
         .unwrap();
 
@@ -507,6 +593,7 @@ fn a_file_that_lost_a_naming_race_still_converges() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            own_file: None,
         })
         .unwrap();
 
@@ -824,6 +911,7 @@ fn a_rescue_does_not_claim_a_name_the_server_has_already_given_away() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            own_file: None,
         })
         .unwrap();
 
@@ -4829,6 +4917,7 @@ fn a_file_deleted_before_this_device_ever_fetched_it_stops_being_tracked() {
         wrapped_file_key: None,
         replaces: None,
         stand_in: None,
+        own_file: None,
     };
     laptop.store.put_entry(&orphan).unwrap();
     assert!(
@@ -5280,6 +5369,7 @@ fn a_download_for_a_file_the_server_has_lost_stops_being_planned() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            own_file: None,
         })
         .unwrap();
 
@@ -5337,6 +5427,7 @@ fn bytes_on_this_disk_survive_the_server_losing_the_file_they_belonged_to() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            own_file: None,
         })
         .unwrap();
 
@@ -8951,6 +9042,7 @@ fn scratch_asymmetric_land_beside() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            own_file: None,
         })
         .unwrap();
 

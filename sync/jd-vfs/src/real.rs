@@ -231,7 +231,78 @@ fn fingerprint_of(_path: &Path, md: &fs::Metadata) -> Fingerprint {
             .saturating_mul(1_000_000_000)
             .saturating_add(md.mtime_nsec() as u64),
         file_id: md.ino(),
+        birth_ns: birth_of(md),
     }
+}
+
+/// The identity of the file at `path`, read the way the scan reads it.
+/// `None` when nothing can be read there.
+pub(crate) fn identity_at(path: &Path) -> Option<crate::FileIdentity> {
+    let md = fs::symlink_metadata(path).ok()?;
+    Some(fingerprint_of(path, &md).identity())
+}
+
+/// Is this a volume whose 64-bit file index is documented as not unique?
+/// ReFS (and so a Windows 11 Dev Drive) numbers files with 128 bits, and the
+/// index `file_index` reads is not guaranteed to tell two of them apart.
+#[cfg(windows)]
+pub(crate) fn ids_not_unique_on_this_volume(dir: &Path) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetVolumeInformationByHandleW, FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+    let Ok(handle) = fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(dir)
+    else {
+        // Unanswered is not an answer that trusts the ids.
+        return true;
+    };
+    let mut name = [0u16; 64];
+    // SAFETY: the handle is live for the call and the buffer's length is the
+    // one passed; every other out-parameter is optional and passed null.
+    let ok = unsafe {
+        GetVolumeInformationByHandleW(
+            handle.as_raw_handle() as _,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            name.as_mut_ptr(),
+            name.len() as u32,
+        )
+    };
+    if ok == 0 {
+        return true;
+    }
+    let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+    String::from_utf16_lossy(&name[..end]).eq_ignore_ascii_case("ReFS")
+}
+
+/// Unix volumes number files with an inode, unique on the volume.
+#[cfg(unix)]
+pub(crate) fn ids_not_unique_on_this_volume(_dir: &Path) -> bool {
+    false
+}
+
+/// When the file came into existence, or 0 where the volume does not say.
+///
+/// `st_birthtime` on macOS, the creation time on Windows, `statx`'s btime on
+/// Linux (ext4, btrfs, xfs v5; the standard library asks `statx` for it).
+/// Unlike an mtime, no Linux call can set it; macOS and Windows can, and
+/// their file ids do not recycle, so a copied birth never meets its old
+/// number (`specs/drive_file_identity.md`, the platform table).
+fn birth_of(md: &fs::Metadata) -> u64 {
+    md.created()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 /// A directory's identity: its inode. The same thing a file's is, read the
@@ -305,6 +376,7 @@ fn fingerprint_of(path: &Path, md: &fs::Metadata) -> Fingerprint {
         // unknown", which the fingerprint comparison treats as changed — the
         // safe direction: it costs a hash, where a wrong identity costs a file.
         file_id: file_index(path).unwrap_or(0),
+        birth_ns: birth_of(md),
     }
 }
 
@@ -862,6 +934,24 @@ mod tests {
 
         assert!(matches!(err, VfsError::AlreadyExists(_)));
         assert_eq!(fs::read(&target).unwrap(), b"something the user just saved");
+    }
+
+    #[test]
+    fn a_files_identity_survives_a_rename_and_a_new_file_has_its_own() {
+        let d = TempDir::new("identity");
+        let a = d.path().join("a.txt");
+        fs::write(&a, b"x").unwrap();
+        let first = identity_at(&a).unwrap();
+        let b = d.path().join("b.txt");
+        fs::rename(&a, &b).unwrap();
+        assert_eq!(identity_at(&b).unwrap(), first, "a rename keeps the file");
+        // A new file under the old name -- the safe-save's second half -- is
+        // another file, while the first still exists.
+        fs::write(&a, b"y").unwrap();
+        assert_ne!(identity_at(&a).unwrap(), first);
+        // The probe trusts this volume exactly when it reports a birth and
+        // keeps the id across a rename, which the lines above just did.
+        assert_eq!(Personality::probe(d.path()).stable_file_identity, first.is_strong());
     }
 
     #[test]

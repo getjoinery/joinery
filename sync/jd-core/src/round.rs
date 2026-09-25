@@ -307,6 +307,7 @@ mod tests {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            own_file: None,
         }
     }
 
