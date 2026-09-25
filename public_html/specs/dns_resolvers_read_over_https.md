@@ -1,10 +1,15 @@
 # DNS Resolvers Read Their Site Over HTTPS
 
-**Status:** WP1–WP5 built and reviewed 2026-09-25, uncommitted (executor public-html-9a,
-reviewer public-html-bb). Final `db --changed`: 461/463 suites, the two failures from
-one suite killed at 180 s under load (it passed alone, 29/29) and the test user it
-stranded, which the harness reclaims after an hour. B6 fixed in core. D1 decided 2026-09-25: the DNS servers download the blocklists. D2
-(cryptominers' dead source) open.
+**Status:** WP1–WP5 built and reviewed 2026-09-25, committed (61a23075; resolver repo
+2c8252b, installer 2.0.0 rebuilt from it) and released in 0.8.427. Executor
+public-html-9a, reviewer public-html-bb.
+- Final `db --changed`: 461/463 suites. The two failures were one suite killed at 180 s
+  under load (it passed alone, 29/29) and the test user it stranded, which the harness
+  reclaims after an hour.
+- B6 fixed in core.
+- D1 decided: the DNS servers download the blocklists.
+- D2 decided: cryptominers moves to the NoCoin list (dns_filtering 1.3.1, uncommitted;
+  needs a release before WP6).
 - **WP6** is live and needs the owner present.
 - **WP7's code, and WP4's site-side removals, stay out of the tree until WP6 is done on
   both DNS servers.** A release carrying them early would strip the resolvers' database
@@ -101,7 +106,8 @@ in 16 categories, 593 MB of a 634 MB database. dev carries 3,959,305 rows (549 M
   - cryptominers' CoinBlockerLists now redirects to a GitLab sign-in (403).
   - Re-enabling `DownloadBlocklists` on today's code would truncate the table and then
     fail these six, emptying six categories. The source list in
-    `blocklist_sources.json` points at the moved paths. cryptominers waits on D2.
+    `blocklist_sources.json` points at the moved paths, and at a new cryptominers source
+    (D2).
 
 - **B6 — deleting a user who owns DNS devices leaves orphan device backups** (found by
   public-html-9a's WP2 fixtures, 2026-09-25; core, not dns-specific).
@@ -466,17 +472,12 @@ refuses scrolldaddy's hand-made database port.
 - **Accepted:** the parsing moves to Go, and the two servers refresh independently, so
   they can differ for a few hours.
 
-**D2 — cryptominers: its source is gone. Open.**
-- **Replace it with the NoCoin list**
-  (`raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt`;
-  maintained, last pushed 2026-09-12, about 300 domains).
-  - **Catch:** it is small. CoinBlocker was larger.
-- **Drop the category.**
-  - **Catch:** devices set to block it lose the choice. The site's filter catalog and the
-    settings page change.
-- **Recommendation:** replace it. It fixes a category that has been silently empty since
-  April, and hagezi's threat list (`tif`, in ip_malware and ai_malware) already covers
-  cryptojacking for those who choose those categories.
+**D2 — cryptominers: its source is gone. Decided 2026-09-25 (owner): replace it.**
+- The source is the NoCoin list
+  (`raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt`): hosts
+  format, 312 domains, maintained (last pushed 2026-09-12).
+- dns_filtering 1.3.1. The DNS servers pick it up from the snapshot once scrolldaddy
+  runs that release.
 
 ## What goes away
 

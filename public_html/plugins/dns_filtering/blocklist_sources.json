@@ -40,7 +40,7 @@
             "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews/hosts"
         ],
         "cryptominers": [
-            "https://zerodot1.gitlab.io/CoinBlockerLists/hosts_browser"
+            "https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt"
         ],
         "dating": [
             "https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/dating/domains"
