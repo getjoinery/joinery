@@ -49,6 +49,8 @@
  * here is that rule. vendor/ is excluded at the site root only: a plugin's
  * Composer tree ships with the plugin and is listed (specs/package_signing.md WP0).
  *
+ * @version 1.3 - republish_artifact(): a site that republishes what it received stages each artifact from
+ *                exactly the files its received manifest lists, each hash-checked as it is copied
  * @version 1.2 - the exclusion rule is PackageSignature's; vendor/ inside an
  *                artifact is listed, so a signed plugin cannot carry an unsigned
  *                Composer tree (specs/package_signing.md WP0, B3)
@@ -127,6 +129,78 @@ class TreeManifestPublisher {
 			return $r;
 		}
 		return self::carry($received_dir ?: $artifact_dir, $artifact_dir, $authority);
+	}
+
+	/**
+	 * Stage an artifact a republishing site serves: exactly the files its
+	 * received manifest lists, copied from this site's tree and each checked
+	 * against the listed hash, with the manifest carried alongside.
+	 *
+	 * A site that republishes what it received serves that release, not its own
+	 * tree. Its tree holds more (files an old release left behind, a stray
+	 * local file) and some of what it holds may differ (an install SQL built
+	 * from its own database). Walking the tree shipped both, under a manifest
+	 * that describes neither. The listing is the release; a file it names that
+	 * is missing here, or whose bytes differ, refuses the publish and names it.
+	 *
+	 * @param string $manifest_dir Where the received manifest lives (the site root, or the live plugin/theme dir)
+	 * @param string $site_root    What the listed paths are relative to
+	 * @param string $to_dir       The staged artifact: the manifest goes at its top, the files beneath it
+	 * @param string $prefix       The listed-path prefix $to_dir stands for: '' for the core,
+	 *                             'public_html/plugins/{name}' for a plugin
+	 * @param array  $authority    From authority()
+	 * @return array ['files' => int, 'manifest' => path, 'carried' => true]
+	 * @throws Exception naming the file, when the listing cannot be served byte for byte
+	 */
+	public static function republish_artifact($manifest_dir, $site_root, $to_dir, $prefix, array $authority) {
+		$site_root = rtrim($site_root, '/');
+		$to_dir    = rtrim($to_dir, '/');
+		$prefix    = trim((string)$prefix, '/');
+		if (!is_dir($to_dir) && !mkdir($to_dir, 0755, true)) {
+			throw new Exception('could not create ' . $to_dir);
+		}
+
+		// The same checks a carried manifest always gets, and the listing is
+		// then read from the copy that ships.
+		$carried = self::carry($manifest_dir, $to_dir, $authority);
+		// parse() refuses an absolute path and a ".." segment.
+		$listed = PackageSignature::parse((string)file_get_contents($carried['manifest']));
+		if ($listed === null) {
+			throw new Exception('the received manifest in ' . rtrim($manifest_dir, '/') . ' has a line that is not a listing the publisher writes');
+		}
+		if ($listed === array()) {
+			throw new Exception('the received manifest in ' . rtrim($manifest_dir, '/') . ' lists nothing');
+		}
+
+		$lead = $prefix === '' ? '' : $prefix . '/';
+		foreach ($listed as $rel => $hash) {
+			if (in_array('', explode('/', $rel), true) || in_array('.', explode('/', $rel), true)) {
+				throw new Exception('the received manifest lists ' . $rel . ', which is not a plain path');
+			}
+			if ($lead !== '' && strpos($rel, $lead) !== 0) {
+				throw new Exception('the received manifest lists ' . $rel . ', which is outside ' . $prefix);
+			}
+			$source = $site_root . '/' . $rel;
+			if (is_link($source) || !is_file($source)) {
+				throw new Exception($rel . ' is listed in the received manifest but is not a file on this site');
+			}
+			$dest = $to_dir . '/' . substr($rel, strlen($lead));
+			$dest_dir = dirname($dest);
+			if (!is_dir($dest_dir) && !mkdir($dest_dir, 0755, true)) {
+				throw new Exception('could not create ' . $dest_dir);
+			}
+			if (!copy($source, $dest)) {
+				throw new Exception('could not copy ' . $rel);
+			}
+			// Checked on the copy, which is what ships.
+			$got = hash_file('sha256', $dest);
+			if ($got === false || !hash_equals($hash, $got)) {
+				throw new Exception('the bytes of ' . $rel . ' on this site are not the bytes the received manifest lists');
+			}
+			// Modes as the tree has them, so an executable script stays one.
+			@chmod($dest, fileperms($source) & 0777);
+		}
+		return array('files' => count($listed), 'manifest' => $carried['manifest'], 'carried' => true);
 	}
 
 	/**

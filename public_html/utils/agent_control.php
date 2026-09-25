@@ -20,6 +20,8 @@
  * --on and --join may be given together: turn the agent on and ask to join in
  * one call, which is what a management node's remote enable does.
  *
+ * @version 1.2 - --join keeps a request for the same URL that has not been answered, so rerunning it
+ *                (install.sh site passes it on every run) does not change the agent's staged key
  * @version 1.1 - --on/--off APPLY the switch (run the installer) rather than only recording it;
  *                as non-root they print the command instead of implying the work is done
  * @version 1.0
@@ -129,14 +131,19 @@ if (isset($options['join'])) {
         fwrite(STDERR, "join: {$refusal}\n");
         exit(1);
     }
-    Setting::put('agent_join_request', json_encode([
-        'url'            => rtrim($url, '/'),
-        'requested_time' => gmdate('Y-m-d H:i:s'),
-    ]));
-    // A fresh ask supersedes whatever an earlier attempt reported.
-    Setting::put('agent_join_state', '');
-    echo "join: requested — the agent introduces itself to " . rtrim($url, '/')
-       . ", and an administrator there approves it after comparing key fingerprints\n";
+    $request = admin_management_node_cli_join_request(
+        agent_control_setting('agent_join_request'), $url, gmdate('Y-m-d H:i:s'));
+    if ($request === null) {
+        // The same ask, still waiting: keep it, and the key the agent staged for it.
+        echo "join: already requested of " . rtrim($url, '/')
+           . " and waiting for approval there — the request and its key fingerprint are unchanged\n";
+    } else {
+        Setting::put('agent_join_request', $request);
+        // A fresh ask supersedes whatever an earlier attempt reported.
+        Setting::put('agent_join_state', '');
+        echo "join: requested — the agent introduces itself to " . rtrim($url, '/')
+           . ", and an administrator there approves it after comparing key fingerprints\n";
+    }
     $changed = true;
 }
 

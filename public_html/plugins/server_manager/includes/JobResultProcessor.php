@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.41 - process_check_status fills an empty mgn_web_root from the web root the agent reports
+ *                 (ManagedNode::adopt_reported_web_root), before the recovery-key report is considered
  * @version 1.40 - a backup run's BACKUP_BYTES figure is the run's whole size (BackupRunner 1.22)
  * @version 1.39 - specs/agent_recipes_and_vocabulary.md: process_restart_unit / _container, process_run_installer,
  *                 process_file_head, process_schema_probe; sanitise_host_report keeps sshd's widened
@@ -523,6 +525,11 @@ class JobResultProcessor {
 			if ($version) {
 				$node->set('mgn_joinery_version', $version);
 			}
+			// A node made without a web root (a join from an agent before 1.44.0)
+			// hosts no site until one is recorded; the agent's own report fills
+			// it. Before the save, so the recovery-key report below is asked of
+			// a node that now hosts a site.
+			ManagedNode::adopt_reported_web_root($node, $result['web_root'] ?? null, 'status check');
 			if ($ssl_new_state !== null) {
 				$node->set('mgn_ssl_state', $ssl_new_state);
 			} elseif ($ssl_token !== null && !$ssl_token['found']) {

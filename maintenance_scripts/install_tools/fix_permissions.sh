@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 4.4 - The tree sweeps go through sweep_find: an entry removed while the
+#              walk is in progress (a test fixture's plugin directory) is not a
+#              failure. findutils 4.9's -ignore_readdir_race covers a file
+#              that vanishes before its stat, not a directory that vanishes
+#              before it is opened, and under set -e that ended the run with a
+#              false "the tree may still be writable" alarm.
 #VERSION 4.3 - config/release_verify_keys is pinned root:root 0644 and pruned
 #              from the config/ data sweep, which would otherwise hand it to
 #              the web user 0770 - a key file the pool can write is one the
@@ -236,6 +242,41 @@ for d in "${PINNED_DIRS[@]}"; do PRUNE+=( -not -path "$d" -not -path "$d/*" ); d
 # by the developer, not by the web server.
 PRUNE+=( -not -path "*/.git" -not -path "*/.git/*" )
 
+# sweep_find ROOT... EXPRESSION... — find over the sweep roots, where an entry
+# removed while the walk is in progress is not a failure. A directory can vanish
+# between find listing it and opening it (findutils 4.9's -ignore_readdir_race
+# does not cover that), and chown or chmod can be handed a file that is gone by
+# the time it runs. Both say "No such file or directory". That is tolerated only
+# for a path strictly under one of the roots: a missing root means the sweep is
+# pointed somewhere wrong. Any other message, or a failure with no message,
+# still fails the run.
+sweep_find() {
+    local roots=() arg
+    for arg in "$@"; do
+        case "$arg" in -*|'('|')'|'!'|',') break ;; esac
+        roots+=( "${arg%/}" )
+    done
+    local err rc=0 line path root under
+    err="$(LC_ALL=C find "$@" 2>&1 >/dev/null)" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        [ -z "$err" ] || printf '%s\n' "$err" >&2
+        return 0
+    fi
+    [ -n "$err" ] || return "$rc"
+    while IFS= read -r line; do
+        path="$(printf '%s\n' "$line" | sed -n "s/^[^']*'\(.*\)': No such file or directory\$/\1/p")"
+        under=false
+        for root in "${roots[@]}"; do
+            case "$path" in "$root"/?*) under=true; break ;; esac
+        done
+        if [ "$under" = false ]; then
+            printf '%s\n' "$err" >&2
+            return "$rc"
+        fi
+    done <<< "$err"
+    return 0
+}
+
 # Ownership and permissions are corrected with find, matching only what is
 # ALREADY wrong — not a blanket chown -R / chmod -R. A recursive chown/chmod
 # updates a file's ctime even when its owner and mode are unchanged, and GNU
@@ -272,19 +313,19 @@ for mf in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
 done
 
 if [ ${#EXEC_ROOTS[@]} -gt 0 ]; then
-    find "${EXEC_ROOTS[@]}" "${PRUNE[@]}" \( -type f -o -type d \) \
+    sweep_find "${EXEC_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
          \( -not -user "$TREE_OWNER" -o -not -group "$TREE_GROUP" \) \
          -exec chown "${TREE_OWNER}:${TREE_GROUP}" {} +
 
-    find "${EXEC_ROOTS[@]}" "${PRUNE[@]}" -type d \
+    sweep_find "${EXEC_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" -type d \
          -not -perm 755 -exec chmod 755 {} +
 
     # 644 for everything, 755 for shell scripts. install.sh, _site_init.sh and
     # this script are invoked as commands rather than as `bash <path>`, so the
     # execute bit is load-bearing on exactly that set. It grants nobody write.
-    find "${EXEC_ROOTS[@]}" "${PRUNE[@]}" -type f -name '*.sh' \
+    sweep_find "${EXEC_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" -type f -name '*.sh' \
          -not -perm 755 -exec chmod 755 {} +
-    find "${EXEC_ROOTS[@]}" "${PRUNE[@]}" -type f -not -name '*.sh' \
+    sweep_find "${EXEC_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" -type f -not -name '*.sh' \
          -not -perm 644 -exec chmod 644 {} +
 fi
 
@@ -321,10 +362,10 @@ done
 
 echo "  Data set: uploads, static_files, cache, logs, storage, backups to www-data:www-data 0770..."
 if [ ${#DATA_ROOTS[@]} -gt 0 ]; then
-    find "${DATA_ROOTS[@]}" "${PRUNE[@]}" \( -type f -o -type d \) \
+    sweep_find "${DATA_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
          \( -not -user www-data -o -not -group www-data \) \
          -exec chown www-data:www-data {} +
-    find "${DATA_ROOTS[@]}" "${PRUNE[@]}" \( -type f -o -type d \) \
+    sweep_find "${DATA_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
          -not -perm 770 -exec chmod 770 {} +
 fi
 
@@ -332,11 +373,11 @@ fi
 # site's backup key, the relay pull key, the ledger. The pins below re-tighten
 # the ones that need it.
 if [ -d "$CONFIG_DIR" ]; then
-    find "$CONFIG_DIR" -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
+    sweep_find "$CONFIG_DIR" -ignore_readdir_race -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
          -not -name '*.php' \
          \( -not -user www-data -o -not -group www-data \) \
          -exec chown www-data:www-data {} +
-    find "$CONFIG_DIR" -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
+    sweep_find "$CONFIG_DIR" -ignore_readdir_race -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
          -not -name '*.php' \
          -not -perm 770 -exec chmod 770 {} +
 fi

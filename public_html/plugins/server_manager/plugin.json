@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.26.3",
+  "version": "1.26.4",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -151,6 +151,12 @@
       "group": "provisioning",
       "label": "Welcome email From name",
       "type": "text"
+    },
+    {
+      "name": "server_manager_provisioning_service_user_id",
+      "default": "",
+      "managed": true,
+      "helptext": "The provisioning pipeline's service account, by user id. Written by ProvisioningSetup when it makes (or, once, adopts) the account; the account is never looked up by its address."
     },
     {
       "name": "server_manager_provisioning_domain_question_id",

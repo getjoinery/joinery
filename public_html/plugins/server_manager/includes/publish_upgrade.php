@@ -458,6 +458,17 @@
 		}
 		publish_output("The deploy tier passed.");
 
+		// A site running exactly what upstream delivered republishes that
+		// release rather than its own tree: every archive is built from the
+		// files its received, signed manifest lists, each checked as it is
+		// copied (TreeManifestPublisher::republish_artifact()), and nothing is
+		// rebuilt or regenerated first. A rebuild would only write bytes the
+		// manifest does not list, and the check would refuse them.
+		$republish = !DeploymentHelper::mayMintReleaseVersion();
+		if ($republish) {
+			publish_output("\nThis site republishes the release it received: every archive is built from its signed manifest, file for file.");
+		}
+
 		// =====================================================
 		// Bundle the management agent artifact (release channel)
 		// =====================================================
@@ -470,9 +481,20 @@
 		// excludes only theme/* and plugins/*) and no longer touches any plugin's
 		// tree hash — which also ends the churn where every agent rebuild
 		// auto-bumped server_manager's version.
-		publish_output("Bundling management agent artifact...");
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentDistPublisher.php'));
-		$agent_bundle = AgentDistPublisher::publish($full_site_dir, 'publish_output');
+		if ($republish) {
+			$received_agent = AgentDistPublisher::readManifest($full_site_dir . '/public_html/agent_dist');
+			$agent_bundle = array(
+				'status'          => AgentDistPublisher::STATUS_CARRIED,
+				'message'         => 'Agent artifact: carried as received',
+				'source_version'  => null,
+				'bundled_version' => is_array($received_agent) ? ($received_agent['version'] ?? null) : null,
+			);
+			publish_output("Agent artifact: carried as received (v" . ($agent_bundle['bundled_version'] ?: 'none') . ")");
+		} else {
+			publish_output("Bundling management agent artifact...");
+			$agent_bundle = AgentDistPublisher::publish($full_site_dir, 'publish_output');
+		}
 
 		if ($agent_bundle['status'] === AgentDistPublisher::STATUS_FAILED) {
 			publish_output("\nRefusing to publish {$version} — the agent bundle is at v"
@@ -502,7 +524,7 @@
 		// stops on the first relay that runs it, and that failure would surface
 		// on a customer's machine mid-provision rather than here.
 		$relay_sealer_path = PathHelper::getIncludePath('plugins/mailbox/includes/RelaySealerPublisher.php');
-		if (file_exists($relay_sealer_path)) {
+		if (!$republish && file_exists($relay_sealer_path)) {
 			publish_output("Building relay sealer binaries...");
 			require_once($relay_sealer_path);
 			$relay_sealer = RelaySealerPublisher::publish($full_site_dir, 'publish_output');
@@ -525,14 +547,16 @@
 		// maintenance_scripts/install_tools/joinery_jail, so the publish is the
 		// place that builds it, before the core archive is rsynced. A stale
 		// launcher must not ship: a build owed and not done refuses the release.
-		publish_output("Building parser jail launcher binaries...");
-		$parser_jail = ParserJailPublisher::publish($full_site_dir, 'publish_output');
-		if ($parser_jail['status'] === ParserJailPublisher::STATUS_FAILED) {
-			publish_output("\nRefusing to publish {$version} — the parser jail launcher "
-				. "(maintenance_scripts/install_tools/joinery_jail/bin) is stale and the build failed. "
-				. "Publishing now would ship an installer with nothing current to install.");
-			publish_output("Fix the launcher build and publish again. Nothing has been written.");
-			exit(1);
+		if (!$republish) {
+			publish_output("Building parser jail launcher binaries...");
+			$parser_jail = ParserJailPublisher::publish($full_site_dir, 'publish_output');
+			if ($parser_jail['status'] === ParserJailPublisher::STATUS_FAILED) {
+				publish_output("\nRefusing to publish {$version} — the parser jail launcher "
+					. "(maintenance_scripts/install_tools/joinery_jail/bin) is stale and the build failed. "
+					. "Publishing now would ship an installer with nothing current to install.");
+				publish_output("Fix the launcher build and publish again. Nothing has been written.");
+				exit(1);
+			}
 		}
 
 		// The support bundle rides beside the agent artifact: the signed script
@@ -552,46 +576,55 @@
 		// fleet; a stale bundle affects only machines with no site, and carrying
 		// the previous one forward leaves those machines exactly where they were
 		// rather than blocking a release the rest of the fleet needs.
-		if (SupportBundlePublisher::hasConsumer()) {
+		if (!$republish && SupportBundlePublisher::hasConsumer()) {
 			publish_output("Bundling agent support bundle...");
 			$support_bundle = SupportBundlePublisher::publish($full_site_dir, 'publish_output');
 		}
 
 		// Write the new version to public_html/VERSION so it ships in the tarball and
 		// becomes the authoritative version for sites upgrading to it.
-		$version_file = PathHelper::getIncludePath('VERSION');
-		if (file_put_contents($version_file, $version . "\n") === false) {
-			publish_output("ERROR: Could not write version to $version_file (permissions?).");
-			exit(1);
+		// A republished release already carries both: its VERSION reads the
+		// version it is running (checked above), and its install SQL is the
+		// one it received, which its manifest lists. Regenerating the SQL here
+		// dumped this site's own database under the received release's hash.
+		$sql_source = null;
+		if ($republish) {
+			publish_output("VERSION and the install SQL are carried as received");
+		} else {
+			$version_file = PathHelper::getIncludePath('VERSION');
+			if (file_put_contents($version_file, $version . "\n") === false) {
+				publish_output("ERROR: Could not write version to $version_file (permissions?).");
+				exit(1);
+			}
+			publish_output("Wrote version $version to $version_file");
+
+			publish_output("Generating install SQL file (version $version)...");
+
+			$create_sql_cmd = sprintf(
+				'php %s %s',
+				escapeshellarg($full_site_dir . '/public_html/utils/create_install_sql.php'),
+				escapeshellarg($version)
+			);
+
+			$output = [];
+			$exit_code = 0;
+			exec($create_sql_cmd, $output, $exit_code);
+
+			if ($exit_code !== 0) {
+				publish_output("ERROR: Failed to generate install SQL file:\n" . implode("\n", $output));
+				exit(1);
+			}
+
+			// The generated file is in uploads with version number
+			$sql_source = $full_site_dir . '/uploads/joinery-install-' . $version . '.sql.gz';
+
+			if (!file_exists($sql_source)) {
+				publish_output("ERROR: Generated SQL file not found at $sql_source");
+				exit(1);
+			}
+
+			publish_output("Generated install SQL file version $version (compressed)");
 		}
-		publish_output("Wrote version $version to $version_file");
-
-		publish_output("Generating install SQL file (version $version)...");
-
-		$create_sql_cmd = sprintf(
-			'php %s %s',
-			escapeshellarg($full_site_dir . '/public_html/utils/create_install_sql.php'),
-			escapeshellarg($version)
-		);
-
-		$output = [];
-		$exit_code = 0;
-		exec($create_sql_cmd, $output, $exit_code);
-
-		if ($exit_code !== 0) {
-			publish_output("ERROR: Failed to generate install SQL file:\n" . implode("\n", $output));
-			exit(1);
-		}
-
-		// The generated file is in uploads with version number
-		$sql_source = $full_site_dir . '/uploads/joinery-install-' . $version . '.sql.gz';
-
-		if (!file_exists($sql_source)) {
-			publish_output("ERROR: Generated SQL file not found at $sql_source");
-			exit(1);
-		}
-
-		publish_output("Generated install SQL file version $version (compressed)");
 
 		$file_output_folder = $full_site_dir.'/static_files';
 
@@ -616,7 +649,7 @@
 			}
 		}
 
-		if (!file_exists($sql_source)) {
+		if (!$republish && !file_exists($sql_source)) {
 			publish_output("ERROR: Required file $sql_source not found. Cannot create archive.");
 			exit(1);
 		}
@@ -624,11 +657,13 @@
 		publish_output("All required directories and files present");
 
 		// Also update the on-disk copy for Docker builds that copy directly from disk
-		$ondisk_sql_path = $full_site_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz';
-		if (copy($sql_source, $ondisk_sql_path)) {
-			publish_output("Updated on-disk install SQL at $ondisk_sql_path");
-		} else {
-			publish_output("Warning: Could not update on-disk SQL at $ondisk_sql_path");
+		if (!$republish) {
+			$ondisk_sql_path = $full_site_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz';
+			if (copy($sql_source, $ondisk_sql_path)) {
+				publish_output("Updated on-disk install SQL at $ondisk_sql_path");
+			} else {
+				publish_output("Warning: Could not update on-disk SQL at $ondisk_sql_path");
+			}
 		}
 
 		// =====================================================
@@ -651,129 +686,159 @@
 		mkdir($core_temp_dir . '/config', 0755, true);
 		mkdir($core_temp_dir . '/maintenance_scripts', 0755, true);
 
-		// Build agent file exclusion list — covers any filename managed by the agent files admin.
-		// Hardcoded fallback set keeps the common names excluded even if the DB query fails.
-		$agent_file_excludes = array('CLAUDE.md', 'GEMINI.md', 'AGENTS.md');
-		try {
-			$_agf_db = DbConnector::get_instance()->get_db_link();
-			$_agf_q  = $_agf_db->prepare("SELECT agf_target_filenames FROM agf_agent_files WHERE agf_delete_time IS NULL");
-			$_agf_q->execute();
-			while ($_agf_row = $_agf_q->fetch(PDO::FETCH_ASSOC)) {
-				$_agf_raw = $_agf_row['agf_target_filenames'];
-				if (!$_agf_raw) continue;
-				$_agf_targets = is_array($_agf_raw) ? $_agf_raw : json_decode($_agf_raw, true);
-				if (is_array($_agf_targets)) {
-					foreach ($_agf_targets as $_agf_name) {
-						if (is_string($_agf_name) && $_agf_name !== '' && strpos($_agf_name, '/') === false && strpos($_agf_name, '\\') === false) {
-							$agent_file_excludes[] = $_agf_name;
+		if ($republish) {
+			// The received release, file for file: the site-root manifest lists
+			// the core (public_html/ and maintenance_scripts/, the install SQL
+			// among them), and each file is checked on its copy. Stray files in
+			// this tree are not listed, so they do not ship.
+			try {
+				$manifest_authority = TreeManifestPublisher::authority($full_site_dir);
+				publish_output($manifest_authority['reason']);
+				$staged_manifest = TreeManifestPublisher::republish_artifact(
+					$full_site_dir, $full_site_dir, $core_temp_dir, '', $manifest_authority);
+			} catch (Exception $e) {
+				exec('rm -rf ' . escapeshellarg($core_temp_dir));
+				publish_output("\nRefusing to republish {$version} — " . $e->getMessage() . '.');
+				publish_output("This site must serve the release it received exactly. Upgrade it again to restore the received files, then publish. Nothing has been written.");
+				exit(1);
+			}
+			publish_output("Core staged from the received manifest ({$staged_manifest['files']} files, each checked)");
+			foreach (array('theme', 'plugins') as $empty_dir) {
+				if (!is_dir($core_temp_dir . '/public_html/' . $empty_dir)) {
+					mkdir($core_temp_dir . '/public_html/' . $empty_dir, 0755, true);
+				}
+			}
+			// config/ is outside every manifest; the template it ships is the
+			// install_tools copy, which the manifest does cover.
+			$staged_template = $core_temp_dir . '/maintenance_scripts/install_tools/default_Globalvars_site.php';
+			if (is_file($staged_template)) {
+				copy($staged_template, $core_temp_dir . '/config/default_Globalvars_site.php');
+			}
+		} else {
+			// Build agent file exclusion list — covers any filename managed by the agent files admin.
+			// Hardcoded fallback set keeps the common names excluded even if the DB query fails.
+			$agent_file_excludes = array('CLAUDE.md', 'GEMINI.md', 'AGENTS.md');
+			try {
+				$_agf_db = DbConnector::get_instance()->get_db_link();
+				$_agf_q  = $_agf_db->prepare("SELECT agf_target_filenames FROM agf_agent_files WHERE agf_delete_time IS NULL");
+				$_agf_q->execute();
+				while ($_agf_row = $_agf_q->fetch(PDO::FETCH_ASSOC)) {
+					$_agf_raw = $_agf_row['agf_target_filenames'];
+					if (!$_agf_raw) continue;
+					$_agf_targets = is_array($_agf_raw) ? $_agf_raw : json_decode($_agf_raw, true);
+					if (is_array($_agf_targets)) {
+						foreach ($_agf_targets as $_agf_name) {
+							if (is_string($_agf_name) && $_agf_name !== '' && strpos($_agf_name, '/') === false && strpos($_agf_name, '\\') === false) {
+								$agent_file_excludes[] = $_agf_name;
+							}
 						}
 					}
 				}
+			} catch (\Throwable $e) {
+				// agf_agent_files table not yet present or DB unavailable — fallback set still applies.
 			}
-		} catch (\Throwable $e) {
-			// agf_agent_files table not yet present or DB unavailable — fallback set still applies.
-		}
-		$agent_file_excludes = array_unique($agent_file_excludes);
-		$agent_excludes_str = '';
-		foreach ($agent_file_excludes as $_agf_name) {
-			$agent_excludes_str .= ' --exclude=' . escapeshellarg($_agf_name);
-		}
+			$agent_file_excludes = array_unique($agent_file_excludes);
+			$agent_excludes_str = '';
+			foreach ($agent_file_excludes as $_agf_name) {
+				$agent_excludes_str .= ' --exclude=' . escapeshellarg($_agf_name);
+			}
 
-		// Copy public_html excluding themes and plugins content
-		// Note: Use anchored patterns (/theme/*, /plugins/*) to only exclude top-level directories,
-		// not subdirectories such as assets/vendor/*/plugins/
-		$rsync_core_cmd = sprintf(
-			// agent_dist.* excludes the SWAP LEAVINGS, never agent_dist itself:
-			// the publisher moves the previous bundle to agent_dist.old before
-			// putting the new one in place, and a .old that cannot be removed
-			// (one left root-owned by a publish that ran as root) otherwise ships
-			// to every node — 10MB of superseded, still-signed agent binaries,
-			// which is dead weight at best and a stale artifact to explain at
-			// worst. Verified the hard way: 0.8.355 carried one.
-			'rsync -av --exclude=.git --exclude=.gitignore --exclude=.claude --exclude=specs%s --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=theme-sources --exclude="/agent_dist.*" --exclude="/theme/*" --exclude="/plugins/*" %s %s 2>&1',
-			$agent_excludes_str,
-			escapeshellarg($full_site_dir . '/public_html/'),
-			escapeshellarg($core_temp_dir . '/public_html/')
-		);
-		exec($rsync_core_cmd, $output, $exit_code);
+			// Copy public_html excluding themes and plugins content
+			// Note: Use anchored patterns (/theme/*, /plugins/*) to only exclude top-level directories,
+			// not subdirectories such as assets/vendor/*/plugins/
+			$rsync_core_cmd = sprintf(
+				// agent_dist.* excludes the SWAP LEAVINGS, never agent_dist itself:
+				// the publisher moves the previous bundle to agent_dist.old before
+				// putting the new one in place, and a .old that cannot be removed
+				// (one left root-owned by a publish that ran as root) otherwise ships
+				// to every node — 10MB of superseded, still-signed agent binaries,
+				// which is dead weight at best and a stale artifact to explain at
+				// worst. Verified the hard way: 0.8.355 carried one.
+				'rsync -av --exclude=.git --exclude=.gitignore --exclude=.claude --exclude=specs%s --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=theme-sources --exclude="/agent_dist.*" --exclude="/theme/*" --exclude="/plugins/*" %s %s 2>&1',
+				$agent_excludes_str,
+				escapeshellarg($full_site_dir . '/public_html/'),
+				escapeshellarg($core_temp_dir . '/public_html/')
+			);
+			exec($rsync_core_cmd, $output, $exit_code);
 
-		// Ensure empty theme/ and plugins/ directories exist in the core archive.
-		// rsync leaves the parent dirs in place even when their contents are excluded,
-		// so check before creating to avoid "File exists" warnings.
-		if (!is_dir($core_temp_dir . '/public_html/theme')) {
-			mkdir($core_temp_dir . '/public_html/theme', 0755, true);
-		}
-		if (!is_dir($core_temp_dir . '/public_html/plugins')) {
-			mkdir($core_temp_dir . '/public_html/plugins', 0755, true);
-		}
+			// Ensure empty theme/ and plugins/ directories exist in the core archive.
+			// rsync leaves the parent dirs in place even when their contents are excluded,
+			// so check before creating to avoid "File exists" warnings.
+			if (!is_dir($core_temp_dir . '/public_html/theme')) {
+				mkdir($core_temp_dir . '/public_html/theme', 0755, true);
+			}
+			if (!is_dir($core_temp_dir . '/public_html/plugins')) {
+				mkdir($core_temp_dir . '/public_html/plugins', 0755, true);
+			}
 
-		// Carry the license into public_html rather than the archive root.
-		// upgrade.php deploys only two things from a staged archive — it swaps
-		// public_html and rsyncs maintenance_scripts. A root-level file would be
-		// laid down once by install.sh and never refreshed, so every upgraded site
-		// would keep whatever license it was born with. The canonical copy stays at
-		// the repo root, where GitHub and license scanners look for it.
-		if (!copy($license_source, $core_temp_dir . '/public_html/LICENSE.md')) {
-			publish_output("ERROR: Failed to copy LICENSE.md into the core archive.");
-			exit(1);
-		}
-
-		if ($business_source !== '') {
-			if (!copy($business_source, $core_temp_dir . '/public_html/LICENSE-BUSINESS.md')) {
-				publish_output("ERROR: Failed to copy LICENSE-BUSINESS.md into the core archive.");
+			// Carry the license into public_html rather than the archive root.
+			// upgrade.php deploys only two things from a staged archive — it swaps
+			// public_html and rsyncs maintenance_scripts. A root-level file would be
+			// laid down once by install.sh and never refreshed, so every upgraded site
+			// would keep whatever license it was born with. The canonical copy stays at
+			// the repo root, where GitHub and license scanners look for it.
+			if (!copy($license_source, $core_temp_dir . '/public_html/LICENSE.md')) {
+				publish_output("ERROR: Failed to copy LICENSE.md into the core archive.");
 				exit(1);
 			}
-			publish_output("Business license present at {$business_source}");
-		}
 
-		// Copy config template
-		if (file_exists($maintenance_dir . 'install_tools/default_Globalvars_site.php')) {
-			copy($maintenance_dir . 'install_tools/default_Globalvars_site.php', $core_temp_dir . '/config/default_Globalvars_site.php');
-		}
-
-		// Copy maintenance_scripts
-		foreach (['install_tools', 'sysadmin_tools'] as $dir) {
-			$source_dir = $maintenance_dir . $dir . '/';
-			$dest_dir = $core_temp_dir . '/maintenance_scripts/' . $dir . '/';
-			if (is_dir($source_dir)) {
-				mkdir($dest_dir, 0755, true);
-				exec(sprintf('rsync -av %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
+			if ($business_source !== '') {
+				if (!copy($business_source, $core_temp_dir . '/public_html/LICENSE-BUSINESS.md')) {
+					publish_output("ERROR: Failed to copy LICENSE-BUSINESS.md into the core archive.");
+					exit(1);
+				}
+				publish_output("Business license present at {$business_source}");
 			}
-		}
 
-		// Copy install SQL file
-		if (file_exists($sql_source)) {
-			copy($sql_source, $core_temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
-		}
-
-		// Signed tree manifest (component G). Whether this site signs at all is
-		// the agent bundle's call — TreeManifestPublisher::authority() — because
-		// the agent verifies against the key that built it, not the key in this
-		// site's config. A site that may sign writes twice, each with a root
-		// matching what it describes: the staging tree that ships and is deleted
-		// after the tar, and its own live tree, so the publishing plane is not
-		// the one machine in the fleet whose own script primitives never verify.
-		// A site that may NOT sign carries the manifest it received forward into
-		// the archive and leaves its live tree exactly as upstream delivered it;
-		// re-signing that tree with a key its own agent does not hold is how a
-		// republishing site stops being able to back itself up. A manifest that
-		// cannot be written, signed or carried aborts the publish — an archive
-		// without one silently disables script primitives on every node that
-		// takes it.
-		try {
-			$manifest_authority = TreeManifestPublisher::authority($full_site_dir);
-			publish_output($manifest_authority['reason']);
-			$staged_manifest = TreeManifestPublisher::publish_artifact(
-				$core_temp_dir, $core_temp_dir, $manifest_authority, $full_site_dir);
-			publish_output($staged_manifest['carried']
-				? "Core tree manifest carried forward as received ({$staged_manifest['files']} files)"
-				: "Core tree manifest signed ({$staged_manifest['files']} files)");
-			if ($manifest_authority['may_sign']) {
-				TreeManifestPublisher::write($full_site_dir, $full_site_dir, $manifest_authority['keys']);
+			// Copy config template
+			if (file_exists($maintenance_dir . 'install_tools/default_Globalvars_site.php')) {
+				copy($maintenance_dir . 'install_tools/default_Globalvars_site.php', $core_temp_dir . '/config/default_Globalvars_site.php');
 			}
-		} catch (Exception $e) {
-			publish_output("ERROR: core tree manifest failed: " . $e->getMessage());
-			exit(1);
+
+			// Copy maintenance_scripts
+			foreach (['install_tools', 'sysadmin_tools'] as $dir) {
+				$source_dir = $maintenance_dir . $dir . '/';
+				$dest_dir = $core_temp_dir . '/maintenance_scripts/' . $dir . '/';
+				if (is_dir($source_dir)) {
+					mkdir($dest_dir, 0755, true);
+					exec(sprintf('rsync -av %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
+				}
+			}
+
+			// Copy install SQL file
+			if (file_exists($sql_source)) {
+				copy($sql_source, $core_temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
+			}
+
+			// Signed tree manifest (component G). Whether this site signs at all is
+			// the agent bundle's call — TreeManifestPublisher::authority() — because
+			// the agent verifies against the key that built it, not the key in this
+			// site's config. A site that may sign writes twice, each with a root
+			// matching what it describes: the staging tree that ships and is deleted
+			// after the tar, and its own live tree, so the publishing plane is not
+			// the one machine in the fleet whose own script primitives never verify.
+			// A site that may NOT sign carries the manifest it received forward into
+			// the archive and leaves its live tree exactly as upstream delivered it;
+			// re-signing that tree with a key its own agent does not hold is how a
+			// republishing site stops being able to back itself up. A manifest that
+			// cannot be written, signed or carried aborts the publish — an archive
+			// without one silently disables script primitives on every node that
+			// takes it.
+			try {
+				$manifest_authority = TreeManifestPublisher::authority($full_site_dir);
+				publish_output($manifest_authority['reason']);
+				$staged_manifest = TreeManifestPublisher::publish_artifact(
+					$core_temp_dir, $core_temp_dir, $manifest_authority, $full_site_dir);
+				publish_output($staged_manifest['carried']
+					? "Core tree manifest carried forward as received ({$staged_manifest['files']} files)"
+					: "Core tree manifest signed ({$staged_manifest['files']} files)");
+				if ($manifest_authority['may_sign']) {
+					TreeManifestPublisher::write($full_site_dir, $full_site_dir, $manifest_authority['keys']);
+				}
+			} catch (Exception $e) {
+				publish_output("ERROR: core tree manifest failed: " . $e->getMessage());
+				exit(1);
+			}
 		}
 
 		// Create core tar.gz archive
@@ -913,6 +978,9 @@
 				// Rule 3: version went backward. Record/archive as-is, but warn.
 				$publish_warnings[] = "theme {$theme_name}: version went backward ({$last['version']} -> {$theme_version}); recorded and archived as-is";
 				publish_output("- WARNING: {$theme_name} version went backward: {$last['version']} -> {$theme_version}");
+			} elseif ($republish) {
+				// A republished release carries the versions it arrived with:
+				// a bump here would edit theme.json under its own manifest.
 			} else {
 				// Rule 4: equal version. Compare hashes.
 				if (!isset($last['tree_hash']) || $last['tree_hash'] !== $current_hash) {
@@ -931,9 +999,21 @@
 			// live directory, so the manifest ships and this box keeps its copy.
 			// A site that may not sign ships the manifest already in that
 			// directory, the one that arrived with the theme.
+			// A republishing site tars a staged copy holding exactly what the
+			// theme's received manifest lists, each file checked.
+			$theme_tar_base = $theme_base_dir;
+			$theme_stage = null;
 			try {
-				TreeManifestPublisher::publish_artifact($theme_dir, $full_site_dir, $manifest_authority);
+				if ($republish) {
+					$theme_stage = sys_get_temp_dir() . '/joinery_theme_' . uniqid();
+					TreeManifestPublisher::republish_artifact($theme_dir, $full_site_dir,
+						$theme_stage . '/' . $theme_name, 'public_html/theme/' . $theme_name, $manifest_authority);
+					$theme_tar_base = $theme_stage;
+				} else {
+					TreeManifestPublisher::publish_artifact($theme_dir, $full_site_dir, $manifest_authority);
+				}
 			} catch (Exception $e) {
+				if ($theme_stage !== null) { exec('rm -rf ' . escapeshellarg($theme_stage)); }
 				publish_output("ERROR: tree manifest failed for theme {$theme_name}: " . $e->getMessage());
 				publish_output("A release must carry every manifest it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");
 				$upgrade->permanent_delete();
@@ -946,11 +1026,12 @@
 			$tar_cmd = sprintf(
 				'tar -czf %s -C %s %s 2>&1',
 				escapeshellarg($theme_archive),
-				escapeshellarg($theme_base_dir),
+				escapeshellarg($theme_tar_base),
 				escapeshellarg($theme_name)
 			);
 			$output = [];
 			exec($tar_cmd, $output, $exit_code);
+			if ($theme_stage !== null) { exec('rm -rf ' . escapeshellarg($theme_stage)); }
 
 			if ($exit_code !== 0 || !file_exists($theme_archive) || filesize($theme_archive) == 0) {
 				// A partial file must not sit in static_files under the current
@@ -1022,6 +1103,9 @@
 				// Rule 3: version went backward. Record/archive as-is, but warn.
 				$publish_warnings[] = "plugin {$plugin_name}: version went backward ({$last['version']} -> {$plugin_version}); recorded and archived as-is";
 				publish_output("- WARNING: {$plugin_name} version went backward: {$last['version']} -> {$plugin_version}");
+			} elseif ($republish) {
+				// A republished release carries the versions it arrived with:
+				// a bump here would edit plugin.json under its own manifest.
 			} else {
 				// Rule 4: equal version. Compare hashes.
 				if (!isset($last['tree_hash']) || $last['tree_hash'] !== $current_hash) {
@@ -1036,9 +1120,20 @@
 
 			// Per-artifact signed manifest (component G) — same shape and same
 			// failure posture as the theme write above.
+			// Same shape as the theme above.
+			$plugin_tar_base = $plugin_base_dir;
+			$plugin_stage = null;
 			try {
-				TreeManifestPublisher::publish_artifact($plugin_dir, $full_site_dir, $manifest_authority);
+				if ($republish) {
+					$plugin_stage = sys_get_temp_dir() . '/joinery_plugin_' . uniqid();
+					TreeManifestPublisher::republish_artifact($plugin_dir, $full_site_dir,
+						$plugin_stage . '/' . $plugin_name, 'public_html/plugins/' . $plugin_name, $manifest_authority);
+					$plugin_tar_base = $plugin_stage;
+				} else {
+					TreeManifestPublisher::publish_artifact($plugin_dir, $full_site_dir, $manifest_authority);
+				}
 			} catch (Exception $e) {
+				if ($plugin_stage !== null) { exec('rm -rf ' . escapeshellarg($plugin_stage)); }
 				publish_output("ERROR: tree manifest failed for plugin {$plugin_name}: " . $e->getMessage());
 				publish_output("A release must carry every manifest it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");
 				$upgrade->permanent_delete();
@@ -1051,11 +1146,12 @@
 			$tar_cmd = sprintf(
 				'tar -czf %s -C %s %s 2>&1',
 				escapeshellarg($plugin_archive),
-				escapeshellarg($plugin_base_dir),
+				escapeshellarg($plugin_tar_base),
 				escapeshellarg($plugin_name)
 			);
 			$output = [];
 			exec($tar_cmd, $output, $exit_code);
+			if ($plugin_stage !== null) { exec('rm -rf ' . escapeshellarg($plugin_stage)); }
 
 			if ($exit_code !== 0 || !file_exists($plugin_archive) || filesize($plugin_archive) == 0) {
 				// A partial file must not sit in static_files under the current
