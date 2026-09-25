@@ -18,17 +18,18 @@
  *     owner is deleted no longer authenticates (browser sessions are refused
  *     by requires_scoped_key, pinned in tests/unit/api_scoped_key_test.php);
  *   - issuing: the key is read-only, scoped, restricted to the server's IPv4
- *     address, owned by the service account, and issuing again replaces it;
- *   - the service account cannot be deleted, soft or permanently, while it
- *     owns a live key, and can be once the key is revoked.
+ *     address, owned by the admin who issued it, and issuing again replaces it;
+ *   - that admin cannot be deleted, soft or permanently, while the key is live,
+ *     and can be once another admin has re-issued it.
  *
  * USAGE (CLI only):
  *   php plugins/dns_filtering/tests/resolver_snapshot_test.php [base_url] [origin_ip]
  *
  * Creates its own users, devices, blocks and keys and removes them afterwards.
- * The issuing section runs only where no DNS server key or service account
- * exists yet, so it never replaces a real one.
+ * The issuing section runs only where no DNS server key exists yet, so it
+ * never replaces a real one.
  *
+ * @version 1.1 - keys belong to the issuing admin; the service account is gone
  * @version 1.0
  */
 
@@ -202,42 +203,35 @@ try {
 	$db->prepare("UPDATE usr_users SET usr_delete_time = NULL WHERE usr_user_id = ?")->execute(array($owner->key));
 
 	// ------------------------------------------------------------------
-	section('Issuing a key, and the service account');
-	$existing = trim((string)get_setting_raw(DnsResolverAccess::ACCOUNT_SETTING))
-		. trim((string)get_setting_raw('dns_filtering_resolver_key_primary'))
+	section('Issuing a key');
+	$existing = trim((string)get_setting_raw('dns_filtering_resolver_key_primary'))
 		. trim((string)get_setting_raw('dns_filtering_resolver_key_secondary'));
 	if ($existing !== '') {
-		echo "  SKIP: this site already has DNS server keys or a service account; issuing here would replace them\n";
+		echo "  SKIP: this site already has DNS server keys; issuing here would replace them\n";
 	} else {
 		harness_defer(function () {
-			foreach (array(DnsResolverAccess::ACCOUNT_SETTING, 'dns_filtering_resolver_key_primary', 'dns_filtering_resolver_key_secondary') as $name) {
+			foreach (array('dns_filtering_resolver_key_primary', 'dns_filtering_resolver_key_secondary') as $name) {
 				Setting::put($name, '');
 			}
 		});
+		// Registered before their keys, so teardown (LIFO) deletes the keys first.
+		$issuer = make_user($suffix . 'ISS', 10);
+		$other_admin = make_user($suffix . 'IS2', 10);
+
 		harness_set_setting_mem('dns_filtering_dns_server_ip', '');
 		$refused = false;
 		try {
-			DnsResolverAccess::issueKey('primary');
+			DnsResolverAccess::issueKey('primary', $issuer);
 		} catch (SystemDisplayableError $e) {
 			$refused = true;
 		}
 		check($refused, 'A server with no IPv4 address set gets no key');
 
 		harness_set_setting_mem('dns_filtering_dns_server_ip', '192.0.2.10');
-		$issued = DnsResolverAccess::issueKey('primary');
+		$issued = DnsResolverAccess::issueKey('primary', $issuer);
 		$key = $issued['api_key'];
-		$account = DnsResolverAccess::serviceAccount();
-		check($account !== null, 'Issuing creates the service account');
-		if ($account) {
-			harness_register_user($account);
-		}
-		// Registered after the account, so teardown (LIFO) deletes it first.
 		harness_register_key_id($key->key);
-		check($account && (int)$key->get('apk_usr_user_id') === (int)$account->key, 'The key belongs to the service account, not the caller');
-		check($account && (int)$account->get('usr_permission') === 0 && $account->get('usr_password') === null
-			&& substr($account->get('usr_email'), -strlen('@service.invalid')) === '@service.invalid',
-			'The account has permission 0, no password, and a .invalid address');
-		check($account && (bool)$account->get('usr_password_recovery_disabled') === true, 'Password recovery is disabled on the account');
+		check((int)$key->get('apk_usr_user_id') === (int)$issuer->key, 'The key belongs to the admin who issued it');
 		check($key->get('apk_type') === ApiKey::TYPE_MACHINE && (int)$key->get('apk_permission') === 1
 			&& $key->scope() === array(DnsResolverAccess::ACTION) && $key->get('apk_ip_restriction') === '192.0.2.10',
 			'The key is a read-only machine key, scoped to the action, restricted to the server\'s address');
@@ -250,30 +244,31 @@ try {
 		check($state[0]['slot'] === 'primary' && $state[0]['drift'] === false, 'The panel shows the key, with no drift');
 		harness_set_setting_mem('dns_filtering_dns_server_ip', '192.0.2.11');
 		check(DnsResolverAccess::panelState()[0]['drift'] === true, 'The panel flags a key whose address no longer matches the setting');
+		harness_set_setting_mem('dns_filtering_dns_server_ip', '192.0.2.10');
 
-		section('The service account cannot be deleted while it owns a live key');
+		section('The issuing admin cannot be deleted while their key is live');
 		foreach (array('soft_delete', 'permanent_delete') as $method) {
 			$threw = false;
 			try {
-				$fresh = new User($account->key, TRUE);
+				$fresh = new User($issuer->key, TRUE);
 				$fresh->$method();
 			} catch (SystemDisplayableError $e) {
 				$threw = strpos($e->getMessage(), DnsResolverAccess::ACTION) !== false;
 			}
 			check($threw, "$method is refused, naming the key's scope");
-			check((new User($account->key, TRUE))->get('usr_delete_time') === null, "After the refused $method the account is intact");
+			check((new User($issuer->key, TRUE))->get('usr_delete_time') === null, "After the refused $method the account is intact");
 		}
 
-		$second = DnsResolverAccess::issueKey('primary');
+		$second = DnsResolverAccess::issueKey('primary', $other_admin);
 		harness_register_key_id($second['api_key']->key);
 		check((new ApiKey($key->key, TRUE))->get('apk_delete_time') !== null, 'Issuing again revokes the old key');
-		check((int)DnsResolverAccess::serviceAccount()->key === (int)$account->key, 'Issuing again reuses the service account');
+		check((int)$second['api_key']->get('apk_usr_user_id') === (int)$other_admin->key, 'A key re-issued by another admin belongs to them');
+		$fresh = new User($issuer->key, TRUE);
+		$fresh->soft_delete();
+		check((new User($issuer->key, TRUE))->get('usr_delete_time') !== null, 'Once their key is replaced, the first admin can be deleted');
 
 		DnsResolverAccess::revokeKey('primary');
 		check(DnsResolverAccess::slotKey('primary') === null, 'Revoke ends the slot\'s key');
-		$fresh = new User($account->key, TRUE);
-		$fresh->soft_delete();
-		check((new User($account->key, TRUE))->get('usr_delete_time') !== null, 'With no live key, the account can be deleted');
 	}
 
 } catch (\Throwable $e) {

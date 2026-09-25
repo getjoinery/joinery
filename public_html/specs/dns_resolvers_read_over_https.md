@@ -8,8 +8,11 @@ public-html-9a, reviewer public-html-bb.
   reclaims after an hour.
 - B6 fixed in core.
 - D1 decided: the DNS servers download the blocklists.
-- D2 decided: cryptominers moves to the NoCoin list (dns_filtering 1.3.1, uncommitted;
-  needs a release before WP6).
+- D2 decided: cryptominers moves to the NoCoin list (dns_filtering 1.3.1, 94628e67; on
+  scrolldaddy in 0.8.428).
+- WP6 started 2026-09-25 and paused at its first step: issuing the secondary's key failed
+  on scrolldaddy (B7). Nothing was written anywhere. The fix is dns_filtering 1.3.2,
+  uncommitted, and needs a release before WP6 resumes.
 - **WP6** is live and needs the owner present.
 - **WP7's code, and WP4's site-side removals, stay out of the tree until WP6 is done on
   both DNS servers.** A release carrying them early would strip the resolvers' database
@@ -126,6 +129,30 @@ in 16 categories, 593 MB of a 634 MB database. dev carries 3,959,305 rows (549 M
     (`set_value` on the user columns) do not remove those rows, and that model delete
     already runs first today, so nothing changes.
 
+- **B7 — issuing a DNS server's key failed on every production site** (found at the WP6
+  start, 2026-09-25; fixed in dns_filtering 1.3.2).
+  - The service account WP2 created had its address on the reserved `.invalid` domain.
+  - The email field's accepts-mail check (`email_validation_mx_check`, on by default)
+    refuses that. It is off on dev, so WP2's suite passed there.
+  - On scrolldaddy, `issueKey` threw and its transaction rolled back, so nothing was
+    written.
+  - **Fix (owner, 2026-09-25):** the service account is gone, and a key belongs to the
+    admin who issues it. The account existed so a key would survive its owner's
+    deletion, and the core `User` guard already refuses that.
+- **B8 — the DNS server installer cannot rebuild a production server** (found
+  2026-09-25; not fixed).
+  - Both servers answer as `dns.scrolldaddy.app`, so each gets its certificate by a DNS
+    challenge through Cloudflare. That takes a custom Caddy build with the Cloudflare
+    module, plus a `CF_API_TOKEN`, both set up by hand.
+  - `install_caddy()` installs stock Caddy, and `configure_caddy()` writes no DNS
+    challenge. On a fresh box, issuance would depend on which of the two servers the
+    ACME check reached.
+  - A rebuilt box also has no way in for us (no SSH keys on new installs), and would
+    need its `SCD_API_KEY`, token and firewall rules carried across.
+  - So the servers are upgraded in place. A hands-off rebuild needs:
+    - the installer to build Caddy with the module and take the token;
+    - a keyless first-boot path, as the relay has.
+
 ## Design
 
 - **The site publishes one read-only action**, `dns_filtering/resolver_snapshot`,
@@ -229,27 +256,19 @@ A machine key that can call only the actions it names.
     `dns_filtering/resolver_snapshot`, and IP-restricted to that server's
     `dns_filtering_dns_server_ip` or `dns_filtering_dns_secondary_server_ip` (IPv4). It
     shows the secret once.
-  - **The key's owner is a service account the plugin creates, not the admin who
-    clicked.** Every key carries a user (`apk_usr_user_id`). `authenticate()` refuses a
-    key whose user is deleted (`ApiAuth.php:158`), and the action runs as that user.
-    Under an admin, deleting or demoting that admin would silently cut both DNS servers
-    off. The account:
-    - has permission 0 and no password;
-    - has an address on the reserved `.invalid` domain, so no reset mail reaches anyone;
-    - is marked on the user list.
-    Deleting it is refused while it owns a live key. The guard is core and general:
-    `User::soft_delete()` and `permanent_delete()` refuse while the user owns any live
-    scoped machine key. server_manager's provisioning service user
-    (`ProvisioningSetup::setupApiCredentials()`) is the same kind of account; its
-    `usr_password_recovery_disabled` guard is copied here.
+  - **The key belongs to the admin who issues it.** Every key carries a user
+    (`apk_usr_user_id`); `authenticate()` refuses a key whose user is deleted
+    (`ApiAuth.php:158`), and the action runs as that user.
+    - Its scope confines it to an action that needs no permission level, so demoting
+      the owner or changing their password does not affect it.
+    - Deleting the owner would cut the servers off, so the core guard refuses it:
+      `User::soft_delete()` and `permanent_delete()` refuse while the user owns any live
+      scoped machine key. The key is revoked, or re-issued by another admin, first.
   - **Address drift:** the restriction is a copy of the setting, made when the key is
     minted. That setting is also the address the setup instructions hand out. When the
     two differ, the panel says so and asks for a re-issue.
   - **Revoke** ends it.
-  - The key IDs and the service account's ID are kept in three managed settings
-    declared in `plugin.json`. The account is found by its ID, never by its address: a
-    fixed address could be registered by anyone through signup before the account
-    exists, and would then be adopted as the key owner.
+  - The key IDs are kept in two managed settings declared in `plugin.json`.
   - A POST action, not a link.
 - **The IP restriction** depends on the resolver's address reaching the site through
   docker-prod's front proxy (`mod_remoteip`, `SessionControl::get_client_ip(true)`).
@@ -259,8 +278,8 @@ A machine key that can call only the actions it names.
   - deleted and inactive devices, blocks and rules are left out;
   - the unchanged path;
   - refusal of an unscoped key;
-  - a key whose owner is deleted is refused, and deleting the service account is
-    refused while it owns a live key;
+  - a key whose owner is deleted is refused; the issuing admin cannot be deleted while
+    the key is live, and can be once another admin has re-issued it;
   - two answers with the same data carry the same `version`.
 
 ## WP3 — The resolver reads HTTPS (scrolldaddy-dns 2.0.0)
@@ -520,7 +539,8 @@ reviewer's: traced (ran it), read (code), instinct (judgement).
   service; one category at a time.
 - **R6** [read]: route families that skip `authorize()` → WP1 lists all four;
   sessionless actions need nothing.
-- **R7** [read]: the key's owner → a service account.
+- **R7** [read]: the key's owner → first a service account; since B7, the issuing
+  admin, with the core delete guard covering the risk R7 named.
 - **R8** [read]: nothing calls `/reload` after WP7 → operator tool; § Today corrected.
 - **R9** [read]: the env file is 0640, not 0600 → WP3.
 - **R10** [read]: dependents WP7 missed → WP7 § Docs and § Other specs, and WP3's

@@ -171,7 +171,7 @@ Only a machine key scoped to this action can call it (`requires_scoped_key`; see
 
 - the key is read-only, scoped to `dns_filtering/resolver_snapshot`, and restricted to the server's IPv4 address (`dns_filtering_dns_server_ip` / `dns_filtering_dns_secondary_server_ip`, copied when the key is minted — the panel flags a key whose address no longer matches the setting);
 - the secret is shown once, as the server's `SCD_JOINERY_SITES` entry for this site (`{base URL}|{public key}|{secret}`); issuing again replaces the key, which is how a key is rotated;
-- the key belongs to a service account the plugin creates (`dns_filtering_resolver_user_id`): permission 0, no password, an address on the reserved `.invalid` domain. `User` refuses to delete an account that owns a live scoped key, so the account cannot be removed out from under the servers;
+- the key belongs to the admin who issued it. Its scope confines it to the snapshot action, which needs no permission level, so the owner's role and password do not affect it. `User` refuses to delete an account that owns a live scoped key, so the owner cannot be removed out from under the servers: the key is revoked, or re-issued by another admin, first;
 - the key ids are kept in `dns_filtering_resolver_key_primary` and `dns_filtering_resolver_key_secondary`.
 
 ## Key Files
