@@ -37,6 +37,9 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.23.0 - Fortress mail (specs/client_custody_mail.md § R4): `fortress` loads
+ *   mailbox_fortress.js, which the reader calls to open browser-sealed rows;
+ *   mailbox_reader_fortress_visible() tells a page to load the vault client
  * @version 1.22.1 - the compose form carries no _csrf_token field: the send is an
  *                  /api/v1 call authenticated by the X-Joinery-Csrf header
  * @version 1.22.0 - messageTimelineUrl: the ⋮ menu's Show logs panel
@@ -72,7 +75,30 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.
  *                                            work, and a member
  *                                            reading their own mail has no
  *                                            business being sent to it.
+ *   - fortress            (bool)             a visible mailbox is Fortress
+ *                                            (mailbox_reader_fortress_visible()):
+ *                                            the page called needs_vault_client()
+ *                                            before its header, and the reader
+ *                                            opens browser-sealed rows through
+ *                                            window.MailboxFortress.
  */
+/**
+ * Does the viewer see a Fortress mailbox (its own level, or an unmatched box on
+ * a Fortress domain) in this seed data? A page mounting the reader asks before
+ * its header, and calls needs_vault_client() on yes, so the browser holds the
+ * modules that open end-to-end mail (specs/client_custody_mail.md § R4).
+ */
+function mailbox_reader_fortress_visible(array $initial_mailboxes): bool {
+	foreach (array('mailboxes', 'unmatched') as $group) {
+		foreach ($initial_mailboxes[$group] ?? array() as $box) {
+			if (($box['security_level'] ?? '') === 'fortress') {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 function mailbox_render_mailbox_reader($page, array $opts): void {
 	$csrf_token = (string)$opts['csrf_token'];
 
@@ -122,6 +148,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'maxFiles'          => MailboxSender::MAX_UPLOAD_FILES,
 		'maxFileBytes'      => MailboxSender::MAX_UPLOAD_BYTES,
 		'maxTotalBytes'     => MailboxSender::MAX_TOTAL_BYTES,
+		'fortress'          => !empty($opts['fortress']),
 	);
 	echo '<script>window.MAILBOX_READER = ' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
 	?>
@@ -327,6 +354,9 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
      Not deferred: it must define window.JoineryPasskeys before the reader script
      below runs. Same include convention as views/login.php and profile/security.php. -->
 <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
+<?php if (!empty($opts['fortress'])): ?>
+<script src="<?php echo htmlspecialchars($asset_ver('mailbox_fortress.js')); ?>"></script>
+<?php endif; ?>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_reader.js')); ?>"></script>
 	<?php
 	mailbox_reader_emit_unseal_convergence();

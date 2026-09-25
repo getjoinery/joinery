@@ -10,7 +10,7 @@
 /**
  * Recovery-code replay under real concurrency.
  *
- * unlockWithRecoveryCode consumes a code with a conditional
+ * unlockWithRecoveryKek consumes a code with a conditional
  * `UPDATE ... SET uew_is_used = true WHERE id = ? AND uew_is_used = false`
  * and treats a rowCount other than 1 as an already-used code. The sequential
  * "a consumed code never unlocks again" case lives in vault_ceremonies_test;
@@ -18,13 +18,17 @@
  *
  * Several worker processes — each its own PHP process with its own DB
  * connection — load the same (user, vault, code) and, released together by a
- * shared wall-clock barrier, all call unlockWithRecoveryCode at once. Every
+ * shared wall-clock barrier, all call unlockWithRecoveryKek at once. Every
  * worker unwraps the secret (the crypto is read-only), so the ONLY thing that
  * can stop two of them from both unlocking is the atomic consume. Exactly one
  * worker must win; the rest must be refused as already-used, and exactly one
  * recovery wrapping may end up consumed. A load-then-save consume (the race the
  * fix removed) would let several win — that regression fails this test.
  *
+ * The code's root twin is spent in the same transaction (specs/
+ * one_vault_experience.md § R6), so exactly one twin may end up used too.
+ *
+ * @version 1.1.0 - the posted account half of the code's KEK; the root twin is counted
  * @version 1.0.0
  */
 
@@ -49,15 +53,15 @@ section('Concurrent use of one recovery code cannot double-unlock');
 $fx = vault_fixture_vault('RaceA', '', 8);
 $user = $fx['user'];
 $vault = $fx['vault'];
-$code = $fx['recovery_codes'][0];
+$code_kek = vault_fixture_code_kek($fx['recovery_codes'][0], $fx['root_salt']);
 $vault_id = (int)$vault->key;
 
 // Wrapping rows are removed by the uew→uev ON DELETE CASCADE when the fixture's
 // registered vault delete runs — the same teardown contract as every other suite.
 
 // The worker: bootstrap the framework, load the pair, wait on the barrier, then
-// attempt the unlock. The code arrives via the environment, never argv, so it
-// cannot surface in a process listing. __ROOT__ is substituted below.
+// attempt the unlock. The code's KEK arrives via the environment, never argv,
+// so it cannot surface in a process listing. __ROOT__ is substituted below.
 $worker_src = <<<'WORKER'
 <?php
 $root = '__ROOT__';
@@ -77,7 +81,7 @@ require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.ph
 $user_id  = (int)($argv[1] ?? 0);
 $vault_id = (int)($argv[2] ?? 0);
 $start    = (float)($argv[3] ?? 0);
-$code     = (string)getenv('VAULT_RC');
+$kek      = (string)SealedBox::b64url_decode((string)getenv('VAULT_RC'));
 
 $user  = new User($user_id, TRUE);
 $vault = new UserEncryptionVault($vault_id, TRUE);
@@ -88,7 +92,7 @@ $ceremonies = new VaultCeremonies();
 while (microtime(true) < $start) { /* spin */ }
 
 try {
-	$ceremonies->unlockWithRecoveryCode($user, $vault, $code, false);
+	$ceremonies->unlockWithRecoveryKek($user, $vault, $kek, false);
 	fwrite(STDOUT, "RESULT:OK\n");
 } catch (\Throwable $e) {
 	fwrite(STDOUT, "RESULT:FAIL:" . $e->getMessage() . "\n");
@@ -105,7 +109,7 @@ $N = 8;
 $php = PHP_BINARY;
 $descriptors = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
 $env = $_ENV;
-$env['VAULT_RC'] = $code;
+$env['VAULT_RC'] = $code_kek;
 $env['PATH'] = getenv('PATH');
 
 // Race the same fixture. A round in which NOBODY wins leaves the code unused — the
@@ -171,10 +175,17 @@ $consumed = new MultiUserEncryptionWrapping(array(
 	'is_used'       => true,
 ));
 check($consumed->count_all() === 1, 'exactly one recovery wrapping is marked used', 'used: ' . $consumed->count_all());
+$root = UserEncryptionVault::loadForUser((int)$user->key, VaultScopes::ROOT_SCOPE);
+$twins = new MultiUserEncryptionWrapping(array(
+	'vault_id'      => $root ? (int)$root->key : 0,
+	'unlocker_type' => UserEncryptionWrapping::TYPE_RECOVERY,
+	'is_used'       => true,
+));
+check($root !== null && $twins->count_all() === 1, 'and exactly one root twin with it', 'used: ' . $twins->count_all());
 
 // And the winning code is spent: a further use, now sequential, is refused.
 $threw = false;
-try { (new VaultCeremonies())->unlockWithRecoveryCode($user, $vault, $code, false); }
+try { (new VaultCeremonies())->unlockWithRecoveryKek($user, $vault, SealedBox::b64url_decode($code_kek), false); }
 catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'the raced code is spent — a later use is refused');
 

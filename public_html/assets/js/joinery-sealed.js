@@ -28,8 +28,23 @@
  * data-client-idle-minutes; a person's own choice for this browser overrides
  * it, see idleMinutes()), when the page is hidden for good (pagehide), and
  * when a back/forward-cache restore brings the page back (pageshow with
- * `persisted`) — a restored page must never show plaintext with a live key.
- * `joinery:vault-scope-unlocked` (detail.scope) announces a session opening.
+ * `persisted`) — a restored page must never show plaintext with a live key;
+ * it reopens through the resume halves instead, like a reload.
+ * `joinery:vault-scope-unlocked` (detail.scope) announces a session opening;
+ * detail.resumed is true when it reopened after a reload rather than by a
+ * ceremony.
+ *
+ * A reload of the same tab reopens what was open (specs/client_custody_mail.md
+ * § R4a). When a scope opens, its secret is wrapped under a key derived from
+ * two random halves: the tab keeps one in sessionStorage beside the wrapped
+ * secret, the server keeps the other in this sign-in's session
+ * (vault_client_resume, keyed by a random id per tab). Neither half opens
+ * anything alone. At load, `ready` settles once every such scope has reopened
+ * or been given up. A reload, or moving to another page in the tab, only drops
+ * the in-memory key (pagehide); a real lock — Lock now, the idle lock, a
+ * consumer's lock() — also drops both halves, so the next page asks again.
+ * Closing the tab loses the tab's half; signing out loses the server's. The
+ * idle clock survives reloads: a tab idle past its limit does not reopen.
  *
  * Framing lives here: `v1.edgeseal.{scope}.` on a sealed DEK and `v1.edge.` on
  * a field. vault-crypto.js stays raw.
@@ -40,6 +55,10 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.7 - the one vault: content vaults open through the root; adopt(); openAllThroughRoot()
+ * @version 1.6 - want(scope, label): a page names the vaults it reads, for the lock chip
+ * @version 1.5 - an open scope survives a reload of the same tab (resume halves, `ready`);
+ *   pagehide drops only the in-memory key
  * @version 1.4 - seals to a pending rotation's key and names the key it used; the
  *   rotation checks it may begin before collecting unlockers; hooks skip and
  *   report keys neither key opens
@@ -58,6 +77,17 @@ window.JoinerySealed = (function () {
 	var pending = {};       // scope -> Promise<session> while a ceremony runs
 	var opened = {};        // scope -> { field ciphertext -> plaintext }
 	var lockHandlers = {};  // scope -> [fn]
+	var wanted = {};        // scope -> label: the browser-held vaults this page reads
+
+	// A page declares the client scopes it reads, so the lock chip can say one
+	// of them is shut and offer to open it, rather than read "unlocked" while
+	// the page still shows sealed content.
+	function want(scope, label) {
+		if (!scope || wanted[scope]) return;
+		wanted[scope] = label || scope;
+		document.dispatchEvent(new CustomEvent('joinery:vault-scope-wanted', { detail: { scope: scope } }));
+	}
+	function wantedScopes() { return Object.keys(wanted); }
 
 	// ---- the idle lock ---------------------------------------------------------
 
@@ -105,12 +135,155 @@ window.JoinerySealed = (function () {
 		if (now - lastActivity < 1000) return;
 		lastActivity = now;
 		if (idleTimer) resetIdle();
+		noteActivity(now);
 	}
 	['keydown', 'pointerdown', 'pointermove'].forEach(function (evt) {
 		document.addEventListener(evt, activity, { passive: true, capture: true });
 	});
-	window.addEventListener('pagehide', function () { lockAll(); });
-	window.addEventListener('pageshow', function (e) { if (e.persisted) lockAll(); });
+	// Leaving the page (a reload, a link, closing the tab) drops the key from
+	// memory; the resume halves stay, so the next page in this tab reopens.
+	window.addEventListener('pagehide', function () { lockAll({ keepResume: true }); });
+	window.addEventListener('pageshow', function (e) {
+		if (!e.persisted) return;
+		lockAll({ keepResume: true });
+		ready = resumeAll();
+	});
+
+	// ---- surviving a reload (the resume halves) ---------------------------------
+
+	var RESUME_PREFIX = 'jy_vault_resume:';
+	var TAB_KEY = 'jy_vault_tab';
+	var ACTIVITY_KEY = 'jy_vault_activity';
+	var RESUME_ACTION = 'vault_client_resume';
+
+	function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+	function ssSet(k, v) { try { sessionStorage.setItem(k, v); return true; } catch (e) { return false; } }
+	function ssDel(k) { try { sessionStorage.removeItem(k); } catch (e) { /* storage blocked */ } }
+
+	// The idle clock, carried across reloads. Written at most every 15 seconds.
+	var activityWritten = 0;
+	function noteActivity(now) {
+		if (now - activityWritten < 15000) return;
+		activityWritten = now;
+		ssSet(ACTIVITY_KEY, String(now));
+	}
+	function idleExpired() {
+		var last = parseInt(ssGet(ACTIVITY_KEY), 10);
+		return last > 0 && (Date.now() - last) > idleMinutes() * 60000;
+	}
+
+	// This tab's id for its server half, made once per tab.
+	function tabId() {
+		var id = ssGet(TAB_KEY);
+		if (id && /^[0-9a-f]{32}$/.test(id)) return id;
+		var bytes = crypto.getRandomValues(new Uint8Array(16));
+		id = Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+		ssSet(TAB_KEY, id);
+		return id;
+	}
+
+	// The wrapping key: HKDF over both halves, bound to the scope.
+	async function resumeKey(serverHalf, tabHalf, scope) {
+		var ikm = new Uint8Array(serverHalf.length + tabHalf.length);
+		ikm.set(serverHalf, 0);
+		ikm.set(tabHalf, serverHalf.length);
+		var base = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveKey']);
+		ikm.fill(0);
+		return crypto.subtle.deriveKey(
+			{ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0),
+				info: new TextEncoder().encode('joinery-vault-resume:v1:' + scope) },
+			base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+	}
+
+	// Keep what a reload needs to reopen `scope`. Best effort: a failure only
+	// means the next page asks for the passkey, as before.
+	async function persistResume(scope, s) {
+		if (!window.joineryApi || typeof s.wrapUnder !== 'function') return;
+		var serverHalf = crypto.getRandomValues(new Uint8Array(32));
+		var tabHalf = crypto.getRandomValues(new Uint8Array(32));
+		try {
+			var key = await resumeKey(serverHalf, tabHalf, scope);
+			var wrapped = await s.wrapUnder(key, 'resume');
+			var tab = tabId();
+			await joineryApi.post(RESUME_ACTION, { op: 'put', scope: scope, tab: tab,
+				share: VaultCrypto.b64encode(serverHalf) });
+			if (!sessions[scope] || sessions[scope] !== s) return;   // locked meanwhile
+			ssSet(RESUME_PREFIX + scope, JSON.stringify({ v: 1, wrapped: wrapped,
+				tab_half: VaultCrypto.b64encode(tabHalf), public_key: s.publicKey, label: s.label || '' }));
+			noteActivity(Date.now());
+		} catch (e) {
+			/* the next page asks, as without this */
+		} finally {
+			serverHalf.fill(0);
+			tabHalf.fill(0);
+		}
+	}
+
+	// Forget both halves of `scope` (a real lock).
+	function dropResume(scope) {
+		var had = ssGet(RESUME_PREFIX + scope) !== null;
+		ssDel(RESUME_PREFIX + scope);
+		if (had && window.joineryApi) {
+			joineryApi.post(RESUME_ACTION, { op: 'drop', scope: scope, tab: tabId() }).catch(function () {});
+		}
+	}
+
+	async function resumeOne(scope) {
+		var rec = null;
+		try { rec = JSON.parse(ssGet(RESUME_PREFIX + scope) || 'null'); } catch (e) { rec = null; }
+		if (!rec || rec.v !== 1 || isOpen(scope)) return;
+		if (idleExpired()) { dropResume(scope); return; }
+		var tabHalf = null, serverHalf = null;
+		try {
+			var got = await joineryApi.post(RESUME_ACTION, { op: 'get', scope: scope, tab: tabId() });
+			if (!got || !got.share) { ssDel(RESUME_PREFIX + scope); return; }
+			// A rotation retired the key this secret belongs to.
+			if (rec.public_key !== got.public_key && rec.public_key !== got.pending_public_key) {
+				dropResume(scope);
+				return;
+			}
+			serverHalf = VaultCrypto.b64decode(got.share);
+			tabHalf = VaultCrypto.b64decode(rec.tab_half);
+			var key = await resumeKey(serverHalf, tabHalf, scope);
+			var secret = await VaultCrypto.unwrapSecretKey(rec.wrapped, key, VaultKeyring.adFor(scope, 'resume'));
+			if (isOpen(scope)) { secret.fill(0); return; }   // a ceremony won the race
+			var s = VaultKeyring.sessionFrom(scope, secret, rec.public_key);
+			s.label = rec.label || s.label;
+			sessions[scope] = s;
+			resetIdle();
+			document.dispatchEvent(new CustomEvent('joinery:vault-scope-unlocked',
+				{ detail: { scope: scope, resumed: true } }));
+		} catch (e) {
+			dropResume(scope);   // unusable halves: ask next time
+		} finally {
+			if (serverHalf) serverHalf.fill(0);
+			if (tabHalf) tabHalf.fill(0);
+		}
+	}
+
+	// Reopen every scope this tab had open. Resolves when each has reopened or
+	// been given up; never rejects.
+	function resumeAll() {
+		var scopes = [];
+		try {
+			for (var i = 0; i < sessionStorage.length; i++) {
+				var k = sessionStorage.key(i);
+				if (k && k.indexOf(RESUME_PREFIX) === 0) scopes.push(k.slice(RESUME_PREFIX.length));
+			}
+		} catch (e) { return Promise.resolve(); }
+		if (!scopes.length) return Promise.resolve();
+		return new Promise(function (resolve) {
+			var go = function () {
+				if (!window.joineryApi || !window.VaultKeyring || !window.VaultCrypto) { resolve(); return; }
+				Promise.all(scopes.map(function (sc) { return resumeOne(sc).catch(function () {}); }))
+					.then(function () { resolve(); });
+			};
+			// The API and keyring scripts load beside this one; start once they are in.
+			if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go);
+			else go();
+		});
+	}
+	var ready = resumeAll();
 
 	function isEdgeField(v) { return typeof v === 'string' && v.indexOf(EDGE_FIELD) === 0; }
 
@@ -138,21 +311,68 @@ window.JoinerySealed = (function () {
 		return Object.keys(sessions).filter(isOpen);
 	}
 
-	// An unlocked session for `scope`, running the unlock (or first-time setup)
-	// ceremony when there is none. Concurrent callers share one ceremony.
+	// ---- the one vault (specs/one_vault_experience.md) -------------------------
+	// The root vault is held here like any scope, and every content vault opens
+	// through it: one touch (the lock chip's ceremony) opens the root, and the
+	// root opens the rest without asking again. A content vault made before the
+	// root opens once by its own ceremony and is given its root wrapping then.
+
+	var ROOT = 'root';
+
+	function rootSession() { return isOpen(ROOT) ? sessions[ROOT] : null; }
+
+	// Hold a session a ceremony elsewhere opened (the lock chip's unlock), as
+	// session() holds one it opened itself.
+	function adopt(scope, s) {
+		if (!s || s.locked()) return;
+		if (isOpen(scope)) { if (sessions[scope] !== s) s.lock(); return; }
+		sessions[scope] = s;
+		resetIdle();
+		persistResume(scope, s);
+		document.dispatchEvent(new CustomEvent('joinery:vault-scope-unlocked', { detail: { scope: scope } }));
+	}
+
+	// The root, running the one unlock when it is shut.
+	async function needRoot(opts) {
+		if (rootSession()) return rootSession();
+		if (!window.JoineryVaultLock) throw new Error('Unlock your vault to open this.');
+		var ok = await JoineryVaultLock.unlock(opts && opts.reason ? { reason: opts.reason } : {});
+		if (!ok) throw new Error('Unlock cancelled.');
+		if (!rootSession()) throw new Error('Your vault opened, but not its end-to-end part. Unlock it with the passkey you set it up with, or a recovery code.');
+		return rootSession();
+	}
+
+	// A content vault through the root, or its own ceremony for one made before
+	// the root existed (then given its root wrapping, so it is the last time).
+	async function openContent(scope, opts) {
+		if (!VaultKeyring.contentSession) return VaultKeyring.ensureUnlocked(scope, opts || {});
+		var root = await needRoot(opts);
+		var s = await VaultKeyring.contentSession(root, scope);
+		if (s) return s;
+		s = await VaultKeyring.ensureUnlocked(scope, opts || {});
+		if (s && !s.locked() && rootSession()) {
+			VaultKeyring.addRootWrapping(rootSession(), scope, s).catch(function () { /* next open asks once more */ });
+		}
+		return s;
+	}
+
+	// An unlocked session for `scope`, running the one unlock when needed.
+	// Concurrent callers share one ceremony.
 	function session(scope, opts) {
 		if (isOpen(scope)) return Promise.resolve(sessions[scope]);
 		if (pending[scope]) return pending[scope];
 		if (!window.VaultKeyring || !VaultKeyring.ensureUnlocked) {
 			return Promise.reject(new Error('This page cannot unlock your ' + scope + ' vault.'));
 		}
-		pending[scope] = Promise.resolve().then(function () {
-			return VaultKeyring.ensureUnlocked(scope, opts || {});
+		// A reload's resume first: no ceremony for a scope this tab already opened.
+		pending[scope] = ready.then(function () {
+			if (isOpen(scope)) return { resumed: sessions[scope] };
+			return scope === ROOT ? needRoot(opts) : openContent(scope, opts);
 		}).then(function (s) {
+			if (s && s.resumed) return s.resumed;
 			if (!s || s.locked()) throw new Error('Unlock did not complete.');
-			sessions[scope] = s;
-			resetIdle();
-			document.dispatchEvent(new CustomEvent('joinery:vault-scope-unlocked', { detail: { scope: scope } }));
+			if (isOpen(scope)) return sessions[scope];
+			adopt(scope, s);
 			return s;
 		});
 		var clear = function () { delete pending[scope]; };
@@ -160,20 +380,43 @@ window.JoinerySealed = (function () {
 		return pending[scope];
 	}
 
+	/**
+	 * With the root just opened: open every content vault this page wants, and
+	 * every one the person holds that opens through the root, so the chip reads
+	 * open. contentStatus is vault_status's `content` map. Best effort.
+	 */
+	async function openAllThroughRoot(contentStatus) {
+		var root = rootSession();
+		if (!root) return;
+		var scopes = Object.keys(contentStatus || {});
+		for (var i = 0; i < scopes.length; i++) {
+			var scope = scopes[i];
+			if (isOpen(scope)) continue;
+			try {
+				var s = await VaultKeyring.openThroughRoot(root, scope, contentStatus[scope]);
+				if (s) adopt(scope, s);
+			} catch (e) { /* that one stays shut; its own open says why */ }
+		}
+	}
+
 	// What to call an open scope: the registry label the ceremony read.
 	function labelFor(scope) {
 		var s = sessions[scope];
-		return (s && s.label) || scope;
+		return (s && s.label) || wanted[scope] || scope;
 	}
 
 	function onLock(scope, fn) {
 		(lockHandlers[scope] = lockHandlers[scope] || []).push(fn);
 	}
 
-	function lock(scope) {
+	// opts.keepResume (pagehide only): drop the key from memory but keep the
+	// resume halves, so the next page in this tab reopens. Every other lock is
+	// a real one and forgets them.
+	function lock(scope, opts) {
 		var s = sessions[scope];
 		delete sessions[scope];
 		delete opened[scope];
+		if (!(opts && opts.keepResume)) dropResume(scope);
 		if (!s) return;
 		s.lock();
 		resetIdle();
@@ -183,7 +426,11 @@ window.JoinerySealed = (function () {
 		document.dispatchEvent(new CustomEvent('joinery:vault-scope-locked', { detail: { scope: scope } }));
 	}
 
-	function lockAll() { Object.keys(sessions).forEach(lock); }
+	function lockAll(opts) {
+		// The idle timer calls this with its own argument; only an object is options.
+		var o = (opts && typeof opts === 'object') ? opts : null;
+		Object.keys(sessions).forEach(function (scope) { lock(scope, o); });
+	}
 
 	// ---- opening -------------------------------------------------------------
 
@@ -435,6 +682,14 @@ window.JoinerySealed = (function () {
 		onLock: onLock,
 		lock: lock,
 		lockAll: lockAll,
+		want: want,
+		wantedScopes: wantedScopes,
+		adopt: adopt,
+		rootSession: rootSession,
+		openAllThroughRoot: openAllThroughRoot,
 		selfCheck: selfCheck,
+		// Settles once a reload's resume has reopened (or given up on) every
+		// scope this tab had open. Read it before deciding a scope is shut.
+		get ready() { return ready; },
 	};
 })();

@@ -17,6 +17,8 @@
  * read a mailbox at all (specs/in_window_deferred_work.md): whether the mail is
  * sealed at rest, and whether the domain has consented to AI reading it.
  *
+ * @version 1.5 - Fortress: securityLevelForAddress() answers 'fortress' for a domain
+ *   set there, and a legacy unconverted value still reads as Private
  * @version 1.4 - sealed at rest means Private (two levels)
  * @changelog 1.3 - aiProcessingConsent() answers from the domain's stored
  *   consent at every security level (specs/security_inventory.md S19); a
@@ -160,8 +162,11 @@ class MailboxAliasConfig {
 	}
 
 	/**
-	 * The protection level of the domain behind $address ('standard' or
-	 * 'private'), or null when the address resolves to nothing.
+	 * The protection level of the domain behind $address ('standard',
+	 * 'private' or 'fortress'), or null when the address resolves to nothing.
+	 * A 'fortress' with no ied_level_set_time is a legacy row mailbox migration
+	 * ied_003_private_with_addons has not converted, and reads as Private —
+	 * the rule InboundEmailDomain::is_unconverted() states.
 	 */
 	public static function securityLevelForAddress(string $address): ?string {
 		$row = self::domainPostureForAddress($address);
@@ -169,12 +174,14 @@ class MailboxAliasConfig {
 			return null;
 		}
 		$level = (string)$row['ied_security_level'];
-		// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
-		return $level === 'fortress' ? 'private' : $level;
+		if ($level === 'fortress' && trim((string)($row['ied_level_set_time'] ?? '')) === '') {
+			return 'private';
+		}
+		return $level;
 	}
 
 	/**
-	 * Is this address's mail sealed at rest? True for 'private'.
+	 * Is this address's mail sealed at rest? True for 'private' and 'fortress'.
 	 *
 	 * Callers use this to decide whether reading the mail needs the owner's
 	 * unlock window — on a sealed domain a cron job can never read it at all
@@ -182,7 +189,6 @@ class MailboxAliasConfig {
 	 */
 	public static function isSealedAtRest(string $address): bool {
 		$level = self::securityLevelForAddress($address);
-		// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
 		return $level === 'private' || $level === 'fortress';
 	}
 
@@ -200,7 +206,6 @@ class MailboxAliasConfig {
 			return false;
 		}
 		$level = (string)$row['ied_security_level'];
-		// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
 		if ($level !== 'private' && $level !== 'fortress') {
 			return true;
 		}
@@ -255,7 +260,7 @@ class MailboxAliasConfig {
 
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT d.ied_security_level, d.ied_ai_processing_enabled, d.ied_ai_processing_consent
+			"SELECT d.ied_security_level, d.ied_level_set_time, d.ied_ai_processing_enabled, d.ied_ai_processing_consent
 			   FROM iea_inbound_email_aliases a
 			   JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
 			  WHERE a.iea_delete_time IS NULL

@@ -1,7 +1,11 @@
 {
     "user": {
         "custody": "server",
-        "label": "Mail & messages vault"
+        "label": "Vault"
+    },
+    "root": {
+        "custody": "client",
+        "label": "Vault"
     },
     "drive": {
         "custody": "client",

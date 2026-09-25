@@ -32,6 +32,11 @@
  * source's Trash folder, and retiring our redundant row must never relocate
  * the user's copy at the provider.
  *
+ * A Fortress row (browser-sealed key, `v1.edge.` recipient) is never this
+ * repair's: it is sealed whole by whoever wrote it, and its key opens only on
+ * its owner's devices (specs/client_custody_mail.md § R7).
+ *
+ * @version 1.1 - leaves Fortress rows out; their `v1.edge.` recipient read as debt
  * @version 1.0
  */
 
@@ -64,6 +69,7 @@ class PromotedRowRepair {
 			    AND iem_content_sealed = true
 			    AND iem_sealed_owner_user_id = ?
 			    AND iem_delete_time IS NULL
+			    AND iem_sealed_key NOT LIKE 'v1.edgeseal.%'
 			    AND (iem_reseal_pending = true
 			         OR (iem_recipient IS NOT NULL AND iem_recipient <> ''
 			             AND iem_recipient NOT LIKE 'v1.aead.%'))
@@ -122,6 +128,7 @@ class PromotedRowRepair {
 			    AND iem_content_sealed = true
 			    AND iem_sealed_owner_user_id = ?
 			    AND iem_delete_time IS NULL
+			    AND iem_sealed_key NOT LIKE 'v1.edgeseal.%'
 			    AND (iem_reseal_pending = true
 			         OR (iem_recipient IS NOT NULL AND iem_recipient <> ''
 			             AND iem_recipient NOT LIKE 'v1.aead.%'))

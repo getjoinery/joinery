@@ -17,6 +17,7 @@
  * The page answers to drive_active like every device-link action: a linked
  * computer is a Drive sync client, and its other vaults ride along with it.
  *
+ * @version 1.2 - content vaults only: the root vault is never handed to a device
  * @version 1.1 - lists every set-up client-custody vault beside Drive's
  */
 
@@ -44,10 +45,11 @@ function devices_link_logic(array $input): LogicResult {
 		$has_vault = false;
 	}
 
-	// Every other client-custody vault the user has set up can ride along,
-	// each with its own checkbox and its own unlock.
+	// Every other content vault the user has set up can ride along, each with
+	// its own checkbox. The root vault never leaves the browser: a device gets
+	// the content keys it syncs, not the key that opens them all.
 	$client_scopes = array();
-	foreach (VaultScopes::clientScopes() as $scope) {
+	foreach (VaultScopes::contentScopes() as $scope) {
 		if ($scope === 'drive') {
 			continue;
 		}

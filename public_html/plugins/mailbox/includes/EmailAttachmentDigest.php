@@ -20,6 +20,7 @@
  *
  * specs/joinery_ai_email_attachments.md
  *
+ * @version 1.3 - refuses a Fortress message (server-side AI never reads one)
  * @version 1.2
  * @changelog 1.2 - the ICS EVENT block carries url and a capped description
  */
@@ -44,6 +45,8 @@ class EmailAttachmentDigest {
 	/** The ATTACHMENTS digest section for one message, or '' when the
 	 *  message has no non-inline attachments. Never throws. */
 	public static function build(InboundEmailMessage $msg): string {
+		// Fortress mail is never read by server-side AI (specs/client_custody_mail.md § R7).
+		InboundEmailMessage::refuseBrowserSealed($msg, 'the AI attachment digest');
 		$attachments = new MultiInboundMessageAttachment([
 			'message_id' => (int)$msg->key,
 			'is_inline'  => false,

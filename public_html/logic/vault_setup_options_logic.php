@@ -34,13 +34,16 @@ function vault_setup_options_logic(array $input): LogicResult {
 		return LogicResult::error('Your vault is already set up.');
 	}
 
+	// with_root: the same touch also yields the root vault's secret, kept by
+	// the browser (specs/one_vault_experience.md § R1).
+	$second = !empty($input['with_root']) ? VaultScopes::prfContext(VaultScopes::ROOT_SCOPE) : null;
 	try {
 		$service = new PasskeyService();
 		// No vault yet, so there are no wrappings to intersect with: the offer is
 		// every enrolled passkey except the ones known never to be able to derive
 		// a secret.
 		$options = $service->getDerivationOptions($user, 'vault-kek',
-			VaultUnlock::offerableCredentialIds((int)$user->key, UserEncryptionVault::SCOPE_USER));
+			VaultUnlock::offerableCredentialIds((int)$user->key, UserEncryptionVault::SCOPE_USER), '', $second);
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -52,7 +55,10 @@ function vault_setup_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Begin Sealed Vault setup (returns WebAuthn PRF request options); requires an existing account password',
+		'description' => 'Begin Sealed Vault setup (returns WebAuthn PRF request options); requires an existing account password. with_root also asks the same touch for the root vault\'s secret, which the browser keeps',
+		'input' => [
+			'with_root' => ['type' => 'bool', 'required' => false, 'label' => 'Also derive the root vault secret (kept in the browser)'],
+		],
 	];
 }
 ?>

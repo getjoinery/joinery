@@ -2,8 +2,9 @@
 
 A per-user encryption identity shared by every feature that seals content the
 server should only read while the user has proven presence. One lock (a
-passkey, a recovery code, or an optional bypass phrase), one bounded unlock
-window, and any number of consumers behind it — mail, AI chat,
+passkey, a recovery code, or — only where no passkey can hold a key — a
+passphrase), one touch that opens every vault the person holds (see
+[One vault](#one-vault)), one bounded unlock window, and any number of consumers behind it — mail, AI chat,
 [protected conversations](social_features.md#protection-levels) and
 [Drive's Private files](drive_encryption.md#private-files--server-custody) seal
 server-custody content; the [password manager](../plugins/vault/docs/overview.md)
@@ -27,20 +28,23 @@ reads for while the member is present; every other scope is client custody. The
 **public** key is cleartext at rest — anything can seal to it, even while the
 user is offline. The **secret** key never touches disk unwrapped: it exists
 only as **wrappings**, one per enrolled unlocker (a passkey's WebAuthn PRF
-output, a recovery code, an optional bypass phrase), and is unwrapped only
-transiently into server RAM for the duration of an **unlock window**.
+output, a recovery code, a passphrase), and is unwrapped only transiently into
+server RAM for the duration of an **unlock window**.
 
-**Naming:** the memorized unlocker is a **bypass phrase** everywhere a user
-sees it (internally `passphrase` in identifiers and API action names). The
-name carries its own warning: it bypasses the passkey requirement, it is not
-the login password, and enrolling one lowers the vault's strength to the
-strength of the phrase. It is never offered during setup — the ceremony is
-passkey + recovery codes only — and is added deliberately from the unlocker
-management panel by users who need to unlock where their passkey is not
-available (another device, CLI tooling).
+**A passphrase only where no passkey can hold the key.** A phrase can be
+guessed and phished where a tapped passkey cannot, so an account holds one
+only when `Passkey::userNeedsPassphraseFallback()` says every passkey it has is
+provably unable to derive a key (see
+[When a passkey cannot hold the key](#when-a-passkey-cannot-hold-the-key)).
+An account with a working passkey has no passphrase: a lost device is what the
+recovery codes are for. `vault_passphrase_enroll`, `vault_client_setup` and
+`VaultCeremonies::setup()`/`rotate()` refuse one otherwise, and a passkey
+unlock removes any phrase an account no longer qualifies for, telling the
+person why.
 
-**One unlock opens everything in that scope.** A single passkey tap puts the
-secret key in the window; every server-custody consumer's
+**One unlock opens everything.** A single passkey tap puts the account
+secret key in the window and, from the same touch, opens the root vault in
+the browser, which opens every browser-held vault ([One vault](#one-vault)); every server-custody consumer's
 `VaultUnlock::secretKey()` call sees it open at once. That is the UX win and
 the accepted cost: an attacker resident during an active window reads every
 consumer's in-window content, not just one — bounded by the idle timeout,
@@ -48,6 +52,93 @@ seal-after-use, and key rotation. A consumer that needs genuine isolation
 declares a **client-custody** scope of its own and accepts that no server-side
 feature can ever read it; isolation *with* server readability is the one
 combination the platform does not offer.
+
+## One vault
+
+*(Design and decisions: [specs/one_vault_experience.md](../specs/one_vault_experience.md).)*
+
+Two kinds of key stay two — the **account vault** (`user`, server custody,
+opened in server RAM) and the **browser-held vaults** (client custody) — but a
+person has one thing to unlock, one set of recovery codes, and at most one
+passphrase.
+
+**The root vault.** `root` is a client-custody scope (`vault_scopes.json`)
+that every unlocker opens: each passkey's second PRF output from the same
+touch (`prf.eval.second`, context `vault-root-kek`), each recovery code's root
+half, and the passphrase's root half where one exists. A **content vault**
+(`mail`, `drive`, `passwords`, …; `VaultScopes::contentScopes()`) holds one
+`root` wrapping: its secret under `HKDF(root secret, 'joinery-vault:scope:v1:'
++ scope)`, derived only inside the root's keyring session
+(`session.scopeKek(scope)`), so each content vault has its own key and the
+root's secret never leaves its closure. `VaultClientCustody::persistWrappings()`
+enforces the split: the root takes only unlockers, and a content vault that
+opens through the root takes only its `root` wrapping. A content vault made
+before the root keeps its own unlockers (its rotation still writes them); it
+opens once by its own ceremony and is then given its `root` wrapping.
+
+**One touch.** `vault_unlock_options {with_root}` asks for both PRF outputs.
+`JoineryPasskeys.derive()` takes the second out of the response it hands back,
+so the posted credential carries the first only, exactly as the server has
+always verified it; `VaultCeremonies::assertNoSecondPrfOutput()` refuses a
+response that still carries the second. The browser opens the root with the
+second output and every content vault through the root
+(`JoinerySealed.openAllThroughRoot()`). An authenticator that returns only the
+first output gets a second touch for the root alone
+(`vault_client_prf_options {scope: root}` — the same salt). A passkey that
+opens the account vault but has no root wrapping yet asks once for a passkey
+that does; the root then learns the first passkey from the output already in
+hand (`vault_client_add_wrapping`, no step-up for a passkey the account vault
+already has).
+
+**One set of recovery codes, never seen by the server.** The browser makes the
+codes (`VaultKeyring.makeCodeSet`) and derives two halves from each, both
+salted by the **root vault's salt**: the account half `HKDF-SHA256(code, salt,
+'joinery-vault:recovery:account:v1')`, posted as `code_set: {id, entries:
+[{index, kek}]}`, and the root half `SHA-256(salt ‖ code)`, which wraps the
+root's secret in the browser. Every wrapping from a set carries its id and the
+code's index (`uew_code_set`, `uew_code_index`) on both vaults.
+`vault_unlock_recovery {code_kek}` finds the account wrapping the posted half
+opens and, in one transaction, spends it and its root twin, returning the twin
+(`root_wrapping`) for the browser to open. A use also ends every window,
+stamps `uev_recovery_time` on every vault the person holds (a reload's resume
+half kept before it is refused — `VaultClientResume::get()`), and clears the
+vault keys of every linked device (`VaultClientCustody::forgetDevices()`).
+Setup, rotation, regeneration and the code-set adoption below always change
+both halves in one transaction: the root is created with the account vault
+(`VaultClientCustody::createVault()` inside `VaultCeremonies::setup()`), and
+its twins are replaced with the account's codes
+(`VaultClientCustody::replaceRootRecovery()`). The key file names the code
+salt and derivation (`code_kdf`), so a code plus the file still rebuilds the
+account key offline.
+
+**One passphrase.** One Argon2id run over the phrase with the root salt and
+KDF params; HKDF splits the result into the account half
+(`joinery-vault:passphrase:account:v1`, posted as `passphrase_kek`) and the
+root half (`…:root:v1`, kept). What it costs, said plainly: a server that has
+been broken into holds the account half from the next passphrase unlock and
+can guess phrases offline; the same guess yields the end-to-end keys. For a
+passphrase account, end-to-end content is as strong as the phrase against a
+compromised server, and the passphrase form says so.
+
+**One setup.** The Security page and the setup wizard make the account vault,
+the root vault and the codes in one step (`VaultKeyring.setupVault()`, over
+`vault_setup_verify` / `vault_setup_passphrase` with `code_set` and `root`). A
+content vault is created silently the first time a feature needs it while the
+root is open (`VaultKeyring.contentSession()`): a keypair in the browser and
+its `root` wrapping, nothing to set up and nothing to remember. A root vault
+is never created on its own beside an account vault (a second set of codes):
+`createVault()` refuses it.
+
+**An account vault whose codes carry no set id** (codes the server made) gets
+a browser-made set, and the root vault, at its next passkey unlock:
+`vault_unlock_passkey {adopt_code_set, root}` opens under the tapped passkey
+with the new wrappings in its wrap list and creates the root in the same
+transaction (`UserEncryptionWrapping::adoptCodeSet()`); the padlock then shows
+the new codes once.
+
+**One name.** Everything a person reads says "vault". The registry labels
+(`vault_scopes.json`, a plugin's `vaultScopes`) name each scope on the
+Security page's detail list and in logs.
 
 ## Crypto core
 
@@ -65,10 +156,21 @@ $blob    = $box->aeadEncrypt($plaintext, $key, $ad);   // xchacha20poly1305_ietf
 $plain   = $box->aeadDecrypt($blob, $key, $ad);        // throws on tamper or AD mismatch
 $wrapped = $box->wrapKey($secret_key, $kek, $ad);      // same AEAD primitive, wrapping a key
 $secret  = $box->unwrapKey($wrapped, $kek, $ad);
-$kek     = $box->kekFromRecoveryCode($code, $salt);    // crypto_generichash - fast; entropy is the defense
-$kek     = $box->kekFromPassphrase($passphrase, $salt);// crypto_pwhash Argon2id - slow, low-entropy input
-$salt    = $box->generateSalt();                       // one uev_salt serves both KDFs above
+$kek     = $box->kekFromRecoveryCode($code, $salt);    // crypto_generichash; the readiness dry run of a vault with no root vault
+$salt    = $box->generateSalt();                       // a vault row's uev_salt
 $code    = $box->generateRecoveryCode();               // 26 Crockford-base32 chars, >=128 bits, grouped
+```
+
+The server derives no KEK from a code or a phrase a person holds: the browser
+does, and posts only the account half (see [One vault](#one-vault)).
+`includes/VaultUnlockerKdf.php` writes those derivations out in PHP for the
+tests to build exactly what a browser sends; nothing in production calls it.
+
+```php
+$account = VaultUnlockerKdf::codeKekAccount($code, $root_salt_b64);  // HKDF-SHA256, info joinery-vault:recovery:account:v1
+$root    = VaultUnlockerKdf::codeKekRoot($code, $root_salt_b64);     // SHA-256(salt ‖ code) = VaultCrypto.kekFromRecoveryCode
+[$a, $r] = VaultUnlockerKdf::passphraseSplit($argon2id_output);     // HKDF per half
+$kek     = VaultUnlockerKdf::scopeKek($root_secret, 'mail');         // a content vault's key from the root
 ```
 
 `includes/VaultCrypto.php` names the per-item envelope-encryption dance every
@@ -178,9 +280,9 @@ tie-breaker and real state always wins over it.
 PRF is a narrower requirement than passkey support: iPhones before iOS 18,
 Windows 10, older Firefox, older Android and most security keys enrol a passkey
 happily and then cannot derive a secret from it. For those accounts a vault is
-bootstrapped under a **bypass phrase** instead — the same
-`TYPE_PASSPHRASE` wrapping the unlocker panel offers, created at setup time
-rather than added later, and with no `TYPE_PASSKEY` wrapping at all.
+bootstrapped under a **passphrase** instead, with no `TYPE_PASSKEY`
+wrapping at all; the same phrase opens the root vault
+([One vault](#one-vault)).
 
 This is a compatibility fallback, never a preference. A phrase can be guessed
 and phished where a tapped passkey cannot, so an account that could use a
@@ -239,21 +341,23 @@ contract rather than left to fail incidentally.
 
 | Action pair | Purpose |
 |---|---|
-| `vault_setup_options` / `vault_setup_verify` | First-time setup: generate the keypair, wrap it under the enrolling passkey + N fresh recovery codes, open the window. The verify action also accepts an optional `passphrase` (a bypass-phrase wrapping) for non-web clients; the web ceremony never offers it. Requires an account password first (see *The vault-activation flip*) and an explicit permanent-loss acknowledgment. |
+| `vault_setup_options` / `vault_setup_verify` | First-time setup: generate the keypair, wrap it under the enrolling passkey and the browser-made code set (`code_set`), create the root vault the browser made (`root`) in the same transaction, open the window. `with_root` on the options asks the same touch for the root's output. Requires an account password first (see *The vault-activation flip*) and an explicit permanent-loss acknowledgment. |
 | `vault_add_passkey_options` / `vault_add_passkey_verify` | Wrap the secret key under another PRF-capable passkey — "activating" that passkey for the vault. The verify step takes the new passkey's derivation and a fresh `unlocker` in the same request. `passkey_register_verify` does the same activation at enrolment when the request carries an `unlocker`, so passkeys end up vault-active by default; each passkey row carries a vault badge with activate/deactivate in its Actions menu. |
 | `vault_passkey_deactivate` | Remove one passkey's vault wrapping (it still signs in; it can no longer unlock). Requires a recent step-up; refused if it would break the unlocker floor. |
-| `vault_regenerate_codes` | Invalidate all recovery codes and mint a fresh set. Requires a recent step-up and a fresh `unlocker`. |
-| `vault_passphrase_enroll` / `vault_passphrase_remove` | Add or remove the optional bypass phrase. Requires a recent step-up; enroll also takes a fresh `unlocker`. |
+| `vault_regenerate_codes` | Replace every recovery code with a browser-made set (`code_set`) and the root's twins of it (`root_wrappings`), in one transaction. Requires a recent step-up and a fresh `unlocker`. |
+| `vault_passphrase_enroll` / `vault_passphrase_remove` | Change or remove the passphrase, only for an account whose passkeys cannot hold a key. Enroll takes the account half (`passphrase_kek`) and the root's wrapping of the same phrase (`root_passphrase`); remove takes both away. Requires a recent step-up; enroll also takes a fresh `unlocker`. |
 
 **Every enrolment presents a fresh unlocker.** A wrapping is produced only
 in the request that presented a real unlocker for the vault — a tap of an
 enrolled passkey (`unlocker: {credential}`, minted by `vault_unlock_options`),
-the bypass phrase (`{passphrase}`) or a recovery code (`{code}`, consumed) —
-never from an open window. `VaultCeremonies::openWithUnlocker()` resolves
+the passphrase's account half (`{passphrase_kek}`) or a recovery code's
+(`{code_kek}`, consumed with its root twin) — never from an open window, and
+never the phrase or the code itself (refused as an out-of-date page). `VaultCeremonies::openWithUnlocker()` resolves
 the input, opens under it with the new wrappings in the wrap list, and arms
 the resulting window for the session. In the browser
 `JoineryVaultLock.collectUnlocker(purpose)` offers whichever of the three the
-vault has and returns the shape to send. A passkey enrolment therefore
+vault has, derives the KEK in the browser, opens the root on the way where it
+can, and returns the shape to send. A passkey enrolment therefore
 verifies two assertions in one request; `PasskeyService` keeps one pending
 challenge per purpose per session, and the add-passkey derivation carries the
 tag `add` so it stands beside the unlocker's own `vault-kek` ceremony.
@@ -309,7 +413,7 @@ VaultUnlock::hasAnyOpenWindow($user_id, $scope = 'user'): bool;  // ANY session,
 
 `openKey()` exists for the two callers that need a key without a window: the
 rotation ceremony, whose old-generation key every resealer uses and which
-must never become the window, and the recovery-code / bypass-phrase probes
+must never become the window, and the recovery-code / passphrase probes
 (and the recovery-readiness dry run), which try each wrapping until one
 opens. A wrong unlocker throws and yields nothing.
 
@@ -335,7 +439,8 @@ Unlock endpoints (`logic/vault_unlock_options_logic.php` and its
 siblings, plus `vault_lock`) mint the WebAuthn PRF assertion options with
 `userVerification: required` (`PasskeyService::getDerivationOptions()`) —
 every passkey unlock demands device user verification, not merely preferred.
-The recovery code and the bypass phrase each open the vault on their own. The
+The recovery code and the passphrase each open the vault on their own, from
+the account half the browser derived (`code_kek`, `passphrase_kek`). The
 account's sign-in second factor never takes part in opening a vault: an
 authenticator code confirms sign-ins and sensitive changes, and opens nothing.
 
@@ -389,24 +494,27 @@ temp file private before the first decrypted byte lands.
 
 The platform-wide "what is unlocked" idiom: one padlock in a fixed place on
 every signed-in page for a user with any vault. It reads **open**
-(success-colored) while the server unlock window is live **or** any vault this
-browser holds is open (see [Client-custody scopes](#client-custody-scopes)),
-and closed otherwise. Clicking the closed padlock runs the unlock ceremony in
-place, offering what the server vault has — a passkey, the bypass phrase or a
-recovery code. Clicking the open padlock opens a popover
-listing each vault by name — "Mail & messages vault", "Password vault", "Drive
-vault" — with its own **Lock now** (or **Unlock** for a server vault that is
-locked). A user with no server vault sees the chip only while a browser-held
-vault is open. Users with no vault at all, on pages that open none, never load
+(success-colored) only while everything is: the server unlock window (when the
+person has an account vault), the root vault (`data-root-vault="1"`) and every
+browser-held vault the page reads (`JoinerySealed.want`); anything less reads
+partly locked. Clicking the closed padlock runs the one unlock in place
+([One vault](#one-vault)), offering what the vault has — a passkey, the
+passphrase or a recovery code. Clicking the open padlock opens a popover with
+one line, "Vault", and one action: **Lock now** locks everything (the server
+window and every browser-held vault), **Unlock** runs the one unlock. The
+server window ending anywhere locks the browser-held vaults too. A user with no
+account vault sees the chip only while a browser-held vault is open. Users with no vault at all, on pages that open none, never load
 any of it.
 
 `PublicPageBase` drives it: for a signed-in user with any vault row, or on a
 page that declared `needs_vault_client()`, it emits
 `<meta name="joinery-vault" content="locked|open" data-idle-minutes="N"
-data-client-idle-minutes="M" data-server-vault="0|1" data-server-label="…">`
+data-client-idle-minutes="M" data-server-vault="0|1" data-root-vault="0|1" data-server-label="…">`
 (`content` and `data-idle-minutes` are the server window's; the client idle time
 is `vault_client_autolock_minutes`) and includes `assets/js/vault-lock.js` +
-`assets/css/vault-lock.css` (plus `passkeys.js` for the ceremony). The chip
+`assets/css/vault-lock.css`, plus `passkeys.js` and the client modules
+(`vault-crypto.js`, `vault-keyring.js`, `joinery-sealed.js`) the one unlock
+needs, so a reload reopens what was open on every page. The chip
 mounts into the page's `[data-vault-lock-slot]` element — the core page classes
 emit one from their header icon cluster via
 `PublicPageBase::render_vault_lock_slot()` (which emits nothing for chip-less
@@ -441,7 +549,7 @@ wrapping **and** fewer than 3 unused recovery codes — the refusal names what
 to enroll first. `VaultUnlock::assertWrappingDeleteSafe($vault_id,
 $exclude_credential_id = null)` is the shared counting logic behind every such
 refusal: passkey revocation (excluding the credential being revoked from the
-count) and bypass-phrase removal (nothing to exclude — a bypass phrase never
+count) and passphrase removal (nothing to exclude — a passphrase never
 counts toward the floor itself, so removing one only matters when the
 passkey/recovery counts are already at the floor). A passkey wrapping counts only if its
 credential row is still live (`pkc_delete_time IS NULL`) — belt-and-suspenders
@@ -1377,32 +1485,50 @@ header; the head then carries `passkeys.js`, `vault-crypto.js`,
 
 ### The ceremony
 
-`VaultKeyring.ensureUnlocked(scope, opts)` reads `vault_client_status` and runs,
-as steps inside one `JoineryModal`:
+`JoinerySealed.session(scope)` opens a content vault through the root
+([One vault](#one-vault)): with the root shut it runs the one unlock
+(`JoineryVaultLock.unlock()`), then opens the vault with its `root` wrapping,
+or creates it silently when it does not exist yet. There is no separate setup
+and no separate prompt per vault. A person with no vault is sent to their
+Security page, where the account vault, the root and the codes are made
+together.
 
-- **not set up** → setup: the permanent-loss acknowledgment, a passkey (or a
-  passphrase only), then the recovery codes, proven kept by typing the last one
-  back or downloading them. While the codes are on screen the modal cannot be
-  dismissed — setup is already saved and the codes are the only copy. With
-  `passkeys_enabled` off the server refuses every setup, so the modal says why
-  and offers nothing. A factorless account is told up front that a vault needs
-  a second factor (the [re-enrollment gate](account_security.md) asks for one
-  from the next page).
-- **set up, no session** → unlock, offering only what the keyring has (passkey,
-  passphrase, recovery code behind a link).
-
-`opts.reason` reads in the prompt ("You need it to open this file"). The label
-comes from the scope registry.
+`VaultKeyring.ensureUnlocked(scope, opts)` remains for a content vault that
+holds unlockers of its own and no `root` wrapping: it reads
+`vault_client_status` and runs the unlock inside one `JoineryModal`, offering
+only what that keyring has; the session is then given its `root` wrapping, so
+it is the last time. `opts.reason` reads in the prompt ("You need it to open
+this file").
 
 ### Sessions and the lock
 
-`JoinerySealed` holds one session per scope per tab (`session(scope)` runs the
-ceremony on a miss) and never hands out key bytes: a session opens and seals,
+`JoinerySealed` holds one session per scope per tab, the root's among them
+(`session(scope)` runs the ceremony on a miss; `adopt(scope, session)` holds
+one the lock chip's unlock opened) and never hands out key bytes: a session opens and seals,
 it cannot reveal. Every open scope locks together after
 `vault_client_autolock_minutes` without keyboard or pointer activity (a
-person's own choice for this browser overrides it), on `pagehide`, and on a
-back/forward-cache restore (`pageshow` with `persisted`) — a restored page must
-never show plaintext with a live key.
+person's own choice for this browser overrides it).
+
+**Reloads reopen.** A scope stays open across a reload, or a move to another
+page, in the same tab. When it opens, its secret is wrapped (`AD
+vault:{scope}:resume`) under `HKDF-SHA256(server half ‖ tab half, info
+'joinery-vault-resume:v1:{scope}')`, two random 32-byte halves. The tab keeps
+the wrapped secret and its half in `sessionStorage`; the server keeps the
+other half in the sign-in's PHP session (`vault_client_resume`,
+`includes/VaultClientResume.php`, keyed by scope and a random per-tab id).
+Neither half opens anything alone, and shares are never logged. At load
+`JoinerySealed.ready` settles once every scope the tab had open has reopened
+(`joinery:vault-scope-unlocked` with `detail.resumed`) or been given up — a
+stored public key a rotation retired, a tab idle past its limit, a session
+that ended. `session()` waits for `ready`, so a page never runs a ceremony for
+a scope that is about to reopen; a consumer deciding a scope is shut waits for
+it too.
+
+`pagehide` drops only the in-memory key, and a back/forward-cache restore
+(`pageshow` with `persisted`) drops it and reopens through the halves — a
+restored page never shows plaintext with a key it did not re-derive. Every
+other lock is real and forgets both halves. Closing the tab loses the tab's
+half; signing out loses the server's. A new tab asks once.
 
 `JoinerySealed.lock(scope)` / `lockAll()` are the explicit entries;
 `onLock(scope, fn)` registers a callback and `document` receives

@@ -18,6 +18,7 @@
  *
  * Run: php plugins/mailbox/tests/inbound_email_attachment_storage_test.php  (schema synced).
  *
+ * @version 1.1 - AtomicAbortRouter follows persistRawAndManifest()'s signature (Fortress flag, manifest return)
  * @version 1.0
  */
 
@@ -43,7 +44,8 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.
  * Fix 4) rolls the whole unit back so no bare, attachment-less row survives.
  */
 class AtomicAbortRouter extends InboundEmailRouter {
-	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null) {
+	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null,
+			bool $for_browser = false): array {
 		throw new \RuntimeException('simulated mid-store abort before attachment persistence');
 	}
 }

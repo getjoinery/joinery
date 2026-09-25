@@ -8,8 +8,8 @@
 /**
  * Mail protection is two levels plus add-ons (specs/implemented/protection_levels_fold.md).
  *
- *  - The setter: Standard and Private are accepted; the reserved end-to-end
- *    value is refused, so nothing writes it.
+ *  - The setter: Standard, Private and Fortress are accepted and stamp the
+ *    set time; anything else is refused, and nothing is written.
  *  - The add-on accessors: each flag is in force only at Private, and inert
  *    (stored, not in force) below it.
  *  - userHasHardenedDomain(): true for each add-on on an owned domain and for a
@@ -32,6 +32,8 @@
  *
  * Run: php tests/run.php db --filter=protection_addons
  *
+ * @version 1.3 - Fortress is a settable level (specs/client_custody_mail.md); a
+ *   legacy value is told apart by ied_level_set_time
  * @version 1.2
  */
 
@@ -90,22 +92,28 @@ function pa_grant_raw(int $alias_id, int $user_id): void {
 }
 
 // ---------------------------------------------------------------------------
-section('The setter accepts two levels and refuses the reserved one');
+section('The setter accepts the three levels and refuses anything else');
 
 $d = new InboundEmailDomain(NULL);
 $d->set_security_level(InboundEmailDomain::LEVEL_PRIVATE);
 check($d->get('ied_security_level') === InboundEmailDomain::LEVEL_PRIVATE, 'Private is settable');
 $d->set_security_level(InboundEmailDomain::LEVEL_STANDARD);
 check($d->get('ied_security_level') === InboundEmailDomain::LEVEL_STANDARD, 'Standard is settable');
+$d->set_security_level(InboundEmailDomain::LEVEL_FORTRESS);
+check($d->get('ied_security_level') === InboundEmailDomain::LEVEL_FORTRESS
+		&& trim((string)$d->get('ied_level_set_time')) !== ''
+		&& $d->security_level() === InboundEmailDomain::LEVEL_FORTRESS,
+	'Fortress is settable, stamps the set time and reads back as Fortress');
+$d->set_security_level(InboundEmailDomain::LEVEL_STANDARD);
 $refused = false;
 try {
-	$d->set_security_level(InboundEmailDomain::LEVEL_FORTRESS);
+	$d->set_security_level('ultra');
 } catch (InboundEmailDomainException $e) {
 	$refused = true;
 }
 check($refused && $d->get('ied_security_level') === InboundEmailDomain::LEVEL_STANDARD,
-	'the reserved end-to-end level is refused and nothing is written');
-check(InboundEmailDomain::SETTABLE_LEVELS === array('standard', 'private'), 'exactly two settable levels');
+	'an unknown level is refused and nothing is written');
+check(InboundEmailDomain::SETTABLE_LEVELS === array('standard', 'private', 'fortress'), 'exactly three settable levels');
 
 $logic_src = (string)file_get_contents(PathHelper::getIncludePath(
 	'plugins/mailbox/logic/admin_mailbox_domains_logic.php'));
@@ -204,9 +212,12 @@ check(MailboxAliasConfig::isSealedAtRest($address) === true
 		&& MailboxAliasConfig::securityLevelForAddress($address) === InboundEmailDomain::LEVEL_PRIVATE,
 	'the address-level resolver agrees');
 
+// A mailbox's own 'fortress' is Fortress: migration ied_003 converted the old
+// mailbox-level value, and one it has not reached holds mail rather than
+// storing it open (InboundEmailAlias::security_level()).
 $own_old = pa_alias(pa_domain('standard'), 'pa_own_unconverted', 'fortress');
-check($own_old->security_level() === InboundEmailDomain::LEVEL_PRIVATE && $own_old->seals_content(),
-	'a mailbox holding the reserved value itself reads as Private');
+check($own_old->security_level() === InboundEmailDomain::LEVEL_FORTRESS && $own_old->seals_content(),
+	'a mailbox holding fortress itself reads as Fortress, and seals');
 check(InboundEmailAlias::domainHasSealingMailbox(intval($own_old->get('iea_ied_inbound_email_domain_id'))),
 	'and the raw SQL sealing predicate still catches it');
 

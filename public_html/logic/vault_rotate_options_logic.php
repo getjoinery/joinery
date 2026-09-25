@@ -26,15 +26,18 @@ function vault_rotate_options_logic(array $input): LogicResult {
 	// instead of minting one over credentials that open nothing.
 	if (!VaultUnlock::hasPasskeyRoute((int)$user->key, UserEncryptionVault::SCOPE_USER)) {
 		return LogicResult::error(
-			'Rotation needs a passkey that unlocks your vault, and none does yet. Unlock with your bypass phrase, add a passkey from your security page, then rotate.',
+			'Rotation needs a passkey that unlocks your vault, and none does yet. Unlock with your passphrase, add a passkey from your security page, then rotate.',
 			['no_passkey_route' => true]
 		);
 	}
 
+	// with_root: the same touch also yields the root vault's secret, kept by
+	// the browser (specs/one_vault_experience.md § R1).
+	$second = !empty($input['with_root']) ? VaultScopes::prfContext(VaultScopes::ROOT_SCOPE) : null;
 	try {
 		$service = new PasskeyService();
 		$options = $service->getDerivationOptions($user, 'vault-kek',
-			VaultUnlock::offerableCredentialIds((int)$user->key, UserEncryptionVault::SCOPE_USER));
+			VaultUnlock::offerableCredentialIds((int)$user->key, UserEncryptionVault::SCOPE_USER), '', $second);
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -46,7 +49,10 @@ function vault_rotate_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Begin vault key rotation (returns WebAuthn PRF request options); use an already-enrolled passkey',
+		'description' => 'Begin vault key rotation (returns WebAuthn PRF request options); use an already-enrolled passkey. with_root also asks the same touch for the root vault\'s secret, which the browser keeps',
+		'input' => [
+			'with_root' => ['type' => 'bool', 'required' => false, 'label' => 'Also derive the root vault secret (kept in the browser)'],
+		],
 	];
 }
 ?>

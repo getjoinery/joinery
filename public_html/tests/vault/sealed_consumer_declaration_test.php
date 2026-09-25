@@ -174,8 +174,10 @@ $rotate_with = function (array $plugin_declarations) use ($fx, $vault_id) {
 	VaultConsumers::setPluginDeclarationsForTests($plugin_declarations);
 	$vault = new UserEncryptionVault($vault_id, TRUE);
 	try {
+		$set = vault_fixture_code_set($fx['root_salt'], 5);
 		(new VaultCeremonies())->rotate($fx['user'], $vault, (int)$fx['passkey']->key,
-			'Vault Test Passkey', $fx['kek'], '', false);
+			'Vault Test Passkey', $fx['kek'], '', $set['set'],
+			['recovery' => vault_fixture_root_recovery($fx['root_salt'], $set, $fx['root_secret'])], false);
 		return null;
 	} catch (VaultCeremonyException $e) {
 		return $e->getMessage();
@@ -251,8 +253,10 @@ foreach (VaultConsumers::allDeclarations() as $core_name => $core_declaration) {
 $vault = new UserEncryptionVault($vault_id, TRUE);
 $rotated = null;
 try {
+	$set = vault_fixture_code_set($fx['root_salt'], 5);
 	$rotated = (new VaultCeremonies())->rotate($fx['user'], $vault, (int)$fx['passkey']->key,
-		'Vault Test Passkey', $fx['kek'], '', false);
+		'Vault Test Passkey', $fx['kek'], '', $set['set'],
+		['recovery' => vault_fixture_root_recovery($fx['root_salt'], $set, $fx['root_secret'])], false);
 } catch (VaultCeremonyException $e) {
 	check(false, 'the rotation must not be refused for a never-activated plugin: ' . $e->getMessage());
 }

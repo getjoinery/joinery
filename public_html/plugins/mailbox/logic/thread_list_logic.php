@@ -12,6 +12,13 @@
  * carry a purge_time; `sent` switches to the Sent view (conversations carrying
  * an outbound row).
  *
+ * A thread whose newest message is Fortress (specs/client_custody_mail.md
+ * § R4) has empty subject/sender/snippet and carries `sealed` ({key,
+ * sealed_scope, sealed_dek, sealed_ad_prefix, iem_sender, iem_subject,
+ * iem_snippet}, `pending` when not yet parsed) for the owner's browser to open;
+ * the response carries `fortress: true` when any thread does.
+ *
+ * @version 1.4.0 - Fortress threads travel sealed; `fortress` on the response
  * @version 1.3.1
  * @changelog 1.3.0 - sent param: the Sent pseudo-folder view
  */
@@ -59,7 +66,10 @@ function thread_list_logic(array $input): LogicResult {
 function thread_list_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'description' => 'List mail threads for a mailbox view (inbox/all/sent/spam/trash, search, labels), paged',
+		'description' => 'List mail threads for a mailbox view (inbox/all/sent/spam/trash, search, labels), paged. '
+			. 'A thread whose newest message is end-to-end (Fortress) has empty subject/sender/snippet and a '
+			. '`sealed` object (key, sealed_scope, sealed_dek, sealed_ad_prefix, iem_* ciphertext) for the owner\'s '
+			. 'browser to open; `fortress: true` on the response says some thread needs the mail key.',
 		'input' => [
 			'alias_id' => ['type' => 'string', 'required' => false, 'label' => 'Mailbox alias ID, unmatched, or unmatched:{domain_id}'],
 			'q' => ['type' => 'string', 'required' => false, 'label' => 'Search text'],

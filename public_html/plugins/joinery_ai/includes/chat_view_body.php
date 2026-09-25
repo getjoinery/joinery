@@ -361,8 +361,12 @@ if (!function_exists('joai_pin_svg')) {
                      message: (d && d.error) || data.message || '' };
         });
     }
-    // Runs the passkey PRF unlock ceremony. Resolves to true on success.
+    // Runs the unlock ceremony. Resolves to true on success. The platform's
+    // one unlock (the lock chip's) opens every vault from one touch
+    // (specs/one_vault_experience.md § R3); the inline passkey ceremony is the
+    // fallback for a page without the chip.
     function unlockVault() {
+        if (window.JoineryVaultLock) { return JoineryVaultLock.unlock(); }
         if (!window.JoineryPasskeys) { alert('Unlock is unavailable on this page.'); return Promise.resolve(false); }
         return joaiApiV1('vault_unlock_options', {}).then(function (opt) {
             var options = opt && opt.data ? opt.data.options : null;

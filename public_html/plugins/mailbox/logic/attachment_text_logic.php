@@ -24,6 +24,7 @@
  * reading it needs an open unlock window; a locked one returns {locked:true},
  * the same contract the body, source and draft reads use.
  *
+ * @version 1.2.0 - a Fortress attachment is never previewed as text
  * @version 1.1.1
  * @changelog 1.1.0 - review fixes: the byte ceiling refuses from the recorded size BEFORE any fetch/decrypt, and every path that fetched bytes (or refused for size) writes a throttle row — refusals were the one unthrottled, most expensive request
  */
@@ -72,6 +73,16 @@ function attachment_text_logic(array $input): LogicResult {
 	$allowed = $alias_id > 0 ? $viewer->canAccess($alias_id) : $viewer->isAllAccess();
 	if (!$allowed) {
 		return LogicResult::error('You do not have access to this mailbox.');
+	}
+
+	// A Fortress attachment opens only in its owner's browser; reading its text
+	// here would mean the server holding the plaintext (specs/client_custody_mail.md § R4).
+	if (InboundEmailMessage::isBrowserSealed($message)) {
+		return LogicResult::render(array(
+			'previewable' => false,
+			'reason'      => 'This attachment is end-to-end encrypted, so it cannot be previewed as text. '
+				. 'Download it to open it.',
+		));
 	}
 
 	$filename = (string)$att->get('ima_filename') ?: 'attachment';

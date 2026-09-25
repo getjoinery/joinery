@@ -29,6 +29,8 @@
  * some fraction of the database. Those ratios belong with the subsystems that
  * know them. This class only ever answers "does N fit".
  *
+ * @version 1.1 - readWith(): a test holds free space still while it compares
+ *   readings, so a disk other processes are writing to cannot race it
  * @version 1.0
  */
 
@@ -43,6 +45,18 @@ class DiskSpace {
 	 * other failure harder to read.
 	 */
 	const DEFAULT_FLOOR_BYTES = 1073741824;
+
+	/** Replaces disk_free_space() for a test; null reads the disk (readWith()). */
+	private static $reader = null;
+
+	/**
+	 * Read free space through $reader (called with the directory, returns bytes
+	 * or false) instead of the disk, or the disk again with null. Tests only: a
+	 * check comparing two readings needs a disk that does not move between them.
+	 */
+	public static function readWith(?callable $reader): void {
+		self::$reader = $reader;
+	}
 
 	/**
 	 * Free bytes on the filesystem holding $path, or NULL when it cannot be known.
@@ -76,7 +90,7 @@ class DiskSpace {
 		if (!is_dir($candidate)) {
 			return null;
 		}
-		$free = @disk_free_space($candidate);
+		$free = (self::$reader !== null) ? (self::$reader)($candidate) : @disk_free_space($candidate);
 		if ($free === false || !is_numeric($free)) {
 			return null;
 		}

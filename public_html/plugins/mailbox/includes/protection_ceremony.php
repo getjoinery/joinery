@@ -30,7 +30,10 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
- * @version 2.1
+ * @version 2.2
+ * @changelog 2.2 - the unseal batch leaves Fortress rows for the browser's custody walk;
+ *   mailbox_protected_grant_error() checks the vault of the mailbox's seal
+ *   scope (a Fortress holder needs a `mail` vault)
  * @changelog 2.1 - neither add-on asks for a second factor: the rows are about
  *   the domain and its readers, and mailbox_protection_facts() takes no acting user
  * @changelog 2.0 - add-ons instead of a third level: mailbox_protection_rows()
@@ -359,7 +362,9 @@ function mailbox_protected_grant_error(InboundEmailDomain $domain, array $user_i
 		?InboundEmailAlias $alias = null): ?string {
 	$seals = ($alias !== null && $alias->key) ? $alias->seals_content()
 		: ($domain->key && $domain->seals_content());
-	return InboundEmailMailboxGrant::grant_set_error($seals, $user_ids);
+	$scope = InboundEmailMessage::sealScopeFor(($alias !== null && $alias->key) ? intval($alias->key) : null,
+		$domain->key ? intval($domain->key) : null);
+	return InboundEmailMailboxGrant::grant_set_error($seals, $user_ids, $scope);
 }
 
 /** Whether every required row passes (the raise gate). */
@@ -422,7 +427,6 @@ function mailbox_protection_posture_join(): string {
 /** True-when-sealing predicate for a query carrying the posture join above. */
 function mailbox_protection_seals_sql(): string {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
-	// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
 	return InboundEmailAlias::effectiveLevelSql('a', 'd') . " IN ('"
 		. InboundEmailDomain::LEVEL_PRIVATE . "','" . InboundEmailDomain::LEVEL_FORTRESS . "')";
 }
@@ -599,6 +603,9 @@ function mailbox_protection_unseal_batch(?InboundEmailDomain $domain, int $calle
 		   AND m.iem_content_sealed = true AND m.iem_pending_parse = false
 		   AND m.iem_sealed_owner_user_id = ?
 		   AND m.iem_delete_time IS NULL
+		   -- A Fortress row reaches the server key through its owner's browser
+		   -- first (JoinerySealed.changeCustody); until then it stays counted.
+		   AND m.iem_sealed_key NOT LIKE 'v1.edgeseal.%'
 		 ORDER BY m.iem_inbound_email_message_id ASC LIMIT " . intval($limit));
 	$stmt->execute(array($caller_user_id));
 	$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);

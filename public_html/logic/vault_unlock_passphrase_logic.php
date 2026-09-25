@@ -26,13 +26,14 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 	}
 
 	// The phrase opens the vault on its own. A vault opens with a passkey, its
-	// bypass phrase or a recovery code; the account's sign-in second factor
-	// (an authenticator code) never takes part in opening one.
-	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
-
+	// passphrase or a recovery code; the account's sign-in second factor
+	// (an authenticator code) never takes part in opening one. The browser
+	// ran the slow derivation and posts only the account half of its KEK: the
+	// phrase never reaches here (specs/one_vault_experience.md § R7).
 	try {
+		$kek = VaultCeremonies::decodeKek($input['passphrase_kek'] ?? '');
 		$ceremonies = new VaultCeremonies();
-		$key = $ceremonies->unlockWithPassphrase($user, $vault, $passphrase);
+		$key = $ceremonies->unlockWithPassphrase($user, $vault, $kek);
 	} catch (VaultCeremonyException $e) {
 		RequestLogger::log('vault_unlock_passphrase', 'verify', false, ['user_id' => $user->key]);
 		return LogicResult::error($e->getMessage());
@@ -48,9 +49,9 @@ function vault_unlock_passphrase_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Unlock the vault with the enrolled bypass phrase',
+		'description' => 'Unlock the vault with the passphrase: the account half of its KEK, derived in the browser (the phrase itself is never sent)',
 		'input' => [
-			'passphrase' => ['type' => 'password', 'required' => true, 'label' => 'Bypass phrase'],
+			'passphrase_kek' => ['type' => 'password', 'required' => true, 'label' => 'Account half of the passphrase KEK (base64url, 32 bytes)'],
 		],
 	];
 }

@@ -37,6 +37,7 @@
  * aeadEncryptGcm produce these same bytes. selfCheck() proves that against the
  * shared vector in tests/vault/fixtures/edge_vector.json.
  *
+ * @version 1.2 - the one vault's derivations: codeKeks(), passphraseKeks(), scopeKek(), hkdf()
  * @version 1.1 - encrypt()/decrypt() take an optional AD; selfCheck() opens the
  *   shared edge-format vector; a passphrase KDF that never settles rejects
  *   after a minute instead of hanging the unlock
@@ -110,10 +111,7 @@ window.VaultCrypto = (function () {
 		// Crockford base32 leniency: the codes are drawn from the Crockford
 		// alphabet (no I/L/O/U), so map a user's ambiguous entry back before
 		// hashing. Then uppercase and strip separators.
-		var normalized = String(code).toUpperCase()
-			.replace(/O/g, '0').replace(/[IL]/g, '1')
-			.replace(/[^A-Z0-9]/g, '');
-		var material = concat(b64decode(saltB64), utf8(normalized));
+		var material = concat(b64decode(saltB64), utf8(normalizeCode(code)));
 		var digest = await subtle.digest('SHA-256', material);
 		return importAesKek(new Uint8Array(digest));
 	}
@@ -127,7 +125,7 @@ window.VaultCrypto = (function () {
 	// these parameters takes seconds; a minute means it is not coming back.
 	var ARGON2_TIMEOUT_MS = 60000;
 
-	async function kekFromPassphrase(passphrase, saltB64, kdfParams) {
+	async function argon2Raw(passphrase, saltB64, kdfParams) {
 		var params = kdfParams || DEFAULT_KDF_PARAMS;
 		await loadArgon2();
 		var timer;
@@ -145,7 +143,11 @@ window.VaultCrypto = (function () {
 			hashLen: params.hashLen || 32,
 			type: window.argon2.ArgonType.Argon2id,
 		})]).finally(function () { clearTimeout(timer); });
-		return importAesKek(result.hash);
+		return new Uint8Array(result.hash);
+	}
+
+	async function kekFromPassphrase(passphrase, saltB64, kdfParams) {
+		return importAesKek(await argon2Raw(passphrase, saltB64, kdfParams));
 	}
 
 	var _argon2Loading = null;
@@ -168,6 +170,68 @@ window.VaultCrypto = (function () {
 	function importAesKek(rawKeyBytes) {
 		return subtle.importKey('raw', rawKeyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 	}
+
+	// ---- the one vault's derivations (specs/one_vault_experience.md) ----------
+	// Mirrored in PHP by includes/VaultUnlockerKdf.php (the same names), which
+	// the tests use to build exactly what this sends. Every one is salted by the
+	// ROOT vault's salt. What leaves the browser is only ever an account half,
+	// as raw bytes the caller base64url-encodes; the code and the phrase never do.
+
+	var RECOVERY_ACCOUNT_INFO = 'joinery-vault:recovery:account:v1';
+	var PASSPHRASE_ACCOUNT_INFO = 'joinery-vault:passphrase:account:v1';
+	var PASSPHRASE_ROOT_INFO = 'joinery-vault:passphrase:root:v1';
+	var SCOPE_INFO_PREFIX = 'joinery-vault:scope:v1:';
+
+	function b64urlEncode(bytes) {
+		return b64encode(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+	}
+
+	// Crockford read-side leniency, as VaultUnlockerKdf::normalizeCode applies it.
+	function normalizeCode(code) {
+		return String(code).toUpperCase()
+			.replace(/O/g, '0').replace(/[IL]/g, '1')
+			.replace(/[^A-Z0-9]/g, '');
+	}
+
+	// HKDF-SHA256 over raw bytes: 32 bytes out.
+	async function hkdf(ikmBytes, saltBytes, info) {
+		var base = await subtle.importKey('raw', ikmBytes, 'HKDF', false, ['deriveBits']);
+		var bits = await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: saltBytes || new Uint8Array(0),
+			info: utf8(info) }, base, 256);
+		return new Uint8Array(bits);
+	}
+
+	// A recovery code's two halves: { account: raw bytes (posted, base64url),
+	// root: AES key (opens the code's twin on the root vault, here) }.
+	async function codeKeks(code, rootSaltB64) {
+		var normalized = utf8(normalizeCode(code));
+		return {
+			account: await hkdf(normalized, b64decode(rootSaltB64), RECOVERY_ACCOUNT_INFO),
+			root: await kekFromRecoveryCode(code, rootSaltB64),
+		};
+	}
+
+	// The passphrase's two halves from ONE Argon2id run: { account: raw bytes
+	// (posted), root: AES key (kept) }.
+	async function passphraseKeks(passphrase, rootSaltB64, kdfParams) {
+		var h = await argon2Raw(passphrase, rootSaltB64, kdfParams);
+		try {
+			return {
+				account: await hkdf(h, null, PASSPHRASE_ACCOUNT_INFO),
+				root: await importAesKek(await hkdf(h, null, PASSPHRASE_ROOT_INFO)),
+			};
+		} finally {
+			h.fill(0);
+		}
+	}
+
+	// A content vault's key from the root vault's secret: each scope its own.
+	async function scopeKek(rootSecretBytes, scope) {
+		var raw = await hkdf(rootSecretBytes, null, SCOPE_INFO_PREFIX + scope);
+		try { return await importAesKek(raw); } finally { raw.fill(0); }
+	}
+
+	function importRawKek(rawKeyBytes) { return importAesKek(rawKeyBytes); }
 
 	// ---- the vault X25519 keypair (generated in-browser) ----------------------
 
@@ -360,6 +424,14 @@ window.VaultCrypto = (function () {
 		kekFromPrf: kekFromPrf,
 		kekFromRecoveryCode: kekFromRecoveryCode,
 		kekFromPassphrase: kekFromPassphrase,
+		b64urlEncode: b64urlEncode,
+		b64urlDecode: b64urlDecode,
+		normalizeCode: normalizeCode,
+		hkdf: hkdf,
+		codeKeks: codeKeks,
+		passphraseKeks: passphraseKeks,
+		scopeKek: scopeKek,
+		importRawKek: importRawKek,
 		generateVaultKeypair: generateVaultKeypair,
 		wrapSecretKey: wrapSecretKey,
 		unwrapSecretKey: unwrapSecretKey,

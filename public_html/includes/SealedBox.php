@@ -30,6 +30,7 @@
  * server key. These are raw primitives like the rest; the `v1.edgeseal.` /
  * `v1.edge.` framing belongs to the row layer (VaultCrypto).
  *
+ * @version 1.7 - kekFromPassphrase() retired: the browser derives a phrase's KEK
  * @version 1.6 - the browser format: sealEdge()/openEdge() and
  *                aeadEncryptGcm()/aeadDecryptGcm(), byte-compatible with
  *                vault-crypto.js (tests/vault/edge_format_test.php)
@@ -554,34 +555,9 @@ class SealedBox {
 	}
 
 	/**
-	 * Derive a KEK from a user passphrase via Argon2id at the MODERATE cost
-	 * profile (~256 MB, noticeably slow — a passphrase is much lower entropy
-	 * than a recovery code, and its threat model is offline guessing against a
-	 * stolen database, so each guess must cost real memory and CPU). The cost
-	 * runs only on the passphrase unlock/enroll paths; passkey and
-	 * recovery-code unlocks never pay it.
-	 */
-	public function kekFromPassphrase(string $passphrase, string $salt): string {
-		$salt_raw = self::b64url_decode($salt);
-		if ($salt_raw === false || strlen($salt_raw) !== SODIUM_CRYPTO_PWHASH_SALTBYTES) {
-			throw new RuntimeException('SealedBox: passphrase salt must decode to '
-				. SODIUM_CRYPTO_PWHASH_SALTBYTES . ' bytes.');
-		}
-		return sodium_crypto_pwhash(
-			SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_KEYBYTES,
-			$passphrase,
-			$salt_raw,
-			SODIUM_CRYPTO_PWHASH_OPSLIMIT_MODERATE,
-			SODIUM_CRYPTO_PWHASH_MEMLIMIT_MODERATE,
-			SODIUM_CRYPTO_PWHASH_ALG_ARGON2ID13
-		);
-	}
-
-	/**
-	 * A fresh KDF salt, sized for kekFromPassphrase()'s Argon2id requirement
-	 * (also reused as the keyed-hash key in kekFromRecoveryCode() — 16 bytes
-	 * is within crypto_generichash's valid key-length range). One `uev_salt`
-	 * column serves both unlockers.
+	 * A fresh 16-byte salt for a vault row's `uev_salt` (the keyed-hash key
+	 * kekFromRecoveryCode() uses for codes made before code sets). A passphrase
+	 * is derived in the browser, never here (specs/one_vault_experience.md § R7).
 	 */
 	public function generateSalt(): string {
 		return self::b64url(random_bytes(SODIUM_CRYPTO_PWHASH_SALTBYTES));

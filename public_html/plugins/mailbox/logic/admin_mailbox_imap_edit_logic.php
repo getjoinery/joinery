@@ -15,6 +15,7 @@
  * Connection details for a known provider come from the preset catalog; the
  * app/basic password is a non-model field stored encrypted via setPassword().
  *
+ * @version 2.10 - refuses to bind a feed to a Fortress mailbox
  * @version 2.9 - no unencrypted connection mode; a generic host inside this
  *   server's own network is refused at save
  * @version 2.8 - two levels, Standard and Private
@@ -358,6 +359,15 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 		try {
 			// A host that resolves inside this server's own network is refused at
 			// save, not only at the first poll (specs/implemented/imap_client_hardening.md F17).
+			// A Fortress mailbox takes no feed: the feed's password reads the whole
+			// source mailbox (specs/client_custody_mail.md § R8, Q3).
+			$bound_id = intval($account->get('iia_iea_inbound_email_alias_id'));
+			$bound = $bound_id > 0 ? new InboundEmailAlias($bound_id, TRUE) : null;
+			if ($bound && $bound->key && $bound->is_fortress()) {
+				throw new InboundImapAccountException($bound->get_full_address() . ' is end-to-end encrypted '
+					. '(Fortress), so it cannot collect mail from another provider: the server would hold a '
+					. 'password that can read the whole source mailbox.');
+			}
 			if ($provider === 'imap_generic') {
 				$host_problem = InboundImapAccount::imapHostProblem(
 					(string)$account->get('iia_imap_host'), intval($account->get('iia_imap_port')));

@@ -90,6 +90,13 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.44 - Fortress rows at ingest (storeMessage, storeDirectMessage): attachments
+ *   seal in the browser format with nothing about the file in the clear, the
+ *   search text / snippet / manifest are sealed beside the content, and a failed
+ *   split defers instead of keeping a raw
+ * @version 1.43 - Fortress: resolveSealTarget() loads the vault for the row's seal scope
+ *   (the `mail` vault at Fortress); a sealing mailbox's log line carries the
+ *   envelope address alone, never the From display name
  * @version 1.42 - storeExtracted clips header columns UTF-8-safely, carries
  *   iem_source_message_key, and lets a database error out as itself
  *   (specs/implemented/imap_client_hardening.md F5, F6)
@@ -670,6 +677,9 @@ class InboundEmailRouter {
 		$seal = $this->resolveSealTarget($alias, $domain);
 		$sealing = $seal['sealing'];
 		$vault = $seal['vault'];
+		// Fortress: sealed to a key only the owner's devices hold, so everything the
+		// server would derive from the plaintext later is derived now and sealed too.
+		$for_browser = $sealing && InboundEmailMessage::isBrowserVault($vault);
 
 		// A composed row (an archive's Sent mail arrives as one) treats iem_recipient
 		// as CONTENT, not as the routing address — that is what decryptSealedField
@@ -793,7 +803,13 @@ class InboundEmailRouter {
 			// private Files and store the lean record (or fall back to raw storage
 			// on failure). Runs INSIDE the transaction so the row and its
 			// attachments/raw commit together — never a bare row.
-			$this->persistRawAndManifest(intval($msg->key), $raw_email, $alias, $dek);
+			$manifest = $this->persistRawAndManifest(intval($msg->key), $raw_email, $alias, $dek, $for_browser);
+			if ($for_browser) {
+				InboundEmailMessage::sealFortressDerived(intval($msg->key), $vault, $dek, array(
+					'sender' => $sender, 'subject' => $subject,
+					'body_plain' => $bodies['plain'], 'body_html' => $bodies['html'],
+				), $manifest);
+			}
 
 			if ($owns_tx) {
 				$db->commit();
@@ -919,7 +935,7 @@ class InboundEmailRouter {
 		$sender  = $this->senderDisplayString($parsed);
 
 		$owner_id = intval($msg->get('iem_sealed_owner_user_id'));
-		$vault = ($owner_id > 0) ? $this->loadOwnerVault($owner_id) : null;
+		$vault = ($owner_id > 0) ? $this->loadOwnerVault($owner_id, UserEncryptionVault::SCOPE_USER) : null;
 		if ($vault === null) {
 			// A relay-sealed row must have a vault owner; without one there is no key
 			// to seal to. Leave pending — the owner may still be enrolling.
@@ -1129,6 +1145,7 @@ class InboundEmailRouter {
 		$seal = $this->resolveSealTarget($alias, $domain);
 		$sealing = $seal['sealing'];
 		$vault = $seal['vault'];
+		$for_browser = $sealing && InboundEmailMessage::isBrowserVault($vault);
 
 		$size_bytes = strlen($body_plain) + strlen($body_html);
 		foreach ($attachments as $attachment) {
@@ -1208,7 +1225,12 @@ class InboundEmailRouter {
 				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $body_plain, $body_html,
 					null, null, $lists);
 			}
-			$this->storeDirectAttachments(intval($msg->key), $attachments, $owner_id, $dek);
+			$manifest = $this->storeDirectAttachments(intval($msg->key), $attachments, $owner_id, $dek, $for_browser);
+			if ($for_browser) {
+				InboundEmailMessage::sealFortressDerived(intval($msg->key), $vault, $dek, array(
+					'sender' => $sender, 'subject' => $subject, 'body_plain' => $body_plain, 'body_html' => $body_html,
+				), $manifest);
+			}
 			if ($owns_tx) {
 				$db->commit();
 			}
@@ -1248,20 +1270,23 @@ class InboundEmailRouter {
 	 * a MIME document to split.
 	 *
 	 * $dek is the message's per-item DEK, non-null only when the body was
-	 * sealed; attachments seal under the SAME key, exactly as on the SMTP path.
+	 * sealed; attachments seal under the SAME key, exactly as on the SMTP path,
+	 * and on a Fortress row ($for_browser) in the same shape
+	 * extractAttachmentsToFiles() gives one.
+	 *
+	 * @return array manifest entries (InboundEmailMessage::manifestEntry())
 	 */
-	private function storeDirectAttachments(int $message_id, array $attachments, int $owner_id, ?string $dek): void {
+	private function storeDirectAttachments(int $message_id, array $attachments, int $owner_id, ?string $dek,
+			bool $for_browser = false): array {
 		if (empty($attachments)) {
-			return;
+			return array();
 		}
-		$crypto = null;
-		if ($dek !== null) {
-			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-			$crypto = new VaultCrypto();
-		}
+		$sealing = ($dek !== null);
+		$for_browser = $sealing && $for_browser;
 
 		$created_files = array();
 		$rows = array();
+		$manifest = array();
 		try {
 			foreach (array_values($attachments) as $index => $attachment) {
 				$bytes = (string)($attachment['bytes'] ?? '');
@@ -1274,41 +1299,49 @@ class InboundEmailRouter {
 				$mime_part = 'direct.' . $index;
 
 				$original_size = strlen($bytes);
-				if ($crypto !== null) {
-					$bytes = $crypto->sealField($bytes, $dek, InboundEmailMessage::attachmentAd($message_id, $mime_part));
+				if ($sealing) {
+					$bytes = InboundEmailMessage::sealAttachmentBytes($bytes, $dek, $message_id, $mime_part, $for_browser);
 				}
+				$stored_type = $for_browser ? InboundEmailMessage::FORTRESS_FILE_TYPE : $type;
 
 				$file = File::createFromBytes(
 					$bytes,
-					$name !== null ? $name : 'attachment',
-					$type,
+					$for_browser ? InboundEmailMessage::fortressAttachmentName($message_id, $mime_part)
+						: ($name !== null ? $name : 'attachment'),
+					$stored_type,
 					$owner_id,
 					array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT)
 				);
-				if ($crypto !== null) {
+				if ($sealing) {
 					// The on-disk bytes are ciphertext, so type detection saw noise —
-					// restore the real content type for the reader.
-					$file->set('fil_type', substr($type, 0, 128));
+					// restore the content type for the reader.
+					$file->set('fil_type', substr($stored_type, 0, 128));
 					$file->save();
 				}
 				$created_files[] = $file;
 
+				$content_id = $cid !== '' ? substr(trim($cid, '<>'), 0, 255) : null;
 				$rows[] = array(
 					'ima_iem_inbound_email_message_id' => $message_id,
-					'ima_filename'     => $name,
-					'ima_content_type' => substr($type, 0, 255),
+					'ima_filename'     => $for_browser ? '' : $name,
+					'ima_content_type' => $for_browser ? '' : substr($type, 0, 255),
 					'ima_size_bytes'   => $original_size,
 					'ima_mime_part'    => substr($mime_part, 0, 40),
 					'ima_encoding'     => 'binary', // no base64: parts transfer as bytes
-					'ima_content_id'   => $cid !== '' ? substr(trim($cid, '<>'), 0, 255) : null,
+					'ima_content_id'   => $for_browser ? '' : $content_id,
 					'ima_is_inline'    => !empty($attachment['is_inline']),
 					'ima_fil_file_id'  => intval($file->key),
-					'ima_is_sealed'    => ($crypto !== null),
+					'ima_is_sealed'    => $sealing,
 				);
+				$manifest[] = array('filename' => $name, 'content_type' => substr($type, 0, 255),
+					'content_id' => $content_id);
 			}
 
-			foreach ($rows as $row) {
-				InboundMessageAttachment::CreateEntry($row);
+			foreach ($rows as $i => $row) {
+				$att = InboundMessageAttachment::CreateEntry($row);
+				$manifest[$i] = InboundEmailMessage::manifestEntry(intval($att->key), $manifest[$i]['filename'],
+					$manifest[$i]['content_type'], $manifest[$i]['content_id'], (string)$row['ima_mime_part'],
+					(bool)$row['ima_is_inline'], intval($row['ima_size_bytes']));
 			}
 		} catch (\Throwable $e) {
 			foreach ($created_files as $file) {
@@ -1317,6 +1350,7 @@ class InboundEmailRouter {
 			$this->deleteManifestRows($message_id);
 			throw $e;
 		}
+		return $manifest;
 	}
 
 	/**
@@ -1439,10 +1473,13 @@ class InboundEmailRouter {
 		);
 	}
 
-	/** The owner's Sealed Vault, or null when they have none (never sealed). */
-	private function loadOwnerVault(int $owner_id) {
-		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-		return UserEncryptionVault::loadForUser($owner_id);
+	/**
+	 * The owner's vault for $scope, or null when they hold none: the
+	 * server-custody `user` vault for Private mail, the client-custody `mail`
+	 * vault for Fortress mail (specs/client_custody_mail.md § R1).
+	 */
+	private function loadOwnerVault(int $owner_id, string $scope) {
+		return InboundEmailMessage::loadSealVault($owner_id, $scope);
 	}
 
 	/**
@@ -1455,7 +1492,10 @@ class InboundEmailRouter {
 	 *
 	 * The posture comes from the MAILBOX (specs/mailbox_connect_flow.md § D) —
 	 * its own level when it has one, the domain's otherwise — and mail with no
-	 * mailbox asks the domain, which is whose mail it is.
+	 * mailbox asks the domain, which is whose mail it is. Which of the owner's
+	 * vaults it seals to is the message model's per-row answer
+	 * (InboundEmailMessage::sealScopeFor): the `mail` vault at Fortress, whose
+	 * secret only the owner's devices hold, the `user` vault at Private.
 	 *
 	 * @throws MailboxSealTargetMissing when the mailbox seals but no key resolves.
 	 */
@@ -1469,8 +1509,9 @@ class InboundEmailRouter {
 			return array('sealing' => false, 'vault' => null, 'owner_id' => null);
 		}
 
+		$scope = InboundEmailMessage::sealScopeFor($alias_id, $domain_id);
 		$owner_id = InboundEmailMessage::sealOwnerUserId($alias_id, $domain_id);
-		$vault = ($owner_id !== null) ? $this->loadOwnerVault($owner_id) : null;
+		$vault = ($owner_id !== null) ? $this->loadOwnerVault($owner_id, $scope) : null;
 		if ($vault === null) {
 			// Decline rather than downgrade. Naming the mailbox matters: this
 			// message is being held, and the operator needs to know which mailbox
@@ -1478,11 +1519,13 @@ class InboundEmailRouter {
 			$where = ($alias_id !== null && $alias->key)
 				? $alias->get_full_address()
 				: (($domain && $domain->key) ? (string)$domain->get('ied_domain') : 'this mailbox');
+			$which = ($scope === UserEncryptionVault::SCOPE_USER) ? 'a vault' : 'a ' . VaultScopes::labelFor($scope);
 			throw new MailboxSealTargetMissing(
 				'Refusing to store mail for ' . $where . ' unprotected: it is a protected mailbox with '
-				. ($owner_id === null ? 'no single member to seal to' : 'a member who holds no vault')
+				. ($owner_id === null ? 'no single member to seal to' : 'a member who holds no '
+					. (($scope === UserEncryptionVault::SCOPE_USER) ? 'vault' : VaultScopes::labelFor($scope)))
 				. '. The message stays where it is and will be delivered once the mailbox has one member '
-				. 'with a vault.');
+				. 'with ' . $which . '.');
 		}
 		return array('sealing' => true, 'vault' => $vault, 'owner_id' => $owner_id);
 	}
@@ -1550,13 +1593,27 @@ class InboundEmailRouter {
 	 * DEK, iem_raw_sealed = true) before it reaches the raw store — the raw
 	 * path never writes a sealed mailbox's plaintext to disk, and the message
 	 * keeps the same durability a plaintext mailbox gets.
+	 *
+	 * A Fortress row ($for_browser) has no raw fallback: no raw is ever kept for
+	 * it (specs/client_custody_mail.md § R2), so a failed split throws and the
+	 * caller's transaction takes the row with it — the sender retries later.
+	 *
+	 * @return array the attachment manifest entries (InboundEmailMessage::manifestEntry())
+	 *               the lean record wrote; empty on the raw fallback
 	 */
-	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null) {
+	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null,
+			bool $for_browser = false): array {
 		try {
-			$this->extractAttachmentsToFiles($message_id, $raw_email, $alias, $dek);
-			return; // lean record: Files written, manifest linked, no raw retained
+			// lean record: Files written, manifest linked, no raw retained
+			return $this->extractAttachmentsToFiles($message_id, $raw_email, $alias, $dek, $for_browser);
 		} catch (\Throwable $e) {
 			// extractAttachmentsToFiles() rolled back its own Files + manifest rows.
+			if ($for_browser) {
+				error_log('INBOUND_FORTRESS_ATTACHMENT_EXTRACTION_FAILED message_id=' . $message_id
+					. ' (deferring: a Fortress message keeps no raw): ' . $e->getMessage());
+				throw new \RuntimeException('Attachment extraction failed for an end-to-end mailbox, which keeps no '
+					. 'raw copy to fall back on; the message is deferred for retry.', 0, $e);
+			}
 			error_log('INBOUND_ATTACHMENT_EXTRACTION_FAILED message_id=' . $message_id
 				. ' (falling back to raw storage): ' . $e->getMessage());
 		}
@@ -1584,7 +1641,7 @@ class InboundEmailRouter {
 			} catch (\Throwable $e) {
 				error_log('InboundEmailRouter: attachment manifest write failed for message ' . $message_id . ': ' . $e->getMessage());
 			}
-			return;
+			return array();
 		}
 
 		// Fallback: persist the whole raw and write a section-pointer manifest —
@@ -1595,6 +1652,7 @@ class InboundEmailRouter {
 		} catch (\Throwable $e) {
 			error_log('InboundEmailRouter: attachment manifest write failed for message ' . $message_id . ': ' . $e->getMessage());
 		}
+		return array();
 	}
 
 	/**
@@ -1606,18 +1664,25 @@ class InboundEmailRouter {
 	 * Files are created first (the failure-prone step — disk I/O); the manifest
 	 * rows are written only once every File exists, so a partial File failure
 	 * never leaves dangling links.
+	 *
+	 * On a Fortress row ($for_browser) the bytes seal in the browser's format
+	 * under the same DEK, and nothing about the file is written in the clear:
+	 * the File is named by message and part, typed octet-stream, and the ima_
+	 * name, type and Content-ID are blank — the returned manifest carries them
+	 * into the row's sealed iem_attachment_manifest.
+	 *
+	 * @return array manifest entries (InboundEmailMessage::manifestEntry()), one per row written
 	 */
-	private function extractAttachmentsToFiles(int $message_id, string $raw_email, $alias, ?string $dek = null) {
+	private function extractAttachmentsToFiles(int $message_id, string $raw_email, $alias, ?string $dek = null,
+			bool $for_browser = false): array {
 		$owner_id = $this->attachmentOwnerId($alias);
 		$parts    = $this->enumerateNonTextParts($raw_email);
-		$crypto   = null;
-		if ($dek !== null) {
-			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-			$crypto = new VaultCrypto();
-		}
+		$sealing  = ($dek !== null);
+		$for_browser = $sealing && $for_browser;
 
 		$created_files = array(); // File[] — for rollback
 		$rows = array();          // pending ima_ row arrays
+		$manifest = array();
 
 		try {
 			// Phase 1: mint a private File per part (all-or-nothing).
@@ -1635,48 +1700,56 @@ class InboundEmailRouter {
 				// ciphertext, and fil_source is the marker the decrypt hook
 				// (plugins/mailbox/includes/bootstrap.php) keys on.
 				$original_size = strlen($bytes);
-				if ($crypto !== null) {
-					$bytes = $crypto->sealField($bytes, $dek, InboundEmailMessage::attachmentAd($message_id, $mime_part));
+				if ($sealing) {
+					$bytes = InboundEmailMessage::sealAttachmentBytes($bytes, $dek, $message_id, $mime_part, $for_browser);
 				}
+				$stored_type = $for_browser ? InboundEmailMessage::FORTRESS_FILE_TYPE : $type;
 
 				// No resize()/variants — email attachments are served as their
 				// original; skipping resize is exactly the small-VPS relief.
 				$file = File::createFromBytes(
 					$bytes,
-					$name !== null ? $name : 'attachment',
-					$type,
+					$for_browser ? InboundEmailMessage::fortressAttachmentName($message_id, $mime_part)
+						: ($name !== null ? $name : 'attachment'),
+					$stored_type,
 					$owner_id,
 					array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT)
 				);
-				if ($crypto !== null) {
+				if ($sealing) {
 					// createFromBytes()/save() detects fil_type from the on-disk bytes,
 					// which are now ciphertext (never a recognizable magic-byte
-					// signature) — restore the real content-type the caller supplied,
+					// signature) — restore the content-type the caller supplied,
 					// so the reader shows the correct type once the hook decrypts.
-					$file->set('fil_type', substr($type, 0, 128));
+					$file->set('fil_type', substr($stored_type, 0, 128));
 					$file->save();
 				}
 				$created_files[] = $file;
 
+				$content_id = $cid ? substr(trim($cid, '<>'), 0, 255) : null;
 				$rows[] = array(
 					'ima_iem_inbound_email_message_id' => $message_id,
-					'ima_filename'     => $name,
-					'ima_content_type' => substr($type, 0, 255),
+					'ima_filename'     => $for_browser ? '' : $name,
+					'ima_content_type' => $for_browser ? '' : substr($type, 0, 255),
 					'ima_size_bytes'   => $original_size,
 					'ima_mime_part'    => substr((string)$part->getMimeId(), 0, 40),
 					'ima_encoding'     => substr($this->partTransferEncoding($part), 0, 40),
-					'ima_content_id'   => $cid ? substr(trim($cid, '<>'), 0, 255) : null,
+					'ima_content_id'   => $for_browser ? '' : $content_id,
 					'ima_is_inline'    => $isInline,
 					'ima_fil_file_id'  => intval($file->key),
 					// Per-file sealed state — every reader of the File bytes keys
 					// on this (InboundEmailMessage::openSealedAttachment).
-					'ima_is_sealed'    => ($crypto !== null),
+					'ima_is_sealed'    => $sealing,
 				);
+				$manifest[] = array('filename' => $name, 'content_type' => substr($type, 0, 255),
+					'content_id' => $content_id);
 			}
 
 			// Phase 2: write the manifest rows now every File exists.
-			foreach ($rows as $row) {
-				InboundMessageAttachment::CreateEntry($row);
+			foreach ($rows as $i => $row) {
+				$att = InboundMessageAttachment::CreateEntry($row);
+				$manifest[$i] = InboundEmailMessage::manifestEntry(intval($att->key), $manifest[$i]['filename'],
+					$manifest[$i]['content_type'], $manifest[$i]['content_id'], (string)$row['ima_mime_part'],
+					(bool)$row['ima_is_inline'], intval($row['ima_size_bytes']));
 			}
 		} catch (\Throwable $e) {
 			foreach ($created_files as $f) {
@@ -1685,6 +1758,7 @@ class InboundEmailRouter {
 			$this->deleteManifestRows($message_id);
 			throw $e;
 		}
+		return $manifest;
 	}
 
 	/**
@@ -1768,8 +1842,9 @@ class InboundEmailRouter {
 	 * shape) first, so re-extraction never duplicates the attachment list.
 	 */
 	public function resealBackfillAttachments(int $message_id, string $raw_email, string $dek): void {
-		$this->deleteManifestRows($message_id);
 		$msg = new InboundEmailMessage($message_id, TRUE);
+		InboundEmailMessage::refuseBrowserSealed($msg, 'the attachment backfill');
+		$this->deleteManifestRows($message_id);
 		$alias_id = $msg->get('iem_iea_inbound_email_alias_id');
 		$alias = $alias_id ? new InboundEmailAlias(intval($alias_id), TRUE) : null;
 		$this->extractAttachmentsToFiles($message_id, $raw_email, $alias, $dek);
@@ -2465,6 +2540,9 @@ class InboundEmailRouter {
 	 * whose columns are plaintext.
 	 */
 	private function synthesizeRawForForward(InboundEmailMessage $msg): ?string {
+		if (InboundEmailMessage::isBrowserSealed($msg)) {
+			return null;   // Fortress: only the owner's devices can read it, so nothing here can forward it
+		}
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
 
@@ -3405,11 +3483,12 @@ class InboundEmailRouter {
 	 * Never logs the subject (specs/implemented/inbound_email_encryption_at_rest.md
 	 * § 7 "no sideways copies" — the log viewer is routing metadata only: sender/
 	 * recipient addresses, verdicts, sizes; never subject/body content, sealed
-	 * mailbox or not).
+	 * mailbox or not). On a sealing mailbox the sender is the envelope address
+	 * alone (logFromFor()).
 	 */
 	public function logTransaction($parsed, $alias, $status, $to_address, $destinations = null, $error = null, $domain_id = null, $message_id = null) {
 		InboundEmailLog::CreateEntry(
-			$parsed['from'] ?? '',
+			$this->logFromFor($parsed, $alias, $domain_id),
 			$to_address,
 			$this->logSubjectFor($parsed, $alias),
 			$destinations,
@@ -3419,6 +3498,40 @@ class InboundEmailRouter {
 			$domain_id,
 			$message_id
 		);
+	}
+
+	/**
+	 * The sender a routing-log line may carry. On a plaintext mailbox, the From
+	 * header as it arrived. On a sealing one (Private or Fortress) the log is
+	 * not sealed, so it carries the envelope sender's bare address — the
+	 * Return-Path the MTA stamped, else the From header's addr-spec — and never
+	 * the display name, which is content the sealed row keeps to itself. With
+	 * no mailbox the domain's posture decides.
+	 */
+	private function logFromFor($parsed, $alias, $domain_id): string {
+		$from = (string)($parsed['from'] ?? '');
+		if ($from === '') {
+			return '';
+		}
+		if ($alias && $alias->key) {
+			$sealing = $alias->seals_content();
+		} else {
+			$domain = intval($domain_id) > 0 ? new InboundEmailDomain(intval($domain_id), TRUE) : null;
+			$sealing = $domain && $domain->key && $domain->seals_content();
+		}
+		if (!$sealing) {
+			return $from;
+		}
+		$return_path = $parsed['headers']['return-path'] ?? '';
+		if (is_array($return_path)) {
+			$return_path = (string)($return_path[0] ?? '');
+		}
+		$return_path = trim((string)$return_path, " \t<>");
+		if ($return_path !== '' && strpos($return_path, '@') !== false) {
+			return $return_path;
+		}
+		$address = trim((string)($parsed['from_email'] ?? ''), " \t<>");
+		return (strpos($address, '@') !== false) ? $address : '';
 	}
 
 	/**

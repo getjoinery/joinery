@@ -97,6 +97,7 @@
  * a working copy or restored blob of another format fails to open and is
  * rebuilt — the disposable-cache contract, so a shape change never needs a
  * migration, just one rebuild per owner on their next unlocked visit.
+ * @version 1.12 - a Fortress message is never folded into the server index
  * @version 1.11 - the persisted index is one file per user at a fixed path
  *   under cache/, not a File per persist: a second copy has no name to take
  *   (specs/implemented/mailbox_search_index_blob_leak.md)
@@ -964,6 +965,12 @@ class MailboxIndex {
 			// The content fields do not exist yet — only the sealed raw blob
 			// does. parsePendingMessage() enqueues a refold when they appear,
 			// so skipping here never strands the message outside the index.
+			return null;
+		}
+		if (InboundEmailMessage::isBrowserSealed($msg)) {
+			// Fortress: sealed to a key only the owner's devices hold. Its search
+			// runs on the device over its own sealed search text
+			// (specs/client_custody_mail.md § R5); the server index never holds it.
 			return null;
 		}
 		try {

@@ -5,6 +5,7 @@
  * pass them to register()/authenticate()/derive(), then POST the returned
  * object back to the matching verify action.
  *
+ * @version 1.6 - derive() hands back a second PRF output apart and strips it from the response
  * @version 1.5
  * @changelog 1.5 - runFlow() reads the error message out of whatever envelope
  *   the failure arrived in (the API's error string, or an exception handler's
@@ -228,17 +229,24 @@ window.JoineryPasskeys = (function () {
 
 	/**
 	 * Like authenticate(), but for options carrying a PRF extension request.
-	 * Returns { response, prfOutput } - response is the same JSON-ready object
-	 * authenticate() returns (POST it to the consumer's derive-verify action);
-	 * prfOutput is the base64url-encoded derived secret for immediate local use.
+	 * Returns { response, prfOutput, secondOutput } - response is the same
+	 * JSON-ready object authenticate() returns (POST it to the consumer's
+	 * derive-verify action); prfOutput is the base64url-encoded derived secret
+	 * for immediate local use. secondOutput is the second secret, when the
+	 * options asked for one (the root vault's, specs/one_vault_experience.md
+	 * § R1): it is taken OUT of response here, so a page posting the response
+	 * can never send it. The server refuses a response that still carries it.
 	 */
 	async function derive(optionsJson) {
 		var response = await authenticate(optionsJson);
 		var results = response.clientExtensionResults && response.clientExtensionResults.prf
 			? response.clientExtensionResults.prf.results : null;
+		var second = results && results.second ? results.second : null;
+		if (results) delete results.second;
 		return {
 			response: response,
 			prfOutput: results && results.first ? results.first : null,
+			secondOutput: second,
 		};
 	}
 

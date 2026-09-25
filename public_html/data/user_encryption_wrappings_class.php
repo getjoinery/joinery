@@ -36,6 +36,14 @@ class UserEncryptionWrappingException extends SystemBaseException {}
  * a vault or blocks a re-enrolment; and reserve() retires any stale reserved
  * row for the same vault, type and credential before saving its own.
  *
+ * A content scope's secret is wrapped once under a key derived from the root
+ * vault's secret (`root`, specs/one_vault_experience.md): no salt, no
+ * credential, opened by whoever holds the root. Recovery wrappings carry the
+ * code set they came from (`uew_code_set`, a random id) and the code's index
+ * in it (`uew_code_index`): one code makes a wrapping on the account vault
+ * and one on the root vault, and using it spends both together.
+ *
+ * @version 1.4 - TYPE_ROOT; uew_code_set / uew_code_index pair a code's wrappings
  * @version 1.3 - reserved (empty) rows are excluded by default and swept by the
  *   next reserve() for the same unlocker; storeWrapped() refuses a row that was
  *   superseded meanwhile
@@ -60,6 +68,8 @@ class UserEncryptionWrapping extends SystemBase {
 	const TYPE_PASSKEY    = 'passkey';
 	const TYPE_RECOVERY   = 'recovery';
 	const TYPE_PASSPHRASE = 'passphrase';
+	/** A content scope's secret, wrapped under a key derived from the root vault. */
+	const TYPE_ROOT       = 'root';
 
 	public static $field_specifications = array(
 		'uew_user_encryption_wrapping_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
@@ -72,6 +82,11 @@ class UserEncryptionWrapping extends SystemBase {
 		'uew_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
 		'uew_is_used'            => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'uew_label'              => array('type'=>'varchar(255)', 'is_nullable'=>true),
+		// The recovery code set this wrapping belongs to, and the code's place in
+		// it: the account vault's and the root vault's wrappings for one code
+		// share both, so a use spends the pair in one statement.
+		'uew_code_set'           => array('type'=>'varchar(32)', 'is_nullable'=>true),
+		'uew_code_index'         => array('type'=>'int2', 'is_nullable'=>true),
 		'uew_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'uew_used_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'uew_delete_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
@@ -134,6 +149,69 @@ class UserEncryptionWrapping extends SystemBase {
 		$wrapping->save();
 		self::$reserved_this_request[(int)$wrapping->key] = true;
 		return $wrapping;
+	}
+
+	/**
+	 * Has this vault's recovery ever been a browser-made set? Used codes count:
+	 * an account whose every code is spent still has its set, and gets new
+	 * codes by regenerating, not by adoption.
+	 */
+	public static function hasCodeSet(int $vault_id): bool {
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			"SELECT 1 FROM uew_user_encryption_wrappings
+			  WHERE uew_uev_user_encryption_vault_id = ? AND uew_unlocker_type = 'recovery'
+			    AND uew_code_set IS NOT NULL AND uew_delete_time IS NULL LIMIT 1");
+		$q->execute(array($vault_id));
+		return (bool)$q->fetchColumn();
+	}
+
+	/**
+	 * Replace a server-custody vault's recovery codes with a browser-made set,
+	 * in the request that presented an unlocker for it
+	 * (specs/one_vault_experience.md § R6). $code_set is
+	 * VaultCeremonies::codeSet()'s shape; $open performs that request's open
+	 * with the wrap list it is handed and returns VaultUnlock::open()'s result.
+	 * Old codes are retired in the same transaction, and $also (the root
+	 * vault's twin of the same set, when the caller carries it) runs inside it
+	 * too, so the two halves of every code change together. Returns true.
+	 */
+	public static function adoptCodeSet($vault, array $code_set, callable $open, ?callable $also = null): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->beginTransaction();
+		try {
+			$old = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => self::TYPE_RECOVERY]);
+			$old->load();
+			$old_rows = array();
+			foreach ($old as $row) {
+				$old_rows[] = $row;
+			}
+			$generation = (int)$vault->get('uev_key_generation');
+			$rows = array();
+			$wrap_under = array();
+			foreach ($code_set['entries'] as $entry) {
+				$row = self::reserve((int)$vault->key, self::TYPE_RECOVERY, null, null, $generation);
+				$row->set('uew_code_set', $code_set['id']);
+				$row->set('uew_code_index', (int)$entry[0]);
+				$row->save();
+				$rows[] = $row;
+				$wrap_under[] = $row->wrapEntry($entry[1]);
+			}
+			$opened = $open($wrap_under);
+			self::storeWrappings($rows, $opened['wrappings']);
+			foreach ($old_rows as $row) {
+				$row->soft_delete();
+			}
+			if ($also !== null) {
+				$also();
+			}
+			$db->commit();
+			return true;
+		} catch (Throwable $e) {
+			if ($db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
 	}
 
 	/** @var array<int,bool> rows reserve() saved in this request — never swept as stale */

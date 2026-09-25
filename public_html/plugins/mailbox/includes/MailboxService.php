@@ -49,6 +49,10 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.44 - Fortress (specs/client_custody_mail.md § R4): list and thread carry a
+ *   browser-sealed message as `sealed` (its columns as stored) with the clear fields
+ *   empty and `fortress` set; its parts are listed without names or URLs, and the
+ *   inline-image rewrite and signed transport leave it alone
  * @version 1.43 - thread rows carry source_gone; a source-gone remote row offers no
  *   live original (specs/implemented/imap_client_hardening.md F15)
  * @version 1.42 - each mailbox row carries protection_addons: the domain's add-ons
@@ -1259,6 +1263,7 @@ class MailboxService {
 		$purge_days = $trash ? self::trashRetentionDays() : 0;
 
 		$section_for = array(0 => 'unread', 1 => 'starred', 2 => 'other');
+		$any_fortress = false;
 		$empty_latest = array('sender' => '', 'subject' => '', 'body_plain' => '', 'body_html' => '');
 
 		// Previews first, for the whole page: the plain part in place, and every
@@ -1339,6 +1344,9 @@ class MailboxService {
 				// nothing in a message's content can reproduce it.
 				'direct_verified' => (bool)$this->pgBool($r['any_direct_verified']),
 				'latest_time'  => $r['latest_time'],
+				// Placeholder so every thread carries the key; filled below for a
+				// Fortress thread.
+				'sealed'       => null,
 				'latest_id'    => $latest_id,
 				// Trash only: when this thread is permanently deleted (UTC), or null
 				// when nothing purges it — retention 0, or any other view.
@@ -1346,6 +1354,19 @@ class MailboxService {
 					? LibraryFunctions::time_shift($r['trashed_time'], $purge_days . ' days', 'Y-m-d H:i:s')
 					: null,
 			);
+			// A Fortress thread's newest message (specs/client_custody_mail.md
+			// § R4): subject, sender and snippet stay sealed for the reader to
+			// open ({key, sealed_scope, sealed_dek, sealed_ad_prefix, iem_sender,
+			// iem_subject, iem_snippet}, `pending` for a relay-sealed row not yet
+			// parsed); the clear fields are empty and there is no AI summary.
+			$last = count($threads) - 1;
+			if (isset($latest['sealed'])) {
+				$threads[$last]['sealed'] = $latest['sealed'];
+				unset($threads[$last]['ai_summary']);
+				$any_fortress = true;
+			} else {
+				unset($threads[$last]['sealed']);
+			}
 		}
 
 		$result = array(
@@ -1380,6 +1401,12 @@ class MailboxService {
 			// relay-sealed pending-parse row). The reader shows metadata now and turns
 			// any content action into a one-tap unlock prompt.
 			$result['locked'] = true;
+		}
+		if ($any_fortress) {
+			// Some thread's newest message is end-to-end sealed: only the owner's
+			// devices open it. A client that cannot (the native apps, until they
+			// hold the mail key) shows that state and hands off to the web reader.
+			$result['fortress'] = true;
 		}
 		return $result;
 	}
@@ -1419,7 +1446,8 @@ class MailboxService {
 					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_subject END AS iem_subject,
 					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_body_plain END AS iem_body_plain,
 					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_body_html END AS iem_body_html,
-					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_ai_summary END AS iem_ai_summary
+					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_ai_summary END AS iem_ai_summary,
+					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_snippet END AS iem_snippet
 				FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN ($in)";
 		$rows = $this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
@@ -1433,6 +1461,21 @@ class MailboxService {
 			// parsed — its content columns are empty. It renders the SAME
 			// placeholder as a locked sealed row, never a visible third state.
 			$pending = $this->pgBool($row['iem_pending_parse'] ?? false);
+			if (InboundEmailMessage::isBrowserSealed($row)) {
+				// Fortress (specs/client_custody_mail.md § R4): nothing here opens
+				// it. The newest message travels sealed for the reader to open;
+				// the others contribute nothing to the senders line.
+				$entry = array('sender' => '', 'subject' => '', 'body_plain' => '', 'body_html' => '', 'ai_summary' => '');
+				if (isset($full[$mid])) {
+					$entry['sealed'] = InboundEmailMessage::sealedForBrowser($row,
+						array('iem_sender', 'iem_subject', 'iem_snippet'));
+					if ($pending) {
+						$entry['sealed']['pending'] = true;
+					}
+				}
+				$out[$mid] = $entry;
+				continue;
+			}
 			$wanted = isset($full[$mid]) ? $fields : array('iem_sender' => 'sender');
 			foreach ($fields as $col => $key) {
 				if (!isset($wanted[$col])) {
@@ -1581,7 +1624,8 @@ class MailboxService {
 					iem_raw_storage_driver, iem_raw_storage_key, iem_source_gone_time,
 					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw,
 					(COALESCE(length(iem_raw_headers), 0) > 0) AS iem_has_raw_headers,
-					CASE WHEN iem_to IS NULL AND iem_cc IS NULL THEN iem_raw_headers END AS iem_raw_headers_for_lists
+					CASE WHEN iem_to IS NULL AND iem_cc IS NULL THEN iem_raw_headers END AS iem_raw_headers_for_lists,
+					iem_attachment_manifest
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -1594,6 +1638,10 @@ class MailboxService {
 		$out = array();
 		foreach ($rows as $r) {
 			$mid = intval($r['iem_inbound_email_message_id']);
+			if (InboundEmailMessage::isBrowserSealed($r)) {
+				$out[] = $this->fortressThreadMessage($r);
+				continue;
+			}
 			$decrypted = $this->decryptThreadRow($r);
 			$lists = $this->addressListsFor($r, $decrypted);
 			$out[] = array(
@@ -1676,6 +1724,97 @@ class MailboxService {
 				// (specs/implemented/imap_client_hardening.md F15).
 				'source_gone'       => $r['iem_source_gone_time'] !== null,
 				'attachments'       => $att_by_msg[$mid] ?? array(),
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * A Fortress message for the thread payload (specs/client_custody_mail.md
+	 * § R4): the routing metadata and flags a Private message carries, content
+	 * fields empty, and `sealed` holding the sealed columns as stored for the
+	 * owner's browser to open — {key, sealed_scope, sealed_dek,
+	 * sealed_ad_prefix, iem_sender, iem_subject, iem_body_plain, iem_body_html,
+	 * iem_to, iem_cc, iem_attachment_manifest, and iem_recipient / iem_bcc on
+	 * a composed row}. `attachments` lists every part, inline ones included,
+	 * by id, MIME part, size and inline flag only: the names are in the sealed
+	 * manifest. `fortress` marks it for clients that cannot open it.
+	 */
+	private function fortressThreadMessage(array $r): array {
+		$mid = intval($r['iem_inbound_email_message_id']);
+		$direction = $r['iem_direction'] ?: 'inbound';
+		$pending = (bool)$this->pgBool($r['iem_pending_parse'] ?? false);
+		$sealed = InboundEmailMessage::sealedForBrowser($r, array('iem_sender', 'iem_subject', 'iem_body_plain',
+			'iem_body_html', 'iem_to', 'iem_cc', 'iem_recipient', 'iem_bcc', 'iem_attachment_manifest'));
+		if ($pending) {
+			$sealed['pending'] = true;
+		}
+		return array(
+			'id'                => $mid,
+			'alias_id'          => $r['iem_iea_inbound_email_alias_id'] !== null
+									? intval($r['iem_iea_inbound_email_alias_id']) : null,
+			'sender'            => '',
+			// An inbound row's recipient is the routing address, stored in the clear.
+			'recipient'         => InboundEmailMessage::isComposedDirection($direction) ? '' : (string)$r['iem_recipient'],
+			'bcc'               => '',
+			'to'                => '',
+			'cc'                => '',
+			'subject'           => '',
+			'received_time'     => $r['iem_received_time'],
+			'is_read'           => (bool)$this->pgBool($r['iem_is_read']),
+			'is_starred'        => (bool)$this->pgBool($r['iem_is_starred']),
+			'read_time'         => $r['iem_read_time'],
+			'dkim_result'       => $r['iem_dkim_result'],
+			'spf_result'        => $r['iem_spf_result'],
+			'dmarc_result'      => $r['iem_dmarc_result'],
+			'auth_source'       => $r['iem_auth_source'],
+			'auth'              => InboundEmailMessage::authReadout(
+									$r['iem_auth_source'], $r['iem_spf_result'],
+									$r['iem_dkim_result'], $r['iem_dmarc_result'], null),
+			'spam_score'        => ($r['iem_spam_score'] !== null) ? (float)$r['iem_spam_score'] : null,
+			'spam_auth_rule'    => InboundEmailMessage::authRuleSaysSpam(array(
+									'spf'   => (string)$r['iem_spf_result'],
+									'dkim'  => (string)$r['iem_dkim_result'],
+									'dmarc' => (string)$r['iem_dmarc_result'])),
+			'transport'         => (string)($r['iem_transport'] ?? ''),
+			'direct_verified'   => (bool)$this->pgBool($r['iem_direct_verified']),
+			'size_bytes'        => intval($r['iem_size_bytes']),
+			'message_id_header' => $r['iem_message_id_header'],
+			'direction'         => $direction,
+			'body_plain'        => '',
+			'body_html'         => '',
+			'ai_danger_score'   => null,
+			'ai_scan'           => null,
+			'ai_scan_time'      => null,
+			'ai_summary'        => '',
+			// No raw is kept for a Fortress row, and its header block is sealed.
+			'original_source'   => 'none',
+			'source_gone'       => false,
+			'attachments'       => $this->fortressAttachments($mid),
+			'sealed'            => $sealed,
+			'fortress'          => true,
+		);
+	}
+
+	/**
+	 * A Fortress message's parts for the reader: id, MIME part, size, inline
+	 * flag. The browser names them from the sealed manifest and fetches the
+	 * ciphertext by id; `url` is null because there is no URL a sessionless
+	 * client could use — it holds no key to open the bytes with.
+	 */
+	private function fortressAttachments(int $message_id): array {
+		$q = $this->db()->prepare("SELECT ima_inbound_message_attachment_id, ima_mime_part, ima_size_bytes, ima_is_inline
+			FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = ?
+			ORDER BY ima_inbound_message_attachment_id ASC");
+		$q->execute(array($message_id));
+		$out = array();
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $a) {
+			$out[] = array(
+				'id'         => intval($a['ima_inbound_message_attachment_id']),
+				'mime_part'  => (string)$a['ima_mime_part'],
+				'size_bytes' => intval($a['ima_size_bytes']),
+				'inline'     => (bool)$this->pgBool($a['ima_is_inline']),
+				'url'        => null,
 			);
 		}
 		return $out;
@@ -1964,7 +2103,11 @@ class MailboxService {
 
 		$ids = array();
 		foreach ($messages as $m) {
-			$ids[] = intval($m['id']);
+			// A Fortress message's parts get no URL: a sessionless client holds no
+			// key to open them (fortressThreadMessage()).
+			if (empty($m['fortress'])) {
+				$ids[] = intval($m['id']);
+			}
 		}
 		if (!count($ids)) {
 			return $messages;
@@ -1997,6 +2140,9 @@ class MailboxService {
 		}
 
 		foreach ($messages as &$m) {
+			if (!empty($m['fortress'])) {
+				continue;
+			}
 			foreach ($m['attachments'] as &$att) {
 				$att['url'] = $signed_by_att[intval($att['id'])] ?? null;
 			}
@@ -2035,7 +2181,10 @@ class MailboxService {
 	public static function resolveInlineImages(array $messages, int $ttl_seconds = self::INLINE_IMAGE_TTL): array {
 		$ids = array();
 		foreach ($messages as $m) {
-			if ((string)($m['body_html'] ?? '') !== '') {
+			// A Fortress body is opened, and its cid: images resolved, in the
+			// owner's browser (specs/client_custody_mail.md § R4); nothing here
+			// can open either.
+			if ((string)($m['body_html'] ?? '') !== '' && empty($m['fortress'])) {
 				$ids[] = intval($m['id']);
 			}
 		}
@@ -2330,6 +2479,12 @@ class MailboxService {
 			$alias_id = intval($r['iem_iea_inbound_email_alias_id']);
 			if ($alias_id <= 0) {
 				continue; // catch-all store row: no mailbox to hang a filter on
+			}
+			// A Fortress message's sender opens only on the owner's device, so no
+			// rule can be written for it here; the message still leaves Spam.
+			if (InboundEmailMessage::isBrowserSealed($r)) {
+				$cleared[] = intval($r['iem_inbound_email_message_id']);
+				continue;
 			}
 			// The sender rides through the same decryption the reader uses, so this
 			// works on a sealed mailbox exactly as it does on a plaintext one — the

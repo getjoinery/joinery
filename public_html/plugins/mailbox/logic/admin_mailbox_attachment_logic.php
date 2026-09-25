@@ -24,6 +24,7 @@
  * (includes/attachment_retrieval.php); only the authorization posture here
  * is admin-specific.
  *
+ * @version 1.4 - a Fortress attachment streams as stored ciphertext, unnamed
  * @version 1.3
  */
 
@@ -92,7 +93,7 @@ function admin_mailbox_attachment_logic(array $input): LogicResult {
 		return _attachment_error($session, $settings, $result['error'], $reader_url);
 	}
 
-	mailbox_stream_attachment($att, $result['content']);
+	mailbox_stream_attachment($att, $result['content'], !empty($result['browser_sealed']));
 }
 
 function _attachment_error($session, $settings, string $message, string $reader_url): LogicResult {

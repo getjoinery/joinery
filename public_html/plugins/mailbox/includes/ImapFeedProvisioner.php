@@ -18,6 +18,7 @@
  * The whole call is idempotent. Re-running it after a partial failure — or
  * after a reconnect — reuses what exists and finishes the rest.
  *
+ * @version 1.2 - refuses a feed on a Fortress mailbox (fortressRefusal()), before anything is created
  * @version 1.1.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.1
  * @changelog 1.1 - the provider domain is shaped in its creating save (retry
@@ -85,6 +86,15 @@ class ImapFeedProvisioner {
 		if ($reader_user_id <= 0) {
 			throw new ImapFeedProvisionException(
 				'A mailbox needs someone to read it — choose who this one belongs to.');
+		}
+
+		// A Fortress mailbox takes no feed, existing or about to inherit the level
+		// from its domain: the feed's password reads the whole source mailbox, so
+		// sealing the copy here would protect nothing (specs/client_custody_mail.md
+		// § R8, Q3). Asked before anything is created, so a refusal leaves nothing.
+		$fortress_refusal = self::fortressRefusal($domain_name, $local_part);
+		if ($fortress_refusal !== null) {
+			throw new ImapFeedProvisionException($fortress_refusal);
 		}
 
 		// A domain this deployment already hosts is reused as it is: that domain
@@ -187,6 +197,34 @@ class ImapFeedProvisioner {
 		$level = strtolower(trim((string)($intent['security_level'] ?? '')));
 		return in_array($level, array(InboundEmailDomain::LEVEL_STANDARD,
 			InboundEmailDomain::LEVEL_PRIVATE), true) ? $level : null;
+	}
+
+	/**
+	 * Why no feed may be attached at $local_part@$domain_name, or null: the
+	 * mailbox there is Fortress, or would be as soon as it existed (a new
+	 * mailbox on a Fortress domain inherits the level).
+	 */
+	public static function fortressRefusal(string $domain_name, string $local_part): ?string {
+		$domain = InboundEmailDomain::GetByDomain($domain_name);
+		if (!$domain || !$domain->key) {
+			return null;
+		}
+		$aliases = new MultiInboundEmailAlias(array('domain_id' => intval($domain->key),
+			'alias' => strtolower($local_part), 'deleted' => false));
+		$fortress = false;
+		$found = false;
+		foreach ($aliases as $alias) {
+			$found = true;
+			$fortress = $alias->is_fortress();
+		}
+		if (!$found) {
+			$fortress = $domain->is_fortress();
+		}
+		if (!$fortress) {
+			return null;
+		}
+		return $local_part . '@' . $domain_name . ' is end-to-end encrypted (Fortress), so it cannot collect mail '
+			. 'from another provider: the server would hold a password that can read the whole source mailbox.';
 	}
 
 	/** This mailbox's existing feed, or a new unsaved one. */

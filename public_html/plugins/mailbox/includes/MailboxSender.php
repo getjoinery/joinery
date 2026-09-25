@@ -53,6 +53,10 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.22 - a Fortress source is refused for reply and forward, with a clear message
+ * @version 1.21 - a Fortress Sent copy: attachments seal in the browser format with nothing
+ *   about the file in the clear, search text / snippet / manifest are sealed beside it,
+ *   and a Fortress mailbox never APPENDs a copy to a provider
  * @version 1.20 - the Sent row takes its Message-ID and thread key after it is sealed:
  *   a reply has opened the sealed original, and SealedEgressGuard refuses a long
  *   plain string on an INSERT, so a reply sent before any draft was saved lost its
@@ -323,7 +327,9 @@ class MailboxSender {
 		// keeps, so the ingest matches its filed copy to that row and adopts the
 		// locator onto it rather than inserting a second one.
 		$sent_copy = MailboxSendAttempt::SENT_COPY_NOT_APPLICABLE;
-		if ($account && $account->showCompose()) {
+		// A Fortress mailbox never APPENDs: the copy would sit in plaintext on the
+		// provider. It cannot have a feed (the level refuses one); this holds anyway.
+		if ($account && $account->showCompose() && !$alias->is_fortress()) {
 			if ($transport->filesSent) {
 				$sent_copy = MailboxSendAttempt::SENT_COPY_PROVIDER;
 			} else {
@@ -349,12 +355,7 @@ class MailboxSender {
 			return array('ok' => true, 'outbound_id' => 0, 'warning' => self::unsavedCopyWarning($sent_copy, $ref));
 		}
 		$attempt(MailboxSendAttempt::OUTCOME_SENT, null, intval($stored['id']), $sent_copy);
-		if (!empty($uploads['regular'])) {
-			$this->persistOutboundUploads($stored['id'], $uploads['regular'], $stored['dek']);
-		}
-		if (!empty($uploads['inline'])) {
-			$this->persistInlineUploads($stored['id'], $uploads['inline'], $stored['dek']);
-		}
+		$this->storeCopyParts($stored, $uploads, $from_address, $subject, $email);
 
 		// A draft morphed IN PLACE into the Sent row (same id, now at-or-below every
 		// index's high-water mark), so a plain `id > since` fold never revisits it.
@@ -412,6 +413,12 @@ class MailboxSender {
 		}
 		if (!$this->viewer->canAccess($alias_id)) {
 			throw new MailboxSenderException('You do not have access to this mailbox.');
+		}
+		// A reply or forward quotes its source on the server, which cannot read an
+		// end-to-end message (specs/client_custody_mail.md § R6).
+		if (InboundEmailMessage::isBrowserSealed($source)) {
+			throw new MailboxSenderException('This message is end-to-end encrypted, so it cannot be replied to or '
+				. 'forwarded from here yet. Write a new message instead.');
 		}
 		return $source;
 	}
@@ -1011,12 +1018,11 @@ class MailboxSender {
 	 *
 	 * @param array<int, array{bytes:string, name:string}> $accepted
 	 */
-	private function persistOutboundUploads(int $message_id, array $accepted, ?string $dek = null): void {
-		$crypto = null;
-		if ($dek !== null) {
-			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-			$crypto = new VaultCrypto();
-		}
+	private function persistOutboundUploads(int $message_id, array $accepted, ?string $dek = null,
+			bool $for_browser = false): array {
+		$sealing = ($dek !== null);
+		$for_browser = $sealing && $for_browser;
+		$manifest = array();
 		$index = 0;
 		foreach ($accepted as $a) {
 			$index++;
@@ -1028,33 +1034,90 @@ class MailboxSender {
 				// this bypasses MIME parsing entirely) — unique per message, which
 				// is all attachmentAd()'s row-binding needs.
 				$part_id = 'upload:' . $index;
-				if ($crypto !== null) {
-					$bytes = $crypto->sealField($bytes, $dek, InboundEmailMessage::attachmentAd($message_id, $part_id));
-				}
-				$file = File::createFromBytes($bytes, $a['name'], $mime, $this->viewer->getUserId(), array(
-					'fil_private' => true,
-					'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
-				));
-				if ($crypto !== null) {
-					// Magic-byte detection on save() saw ciphertext — restore the real type.
-					$file->set('fil_type', substr($mime, 0, 128));
-					$file->save();
-				}
-				InboundMessageAttachment::CreateEntry(array(
-					'ima_iem_inbound_email_message_id' => $message_id,
-					'ima_filename'     => $a['name'],
-					'ima_content_type' => $mime,
-					'ima_size_bytes'   => $original_size,
-					'ima_mime_part'    => $part_id,
-					'ima_is_inline'    => false,
-					'ima_fil_file_id'  => (int)$file->key,
-					'ima_is_sealed'    => ($crypto !== null),
-				));
+				$att = $this->persistSealedPart($message_id, $bytes, $a['name'], $mime, $part_id, null, false,
+					$dek, $for_browser);
+				$manifest[] = InboundEmailMessage::manifestEntry(intval($att->key), $a['name'], $mime, null,
+					$part_id, false, $original_size);
 			} catch (Throwable $e) {
-				error_log('MailboxSender: failed to persist outbound upload "' . $a['name'] . '" on message '
+				error_log('MailboxSender: failed to persist outbound upload on message '
 					. $message_id . ': ' . $e->getMessage());
 			}
 		}
+		return $manifest;
+	}
+
+	/**
+	 * The rest of a stored Sent copy once its row exists: the uploaded
+	 * attachments and inline images under the row's DEK, and on a Fortress row
+	 * the search text, preview and attachment names sealed beside the content
+	 * (specs/client_custody_mail.md § R6). The message has already left, so a
+	 * failure here degrades this copy, never the send.
+	 *
+	 * @param array $stored  storeOutboundRow()'s answer
+	 * @param array $uploads attachUploads()' answer (regular, inline)
+	 */
+	private function storeCopyParts(array $stored, array $uploads, string $from_address, string $subject,
+			EmailMessage $email): void {
+		$manifest = array();
+		if (!empty($uploads['regular'])) {
+			$manifest = array_merge($manifest,
+				$this->persistOutboundUploads($stored['id'], $uploads['regular'], $stored['dek'], $stored['for_browser']));
+		}
+		if (!empty($uploads['inline'])) {
+			$manifest = array_merge($manifest,
+				$this->persistInlineUploads($stored['id'], $uploads['inline'], $stored['dek'], $stored['for_browser']));
+		}
+		if (!$stored['for_browser']) {
+			return;
+		}
+		try {
+			InboundEmailMessage::sealFortressDerived(intval($stored['id']), $stored['vault'], $stored['dek'], array(
+				'sender' => $from_address, 'subject' => $subject,
+				'body_plain' => (string)$email->getTextBody(), 'body_html' => (string)$email->getHtmlBody(),
+			), $manifest);
+		} catch (Throwable $e) {
+			error_log('MailboxSender: could not seal the search text of Sent message ' . $stored['id'] . ': '
+				. $e->getMessage());
+		}
+	}
+
+	/**
+	 * One stored part of a composed row: its bytes sealed under the row DEK
+	 * (the browser's format on a Fortress row), a private File and its ima_ row.
+	 * On a Fortress row nothing about the file is written in the clear — the
+	 * File is named by message and part, typed octet-stream, and the ima_ name,
+	 * type and Content-ID are blank; the caller's manifest carries them.
+	 */
+	private function persistSealedPart(int $message_id, string $bytes, string $name, string $mime, string $part_id,
+			?string $content_id, bool $inline, ?string $dek, bool $for_browser): InboundMessageAttachment {
+		$original_size = strlen($bytes);
+		$sealing = ($dek !== null);
+		if ($sealing) {
+			$bytes = InboundEmailMessage::sealAttachmentBytes($bytes, $dek, $message_id, $part_id, $for_browser);
+		}
+		$stored_type = $for_browser ? InboundEmailMessage::FORTRESS_FILE_TYPE : $mime;
+		$file = File::createFromBytes($bytes,
+			$for_browser ? InboundEmailMessage::fortressAttachmentName($message_id, $part_id) : $name,
+			$stored_type, $this->viewer->getUserId(), array(
+				'fil_private' => true,
+				'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
+			));
+		if ($sealing) {
+			// Magic-byte detection on save() saw ciphertext — restore the type.
+			$file->set('fil_type', substr($stored_type, 0, 128));
+			$file->save();
+		}
+		return InboundMessageAttachment::CreateEntry(array(
+			'ima_iem_inbound_email_message_id' => $message_id,
+			'ima_filename'     => $for_browser ? '' : $name,
+			'ima_content_type' => $for_browser ? '' : $mime,
+			'ima_size_bytes'   => $original_size,
+			'ima_mime_part'    => $part_id,
+			'ima_content_id'   => $for_browser ? '' : $content_id,
+			'ima_is_inline'    => $inline,
+			'ima_fil_file_id'  => (int)$file->key,
+			'ima_is_sealed'    => $sealing,
+		));
 	}
 
 	/**
@@ -1067,47 +1130,26 @@ class MailboxSender {
 	 *
 	 * @param array<int, array{bytes:string, name:string, type:string, cid:string}> $inline
 	 */
-	private function persistInlineUploads(int $message_id, array $inline, ?string $dek = null): void {
-		$crypto = null;
-		if ($dek !== null) {
-			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-			$crypto = new VaultCrypto();
-		}
+	private function persistInlineUploads(int $message_id, array $inline, ?string $dek = null,
+			bool $for_browser = false): array {
+		$for_browser = ($dek !== null) && $for_browser;
+		$manifest = array();
 		$index = 0;
 		foreach ($inline as $a) {
 			$index++;
 			try {
 				$mime = File::detect_mime_bytes($a['bytes']) ?: ($a['type'] ?: 'application/octet-stream');
-				$bytes = $a['bytes'];
-				$original_size = strlen($bytes);
 				$part_id = 'inline:' . $index;
-				if ($crypto !== null) {
-					$bytes = $crypto->sealField($bytes, $dek, InboundEmailMessage::attachmentAd($message_id, $part_id));
-				}
-				$file = File::createFromBytes($bytes, $a['name'], $mime, $this->viewer->getUserId(), array(
-					'fil_private' => true,
-					'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
-				));
-				if ($crypto !== null) {
-					$file->set('fil_type', substr($mime, 0, 128));
-					$file->save();
-				}
-				InboundMessageAttachment::CreateEntry(array(
-					'ima_iem_inbound_email_message_id' => $message_id,
-					'ima_filename'     => $a['name'],
-					'ima_content_type' => $mime,
-					'ima_size_bytes'   => $original_size,
-					'ima_mime_part'    => $part_id,
-					'ima_content_id'   => $a['cid'],
-					'ima_is_inline'    => true,
-					'ima_fil_file_id'  => (int)$file->key,
-					'ima_is_sealed'    => ($crypto !== null),
-				));
+				$att = $this->persistSealedPart($message_id, $a['bytes'], $a['name'], $mime, $part_id, $a['cid'], true,
+					$dek, $for_browser);
+				$manifest[] = InboundEmailMessage::manifestEntry(intval($att->key), $a['name'], $mime, $a['cid'],
+					$part_id, true, strlen($a['bytes']));
 			} catch (Throwable $e) {
-				error_log('MailboxSender: failed to persist inline image "' . $a['name'] . '" on message '
+				error_log('MailboxSender: failed to persist inline image on message '
 					. $message_id . ': ' . $e->getMessage());
 			}
 		}
+		return $manifest;
 	}
 
 	/**
@@ -1309,6 +1351,7 @@ class MailboxSender {
 		$seal = self::sealTargetFor($alias);
 		$vault = $seal['vault'];
 		$sealing = $seal['sealing'];
+		$for_browser = $sealing && InboundEmailMessage::isBrowserVault($vault);
 
 		// The columns common to a fresh Sent row and a draft-morph. Content is empty
 		// when sealing (sealAndPersistContent writes the ciphertext right after).
@@ -1387,7 +1430,7 @@ class MailboxSender {
 				if ($db->inTransaction()) { $db->rollBack(); }
 				throw $e;
 			}
-			return array('id' => $message_id_row, 'dek' => $dek);
+			return array('id' => $message_id_row, 'dek' => $dek, 'vault' => $vault, 'for_browser' => $for_browser);
 		}
 
 		// A fresh Sent row. The empty-content insert, its seal UPDATE and its threading
@@ -1417,7 +1460,7 @@ class MailboxSender {
 			throw $e;
 		}
 
-		return array('id' => intval($row->key), 'dek' => $dek);
+		return array('id' => intval($row->key), 'dek' => $dek, 'vault' => $vault, 'for_browser' => $for_browser);
 	}
 
 	/**

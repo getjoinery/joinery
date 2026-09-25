@@ -32,6 +32,8 @@ class UserEncryptionVaultException extends SystemBaseException {}
  * will become) while every sealed DEK is re-sealed to it, and the commit makes
  * it current.
  *
+ * @version 1.3 - uev_recovery_time: when a recovery code last opened this vault
+ *   (a reload may not reopen a browser-held vault from before it)
  * @version 1.2 - sealingPublicKey()/sealingKeyGeneration(): new material seals to a pending rotation's key
  * @version 1.1 - uev_pending_public_key / uev_pending_key_generation: a client-custody rotation in progress
  * @version 1.0
@@ -74,6 +76,11 @@ class UserEncryptionVault extends SystemBase {
 		'uev_key_generation' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
 		'uev_pending_public_key'     => array('type'=>'text', 'is_nullable'=>true),
 		'uev_pending_key_generation' => array('type'=>'int4', 'is_nullable'=>true),
+		// When a recovery code last opened this vault (UTC). A recovery code
+		// used is a possible theft, so anything opened before it — a
+		// browser-held vault waiting to reopen after a reload
+		// (VaultClientResume) — must not reopen on its own.
+		'uev_recovery_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'uev_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'uev_update_time'   => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
@@ -95,6 +102,25 @@ class UserEncryptionVault extends SystemBase {
 		$pending = $this->get('uev_pending_public_key');
 		return ($this->get('uev_pending_key_generation') !== null && (string)$pending !== '')
 			? (string)$pending : (string)$this->get('uev_public_key');
+	}
+
+	/**
+	 * When a recovery code last opened ANY of this user's vaults (UTC), or null.
+	 * One set of codes opens them all, so one use counts for all.
+	 */
+	public static function lastRecoveryTime(int $user_id): ?string {
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT MAX(uev_recovery_time) FROM uev_user_encryption_vaults WHERE uev_usr_user_id = ?');
+		$q->execute(array($user_id));
+		$t = $q->fetchColumn();
+		return ($t === false || $t === null) ? null : (string)$t;
+	}
+
+	/** Stamp a recovery-code use on every vault the user holds (see lastRecoveryTime()). */
+	public static function stampRecovery(int $user_id): void {
+		DbConnector::get_instance()->get_db_link()->prepare(
+			'UPDATE uev_user_encryption_vaults SET uev_recovery_time = ? WHERE uev_usr_user_id = ?')
+			->execute(array(gmdate('Y-m-d H:i:s'), $user_id));
 	}
 
 	/** The key generation that goes with sealingPublicKey(). */

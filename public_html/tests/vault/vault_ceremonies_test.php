@@ -23,36 +23,57 @@ $apcu = vault_apcu_usable() && vault_ensure_session();
 $box = new SealedBox();
 $ceremonies = new VaultCeremonies();
 
-section('Setup happy path');
-$fx = vault_fixture_vault('CerA', 'a sufficiently long passphrase', 7);
+/** Count a vault's live wrappings by type. */
+function cer_counts(int $vault_id): array {
+	$counts = ['passkey' => 0, 'recovery' => 0, 'passphrase' => 0, 'root' => 0];
+	foreach (vault_live_wrappings($vault_id) as $w) {
+		$counts[$w->get('uew_unlocker_type')]++;
+	}
+	return $counts;
+}
+
+/** The root vault of a user, or null. */
+function cer_root(int $user_id): ?UserEncryptionVault {
+	return UserEncryptionVault::loadForUser($user_id, VaultScopes::ROOT_SCOPE);
+}
+
+section('Setup: the account vault and the root vault, one set of codes');
+$fx = vault_fixture_vault('CerA', '', 7);
 $vault = $fx['vault'];
 check((int)$vault->get('uev_key_generation') === 1, 'a fresh vault is generation 1');
-$wrappings = vault_live_wrappings((int)$vault->key);
-$counts = ['passkey' => 0, 'recovery' => 0, 'passphrase' => 0];
-$salts_ok = true;
-foreach ($wrappings as $w) {
-	$counts[$w->get('uew_unlocker_type')]++;
-	$type = $w->get('uew_unlocker_type');
-	$s = (string)$w->get('uew_salt');
-	if ($type === UserEncryptionWrapping::TYPE_PASSKEY && $s !== '') { $salts_ok = false; }
-	if ($type !== UserEncryptionWrapping::TYPE_PASSKEY && $s !== (string)$vault->get('uev_salt')) { $salts_ok = false; }
+check(cer_counts((int)$vault->key) === ['passkey' => 1, 'recovery' => 7, 'passphrase' => 0, 'root' => 0],
+	'the account vault: one passkey and 7 codes', json_encode(cer_counts((int)$vault->key)));
+$root = cer_root((int)$fx['user']->key);
+check($root !== null && (string)$root->get('uev_custody') === UserEncryptionVault::CUSTODY_CLIENT,
+	'the root vault was created with it, browser-held');
+check($root !== null && cer_counts((int)$root->key) === ['passkey' => 1, 'recovery' => 7, 'passphrase' => 0, 'root' => 0],
+	'the root: the same passkey and the same 7 codes');
+$pairs_ok = true;
+foreach ([(int)$vault->key, $root ? (int)$root->key : 0] as $vid) {
+	$indices = [];
+	foreach (vault_live_wrappings($vid) as $w) {
+		if ($w->get('uew_unlocker_type') !== UserEncryptionWrapping::TYPE_RECOVERY) { continue; }
+		if ((string)$w->get('uew_code_set') !== $fx['code_set']['post']['id']) { $pairs_ok = false; }
+		$indices[] = (int)$w->get('uew_code_index');
+	}
+	sort($indices);
+	if ($indices !== range(0, 6)) { $pairs_ok = false; }
 }
-check($counts === ['passkey' => 1, 'recovery' => 7, 'passphrase' => 1], 'one passkey + 7 codes + passphrase wrappings', json_encode($counts));
-check($salts_ok, 'recovery/passphrase wrappings record the vault salt; the passkey records none');
-check(count($fx['recovery_codes']) === 7, 'the codes were returned for display');
+check($pairs_ok, 'every code wrapping on both vaults carries the set id and its index, 0 to 6');
+check(UserEncryptionWrapping::hasCodeSet((int)$vault->key), 'the account vault reads as holding a browser-made set');
 
 section('Key file reconstructibility');
 // The backup payload alone + one known recovery code must reconstruct the
-// secret - that is its entire reason to exist.
+// secret: the file names the salt the code's KEK is derived with.
 $kf = $fx['key_file'];
-check(count($kf['wrappings']) === 9, 'key file carries every wrapping row');
+check(($kf['code_kdf']['code_salt'] ?? null) === $fx['root_salt'], 'the key file names the code salt (the root vault\'s)');
 $code = $fx['recovery_codes'][0];
 $recovered = null;
+$kek0 = VaultUnlockerKdf::codeKekAccount($code, $kf['code_kdf']['code_salt']);
 foreach ($kf['wrappings'] as $row) {
 	if ($row['unlocker_type'] !== 'recovery') { continue; }
 	try {
-		$kek = $box->kekFromRecoveryCode($code, $row['salt']);
-		$recovered = $box->unwrapKey($row['wrapped_secret'], $kek, UserEncryptionWrapping::adFor($kf['vault_id'], $row['id']));
+		$recovered = $box->unwrapKey($row['wrapped_secret'], $kek0, UserEncryptionWrapping::adFor($kf['vault_id'], $row['id']));
 		break;
 	} catch (Exception $e) { continue; }
 }
@@ -61,77 +82,144 @@ check($recovered !== null && SealedBox::b64url(sodium_crypto_box_publickey_from_
 	'the reconstructed secret matches the advertised public key');
 
 section('Setup refusals');
+$root_salt = vault_fixture_root_salt();
+$codes = vault_fixture_code_set($root_salt, 5);
 $threw = '';
-try { $ceremonies->setup($fx['user'], (int)$fx['passkey']->key, 'x', random_bytes(32), '', 10, false); } catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+try {
+	$ceremonies->setup($fx['user'], (int)$fx['passkey']->key, 'x', random_bytes(32), '', $codes['set'],
+		vault_fixture_root($root_salt, $codes, $fx['passkey'])['payload'], false);
+} catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'already set up') !== false, 'a second setup is refused');
 
 $user_b = make_user('VaultCerB');
 $pk_b = vault_fixture_passkey((int)$user_b->key);
+[$pp_account, $pp_root] = vault_fixture_passphrase('a sufficiently long passphrase', $root_salt);
 $threw = '';
-try { $ceremonies->setup($user_b, (int)$pk_b->key, 'x', random_bytes(32), 'short', 10, false); } catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
-check(strpos($threw, '12 characters') !== false, 'a short passphrase is refused at setup');
+try {
+	$ceremonies->setup($user_b, (int)$pk_b->key, 'x', random_bytes(32), $pp_account, $codes['set'],
+		vault_fixture_root($root_salt, $codes, $pk_b, null, $pp_root)['payload'], false);
+} catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+check($threw !== '', 'a passphrase beside a passkey that can hold the key is refused (R8)', $threw);
+
+// A root whose codes are not the account's set: refused, nothing kept.
+$other = vault_fixture_code_set($root_salt, 5);
+$threw = '';
+try {
+	$ceremonies->setup($user_b, (int)$pk_b->key, 'x', random_bytes(32), '', $codes['set'],
+		vault_fixture_root($root_salt, $other, $pk_b)['payload'], false);
+} catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+check($threw !== '', 'a root vault made with a different set of codes is refused', $threw);
+check((new MultiUserEncryptionVault(['user_id' => $user_b->key]))->count_all() === 0,
+	'and neither vault exists: the two are made together or not at all');
+
+$threw = '';
+try {
+	$ceremonies->setup($user_b, (int)$pk_b->key, 'x', random_bytes(32), '', $codes['set'],
+		vault_fixture_root($root_salt, $codes)['payload'], false);
+} catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+check($threw !== '', 'a root vault with no passkey or phrase to open it is refused', $threw);
+check((new MultiUserEncryptionVault(['user_id' => $user_b->key]))->count_all() === 0, 'and nothing was kept');
 
 section('Setup atomicity');
 // A 16-byte KEK passes no validation until the FIRST wrapping is sealed -
 // by then the vault row is saved inside the transaction. The failure must
 // roll everything back: no vault, no wrappings, and setup can run again.
 $threw = false;
-try { $ceremonies->setup($user_b, (int)$pk_b->key, 'x', random_bytes(16), '', 10, false); } catch (VaultCeremonyException $e) { $threw = true; }
+try {
+	$ceremonies->setup($user_b, (int)$pk_b->key, 'x', random_bytes(16), '', $codes['set'],
+		vault_fixture_root($root_salt, $codes, $pk_b)['payload'], false);
+} catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'a mid-ceremony failure surfaces as an error');
-$leftover = new MultiUserEncryptionVault(['user_id' => $user_b->key, 'scope' => UserEncryptionVault::SCOPE_USER]);
-check($leftover->count_all() === 0, 'no vault row survives the rollback - never a vault with zero unlockers');
-$retry = $ceremonies->setup($user_b, (int)$pk_b->key, 'x', random_bytes(32), '', 5, false);
-harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$retry['vault']->key);
+check((new MultiUserEncryptionVault(['user_id' => $user_b->key]))->count_all() === 0,
+	'no vault row survives the rollback - never a vault with zero unlockers');
+$retry = $ceremonies->setup($user_b, (int)$pk_b->key, 'x', random_bytes(32), '', $codes['set'],
+	vault_fixture_root($root_salt, $codes, $pk_b)['payload'], false);
+vault_fixture_register_vaults((int)$user_b->key);
 check((int)$retry['vault']->key > 0, 'setup runs cleanly after the rolled-back attempt');
-check(count($retry['recovery_codes']) === 5, 'code_count floor of 5 honored');
+check(cer_counts((int)$retry['vault']->key)['recovery'] === 5, 'with its five codes');
 
-section('Code count clamps');
-$user_c = make_user('VaultCerC');
-$pk_c = vault_fixture_passkey((int)$user_c->key);
-$clamped = $ceremonies->setup($user_c, (int)$pk_c->key, 'x', random_bytes(32), '', 50, false);
-harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$clamped['vault']->key);
-check(count($clamped['recovery_codes']) === 20, 'code_count caps at 20');
-
-section('Passphrase unlock');
-$secret = $ceremonies->unlockWithPassphrase($fx['user'], $fx['vault'], 'a sufficiently long passphrase');
-check($recovered !== null && $secret instanceof VaultKey && $secret->id() === vault_fixture_key($recovered)->id(),
-	'passphrase opens the same key the key file reconstructed, as a VaultKey');
-check($secret->publicKey() === $kf['public_key'], 'the opened key advertises the vault\'s public half');
+section('Code sets are 5 to 20 codes, well formed');
 $threw = false;
-try { $ceremonies->unlockWithPassphrase($fx['user'], $fx['vault'], 'the wrong passphrase entirely'); } catch (VaultCeremonyException $e) { $threw = true; }
+try { VaultCeremonies::codeSet(vault_fixture_code_set($root_salt, 5)['post']); } catch (VaultCeremonyException $e) { $threw = true; }
+check(!$threw, 'five codes are a set');
+foreach ([4 => 'four codes', 21 => 'twenty-one codes'] as $n => $label) {
+	$post = ['id' => bin2hex(random_bytes(16)), 'entries' => []];
+	for ($i = 0; $i < $n; $i++) { $post['entries'][] = ['index' => $i, 'kek' => SealedBox::b64url(random_bytes(32))]; }
+	$threw = false;
+	try { VaultCeremonies::codeSet($post); } catch (VaultCeremonyException $e) { $threw = true; }
+	check($threw, $label . ' are refused');
+}
+$post = $codes['post'];
+$post['entries'][1]['index'] = $post['entries'][0]['index'];
+$threw = false;
+try { VaultCeremonies::codeSet($post); } catch (VaultCeremonyException $e) { $threw = true; }
+check($threw, 'a repeated index is refused');
+$post = $codes['post'];
+$post['entries'][0]['kek'] = SealedBox::b64url(random_bytes(16));
+$threw = false;
+try { VaultCeremonies::codeSet($post); } catch (VaultCeremonyException $e) { $threw = true; }
+check($threw, 'a KEK that is not 32 bytes is refused');
+
+section('The passphrase fallback: one phrase, both halves');
+$fp = vault_fixture_vault('CerPhrase', 'a sufficiently long passphrase', 5);
+check(cer_counts((int)$fp['vault']->key) === ['passkey' => 0, 'recovery' => 5, 'passphrase' => 1, 'root' => 0],
+	'a passkeyless account vault: 5 codes and the phrase');
+$fp_root = cer_root((int)$fp['user']->key);
+check($fp_root !== null && cer_counts((int)$fp_root->key)['passphrase'] === 1, 'the root holds the phrase\'s other half');
+$pp_key = $ceremonies->unlockWithPassphrase($fp['user'], $fp['vault'], $fp['passphrase_kek']);
+check($pp_key instanceof VaultKey && $pp_key->publicKey() === (string)$fp['vault']->get('uev_public_key'),
+	'the phrase\'s account half opens the account key');
+[, $fp_root_kek] = vault_fixture_passphrase('a sufficiently long passphrase', $fp['root_salt']);
+$root_phrase_blob = null;
+foreach (vault_live_wrappings((int)$fp_root->key) as $w) {
+	if ($w->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSPHRASE) { $root_phrase_blob = (string)$w->get('uew_wrapped_secret_key'); }
+}
+check($root_phrase_blob !== null && vault_fixture_unwrap($root_phrase_blob, $fp_root_kek, 'vault:root:passphrase') === $fp['root_secret'],
+	'and the same phrase\'s root half opens the root vault (in the browser)');
+[$wrong_account] = vault_fixture_passphrase('the wrong passphrase entirely', $fp['root_salt']);
+$threw = false;
+try { $ceremonies->unlockWithPassphrase($fp['user'], $fp['vault'], $wrong_account); } catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'a wrong passphrase is refused');
 $threw = false;
-try { $ceremonies->unlockWithPassphrase($user_c, $clamped['vault'], 'a sufficiently long passphrase'); } catch (VaultCeremonyException $e) { $threw = true; }
+try { $ceremonies->unlockWithPassphrase($fx['user'], $fx['vault'], $fp['passphrase_kek']); } catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'a vault with no passphrase enrolled refuses');
 
-// Per-wrapping salt: retag the wrapping under a DIFFERENT vault salt and it
-// must still unlock (the wrapping's own salt wins).
-$old_salt = (string)$vault->get('uev_salt');
-$vault->set('uev_salt', $box->generateSalt());
-$vault->save();
-$secret2 = $ceremonies->unlockWithPassphrase($fx['user'], new UserEncryptionVault((int)$vault->key, TRUE), 'a sufficiently long passphrase');
-check($secret2->id() === $secret->id(), 'passphrase unlock survives a uev_salt change (per-wrapping salt)');
-$vault->set('uev_salt', $old_salt);
-$vault->save();
-
-section('Recovery unlock');
-$res = $ceremonies->unlockWithRecoveryCode($fx['user'], $fx['vault'], $fx['recovery_codes'][1], $apcu);
+section('Recovery unlock: one code, both halves, spent together');
+$root_twin_used = function (int $root_id, int $index) {
+	foreach (vault_live_wrappings($root_id) as $w) {
+		if ($w->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_RECOVERY && (int)$w->get('uew_code_index') === $index) {
+			return (bool)$w->get('uew_is_used');
+		}
+	}
+	return null;
+};
+$res = $ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($fx['recovery_codes'][1], $fx['root_salt']), $apcu);
 check($res['regenerate_recommended'] === false, 'plenty of codes left: no regenerate nag');
+check(is_array($res['root_wrapping']), 'the code\'s root twin comes back for the browser');
+check(is_array($res['root_wrapping']) && vault_fixture_unwrap($res['root_wrapping']['wrapped_secret_key'],
+	VaultUnlockerKdf::codeKekRoot($fx['recovery_codes'][1], $fx['root_salt']), 'vault:root:recovery') === $fx['root_secret'],
+	'and the same code\'s root half opens the root vault');
+check($root_twin_used((int)$root->key, 1) === true, 'the twin is spent with the code');
+check($root_twin_used((int)$root->key, 2) === false, 'and no other twin is');
 $threw = false;
-try { $ceremonies->unlockWithRecoveryCode($fx['user'], $fx['vault'], $fx['recovery_codes'][1], false); } catch (VaultCeremonyException $e) { $threw = true; }
+try { $ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($fx['recovery_codes'][1], $fx['root_salt']), false); }
+catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'a consumed code never unlocks again');
 $typo = strtr($fx['recovery_codes'][2], ['0' => 'O', '1' => 'l']);
-$res = $ceremonies->unlockWithRecoveryCode($fx['user'], $fx['vault'], $typo, false);
-check(is_array($res), 'a mistranscribed code (O for 0, l for 1) unlocks');
+$res = $ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($typo, $fx['root_salt']), false);
+check(is_array($res), 'a mistranscribed code (O for 0, l for 1) derives the same KEK and unlocks');
 $threw = false;
-try { $ceremonies->unlockWithRecoveryCode($fx['user'], $fx['vault'], 'AAAAA-AAAAA-AAAAA-AAAAA-AAAAA-A', false); } catch (VaultCeremonyException $e) { $threw = true; }
+try { $ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount('AAAAA-AAAAA-AAAAA-AAAAA-AAAAA-A', $fx['root_salt']), false); }
+catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'a wrong code is refused');
+check(UserEncryptionVault::lastRecoveryTime((int)$fx['user']->key) !== null, 'a recovery use is stamped for the resume check');
 
 // Burn down to fewer than 3 unused: the nag flips on. Of 7 codes, 1 and 2
 // are already consumed; burning 3, 4, and 6 leaves only 0 and 5 unused.
-$ceremonies->unlockWithRecoveryCode($fx['user'], $fx['vault'], $fx['recovery_codes'][3], false);
-$ceremonies->unlockWithRecoveryCode($fx['user'], $fx['vault'], $fx['recovery_codes'][4], false);
-$res = $ceremonies->unlockWithRecoveryCode($fx['user'], $fx['vault'], $fx['recovery_codes'][6], false);
+foreach ([3, 4] as $i) {
+	$ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($fx['recovery_codes'][$i], $fx['root_salt']), false);
+}
+$res = $ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($fx['recovery_codes'][6], $fx['root_salt']), false);
 check($res['regenerate_recommended'] === true, 'fewer than 3 unused codes recommends regeneration');
 
 section('Recovery kill-switch');
@@ -141,7 +229,7 @@ if (!$apcu) {
 	$uid = (int)$fx['user']->key;
 	// A pre-existing window on another session (the thief's, say).
 	apcu_store('vault:stolen-session:' . $uid . ':user', 'stolen-secret', 3600);
-	$ceremonies->unlockWithRecoveryCode($fx['user'], $fx['vault'], $fx['recovery_codes'][5], true);
+	$ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($fx['recovery_codes'][5], $fx['root_salt']), true);
 	check(apcu_fetch('vault:stolen-session:' . $uid . ':user') === false, 'every pre-existing window died first');
 	check(VaultUnlock::isOpen($uid), 'and a fresh window opened for the recovering session only');
 	VaultUnlock::lockAll($uid);
@@ -152,33 +240,45 @@ section('Cross-user ownership guard');
 // boundary — before any passphrase/code check — so a mismatched pair can never
 // open one user's window with another user's vault secret.
 $threw = false;
-try { $ceremonies->unlockWithPassphrase($fx['user'], $clamped['vault'], 'a sufficiently long passphrase'); }
+try { $ceremonies->unlockWithPassphrase($fx['user'], $fp['vault'], $fp['passphrase_kek']); }
 catch (VaultCeremonyException $e) { $threw = ($e->getMessage() === 'Vault does not belong to this user.'); }
 check($threw, 'passphrase unlock refuses a foreign vault (ownership)');
-
 $threw = false;
-try { $ceremonies->unlockWithRecoveryCode($fx['user'], $clamped['vault'], $fx['recovery_codes'][2], false); }
+try { $ceremonies->unlockWithRecoveryKek($fx['user'], $fp['vault'], VaultUnlockerKdf::codeKekAccount($fp['recovery_codes'][0], $fp['root_salt']), false); }
 catch (VaultCeremonyException $e) { $threw = ($e->getMessage() === 'Vault does not belong to this user.'); }
 check($threw, 'recovery unlock refuses a foreign vault (ownership)');
 
+section('The server never takes a code or a phrase');
+foreach ([['code' => $fp['recovery_codes'][0]], ['passphrase' => 'a sufficiently long passphrase']] as $raw) {
+	$threw = '';
+	try { $ceremonies->openWithUnlocker($fp['user'], $fp['vault'], $raw, []); } catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'out of date') !== false, 'openWithUnlocker refuses a raw ' . key($raw) . ' without a look');
+}
+$threw = '';
+try { VaultCeremonies::assertNoSecondPrfOutput(['clientExtensionResults' => ['prf' => ['results' => ['first' => 'a', 'second' => 'b']]]]); }
+catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+check($threw !== '', 'a passkey assertion still carrying the root vault\'s output is refused');
+$threw = '';
+try { VaultCeremonies::assertNoSecondPrfOutput(['clientExtensionResults' => ['prf' => ['results' => ['first' => 'a']]]]); }
+catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+check($threw === '', 'one with the first output only passes');
+
 section('Enrolment presents a fresh unlocker (openWithUnlocker, spec B1)');
-// A wrapping is produced only in the request that presented a real unlocker:
-// a fresh vault, then a new bypass phrase enrolled under a recovery code, then
-// fresh codes under the phrase — each an open with the new rows in its wrap
-// list, and the window that results is the session's.
+// A wrapping is produced only in the request that presented a real unlocker;
+// the window that results is the session's.
 if (!$apcu) {
 	harness_skip('APCu unavailable', 'openWithUnlocker arms a window; run with -d apc.enable_cli=1');
 } else {
-	$ex = vault_fixture_vault('CerEnrol', '', 5);
+	$ex = vault_fixture_vault('CerEnrol', 'the enrolment phrase, long enough', 5);
 	$euser = $ex['user'];
 	$evault = $ex['vault'];
 	$euid = (int)$euser->key;
-	$esalt = (string)$evault->get('uev_salt');
+	$code_kek = fn($i) => vault_fixture_code_kek($ex['recovery_codes'][$i], $ex['root_salt']);
 
-	// 1. Enrol a phrase, confirming with recovery code 0.
-	$phrase_row = UserEncryptionWrapping::reserve((int)$evault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, null, null, 1, $esalt);
-	$opened = $ceremonies->openWithUnlocker($euser, $evault, ['code' => $ex['recovery_codes'][0]],
-		[$phrase_row->wrapEntry($box->kekFromPassphrase('a brand new bypass phrase', $esalt))]);
+	// 1. A new phrase, confirming with recovery code 0.
+	[$new_account] = vault_fixture_passphrase('a brand new passphrase', $ex['root_salt']);
+	$phrase_row = UserEncryptionWrapping::reserve((int)$evault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, null, null, 1);
+	$opened = $ceremonies->openWithUnlocker($euser, $evault, ['code_kek' => $code_kek(0)], [$phrase_row->wrapEntry($new_account)]);
 	$phrase_row->storeWrapped($opened['wrappings'][0]);
 	check($opened['key'] instanceof VaultKey && $opened['key']->publicKey() === (string)$evault->get('uev_public_key'),
 		'the open under a recovery code yields the vault key');
@@ -188,43 +288,57 @@ if (!$apcu) {
 		if ($w->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_RECOVERY && $w->get('uew_is_used')) { $consumed++; }
 	}
 	check($consumed === 1, 'the code that confirmed the enrolment is used up');
-	$via_phrase = $ceremonies->unlockWithPassphrase($euser, new UserEncryptionVault((int)$evault->key, TRUE), 'a brand new bypass phrase');
+	check($root_twin_used((int)cer_root($euid)->key, 0) === true, 'with its root twin');
+	$via_phrase = $ceremonies->unlockWithPassphrase($euser, new UserEncryptionVault((int)$evault->key, TRUE), $new_account);
 	check($via_phrase->id() === $opened['key']->id(), 'the enrolled phrase opens the same key');
 
 	// 2. The same code again is refused, and so is a wrong phrase.
 	$threw = false;
-	try { $ceremonies->openWithUnlocker($euser, $evault, ['code' => $ex['recovery_codes'][0]], []); }
-	catch (VaultCeremonyException $e) { $threw = true; }
+	try { $ceremonies->openWithUnlocker($euser, $evault, ['code_kek' => $code_kek(0)], []); } catch (VaultCeremonyException $e) { $threw = true; }
 	check($threw, 'a used recovery code cannot confirm an enrolment');
+	[$not_it] = vault_fixture_passphrase('not the phrase at all', $ex['root_salt']);
 	$threw = false;
-	try { $ceremonies->openWithUnlocker($euser, $evault, ['passphrase' => 'not the phrase at all'], []); }
-	catch (VaultCeremonyException $e) { $threw = true; }
-	check($threw, 'a wrong bypass phrase cannot confirm an enrolment');
+	try { $ceremonies->openWithUnlocker($euser, $evault, ['passphrase_kek' => SealedBox::b64url($not_it)], []); } catch (VaultCeremonyException $e) { $threw = true; }
+	check($threw, 'a wrong passphrase cannot confirm an enrolment');
 	$threw = false;
-	try { $ceremonies->openWithUnlocker($euser, $evault, null, []); }
-	catch (VaultCeremonyException $e) { $threw = true; }
+	try { $ceremonies->openWithUnlocker($euser, $evault, null, []); } catch (VaultCeremonyException $e) { $threw = true; }
 	check($threw, 'no unlocker at all is refused');
 	$threw = false;
-	try { $ceremonies->openWithUnlocker($euser, $clamped['vault'], ['passphrase' => 'a brand new bypass phrase'], []); }
+	try { $ceremonies->openWithUnlocker($euser, $fx['vault'], ['passphrase_kek' => SealedBox::b64url($new_account)], []); }
 	catch (VaultCeremonyException $e) { $threw = ($e->getMessage() === 'Vault does not belong to this user.'); }
 	check($threw, 'a foreign vault is refused before any unlocker is tried');
 
-	// 3. Fresh codes under the phrase: a batch of wrappings from one open.
-	$rows = [];
-	$wrap_under = [];
-	$new_codes = [];
-	for ($i = 0; $i < 3; $i++) {
-		$code = $box->generateRecoveryCode();
-		$new_codes[] = $code;
-		$row = UserEncryptionWrapping::reserve((int)$evault->key, UserEncryptionWrapping::TYPE_RECOVERY, null, null, 1, $esalt);
-		$rows[] = $row;
-		$wrap_under[] = $row->wrapEntry($box->kekFromRecoveryCode($code, $esalt));
-	}
-	$opened = $ceremonies->openWithUnlocker($euser, $evault, ['passphrase' => 'a brand new bypass phrase'], $wrap_under);
-	check(count($opened['wrappings']) === 3, 'three wrap entries, three wrappings back');
-	UserEncryptionWrapping::storeWrappings($rows, $opened['wrappings']);
-	$res = $ceremonies->unlockWithRecoveryCode($euser, new UserEncryptionVault((int)$evault->key, TRUE), $new_codes[1], false);
-	check(is_array($res), 'a code from the new set unlocks');
+	// 3. A new set under the phrase, with the root's twins in the same transaction.
+	$fresh = vault_fixture_code_set($ex['root_salt'], 5);
+	UserEncryptionWrapping::adoptCodeSet($evault, $fresh['set'], function (array $wrap_under) use ($ceremonies, $euser, $evault, $new_account) {
+		return $ceremonies->openWithUnlocker($euser, $evault, ['passphrase_kek' => SealedBox::b64url($new_account)], $wrap_under);
+	}, function () use ($ceremonies, $euser, $fresh, $ex) {
+		$ceremonies->replaceRootTwins($euser, $fresh['set'], ['recovery' => vault_fixture_root_recovery($ex['root_salt'], $fresh, $ex['root_secret'])]);
+	});
+	$res = $ceremonies->unlockWithRecoveryKek($euser, new UserEncryptionVault((int)$evault->key, TRUE),
+		VaultUnlockerKdf::codeKekAccount($fresh['codes'][1], $ex['root_salt']), false);
+	check(is_array($res) && is_array($res['root_wrapping']), 'a code from the new set opens both halves');
+	$threw = false;
+	try { $ceremonies->unlockWithRecoveryKek($euser, new UserEncryptionVault((int)$evault->key, TRUE), VaultUnlockerKdf::codeKekAccount($ex['recovery_codes'][2], $ex['root_salt']), false); }
+	catch (VaultCeremonyException $e) { $threw = true; }
+	check($threw, 'and the old set is gone');
+	check(cer_counts((int)cer_root($euid)->key)['recovery'] === 5, 'the root holds exactly the new set\'s five twins');
+
+	// 4. A root twin set that does not match the account's set changes nothing.
+	$bad = vault_fixture_code_set($ex['root_salt'], 5);
+	$mismatch = vault_fixture_code_set($ex['root_salt'], 5);
+	$threw = false;
+	try {
+		UserEncryptionWrapping::adoptCodeSet($evault, $bad['set'], function (array $wrap_under) use ($ceremonies, $euser, $evault, $new_account) {
+			return $ceremonies->openWithUnlocker($euser, $evault, ['passphrase_kek' => SealedBox::b64url($new_account)], $wrap_under);
+		}, function () use ($ceremonies, $euser, $bad, $mismatch, $ex) {
+			$ceremonies->replaceRootTwins($euser, $bad['set'], ['recovery' => vault_fixture_root_recovery($ex['root_salt'], $mismatch, $ex['root_secret'])]);
+		});
+	} catch (Throwable $e) { $threw = true; }
+	check($threw, 'root twins of a different set are refused');
+	$res = $ceremonies->unlockWithRecoveryKek($euser, new UserEncryptionVault((int)$evault->key, TRUE),
+		VaultUnlockerKdf::codeKekAccount($fresh['codes'][2], $ex['root_salt']), false);
+	check(is_array($res), 'and the set in place still works: a failure mid-change spends and replaces nothing');
 	VaultUnlock::lockAll($euid);
 }
 

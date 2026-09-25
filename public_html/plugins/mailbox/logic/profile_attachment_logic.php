@@ -17,6 +17,10 @@
  * On success this streams and exit()s. On any failure it returns a
  * LogicResult so the view can render an honest message.
  *
+ * A Fortress attachment streams as stored ciphertext, unnamed; the reader
+ * fetches it and opens it in the browser (specs/client_custody_mail.md § R4).
+ *
+ * @version 1.1.0 - Fortress attachments stream as ciphertext
  * @version 1.0.0
  */
 
@@ -66,7 +70,7 @@ function profile_attachment_logic(array $input): LogicResult {
 		return _profile_attachment_error($session, $settings, $result['error'], $reader_url);
 	}
 
-	mailbox_stream_attachment($att, $result['content']);
+	mailbox_stream_attachment($att, $result['content'], !empty($result['browser_sealed']));
 }
 
 function _profile_attachment_error($session, $settings, string $message, string $reader_url): LogicResult {

@@ -100,15 +100,9 @@ check($box->kekFromRecoveryCode($typo_l, $salt) === $kek_clean, 'lowercase l-for
 check($box->kekFromRecoveryCode($box->generateRecoveryCode(), $salt) !== $kek_clean, 'a different code derives a different KEK');
 check($box->kekFromRecoveryCode($code, $box->generateSalt()) !== $kek_clean, 'a different salt derives a different KEK');
 
-section('Passphrase KDF');
-check(strlen(SealedBox::b64url_decode($salt)) === SODIUM_CRYPTO_PWHASH_SALTBYTES, 'generated salt is sized for Argon2id');
-$k1 = $box->kekFromPassphrase('correct horse battery staple', $salt);
-check(strlen($k1) === SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_KEYBYTES, 'passphrase KEK is 32 bytes');
-check($box->kekFromPassphrase('correct horse battery staple', $salt) === $k1, 'deterministic for the same salt');
-check($box->kekFromPassphrase('correct horse battery staple', $box->generateSalt()) !== $k1, 'salt-dependent');
-$threw = false;
-try { $box->kekFromPassphrase('x', SealedBox::b64url(random_bytes(8))); } catch (Exception $e) { $threw = true; }
-check($threw, 'wrong-length salt throws');
+section('Salt');
+check(strlen(SealedBox::b64url_decode($salt)) === 16, 'a generated salt is 16 bytes');
+check(!method_exists('SealedBox', 'kekFromPassphrase'), 'the server derives no passphrase KEK (the browser does)');
 
 harness_finish();
 ?>

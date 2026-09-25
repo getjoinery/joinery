@@ -8,6 +8,9 @@
 
 	$page = new PublicPage();
 	$page->needs_vault_rotation();
+	// Setting up the vault makes its codes and its root vault here, in the
+	// browser (specs/one_vault_experience.md § R4, R6).
+	$page->needs_vault_client();
 	$page->public_header([
 		'title' => 'Security Settings',
 	]);
@@ -502,14 +505,41 @@
                 async function runVaultActivation(credentialId) {
                     var options = await apiFetch('/api/v1/action/vault_add_passkey_options', {
                         method: 'POST',
-                        body: JSON.stringify({ credential_id: credentialId }),
+                        body: JSON.stringify({ credential_id: credentialId, with_root: 1 }),
                     });
-                    var credential = (await JoineryPasskeys.derive(options.data.options)).response;
+                    // The same touch gives the root vault's output, kept here
+                    // (specs/one_vault_experience.md § R1).
+                    var derived = await JoineryPasskeys.derive(options.data.options);
                     var unlocker = await JoineryVaultLock.collectUnlocker('to let this passkey open your vault');
                     if (!unlocker) { throw new Error('Confirmation was cancelled.'); }
-                    var result = await apiFetch('/api/v1/action/vault_add_passkey_verify', { method: 'POST', body: JSON.stringify({ credential: credential, unlocker: unlocker }) });
+                    var result = await apiFetch('/api/v1/action/vault_add_passkey_verify', { method: 'POST', body: JSON.stringify({ credential: derived.response, unlocker: unlocker }) });
+                    await rootLearnsPasskey(derived.response.rawId || derived.response.id, derived.secondOutput);
                     document.dispatchEvent(new CustomEvent('joinery:vault-changed'));
                     return (result.data && result.data.label) || 'Passkey';
+                }
+
+                // A passkey that opens the account vault also opens the root, so
+                // one touch keeps opening everything. Needs the root open here and
+                // that passkey's root output; best effort — a passkey the root
+                // does not know yet catches up at its first unlock.
+                async function rootLearnsPasskey(credentialB64, secondOutput) {
+                    if (!window.JoinerySealed || !JoinerySealed.rootSession() || !credentialB64) return;
+                    try {
+                        if (!secondOutput) return;
+                        await VaultKeyring.addRootPasskey(JoinerySealed.rootSession(), credentialB64, secondOutput);
+                    } catch (e) { /* caught up at its first unlock */ }
+                }
+
+                // The root output of a passkey registered just now: one touch of
+                // it, asked for only while the root is open.
+                async function rootLearnsNewPasskey(internalId) {
+                    if (!window.JoinerySealed || !JoinerySealed.rootSession()) return;
+                    try {
+                        var options = await apiFetch('/api/v1/action/vault_add_passkey_options', {
+                            method: 'POST', body: JSON.stringify({ credential_id: internalId, with_root: 1 }) });
+                        var derived = await JoineryPasskeys.derive(options.data.options);
+                        await rootLearnsPasskey(derived.response.rawId || derived.response.id, derived.secondOutput);
+                    } catch (e) { /* caught up at its first unlock */ }
                 }
 
                 // A server refusal (no unlock window, no PRF output, step-up
@@ -594,7 +624,7 @@
                         // and not yet activated — the Activate action remains.
                         var unlocker = null;
                         if (vaultStatus && window.JoineryVaultLock) {
-                            showFlowHint('One more step — confirm with a passkey, bypass phrase or recovery code you already have, so the new passkey can open your vault too.');
+                            showFlowHint('One more step — confirm with a passkey, your passphrase or a recovery code you already have, so the new passkey can open your vault too.');
                             try {
                                 unlocker = await JoineryVaultLock.collectUnlocker('to let the new passkey open your vault');
                             } catch (e) {
@@ -663,6 +693,9 @@
                         if (regResult.data && !regResult.data.vault_activated && regResult.data.vault_activation_error) {
                             JoineryModal.alert('The passkey was added, but is not activated for your vault yet: '
                                 + regResult.data.vault_activation_error + ' You can activate it any time from its Actions menu.');
+                        } else if (regResult.data && regResult.data.vault_activated && newId) {
+                            showFlowHint('Last step — tap the new passkey once more so it opens your end-to-end content too.');
+                            await rootLearnsNewPasskey(newId);
                         }
                         if (window.jyMaybeReturn && jyMaybeReturn()) return;
                     } catch (e) {
@@ -703,8 +736,8 @@
                         <summary class="btn btn-secondary">Actions</summary>
                         <div class="jy-actions-menu">
                             <button type="button" id="vault-regenerate-codes-btn">Regenerate Recovery Codes</button>
-                            <button type="button" id="vault-passphrase-enroll-btn">Add/Replace Bypass Phrase</button>
-                            <button type="button" class="d-none" id="vault-passphrase-remove-btn">Remove Bypass Phrase</button>
+                            <button type="button" class="d-none" id="vault-passphrase-enroll-btn">Change Passphrase</button>
+                            <button type="button" class="d-none" id="vault-passphrase-remove-btn">Remove Passphrase</button>
                             <button type="button" class="jy-action-danger" id="vault-rotate-btn">Rotate Vault Key</button>
                         </div>
                     </details>
@@ -717,9 +750,7 @@
 
                 <div class="d-none" id="vault-locked">
                     <p><strong>Status:</strong> Locked</p>
-                    <button type="button" class="btn btn-primary" id="vault-unlock-passkey-btn">Unlock with Passkey</button>
-                    <button type="button" class="btn btn-secondary" id="vault-unlock-recovery-btn">Unlock with Recovery Code</button>
-                    <button type="button" class="btn btn-secondary d-none" id="vault-unlock-passphrase-btn">Unlock with Bypass Phrase</button>
+                    <button type="button" class="btn btn-primary" id="vault-unlock-btn">Unlock</button>
                 </div>
 
                 <div class="d-none" id="vault-unlocked">
@@ -795,8 +826,9 @@
                     codesDisplay.classList.remove('d-none');
                 }
 
-                var unlockerNames = { passkey: 'Passkey', recovery: 'Recovery code', passphrase: 'Bypass phrase' };
+                var unlockerNames = { passkey: 'Passkey', recovery: 'Recovery code', passphrase: 'Passphrase' };
                 var hasPassphrase = false;
+                var lastStatus = null;
 
                 function renderWrappings(status) {
                     var body = document.getElementById('vault-wrappings-body');
@@ -818,6 +850,7 @@
                 function refresh() {
                     return apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' }).then(function (json) {
                         var status = json.data;
+                        lastStatus = status;
                         hasPassphrase = !!status.has_passphrase;
                         // Presence beacon (assets/js/vault-presence.js): follow the
                         // window state, so an unlock on this page starts site-wide
@@ -827,6 +860,10 @@
                             else { JoineryVaultPresence.stop(); }
                         }
                         codesDisplay.classList.add('d-none');
+                        // A passphrase exists only where no passkey can hold the key
+                        // (specs/one_vault_experience.md § R8): offered only then.
+                        document.getElementById('vault-passphrase-enroll-btn').classList.toggle('d-none', !status.passphrase_allowed);
+                        document.getElementById('vault-passphrase-remove-btn').classList.toggle('d-none', !status.has_passphrase);
                         if (!status.set_up) {
                             notSetUp.classList.remove('d-none');
                             locked.classList.add('d-none');
@@ -839,17 +876,33 @@
                             // Every action here confirms with an unlocker of its
                             // own, so none needs the window open first.
                             setActionsVisible(true);
-                            document.getElementById('vault-unlock-passphrase-btn').classList.toggle('d-none', !status.has_passphrase);
-                            document.getElementById('vault-passphrase-remove-btn').classList.toggle('d-none', !status.has_passphrase);
                         } else {
                             notSetUp.classList.add('d-none');
                             locked.classList.add('d-none');
                             unlocked.classList.remove('d-none');
                             setActionsVisible(true);
-                            document.getElementById('vault-passphrase-remove-btn').classList.toggle('d-none', !status.has_passphrase);
                             renderWrappings(status);
                         }
                     });
+                }
+
+                // The root vault's session, opening it (the one unlock) when shut:
+                // new codes and a new phrase are made for both halves at once.
+                // Always BEFORE the action's own passkey ceremony: every vault-kek
+                // ceremony keeps one pending challenge per session, so an unlock
+                // run between an assertion and its post would replace the
+                // challenge that assertion was signed against.
+                async function rootOpen() {
+                    if (JoinerySealed.rootSession()) return JoinerySealed.rootSession();
+                    return JoinerySealed.session(VaultKeyring.ROOT, { reason: 'to change what opens it' });
+                }
+
+                function secondFactorRedirect(data) {
+                    if (data && data.second_factor_required) {
+                        window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                        return true;
+                    }
+                    return false;
                 }
 
                 document.getElementById('vault-setup-btn').addEventListener('click', async function () {
@@ -865,23 +918,24 @@
                     }
                     if (!await JoineryModal.confirmAsync('If you lose every unlocker (your passkey and your recovery codes), everything sealed in your vault is permanently lost - there is no support-desk recovery. Continue?', { confirmLabel: 'I understand' })) return;
                     try {
-                        var options = await apiFetch('/api/v1/action/vault_setup_options', { method: 'POST', body: '{}' });
-                        var credential = (await JoineryPasskeys.derive(options.data.options)).response;
-                        var body = { credential: credential, acknowledged: true };
-                        var result = await apiFetch('/api/v1/action/vault_setup_verify', { method: 'POST', body: JSON.stringify(body) });
-                        showCodes(result.data.recovery_codes, result.data.key_file);
+                        var made = await VaultKeyring.setupVault({ acknowledged: true });
+                        JoinerySealed.adopt(VaultKeyring.ROOT, made.rootSession);
+                        showCodes(made.codes, made.result.key_file);
                     } catch (e) {
                         // The hardware-limit refusal reveals the compatibility
                         // fallback here too — this page is the step's permanent
                         // home. Eligibility stays server-decided: the action
                         // refuses an account with any working passkey route.
                         if (e.data && e.data.prf_unsupported) {
-                            if (!await JoineryModal.confirmAsync('This passkey cannot hold an encryption key - a limit of the device or security key itself, not a setting. A passkey from a newer phone, laptop or password manager is the better route. If none of your passkeys can, you can unlock with a memorized bypass phrase instead - weaker than a passkey, offered because the device leaves no better option. If you forget it and lose your recovery codes, the data is gone for good. Use a bypass phrase?', { confirmLabel: 'Use a bypass phrase' })) return;
-                            var phrase = await JoineryModal.promptAsync('Set a bypass phrase (12+ characters):', { inputType: 'password', confirmLabel: 'Create' });
+                            if (!await JoineryModal.confirmAsync('This passkey cannot hold an encryption key - a limit of the device or security key itself, not a setting. A passkey from a newer phone, laptop or password manager is the better route. If none of your passkeys can, you can unlock with a memorized passphrase instead - weaker than a passkey: everything in your vault, end-to-end content included, is then as safe from a broken-into server as the passphrase is hard to guess. If you forget it and lose your recovery codes, the data is gone for good. Use a passphrase?', { confirmLabel: 'Use a passphrase' })) return;
+                            var phrase = await JoineryModal.promptAsync('Set a passphrase (12+ characters):', { inputType: 'password', confirmLabel: 'Create' });
                             if (!phrase) return;
+                            if (phrase.length < 12) { JoineryModal.alert('Use a passphrase of at least 12 characters.'); return; }
                             try {
-                                var created = await apiFetch('/api/v1/action/vault_setup_passphrase', { method: 'POST', body: JSON.stringify({ passphrase: phrase, acknowledged: true }) });
-                                showCodes(created.data.recovery_codes, created.data.key_file);
+                                var created = await VaultKeyring.setupVault({ acknowledged: true, passphrase: phrase });
+                                if (secondFactorRedirect(created.result)) return;
+                                JoinerySealed.adopt(VaultKeyring.ROOT, created.rootSession);
+                                showCodes(created.codes, created.result.key_file);
                             } catch (e2) {
                                 JoineryModal.alert(e2.message || 'Could not set up your vault.');
                             }
@@ -891,102 +945,92 @@
                     }
                 });
 
-                document.getElementById('vault-unlock-passkey-btn').addEventListener('click', async function () {
-                    try {
-                        var options = await apiFetch('/api/v1/action/vault_unlock_options', { method: 'POST', body: '{}' });
-                        var credential = (await JoineryPasskeys.derive(options.data.options)).response;
-                        await apiFetch('/api/v1/action/vault_unlock_passkey', { method: 'POST', body: JSON.stringify({ credential: credential }) });
-                        await refresh();
-                    } catch (e) {
-                        JoineryModal.alert(e.message || 'Could not unlock your vault.');
-                    }
-                });
-
-                document.getElementById('vault-unlock-recovery-btn').addEventListener('click', async function () {
-                    var code = await JoineryModal.promptAsync('Enter a recovery code:', { confirmLabel: 'Unlock' });
-                    if (!code) return;
-                    try {
-                        var result = await apiFetch('/api/v1/action/vault_unlock_recovery', { method: 'POST', body: JSON.stringify({ code: code }) });
-                        if (result.data && result.data.regenerate_recommended) {
-                            JoineryModal.alert('Unlocked. Fewer than 3 unused recovery codes remain - consider regenerating them.');
-                        }
-                        await refresh();
-                    } catch (e) {
-                        JoineryModal.alert(e.message || 'Could not unlock your vault.');
-                    }
-                });
-
-                document.getElementById('vault-unlock-passphrase-btn').addEventListener('click', async function () {
-                    var passphrase = await JoineryModal.promptAsync('Enter your bypass phrase:', { inputType: 'password', confirmLabel: 'Unlock' });
-                    if (!passphrase) return;
-                    try {
-                        await apiFetch('/api/v1/action/vault_unlock_passphrase', { method: 'POST', body: JSON.stringify({ passphrase: passphrase }) });
-                        await refresh();
-                    } catch (e) {
-                        JoineryModal.alert(e.message || 'Could not unlock your vault.');
-                    }
+                document.getElementById('vault-unlock-btn').addEventListener('click', async function () {
+                    if (await JoineryVaultLock.unlock()) { await refresh(); }
                 });
 
                 document.getElementById('vault-lock-btn').addEventListener('click', async function () {
-                    try {
-                        await apiFetch('/api/v1/action/vault_lock', { method: 'POST', body: '{}' });
-                        await refresh();
-                    } catch (e) {
-                        JoineryModal.alert(e.message || 'Could not lock your vault.');
-                    }
+                    await JoineryVaultLock.lock();
+                    await refresh();
                 });
 
                 document.getElementById('vault-regenerate-codes-btn').addEventListener('click', async function () {
-                    if (!await JoineryModal.confirmAsync('This invalidates all existing recovery codes. Continue?', { confirmLabel: 'Regenerate' })) return;
+                    if (!await JoineryModal.confirmAsync('This replaces all your recovery codes, for all of your vault. Continue?', { confirmLabel: 'Regenerate' })) return;
                     try {
+                        var root = await rootOpen();
                         var unlocker = await JoineryVaultLock.collectUnlocker('to replace your recovery codes');
                         if (!unlocker) return;
-                        var result = await apiFetch('/api/v1/action/vault_regenerate_codes', { method: 'POST', body: JSON.stringify({ unlocker: unlocker }) });
-                        showCodes(result.data.recovery_codes, null);
+                        var st = (await apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' })).data;
+                        var fresh = await VaultKeyring.replacementCodes(st.root, root);
+                        await apiFetch('/api/v1/action/vault_regenerate_codes', { method: 'POST', body: JSON.stringify({
+                            unlocker: unlocker, code_set: fresh.code_set, root_wrappings: fresh.root_wrappings }) });
+                        showCodes(fresh.codes, null);
                     } catch (e) {
                         JoineryModal.alert(e.message || 'Could not regenerate recovery codes.');
                     }
                 });
 
                 document.getElementById('vault-passphrase-enroll-btn').addEventListener('click', async function () {
-                    if (!await JoineryModal.confirmAsync('A bypass phrase is a memorized phrase that opens your vault without your passkey - it is not your login password. It lowers your vault\'s strength to the strength of the phrase: anyone who learns or guesses it can unlock. Add one only if you need to unlock where your passkey is not available.', { confirmLabel: 'I understand' })) return;
-                    var passphrase = await JoineryModal.promptAsync('Set a bypass phrase (12+ characters):', { inputType: 'password', confirmLabel: 'Save' });
+                    if (!await JoineryModal.confirmAsync('Your passkeys cannot hold an encryption key, so your vault opens with a passphrase. It opens everything in your vault, end-to-end content included, which is then as safe from a broken-into server as the passphrase is hard to guess. Use something long and unique.', { confirmLabel: 'I understand' })) return;
+                    var passphrase = await JoineryModal.promptAsync('Set a new passphrase (12+ characters):', { inputType: 'password', confirmLabel: 'Save' });
                     if (!passphrase) return;
+                    if (passphrase.length < 12) { JoineryModal.alert('Use a passphrase of at least 12 characters.'); return; }
                     try {
-                        var unlocker = await JoineryVaultLock.collectUnlocker('to add your bypass phrase');
+                        var root = await rootOpen();
+                        var unlocker = await JoineryVaultLock.collectUnlocker('to change your passphrase');
                         if (!unlocker) return;
-                        await apiFetch('/api/v1/action/vault_passphrase_enroll', { method: 'POST', body: JSON.stringify({ passphrase: passphrase, unlocker: unlocker }) });
+                        var st = (await apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' })).data;
+                        var halves = await VaultKeyring.passphraseEnrolment(st.root, root, passphrase);
+                        await apiFetch('/api/v1/action/vault_passphrase_enroll', { method: 'POST', body: JSON.stringify({
+                            unlocker: unlocker, passphrase_kek: halves.passphrase_kek, root_passphrase: halves.root_passphrase }) });
                         await refresh();
-                        JoineryModal.alert('Bypass phrase added.');
+                        JoineryModal.alert('Passphrase changed.');
                     } catch (e) {
-                        JoineryModal.alert(e.message || 'Could not add a bypass phrase.');
+                        JoineryModal.alert(e.message || 'Could not change your passphrase.');
                     }
                 });
 
                 document.getElementById('vault-passphrase-remove-btn').addEventListener('click', async function () {
-                    if (!await JoineryModal.confirmAsync('Remove your bypass phrase?', { confirmLabel: 'Remove' })) return;
+                    if (!await JoineryModal.confirmAsync('Remove your passphrase?', { confirmLabel: 'Remove' })) return;
                     try {
                         await apiFetch('/api/v1/action/vault_passphrase_remove', { method: 'POST', body: '{}' });
                         await refresh();
                     } catch (e) {
-                        JoineryModal.alert(e.message || 'Could not remove your bypass phrase.');
+                        JoineryModal.alert(e.message || 'Could not remove your passphrase.');
                     }
                 });
 
                 document.getElementById('vault-rotate-btn').addEventListener('click', async function () {
-                    if (!await JoineryModal.confirmAsync('Rotate your vault key now? Passkeys other than the one you use here' + (hasPassphrase ? ', and your bypass phrase unless re-entered,' : '') + ' will need to be re-added afterward. Continue?', { confirmLabel: 'Rotate' })) return;
+                    var keepPhrase = hasPassphrase && lastStatus && lastStatus.passphrase_allowed;
+                    if (!await JoineryModal.confirmAsync('Rotate your vault key now? Passkeys other than the one you use here' + (keepPhrase ? ', and your passphrase unless re-entered,' : '') + ' will need to be re-added afterward, and you get new recovery codes. Continue?', { confirmLabel: 'Rotate' })) return;
                     var passphrase = '';
-                    if (hasPassphrase) {
-                        passphrase = await JoineryModal.promptAsync('Re-enter your bypass phrase to carry it forward, or leave blank to drop it:', { inputType: 'password', confirmLabel: 'Continue' });
+                    if (keepPhrase) {
+                        passphrase = await JoineryModal.promptAsync('Re-enter your passphrase to carry it forward, or leave blank to drop it:', { inputType: 'password', confirmLabel: 'Continue' });
                         if (passphrase === null) return;
                     }
                     try {
+                        var root = await rootOpen();
                         var options = await apiFetch('/api/v1/action/vault_rotate_options', { method: 'POST', body: '{}' });
-                        var credential = (await JoineryPasskeys.derive(options.data.options)).response;
-                        var body = { credential: credential, acknowledged: true };
-                        if (passphrase) body.passphrase = passphrase;
+                        var derived = await JoineryPasskeys.derive(options.data.options);
+                        var st = (await apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' })).data;
+                        var fresh = await VaultKeyring.replacementCodes(st.root, root);
+                        var body = { credential: derived.response, acknowledged: true, code_set: fresh.code_set,
+                            root_unlockers: { recovery: fresh.root_wrappings } };
+                        if (passphrase) {
+                            var halves = await VaultKeyring.passphraseEnrolment(st.root, root, passphrase);
+                            body.passphrase_kek = halves.passphrase_kek;
+                            body.root_unlockers.passphrase = [halves.root_passphrase];
+                        }
                         var result = await apiFetch('/api/v1/action/vault_rotate_verify', { method: 'POST', body: JSON.stringify(body) });
-                        showCodes(result.data.recovery_codes, null);
+                        if (result.data.completed_pending) {
+                            // This finished a rotation that had stopped: the codes made
+                            // here were not used, and the ones the stopped attempt made
+                            // were never shown.
+                            await refresh();
+                            JoineryModal.alert('Your key rotation is finished. Its recovery codes were never shown, so make a new set now: Actions → Regenerate Recovery Codes.');
+                        } else {
+                            showCodes(fresh.codes, result.data.key_file);
+                        }
                         if (result.data.dropped_passkeys && result.data.dropped_passkeys.length) {
                             JoineryModal.alert('These passkeys need to be re-added to your vault: ' + result.data.dropped_passkeys.map(function (p) { return p.label || 'Passkey'; }).join(', '));
                         }
@@ -1183,6 +1227,7 @@
                         $rr_vault = UserEncryptionVault::loadForUser((int)$user->key, $rr_item['scope']);
                         $rr_pending = $rr_vault && $rr_vault->get('uev_pending_key_generation') !== null;
                         ?>
+                        <?php if ($rr_item['scope'] !== VaultScopes::ROOT_SCOPE): /* the root's key is not rotated here: it would orphan every content vault */ ?>
                         <div class="jy-mt-3" data-vault-rotate="<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>">
                             <?php if ($rr_pending): ?>
                                 <div class="jy-alert jy-alert-warning">A rotation of this vault's key stopped part way. What it already moved to the new key will not open until the rotation is finished, so finish it now.</div>
@@ -1192,6 +1237,7 @@
                             <button type="button" class="btn btn-secondary" data-vault-rotate-btn><?php echo $rr_pending ? 'Finish rotating this vault\'s key' : 'Rotate this vault\'s key'; ?></button>
                             <div class="jy-mt-1" data-vault-rotate-status role="status"></div>
                         </div>
+                        <?php endif; ?>
                     <?php else: ?>
                         <form action="/profile/security" method="POST">
                             <input type="hidden" name="action" value="vault_code_check">

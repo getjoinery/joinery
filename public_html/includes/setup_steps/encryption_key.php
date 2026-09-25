@@ -1,10 +1,11 @@
 <?php
 /**
  * Setup wizard step: Your encryption key (specs/setup_wizard.md § Step 2).
- * Mounts the existing vault ceremony (vault_setup_options / vault_setup_verify)
- * over the API. Included by views/setup.php with $page, $viewer, $settings,
+ * Mounts the vault setup ceremony (VaultKeyring.setupVault, over
+ * vault_setup_options / vault_setup_verify / vault_setup_passphrase). Included by views/setup.php with $page, $viewer, $settings,
  * $next_key in scope.
  *
+ * @version 1.6 - one vault: the codes, the phrase's keys and the root vault are made in the browser
  * @version 1.5 - "Add a passkey elsewhere" goes to the security page (the wizard interrupt
  *                exempts it); the bypass-phrase route steps up BEFORE the phrase is typed
  * @version 1.4
@@ -46,9 +47,9 @@ $setup_vault_phrase_return = '/setup?step=encryption_key&phrase=1';
 	<div class="setup-choice jy-mt-2">
 		<a class="btn btn-primary" href="/profile/security">&larr; Add a passkey elsewhere</a>
 <?php if ($setup_vault_stepup_first) { ?>
-		<a class="btn btn-secondary" href="/verify-stepup?return=<?php echo urlencode($setup_vault_phrase_return); ?>">Use a bypass phrase instead</a>
+		<a class="btn btn-secondary" href="/verify-stepup?return=<?php echo urlencode($setup_vault_phrase_return); ?>">Use a passphrase instead</a>
 <?php } else { ?>
-		<button type="button" class="btn btn-secondary" id="setup-vault-phrase-open">Use a bypass phrase instead</button>
+		<button type="button" class="btn btn-secondary" id="setup-vault-phrase-open">Use a passphrase instead</button>
 <?php } ?>
 	</div>
 	<p class="jy-muted">Adding a passkey happens on your security page; the "Finish setup" reminder in the header brings you back here.</p>
@@ -56,7 +57,7 @@ $setup_vault_phrase_return = '/setup?step=encryption_key&phrase=1';
 	<div id="setup-vault-phrase" class="d-none jy-mt-3">
 		<p class="jy-muted">A phrase you type is weaker than a passkey you tap — it can be guessed, and it can be phished. It is here because your device leaves no better option. Use something long and unique, and store it in a password manager if you have one. Minimum <?php echo $setup_vault_phrase_min; ?> characters.</p>
 		<label class="setup-field">
-			<span>Bypass phrase</span>
+			<span>Passphrase</span>
 			<input type="password" id="setup-vault-phrase-1" autocomplete="new-password">
 		</label>
 		<label class="setup-field jy-mt-2">
@@ -113,20 +114,21 @@ document.addEventListener('DOMContentLoaded', function () {
 		hint.textContent = '';
 		create.disabled = true;
 		try {
-			var result = await joineryApi.post('vault_setup_passphrase', {
-				passphrase: one.value,
-				passphrase_confirm: two.value,
-				acknowledged: 1
-			});
+			// The phrase and the codes stay in this browser: only the account
+			// halves of their keys are sent (specs/one_vault_experience.md § R6, R7).
+			var made = await VaultKeyring.setupVault({ acknowledged: true, passphrase: one.value });
+			var result = made.result;
 			// Shared second-factor step-up handling: a 2xx render carrying the
 			// flag redirects to the ceremony, then back to this step.
 			if (result && result.second_factor_required) {
 				window.location = '/verify-stepup?return=' + encodeURIComponent('/setup?step=encryption_key');
 				return;
 			}
+			one.value = two.value = '';
+			if (window.JoinerySealed) { JoinerySealed.adopt(VaultKeyring.ROOT, made.rootSession); }
 			// The whole step collapses, not just the phrase panel — the
 			// "add a passkey elsewhere" route above it is moot now.
-			window.setupVaultShowResult(result, 'setup-vault-phrase-branch');
+			window.setupVaultShowResult({ recovery_codes: made.codes, key_file: result.key_file }, 'setup-vault-phrase-branch');
 		} catch (e) {
 			hint.textContent = e.message || 'The key could not be created.';
 			sync();
@@ -179,7 +181,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
 	<?php require(PathHelper::getIncludePath('includes/setup_steps/vault_shown_once.php')); ?>
 
-<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
 	var ack = document.getElementById('setup-vault-ack');
@@ -193,13 +194,11 @@ document.addEventListener('DOMContentLoaded', function () {
 		hint.textContent = '';
 		create.disabled = true;
 		try {
-			var opts = await joineryApi.post('vault_setup_options', {});
-			var derived = await JoineryPasskeys.derive(opts.options);
-			var result = await joineryApi.post('vault_setup_verify', {
-				credential: derived.response,
-				acknowledged: 1
-			});
-			window.setupVaultShowResult(result, 'setup-vault-start');
+			// One touch makes the account key and the root vault together,
+			// with codes made here (specs/one_vault_experience.md § R4, R6).
+			var made = await VaultKeyring.setupVault({ acknowledged: true });
+			if (window.JoinerySealed) { JoinerySealed.adopt(VaultKeyring.ROOT, made.rootSession); }
+			window.setupVaultShowResult({ recovery_codes: made.codes, key_file: made.result.key_file }, 'setup-vault-start');
 		} catch (e) {
 			// Every refusal this page cannot talk the user out of reveals the
 			// fallback: a mandatory step must never become a dead end. PRF

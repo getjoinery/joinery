@@ -1,6 +1,15 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.72 — a send whose Sent copy could not be stored closes
+ * No framework. @version 2.77 — one vault: "Unlock your vault"; the first unlock makes the mail key.
+ * @version 2.76 — a reload that reopens the mail vault renders open the first time.
+ * @version 2.75 — opening the mail vault clears its banner at once and re-asks
+ * the setup verdict past its cache.
+ * @version 2.74 — the Fortress list banner is laid out like the setup banner.
+ * @version 2.73 — end-to-end (Fortress) rows are opened in this
+ * browser by MailboxFortress (mailbox_fortress.js) before the list or a thread
+ * renders; their attachments download and preview from bytes opened here, and a
+ * mail-vault lock re-renders both from the sealed server copies.
+ * @version 2.72 — a send whose Sent copy could not be stored closes
  * the compose as sent and shows the server's warning; the send no longer posts
  * a form token (the API call carries X-Joinery-Csrf).
  * @version 2.71 — every address in a message header carries a
@@ -217,6 +226,99 @@
 		if (payload.present != null) body.present = payload.present ? '1' : '0';
 		if (payload.name != null) body.name = String(payload.name);
 		return joineryApi.post(CFG.actionUrl, body).catch(function () { return {}; });
+	}
+
+	// ---- end-to-end (Fortress) rows (specs/client_custody_mail.md § R4) ----
+	// A Fortress row arrives with its content under `sealed`; MailboxFortress opens
+	// it here before anything renders. With no Fortress mailbox visible the module
+	// is not loaded, and a stray sealed row (one mid-way through a level change)
+	// shows a placeholder rather than an empty line.
+	function fortressReady() { return !!(CFG.fortress && window.MailboxFortress); }
+	function fortressList(data) {
+		if (fortressReady()) return MailboxFortress.openList(data);
+		((data && data.threads) || []).forEach(function (t) {
+			if (t && t.sealed) { t.snippet = 'End-to-end encrypted.'; t.fortress_placeholder = true; }
+		});
+		return data;
+	}
+	function fortressThread(data) {
+		if (fortressReady()) return MailboxFortress.openThread(data);
+		((data && data.messages) || []).forEach(function (m) {
+			if (m && m.sealed) { m.body_plain = 'End-to-end encrypted.'; m.attachments = []; }
+		});
+		return data;
+	}
+	// The banner a locked vault puts above a list or a thread: one button runs
+	// the one unlock, which also makes the mail key on first use
+	// (specs/one_vault_experience.md § R4). The session opening
+	// re-renders the list and the open thread (the joinery:vault-scope-unlocked
+	// listener in init).
+	function fortressUnlockBanner(tag, text, label) {
+		var banner = el(tag, 'mbx-unlock-banner');
+		banner.appendChild(el('span', 'mbx-unlock-text', text));
+		var btn = el('button', 'mbx-unlock-btn', label || 'Unlock your vault');
+		btn.type = 'button';
+		btn.addEventListener('click', async function () {
+			btn.disabled = true;
+			try {
+				if (await MailboxFortress.unlock()) { return; }
+			} catch (e) { /* cancelled or failed: the button comes back */ }
+			btn.disabled = false;
+		});
+		banner.appendChild(btn);
+		return banner;
+	}
+	// A Fortress mailbox in view (the open one, or any of them under All mail)
+	// and the vault shut: say so above the list, sealed rows or none. With no
+	// mail key yet, mail to the mailbox is held until one exists; the first
+	// unlock here makes it, silently (specs/one_vault_experience.md § R4).
+	function fortressMailboxInView() {
+		return (state.mailboxes || []).some(function (m) {
+			if (m.security_level !== 'fortress') return false;
+			return state.aliasId == null || String(m.alias_id) === String(state.aliasId);
+		});
+	}
+	// Laid out like the setup banner ("This mailbox needs attention"): a title,
+	// the reason, and the one button that fixes it.
+	function showFortressListBanner(listEl, seq) {
+		if (!fortressReady() || !fortressMailboxInView()) return;
+		MailboxFortress.ready().then(function () {
+			return MailboxFortress.isOpen() ? null : MailboxFortress.isSetUp();
+		}).then(function (setUp) {
+			if (setUp === null && MailboxFortress.isOpen()) return;   // reopened by a reload's resume
+			if (seq !== listSeq || MailboxFortress.isOpen()) return;   // a newer list, or opened meanwhile
+			var li = el('li', 'mbx-setup-banner mbx-fortress-banner');
+			var body = el('div', 'mbx-setup-banner-body');
+			body.appendChild(el('span', 'mbx-setup-banner-title', setUp === false
+				? 'Unlock your vault to receive mail here' : 'This mailbox is end-to-end encrypted'));
+			body.appendChild(el('span', 'mbx-setup-banner-reason', setUp === false
+				? 'This mailbox is end-to-end encrypted. Mail to it is held until you unlock your vault here once, '
+					+ 'which makes the key only your devices can open.'
+				: 'Unlock your vault to read it.'));
+			li.appendChild(body);
+			var btn = el('button', 'mbx-setup-banner-btn', 'Unlock your vault');
+			btn.type = 'button';
+			btn.addEventListener('click', async function () {
+				btn.disabled = true;
+				try {
+					if (await MailboxFortress.unlock()) { return; }   // the unlock listener re-renders
+				} catch (e) { /* cancelled or failed: the button comes back */ }
+				btn.disabled = false;
+			});
+			li.appendChild(btn);
+			listEl.insertBefore(li, listEl.firstChild);
+		});
+	}
+
+	function fortressDownload(a) {
+		if (a.fortress_locked) {
+			// Opening the vault re-renders the thread with real chips.
+			MailboxFortress.unlock().catch(function () {});
+			return;
+		}
+		MailboxFortress.download(a).catch(function (err) {
+			alert((err && err.message) || 'This attachment could not be opened.');
+		});
 	}
 
 	// ---- vault unlock (locked-state contract) ----
@@ -691,7 +793,8 @@
 		// The list may have moved on while the check ran.
 		if (String(aliasId) !== String(state.aliasId) || !setupCheckable()) return;
 		var listEl = $('#mbx-threads');
-		var existing = $('.mbx-setup-banner', listEl);
+		// The Fortress banner shares the look, not the slot (showFortressListBanner).
+		var existing = $('.mbx-setup-banner:not(.mbx-fortress-banner)', listEl);
 		if (existing) listEl.removeChild(existing);
 		if (!status || status.status !== 'attention') return;
 
@@ -1110,7 +1213,7 @@
 			listEl.appendChild(loadingRow());
 		}
 		var seq = ++listSeq;
-		apiGet(buildListQuery()).then(function (data) {
+		apiGet(buildListQuery()).then(fortressList).then(function (data) {
 			if (seq !== listSeq) { return; }   // superseded by a newer load
 			if (soft) {
 				// Keep only the ticks the refreshed list still shows — rows re-tick
@@ -1145,6 +1248,7 @@
 				row.appendChild(sbtn);
 				listEl.insertBefore(row, listEl.firstChild);
 			}
+			if (reset) { showFortressListBanner(listEl, seq); }
 			if (data.search_scope === 'all_mail') {
 				// The Inbox tab is open but the search covered All Mail (archived
 				// and sent included) — say so, or a hit outside the Inbox looks
@@ -1477,7 +1581,8 @@
 
 		// Subject + snippet share one clipped line: "Subject — preview text…".
 		var mid = el('div', 'mbx-thread-mid');
-		var subj = el('span', 'mbx-thread-subject', t.subject || '(no subject)');
+		var subj = el('span', 'mbx-thread-subject',
+			t.subject || (t.fortress_placeholder ? 'Encrypted message' : '(no subject)'));
 		mid.appendChild(subj);
 		if (t.msg_count > 1) {
 			mid.appendChild(el('span', 'mbx-thread-count', String(t.msg_count)));
@@ -1559,12 +1664,16 @@
 			// A discarded conversation is invisible to the read scope, so the Trash
 			// view has to say which scope it is asking under.
 			+ (state.trashView ? '&trash=1' : '');
-		apiGet(url).then(function (data) {
+		apiGet(url).then(fortressThread).then(function (data) {
 			// Track the thread's locked state so content actions within it (e.g. an
 			// attachment download) can prompt one-tap unlock first (§ 4.1).
 			state.threadLocked = !!data.locked;
 			renderThread(t, data.messages || [], data.folders || []);
 			loadSenderContext(data.messages || []); // member-context panel (§ Phase 5)
+			if (data.fortress_locked && fortressReady()) {
+				pane.insertBefore(fortressUnlockBanner('div', 'This mail is end-to-end encrypted.'),
+					pane.firstChild);
+			}
 			if (data.locked) {
 				// Sealed thread: metadata rendered, content is placeholders. Offer a
 				// one-tap unlock that re-runs this exact open on success — no navigation.
@@ -1718,7 +1827,10 @@
 		// conversation. They act on the latest message and only show for a real
 		// mailbox (not the superadmin "Unmatched" view).
 		var latest = lastInboundOrLast(messages);
-		if (latest && latest.alias_id != null) {
+		// An end-to-end message is quoted on the server, which cannot read it,
+		// so it offers no reply or forward until the browser writes the reply
+		// itself (specs/client_custody_mail.md WP4).
+		if (latest && latest.alias_id != null && !latest.sealed) {
 			var chips = el('div', 'mbx-reply-actions');
 			chips.appendChild(replyChip('↩ Reply', function () { openCompose('reply', t, latest); }));
 			chips.appendChild(replyChip('↩ Reply All', function () { openCompose('reply_all', t, latest); }));
@@ -2260,6 +2372,12 @@
 			// Downloading a sealed attachment is a content action: while the thread
 			// is locked, prompt one-tap unlock, then open the download (§ 4.1).
 			open.addEventListener('click', function (ev) {
+				if (a.fortress) {
+					// End-to-end: the bytes are ciphertext until this browser opens them.
+					ev.preventDefault();
+					fortressDownload(a);
+					return;
+				}
 				if (!state.threadLocked) return; // unlocked / Standard — download directly
 				ev.preventDefault();
 				unlockVault().then(function (ok) {
@@ -2355,6 +2473,7 @@
 		// GET would render the endpoint's raw refusal text — run the one-tap
 		// unlock ceremony instead, then open the download.
 		download.addEventListener('click', function (ev) {
+			if (att.fortress) { ev.preventDefault(); fortressDownload(att); return; }
 			if (!state.threadLocked) return; // unlocked / Standard — download directly
 			ev.preventDefault();
 			unlockVault().then(function (ok) {
@@ -2458,7 +2577,10 @@
 				return;
 			}
 
-			fetch(downloadUrl, { credentials: 'same-origin' }).then(function (res) {
+			// An end-to-end picture is ciphertext on the server; MailboxFortress
+			// fetches it and opens it here.
+			var fetched = att.fortress ? MailboxFortress.attachmentBlob(att)
+				: fetch(downloadUrl, { credentials: 'same-origin' }).then(function (res) {
 				var type = res.headers.get('content-type') || '';
 				// The download endpoint renders an HTML page for its own refusals
 				// (no access, no longer available) rather than failing the request.
@@ -2466,7 +2588,8 @@
 					throw new Error('This picture could not be loaded.');
 				}
 				return res.blob();
-			}).then(function (blob) {
+			});
+			fetched.then(function (blob) {
 				var ext = name.toLowerCase().split('.').pop();
 				var typed = (blob.type && blob.type.indexOf('image/') === 0)
 					? blob : new Blob([blob], { type: IMAGE_TYPES[ext] || 'image/png' });
@@ -2582,12 +2705,15 @@
 			menu.appendChild(download);
 		}
 
-		var print = el('a', 'mbx-kebab-item', 'Print');
-		print.href = CFG.exportUrlBase + '?format=print&message_id=' + encodeURIComponent(m.id);
-		print.target = '_blank';
-		print.rel = 'noopener';
-		print.addEventListener('click', function () { closeAllKebabs(); });
-		menu.appendChild(print);
+		// The print sheet is built on the server, which cannot read an end-to-end message.
+		if (!m.sealed) {
+			var print = el('a', 'mbx-kebab-item', 'Print');
+			print.href = CFG.exportUrlBase + '?format=print&message_id=' + encodeURIComponent(m.id);
+			print.target = '_blank';
+			print.rel = 'noopener';
+			print.addEventListener('click', function () { closeAllKebabs(); });
+			menu.appendChild(print);
+		}
 
 		// Every message has a history — an arrival, a send, or at least a saved
 		// draft — so the timeline is offered on all of them.
@@ -3231,7 +3357,9 @@
 	function fetchSenderContext(mid) {
 		joineryApi.post(CFG.senderContextUrl, { message_id: String(mid) }).then(function (data) {
 			data = data || {};
-			if (data.locked) { hidePeoplePanel(); return; }
+			// An end-to-end message's addresses open only here, so the server has
+			// no one to describe.
+			if (data.locked || data.fortress) { hidePeoplePanel(); return; }
 			contextCache[mid] = data;
 			renderSenderContext(data);
 		}).catch(function () { hidePeoplePanel(); });
@@ -4400,7 +4528,9 @@
 	function reopenCurrentThread() {
 		var url = CFG.threadUrl + '?thread_key=' + encodeURIComponent(state.threadKey)
 			+ (state.aliasId != null ? '&alias_id=' + encodeURIComponent(state.aliasId) : '');
-		apiGet(url).then(function (data) {
+		// Through the same Fortress open step a thread load takes, or end-to-end
+		// messages repaint sealed.
+		apiGet(url).then(fortressThread).then(function (data) {
 			renderThread(state.openThread || { thread_key: state.threadKey, subject: '' },
 				data.messages || [], data.folders || []);
 		}).catch(function () {
@@ -4614,6 +4744,35 @@
 			refreshMailboxes();
 			refreshThreads();
 		});
+
+		// The mail key (end-to-end mail) locks with the rest of the vault — idle, the lock
+		// chip, pagehide. MailboxFortress has dropped every key and revoked every
+		// object URL by now; re-render so no opened text stays on screen. An open
+		// from elsewhere (another tab's ceremony does not reach here; this tab's
+		// does) fills the rows in place.
+		if (fortressReady()) {
+			var fortressRerender = function () {
+				refreshThreads();
+				if (state.threadKey && state.openThread) {
+					openThread(state.openThread, $('.mbx-thread-item.active'));
+				}
+			};
+			MailboxFortress.onLock(fortressRerender);
+			document.addEventListener('joinery:vault-scope-unlocked', function (e) {
+				if (!(e && e.detail && e.detail.scope === 'mail')) return;
+				// A reload's resume lands before the first render reads the vault
+				// (MailboxFortress waits for it), so there is nothing to redo.
+				if (e.detail.resumed) return;
+				// The vault banner goes at once, not when the list reload lands,
+				// and the setup verdict is asked again past its cache: a first
+				// unlock is usually what makes the mail key and clears that step.
+				Array.prototype.forEach.call(document.querySelectorAll('.mbx-fortress-banner'), function (b) {
+					b.parentNode.removeChild(b);
+				});
+				fortressRerender();
+				updateSetupBanner(true);
+			});
+		}
 
 		var newMsgBtn = $('#mbx-new-message');
 		if (newMsgBtn) newMsgBtn.addEventListener('click', openComposeNew);

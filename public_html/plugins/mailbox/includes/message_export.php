@@ -17,6 +17,7 @@
  * network fetch beyond images. The sanitizer and the policy are independent —
  * a miss in one is still not an execution.
  *
+ * @version 1.2.0 - a Fortress message has no original and no server print sheet
  * @version 1.1.0
  * @changelog 1.1.0 - mailbox_resolve_original(): one resolver for "the
  *   original of this message", shared by the source modal and the .eml
@@ -62,6 +63,12 @@ function mailbox_resolve_original(InboundEmailMessage $message, ?ImapIngestor $i
 	$fail = function (string $reason, bool $locked = false) {
 		return array('ok' => false, 'raw' => null, 'kind' => null, 'reason' => $reason, 'locked' => $locked);
 	};
+
+	// Fortress: no raw is kept, and the header block is sealed to the owner's
+	// devices (specs/client_custody_mail.md § R2).
+	if (InboundEmailMessage::isBrowserSealed($message)) {
+		return $fail('This message is end-to-end encrypted, and no original is kept for it.');
+	}
 
 	try {
 		$raw = $message->getRawMessage();
@@ -162,6 +169,7 @@ function mailbox_eml_filename(string $subject, int $id): string {
  * @throws VaultLockedException reading a sealed body with the window closed
  */
 function mailbox_print_message(InboundEmailMessage $message): void {
+	InboundEmailMessage::refuseBrowserSealed($message, 'the print sheet');
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxHtmlSanitizer.php'));
 

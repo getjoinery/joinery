@@ -29,6 +29,7 @@
  * is not yet a contact. The lists come from iem_to / iem_cc, or from the retained header
  * block on a row stored before those columns existed.
  *
+ * @version 1.6.0 - a Fortress message answers {fortress: true}: its addresses open only on the owner's devices
  * @version 1.5.0
  */
 
@@ -66,6 +67,12 @@ function sender_context_logic(array $input): LogicResult {
 	$viewer = MailboxViewer::fromSession($session);
 	if (!$viewer->isAllAccess() && ($alias_id <= 0 || !$viewer->canAccess($alias_id))) {
 		return LogicResult::error('Not authorized.');
+	}
+
+	// A Fortress message's addresses open only on its owner's devices; there is
+	// no counterparty here to look up (specs/client_custody_mail.md § R7).
+	if (InboundEmailMessage::isBrowserSealed($msg)) {
+		return LogicResult::render(array('fortress' => true));
 	}
 
 	// Derive the counterparty: the sender of an inbound message, the recipient of an

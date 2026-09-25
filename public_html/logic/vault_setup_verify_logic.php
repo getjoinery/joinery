@@ -33,8 +33,18 @@ function vault_setup_verify_logic(array $input): LogicResult {
 	if (!is_array($credential)) {
 		return LogicResult::error('Missing passkey credential response.');
 	}
-	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
-	$code_count = isset($input['recovery_code_count']) ? (int)$input['recovery_code_count'] : 10;
+	// The codes are made in the browser, which shows them; only the account
+	// half of each code's KEK arrives (specs/one_vault_experience.md § R6).
+	// A passkey that can hold the key means no passphrase (R8). The root vault
+	// (`root`) is the browser's, made beside this one with the same codes and
+	// the same tap's second output.
+	try {
+		VaultCeremonies::assertNoSecondPrfOutput($credential);
+		$code_set = VaultCeremonies::codeSet($input['code_set'] ?? null);
+		$root = is_array($input['root'] ?? null) ? $input['root'] : array();
+	} catch (VaultCeremonyException $e) {
+		return LogicResult::error($e->getMessage());
+	}
 
 	try {
 		$service = new PasskeyService();
@@ -52,14 +62,13 @@ function vault_setup_verify_logic(array $input): LogicResult {
 
 	try {
 		$ceremonies = new VaultCeremonies();
-		$result = $ceremonies->setup($user, (int)$passkey->key, $passkey->get('pkc_label'), $prf_output, $passphrase, $code_count);
+		$result = $ceremonies->setup($user, (int)$passkey->key, $passkey->get('pkc_label'), $prf_output, '', $code_set, $root);
 	} catch (VaultCeremonyException $e) {
 		return LogicResult::error($e->getMessage());
 	}
 
 	return LogicResult::render([
 		'vault_id'       => (int)$result['vault']->key,
-		'recovery_codes' => $result['recovery_codes'],
 		'key_file'       => $result['key_file'],
 	]);
 }
@@ -68,12 +77,12 @@ function vault_setup_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Complete Sealed Vault setup: generate the keypair, wrap it under the enrolling passkey/recovery codes/optional passphrase, and open the unlock window',
+		'description' => 'Complete Sealed Vault setup: generate the keypair, wrap it under the enrolling passkey and a browser-made recovery code set (account halves of each code KEK), and open the unlock window',
 		'input' => [
 			'acknowledged' => ['type' => 'bool', 'required' => true, 'label' => 'Acknowledge the consequences'],
 			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
-			'passphrase' => ['type' => 'password', 'required' => false, 'label' => 'Optional bypass phrase'],
-			'recovery_code_count' => ['type' => 'int', 'required' => false, 'label' => 'Number of recovery codes (10 by default)'],
+			'code_set' => ['type' => 'object', 'required' => true, 'label' => 'Browser-made code set {id, entries:[{index, kek}]} (account halves only)'],
+			'root' => ['type' => 'object', 'required' => true, 'label' => 'The root vault the browser made: {public_key, salt, kdf_params, wrappings}'],
 		],
 	];
 }

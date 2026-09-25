@@ -21,6 +21,7 @@
  * recipients (sealed with the mailbox), and a closed window drops exactly
  * those lines and sets locked:true beside the rest.
  *
+ * @version 1.1 - a Fortress message shows routing events only (no header block)
  * @version 1.0
  */
 
@@ -174,6 +175,11 @@ class MailboxMessageTimeline {
 	 */
 	private function headerBlock(): ?string {
 		$m = $this->message;
+		// A Fortress message's headers are sealed to its owner's devices and no
+		// raw is kept: its timeline is routing events only (specs/client_custody_mail.md § R7).
+		if (InboundEmailMessage::isBrowserSealed($m)) {
+			return null;
+		}
 		try {
 			$headers = (string)$m->get('iem_raw_headers');
 			if ($headers !== '') {

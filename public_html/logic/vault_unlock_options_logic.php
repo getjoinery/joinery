@@ -31,10 +31,15 @@ function vault_unlock_options_logic(array $input): LogicResult {
 		);
 	}
 
+	// with_root: the same touch also yields the root vault's secret, kept by
+	// the browser — one unlock opens every vault (specs/one_vault_experience.md
+	// § R1). Asked for whether or not the root exists yet: a first unlock
+	// creates it from this very output.
+	$second = !empty($input['with_root']) ? VaultScopes::prfContext(VaultScopes::ROOT_SCOPE) : null;
 	try {
 		$service = new PasskeyService();
 		$options = $service->getDerivationOptions($user, 'vault-kek',
-			VaultUnlock::offerableCredentialIds((int)$user->key, UserEncryptionVault::SCOPE_USER));
+			VaultUnlock::offerableCredentialIds((int)$user->key, UserEncryptionVault::SCOPE_USER), '', $second);
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -46,7 +51,10 @@ function vault_unlock_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Begin unlocking the vault with a passkey (returns WebAuthn PRF request options, userVerification required)',
+		'description' => 'Begin unlocking the vault with a passkey (returns WebAuthn PRF request options, userVerification required). with_root also asks the same touch for the root vault\'s secret, which the browser keeps and must strip before posting the assertion',
+		'input' => [
+			'with_root' => ['type' => 'bool', 'required' => false, 'label' => 'Also derive the root vault secret (kept in the browser)'],
+		],
 	];
 }
 ?>

@@ -31,10 +31,13 @@
  * refuses while one is pending, and the way out is to finish it — the new key
  * opens with the unlockers it was given.
  *
+ * @version 1.2 - the root vault's key is refused (rotating it would orphan every content vault)
  * @version 1.1 - no abandon (it could not see what the hooks moved); assertCanBegin()
  *   for the browser to ask before collecting taps; one vault load per scope
  * @version 1.0
  */
+require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+
 class VaultClientRotation {
 
 	/** Rows per page of the re-seal walk. */
@@ -82,6 +85,13 @@ class VaultClientRotation {
 	 */
 	public static function assertCanBegin(int $user_id, string $scope): UserEncryptionVault {
 		VaultClientCustody::assertClientScope($scope);
+		// The root vault's key is not rotated here: every content vault's `root`
+		// wrapping is under a key derived from the root's secret, not sealed to
+		// its public key, so no reseal would move them and a committed rotation
+		// would orphan them all (specs/one_vault_experience.md § As built).
+		if ($scope === VaultScopes::ROOT_SCOPE) {
+			throw new VaultClientCustodyException('Your vault\'s own key cannot be rotated here.');
+		}
 		$vault = VaultClientCustody::loadVault($user_id, $scope);
 		if (!$vault) {
 			throw new VaultClientCustodyException('Your vault is not set up.');

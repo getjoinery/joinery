@@ -11,6 +11,7 @@
  * logic layer before the body reaches this view (the sandboxed iframe sends
  * no cookies, so the URLs must authorize themselves).
  *
+ * @version 1.7 - a Fortress message says it opens only on its owner's devices
  * @version 1.6
  */
 
@@ -48,7 +49,10 @@ $received_local = $message->get_local('iem_received_time', 'M j, Y g:i:s A T');
 // (specs/implemented/inbound_email_encryption_at_rest.md § 7: gate on key
 // possession, not permission — $locked means no open window for this
 // message's owner, admin or not).
-if ($locked) {
+if (!empty($fortress)) {
+	echo '<div class="alert alert-warning mb-3">This message is end-to-end encrypted. Only its owner\'s '
+		. 'devices can open it, in their mailbox.</div>';
+} elseif ($locked) {
 	echo '<div class="alert alert-warning mb-3">This message is sealed and its owner\'s vault is locked. '
 		. 'Content is unreadable until they unlock it.</div>';
 }

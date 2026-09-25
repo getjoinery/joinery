@@ -32,7 +32,8 @@
  * mailbox whose whole promise is that it does not. The protection ceremony
  * checks both at the raise; this is what holds them afterwards.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - a Fortress mailbox's holder must hold a `mail` vault (grant_set_error() $scope)
  * @changelog 1.5 - sync_for_alias serialises per mailbox on an advisory lock
  *   (two concurrent syncs could each pass the one-holder check and each
  *   insert); the delete backstop also refuses leaving a sole holder without a
@@ -155,9 +156,11 @@ class InboundEmailMailboxGrant extends SystemBase {
 	 *
 	 * $seals is the mailbox's effective posture (InboundEmailAlias::seals_content()).
 	 * A non-sealing mailbox has no constraint at all: shared team inboxes are
-	 * ordinary there.
+	 * ordinary there. $scope is the vault the mail seals to
+	 * (InboundEmailMessage::sealScopeFor()): a Fortress mailbox's holder must
+	 * hold a `mail` vault, a Private one's the server-custody vault.
 	 */
-	static function grant_set_error(bool $seals, array $user_ids): ?string {
+	static function grant_set_error(bool $seals, array $user_ids, string $scope = 'user'): ?string {
 		if (!$seals) {
 			return null;
 		}
@@ -182,7 +185,7 @@ class InboundEmailMailboxGrant extends SystemBase {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$holder_id = intval(array_key_first($ids));
-		if (UserEncryptionVault::loadForUser($holder_id) === null) {
+		if (InboundEmailMessage::loadSealVault($holder_id, $scope) === null) {
 			$user = new User($holder_id, TRUE);
 			$name = trim((string)$user->get('usr_first_name') . ' ' . (string)$user->get('usr_last_name'));
 			if ($name === '') {
@@ -190,6 +193,12 @@ class InboundEmailMailboxGrant extends SystemBase {
 			}
 			if ($name === '') {
 				$name = 'That member';
+			}
+			if ($scope !== UserEncryptionVault::SCOPE_USER) {
+				return $name . ' has no ' . strtolower(VaultScopes::labelFor($scope)) . ' yet, and a Fortress '
+					. 'mailbox seals its mail to its member\'s own devices — without one, arriving mail '
+					. 'is held. Only they can create it, from their mailbox. Set this mailbox to Private '
+					. 'or Standard first if you need it now.';
 			}
 			return $name . ' has no vault yet, and a protected mailbox seals its mail to its member\'s '
 				. 'vault — without one the mail would be stored unprotected. Only they can create it, '
@@ -241,13 +250,20 @@ class InboundEmailMailboxGrant extends SystemBase {
 		}
 	}
 
+	/** Which vault this mailbox's mail seals to (InboundEmailMessage::sealScopeFor()). */
+	private static function sealScopeOf(InboundEmailAlias $alias): string {
+		return InboundEmailMessage::sealScopeFor(intval($alias->key),
+			intval($alias->get('iea_ied_inbound_email_domain_id')) ?: null);
+	}
+
 	/** The advisory-lock class sync_for_alias() serialises on (arbitrary, fixed). */
 	const SYNC_LOCK_CLASS = 74211;
 
 	/** The body of sync_for_alias(), entered only under the per-alias lock. */
 	private static function sync_for_alias_locked(int $alias_id, array $user_ids): void {
 		$alias = new InboundEmailAlias($alias_id, TRUE);
-		$error = self::grant_set_error($alias->key ? $alias->seals_content() : false, $user_ids);
+		$error = self::grant_set_error($alias->key ? $alias->seals_content() : false, $user_ids,
+			$alias->key ? self::sealScopeOf($alias) : UserEncryptionVault::SCOPE_USER);
 		if ($error !== null) {
 			throw new InboundEmailMailboxGrantException($error);
 		}
@@ -322,7 +338,7 @@ class InboundEmailMailboxGrant extends SystemBase {
 				// moves TOWARD one holder with a vault — but not when the one it
 				// would leave behind has no vault to seal to.
 				if (count($remaining) === 1) {
-					$err = self::grant_set_error(true, $remaining);
+					$err = self::grant_set_error(true, $remaining, self::sealScopeOf($alias));
 					if ($err !== null) {
 						throw new SystemDisplayableError($alias->get_full_address() . ': ' . $err);
 					}

@@ -12,6 +12,7 @@ require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 1.2 - a refused protected-domain send logs its addresses, never its subject
  * @version 1.1 - lastSendReport(): which transport took the message, the carrier's
  *   receipt, which recipients Direct delivered, the error on refusal
  *   (specs/mailbox_message_timeline.md A3); the debug log writes the columns
@@ -293,8 +294,12 @@ class EmailSender {
      *
      * Never throws: the refusal exception behind it is the real event, and a
      * logging hiccup must not mask it.
+     *
+     * Addresses only. Only a protected domain is refused here, and on one whose
+     * mail is sealed end to end (specs/client_custody_mail.md § R6) the subject
+     * is the message's own words, which the event log would keep in the clear.
      */
-    private static function logRefusedSend(string $from, string $to, string $subject, string $reason): void {
+    private static function logRefusedSend(string $from, string $to, string $reason): void {
         try {
             require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
             $today = new MultiEventLog([
@@ -311,7 +316,7 @@ class EmailSender {
             $log = new EventLog(NULL);
             $log->set('evl_event', 'email_send_refused');
             $log->set('evl_was_success', false);
-            $log->set('evl_note', $prefix . 'to=' . $to . ' subject=' . $subject . ' — ' . $reason);
+            $log->set('evl_note', $prefix . 'to=' . $to . ' — ' . $reason);
             $log->save();
         } catch (Throwable $e) {
             error_log('email_send_refused: could not write the event-log record — ' . $e->getMessage());
@@ -373,7 +378,6 @@ class EmailSender {
             && MailIdentityGuard::isProtectedDomain(MailIdentityGuard::domainOf((string)$message->getFrom()))) {
             $recipients = array_column($message->getRecipients() ?: array(), 'email');
             self::logRefusedSend((string)$message->getFrom(), implode(', ', $recipients),
-                (string)$message->getSubject(),
                 'protected identity domain outside the session-gated mailbox compose path');
             throw new Exception('Refusing to send from a protected identity domain outside the '
                 . 'session-gated mailbox compose path.');
