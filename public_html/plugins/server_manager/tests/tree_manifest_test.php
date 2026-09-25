@@ -130,6 +130,17 @@ check(TreeManifestPublisher::excluded('public_html/plugins/x/cache/y')
 	&& TreeManifestPublisher::excluded('vendor/x') === PackageSignature::excluded('vendor/x'),
 	'the writer and the node-side verifier share one exclusion rule');
 
+// What the manifest leaves out, the archive must not ship: a shipped file
+// nothing lists is a file nothing verifies. The publisher's maintenance_scripts
+// copy once kept install_tools/joinery_jail/.gitignore, and every core archive
+// through 0.8.430 carried it unlisted.
+check(TreeManifestPublisher::excluded('maintenance_scripts/install_tools/joinery_jail/.gitignore'),
+	'a .gitignore under maintenance_scripts is not listed');
+$publisher_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/publish_upgrade.php'));
+check(strpos($publisher_src, "exec(sprintf('rsync -av --exclude=.git --exclude=.gitignore %s %s 2>&1', escapeshellarg(\$source_dir), escapeshellarg(\$dest_dir)));") !== false,
+	'so the publisher\'s maintenance_scripts copy leaves .git and .gitignore behind',
+	'the archive shipped a .gitignore its signed manifest did not list');
+
 section('The signature verifies, and is checked before it ships');
 
 $keys = tm_keys();

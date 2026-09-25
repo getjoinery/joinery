@@ -3581,6 +3581,61 @@ check(strpos($rebase_code_b16, 'stop_site_writes || die') !== false && strpos($r
 check(strpos($rebase_b16, ':/var/log/postgresql$#') !== false,
 	'rollback hands PostgreSQL\'s log directory back to the old image\'s postgres user');
 
+section('The move keeps the name the host serves and the signed manifest (specs/fleet_ubuntu_2604_postgres_upgrade.md B21, B22)');
+
+// The domain comes from the enabled host vhosts proxying to the site's port:
+// www. folds into its apex, a vhost on another port is not this site's, and
+// the file name does not matter (getjoinery_developers's are -proxy.conf and
+// -proxy-le-ssl.conf). joinerydemo's container said joinerydemo.site while
+// the host served demo.getjoinery.com.
+$vh_dir = sys_get_temp_dir() . '/joinery_rebase_vh_' . getmypid();
+@mkdir($vh_dir . '/sites-enabled', 0700, true);
+file_put_contents($vh_dir . '/sites-enabled/joinerydemo.conf', "<VirtualHost *:80>\n    ServerName demo.getjoinery.com\n    ProxyPass / http://127.0.0.1:8086/\n</VirtualHost>\n"
+	. "<VirtualHost *:80>\n    ServerName www.demo.getjoinery.com\n    ProxyPass / http://127.0.0.1:8086/\n</VirtualHost>\n");
+file_put_contents($vh_dir . '/sites-enabled/dev-proxy.conf', "<VirtualHost *:80>\n    ServerName developers.getjoinery.com\n    ProxyPass / http://127.0.0.1:8081/\n</VirtualHost>\n");
+file_put_contents($vh_dir . '/sites-enabled/dev-proxy-le-ssl.conf', "<VirtualHost *:443>\n    ServerName developers.getjoinery.com\n    ServerAlias www.developers.getjoinery.com\n    ProxyPass / http://127.0.0.1:8081/\n</VirtualHost>\n");
+file_put_contents($vh_dir . '/sites-enabled/other.conf', "<VirtualHost *:80>\n    ServerName getjoinery.com\n    ProxyPass / http://127.0.0.1:80861/\n</VirtualHost>\n");
+file_put_contents($vh_dir . '/sites-enabled/two.conf', "<VirtualHost *:80>\n    ServerName a.example.com\n    ServerAlias b.example.com\n    ProxyPass / http://127.0.0.1:8090/\n</VirtualHost>\n");
+file_put_contents($vh_dir . '/run.sh', <<<'SH'
+#!/usr/bin/env bash
+SRC="$1"; D="$2"; PORT="$3"
+eval "$(awk '/^host_vhost_files\(\) \{/,/^}$/' "$SRC" | sed "s#/etc/apache2/sites-enabled#$D/sites-enabled#g")"
+eval "$(awk '/^host_domains\(\) \{/,/^}$/' "$SRC")"
+mapfile -t F < <(host_vhost_files "$PORT")
+printf 'files=%s names=%s\n' "$(for f in ${F[@]+"${F[@]}"}; do basename "$f"; done | LC_ALL=C sort | paste -sd, -)" "$(host_domains ${F[@]+"${F[@]}"} | paste -sd, -)"
+SH
+);
+$vh_run = function ($port) use ($vh_dir, $site_root) {
+	return trim((string)shell_exec('bash ' . escapeshellarg($vh_dir . '/run.sh') . ' '
+		. escapeshellarg($site_root . '/maintenance_scripts/sysadmin_tools/rebase_site_container.sh') . ' '
+		. escapeshellarg($vh_dir) . ' ' . escapeshellarg($port) . ' 2>&1'));
+};
+check($vh_run('8086') === 'files=joinerydemo.conf names=demo.getjoinery.com',
+	'the domain is the name the host serves on the site\'s port, www. folded in', 'got: ' . $vh_run('8086'));
+check($vh_run('8081') === 'files=dev-proxy-le-ssl.conf,dev-proxy.conf names=developers.getjoinery.com',
+	'vhost files under any name are found by the port they proxy to', 'got: ' . $vh_run('8081'));
+check($vh_run('8090') === 'files=two.conf names=a.example.com,b.example.com',
+	'a site served under two names shows both, which prepare refuses', 'got: ' . $vh_run('8090'));
+check($vh_run('8099') === 'files= names=',
+	'a site with no host vhost has no host name, so DOMAIN_NAME stays', 'got: ' . $vh_run('8099'));
+exec('rm -rf ' . escapeshellarg($vh_dir));
+
+$rebase_b21 = implode("\n", array_filter(explode("\n", (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/rebase_site_container.sh')),
+	function ($l) { return strpos(ltrim($l), '#') !== 0; }));
+check(strpos($rebase_b21, '[ "${#HOST_NAMES[@]}" -eq 0 ] || DOMAIN="${HOST_NAMES[0]}"') !== false
+	&& strpos($rebase_b21, 'under several names') !== false,
+	'prepare takes the host\'s name over DOMAIN_NAME and refuses several');
+check(substr_count($rebase_b21, 'manifest_failures)"') >= 3,
+	'prepare, swap and the swap\'s last check all count files against the manifest');
+check(preg_match('/docker cp "\$\{SITE\}:\/var\/www\/html\/\$\{SITE\}\/\$\{f\}" "\$\{WORK\}\/\$\{f\}"/', $rebase_b21) === 1
+	&& strpos($rebase_b21, 'put_manifest || die') !== false,
+	'swap keeps the old container\'s manifest and puts it in the new one, or stops',
+	'the manifest is in the container\'s own layer; the rebuild lays in whatever release install.sh downloaded');
+check(strpos($rebase_b21, 'save_host_vhosts') !== false && strpos($rebase_b21, 'restore_host_vhosts ||') !== false,
+	'swap keeps the site\'s host vhost files and rollback puts them back');
+check(preg_match('/for b in \$OTHER; do rm -f "\/etc\/apache2\/sites-enabled\/\$\{b\}"; done/', $rebase_b21) === 1,
+	'swap disables the other vhost files on the site\'s port once install.sh has written its own');
+
 section('New Docker sites are born on Ubuntu 26.04 with PostgreSQL 18 (specs/fleet_ubuntu_2604_postgres_upgrade.md WP6)');
 
 $install_wp6 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
