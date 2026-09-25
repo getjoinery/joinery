@@ -15,6 +15,10 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.5 - the service account is found by its id (server_manager_provisioning_service_user_id),
+ *                never by address: whoever registered provisioning@<host> first owned the pipeline key.
+ *                A new account gets a random address; an existing one is adopted once, only when it
+ *                owns the configured key
  * @version 1.4 - the domain-registration leg's status and sealed credentials
  * @version 1.4 - domainStatus() reports whether a registrar promotion code is set; the domain
  *                product gate reads from ManagedDomainIntake
@@ -34,6 +38,8 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/GetJoin
 class ProvisioningSetup {
 
 	const SERVICE_USER_LOCAL_PART = 'provisioning';
+	/** The managed setting holding the service account's user id. */
+	const SERVICE_USER_SETTING = 'server_manager_provisioning_service_user_id';
 	const SERVICE_KEY_NAME = 'Provisioning pipeline';
 	/**
 	 * The pipeline reads other buyers' order items/requirements and posts
@@ -71,10 +77,62 @@ class ProvisioningSetup {
 		return rtrim(LibraryFunctions::get_absolute_url('/'), '/');
 	}
 
-	/** provisioning@<this-host> — the service user's identity. */
-	public static function serviceUserEmail(): string {
-		$host = parse_url(self::selfApiUrl(), PHP_URL_HOST) ?: 'localhost';
-		return self::SERVICE_USER_LOCAL_PART . '@' . $host;
+	/** This site's host, the domain a service account's address is on. */
+	private static function selfHost(): string {
+		return parse_url(self::selfApiUrl(), PHP_URL_HOST) ?: 'localhost';
+	}
+
+	/**
+	 * The address the service account was once found by, provisioning@<host>.
+	 * Read only to adopt an existing account once (adoptableServiceUser());
+	 * tests name a fixture address here, null means this site's.
+	 */
+	public static $legacy_service_email = null;
+
+	public static function legacyServiceUserEmail(): string {
+		return self::$legacy_service_email ?? (self::SERVICE_USER_LOCAL_PART . '@' . self::selfHost());
+	}
+
+	/**
+	 * The service account, by the id the managed setting holds, or null when
+	 * there is none (no id, or the account is gone). Never by address: an
+	 * address can be registered by anyone before the account exists, and the
+	 * account found that way became the pipeline key's owner.
+	 */
+	public static function serviceUser(): ?User {
+		$id = (int)self::readSetting(self::SERVICE_USER_SETTING);
+		if ($id <= 0) {
+			return null;
+		}
+		$user = new User($id);
+		if ($user->load() === false || $user->get('usr_delete_time')) {
+			return null;
+		}
+		return $user;
+	}
+
+	/**
+	 * The account a management node made before the id was recorded, when it
+	 * can be trusted: the one at the old address that owns the active key
+	 * whose public half the pipeline is configured with. An account at that
+	 * address that does not own the key is not ours, whoever made it.
+	 */
+	public static function adoptableServiceUser(): ?User {
+		$public_key = self::readSetting('server_manager_getjoinery_api_public_key');
+		if ($public_key === '') {
+			return null;
+		}
+		$user = User::GetByEmail(self::legacyServiceUserEmail());
+		if ($user === NULL || $user->get('usr_delete_time')) {
+			return null;
+		}
+		$keys = new MultiApiKey(array('user_id' => (int)$user->key));
+		foreach ($keys as $key) {
+			if ($key->get('apk_is_active') && hash_equals((string)$key->get('apk_public_key'), $public_key)) {
+				return $user;
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -163,10 +221,16 @@ class ProvisioningSetup {
 
 	/**
 	 * Mint the store API credential set for the self-store case: service
-	 * user (permission 3), machine API key, and the three settings the
+	 * user (permission 5), machine API key, and the three settings the
 	 * pipeline reads. Idempotent — a configured credential set is left
 	 * alone unless $rotate, which mints a fresh key (deactivating this
 	 * user's previous pipeline keys) and updates the settings.
+	 *
+	 * The service account is the one serviceUser() names. With no id recorded,
+	 * an account from before the id existed is adopted once when it owns the
+	 * configured key (adoptableServiceUser()); otherwise a new account is made
+	 * and, on a configured site, a fresh key minted for it as a rotation does,
+	 * and the configured key is retired.
 	 *
 	 * @return array{ok:bool, message:string, user_id?:int, api_key_id?:int,
 	 *               user_created?:bool, key_created?:bool}
@@ -175,14 +239,47 @@ class ProvisioningSetup {
 		$configured = self::readSetting('server_manager_getjoinery_api_url') !== ''
 			&& self::readSetting('server_manager_getjoinery_api_public_key') !== ''
 			&& self::readSetting('server_manager_getjoinery_api_secret_key') !== '';
-		if ($configured && !$rotate) {
+		$is_self = in_array(self::readSetting('server_manager_getjoinery_api_url'), array('', self::selfApiUrl()), true);
+		if ($configured && !$rotate && !$is_self) {
+			// A remote store's service account lives on the store site.
 			return array('ok' => true, 'message' => 'API credentials already configured.');
 		}
 
-		$email = self::serviceUserEmail();
-		$user = User::GetByEmail($email);
+		$user = self::serviceUser();
+		$adopted = false;
+		if ($user === null && (int)self::readSetting(self::SERVICE_USER_SETTING) <= 0) {
+			$user = self::adoptableServiceUser();
+			if ($user !== null) {
+				self::writeSetting(self::SERVICE_USER_SETTING, (string)$user->key);
+				$adopted = true;
+			}
+		}
+		if ($configured && !$rotate && $user !== null) {
+			return array('ok' => true, 'message' => ($adopted
+				? 'Service account ' . $user->get('usr_email') . ' (user ' . (int)$user->key . ') adopted: it owns the configured key. '
+				: '') . 'API credentials already configured.',
+				'user_id' => (int)$user->key, 'adopted' => $adopted);
+		}
+
+		// No trusted account for a configured key: the key is retired, not left
+		// with whoever holds it, and a fresh one is minted below.
+		$retired_configured_key = false;
+		if ($configured && $user === null) {
+			$configured_public = self::readSetting('server_manager_getjoinery_api_public_key');
+			foreach (new MultiApiKey(array('public_key' => $configured_public)) as $stranded) {
+				if ($stranded->get('apk_is_active')) {
+					$stranded->set('apk_is_active', FALSE);
+					$stranded->save();
+					$retired_configured_key = true;
+				}
+			}
+		}
+
 		$user_created = false;
-		if ($user === NULL) {
+		if ($user === null) {
+			// A random address on this site's host: nobody can register it
+			// ahead of the account, and the account is found by id anyway.
+			$email = self::SERVICE_USER_LOCAL_PART . '-' . bin2hex(random_bytes(6)) . '@' . self::selfHost();
 			$user = new User(NULL);
 			$user->set('usr_first_name', 'Provisioning');
 			$user->set('usr_last_name', 'Service');
@@ -196,6 +293,7 @@ class ProvisioningSetup {
 			$user->save();
 			$user->load();
 			$user_created = true;
+			self::writeSetting(self::SERVICE_USER_SETTING, (string)$user->key);
 		}
 
 		// Retire this user's previous pipeline keys before minting a new one.
@@ -228,11 +326,14 @@ class ProvisioningSetup {
 
 		return array(
 			'ok' => true,
-			'message' => ($user_created ? 'Service user ' . $email . ' created; ' : '')
+			'message' => ($adopted ? 'Service account ' . $user->get('usr_email') . ' adopted; ' : '')
+				. ($user_created ? 'Service user ' . $user->get('usr_email') . ' created; ' : '')
+				. ($retired_configured_key ? 'the configured key had no trusted owner and was retired; ' : '')
 				. 'API key minted and settings written.',
 			'user_id' => (int)$user->key,
 			'api_key_id' => (int)$api_key->key,
 			'user_created' => $user_created,
+			'adopted' => $adopted,
 			'key_created' => true,
 		);
 	}
@@ -428,6 +529,12 @@ class ProvisioningSetup {
 	 * offer. Read-only; the probe only runs when credentials are present.
 	 */
 	public static function status(): array {
+		// Read-only: an account still to be adopted shows as the one setup
+		// will adopt, and is recorded only when setup runs.
+		$service_user = self::serviceUser();
+		if ($service_user === null && (int)self::readSetting(self::SERVICE_USER_SETTING) <= 0) {
+			$service_user = self::adoptableServiceUser();
+		}
 		$api_url = self::readSetting('server_manager_getjoinery_api_url');
 		$api_pub = self::readSetting('server_manager_getjoinery_api_public_key');
 		$api_sec = self::readSetting('server_manager_getjoinery_api_secret_key');
@@ -462,8 +569,8 @@ class ProvisioningSetup {
 				'configured' => $api_configured,
 				'url' => $api_url,
 				'is_self' => $api_url === '' || $api_url === self::selfApiUrl(),
-				'service_user_email' => self::serviceUserEmail(),
-				'service_user_exists' => User::GetByEmail(self::serviceUserEmail()) !== NULL,
+				'service_user_email' => $service_user !== null ? (string)$service_user->get('usr_email') : '',
+				'service_user_exists' => $service_user !== null,
 				'probe_ok' => $api_configured ? self::probeApi() : false,
 			),
 			'question' => array(

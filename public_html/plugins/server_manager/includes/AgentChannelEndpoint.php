@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.26 - a join carries the site's web root (agent 1.44.0): kept on the request when it is one
+ *                (ManagedNode::valid_web_root), and approveJoin() fills an empty mgn_web_root from it, so a
+ *                node made from a join hosts a site and is backed up
  * @version 1.25 - known_claim_fields(): a claim field this plane does not know is set aside unread, not a
  *                 refusal of the whole claim, so an agent newer than its management node keeps reporting
  *                 its vocabulary (specs/agent_recipes_and_vocabulary.md, Different agent versions).
@@ -457,6 +460,8 @@ class AgentChannelEndpoint {
 			// Every address the machine answers on; reported_addresses() keeps
 			// the valid, distinct ones up to AgentJoinRequest::MAX_ADDRESSES.
 			'addresses'        => ['type' => 'list', 'max' => 64],
+			// The site's public_html directory; a machine with no site sends none.
+			'web_root'         => ['type' => 'string', 'max' => 500],
 		];
 	}
 
@@ -475,6 +480,7 @@ class AgentChannelEndpoint {
 				// fresh clock. The human never sees two rows for one node.
 				$existing->set('ajr_create_time', gmdate('Y-m-d H:i:s'));
 				$existing->set('ajr_claimed_name', $in['claimed_name']);
+				$existing->set('ajr_web_root', ManagedNode::valid_web_root($in['web_root'] ?? null));
 				$existing->save();
 			}
 			api_success(self::join_status_payload($existing), '', 200);
@@ -496,6 +502,9 @@ class AgentChannelEndpoint {
 		$request->set('ajr_source_ip', substr((string)SessionControl::get_client_ip(true), 0, 64));
 		$request->set('ajr_addresses', self::reported_addresses($body));
 		$request->set('ajr_agent_version', (string)($in['agent_version'] ?? ''));
+		// Not a web root is no web root: the join still stands, and the node
+		// it makes simply has none, as one from an older agent does.
+		$request->set('ajr_web_root', ManagedNode::valid_web_root($in['web_root'] ?? null));
 		$request->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
 		$request->save();
 
@@ -730,6 +739,10 @@ class AgentChannelEndpoint {
 		if ($request->get('ajr_agent_version')) {
 			$node->set('mgn_agent_version', (string)$request->get('ajr_agent_version'));
 		}
+		// The site's web root, as the joining agent named it. Without one the
+		// node hosts no site: no backup, no recovery-key report, and Run
+		// backup refuses. A web root already on the record stays.
+		ManagedNode::adopt_reported_web_root($node, $request->get('ajr_web_root'), 'join');
 		$node->save();
 
 		$request->set('ajr_status', AgentJoinRequest::STATUS_APPROVED);

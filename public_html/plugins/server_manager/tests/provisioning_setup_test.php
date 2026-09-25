@@ -12,6 +12,9 @@
  *  - writeSetting/readSetting round-trip (create + update).
  *  - setupApiCredentials: mints service user + key + settings; idempotent
  *    when configured; rotation retires the old key and updates settings.
+ *  - The service account is found by its id: an account at the old
+ *    provisioning@<host> address is adopted once only when it owns the
+ *    configured key, and a squatted address is not.
  *  - ensureDomainQuestion: creates once, reuses thereafter.
  *  - activateTasks: creates missing rows, resumes paused, idempotent.
  *
@@ -21,6 +24,8 @@
  *
  * Run: php plugins/server_manager/tests/provisioning_setup_test.php
  *
+ * @version 1.4 - the service account by id: a new one has a random address, a squatted old address is
+ *                not adopted, an owner of the configured key is adopted once, the id is used thereafter
  * @version 1.3 - the resume check follows TASK_CLASSES instead of naming a phase class
  * @version 1.2
  */
@@ -40,6 +45,7 @@ $snapshot_settings = array(
 	'server_manager_getjoinery_api_public_key',
 	'server_manager_getjoinery_api_secret_key',
 	'server_manager_provisioning_domain_question_id',
+	ProvisioningSetup::SERVICE_USER_SETTING,
 );
 $saved = array();
 foreach ($snapshot_settings as $name) {
@@ -57,19 +63,12 @@ foreach (array_keys(ProvisioningSetup::TASK_CLASSES) as $class) {
 	}
 }
 
-$service_user_before = User::GetByEmail(ProvisioningSetup::serviceUserEmail());
-
-// Any pre-existing active pipeline keys — setup rotation deactivates them, so
-// remember them for reactivation in cleanup.
+// Every active pipeline key before the run: setup retires keys, and whatever
+// it retires of the deployment's own is reactivated in cleanup.
 $preexisting_active_key_ids = array();
-if ($service_user_before !== NULL) {
-	$rows = new MultiApiKey(array('user_id' => (int)$service_user_before->key));
-	$rows->load();
-	foreach ($rows as $row) {
-		if ($row->get('apk_name') === ProvisioningSetup::SERVICE_KEY_NAME && $row->get('apk_is_active')) {
-			$preexisting_active_key_ids[] = (int)$row->key;
-		}
-	}
+foreach ($db->query("SELECT apk_api_key_id FROM apk_api_keys WHERE apk_is_active = TRUE AND apk_name = "
+		. $db->quote(ProvisioningSetup::SERVICE_KEY_NAME))->fetchAll(PDO::FETCH_COLUMN) as $kid) {
+	$preexisting_active_key_ids[] = (int)$kid;
 }
 
 $cleanup_user_ids = array();
@@ -105,6 +104,7 @@ section('setupApiCredentials');
 ProvisioningSetup::writeSetting('server_manager_getjoinery_api_url', '');
 ProvisioningSetup::writeSetting('server_manager_getjoinery_api_public_key', '');
 ProvisioningSetup::writeSetting('server_manager_getjoinery_api_secret_key', '');
+ProvisioningSetup::writeSetting(ProvisioningSetup::SERVICE_USER_SETTING, '');
 
 $r1 = ProvisioningSetup::setupApiCredentials();
 if (!empty($r1['user_created'])) $cleanup_user_ids[] = $r1['user_id'];
@@ -134,8 +134,13 @@ if ($has_box_key) {
 	section('secret at-rest encryption checks skipped: no secret_box_key configured (zero-config plaintext path)');
 }
 
-$user = User::GetByEmail(ProvisioningSetup::serviceUserEmail());
-check($user !== NULL, 'service user exists');
+$user = ProvisioningSetup::serviceUser();
+check($user !== NULL && (int)$user->key === (int)$r1['user_id'], 'service user exists, found by the recorded id');
+check((int)ProvisioningSetup::readSetting(ProvisioningSetup::SERVICE_USER_SETTING) === (int)$r1['user_id'],
+	'the id is recorded in the managed setting');
+check($user->get('usr_email') !== ProvisioningSetup::legacyServiceUserEmail()
+	&& preg_match('/^provisioning-[0-9a-f]{12}@/', (string)$user->get('usr_email')) === 1,
+	'a new account has a random address, not provisioning@<host>', (string)$user->get('usr_email'));
 check((int)$user->get('usr_permission') === 5, 'service user permission is 5 (cross-user API read)');
 check((bool)$user->get('usr_password_recovery_disabled'), 'service user password recovery disabled');
 
@@ -157,6 +162,90 @@ check(ProvisioningSetup::readSetting('server_manager_getjoinery_api_public_key')
 	'rotation updates the public key setting');
 $old_key = new ApiKey($r1['api_key_id'], TRUE);
 check(!$old_key->get('apk_is_active'), 'rotation deactivates the old key');
+
+// ---------------------------------------------------------------------------
+section('A squatted address is not adopted');
+// ---------------------------------------------------------------------------
+
+// An account made at the old address by somebody else, owning no pipeline key;
+// the configured key belongs to some other account. The first setup after
+// this release finds no recorded id. It must not hand the pipeline to the
+// address holder.
+$pst_key = function ($owner_id) use (&$cleanup_key_ids) {
+	$k = new ApiKey(NULL);
+	$k->set('apk_usr_user_id', (int)$owner_id);
+	$k->set('apk_name', ProvisioningSetup::SERVICE_KEY_NAME);
+	$k->set('apk_public_key', 'public_' . LibraryFunctions::random_string(16));
+	$k->set('apk_secret_key', ApiKey::GenerateKey('secret_' . LibraryFunctions::random_string(16)));
+	$k->set('apk_permission', ProvisioningSetup::SERVICE_KEY_PERMISSION);
+	$k->set('apk_is_active', TRUE);
+	$k->save();
+	$k->load();
+	$cleanup_key_ids[] = (int)$k->key;
+	return $k;
+};
+$pst_configure = function ($key) {
+	ProvisioningSetup::writeSetting('server_manager_getjoinery_api_url', ProvisioningSetup::selfApiUrl());
+	ProvisioningSetup::writeSetting('server_manager_getjoinery_api_public_key', (string)$key->get('apk_public_key'));
+	ProvisioningSetup::writeSetting('server_manager_getjoinery_api_secret_key', 'x');
+	ProvisioningSetup::writeSetting(ProvisioningSetup::SERVICE_USER_SETTING, '');
+};
+
+$squatter = make_user('PstSquatter');
+$elsewhere = make_user('PstKeyOwner');
+ProvisioningSetup::$legacy_service_email = (string)$squatter->get('usr_email');
+$stranded_key = $pst_key($elsewhere->key);
+$pst_configure($stranded_key);
+
+check(ProvisioningSetup::adoptableServiceUser() === null, 'an account at the old address that owns no configured key is not adoptable');
+$sq = ProvisioningSetup::setupApiCredentials();
+if (!empty($sq['user_created'])) $cleanup_user_ids[] = $sq['user_id'];
+if (!empty($sq['api_key_id'])) $cleanup_key_ids[] = $sq['api_key_id'];
+check(empty($sq['adopted']) && !empty($sq['user_created']) && (int)$sq['user_id'] !== (int)$squatter->key,
+	'setup makes a new account rather than adopting the address holder', $sq['message']);
+check((int)ProvisioningSetup::readSetting(ProvisioningSetup::SERVICE_USER_SETTING) === (int)$sq['user_id'],
+	'and records the new account');
+check(!empty($sq['api_key_id']) && (int)(new ApiKey($sq['api_key_id'], TRUE))->get('apk_usr_user_id') === (int)$sq['user_id'],
+	'a fresh key is minted for it, as a rotation does');
+check(!(new ApiKey($stranded_key->key, TRUE))->get('apk_is_active'),
+	'and the configured key, which no trusted account owned, is retired');
+check(ProvisioningSetup::readSetting('server_manager_getjoinery_api_public_key') !== (string)$stranded_key->get('apk_public_key'),
+	'the pipeline now uses the new key');
+
+// ---------------------------------------------------------------------------
+section('An existing account that owns the key is adopted once, then found by id');
+// ---------------------------------------------------------------------------
+
+// dev and getjoinery: a Provisioning Service account made at the old address
+// before the id was recorded, owning the configured key.
+$existing = make_user('PstExisting', ProvisioningSetup::SERVICE_USER_PERMISSION);
+ProvisioningSetup::$legacy_service_email = (string)$existing->get('usr_email');
+$live_key = $pst_key($existing->key);
+$pst_configure($live_key);
+
+check(ProvisioningSetup::status()['api']['service_user_exists'] === true
+	&& ProvisioningSetup::readSetting(ProvisioningSetup::SERVICE_USER_SETTING) === '',
+	'the status page shows the account setup will adopt, and records nothing on a view');
+$ad = ProvisioningSetup::setupApiCredentials();
+check(!empty($ad['adopted']) && (int)$ad['user_id'] === (int)$existing->key && empty($ad['api_key_id']),
+	'the first setup adopts it and mints nothing: the pipeline key is not stranded', $ad['message']);
+check((int)ProvisioningSetup::readSetting(ProvisioningSetup::SERVICE_USER_SETTING) === (int)$existing->key,
+	'its id is recorded');
+check((bool)(new ApiKey($live_key->key, TRUE))->get('apk_is_active')
+	&& ProvisioningSetup::readSetting('server_manager_getjoinery_api_public_key') === (string)$live_key->get('apk_public_key'),
+	'and the configured key stays live');
+
+$again = ProvisioningSetup::setupApiCredentials();
+check(empty($again['adopted']) && (int)($again['user_id'] ?? 0) === (int)$existing->key, 'a second setup does not adopt again');
+
+// Somebody now holds the old address: with the id recorded it is never consulted.
+ProvisioningSetup::$legacy_service_email = (string)$squatter->get('usr_email');
+$rot = ProvisioningSetup::setupApiCredentials(true);
+if (!empty($rot['api_key_id'])) $cleanup_key_ids[] = $rot['api_key_id'];
+check(empty($rot['user_created']) && (int)$rot['user_id'] === (int)$existing->key
+	&& (int)(new ApiKey($rot['api_key_id'], TRUE))->get('apk_usr_user_id') === (int)$existing->key,
+	'a rotation mints for the recorded account, whoever holds the old address');
+ProvisioningSetup::$legacy_service_email = null;
 
 // ---------------------------------------------------------------------------
 section('ensureDomainQuestion');
@@ -364,12 +453,12 @@ foreach ($cleanup_question_ids as $qid) {
 foreach ($cleanup_key_ids as $kid) {
 	$db->prepare('DELETE FROM apk_api_keys WHERE apk_api_key_id = ?')->execute(array($kid));
 }
-// Only delete the service user if this run created it.
-if ($service_user_before === NULL) {
-	foreach ($cleanup_user_ids as $uid) {
-		$db->prepare('DELETE FROM usr_users WHERE usr_user_id = ?')->execute(array($uid));
-	}
+// Every service account a run makes is new (a random address), so each goes.
+foreach ($cleanup_user_ids as $uid) {
+	$db->prepare('DELETE FROM apk_api_keys WHERE apk_usr_user_id = ?')->execute(array($uid));
+	$db->prepare('DELETE FROM usr_users WHERE usr_user_id = ?')->execute(array($uid));
 }
+ProvisioningSetup::$legacy_service_email = null;
 
 // Reactivate any real pipeline keys the setup rotation deactivated.
 foreach ($preexisting_active_key_ids as $kid) {

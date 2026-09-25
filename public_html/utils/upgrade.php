@@ -34,6 +34,9 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.4 - maintenance_scripts/ files the previous signed release shipped and this one does not
+	 *               are removed once the new release has passed its deploy tier, plus (one time) two
+	 *               retired before signed manifests existed; a file no release listed stays
 	 * @version 1.3 - the structured apply result: an APPLY_RESULT line at the end of every CLI run
 	 *               (versions, migrations with rows, schema changes, plugins, deploy tier, rollback)
 	 * @version 1.2 - the browser-upgrade note says a minute, which is the host
@@ -1487,6 +1490,37 @@
 			// not ship — install.sh seeds an additional site's maintenance_scripts
 			// from the main site on the same host — and removing those is worse
 			// than leaving a stale file behind.
+			// Which maintenance_scripts/ files this release stopped shipping,
+			// worked out now: the previous release's manifest is still at the
+			// site root, and the step below replaces it with this release's.
+			// Only files a signed release listed qualify, so a script a node
+			// carries of its own (an additional site's seeded copy) is never
+			// one of them. They are removed once this release has passed its
+			// deploy tier, so a rolled-back upgrade removes nothing.
+			$stale_release_files = array();
+			$new_listing = class_exists('PackageSignature') ? PackageSignature::trustedListing($stage_location) : null;
+			if ($new_listing !== null) {
+				$previous_listing = PackageSignature::trustedListing($full_site_dir);
+				if ($previous_listing !== null) {
+					$stale_release_files = PackageSignature::droppedPaths($previous_listing, $new_listing, 'maintenance_scripts');
+				}
+			}
+
+			// ---- BEGIN one-time retired files -------------------------------
+			// Remove once every managed node has taken this release and the two
+			// files are gone (specs/fleet_move_bug_fixes_2026_09_25.md WP2).
+			// Both left git before signed manifests existed (2026-08-27,
+			// 0d5371fc), so no listing names them. Nothing else reads this block.
+			foreach (array(
+				'maintenance_scripts/install_tools/deploy.sh',                 // renamed out, 253330e4
+				'maintenance_scripts/install_tools/_reconcile_stock_assets.sh', // removed, 4314d992
+			) as $retired) {
+				if ($new_listing !== null && !isset($new_listing[$retired]) && !in_array($retired, $stale_release_files, true)) {
+					$stale_release_files[] = $retired;
+				}
+			}
+			// ---- END one-time retired files ---------------------------------
+
 			$staged_maintenance = rtrim($stage_location, '/') . '/maintenance_scripts';
 			$site_maintenance = $full_site_dir . '/maintenance_scripts';
 			if(is_dir($staged_maintenance)){
@@ -2028,6 +2062,26 @@
 			}
 		} else if (!file_exists($test_runner)) {
 			upgrade_echo('⚠ tests/run.php not found in the deployed tree — deployed code was not verified<br>');
+		}
+
+		// The maintenance_scripts/ files this release stopped shipping (worked
+		// out before its manifest replaced the previous one). The release has
+		// deployed and passed its deploy tier by here; every rollback above
+		// exits before this point.
+		foreach (($stale_release_files ?? array()) as $stale_rel) {
+			$stale_path = $full_site_dir . '/' . $stale_rel;
+			if (is_link($stale_path) || !is_file($stale_path)) {
+				continue;
+			}
+			$rm_out = [];
+			$rm_exit = 0;
+			exec($root_prefix . 'rm -f -- ' . escapeshellarg($stale_path) . ' 2>&1', $rm_out, $rm_exit);
+			if ($rm_exit === 0) {
+				upgrade_echo('Removed ' . htmlspecialchars($stale_rel) . ', which this release no longer ships<br>');
+			} else {
+				out_alert('warning', 'Could not remove ' . htmlspecialchars($stale_rel),
+					'This release no longer ships it. ' . htmlspecialchars(implode(' ', array_slice($rm_out, -2))));
+			}
 		}
 
 		// ============================================

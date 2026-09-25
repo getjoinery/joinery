@@ -29,6 +29,8 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.8 - a join carries the site's web root: the spec takes it, and a node made from a join that
+ *                names one hosts a site; a malformed one is dropped and the join still stands
  * @version 1.7 - a result is folded as it arrives through record_result, failed and refused as much as
  *                completed, and no terminal control code survives into any field the card reads
  * @version 1.6 - the claim's closed field set gains cases (an object keyed by source); a list, and a
@@ -634,9 +636,10 @@ $real_join = [
 	'agent_public_key' => base64_encode(random_bytes(32)),
 	'agent_version'    => '1.37.1',
 	'addresses'        => [$ds_v4, $ds_v6],
+	'web_root'         => '/var/www/html/test380s-com/public_html',
 ];
 check(AgentChannelEndpoint::validation_error($real_join, AgentChannelEndpoint::join_spec()) === null,
-	'the join the agent sends — claimed name, key, version, addresses — passes the join spec',
+	'the join the agent sends — claimed name, key, version, addresses, web root — passes the join spec',
 	var_export(AgentChannelEndpoint::validation_error($real_join, AgentChannelEndpoint::join_spec()), true));
 check(AgentChannelEndpoint::validation_error(['claimed_name' => 'x', 'agent_public_key' => 'k'], AgentChannelEndpoint::join_spec()) === null,
 	'and a join from an agent too old to send addresses still passes');
@@ -790,6 +793,39 @@ try {
 $late_left = 0;
 foreach (new MultiManagedNode(['slug' => 'agtest-late', 'deleted' => false]) as $x) { $late_left++; }
 check($late_left === 0, 'A refused adoption makes no node record');
+
+section('A join that names its web root makes a node that hosts a site');
+
+// B20: a node made from a join had no web root, so it got no nightly backup
+// and no recovery-key report, and Run backup refused it. Agent 1.44.0 names
+// the site's public_html in its join.
+$site_pair = sodium_crypto_sign_keypair();
+$site_pub  = sodium_crypto_sign_publickey($site_pair);
+$site_jr = new AgentJoinRequest();
+$site_jr->set('ajr_claimed_name', 'agtest-site-joins');
+$site_jr->set('ajr_public_key', base64_encode($site_pub));
+$site_jr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($site_pub));
+$site_jr->set('ajr_source_ip', '203.0.113.79');
+$site_jr->set('ajr_agent_version', '1.44.0');
+$site_jr->set('ajr_web_root', ManagedNode::valid_web_root('/var/www/html/agtest-site-joins/public_html'));
+$site_jr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+$site_jr->save();
+$made_join_requests[] = $site_jr->key;
+$site_jr->load();
+check($site_jr->get('ajr_web_root') === '/var/www/html/agtest-site-joins/public_html', 'The request keeps the web root it named');
+$site_adopted = AgentChannelEndpoint::adoptJoin($site_jr);
+$site_joined = $site_adopted['node'];
+$made_nodes[] = $site_joined->key;
+if ($site_joined->get('mgn_mgh_managed_host_id')) { $made_hosts[] = (int)$site_joined->get('mgn_mgh_managed_host_id'); }
+$site_joined = new ManagedNode($site_joined->key, TRUE);
+check($site_joined->get('mgn_web_root') === '/var/www/html/agtest-site-joins/public_html',
+	'The node made from it carries that web root', (string)$site_joined->get('mgn_web_root'));
+check($site_joined->hosts_site(), 'and hosts a site, so it is backed up and asked for its recovery key');
+check(!$adopt_node->hosts_site(), 'A join that named none (an older agent) still makes a node with no site, as before');
+
+check(ManagedNode::valid_web_root('/var/www/html/x/public_html/../../etc') === null
+	&& ManagedNode::valid_web_root('public_html') === null,
+	'A malformed web root is no web root: intake stores nothing, and the join itself still stands');
 
 section('A rejection is reversible for a day: reopen puts the same key back in front of the operator');
 // keyless10, 2026-09-07: one wrong click rejected the container's join and

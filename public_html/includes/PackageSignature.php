@@ -30,6 +30,8 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.1 - trustedListing() and droppedPaths(): the files one signed release shipped and the next
+ *                does not, which an upgrade removes from maintenance_scripts/
  * @version 1.0
  */
 class PackageSignature {
@@ -295,6 +297,52 @@ class PackageSignature {
 
 		return new PackageVerdict(self::SIGNED,
 			count($listed) . ' file(s) verified', $root, $verified_by, null, count($listed));
+	}
+
+	/**
+	 * The listing of the manifest at $dir ([site-root-relative path => sha256])
+	 * when a key this machine trusts signed it, or null. Reads the manifest and
+	 * its signature and nothing else: it says what a release shipped, not
+	 * whether the files are still there.
+	 *
+	 * @param string|null $keys_file The key file; the node's own when null
+	 */
+	public static function trustedListing(string $dir, ?string $keys_file = null): ?array {
+		$dir = rtrim($dir, '/');
+		$own_keys = ($keys_file === null);
+		$keys = self::keysOrRefusal($keys_file ?? self::keysPath(), $own_keys);
+		if (!is_array($keys)) {
+			return null;
+		}
+		$body = @file_get_contents($dir . '/' . self::MANIFEST_NAME);
+		$signature = base64_decode(trim((string)@file_get_contents($dir . '/' . self::SIGNATURE_NAME)), true);
+		if ($body === false || $body === '' || $signature === false || strlen($signature) !== SODIUM_CRYPTO_SIGN_BYTES) {
+			return null;
+		}
+		foreach ($keys as $key) {
+			if (sodium_crypto_sign_verify_detached($signature, $body, $key)) {
+				return self::parse($body);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The paths under $under (a site-root-relative directory, e.g.
+	 * 'maintenance_scripts') that the previous release's listing names and the
+	 * new one does not: the files a release stopped shipping. A path neither
+	 * listing names is local, and is never among them.
+	 */
+	public static function droppedPaths(array $previous, array $new, string $under): array {
+		$lead = trim($under, '/') . '/';
+		$dropped = array();
+		foreach (array_keys($previous) as $rel) {
+			if (strpos($rel, $lead) === 0 && !isset($new[$rel])) {
+				$dropped[] = $rel;
+			}
+		}
+		sort($dropped);
+		return $dropped;
 	}
 
 	/**

@@ -12,6 +12,9 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 1.5 - admin_management_node_cli_join_request(): a CLI join naming the URL of a request not yet
+ *                answered keeps that request, so the agent keeps its staged key; the page's Connect
+ *                stays a fresh ask
  * @version 1.4 - disconnecting also removes the manager backup profile's object-store marker, so
  *                offloaded files stop waiting for a management node's backup that will not come
  * @version 1.3 - the log-access switch (agent_log_access, specs/agent_log_access.md): whether a connected
@@ -195,6 +198,34 @@ function admin_management_node_installer_hint(): string {
  * Why a management-node URL is unacceptable, or null when it is fine.
  * Pure so the boundary is testable without a session.
  */
+/**
+ * The join request `utils/agent_control.php --join` records, or null to keep
+ * the one already there.
+ *
+ * The agent treats a newer requested_time as a new ask: it withdraws, drops
+ * the keypair it staged and asks again with a new one, orphaning the request
+ * waiting on the management node. `install.sh site` passes --join on every run,
+ * so rebuilding a site before its join was approved changed its key. A request
+ * for the same URL that is still recorded has not been answered (the agent
+ * clears it on approval and on rejection), and the same ask again is that
+ * request. A different URL, or no request, is a fresh ask.
+ *
+ * The page's own Connect does not use this: an operator asking again means it.
+ */
+function admin_management_node_cli_join_request(string $current, string $url, string $now): ?string {
+	$url = rtrim(trim($url), '/');
+	$existing = json_decode($current, true);
+	if (is_array($existing)
+		&& rtrim(trim((string)($existing['url'] ?? '')), '/') === $url
+		&& trim((string)($existing['requested_time'] ?? '')) !== '') {
+		return null;
+	}
+	return json_encode([
+		'url'            => $url,
+		'requested_time' => $now,
+	]);
+}
+
 function admin_management_node_url_refusal(string $url): ?string {
 	if ($url === '') {
 		return 'Enter the management node\'s URL.';

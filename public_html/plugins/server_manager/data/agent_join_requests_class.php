@@ -13,6 +13,8 @@
  * key fingerprint and tells the operator to compare it against what the node's
  * own panel shows.
  *
+ * @version 1.4 - ajr_web_root: the public_html directory the joining agent's site lives in, when it has one
+ *                (agent 1.44.0), validated by ManagedNode::valid_web_root() on intake
  * @version 1.3 - ajr_addresses: every address the machine says it answers on, so approval can match
  *                the placement record whichever family the request travelled over (a dual-stack host
  *                joins over IPv6 while its placement is keyed by IPv4)
@@ -59,6 +61,7 @@ class AgentJoinRequest extends SystemBase {
 		'ajr_source_ip'     => array('type'=>'varchar(64)'),
 		'ajr_addresses'     => array('type'=>'varchar(1024)'),
 		'ajr_agent_version' => array('type'=>'varchar(20)'),
+		'ajr_web_root'      => array('type'=>'varchar(500)'),
 		'ajr_status'        => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'pending', 'allowed_values'=>array('pending', 'approved', 'rejected')),
 		'ajr_mgn_managed_node_id'   => array('type'=>'int8'),
 		'ajr_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),

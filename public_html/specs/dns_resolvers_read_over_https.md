@@ -10,9 +10,31 @@ public-html-9a, reviewer public-html-bb.
 - D1 decided: the DNS servers download the blocklists.
 - D2 decided: cryptominers moves to the NoCoin list (dns_filtering 1.3.1, 94628e67; on
   scrolldaddy in 0.8.428).
-- WP6 started 2026-09-25 and paused at its first step: issuing the secondary's key failed
-  on scrolldaddy (B7). Nothing was written anywhere. The fix is dns_filtering 1.3.2,
-  uncommitted, and needs a release before WP6 resumes.
+- **WP6, secondary done 2026-09-25 20:00 UTC** (after B7's fix shipped in 0.8.429):
+  - key 2, owned by user 1, restricted to 97.107.131.227;
+  - `.pre-https` backup kept, and `SCD_DB_*` left in the env;
+  - 2.0.0 primed in 12 s (1 device, 18 lists, 3.8 M domains) and swapped in.
+  - Gates passed:
+    - health 200 ok with `source_ok`;
+    - the same verdicts as the 1.8.0 baseline (`pornhub.com` and `doubleclick.net`
+      blocked, `example.com` forwarded);
+    - the key answers over IPv4 and is refused over IPv6 ("Unauthorized IP");
+    - public HTTPS through Caddy is 200;
+    - with scrolldaddy.app unreachable, a restart filters from the cache (200 `stale`);
+    - RSS 226 MB.
+  - Live rule change on the owner's device: a block rule for `example.org` took effect in
+    61 s, and its removal in 58 s. The rule is gone.
+  - B4 (peer URL) is left as it was: the secondary has no private address, and query logs
+    should not cross the internet in clear.
+- **WP6, primary done 2026-09-25 20:10 UTC.** The owner went ahead the same day: the two
+  servers serve one device, the owner's.
+  - key 3, owned by user 1, restricted to 45.56.103.84; `.pre-https` backup kept, and
+    `SCD_DB_*` left in the env;
+  - primed in 15 s and swapped in;
+  - the same gates passed (health ok, baseline verdicts, IPv4 answers and IPv6 refused,
+    public HTTPS 200, cache restart 200 `stale`, RSS 226 MB).
+  - The check scripts are removed from both boxes.
+- **Next: WP7**, after both have served for a week (from about 2026-10-02).
 - **WP6** is live and needs the owner present.
 - **WP7's code, and WP4's site-side removals, stay out of the tree until WP6 is done on
   both DNS servers.** A release carrying them early would strip the resolvers' database
@@ -422,8 +444,10 @@ A machine key that can call only the actions it names.
          `SCD_JOINERY_SITES` elsewhere reads as a different site with no cache.
        - An OUTPUT rule would have to block every Cloudflare range, v4 and v6.
 4. **Primary:** the same, once the secondary has served 24 hours.
-5. **Rollback, per server:** reinstall 1.8.0 and restore the `.pre-https` env. This
-   works until WP7, because the database access is still in place.
+5. **Rollback, per server:** reinstall 1.8.0 with the **current** env, which still
+   carries the `SCD_DB_*` lines. This works until WP7, because the database access is
+   still in place. Do not restore `.pre-https`: since the B4 fix the servers share one
+   API key, and that backup holds the secondary's old one.
 6. **Blocklist:** one daily refresh is watched end to end on each server: every category
    non-empty, cryptominers included (B2).
 

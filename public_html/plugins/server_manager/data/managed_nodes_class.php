@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.26 - valid_web_root() and adopt_reported_web_root(): a web root the node's agent reports fills
+ *                an empty mgn_web_root and never replaces a set one; a mismatch is logged
  * @version 1.25 - mgn_backup_keep_days: the site's own retention window, reported by its backup runs
  * @version 1.24 - MultiManagedNode option reports_failed_backup: the nodes whose last scheduled
  *                (manager-profile) backup is recorded as failed
@@ -346,6 +348,60 @@ class ManagedNode extends SystemBase {
 	public static function hosts_site_from($node): bool {
 		return trim((string)$node->get('mgn_web_root')) !== ''
 			&& !$node->get('mgn_skip_joinery_checks');
+	}
+
+	/**
+	 * A web root as a node's agent reports it, or null when it is not one: an
+	 * absolute path ending in /public_html, of plain path characters, with no
+	 * empty, "." or ".." segment. The agent is authenticated but the value is
+	 * still the node's word, and it ends up in the node record.
+	 */
+	public static function valid_web_root($path): ?string {
+		if (!is_string($path) || $path === '' || strlen($path) > 500) {
+			return null;
+		}
+		if (!preg_match('#^(/[A-Za-z0-9._-]+)+/public_html$#', $path)) {
+			return null;
+		}
+		foreach (explode('/', substr($path, 1)) as $segment) {
+			if ($segment === '.' || $segment === '..') {
+				return null;
+			}
+		}
+		return $path;
+	}
+
+	/**
+	 * Take the web root the node's agent reported ($source names where: a join,
+	 * a status check). It fills an empty mgn_web_root, so a node made without
+	 * one becomes a node that hosts a site. It never replaces a set one: a
+	 * difference is logged for the operator and left alone. Sets the field and
+	 * leaves saving to the caller.
+	 *
+	 * Returns what happened: filled, same, mismatch, refused (not a web root),
+	 * or none (nothing reported).
+	 */
+	public static function adopt_reported_web_root($node, $reported, string $source): string {
+		if ($reported === null || $reported === '') {
+			return 'none';
+		}
+		$path = self::valid_web_root($reported);
+		if ($path === null) {
+			error_log('ManagedNode: node ' . (int)$node->key . ' reported a web root that is not one in its ' . $source
+				. ', ignored: ' . substr(preg_replace('/[^\x20-\x7e]/', '?', (string)$reported), 0, 200));
+			return 'refused';
+		}
+		$current = rtrim(trim((string)$node->get('mgn_web_root')), '/');
+		if ($current === '') {
+			$node->set('mgn_web_root', $path);
+			return 'filled';
+		}
+		if ($current === $path) {
+			return 'same';
+		}
+		error_log('ManagedNode: node ' . (int)$node->key . ' reported web root ' . $path . ' in its ' . $source
+			. ', but its record says ' . $current . '; the record is kept');
+		return 'mismatch';
 	}
 
 	/**

@@ -772,6 +772,38 @@ JobResultProcessor::process(jrp_job($site_node, 'check_status', $machine_status)
 check(count(jrp_pending_jobs($site_node->key, 'recovery_key_report')) === 1,
 	'the same status check on a node with a site queues one recovery_key_report');
 
+section('A status check fills an empty web root, and leaves a set one alone');
+
+// B20: a node made from a join before agent 1.44.0 has no web root, and so no
+// site. The agent's own status report fills it.
+$wr_status = function ($web_root) {
+	return "=== [Step 1/1] check_status ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+		'web_root' => $web_root, 'load_1m' => 0.3, 'uptime' => 'up 2 days'))) . "\n[Step 1/1 OK]";
+};
+$wr_node = jrp_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
+	'mgn_web_root'         => '',
+));
+JobResultProcessor::process(jrp_job($wr_node, 'check_status', $wr_status('/var/www/html/wrfill/public_html')));
+$wr_node = new ManagedNode($wr_node->key, TRUE);
+check($wr_node->get('mgn_web_root') === '/var/www/html/wrfill/public_html' && $wr_node->hosts_site(),
+	'an empty web root is filled from the report, and the node hosts a site', (string)$wr_node->get('mgn_web_root'));
+check(count(jrp_pending_jobs($wr_node->key, 'recovery_key_report')) === 1,
+	'and the same check asks it for its recovery key');
+
+JobResultProcessor::process(jrp_job($wr_node, 'check_status', $wr_status('/var/www/html/elsewhere/public_html')));
+$wr_node = new ManagedNode($wr_node->key, TRUE);
+check($wr_node->get('mgn_web_root') === '/var/www/html/wrfill/public_html',
+	'a set web root is never replaced by a different report', (string)$wr_node->get('mgn_web_root'));
+
+$wr_bad = jrp_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
+	'mgn_web_root'         => '',
+));
+JobResultProcessor::process(jrp_job($wr_bad, 'check_status', $wr_status('/var/www/html/../../tmp/public_html')));
+$wr_bad = new ManagedNode($wr_bad->key, TRUE);
+check(trim((string)$wr_bad->get('mgn_web_root')) === '', 'a malformed report is refused and fills nothing');
+
 section('verify_backup: the node\'s VERIFY_* lines become the plane\'s copy, in plain words');
 
 $vpass = "fetching files-0000.tar.gz.enc\nVERIFY_RESULT=pass\nVERIFY_LEVEL=2\nVERIFY_RUN=chain-20260912_044520/3\n"

@@ -260,9 +260,9 @@ The policy lives at `/etc/joinery-agent/policy.json`, root-owned, outside the we
 
 ### Connecting a node (the join)
 
-Enrollment is node-initiated and **shares no secret**. On the node, Admin → System → **Management Node**: the site's admin enters the management node's URL — just an address. The node's root agent generates an Ed25519 keypair, keeps the private half at `/etc/joinery-agent/node_identity.json` (mode 0600, root-owned), and sends a join request carrying only the public half and a claimed name. The node's page then shows the key's short fingerprint and waits.
+Enrollment is node-initiated and **shares no secret**. On the node, Admin → System → **Management Node**: the site's admin enters the management node's URL — just an address. The node's root agent generates an Ed25519 keypair, keeps the private half at `/etc/joinery-agent/node_identity.json` (mode 0600, root-owned), and sends a join request carrying only the public half, a claimed name and, when the machine has a site, the site's `public_html` path. The node's page then shows the key's short fingerprint and waits.
 
-On the management node, the request appears on the node's Detail → **API Keys** tab: claimed name, source address, and the same fingerprint. Approving is superadmin-only and should happen **only if the fingerprint matches the node's own page exactly** — the name and address are claims anyone could make; the fingerprint comparison is the entire security of the introduction. Approval binds the public key to the node record; the agent picks it up on its next check and both panels flip to Connected.
+On the management node, the request appears on the node's Detail → **API Keys** tab: claimed name, source address, and the same fingerprint. Approving is superadmin-only and should happen **only if the fingerprint matches the node's own page exactly** — the name and address are claims anyone could make; the fingerprint comparison is the entire security of the introduction. Approval binds the public key to the node record, and fills an empty web root from the one the join named; the agent picks it up on its next check and both panels flip to Connected.
 
 **The management node stores only the public half**, so there is no credential on it that could act as the node — and enrollment adds nothing to steal: no token, no code, nothing copied by a human. A wrong approval is visible (the tab stamps the connection time, agent version, and last poll) and severable with the Disconnect button, which forgets the key and drops the node back to API/SSH routing.
 
@@ -374,7 +374,7 @@ The request names a **kind** from a closed set and, for a binary, an **architect
 
 A script-invoking primitive verifies its script against the signed release manifest before running it as root. On a site that manifest is `RELEASE_MANIFEST` and `RELEASE_MANIFEST.sig` at the site root, beside `public_html`; `install.sh` places it there when it lays down a fresh site (bare metal and the Docker image alike, from whichever archive it actually applied) and `upgrade.php` replaces it on every upgrade. A site tree without it refuses every script primitive, `apply_update` included. On a machine with no site there is no release manifest, so there is nothing to verify against and no script primitive can run at all — which would leave the machine's whole vocabulary in embedded Go.
 
-**Only the site that built the shipped agent signs.** The agent verifies against the key compiled into its binary, so the key that built the bundle in `agent_dist/` is the only one whose signatures any node will accept; `agent_dist/manifest.json` records it as `signing_public_key`. `TreeManifestPublisher::authority()` compares that key with the site's own `config/agent_signing_key` and the publish signs only when they are the same (a bundle that predates the record counts as built here when the agent source is on the box). A site that received its agent from upstream — getjoinery, republishing for the beta testers — holds a different key, and a manifest it signed is one its own agent and every node it serves would refuse. Such a site carries forward the manifest it received: into the core archive from its own site root, and for each theme and plugin from the directory that ships, leaving its live tree exactly as upstream delivered it. The support bundle is not rebuilt there either; the received one rides along in `agent_dist/`. A received manifest that turns out to be signed with the site's own key, or that does not verify against the bundle's key, aborts the publish and says so, rather than republishing a tree nothing can run.
+**Only the site that built the shipped agent signs.** The agent verifies against the key compiled into its binary, so the key that built the bundle in `agent_dist/` is the only one whose signatures any node will accept; `agent_dist/manifest.json` records it as `signing_public_key`. `TreeManifestPublisher::authority()` compares that key with the site's own `config/agent_signing_key` and the publish signs only when they are the same (a bundle that predates the record counts as built here when the agent source is on the box). A site that received its agent from upstream — getjoinery, republishing for the beta testers — holds a different key, and a manifest it signed is one its own agent and every node it serves would refuse. Such a site carries forward the manifest it received: into the core archive from its own site root, and for each theme and plugin from the directory that ships, leaving its live tree exactly as upstream delivered it. A site that republishes (it may not mint a release number) also builds each archive from exactly the files that manifest lists, each checked against its hash (`TreeManifestPublisher::republish_artifact()`; see docs/deploy_and_upgrade.md), and rebuilds nothing — the agent, the support bundle and the other binaries ride along as received. A received manifest that turns out to be signed with the site's own key, or that does not verify against the bundle's key, aborts the publish and says so, rather than republishing a tree nothing can run.
 
 ### When a node cannot verify its own scripts
 
@@ -669,7 +669,11 @@ Question, and the Orders poll reads its answer from the store.
 activates the pipeline: every requirement shows a live status badge, and each
 automatable step is a one-click, idempotent action backed by
 `includes/ProvisioningSetup.php` — mint the store API service user
-(`provisioning@<host>`, permission 5, password recovery disabled) and machine
+(permission 5, password recovery disabled, a random `provisioning-<hex>@<host>`
+address; found by the id in the managed setting
+`server_manager_provisioning_service_user_id`, never by address — an account
+at the old `provisioning@<host>` address is adopted once only when it owns the
+configured key, otherwise a new account and key replace it) and machine
 key and write the API settings (with a loopback probe badge and key
 rotation), create the domain Question (shared-host products only), save the
 email settings, activate the scheduled tasks (the provisioning umbrella, which
@@ -1880,7 +1884,7 @@ Represents a remote Joinery instance. Key fields:
 - `mgn_host` -- SSH host (IP or hostname)
 - `mgn_ssh_user`, `mgn_ssh_key_path`, `mgn_ssh_port` -- SSH connection details
 - `mgn_container_name` -- Docker container name (null for bare metal)
-- `mgn_web_root` -- Path to `public_html` inside the server/container
+- `mgn_web_root` -- Path to `public_html` inside the server/container. Empty means the node hosts no site (no backup, no recovery-key report). The node's agent reports it at join and in every `check_status`; a report fills an empty one (an absolute path ending `/public_html`) and never replaces a set one — a difference is logged.
 - `mgn_last_status_data` -- JSON from last status check (disk, memory, load, etc.)
 - `mgn_joinery_version` -- Last known version string
 - `mgn_bkt_backup_target_id` -- FK to backup target (null = local only)
