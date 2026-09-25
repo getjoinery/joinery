@@ -19,6 +19,10 @@
  * on saves that do not affect routing, and best-effort on network failure with the
  * SyncRelayMap reconcile as the backstop.
  *
+ * The same writes decide which vault a message seals to, so each also forgets
+ * InboundEmailMessage::sealScopeFor()'s per-request memo.
+ *
+ * @version 1.1.0 - forgets the message seal-scope memo on every write
  * @version 1.0.1 - comment wording: the Seal at the relay add-on
  */
 
@@ -37,6 +41,7 @@ trait NotifiesRelayMapOnChange {
 	}
 
 	private static function notifyRelayMapChange(): void {
+		InboundEmailMessage::forgetSealScopes();
 		try {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayMapSync.php'));
 			RelayMapSync::onChange();

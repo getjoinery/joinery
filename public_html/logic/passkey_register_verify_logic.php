@@ -31,6 +31,13 @@ function passkey_register_verify_logic(array $input): LogicResult {
 		return LogicResult::error('Missing passkey credential response.');
 	}
 	$label = isset($input['label']) ? trim($input['label']) : '';
+	// A second PRF output (the root vault's) never leaves the browser, at
+	// creation as at assertion (specs/one_vault_experience.md § R1).
+	try {
+		VaultCeremonies::assertNoSecondPrfOutput($credential);
+	} catch (VaultCeremonyException $e) {
+		return LogicResult::error($e->getMessage());
+	}
 
 	// Enrolling a first factor silently changes sign-in behavior (the account
 	// starts being asked for it), so the moment the predicate flips is reported
@@ -112,11 +119,11 @@ function passkey_register_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Complete passkey enrollment and persist the new credential; with unlocker ({credential} from vault_unlock_options, {passphrase} or {code}) also activates it for the vault',
+		'description' => 'Complete passkey enrollment and persist the new credential; with unlocker ({credential} from vault_unlock_options, {passphrase_kek} or {code_kek}) also activates it for the vault',
 		'input' => [
 			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
 			'label' => ['type' => 'string', 'required' => false, 'label' => 'Passkey label'],
-			'unlocker' => ['type' => 'object', 'required' => false, 'label' => 'Fresh unlocker: {credential} from vault_unlock_options, {passphrase} or {code}'],
+			'unlocker' => ['type' => 'object', 'required' => false, 'label' => 'Fresh unlocker: {credential} from vault_unlock_options, {passphrase_kek} or {code_kek}'],
 		],
 	];
 }

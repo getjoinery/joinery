@@ -16,6 +16,15 @@
  * Each client-custody scope is its own X25519 keypair with its own per-scope
  * PRF context, so a KEK derived for one scope can never open another's key.
  *
+ * The root vault and content scopes (specs/one_vault_experience.md): the
+ * `root` scope is opened by the person's unlockers (passkeys, the passphrase
+ * where one is allowed, recovery codes from the one set); a content scope
+ * holds one `root` wrapping — its secret under a key the browser derives from
+ * the root's secret — and nothing else. A passphrase wrapping is accepted only
+ * on the root, and only for an account whose passkeys cannot hold a key (R8).
+ *
+ * @version 1.2 - root and content scopes; `root` wrappings; code set id/index on
+ *   recovery wrappings; passphrase gated (R8); forgetDevices()
  * @version 1.1 - wrappings carry a key generation; the status lists the one in use and,
  *   apart, a pending rotation's; assertNoPendingRotation()
  * @version 1.0
@@ -83,6 +92,22 @@ class VaultClientCustody {
 	 * one at enrollment) via createWrapped()'s null default.
 	 */
 	public static function persistWrappings(int $user_id, UserEncryptionVault $vault, array $wrappings, ?int $key_generation = null): void {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		$is_root = ((string)$vault->get('uev_scope') === VaultScopes::ROOT_SCOPE);
+		// A content vault that opens through the root (it holds, or is being
+		// given, a `root` wrapping) takes no unlocker of its own. One made before
+		// the root keeps its own until it is given one (§ As built, D3): its
+		// rotation and enrolments still write them.
+		$through_root = false;
+		if (!$is_root) {
+			foreach ($wrappings as $w) {
+				if (($w['unlocker_type'] ?? '') === UserEncryptionWrapping::TYPE_ROOT) {
+					$through_root = true;
+				}
+			}
+			$through_root = $through_root || (new MultiUserEncryptionWrapping([
+				'vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_ROOT]))->count() > 0;
+		}
 		foreach ($wrappings as $w) {
 			$type = isset($w['unlocker_type']) ? (string)$w['unlocker_type'] : '';
 			$blob = isset($w['wrapped_secret_key']) ? (string)$w['wrapped_secret_key'] : '';
@@ -92,20 +117,245 @@ class VaultClientCustody {
 			$credential_internal_id = null;
 			$salt = null;
 			$label = isset($w['label']) ? (string)$w['label'] : null;
+			$code_set = null;
+			$code_index = null;
 
-			if ($type === UserEncryptionWrapping::TYPE_PASSKEY) {
+			// The root opens through the person's own unlockers, never another
+			// vault; a content vault that opens through the root, through it alone.
+			if ($is_root && $type === UserEncryptionWrapping::TYPE_ROOT) {
+				throw new VaultClientCustodyException('Your vault cannot be opened by another vault.');
+			}
+			if ($through_root && $type !== UserEncryptionWrapping::TYPE_ROOT) {
+				throw new VaultClientCustodyException('This vault opens through your vault; it takes no unlocker of its own.');
+			}
+
+			if ($type === UserEncryptionWrapping::TYPE_ROOT) {
+				// no salt, no credential: the key comes from the root's secret
+			} elseif ($type === UserEncryptionWrapping::TYPE_PASSKEY) {
 				$cred_b64 = isset($w['credential_id']) ? (string)$w['credential_id'] : '';
 				if ($cred_b64 === '') {
 					throw new VaultClientCustodyException('A passkey wrapping was missing its credential id.');
 				}
 				$credential_internal_id = self::resolveOwnedPrfPasskeyId($user_id, $cred_b64);
 			} elseif ($type === UserEncryptionWrapping::TYPE_RECOVERY || $type === UserEncryptionWrapping::TYPE_PASSPHRASE) {
+				if ($type === UserEncryptionWrapping::TYPE_PASSPHRASE && !self::passphraseAllowed($user_id)) {
+					throw new VaultClientCustodyException('Your passkey can hold your key, so a passphrase is not offered.');
+				}
 				$salt = isset($w['salt']) ? (string)$w['salt'] : (string)$vault->get('uev_salt');
+				if ($type === UserEncryptionWrapping::TYPE_RECOVERY && isset($w['code_set'])) {
+					$code_set = strtolower((string)$w['code_set']);
+					$code_index = (int)($w['code_index'] ?? -1);
+					if (!preg_match('/^[0-9a-f]{32}$/', $code_set) || $code_index < 0 || $code_index > 19) {
+						throw new VaultClientCustodyException('A recovery code was not sent in the expected form.');
+					}
+				}
 			} else {
 				throw new VaultClientCustodyException('Unknown unlocker type in a wrapping.');
 			}
 
-			self::insertOpaqueWrapping((int)$vault->key, $type, $blob, $credential_internal_id, $label, $salt, $key_generation);
+			$row = self::insertOpaqueWrapping((int)$vault->key, $type, $blob, $credential_internal_id, $label, $salt, $key_generation);
+			if ($code_set !== null) {
+				$row->set('uew_code_set', $code_set);
+				$row->set('uew_code_index', $code_index);
+				$row->save();
+			}
+		}
+	}
+
+	/**
+	 * Create a client-custody vault from what the browser made: the public key,
+	 * the salt and KDF params, and the opaque wrappings. Runs inside the
+	 * caller's transaction when one is open (the account setup and the code
+	 * set adoption create the root beside the account vault), else in its own.
+	 *
+	 * The floor at birth: the root takes at least one everyday unlocker (a
+	 * passkey, or the passphrase where allowed) and the codes of one set; a
+	 * content scope takes one `root` wrapping and nothing else
+	 * (specs/one_vault_experience.md § R2, R4). The root is made only in the
+	 * request that gives the account vault the same codes — $paired_code_set,
+	 * VaultCeremonies::codeSet()'s shape, required for it — so one set opens
+	 * both; its codes must be that set, index for index.
+	 *
+	 * @throws VaultClientCustodyException with the message to show
+	 */
+	public static function createVault(int $user_id, string $scope, array $input, ?array $paired_code_set = null): UserEncryptionVault {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		self::assertClientScope($scope);
+		$public_key = isset($input['public_key']) ? (string)$input['public_key'] : '';
+		$salt       = isset($input['salt']) ? (string)$input['salt'] : '';
+		$wrappings  = isset($input['wrappings']) && is_array($input['wrappings']) ? $input['wrappings'] : array();
+		if ($public_key === '' || $salt === '') {
+			throw new VaultClientCustodyException('Missing vault key material.');
+		}
+
+		$primary = 0; $root = 0; $indices = array(); $sets = array();
+		foreach ($wrappings as $w) {
+			$t = isset($w['unlocker_type']) ? $w['unlocker_type'] : '';
+			if ($t === UserEncryptionWrapping::TYPE_PASSKEY || $t === UserEncryptionWrapping::TYPE_PASSPHRASE) $primary++;
+			if ($t === UserEncryptionWrapping::TYPE_RECOVERY) {
+				$sets[strtolower((string)($w['code_set'] ?? ''))] = true;
+				$indices[] = (int)($w['code_index'] ?? -1);
+			}
+			if ($t === UserEncryptionWrapping::TYPE_ROOT) $root++;
+		}
+		if ($scope === VaultScopes::ROOT_SCOPE) {
+			if ($primary < 1) {
+				throw new VaultClientCustodyException('Your vault needs a passkey or a passphrase to unlock it.');
+			}
+			if (!$indices || count($sets) !== 1 || isset($sets[''])) {
+				throw new VaultClientCustodyException('Your vault needs its recovery codes.');
+			}
+			if ($paired_code_set === null) {
+				// The root is made only beside the account vault, in the request
+				// that gives both the same codes (setup, code set adoption). Made
+				// on its own it would carry a second set of codes, or, before the
+				// account vault exists, block that vault's setup for good.
+				throw new VaultClientCustodyException(UserEncryptionVault::loadForUser($user_id)
+					? 'Unlock your vault: that finishes setting it up.'
+					: 'Set up your vault on your security page.');
+			}
+			$want = array_map(function ($e) { return (int)$e[0]; }, $paired_code_set['entries']);
+			sort($want);
+			sort($indices);
+			if (!isset($sets[$paired_code_set['id']]) || $want !== $indices) {
+				throw new VaultClientCustodyException('Your recovery codes did not arrive together. Reload the page and try again.');
+			}
+		} elseif ($root < 1 || $root !== count($wrappings)) {
+			throw new VaultClientCustodyException('This vault opens through your vault. Open your vault first.');
+		}
+
+		if (self::loadVault($user_id, $scope)) {
+			throw new VaultClientCustodyException('Your vault is already set up.');
+		}
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$owns_tx = !$db->inTransaction();
+		if ($owns_tx) {
+			$db->beginTransaction();
+		}
+		try {
+			$vault = new UserEncryptionVault(NULL);
+			$vault->set('uev_usr_user_id', $user_id);
+			$vault->set('uev_scope', $scope);
+			$vault->set('uev_custody', UserEncryptionVault::CUSTODY_CLIENT);
+			$vault->set('uev_public_key', $public_key);
+			$vault->set('uev_salt', $salt);
+			$vault->set('uev_kdf_params', self::encodeKdfParams($input['kdf_params'] ?? null));
+			$vault->set('uev_key_generation', 1);
+			$vault->save();
+
+			self::persistWrappings($user_id, $vault, $wrappings);
+
+			if ($owns_tx) {
+				$db->commit();
+			}
+			return $vault;
+		} catch (Throwable $e) {
+			if ($owns_tx && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
+	}
+
+	/**
+	 * Replace the root vault's passphrase wrapping with the browser's (none
+	 * removes it), inside the caller's transaction, beside the account vault's
+	 * own phrase change (specs/one_vault_experience.md § R7). The phrase is one:
+	 * both halves change together or neither does.
+	 *
+	 * @throws VaultClientCustodyException
+	 */
+	public static function replaceRootPassphrase(int $user_id, array $wrappings): void {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		$root = self::loadVault($user_id, VaultScopes::ROOT_SCOPE);
+		if (!$root) {
+			if (!$wrappings) {
+				return;
+			}
+			throw new VaultClientCustodyException('Your vault is not set up.');
+		}
+		self::assertNoPendingRotation($root);
+		if (count($wrappings) > 1) {
+			throw new VaultClientCustodyException('Your vault takes one passphrase.');
+		}
+		foreach ($wrappings as $w) {
+			if (($w['unlocker_type'] ?? '') !== UserEncryptionWrapping::TYPE_PASSPHRASE) {
+				throw new VaultClientCustodyException('A wrapping for your vault was not the kind expected.');
+			}
+		}
+		$old = new MultiUserEncryptionWrapping(['vault_id' => $root->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE]);
+		foreach ($old as $row) {
+			$row->soft_delete();
+		}
+		self::persistWrappings($user_id, $root, $wrappings);
+	}
+
+	/**
+	 * A passphrase is for an account whose passkeys cannot hold a key, and for
+	 * no other (specs/one_vault_experience.md § R8): at least one passkey, and
+	 * every one provably incapable.
+	 */
+	public static function passphraseAllowed(int $user_id): bool {
+		require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
+		return Passkey::userNeedsPassphraseFallback($user_id);
+	}
+
+	/**
+	 * Replace the root vault's recovery wrappings with the root halves of a
+	 * browser-made set whose account halves the caller is storing in the same
+	 * transaction (specs/one_vault_experience.md § R6: one set opens both).
+	 * Every wrapping must be a recovery wrapping of that set, one per index
+	 * the account side holds. No transaction of its own: the caller's.
+	 */
+	public static function replaceRootRecovery(int $user_id, array $code_set, array $wrappings): void {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		$root = self::loadVault($user_id, VaultScopes::ROOT_SCOPE);
+		if (!$root) {
+			throw new VaultClientCustodyException('Your vault is not set up.');
+		}
+		self::assertNoPendingRotation($root);
+		$want = array();
+		foreach ($code_set['entries'] as $entry) {
+			$want[(int)$entry[0]] = true;
+		}
+		$got = array();
+		foreach ($wrappings as $w) {
+			if (($w['unlocker_type'] ?? '') !== UserEncryptionWrapping::TYPE_RECOVERY
+					|| strtolower((string)($w['code_set'] ?? '')) !== $code_set['id']) {
+				throw new VaultClientCustodyException('Your new recovery codes did not match. Nothing was changed; try again.');
+			}
+			$got[(int)($w['code_index'] ?? -1)] = true;
+		}
+		ksort($want);
+		ksort($got);
+		if (array_keys($want) !== array_keys($got) || count($got) !== count($wrappings)) {
+			throw new VaultClientCustodyException('Your new recovery codes did not match. Nothing was changed; try again.');
+		}
+		$old = new MultiUserEncryptionWrapping(['vault_id' => $root->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_RECOVERY]);
+		foreach ($old as $row) {
+			$row->soft_delete();
+		}
+		self::persistWrappings($user_id, $root, $wrappings);
+	}
+
+	/**
+	 * Forget every vault key handed to this user's linked devices. A recovery
+	 * code in use is a possible theft, so each device re-confirms by linking
+	 * again (specs/one_vault_experience.md § R6, review B6).
+	 */
+	public static function forgetDevices(int $user_id): void {
+		if (!class_exists('MultiSyncDevice')) {
+			return;
+		}
+		$devices = new MultiSyncDevice(array('user_id' => $user_id, 'deleted' => false));
+		foreach ($devices as $device) {
+			if (!$device->vault_scopes()) {
+				continue;
+			}
+			$device->set('sde_vault_scopes', null);
+			$device->set('sde_device_pubkey', null);
+			$device->save();
 		}
 	}
 
@@ -146,7 +396,8 @@ class VaultClientCustody {
 	public static function statusPayload(int $user_id, string $scope): array {
 		$vault = self::loadVault($user_id, $scope);
 		if (!$vault) {
-			return ['set_up' => false, 'scope' => $scope, 'prf_context' => self::contextForScope($scope)];
+			return ['set_up' => false, 'scope' => $scope, 'prf_context' => self::contextForScope($scope),
+				'passphrase_allowed' => self::passphraseAllowed($user_id)];
 		}
 
 		$wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault->key]);
@@ -156,6 +407,8 @@ class VaultClientCustody {
 		$passkey_count = 0;
 		$unused_recovery = 0;
 		$has_passphrase = false;
+		$root_wrapped = false;
+		$code_set = null;
 		$generation = (int)$vault->get('uev_key_generation');
 		$pending_generation = $vault->get('uev_pending_key_generation') !== null ? (int)$vault->get('uev_pending_key_generation') : null;
 		foreach ($wrappings as $w) {
@@ -178,6 +431,12 @@ class VaultClientCustody {
 			if ($type === UserEncryptionWrapping::TYPE_PASSPHRASE) {
 				$has_passphrase = true;
 			}
+			if ($type === UserEncryptionWrapping::TYPE_ROOT) {
+				$root_wrapped = true;
+			}
+			if ($type === UserEncryptionWrapping::TYPE_RECOVERY && (string)$w->get('uew_code_set') !== '') {
+				$code_set = (string)$w->get('uew_code_set');
+			}
 			$list[] = self::wrappingView($w);
 		}
 
@@ -194,6 +453,12 @@ class VaultClientCustody {
 			'has_passphrase'             => $has_passphrase,
 			'regenerate_recommended'     => $unused_recovery < 3,
 			'wrappings'                  => $list,
+			// Opens through the root vault (a content scope made after the root).
+			'root_wrapped'               => $root_wrapped,
+			// The code set the root's recovery wrappings belong to, or null for
+			// codes made before sets existed.
+			'code_set'                   => $code_set,
+			'passphrase_allowed'         => self::passphraseAllowed($user_id),
 			'pending_key_generation'     => $pending_generation,
 			'pending_public_key'         => $pending_generation !== null ? $vault->get('uev_pending_public_key') : null,
 			'pending_wrappings'          => $pending_list,
@@ -210,6 +475,8 @@ class VaultClientCustody {
 			'salt'               => $w->get('uew_salt'),
 			'label'              => $w->get('uew_label'),
 			'is_used'            => (bool)$w->get('uew_is_used'),
+			'code_set'           => $w->get('uew_code_set'),
+			'code_index'         => $w->get('uew_code_index') !== null ? (int)$w->get('uew_code_index') : null,
 		];
 	}
 

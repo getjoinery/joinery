@@ -29,6 +29,12 @@ function vault_client_replace_recovery_logic(array $input): LogicResult {
 
 	try {
 		VaultClientCustody::assertClientScope($scope);
+		// The root vault's codes are the account vault's codes' twins: they
+		// change only with them, through vault_regenerate_codes
+		// (specs/one_vault_experience.md § R6).
+		if ($scope === VaultScopes::ROOT_SCOPE) {
+			return LogicResult::error('Replace your recovery codes on your security page.');
+		}
 		$vault = VaultClientCustody::loadVault($user_id, $scope);
 		if (!$vault) {
 			return LogicResult::error('Your vault is not set up.');

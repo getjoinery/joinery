@@ -21,6 +21,7 @@
  * for the same reason. RP ID/origin come from the site's own domain
  * (LibraryFunctions::get_absolute_url()) - no separate setting.
  *
+ * @version 1.11 - getDerivationOptions() can ask the same touch for a second secret (the root vault's)
  * @version 1.10
  * @changelog 1.10 - One pending challenge PER PURPOSE per session, not one per
  *   session: a vault enrolment presents two assertions in one request (the new
@@ -463,9 +464,17 @@ class PasskeyService {
 	 *   caller passes through, rather than in each of them.
 	 */
 	public function getDerivationOptions(User $user, string $context, ?array $credential_ids = null,
-			string $tag = ''): array {
+			string $tag = '', ?string $second_context = null): array {
 		if (!in_array($context, self::allowedPrfContexts(), true)) {
 			throw new PasskeyException('Unknown passkey secret context: ' . $context);
+		}
+		// $second_context asks the same touch for a second secret
+		// (specs/one_vault_experience.md § R1): the root vault's, which the
+		// browser keeps. verifyDerivation() reads only the first, and a
+		// response that still carries the second is refused before it
+		// (VaultCeremonies::assertNoSecondPrfOutput).
+		if ($second_context !== null && !in_array($second_context, self::allowedPrfContexts(), true)) {
+			throw new PasskeyException('Unknown passkey secret context: ' . $second_context);
 		}
 
 		$filter = null;
@@ -499,7 +508,8 @@ class PasskeyService {
 
 		$extensions = AuthenticationExtensions::create([
 			PseudoRandomFunctionInputExtensionBuilder::create()
-				->withInputs($this->_prfSalt($context))
+				->withInputs($this->_prfSalt($context),
+					$second_context !== null ? $this->_prfSalt($second_context) : null)
 				->build(),
 		]);
 

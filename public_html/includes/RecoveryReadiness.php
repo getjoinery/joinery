@@ -31,6 +31,7 @@
  * newest live recovery code was made, and a check that predates it proved codes
  * that no longer exist (regenerated, or retired by a key rotation).
  *
+ * @version 1.3.0 - with the root vault, one card for the one code set (the account and root-opened vaults fold into it)
  * @version 1.2.0 - a check older than the newest live recovery code is stale (codes_since)
  * @version 1.1.0 - counts and checks only the unlockers of the key generation in use
  * @version 1.0.0
@@ -186,6 +187,17 @@ class RecoveryReadiness {
 		$vaults = new MultiUserEncryptionVault(array('user_id' => $user_id));
 		$vaults->load();
 
+		// One set of codes opens everything (specs/one_vault_experience.md
+		// § R6, review B7): with the root vault in place, its card is the one
+		// card. The account vault's codes are the same set, and a content vault
+		// that opens through the root has no codes of its own worth checking.
+		$has_root = false;
+		foreach ($vaults as $vault) {
+			if ((string)$vault->get('uev_scope') === VaultScopes::ROOT_SCOPE) {
+				$has_root = true;
+			}
+		}
+
 		$items = array();
 		foreach ($vaults as $vault) {
 			$scope = (string)$vault->get('uev_scope');
@@ -196,6 +208,9 @@ class RecoveryReadiness {
 				continue;
 			}
 			$counts = self::wrappingCounts((int)$vault->key);
+			if ($has_root && ($scope === UserEncryptionVault::SCOPE_USER || $counts['root'] > 0)) {
+				continue;
+			}
 
 			$warnings = array();
 			if ($counts['recovery'] < self::LOW_CODE_THRESHOLD) {
@@ -221,11 +236,12 @@ class RecoveryReadiness {
 
 			$items[] = self::normalize(array(
 				'key'      => 'vault_codes_' . $scope,
-				'title'    => VaultScopes::labelFor($scope) . ' recovery codes',
+				'title'    => $scope === VaultScopes::ROOT_SCOPE ? 'Vault recovery codes' : VaultScopes::labelFor($scope) . ' recovery codes',
 				'protects' => $custody === 'client'
 					? 'This content is end-to-end encrypted. If every unlocker is lost, nobody — including this server — can ever open it again.'
 					: 'Encrypted content in this vault. Losing every unlocker makes it permanently unreadable.',
-				'label'    => '{site} — ' . $scope . ' vault recovery codes ({account})',
+				'label'    => $scope === VaultScopes::ROOT_SCOPE ? '{site} — vault recovery codes ({account})'
+					: '{site} — ' . $scope . ' vault recovery codes ({account})',
 				'facts'    => array(
 					'Unused recovery codes' => (string)$counts['recovery'],
 					'Passkeys enrolled'     => (string)$counts['passkey'],
@@ -280,6 +296,7 @@ class RecoveryReadiness {
 			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'recovery' AND uew_is_used = false AND uew_delete_time IS NULL) AS recovery,
 			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'passkey' AND uew_delete_time IS NULL) AS passkey,
 			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'passphrase' AND uew_delete_time IS NULL) AS passphrase,
+			    COUNT(*) FILTER (WHERE uew_unlocker_type = 'root' AND uew_delete_time IS NULL) AS root,
 			    MAX(uew_create_time) FILTER (WHERE uew_unlocker_type = 'recovery' AND uew_delete_time IS NULL) AS codes_since
 			   FROM uew_user_encryption_wrappings
 			  WHERE uew_uev_user_encryption_vault_id = ?
@@ -292,6 +309,7 @@ class RecoveryReadiness {
 			'recovery'   => (int)($row['recovery'] ?? 0),
 			'passkey'    => (int)($row['passkey'] ?? 0),
 			'passphrase' => (int)($row['passphrase'] ?? 0),
+			'root'       => (int)($row['root'] ?? 0),
 			// When the newest live recovery code was made (UTC); a verification
 			// older than this proved codes that no longer exist.
 			'codes_since' => isset($row['codes_since']) && $row['codes_since'] !== null ? (string)$row['codes_since'] : null,

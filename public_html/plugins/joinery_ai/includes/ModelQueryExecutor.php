@@ -43,6 +43,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  *   field_before    -> field <= value
  *   field_min       -> field >= value     (numerics)
  *   field_max       -> field <= value
+ *
+ * @version 1.1 - a row holding browser-sealed (`v1.edge.`) values is excluded, never opened
  */
 class ModelQueryExecutor {
 
@@ -215,6 +217,13 @@ class ModelQueryExecutor {
             $locked = false;
             foreach ($sealed as $field) {
                 if (!array_key_exists($field, $row) || $row[$field] === null) continue;
+                // A browser-sealed value (`v1.edge.`, a client-custody row such as
+                // Fortress mail) opens only on its owner's devices — no window here
+                // ever opens it, so the row is left out rather than failing the query.
+                if (VaultCrypto::isEdgeField((string)$row[$field])) {
+                    $locked = true;
+                    break;
+                }
                 // Surface confined to protected contexts (a standard chat): never
                 // open actually-sealed content. Exclude the row exactly as a locked
                 // vault does, so the turn never goes hot and no plaintext escapes.

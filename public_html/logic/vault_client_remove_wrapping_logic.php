@@ -38,6 +38,13 @@ function vault_client_remove_wrapping_logic(array $input): LogicResult {
 		if (!$wrapping->key || (int)$wrapping->get('uew_uev_user_encryption_vault_id') !== (int)$vault->key) {
 			return LogicResult::error('That unlocker does not belong to your vault.');
 		}
+		// The root vault's codes and phrase are twins of the account vault's and
+		// change only with them (regenerate, passphrase change or removal); only
+		// a passkey is removed from the root on its own.
+		if ($scope === VaultScopes::ROOT_SCOPE
+				&& $wrapping->get('uew_unlocker_type') !== UserEncryptionWrapping::TYPE_PASSKEY) {
+			return LogicResult::error('Change your recovery codes or passphrase on your security page.');
+		}
 
 		$exclude = $wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
 			? (int)$wrapping->get('uew_pkc_passkey_credential_id') : null;

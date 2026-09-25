@@ -37,6 +37,7 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.5 - matches() never matches a stored Fortress message (no plaintext to read)
  * @version 1.4 - prefix ief, table ief_inbound_email_filters: fil is File's alone
  *                (specs/implemented/shared_prefix_inbound_email_filter.md)
  * @version 1.3 - parseGmailExport(): the XML opens in the parser jail
@@ -287,6 +288,12 @@ class InboundEmailFilter extends SystemBase {
 	 * unsealed mail, and for sealed mail only reachable in-window.
 	 */
 	function matches(InboundEmailMessage $msg, array $parsed = array(), ?array $plaintext = null): bool {
+		// A stored Fortress message cannot be read here, so a rule applied to
+		// existing mail never matches one; at arrival the plaintext is handed in
+		// and rules run as on any mailbox (specs/client_custody_mail.md § R7).
+		if ($plaintext === null && InboundEmailMessage::isBrowserSealed($msg)) {
+			return false;
+		}
 		$sender_raw      = $plaintext['sender']      ?? (string)$msg->get('iem_sender');
 		$subject_raw     = $plaintext['subject']     ?? (string)$msg->get('iem_subject');
 		$body_plain_raw  = $plaintext['body_plain']  ?? (string)$msg->get('iem_body_plain');

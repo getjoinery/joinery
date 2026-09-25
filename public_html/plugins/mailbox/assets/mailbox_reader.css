@@ -1,7 +1,9 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.43 — .mbx-addcontact (header add-to-contacts icon)
+ * Vanilla CSS, no framework. @version 2.45 — the Fortress list banner reuses the setup banner
+ * @version 2.44 — .mbx-level-fortress (the Fortress chip)
+ * @version 2.43 — .mbx-addcontact (header add-to-contacts icon)
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -180,6 +182,7 @@
 	padding: 1px 7px;
 }
 .mbx-level-private { background: #d7e7fb; color: #1e40af; }
+.mbx-level-fortress { background: #e4dcfa; color: #4c1d95; }
 
 /* ---- Main pane (swaps between list view and reading view) ---- */
 .mbx-main {
@@ -1174,6 +1177,9 @@
 	white-space: nowrap;
 }
 .mbx-setup-banner-btn:hover { background: #92400e; color: #fff; }
+/* The Fortress banner's action is a button, not a link. */
+button.mbx-setup-banner-btn { border: 0; cursor: pointer; font-family: inherit; line-height: inherit; }
+button.mbx-setup-banner-btn:disabled { opacity: 0.6; cursor: default; }
 
 /* ── compose maturity: rich-text editor + Bcc toggle (§ Phase 1) ───────────── */
 .mbx-bcc-toggle-row { display: flex; gap: 14px; margin: -0.25rem 0 0.35rem; }

@@ -476,6 +476,45 @@ in the sealed-for-browser shape and is opened with `JoinerySealed.open`.
 - **Pending rows** (relay path, R9) render as "Waiting to be opened on this
   device" until the parse runs.
 
+### R4a. An open vault survives a reload of the same tab (owner, 2026-09-24)
+
+A browser-held vault's secret lives in the page's memory, so without this a
+reload, or following a link to another page, asked for the passkey again.
+Owner decision: that is not acceptable for mail; keep the key open across
+reloads in the same tab without handing the server anything it can open.
+
+- **The split.** When a client scope opens (`JoinerySealed.session()`), the
+  browser makes two random 32-byte halves and wraps the vault secret under
+  `AES-GCM` with a key from `HKDF-SHA256(server half ‖ tab half, info
+  'joinery-vault-resume:v1:{scope}')`, AD `vault:{scope}:resume`
+  (`session.wrapUnder`). The tab keeps `{wrapped, tab half, public_key,
+  label}` in `sessionStorage` (`jy_vault_resume:{scope}`); the server keeps
+  the other half in this sign-in's PHP session through
+  `vault_client_resume` (`op` put / get / drop, keyed by scope and a random
+  per-tab id so two tabs never overwrite each other; at most 8 per scope).
+  Neither half opens anything alone, and the server never sees the tab half
+  or the wrapped secret.
+- **Reopening.** At load `JoinerySealed.ready` asks for the server half,
+  checks the stored public key is still the vault's (current or pending; a
+  rotation that retired it drops the halves), rebuilds the key, unwraps,
+  and dispatches `joinery:vault-scope-unlocked` with `resumed: true`.
+  `session()` waits for `ready`, so no ceremony runs for a scope the tab
+  already opened. `MailboxFortress` waits for it before calling the vault
+  shut.
+- **Ending.** `pagehide` (reload, navigation, tab close) drops only the
+  in-memory key. Every real lock — Lock now, the idle lock, a consumer's
+  `lock()` — also drops both halves. Closing the tab loses the tab half;
+  signing out or the session ending loses the server half. The idle clock
+  survives reloads (`jy_vault_activity` in `sessionStorage`): a tab idle past
+  its limit does not reopen. A brand-new tab asks once.
+- **What it costs.** While the tab is open and the session is live, a
+  machine holding both the browser's storage and the session cookie can
+  reopen the vault; that is the same machine the unlocked page already
+  runs on. The server alone, a stolen database, or a disk image of the
+  browser without the live session, opens nothing. Shares are never logged.
+- Core, not mail-only: Drive's client-custody folders and the password vault
+  get the same behaviour.
+
 ### R5. Search runs in the browser
 
 New action `mailbox/search_entries` (browser session): pages the caller's
@@ -749,6 +788,11 @@ at begin and commit.
   arrives. Your browser checks which key the relay seals to, pinned on first
   use. Mail rules do not run on relay-sealed mail."
 
+- Note (the owner unlocks by passphrase, `specs/one_vault_experience.md`
+  § R7): "You unlock with a passphrase, so this mail is as safe from a
+  hacked server as your passphrase is hard to guess. A passkey that can
+  hold a key makes it only-your-devices."
+
 Relay add-on copy at Fortress (`addonCatalog`, keyed by level):
 protects "This server never sees your mail, not even as it arrives", costs
 "New mail is opened on your device; mail rules do not run on it."
@@ -860,6 +904,27 @@ test before the code it tests.
   mail vault in the reader, read it, download the attachment, lock, see the
   body blank. Screenshot each. psql on the row shows ciphertext only.
 
+### WP2b. Reopen after a reload (R4a) — built 2026-09-24
+
+- Core: `includes/VaultClientResume.php`, `logic/vault_client_resume_logic.php`
+  (`requires_browser_session`, `session_write`), `assets/js/joinery-sealed.js`
+  (the halves, `ready`, `pagehide` keeps them, real locks drop them, the idle
+  clock across reloads). `mailbox_fortress.js` and the reader wait for
+  `ready`.
+- **Tests:** `tests/vault/client_resume_test.php` (`test-db`): put / get /
+  drop per scope and per tab, the public keys in the answer, the refusals,
+  another user in the same session gets nothing, the per-scope cap, the
+  action's auth and that nothing logs a share.
+- **Acceptance:** unlock the mail vault on dev, reload: the mailbox opens
+  without a ceremony. Lock now, reload: it asks. Close the tab, open a new
+  one: it asks.
+
+**Ordering (owner, 2026-09-24).** `specs/one_vault_experience.md` is built
+before WP3: one passkey touch opens the account key and the mail key, one
+padlock state, one setup, one name ("Vault"). Until it lands, a Fortress
+mailbox needs its own unlock and setup, and the strings "mail vault" / "Set
+up mail vault" in WP0–WP2b change to "your vault" there.
+
 ### WP3. Search on the device
 
 - `mailbox/search_entries` action, `thread_keys[]` on `thread_list`,
@@ -894,6 +959,15 @@ test before the code it tests.
   the request bodies in the browser's network log). Screenshot.
 
 ### WP5. Level changes (R8)
+
+**Ordering constraint (review of WP0–WP2, B11).** Until WP7 lands,
+`RelayMapExporter::sealTargetForAlias()` gives a Fortress mailbox the relay's
+transport key (never the owner's server key, which would store relay mail as a
+Private row). Mail is then sealed to the mail key at pull, but the relay add-on's
+promise that the server never sees arriving mail does not hold. So WP5 must not
+let a domain be Fortress with Seal at the relay on until WP7 is built: refuse
+that combination in `admin_mailbox_domains_logic` (the relay add-on off, or WP7
+first), and lift the refusal in WP7.
 
 - Core: `convertRowToClientCustody`, `browserCustodyPage`,
   `browserCustodyBacklog`, `acceptBrowserCustodyChange` in `SystemBase`;
@@ -980,7 +1054,8 @@ test before the code it tests.
 
 ### WP9. Docs
 
-- `docs/sealed_vault.md` § Client-custody scopes: the custody-change batch,
+- `docs/sealed_vault.md` § Client-custody scopes: reopening after a reload
+  (R4a: the two halves, `ready`, what ends it), the custody-change batch,
   the `onClientRotation` registry. `plugins/mailbox/docs/overview.md`: the
   Fortress row, arrival on both paths, the reader, search, compose, level
   changes, the relay pin, what the apps do. `docs/account_security.md` if it

@@ -1,6 +1,73 @@
 <?php
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
+// @version 1.1 - the Fortress refusals (specs/client_custody_mail.md § R8)
+
+/**
+ * Why this domain cannot go to Fortress with $acting_user_id acting, or null
+ * when nothing refuses it (specs/client_custody_mail.md § R8).
+ *
+ * Fortress mail is sealed to its owner's `mail` vault, which only their own
+ * browser opens, so in this build a domain goes there only when the admin
+ * doing it is the one owner of every mailbox on it, holds that vault already,
+ * and nothing on the domain needs the server to read the mail:
+ *   - an IMAP feed: the server keeps a password that reads the whole source
+ *     mailbox, so sealing the copy here protects nothing;
+ *   - a group mailbox, or one with no owner: there is no one person to seal to;
+ *   - a mailbox or the domain owned by someone else: only they can set up the
+ *     key their mail would seal to.
+ * The first reason found is returned, worded for the page.
+ */
+function admin_mailbox_domains_fortress_refusal(InboundEmailDomain $domain, int $acting_user_id): ?string {
+	if (!$domain->key) {
+		return 'Save the domain first, then set it to Fortress.';
+	}
+	if ($domain->is_imap_source()) {
+		return 'A mailbox collected from another provider cannot be Fortress: the server holds a password '
+			. 'that can read the whole source mailbox.';
+	}
+	if ($acting_user_id <= 0) {
+		return 'Sign in as the owner of this domain\'s mail to set it to Fortress.';
+	}
+	$domain_owner = intval($domain->get('ied_owner_usr_user_id'));
+	if ($domain_owner > 0 && $domain_owner !== $acting_user_id) {
+		return 'Only this domain\'s owner can set it to Fortress: mail for addresses without a mailbox '
+			. 'is sealed to the owner\'s own device key.';
+	}
+
+	$aliases = new MultiInboundEmailAlias(array('domain_id' => intval($domain->key), 'deleted' => false));
+	foreach ($aliases as $alias) {
+		$address = $alias->get_full_address();
+		$feeds = new MultiInboundImapAccount(array('alias_id' => intval($alias->key), 'deleted' => false));
+		if ($feeds->count() > 0) {
+			return 'The mailbox ' . $address . ' collects mail from another provider, so this domain cannot be '
+				. 'Fortress: the server holds a password that can read the whole source mailbox.';
+		}
+		if ((string)$alias->get('iea_delivery_mode') === InboundEmailAlias::MODE_FORWARD) {
+			continue;   // forwards and stores nothing, so there is nothing to seal
+		}
+		$owners = InboundEmailMailboxGrant::user_ids_for_alias(intval($alias->key));
+		if (count($owners) > 1) {
+			return 'The mailbox ' . $address . ' is shared by several people, so this domain cannot be Fortress: '
+				. 'end-to-end mail is sealed to one person\'s devices.';
+		}
+		if (count($owners) === 0) {
+			return 'The mailbox ' . $address . ' has no owner, so there is no one to seal its mail to. '
+				. 'Give it one owner first.';
+		}
+		if (intval($owners[0]) !== $acting_user_id) {
+			return 'The mailbox ' . $address . ' belongs to someone else. Only the owner of every mailbox on a '
+				. 'domain can set it to Fortress, because only they can set up the key its mail seals to.';
+		}
+	}
+
+	if (VaultClientCustody::loadVault($acting_user_id, InboundEmailMessage::SEAL_SCOPE_FORTRESS) === null) {
+		return 'Open your mailbox and unlock your vault once before choosing Fortress: that makes the key '
+			. 'Fortress mail is sealed to, and it has to exist first.';
+	}
+	return null;
+}
+
 /**
  * The add-on flags a domain-editor save stores, as [relay, send_lock].
  *
@@ -18,7 +85,7 @@ function admin_mailbox_domains_addon_flags(InboundEmailDomain $domain, array $in
 		bool $is_imap): array {
 	$old_relay = $domain->key && $domain->addon_flag('ied_relay_seals_to_owner');
 	$old_send  = $domain->key && $domain->addon_flag('ied_send_lock_requested');
-	if ($is_imap || $new_level !== InboundEmailDomain::LEVEL_PRIVATE) {
+	if ($is_imap || $new_level === InboundEmailDomain::LEVEL_STANDARD) {
 		return array($old_relay, $old_send);
 	}
 	return array(
@@ -54,6 +121,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	$level_rank = array(
 		InboundEmailDomain::LEVEL_STANDARD => 0,
 		InboundEmailDomain::LEVEL_PRIVATE  => 1,
+		InboundEmailDomain::LEVEL_FORTRESS => 2,
 	);
 
 	// True when any alias on the domain has more than one live grant — today's
@@ -195,8 +263,10 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// --- Protection level (specs/mailbox_security_levels.md Phase 2) ---
 		$old_level = $domain->key ? $domain->security_level() : InboundEmailDomain::LEVEL_STANDARD;
 		$new_level = strtolower(trim((string)($input['ied_security_level'] ?? InboundEmailDomain::LEVEL_STANDARD)));
-		// The end-to-end level is reserved until end-to-end mail exists. A POST
-		// naming it is refused below, never quietly read as something else.
+		// The end-to-end level is refused below until the level change is wired
+		// (specs/client_custody_mail.md WP5); a POST naming it is refused, never
+		// quietly read as something else. Its own refusals come first, so the
+		// page names what stands in the way.
 		$refused_level = ($new_level === InboundEmailDomain::LEVEL_FORTRESS);
 		if (!isset($level_rank[$new_level])) {
 			$new_level = InboundEmailDomain::LEVEL_STANDARD;
@@ -212,8 +282,8 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 
 		$raising = ($level_rank[$new_level] > $level_rank[$old_level]);
 		$lowering = ($level_rank[$new_level] < $level_rank[$old_level]);
-		$new_seals = ($new_level === InboundEmailDomain::LEVEL_PRIVATE);
-		$old_seals = ($old_level === InboundEmailDomain::LEVEL_PRIVATE);
+		$new_seals = ($new_level !== InboundEmailDomain::LEVEL_STANDARD);
+		$old_seals = ($old_level !== InboundEmailDomain::LEVEL_STANDARD);
 
 		// --- Add-ons (specs/protection_levels_platform.md § Add-ons) ---
 		// Each is a stored flag, in force only at Private; "in force" is the flag
@@ -239,6 +309,12 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			));
 		};
 
+		if ($new_level === InboundEmailDomain::LEVEL_FORTRESS && $old_level !== InboundEmailDomain::LEVEL_FORTRESS) {
+			$fortress_refusal = admin_mailbox_domains_fortress_refusal($domain, intval($session->get_user_id()));
+			if ($fortress_refusal !== null) {
+				return $level_error($fortress_refusal);
+			}
+		}
 		if ($refused_level) {
 			return $level_error('A mail domain can be Standard or Private. End-to-end protection for mail '
 				. 'is not available yet.');

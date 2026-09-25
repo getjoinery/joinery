@@ -9,7 +9,12 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  * only be re-created from a KEK the ceremony can re-derive right now: the
  * authorizing passkey's PRF output, a resupplied passphrase, and fresh
  * recovery codes. Anything else is invalidated rather than left dangling;
- * the response lists what needs re-adding.
+ * the response lists what needs re-adding. The new codes and the phrase are
+ * the browser's: only the account halves of their KEKs arrive
+ * (specs/one_vault_experience.md § R6).
+ *
+ * @version 1.2 - root_unlockers: the root vault's code (and phrase) twins, replaced with the account's
+ * @version 1.1
  */
 function vault_rotate_verify_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -43,7 +48,13 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 	if (!is_array($credential)) {
 		return LogicResult::error('Missing passkey credential response.');
 	}
-	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
+	try {
+		VaultCeremonies::assertNoSecondPrfOutput($credential);
+		$code_set = VaultCeremonies::codeSet($input['code_set'] ?? null);
+		$passphrase_kek = VaultCeremonies::decodeKek($input['passphrase_kek'] ?? '');
+	} catch (VaultCeremonyException $e) {
+		return LogicResult::error($e->getMessage());
+	}
 
 	try {
 		$service = new PasskeyService();
@@ -57,7 +68,8 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 
 	try {
 		$ceremonies = new VaultCeremonies();
-		$result = $ceremonies->rotate($user, $vault, (int)$passkey->key, $passkey->get('pkc_label'), $prf_output, $passphrase);
+		$result = $ceremonies->rotate($user, $vault, (int)$passkey->key, $passkey->get('pkc_label'), $prf_output,
+			$passphrase_kek, $code_set, is_array($input['root_unlockers'] ?? null) ? $input['root_unlockers'] : array());
 	} catch (VaultCeremonyException $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -66,7 +78,6 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 		'rotated'                => true,
 		'completed_pending'      => $result['completed_pending'],
 		'key_generation'         => $result['key_generation'],
-		'recovery_codes'         => $result['recovery_codes'],
 		'regenerate_recommended' => $result['regenerate_recommended'],
 		'passphrase_reenrolled'  => $result['passphrase_reenrolled'],
 		'dropped_passkeys'       => $result['dropped_passkeys'],
@@ -82,7 +93,9 @@ function vault_rotate_verify_logic_descriptor() {
 		'input' => [
 			'acknowledged' => ['type' => 'bool', 'required' => true, 'label' => 'Acknowledge the consequences'],
 			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
-			'passphrase' => ['type' => 'password', 'required' => false, 'label' => 'Bypass phrase to re-enroll'],
+			'code_set' => ['type' => 'object', 'required' => true, 'label' => 'Browser-made code set for the new generation (account halves only)'],
+			'passphrase_kek' => ['type' => 'password', 'required' => false, 'label' => 'Account half of the passphrase KEK, to carry the passphrase forward'],
+			'root_unlockers' => ['type' => 'object', 'required' => true, 'label' => 'The root vault\'s side: {recovery: [the new set\'s wrappings], passphrase: [the phrase\'s wrapping]}'],
 		],
 	];
 }

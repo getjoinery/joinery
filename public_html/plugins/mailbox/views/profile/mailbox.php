@@ -5,6 +5,7 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
+ * @version 1.11.0 - loads the vault client when a visible mailbox is Fortress
  * @version 1.10.0 - an operator gets the setup banner here too: the check is turned on
  *                  for permission 5 and above, since this is where they read mail
  * @version 1.9.0 - the AI panel docks in the reader's right column
@@ -22,6 +23,11 @@ $page_vars = process_logic(profile_mailbox_logic(array_merge($_GET, $_POST, $par
 extract($page_vars);
 
 $page = new PublicPage();
+// End-to-end mail opens in this browser, so the vault client rides in the head.
+$fortress_visible = !empty($initial_mailboxes) && mailbox_reader_fortress_visible($initial_mailboxes);
+if ($fortress_visible) {
+	$page->needs_vault_client();
+}
 $hoptions = array(
 	'title' => 'Email',
 	'breadcrumbs' => array(
@@ -78,6 +84,7 @@ if (!$has_mailboxes) {
 		'initial_mailboxes'   => $initial_mailboxes,
 		'attachment_url_base' => '/profile/mailbox/attachment',
 		'setup_url_base'      => $is_operator ? '/plugins/mailbox/admin/admin_mailbox_setup?alias_id=' : null,
+		'fortress'            => $fortress_visible,
 	));
 
 	if ($ai_panel_active) {

@@ -55,6 +55,13 @@ $session = SessionControl::get_instance();
 
 $owner = make_user('ClientReseal');
 $owner_id = (int)$owner->key;
+// The new key is opened by a passphrase, which an account holds only when its
+// passkeys cannot hold a key (specs/one_vault_experience.md § R8): the owner's
+// one passkey has failed a real derivation.
+$owner_passkey = vault_fixture_passkey($owner_id);
+$owner_passkey->set('pkc_prf_capable', false);
+$owner_passkey->set('pkc_prf_failed_time', gmdate('Y-m-d H:i:s'));
+$owner_passkey->save();
 $other = make_user('ClientResealOther');
 
 // The browser's keypairs: the one in use, and the one the rotation makes.

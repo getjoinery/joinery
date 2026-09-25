@@ -40,6 +40,11 @@
 	}
 
 	$page = new PublicPage();
+	// The encryption key step makes the codes and the root vault in the
+	// browser (specs/one_vault_experience.md § R4, R6).
+	if ($current_key === 'encryption_key') {
+		$page->needs_vault_client();
+	}
 	$page->public_header([
 		'is_valid_page' => true,
 		'title'         => 'Set up — ' . $site_name,

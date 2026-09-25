@@ -30,6 +30,8 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 	}
 
 	try {
+		// The root vault's output from the same touch stays in the browser.
+		VaultCeremonies::assertNoSecondPrfOutput($credential);
 		$service = new PasskeyService();
 		[$derived_user, $passkey, $prf_output] = $service->verifyDerivation(json_encode($credential), 'vault-kek', 'add');
 	} catch (Exception $e) {
@@ -85,10 +87,10 @@ function vault_add_passkey_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Complete adding a vault wrapping for another PRF-capable passkey; takes the new passkey\'s derivation (credential) and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase} or {code}) in the same request',
+		'description' => 'Complete adding a vault wrapping for another PRF-capable passkey; takes the new passkey\'s derivation (credential) and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase_kek} or {code_kek}) in the same request',
 		'input' => [
 			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
-			'unlocker' => ['type' => 'object', 'required' => false, 'label' => 'Fresh unlocker: {credential} from vault_unlock_options, {passphrase} or {code}'],
+			'unlocker' => ['type' => 'object', 'required' => false, 'label' => 'Fresh unlocker: {credential} from vault_unlock_options, {passphrase_kek} or {code_kek}'],
 		],
 	];
 }

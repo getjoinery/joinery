@@ -20,8 +20,10 @@
  * pending selector's DNS record verifies. Signing always reads the live columns.
  *
  * ied_security_level is the per-domain protection level
- * (specs/mailbox_security_levels.md): 'standard' (server-managed plaintext) or
- * 'private' (sealed at rest). It is the switch that selects each mechanism's
+ * (specs/mailbox_security_levels.md): 'standard' (server-managed plaintext),
+ * 'private' (sealed at rest to the owner's server-custody vault) or 'fortress'
+ * (sealed end-to-end to the owner's `mail` vault, whose secret only their
+ * devices hold — specs/client_custody_mail.md). It is the switch that selects each mechanism's
  * plaintext-vs-sealed branch for every mailbox that inherits it — which is every
  * mailbox on a domain this deployment hosts. A mailbox pulled in over IMAP can
  * carry its own instead (iea_security_level), because gmail.com is not an
@@ -41,6 +43,10 @@
  * Either one hardens its holders (userHasHardenedDomain): short unlock-window
  * caps.
  *
+ * @version 1.13 - Fortress is settable: ied_level_set_time marks a level set
+ *   through set_security_level(), which is what tells a Fortress domain from a
+ *   legacy unconverted row; seals_content() covers Private and Fortress;
+ *   is_fortress()
  * @version 1.12 - a write to an unconverted row converts it first (set()), and
  *   addon_labels() carries the catalog names and shows an enforcing lock at any
  *   level
@@ -77,13 +83,13 @@ class InboundEmailDomain extends SystemBase {
 	// Standard = server-managed plaintext; Private = sealed at rest.
 	const LEVEL_STANDARD = 'standard';
 	const LEVEL_PRIVATE  = 'private';
-	// Reserved for end-to-end mail (specs/DEFERRED_client_custody_mail.md): the
-	// server holds nothing it can decrypt. Not built — set_security_level()
-	// refuses it, and nothing may store it.
+	// End-to-end mail (specs/client_custody_mail.md): stored content seals to
+	// the owner's `mail` vault, whose secret only their devices hold, so the
+	// server keeps nothing it can open.
 	const LEVEL_FORTRESS = 'fortress';
 
-	/** The levels a mail domain or mailbox can be set to today. */
-	const SETTABLE_LEVELS = array(self::LEVEL_STANDARD, self::LEVEL_PRIVATE);
+	/** The levels a mail domain or mailbox can be set to. */
+	const SETTABLE_LEVELS = array(self::LEVEL_STANDARD, self::LEVEL_PRIVATE, self::LEVEL_FORTRESS);
 
 	// How far this domain's decrypted mail may travel to be read by an AI
 	// model, as the most permissive endpoint trust class it may reach. Same
@@ -113,7 +119,12 @@ class InboundEmailDomain extends SystemBase {
 		// is the only thing that claims a domain is correct or broken.
 		'ied_setup_status'       => array('type'=>'varchar(16)'),   // ok | attention | unknown; empty = never checked
 		'ied_setup_checked_time' => array('type'=>'timestamp(6)'),
-		'ied_security_level'    => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'standard'), // 'standard' | 'private'
+		'ied_security_level'    => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'standard'), // 'standard' | 'private' | 'fortress'
+		// When the level was last set through set_security_level(). A stored
+		// 'fortress' WITH this set is a Fortress domain; one without it is a
+		// legacy row from the old top level that mailbox migration
+		// ied_003_private_with_addons has not converted yet (is_unconverted()).
+		'ied_level_set_time'    => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		// Add-ons on a Private domain (specs/protection_levels_platform.md § Add-ons).
 		// Inert below Private: lowering leaves the flags stored, so raising again
 		// restores them.
@@ -164,7 +175,7 @@ class InboundEmailDomain extends SystemBase {
 	);
 
 	/**
-	 * Every write to a stored row that still holds the reserved end-to-end value
+	 * Every write to a stored row that still holds the legacy top-level value
 	 * (is_unconverted()) first makes the conversion the mailbox migration would
 	 * make — Private, Seal at the relay on, the sending lock asked for only
 	 * where it is already enforcing — and only then applies the caller's
@@ -332,14 +343,15 @@ class InboundEmailDomain extends SystemBase {
 	/**
 	 * This domain's security level (specs/mailbox_security_levels.md) — the
 	 * single switch selecting each mechanism's plaintext-vs-sealed branch.
-	 * Falls back to Standard for any unrecognized or empty stored value — except
-	 * the reserved end-to-end value, which reads as Private: it can only be a
-	 * row mailbox migration ied_003_private_with_addons has not converted yet,
-	 * and that mail is sealed (is_unconverted()).
+	 * Falls back to Standard for any unrecognized or empty stored value. A
+	 * stored 'fortress' is Fortress when set_security_level() wrote it, and
+	 * reads as Private when it is a legacy row mailbox migration
+	 * ied_003_private_with_addons has not converted yet: that mail is sealed to
+	 * the server-custody vault (is_unconverted()).
 	 */
 	function security_level() {
 		$v = strtolower(trim((string)$this->get('ied_security_level')));
-		if ($v === self::LEVEL_FORTRESS) {
+		if ($v === self::LEVEL_FORTRESS && $this->is_unconverted()) {
 			return self::LEVEL_PRIVATE;
 		}
 		if (!in_array($v, self::SETTABLE_LEVELS, true)) {
@@ -349,17 +361,22 @@ class InboundEmailDomain extends SystemBase {
 	}
 
 	/**
-	 * Set the protection level. Only the settable levels are accepted: the
-	 * end-to-end level is reserved until end-to-end mail exists, and storing it
-	 * would promise something nothing on the server delivers.
+	 * Set the protection level, stamping ied_level_set_time. Only the settable
+	 * levels are accepted. The stamp is written first: on a legacy unconverted
+	 * row that write converts it (set()), and the level written after it is
+	 * then read as what it says.
+	 *
+	 * Who may set Fortress, and what must hold first (a `mail` vault, one
+	 * owner), is the level-change logic's call; this only records the answer.
 	 *
 	 * @throws InboundEmailDomainException on any other value
 	 */
 	function set_security_level(string $level) {
 		$level = strtolower(trim($level));
 		if (!in_array($level, self::SETTABLE_LEVELS, true)) {
-			throw new InboundEmailDomainException('A mail domain can be Standard or Private.');
+			throw new InboundEmailDomainException('A mail domain can be Standard, Private or Fortress.');
 		}
+		$this->set('ied_level_set_time', gmdate('Y-m-d H:i:s'));
 		$this->set('ied_security_level', $level);
 	}
 
@@ -371,14 +388,17 @@ class InboundEmailDomain extends SystemBase {
 	}
 
 	/**
-	 * True for a row still holding the reserved end-to-end value — one mailbox
+	 * True for a row holding the legacy top-level value — 'fortress' with no
+	 * ied_level_set_time, which only the old level model wrote and mailbox
 	 * migration ied_003_private_with_addons has not converted yet. Until it
 	 * runs, such a row behaves exactly as the migration will leave it: Private
 	 * with Seal at the relay on, and the sending lock asked for only where it is
-	 * already enforcing. Nothing writes this value any more.
+	 * already enforcing. A Fortress domain set through set_security_level()
+	 * carries the stamp and is not this.
 	 */
 	function is_unconverted(): bool {
-		return strtolower(trim((string)$this->get('ied_security_level'))) === self::LEVEL_FORTRESS;
+		return strtolower(trim((string)$this->get('ied_security_level'))) === self::LEVEL_FORTRESS
+			&& trim((string)$this->get('ied_level_set_time')) === '';
 	}
 
 	/**
@@ -399,12 +419,12 @@ class InboundEmailDomain extends SystemBase {
 			: true;
 	}
 
-	/** The Seal-at-the-relay add-on is on AND in force (the domain is Private). */
+	/** The Seal-at-the-relay add-on is on AND in force (the domain seals: Private or Fortress). */
 	function relay_seals_to_owner() {
 		return $this->seals_content() && $this->addon_flag('ied_relay_seals_to_owner');
 	}
 
-	/** The Only-send-while-signed-in add-on was asked for AND is in force (Private). */
+	/** The Only-send-while-signed-in add-on was asked for AND is in force (Private or Fortress). */
 	function send_lock_requested() {
 		return $this->seals_content() && $this->addon_flag('ied_send_lock_requested');
 	}
@@ -476,9 +496,14 @@ class InboundEmailDomain extends SystemBase {
 		return (($rank[$a] ?? 0) <= ($rank[$b] ?? 0)) ? $a : $b;
 	}
 
-	/** True when this domain seals stored content at rest (Private). */
+	/** True when this domain seals stored content at rest (Private or Fortress). */
 	function seals_content() {
-		return $this->security_level() === self::LEVEL_PRIVATE;
+		return in_array($this->security_level(), array(self::LEVEL_PRIVATE, self::LEVEL_FORTRESS), true);
+	}
+
+	/** True when this domain's mail seals end-to-end, to the owner's `mail` vault. */
+	function is_fortress() {
+		return $this->security_level() === self::LEVEL_FORTRESS;
 	}
 
 	/**
@@ -496,7 +521,7 @@ class InboundEmailDomain extends SystemBase {
 	 * they would silently get a Standard-length unlock window over sealed mail.
 	 */
 	static function maxSecurityLevelForUser(int $user_id): string {
-		$rank = array(self::LEVEL_STANDARD => 0, self::LEVEL_PRIVATE => 1);
+		$rank = array(self::LEVEL_STANDARD => 0, self::LEVEL_PRIVATE => 1, self::LEVEL_FORTRESS => 2);
 		$best = self::LEVEL_STANDARD;
 
 		$consider = function($level) use (&$best, $rank) {

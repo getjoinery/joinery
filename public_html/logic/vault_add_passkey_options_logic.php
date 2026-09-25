@@ -34,12 +34,15 @@ function vault_add_passkey_options_logic(array $input): LogicResult {
 	// no preference.
 	$credential_id = isset($input['credential_id']) ? (int)$input['credential_id'] : 0;
 
+	// with_root: the same touch also yields the root vault's secret, kept by
+	// the browser (specs/one_vault_experience.md § R1).
+	$second = !empty($input['with_root']) ? VaultScopes::prfContext(VaultScopes::ROOT_SCOPE) : null;
 	try {
 		$service = new PasskeyService();
 		// Tagged so it can stand beside the unlocker's own vault-kek ceremony,
 		// which vault_unlock_options mints for the same request.
 		$options = $service->getDerivationOptions($user, 'vault-kek',
-			$credential_id ? [$credential_id] : null, 'add');
+			$credential_id ? [$credential_id] : null, 'add', $second);
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -54,6 +57,7 @@ function vault_add_passkey_options_logic_descriptor() {
 		'description' => 'Begin adding a vault wrapping for another PRF-capable passkey (returns WebAuthn PRF request options); pass credential_id to scope the ceremony to one passkey; the verify step also takes a fresh unlocker',
 		'input' => [
 			'credential_id' => ['type' => 'int', 'required' => false, 'label' => 'Scope the ceremony to one passkey'],
+			'with_root' => ['type' => 'bool', 'required' => false, 'label' => 'Also derive the root vault secret (kept in the browser)'],
 		],
 	];
 }

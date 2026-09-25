@@ -22,7 +22,11 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.17
+ * @version 1.18
+ * @changelog 1.18 - Fortress mail (specs/client_custody_mail.md): registers the
+ *   `mail` client-custody reseal over InboundEmailMessage; the server-key
+ *   rotation leaves browser-sealed rows alone (their key is the mail vault's);
+ *   a Fortress holder keeps the Private absolute window cap
  * @changelog 1.17 - the short window caps follow the hardening add-ons
  *   (userHasHardenedDomain), not a level
  * @changelog 1.16 - the To/Cc backfill consumers are retired (specs/implemented/mailbox_to_cc_lists.md § 6)
@@ -98,7 +102,8 @@ VaultUnlock::onWindowCaps(
 				'absolute' => VaultUnlock::HARDENED_ABSOLUTE_CAP_SECONDS,
 			);
 		}
-		if (InboundEmailDomain::maxSecurityLevelForUser($user_id) === InboundEmailDomain::LEVEL_PRIVATE) {
+		// Fortress counts: a domain mid-raise still holds rows the server window opens.
+		if (InboundEmailDomain::maxSecurityLevelForUser($user_id) !== InboundEmailDomain::LEVEL_STANDARD) {
 			return array('idle' => null, 'absolute' => VaultUnlock::PRIVATE_ABSOLUTE_CAP_SECONDS);
 		}
 		return array('idle' => null, 'absolute' => null);
@@ -168,11 +173,15 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 		$in = implode(',', array_map('intval', $alias_ids));
 		// Soft-deleted messages are re-sealed too (the resealRows() contract): a
 		// deleted row is restorable, and one left on a retired generation would
-		// come back permanently unreadable.
+		// come back permanently unreadable. A Fortress row's key belongs to the
+		// `mail` vault, whose generations are counted separately and which only
+		// the browser can re-seal (the `mail` client reseal below), so it is
+		// never this rotation's to touch.
 		$stmt = $db->prepare(
 			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 			 WHERE iem_iea_inbound_email_alias_id IN ($in)
-			 AND iem_content_sealed = true AND iem_key_generation = ?");
+			 AND iem_content_sealed = true AND iem_key_generation = ?
+			 AND iem_sealed_key NOT LIKE 'v1.edgeseal.%'");
 		$stmt->execute(array($old_key_generation));
 		$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
@@ -299,6 +308,13 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 // rotation leaves every address hash valid.
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contact_index_keys_class.php'));
 VaultUnlock::onReseal(VaultUnlock::modelReseal(array(MailboxContactIndexKey::class)));
+
+// --- Fortress mail: the `mail` client-custody scope (specs/client_custody_mail.md § R11) ---
+// A Fortress row's DEK is sealed to the owner's `mail` vault, whose secret only
+// their browser holds, so rotating that vault is the browser's walk over these
+// rows (vault_client_reseal_rows / vault_row_reseal). Pending relay rows carry
+// the same key and are walked with them.
+VaultUnlock::clientReseal('mail', array(InboundEmailMessage::class));
 
 // --- Window-wipe callback (docs/sealed_vault.md § consumer contract) ---
 // Clears the /dev/shm FTS working copy when a window closes (explicit lock,

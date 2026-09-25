@@ -15,6 +15,8 @@
  * (the admin endpoint per its backing rules, the member endpoint via
  * MailboxViewer scope) and only then retrieves.
  *
+ * @version 1.4.0 - a Fortress attachment is handed over as stored (ciphertext): only the
+ *   owner's browser opens it, and the stream names and types nothing
  * @version 1.3.0
  */
 
@@ -30,14 +32,30 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mess
  * answer {locked:true} so the browser can run the one-tap unlock ceremony and
  * retry instead of showing an error.
  *
- * @return array ['ok' => bool, 'content' => string|null, 'error' => string|null, 'locked' => bool]
+ * A Fortress message's attachment (InboundEmailMessage::isBrowserSealed())
+ * comes back exactly as stored, with 'browser_sealed' => true: the owner's
+ * browser opens it under the row key only it can unseal
+ * (specs/client_custody_mail.md § R4). A caller that needs plaintext refuses it.
+ *
+ * @return array ['ok' => bool, 'content' => string|null, 'error' => string|null, 'locked' => bool,
+ *                'browser_sealed' => bool]
  */
 function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, InboundEmailMessage $message): array {
 	$fail = function (string $error, bool $locked = false) {
-		return array('ok' => false, 'content' => null, 'error' => $error, 'locked' => $locked);
+		return array('ok' => false, 'content' => null, 'error' => $error, 'locked' => $locked, 'browser_sealed' => false);
 	};
 
 	$fil_id = intval($att->get('ima_fil_file_id'));
+
+	if (InboundEmailMessage::isBrowserSealed($message)) {
+		require_once(PathHelper::getIncludePath('data/files_class.php'));
+		$file = $fil_id > 0 ? new File($fil_id, TRUE) : null;
+		$content = ($file && $file->key && !$file->get('fil_delete_time')) ? $file->read_bytes('original') : null;
+		if ($content === null) {
+			return $fail('This attachment is no longer available.');
+		}
+		return array('ok' => true, 'content' => $content, 'error' => null, 'locked' => false, 'browser_sealed' => true);
+	}
 
 	if ($fil_id > 0) {
 		// File-backed (push mail, lean record): the bytes are a private File.
@@ -59,7 +77,7 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 		} catch (VaultLockedException $e) {
 			return $fail('Unlock your vault to download this attachment.', true);
 		}
-		return array('ok' => true, 'content' => $content, 'error' => null, 'locked' => false);
+		return array('ok' => true, 'content' => $content, 'error' => null, 'locked' => false, 'browser_sealed' => false);
 	}
 
 	// Section-pointer / IMAP rows: retrieve by the message's raw-storage driver.
@@ -93,7 +111,8 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 		if (empty($result['ok'])) {
 			return $fail($result['message'] ?? 'This attachment is no longer available in the source mailbox.');
 		}
-		return array('ok' => true, 'content' => (string)$result['content'], 'error' => null, 'locked' => false);
+		return array('ok' => true, 'content' => (string)$result['content'], 'error' => null, 'locked' => false,
+			'browser_sealed' => false);
 	}
 
 	// Stored raw (inline / local / cloud): MIME-parse and extract the one part.
@@ -108,7 +127,8 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 	if ($part === null) {
 		return $fail('This attachment is no longer available.');
 	}
-	return array('ok' => true, 'content' => (string)$part['content'], 'error' => null, 'locked' => false);
+	return array('ok' => true, 'content' => (string)$part['content'], 'error' => null, 'locked' => false,
+		'browser_sealed' => false);
 }
 
 /** Strip CR/LF and path separators; fall back to a safe default. */
@@ -126,16 +146,21 @@ function mailbox_attachment_safe_filename(string $name): string {
  * for the header (header-injection guard) and serves with nosniff +
  * attachment disposition so attacker-controlled bytes are never rendered
  * inline; text/html is downgraded so it can never render in our origin.
+ *
+ * $browser_sealed (a Fortress attachment's ciphertext) streams as
+ * octet-stream with no filename: the name and type live in the sealed
+ * manifest, and the browser that opens the bytes names the file it hands over.
  */
-function mailbox_stream_attachment(InboundMessageAttachment $att, string $content): void {
+function mailbox_stream_attachment(InboundMessageAttachment $att, string $content, bool $browser_sealed = false): void {
 	$filename = mailbox_attachment_safe_filename((string)$att->get('ima_filename'));
 	$content_type = (string)$att->get('ima_content_type') ?: 'application/octet-stream';
-	if (stripos($content_type, 'text/html') !== false) {
+	if (stripos($content_type, 'text/html') !== false || $browser_sealed) {
 		$content_type = 'application/octet-stream';
 	}
 
 	header('Content-Type: ' . $content_type);
-	header('Content-Disposition: attachment; filename="' . $filename . '"');
+	header($browser_sealed ? 'Content-Disposition: attachment'
+		: 'Content-Disposition: attachment; filename="' . $filename . '"');
 	header('X-Content-Type-Options: nosniff');
 	header('Content-Length: ' . strlen($content));
 	echo $content;

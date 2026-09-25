@@ -20,6 +20,7 @@
  * at pull. Catch-all recipients have no single owner, so they are always
  * transport-sealed.
  *
+ * @version 2.3 - a Fortress mailbox takes the transport key until the relay seals to the mail key
  * @version 2.2 - the owner-key seal target follows the Seal at the relay add-on
  *                (ied_relay_seals_to_owner), not a level
  * @version 2.1 - the fragment carries Joinery Direct's served kinds, decoy secret,
@@ -227,6 +228,14 @@ class RelayMapExporter {
 	 * only under the add-on, so the pending-parse path needs no check of its own.
 	 */
 	private function sealTargetForAlias($alias, $domain): array {
+		// A Fortress mailbox never takes the owner's SERVER key: a relay blob
+		// sealed to it would be parsed in the server window and stored as a
+		// Private row. Until the relay seals to the browser-held mail key
+		// (specs/client_custody_mail.md WP7) it takes the transport key, and the
+		// pull seals the message to the mail key like any Fortress arrival.
+		if ($alias->is_fortress()) {
+			return array($this->transport_public_key, 'transport');
+		}
 		if ($domain->relay_seals_to_owner()) {
 			$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
 			if ($owner_id !== null) {

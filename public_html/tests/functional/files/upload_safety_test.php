@@ -34,6 +34,8 @@
  *
  * Run:  php tests/functional/files/upload_safety_test.php
  *
+ * @version 1.1 - the unrecognized-bytes check uses fixed signature-free bytes (random ones
+ *   sometimes carried a real signature)
  * @version 1.0
  */
 
@@ -211,8 +213,10 @@ check($real_png->get('fil_type') === 'image/png', 'real PNG detected despite a .
 check($real_png->is_image(), 'real PNG is treated as an image');
 
 // Unrecognized bytes fail closed to the sentinel rather than to something
-// renderable.
-$junk = ingest(random_bytes(64), 'thing.png', 'image/png', $owner->key);
+// renderable. Fixed bytes, not random ones: a random prefix now and then
+// carries a real signature ("MZ" reads as a DOS executable) and the check
+// would fail on a correct detector.
+$junk = ingest(str_repeat("\x01\x7f\x03\x19\xfe\x02\x88\x10", 8), 'thing.png', 'image/png', $owner->key);
 check(in_array($junk->get('fil_type'), array('application/octet-stream', 'application/x-empty'), true),
     'unrecognized bytes store a fail-closed type', 'got: ' . $junk->get('fil_type'));
 check(!$junk->is_image(), 'unrecognized bytes are not an image');

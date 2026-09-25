@@ -36,55 +36,13 @@ function vault_client_setup_logic(array $input): LogicResult {
 		);
 	}
 
-	$public_key = isset($input['public_key']) ? (string)$input['public_key'] : '';
-	$salt       = isset($input['salt']) ? (string)$input['salt'] : '';
-	$wrappings  = isset($input['wrappings']) && is_array($input['wrappings']) ? $input['wrappings'] : [];
-	if ($public_key === '' || $salt === '') {
-		return LogicResult::error('Missing vault key material.');
-	}
-
-	// Structural unlocker floor at birth: at least one everyday unlocker
-	// (passkey or passphrase) so the vault is openable, and at least one
-	// recovery wrapping so it is recoverable if the everyday unlocker is lost.
-	$primary = 0; $recovery = 0;
-	foreach ($wrappings as $w) {
-		$t = isset($w['unlocker_type']) ? $w['unlocker_type'] : '';
-		if ($t === UserEncryptionWrapping::TYPE_PASSKEY || $t === UserEncryptionWrapping::TYPE_PASSPHRASE) $primary++;
-		if ($t === UserEncryptionWrapping::TYPE_RECOVERY) $recovery++;
-	}
-	if ($primary < 1) {
-		return LogicResult::error('Your vault needs a passkey or a passphrase to unlock it.');
-	}
-	if ($recovery < 1) {
-		return LogicResult::error('Your vault needs at least one recovery key.');
-	}
-
-	if (VaultClientCustody::loadVault($user_id, $scope)) {
-		return LogicResult::error('Your vault is already set up.');
-	}
-
-	$db = DbConnector::get_instance()->get_db_link();
+	// The floor at birth and the root's pairing with the account vault's codes
+	// live in createVault() (specs/one_vault_experience.md § R2, R4, R6).
 	try {
-		$db->beginTransaction();
-
-		$vault = new UserEncryptionVault(NULL);
-		$vault->set('uev_usr_user_id', $user_id);
-		$vault->set('uev_scope', $scope);
-		$vault->set('uev_custody', UserEncryptionVault::CUSTODY_CLIENT);
-		$vault->set('uev_public_key', $public_key);
-		$vault->set('uev_salt', $salt);
-		$vault->set('uev_kdf_params', VaultClientCustody::encodeKdfParams($input['kdf_params'] ?? null));
-		$vault->set('uev_key_generation', 1);
-		$vault->save();
-
-		VaultClientCustody::persistWrappings($user_id, $vault, $wrappings);
-
-		$db->commit();
+		$vault = VaultClientCustody::createVault($user_id, $scope, $input);
 	} catch (VaultClientCustodyException $e) {
-		if ($db->inTransaction()) $db->rollBack();
 		return LogicResult::error($e->getMessage());
 	} catch (Throwable $e) {
-		if ($db->inTransaction()) $db->rollBack();
 		error_log('Client vault setup: could not persist for user ' . $user_id . ' scope ' . $scope . ': ' . $e->getMessage());
 		return LogicResult::error('Could not create your vault - nothing was saved. Try again.');
 	}
@@ -97,6 +55,7 @@ function vault_client_setup_logic(array $input): LogicResult {
 	return LogicResult::render(['set_up' => true, 'scope' => $scope, 'vault_id' => (int)$vault->key]);
 }
 
+// @version 1.1 - the floor and the root's code pairing move to VaultClientCustody::createVault()
 function vault_client_setup_logic_descriptor() {
 	return [
 		'requires_session' => true,

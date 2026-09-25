@@ -43,6 +43,7 @@
  * the standard addresses on the same list are unaffected — instead of anything
  * reading ciphertext as if it were text.
  *
+ * @version 1.3 - never selects a Fortress message
  * @version 1.2
  * @changelog 1.2 - lookback_days floor on iem_received_time (default 7 days)
  */
@@ -223,6 +224,9 @@ class EmailJobCandidates {
 			  AND iem_spam_verdict IS DISTINCT FROM 'spam'
 			  AND iem_direction IS DISTINCT FROM 'draft'
 			  AND iem_pending_parse IS NOT TRUE
+			  -- Fortress mail: sealed to a key only the owner's devices hold, and
+			  -- never read by server-side AI (specs/client_custody_mail.md § R7).
+			  AND (iem_sealed_key IS NULL OR iem_sealed_key NOT LIKE 'v1.edgeseal.%')
 			  AND iem_is_read = false
 			  " . ($lookback_days > 0 ? 'AND iem_received_time >= :received_since' : '') . "
 			  " . ($sealed_readable ? '' : 'AND iem_content_sealed IS NOT TRUE') . "

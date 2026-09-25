@@ -9,7 +9,13 @@
  * so that hiding the button is never the only thing standing between an
  * account with a working passkey and a weaker unlocker.
  *
- * @version 1.1
+ * The phrase and the recovery codes never reach this server: the browser
+ * ran the slow derivation and made the codes, and posts only the account
+ * halves of their KEKs (specs/one_vault_experience.md § R6, R7). The length
+ * rule is the browser's, checked before it derives.
+ *
+ * @version 1.3 - the root vault is created with it (root)
+ * @version 1.2
  */
 
 function vault_setup_passphrase_logic(array $input): LogicResult {
@@ -70,21 +76,14 @@ function vault_setup_passphrase_logic(array $input): LogicResult {
 		);
 	}
 
-	$passphrase = (string)($input['passphrase'] ?? '');
-	if (strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
-		return LogicResult::error('Your bypass phrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
-	}
-	if ($passphrase !== (string)($input['passphrase_confirm'] ?? $passphrase)) {
-		return LogicResult::error('Those two phrases do not match.');
-	}
-
-	$code_count = isset($input['recovery_code_count']) ? (int)$input['recovery_code_count'] : 10;
-
 	try {
+		$passphrase_kek = VaultCeremonies::decodeKek($input['passphrase_kek'] ?? '');
+		$code_set = VaultCeremonies::codeSet($input['code_set'] ?? null);
 		$ceremonies = new VaultCeremonies();
 		// Credential id 0 = no passkey wrapping; the ceremony re-checks
 		// eligibility itself before honouring that.
-		$result = $ceremonies->setup($user, 0, null, '', $passphrase, $code_count);
+		$result = $ceremonies->setup($user, 0, null, '', $passphrase_kek, $code_set,
+			is_array($input['root'] ?? null) ? $input['root'] : array());
 	} catch (VaultCeremonyException $e) {
 		RequestLogger::log('vault_setup_passphrase', 'setup', false, ['user_id' => $user->key]);
 		return LogicResult::error($e->getMessage());
@@ -93,7 +92,6 @@ function vault_setup_passphrase_logic(array $input): LogicResult {
 
 	return LogicResult::render([
 		'vault_id'       => (int)$result['vault']->key,
-		'recovery_codes' => $result['recovery_codes'],
 		'key_file'       => $result['key_file'],
 	]);
 }
@@ -102,11 +100,12 @@ function vault_setup_passphrase_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Set up a Sealed Vault unlocked by a bypass phrase, for an account whose passkeys cannot derive a key',
+		'description' => 'Set up a Sealed Vault unlocked by a passphrase, for an account whose passkeys cannot derive a key. The browser derives the phrase and makes the recovery codes; only the account halves of their KEKs are sent',
 		'input' => array(
-			'passphrase'         => array('type' => 'string', 'required' => true,  'label' => 'Bypass phrase'),
-			'passphrase_confirm' => array('type' => 'string', 'required' => false, 'label' => 'Confirm bypass phrase'),
+			'passphrase_kek'     => array('type' => 'password', 'required' => true, 'label' => 'Account half of the passphrase KEK (base64url, 32 bytes)'),
+			'code_set'           => array('type' => 'object', 'required' => true, 'label' => 'Browser-made code set {id, entries:[{index, kek}]} (account halves only)'),
 			'acknowledged'       => array('type' => 'bool',   'required' => true,  'label' => 'Permanent-loss acknowledgement'),
+			'root'               => array('type' => 'object', 'required' => true,  'label' => 'The root vault the browser made: {public_key, salt, kdf_params, wrappings}'),
 		),
 	];
 }

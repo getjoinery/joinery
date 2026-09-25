@@ -30,11 +30,12 @@ function vault_unlock_recovery_logic(array $input): LogicResult {
 	// passkey holds, and the account's sign-in second factor (an authenticator
 	// code) never takes part in opening a vault. What guards a used code is
 	// below: it ends every other open window and alerts the account by email.
-	$code = isset($input['code']) ? (string)$input['code'] : '';
-
+	// The browser posts only the account half of the code's KEK; the code
+	// itself never reaches here (specs/one_vault_experience.md § R6).
 	try {
+		$kek = VaultCeremonies::decodeKek($input['code_kek'] ?? '');
 		$ceremonies = new VaultCeremonies();
-		$result = $ceremonies->unlockWithRecoveryCode($user, $vault, $code);
+		$result = $ceremonies->unlockWithRecoveryKek($user, $vault, $kek);
 	} catch (VaultCeremonyException $e) {
 		RequestLogger::log('vault_unlock_recovery', 'verify', false, ['user_id' => $user->key]);
 		return LogicResult::error($e->getMessage());
@@ -53,7 +54,8 @@ function vault_unlock_recovery_logic(array $input): LogicResult {
 				$to,
 				trim($site . ' security alert'),
 				"A vault recovery code was just used on your account. If this was you, no action is needed — "
-				. "all other unlocked sessions were signed out of your vault as a precaution. If this was NOT you, "
+				. "all other unlocked sessions were signed out of your vault as a precaution, and linked computers "
+				. "and phones need linking again. If this was NOT you, "
 				. "change your password immediately from a device you trust."
 			);
 		}
@@ -64,6 +66,9 @@ function vault_unlock_recovery_logic(array $input): LogicResult {
 	return LogicResult::render([
 		'unlocked' => true,
 		'regenerate_recommended' => $result['regenerate_recommended'],
+		// The same code's twin on the root vault, spent with it: the browser
+		// opens the root with its own half of the code's KEK.
+		'root_wrapping' => $result['root_wrapping'],
 	]);
 }
 
@@ -71,9 +76,9 @@ function vault_unlock_recovery_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Unlock the vault with a one-time recovery code',
+		'description' => 'Unlock the vault with a one-time recovery code: the account half of its KEK, derived in the browser (the code itself is never sent). Spends the code\'s root-vault twin with it and returns that twin as root_wrapping',
 		'input' => [
-			'code' => ['type' => 'password', 'required' => true, 'label' => 'Recovery code'],
+			'code_kek' => ['type' => 'password', 'required' => true, 'label' => 'Account half of the recovery code KEK (base64url, 32 bytes)'],
 		],
 	];
 }

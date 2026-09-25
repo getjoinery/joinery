@@ -79,13 +79,30 @@ $secret_for_generation = function (int $gen) use ($box, $vault_id, $credential_i
 	return null;
 };
 
+// A rotation takes a browser-made code set and the root vault's twins of it
+// (specs/one_vault_experience.md § R6). Returns [result, codes].
+$rotate = function (string $label = 'label') use ($ceremonies, $user, $vault_id, $credential_id, $kek, $fx): array {
+	// Each rotation is its own request, so it starts cold: this process opened
+	// sealed items between rotations (the suite's own checks), which a real
+	// rotation request never has when it writes the root's code twins.
+	SealedEgressGuard::reset();
+	$set = vault_fixture_code_set($fx['root_salt'], 10);
+	$twins = vault_fixture_root_recovery($fx['root_salt'], $set, $fx['root_secret']);
+	$r = $ceremonies->rotate($user, new UserEncryptionVault($vault_id, TRUE), $credential_id, $label, $kek, '',
+		$set['set'], ['recovery' => $twins], false);
+	return [$r, array_values($set['codes'])];
+};
+$code_kek = function (string $code) use ($fx): string {
+	return VaultUnlockerKdf::codeKekAccount($code, $fx['root_salt']);
+};
+
 $seal_item('first message', 'item:1');
 $seal_item('second message', 'item:2');
 $seal_item('third message', 'item:3');
 
 // ---- R1: happy rotation -------------------------------------------------
 section('R1 happy rotation');
-$r1 = $ceremonies->rotate($user, new UserEncryptionVault($vault_id, TRUE), $credential_id, 'label', $kek, '', false);
+[$r1, $r1_codes] = $rotate();
 check($r1['completed_pending'] === false, 'normal mode');
 check($r1['key_generation'] === 2, 'vault moved to generation 2');
 check(count($consumer->calls) === 1 && $consumer->calls[0]['old_gen'] === 1 && $consumer->calls[0]['new_gen'] === 2, 'consumer drained generation 1 toward 2');
@@ -95,18 +112,18 @@ check(UserEncryptionWrapping::liveGenerations($vault_id) === [2], 'generation 1 
 $gen2_secret = $secret_for_generation(2);
 check($gen2_secret !== null, 'the presented credential unwraps the new secret');
 check($open_all_items($gen2_secret) === 3, 'every item opens under the new secret');
-check(count($r1['recovery_codes']) === 10, 'fresh codes were minted and returned');
+check(count($r1_codes) === 10, 'the new generation carries the browser\'s ten codes');
 $threw = false;
-try { $ceremonies->unlockWithRecoveryCode($user, $v, $fx['recovery_codes'][0], false); } catch (VaultCeremonyException $e) { $threw = true; }
+try { $ceremonies->unlockWithRecoveryKek($user, $v, $code_kek($fx['recovery_codes'][0]), false); } catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'the drained generation\'s codes are dead');
-$ok = $ceremonies->unlockWithRecoveryCode($user, $v, $r1['recovery_codes'][0], false);
-check(is_array($ok), 'the new generation\'s codes unlock');
+$ok = $ceremonies->unlockWithRecoveryKek($user, $v, $code_kek($r1_codes[0]), false);
+check(is_array($ok) && is_array($ok['root_wrapping']), 'the new generation\'s codes unlock, and open the root with it');
 
 // ---- R3: re-seal failure leaves the two-generation state ----------------
 section('R3 re-seal failure');
 $consumer->armed = true;
 $threw = '';
-try { $ceremonies->rotate($user, new UserEncryptionVault($vault_id, TRUE), $credential_id, 'label', $kek, '', false); } catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+try { $rotate(); } catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'nothing was retired') !== false, 'the ceremony reports the failure honestly');
 $v = new UserEncryptionVault($vault_id, TRUE);
 check((int)$v->get('uev_key_generation') === 3, 'the vault row already advertises generation 3 (persisted before the drain)');
@@ -114,10 +131,10 @@ $gens = UserEncryptionWrapping::liveGenerations($vault_id);
 sort($gens);
 check($gens === [2, 3], 'both generations\' wrappings are live', json_encode($gens));
 check($open_all_items($secret_for_generation(2)) === 3, 'every item still opens under the generation-2 secret');
-// The tour's #9 regression: gen-2 recovery codes derive from the gen-2 salt,
-// which the failed attempt replaced on the vault row.
-$ok = $ceremonies->unlockWithRecoveryCode($user, $v, $r1['recovery_codes'][1], false);
-check(is_array($ok), 'a generation-2 recovery code still unlocks via its per-wrapping salt');
+// The tour's #9 regression: the failed attempt replaced the vault row's salt;
+// a generation-2 code's KEK never depended on it.
+$ok = $ceremonies->unlockWithRecoveryKek($user, $v, $code_kek($r1_codes[1]), false);
+check(is_array($ok), 'a generation-2 recovery code still unlocks the account vault');
 
 // ---- R5: content sealed during the broken state survives ----------------
 section('R5 mid-brokenness seal survives');
@@ -131,10 +148,9 @@ check($secret_for_generation(3) !== null, 'the generation-3 secret is recoverabl
 // ---- Completion: the retry converges instead of splitting forever -------
 section('Completion mode convergence');
 $consumer->armed = false;
-$r2 = $ceremonies->rotate($user, new UserEncryptionVault($vault_id, TRUE), $credential_id, 'label', $kek, '', false);
+[$r2] = $rotate();
 check($r2['completed_pending'] === true, 'the retry COMPLETES the pending rotation');
 check($r2['key_generation'] === 3, 'no new generation was minted');
-check($r2['recovery_codes'] === [], 'no codes to display (generation 3\'s were minted by the interrupted attempt)');
 check($r2['regenerate_recommended'] === true, 'and the user is told to regenerate them');
 check(UserEncryptionWrapping::liveGenerations($vault_id) === [3], 'exactly one generation remains live');
 $last = $consumer->calls[count($consumer->calls) - 1];
@@ -142,7 +158,7 @@ check($last['old_gen'] === 2 && $last['new_gen'] === 3, 'the drain ran from gene
 $gen3_secret = $secret_for_generation(3);
 check($open_all_items($gen3_secret) === 4, 'ALL content - including the mid-brokenness item - opens under one secret');
 $threw = false;
-try { $ceremonies->unlockWithRecoveryCode($user, new UserEncryptionVault($vault_id, TRUE), $r1['recovery_codes'][2], false); } catch (VaultCeremonyException $e) { $threw = true; }
+try { $ceremonies->unlockWithRecoveryKek($user, new UserEncryptionVault($vault_id, TRUE), $code_kek($r1_codes[2]), false); } catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'the drained generation-2 codes are dead after completion');
 
 // ---- R4: orphan-generation cleanup --------------------------------------
@@ -151,7 +167,7 @@ section('R4 orphan cleanup');
 // the vault row (its keypair was never advertised).
 $orphan = UserEncryptionWrapping::reserve($vault_id, UserEncryptionWrapping::TYPE_PASSKEY, $credential_id, 'orphan', 9);
 $orphan->storeWrapped(VaultUnlock::openKey(0, null, [$orphan->wrapEntry(random_bytes(32))])['wrappings'][0]);
-$r3 = $ceremonies->rotate($user, new UserEncryptionVault($vault_id, TRUE), $credential_id, 'label', $kek, '', false);
+[$r3] = $rotate();
 check($r3['completed_pending'] === false && $r3['key_generation'] === 4, 'rotation proceeded normally past the orphan');
 $orphan_after = new UserEncryptionWrapping((int)$orphan->key, TRUE);
 check($orphan_after->get('uew_delete_time') !== null, 'the orphan wrapping was retired, not authorized from');
@@ -164,7 +180,7 @@ $wrappings_before = count(vault_live_wrappings($vault_id));
 $threw = '';
 // An invalid-UTF8 label is rejected by Postgres at the first INSERT of the
 // persist phase; the transaction must leave the vault untouched.
-try { $ceremonies->rotate($user, new UserEncryptionVault($vault_id, TRUE), $credential_id, "bad\xC3\x28label", $kek, '', false); } catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+try { $rotate("bad\xC3\x28label"); } catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'nothing was changed') !== false, 'the ceremony reports a clean abort');
 $v_after = new UserEncryptionVault($vault_id, TRUE);
 check((string)$v_after->get('uev_public_key') === (string)$v_before->get('uev_public_key'), 'public key untouched');

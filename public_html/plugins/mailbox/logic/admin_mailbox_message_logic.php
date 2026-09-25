@@ -9,6 +9,7 @@
  * the HTML body are rewritten to short-lived signed URLs by the shared
  * MailboxService::resolveInlineImages(), scoped to this message only.
  *
+ * @version 1.5 - a Fortress message renders locked, with fortress set
  * @version 1.4
  */
 
@@ -85,7 +86,12 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 	$locked = false;
 	$sender = $recipient = $subject = $body_plain = '';
 	$body_html = '';
-	try {
+	// Fortress: sealed to its owner's devices, so there is no window here that
+	// opens it — it renders as locked, and says why (specs/client_custody_mail.md § R7).
+	$fortress = InboundEmailMessage::isBrowserSealed($message);
+	if ($fortress) {
+		$locked = true;
+	} else try {
 		$sender = (string)$message->get('iem_sender');
 		$recipient = (string)$message->get('iem_recipient');
 		$subject = (string)$message->get('iem_subject');
@@ -114,6 +120,7 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 		'alias_name' => $alias_name,
 		'attachments' => $attachments,
 		'locked' => $locked,
+		'fortress' => $fortress,
 		'sender' => $sender,
 		'recipient' => $recipient,
 		'subject' => $subject,

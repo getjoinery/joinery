@@ -16,9 +16,11 @@ An account has up to two doors, and they are deliberately different:
   sign-in where allowed, below). A session reads and does everything that is
   not sealed.
 - **The vault** — proves *presence*. Opened only by a live unlocker ceremony
-  (a passkey assertion with user verification, a one-time recovery code, or
-  an enrolled bypass phrase). Content sealed to the vault — and nothing else —
-  is behind this door. See [Sealed Vault](sealed_vault.md).
+  (a passkey assertion with user verification, a one-time recovery code, or —
+  only where no passkey can hold a key — a passphrase). One touch opens every
+  vault the person holds, the account vault and the browser-held ones alike.
+  Content sealed to the vault — and nothing else — is behind this door. See
+  [Sealed Vault](sealed_vault.md) and its [One vault](sealed_vault.md#one-vault).
 
 Everything below follows from keeping those doors separate.
 
@@ -132,9 +134,8 @@ lets the enrollment ceremonies on that page actually run. Vault existence is
 cached per session and per user; the factor check is a live read, so enrolling
 clears the gate on the next page load rather than the next sign-in.
 
-The same state follows setting up a browser-held vault (Drive's Fortress
-folders, the password vault) with a passphrase on an account that has no second
-factor. The setup ceremony says so before it runs, and the setup action drops the
+The same state follows setting up a browser-held vault with a passphrase on an
+account that has no second factor. The setup ceremony says so before it runs, and the setup action drops the
 cached vault answer (`SessionControl::forget_vault_posture()`), so the gate takes
 the account from its next page.
 
@@ -257,8 +258,8 @@ be able to quietly enroll their own key:
 - **First passkey** on an account: requires the account password re-entered.
 - **Additional passkeys**: require a recent step-up with an existing passkey.
 - **Vault unlockers** (another passkey wrapping, regenerated recovery codes,
-  a bypass phrase): require an open unlock window, and code regeneration and
-  bypass-phrase changes additionally require a recent step-up. When the window
+  a passphrase): require an open unlock window, and code regeneration and
+  passphrase changes additionally require a recent step-up. When the window
   is open at enrollment, a capable authenticator activates for the vault
   inside the creation ceremony itself ([Passkeys § Creation-time vault
   activation](passkeys.md)) — the same open-window requirement, one prompt
@@ -326,11 +327,11 @@ One account setting, two values (`usr_2fa_cadence`, `User::two_factor_cadence()`
 - **`sensitive_only`** — sign-in is password-only; the factor is asked at
   sensitive actions instead (the step-up gate above). Sound, not a loophole,
   because every escalation from a bare session is independently gated: sealed
-  content needs a vault unlocker (a passkey, the bypass phrase or a recovery
+  content needs a vault unlocker (a passkey, the passphrase or a recovery
   code); password/email/2FA changes need a step-up; routing changes need an
   open window. A phished password on this posture sees the mailbox's shape —
   counts, times, labels, placeholders — and opens nothing; a phished password
-  together with a phished bypass phrase or recovery code opens the vault. The
+  together with a phished passphrase or recovery code opens the vault. The
   setting's own change is a step-up action, and choosing it carries the
   one-line consequence.
 
@@ -338,18 +339,29 @@ One account setting, two values (`usr_2fa_cadence`, `User::two_factor_cadence()`
 
 - **Passkey** — the everyday unlocker: one tap, user verification required.
 - **Recovery codes** — one-time, for disasters: a code is what someone who
-  lost their passkey holds, so it opens the vault on its own. On use it **ends
-  every open window everywhere** (`VaultUnlock::lockAll()`) and then opens one
-  only for the recovering session, and emails a security alert to the account —
-  so a *stolen* code is announced to the owner the moment it is used.
+  lost their passkey holds, so it opens the vault on its own. **One set opens
+  everything**: the codes are made in the browser, and the server only ever
+  sees a one-way derivation of each, so a code opens end-to-end content too
+  ([One vault](sealed_vault.md#one-vault)). On use it **ends every open window
+  everywhere** (`VaultUnlock::lockAll()`), refuses every tab's saved reload
+  key, clears the vault keys of every linked device (each links again), then
+  opens one only for the recovering session, and emails a security alert to
+  the account — so a *stolen* code is announced to the owner the moment it is
+  used.
   Consuming one drops the vault into a *regenerate recommended* state once
   fewer than 3 remain unused. **Recovery codes are vault-only**: they
   answer "give me my data," never "log me in."
-- **Bypass phrase** — optional fallback (Argon2id-derived, internally `passphrase`), for accounts that
-  want a memorized unlocker alongside hardware. Never offered during vault
-  setup — added deliberately from unlocker management, behind a warning that
-  it lowers the vault's strength to the strength of the phrase. It opens the
-  vault on its own, like a passkey or a recovery code.
+- **Passphrase** — only for an account whose passkeys cannot hold a key
+  (`Passkey::userNeedsPassphraseFallback()`: at least one passkey, and every
+  one provably incapable; see [Sealed Vault § When a passkey cannot hold the
+  key](sealed_vault.md#when-a-passkey-cannot-hold-the-key)). An account with a
+  working passkey has none — recovery codes cover a lost device — and a
+  passkey unlock removes one the account no longer qualifies for, with notice.
+  One phrase opens everything, derived in the browser with Argon2id; the
+  server receives only a one-way half. What it costs: a server that has been
+  broken into can guess the phrase offline, so for these accounts end-to-end
+  content is as safe as the phrase is hard to guess, and the form says so. It
+  opens the vault on its own, like a passkey or a recovery code.
 
 **The unlocker floor:** any change that would leave a vault with fewer than 1
 passkey wrapping *and* fewer than 3 unused recovery codes is refused at the
@@ -377,9 +389,10 @@ Verify tools, by kind:
   and never reaches the server.
 - **Dry run** (vault recovery codes): the code is checked exactly as the real
   recovery flow would, but **nothing is consumed** — `uew_is_used` is never
-  touched. Server-custody codes check server-side; client-custody codes check
-  in the browser (`assets/js/recovery-readiness.js` + `vault-crypto.js`) and
-  report only pass/fail.
+  touched. With the root vault in place there is one card for the one set, and
+  its check runs in the browser against the root's wrappings
+  (`assets/js/recovery-readiness.js` + `vault-crypto.js`), reporting only
+  pass/fail; a vault with no root vault is checked server-side.
 - **Attestation** (bucket console logins): a timestamped honor-system
   checkbox; the page says plainly that the platform cannot check it.
 
@@ -533,10 +546,10 @@ core dependency on any one plugin.
 | Sign in | Password — or passkey, only while the account has no vault |
 | Second factor at sign-in | Asked when cadence is `every_login` and the account holds any factor: a TOTP/backup code or a passkey step-up — skipped on a device the user chose to trust (`sf_trusted`) |
 | Read sealed content | Open unlock window |
-| Open the window | Unlocker ceremony (passkey + user verification / recovery code / bypass phrase) |
+| Open the window | Unlocker ceremony (passkey + user verification / recovery code / passphrase); the same touch opens every browser-held vault |
 | Enroll first passkey | Session + password re-entry |
 | Enroll additional passkey | Session + recent step-up |
-| Add a vault unlocker | Open window (+ step-up for codes/bypass phrase) |
+| Add a vault unlocker | Open window (+ step-up for codes/passphrase); a passphrase only where no passkey can hold a key |
 | Deactivate a passkey for the vault | Session + recent step-up; refused if it breaks the unlocker floor |
 | Revoke a passkey | Session; refused if it breaks the unlocker floor, or if it is a vault holder's last passkey while TOTP is off; trusted devices re-earn |
 | Turn off the authenticator app | Session + a current TOTP/backup code; refused for a vault holder with no live passkey; ends all windows; trusted devices re-earn |
@@ -558,8 +571,8 @@ core dependency on any one plugin.
 | Change 2FA cadence | Session + recent step-up |
 | Change a domain's security level | Session + recent second-factor step-up |
 | Unlock the vault with a recovery code | Session + the code; ends all other windows + alerts. No sign-in second factor |
-| Unlock the vault with a bypass phrase | Session + the phrase. No sign-in second factor |
-| Open a browser-held vault (Drive's Fortress folders, the password vault) | Session + a passkey, its passphrase or a recovery code, in the browser. No sign-in second factor |
+| Unlock the vault with a passphrase | Session + the phrase's account half, derived in the browser. No sign-in second factor |
+| Open a browser-held vault (Drive's Fortress folders, the password vault, Fortress mail) | Opens with the vault: the one unlock opens the root vault in the browser, and the root opens each. No sign-in second factor |
 | Change a sealed mailbox's filters or alias routing | Session + open unlock window (the owner's own) |
 | Send as a protected identity domain | Open unlock window, via the mailbox compose path only — ambient/transactional senders are refused outright |
 | Protect a domain / stage or cut over a DKIM rotation | Admin session + open unlock window (the key seals to the owner's vault) |

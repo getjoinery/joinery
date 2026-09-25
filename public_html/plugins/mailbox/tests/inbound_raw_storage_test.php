@@ -19,9 +19,13 @@
  *    'remote' row yields null. These are exercised against directly-built rows (the
  *    fallback/legacy shape), since the happy path no longer stores a raw.
  *  - Deletion: permanent_delete reclaims the message's attachment Files (and any raw).
+ *  - The routing log (iel_from_address) keeps the From header on a plaintext
+ *    mailbox and carries the bare envelope address on a sealing one — never the
+ *    display name, which is content (specs/client_custody_mail.md § R2).
  *
  * Run: php plugins/mailbox/tests/inbound_raw_storage_test.php  (schema synced).
  *
+ * @version 2.2 - the routing log's sender on a sealing mailbox is the bare address
  * @version 2.1 - one store: the mock is injected into the factory's single cache
  * @version 2.0
  */
@@ -73,6 +77,7 @@ class InboundRawStorageTest {
 			$this->testAccessorRemoteYieldsNull();
 			$this->testAccessorCloud();
 			$this->testPermanentDeleteReclaimsFiles();
+			$this->testLogSenderOnSealingMailbox();
 		} catch (\Throwable $e) {
 			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -350,6 +355,51 @@ class InboundRawStorageTest {
 		$id = intval($stmt->fetchColumn());
 		$this->created_message_ids[] = $id;
 		return $id;
+	}
+
+	/**
+	 * The routing log is never sealed, so on a sealing mailbox (Private here;
+	 * Fortress takes the same branch through seals_content()) its sender is the
+	 * envelope address alone: the Return-Path when the MTA stamped one, else the
+	 * From header's addr-spec. A plaintext mailbox keeps the header as it came.
+	 */
+	private function testLogSenderOnSealingMailbox() {
+		section('routing log: no display name on a sealing mailbox');
+		$raw = "Return-Path: <bounce+" . $this->suffix . "@lists.example.com>\r\n"
+			. "From: Secret Display Name <sender@example.com>\r\n"
+			. "To: " . $this->recipient() . "\r\nSubject: log test\r\n\r\nbody\r\n";
+		$parsed = $this->router->parseEmail($raw);
+
+		$read = function () {
+			return (string)$this->db->query("SELECT iel_from_address FROM iel_inbound_email_logs
+				WHERE iel_iea_inbound_email_alias_id = " . intval($this->alias_id)
+				. " ORDER BY iel_inbound_email_log_id DESC LIMIT 1")->fetchColumn();
+		};
+
+		$this->router->logTransaction($parsed, $this->alias, InboundEmailLog::STATUS_STORED,
+			$this->recipient(), null, null, $this->domain_id);
+		$this->ok(strpos($read(), 'Secret Display Name') !== false,
+			'a plaintext mailbox logs the From header as it arrived');
+
+		$sealing = new InboundEmailAlias($this->alias_id, TRUE);
+		$sealing->set('iea_security_level', InboundEmailDomain::LEVEL_PRIVATE);
+		$sealing->save();
+		$this->router->logTransaction($parsed, $sealing, InboundEmailLog::STATUS_STORED,
+			$this->recipient(), null, null, $this->domain_id);
+		$logged = $read();
+		$this->ok(strpos($logged, 'Secret Display Name') === false, 'a sealing mailbox logs no display name');
+		check($logged === 'bounce+' . $this->suffix . '@lists.example.com',
+			'it logs the envelope (Return-Path) address', $logged);
+
+		$no_rp = $this->router->parseEmail("From: Secret Display Name <sender@example.com>\r\n"
+			. "To: " . $this->recipient() . "\r\nSubject: log test\r\n\r\nbody\r\n");
+		$this->router->logTransaction($no_rp, $sealing, InboundEmailLog::STATUS_STORED,
+			$this->recipient(), null, null, $this->domain_id);
+		check($read() === 'sender@example.com', 'without a Return-Path, the From address alone', $read());
+
+		$sealing->set('iea_security_level', null);
+		$sealing->save();
+		$this->db->exec("DELETE FROM iel_inbound_email_logs WHERE iel_iea_inbound_email_alias_id = " . intval($this->alias_id));
 	}
 
 	private function injectPrivateDriver($mock) {

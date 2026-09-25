@@ -25,6 +25,8 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.51 - a Fortress mailbox shows its mail-vault step (address.mail_vault); the
+ *   sealed-backlog row asks for the vault of the mailbox's seal scope
  * @version 1.50 - the signing-stage records are prescribed only while the
  *   sending lock is asked for or on
  * @version 1.49 - the send-protection row follows the sending-lock add-on (asked
@@ -1871,7 +1873,10 @@ class InboundEmailSetupCheck {
 					// belongs to no mailbox (specs/mailbox_unmatched_sealing.md).
 					$alias_id = intval($group['alias_id']);
 					$owner_id = InboundEmailMessage::sealOwnerUserId($alias_id ?: null, intval($model->key));
-					if ($owner_id !== null && UserEncryptionVault::loadForUser($owner_id) !== null) {
+					// The vault this mailbox seals to: the mail vault at Fortress,
+					// the server vault at Private (InboundEmailMessage::sealScopeFor).
+					$seal_scope = InboundEmailMessage::sealScopeFor($alias_id ?: null, intval($model->key));
+					if ($owner_id !== null && InboundEmailMessage::loadSealVault($owner_id, $seal_scope) !== null) {
 						$converging += $n;
 						$oldest = (string)($group['oldest_unsealed'] ?? '');
 						if ($oldest !== '' && ($converging_oldest === null || $oldest < $converging_oldest)) {
@@ -1924,7 +1929,9 @@ class InboundEmailSetupCheck {
 							. count($holders) . ' owners, so there is no single key to seal to)');
 					} else {
 						$blocked_causes[] = array('n' => $n,
-							'text' => $where . ' (its owner has not set up a vault)');
+							'text' => $where . ($seal_scope === UserEncryptionVault::SCOPE_USER
+								? ' (its owner has not set up a vault)'
+								: ' (its owner has not unlocked their vault in the mailbox yet)'));
 						$blocked_novault = true;
 					}
 				}
@@ -2613,6 +2620,14 @@ class InboundEmailSetupCheck {
 				'', array('text' => 'Create an alias for ' . $address . ' on the Forwarding Aliases tab.'));
 		}
 
+		// Fortress: mail is sealed to the owner's mail vault, which only their
+		// devices hold. Until they have one, mail to this mailbox is HELD (the
+		// sender is told to retry), so it is a setup step like any other
+		// (specs/client_custody_mail.md § R1).
+		if ($alias && $alias->is_fortress()) {
+			$out[] = $this->fortressVaultRow($alias, $address);
+		}
+
 		// End-to-end: has a real inbound message for this address arrived?
 		//
 		// Two places record an arrival, because two ingest paths exist. The
@@ -2662,6 +2677,58 @@ class InboundEmailSetupCheck {
 		}
 
 		return $out;
+	}
+
+	/**
+	 * The vault step of a Fortress mailbox: its one owner holds the `mail` key,
+	 * or its mail is held until they do. The key is made in the owner's own
+	 * browser the first time they unlock their vault in their mailbox
+	 * (specs/one_vault_experience.md § R4), so the fix says so rather than
+	 * offering a button an admin could press for them. Person-facing text says
+	 * "vault" (§ R5).
+	 */
+	private function fortressVaultRow(InboundEmailAlias $alias, string $address): array {
+		$label = 'Vault (end-to-end)';
+		$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
+		if ($owner_id === null) {
+			return $this->r('address.mail_vault', $address, 'address', $label, self::REQUIRED, self::FAIL,
+				'Mail to ' . $address . ' is being held: an end-to-end mailbox is sealed to one person\'s '
+				. 'devices, and this one does not have exactly one owner.',
+				'', array('text' => 'Give ' . $address . ' exactly one owner in its mailbox editor.'));
+		}
+		if (InboundEmailMessage::loadSealVault($owner_id, InboundEmailMessage::SEAL_SCOPE_FORTRESS) !== null) {
+			return $this->r('address.mail_vault', $address, 'address', $label, self::REQUIRED, self::PASS,
+				'Mail to ' . $address . ' is sealed to its owner\'s vault, which only their devices can open.');
+		}
+		$owner = new User($owner_id, TRUE);
+		$who = trim((string)$owner->get('usr_first_name') . ' ' . (string)$owner->get('usr_last_name'));
+		if ($who === '') {
+			$who = (string)$owner->get('usr_email');
+		}
+		$is_owner = intval(SessionControl::get_instance()->get_user_id()) === $owner_id;
+		$has_vault = UserEncryptionVault::loadForUser($owner_id) !== null;
+		if (!$has_vault) {
+			return $this->r('address.mail_vault', $address, 'address', $label, self::REQUIRED, self::FAIL,
+				'Mail to ' . $address . ' is being held, not stored, until ' . ($is_owner ? 'you set up your' : $who
+					. ' sets up their') . ' vault. Senders keep retrying meanwhile.',
+				'End-to-end mail is sealed to a key made in the owner\'s own browser with their passkey, so no one '
+				. 'else can create it for them.',
+				$is_owner
+					? array('text' => 'Set up your vault on your security page, then open your mailbox and unlock it.',
+						'link' => array('url' => '/profile/security', 'label' => 'Open my security page'))
+					: array('text' => 'Ask ' . $who . ' to set up their vault on their security page, then open their '
+						. 'mailbox and unlock it.'));
+		}
+		return $this->r('address.mail_vault', $address, 'address', $label, self::REQUIRED, self::FAIL,
+			'Mail to ' . $address . ' is being held, not stored, until ' . ($is_owner ? 'you unlock your' : $who
+				. ' unlocks their') . ' vault in the mailbox once. Senders keep retrying meanwhile.',
+			'The first unlock in the mailbox makes the key end-to-end mail is sealed to, in the owner\'s own '
+			. 'browser, so no one else can create it for them.',
+			$is_owner
+				? array('text' => 'Open your mailbox and choose "Unlock your vault" above the message list.',
+					'link' => array('url' => '/profile/mailbox/mailbox', 'label' => 'Open my mailbox'))
+				: array('text' => 'Ask ' . $who . ' to open their mailbox and choose "Unlock your vault" above '
+					. 'the message list.'));
 	}
 
 	// ===================================================================

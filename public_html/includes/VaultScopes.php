@@ -39,6 +39,16 @@
  * `custody: server` is refused. Server custody is not withheld from third
  * parties — it is reached by declaring no scope and sealing into `user`.
  *
+ * § The root scope (specs/one_vault_experience.md). `root` is the one vault
+ * every unlocker opens — each passkey, the passphrase where one is allowed,
+ * each recovery code — and it holds nothing of its own. Every other client
+ * scope (a CONTENT scope) keeps its secret wrapped under a key derived from
+ * the root's secret, so one unlock opens them all and a new content scope is
+ * made silently while the vault is open. contentScopes() lists the content
+ * scopes: the ones a device is handed and a person thinks of as "my Drive",
+ * "my mail".
+ *
+ * @version 1.2 - ROOT_SCOPE and contentScopes()
  * @version 1.1
  * @changelog 1.1 - a missing/corrupt vault_scopes.json refuses loudly instead of
  *   silently offering no scopes, and the server-custody scope has a structural
@@ -55,6 +65,9 @@ class VaultScopes {
 	/** The one server-custody scope, and the one derivation exception. */
 	const SERVER_SCOPE = 'user';
 	const SERVER_SCOPE_CONTEXT = 'vault-kek';
+
+	/** The browser-held vault every unlocker opens; content scopes hang off it. */
+	const ROOT_SCOPE = 'root';
 
 	/** @var array<string,array>|null request-scoped registry cache */
 	private static $registry = null;
@@ -196,6 +209,13 @@ class VaultScopes {
 			}
 		}
 		return $scopes;
+	}
+
+	/** The client scopes that hold content: every client scope but the root. */
+	public static function contentScopes(): array {
+		return array_values(array_filter(self::clientScopes(), function ($scope) {
+			return $scope !== self::ROOT_SCOPE;
+		}));
 	}
 
 	/**

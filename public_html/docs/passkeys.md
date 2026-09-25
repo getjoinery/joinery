@@ -152,12 +152,23 @@ than each re-deriving it.
 ## Consumer contract
 
 Every PRF consumer today is a [Sealed Vault](sealed_vault.md) scope, one context
-each: `vault-kek` (server-custody mail + chat, whose KEK is sent to the server),
-and the client-custody contexts `vault-passwords-kek` (the
-[password manager](../plugins/vault/docs/overview.md)) and `vault-drive-kek`
-(Drive), whose KEK is derived and used **only in the browser** and never
-transmitted. The distinct per-scope context is what guarantees one scope's KEK can
-never unwrap another's key.
+each: `vault-kek` (the server-custody account vault, whose KEK is sent to the
+server), and the client-custody contexts — `vault-root-kek` (the root vault) and
+one per content vault such as `vault-passwords-kek` and `vault-drive-kek` — whose
+KEK is derived and used **only in the browser** and never transmitted. The
+distinct per-scope context is what guarantees one scope's KEK can never unwrap
+another's key.
+
+**Two outputs from one touch.** `getDerivationOptions(..., $second_context)`
+asks the authenticator for two PRF outputs in one assertion
+(`prf.eval.first` and `prf.eval.second`). The vault's one unlock asks for
+`vault-kek` and `vault-root-kek` together
+([One vault](sealed_vault.md#one-vault)). `JoineryPasskeys.derive()` returns
+the second output apart (`secondOutput`) and deletes it from the response it
+hands back for posting; the server reads only `results.first` and refuses a
+response that still carries a second (`VaultCeremonies::assertNoSecondPrfOutput()`).
+An authenticator that returns only the first output is asked again with the
+second context alone, which gives the same bytes.
 
 **A context is DERIVED from its scope name, never declared.**
 `VaultScopes::prfContext($scope)` returns `vault-{scope}-kek`, with the single
@@ -299,7 +310,7 @@ verify action.
 No feature may *require* PRF support: `isPrfLikely()` is a coarse, best-effort
 probe (platform authenticator availability, or the client-capabilities API where
 present) — a consumer branches its UI on it but must still offer a non-PRF
-fallback (recovery codes, a bypass phrase) since some authenticators only reveal PRF
+fallback (recovery codes, and a passphrase where no passkey can hold a key) since some authenticators only reveal PRF
 support at the first real evaluation.
 
 ## Diagnostics

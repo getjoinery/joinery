@@ -1,14 +1,23 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
+/**
+ * Replace the vault's recovery codes with a set the browser made and is
+ * showing (specs/one_vault_experience.md § R6). The codes never reach this
+ * server: `code_set` carries the account half of each code's KEK, and
+ * `root_wrappings` the root vault's twin wrappings of the same codes, so one
+ * set keeps opening both. Both sides change in one transaction, under a fresh
+ * unlocker presented in this same request (specs/unseal_daemon.md B1); the
+ * old codes stay live until the new set is stored, so one of them can be the
+ * unlocker that replaces them all.
+ *
+ * @version 2.0
+ */
 function vault_regenerate_codes_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
-	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultCeremonies.php'));
-	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-	require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
-	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultClientCustody.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
 
 	$settings = Globalvars::get_instance();
 	if (!$settings->get_setting('passkeys_enabled')) {
@@ -34,76 +43,54 @@ function vault_regenerate_codes_logic(array $input): LogicResult {
 		return LogicResult::error('Your vault has an unfinished key rotation. Run the rotation again to complete it, then regenerate your codes.');
 	}
 
-	$code_count = isset($input['recovery_code_count']) ? (int)$input['recovery_code_count'] : 10;
-	$code_count = max(5, min(20, $code_count));
-
-	$box = new SealedBox();
-	$salt = (string)$vault->get('uev_salt');
-	$generation = (int)$vault->get('uev_key_generation');
-
-	// Mint the new set and retire the old codes in ONE transaction: a failure
-	// mid-mint (e.g. a malformed uev_salt failing the KEK derivation) must roll
-	// the retirement back too — recovery codes are the last-resort unlockers,
-	// so a failed regeneration must leave the existing set fully usable.
-	//
-	// The new wrappings are produced only under a fresh tap of an unlocker the
-	// vault already has, in this same request (specs/unseal_daemon.md B1). The
-	// old codes stay live until the new set is stored, so one of them can be
-	// the unlocker that replaces them all.
-	$db = DbConnector::get_instance()->get_db_link();
-	$recovery_codes = [];
 	try {
-		$db->beginTransaction();
+		$code_set = VaultCeremonies::codeSet($input['code_set'] ?? null);
+	} catch (VaultCeremonyException $e) {
+		return LogicResult::error($e->getMessage());
+	}
 
-		$old_codes = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_RECOVERY]);
-		$old_codes->load();
-		$old_rows = [];
-		foreach ($old_codes as $wrapping) {
-			$old_rows[] = $wrapping;
-		}
+	// The root vault's twin of the set, required: the codes are salted with
+	// the root's salt, and codes that opened one half would strand the other.
+	// An account from before the root existed gets it at its next passkey
+	// unlock, which also replaces its codes.
+	$root_wrappings = isset($input['root_wrappings']) && is_array($input['root_wrappings']) ? array_values($input['root_wrappings']) : array();
+	if (VaultClientCustody::loadVault((int)$user->key, VaultScopes::ROOT_SCOPE) === null) {
+		return LogicResult::error('Unlock your vault with your passkey first: that finishes setting it up, with new codes.');
+	}
+	if (!$root_wrappings) {
+		return LogicResult::error('Unlock your vault on this page first, so your new codes open all of it.', ['root_required' => true]);
+	}
 
-		$rows = [];
-		$wrap_under = [];
-		for ($i = 0; $i < $code_count; $i++) {
-			$code = $box->generateRecoveryCode();
-			$recovery_codes[] = $code;
-			$row = UserEncryptionWrapping::reserve($vault->key, UserEncryptionWrapping::TYPE_RECOVERY, null, null, $generation, $salt);
-			$rows[] = $row;
-			$wrap_under[] = $row->wrapEntry($box->kekFromRecoveryCode($code, $salt));
-		}
-
-		try {
-			$opened = (new VaultCeremonies())->openWithUnlocker($user, $vault, $input['unlocker'] ?? null, $wrap_under);
-		} catch (VaultCeremonyException $e) {
-			$db->rollBack();
-			return LogicResult::error($e->getMessage(), ['unlocker_required' => true]);
-		}
-		UserEncryptionWrapping::storeWrappings($rows, $opened['wrappings']);
-
-		foreach ($old_rows as $wrapping) {
-			$wrapping->soft_delete();
-		}
-
-		$db->commit();
+	$ceremonies = new VaultCeremonies();
+	try {
+		UserEncryptionWrapping::adoptCodeSet($vault, $code_set,
+			function (array $wrap_under) use ($ceremonies, $user, $vault, $input) {
+				return $ceremonies->openWithUnlocker($user, $vault, $input['unlocker'] ?? null, $wrap_under);
+			},
+			function () use ($user, $code_set, $root_wrappings) {
+				VaultClientCustody::replaceRootRecovery((int)$user->key, $code_set, $root_wrappings);
+			});
+	} catch (VaultCeremonyException $e) {
+		return LogicResult::error($e->getMessage(), ['unlocker_required' => true]);
+	} catch (VaultClientCustodyException $e) {
+		return LogicResult::error($e->getMessage());
 	} catch (Throwable $e) {
-		if ($db->inTransaction()) {
-			$db->rollBack();
-		}
 		error_log('Recovery code regeneration: could not replace the codes for vault ' . (int)$vault->key . ': ' . $e->getMessage());
 		return LogicResult::error('Could not regenerate your recovery codes - nothing was changed and your existing codes still work. Try again.');
 	}
 
-	return LogicResult::render(['recovery_codes' => $recovery_codes]);
+	return LogicResult::render(['replaced' => true, 'recovery_code_count' => count($code_set['entries'])]);
 }
 
 function vault_regenerate_codes_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Invalidate all existing recovery codes and issue a fresh set; requires a recent step-up and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase} or {code}) in the same request',
+		'description' => 'Replace every recovery code with a browser-made set (account halves of each code KEK, plus the root vault\'s wrappings of the same codes); requires a recent step-up and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase_kek} or {code_kek}) in the same request',
 		'input' => [
-			'recovery_code_count' => ['type' => 'int', 'required' => false, 'label' => 'Number of codes to issue (10 by default)'],
-			'unlocker' => ['type' => 'object', 'required' => false, 'label' => 'Fresh unlocker: {credential} from vault_unlock_options, {passphrase} or {code}'],
+			'code_set' => ['type' => 'object', 'required' => true, 'label' => 'Browser-made code set {id, entries:[{index, kek}]} (account halves only)'],
+			'root_wrappings' => ['type' => 'array', 'required' => true, 'items' => ['type' => 'object'], 'label' => 'The root vault\'s recovery wrappings of the same codes (code_set, code_index, wrapped_secret_key, salt)'],
+			'unlocker' => ['type' => 'object', 'required' => false, 'label' => 'Fresh unlocker: {credential} from vault_unlock_options, {passphrase_kek} or {code_kek}'],
 		],
 	];
 }

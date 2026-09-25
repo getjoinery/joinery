@@ -18,6 +18,8 @@
  * decision asks the alias; domain identity (DKIM, protected identity, DNS shape,
  * relay export) keeps asking the domain.
  *
+ * @version 1.7 - Fortress: an own 'fortress' reads as Fortress, seals_content() covers
+ *   Private and Fortress, is_fortress(), iea_relay_identity_pin
  * @version 1.6 - two settable levels, Standard and Private; the reserved
  *   end-to-end value reads as Private, like the domain's resolver
  * @version 1.5 - the SQL level helpers normalise case exactly as the PHP
@@ -60,6 +62,12 @@ class InboundEmailAlias extends SystemBase {
 		// (specs/mailbox_connect_flow.md § D). NULL is what every existing row
 		// means, so there is nothing to migrate. Read through security_level().
 		'iea_security_level'     => array('type'=>'varchar(16)', 'is_nullable'=>true),
+		// The relay identity the owner's browser pinned for this Fortress
+		// mailbox under Seal at the relay (specs/client_custody_mail.md § R10):
+		// JSON {relay_identity_public_key, mac}, the MAC made with a key only
+		// the owner's `mail` vault derives, so the server cannot forge or alter
+		// a pin the browser will accept. NULL until first use.
+		'iea_relay_identity_pin' => array('type'=>'text', 'is_nullable'=>true),
 		'iea_forward_count'      => array('type'=>'int4', 'default'=>'0'),
 		'iea_last_forward_time'  => array('type'=>'timestamp(6)'),
 		'iea_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -190,26 +198,34 @@ class InboundEmailAlias extends SystemBase {
 	 * has one, otherwise the domain's, and Standard for a stored value that is
 	 * not a level at all (the same rule the domain applies; the column is only
 	 * ever written through validated pickers).
+	 *
+	 * An own 'fortress' is Fortress. The old level model's mailbox-level value
+	 * of that name was converted to 'private' by mailbox migration
+	 * ied_003_private_with_addons, which runs in the same upgrade that ships
+	 * this reading; a row it has not reached yet seals to a `mail` vault its
+	 * owner does not hold, which holds the mail rather than storing it open.
 	 */
 	function security_level() {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 		$own = strtolower(trim((string)$this->get('iea_security_level')));
 		if ($own !== '') {
-			if ($own === InboundEmailDomain::LEVEL_FORTRESS) {
-				// Unconverted until mailbox migration ied_003_private_with_addons
-				// runs: its mail is sealed, so it reads as Private.
-				return InboundEmailDomain::LEVEL_PRIVATE;
-			}
 			return in_array($own, InboundEmailDomain::SETTABLE_LEVELS, true)
 				? $own : InboundEmailDomain::LEVEL_STANDARD;
 		}
 		return self::domainLevel(intval($this->get('iea_ied_inbound_email_domain_id')));
 	}
 
-	/** True when this mailbox seals stored content at rest (Private). */
+	/** True when this mailbox seals stored content at rest (Private or Fortress). */
 	function seals_content() {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
-		return $this->security_level() === InboundEmailDomain::LEVEL_PRIVATE;
+		return in_array($this->security_level(),
+			array(InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS), true);
+	}
+
+	/** True when this mailbox's mail seals end-to-end, to its owner's `mail` vault. */
+	function is_fortress() {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+		return $this->security_level() === InboundEmailDomain::LEVEL_FORTRESS;
 	}
 
 	/** True when this mailbox carries a level of its own rather than inheriting. */
@@ -251,7 +267,6 @@ class InboundEmailAlias extends SystemBase {
 			'SELECT 1 FROM iea_inbound_email_aliases
 			 WHERE iea_ied_inbound_email_domain_id = ? AND iea_delete_time IS NULL
 			   AND LOWER(TRIM(iea_security_level)) IN (?, ?) LIMIT 1');
-		// 'fortress' until mailbox migration ied_003_private_with_addons converts it.
 		$stmt->execute(array($domain_id, InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS));
 		return (bool)$stmt->fetchColumn();
 	}

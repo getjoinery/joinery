@@ -103,6 +103,9 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.33 - Fortress (specs/client_custody_mail.md): sealScopeForWrite()
+ *   answers `mail` for a Fortress mailbox, isBrowserSealed(), and the sealed
+ *   iem_search_text / iem_snippet / iem_attachment_manifest columns
  * @version 1.32 - iem_source_message_key, iem_source_gone_time, iem_push_attempts,
  *   iem_push_retry_after (specs/implemented/imap_client_hardening.md F6, F15, F11)
  * @version 1.31.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
@@ -161,6 +164,15 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 class InboundEmailMessageException extends SystemBaseException {}
 
+/**
+ * A server-side reader reached a Fortress row (InboundEmailMessage::
+ * isBrowserSealed()): its content is sealed to a key only the owner's devices
+ * hold, so there is nothing here to open. Readers that walk many rows check the
+ * predicate first and leave such a row out; this is what the ones that open a
+ * single named row throw (specs/client_custody_mail.md § R7).
+ */
+class MailboxBrowserSealedException extends RuntimeException {}
+
 class InboundEmailMessage extends SystemBase {
 	public static $prefix = 'iem';
 	public static $tablename = 'iem_inbound_email_messages';
@@ -211,7 +223,11 @@ class InboundEmailMessage extends SystemBase {
 	// on EVERY direction — who else a received message went to is as much the
 	// owner's business as who they wrote to — so they seal like iem_sender, with no
 	// direction guard.
-	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers', 'iem_to', 'iem_cc');
+	// iem_search_text / iem_snippet / iem_attachment_manifest exist only on a
+	// Fortress row (specs/client_custody_mail.md § R2), where the server can open
+	// nothing: they carry what the server derives from the plaintext on every
+	// other row (the search index input, the list preview, the attachment names).
+	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers', 'iem_to', 'iem_cc', 'iem_search_text', 'iem_snippet', 'iem_attachment_manifest');
 
 	// Sealing runs through this class's own sealAndPersistContent() /
 	// sealExistingRow() paths,
@@ -231,7 +247,7 @@ class InboundEmailMessage extends SystemBase {
 	 * same "the safe thing is the thing you have to remember" shape this file's
 	 * updateContentColumns() note describes.
 	 */
-	public static $optional_sealed_fields = array('iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers', 'iem_to', 'iem_cc');
+	public static $optional_sealed_fields = array('iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers', 'iem_to', 'iem_cc', 'iem_search_text', 'iem_snippet', 'iem_attachment_manifest');
 
 	// AI surface (docs/example_class.php § AI): recipes may read mail through the
 	// query_model tool. On a protected domain a locked row is EXCLUDED from
@@ -424,6 +440,22 @@ class InboundEmailMessage extends SystemBase {
 		// 42 characters. varchar(280) overflowed for any summary past ~170
 		// characters, so a sealed row's first summary was a Postgres error.
 		'iem_ai_summary'          => array('type'=>'text'),
+		// Fortress-only sealed fields (specs/client_custody_mail.md § R2), NULL on
+		// every other row. All 'text' for the reason iem_ai_summary gives: the
+		// column holds the sealed form, which outgrows any varchar sized for the
+		// plaintext.
+		//   iem_search_text — what the server's search index would fold (sender,
+		//     subject, bodies' readable text, attachment names), capped at 8192
+		//     characters; 'gz:' + base64(gzip) when that saves a third or more.
+		//     The browser matches search terms against it.
+		//   iem_snippet — the first 240 characters of the readable body: the
+		//     list preview.
+		//   iem_attachment_manifest — JSON [{id, filename, content_type,
+		//     content_id, mime_part, inline, size}]: the attachment names and
+		//     types, which the ima_ rows of a Fortress message leave blank.
+		'iem_search_text'         => array('type'=>'text', 'is_nullable'=>true),
+		'iem_snippet'             => array('type'=>'text', 'is_nullable'=>true),
+		'iem_attachment_manifest' => array('type'=>'text', 'is_nullable'=>true),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
 		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed
@@ -667,6 +699,257 @@ class InboundEmailMessage extends SystemBase {
 	}
 
 	/**
+	 * Which vault a row seals to (specs/client_custody_mail.md § R1): `mail`, the
+	 * owner's client-custody vault, when the row's mailbox is at Fortress; the
+	 * server-custody `user` vault otherwise. The mailbox answers — its own level
+	 * when it has one, else its domain's — and a row with no mailbox (catch-all,
+	 * domain-owned) follows its domain.
+	 *
+	 * sealColumns() writes the browser format for a client-custody vault, so the
+	 * ingest, Sent-copy and raise paths seal a Fortress row with the code that
+	 * seals a Private one; this decides only which vault row they are handed
+	 * (InboundEmailRouter::resolveSealTarget).
+	 */
+	protected static function sealScopeForWrite(array $row): string {
+		$alias_id  = intval($row['iem_iea_inbound_email_alias_id'] ?? 0);
+		$domain_id = intval($row['iem_ied_inbound_email_domain_id'] ?? 0);
+		return self::sealScopeFor($alias_id ?: null, $domain_id ?: null);
+	}
+
+	/** Per-request memo of sealScopeFor(), keyed by mailbox and domain. */
+	private static $seal_scope_memo = array();
+
+	/**
+	 * sealScopeForWrite() by ids, for a caller that has no row yet (ingest
+	 * resolves the vault before it inserts). Memoized for the request, because a
+	 * raise or a custody walk asks once per row; every save of a domain, mailbox
+	 * or grant forgets the memo (NotifiesRelayMapOnChange), so a level changed in
+	 * this request is read fresh.
+	 */
+	public static function sealScopeFor(?int $alias_id, ?int $domain_id): string {
+		$memo_key = intval($alias_id) . ':' . intval($domain_id);
+		if (isset(self::$seal_scope_memo[$memo_key])) {
+			return self::$seal_scope_memo[$memo_key];
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+		$level = InboundEmailDomain::LEVEL_STANDARD;
+		$alias = $alias_id ? new InboundEmailAlias($alias_id, TRUE) : null;
+		if ($alias && $alias->key) {
+			$level = $alias->security_level();
+		} elseif ($domain_id) {
+			$domain = new InboundEmailDomain($domain_id, TRUE);
+			if ($domain->key) {
+				$level = $domain->security_level();
+			}
+		}
+		return self::$seal_scope_memo[$memo_key] =
+			($level === InboundEmailDomain::LEVEL_FORTRESS) ? self::SEAL_SCOPE_FORTRESS : UserEncryptionVault::SCOPE_USER;
+	}
+
+	/** Forget sealScopeFor()'s memo — any level, mailbox or grant may have changed. */
+	public static function forgetSealScopes(): void {
+		self::$seal_scope_memo = array();
+	}
+
+	/** The client-custody vault scope Fortress mail seals to (plugin.json vaultScopes). */
+	const SEAL_SCOPE_FORTRESS = 'mail';
+
+	/**
+	 * $owner_id's vault for $scope (a sealScopeFor() answer), or null when they
+	 * hold none. The one place a mail path turns "whose key, which scope" into a
+	 * vault row, so no caller loads the server-custody vault for a Fortress
+	 * mailbox by habit.
+	 */
+	public static function loadSealVault(int $owner_id, string $scope): ?UserEncryptionVault {
+		if ($owner_id <= 0) {
+			return null;
+		}
+		if ($scope === UserEncryptionVault::SCOPE_USER) {
+			return UserEncryptionVault::loadForUser($owner_id);
+		}
+		return VaultClientCustody::loadVault($owner_id, $scope);
+	}
+
+	/** True when $vault is a client-custody vault: what it seals, only the owner's devices open. */
+	public static function isBrowserVault($vault): bool {
+		return static::vaultIsClientCustody($vault);
+	}
+
+	/** Search text longer than this is cut before sealing (specs/client_custody_mail.md § R2). */
+	const SEARCH_TEXT_MAX_CHARS = 8192;
+	/** The list preview a Fortress row carries in iem_snippet. */
+	const SNIPPET_MAX_CHARS = 240;
+	/** The content type a Fortress attachment's File is stored as: the real one is in the manifest. */
+	const FORTRESS_FILE_TYPE = 'application/octet-stream';
+
+	/**
+	 * What a Fortress row's search matches against: the recipe MailboxIndex
+	 * folds for a server-searched row (sender, subject, attachment names, plain
+	 * body, the HTML body's readable text), whitespace folded and cut at
+	 * SEARCH_TEXT_MAX_CHARS. The short fields lead, so the cap only ever trims
+	 * body text. Stored as 'gz:' + base64(gzip) when that is a third or more
+	 * shorter; the browser inflates it with DecompressionStream.
+	 *
+	 * @param array{sender?:string, subject?:string, body_plain?:string,
+	 *              readable_html?:string, filenames?:string[]} $parts
+	 */
+	public static function searchTextFor(array $parts): string {
+		$text = implode(' ', array(
+			(string)($parts['sender'] ?? ''), (string)($parts['subject'] ?? ''),
+			implode(' ', array_map('strval', $parts['filenames'] ?? array())),
+			(string)($parts['body_plain'] ?? ''), (string)($parts['readable_html'] ?? ''),
+		));
+		$text = trim((string)preg_replace('/\s+/u', ' ', $text));
+		if (mb_strlen($text, 'UTF-8') > self::SEARCH_TEXT_MAX_CHARS) {
+			$text = mb_substr($text, 0, self::SEARCH_TEXT_MAX_CHARS, 'UTF-8');
+		}
+		$gz = 'gz:' . base64_encode((string)gzencode($text, 9));
+		return (strlen($gz) * 3 <= strlen($text) * 2) ? $gz : $text;
+	}
+
+	/**
+	 * The list preview for a Fortress row: the plain body cleaned the way the
+	 * list cleans it (MailboxHtmlSanitizer::previewText), else the HTML body's
+	 * readable text, on one line, cut at SNIPPET_MAX_CHARS.
+	 */
+	public static function snippetFor(string $body_plain, string $readable_html): string {
+		$text = MailboxHtmlSanitizer::previewText(mb_substr($body_plain, 0, 4000, 'UTF-8'));
+		if ($text === '') {
+			$text = $readable_html;
+		}
+		$text = trim((string)preg_replace('/\s+/u', ' ', $text));
+		return mb_substr($text, 0, self::SNIPPET_MAX_CHARS, 'UTF-8');
+	}
+
+	/**
+	 * Seal a Fortress row's derived fields — search text, snippet, attachment
+	 * manifest — under the DEK its content was just sealed with. They are what
+	 * the server derives from plaintext for every other row, and on this one it
+	 * keeps none of it (specs/client_custody_mail.md § R2). Called by whoever
+	 * sealed the row, after its attachments exist, since the manifest names them.
+	 *
+	 * @param array $content  sender, subject, body_plain, body_html
+	 * @param array $manifest [{id, filename, content_type, content_id, mime_part, inline, size}]
+	 */
+	public static function sealFortressDerived(int $message_id, UserEncryptionVault $vault, string $dek,
+			array $content, array $manifest): void {
+		$html = (string)($content['body_html'] ?? '');
+		$readable = trim($html) === '' ? '' : MailboxHtmlSanitizer::toReadableText($html);
+		$plain = (string)($content['body_plain'] ?? '');
+		$filenames = array();
+		foreach ($manifest as $entry) {
+			if ((string)($entry['filename'] ?? '') !== '') {
+				$filenames[] = (string)$entry['filename'];
+			}
+		}
+		static::sealColumns($message_id, $vault, array(
+			'iem_search_text' => self::searchTextFor(array(
+				'sender' => (string)($content['sender'] ?? ''), 'subject' => (string)($content['subject'] ?? ''),
+				'body_plain' => $plain, 'readable_html' => $readable, 'filenames' => $filenames)),
+			'iem_snippet' => self::snippetFor($plain, $readable),
+			'iem_attachment_manifest' => json_encode(array_values($manifest), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+		), $dek);
+	}
+
+	/** One manifest entry for iem_attachment_manifest, from an ima_ row's values. */
+	public static function manifestEntry(int $attachment_id, ?string $filename, string $content_type,
+			?string $content_id, string $mime_part, bool $inline, int $size): array {
+		return array(
+			'id' => $attachment_id, 'filename' => (string)$filename, 'content_type' => $content_type,
+			'content_id' => (string)$content_id, 'mime_part' => $mime_part, 'inline' => $inline, 'size' => $size,
+		);
+	}
+
+	/**
+	 * Seal one attachment's bytes under the message DEK, bound to its MIME part
+	 * (attachmentAd()): the browser's `v1.edge.` field format for a Fortress row,
+	 * which the owner's browser opens with the DEK it already holds for the row,
+	 * the server's format otherwise.
+	 */
+	public static function sealAttachmentBytes(string $bytes, string $dek, int $message_id, string $mime_part,
+			bool $for_browser): string {
+		$crypto = new VaultCrypto();
+		$ad = self::attachmentAd($message_id, $mime_part);
+		return $for_browser ? $crypto->sealFieldForBrowser($bytes, $dek, $ad) : $crypto->sealField($bytes, $dek, $ad);
+	}
+
+	/**
+	 * The name a Fortress attachment's File is stored under: the message and
+	 * part it belongs to, nothing of the file itself. The File's name reaches
+	 * the blob store's object name, so the real one lives in the sealed
+	 * manifest only.
+	 */
+	public static function fortressAttachmentName(int $message_id, string $mime_part): string {
+		return 'mail-' . $message_id . '-part-' . preg_replace('/[^0-9A-Za-z]+/', '-', $mime_part) . '.bin';
+	}
+
+	/**
+	 * Throw MailboxBrowserSealedException for a Fortress row — the refusal a
+	 * server-custody tool gives instead of trying to open it.
+	 *
+	 * @param array|self $row
+	 */
+	public static function refuseBrowserSealed($row, string $what): void {
+		if (self::isBrowserSealed($row)) {
+			$id = is_array($row) ? intval($row['iem_inbound_email_message_id'] ?? 0) : intval($row->key);
+			throw new MailboxBrowserSealedException('Message ' . $id . ' is end-to-end encrypted: only its '
+				. 'owner\'s devices can open it, so ' . $what . ' cannot run on it here.');
+		}
+	}
+
+	/**
+	 * True when this row's content is sealed to a browser-held key: its DEK is a
+	 * `v1.edgeseal.` blob, which nothing on the server can open. The one
+	 * predicate every server-side reader of message content checks before it
+	 * touches a row (specs/client_custody_mail.md § R7) — such a row is left
+	 * out, never opened and never an error.
+	 *
+	 * @param array|self $row a raw row (keyed by column) or a loaded message
+	 */
+	public static function isBrowserSealed($row): bool {
+		$key = is_array($row) ? ($row['iem_sealed_key'] ?? '') : (is_object($row) ? $row->get('iem_sealed_key') : '');
+		return strncmp((string)$key, 'v1.edgeseal.', 12) === 0;
+	}
+
+	/**
+	 * A browser-sealed row's columns as the owner's browser opens them
+	 * (JoinerySealed.open): {key, sealed_scope, sealed_dek, sealed_ad_prefix}
+	 * plus each named column as stored, ciphertext untouched — the shape
+	 * SystemBase::export_for_api_sealed_for_browser() gives, for the raw-row
+	 * readers (the thread list, a thread, the search entries). Nothing here is
+	 * opened; the server holds no key that could.
+	 *
+	 * @param array    $row     a raw row carrying iem_inbound_email_message_id and iem_sealed_key
+	 * @param string[] $columns the sealed columns to carry
+	 */
+	public static function sealedForBrowser(array $row, array $columns): array {
+		$sealed_key = (string)($row['iem_sealed_key'] ?? '');
+		$out = array(
+			'key'              => intval($row['iem_inbound_email_message_id'] ?? 0),
+			'sealed_scope'     => (string)VaultCrypto::parseEdgeScope($sealed_key),
+			'sealed_dek'       => $sealed_key,
+			'sealed_ad_prefix' => static::sealedAdPrefix(),
+		);
+		foreach ($columns as $col) {
+			if (!in_array($col, static::$sealed_fields, true)) {
+				continue;
+			}
+			$value = $row[$col] ?? null;
+			if ($value === null || $value === '') {
+				continue;
+			}
+			// A plaintext column (an inbound row's routing recipient) is not
+			// ciphertext for the browser to open; it travels in the clear shape.
+			if (strncmp((string)$value, 'v1.edge.', 8) !== 0) {
+				continue;
+			}
+			$out[$col] = (string)$value;
+		}
+		return $out;
+	}
+
+	/**
 	 * The AD for a sealed attachment File's bytes — see sealAd(). Bound to the
 	 * MIME part id (e.g. "2", "1.2"), not the ima_ manifest row's serial id:
 	 * the part id is known before the manifest row is inserted (the seal
@@ -902,6 +1185,9 @@ class InboundEmailMessage extends SystemBase {
 	 */
 	public static function openSealedAttachment(InboundEmailMessage $msg, InboundMessageAttachment $att, string $bytes,
 			?File $file = null): string {
+		// A Fortress attachment opens in its owner's browser, under the row DEK
+		// only that browser can unseal (specs/client_custody_mail.md § R4).
+		self::refuseBrowserSealed($msg, 'opening an attachment');
 		// Self-sealed File first: it carries its own key, so nothing about the
 		// message is consulted. A redeemed serve grant (includes/
 		// FileServeGrant.php) supplies the key on a cookie-less signed fetch;
@@ -952,6 +1238,9 @@ class InboundEmailMessage extends SystemBase {
 	 * already-persisted draft attachments (sealed under that DEK) readable.
 	 */
 	public static function unwrapDekInWindow(int $owner_id, string $sealed_key): ?string {
+		if (strncmp($sealed_key, 'v1.edgeseal.', 12) === 0) {
+			return null;   // a Fortress row: no window here opens it
+		}
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 		$key = VaultUnlock::secretKey($owner_id);
@@ -964,6 +1253,7 @@ class InboundEmailMessage extends SystemBase {
 
 	/** @return array{crypto:VaultCrypto,dek:string} */
 	private static function openMessageDekCrypto(int $owner_id, string $sealed_key): array {
+		self::refuseBrowserSealed(array('iem_sealed_key' => $sealed_key), 'opening its key');
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 
@@ -1136,6 +1426,11 @@ class InboundEmailMessage extends SystemBase {
 		$stmt = $db->prepare('SELECT * FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
 		$stmt->execute(array($message_id));
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if ($row) {
+			// Lowering a Fortress row is its owner's browser's walk
+			// (JoinerySealed.changeCustody), never this server-custody pass.
+			self::refuseBrowserSealed($row, 'unsealing');
+		}
 		if (!$row || empty($row['iem_sealed_key']) || $owner_id === null) {
 			return false;
 		}

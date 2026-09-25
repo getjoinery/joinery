@@ -23,6 +23,7 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.4 - the one vault: the root, one touch, one set of codes, content vaults through the root
  * @version 1.3 - rotationPlan()/showRecoveryCodes()/sessionFrom() for a key rotation;
  *   ensureUnlocked({pending}) opens a rotation's new key; buildWrappings() shared with setup
  * @version 1.2 - a close during the recovery-codes step re-opens it (setup is already
@@ -95,6 +96,14 @@ window.VaultKeyring = (function () {
 			wrapUnder: function (kek, type, credentialId) {
 				if (secret === null) return Promise.reject(new Error('Vault is locked.'));
 				return VaultCrypto.wrapSecretKey(secret, kek, adFor(scope, type, credentialId));
+			},
+			// The root vault only: the key a content vault's `root` wrapping is
+			// under (specs/one_vault_experience.md § R2). The root's secret
+			// never leaves this closure; each content vault gets its own key.
+			scopeKek: function (targetScope) {
+				if (scope !== ROOT) return Promise.reject(new Error('Only your vault derives the others\' keys.'));
+				if (secret === null) return Promise.reject(new Error('Vault is locked.'));
+				return VaultCrypto.scopeKek(secret, targetScope);
 			},
 			lock: function () {
 				if (secret) { secret.fill(0); secret = null; }
@@ -748,6 +757,328 @@ window.VaultKeyring = (function () {
 		});
 	}
 
+	// ---- the one vault (specs/one_vault_experience.md) -------------------------
+	// Two kinds of key stay two: the account vault (server custody, opened by
+	// the vault_* actions) and the browser-held ones. The ROOT vault joins them:
+	// a browser-held vault every unlocker opens — the passkey's second output
+	// from the same touch, each recovery code's root half, the passphrase's root
+	// half — and whose secret derives each content vault's key (`root`
+	// wrappings). One touch opens the account vault and the root; the root opens
+	// everything else here, in the browser. Its salt keys every code and phrase
+	// derivation (VaultCrypto.codeKeks/passphraseKeks), and only the account
+	// halves are ever posted.
+
+	var ROOT = 'root';
+
+	function rootAd(type, credentialId) { return adFor(ROOT, type, credentialId); }
+
+	// A fresh root vault's keys, made before anything is posted.
+	async function newRoot() {
+		var pair = await VaultCrypto.generateVaultKeypair();
+		return { pair: pair, salt: VaultCrypto.b64encode(VaultCrypto.randomBytes(16)), kdfParams: VaultCrypto.DEFAULT_KDF_PARAMS };
+	}
+
+	// A new set of recovery codes for the root salt: the codes to show, the
+	// code_set to post (account halves), and each code's root half kept here.
+	async function makeCodeSet(rootSaltB64, count) {
+		count = count || DEFAULT_RECOVERY_COUNT;
+		var id = Array.prototype.map.call(VaultCrypto.randomBytes(16), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+		var codes = [], entries = [], rootKeks = [];
+		for (var i = 0; i < count; i++) {
+			var code = generateRecoveryCode();
+			var k = await VaultCrypto.codeKeks(code, rootSaltB64);
+			codes.push(code);
+			entries.push({ index: i, kek: VaultCrypto.b64urlEncode(k.account) });
+			k.account.fill(0);
+			rootKeks.push(k.root);
+		}
+		return { codes: codes, post: { id: id, entries: entries }, rootKeks: rootKeks, salt: rootSaltB64 };
+	}
+
+	// The root's recovery wrappings of a set: wrap(kek, type) wraps the root's
+	// secret (a root session's wrapUnder, or a fresh secret's).
+	async function rootCodeWrappings(set, wrap) {
+		var out = [];
+		for (var i = 0; i < set.rootKeks.length; i++) {
+			out.push({ unlocker_type: 'recovery', salt: set.salt, code_set: set.post.id, code_index: i,
+				wrapped_secret_key: await wrap(set.rootKeks[i], 'recovery') });
+		}
+		return out;
+	}
+
+	function freshWrap(secretBytes) {
+		return function (kek, type, credentialId) {
+			return VaultCrypto.wrapSecretKey(secretBytes, kek, rootAd(type, credentialId));
+		};
+	}
+
+	/**
+	 * The root vault to post beside a new account vault or a code set it adopts
+	 * (VaultClientCustody::createVault's input). opts: { passkey: {credentialId,
+	 * kek}, phraseRootKek }. Resolves { payload, session }.
+	 */
+	async function rootPayload(fresh, set, opts) {
+		opts = opts || {};
+		var wrap = freshWrap(fresh.pair.secretKeyBytes);
+		var wrappings = [];
+		if (opts.passkey) {
+			wrappings.push({ unlocker_type: 'passkey', credential_id: opts.passkey.credentialId,
+				wrapped_secret_key: await wrap(opts.passkey.kek, 'passkey', opts.passkey.credentialId) });
+		}
+		if (opts.phraseRootKek) {
+			wrappings.push({ unlocker_type: 'passphrase', salt: fresh.salt,
+				wrapped_secret_key: await wrap(opts.phraseRootKek, 'passphrase') });
+		}
+		wrappings = wrappings.concat(await rootCodeWrappings(set, wrap));
+		return {
+			payload: { public_key: fresh.pair.publicKeyB64, salt: fresh.salt, kdf_params: fresh.kdfParams, wrappings: wrappings },
+			session: makeSession(ROOT, fresh.pair.secretKeyBytes, fresh.pair.publicKeyB64),
+		};
+	}
+
+	// Open the root from its keyring view with a KEK for one of its wrappings.
+	// Resolves a session, or null when no wrapping of that kind opens.
+	async function openRoot(rootSt, kek, type, credentialId) {
+		if (!rootSt || !rootSt.set_up) return null;
+		var list = (rootSt.wrappings || []).filter(function (w) {
+			return w.unlocker_type === type && (type !== 'passkey' || w.credential_id === credentialId)
+				&& !(type === 'recovery' && w.is_used);
+		});
+		for (var i = 0; i < list.length; i++) {
+			try {
+				var secret = await VaultCrypto.unwrapSecretKey(list[i].wrapped_secret_key, kek, rootAd(type, credentialId));
+				return makeSession(ROOT, secret, rootSt.public_key);
+			} catch (e) { /* not this one */ }
+		}
+		return null;
+	}
+
+	// A content vault's session through the root. Resolves null when the vault
+	// has no `root` wrapping yet (made before the root existed).
+	async function openThroughRoot(rootSession, scope, st) {
+		var w = (st.wrappings || []).find(function (x) { return x.unlocker_type === 'root'; });
+		if (!w) return null;
+		var kek = await rootSession.scopeKek(scope);
+		var secret = await VaultCrypto.unwrapSecretKey(w.wrapped_secret_key, kek, adFor(scope, 'root'));
+		var s = makeSession(scope, secret, st.public_key);
+		s.label = st.label;
+		return s;
+	}
+
+	// Give a content vault opened some other way its `root` wrapping, so the
+	// next touch opens it with everything else. Best effort.
+	async function addRootWrapping(rootSession, scope, contentSession) {
+		var kek = await rootSession.scopeKek(scope);
+		var blob = await contentSession.wrapUnder(kek, 'root');
+		return api('vault_client_add_wrapping', { scope: scope, wrapping: { unlocker_type: 'root', wrapped_secret_key: blob } });
+	}
+
+	// Create a content vault silently, the first time a feature needs it while
+	// the root is open (§ R4): nothing to set up, nothing to remember.
+	async function createThroughRoot(rootSession, scope, label) {
+		var pair = await VaultCrypto.generateVaultKeypair();
+		var kek = await rootSession.scopeKek(scope);
+		var blob = await VaultCrypto.wrapSecretKey(pair.secretKeyBytes, kek, adFor(scope, 'root'));
+		await api('vault_client_setup', {
+			scope: scope, public_key: pair.publicKeyB64, salt: VaultCrypto.b64encode(VaultCrypto.randomBytes(16)),
+			acknowledged: 1, wrappings: [{ unlocker_type: 'root', wrapped_secret_key: blob }],
+		});
+		var s = makeSession(scope, pair.secretKeyBytes, pair.publicKeyB64);
+		s.label = label;
+		return s;
+	}
+
+	/**
+	 * A content vault's session with the root open: through its `root`
+	 * wrapping, or created on the spot when it does not exist yet. Resolves
+	 * null for a vault made before the root (its own ceremony opens it once;
+	 * the caller then adds the root wrapping).
+	 */
+	async function contentSession(rootSession, scope) {
+		var st = await status(scope);
+		if (!st.set_up) return createThroughRoot(rootSession, scope, st.label);
+		return openThroughRoot(rootSession, scope, st);
+	}
+
+	// A passkey touch for the root alone, for an authenticator that returned
+	// only the first output. Resolves { kek, credentialId } or rejects.
+	async function rootPasskeyKek() {
+		return derivePasskeyKek(ROOT);
+	}
+
+	// Import a base64url PRF output as a KEK.
+	function prfKek(b64url) { return VaultCrypto.kekFromPrf(b64url); }
+
+	/**
+	 * The one touch (§ R1). Asks the passkey for both outputs, posts the first
+	 * only (JoineryPasskeys.derive has already taken the second out), and — for
+	 * an account whose codes predate code sets — makes the new set and the root
+	 * vault in the same request (§ R6). Resolves { res, second, credentialId,
+	 * codes }: codes is the new set to show, or null.
+	 */
+	async function passkeyUnlock(st) {
+		var opt = await api('vault_unlock_options', { with_root: 1 });
+		if (!opt || !opt.options) throw new Error('Could not start unlock.');
+		var derived = await JoineryPasskeys.derive(opt.options);
+		var credentialId = derived.response.rawId || derived.response.id;
+		var body = { credential: derived.response };
+		var codes = null, made = null;
+		if (!st.has_code_set) {
+			var rootSt = st.root || {};
+			if (rootSt.set_up) {
+				// A root without a set cannot be: codes and root are made together.
+				throw new Error('Your vault needs attention. Reload the page and try again.');
+			}
+			var fresh = await newRoot();
+			var set = await makeCodeSet(fresh.salt);
+			var secondKek = derived.secondOutput ? await prfKek(derived.secondOutput) : (await rootPasskeyKek()).kek;
+			made = await rootPayload(fresh, set, { passkey: { credentialId: credentialId, kek: secondKek } });
+			body.adopt_code_set = set.post;
+			body.root = made.payload;
+			codes = set.codes;
+		}
+		var res = await api('vault_unlock_passkey', body);
+		// The server adopts only when it can (not during an unfinished
+		// rotation): otherwise the codes and the root made here were not kept.
+		if (made && !(res && res.code_set_adopted)) {
+			made.session.lock();
+			made = null;
+			codes = null;
+		}
+		return { res: res, second: derived.secondOutput, credentialId: credentialId, codes: codes,
+			rootSession: made ? made.session : null };
+	}
+
+	// The passphrase: one Argon2id run, the account half posted, the root half
+	// kept. Resolves { res, rootSession }.
+	async function passphraseUnlock(st, phrase) {
+		var rootSt = st.root || {};
+		if (!rootSt.set_up) throw new Error('Your vault is not set up for a passphrase on this account.');
+		var k = await VaultCrypto.passphraseKeks(phrase, rootSt.salt, rootSt.kdf_params);
+		var res = await api('vault_unlock_passphrase', { passphrase_kek: VaultCrypto.b64urlEncode(k.account) });
+		k.account.fill(0);
+		return { res: res, rootSession: await openRoot(rootSt, k.root, 'passphrase') };
+	}
+
+	// A recovery code: the account half posted, which spends it with its root
+	// twin; the twin comes back and the root half opens it here.
+	async function codeUnlock(st, code) {
+		var rootSt = st.root || {};
+		if (!rootSt.set_up) throw new Error('That code is from a set this account no longer uses. Unlock with your passkey instead.');
+		var k = await VaultCrypto.codeKeks(code, rootSt.salt);
+		var res = await api('vault_unlock_recovery', { code_kek: VaultCrypto.b64urlEncode(k.account) });
+		k.account.fill(0);
+		var root = null;
+		if (res && res.root_wrapping) {
+			try {
+				var secret = await VaultCrypto.unwrapSecretKey(res.root_wrapping.wrapped_secret_key, k.root, rootAd('recovery'));
+				root = makeSession(ROOT, secret, rootSt.public_key);
+			} catch (e) { root = null; }
+		}
+		return { res: res, rootSession: root };
+	}
+
+	/**
+	 * A fresh unlocker for an enrolment (§ R6, R7: the server takes KEKs, never
+	 * a code or a phrase), opening the root on the way where it can. method is
+	 * 'passkey', 'passphrase' or 'code'; value the phrase or code. Resolves
+	 * { unlocker, rootSession }.
+	 */
+	async function enrolmentUnlocker(st, method, value) {
+		var rootSt = st.root || {};
+		if (method === 'passkey') {
+			var opt = await api('vault_unlock_options', { with_root: 1 });
+			var derived = await JoineryPasskeys.derive(opt.options);
+			var credentialId = derived.response.rawId || derived.response.id;
+			var root = derived.secondOutput ? await openRoot(rootSt, await prfKek(derived.secondOutput), 'passkey', credentialId) : null;
+			return { unlocker: { credential: derived.response }, rootSession: root };
+		}
+		if (!rootSt.set_up) throw new Error('Unlock your vault with your passkey first: that finishes setting it up.');
+		if (method === 'passphrase') {
+			var p = await VaultCrypto.passphraseKeks(value, rootSt.salt, rootSt.kdf_params);
+			var u = { passphrase_kek: VaultCrypto.b64urlEncode(p.account) };
+			p.account.fill(0);
+			return { unlocker: u, rootSession: await openRoot(rootSt, p.root, 'passphrase') };
+		}
+		var c = await VaultCrypto.codeKeks(value, rootSt.salt);
+		var cu = { code_kek: VaultCrypto.b64urlEncode(c.account) };
+		c.account.fill(0);
+		return { unlocker: cu, rootSession: await openRoot(rootSt, c.root, 'recovery') };
+	}
+
+	/**
+	 * A new set of codes for an account whose root is open: the set to post
+	 * (account halves) and the root's twins, made with the root session.
+	 * Resolves { codes, code_set, root_wrappings }.
+	 */
+	async function replacementCodes(rootSt, rootSession, count) {
+		var set = await makeCodeSet(rootSt.salt, count);
+		var twins = await rootCodeWrappings(set, function (kek, type) { return rootSession.wrapUnder(kek, type); });
+		return { codes: set.codes, code_set: set.post, root_wrappings: twins };
+	}
+
+	/**
+	 * A passphrase's two halves for an enrolment with the root open: the
+	 * account KEK to post and the root's wrapping of the same phrase.
+	 */
+	async function passphraseEnrolment(rootSt, rootSession, phrase) {
+		var k = await VaultCrypto.passphraseKeks(phrase, rootSt.salt, rootSt.kdf_params);
+		var out = {
+			passphrase_kek: VaultCrypto.b64urlEncode(k.account),
+			root_passphrase: { unlocker_type: 'passphrase', salt: rootSt.salt,
+				wrapped_secret_key: await rootSession.wrapUnder(k.root, 'passphrase') },
+		};
+		k.account.fill(0);
+		return out;
+	}
+
+	/**
+	 * First-time setup of the account vault and the root together (§ R4, R6):
+	 * the codes are made here and shown once the server has both. opts:
+	 * { acknowledged, passphrase } — a passphrase only for an account whose
+	 * passkeys cannot hold a key (R8), in which case no passkey is used.
+	 * Resolves { result, codes, rootSession }.
+	 */
+	async function setupVault(opts) {
+		opts = opts || {};
+		var fresh = await newRoot();
+		var set = await makeCodeSet(fresh.salt);
+		if (opts.passphrase) {
+			var k = await VaultCrypto.passphraseKeks(opts.passphrase, fresh.salt, fresh.kdfParams);
+			var made = await rootPayload(fresh, set, { phraseRootKek: k.root });
+			var result = await api('vault_setup_passphrase', { acknowledged: 1,
+				passphrase_kek: VaultCrypto.b64urlEncode(k.account), code_set: set.post, root: made.payload });
+			k.account.fill(0);
+			return { result: result, codes: set.codes, rootSession: made.session };
+		}
+		var opt = await api('vault_setup_options', { with_root: 1 });
+		var derived = await JoineryPasskeys.derive(opt.options);
+		if (!derived.prfOutput) {
+			// The server records a passkey that cannot hold a key (it is what
+			// makes the passphrase route available) and refuses with
+			// prf_unsupported: post the attempt for it to see.
+			await api('vault_setup_verify', { acknowledged: 1, credential: derived.response, code_set: set.post, root: {} });
+			throw new Error('This passkey did not return a derived secret.');
+		}
+		var credentialId = derived.response.rawId || derived.response.id;
+		var secondKek = derived.secondOutput ? await prfKek(derived.secondOutput) : (await rootPasskeyKek()).kek;
+		var madeP = await rootPayload(fresh, set, { passkey: { credentialId: credentialId, kek: secondKek } });
+		var res = await api('vault_setup_verify', { acknowledged: 1, credential: derived.response, code_set: set.post, root: madeP.payload });
+		return { result: res, codes: set.codes, rootSession: madeP.session };
+	}
+
+	/**
+	 * Give the root a wrapping for a passkey that opens the account vault but
+	 * not yet the root (enrolled before the root existed, or just added):
+	 * secondOutput is that passkey's root output from its own touch.
+	 */
+	async function addRootPasskey(rootSession, credentialId, secondOutput) {
+		var kek = await prfKek(secondOutput);
+		var blob = await rootSession.wrapUnder(kek, 'passkey', credentialId);
+		return api('vault_client_add_wrapping', { scope: ROOT, wrapping: {
+			unlocker_type: 'passkey', credential_id: credentialId, wrapped_secret_key: blob } });
+	}
+
 	return {
 		DEFAULT_RECOVERY_COUNT: DEFAULT_RECOVERY_COUNT,
 		ensureUnlocked: ensureUnlocked,
@@ -762,5 +1093,21 @@ window.VaultKeyring = (function () {
 		unlockWithPasskey: unlockWithPasskey,
 		unlockWithPassphrase: unlockWithPassphrase,
 		unlockWithRecovery: unlockWithRecovery,
+		// the one vault
+		ROOT: ROOT,
+		makeCodeSet: makeCodeSet,
+		openRoot: openRoot,
+		openThroughRoot: openThroughRoot,
+		contentSession: contentSession,
+		addRootWrapping: addRootWrapping,
+		addRootPasskey: addRootPasskey,
+		rootPasskeyKek: rootPasskeyKek,
+		passkeyUnlock: passkeyUnlock,
+		passphraseUnlock: passphraseUnlock,
+		codeUnlock: codeUnlock,
+		enrolmentUnlocker: enrolmentUnlocker,
+		replacementCodes: replacementCodes,
+		passphraseEnrolment: passphraseEnrolment,
+		setupVault: setupVault,
 	};
 })();

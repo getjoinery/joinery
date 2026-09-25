@@ -19,6 +19,7 @@
  *
  * Run: php plugins/mailbox/tests/forward_and_store_ordering_test.php  (schema synced).
  *
+ * @version 1.2 - the persistRawAndManifest() override follows its signature (Fortress flag, manifest return)
  * @version 1.1 - teardown goes through mailbox_purge_domains(), which also removes the
  *   send attempts a forward records; the hand-rolled copy left one per alias behind
  * @version 1.0
@@ -48,11 +49,12 @@ class ForwardStoreProbeRouter extends InboundEmailRouter {
 		return $map;
 	}
 
-	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null) {
+	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null,
+			bool $for_browser = false): array {
 		if ($this->fail_store) {
 			throw new \RuntimeException('forced store failure (simulating store backend down)');
 		}
-		parent::persistRawAndManifest($message_id, $raw_email, $alias, $dek);
+		return parent::persistRawAndManifest($message_id, $raw_email, $alias, $dek, $for_browser);
 	}
 
 	protected function checkAliasRateLimit($alias_id) {

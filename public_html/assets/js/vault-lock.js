@@ -4,7 +4,7 @@
  * The platform-wide "you're locked" idiom: every signed-in page for a user
  * with a set-up server-custody vault shows a padlock in a fixed place —
  * closed while the vault is locked (click runs the unlock ceremony right
- * there: a passkey, the bypass phrase or a recovery code, whichever it has), open while an unlock window is live (click opens a
+ * there: a passkey, the passphrase or a recovery code, whichever it has), open while an unlock window is live (click opens a
  * small popover with a Lock now control). PublicPageBase includes this script
  * only when the user's vault exists and emits
  * <meta name="joinery-vault" content="locked|open" data-idle-minutes="30">.
@@ -31,13 +31,19 @@
  * phrase, new recovery codes): a wrapping is produced only in the request
  * that proved it may be (specs/unseal_daemon.md B1).
  *
- * One chip for every vault: it reads open while the server window OR any
- * vault this browser holds (JoinerySealed.openScopes()) is open, and its
- * popover lists each open vault with its own Lock now. The meta's
- * data-server-vault="0" means this person has no server vault: the chip then
- * shows only while a browser-held vault is open. It follows
- * 'joinery:vault-scope-unlocked' / 'joinery:vault-scope-locked' for those.
+ * One chip, one vault (specs/one_vault_experience.md § R3): it reads open
+ * only while the account vault's window is open (when there is one) and every
+ * browser-held vault that should be — the root (data-root-vault="1") and each
+ * one the page reads (JoinerySealed.want). Its menu is one line: Unlock runs
+ * the one ceremony, Lock now locks everything. The meta's data-server-vault="0"
+ * means this person has no account vault: the chip then shows only while a
+ * browser-held vault is open. It follows 'joinery:vault-scope-unlocked' /
+ * 'joinery:vault-scope-locked' for those.
  *
+ * @version 2.0 - the one vault: one unlock opens the account vault, the root and every browser-held vault;
+ *   one line in the menu; Lock now locks everything; the server gets KEKs, never a code or a phrase
+ * @version 1.6 - the chip reads open only when every vault the page needs is open
+ *   (JoinerySealed.want); its menu offers Unlock for each one still shut
  * @version 1.5 - a bypass phrase or recovery code opens the vault on its own, with no step-up page
  * @version 1.4 - unlock() offers every method the vault has, not only a passkey
  * @version 1.3 - one chip for the server window and browser-held vaults
@@ -53,7 +59,7 @@
 	var state = meta && meta.getAttribute('content') === 'open' ? 'open' : 'locked';
 	var idleMinutes = meta ? parseInt(meta.getAttribute('data-idle-minutes'), 10) || 30 : 30;
 	var serverVault = !meta || meta.getAttribute('data-server-vault') !== '0';
-	var serverLabel = (meta && meta.getAttribute('data-server-label')) || 'Mail & messages vault';
+	var rootVault = !!meta && meta.getAttribute('data-root-vault') === '1';
 	var chip = null;
 	var popover = null;
 	var busy = false;
@@ -65,15 +71,35 @@
 		return window.joineryApi.post(action, payload || {});
 	}
 
-	// Run the unlock ceremony; resolves true on success. This is THE shared
-	// ceremony — consumer surfaces delegate here so every unlock updates the
-	// chip and announces itself. It offers what the vault has (a passkey, the
-	// bypass phrase, a recovery code), the same choices collectUnlocker() does:
-	// a vault with no working passkey still opens from any page.
-	async function unlock() {
+	// What the vault can be opened with, from vault_status.
+	function choicesFor(status) {
+		var choices = [];
+		if (status.passkey_wrapping_count > 0 && window.JoineryPasskeys) { choices.push('passkey'); }
+		if (status.has_passphrase) { choices.push('passphrase'); }
+		if (status.unused_recovery_code_count > 0) { choices.push('code'); }
+		return choices;
+	}
+
+	function keyringReady() {
+		return !!(window.VaultKeyring && VaultKeyring.passkeyUnlock && window.VaultCrypto && window.JoinerySealed);
+	}
+
+	// Run the one unlock (specs/one_vault_experience.md § R3); resolves true on
+	// success. THE shared ceremony: one touch opens the account vault, the root
+	// vault from the same touch, and through the root every browser-held vault
+	// — consumer surfaces delegate here so every unlock updates the chip and
+	// announces itself. It offers what the vault has (a passkey, the
+	// passphrase, a recovery code), the same choices collectUnlocker() does.
+	// The server is sent the account half of a KEK, never a code or a phrase.
+	async function unlock(opts) {
+		opts = opts || {};
 		if (busy) { return false; }
 		if (!window.JoineryModal) {
 			alert('Unlocking is unavailable on this page.');
+			return false;
+		}
+		if (!keyringReady()) {
+			JoineryModal.alert('This page could not load what unlocking needs. Reload it and try again.');
 			return false;
 		}
 		busy = true;
@@ -81,36 +107,69 @@
 		try {
 			var status = await api('vault_status', {});
 			if (!status || !status.set_up) { throw new Error('Set up your vault first, on your security page.'); }
-			var choices = [];
-			if (status.passkey_wrapping_count > 0 && window.JoineryPasskeys) { choices.push('passkey'); }
-			if (status.has_passphrase) { choices.push('passphrase'); }
-			if (status.unused_recovery_code_count > 0) { choices.push('code'); }
+			var choices = choicesFor(status);
 			if (!choices.length) {
-				throw new Error('Nothing can unlock your vault here: it has no working passkey, bypass phrase or recovery code.');
+				throw new Error('Nothing can unlock your vault here: it has no working passkey, passphrase or recovery code.');
 			}
-			var method = choices.length === 1 ? choices[0] : await chooseUnlocker('to unlock your vault', choices);
+			var method = choices.length === 1 ? choices[0]
+				: await chooseUnlocker(opts.reason ? opts.reason : 'to unlock your vault', choices);
 			if (!method) { return false; }
-			var res;
+			var res, root = null, heal = null, codes = null;
 			if (method === 'passkey') {
-				var opt = await api('vault_unlock_options', {});
-				if (!opt || !opt.options) { throw new Error('Could not start unlock.'); }
-				var credential = (await JoineryPasskeys.derive(opt.options)).response;
-				res = await api('vault_unlock_passkey', { credential: credential });
+				var r = await VaultKeyring.passkeyUnlock(status);
+				res = r.res;
+				root = r.rootSession;
+				codes = r.codes;
+				if (!root && status.root && status.root.set_up) {
+					if (r.second) {
+						root = await VaultKeyring.openRoot(status.root, await VaultCrypto.kekFromPrf(r.second), 'passkey', r.credentialId);
+						// This passkey opens the account vault but not yet the root:
+						// once the root is open another way, it learns this one.
+						if (!root) { heal = { credentialId: r.credentialId, second: r.second }; }
+					} else {
+						// An authenticator that returns one output: a second touch for the root.
+						try {
+							var d = await VaultKeyring.rootPasskeyKek();
+							root = await VaultKeyring.openRoot(status.root, d.kek, 'passkey', d.credentialId);
+						} catch (e) { root = null; }
+					}
+				}
 			} else if (method === 'passphrase') {
-				var phrase = await JoineryModal.promptAsync('Enter your bypass phrase:',
+				var phrase = await JoineryModal.promptAsync('Enter your passphrase:',
 					{ inputType: 'password', confirmLabel: 'Unlock', confirmStyle: 'primary' });
 				if (!phrase) { return false; }
-				res = await api('vault_unlock_passphrase', { passphrase: phrase });
+				var p = await VaultKeyring.passphraseUnlock(status, phrase);
+				res = p.res;
+				root = p.rootSession;
 			} else {
 				var code = await JoineryModal.promptAsync('Enter a recovery code. The code is used up by this:',
 					{ confirmLabel: 'Unlock', confirmStyle: 'primary' });
 				if (!code) { return false; }
-				res = await api('vault_unlock_recovery', { code: code });
+				var c = await VaultKeyring.codeUnlock(status, code);
+				res = c.res;
+				root = c.rootSession;
 			}
 			if (res && res.success === false) { throw new Error(res.message || 'Unlock failed.'); }
 			setState('open');
 			document.dispatchEvent(new CustomEvent('joinery:vault-unlocked'));
-			if (res && res.regenerate_recommended) {
+
+			if (!root && heal) { root = await openRootAnotherWay(status); }
+			if (root) {
+				JoinerySealed.adopt(VaultKeyring.ROOT, root);
+				if (heal) {
+					VaultKeyring.addRootPasskey(root, heal.credentialId, heal.second).catch(function () { /* asks again next time */ });
+				}
+				await JoinerySealed.openAllThroughRoot(status.content || {});
+			}
+			render();
+			if (codes) {
+				await VaultKeyring.showRecoveryCodes(VaultKeyring.ROOT, 'vault', codes,
+					'Your vault has new recovery codes: one set now opens all of it, including end-to-end content. '
+					+ 'Your old codes no longer work. This is the only time these are shown. Download them, or copy them somewhere safe and type the last one below.');
+			}
+			if (res && res.passphrase_removed) {
+				JoineryModal.alert('Your passphrase was removed: your passkey can hold your key, and your recovery codes cover a lost device.');
+			} else if (res && res.regenerate_recommended) {
 				JoineryModal.alert('Unlocked. Fewer than 3 unused recovery codes remain — make a new set on your security page.');
 			}
 			return true;
@@ -130,46 +189,69 @@
 		}
 	}
 
+	// The passkey opened the account vault but not the root (it was enrolled
+	// before the root existed): offer the passkey the root was set up with.
+	async function openRootAnotherWay(status) {
+		var go = await new Promise(function (resolve) {
+			var picked = false;
+			var text = document.createElement('p');
+			text.textContent = 'Your vault is open, but this passkey does not open its end-to-end part yet. '
+				+ 'Use the passkey you set your vault up with, once, and this one will open everything from then on.';
+			var handle = JoineryModal.open(text, { buttons: [
+				{ label: 'Use another passkey', style: 'primary', onClick: function () { picked = true; } },
+				{ label: 'Not now', style: 'secondary' },
+			] });
+			handle.dialog.addEventListener('close', function () { resolve(picked); }, { once: true });
+		});
+		if (!go) { return null; }
+		try {
+			var d = await VaultKeyring.rootPasskeyKek();
+			var root = await VaultKeyring.openRoot(status.root, d.kek, 'passkey', d.credentialId);
+			if (!root) { JoineryModal.alert('That passkey does not open it either.'); }
+			return root;
+		} catch (e) {
+			return null;
+		}
+	}
+
 	// A fresh unlocker for an enrolment. Resolves {credential} (a vault-kek
-	// assertion from a passkey that already unlocks the vault), {passphrase}
-	// or {code}, which the caller sends as `unlocker` beside its own request —
-	// or null when the person backed out of the prompt. `purpose` reads in the
-	// prompts: "to let this passkey open your vault". Which methods are
-	// offered follows what the vault actually has enrolled; with exactly one
-	// there is nothing to choose and the prompt for it opens directly.
+	// assertion from a passkey that already unlocks the vault), {passphrase_kek}
+	// or {code_kek} (the account half, derived here: the phrase and the code
+	// never leave the browser), which the caller sends as `unlocker` beside its
+	// own request — or null when the person backed out of the prompt. The root
+	// vault opens on the way where it can (JoinerySealed.rootSession()), for an
+	// enrolment that also changes the root. `purpose` reads in the prompts: "to
+	// let this passkey open your vault".
 	async function collectUnlocker(purpose) {
 		if (!window.JoineryModal) { throw new Error('Confirming is unavailable on this page.'); }
+		if (!keyringReady()) { throw new Error('This page could not load what confirming needs. Reload it and try again.'); }
 		var status = await api('vault_status', {});
 		if (!status || !status.set_up) { throw new Error('Set up your vault first.'); }
-		var choices = [];
-		if (status.passkey_wrapping_count > 0 && window.JoineryPasskeys) { choices.push('passkey'); }
-		if (status.has_passphrase) { choices.push('passphrase'); }
-		if (status.unused_recovery_code_count > 0) { choices.push('code'); }
+		var choices = choicesFor(status);
 		if (!choices.length) {
-			throw new Error('Nothing can confirm this: your vault has no working passkey, bypass phrase or recovery code.');
+			throw new Error('Nothing can confirm this: your vault has no working passkey, passphrase or recovery code.');
 		}
 		var method = choices.length === 1 ? choices[0] : await chooseUnlocker(purpose, choices);
 		if (!method) { return null; }
-		if (method === 'passkey') {
-			var opt = await api('vault_unlock_options', {});
-			if (!opt || !opt.options) { throw new Error('Could not start the passkey prompt.'); }
-			var credential = (await JoineryPasskeys.derive(opt.options)).response;
-			return { credential: credential };
-		}
+		var value = null;
 		if (method === 'passphrase') {
-			var phrase = await JoineryModal.promptAsync('Enter your bypass phrase ' + purpose + ':',
+			value = await JoineryModal.promptAsync('Enter your passphrase ' + purpose + ':',
 				{ inputType: 'password', confirmLabel: 'Continue', confirmStyle: 'primary' });
-			return phrase ? { passphrase: phrase } : null;
+			if (!value) { return null; }
+		} else if (method === 'code') {
+			value = await JoineryModal.promptAsync('Enter a recovery code ' + purpose + '. The code is used up by this:',
+				{ confirmLabel: 'Continue', confirmStyle: 'primary' });
+			if (!value) { return null; }
 		}
-		var code = await JoineryModal.promptAsync('Enter a recovery code ' + purpose + '. The code is used up by this:',
-			{ confirmLabel: 'Continue', confirmStyle: 'primary' });
-		return code ? { code: code } : null;
+		var got = await VaultKeyring.enrolmentUnlocker(status, method, value);
+		if (got.rootSession) { JoinerySealed.adopt(VaultKeyring.ROOT, got.rootSession); }
+		return got.unlocker;
 	}
 
 	// One button per method the vault has; resolves the method picked, or null.
 	function chooseUnlocker(purpose, choices) {
 		return new Promise(function (resolve) {
-			var labels = { passkey: 'Use a passkey', passphrase: 'Use my bypass phrase', code: 'Use a recovery code' };
+			var labels = { passkey: 'Use a passkey', passphrase: 'Use my passphrase', code: 'Use a recovery code' };
 			var picked = null;
 			var buttons = choices.map(function (c) {
 				return { label: labels[c], style: c === 'passkey' ? 'primary' : 'secondary', onClick: function () { picked = c; } };
@@ -182,8 +264,10 @@
 		});
 	}
 
-	// End the unlock window for this session and announce it.
+	// Lock everything (§ R3): the account vault's window and every vault this
+	// browser holds, and announce it.
 	async function lock() {
+		if (window.JoinerySealed) { JoinerySealed.lockAll(); }
 		try { await api('vault_lock', {}); } catch (e) { /* window may already be gone */ }
 		setState('locked');
 		hidePopover();
@@ -200,21 +284,35 @@
 	function clientOpen() {
 		return window.JoinerySealed ? JoinerySealed.openScopes() : [];
 	}
+	// Browser-held vaults that are shut but should be open: the ones this page
+	// reads (JoinerySealed.want) and the root, when the person has one.
+	function clientShut() {
+		if (!window.JoinerySealed || !JoinerySealed.wantedScopes) { return []; }
+		var want = JoinerySealed.wantedScopes().slice();
+		if (rootVault && want.indexOf('root') < 0) { want.push('root'); }
+		return want.filter(function (s) { return !JoinerySealed.isOpen(s); });
+	}
 	function serverOpen() { return serverVault && state === 'open'; }
 	function anyOpen() { return serverOpen() || clientOpen().length > 0; }
+	// Open means everything this page reads is open: the server window (when
+	// there is a server vault) and every browser-held vault the page named.
+	function allOpen() { return anyOpen() && (!serverVault || serverOpen()) && clientShut().length === 0; }
+	// Something to list in the menu: an open vault to lock, or a named one to open.
+	function hasMenu() { return anyOpen() || clientShut().length > 0; }
 
 	function render() {
 		if (!chip) { return; }
-		var open = anyOpen();
-		chip.hidden = !serverVault && !open;
+		var open = allOpen();
+		var partly = !open && anyOpen();
+		chip.hidden = !serverVault && !hasMenu();
 		chip.setAttribute('data-state', open ? 'open' : 'locked');
 		var btn = chip.querySelector('.jy-vault-lock-btn');
 		btn.innerHTML = open ? ICON_OPEN : ICON_LOCKED;
 		btn.setAttribute('aria-label', open
 			? 'Vault unlocked — sealed content is readable. Click for options.'
-			: 'Vault locked — click to unlock');
-		btn.title = open ? 'Vault unlocked' : 'Unlock your vault';
-		if (!open) { hidePopover(); }
+			: (partly ? 'Vault partly locked — click to unlock the rest' : 'Vault locked — click to unlock'));
+		btn.title = open ? 'Vault unlocked' : (partly ? 'Vault partly locked' : 'Unlock your vault');
+		if (!hasMenu()) { hidePopover(); }
 		else if (popover && !popover.hidden) { fillPopover(); }
 	}
 
@@ -254,26 +352,25 @@
 		return row;
 	}
 
+	// One line for the one vault (§ R3): open or locked, and the one action.
 	function fillPopover() {
 		popover.innerHTML = '';
 		var title = document.createElement('div');
 		title.className = 'jy-vault-lock-pop-title';
-		title.textContent = 'Unlocked vaults';
+		title.textContent = 'Your vault';
 		popover.appendChild(title);
-		if (serverVault) {
-			popover.appendChild(serverOpen()
-				? popLine(serverLabel, null, 'Lock now', lock)
-				: popLine(serverLabel, '(locked)', 'Unlock', unlock));
-		}
-		clientOpen().forEach(function (scope) {
-			popover.appendChild(popLine(JoinerySealed.labelFor(scope), null, 'Lock now', function () {
-				JoinerySealed.lock(scope);
+		var open = allOpen();
+		popover.appendChild(open
+			? popLine('Vault', '(unlocked)', 'Lock now', lock)
+			: popLine('Vault', anyOpen() ? '(partly locked)' : '(locked)', 'Unlock', function () {
+				hidePopover();
+				return unlock();
 			}));
-		});
 		var body = document.createElement('div');
 		body.className = 'jy-vault-lock-pop-body';
-		body.textContent = 'Sealed content is readable while you’re here. Each vault locks on its own after a while away'
-			+ (serverVault ? ' (the server’s after ' + idleMinutes + ' minutes)' : '') + '.';
+		body.textContent = open
+			? 'Everything sealed is readable while you’re here. It all locks together after a while away, or when you press Lock now.'
+			: 'One unlock opens all of it.';
 		popover.appendChild(body);
 	}
 
@@ -285,8 +382,11 @@
 		btn.type = 'button';
 		btn.className = 'jy-vault-lock-btn';
 		btn.addEventListener('click', function () {
+			// Locked goes straight to the one unlock; open (or partly) shows the
+			// menu with Lock now.
 			if (anyOpen()) { togglePopover(); }
 			else if (serverVault) { unlock(); }
+			else if (hasMenu()) { togglePopover(); }
 		});
 		chip.appendChild(btn);
 
@@ -314,9 +414,15 @@
 	// page (a consumer's own unlock banner, a heartbeat learning the window
 	// ended in another session, a browser-held vault opening or locking).
 	document.addEventListener('joinery:vault-unlocked', function () { setState('open'); });
-	document.addEventListener('joinery:vault-locked', function () { setState('locked'); });
+	// The account vault's window ending anywhere (Lock now in another tab, its
+	// idle lock) ends the browser-held ones here too: they lock together.
+	document.addEventListener('joinery:vault-locked', function () {
+		if (window.JoinerySealed) { JoinerySealed.lockAll(); }
+		setState('locked');
+	});
 	document.addEventListener('joinery:vault-scope-unlocked', render);
 	document.addEventListener('joinery:vault-scope-locked', render);
+	document.addEventListener('joinery:vault-scope-wanted', render);
 
 	window.JoineryVaultLock = {
 		unlock: unlock,

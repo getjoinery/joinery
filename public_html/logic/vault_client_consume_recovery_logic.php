@@ -36,10 +36,22 @@ function vault_client_consume_recovery_logic(array $input): LogicResult {
 			return LogicResult::error('That recovery key does not belong to your vault.');
 		}
 
+		// A code of the one set also opens the account vault: its use goes
+		// through vault_unlock_recovery, which spends both halves together
+		// (specs/one_vault_experience.md § R6). Only a code with no account twin
+		// is spent here.
+		if ((string)$wrapping->get('uew_code_set') !== '' && UserEncryptionVault::loadForUser($user_id)) {
+			return LogicResult::error('Use this code where you unlock your vault.');
+		}
+
 		if (!$wrapping->get('uew_is_used')) {
 			$wrapping->set('uew_is_used', true);
 			$wrapping->set('uew_used_time', gmdate('Y-m-d H:i:s'));
 			$wrapping->save();
+			// A recovery code in use is a possible theft: nothing opened before
+			// it reopens on its own, and linked devices re-confirm.
+			UserEncryptionVault::stampRecovery($user_id);
+			VaultClientCustody::forgetDevices($user_id);
 
 			// Notify the account. The server cannot verify code knowledge (that
 			// would break zero-knowledge), so this action is callable by any

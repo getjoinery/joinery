@@ -830,10 +830,14 @@ abstract class PublicPageBase {
 			// vault rows at most, one per scope.
 			$has_any_vault = false;
 			$has_server_vault = false;
+			$has_root_vault = false;
 			foreach (new MultiUserEncryptionVault(array('user_id' => $user_id)) as $vault_row) {
 				$has_any_vault = true;
 				if ($vault_row->get('uev_scope') === UserEncryptionVault::SCOPE_USER) {
 					$has_server_vault = true;
+				}
+				if ($vault_row->get('uev_scope') === VaultScopes::ROOT_SCOPE) {
+					$has_root_vault = true;
 				}
 			}
 			if ($has_any_vault || $this->vault_client_needed) {
@@ -846,11 +850,18 @@ abstract class PublicPageBase {
 					. '" data-idle-minutes="' . $idle_minutes . '"'
 					. ' data-client-idle-minutes="' . $client_idle_minutes . '"'
 					. ' data-server-vault="' . ($has_server_vault ? '1' : '0') . '"'
+					. ' data-root-vault="' . ($has_root_vault ? '1' : '0') . '"'
 					. ' data-server-label="' . htmlspecialchars(VaultScopes::labelFor(UserEncryptionVault::SCOPE_USER), ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 				echo '<link rel="stylesheet" href="/assets/css/vault-lock.css?v='
 					. $this->asset_mtime('assets/css/vault-lock.css') . '">' . "\n";
 				$this->render_vault_script('assets/js/passkeys.js', false);
 				$this->render_vault_script('assets/js/vault-lock.js', false);
+				// One touch opens every vault (specs/one_vault_experience.md
+				// § R3): the padlock's ceremony opens the browser-held ones too,
+				// so it brings the modules that hold them, and a reload reopens
+				// what was open on any page, not only the ones that read sealed
+				// content.
+				$this->render_vault_client_scripts();
 			}
 		}
 		// The client modules answer to the page, not the viewer: a signed-out

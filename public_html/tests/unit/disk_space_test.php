@@ -22,15 +22,29 @@
  *    whether deleting one file would fix it has not told them anything.
  *
  * No writing and no database: every check reads the free space that is already
- * there and does arithmetic against it.
+ * there and does arithmetic against it. Each directory's reading is taken once
+ * and held (DiskSpace::readWith()), because the checks compare readings for
+ * equality and other processes write to the same disk while this runs.
  *
  * Run: php tests/run.php safe --filter=disk_space
  *
+ * @version 1.1 - readings are held still, so a busy disk cannot fail an equality check
  * @version 1.0
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
+
+// The real reading per directory, taken once: the walk to the nearest existing
+// ancestor is still the code under test; only the number stops moving.
+$held = array();
+DiskSpace::readWith(function (string $dir) use (&$held) {
+	if (!array_key_exists($dir, $held)) {
+		$held[$dir] = @disk_free_space($dir);
+	}
+	return $held[$dir];
+});
+harness_defer(function () { DiskSpace::readWith(null); });
 
 $tmp = sys_get_temp_dir();
 $free = DiskSpace::freeBytes($tmp);

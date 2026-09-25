@@ -20,6 +20,8 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.22 - checkSealingMailboxHolders() asks for the vault of the mailbox's seal
+ *   scope, so a Fortress holder without a mail vault is named
  * @version 1.21 - the origin probe skips relay-sealed domains (the Seal at the
  *   relay add-on); the sealing-holders check counts Private only
  * @version 1.20 - checkSearchIndexStorage() also counts the File era's index bytes no File
@@ -142,7 +144,6 @@ class InboundEmailHealth {
                  WHERE a.iea_delete_time IS NULL AND d.ied_delete_time IS NULL
                    AND " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " IN ('"
                        . InboundEmailDomain::LEVEL_PRIVATE . "','"
-                       // 'fortress' until mailbox migration ied_003_private_with_addons converts it.
                        . InboundEmailDomain::LEVEL_FORTRESS . "')";
         $rows = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
@@ -159,8 +160,10 @@ class InboundEmailHealth {
                 continue;
             }
             $holder_id = InboundEmailMessage::singleOwnerUserId(intval($row['alias_id']));
-            if ($holder_id === null || UserEncryptionVault::loadForUser($holder_id) === null) {
-                $broken[] = $address . '\'s member has no vault';
+            $scope = InboundEmailMessage::sealScopeFor(intval($row['alias_id']), null);
+            if ($holder_id === null || InboundEmailMessage::loadSealVault($holder_id, $scope) === null) {
+                $broken[] = $address . '\'s member has no '
+                    . ($scope === UserEncryptionVault::SCOPE_USER ? 'vault' : strtolower(VaultScopes::labelFor($scope)));
             }
         }
 

@@ -6,12 +6,12 @@
  * needs: [db]
  */
 /**
- * A vault opens with a passkey, its bypass phrase or a recovery code — and the
+ * A vault opens with a passkey, its passphrase or a recovery code — and the
  * account's sign-in second factor never takes part (docs/sealed_vault.md,
  * docs/account_security.md § Unlockers, ranked). An authenticator code confirms
  * sign-ins and sensitive changes; it opens nothing.
  *
- * So the two unlocks a person types — the bypass phrase and a recovery code —
+ * So the two unlocks a person types — the passphrase and a recovery code —
  * must each open the vault on their own for an account that holds an
  * authenticator app and a passkey, with no step-up marker in the session. If
  * either answers "confirm your second factor first", the step-up page would
@@ -37,7 +37,7 @@ if (!vault_apcu_usable()) {
 harness_set_setting_mem('passkeys_enabled', '1');
 harness_set_setting_mem('email_dry_run', '1');
 
-$phrase = 'a bypass phrase long enough for the setup ceremony';
+$phrase = 'a passphrase long enough for the setup ceremony';
 $fx = vault_fixture_vault('NoSecondFactor', $phrase);
 $user = $fx['user'];
 $user->enable_totp('JBSWY3DPEHPK3PXP');
@@ -65,10 +65,10 @@ check($session->user_has_second_factor($fresh), 'the account counts as holding a
 check(!$session->has_recent_second_factor(), 'this session has confirmed no second factor');
 
 // ---------------------------------------------------------------------------
-section('The bypass phrase opens the vault on its own');
+section('The passphrase opens the vault on its own');
 
 VaultUnlock::lockAll($user_id);
-$res = vault_unlock_passphrase_logic(array('passphrase' => $phrase));
+$res = vault_unlock_passphrase_logic(array('passphrase_kek' => SealedBox::b64url($fx['passphrase_kek'])));
 check(empty($res->data['second_factor_required']),
 	'the phrase is not sent to the second-factor step-up page');
 check($res->error === null && !empty($res->data['unlocked']),
@@ -81,12 +81,24 @@ section('A recovery code opens the vault on its own');
 
 VaultUnlock::lockAll($user_id);
 check(!VaultUnlock::isOpen($user_id), 'the vault is locked again before the code is tried');
-$res = vault_unlock_recovery_logic(array('code' => $fx['recovery_codes'][0]));
+$res = vault_unlock_recovery_logic(array('code_kek' => vault_fixture_code_kek($fx['recovery_codes'][0], $fx['root_salt'])));
 check(empty($res->data['second_factor_required']),
 	'the code is not sent to the second-factor step-up page');
 check($res->error === null && !empty($res->data['unlocked']),
 	'the code unlocks the vault',
 	'error: ' . var_export($res->error, true));
 check(VaultUnlock::isOpen($user_id), 'the unlock window is open');
+check(!empty($res->data['root_wrapping']), 'and hands back the code\'s root twin for the browser');
+
+// ---------------------------------------------------------------------------
+section('Neither action takes the phrase or the code itself');
+
+// The browser derives and posts only the account half of a KEK
+// (specs/one_vault_experience.md § R6, R7); a raw phrase or code opens nothing.
+VaultUnlock::lockAll($user_id);
+$res = vault_unlock_passphrase_logic(array('passphrase' => $phrase));
+check($res->error !== null && !VaultUnlock::isOpen($user_id), 'a raw passphrase is refused');
+$res = vault_unlock_recovery_logic(array('code' => $fx['recovery_codes'][1]));
+check($res->error !== null && !VaultUnlock::isOpen($user_id), 'a raw recovery code is refused');
 
 harness_finish();

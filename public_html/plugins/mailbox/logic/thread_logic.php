@@ -14,6 +14,14 @@
  * a discarded conversation is invisible to every other read, so the Trash view
  * says so when it asks.
  *
+ * A Fortress message (specs/client_custody_mail.md § R4) carries its content
+ * sealed for the owner's browser under `sealed` ({key, sealed_scope,
+ * sealed_dek, sealed_ad_prefix} and the sealed columns as stored), its clear
+ * content fields empty, `fortress: true`, and attachments by id and MIME part
+ * with no name or URL. The response's own `fortress: true` says some message
+ * needs the mail key: a client without it shows that and opens the web reader.
+ *
+ * @version 1.3.0 - Fortress messages travel sealed; `fortress` on the response
  * @version 1.2.1
  */
 
@@ -47,8 +55,18 @@ function thread_logic(array $input): LogicResult {
 	// write themselves into your address book, which is how a spam address gets there.
 	// The reader offers an explicit Add beside the sender instead.
 
+	$fortress = false;
+	foreach ($messages as $m) {
+		if (!empty($m['fortress'])) {
+			$fortress = true;
+			break;
+		}
+	}
+
 	return LogicResult::render(array(
 		'messages' => $messages,
+		// Some message is end-to-end sealed: only the owner's devices open it.
+		'fortress' => $fortress,
 		'folders'  => $service->threadFolderIds($alias_id, $thread_key, $trashed),
 		// Locked-state contract (specs/mailbox_security_levels.md § 4.2): metadata
 		// plus a `locked` flag rather than an error, so the client renders sealed
@@ -60,7 +78,11 @@ function thread_logic(array $input): LogicResult {
 function thread_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'description' => 'Fetch a mail thread: messages with bodies, signed attachment and inline-image URLs',
+		'description' => 'Fetch a mail thread: messages with bodies, signed attachment and inline-image URLs. '
+			. 'An end-to-end (Fortress) message has empty content fields, its sealed columns under `sealed` '
+			. '(key, sealed_scope, sealed_dek, sealed_ad_prefix, iem_* ciphertext) for the owner\'s browser to '
+			. 'open, `fortress: true`, and attachments without names or URLs; `fortress` on the response says '
+			. 'some message needs the mail key.',
 		'input' => [
 			'thread_key' => ['type' => 'string', 'required' => true, 'label' => 'Thread key'],
 			'alias_id' => ['type' => 'string', 'required' => false, 'label' => 'Mailbox alias ID, unmatched, or unmatched:{domain_id}'],

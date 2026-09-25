@@ -306,7 +306,7 @@ section('device link hands over each chosen vault');
 // step-up has nothing to ask for (the approve logic's own rule).
 vault_fixture_client_vault((int)$owner->key, base64_encode(random_bytes(32)), 'drive');
 $other_scope = null;
-foreach (VaultScopes::clientScopes() as $cs) {
+foreach (VaultScopes::contentScopes() as $cs) {
 	if ($cs !== 'drive') { $other_scope = $cs; break; }
 }
 if ($other_scope !== null) {

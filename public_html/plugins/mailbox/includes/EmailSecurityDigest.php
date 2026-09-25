@@ -22,6 +22,7 @@
  * headers, and any format change requires a full re-score against the
  * labelled corpus.
  *
+ * @version 1.2 - refuses a Fortress message (server-side AI never reads one)
  * @version 1.1
  */
 
@@ -42,6 +43,8 @@ class EmailSecurityDigest {
 	const WHITESPACE_RUN_PATTERN = '/[ \t\x{00A0}\x{200B}\x{200C}\x{200D}\x{2060}\x{FEFF}\x{3000}]{4,}/u';
 
 	public static function build(InboundEmailMessage $msg): string {
+		// Fortress mail is never read by server-side AI (specs/client_custody_mail.md § R7).
+		InboundEmailMessage::refuseBrowserSealed($msg, 'the AI security digest');
 		try {
 			$raw = $msg->getRawMessage();
 		} catch (VaultLockedException $e) {

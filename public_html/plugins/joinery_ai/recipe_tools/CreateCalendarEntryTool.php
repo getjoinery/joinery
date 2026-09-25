@@ -21,6 +21,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
  * The subject is always the acting user. Nothing in the input can aim the
  * entry at anyone else's calendar.
  *
+ * @version 1.3 - a Fortress source email is named, never read
  * @version 1.2
  * @changelog 1.2 - location, link (shown in full), notes on the card and
  *   through to the importer (specs/calendar_entry_details.md)
@@ -178,6 +179,10 @@ class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInter
         }
         $in_mailbox = $mailbox !== '' ? ' to ' . ProposedActionFacts::scalar($mailbox) : '';
 
+        // Fortress mail opens only on its owner's devices; the server names it, never reads it.
+        if (InboundEmailMessage::isBrowserSealed($msg)) {
+            return 'From an end-to-end encrypted email' . $in_mailbox;
+        }
         try {
             $subject = ProposedActionFacts::scalar($msg->get('iem_subject'));
             $sender  = ProposedActionFacts::scalar($msg->get('iem_sender'));
