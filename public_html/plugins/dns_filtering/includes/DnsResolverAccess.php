@@ -8,22 +8,22 @@
  * address. This class mints and revokes those keys for the "DNS server
  * access" panel on the plugin's settings page.
  *
- * The keys belong to a service account the plugin creates, not to the admin
- * who issued them: every key carries a user, a deleted user's keys stop
- * authenticating, and the action runs as that user. The account has
- * permission 0, no password, password recovery disabled, and an address on
- * the reserved .invalid domain, so it can neither sign in nor receive mail.
- * (server_manager's provisioning service user, ProvisioningSetup, is the
- * same kind of account.) User refuses to delete it while
- * it owns a live scoped key.
+ * A key belongs to the admin who issued it; every key carries a user, and the
+ * action runs as that user. Nothing about the owner widens the key: its scope
+ * confines it to the snapshot action, which needs no permission level, so
+ * demoting the owner or changing their password leaves it working. Deleting
+ * the owner would stop it, and User refuses that while they own a live
+ * scoped key: the key is revoked, or re-issued by another admin, first.
  *
+ * @version 1.1 - a key belongs to the admin who issues it; the service account is gone. It
+ *                existed to survive its owner's deletion, which User already refuses while
+ *                the owner holds a live scoped key, and creating it failed on every
+ *                production site (the email field's accepts-mail check refused .invalid)
  * @version 1.0
  */
 class DnsResolverAccess {
 
 	const ACTION = 'dns_filtering/resolver_snapshot';
-
-	const ACCOUNT_SETTING = 'dns_filtering_resolver_user_id';
 
 	/**
 	 * One slot per DNS server: the setting holding its public address (which the
@@ -43,48 +43,19 @@ class DnsResolverAccess {
 	);
 
 	/**
-	 * The service account, created on first use when $create is true.
-	 * Returns null when there is none and $create is false.
-	 */
-	public static function serviceAccount(bool $create = false): ?User {
-		$id = (int)Globalvars::get_instance()->get_setting(self::ACCOUNT_SETTING);
-		if ($id > 0) {
-			$user = new User($id, TRUE);
-			if ($user->key && !$user->get('usr_delete_time')) {
-				return $user;
-			}
-		}
-		if (!$create) {
-			return null;
-		}
-
-		// The random part keeps the address from being claimable in advance
-		// by an ordinary signup; the account is found by its id, never by it.
-		$user = new User(NULL);
-		$user->set('usr_first_name', 'DNS servers');
-		$user->set('usr_last_name', '(service account)');
-		$user->set('usr_email', 'dns-servers-' . bin2hex(random_bytes(6)) . '@service.invalid');
-		$user->set('usr_password', NULL);
-		// A machine account: no password to recover, and no mailbox to recover into.
-		$user->set('usr_password_recovery_disabled', TRUE);
-		$user->set('usr_permission', 0);
-		$user->set('usr_timezone', 'UTC');
-		$user->save();
-		$user->load();
-		Setting::put(self::ACCOUNT_SETTING, $user->key);
-		return $user;
-	}
-
-	/**
-	 * Mint a key for one DNS server, revoking any key that slot already held.
-	 * Returns ['api_key' => ApiKey, 'secret_key' => plaintext]; the plaintext
-	 * exists only in this return value and is never stored or logged.
+	 * Mint a key for one DNS server, owned by $owner (the admin issuing it),
+	 * revoking any key that slot already held. Returns ['api_key' => ApiKey,
+	 * 'secret_key' => plaintext]; the plaintext exists only in this return
+	 * value and is never stored or logged.
 	 *
-	 * @throws SystemDisplayableError for an unknown slot, or a server with no
-	 *   IPv4 address set yet.
+	 * @throws SystemDisplayableError for an unknown slot, an owner who is not a
+	 *   live saved user, or a server with no IPv4 address set yet.
 	 */
-	public static function issueKey(string $slot): array {
+	public static function issueKey(string $slot, User $owner): array {
 		$def = self::slot($slot);
+		if (!$owner->key || $owner->get('usr_delete_time')) {
+			throw new SystemDisplayableError('A DNS server key needs a live account to belong to.');
+		}
 		$ip = trim((string)Globalvars::get_instance()->get_setting($def['ip_setting']));
 		if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
 			throw new SystemDisplayableError(
@@ -98,11 +69,10 @@ class DnsResolverAccess {
 		}
 		try {
 			self::revokeKey($slot);
-			$account = self::serviceAccount(true);
 
 			$secret = 'secret_' . bin2hex(random_bytes(24));
 			$key = new ApiKey(NULL);
-			$key->set('apk_usr_user_id', $account->key);
+			$key->set('apk_usr_user_id', $owner->key);
 			$key->set('apk_name', 'DNS server: ' . $slot);
 			$key->set('apk_public_key', 'public_' . bin2hex(random_bytes(12)));
 			$key->set('apk_secret_key', ApiKey::GenerateKey($secret));
