@@ -3,9 +3,13 @@
 **Status:** Stage 1 is released in 0.8.424 (published 2026-09-24; commit 71277d44): WP1–WP5,
 WP3b/B7, B1, B9, B11, B12, Postgres local-only, and WP7 (the move script). B8's remainder,
 B10, B13–B17 and WP6 (base 2.0) are released in 0.8.426 (commits e98df32c, 4de2fdc3);
-every node runs 0.8.426 (checked 2026-09-25). Stage 3 is next.
+every node runs 0.8.426 (checked 2026-09-25).
 R1 passed on the owner's test box, all gates (last two 2026-09-25). R2 waits on the owner.
-B19 and B20 (found finishing R1) are open.
+B19 and B20 (found finishing R1) are fixed in 0.8.430 (`specs/fleet_move_bug_fixes_2026_09_25.md`).
+**Stage 3 started 2026-09-25 from 0.8.430:** joinerydemo is on PostgreSQL 18 and passes
+every gate. Its public name was dark for 35 minutes after the move (B22) until the host
+vhost was put back. The move script 1.5 (B21, B22) runs every
+site after it.
 Two owner decisions open (D3, D4; D1 and D2 are in `specs/backup_database_incrementals.md`).
 **Date:** 2026-09-24 (rewritten from the 2026-08-01 draft after a fleet investigation;
 the code-side cutover items of `php_85_pg18_stack_cutover.md` are folded in here).
@@ -199,7 +203,7 @@ Consequences:
 - **WP7 would have cut the resolvers off.** Fixed: `rebase_site_container.sh` 1.1 refuses
   a container with any port binding `install.sh` does not recreate, and names each one.
 
-**Fixed 2026-09-24, one declared home for each piece** (uncommitted):
+**Fixed 2026-09-24, one declared home for each piece** (released in 0.8.426):
 - **Roles:** `restore_database.sh` 3.8 reads every role the dump names (owners, grantees,
   default privileges; COPY data skipped) before it drops anything, and creates any the
   server lacks, unable to log in. A role it may not create is refused as
@@ -299,7 +303,7 @@ to `/login`). `docker ps` shows every container's web port on `0.0.0.0` and `[::
   management-node probe, the SSL and certificate checks, Cloudflare and the agent use the
   domain through the proxy, which targets `127.0.0.1:<port>`. The exception is a site with
   no domain (or `--no-ssl`), which gets no proxy: its port is its only way in.
-- **Fixed in the tree 2026-09-24** (uncommitted):
+- **Fixed in the tree 2026-09-24** (released in 0.8.426):
   - `install.sh` 2.82 publishes a proxied site's web port on `127.0.0.1`. A site with no
     domain keeps every interface, and says so. The post-start probe asks `127.0.0.1`. The
     port checks and the container list read a binding on any address.
@@ -415,6 +419,53 @@ place, the same bundle installs cleanly.
 - **Sites already installed** without the bundle get their plugins from the admin Plugins
   page; nothing installs them after the fact.
 
+**B21 — a moved site's signed manifest came from another release** (found 2026-09-25
+moving joinerydemo). The manifest sits at the site root in the container's own layer; the
+code lives on a volume. `install.sh` lays the newest core from its upgrade server into the
+image and takes the manifest from that archive. getjoinery.com still served 0.8.426, so
+the rebuilt joinerydemo had 0.8.430 code under a 0.8.426 manifest (28 files failed). Its
+agent would have refused every backup, as in R1. Hand-fixed by copying the 0.8.430
+manifest (the same bytes the unmoved sites carry) into the container: 0 files failed.
+- **Fix** (move script 1.5): `prepare` and `swap` refuse a site whose files
+  do not match its manifest. `swap` keeps the old container's manifest and puts it into
+  the new one, stopping unless every file matches. It checks again after the restart.
+  `rollback` puts it into the old image's container too: that layer holds whatever release
+  the old image was built from.
+- **Still open, outside the move:** any container rebuilt from its image gets the image's
+  manifest back, whatever the code volume holds. Recorded in the running to-do list.
+
+**B22 — the move renders the host vhost for a stale name** (found 2026-09-25 moving
+joinerydemo). `prepare` read the domain from the container's `DOMAIN_NAME`, and `install.sh`
+rewrote `/etc/apache2/sites-available/<site>.conf` for that name.
+- joinerydemo's said `joinerydemo.site`, a name that is now unregistered. The host served
+  it as `demo.getjoinery.com`, the name its `webDir` and its Let's Encrypt certificate
+  carry.
+- After the swap the host had no vhost for `demo.getjoinery.com`, and Cloudflare answered
+  526. The deploy tier's read-only gate caught it.
+- `install.sh` also minted a placeholder certificate and started a five-minute retry timer
+  (`joinery-ssl-retry@joinerydemo.site`) for the dead name.
+- The same survey found getjoinery_orgs's `DOMAIN_NAME` is `getjoinery.com`, another
+  site's name; it is served as `orgs.getjoinery.com`. getjoinery_developers is served from
+  `getjoinery_developers-proxy.conf` and `-proxy-le-ssl.conf`, so a rebuild would put a
+  second `developers.getjoinery.com` vhost beside them.
+
+- **Fix** (move script 1.5):
+  - `prepare` takes the name from the enabled host vhosts that proxy to the site's web
+    port, with `www.` folded in, and prints any disagreement with `DOMAIN_NAME`. It refuses
+    a site served under several names, and lists other vhost files on the port.
+  - `swap` keeps the site's host vhost files, and disables the other files once
+    `install.sh` has written `<site>.conf`.
+  - `rollback` puts all of them back.
+- **Tests:** `installer_contract` checks the name choice on fixture vhosts (www folding,
+  files under any name, two names, none) and pins the carry-overs statically: 761/761.
+- **joinerydemo, fixed 2026-09-25 23:23 UTC (owner approved):**
+  - `joinerydemo.conf` was rendered from the 0.8.430 template for `demo.getjoinery.com`.
+    The file on disk had been exactly `install.sh`'s render for the dead name; it is kept as
+    `joinerydemo.conf.swap-wrong-domain.20260925232310`.
+  - The retry timer is stopped and disabled, and the placeholder is removed.
+  - The site answers again: `/` 302, `/login` 200, 0.8.430, on its Let's Encrypt
+    certificate.
+
 **B9 — the platform's PHP tuning loaded the PostgreSQL extensions twice** (fixed
 2026-09-24). `host_files_tune_php_ini()` enabled `extension=pdo_pgsql` and `extension=pgsql`
 in `php.ini`, but Ubuntu's php-pgsql package already loads both from `conf.d`. Every PHP
@@ -429,7 +480,7 @@ pdo_parse_params` (it loaded before PDO) and `Module "pgsql" is already loaded`.
 ## Stage 2 — The 26.04 container image (dev tree)
 
 **WP6 — Land `joinery-base:2.0`.** This was proven and deliberately held back in
-August. **In the tree 2026-09-24** (uncommitted; landed with the converger stopped): `install.sh` 2.84 (`BASE_IMAGE_VERSION` 2.0), `Dockerfile.base` 1.3
+August. **In the tree 2026-09-24** (landed with the converger stopped; released in 0.8.426): `install.sh` 2.84 (`BASE_IMAGE_VERSION` 2.0), `Dockerfile.base` 1.3
 (`FROM ubuntu:26.04`), `Dockerfile.template` 5.6 (default 2.0). Contract: 3 checks, one
 pinning the template's default to `install.sh`'s version. Docs: `deploy_and_upgrade.md`
 § Docker Shared Base Image. **Gates run on the owner's test box:**
@@ -605,7 +656,7 @@ database-incrementals integration tests run in the ordinary gate.
 - **Dev's own PHP gets B3's fix at the converger's next run.** Its PHP 8.3 `php.ini` is
   the untouched packaged file (2 MB uploads, 30 s, no timezone). The next converge tunes
   it and restarts php8.3-fpm.
-- **B8 remainder + B10, built 2026-09-24, uncommitted:**
+- **B8 remainder + B10, built 2026-09-24, released in 0.8.426:**
   - In the tree: `restore_database.sh` 3.8, `rebase_site_container.sh` 1.2,
     `manage_domain.sh` 1.2, `restore_roundtrip_gate.sh`, `install_container_gate.sh`, and
     the docs.
@@ -682,6 +733,23 @@ database-incrementals integration tests run in the ordinary gate.
   dev Linode token reaches (that account holds only the test boxes). The clone,
   the firewall, and the console step to open SSH on the clone happen in jeremytunnell's
   own account.
+- **Stage 3, joinerydemo — moved 2026-09-25** from 0.8.430 (`/root/rebase/release-0.8.430`
+  on docker-prod, manifest verified). Move script 1.4.
+  - `prepare` was re-run from 0.8.430. `swap` exited 0: the site was down from 22:46:54 to
+    22:49:14, and 138/138 tables matched.
+  - Now on Ubuntu 26.04.1, PostgreSQL 18 and PHP 8.5.4. Ports are on 127.0.0.1 only, and
+    pg_hba has loopback plus the Docker gateway.
+  - The agent kept its key and pairing. A `check_status` round trip (job 37695) reports
+    0.8.430 with PostgreSQL accepting connections.
+  - A full backup (job 37696, 81.8 MB, chain-20260925_225842) and a level-2 verification of
+    it (job 37697: 4 archives, 3,167 files, pass).
+  - Deploy tier: 4/4 after B22's vhost fix. Before it, `read_only_tree` failed one check
+    (526).
+  - Found: B21 and B22. The one extra step was copying the right manifest into the
+    container.
+  - Also found: `joinerydemo.site` is unregistered (available at the registry). Only the
+    container's `DOMAIN_NAME` carries it; the site's name is `demo.getjoinery.com`, which
+    `install.sh` sets at the next rebuild through move script 1.5.
 
 ## Per-site gates (every site, both stages)
 

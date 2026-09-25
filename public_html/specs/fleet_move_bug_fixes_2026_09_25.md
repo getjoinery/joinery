@@ -5,13 +5,13 @@ public-html-bb). WP5 and the Caddy diversion were done live. Owner, 2026-09-25: 
 should pause and fix all of these bugs now before moving forward".
 - **Final `db --changed`:** 508/510 suites. One failure is `agent_bundle_drift`, which
   the publish clears. The other was a stale `dns_filtering_resolver_user_id` row on
-  dev, since deleted; scrolldaddy has the same row.
-- **Left:**
-  - the release;
-  - WP2's live check on getjoinery (upgrade, then publish, then compare with dev);
-  - updating jeremytunnell.com.
+  dev, since deleted. scrolldaddy's copy of the row was deleted too, with the owner's
+  yes; no other docker-prod site had it.
+- **Released in 0.8.430** (2026-09-25). Every docker-prod site and dev took it.
+  getjoinery upgraded, then republished at 23:26 UTC. WP2's live check passed (below).
+- **Left:** updating jeremytunnell.com (on 0.8.429).
 - The PostgreSQL 18 site moves (`specs/fleet_ubuntu_2604_postgres_upgrade.md` Stage 3)
-  resume after the release. joinerydemo is prepared.
+  resumed after the release: joinerydemo moved 2026-09-25.
 **Related:** `specs/fleet_ubuntu_2604_postgres_upgrade.md` (B18–B20),
 `specs/dns_resolvers_read_over_https.md` (B4, B8).
 
@@ -118,6 +118,22 @@ New customer installs fetch `getjoinery.com/utils/latest_release`.
   file by file with dev's.
   - Checked 2026-09-25: every theme and plugin getjoinery republishes carries a
     `RELEASE_MANIFEST`.
+  - **Passed 2026-09-25.** getjoinery.com serves 0.8.430, republished at 23:26 UTC.
+    - Its core archive matches dev's in all 1,889 files it ships, with none of its own,
+      including `joinery-install.sql.gz`.
+    - `RELEASE_MANIFEST` and its signature are byte-identical to dev's, and both archives
+      verify with 0 failures.
+    - `deploy.sh` and `_reconcile_stock_assets.sh` are in neither archive. They are also
+      gone from the getjoinery and joinerydemo trees.
+  - **Found by the compare:** dev's archive carries one file getjoinery's does not:
+    `maintenance_scripts/install_tools/joinery_jail/.gitignore` (79 bytes).
+    - The manifest rule excludes every `.gitignore`, but the publisher's
+      `maintenance_scripts` copy did not. Every core archive through 0.8.430 shipped it
+      unlisted.
+    - A republish ships only what the manifest lists, which is why getjoinery's lacks it.
+    - **Fixed:** the publisher's copy leaves `.git` and `.gitignore` behind,
+      pinned in `tree_manifest_test` (41/41).
+    - Editing the publisher means the next publish runs once by hand under sudo.
 
 ## WP3 — Rebuilding a site before approval keeps its agent's key (B19)
 

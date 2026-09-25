@@ -2,6 +2,21 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.5 - Two things the rebuild replaced outside the site's volumes, found moving
+#                joinerydemo. (1) The domain comes from the host vhost that proxies to the
+#                site's web port, not the container's DOMAIN_NAME: joinerydemo's said
+#                joinerydemo.site while the host served demo.getjoinery.com, install.sh
+#                rendered the host vhost for the stale name, and the site went dark behind
+#                its edge (526). getjoinery_orgs's says getjoinery.com, another site's name.
+#                prepare refuses a site served under several names and names any other
+#                enabled vhost file on its port; swap disables those once install.sh has
+#                written <site>.conf. (2) The signed release manifest sits in the
+#                container's own layer, not on a volume, and install.sh lays in whatever
+#                release its upgrade server serves (0.8.426 over a 0.8.430 tree): the agent
+#                then refuses every backup. swap carries the old container's manifest into
+#                the new one and stops unless every file matches it; prepare and swap refuse
+#                a site whose files already do not. swap keeps the site's host vhost files,
+#                and rollback puts them back along with the manifest.
 # Version: 1.4 - The old image is kept by its id, not its name. install.sh rebuilds under the
 #                same name (joinery-<site>), so after one swap the name meant the new image;
 #                a second swap then tagged that as the rollback image, and rollback started
@@ -57,7 +72,10 @@
 # the locale), every table's row count, the roles the container carries beyond
 # its image, pg_hba lines its config/postgres_access.conf does not declare (a
 # rebuild drops them), the old container's exact run arguments
-# (for rollback), and a trial dump's size against the disk free here.
+# (for rollback), the name the host's vhost serves the site under (install.sh
+# rewrites that vhost for the name it is given), that every file matches the
+# site's signed release manifest, and a trial dump's size against the disk
+# free here.
 #
 # swap stops the site's writes, dumps the database, keeps a copy of the old
 # database volume and the old image, rebuilds the container with install.sh
@@ -174,6 +192,89 @@ hba_undeclared() {  # $1 major, $2 the site's postgres_access.conf
         <({ [ -f "$2" ] && grep -E '^[[:space:]]*host' "$2"; } | sed -E 's/^[[:space:]]+//; s/[[:space:]]+/ /g; s/ $//' | sort -u)
 }
 
+# The enabled host vhosts that proxy to this site's web port, one path each.
+# install.sh renders the host vhost for the name it is given, so the name comes
+# from what the host serves, never from the container's DOMAIN_NAME, which can
+# be stale or another site's. A host with no Apache, or a site with no vhost,
+# has none.
+host_vhost_files() {  # $1 web port
+    [ -d /etc/apache2/sites-enabled ] || return 0
+    grep -lE "^[[:space:]]*ProxyPass[[:space:]]+/[[:space:]]+http://(127\.0\.0\.1|localhost):$1/" \
+        /etc/apache2/sites-enabled/*.conf 2>/dev/null || true
+}
+
+# The names those vhosts serve, each www. folded into its apex, one per line.
+host_domains() {  # vhost files...
+    [ "$#" -gt 0 ] || return 0
+    grep -hoE '^[[:space:]]*Server(Name|Alias)[[:space:]]+.*' "$@" \
+        | awk '{ for (i = 2; i <= NF; i++) print $i }' | sed 's/^www\.//' | sort -u
+}
+
+# How many of the site's files do not match its signed release manifest, or
+# "missing" when it has none. The agent verifies every script it runs as root
+# against this file, so a tree that does not match has its backups refused.
+manifest_failures() {
+    docker exec "$SITE" bash -c 'cd "/var/www/html/$1" 2>/dev/null && [ -f RELEASE_MANIFEST ] || { echo missing; exit 0; }
+        sha256sum -c --quiet RELEASE_MANIFEST 2>/dev/null | grep -c FAILED || true' _ "$SITE"
+}
+
+# The manifest lives in the container's own layer, not on a volume, so a
+# rebuilt container carries whichever release its image was built from. The
+# code volume comes across unchanged, and the manifest that described it before
+# still does: put it back, and succeed only when every file matches.
+put_manifest() {
+    local f
+    for f in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
+        docker cp "${WORK}/${f}" "${SITE}:/var/www/html/${SITE}/${f}" || return 1
+    done
+    docker exec "$SITE" bash -c 'cd "/var/www/html/$1" && chown root:root RELEASE_MANIFEST RELEASE_MANIFEST.sig && chmod 644 RELEASE_MANIFEST RELEASE_MANIFEST.sig' _ "$SITE" || return 1
+    [ "$(manifest_failures)" = "0" ]
+}
+
+# The host's vhost files for this site, as they are before the rebuild:
+# <site>.conf (install.sh rewrites it) and every other enabled file on the
+# site's port (swap disables them). rollback puts back exactly this.
+save_host_vhosts() {
+    local d="${WORK}/host_vhosts" b
+    rm -rf "$d"; mkdir -p "${d}/other"
+    [ -d /etc/apache2/sites-available ] || return 0
+    if [ -f "/etc/apache2/sites-available/${SITE}.conf" ]; then
+        cp -p "/etc/apache2/sites-available/${SITE}.conf" "${d}/own.conf"
+    fi
+    if [ -e "/etc/apache2/sites-enabled/${SITE}.conf" ]; then touch "${d}/own.enabled"; fi
+    for b in $(state_get other_vhosts); do
+        if [ -L "/etc/apache2/sites-enabled/${b}" ]; then
+            readlink "/etc/apache2/sites-enabled/${b}" > "${d}/other/${b}.link"
+        else
+            cp -p "/etc/apache2/sites-enabled/${b}" "${d}/other/${b}"
+        fi
+    done
+}
+
+restore_host_vhosts() {
+    local d="${WORK}/host_vhosts" f b
+    [ -d "$d" ] || return 0
+    if [ -f "${d}/own.conf" ]; then
+        cp -p "${d}/own.conf" "/etc/apache2/sites-available/${SITE}.conf"
+    else
+        rm -f "/etc/apache2/sites-available/${SITE}.conf"
+    fi
+    if [ -f "${d}/own.enabled" ] && [ -f "/etc/apache2/sites-available/${SITE}.conf" ]; then
+        ln -sfn "../sites-available/${SITE}.conf" "/etc/apache2/sites-enabled/${SITE}.conf"
+    else
+        rm -f "/etc/apache2/sites-enabled/${SITE}.conf"
+    fi
+    for f in "${d}/other/"*; do
+        [ -e "$f" ] || continue
+        b="$(basename "$f")"
+        case "$b" in
+            *.link) ln -sfn "$(cat "$f")" "/etc/apache2/sites-enabled/${b%.link}" ;;
+            *) cp -p "$f" "/etc/apache2/sites-enabled/${b}" ;;
+        esac
+    done
+    apache2ctl -t > /dev/null 2>&1 && apache2ctl graceful
+}
+
 # Stop everything in the container that writes to the site's database, and
 # leave the container running: Apache is its main process, so stopping Apache
 # ends the container, and the restart policy starts it again with every writer
@@ -278,6 +379,22 @@ if [ "$STAGE" = "prepare" ]; then
     PORT="$(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{if eq $p "80/tcp"}}{{range $conf}}{{.HostPort}}{{end}}{{end}}{{end}}' "$SITE")"
     [ -n "$PORT" ] || die "could not read ${SITE}'s web port"
 
+    # The name install.sh renders the host vhost for is the one the host serves
+    # the site under now; the container's DOMAIN_NAME is only the fallback for
+    # a site with no host vhost.
+    ENV_DOMAIN="$DOMAIN"
+    mapfile -t HOST_VHOSTS < <(host_vhost_files "$PORT")
+    mapfile -t HOST_NAMES < <(host_domains ${HOST_VHOSTS[@]+"${HOST_VHOSTS[@]}"})
+    [ "${#HOST_NAMES[@]}" -le 1 ] || die "the host serves ${SITE} (port ${PORT}) under several names: ${HOST_NAMES[*]}. install.sh renders a vhost for one; nothing was changed"
+    [ "${#HOST_NAMES[@]}" -eq 0 ] || DOMAIN="${HOST_NAMES[0]}"
+    OTHER_VHOSTS=""
+    for f in ${HOST_VHOSTS[@]+"${HOST_VHOSTS[@]}"}; do
+        [ "$(basename "$f")" = "${SITE}.conf" ] || OTHER_VHOSTS="${OTHER_VHOSTS:+${OTHER_VHOSTS} }$(basename "$f")"
+    done
+
+    MF_FAILED="$(manifest_failures)"
+    [ "$MF_FAILED" = "0" ] || die "${SITE}'s files do not match its signed release manifest (${MF_FAILED}). Its agent refuses backups like this, and the move would carry it across. Apply the site's update first; nothing was changed"
+
     # install.sh recreates exactly two bindings: the web port (127.0.0.1 behind
     # the host proxy, every interface for a site with no domain) and the
     # database port (web + 1000) on 127.0.0.1, or on the address the site's
@@ -310,6 +427,7 @@ if [ "$STAGE" = "prepare" ]; then
     state_set base "$BASE"; state_set from_major "$HAVE"; state_set to_major "$WANT"
     state_set db "$DB"; state_set encoding "$ENC"; state_set collate "$COLL"; state_set ctype "$CTYPE"
     state_set domain "$DOMAIN"; state_set port "$PORT"; state_set old_image "$OLD_IMAGE"
+    state_set other_vhosts "$OTHER_VHOSTS"
 
     save_run_args "${WORK}/run_args"
     docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
@@ -330,6 +448,20 @@ if [ "$STAGE" = "prepare" ]; then
     say "Plan for ${SITE}:"
     echo "  PostgreSQL ${HAVE} -> ${WANT} (${BASE}), database ${DB} (${ENC}, ${COLL})"
     echo "  domain ${DOMAIN:-?}, web port ${PORT}, image $(docker inspect -f '{{.Config.Image}}' "$SITE") (${OLD_IMAGE:7:12}) kept for rollback"
+    if [ -n "$ENV_DOMAIN" ] && [ "$ENV_DOMAIN" != "$DOMAIN" ]; then
+        echo "  the host serves ${DOMAIN}; the container's DOMAIN_NAME says ${ENV_DOMAIN}. The rebuild uses ${DOMAIN}"
+    fi
+    if [ "${#HOST_NAMES[@]}" -eq 0 ]; then
+        echo "  no host vhost proxies to port ${PORT}; the domain is the container's DOMAIN_NAME"
+    elif [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+        echo "  certificate: the Let's Encrypt lineage for ${DOMAIN}"
+    else
+        echo "  certificate: none for ${DOMAIN} (install.sh answers with a placeholder until one is issued)"
+    fi
+    if [ -n "$OTHER_VHOSTS" ]; then
+        echo "  also serving port ${PORT}: ${OTHER_VHOSTS}. swap disables them once install.sh has written ${SITE}.conf; rollback enables them again"
+    fi
+    echo "  every file matches the signed release manifest"
     echo "  $(wc -l < "${WORK}/counts.prepare.tsv") tables; trial dump $(awk -v b="$DUMP_BYTES" 'BEGIN { printf "%.1f", b / 1000000 }') MB in $((T1 - T0)) s"
     echo "  roles beyond postgres: $(grep -c '^CREATE ROLE' "${WORK}/roles.sql" || true)"
     DECLARED_HBA="$(grep -cE '^[[:space:]]*host' "$ACCESS_FILE" 2>/dev/null || true)"
@@ -362,6 +494,8 @@ if [ "$STAGE" = "swap" ]; then
     KEPT="$(docker image inspect -f '{{.Id}}' "$KEEP_IMAGE" 2>/dev/null || true)"
     [ -z "$KEPT" ] || [ "$KEPT" = "$OLD_IMAGE" ] || die "${KEEP_IMAGE} already names another image (${KEPT:7:12}); it may be the only copy of an earlier rollback image. Nothing was changed"
     ! docker volume inspect "$BACKUP_VOL" > /dev/null 2>&1 || die "${BACKUP_VOL} already exists — a previous swap was not finished or rolled back"
+    MF_FAILED="$(manifest_failures)"
+    [ "$MF_FAILED" = "0" ] || die "${SITE}'s files do not match its signed release manifest (${MF_FAILED}); apply its update, then prepare again. Nothing was changed"
 
     say "Stopping the site's writes (PHP-FPM, cron, the agent, Postfix)"
     stop_site_writes || die "the site's writes could not be stopped; nothing was moved. Restart it with: docker restart ${SITE}"
@@ -373,6 +507,11 @@ if [ "$STAGE" = "swap" ]; then
     docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
         | grep -vE '^(CREATE|ALTER) ROLE postgres[ ;]' > "${WORK}/roles.sql"
     save_run_args "${WORK}/run_args"
+    for f in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
+        docker cp "${SITE}:/var/www/html/${SITE}/${f}" "${WORK}/${f}" \
+            || die "could not keep ${SITE}'s ${f}; nothing was moved. Restart it with: docker restart ${SITE}"
+    done
+    save_host_vhosts
 
     # The agent's identity must outlive the old container. install.sh carries
     # it across its own rebuild, but this removes the container first, so the
@@ -406,6 +545,15 @@ if [ "$STAGE" = "swap" ]; then
 
     wait_for_postgres || die "PostgreSQL did not start in the rebuilt container. Roll back with: $0 ${SITE} rollback"
     [ "$(db_major)" = "$TO" ] || die "the rebuilt container runs PostgreSQL $(db_major), not ${TO}. Roll back with: $0 ${SITE} rollback"
+    put_manifest || die "the site's files do not match the manifest carried from the old container. Roll back with: $0 ${SITE} rollback"
+    say "Carried the signed release manifest across; every file matches it"
+    OTHER="$(state_get other_vhosts)"
+    if [ -n "$OTHER" ]; then
+        for b in $OTHER; do rm -f "/etc/apache2/sites-enabled/${b}"; done
+        apache2ctl -t > /dev/null 2>&1 && apache2ctl graceful \
+            || die "Apache refuses its configuration without ${OTHER}. Roll back with: $0 ${SITE} rollback"
+        say "Disabled ${OTHER}: ${SITE}.conf serves ${SITE} now (the files are kept for rollback)"
+    fi
     stop_site_writes || die "the rebuilt site's writes could not be stopped. Roll back with: $0 ${SITE} rollback"
 
     say "Setting the postgres password from the site's environment"
@@ -434,6 +582,8 @@ if [ "$STAGE" = "swap" ]; then
     CODE="$(wait_for_site)"
     say "Front page through the container's port: HTTP ${CODE}"
     case "$CODE" in 000|5*) say "WARNING: the site is not answering. Roll back with: $0 ${SITE} rollback" ;; esac
+    MF_FAILED="$(manifest_failures)"
+    [ "$MF_FAILED" = "0" ] || say "WARNING: after the restart, ${MF_FAILED} file(s) do not match the signed release manifest; the agent will refuse backups. Roll back with: $0 ${SITE} rollback"
     state_set stage swapped
     say "Swapped. Check the site, its login and admin, its agent on the management node,"
     say "and one backup. Roll back with: $0 ${SITE} rollback   Finish (after a week): $0 ${SITE} finish"
@@ -469,6 +619,12 @@ if [ "$STAGE" = "rollback" ]; then
     docker run -d "${ARGS[@]}" "$KEEP_IMAGE" > /dev/null
     wait_for_postgres || die "PostgreSQL did not start on the old image; the copy is still in ${BACKUP_VOL}"
     [ "$(db_major)" = "$FROM" ] || die "the rolled-back container does not see PostgreSQL ${FROM}; the copy is still in ${BACKUP_VOL}"
+    # The old image's own layer carries the manifest it was built with, not the
+    # one that matched the code volume when the swap began.
+    if [ -f "${WORK}/RELEASE_MANIFEST" ]; then
+        put_manifest || say "WARNING: the site's files do not match the manifest kept from before the swap; its agent refuses backups until the site's update is applied again"
+    fi
+    restore_host_vhosts || say "WARNING: Apache refused the restored vhosts; the copies are in ${WORK}/host_vhosts"
     # The data is back in ${SITE}_postgres and running; the copy has done its job,
     # and leaving it would block the next swap.
     docker volume rm "$BACKUP_VOL" > /dev/null
@@ -483,7 +639,8 @@ if [ "$STAGE" = "finish" ]; then
     [ "$(state_get stage)" = "swapped" ] || die "${SITE} is at stage '$(state_get stage)', not swapped"
     docker volume rm "$BACKUP_VOL" > /dev/null
     docker rmi "$KEEP_IMAGE" > /dev/null 2>&1 || true
-    rm -f "${WORK}/${DB}.dump" "${WORK}/run_args" "${WORK}/roles.sql"
+    rm -f "${WORK}/${DB}.dump" "${WORK}/run_args" "${WORK}/roles.sql" "${WORK}/RELEASE_MANIFEST" "${WORK}/RELEASE_MANIFEST.sig"
+    rm -rf "${WORK}/host_vhosts"
     state_set stage finished
     say "Finished: ${BACKUP_VOL}, ${KEEP_IMAGE} and the dump are gone. ${SITE} runs PostgreSQL ${TO}."
 fi

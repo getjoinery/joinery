@@ -795,13 +795,15 @@
 				copy($maintenance_dir . 'install_tools/default_Globalvars_site.php', $core_temp_dir . '/config/default_Globalvars_site.php');
 			}
 
-			// Copy maintenance_scripts
+			// Copy maintenance_scripts. .git and .gitignore stay behind, as they do
+			// for public_html: the signed manifest never lists them, so shipping one
+			// is shipping a file nothing verifies.
 			foreach (['install_tools', 'sysadmin_tools'] as $dir) {
 				$source_dir = $maintenance_dir . $dir . '/';
 				$dest_dir = $core_temp_dir . '/maintenance_scripts/' . $dir . '/';
 				if (is_dir($source_dir)) {
 					mkdir($dest_dir, 0755, true);
-					exec(sprintf('rsync -av %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
+					exec(sprintf('rsync -av --exclude=.git --exclude=.gitignore %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
 				}
 			}
 
