@@ -62,6 +62,8 @@ pub struct PlanItem {
     /// For a move: where it is now, and where it is going. Used to find cycles.
     pub move_from: Option<Placement>,
     pub move_to: Option<Placement>,
+    /// For a delete: the slot it frees, on the side it deletes from.
+    pub vacating: Option<Placement>,
 }
 
 impl PlanItem {
@@ -72,6 +74,7 @@ impl PlanItem {
             depth,
             move_from: None,
             move_to: None,
+            vacating: None,
         }
     }
 
@@ -86,6 +89,13 @@ impl PlanItem {
     /// move into it waits for it to exist.
     pub fn arriving(mut self, to: Placement) -> Self {
         self.move_to = Some(to);
+        self
+    }
+
+    /// A delete, and the slot it frees: the server's placement for a trash
+    /// on the server, this disk's for a trash here.
+    pub fn vacating(mut self, slot: Placement) -> Self {
+        self.vacating = Some(slot);
         self
     }
 }
@@ -378,6 +388,41 @@ fn dependency_graph(
         .map(|i| i.entity)
         .collect();
     let mut impossible: HashSet<EntityId> = HashSet::new();
+
+    // A move onto a slot a delete in this round frees: a file the user moved
+    // over another, read as one move and one delete. Deletes run last, so run
+    // in stage order the move reaches a name that is still taken -- the server
+    // refuses it, and the retry steps aside under a conflict name, renaming
+    // the user's own file on their disk. It is impossible this round; the
+    // delete lands, and the next round derives the move again onto a free
+    // name. Matched by side: a move pushed to the server waits for a trash on
+    // the server, a move applied here for a trash here.
+    let freed: HashMap<((Option<i64>, String), bool), EntityId> = items
+        .iter()
+        .filter_map(|i| {
+            let on_the_server = match i.action {
+                Action::TrashRemote => true,
+                Action::TrashLocal => false,
+                _ => return None,
+            };
+            i.vacating.as_ref().map(|p| ((slot(p, personality), on_the_server), i.entity))
+        })
+        .collect();
+    for item in items {
+        let on_the_server = match item.action {
+            Action::ApplyLocalMove { .. } => true,
+            Action::ApplyRemoteMove { .. } => false,
+            _ => continue,
+        };
+        let Some(to) = &item.move_to else { continue };
+        if freed
+            .get(&(slot(to, personality), on_the_server))
+            .is_some_and(|holder| *holder != item.entity)
+        {
+            impossible.insert(item.entity);
+        }
+    }
+
     for item in items {
         if item.entity.entity_type != EntityType::Folder {
             continue;

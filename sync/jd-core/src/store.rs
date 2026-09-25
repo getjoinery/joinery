@@ -297,7 +297,8 @@ impl Store {
         // Who holds this disk identity: asked by `make_room` for every file it
         // moves aside, so it is an index and not a table read.
         store.conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS entries_synced_id ON entries (entity_type, synced_fp_file_id);",
+            "CREATE INDEX IF NOT EXISTS entries_synced_id ON entries (entity_type, synced_fp_file_id);
+             CREATE INDEX IF NOT EXISTS entries_own_id ON entries (entity_type, own_file_id);",
         )?;
         match store.get_meta("schema_version")? {
             None => store.set_meta("schema_version", &SCHEMA_VERSION.to_string())?,
@@ -618,7 +619,10 @@ impl Store {
     /// re-read every byte. Its queued operations are **dropped**, not moved —
     /// the only one that can be outstanding is the upload the server will refuse
     /// for as long as the name is taken, which is forever.
-    pub fn merge_file(&self, from: EntityId, to: EntityId) -> StoreResult<()> {
+    /// `hand_over`: the real entry takes the provisional's own file. The caller
+    /// decides, because it takes the disk or the server to say whether the file
+    /// the provisional was minted for is the real entry's (`pass::may_take_a_merged_file`).
+    pub fn merge_file(&self, from: EntityId, to: EntityId, hand_over: bool) -> StoreResult<()> {
         if from == to || from.entity_type != EntityType::File || to.entity_type != EntityType::File
         {
             return Ok(());
@@ -643,14 +647,14 @@ impl Store {
                 };
                 changed = true;
             }
-            // The file the provisional was minted for is the real entry's own
-            // when the real entry keeps an agreement here: the scan then
-            // compares that file against it. Handed over, never copied -- the
-            // provisional goes below. With no agreement the file is a spare
-            // copy `make_room` sets aside, and it stays nobody's until it is
-            // found again as new.
+            // The file the provisional was minted for, when the caller has
+            // found it is the real entry's own. Handed over, never copied --
+            // the provisional goes below. With no agreement here the file is a
+            // spare copy `make_room` sets aside, and it stays nobody's until it
+            // is found again as new.
             let provisional_own = self.get_entry(from)?.and_then(|p| p.own_file);
-            if real.synced_placement.is_some()
+            if hand_over
+                && real.synced_placement.is_some()
                 && provisional_own.is_some()
                 && real.own_file != provisional_own
             {
@@ -1346,6 +1350,35 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// The FILE records whose own file this is (`Entry::owns`), the server's
+    /// deleted ones included when `live_only` is false. Asked by the file id,
+    /// then held to the birth where both sides have one: a recycled id is
+    /// another file.
+    pub fn owners_of_file(&self, here: jd_vfs::FileIdentity, live_only: bool) -> StoreResult<Vec<Entry>> {
+        if here.file_id == 0 {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT entity_type, server_id, parent_folder_id, remote_name, local_name,
+                    is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
+                    head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
+                    synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
+                    local_status, unsyncable_reason, wrapped_file_key,
+                    content_id, synced_remote_sha256, synced_remote_size,
+                    replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
+               FROM entries
+              WHERE entity_type = 'file'
+                AND (own_file_id = ?1 OR (own_file_id IS NULL AND synced_fp_file_id = ?1))",
+        )?;
+        let rows = stmt.query_map(params![here.file_id as i64], row_to_entry)?;
+        let all: Vec<Entry> = rows.collect::<Result<_, _>>()?;
+        Ok(all
+            .into_iter()
+            .filter(|e| e.owns(here) && !(live_only && e.remote_deleted))
+            .collect())
+    }
+
     pub fn live_holders_of(&self, entity_type: EntityType, file_id: u64) -> StoreResult<Vec<Entry>> {
         if file_id == 0 {
             return Ok(Vec::new());
@@ -1949,7 +1982,7 @@ mod tests {
         // minted for is its own now, and only its own.
         s.put_entry(&Entry { own_file: None, ..entry(7, "Report.txt") }).unwrap();
         s.put_entry(&provisional).unwrap();
-        s.merge_file(EntityId::file(-3), EntityId::file(7)).unwrap();
+        s.merge_file(EntityId::file(-3), EntityId::file(7), true).unwrap();
         assert_eq!(s.get_entry(EntityId::file(7)).unwrap().unwrap().own_file, Some(mine));
         assert!(s.get_entry(EntityId::file(-3)).unwrap().is_none());
 
@@ -1964,7 +1997,7 @@ mod tests {
         .unwrap();
         s.put_entry(&Entry { id: EntityId::file(-4), own_file: Some(mine), ..entry(-4, "Other.txt") })
             .unwrap();
-        s.merge_file(EntityId::file(-4), EntityId::file(8)).unwrap();
+        s.merge_file(EntityId::file(-4), EntityId::file(8), true).unwrap();
         assert_eq!(s.get_entry(EntityId::file(8)).unwrap().unwrap().own_file, None);
     }
 

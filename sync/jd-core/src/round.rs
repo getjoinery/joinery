@@ -219,6 +219,20 @@ pub fn run_round(
             if let Action::CreateLocalFolder { placement } = &action {
                 item = item.arriving(placement.clone());
             }
+            // A delete frees a slot a move in this round may be waiting for:
+            // on the server where it trashes there, here where it trashes here.
+            let freed = match &action {
+                Action::TrashRemote => Some(input.entry.remote.clone()),
+                Action::TrashLocal => input
+                    .local
+                    .placement()
+                    .cloned()
+                    .or_else(|| input.entry.synced_placement.clone()),
+                _ => None,
+            };
+            if let Some(slot) = freed {
+                item = item.vacating(slot);
+            }
             items.push(item);
         }
     }

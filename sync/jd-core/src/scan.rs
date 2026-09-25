@@ -69,10 +69,17 @@ pub struct KnownLocal {
     /// (owner decision D1). Its own file standing there is the file come
     /// home, whatever now stands at the path it was held at.
     pub server_home: Option<String>,
+    /// Where the server has this record, as a path, when that is not where
+    /// this disk has it: a move owed or in flight either way, or a hold. A
+    /// name the server gives this record is a name it holds (step 2).
+    pub server_path: Option<String>,
     /// The file on this disk that is this record's own
-    /// (`Entry::own_file`). Recorded; the pairing does not read it yet
-    /// (`specs/drive_file_identity.md`, commit 1).
+    /// (`Entry::own_file`). `pair_files` pairs by it; `pair_with` does not.
     pub own_file: Option<jd_vfs::FileIdentity>,
+    /// For a claimant -- a record waiting for a vault key to send the file its
+    /// source had -- the source. A claimant stands for the bytes at its path
+    /// in the vault: its file standing anywhere else is its source's again.
+    pub claimant_for: Option<EntityId>,
 }
 
 /// What the scan concluded about one tracked file.
@@ -101,6 +108,11 @@ pub struct ScanOutcome {
     pub changes: Vec<(EntityId, LocalChange)>,
     /// Files on disk that belong to nothing the engine knows about.
     pub created: Vec<ObservedFile>,
+    /// Which file each record was paired with, by identity (`pair_files`):
+    /// the record's own file from now on. Includes a record read unchanged
+    /// against a file that is not the one it knew -- restored from a backup,
+    /// saved again with the same bytes -- which no change reports.
+    pub bound: Vec<(EntityId, jd_vfs::FileIdentity)>,
 }
 
 impl ScanOutcome {
@@ -440,6 +452,295 @@ pub fn pair_with(
     out
 }
 
+/// The folder a relative path stands in; "" is the sync root.
+fn folder_of(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(dir, _)| dir)
+}
+
+/// Pair what is on disk against what the engine last recorded, by each file's
+/// own identity first (`specs/drive_file_identity.md`).
+///
+/// A record whose own file is a strong identity -- an id and a birth, on a
+/// volume whose personality trusts them (`strong_volume`) -- is paired by that
+/// file wherever it now stands, and its path decides only when the file is
+/// gone from this disk. The path rule above was right for the safe-save and
+/// wrong for a trade: two files that exchanged names each read as the other's
+/// edit, and a sealed file at a plain record's path went up as that record's
+/// version (Defects AI, AH). A record without a strong own file is paired by
+/// [`pair_with`], unchanged, over the files no strong record owns; with no
+/// strong record at all this is `pair_with` exactly.
+///
+/// Each step works over files no earlier step claimed:
+///
+/// 1. **At home.** A record whose own file stands at its path takes it:
+///    unchanged, or edited in place. Records sharing one path and one file
+///    (case twins, a server-deleted record) rank by `contender_rank`; the
+///    rest are unchanged for naming, or deleted if the server deleted them.
+/// 2. **Followed.** A record whose own file stands elsewhere follows it:
+///    moved, or moved and edited. An identity a record is at home with is
+///    that record's, and a hard-linked twin reads by its path (step 3). A
+///    backup made by renaming -- the record's own file under a new name in
+///    the same folder, at a path no record holds, and a file no record owns
+///    standing at the record's path -- is a save: the file at the path is the
+///    edit, and the renamed one is new. Never for a held record: its file
+///    stands in a plain folder while it is sealed, and read as a backup the
+///    vault's plaintext went up as a new file.
+/// 3. **Replaced.** A record whose own file is gone takes a file no record
+///    owns at its path: the safe-save.
+/// 4. **Weak records** run `pair_with` over the files left that no strong
+///    record owns.
+/// 5. **Found by content.** A record still unsettled whose agreed bytes stand
+///    on a file no record owns has moved: another volume, a restore.
+/// 6. The rest are deleted, except a live record whose path holds another
+///    record's at-home file, which is left to naming.
+///
+/// A claimant's own file standing anywhere but at its path is its source's
+/// again: the source follows it (step 2), which is what ends the hold, and
+/// the claimant reads its path like any record whose own file is gone. A
+/// held record (its bytes held by a claimant, or held outside its vault)
+/// reads by steps 1 and 2 only. A slot awaiting a download is a path a record
+/// holds (steps 2, 3 and 5). Files no step claimed are new.
+///
+/// The invariant: a file whose strong identity a record owns is claimed by
+/// that record or by nobody.
+pub fn pair_files(
+    known: &[KnownLocal],
+    observed: &[ObservedFile],
+    awaiting_bytes: &HashSet<String>,
+    strong_volume: bool,
+) -> ScanOutcome {
+    use jd_vfs::FileIdentity;
+    let own = |k: &KnownLocal| k.own_file.filter(|o| strong_volume && o.is_strong());
+    if !known.iter().any(|k| own(k).is_some()) {
+        return pair_with(known, observed, awaiting_bytes);
+    }
+    let identity = |o: &ObservedFile| {
+        Some(o.fingerprint.identity()).filter(|i| strong_volume && i.is_strong())
+    };
+    let held = |k: &KnownLocal| k.held || k.server_home.is_some();
+    let moved = |k: &KnownLocal, o: &ObservedFile| {
+        if k.sha256.as_deref() == Some(o.sha256.as_str()) {
+            LocalChange::Moved {
+                to_path: o.path.clone(),
+                fingerprint: o.fingerprint,
+            }
+        } else {
+            LocalChange::MovedAndEdited {
+                to_path: o.path.clone(),
+                sha256: o.sha256.clone(),
+                fingerprint: o.fingerprint,
+            }
+        }
+    };
+    let unchanged_or_edited = |k: &KnownLocal, o: &ObservedFile| {
+        if k.sha256.as_deref() == Some(o.sha256.as_str()) {
+            LocalChange::Unchanged
+        } else {
+            LocalChange::Edited {
+                sha256: o.sha256.clone(),
+                fingerprint: o.fingerprint,
+            }
+        }
+    };
+
+    let mut out = ScanOutcome::default();
+    let mut claimed = vec![false; observed.len()];
+    let mut settled = vec![false; known.len()];
+    let at_path: HashMap<&str, usize> =
+        observed.iter().enumerate().map(|(i, o)| (o.path.as_str(), i)).collect();
+    let mut by_identity: HashMap<FileIdentity, Vec<usize>> = HashMap::new();
+    for (i, o) in observed.iter().enumerate() {
+        if let Some(id) = identity(o) {
+            by_identity.entry(id).or_default().push(i);
+        }
+    }
+    // Every strong record owns its file, the server's deleted ones included:
+    // a record owns its file until it is forgotten.
+    let owned_ids: HashSet<FileIdentity> = known.iter().filter_map(own).collect();
+    let owned = |i: usize| identity(&observed[i]).is_some_and(|id| owned_ids.contains(&id));
+    let held_paths: HashSet<&str> = known
+        .iter()
+        .map(|k| k.path.as_str())
+        .chain(known.iter().filter_map(|k| k.server_path.as_deref()))
+        .chain(awaiting_bytes.iter().map(String::as_str))
+        .collect();
+    // Who goes first among records after one file: live before the server's
+    // deleted, a synced record before a provisional, then the lowest id.
+    let contender_rank = |n: usize| {
+        let k = &known[n];
+        (k.server_deleted, k.id.is_provisional(), k.id.server_id)
+    };
+    let nearest = |k: &KnownLocal, candidates: &mut Vec<usize>| {
+        candidates.sort_by(|a, b| {
+            let key = |i: &usize| (folder_of(&observed[*i].path) != folder_of(&k.path), &observed[*i].path);
+            key(a).cmp(&key(b))
+        });
+        candidates.first().copied()
+    };
+
+    // 1. At home.
+    let mut home: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
+    for (n, k) in known.iter().enumerate() {
+        let Some(id) = own(k) else { continue };
+        if let Some(&i) = at_path.get(k.path.as_str()) {
+            if identity(&observed[i]) == Some(id) {
+                home.entry(i).or_default().push(n);
+            }
+        }
+    }
+    let mut at_home_ids: HashSet<FileIdentity> = HashSet::new();
+    let mut home_taken: HashSet<usize> = HashSet::new();
+    for (i, mut contenders) in home {
+        let bytes_here = |n: &usize| known[*n].sha256.as_deref() != Some(observed[i].sha256.as_str());
+        contenders.sort_by_key(|n| (bytes_here(n), contender_rank(*n)));
+        claimed[i] = true;
+        home_taken.insert(i);
+        at_home_ids.extend(identity(&observed[i]));
+        for (place, n) in contenders.into_iter().enumerate() {
+            settled[n] = true;
+            let k = &known[n];
+            let change = if place == 0 {
+                out.bound.extend(identity(&observed[i]).map(|id| (k.id, id)));
+                unchanged_or_edited(k, &observed[i])
+            } else if k.server_deleted {
+                LocalChange::Deleted
+            } else {
+                LocalChange::Unchanged
+            };
+            out.changes.push((k.id, change));
+        }
+    }
+
+    // 2. Followed.
+    let mut followers: Vec<usize> = (0..known.len())
+        .filter(|n| !settled[*n] && own(&known[*n]).is_some_and(|id| !at_home_ids.contains(&id)))
+        .collect();
+    followers.sort_by_key(|n| contender_rank(*n));
+    for n in followers {
+        let k = &known[n];
+        let Some(id) = own(k) else { continue };
+        let mut names: Vec<usize> = by_identity
+            .get(&id)
+            .map(|v| v.iter().copied().filter(|i| !claimed[*i]).collect())
+            .unwrap_or_default();
+        let Some(c) = nearest(k, &mut names) else { continue };
+        if let Some(source) = k.claimant_for {
+            // Path-bound: the claimant stays for step 3, and its source takes
+            // the file where it stands.
+            let Some(s) = known.iter().position(|r| r.id == source).filter(|s| !settled[*s]) else {
+                continue;
+            };
+            claimed[c] = true;
+            settled[s] = true;
+            let obs = &observed[c];
+            out.bound.extend(identity(obs).map(|id| (known[s].id, id)));
+            out.changes.push((known[s].id, moved(&known[s], obs)));
+            continue;
+        }
+        let backup = !held(k)
+            && folder_of(&observed[c].path) == folder_of(&k.path)
+            && !held_paths.contains(observed[c].path.as_str())
+            && !awaiting_bytes.contains(k.path.as_str());
+        if backup {
+            if let Some(&o) = at_path.get(k.path.as_str()).filter(|o| !claimed[**o] && !owned(**o)) {
+                claimed[o] = true;
+                settled[n] = true;
+                out.bound.extend(identity(&observed[o]).map(|id| (k.id, id)));
+                out.changes.push((k.id, unchanged_or_edited(k, &observed[o])));
+                continue;
+            }
+        }
+        claimed[c] = true;
+        settled[n] = true;
+        out.bound.push((k.id, id));
+        out.changes.push((k.id, moved(k, &observed[c])));
+    }
+
+    // 3. Replaced.
+    let mut replaced: Vec<usize> = (0..known.len())
+        .filter(|n| !settled[*n] && own(&known[*n]).is_some() && !held(&known[*n]))
+        .collect();
+    replaced.sort_by_key(|n| contender_rank(*n));
+    for n in replaced {
+        let k = &known[n];
+        if awaiting_bytes.contains(k.path.as_str()) {
+            continue;
+        }
+        let Some(&o) = at_path.get(k.path.as_str()) else { continue };
+        if claimed[o] || owned(o) {
+            continue;
+        }
+        claimed[o] = true;
+        settled[n] = true;
+        out.bound.extend(identity(&observed[o]).map(|id| (k.id, id)));
+        out.changes.push((k.id, unchanged_or_edited(k, &observed[o])));
+    }
+
+    // 4. Weak records, by today's rules, over what no strong record owns.
+    let weak: Vec<KnownLocal> = known.iter().filter(|k| own(k).is_none()).cloned().collect();
+    let rest: Vec<usize> = (0..observed.len()).filter(|i| !claimed[*i] && !owned(*i)).collect();
+    let rest_files: Vec<ObservedFile> = rest.iter().map(|i| observed[*i].clone()).collect();
+    let weak_out = pair_with(&weak, &rest_files, awaiting_bytes);
+    let left: HashSet<&str> = weak_out.created.iter().map(|o| o.path.as_str()).collect();
+    for i in rest {
+        if !left.contains(observed[i].path.as_str()) {
+            claimed[i] = true;
+        }
+    }
+    out.changes.extend(weak_out.changes);
+
+    // 5. Found by content.
+    let mut searchers: Vec<usize> = (0..known.len())
+        .filter(|n| !settled[*n] && own(&known[*n]).is_some() && !held(&known[*n]))
+        .collect();
+    searchers.sort_by_key(|n| contender_rank(*n));
+    for n in searchers {
+        let k = &known[n];
+        let Some(want) = k.sha256.as_deref() else { continue };
+        let mut hits: Vec<usize> = (0..observed.len())
+            .filter(|i| {
+                !claimed[*i]
+                    && !owned(*i)
+                    && observed[*i].sha256 == want
+                    && !awaiting_bytes.contains(observed[*i].path.as_str())
+            })
+            .collect();
+        let Some(i) = nearest(k, &mut hits) else { continue };
+        claimed[i] = true;
+        settled[n] = true;
+        out.bound.extend(identity(&observed[i]).map(|id| (k.id, id)));
+        out.changes.push((
+            k.id,
+            LocalChange::Moved {
+                to_path: observed[i].path.clone(),
+                fingerprint: observed[i].fingerprint,
+            },
+        ));
+    }
+
+    // 6. The rest.
+    for (n, k) in known.iter().enumerate() {
+        if settled[n] || own(k).is_none() {
+            continue;
+        }
+        let twin = !k.server_deleted
+            && at_path.get(k.path.as_str()).is_some_and(|i| home_taken.contains(i));
+        out.changes.push((k.id, if twin { LocalChange::Unchanged } else { LocalChange::Deleted }));
+    }
+
+    // In the order the records were given, whichever step settled them.
+    let position: HashMap<EntityId, usize> =
+        known.iter().enumerate().map(|(n, k)| (k.id, n)).collect();
+    out.changes.sort_by_key(|(id, _)| position.get(id).copied().unwrap_or(usize::MAX));
+    out.bound.sort_by_key(|(id, _)| position.get(id).copied().unwrap_or(usize::MAX));
+    for (i, o) in observed.iter().enumerate() {
+        if !claimed[i] {
+            out.created.push(o.clone());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,7 +768,7 @@ mod tests {
             path: path.into(),
             fingerprint: Some(fp(file_id, 10, 100)),
             sha256: Some(sha.into()),
-            server_deleted: false, held: false, server_home: None, own_file: None,
+            server_deleted: false, held: false, server_home: None, server_path: None, own_file: None, claimant_for: None,
         }
     }
 
@@ -745,7 +1046,9 @@ mod tests {
             server_deleted: false,
             held: false,
             server_home: None,
+            server_path: None,
             own_file: None,
+            claimant_for: None,
         };
         let out = pair(
             &[bare.clone()],
@@ -850,7 +1153,7 @@ mod tests {
                 path: "a.txt".into(),
                 fingerprint: None,
                 sha256: None,
-                server_deleted: false, held: false, server_home: None, own_file: None,
+                server_deleted: false, held: false, server_home: None, server_path: None, own_file: None, claimant_for: None,
             }],
             &[observed("elsewhere.txt", 900, "sha-x")],
         );
@@ -948,6 +1251,240 @@ mod tests {
             out.change_for(EntityId::file(2)),
             Some(&LocalChange::Unchanged),
             "the one that missed out is left alone for naming to sort out"
+        );
+    }
+
+    // ---- by identity (`pair_files`, specs/drive_file_identity.md) -----------
+
+    fn sfp(file_id: u64, birth_ns: u64) -> jd_vfs::Fingerprint {
+        jd_vfs::Fingerprint { size: 10, mtime_ns: 100, file_id, birth_ns }
+    }
+
+    /// A record whose own file is `(file_id, birth)`.
+    fn mine(id: i64, path: &str, file_id: u64, birth: u64, sha: &str) -> KnownLocal {
+        KnownLocal {
+            fingerprint: Some(sfp(file_id, birth)),
+            own_file: Some(jd_vfs::FileIdentity { file_id, birth_ns: birth }),
+            ..known(id, path, file_id, sha)
+        }
+    }
+
+    fn seen(path: &str, file_id: u64, birth: u64, sha: &str) -> ObservedFile {
+        ObservedFile { path: path.into(), fingerprint: sfp(file_id, birth), sha256: sha.into() }
+    }
+
+    fn by_identity(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
+        pair_files(known, observed, &HashSet::new(), true)
+    }
+
+    fn moved_to(out: &ScanOutcome, id: i64) -> Option<String> {
+        match out.change_for(EntityId::file(id)) {
+            Some(LocalChange::Moved { to_path, .. }) | Some(LocalChange::MovedAndEdited { to_path, .. }) => {
+                Some(to_path.clone())
+            }
+            _ => None,
+        }
+    }
+
+    fn created(out: &ScanOutcome) -> Vec<&str> {
+        out.created.iter().map(|o| o.path.as_str()).collect()
+    }
+
+    #[test]
+    fn by_identity_a_file_moved_and_edited_keeps_its_history() {
+        // Rule 4's price, paid only by a bare inode: with a birth the file is
+        // the same file, renamed and edited.
+        let out = by_identity(&[mine(1, "draft.txt", 100, 7, "sha-old")], &[seen("final.txt", 100, 7, "sha-new")]);
+        assert!(
+            matches!(out.change_for(EntityId::file(1)), Some(LocalChange::MovedAndEdited { to_path, sha256, .. })
+                if to_path == "final.txt" && sha256 == "sha-new"),
+            "{:?}", out.change_for(EntityId::file(1))
+        );
+        assert!(out.created.is_empty());
+    }
+
+    #[test]
+    fn by_identity_a_recycled_id_with_a_new_birth_is_another_file() {
+        let out = by_identity(&[mine(1, "gone.txt", 100, 7, "sha-gone")], &[seen("unrelated.txt", 100, 8, "sha-other")]);
+        assert_eq!(out.change_for(EntityId::file(1)), Some(&LocalChange::Deleted));
+        assert_eq!(created(&out), vec!["unrelated.txt"]);
+    }
+
+    #[test]
+    fn by_identity_two_files_trading_names_are_two_moves() {
+        let out = by_identity(
+            &[mine(1, "a.txt", 100, 1, "sha-a"), mine(2, "b.txt", 200, 2, "sha-b")],
+            &[seen("a.txt", 200, 2, "sha-b"), seen("b.txt", 100, 1, "sha-a")],
+        );
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("b.txt"));
+        assert_eq!(moved_to(&out, 2).as_deref(), Some("a.txt"));
+        assert!(out.created.is_empty());
+    }
+
+    #[test]
+    fn by_identity_a_rotation_caught_half_way_is_two_moves() {
+        // a -> tmp, b -> a, and the scan lands before tmp -> b.
+        let out = by_identity(
+            &[mine(1, "a.txt", 100, 1, "sha-a"), mine(2, "b.txt", 200, 2, "sha-b")],
+            &[seen("tmp", 100, 1, "sha-a"), seen("a.txt", 200, 2, "sha-b")],
+        );
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("tmp"));
+        assert_eq!(moved_to(&out, 2).as_deref(), Some("a.txt"));
+    }
+
+    #[test]
+    fn by_identity_a_file_moved_over_another_is_a_move_and_a_delete() {
+        // `mv old-name.txt Report.txt`. The path rule read Report.txt's record
+        // as edited with the mover's bytes -- a sealed mover's plaintext sent
+        // as a plain file's version (AH) -- and the mover as deleted.
+        let out = by_identity(
+            &[mine(1, "old-name.txt", 100, 1, "sha-a"), mine(2, "Report.txt", 200, 2, "sha-b")],
+            &[seen("Report.txt", 100, 1, "sha-a")],
+        );
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("Report.txt"));
+        assert_eq!(out.change_for(EntityId::file(2)), Some(&LocalChange::Deleted));
+    }
+
+    #[test]
+    fn by_identity_a_backup_made_by_renaming_is_still_a_save() {
+        // p1 with births: the original renamed beside itself, a new file at
+        // the name. The renamed one is new; the name's record is edited.
+        let out = by_identity(
+            &[mine(1, "notes.txt", 100, 1, "sha-old")],
+            &[seen("notes.txt~", 100, 1, "sha-old"), seen("notes.txt", 101, 2, "sha-new")],
+        );
+        assert!(edited(&out, 1), "{:?}", out.change_for(EntityId::file(1)));
+        assert_eq!(created(&out), vec!["notes.txt~"]);
+    }
+
+    #[test]
+    fn by_identity_a_file_renamed_into_another_folder_is_never_a_backup() {
+        // A backup is written beside its original. The same disk across two
+        // folders is the file moved, and a new file saved at its old name.
+        let out = by_identity(
+            &[mine(1, "Plain/out.txt", 100, 1, "sha-out")],
+            &[seen("Private/out.txt", 100, 1, "sha-out"), seen("Plain/out.txt", 300, 3, "sha-new")],
+        );
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("Private/out.txt"));
+        assert_eq!(created(&out), vec!["Plain/out.txt"]);
+    }
+
+    #[test]
+    fn by_identity_a_held_file_renamed_in_place_beside_a_stranger_is_moved() {
+        // O1. A held file is sealed and stands in a plain folder, so the
+        // backup reading would make the stranger its edit and put the vault's
+        // plaintext, renamed, up as a new plain file. Both kinds of hold.
+        for held in [
+            KnownLocal { held: true, ..mine(1, "Plain/out.txt", 100, 1, "sha-sealed") },
+            KnownLocal { server_home: Some("Private/out.txt".into()), ..mine(1, "Plain/out.txt", 100, 1, "sha-sealed") },
+        ] {
+            let out = by_identity(
+                &[held],
+                &[seen("Plain/out2.txt", 100, 1, "sha-sealed"), seen("Plain/out.txt", 300, 3, "sha-stranger")],
+            );
+            assert_eq!(moved_to(&out, 1).as_deref(), Some("Plain/out2.txt"));
+            assert_eq!(created(&out), vec!["Plain/out.txt"]);
+        }
+    }
+
+    #[test]
+    fn by_identity_a_trade_with_a_slot_awaiting_a_download_is_not_a_backup() {
+        // O6 (T1, plain2 75292): b.txt is a live record's with nothing here
+        // yet. The record's own file standing there is the file moved.
+        let awaiting: HashSet<String> = ["b.txt".to_string()].into();
+        let out = pair_files(
+            &[mine(1, "a.txt", 100, 1, "sha-a")],
+            &[seen("b.txt", 100, 1, "sha-a"), seen("a.txt", 300, 3, "sha-new")],
+            &awaiting,
+            true,
+        );
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("b.txt"));
+        assert_eq!(created(&out), vec!["a.txt"]);
+    }
+
+    #[test]
+    fn by_identity_a_provisional_traded_with_a_synced_file_is_two_moves() {
+        // T1-C: a record never uploaded has its own file from its mint.
+        let provisional = KnownLocal { id: EntityId::file(-1), sha256: None, fingerprint: None, ..mine(-1, "new.txt", 500, 5, "") };
+        let out = by_identity(
+            &[provisional, mine(2, "old.txt", 600, 6, "sha-old")],
+            &[seen("new.txt", 600, 6, "sha-old"), seen("old.txt", 500, 5, "sha-draft")],
+        );
+        assert_eq!(moved_to(&out, -1).as_deref(), Some("old.txt"));
+        assert_eq!(moved_to(&out, 2).as_deref(), Some("new.txt"));
+    }
+
+    #[test]
+    fn by_identity_a_file_the_server_deleted_is_still_its_records_own() {
+        // Its record is deleted on the server and not yet forgotten; its file
+        // traded onto another record's path is not that record's edit.
+        let out = by_identity(
+            &[
+                KnownLocal { server_deleted: true, ..mine(1, "sealed.txt", 100, 1, "sha-sealed") },
+                mine(2, "plain.txt", 200, 2, "sha-plain"),
+            ],
+            &[seen("plain.txt", 100, 1, "sha-sealed")],
+        );
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("plain.txt"));
+        assert_eq!(out.change_for(EntityId::file(2)), Some(&LocalChange::Deleted));
+    }
+
+    #[test]
+    fn by_identity_a_hard_linked_file_is_followed_to_its_nearest_name() {
+        let out = by_identity(
+            &[mine(1, "a.txt", 100, 1, "sha-a")],
+            &[seen("c.txt", 100, 1, "sha-a"), seen("b.txt", 100, 1, "sha-a")],
+        );
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("b.txt"));
+        assert_eq!(created(&out), vec!["c.txt"]);
+    }
+
+    #[test]
+    fn by_identity_a_safe_save_of_one_hard_linked_name_is_an_edit() {
+        // p2 with births: the identity is at home under b.txt, so a.txt reads
+        // by its path.
+        let out = by_identity(
+            &[mine(1, "a.txt", 100, 1, "sha-x"), mine(2, "b.txt", 100, 1, "sha-x")],
+            &[seen("a.txt", 101, 2, "sha-y"), seen("b.txt", 100, 1, "sha-x")],
+        );
+        assert!(edited(&out, 1), "{:?}", out.change_for(EntityId::file(1)));
+        assert_eq!(out.change_for(EntityId::file(2)), Some(&LocalChange::Unchanged));
+    }
+
+    #[test]
+    fn by_identity_a_claimants_file_brought_back_out_is_its_sources_again() {
+        // A keyless device dragged memo.txt into a vault: a claimant waits at
+        // the vault path with the file, and the source is held. The file comes
+        // back out under a new name and a new note is saved at the vault path.
+        // The source moved; the claimant now stands for the note.
+        let source = KnownLocal { held: true, own_file: None, ..known(1, "memo.txt", 100, "sha-memo") };
+        let claimant = KnownLocal {
+            claimant_for: Some(EntityId::file(1)),
+            sha256: None,
+            fingerprint: None,
+            ..mine(-1, "Private/memo.txt", 100, 1, "")
+        };
+        let out = by_identity(
+            &[source, claimant],
+            &[seen("memo-again.txt", 100, 1, "sha-memo"), seen("Private/memo.txt", 300, 3, "sha-note")],
+        );
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("memo-again.txt"));
+        assert!(edited(&out, -1), "{:?}", out.change_for(EntityId::file(-1)));
+        assert!(out.created.is_empty());
+    }
+
+    #[test]
+    fn by_identity_nothing_strong_is_the_path_rule_exactly() {
+        // No birth, or a volume that does not trust its ids: `pair_with`.
+        let known = [known(1, "a.txt", 100, "sha-a"), known(2, "b.txt", 200, "sha-b")];
+        let observed = [observed("a.txt", 200, "sha-b"), observed("b.txt", 100, "sha-a")];
+        let weak = pair_with(&known, &observed, &HashSet::new());
+        assert_eq!(by_identity(&known, &observed), weak);
+        let strong = [mine(1, "a.txt", 100, 1, "sha-a"), mine(2, "b.txt", 200, 2, "sha-b")];
+        let seen_strong = [seen("a.txt", 200, 2, "sha-b"), seen("b.txt", 100, 1, "sha-a")];
+        assert_eq!(
+            pair_files(&strong, &seen_strong, &HashSet::new(), false),
+            pair_with(&strong, &seen_strong, &HashSet::new())
         );
     }
 

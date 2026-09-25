@@ -278,8 +278,9 @@ impl MemFs {
         self.state.lock().unwrap().reuse_file_ids = on;
     }
 
-    /// Report no file's birth: the volume with no birth time, where the engine
-    /// reads the disk by its older rules.
+    /// Report no file's birth: the volume with no birth time, whose
+    /// personality then says its file identity is weak, where the engine reads
+    /// the disk by its older rules.
     pub fn hide_births(&self, on: bool) {
         self.state.lock().unwrap().births_hidden = on;
     }
@@ -915,7 +916,13 @@ impl MemFs {
 
 impl Vfs for MemFs {
     fn personality(&self) -> Personality {
-        self.personality
+        // A volume with no birth time is one whose file identity is weak, and
+        // a real one says so through its probe.
+        let mut p = self.personality;
+        if self.state.lock().unwrap().births_hidden {
+            p.stable_file_identity = false;
+        }
+        p
     }
 
     fn root(&self) -> Option<PathBuf> {

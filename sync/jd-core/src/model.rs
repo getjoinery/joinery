@@ -287,6 +287,30 @@ impl Entry {
     /// to another. `PendingDownload` deliberately answers yes: those bytes are
     /// on their way to that path, and letting something else take it in the
     /// meantime is how two files end up fighting over one slot.
+    /// The file id of this record's own file on this disk: its own file, or,
+    /// for a record that has none yet, the file its agreement names. Files
+    /// only -- a folder's directory id is its agreement's fingerprint. `None`
+    /// for an unknown id (0).
+    pub fn own_file_id(&self) -> Option<u64> {
+        if self.id.entity_type != EntityType::File {
+            return None;
+        }
+        self.own_file
+            .map(|o| o.file_id)
+            .or_else(|| self.synced_fingerprint.map(|f| f.file_id))
+            .filter(|id| *id != 0)
+    }
+
+    /// Is this file, standing on the disk, this record's own? By the full
+    /// identity where both sides have a birth; by the file id where either
+    /// does not, which is all a record from before own files can say.
+    pub fn owns(&self, here: jd_vfs::FileIdentity) -> bool {
+        match self.own_file {
+            Some(own) if own.is_strong() && here.is_strong() => own == here,
+            _ => self.own_file_id().is_some_and(|id| id == here.file_id),
+        }
+    }
+
     pub fn holds_a_local_file(&self) -> bool {
         !matches!(
             self.status,
