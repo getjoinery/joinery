@@ -689,8 +689,15 @@ impl Custody {
                     Some(k) => *k,
                     None => {
                         let k = self.file_key(&w.path);
-                        if let Some(h) = self.handle_of(di, d, Self::parent_of(&w.path)) {
-                            self.placed[k].push(h);
+                        match self.handle_of(di, d, Self::parent_of(&w.path)) {
+                            Some(h) => self.placed[k].push(h),
+                            // Its folder is gone before this could read it (a
+                            // folder the engine trashed, the rescue net
+                            // emptying it): an unknown candidate, never an
+                            // empty set -- an empty set reads as known and
+                            // lends nothing to a chaos swap partner (hostile2
+                            // 74424).
+                            None => self.placed[k].push((di, u64::MAX)),
                         }
                         k
                     }
@@ -994,7 +1001,7 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
     eprintln!(
         "CUSTODY-ORACLE seed={seed} files_checked={checked} multi_candidate={multi} bodies_unknown={unknown} \
          sealed_unopened={sealed_unopened} unresolved={skipped_unresolved} folders={} learned={learned} late={} \
-         deferred={} undecided={} rescued={} reminted={} held={} misplaced={} held_records_converged_skips={} held_waiting={} user_removed_folders={} removal_unattributed={} \
+         deferred={} undecided={} rescued={} reminted={} held={} misplaced={} held_records_converged_skips={} held_waiting={} held_never_sent={} user_removed_folders={} removal_unattributed={} \
          net_fires_outside_a_user_delete={} rescued_lines={rescued:?} reminted_lines={reminted:?} net_lines={net_fires_outside_a_user_delete:?}",
         custody.handles.len(),
         custody.late.len(),
@@ -1006,6 +1013,7 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
         misplaced.len(),
         world.devices.iter().map(|d| jd_sim::scenario::held_outside_the_vault(d).len()).sum::<usize>(),
         world.devices.iter().map(|d| jd_sim::scenario::held_waiting(d).len()).sum::<usize>(),
+        world.devices.iter().map(|d| jd_sim::scenario::held_never_sent(d).len()).sum::<usize>(),
         custody.user_removed_folders.len(),
         custody.removal_unattributed,
         net_fires_outside_a_user_delete.len(),
@@ -1067,6 +1075,19 @@ fn workload_core_with(
     }
     if let Ok(path) = std::env::var("JD_JOURNAL") {
         std::fs::write(&path, seed_trace(&world).join("\n")).unwrap();
+    }
+    // How many names a conflict made, on the server and on every disk: a
+    // move over another's name must cost none (specs/drive_file_identity.md,
+    // O2), and a count going up is the first sign it does.
+    {
+        let conflicted = |paths: Vec<String>| paths.iter().filter(|p| p.contains("(conflicted copy")).count();
+        let server = conflicted(jd_sim::scenario::server_tree(&world.server).into_keys().collect());
+        let disks: usize = world
+            .devices
+            .iter()
+            .map(|d| conflicted(jd_sim::scenario::disk_tree(d).into_keys().collect()))
+            .sum();
+        eprintln!("CONFLICT-NAMES seed={seed} server={server} disks={disks}");
     }
     // Which records' own files are not the file standing where they are
     // placed, or are claimed twice (`own_files_astray`). Off unless asked.
@@ -4378,7 +4399,9 @@ fn scratch_ghost_probe() {
 ///
 /// This seed passed before parking a materialized entry went through the park
 /// operation, so it is that change's bill coming due rather than an old fault
-/// the estate happened to reach.
+/// the estate happened to reach. Green outright with file identity
+/// (specs/drive_file_identity.md, commit 2): the chain oracle's Defect AH
+/// pairing is gone.
 #[test]
 fn frozen_park_onto_a_strangers_name_seed() {
     let refs: [(&str, Platform); 3] = [
@@ -4386,17 +4409,15 @@ fn frozen_park_onto_a_strangers_name_seed() {
         ("pc", Platform::Windows),
         ("disk", Platform::Decomposing),
     ];
-    red_only_on_the_chain_oracle(|| {
-        workload_core(
-            4_123_847,
-            60,
-            &refs,
-            true,
-            Vault::None,
-            false,
-            Names::WindowsHostile,
-        );
-    });
+    workload_core(
+        4_123_847,
+        60,
+        &refs,
+        true,
+        Vault::None,
+        false,
+        Names::WindowsHostile,
+    );
 }
 
 /// The seed that proves a park stands down for work it is blocking.
@@ -4552,7 +4573,10 @@ fn frozen_contested_name_loop_seeds() {
     // it alone; make_room's file owner following the aside closes it too, but
     // only with the upload keeping its owed move (each measured with the
     // others switched off).
-    for (seed, poisoned_by_ah) in [(111_740u64, false), (111_201, true), (111_120, true)] {
+    // 111201 and 111120 green outright with file identity
+    // (specs/drive_file_identity.md, commit 2): the scan follows each file by
+    // its own identity, and the name trades that poisoned them read as moves.
+    for (seed, poisoned_by_ah) in [(111_740u64, false), (111_201, false), (111_120, false)] {
         let run = || {
             workload_core(seed, 70, &refs, true, Vault::None, false, Names::Ordinary);
         };

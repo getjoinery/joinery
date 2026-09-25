@@ -296,6 +296,14 @@ pub fn apply_naming(
         if crate::pass::held_and_away(env, &entry)? {
             continue;
         }
+        // Nor does a file saved in a vault and carried out before it was sent:
+        // it is never uploaded under any name. Judged here, it outranked a
+        // file the server sent to its name, which was parked as a duplicate
+        // for good. That file lands, the one here is moved aside (`make_room`),
+        // and the next scan finds it there by its own identity.
+        if crate::pass::held_and_never_sent(env, &entry)? {
+            continue;
+        }
         by_parent
             .entry(competing_placement(&entry).parent)
             .or_default()

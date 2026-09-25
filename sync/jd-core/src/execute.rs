@@ -1258,11 +1258,11 @@ fn the_owner_follows_its_directory(env: &ExecEnv, aside: &std::path::Path) -> Re
 /// engine's to lift.
 fn the_owner_follows_its_file(
     env: &ExecEnv,
-    file_id: u64,
+    here: jd_vfs::FileIdentity,
     aside: &std::path::Path,
     key: &str,
 ) -> Result<(), ExecError> {
-    let mut owners = env.store.live_holders_of(EntityType::File, file_id)?;
+    let mut owners = env.store.owners_of_file(here, true)?;
     if owners.len() != 1 {
         return Ok(());
     }
@@ -1284,7 +1284,7 @@ fn the_owner_follows_its_file(
     // 75100: a download of the record the user traded it with landed there).
     if !crate::pass::held_outside_its_vault(env, &owner)? {
         if let Placed::At(home) = local_path(env, &owner)? {
-            if env.vfs.fingerprint(&home)?.is_some_and(|fp| fp.file_id == file_id) {
+            if env.vfs.fingerprint(&home)?.is_some_and(|fp| fp.identity() == here) {
                 return Ok(());
             }
         }
@@ -1390,7 +1390,7 @@ pub(crate) fn make_room(
     // very state this exists to prevent. (A directory's owner reads the
     // directory at the aside, so it follows after.)
     if let Some(fp) = env.vfs.fingerprint(path)? {
-        the_owner_follows_its_file(env, fp.file_id, &aside, key)?;
+        the_owner_follows_its_file(env, fp.identity(), &aside, key)?;
     }
     env.vfs.rename(path, &aside)?;
     the_owner_follows_its_directory(env, &aside)?;
@@ -1911,6 +1911,14 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 && e.local_placement() == p
         }))
     };
+    // The record's own file, where the volume can say which file that is
+    // (`specs/drive_file_identity.md`, T1-D). A candidate holding another
+    // file is not this record's to send: a file swapped onto its path went up
+    // as its next version, and the file itself stood elsewhere, minted new.
+    let own = entry
+        .own_file
+        .filter(|o| o.is_strong() && env.vfs.personality().stable_file_identity);
+    let mut not_its_own = false;
     let mut vetoed = false;
     let mut found = None;
     let mut found_at: Option<Placement> = None;
@@ -1928,6 +1936,10 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         match path_for(env, candidate)? {
             Placed::At(path) => {
                 if let Some(fp) = env.vfs.fingerprint(&path)? {
+                    if own.is_some_and(|own| fp.identity() != own) {
+                        not_its_own = true;
+                        continue;
+                    }
                     found = Some((path, fp));
                     found_at = Some(candidate.clone());
                     break;
@@ -1942,6 +1954,13 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     let Some((mut path, fingerprint)) = found else {
         if let Some(why) = unplaced {
             return Ok(why.outcome());
+        }
+        // Its own file stands somewhere this op does not name: the next scan
+        // finds it there, by its identity, and decides from that.
+        if not_its_own {
+            return Ok(OpOutcome::Overtaken(
+                "the file at this path is another file; deciding again from what is there now".into(),
+            ));
         }
         // Every candidate was refused because another entry already holds the
         // name -- which means the file is still HERE. Deleting the identity now
@@ -1975,6 +1994,16 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         // Letting it go is safe in the direction that matters: if a file for it
         // does turn up, the next scan finds it as something new and uploads it,
         // which costs a transfer and loses nothing.
+        // Unless it knows its own file: then the file may simply have moved,
+        // and forgetting the record here is how a file saved in a vault and
+        // carried out of it was minted again as a new plain one and sent in
+        // the clear. The next scan finds it by its identity wherever it is, or
+        // reads it gone and forgets the record then.
+        if op.entity.is_provisional() && own.is_some() {
+            return Ok(OpOutcome::Overtaken(
+                "the file is not where this upload looked; deciding again from what is there now".into(),
+            ));
+        }
         if op.entity.is_provisional() {
             env.store.delete_entry(op.entity)?;
             return Ok(OpOutcome::Overtaken(
@@ -2183,9 +2212,10 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                     entity_type: EntityType::File,
                     server_id: holder.id,
                 };
-                if env.store.get_entry(target)?.is_some() {
+                if let Some(real) = env.store.get_entry(target)? {
                     // Both records exist here; folding them is the whole repair.
-                    env.store.merge_file(entry.id, target)?;
+                    let hand_over = takes_the_uploaded_file(env, &real)?;
+                    env.store.merge_file(entry.id, target, hand_over)?;
                     return Ok(OpOutcome::Done);
                 }
                 let mut adopted = entry.clone();
@@ -2334,8 +2364,9 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         // the file up under its real id. The bytes are on the server either
         // way, so this is done — what is left is two records of one file, and
         // folding them is the whole repair.
-        if env.store.get_entry(target)?.is_some() {
-            env.store.merge_file(entry.id, target)?;
+        if let Some(real) = env.store.get_entry(target)? {
+            let hand_over = takes_the_uploaded_file(env, &real)?;
+            env.store.merge_file(entry.id, target, hand_over)?;
             return Ok(OpOutcome::Done);
         }
         env.store.rekey_entry(entry.id, target)?;
@@ -2802,9 +2833,13 @@ fn held_by_a_rename_this_device_owes(
     }
     // Only the operations that change a name ON THE SERVER. A local move
     // rearranges this disk and leaves the server calling it exactly what it
-    // calls it now, so waiting for one would be waiting for nothing.
+    // calls it now, so waiting for one would be waiting for nothing. A trash
+    // there frees the name as surely as a rename: a file the user moved over
+    // another waits for the one it replaced to go, where stepping aside would
+    // rename the user's own file on their disk to a conflict name.
     Ok(env.store.queued_ops()?.iter().any(|op| {
-        holders.contains(&op.entity) && matches!(op.kind.as_str(), "move_remote" | "park_remote")
+        holders.contains(&op.entity)
+            && matches!(op.kind.as_str(), "move_remote" | "park_remote" | "trash_remote")
     }))
 }
 
@@ -3353,9 +3388,9 @@ fn move_remote(
         && op.entity.entity_type == EntityType::File
         && entry.remote == to
         && from.as_ref().is_some_and(|f| entry.synced_placement.as_ref() == Some(f))
-        && match entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0) {
-            Some(mine) => match path_for(env, &to)? {
-                Placed::At(dest) => env.vfs.fingerprint(&dest)?.map(|fp| fp.file_id) == Some(mine),
+        && match entry.own_file_id() {
+            Some(_) => match path_for(env, &to)? {
+                Placed::At(dest) => env.vfs.fingerprint(&dest)?.is_some_and(|fp| entry.owns(fp.identity())),
                 Placed::Not(_) => false,
             },
             None => false,
@@ -3681,15 +3716,20 @@ fn move_remote(
             path_for(env, &Placement { parent: to.parent, name: asked_for.clone() })?,
             path_for(env, &to)?,
         ) {
-            let own = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0);
-            let here = match entry.id.entity_type {
-                EntityType::Folder => env.vfs.directory_id(&from)?,
-                EntityType::File => env.vfs.fingerprint(&from)?.map(|fp| fp.file_id),
-            }
-            .filter(|id| *id != 0);
-            let its_own = match (own, here) {
-                (Some(own), Some(here)) => own == here,
-                _ => !nothing_at(env, &from)?,
+            // A folder by its directory's id (its agreement's fingerprint), a
+            // file by its own file.
+            let its_own = match entry.id.entity_type {
+                EntityType::Folder => {
+                    let own = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0);
+                    match (own, env.vfs.directory_id(&from)?.filter(|id| *id != 0)) {
+                        (Some(own), Some(here)) => own == here,
+                        _ => !nothing_at(env, &from)?,
+                    }
+                }
+                EntityType::File => match (entry.own_file_id(), env.vfs.fingerprint(&from)?) {
+                    (Some(_), Some(here)) if here.file_id != 0 => entry.owns(here.identity()),
+                    _ => !nothing_at(env, &from)?,
+                },
             };
             if from != dest && its_own {
                 make_room(env, &dest, None, &op.idempotency_key)?;
@@ -4089,6 +4129,23 @@ fn move_local(
         && !is_at(env, entry.id.entity_type, &from)?
         && is_at(env, entry.id.entity_type, &dest)?;
     if from != dest && !landed {
+        // The file at the destination is one this device is about to trash:
+        // the server replaced it with this one. Setting it aside instead would
+        // hand it a conflict name, and the trash would then find nothing at
+        // its path. It goes first.
+        if entry.id.entity_type == EntityType::File {
+            for queued in env.store.queued_ops()? {
+                if queued.kind != "trash_local" || queued.entity == entry.id {
+                    continue;
+                }
+                let Some(going) = env.store.get_entry(queued.entity)? else { continue };
+                if matches!(local_path(env, &going)?, Placed::At(p) if p == dest) {
+                    return Ok(OpOutcome::Retry(
+                        "the file at that name is being moved to the trash first".into(),
+                    ));
+                }
+            }
+        }
         // A rename lands on top of whatever is at the destination. If that is
         // something nobody has uploaded, this is the moment it would disappear.
         let moving = env
@@ -4816,7 +4873,7 @@ fn is_on_the_server(
     // would go and the scan would then read its absence as a delete of the
     // sealed copy too. It is carried out like anything unsent, and stays held
     // where it lands.
-    for holder in env.store.live_holders_of(EntityType::File, fp.file_id)? {
+    for holder in env.store.owners_of_file(fp.identity(), true)? {
         if crate::pass::held_outside_its_vault(env, &holder)? {
             return Ok(false);
         }
@@ -4941,13 +4998,13 @@ fn rescue_unsynced(
                 // the scan would mint these bytes as a new PLAIN file.
                 if let Some(fp) = child.fingerprint {
                     let mut held = None;
-                    for h in env.store.live_holders_of(EntityType::File, fp.file_id)? {
+                    for h in env.store.owners_of_file(fp.identity(), true)? {
                         if crate::pass::held_outside_its_vault(env, &h)? {
                             held = Some(h.id);
                         }
                     }
                     if let Some(id) = held {
-                        the_owner_follows_its_file(env, fp.file_id, &to, "rescue")?;
+                        the_owner_follows_its_file(env, fp.identity(), &to, "rescue")?;
                         let name = to
                             .file_name()
                             .map(|n| n.to_string_lossy().to_string())
@@ -5081,8 +5138,8 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
             // A FILE that is sealed: a sealed subfolder carries its directory's
             // id in the same slot, and `still_here` is a set of file inodes.
             .filter(|e| e.is_encrypted && e.id.entity_type == EntityType::File)
-            .and_then(|e| e.synced_fingerprint)
-            .is_some_and(|f| f.file_id != 0 && still_here.contains(&f.file_id)))
+            .and_then(|e| e.own_file_id())
+            .is_some_and(|id| still_here.contains(&id)))
     };
     // The names of what was kept, for the user and for the reset's reading
     // of this belt (R8: a belt reports the shape it fired on). Raised once
@@ -5621,6 +5678,23 @@ pub fn recover(env: &ExecEnv) -> Result<ExecReport, ExecError> {
 // ---------------------------------------------------------------------------
 // Bookkeeping
 // ---------------------------------------------------------------------------
+
+/// Does the real entry an upload turned out to be take the uploaded file as
+/// its own? The server has said the bytes are that entry's, so yes -- unless
+/// it is held (`pass::may_take_a_merged_file`), or its own file still stands
+/// where it lives here, which makes the uploaded one a second copy.
+fn takes_the_uploaded_file(env: &ExecEnv, real: &Entry) -> Result<bool, ExecError> {
+    if !crate::pass::may_take_a_merged_file(env, real)? {
+        return Ok(false);
+    }
+    if real.own_file.is_none() {
+        return Ok(true);
+    }
+    Ok(match local_path(env, real)? {
+        Placed::At(path) => !env.vfs.fingerprint(&path)?.is_some_and(|fp| real.owns(fp.identity())),
+        Placed::Not(_) => true,
+    })
+}
 
 /// Record that the two sides now agree.
 ///

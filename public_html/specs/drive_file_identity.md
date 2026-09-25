@@ -7,7 +7,11 @@ NEEDED and VALID 2026-09-25, its bar met: on 420 seeds (swaps on 160, off
 every log identical once the random `enc-` content ids are masked (4 raw
 differences, all of them `enc-` names, which differ between two runs of
 `9b992a58` alone: R6's field whose meaning differs by branch, the reset's
-B10).**
+B10). Commit 2 (the scan, and the upload's half of T1-D) VALID 2026-09-25
+(freeze 609ad11f): against commit 1 on the same 420 seeds, swaps off
+identical; swaps on, leaked files 158 to 40 and swap-oracle fires 74 to 5;
+every G->R traced, to older gaps now filed as the reset's B2-B9. Commit 3
+(the executor) is next.**
 
 **Owner decision 2026-09-25: a file's own identity decides which record it belongs to, and its
 path decides only when that identity is gone. This settles the reset's AH
@@ -319,7 +323,12 @@ WP3's bar, each with its shape report (R8), never in the same change.
   outside the sync root (`NSItemReplacementDirectory`, on the boot volume or
   in the volume's `.TemporaryItems`), so the record's own file reads as gone
   and step 3 reads an edit.
-- **Weak volumes keep today's behaviour,** including its leaks under swaps.
+- **Weak volumes keep today's reading,** the scan's path-first rules,
+  including its leaks under swaps. Rules outside the scan reach them as they
+  reach every volume: O2's ordering, the own-file reads (by file id alone
+  where the identity is weak), and the held-name set built from the scan's
+  moves. On the 420-seed sweep with births hidden that moves 14 verdicts, 7
+  each way, every one attributed by knockout to one of those three.
 - **Folders.** WP2 gave folders directory identity. The same birth pair would
   retire C5's recycled-directory rule; that is a follow-up. C9 part 2, the
   folder make_room rule, folder T1, the D1 park gap and C13 are separate.
@@ -340,6 +349,12 @@ WP3's bar, each with its shape report (R8), never in the same change.
     to move it out gets it synced; the user who did not has published it.
 
   Recommendation: hold. The wording is the owner's to approve.
+
+  The hold's real scope is a file SEEN in a vault by a pass while unsent: a
+  file saved outside, dragged into a vault, seen there, and dragged out again
+  is held too (it may have been edited there). An over-hold, never a leak.
+  If the owner picks hold, "stood in a vault" says that more truly than "was
+  saved in a vault" (reviewer, 2026-09-25).
 - **Q1: a vault folder on a weak volume** (a USB stick, a network share).
   Two options:
   - *Sync it by today's rules.* It works anywhere, and carries today's swap
@@ -418,7 +433,7 @@ Every scenario pin that changes result is listed in the build report with
 its old and new end state. Each one is a behaviour change, not a fixture
 update.
 
-## Found while building commit 2 (for review before it is frozen)
+## Found while building commit 2 (reviewed VALID with the freeze)
 
 Each of these was found by a pin or a frozen seed, traced, and fixed at its
 cause. They go beyond the approved text, so they are here before the patch
@@ -494,12 +509,67 @@ is frozen (R5).
   existing path: planned from the server's placement, a move into that
   folder, and the edit its next version, sealed
   (`a_held_file_moved_and_edited_into_another_vault_folder_is_released_with_the_edit`).
+- **A sealed file leaving its vault holds its name from the start of the
+  pass** (found by the commit 1 to commit 2 sweep: hostile2 74403, 74406,
+  74414, the server holding one real name twice in a vault). The hold is
+  written when the round reaches the record. A file arriving at its slot
+  earlier in the same pass -- a new file saved there, or another record moved
+  there -- found the name free (`clear_of_a_held_name` read only holds already
+  written) and went up under it. Rule: the pass first collects the sealed
+  records its scan finds outside their vault, and their names count as held.
+  Commit 1 has the same gap; in these seeds its path rule read the drag-out
+  and the arrival in different passes. Pins, both RED on commit 1 (two sealed
+  files with the one name):
+  `a_file_saved_where_a_sealed_file_left_in_the_same_pass_is_set_aside`,
+  `a_held_file_moved_home_onto_a_name_leaving_in_the_same_pass_is_set_aside`.
+- **A file never sent holds no name and is never merged** (hostile2 74403: a
+  sealed file never sent, carried out of its vault, then another device sent
+  a plain file under the name it stood at). The name merge folded it into
+  that file; its own file was owned by nobody, minted again in the plain
+  folder, and sent in the clear. Rule: a provisional held outside its vault
+  is never merged by name (no server file is its upload), and naming does not
+  judge it for a name (it is never uploaded under one; judged, it outranked
+  the other file, which was parked as a duplicate for good). The other file
+  lands, the held one is moved aside, and the next scan finds it by its own
+  identity. On a weak volume the drag-out itself still sends it plain: the
+  path rule forgets the provisional and mints the file where it lands (weak
+  volumes keep today's reading; Q1). Pin, RED on commit 1 (which sends it
+  plain at the drag-out) and RED on commit 2 with either rule out:
+  `a_never_sent_file_moved_aside_by_a_download_stays_held`.
+- **A record's server name is a name it holds, and the name merge never folds
+  two files** (plain2 75237, 75292: green on commit 1, a swap-oracle fire on
+  the draft). In both seeds a record's own file stood at the record's server
+  name -- the server had moved it, or a move this device owed had landed --
+  while this device's agreement still named the old path, and a file no
+  record owned stood there. Step 2's backup exception (own file moved in its
+  folder to a path no record holds, an unowned file at its path) read the
+  unowned file as the record's edit: two files' bytes in one history. The
+  unowned file got there because the name merge had folded its provisional
+  into a real record that owned another file, leaving it nobody's. Two rules:
+  - a record's server placement, where it differs from this disk's, is a
+    path it holds (`KnownLocal::server_path`), so its own file standing there
+    is a move, never a backup;
+  - the name merge skips a provisional and a real record that each own a
+    different strong file: two files, and the provisional's upload lands
+    beside under a conflict name.
+
+  Commit 1 has the same backup reading. Pins, each RED on commit 1 and RED
+  on commit 2 with its rule out:
+  `a_file_found_at_its_server_name_is_moved_and_the_file_at_its_old_name_is_new`,
+  `a_new_file_at_a_name_a_record_reaches_later_is_not_folded_into_it`.
+- **Two harness fixes** (hostile2 74424, whose engine behaviour was right).
+  The convergence check dropped every disk path whose bytes match a parked
+  server file before looking for held files, so a never-sent held file with
+  the same bytes as a parked file read as missing; declared held paths are
+  now exempt from that drop. And a harness write whose folder was already
+  gone when it was attributed was recorded as belonging to no folder, which
+  reads as known and lent nothing to a swap partner; it is now unknown.
 - **Births hidden marks the simulated volume weak** (`MemFs::personality`),
   as a real volume's probe does, so a pin can run the path-first rules.
 - **Pins:** the three held-file and rule-4 pins now run on disks without
   births (`a_vault_of_two_without_births`), with strong twins; the frozen
   seeds 111201, 111120 and `frozen_park_onto_a_strangers_name_seed` are green
-  outright (AH fixed there) and lose their chain-oracle wrappers. Ten new
+  outright (AH fixed there) and lose their chain-oracle wrappers. Fifteen new
   scenario pins RED on commit 1 (two of them on the sealed oracle: the
   sealed file moved and edited out of its vault, and the sealed file moved
   over a plain file's name), among them T1-D's
@@ -541,7 +611,15 @@ is frozen (R5).
 
    Measured alone against commit 1.
 3. **The executor checks it.** Measured alone against commit 1, then with
-   commit 2 (R7: each with its neighbour removed).
+   commit 2 (R7: each with its neighbour removed). What is left for it once
+   the upload's half moved into commit 2:
+   - `move_local` checks the file at `from` is the record's own;
+   - `trash_local` checks the same before it trashes: on a strong volume it
+     trashes only the record's own file, and otherwise answers overtaken for
+     the next scan to decide (kill2 75129: a swap in the pass put another
+     record's file at the path, the trash took it, and that record read the
+     unowned file left at its own path as its replacement);
+   - hashing and sending read one handle.
 
 **Simulator fidelity, known.** The simulated spool commit keeps the id
 of a file it lands on ("same inode, new content", by design), where a real

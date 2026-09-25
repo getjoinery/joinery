@@ -1742,8 +1742,13 @@ belt in, before the belt lands.** B1 is what happens without this.
   into one cause; their entries below stay as the evidence. Approach NEEDED
   and VALID (public-html-e9, 2026-09-25). Commit 1 (disk and record, read by
   nothing) NEEDED and VALID, its bar met: 420 of 420 traces byte-identical to
-  `9b992a58`. C9 part 2, the D1 park gap and C13 follow its third
-  commit (order confirmed by the reviewer).
+  `9b992a58`. Commit 2 (the scan) VALID 2026-09-25: leaked files under swaps
+  158 to 40, swaps off unchanged. Order from here (reviewer): the harness
+  fixes B7-B9 as their own commit, shown to move no engine verdict on the 420
+  seeds; then commit 3 (the executor), measured alone against commit 2; then
+  B6, a file at a reserved download slot gets a record so the hold reaches
+  it; then C9 part 2 with B4 and B5, the D1 park gap and C13. B3 waits for its
+  prototype's three neighbour reds to be traced.
 - **B1, open (public-html-e9, 2026-09-25, read): a sync root on a different
   volume from the state directory cannot download.** `OsSpoolFile::commit`
   places a file with a bare `fs::rename` (`jd-vfs` `real.rs`), which fails
@@ -1751,6 +1756,78 @@ belt in, before the belt lands.** B1 is what happens without this.
   copy and still correct. It is older than file identity and not part of it;
   file identity reads a placed file's identity from the committed target so
   that it stays right whichever way this is fixed.
+- **B2, open (2026-09-25, traced in plain2 75292): a server move whose
+  response was lost is Overtaken on its retry, not Done.** The move lands,
+  the response is lost ("connection reset while reading the response"), and
+  the retry finds the server already at the op's own destination and answers
+  "the server has moved it since this was planned" (`execute.rs`
+  `move_remote`). The agreement stays at the old name for a pass while the
+  server has the new one, which is the state a later misreading started from
+  in that seed. Older than file identity; commit 1 does the same.
+- **B3, open (2026-09-25, traced in plain2 75208): a move finishes a park
+  whose answer was lost, from a placement that answer made stale.** Two
+  records trade names across folders; the planner parks one under a
+  `.jd-swap-` name and a second op finishes the move. The park lands but its
+  answer is lost, so it retries, and the store still has the name before the
+  park. The finishing `move_remote` runs in the same pass, reads that stale
+  placement as its own half-done move, and only reparents: the server keeps
+  the scratch name, naming parks the record as a reserved prefix, and the
+  seed never settles (`execute.rs` `move_remote`, `ours_to_finish` and
+  `renaming`). Commit 1 has the same code; its run of this seed never parks.
+  A prototype (the finishing move waits while its park op is queued) clears
+  the seed and brings three new reds on 90 neighbours, untraced.
+- **B4, open (2026-09-25, traced in kill2 75123): a plain folder cannot take
+  back its own directory once a naming park breaks a folder ring.** Two
+  devices rotate three folders; a park takes one out of the folder scan's
+  path map, the ring no longer closes, and a folder whose own directory
+  stands at a path no record accounts for is left reading its old path
+  while that directory is registered again as a new folder. Two records hold
+  one directory and one device ends without a record for a server folder.
+  Plain folders never claim a directory by identity (decision 2A), so the
+  close is a design question: let a plain folder claim its own directory
+  when it stands unclaimed. Refusing to register a directory a live folder
+  owns was tried and left directories unclaimed on three neighbours. Commit 1
+  has the same gap (the draft's folder change reverted gives the same
+  verdict).
+- **B5, open (2026-09-25, traced in kill2 75101): a vault folder and a plain
+  folder trading names do not swap when one side holds no known files.** The
+  folder scan finds only one of the two paths contested, so no swap closes,
+  and the vault's claim of its own directory is refused on every pass
+  because `remote_wants` counts a folder that is not moving (`pass.rs`, the
+  vault-claim check). A file then follows its own identity into the vault's
+  old path and is withdrawn every pass as a misread folder. Commit 1 has the
+  same rule; it re-paired that file by path instead (a swap and custody fire
+  there). Two narrowings of `remote_wants` cleared it and broke two
+  neighbours each (a livelock, a leak). Belongs with C9 part 2 (folder
+  identity).
+- **B6, open (2026-09-25, traced in kill2 75129): a file saved at a vault
+  slot reserved for a download it has not received yet is nobody's, and
+  carried out of the vault it goes up plain.** The scan gives no record to a
+  file standing where a pending download will land (`pass.rs`, the
+  `reserved` set before the mint loop), so the download can move it aside
+  as a conflict copy. A swap carried it into a plain folder before the
+  download landed; the next pass minted it there as a new plain file and
+  sent a sealed body in the clear. With no record there is no identity, and
+  the hold for a file saved in a vault and moved out before it was sent
+  (Q2) cannot reach it. Commit 1 has the same rule.
+- **B7, open (2026-09-25, traced in plain2 75221): the folder oracle lends a
+  chaos-swapped file only its partner body's recorded folders.** A landing
+  save set aside and then swapped into another folder is judged misplaced
+  when the partner body stood there because the device applied a peer's
+  move, not because the user put it there. The lend should be the folder
+  each side physically stood in at swap time. Harness, not engine (kill2
+  75118 shows the same for two landing saves).
+- **B8, open (2026-09-25, traced in kill2 75118, births hidden): the
+  convergence check drops a held record's agreed path from the disk map
+  whatever file stands there.** When the held record's own file has left
+  that path and a plain record's file stands at it, the plain file is hidden
+  and its server copy reads "only on the server" (kill2 75112, plat3 75413
+  the same shape). Harness; commit 1's check does the same.
+- **B9, open (2026-09-25, traced in plat3 75426, births hidden): the harness
+  does not declare a held file whose sealed copy the server deleted.** The
+  engine keeps the edited copy on this device only, as designed, and
+  `held_outside_the_vault` excludes server-deleted records, so it reads
+  "only on the disk". Harness.
 - **D1 (2026-09-24), a sealed file dragged out of a vault is held, not
   converted. NEEDED and VALID (public-html-25), landed 0c66212d.** Post-commit
   reading 181843af -> 0c66212d: identical, seed for seed, to the reviewed

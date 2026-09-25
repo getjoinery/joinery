@@ -1228,8 +1228,30 @@ pub fn assert_converged(world: &World) {
             })
             .collect();
         let held_back = |h: &Option<String>| h.as_ref().is_some_and(|h| declined.contains(h));
-        let disk: BTreeMap<String, Option<String>> =
-            disk.into_iter().filter(|(_, h)| !held_back(h)).collect();
+        // A file declared held stands at its own path by design and is
+        // checked there, by path (below): the content excuse must not take it
+        // first. A held file carrying the same bytes as a parked server file
+        // otherwise reads as the held file missing (hostile2 74424).
+        let held_here: std::collections::HashSet<String> = {
+            let mut paths: std::collections::HashSet<String> =
+                held_never_sent(device).into_iter().map(|(_, p)| p).collect();
+            paths.extend(held_waiting(device).into_iter().map(|(_, p)| p));
+            for id in held_outside_the_vault(device) {
+                let Some(agreed) = entries.iter().find(|e| e.id == id).and_then(|e| e.synced_placement.clone()) else {
+                    continue;
+                };
+                let here = match agreed.parent {
+                    None => Some(agreed.name.clone()),
+                    Some(folder) => local_path_of_folder(device, folder).map(|d| format!("{d}/{}", agreed.name)),
+                };
+                paths.extend(here);
+            }
+            paths
+        };
+        let disk: BTreeMap<String, Option<String>> = disk
+            .into_iter()
+            .filter(|(p, h)| held_here.contains(p) || !held_back(h))
+            .collect();
         // A FOLDER moved into a vault this device cannot open is held the same
         // way, and has no content to be matched on. The server keeps it until
         // the claimant standing at the vault path can upload -- so it is
@@ -1483,6 +1505,16 @@ pub fn assert_converged(world: &World) {
                 e.id.server_id
             );
         }
+        // A file saved in a vault and carried out of it before it was ever
+        // sent is held here and nowhere else, by design: declared per entity,
+        // and still required to BE at its path here.
+        for (id, path) in held_never_sent(device) {
+            assert!(
+                disk.remove(&path).is_some(),
+                "{}: {id:?} is held here, never sent, at {path:?}, and nothing stands there",
+                device.name
+            );
+        }
         if disk != server {
             let only_disk: Vec<_> = disk.keys().filter(|k| !server.contains_key(*k)).collect();
             let only_server: Vec<_> = server.keys().filter(|k| !disk.contains_key(*k)).collect();
@@ -1546,6 +1578,52 @@ pub fn held_outside_the_vault(device: &Device) -> Vec<jd_core::model::EntityId> 
                 .is_some_and(|agreed| sealed(e.remote.parent) && !sealed(agreed.parent))
         })
         .map(|e| e.id)
+        .collect()
+}
+
+/// Files saved in a vault and carried out of it before they were ever sent,
+/// held on this device (`specs/drive_file_identity.md`, owner question Q2): a
+/// sealed provisional FILE standing in a plain folder or at the root, with an
+/// open `held_outside_the_vault` issue. The entity and the path its file stands
+/// at; it is on this disk only, and nowhere on the server, on purpose.
+pub fn held_never_sent(device: &Device) -> Vec<(jd_core::model::EntityId, String)> {
+    let open: std::collections::HashSet<jd_core::model::EntityId> = device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "held_outside_the_vault")
+        .filter_map(|i| i.entity)
+        .collect();
+    let sealed = |parent: Option<i64>| {
+        parent.is_some_and(|id| {
+            device
+                .store
+                .get_entry(jd_core::model::EntityId::folder(id))
+                .unwrap()
+                .is_some_and(|f| f.is_encrypted)
+        })
+    };
+    device
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|e| {
+            e.id.is_provisional()
+                && e.id.entity_type == jd_core::model::EntityType::File
+                && e.is_encrypted
+                && open.contains(&e.id)
+                && !sealed(e.remote.parent)
+        })
+        .filter_map(|e| {
+            let name = e.local_name.clone().unwrap_or_else(|| e.remote.name.clone());
+            let path = match e.remote.parent {
+                None => Some(name),
+                Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{name}")),
+            };
+            path.map(|p| (e.id, p))
+        })
         .collect()
 }
 
