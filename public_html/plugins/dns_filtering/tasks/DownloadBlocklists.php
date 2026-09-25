@@ -5,7 +5,7 @@
  * Downloads domain blocklists from external sources (Hagezi, OISD, StevenBlack, etc.),
  * writes them to bld_blocklist_domains, and triggers a DNS server cache reload.
  *
- * @version 1.1
+ * @version 1.2 - The source list and skip list come from blocklist_sources.json.
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -13,61 +13,11 @@ require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 class DownloadBlocklists implements ScheduledTaskInterface {
 
 	/**
-	 * Category-to-source mapping.
-	 * Keys must match filter keys used in sdf_filters (sdf_filter_key column).
-	 * Values are single URL strings or arrays of URLs (merged and deduplicated).
+	 * Category-to-source mapping and the always-skipped names, from
+	 * blocklist_sources.json (BlocklistSources) — the same list the
+	 * resolver_snapshot action hands to the DNS servers.
 	 */
-	const SOURCES = array(
-		// Ads
-		'ads_small'     => 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/light.txt',
-		'ads_medium'    => 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/multi.txt',
-		'ads'           => 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.txt',
-
-		// Malware
-		'malware'       => 'https://urlhaus.abuse.ch/downloads/hostfile/',
-		'ip_malware'    => 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/tif.txt',
-		'ai_malware'    => array(
-			'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/tif.txt',
-			'https://phishing.army/download/phishing_army_blocklist_extended.txt',
-		),
-
-		// Phishing / typosquatting
-		'typo'          => 'https://phishing.army/download/phishing_army_blocklist_extended.txt',
-
-		// Adult content
-		'porn'          => 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts',
-		'porn_strict'   => 'https://nsfw.oisd.nl/domainswild',
-
-		// Gambling
-		'gambling'      => array(
-			'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts',
-			'https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/gambling/domains',
-		),
-
-		// Social media
-		'social'        => 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts',
-
-		// Disinformation
-		'fakenews'      => 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews/hosts',
-
-		// Cryptomining
-		'cryptominers'  => 'https://zerodot1.gitlab.io/CoinBlockerLists/hosts_browser',
-
-		// UT1 Toulouse categories
-		'dating'        => 'https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/dating/domains',
-		'drugs'         => 'https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/drogue/domains',
-		'games'         => 'https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/games/domains',
-
-		// DNS/network bypass
-		'dnsvpn'        => 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/doh.txt',
-	);
-
-	/** Domains to always skip regardless of source */
-	const SKIP_DOMAINS = array(
-		'localhost', '0.0.0.0', '127.0.0.1', 'broadcasthost', 'local',
-		'ip6-localhost', 'ip6-loopback', 'ip6-localnet', 'ip6-mcastprefix',
-		'ip6-allnodes', 'ip6-allrouters', 'ip6-allhosts',
-	);
+	private $skip_domains = array();
 
 	public function run(array $config) {
 		// Large lists can exhaust the default 128MB web limit
@@ -76,6 +26,16 @@ class DownloadBlocklists implements ScheduledTaskInterface {
 		$categories_updated = 0;
 		$total_domains = 0;
 		$errors = array();
+
+		try {
+			$sources = BlocklistSources::load();
+		} catch (BlocklistSourcesException $e) {
+			return array(
+				'status'  => 'error',
+				'message' => $e->getMessage(),
+			);
+		}
+		$this->skip_domains = array_flip($sources['skip_domains']);
 
 		$dbconnector = DbConnector::get_instance();
 		$dblink = $dbconnector->get_db_link();
@@ -93,8 +53,7 @@ class DownloadBlocklists implements ScheduledTaskInterface {
 		}
 
 		// ── Process one category at a time to keep memory bounded ─────────────
-		foreach (self::SOURCES as $category_key => $source) {
-			$urls = is_array($source) ? $source : array($source);
+		foreach ($sources['categories'] as $category_key => $urls) {
 			$seen = array();       // dedup within this category
 			$domain_count = 0;
 			$category_ok = false;
@@ -272,11 +231,7 @@ class DownloadBlocklists implements ScheduledTaskInterface {
 			return null;
 		}
 
-		static $skip = null;
-		if ($skip === null) {
-			$skip = array_flip(self::SKIP_DOMAINS);
-		}
-		if (isset($skip[$domain])) {
+		if (isset($this->skip_domains[$domain])) {
 			return null;
 		}
 

@@ -1,0 +1,72 @@
+{
+    "description": "Blocklist sources: each category key (a filter key in sdf_filters) maps to the URLs whose domains it blocks. The DNS servers download and parse these; the site hands the list to them in the resolver_snapshot action.",
+    "categories": {
+        "ads_small": [
+            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt"
+        ],
+        "ads_medium": [
+            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt"
+        ],
+        "ads": [
+            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt"
+        ],
+        "malware": [
+            "https://urlhaus.abuse.ch/downloads/hostfile/"
+        ],
+        "ip_malware": [
+            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt"
+        ],
+        "ai_malware": [
+            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt",
+            "https://phishing.army/download/phishing_army_blocklist_extended.txt"
+        ],
+        "typo": [
+            "https://phishing.army/download/phishing_army_blocklist_extended.txt"
+        ],
+        "porn": [
+            "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts"
+        ],
+        "porn_strict": [
+            "https://nsfw.oisd.nl/domainswild"
+        ],
+        "gambling": [
+            "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts",
+            "https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/gambling/domains"
+        ],
+        "social": [
+            "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts"
+        ],
+        "fakenews": [
+            "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews/hosts"
+        ],
+        "cryptominers": [
+            "https://zerodot1.gitlab.io/CoinBlockerLists/hosts_browser"
+        ],
+        "dating": [
+            "https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/dating/domains"
+        ],
+        "drugs": [
+            "https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/drogue/domains"
+        ],
+        "games": [
+            "https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/games/domains"
+        ],
+        "dnsvpn": [
+            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/doh-onlydomains.txt"
+        ]
+    },
+    "skip_domains": [
+        "localhost",
+        "0.0.0.0",
+        "127.0.0.1",
+        "broadcasthost",
+        "local",
+        "ip6-localhost",
+        "ip6-loopback",
+        "ip6-localnet",
+        "ip6-mcastprefix",
+        "ip6-allnodes",
+        "ip6-allrouters",
+        "ip6-allhosts"
+    ]
+}

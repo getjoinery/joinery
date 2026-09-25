@@ -30,7 +30,9 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.5.1
+ * @version 1.5.2
+ * @changelog 1.5.2 - Action dispatch passes the action's name to
+ *   ApiAuth::authorize(), so a scoped machine key reaches only its actions.
  * @changelog 1.5.1 - Header and boundary-validation comments describe the
  *   descriptor as the only metadata companion (specs/logic_api_descriptor_migration.md).
  * @changelog 1.5.0 - Feature gating (specs/api_action_feature_gate.md): a
@@ -186,7 +188,7 @@ class ApiLogicEndpoint {
 		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
 		$auth = ($meta['auth'] ?? []) + ['capability' => ApiAuth::CAP_WRITE];
 		ApiAuth::authorize($auth, $api_entry,
-			$api_user ? $api_user->get('usr_permission') : null, 'Action');
+			$api_user ? $api_user->get('usr_permission') : null, 'Action', $action_label);
 
 		// Sessionless actions were executed pre-auth; anything reaching here
 		// with requires_session=false would be a dispatch-order bug, so run it

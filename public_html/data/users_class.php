@@ -1186,6 +1186,42 @@ private static function UcName($string) {
 		}
 	}
 
+	/**
+	 * A soft-deleted user's keys stop authenticating, so the same refusal as
+	 * permanent_delete() applies: see refuse_while_scoped_key_is_live().
+	 */
+	function soft_delete(){
+		if($this->key !== NULL && $this->key !== ''){
+			$this->refuse_while_scoped_key_is_live();
+		}
+		return parent::soft_delete();
+	}
+
+	/**
+	 * Refuse to delete an account that owns a live scoped machine key. Such a
+	 * key is another machine's credential for one job (a DNS server reading
+	 * its snapshot, say), minted by the feature that owns that job under an
+	 * account made for it. Deleting the account would silently cut that
+	 * machine off, and permanent deletion would take the key with it; the
+	 * key is revoked first, by the feature that issued it.
+	 */
+	private function refuse_while_scoped_key_is_live(){
+		require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
+		$keys = new MultiApiKey(array(
+			'user_id' => $this->key,
+			'type' => ApiKey::TYPE_MACHINE,
+			'deleted' => false,
+		));
+		foreach($keys as $key){
+			if($key->is_scoped()){
+				throw new SystemDisplayableError(
+					'This account owns the key "' . $key->get('apk_name') . '", which is limited to '
+					. implode(', ', $key->scope()) . ' and is in use by another machine. Revoke that key '
+					. 'where it was issued first; deleting the account would cut that machine off.');
+			}
+		}
+	}
+
 	function permanent_delete($debug=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -1203,6 +1239,8 @@ private static function UcName($string) {
 			throw new SystemAuthenticationError(
 					'You cannot delete this user.');
 		}
+
+		$this->refuse_while_scoped_key_is_live();
 		
 		$this_transaction = false;
 		if(!$dblink->inTransaction()){

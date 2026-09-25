@@ -2,7 +2,9 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.19
+ * @version 2.20
+ * @changelog 2.20 - A scoped machine key is refused on every route family but
+ *   action dispatch (ApiAuth::refuseScopedKeyOutsideActions()).
  * @changelog 2.19 - Sessioned actions dispatch before the CRUD model list is
  *   assembled. Assembling it loads every model class on the platform, ~180 ms
  *   a call that no action ever used; a page mounting with five calls in
@@ -510,6 +512,13 @@ if ($api_entry === null) {
 // reads $api_user unconditionally and has no guest vocabulary.
 if ($api_user === null && strtolower($url_segments[2] ?? '') !== 'action') {
 	api_error('Authentication required', 'AuthenticationError', 401);
+}
+
+// A scoped machine key reaches only the actions its scope names. Action
+// dispatch checks the name in ApiAuth::authorize(); every other route family
+// refuses the key here, including the ones that never call authorize().
+if (strtolower($url_segments[2] ?? '') !== 'action') {
+	ApiAuth::refuseScopedKeyOutsideActions($api_entry, strtolower($url_segments[2] ?? ''));
 }
 
 // Sessioned action endpoint — sessionless actions executed pre-auth above.

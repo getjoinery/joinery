@@ -27,7 +27,11 @@
 	);
 
 	$options['title'] = 'ApiKey';
-	$options['altlinks'] = array('Edit'=>'/admin/admin_api_key_edit?apk_api_key_id='.$api_key->key);
+	$options['altlinks'] = array();
+	// A scoped key is managed by the feature that issued it (see the Scope line).
+	if(!$api_key->is_scoped()){
+		$options['altlinks']['Edit'] = '/admin/admin_api_key_edit?apk_api_key_id='.$api_key->key;
+	}
 	if(!$api_key->get('apk_delete_time')){
 		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'soft_delete', 'apk_api_key_id' => $api_key->key));
 	}
@@ -91,6 +95,14 @@
 	}
 
 	echo '<strong>Owner:</strong> '. $owner->display_name().'<br>';
+
+	if($api_key->is_scoped()){
+		echo '<strong>Scope:</strong> '. htmlspecialchars(implode(', ', $api_key->scope()))
+			.' <em style="color: #6c757d;">(this key can call only these actions; it is managed by the feature that issued it)</em><br>';
+	}
+	else{
+		echo '<strong>Scope:</strong> <em style="color: #6c757d;">Unscoped</em><br>';
+	}
 
 	if($api_key->get('apk_start_time')){
 		echo '<strong>Starts:</strong> '. LibraryFunctions::convert_time($api_key->get('apk_start_time'), "UTC", $session->get_timezone(), 'M j, Y').'<br>';

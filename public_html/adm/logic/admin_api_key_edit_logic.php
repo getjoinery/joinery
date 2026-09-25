@@ -20,6 +20,14 @@ function admin_api_key_edit_logic(array $input): LogicResult {
 		$api_key = new ApiKey(NULL);
 	}
 
+	// A scoped key belongs to the feature that minted it: its owner, scope and
+	// address restriction are that feature's to set, and saving this form
+	// would hand the key to whoever submitted it.
+	if ($api_key->key && $api_key->is_scoped()) {
+		return LogicResult::error('This key is limited to ' . implode(', ', $api_key->scope())
+			. ' and is managed by the feature that issued it, so it cannot be edited here.');
+	}
+
 	if(LibraryFunctions::isFormSubmission()){
 
 		$editable_fields = array('apk_name','apk_is_active','apk_permission', 'apk_ip_restriction');

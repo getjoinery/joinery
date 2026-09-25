@@ -57,6 +57,7 @@ class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	    'apk_type' => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'machine'),
 	    'apk_permission' => array('type'=>'int4'),
 	    'apk_ip_restriction' => array('type'=>'varchar(255)'),
+	    'apk_scope' => array('type'=>'text'),
 	    'apk_start_time' => array('type'=>'timestamp(6)'),
 	    'apk_expires_time' => array('type'=>'timestamp(6)'),
 	    'apk_last_used_time' => array('type'=>'timestamp(6)'),
@@ -106,6 +107,39 @@ public static function GenerateKey($key) {
 
 	function is_session() {
 		return $this->get('apk_type') === self::TYPE_SESSION;
+	}
+
+	/**
+	 * The action names this key may call, from apk_scope (comma separated).
+	 * Empty means unscoped: the key reaches whatever its permission and its
+	 * user allow. A scoped key reaches only the actions named here — see
+	 * ApiAuth::authorize().
+	 *
+	 * @return string[]
+	 */
+	function scope() {
+		$raw = (string)$this->get('apk_scope');
+		if (trim($raw) === '') {
+			return array();
+		}
+		return array_values(array_filter(array_map('trim', explode(',', $raw)), 'strlen'));
+	}
+
+	function is_scoped() {
+		return $this->scope() !== array();
+	}
+
+	/**
+	 * Only a machine key may be scoped: a session key is the user's own device
+	 * credential and carries the user's whole reach by design.
+	 */
+	function save($debug = false) {
+		// An unsaved key with no type takes the column default, machine.
+		$type = $this->get('apk_type') ?: self::TYPE_MACHINE;
+		if ($this->is_scoped() && $type !== self::TYPE_MACHINE) {
+			throw new ApiKeyException('Only a machine key may be scoped.');
+		}
+		return parent::save($debug);
 	}
 
 	/**

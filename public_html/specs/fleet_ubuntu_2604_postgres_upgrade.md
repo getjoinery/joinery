@@ -1,13 +1,11 @@
 # Fleet Move to Ubuntu 26.04 / PostgreSQL 18
 
 **Status:** Stage 1 is released in 0.8.424 (published 2026-09-24; commit 71277d44): WP1–WP5,
-WP3b/B7, B1, B9, B11, B12, Postgres local-only, and WP7 (the move script). The docker-prod
-sites still run 0.8.423. B8's remainder and B10 are built and in the tree 2026-09-24,
-uncommitted. B13–B16, found by rehearsal R1, are fixed and in the tree, uncommitted.
-WP6 (base 2.0) and B17 (fresh installs lost their plugin bundle) are built, gated and in
-the tree, uncommitted.
-R1 passed on the owner's test box; two of its gates wait on approving its agent on dev
-(§ Progress). R2 waits on the owner.
+WP3b/B7, B1, B9, B11, B12, Postgres local-only, and WP7 (the move script). B8's remainder,
+B10, B13–B17 and WP6 (base 2.0) are released in 0.8.426 (commits e98df32c, 4de2fdc3);
+every node runs 0.8.426 (checked 2026-09-25). Stage 3 is next.
+R1 passed on the owner's test box, all gates (last two 2026-09-25). R2 waits on the owner.
+B19 and B20 (found finishing R1) are open.
 Two owner decisions open (D3, D4; D1 and D2 are in `specs/backup_database_incrementals.md`).
 **Date:** 2026-09-24 (rewritten from the 2026-08-01 draft after a fleet investigation;
 the code-side cutover items of `php_85_pg18_stack_cutover.md` are folded in here).
@@ -23,11 +21,11 @@ PostgreSQL 18 can back up only what changed in the database, so jeremytunnell's 
 1.65 GB database upload can drop to a fraction of that. It also puts the fleet on the
 current Ubuntu LTS.
 
-**No site runs PostgreSQL 18 today — including new ones.** Every node reports Ubuntu
-24.04 / PostgreSQL 16. New *standalone* installs land on 26.04 / PostgreSQL 18, but a new
-*Docker* site is built from the `joinery-base` image, which is still Ubuntu 24.04
-(`Dockerfile.base:17`). test380s — a 26.04 server — built its site on `joinery-base:1.2`
-(job 23394, output line 303), so it runs PostgreSQL 16 too.
+**No existing site runs PostgreSQL 18 yet.** Every node reports Ubuntu 24.04 /
+PostgreSQL 16. New standalone installs land on 26.04 / PostgreSQL 18, and new Docker
+sites are born on it from 0.8.426 (WP6). Before that release a Docker site was built from
+`joinery-base:1.2` (Ubuntu 24.04): test380s — a 26.04 server — built its site on it (job
+23394, output line 303), so it runs PostgreSQL 16.
 
 **Ubuntu has not opened the 24.04 → 26.04 upgrade.** `meta-release-lts` lists resolute
 26.04.1 with `Supported: 0` (checked 2026-09-24). Press reports put the hold on
@@ -39,8 +37,8 @@ without it.
 
 | Box | Runs | What moves it | Blocked on |
 |---|---|---|---|
-| 8 sites on docker-prod (galactictribune, getjoinery, getjoinery-developers, getjoinery-orgs, joinerydemo, mapsofwisdom, phillyzouk, scrolldaddy) | a container per site, each with its own PostgreSQL | rebuild the container on a 26.04 image, carrying its database across (Stage 3) | Stages 1–2 (buildable now) |
-| new Docker sites (customer servers) | same | born on the 26.04 image once it lands (Stage 2) | Stage 1 |
+| 8 sites on docker-prod (galactictribune, getjoinery, getjoinery-developers, getjoinery-orgs, joinerydemo, mapsofwisdom, phillyzouk, scrolldaddy) | a container per site, each with its own PostgreSQL | rebuild the container on a 26.04 image, carrying its database across (Stage 3) | nothing: 0.8.426 carries the image and the move script |
+| new Docker sites (customer servers) | same | born on the 26.04 image (Stage 2, released in 0.8.426) | — |
 | jeremytunnell-vps | standalone | in-place OS upgrade, by hand (Stage 4) | Ubuntu opening the upgrade (D3) |
 | dev (management node) | standalone | in-place OS upgrade, by hand (Stage 4) | same |
 | docker-prod server, joinery-relay-1, both scrolldaddy-dns | no site database | **stay on 24.04** (supported to 2029) | — |
@@ -230,8 +228,9 @@ Consequences:
   rebuilds `pg_hba` from the declaration at every container start. `prepare` refuses a
   network line the file does not declare, naming it.
 - **Stopgap:** done live on 2026-09-24 (next section).
-- **After the release, on docker-prod:** add `publish 192.168.206.198` to scrolldaddy's
-  `config/postgres_access.conf` before anything rebuilds it.
+- **Superseded 2026-09-25:** no `publish` line. The owner wants no exception at all, so
+  the resolvers stop reading the database and the exception mechanism is removed:
+  `specs/dns_resolvers_read_over_https.md`.
 
 **PostgreSQL answers only locally — every box, and every new install** (owner, 2026-09-24:
 "Postgres should be completely shut off to any remote access and only work locally").
@@ -437,7 +436,8 @@ pinning the template's default to `install.sh`'s version. Docs: `deploy_and_upgr
 - Base 2.0 built: Ubuntu 26.04.1, PostgreSQL 18, PHP 8.5.4.
 - A fresh site on it passes the deploy tier (4/4).
 - A routine `install.sh site` rebuild of that site keeps the agent's identity: same
-  fingerprint and identity file, new container, no duplicate join request on dev.
+  fingerprint and identity file, new container. The site was not yet approved, and a
+  minute later its agent asked again with a new key (B19).
 - Not run, because it buys a Linode: the quick-deploy live gates with a customer provision.
 - `Dockerfile.base:17` becomes `FROM ubuntu:26.04`; `BASE_IMAGE_VERSION` goes `1.2` → `2.0`
   (`install.sh:477`).
@@ -515,12 +515,10 @@ returns to `prepared`, so a retry needs a fresh `prepare`.
 6. getjoinery-orgs
 7. getjoinery-developers
 8. getjoinery — the production management node, so dispatch nothing from it while it moves.
-9. **scrolldaddy last.** Its DNS resolvers read its database over the network as
-   `scrolldaddy_reader`. Their access lines and the publish address are declared in its
-   `config/postgres_access.conf` (B8), which the rebuild keeps. The role is carried by
-   `prepare`'s `pg_dumpall --roles-only`. Confirm both resolvers serve during and after
-   the move. Unverified: whether the resolvers keep answering from memory while the
-   database is down.
+9. **scrolldaddy last, after `specs/dns_resolvers_read_over_https.md` WP7.** By then its
+   DNS resolvers read the site over HTTPS and its hand-made database port is reported
+   as dropped rather than refused, so it moves like the others. Confirm both resolvers
+   serve during and after the move.
 
 ## Stage 4 — The two standalone boxes (owner, by hand)
 
@@ -647,8 +645,33 @@ database-incrementals integration tests run in the ordinary gate.
     - the agent's fingerprint `80fe16726c9cadce` matches its pending join request on dev;
     - the deploy tier passes (the read-only gate needed the fake domain in the container's
       `/etc/hosts`).
-  - **Not run:** a `check_status` round trip, and one backup with a level-2 verification.
-    Both need the agent's join request on dev (request 1787) approved.
+  - **Finished 2026-09-25**, after approving request 1787 on dev (node 61130):
+    - two `check_status` round trips through the agent (PostgreSQL 18 accepting
+      connections), and the recovery-key report it queues;
+    - an upgrade 0.8.424 → 0.8.426 through the agent (`apply_update`, deploy tier passed,
+      every file matches the signed manifest) — first needed because R1's rebuild had
+      laid the uncommitted dev tree over the site, so the agent refused to back it up
+      (`run_backup.php` does not match its signed hash) — correctly;
+    - one full backup to B2 (69.8 MB, database 128 KB) and a level-2 verification of it
+      (4 archives, 2,487 files, pass);
+    - the recovery key was set and proven in PHP inside the container (the throwaway
+      site had none; the private half was discarded). The node's scheduled backups are
+      off. Requests 1788 and 1789 (the `fresh` site) were rejected.
+  - **B19 — rebuilding a site that is not yet approved changes its agent's key.**
+    `install.sh site` passes `--join` again, `agent_control.php` writes a new
+    `requested_time`, and the agent treats a newer ask as a new one: it withdraws, drops
+    the staged key and asks with a new key. `fresh` did this at 18:12 on 09-24 (request
+    1788, key 2d45…, then 1789, key ec01…). The old request drops off the board
+    unrenewed after an hour. So the WP6 gate line "no duplicate join request" held only
+    for the first minute. An approved site is unaffected: its credential is promoted and a
+    new ask is ignored. Fix: `agent_control.php --join` keeps the existing
+    `requested_time` when the same URL is already being asked. Not fixed.
+  - **B20 — a site that joins by its agent is never backed up.** `adoptJoin` makes the
+    node with no web root, and `hosts_site_from()` reads an empty web root as "no
+    site". The node gets no recovery-key report, no nightly backup, and Run backup
+    refuses "does not host a Joinery site" — silently, until someone types the path. The
+    agent knows the path (`cfg.WebRoot`). Fix: the agent reports its web root (poll or
+    `check_status`) and the plane fills an empty `mgn_web_root` from it. Not fixed.
   - **For Stage 3:** a site takes the release carrying the new scripts first, then moves.
     Until it does, its container runs the scripts on its scripts volume, which is why
     housekeeping 1.7 there still refused the `publish` line.

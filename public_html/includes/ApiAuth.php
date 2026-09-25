@@ -16,9 +16,11 @@
  *                         principal has api_entry === null and carries the same
  *                         full capability a freshly minted session key gets.
  *   authorize()         — decide whether a principal may invoke an endpoint,
- *                         against a small contract (capability + machine-key +
- *                         user floor). Called by the CRUD verbs, the logic
- *                         endpoint, and the management router.
+ *                         against a small contract (key scope + capability +
+ *                         machine-key + user floor). Called by the CRUD verbs,
+ *                         the logic endpoint, and the management router.
+ *   refuseScopedKeyOutsideActions() — confine a scoped key to action dispatch;
+ *                         apiv1.php calls it for every other route family.
  *   attemptLogin()      — verify an email/password and mint a session key.
  *   revokeSessionKey()  — revoke a presented session key (logout).
  *
@@ -38,7 +40,17 @@
  * The user role axis (usr_permission) is a simple floor (e.g. management = 10).
  * See specs/implemented/api_auth_gate_unification.md for the equivalence table.
  *
- * @version 1.2.0
+ * SCOPE — a machine key may carry apk_scope, a list of action names. A scoped
+ * key reaches those actions and nothing else: authorize() refuses it on every
+ * endpoint its scope does not name (CRUD, forms and management pass no name,
+ * so they always refuse it), and apiv1.php keeps it out of the route families
+ * that never reach authorize(). An action whose auth block declares
+ * requires_scoped_key admits only a key scoped to it.
+ *
+ * @version 1.3.0
+ * @changelog 1.3.0 - Scoped machine keys: authorize() takes the endpoint's
+ *   name, refuses a scoped key outside its scope, and enforces
+ *   requires_scoped_key; refuseScopedKeyOutsideActions() for apiv1.php.
  * @changelog 1.2.0 - Anonymous browser-session principal: a session cookie with
  *   a valid X-Joinery-Csrf proof but no logged-in user authenticates as an
  *   anonymous principal (api_user === null). authorize() denies it 401 unless
@@ -328,21 +340,48 @@ class ApiAuth {
 	 *                                other check, so every contract that does not
 	 *                                opt in stays guest-free with no audit needed.
 	 *   'min_user_permission'     => int  (default 0)
+	 *   'requires_scoped_key'     => bool (default false) — admit only a machine
+	 *                                key whose apk_scope names this endpoint.
+	 *                                Refuses unscoped keys and browser sessions,
+	 *                                so a general-purpose credential copied onto
+	 *                                another machine cannot call it.
 	 * @param ApiKey $api_entry       The authenticated key.
 	 * @param int|null $user_permission The owning user's usr_permission, or null
 	 *                                for the anonymous browser-session principal
 	 *                                (null is the anonymity signal — never pass
 	 *                                null for a real user).
 	 * @param string $message_prefix  Surface label for the 403 body.
+	 * @param string|null $endpoint   The action's name ('{plugin}/{action}' or
+	 *                                '{action}'), matched against a scoped key's
+	 *                                apk_scope. Null for surfaces that are not
+	 *                                actions (CRUD, forms, management), which no
+	 *                                scope can name.
 	 * @return void Returns when authorized; otherwise exits.
 	 */
-	public static function authorize(array $auth, $api_entry, $user_permission, $message_prefix = 'Endpoint') {
+	public static function authorize(array $auth, $api_entry, $user_permission, $message_prefix = 'Endpoint', $endpoint = null) {
 		// Anonymous gate first — fails closed before every other check. The
 		// 401 body matches the missing-credential shape: no oracle separating
 		// "this action exists but needs login" from "no credential presented".
 		if ($user_permission === null && empty($auth['allow_guest'])) {
 			api_error($message_prefix . ' requires authentication', 'AuthenticationError', 401);
 		}
+		// Scope gate. A scoped key reaches only the endpoints its scope names;
+		// a surface with no name is never among them.
+		if ($api_entry && $api_entry->is_scoped()
+			&& ($endpoint === null || !in_array($endpoint, $api_entry->scope(), true))) {
+			api_error($message_prefix . ': this key is limited to ' . implode(', ', $api_entry->scope()),
+				'AuthenticationError', 403);
+		}
+		// The inverse: an endpoint that admits only a key scoped to it. The
+		// gate above already refused a key scoped elsewhere, so what remains
+		// to refuse is a browser session, an unscoped key, and a scoped key
+		// that is somehow not a machine key.
+		if (!empty($auth['requires_scoped_key'])
+			&& (!$api_entry || !$api_entry->is_scoped()
+				|| $api_entry->get('apk_type') !== ApiKey::TYPE_MACHINE)) {
+			api_error($message_prefix . ' requires a machine key scoped to it', 'AuthenticationError', 403);
+		}
+
 		// Machine-key gate first — fails closed before any finer-grained check.
 		// Null-safe: a missing key is, by definition, not a machine key.
 		if (!empty($auth['requires_machine_key'])
@@ -378,6 +417,24 @@ class ApiAuth {
 		$min_user_permission = isset($auth['min_user_permission']) ? (int) $auth['min_user_permission'] : 0;
 		if ((int) $user_permission < $min_user_permission) {
 			api_error($message_prefix . ': insufficient user permission', 'AuthenticationError', 403);
+		}
+	}
+
+	/**
+	 * Refuse a scoped key on a route family other than action dispatch. The
+	 * families that never reach authorize() after authentication — auth/*,
+	 * app/*, drive_upload, the GET actions listing — have no endpoint name to
+	 * match, and a scope names only actions, so apiv1.php calls this once for
+	 * all of them rather than each endpoint class refusing on its own. The
+	 * families that do reach authorize() are refused there too.
+	 *
+	 * @param ApiKey|null $api_entry The authenticated key (null for a browser session).
+	 * @param string      $family    The route family, for the 403 body.
+	 */
+	public static function refuseScopedKeyOutsideActions($api_entry, $family) {
+		if ($api_entry && $api_entry->is_scoped()) {
+			api_error(($family !== '' ? $family : 'This endpoint') . ': this key is limited to '
+				. implode(', ', $api_entry->scope()), 'AuthenticationError', 403);
 		}
 	}
 

@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.25 - the Service box reads a DNS server's source_ok (site reachable/unreachable), and
+ *                 db_connected only from a 1.8 server that reports it instead
  * @version 1.24 - specs/agent_recipes_and_vocabulary.md: services answer/Restart, served certificates, site
  *                 containers, sshd's widened settings; config/page/table/installer/reset forms; a paired node
  *                 lacking any word this tab offers shows the one "needs a newer agent" state (AgentVocabulary)
@@ -641,7 +643,10 @@
 					. htmlspecialchars((string)$status_data['status']) . '</span></div>';
 			}
 			$svc_bits = array();
-			if (isset($status_data['db_connected'])) {
+			if (isset($status_data['source_ok'])) {
+				$svc_bits[] = $status_data['source_ok'] ? 'site reachable' : 'site unreachable';
+			} elseif (isset($status_data['db_connected'])) {
+				// A 1.8 DNS server, which reads its site's database instead.
 				$svc_bits[] = $status_data['db_connected'] ? 'database connected' : 'database unreachable';
 			}
 			if (!empty($status_data['service_uptime_seconds'])) {

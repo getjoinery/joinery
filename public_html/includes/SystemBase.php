@@ -2218,6 +2218,22 @@ abstract class SystemBase {
 	}
 
 	/**
+	 * The order a record's deletion rules are walked in, by permanent_delete()
+	 * and permanent_delete_dry_run() alike:
+	 *
+	 *   1. prevent — refuse before anything is touched;
+	 *   2. permanent_delete — each dependent's own permanent_delete() runs, and
+	 *      may write rows of its own under the same parent (a device records
+	 *      its deactivation PIN in the user's device backups as it goes);
+	 *   3. the flat actions (cascade, null, set_value) — which therefore also
+	 *      reach rows step 2 just wrote. Walked the other way round, those rows
+	 *      outlived the parent.
+	 *
+	 * Within each group the rule id keeps the order deterministic.
+	 */
+	const DELETION_RULE_ORDER = "CASE del_action WHEN 'prevent' THEN 0 WHEN 'permanent_delete' THEN 1 ELSE 2 END, del_deletion_rule_id";
+
+	/**
 	 * Perform a dry run of deletion to see what would be affected
 	 * Returns structured array of all actions that would be taken
 	 */
@@ -2239,7 +2255,7 @@ abstract class SystemBase {
 		// Get all deletion rules for this table from the database
 		$sql = "SELECT * FROM del_deletion_rules
 				WHERE del_source_table = ?
-				ORDER BY del_deletion_rule_id";
+				ORDER BY " . self::DELETION_RULE_ORDER;
 		$stmt = $db->prepare($sql);
 		$stmt->execute([static::$tablename]);
 
@@ -2272,7 +2288,7 @@ abstract class SystemBase {
 					$dependency['blocks_deletion'] = true;
 				} elseif ($rule['del_action'] === 'permanent_delete') {
 					// Recursively count what model-level permanent_delete would affect
-					$model_class = self::getModelClassForTable($dep_table);
+					$model_class = static::getModelClassForTable($dep_table);
 					if ($model_class) {
 						$dep_pkey = $model_class::$pkey_column;
 						$select_sql = "SELECT {$dep_pkey} FROM {$dep_table} WHERE {$dep_column} = ?";
@@ -2333,7 +2349,7 @@ abstract class SystemBase {
 			// This is much more efficient than scanning information_schema
 			$sql = "SELECT * FROM del_deletion_rules
 					WHERE del_source_table = ?
-					ORDER BY del_deletion_rule_id";
+					ORDER BY " . self::DELETION_RULE_ORDER;
 			$stmt = $db->prepare($sql);
 			$stmt->execute([static::$tablename]);
 
@@ -2391,7 +2407,7 @@ abstract class SystemBase {
 						case 'permanent_delete':
 							// Load each dependent record as a model object and call its permanent_delete()
 							// This enables custom cascade logic (e.g., SdDevice cleans up profiles/filters)
-							$model_class = self::getModelClassForTable($dep_table);
+							$model_class = static::getModelClassForTable($dep_table);
 							if ($model_class) {
 								$dep_pkey = $model_class::$pkey_column;
 								if($debug){
