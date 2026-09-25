@@ -156,12 +156,32 @@ Each DB must be reachable from the resolver IPs (`45.56.103.84`, `97.107.131.227
 
 See the resolver's `README.md` and `/etc/scrolldaddy/OPS_GUIDE.md` for ops details.
 
+### Resolver snapshot and DNS server access
+
+`POST /api/v1/action/dns_filtering/resolver_snapshot` (`logic/resolver_snapshot_logic.php`) answers with everything a DNS server needs to filter this site's devices:
+
+- `devices`: `id`, `uid`, `timezone`, `log_queries` — active, undeleted, with a resolver UID;
+- `blocks`: `id`, `device_id`, `name`, `always_on`, `start`, `end`, `days`, `timezone`, and `filters`, `services` and `domains` lists of `{key, action}` — active, undeleted blocks; domain rules active only;
+- `blocklist_sources`: the category → URL list and the skip list from `blocklist_sources.json` (`BlocklistSources`), which the DNS servers download and parse themselves;
+- `version`: sha256 of the canonical JSON of those three, and `generated_at`.
+
+A caller sends the `if_version` it holds; when it still matches, the answer is `{version, unchanged: true}`. The rows selected match the resolver's database queries (`db.go`) exactly.
+
+Only a machine key scoped to this action can call it (`requires_scoped_key`; see `docs/api.md` § Scoped machine keys). The **DNS server access** panel under the plugin's settings (`includes/settings_actions.php`) mints one per configured server through `resolver_key_issue` and ends it through `resolver_key_revoke` (`DnsResolverAccess`):
+
+- the key is read-only, scoped to `dns_filtering/resolver_snapshot`, and restricted to the server's IPv4 address (`dns_filtering_dns_server_ip` / `dns_filtering_dns_secondary_server_ip`, copied when the key is minted — the panel flags a key whose address no longer matches the setting);
+- the secret is shown once, as the server's `SCD_JOINERY_SITES` entry for this site (`{base URL}|{public key}|{secret}`); issuing again replaces the key, which is how a key is rotated;
+- the key belongs to a service account the plugin creates (`dns_filtering_resolver_user_id`): permission 0, no password, an address on the reserved `.invalid` domain. `User` refuses to delete an account that owns a live scoped key, so the account cannot be removed out from under the servers;
+- the key ids are kept in `dns_filtering_resolver_key_primary` and `dns_filtering_resolver_key_secondary`.
+
 ## Key Files
 
 - **Data model:** `plugins/dns_filtering/data/scheduled_blocks_class.php`, `scheduled_block_filters_class.php`, `scheduled_block_services_class.php`, `scheduled_block_rules_class.php`, `devices_class.php`, `profiles_class.php`
 - **UI:** `plugins/dns_filtering/views/profile/scheduled_block_edit.php`, `devices.php`
 - **Business logic:** `plugins/dns_filtering/logic/` — page logic (`scheduled_block_edit_logic.php`, `devices_logic.php`, …) plus the API action logic (`block_rule_add_logic.php`, `scan_url_logic.php`, `catalog_logic.php`, …)
 - **API actions:** `POST /api/v1/action/dns_filtering/{scan_url|test_domain|purge_querylog|block_rule_add|block_rule_delete|block_filter_set}` — the editor's page JS calls these with the browser-session credential; each has a `_logic_descriptor()` on its logic file
+- **Resolver snapshot & keys:** `plugins/dns_filtering/logic/resolver_snapshot_logic.php`, `resolver_key_issue_logic.php`, `resolver_key_revoke_logic.php`, `includes/DnsResolverAccess.php`, `includes/settings_actions.php`
+- **Blocklist sources:** `plugins/dns_filtering/blocklist_sources.json`, read by `includes/BlocklistSources.php`
 - **Category list & API exports:** `plugins/dns_filtering/includes/ScrollDaddyHelper.php` (`$filters`, `$services`, `exportDevice()`, `exportBlock()`, `getHardBlockHostnames()`)
 - **DNS resolver source:** `/home/user1/scrolldaddy-dns/` (Go)
 

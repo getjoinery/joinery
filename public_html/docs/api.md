@@ -223,6 +223,18 @@ Mechanics worth knowing: the API *reads* the session and releases the session lo
 | `last_used_time` | Updated by the auth path at most once per hour |
 | `ip_restriction` | Comma-separated list of allowed IPs (optional, machine keys) |
 | `permission` | Access level (see Permission Levels below) |
+| `scope` | Comma-separated action names (machine keys only; empty = unscoped). A scoped key can call only those actions — see [Scoped machine keys](#scoped-machine-keys) |
+
+### Scoped machine keys
+
+A machine key that sits on another machine should be able to do one job and nothing else. `apk_scope` names the actions a key may call, e.g. `dns_filtering/resolver_snapshot`. A scoped key:
+
+- calls the actions its scope names, subject to the rest of each action's contract (capability, user floor);
+- is refused 403 everywhere else: every other action, CRUD, forms, management, `auth/*`, `app/*`, `drive_upload` and the `GET /api/v1/actions` listing. The message names the scope.
+
+The check lives in `ApiAuth::authorize()`, which action dispatch calls with the action's name; CRUD, forms and management pass no name, and no scope can name them. The route families that never reach `authorize()` after authentication refuse a scoped key in `apiv1.php` (`ApiAuth::refuseScopedKeyOutsideActions()`). Sessionless actions (`requires_session: false`) run before authentication and never see a key; anyone may call them.
+
+Only a machine key may be scoped (`ApiKey::save()` refuses otherwise). Scoped keys are minted by the feature that owns the action, never typed: the admin API key page shows a key's scope and does not offer to edit a scoped key, since saving that form would hand the key to the admin who submitted it.
 
 ## Auth Endpoints
 
@@ -337,7 +349,7 @@ API authorization decisions involve two distinct axes — keep them separate whe
 | **Key capability** | `apk_permission` | What a *key* may do on the CRUD axis (read / write / delete, non-monotonic — see above). |
 | **User role** | `usr_permission` | The owning *user's* role floor (e.g. `5` = staff, `10` = superadmin). This is the value passed to per-record `authenticate_read/write` as `current_user_permission`, and the floor the management plane gates on. |
 
-Both axes live in one class, `ApiAuth` (`includes/ApiAuth.php`), which owns the whole security boundary: `ApiAuth::authenticate()` resolves the principal from request headers, and `ApiAuth::authorize()` enforces every endpoint's authorization against a small contract — a `capability`, an optional `requires_machine_key` or its inverse `requires_browser_session`, and a `min_user_permission` floor.
+Both axes live in one class, `ApiAuth` (`includes/ApiAuth.php`), which owns the whole security boundary: `ApiAuth::authenticate()` resolves the principal from request headers, and `ApiAuth::authorize()` enforces every endpoint's authorization against a small contract — a key's scope, a `capability`, an optional `requires_machine_key` or its inverse `requires_browser_session`, an optional `requires_scoped_key`, and a `min_user_permission` floor.
 
 ### Declaring endpoint authorization
 
@@ -355,6 +367,7 @@ function catalog_logic_descriptor(): array {
             'allow_guest'              => false,   // accept the anonymous browser principal (valid CSRF, no signed-in user)
             'session_write'            => false,   // re-open the session so the action's $_SESSION writes persist (browser credential only)
             'min_user_permission'      => 0,       // usr_permission floor
+            'requires_scoped_key'      => false,   // admit only a machine key whose apk_scope names this action
         ],
     ];
 }
@@ -372,6 +385,8 @@ Resolution order for each field: explicit `auth` value → router default → `A
 `requires_machine_key` and `requires_browser_session` are mutually exclusive opposites: the first admits only machine keys, the second refuses every API key so the action is reachable only through the browser-session credential (session cookie + CSRF; native apps ride the same bridge). Session-bound operations whose state is keyed to the session id — Sealed Vault and passkey management — set `requires_browser_session` so the boundary is declared, not left to incidental session-plumbing behavior.
 
 `allow_guest` admits the anonymous browser principal (see [Browser sessions](#browser-sessions-page-javascript)); without it, `ApiAuth::authorize()` denies anonymous callers 401 before any other check, so contracts that never think about guests stay guest-free. Guest-reachable actions whose state lives in the web session (the cart) pair it with `requires_browser_session` — an API key has no session to act on — and with `session_write` when they mutate that state, since the browser credential otherwise releases the session lock after reading identity and later `$_SESSION` writes would not persist.
+
+`requires_scoped_key` admits only a machine key whose scope names the action, and refuses an unscoped key and a browser session. Use it for an action meant for one machine client: an admin's ordinary key copied onto that machine would otherwise carry the admin's whole reach. The feature that owns the action mints the scoped key for its client (e.g. the dns_filtering plugin's DNS server access panel).
 
 A management handler's `auth` block may **tighten** the default (e.g. raise the user floor or add a capability) but cannot loosen it — the machine-key + superadmin default is enforced before the handler resolves so unknown paths still fail closed.
 

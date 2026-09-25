@@ -145,9 +145,9 @@ private function _check_for_duplicate_setting() {
 	 * so a typo becomes a setting that silently never takes effect. The same
 	 * rule the settings page enforces (SettingsWriter) applies here.
 	 *
-	 * Reading back is immediate: get_setting() re-reads a blank value from the
-	 * database rather than trusting its in-request copy, so there is no cache
-	 * to invalidate.
+	 * Reading back is immediate: put() drops this process's memoized copy
+	 * (Globalvars::forget_setting()), so the next get_setting() reads the row
+	 * it just wrote.
 	 *
 	 * @param string $name A declared setting name.
 	 * @param string|int|bool|null $value The value to store.
@@ -178,6 +178,7 @@ private function _check_for_duplicate_setting() {
 			 VALUES (?, ?, 1, NOW(), NOW(), 'general')
 			 ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value, stg_update_time = NOW()");
 		$stmt->execute(array($name, $value));
+		Globalvars::get_instance()->forget_setting($name);
 	}
 
 	/**

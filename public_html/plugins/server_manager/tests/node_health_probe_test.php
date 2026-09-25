@@ -86,6 +86,26 @@ check(($facts['service_uptime_seconds'] ?? null) === 2958346,
 	'it is kept under its own name instead');
 
 // ---------------------------------------------------------------------------
+section('A 2.0 DNS server reports its sites instead of a database');
+
+// scrolldaddy-dns 2.0 reads its sites over HTTPS: source_ok replaces
+// db_connected, and "stale" (200) means it filters from its cached copy.
+$v2 = NodeHealthProbe::facts_from_body(json_encode(array(
+	'status'             => 'stale',
+	'source_ok'          => false,
+	'sources'            => array(array('host' => 'scrolldaddy.app', 'ok' => false, 'last_ok' => '2026-09-25T12:00:00Z')),
+	'blocklists_missing' => array('https://lists.example/dead'),
+	'uptime_seconds'     => 120,
+	'last_reload'        => '2026-09-25T12:00:00Z',
+	'memory_total_mb'    => 961,
+)));
+check(($v2['source_ok'] ?? null) === false, 'source_ok arrives, as a boolean');
+check(($v2['status'] ?? null) === 'stale', 'the stale status arrives');
+check(!array_key_exists('db_connected', $v2), 'a 2.0 document invents no db_connected');
+check(!array_key_exists('sources', $v2) && !array_key_exists('blocklists_missing', $v2),
+	'the per-site and per-list arrays are not folded as scalar facts');
+
+// ---------------------------------------------------------------------------
 section('A reading that could not be taken is absent, never zero');
 
 $partial = NodeHealthProbe::facts_from_body(json_encode(array('status' => 'ok')));

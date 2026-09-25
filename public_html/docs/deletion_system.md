@@ -457,7 +457,7 @@ When `permanent_delete()` is called:
 
 1. **Start transaction** (if not already in one)
 2. **Query deletion rules** from `del_deletion_rules` for this source table
-3. **For each dependent table**:
+3. **For each dependent table**, in this order (`SystemBase::DELETION_RULE_ORDER`; the rule id breaks ties): every `prevent` rule first, then every `permanent_delete` rule, then the flat actions (`cascade`, `null`, `set_value`). A dependent's own `permanent_delete()` may write rows under the same parent (a DNS filtering device records its deactivation PIN in the user's device backups as it goes); running the flat actions after it reaches those rows too, so none outlive the parent. `permanent_delete_dry_run()` walks the same order.
    - Count how many dependent records exist
    - If count > 0, apply the action:
      - **cascade**: DELETE dependent records
