@@ -13,8 +13,8 @@ directory id under a folder's own path is void) lands C5; change 4 (a folder
 record knows its directory from the mint) closes C4, next in the chain C4,
 C6, fix 4's removal, C7, each measured and graded. C10 + C11 (a device puts back only its own
 park; a scratch name is not a placement) NEEDED and VALID 2026-09-22. Every
-change reviewed approach-before-patch: public-html-25 from 2026-09-22
-(public-html-67 from 2026-09-14, public-html-c6 before that). Cause 2 (file
+change reviewed approach-before-patch: public-html-e9 from 2026-09-25,
+public-html-25 from 2026-09-22 (public-html-67 from 2026-09-14, public-html-c6 before that). Cause 2 (file
 identity, owner decision 2026-09-25) is `drive_file_identity.md`.**
 
 Testing is paused. No further guards land on the sync engine until the work
@@ -1739,9 +1739,18 @@ belt in, before the belt lands.** B1 is what happens without this.
   file's own identity (file id plus birth time) decides which record it
   belongs to; its path decides only when that identity is gone. It is cause
   2 above, it settles the AH decision, and it takes T1-C, T1-D and R as routes
-  into one cause; their entries below stay as the evidence. Approach review
-  (R5) with public-html-25. C9 part 2, the D1 park gap and C13 follow its
-  third commit unless the reviewer reorders.
+  into one cause; their entries below stay as the evidence. Approach NEEDED
+  and VALID (public-html-e9, 2026-09-25). Commit 1 (disk and record, read by
+  nothing) NEEDED and VALID, its bar met: 420 of 420 traces byte-identical to
+  `9b992a58`. C9 part 2, the D1 park gap and C13 follow its third
+  commit (order confirmed by the reviewer).
+- **B1, open (public-html-e9, 2026-09-25, read): a sync root on a different
+  volume from the state directory cannot download.** `OsSpoolFile::commit`
+  places a file with a bare `fs::rename` (`jd-vfs` `real.rs`), which fails
+  across volumes, while `jd-platform` `dirs.rs` says the commit is then a
+  copy and still correct. It is older than file identity and not part of it;
+  file identity reads a placed file's identity from the committed target so
+  that it stays right whichever way this is fixed.
 - **D1 (2026-09-24), a sealed file dragged out of a vault is held, not
   converted. NEEDED and VALID (public-html-25), landed 0c66212d.** Post-commit
   reading 181843af -> 0c66212d: identical, seed for seed, to the reviewed

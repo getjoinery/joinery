@@ -60,6 +60,15 @@ pub struct Personality {
     /// seconds; a fingerprint comparison has to tolerate at least this much
     /// before it decides a file changed.
     pub mtime_granularity_ns: u64,
+    /// Does a file's id and birth ([`crate::FileIdentity`]) name that one file
+    /// for as long as it exists? True where the id survives a rename and the
+    /// birth is real. False on FAT and exFAT, whose "ids" are the position of
+    /// a directory entry and change when the entry moves, and on any volume
+    /// [`Personality::probe`] catches changing an id on a rename or reporting
+    /// no birth, or a birth that is not the time the file was made. Where it
+    /// is false every file's identity is weak, and the engine reads the disk
+    /// by its older rules (`specs/drive_file_identity.md`).
+    pub stable_file_identity: bool,
 }
 
 const WINDOWS_ILLEGAL: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
@@ -83,6 +92,7 @@ impl Personality {
             max_name_bytes: 255,
             max_path_bytes: 4096,
             mtime_granularity_ns: 1,
+            stable_file_identity: true,
         }
     }
 
@@ -113,6 +123,7 @@ impl Personality {
             max_name_bytes: 255,
             max_path_bytes: 1024,
             mtime_granularity_ns: 1,
+            stable_file_identity: true,
         }
     }
 
@@ -148,6 +159,7 @@ impl Personality {
             // engine's own scratch names.
             max_path_bytes: 32_000,
             mtime_granularity_ns: 100,
+            stable_file_identity: true,
         }
     }
 
@@ -156,6 +168,7 @@ impl Personality {
     pub const fn fat32() -> Self {
         Personality {
             mtime_granularity_ns: 2_000_000_000,
+            stable_file_identity: false,
             ..Personality::windows()
         }
     }
@@ -191,6 +204,9 @@ impl Personality {
         let path = dir.join(&base);
         let _ = std::fs::remove_file(&path);
         if std::fs::write(&path, b"probe").is_err() {
+            // The platform's names are its safe guess; for identity the safe
+            // guess is none, which costs only the older rules.
+            p.stable_file_identity = false;
             return p;
         }
 
@@ -223,6 +239,37 @@ impl Personality {
         } else {
             p.normalization_insensitive = p.decomposes_unicode;
         }
+
+        // Does a file keep one identity for as long as it exists? Read the
+        // probe's id and birth, rename it in place to a much longer name (on
+        // FAT that moves the directory entry, which is what its "id" is), and
+        // read them again. Weak if the id moved, if either half is missing, or
+        // if the birth is not the moment the file was made: a constant or an
+        // epoch birth would make the pair a bare file id again.
+        let renamed = dir.join(format!(
+            "{base}-renamed-under-a-much-longer-name-so-its-entry-has-to-move"
+        ));
+        let before = crate::real::identity_at(&path);
+        p.stable_file_identity = match std::fs::rename(&path, &renamed) {
+            Ok(()) => {
+                let after = crate::real::identity_at(&renamed);
+                let _ = std::fs::remove_file(&renamed);
+                let now_ns = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
+                    .unwrap_or(0);
+                match (before, after) {
+                    (Some(b), Some(a)) => {
+                        b.is_strong()
+                            && a == b
+                            && now_ns.abs_diff(b.birth_ns) < 60_000_000_000
+                            && !crate::real::ids_not_unique_on_this_volume(dir)
+                    }
+                    _ => false,
+                }
+            }
+            Err(_) => false,
+        };
 
         let _ = std::fs::remove_file(&path);
         p
@@ -277,12 +324,21 @@ mod tests {
     }
 
     #[test]
-    fn an_unwritable_directory_probes_to_the_native_default() {
+    fn an_unwritable_directory_probes_to_the_native_names_and_no_identity() {
         // The engine has to start. A probe that cannot run is not a reason to
-        // refuse to sync; the compile-time default is the conservative answer.
+        // refuse to sync; for names the compile-time default is the
+        // conservative answer. For file identity it is not: ids nobody tried
+        // are ids nobody trusts, and distrusting them costs only the older
+        // rules.
         let missing = std::env::temp_dir().join("jd-probe-does-not-exist-at-all");
         let _ = std::fs::remove_dir_all(&missing);
-        assert_eq!(Personality::probe(&missing), Personality::native());
+        assert_eq!(
+            Personality::probe(&missing),
+            Personality {
+                stable_file_identity: false,
+                ..Personality::native()
+            }
+        );
     }
 
     #[test]

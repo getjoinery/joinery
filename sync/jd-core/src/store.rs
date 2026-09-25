@@ -32,7 +32,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placement};
 
 /// Bumped when the schema changes in a way an older engine could misread.
-pub const SCHEMA_VERSION: i64 = 6;
+///
+/// 7: a record's own file (`own_file_id`, `own_file_birth_ns`) and the agreed
+/// fingerprint's birth. An older engine writing an entry would leave the own
+/// file standing after it had given the file up.
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// What makes a written-off note apply *right now*, as one SQL predicate over
 /// `entries e` joined to `unreadable u`.
@@ -188,6 +192,10 @@ impl Store {
                 replaces_id            INTEGER,
                 stand_in_parent_id     INTEGER,
                 stand_in_name          TEXT,
+                synced_fp_birth_ns     INTEGER,
+                -- the file on this disk that is this record's (FileIdentity)
+                own_file_id            INTEGER,
+                own_file_birth_ns      INTEGER,
                 PRIMARY KEY (entity_type, server_id)
             );
             CREATE INDEX IF NOT EXISTS entries_parent ON entries (parent_folder_id);
@@ -279,6 +287,9 @@ impl Store {
             ("replaces_id", "INTEGER"),
             ("stand_in_parent_id", "INTEGER"),
             ("stand_in_name", "TEXT"),
+            ("synced_fp_birth_ns", "INTEGER"),
+            ("own_file_id", "INTEGER"),
+            ("own_file_birth_ns", "INTEGER"),
         ] {
             store.add_column_if_missing("entries", column, ddl)?;
         }
@@ -405,8 +416,9 @@ impl Store {
                 synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                 local_status, unsyncable_reason, wrapped_file_key,
                 content_id, synced_remote_sha256, synced_remote_size,
-                replaces_type, replaces_id, stand_in_parent_id, stand_in_name
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)
+                replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
+                synced_fp_birth_ns, own_file_id, own_file_birth_ns
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)
              ON CONFLICT(entity_type, server_id) DO UPDATE SET
                 parent_folder_id = excluded.parent_folder_id,
                 remote_name = excluded.remote_name,
@@ -433,7 +445,10 @@ impl Store {
                 replaces_type = excluded.replaces_type,
                 replaces_id = excluded.replaces_id,
                 stand_in_parent_id = excluded.stand_in_parent_id,
-                stand_in_name = excluded.stand_in_name",
+                stand_in_name = excluded.stand_in_name,
+                synced_fp_birth_ns = excluded.synced_fp_birth_ns,
+                own_file_id = excluded.own_file_id,
+                own_file_birth_ns = excluded.own_file_birth_ns",
             params![
                 e.id.entity_type.to_string(),
                 e.id.server_id,
@@ -463,6 +478,9 @@ impl Store {
                 e.replaces.map(|r| r.server_id),
                 e.stand_in.as_ref().and_then(|p| p.parent),
                 e.stand_in.as_ref().map(|p| p.name.clone()),
+                e.synced_fingerprint.map(|f| f.birth_ns as i64),
+                e.own_file.map(|o| o.file_id as i64),
+                e.own_file.map(|o| o.birth_ns as i64),
             ],
         )?;
         Ok(())
@@ -478,7 +496,8 @@ impl Store {
                         synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                         local_status, unsyncable_reason, wrapped_file_key,
                         content_id, synced_remote_sha256, synced_remote_size,
-                        replaces_type, replaces_id, stand_in_parent_id, stand_in_name
+                        replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
                    FROM entries WHERE entity_type = ?1 AND server_id = ?2",
                 params![id.entity_type.to_string(), id.server_id],
                 row_to_entry,
@@ -607,21 +626,39 @@ impl Store {
         let t = EntityType::File.to_string();
         self.conn.execute("BEGIN IMMEDIATE", [])?;
         let result = (|| -> StoreResult<()> {
-            let Some(real) = self.get_entry(to)? else {
+            let Some(mut real) = self.get_entry(to)? else {
                 return Ok(());
             };
+            let mut changed = false;
             // Unsyncable is the state the deadlock parks it in, and a pass skips
             // an unsyncable entry, so leaving it would fold the rival away and
             // still never look at the survivor. What it goes back to is decided
             // by whether anything was ever agreed about it, which is the same
             // question the scanner asks.
             if matches!(real.status, LocalStatus::Unsyncable(_)) {
-                let status = if real.synced_placement.is_some() {
+                real.status = if real.synced_placement.is_some() {
                     LocalStatus::Synced
                 } else {
                     LocalStatus::PendingDownload
                 };
-                self.put_entry(&Entry { status, ..real })?;
+                changed = true;
+            }
+            // The file the provisional was minted for is the real entry's own
+            // when the real entry keeps an agreement here: the scan then
+            // compares that file against it. Handed over, never copied -- the
+            // provisional goes below. With no agreement the file is a spare
+            // copy `make_room` sets aside, and it stays nobody's until it is
+            // found again as new.
+            let provisional_own = self.get_entry(from)?.and_then(|p| p.own_file);
+            if real.synced_placement.is_some()
+                && provisional_own.is_some()
+                && real.own_file != provisional_own
+            {
+                real.own_file = provisional_own;
+                changed = true;
+            }
+            if changed {
+                self.put_entry(&real)?;
             }
             self.conn.execute(
                 "UPDATE local_index SET server_id = ?3
@@ -789,7 +826,8 @@ impl Store {
                           synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                           local_status, unsyncable_reason, wrapped_file_key,
                           content_id, synced_remote_sha256, synced_remote_size,
-                          replaces_type, replaces_id, stand_in_parent_id, stand_in_name
+                          replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
                      FROM entries
                     ORDER BY entity_type, server_id";
         let mut stmt = self.conn.prepare(sql)?;
@@ -809,7 +847,8 @@ impl Store {
                           synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                           local_status, unsyncable_reason, wrapped_file_key,
                           content_id, synced_remote_sha256, synced_remote_size,
-                          replaces_type, replaces_id, stand_in_parent_id, stand_in_name
+                          replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
                      FROM entries
                     WHERE parent_folder_id IS ?1
                     ORDER BY entity_type, server_id";
@@ -1298,7 +1337,8 @@ impl Store {
                     synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                     local_status, unsyncable_reason, wrapped_file_key,
                     content_id, synced_remote_sha256, synced_remote_size,
-                    replaces_type, replaces_id, stand_in_parent_id, stand_in_name
+                    replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
                FROM entries
               WHERE entity_type = ?1 AND synced_fp_file_id = ?2",
         )?;
@@ -1317,7 +1357,8 @@ impl Store {
                     synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                     local_status, unsyncable_reason, wrapped_file_key,
                     content_id, synced_remote_sha256, synced_remote_size,
-                    replaces_type, replaces_id, stand_in_parent_id, stand_in_name
+                    replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
                FROM entries
               WHERE entity_type = ?1 AND synced_fp_file_id = ?2 AND remote_deleted = 0",
         )?;
@@ -1656,6 +1697,9 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
     let reason: Option<String> = r.get(19)?;
     let synced_remote_sha: Option<String> = r.get(22)?;
     let synced_remote_size: Option<i64> = r.get(23)?;
+    let fp_birth: Option<i64> = r.get(28)?;
+    let own_file_id: Option<i64> = r.get(29)?;
+    let own_file_birth: Option<i64> = r.get(30)?;
 
     Ok(Entry {
         id: EntityId {
@@ -1694,6 +1738,7 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
                 size: size as u64,
                 mtime_ns: mtime_ns as u64,
                 file_id: file_id as u64,
+                birth_ns: fp_birth.unwrap_or(0) as u64,
             }),
             _ => None,
         },
@@ -1729,6 +1774,13 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
                 parent: r.get::<_, Option<i64>>(26).unwrap_or(None),
                 name,
             }),
+        own_file: match (own_file_id, own_file_birth) {
+            (Some(file_id), Some(birth_ns)) => Some(jd_vfs::FileIdentity {
+                file_id: file_id as u64,
+                birth_ns: birth_ns as u64,
+            }),
+            _ => None,
+        },
     })
 }
 
@@ -1826,12 +1878,14 @@ mod tests {
                 size: 10,
                 mtime_ns: 1234,
                 file_id: 99,
+                birth_ns: 5678,
             }),
             local_name: None,
             status: LocalStatus::Synced,
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            own_file: Some(jd_vfs::FileIdentity { file_id: 99, birth_ns: 5678 }),
         }
     }
 
@@ -1878,6 +1932,40 @@ mod tests {
         // The agreement is the whole point — spot-check it explicitly.
         assert_eq!(back.synced_content.unwrap().sha256, "agreed-sha");
         assert_eq!(back.synced_fingerprint.unwrap().file_id, 99);
+        assert_eq!(back.synced_fingerprint.unwrap().birth_ns, 5678);
+        assert_eq!(back.own_file, Some(jd_vfs::FileIdentity { file_id: 99, birth_ns: 5678 }));
+    }
+
+    #[test]
+    fn a_merge_hands_the_provisionals_own_file_to_a_real_entry_that_agrees_here() {
+        let s = Store::open_in_memory().unwrap();
+        let mine = jd_vfs::FileIdentity { file_id: 41, birth_ns: 4242 };
+        let provisional = Entry {
+            id: EntityId::file(-3),
+            own_file: Some(mine),
+            ..entry(-3, "Report.txt")
+        };
+        // The real entry agrees on this path: the file the provisional was
+        // minted for is its own now, and only its own.
+        s.put_entry(&Entry { own_file: None, ..entry(7, "Report.txt") }).unwrap();
+        s.put_entry(&provisional).unwrap();
+        s.merge_file(EntityId::file(-3), EntityId::file(7)).unwrap();
+        assert_eq!(s.get_entry(EntityId::file(7)).unwrap().unwrap().own_file, Some(mine));
+        assert!(s.get_entry(EntityId::file(-3)).unwrap().is_none());
+
+        // With no agreement here the file is a spare copy, set aside by the
+        // download; it is nobody's until it is found again as new.
+        s.put_entry(&Entry {
+            own_file: None,
+            synced_placement: None,
+            status: LocalStatus::PendingDownload,
+            ..entry(8, "Other.txt")
+        })
+        .unwrap();
+        s.put_entry(&Entry { id: EntityId::file(-4), own_file: Some(mine), ..entry(-4, "Other.txt") })
+            .unwrap();
+        s.merge_file(EntityId::file(-4), EntityId::file(8)).unwrap();
+        assert_eq!(s.get_entry(EntityId::file(8)).unwrap().unwrap().own_file, None);
     }
 
     #[test]
@@ -1981,6 +2069,7 @@ mod tests {
             size: 100,
             mtime_ns: 5000,
             file_id: 42,
+            birth_ns: 0,
         };
         s.cache_hash(fp, "sha-of-those-bytes", Some(EntityId::file(1)), 9000)
             .unwrap();
@@ -2018,6 +2107,7 @@ mod tests {
             size: 10,
             mtime_ns: 1,
             file_id: 777,
+            birth_ns: 0,
         };
         s.cache_hash(fp, "sha", Some(EntityId::file(12)), 2).unwrap();
         assert_eq!(s.entity_for_file_id(777).unwrap(), Some(EntityId::file(12)));

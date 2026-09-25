@@ -311,6 +311,7 @@ pub fn run_pass(
     let observed = observe(env)?;
     let known = known_local(env)?;
     let scan = pair_with(&known, &observed, &awaiting_bytes(env)?);
+    adopt_own_files(env, &known, &observed)?;
 
     // Anything on disk that nothing is tracking gets an identity now, so that
     // the loop below can treat it like any other entry. Folders first: a new
@@ -504,6 +505,10 @@ pub fn run_pass(
         };
         let id = EntityId::file(env.store.next_provisional_id()?);
         let mut entry = blank(id, &placement);
+        // The file this record is minted for is its own from this moment,
+        // before any upload: a record with nothing to know its file by is
+        // one any file at its path can pass for.
+        entry.own_file = Some(file.fingerprint.identity());
         // Encryption is a property of where a thing lives, not of the thing:
         // the server decides an upload is encrypted by looking at the
         // destination folder. Working that out HERE, when the file first gets
@@ -1239,7 +1244,19 @@ pub fn run_pass(
                     waiting.is_encrypted = true;
                     waiting.status = LocalStatus::PendingKey;
                     waiting.replaces = Some(entry.id);
+                    // The file standing at `to` is the source's own file,
+                    // moved there. The claimant is the record that will send
+                    // it, so the file is handed over: two records owning one
+                    // file is not a hard link, and nothing could tell them
+                    // apart.
+                    waiting.own_file = entry.own_file.filter(|_| claimant.entity_type == EntityType::File);
                     env.store.put_entry(&waiting)?;
+                    if waiting.own_file.is_some() {
+                        let source = Entry { own_file: None, ..entry.clone() };
+                        env.store.put_entry(&source)?;
+                        follow_the_server(env, &source)?;
+                        continue;
+                    }
                 }
                 follow_the_server(env, &entry)?;
                 continue;
@@ -3943,6 +3960,34 @@ fn awaiting_bytes(env: &ExecEnv) -> Result<std::collections::HashSet<String>, Ex
     Ok(out)
 }
 
+/// A record that has no own file yet learns it the first time the scan
+/// finds it at home: the file standing at its path carries the file id its
+/// agreement recorded. That is every record from before own files were kept,
+/// once; a record made since has one from its mint, its download or its
+/// upload, and one learned here means a site that should have set it did not.
+fn adopt_own_files(
+    env: &ExecEnv,
+    known: &[KnownLocal],
+    observed: &[ObservedFile],
+) -> Result<(), ExecError> {
+    let at: HashMap<&str, &ObservedFile> =
+        observed.iter().map(|o| (o.path.as_str(), o)).collect();
+    for k in known.iter().filter(|k| k.own_file.is_none() && k.id.entity_type == EntityType::File) {
+        let Some(recorded) = k.fingerprint.map(|f| f.file_id).filter(|id| *id != 0) else {
+            continue;
+        };
+        let Some(here) = at.get(k.path.as_str()).filter(|o| o.fingerprint.file_id == recorded) else {
+            continue;
+        };
+        let Some(mut entry) = env.store.get_entry(k.id)? else {
+            continue;
+        };
+        entry.own_file = Some(here.fingerprint.identity());
+        env.store.put_entry(&entry)?;
+    }
+    Ok(())
+}
+
 fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
     let mut out = Vec::new();
     let mut deleted = Vec::new();
@@ -3990,6 +4035,7 @@ fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
             server_deleted: entry.remote_deleted,
             held: held.contains(&entry.id),
             server_home,
+            own_file: entry.own_file,
         };
         if entry.remote_deleted {
             deleted.push(known);
@@ -4381,6 +4427,7 @@ fn blank(id: EntityId, placement: &Placement) -> Entry {
         wrapped_file_key: None,
         replaces: None,
         stand_in: None,
+        own_file: None,
     }
 }
 

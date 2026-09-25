@@ -1591,6 +1591,51 @@ pub fn held_waiting(device: &Device) -> Vec<(jd_core::model::EntityId, String)> 
     out
 }
 
+/// Every file record against the disk: a synced record whose own file is
+/// not the file standing where it is placed here, and an own file two live
+/// records both claim. Empty is right. `specs/drive_file_identity.md`: the
+/// own file is recorded by commit 1 and read by nothing but this.
+pub fn own_files_astray(device: &Device) -> Vec<String> {
+    let Some(root) = jd_vfs::Vfs::root(&device.fs) else {
+        return Vec::new();
+    };
+    let entries = device.store.every_entry().unwrap();
+    let mut out = Vec::new();
+    let mut owners: std::collections::BTreeMap<(u64, u64), Vec<jd_core::model::EntityId>> =
+        std::collections::BTreeMap::new();
+    for e in entries
+        .iter()
+        .filter(|e| e.id.entity_type == jd_core::model::EntityType::File && !e.remote_deleted)
+    {
+        if let Some(own) = e.own_file {
+            owners.entry((own.file_id, own.birth_ns)).or_default().push(e.id);
+        }
+        if e.status != jd_core::model::LocalStatus::Synced {
+            continue;
+        }
+        let Some(placement) = e.synced_placement.as_ref() else {
+            continue;
+        };
+        let name = e.local_name.clone().unwrap_or_else(|| placement.name.clone());
+        let path = match placement.parent {
+            None => Some(name),
+            Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{name}")),
+        };
+        let Some(path) = path else { continue };
+        let here = jd_vfs::Vfs::fingerprint(&device.fs, &root.join(&path))
+            .ok()
+            .flatten()
+            .map(|f| f.identity());
+        if here != e.own_file {
+            out.push(format!("{:?} at {path:?}: own {:?}, here {:?}", e.id, e.own_file, here));
+        }
+    }
+    for (own, ids) in owners.into_iter().filter(|(_, ids)| ids.len() > 1) {
+        out.push(format!("{own:?} owned by {ids:?}"));
+    }
+    out
+}
+
 pub fn assert_records_agree_with_the_server(world: &World) {
     for device in &world.devices {
         let held = held_outside_the_vault(device);

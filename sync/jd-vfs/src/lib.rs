@@ -79,6 +79,44 @@ pub struct Fingerprint {
     /// which is how a 4 GB move stays a move instead of a delete plus an
     /// upload.
     pub file_id: u64,
+    /// When the file came into existence, in nanoseconds since the Unix
+    /// epoch; 0 where the volume does not say. Kept by a rename, new for a
+    /// safe-save, a copy or a new file. See [`FileIdentity`].
+    pub birth_ns: u64,
+}
+
+impl Fingerprint {
+    /// Which file this is, as opposed to what is in it.
+    pub fn identity(&self) -> FileIdentity {
+        FileIdentity {
+            file_id: self.file_id,
+            birth_ns: self.birth_ns,
+        }
+    }
+}
+
+/// Which file on the disk this is: its file id and its birth.
+///
+/// A file id alone is not an identity. A disk hands a deleted file's number
+/// to the next file that wants one, so a bare id can only ever say "look
+/// here first". The birth is what makes the pair one: a recycled number
+/// arrives with a new birth, so the pair of a file that died never matches
+/// the file that inherited its number. A pair with either half zero is no
+/// identity at all (`is_strong` is false), and neither is one read on a
+/// volume whose personality does not trust its ids
+/// (`Personality::stable_file_identity`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileIdentity {
+    pub file_id: u64,
+    pub birth_ns: u64,
+}
+
+impl FileIdentity {
+    /// Both halves read. Says nothing about whether the volume's ids can be
+    /// trusted; the personality says that.
+    pub fn is_strong(&self) -> bool {
+        self.file_id != 0 && self.birth_ns != 0
+    }
 }
 
 impl Fingerprint {
@@ -88,7 +126,8 @@ impl Fingerprint {
     /// FAT stores modification times in two-second steps, so a file written
     /// twice inside one step reports the same mtime. The size and the file id
     /// still have to match, and any doubt sends us to the hash — this only
-    /// decides whether a rescan bothers to read the bytes.
+    /// decides whether a rescan bothers to read the bytes. The birth is not
+    /// compared: this is a question about content, not identity.
     pub fn unchanged_from(&self, other: &Fingerprint, p: &Personality) -> bool {
         if self.size != other.size || self.file_id != other.file_id {
             return false;
@@ -131,6 +170,7 @@ impl Fingerprint {
             size: 0,
             mtime_ns: 0,
             file_id,
+            birth_ns: 0,
         }
     }
 }
@@ -270,6 +310,7 @@ mod tests {
             size,
             mtime_ns,
             file_id,
+            birth_ns: 0,
         }
     }
 

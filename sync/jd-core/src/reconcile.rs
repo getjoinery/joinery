@@ -480,6 +480,7 @@ mod tests {
             content_id: None,
             replaces: None,
             stand_in: None,
+            own_file: None,
             synced_remote_content: None,
             synced_content: Some(content(sha, 10)),
             synced_placement: Some(placement(None, name)),

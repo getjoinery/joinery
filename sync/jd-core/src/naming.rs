@@ -1004,6 +1004,7 @@ mod tests {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            own_file: None,
         }
     }
 
@@ -1016,6 +1017,7 @@ mod tests {
             size: 1,
             mtime_ns: 1,
             file_id: id.server_id as u64,
+            birth_ns: 0,
         });
         e.status = LocalStatus::Synced;
         e

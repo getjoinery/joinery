@@ -339,6 +339,14 @@ fn sweep_world_with(
             device.fs.reuse_file_ids(true);
         }
     }
+    // The weak control (`specs/drive_file_identity.md`): every disk reports no
+    // birth, so every file's identity is weak and the engine reads the disk
+    // by its older rules.
+    if std::env::var("HIDEBIRTHS").is_ok() {
+        for device in &world.devices {
+            device.fs.hide_births(true);
+        }
+    }
     world
 }
 
@@ -1059,6 +1067,17 @@ fn workload_core_with(
     }
     if let Ok(path) = std::env::var("JD_JOURNAL") {
         std::fs::write(&path, seed_trace(&world).join("\n")).unwrap();
+    }
+    // Which records' own files are not the file standing where they are
+    // placed, or are claimed twice (`own_files_astray`). Off unless asked.
+    if std::env::var("OWNFILE").is_ok() {
+        for d in &world.devices {
+            let astray = jd_sim::scenario::own_files_astray(d);
+            eprintln!("OWNFILE seed={seed} device={} astray={}", d.name, astray.len());
+            for line in astray.iter().take(8) {
+                eprintln!("OWNFILE   {line}");
+            }
+        }
     }
     if settled.is_none() {
         let mut lines = Vec::new();
