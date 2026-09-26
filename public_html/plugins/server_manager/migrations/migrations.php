@@ -6,6 +6,8 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.4 - sm_008 removes the provisioning records and hosted trials of nodes removed before
+ *                ManagedNode 1.27
  * @version 1.3 - sm_007 drops the customer-cloud SSH key setting (keyless provisioning)
  */
 return [
@@ -141,6 +143,39 @@ return [
 			$dblink = $dbconnector->get_db_link();
 			$stmt = $dblink->prepare("DELETE FROM stg_settings WHERE stg_name = ?");
 			$stmt->execute(['server_manager_customer_cloud_ssh_key_path']);
+		},
+	],
+
+	[
+		// Removing a node releases its site's records (ManagedNode 1.27): its
+		// provisioning record and hosted trial go with it. A node removed
+		// before that left both live, and the provisioning task kept working
+		// on them for a site nobody tracks. Remove them the same way. Such a
+		// site's domain is parked by the domain stage on its next run.
+		'id' => 'sm_008_release_removed_nodes_provisions',
+		'version' => '1.26.6',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$tables = $dblink->query("SELECT to_regclass('cvp_customer_cloud_provisions') IS NOT NULL
+				AND to_regclass('htr_hosted_trials') IS NOT NULL
+				AND to_regclass('mgn_managed_nodes') IS NOT NULL")->fetchColumn();
+			if (!$tables) {
+				return;   // a fresh install: no provision has ever outlived its node here
+			}
+			$dblink->exec("
+				UPDATE htr_hosted_trials t SET htr_delete_time = now()
+				FROM cvp_customer_cloud_provisions p
+				JOIN mgn_managed_nodes n ON n.mgn_managed_node_id = p.cvp_mgn_managed_node_id
+				WHERE t.htr_cvp_customer_cloud_provision_id = p.cvp_customer_cloud_provision_id
+				  AND t.htr_delete_time IS NULL AND p.cvp_delete_time IS NULL
+				  AND n.mgn_delete_time IS NOT NULL
+			");
+			$dblink->exec("
+				UPDATE cvp_customer_cloud_provisions p SET cvp_delete_time = now()
+				FROM mgn_managed_nodes n
+				WHERE n.mgn_managed_node_id = p.cvp_mgn_managed_node_id
+				  AND p.cvp_delete_time IS NULL AND n.mgn_delete_time IS NOT NULL
+			");
 		},
 	],
 ];

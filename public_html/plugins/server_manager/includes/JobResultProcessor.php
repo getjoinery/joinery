@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.42 - process_decommission_node records what removing the node also did ('also')
  * @version 1.41 - process_check_status fills an empty mgn_web_root from the web root the agent reports
  *                 (ManagedNode::adopt_reported_web_root), before the recovery-key report is considered
  * @version 1.40 - a backup run's BACKUP_BYTES figure is the run's whole size (BackupRunner 1.22)
@@ -3150,6 +3151,7 @@ HTML;
 
 		if ($status === 'completed' && $verified) {
 			$soft_deleted = false;
+			$also = [];
 			$node_id = $victim_id;
 			if (!$node_id) {
 				// Legacy shape: pre-primitive jobs carried the victim as the
@@ -3169,12 +3171,14 @@ HTML;
 				if ($node->key && !$node->get('mgn_delete_time')) {
 					$node->soft_delete();
 					$soft_deleted = true;
+					$also = $node->removal_notes();
 				}
 			}
 			$job->set('mjb_result', json_encode([
 				'status' => 'completed',
 				'decommissioned' => true,
 				'node_soft_deleted' => $soft_deleted,
+				'also' => $also,
 			]));
 			$job->save();
 			return;

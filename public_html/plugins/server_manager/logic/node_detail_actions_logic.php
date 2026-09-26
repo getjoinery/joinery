@@ -93,6 +93,7 @@
  *                listed) — deleting the record would orphan them; clear them from the target first
  * @version 1.4 - purge_node action: hard-delete a removed node's record (guarded — only after
  *                soft-delete; escrow + job history preserved via cascade rules)
+ * @version 1.4 - delete_node's message says what else the removal did (ManagedNode::removal_notes())
  * @version 1.3 - decommission_node action: type-to-confirm guarded permanent site deletion
  *                (host teardown job); delete_node message clarifies it is record-only
  * @version 1.2 - reverse-DNS messages are plain text (display loop escapes); ensureNodeKey failures fail loud
@@ -799,7 +800,8 @@ class NodeDetailActions {
 				}
 				$node->soft_delete();
 				$session->save_message(new DisplayMessage(
-					'Removed from dashboard. The site itself keeps running on its host.', 'Success', $page_regex,
+					trim('Removed from dashboard. The site itself keeps running on its host. '
+						. implode(' ', $node->removal_notes())), 'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return '/admin/server_manager';

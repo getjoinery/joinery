@@ -41,6 +41,7 @@
  * that prompt is their first mention of a deadline that takes their site and
  * their email with it if they miss it.
  *
+ * @version 1.4 - no notice is sent to a node removed from the dashboard
  * @version 1.3 - the notice travels the agent channel as a job, and the watcher converges
  *                on desired state instead of firing four separate pushes
  * @version 1.2 - the sweep mark never steps past an order nobody was told about
@@ -413,8 +414,8 @@ class ManagedDomainWatch {
 			return 0;   // nothing built yet; there is no box to tell
 		}
 		$node = new ManagedNode($node_id, TRUE);
-		if (!$node->key) {
-			return 0;
+		if (!$node->key || $node->get('mgn_delete_time')) {
+			return 0;   // the site was removed from the dashboard; there is no box to tell
 		}
 
 		$domain = (string)$row->get('rdm_domain');

@@ -1312,8 +1312,16 @@ Delete acts through `S3Signer` from the management node: a single object (guarde
 
 Two distinct actions on the node detail Overview tab, both permission-10 and CSRF-guarded:
 
-- **Remove from Dashboard** — soft-deletes the node record only. The site keeps running on its host; Server Manager simply stops tracking it. For a box handed back to its owner or managed elsewhere.
+- **Remove from Dashboard** — soft-deletes the node record. The site keeps running on its host; Server Manager simply stops tracking it. For a box handed back to its owner or managed elsewhere, or a machine already deleted at its provider.
 - **Permanently Delete Site** — creates a `decommission_node` job addressed to the **host's own agent** as the `decommission_site` primitive (see [Removing a container site](#removing-a-container-site-decommission)). The site approves its own removal on its own Backups page with its own recovery key; the host then runs the bundled self-verifying `remove_account.sh`. Only on `DECOMMISSION_VERIFIED` in the result does the result processor soft-delete the **victim's** node record (the job's subject is the host; the victim travels in the job params); a failed, declined or unverified teardown leaves the node intact and enabled to retry. Type-to-confirm the site name; the name is derived from the node's own fields, never operator input. Relays and bare-metal machines are refused — a whole machine is deleted at its provider, then its record removed here.
+
+Either way, removing the node ends the provisioning task's work on its site (`ManagedNode::soft_delete()`):
+
+- The hosting order's provisioning record and its hosted trial are removed, so nothing seeds, retires a password on, sends mail setup to, or powers off a site nobody tracks.
+- A domain bought for the site is kept: the buyer is its registrant, and its record carries the renewals and the hand-over. One still being bought or wired up is parked on the Domains page with the reason (Retry parks it again while its site is still removed). An active domain needs no server and is left as it is; the domain watch sends a removed node no notice.
+- Billing is never touched. A subscription still charging for the hosting is named in the removal's message, so whoever removed the site can cancel it on its order.
+
+The page's message after Remove from Dashboard lists each of these; a permanent deletion records them in its job result.
 
 The record is soft-deleted, not hard-deleted, on purpose: the container port stays reserved on shared hosts, and the job history stays joinable. A decommissioned site's offsite backups stay readable regardless — each carries its own key sealed to the recovery key — and are not purged by decommission; delete them deliberately from the Stored Backups panel above.
 
