@@ -32,6 +32,10 @@
  *   s3fx_object($fx, 'bucket', '/k');  // the bytes, or null
  *   s3fx_count($fx, 'complete');       // how many completes were seen
  *
+ * @version 1.3 - bodies stream to disk: a part or an object is copied from the request to its file, and a
+ *                multipart complete joins the parts on disk, so the stand-in holds no more than one request
+ *                in memory (php -S buffers that). Joining them in a string held a 450 MB archive twice over
+ *                (745 MB, measured) and froze a 1 GB box running it beside a backup
  * @version 1.2 - HeadBucket answers 200, so the cloud storage check's reach step passes over the fixture
  * @version 1.1 - anonymous reads refused unless FIXTURE_ANON_READ; write-only key by id prefix
  * @version 1.0
@@ -137,9 +141,13 @@ $bump = function($name) use ($dir) {
 	file_put_contents($dir . "/" . $name . ".count", (string)$n);
 	return $n;
 };
-$store = function($bytes) use ($file, $full) {
-	file_put_contents($file, $bytes);
-	file_put_contents($file . ".key", $full);
+// A request body goes to disk as it is read, never whole into a string.
+$sink = function($path) {
+	$in = fopen("php://input", "rb");
+	$out = fopen($path, "wb");
+	stream_copy_to_stream($in, $out);
+	fclose($in);
+	fclose($out);
 };
 header("Content-Type: application/xml");
 
@@ -168,7 +176,7 @@ if ($method === "PUT" && isset($q["partNumber"], $q["uploadId"])) {
 		echo "<?xml version=\"1.0\"?><Error><Code>InvalidPart</Code><Message>part refused</Message></Error>";
 		return true;
 	}
-	file_put_contents($dir . "/parts/" . $q["uploadId"] . "." . $n, file_get_contents("php://input"));
+	$sink($dir . "/parts/" . $q["uploadId"] . "." . $n);
 	header("ETag: \"etag-part-" . $n . "\"");
 	return true;
 }
@@ -178,14 +186,17 @@ if ($method === "POST" && isset($q["uploadId"])) {
 		echo "<?xml version=\"1.0\"?><Error><Code>InternalError</Code><Message>We encountered an internal error. Please try again.</Message></Error>";
 		return true;
 	}
-	$assembled = "";
+	// Joined on disk, a part at a time: an archive of any size costs the
+	// stand-in no more memory than one request.
+	$out = fopen($file, "wb");
 	for ($i = 1; is_file($dir . "/parts/" . $q["uploadId"] . "." . $i); $i++) {
-		$assembled .= file_get_contents($dir . "/parts/" . $q["uploadId"] . "." . $i);
+		$in = fopen($dir . "/parts/" . $q["uploadId"] . "." . $i, "rb");
+		stream_copy_to_stream($in, $out);
+		fclose($in);
 		unlink($dir . "/parts/" . $q["uploadId"] . "." . $i);
 	}
-	$store($assembled);
-	// Kept for suites written against the older single-object fixture.
-	file_put_contents($dir . "/assembled", $assembled);
+	fclose($out);
+	file_put_contents($file . ".key", $full);
 	echo "<?xml version=\"1.0\"?><CompleteMultipartUploadResult><ETag>\"final\"</ETag></CompleteMultipartUploadResult>";
 	return true;
 }
@@ -202,7 +213,8 @@ if ($method === "PUT") {
 		echo "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>put refused</Message></Error>";
 		return true;
 	}
-	$store(file_get_contents("php://input"));
+	$sink($file);
+	file_put_contents($file . ".key", $full);
 	header("ETag: \"" . md5_file($file) . "\"");
 	return true;
 }

@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 4.5 - Every sweep sets the mode before the owner. Owner first left each entry, between the
+#              two walks, owned by its new owner at its old mode: a 0700 directory or 0600 file
+#              handed to www-data before the chmod reached it could be read by nobody in the
+#              group, so a developer's process in cache/ lost its own files for seconds, and a
+#              config/*.php or a tree file re-owned before its 0640/0644 was unreadable to the pool.
+#              Mode first, no entry is ever at a mode its new owner's group cannot use.
 #VERSION 4.4 - The tree sweeps go through sweep_find: an entry removed while the
 #              walk is in progress (a test fixture's plugin directory) is not a
 #              failure. findutils 4.9's -ignore_readdir_race covers a file
@@ -302,21 +308,21 @@ done
 # have it. Its other children (a checkout's .git, android/, ios/) are in neither
 # set and are not walked.
 echo "  Executable set: the site directory, public_html, maintenance_scripts, vendor..."
-chown "${TREE_OWNER}:${TREE_GROUP}" "$SITE_ROOT"
+# Every sweep below sets the mode BEFORE the owner. Owner first, an entry sits
+# between the two walks owned by its new owner at its old mode — a 0600 file
+# handed to a new owner is readable by nobody in the group — and the walks over
+# a large tree take seconds.
 chmod 755 "$SITE_ROOT"
+chown "${TREE_OWNER}:${TREE_GROUP}" "$SITE_ROOT"
 
 for mf in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
     if [ -f "$SITE_ROOT/$mf" ]; then
-        chown "${TREE_OWNER}:${TREE_GROUP}" "$SITE_ROOT/$mf"
         chmod 644 "$SITE_ROOT/$mf"
+        chown "${TREE_OWNER}:${TREE_GROUP}" "$SITE_ROOT/$mf"
     fi
 done
 
 if [ ${#EXEC_ROOTS[@]} -gt 0 ]; then
-    sweep_find "${EXEC_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
-         \( -not -user "$TREE_OWNER" -o -not -group "$TREE_GROUP" \) \
-         -exec chown "${TREE_OWNER}:${TREE_GROUP}" {} +
-
     sweep_find "${EXEC_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" -type d \
          -not -perm 755 -exec chmod 755 {} +
 
@@ -327,6 +333,10 @@ if [ ${#EXEC_ROOTS[@]} -gt 0 ]; then
          -not -perm 755 -exec chmod 755 {} +
     sweep_find "${EXEC_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" -type f -not -name '*.sh' \
          -not -perm 644 -exec chmod 644 {} +
+
+    sweep_find "${EXEC_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
+         \( -not -user "$TREE_OWNER" -o -not -group "$TREE_GROUP" \) \
+         -exec chown "${TREE_OWNER}:${TREE_GROUP}" {} +
 fi
 
 # config/ holds `require`d PHP. The directory belongs to the tree owner with
@@ -336,16 +346,16 @@ fi
 CONFIG_DIR="$SITE_ROOT/config"
 if [ -d "$CONFIG_DIR" ]; then
     echo "  Executable set: config/*.php to root:www-data 0640..."
-    chown "${TREE_OWNER}:www-data" "$CONFIG_DIR"
     chmod 750 "$CONFIG_DIR"
+    chown "${TREE_OWNER}:www-data" "$CONFIG_DIR"
     # root, not the tree owner: the pool has to read it and nobody else needs
     # to. On the developer box the developer is in the www-data group, so the
     # file is still readable from a shell and still not writable from one.
     find "$CONFIG_DIR" -maxdepth 1 -type f -name '*.php' \
+         -not -perm 640 -exec chmod 640 {} +
+    find "$CONFIG_DIR" -maxdepth 1 -type f -name '*.php' \
          \( -not -user root -o -not -group www-data \) \
          -exec chown root:www-data {} +
-    find "$CONFIG_DIR" -maxdepth 1 -type f -name '*.php' \
-         -not -perm 640 -exec chmod 640 {} +
 fi
 
 # =============================================================================
@@ -363,10 +373,10 @@ done
 echo "  Data set: uploads, static_files, cache, logs, storage, backups to www-data:www-data 0770..."
 if [ ${#DATA_ROOTS[@]} -gt 0 ]; then
     sweep_find "${DATA_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
+         -not -perm 770 -exec chmod 770 {} +
+    sweep_find "${DATA_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
          \( -not -user www-data -o -not -group www-data \) \
          -exec chown www-data:www-data {} +
-    sweep_find "${DATA_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
-         -not -perm 770 -exec chmod 770 {} +
 fi
 
 # The non-PHP contents of config/ are data the pool reads and writes: this
@@ -375,11 +385,11 @@ fi
 if [ -d "$CONFIG_DIR" ]; then
     sweep_find "$CONFIG_DIR" -ignore_readdir_race -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
          -not -name '*.php' \
-         \( -not -user www-data -o -not -group www-data \) \
-         -exec chown www-data:www-data {} +
+         -not -perm 770 -exec chmod 770 {} +
     sweep_find "$CONFIG_DIR" -ignore_readdir_race -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
          -not -name '*.php' \
-         -not -perm 770 -exec chmod 770 {} +
+         \( -not -user www-data -o -not -group www-data \) \
+         -exec chown www-data:www-data {} +
 fi
 
 # =============================================================================

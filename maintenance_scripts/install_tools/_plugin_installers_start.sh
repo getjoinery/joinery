@@ -3,6 +3,9 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.20 - The re-ownership sets the mode before the owner (fix_permissions.sh 4.5): owner
+#                  first left a tree file or config/*.php, between the two walks, owned by its new
+#                  owner at a mode the pool could not read.
 # Version: 2.19 - The release verification key is written by host_files_write_release_verify_keys
 #                 in _host_files.sh, the definition _site_init.sh shares: a fresh site
 #                 installs its plugin bundle before this runner first runs, and every
@@ -505,36 +508,39 @@ assert_tree_ownership() {
         return 0
     fi
 
-    chown "${TREE_OWNER_TARGET}:${TREE_OWNER_GROUP}" "${SITE_ROOT}" 2>/dev/null || true
+    # The mode before the owner, as fix_permissions.sh does and for its
+    # reason: owner first, an entry is its new owner's at a mode the pool
+    # cannot read until the second walk reaches it.
     chmod 755 "${SITE_ROOT}" 2>/dev/null || true
+    chown "${TREE_OWNER_TARGET}:${TREE_OWNER_GROUP}" "${SITE_ROOT}" 2>/dev/null || true
     for _mf in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
         if [[ -f "${SITE_ROOT}/${_mf}" ]]; then
-            chown "${TREE_OWNER_TARGET}:${TREE_OWNER_GROUP}" "${SITE_ROOT}/${_mf}" 2>/dev/null || true
             chmod 644 "${SITE_ROOT}/${_mf}" 2>/dev/null || true
+            chown "${TREE_OWNER_TARGET}:${TREE_OWNER_GROUP}" "${SITE_ROOT}/${_mf}" 2>/dev/null || true
         fi
     done
 
     if (( ${#EXEC_ROOTS[@]} )); then
         local prune=( -not -path "*/.git" -not -path "*/.git/*" )
-        find "${EXEC_ROOTS[@]}" "${prune[@]}" \( -type f -o -type d \) \
-             \( -not -user "${TREE_OWNER_TARGET}" -o -not -group "${TREE_OWNER_GROUP}" \) \
-             -exec chown "${TREE_OWNER_TARGET}:${TREE_OWNER_GROUP}" {} + 2>/dev/null || true
         find "${EXEC_ROOTS[@]}" "${prune[@]}" -type d \
              -not -perm 755 -exec chmod 755 {} + 2>/dev/null || true
         find "${EXEC_ROOTS[@]}" "${prune[@]}" -type f -name '*.sh' \
              -not -perm 755 -exec chmod 755 {} + 2>/dev/null || true
         find "${EXEC_ROOTS[@]}" "${prune[@]}" -type f -not -name '*.sh' \
              -not -perm 644 -exec chmod 644 {} + 2>/dev/null || true
+        find "${EXEC_ROOTS[@]}" "${prune[@]}" \( -type f -o -type d \) \
+             \( -not -user "${TREE_OWNER_TARGET}" -o -not -group "${TREE_OWNER_GROUP}" \) \
+             -exec chown "${TREE_OWNER_TARGET}:${TREE_OWNER_GROUP}" {} + 2>/dev/null || true
     fi
 
     if [[ -d "${SITE_ROOT}/config" ]]; then
         # The recorded owner, not root: fix_permissions.sh gives this directory
         # {tree owner}:www-data, and hardcoding root here would have the two
         # taking it off each other on every tick of a developer box.
-        chown "${TREE_OWNER_TARGET}:www-data" "${SITE_ROOT}/config" 2>/dev/null || true
         chmod 750 "${SITE_ROOT}/config" 2>/dev/null || true
+        chown "${TREE_OWNER_TARGET}:www-data" "${SITE_ROOT}/config" 2>/dev/null || true
         find "${SITE_ROOT}/config" -maxdepth 1 -type f -name '*.php' \
-             -exec chown root:www-data {} + -exec chmod 640 {} + 2>/dev/null || true
+             -exec chmod 640 {} + -exec chown root:www-data {} + 2>/dev/null || true
     fi
 
     echo "ownership: the executable set was owned by www-data; re-owned to ${TREE_OWNER_TARGET}"
