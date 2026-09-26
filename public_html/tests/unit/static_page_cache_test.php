@@ -200,4 +200,37 @@ check($removed >= 1 && !file_exists($dir . '/about.html'), 'the cached files are
 check((string)file_get_contents($dir . '/index.json') === $before, 'the index file is byte-for-byte what it was');
 check(StaticPageCache::checkCache('/about', []) === false, 'the stale entry drops out on the next request for it');
 
+
+section('Writers saving at once never collide');
+
+// Every write goes through a temporary name and a rename. With one shared
+// "{file}.tmp", two requests saving together renamed each other's temporary
+// away and the loser failed on a file that was gone — crashing whatever test
+// or request it ran in. Six processes each saving the same page and the index
+// forty times, into this run's directory.
+$race_dir = $dir . '/race';
+@mkdir($race_dir, 0775, true);
+$child = 'require ' . var_export(PathHelper::getIncludePath('includes/PathHelper.php'), true) . ';'
+	. 'set_error_handler(function ($n, $m) { fwrite(STDERR, "E: $m\n"); return true; });'
+	. 'StaticPageCache::setCacheDirForTests(' . var_export($race_dir, true) . ');'
+	. '$html = "<!DOCTYPE html><html><head></head><body>" . str_repeat("x", 20000) . "</body></html>";'
+	. 'for ($i = 0; $i < 40; $i++) { StaticPageCache::createCache("/race-page", array(), $html); }'
+	. 'echo "done";';
+$procs = array();
+for ($i = 0; $i < 6; $i++) {
+	$procs[] = proc_open(array('php', '-r', $child), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes_i);
+	$race_pipes[] = $pipes_i;
+}
+$errors = ''; $done = 0;
+foreach ($procs as $k => $p) {
+	$out = stream_get_contents($race_pipes[$k][1]);
+	$errors .= stream_get_contents($race_pipes[$k][2]);
+	proc_close($p);
+	if (strpos($out, 'done') !== false) { $done++; }
+}
+check($done === 6 && $errors === '', 'six writers finish with no error between them', trim($errors));
+check(!glob($race_dir . '/*.tmp'), 'and leave no temporary behind');
+array_map('unlink', glob($race_dir . '/*') ?: array());
+@rmdir($race_dir);
+
 harness_finish();

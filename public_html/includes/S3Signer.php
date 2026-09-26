@@ -9,6 +9,10 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.7 - MULTIPART_PART_BYTES is 32 MiB, and put_stream() builds each part in one string
+ *                (read_up_to() takes the carried byte as its prefix) and drops the sent part before reading
+ *                the next: an upload held two parts at once and peaked at 248 MB at 100 MiB parts, which
+ *                with the mail filter running froze a 1 GB box on its first backup. About 110 MB, measured
  * @version 1.6 - put_stream(): a stream of unknown length (an engine's stdout) goes up through the
  *                multipart path, hashed and counted as it goes, with completion deferrable so a
  *                caller can refuse an archive whose producer failed after the bytes
@@ -56,11 +60,15 @@ class S3Signer {
 	// routinely (a nightly database dump crosses it) instead of only in the
 	// emergency it exists for — a path exercised only in emergencies is broken
 	// when the emergency comes. Parts are read into memory one at a time to be
-	// hashed and signed, so the part size is also the peak memory cost, chosen to
-	// fit the smallest fleet VPS. 100 MiB × the API's 10,000-part cap ≈ 1 TB per
-	// object, far beyond any plausible artifact.
+	// hashed and signed, so an upload holds one part plus the process — about
+	// 110 MB at 32 MiB, measured. A backup runs beside PostgreSQL, the web server and the mail
+	// filter on a 1 GB box, so the part size is a memory budget first: 32 MiB
+	// leaves that box its headroom, and × the API's 10,000-part cap still allows
+	// about 320 GB per object, far beyond any plausible artifact. Smaller parts
+	// buy little more memory for many more requests; larger ones buy object size
+	// nothing needs.
 	const MULTIPART_THRESHOLD_BYTES = 1073741824;   // 1 GiB
-	const MULTIPART_PART_BYTES = 104857600;         // 100 MiB
+	const MULTIPART_PART_BYTES = 33554432;          // 32 MiB
 	const MULTIPART_MAX_PARTS = 10000;
 
 	/**
@@ -282,8 +290,8 @@ class S3Signer {
 	 * Upload a stream of unknown length that cannot be re-read — an engine's
 	 * stdout — without ever landing it on disk.
 	 *
-	 * The stream is read one part at a time (MULTIPART_PART_BYTES: the same
-	 * peak memory as put_file()'s multipart path), hashed and counted as it
+	 * The stream is read one part at a time (MULTIPART_PART_BYTES: one part in
+	 * memory, the same as put_file()'s multipart path), hashed and counted as it
 	 * goes. A stream that ends inside the first part is sent as one signed PUT
 	 * of the buffered bytes, length known, exactly as a small file is. Anything
 	 * longer opens a multipart upload once the first full part is in hand; each
@@ -390,11 +398,9 @@ class S3Signer {
 				// The next part starts with the byte peeked to decide the shape
 				// (or with whatever the previous read left over), then fills to
 				// the part size or to the end of the stream.
-				$chunk = $carry;
+				$chunk = null;
+				$chunk = self::read_up_to($fh, $part_size, $carry);
 				$carry = '';
-				if (strlen($chunk) < $part_size) {
-					$chunk .= self::read_up_to($fh, $part_size - strlen($chunk));
-				}
 				hash_update($hash, $chunk);
 				$bytes += strlen($chunk);
 			}
@@ -492,9 +498,12 @@ class S3Signer {
 	 * A pipe hands back whatever is ready on each fread(), so one call is not
 	 * one part; this loops until the part is full or the producer has closed.
 	 */
-	private static function read_up_to($fh, $bytes) {
-		$chunk = '';
-		$remaining = (int)$bytes;
+	private static function read_up_to($fh, $bytes, $prefix = '') {
+		// Built in one string from the start: the caller's leftover bytes, then
+		// what the stream gives. Joining a returned part to a prefix afterwards
+		// made a second copy of the whole part, doubling an upload's peak.
+		$chunk = (string)$prefix;
+		$remaining = (int)$bytes - strlen($chunk);
 		while ($remaining > 0) {
 			$piece = fread($fh, min($remaining, 8388608));
 			if ($piece === false || $piece === '') {

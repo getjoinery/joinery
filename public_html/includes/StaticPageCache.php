@@ -6,6 +6,9 @@
  * It works in conjunction with RouteHelper to cache and serve static HTML versions
  * of public pages, dramatically improving performance for anonymous users.
  *
+ * @version 1.2 - the index and every page are written through a temporary name of the writer's own
+ *                (tempName()), not a shared "{file}.tmp": two requests saving at once renamed each
+ *                other's temporary away, and the loser failed on a file that was no longer there
  * @version 1.1 - three defects (specs/post_release_fleet_defects.md B4.5): the
  *                index written by root (an agent-run upgrade's cache clear) is
  *                given back to the cache's owner, a CLI clearAll() deletes files
@@ -211,6 +214,16 @@ class StaticPageCache {
     }
 
     /**
+     * A temporary name beside $path that belongs to this write alone. The
+     * rename onto $path is what makes a write atomic, and it only is when no
+     * other writer can be holding the same temporary. Ends in .tmp, which is
+     * how a listing of the cache leaves temporaries out.
+     */
+    private static function tempName($path) {
+        return $path . '.' . getmypid() . '.' . bin2hex(random_bytes(4)) . '.tmp';
+    }
+
+    /**
      * Save the cache index to disk (atomic operation)
      */
     private static function saveIndex() {
@@ -222,7 +235,7 @@ class StaticPageCache {
         }
 
         if (self::$index !== null) {
-            $temp = self::$index_path . '.tmp';
+            $temp = self::tempName(self::$index_path);
             $json = json_encode(self::$index, JSON_PRETTY_PRINT);
             if ($json === false) {
                 throw new Exception("Failed to encode cache index to JSON");
@@ -452,7 +465,7 @@ class StaticPageCache {
         }
 
         // Atomic write
-        $temp = $file . '.tmp';
+        $temp = self::tempName($file);
         if (@file_put_contents($temp, $content_with_comment, LOCK_EX) === false) {
             // Non-fatal - just log and continue without caching
             error_log("StaticPageCache: Failed to write cache file: " . $temp);

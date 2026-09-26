@@ -21,6 +21,8 @@
  *   - a caller-declined completion aborts (multipart) or sends nothing (small)
  *   - a caller-accepted completion lands the object, in both shapes
  *   - a pipe from a real child process streams through
+ *   - an upload's peak memory is bounded — the runner's and the stand-in's —
+ *     at the real part size, so a backup fits a 1 GB box beside the site
  *
  * Run: php tests/backups/s3signer_stream_test.php
  */
@@ -174,6 +176,45 @@ if (!is_resource($proc)) {
 	check($rc === 0, 'the child exited cleanly after its stdout drained', 'rc ' . $rc);
 	check((int)$resp['status'] === 200 && $resp['bytes'] === $n, 'every byte of the pipe went up', 'bytes ' . $resp['bytes']);
 	check(s3fx_object($fx, 'bkt', '/piped.bin') === str_repeat('x', $n), 'and the object is exactly the pipe\'s output');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+section('An upload\'s peak memory is bounded');
+
+// A backup uploads beside PostgreSQL, the web server and the mail filter on a
+// 1 GB box. A 100 MiB part held twice (248 MB for the runner) beside a
+// stand-in that joined an archive in memory (745 MB) froze such a box on its
+// first backup. Measured here at the real part size, in a separate process so
+// the peak is the uploader's own: five parts of incompressible bytes.
+check(S3Signer::MULTIPART_PART_BYTES <= 33554432, 'a part is at most 32 MiB — the part size is the upload\'s memory budget',
+	(string)S3Signer::MULTIPART_PART_BYTES);
+$fx4 = s3fx_start();
+if ($fx4 === null) {
+	harness_skip('peak memory', 'could not start a second local server');
+} else {
+	$mib = (int)(5 * S3Signer::MULTIPART_PART_BYTES / 1048576);
+	$child = '$fh = popen("head -c ' . ($mib * 1048576) . ' /dev/urandom", "rb");'
+		. '$r = S3Signer::put_stream(' . var_export(s3fx_creds($fx4), true) . ', "bkt", "/peak.enc", $fh);'
+		. 'pclose($fh);'
+		. 'preg_match("/VmHWM:\\s+(\\d+)/", file_get_contents("/proc/self/status"), $m);'
+		. 'echo json_encode(array("status" => $r["status"], "bytes" => $r["bytes"], "sha256" => $r["sha256"], '
+		. '"heap" => memory_get_peak_usage(true), "hwm_kb" => (int)$m[1]));';
+	$boot = 'require ' . var_export(PathHelper::getIncludePath('includes/PathHelper.php'), true) . ';'
+		. 'require_once PathHelper::getIncludePath("includes/S3Signer.php");';
+	$out = shell_exec('php -r ' . escapeshellarg($boot . $child) . ' 2>&1');
+	$peak = json_decode((string)$out, true) ?: array();
+	$stored = s3fx_object($fx4, 'bkt', '/peak.enc');
+	check(($peak['status'] ?? 0) === 200 && strlen((string)$stored) === $mib * 1048576
+		&& hash('sha256', (string)$stored) === ($peak['sha256'] ?? ''), 'the ' . $mib . ' MiB upload lands whole', (string)$out);
+	$runner_mb = (int)(($peak['hwm_kb'] ?? 0) / 1024);
+	check($runner_mb > 0 && $runner_mb < 160, 'the uploading process peaks under 160 MB (measured about 110)', $runner_mb . ' MB');
+	check(($peak['heap'] ?? PHP_INT_MAX) < 2.5 * S3Signer::MULTIPART_PART_BYTES,
+		'its PHP heap holds about one part at a time, not two', (int)(($peak['heap'] ?? 0) / 1048576) . ' MiB');
+	$pid = (int)(proc_get_status($fx4['proc'])['pid'] ?? 0);
+	$standin_mb = preg_match('/VmHWM:\s+(\d+)/', (string)@file_get_contents('/proc/' . $pid . '/status'), $sm) ? (int)($sm[1] / 1024) : 0;
+	check($standin_mb > 0 && $standin_mb < 150, 'the stand-in peaks under 150 MB: it writes to disk as bytes arrive',
+		$standin_mb . ' MB');
+	s3fx_stop($fx4);
 }
 
 harness_finish();

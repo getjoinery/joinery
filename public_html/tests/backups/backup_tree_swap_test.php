@@ -41,14 +41,23 @@ function tree_make($dir, $tag) {
 	file_put_contents($dir . '/VERSION', $tag . "\n");
 }
 
-/** One engine run: returns [level, archive path]. $part '' archives the whole site. */
+/**
+ * One engine run: returns [level, archive path]. $part '' archives the whole
+ * site. A failed run's stderr is kept in $GLOBALS['engine_errors'] and shown
+ * by the checks, so a failure says why rather than only that it happened.
+ */
 function engine_run($engine, $site, $snar, $out_dir, $name, $part = '') {
+	$err = tempnam(sys_get_temp_dir(), 'tsw');
 	$cmd = 'bash ' . escapeshellarg($engine) . ' site --project-dir ' . escapeshellarg($site)
 		. ' --output-dir ' . escapeshellarg($out_dir) . ' --name ' . escapeshellarg($name)
 		. ' --snar ' . escapeshellarg($snar) . ' --plaintext'
-		. ($part !== '' ? ' --part ' . escapeshellarg($part) : '') . ' 2>/dev/null';
+		. ($part !== '' ? ' --part ' . escapeshellarg($part) : '') . ' 2>' . escapeshellarg($err);
 	$lines = array(); $rc = 0;
 	exec($cmd, $lines, $rc);
+	if ($rc !== 0) {
+		$GLOBALS['engine_errors'][] = $name . ' (exit ' . $rc . '): ' . trim((string)@file_get_contents($err));
+	}
+	@unlink($err);
 	$level = null; $archive = '';
 	foreach ($lines as $l) {
 		if (strpos($l, 'LEVEL=') === 0)   { $level = (int)substr($l, 6); }
@@ -174,13 +183,13 @@ file_put_contents($ps . '/uploads/photos/b.jpg', "photo b\n");
 
 list($d1, $da1) = engine_run($engine, $ps, $ds, $p, 'data-0001', 'data');
 list($c1, $ca1) = engine_run($engine, $ps, $cs, $p, 'code-0001', 'code');
-check($d1 === 1, 'the data increments across the upgrade', var_export($d1, true));
+check($d1 === 1, 'the data increments across the upgrade', var_export($d1, true) . ' ' . implode(' | ', $GLOBALS['engine_errors'] ?? array()));
 check($c1 === 0, 'the code starts over at the upgrade', var_export($c1, true));
 check(filesize($da1) < filesize($da0) + 200, 'and the data increment carries only what changed, not the whole upload tree again');
 
 list($d2, $da2) = engine_run($engine, $ps, $ds, $p, 'data-0002', 'data');
 list($c2, $ca2) = engine_run($engine, $ps, $cs, $p, 'code-0002', 'code');
-check($d2 === 1 && $c2 === 1, 'the next run increments both');
+check($d2 === 1 && $c2 === 1, 'the next run increments both', implode(' | ', $GLOBALS['engine_errors'] ?? array()));
 
 $restored = $p . '/restored';
 check(chain_extract(array($da0, $da1, $da2), $restored) === 0 && code_extract(array($ca1, $ca2), $restored . '/site') === 0,
@@ -192,7 +201,7 @@ check(trees_equal($ps, $restored . '/site'), 'into exactly the tree as it stands
 list($d3, ) = engine_run($engine, $ps, $ds, $p, 'data-0003', 'data');
 exec('rm -rf ' . escapeshellarg($ps . '/vendor')); @mkdir($ps . '/vendor', 0755, true);
 list($d4, ) = engine_run($engine, $ps, $ds, $p, 'data-0004', 'data');
-check($d4 === 1, 'a directory the data archive leaves out can be recreated without re-basing the data', var_export($d4, true));
+check($d4 === 1, 'a directory the data archive leaves out can be recreated without re-basing the data', var_export($d4, true) . ' ' . implode(' | ', $GLOBALS['engine_errors'] ?? array()));
 // A top-level data directory swapped by hand is.
 exec('mv ' . escapeshellarg($ps . '/config') . ' ' . escapeshellarg($ps . '/config.old') . ' && mkdir '
 	. escapeshellarg($ps . '/config') . ' && cp -a ' . escapeshellarg($ps . '/config.old') . '/. ' . escapeshellarg($ps . '/config')
