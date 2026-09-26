@@ -415,7 +415,7 @@ A run starts a **new chain** when there is nothing to extend, when the snapshot
 file is missing or empty, when the chain is older than the configured interval
 (measured with an hour's slack, so a weekly run on a fixed schedule rolls on the
 seventh day even when the tick lands a few seconds earlier in the minute than
-the run that started the chain), when one full is carrying more than 30 incrementals, or when the chain's
+the run that started the chain), when one full is carrying more than 180 incrementals (a week of hourly runs), or when the chain's
 envelope no longer opens with the site key (the site key is disposable; a chain
 sealed to a lost one cannot be extended, only restored). Losing the snapshot —
 or the local manifest — is therefore safe: the next run costs one extra full,

@@ -1787,6 +1787,65 @@ if (!$verify_target) {
 	$v_gap1 = JobCommandBuilder::build_verify_backup($objects_node, array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager', 'level' => 3, 'seq' => 1));
 	check(array_keys($v_gap1['params']['object_urls'] ?? array()) === array('beach.jpg', 'dune.png'), 'while naming run 1 still reads run 1\'s index');
 
+	// ── A long chain: every object's link in one job ─────────────────────────
+	// A chain job signs every object in the chain, runs × artifacts per run.
+	// The longest chain the engine writes (181 runs of up to five artifacts)
+	// goes out whole; one past CHAIN_LINKS_MAX is refused at build. Whether a
+	// given node's agent can take it is answered at dispatch, from its claim.
+	$long_listing = array(array('key' => $vprefix . 'manifest.json', 'size' => 900));
+	for ($s = 0; $s < 181; $s++) {
+		foreach (array('code-%04d.tar.gz.enc', 'data-%04d.tar.gz.enc', 'pgdata-%04d.tar.gz.enc', 'meta-%04d.tar.gz.enc', 'objects-%04d.json.gz') as $fmt) {
+			$long_listing[] = array('key' => $vprefix . sprintf($fmt, $s), 'size' => 100);
+		}
+	}
+	JobCommandBuilder::set_shelf_listing_for_tests($long_listing);
+	$long_args = array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager');
+
+	$long_stage  = JobCommandBuilder::build_stage_chain($verify_node, $long_args);
+	$long_verify = JobCommandBuilder::build_verify_backup($verify_node, $long_args + array('level' => 2));
+	check($long_stage['primitive'] === 'stage_chain' && count($long_stage['params']['artifact_urls']) === 905,
+		'the whole long chain goes out as one stage_chain job', count($long_stage['params']['artifact_urls']));
+	check($long_verify['primitive'] === 'verify_backup' && count($long_verify['params']['artifact_urls']) === 905,
+		'and as one verify_backup job');
+	check(ManagementJob::params_ceiling('stage_chain') === ManagementJob::CHAIN_PARAMS_BYTES
+		&& ManagementJob::params_ceiling('verify_backup') === ManagementJob::CHAIN_PARAMS_BYTES
+		&& ManagementJob::params_ceiling('restore_objects') === ManagementJob::MAX_PARAMS_BYTES,
+		'only the chain words carry the larger params ceiling');
+
+	$over = $long_listing;
+	for ($s = 181; count($over) <= ManagementJob::CHAIN_LINKS_MAX + 1; $s++) {
+		$over[] = array('key' => $vprefix . sprintf('data-%04d.tar.gz.enc', $s), 'size' => 100);
+	}
+	JobCommandBuilder::set_shelf_listing_for_tests($over);
+	$threw = '';
+	try { JobCommandBuilder::build_stage_chain($verify_node, $long_args); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, (ManagementJob::CHAIN_LINKS_MAX + 1) . ' objects') !== false && strpos($threw, 'fresh chain') !== false,
+		'one object past CHAIN_LINKS_MAX is refused at build', $threw);
+	JobCommandBuilder::set_shelf_listing_for_tests($vlisting);
+
+	// At dispatch: the claim says how much its agent reads.
+	$as_sent = json_decode(json_encode(array('node_id' => 7, 'claim_bytes' => 1048576)), true);
+	check(AgentChannelEndpoint::validation_error(AgentChannelEndpoint::known_claim_fields($as_sent), AgentChannelEndpoint::claim_request_spec()) === null,
+		'a claim carrying claim_bytes, as the agent sends it, passes the claim intake');
+	$long_bytes = strlen((string)json_encode($long_stage['params']));
+	$new_claim  = array('claim_bytes' => AgentChannelEndpoint::MAX_CLAIM_BODY);
+	check(ManagementJob::CHAIN_PARAMS_BYTES + 4096 === AgentChannelEndpoint::MAX_CLAIM_BODY
+		&& AgentChannelEndpoint::claim_body_limit($new_claim) === AgentChannelEndpoint::MAX_CLAIM_BODY
+		&& AgentChannelEndpoint::claim_body_limit(array()) === AgentChannelEndpoint::MAX_JOB_BODY
+		&& AgentChannelEndpoint::claim_body_limit(array('claim_bytes' => 50 * 1048576)) === AgentChannelEndpoint::MAX_CLAIM_BODY,
+		'a claim is held to what its agent reports, never past MAX_CLAIM_BODY, and to MAX_JOB_BODY when it reports none');
+	check(AgentChannelEndpoint::dispatch_refusal($new_claim, 'stage_chain', $long_stage['params'], $long_bytes + 200, $verify_node) === '',
+		'the long chain goes to an agent that reports claim_bytes');
+	$old_refusal = AgentChannelEndpoint::dispatch_refusal(array(), 'stage_chain', $long_stage['params'], $long_bytes + 200, $verify_node);
+	check(strpos($old_refusal, 'never dispatched') !== false && strpos($old_refusal, 'Needs a newer agent') !== false,
+		'and is refused at dispatch to one that does not, naming the update', $old_refusal);
+	$links65 = array('artifact_urls' => array_fill_keys(array_map(function ($i) { return sprintf('files-%04d.tar.gz.enc', $i); }, range(0, 64)), 'https://x.invalid/o'));
+	$links64 = array('artifact_urls' => array_slice($links65['artifact_urls'], 0, 64, true));
+	check(strpos(AgentChannelEndpoint::dispatch_refusal(array(), 'verify_backup', $links65, 5000, $verify_node), '65 objects') !== false
+		&& AgentChannelEndpoint::dispatch_refusal(array(), 'verify_backup', $links64, 5000, $verify_node) === ''
+		&& AgentChannelEndpoint::dispatch_refusal(array(), 'restore_objects', $links65, 5000, $verify_node) === '',
+		'an agent before claim_bytes is sent 64 chain links and refused the 65th; other words are not counted');
+
 	// ── restore_objects: the index by link, then pages of links ─────────────
 	// (specs/implemented/backup_offloaded_files.md § Restore). A survey carries the run's
 	// index and nothing else; a page carries what fits of the names it is

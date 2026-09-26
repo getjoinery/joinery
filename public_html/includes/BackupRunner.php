@@ -33,6 +33,9 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.23 - MAX_INCREMENTALS is 180: a week of hourly runs fits one chain. Restoring or verifying a
+ *                long chain from the management node takes agent 1.45.0, whose stage_chain / verify_backup
+ *                carry a whole chain's links in one job
  * @version 1.22 - a chain run states its whole size with its parts named — "Full backup 4.7 GB (files
  *                3.0 GB, database 1.7 GB)" — and its `bytes` figure is that total; it stated the files
  *                archive alone, which hid the database. human() counts in decimal units, as backup
@@ -193,9 +196,13 @@ class BackupRunner {
 	 * Incrementals one full will carry before the next run starts a new chain.
 	 * A ceiling regardless of the day interval: every incremental is another
 	 * archive a restore has to download and apply in order, and the failure of
-	 * any one of them invalidates every run after it.
+	 * any one of them invalidates every run after it. 180 fits a week of hourly
+	 * runs, so the day interval is what ends a chain on any schedule a site
+	 * would choose. A chain job signs a link per object in the chain, and the
+	 * agent's stage_chain / verify_backup are sized for this chain
+	 * at five artifacts a run (ManagementJob::CHAIN_LINKS_MAX).
 	 */
-	const MAX_INCREMENTALS = 30;
+	const MAX_INCREMENTALS = 180;
 
 	/**
 	 * One budget covers a run's whole object store step — local originals
