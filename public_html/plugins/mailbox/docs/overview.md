@@ -1852,8 +1852,10 @@ keeps scheme, host and port only, and accepts plain http only for `localhost`
 and private or tailnet IP literals (`hostIsPrivate()`: 10/8, 172.16/12,
 192.168/16, 100.64/10, 127/8, ::1, fc00::/7); a hostname over plain http is
 refused. The Email settings page (`/profile/mailbox/settings#your-model`,
-`mailbox_device_ai_settings.js`) takes one pasted address and splits it: the
-origin goes to the server, the path stays in the browser. The mailbox page
+`mailbox_device_ai_settings.js`) takes the address, the key and the model
+name in one form, opened by *Enter a different model* (the site's own model,
+when offered, is the primary button): the address's origin goes to the
+server, the path, key and model stay in the browser. The mailbox page
 adds exactly that origin to its `connect-src`
 (`$page->allow_connect_origin()`, `PublicPageBase::csp_policy($extra_connect)`),
 so the page can reach that host and no other; `csp_header_test` pins the

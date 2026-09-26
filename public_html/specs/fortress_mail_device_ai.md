@@ -583,7 +583,10 @@ As built: `MailboxDeviceAi::siteModel()` / `siteModelFrom()` (1.3), handed
 to both pages as `device_ai_site_model` (`profile_mailbox_logic` 1.2.0,
 `mailbox_settings_page_logic` 1.3.0) and to the scripts as
 `MAILBOX_DEVICE_AI.site_model`; the settings page's *Use this site's model*
-button (`settings.php` 2.3, `mailbox_device_ai_settings.js` 1.2); the
+as the primary button, with *Enter a different model* opening a form that
+takes the address, key and model together (owner, 2026-09-26; `settings.php`
+2.4, `mailbox_device_ai_settings.js` 1.3: the key and model go to the same
+browser entry the panel reads); the
 panel's offer while no origin is registered and the prefilled fields once
 the site's origin is (`mailbox_device_ai.js` 1.5, `siteOffer()`);
 `MailboxDeviceAi.registerOrigin()` is the one registration path, loaded on

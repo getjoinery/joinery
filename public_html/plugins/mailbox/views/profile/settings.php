@@ -19,6 +19,8 @@
  * mailbox/device_ai_host API action, which asks for a second-factor
  * confirmation.
  *
+ * @version 2.4 - "Your AI model": the site's model is the primary choice; the form takes the
+ *   address, key and model name together and opens on request
  * @version 2.3 - "Your AI model" offers the site's own model with one click
  * @version 2.2 - "Your AI model" links the page "Using your own model"
  * @version 2.1 - "Your AI model" for members with a Fortress mailbox
@@ -92,36 +94,54 @@ $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signatur
 				<p class="jy-muted">AI summaries and the security scan for your end-to-end encrypted mail run in
 					your browser, against an AI model you choose: a service you have a key for, or one on a
 					computer of your own. Your mail is sent from your browser to that model; Joinery never sees
-					it. Enter where the model answers. The key and the model name go in the AI panel on your
-					mail, and stay in each browser you use.
+					it.
 					<a href="/documentation?doc=plugin/mailbox/using_your_own_model" target="_blank" rel="noopener">Using your own model</a></p>
-				<p class="jy-muted">Choosing where your mail is sent asks you to confirm it is you.</p>
 				<?php
 				$current = (string)($page_vars['device_ai_origin'] ?? '');
-				$formwriter = $page->getFormWriter('device-ai-host-form', array('action' => '/profile/mailbox/settings'));
-				echo $formwriter->begin_form();
-				$formwriter->textinput('device_ai_address', 'Your model\'s address', array(
-					'value'       => $current,
-					'placeholder' => 'https://api.fireworks.ai/inference/v1',
-					'helptext'    => 'Paste the address your model\'s service gives you. The start of it, up to the host name, is kept with your account; the rest stays in this browser.',
-				));
-				?>
-				<p class="mbx-sig-note" data-device-ai-note hidden></p>
-				<?php
-				$formwriter->submitbutton('save_device_ai', 'Save address');
-				echo $formwriter->end_form();
+				$site = $page_vars['device_ai_site_model'] ?? null;
+				$site_offered = is_array($site) && $site['origin'] !== $current;
 				?>
 				<?php if ($current !== ''): ?>
 					<p>Your mail may be sent to <code><?php echo htmlspecialchars($current); ?></code>.
 						<button type="button" class="btn btn-secondary" data-device-ai-remove>Remove</button></p>
 				<?php endif; ?>
-				<?php $site = $page_vars['device_ai_site_model'] ?? null; if (is_array($site) && $site['origin'] !== $current): ?>
+				<?php if ($site_offered): ?>
 					<p class="jy-muted">This site runs its own model, <code><?php echo htmlspecialchars($site['model']); ?></code>
 						at <code><?php echo htmlspecialchars($site['host']); ?></code>.
 						<?php echo $site['operator'] ? 'It runs on hardware you operate.'
-							: 'The operator of this site runs that machine and could see mail sent to it.'; ?>
-						<button type="button" class="btn btn-secondary" data-device-ai-use-site>Use this site's model</button></p>
+							: 'The operator of this site runs that machine and could see mail sent to it.'; ?></p>
+					<p><button type="button" class="btn btn-primary" data-device-ai-use-site>Use this site's model</button>
+						<button type="button" class="btn btn-secondary" data-device-ai-enter>Enter a different model</button></p>
+				<?php elseif ($current !== ''): ?>
+					<p><button type="button" class="btn btn-secondary" data-device-ai-enter>Change the model</button></p>
 				<?php endif; ?>
+				<div data-device-ai-form<?php echo ($site_offered || $current !== '') ? ' hidden' : ''; ?>>
+					<p class="jy-muted">Choosing where your mail is sent asks you to confirm it is you. The key and the
+						model name stay in this browser; on another computer, enter them again in the AI panel on
+						your mail. Test the model from that panel once it is saved.</p>
+					<?php
+					$formwriter = $page->getFormWriter('device-ai-host-form', array('action' => '/profile/mailbox/settings'));
+					echo $formwriter->begin_form();
+					$formwriter->textinput('device_ai_address', 'Your model\'s address', array(
+						'value'       => $current,
+						'placeholder' => 'https://api.fireworks.ai/inference/v1',
+						'helptext'    => 'Paste the address your model\'s service gives you. The start of it, up to the host name, is kept with your account; the rest stays in this browser.',
+					));
+					$formwriter->passwordinput('device_ai_key', 'Key', array(
+						'placeholder' => 'Leave empty if your model needs none',
+						'helptext'    => 'Kept in this browser only. It never reaches Joinery.',
+					));
+					$formwriter->textinput('device_ai_model', 'Model name', array(
+						'placeholder' => 'e.g. accounts/fireworks/models/… or llama3.1:8b',
+						'helptext'    => 'Exactly as your service names it.',
+					));
+					?>
+					<p class="mbx-sig-note" data-device-ai-note hidden></p>
+					<?php
+					$formwriter->submitbutton('save_device_ai', 'Save model');
+					echo $formwriter->end_form();
+					?>
+				</div>
 			</div>
 			<?php endif; ?>
 
