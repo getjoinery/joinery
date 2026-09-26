@@ -85,9 +85,15 @@ second output and every content vault through the root
 (`JoinerySealed.openAllThroughRoot()`). An authenticator that returns only the
 first output gets a second touch for the root alone
 (`vault_client_prf_options {scope: root}` — the same salt). A passkey that
-opens the account vault but has no root wrapping yet asks once for a passkey
-that does; the root then learns the first passkey from the output already in
-hand (`vault_client_add_wrapping`, no step-up for a passkey the account vault
+opens the account vault but has no root wrapping yet (it was enrolled before
+the root existed, or its wrapping is bad) asks once for another way in: a
+recovery code, the passphrase where one exists, or a passkey the root knows.
+The root was made on one device under that device's passkey, so on any other
+device the code is the way that is always there. The browser opens the root
+from its keyring view alone (`VaultKeyring.openRootWith`); nothing is posted,
+so the code is not used up and the recovery kill-switch does not fire. The
+root then learns the passkey from the output already in hand
+(`vault_client_add_wrapping`, no step-up for a passkey the account vault
 already has).
 
 **One set of recovery codes, never seen by the server.** The browser makes the

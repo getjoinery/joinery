@@ -40,6 +40,8 @@
  * browser-held vault is open. It follows 'joinery:vault-scope-unlocked' /
  * 'joinery:vault-scope-locked' for those.
  *
+ * @version 2.1 - a passkey catching up on the root can prove the vault with a recovery code or the
+ *   passphrase, not only with a passkey the root knows (which lives on the device the root was made on)
  * @version 2.0 - the one vault: one unlock opens the account vault, the root and every browser-held vault;
  *   one line in the menu; Lock now locks everything; the server gets KEKs, never a code or a phrase
  * @version 1.6 - the chip reads open only when every vault the page needs is open
@@ -153,7 +155,7 @@
 			setState('open');
 			document.dispatchEvent(new CustomEvent('joinery:vault-unlocked'));
 
-			if (!root && heal) { root = await openRootAnotherWay(status); }
+			if (!root && heal) { root = await openRootAnotherWay(status, heal.credentialId); }
 			if (root) {
 				JoinerySealed.adopt(VaultKeyring.ROOT, root);
 				if (heal) {
@@ -189,28 +191,71 @@
 		}
 	}
 
-	// The passkey opened the account vault but not the root (it was enrolled
-	// before the root existed): offer the passkey the root was set up with.
-	async function openRootAnotherWay(status) {
-		var go = await new Promise(function (resolve) {
-			var picked = false;
-			var text = document.createElement('p');
-			text.textContent = 'Your vault is open, but this passkey does not open its end-to-end part yet. '
-				+ 'Use the passkey you set your vault up with, once, and this one will open everything from then on.';
-			var handle = JoineryModal.open(text, { buttons: [
-				{ label: 'Use another passkey', style: 'primary', onClick: function () { picked = true; } },
-				{ label: 'Not now', style: 'secondary' },
-			] });
-			handle.dialog.addEventListener('close', function () { resolve(picked); }, { once: true });
-		});
-		if (!go) { return null; }
-		try {
-			var d = await VaultKeyring.rootPasskeyKek();
-			var root = await VaultKeyring.openRoot(status.root, d.kek, 'passkey', d.credentialId);
-			if (!root) { JoineryModal.alert('That passkey does not open it either.'); }
-			return root;
-		} catch (e) {
+	// The passkey opened the account vault but not the root: it was enrolled
+	// before the root existed, or its root wrapping is bad (§ D9). The root
+	// was made on some other device, under that device's passkey, so offer
+	// every way the root opens WITHOUT this passkey: a recovery code (the
+	// root always carries the account's codes, and the person was handed
+	// them where the root was made), the passphrase where one exists, and a
+	// passkey the root already knows. Once the root is open, the caller
+	// teaches it this passkey and it opens everything from then on. A wrong
+	// code or phrase comes back to this choice; Not now leaves the root shut
+	// until the next unlock asks again.
+	async function openRootAnotherWay(status, failedCredentialId) {
+		var rootSt = status.root || {};
+		var ws = rootSt.wrappings || [];
+		var has = function (type) {
+			return ws.some(function (w) {
+				return w.unlocker_type === type && !(type === 'recovery' && w.is_used)
+					&& !(type === 'passkey' && w.credential_id === failedCredentialId);
+			});
+		};
+		var ways = [];
+		if (has('recovery')) { ways.push({ method: 'code', label: 'Use a recovery code' }); }
+		if (has('passphrase')) { ways.push({ method: 'passphrase', label: 'Use my passphrase' }); }
+		if (has('passkey') && window.JoineryPasskeys) { ways.push({ method: 'passkey', label: 'Use another passkey' }); }
+		if (!ways.length) {
+			JoineryModal.alert('Your vault is open, but this passkey cannot open its end-to-end content, '
+				+ 'and nothing else on this account can open it either.');
 			return null;
+		}
+		var intro = 'Your vault is open, but this passkey cannot yet open its end-to-end content. '
+			+ 'Confirm once, another way, that this vault is yours';
+		if (has('passkey')) { intro += ': with a recovery code, or with the passkey on the device where your recovery codes were shown'; }
+		intro += '. After that, this passkey opens everything on its own.';
+		for (;;) {
+			var method = await new Promise(function (resolve) {
+				var picked = null;
+				var text = document.createElement('p');
+				text.textContent = intro;
+				var buttons = ways.map(function (w, i) {
+					return { label: w.label, style: i === 0 ? 'primary' : 'secondary', onClick: function () { picked = w.method; } };
+				});
+				buttons.push({ label: 'Not now', style: 'secondary' });
+				var handle = JoineryModal.open(text, { buttons: buttons });
+				handle.dialog.addEventListener('close', function () { resolve(picked); }, { once: true });
+			});
+			if (!method) { return null; }
+			var value = null;
+			if (method === 'code') {
+				value = await JoineryModal.promptAsync('Enter a recovery code. It is not used up by this: it only shows the codes are yours.',
+					{ confirmLabel: 'Continue', confirmStyle: 'primary' });
+				if (!value) { continue; }
+			} else if (method === 'passphrase') {
+				value = await JoineryModal.promptAsync('Enter your passphrase:',
+					{ inputType: 'password', confirmLabel: 'Continue', confirmStyle: 'primary' });
+				if (!value) { continue; }
+			}
+			var root = null;
+			try {
+				root = await VaultKeyring.openRootWith(status, method, value);
+			} catch (e) {
+				root = null;
+			}
+			if (root) { return root; }
+			await JoineryModal.alertAsync(method === 'code' ? 'That code does not open your vault. Check it and try again.'
+				: method === 'passphrase' ? 'That passphrase does not open your vault.'
+				: 'That passkey does not open it either.');
 		}
 	}
 
