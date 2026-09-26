@@ -3,6 +3,12 @@
 # render_vhost.sh - keep this site's Apache vhost in step with the template the
 # deployed release ships.
 #
+# Version: 1.9 - The renewal-config heal moves to _host_files.sh, run by host_housekeeping.sh
+#                over every lineage on the machine. Healing only the lineage named by this
+#                vhost's ServerName missed any certificate under another name, and a
+#                Docker host's proxy vhosts are never rendered here at all: three
+#                lineages on docker-prod still let certbot edit their vhosts
+#                (specs/fleet_ubuntu_2604_postgres_upgrade.md B23).
 # Version: 1.8 - Reclaim: with the vhost moved aside by the agent's
 #               reclaim_managed_file, which leaves a one-shot marker naming the
 #               dated copy, the facts are read from that copy and the render is
@@ -139,42 +145,9 @@ DOMAIN="$(grep -m1 -oE '^[[:space:]]*ServerName[[:space:]]+\S+' "${SOURCE}" | aw
 SERVER_IP="$(grep -m1 -oE '<VirtualHost[[:space:]]+[^:]+:' "${SOURCE}" | sed -E 's/<VirtualHost[[:space:]]+//; s/:$//')"
 [[ -n "${SERVER_IP}" ]] || SERVER_IP="*"
 
-# certbot's Apache installer edits the vhost this script owns: on every renewal
-# ApacheConfigurator._deploy_cert adds `Include /etc/letsencrypt/options-ssl-apache.conf`
-# wherever the line is missing, and older installs also got its http->https
-# redirect block. The template states both itself, so the edit only ever made
-# the file stop matching the record. The renewal conf is where certbot decides
-# to do that (`installer = apache`); with `installer = None` it writes the
-# certificate files and runs the hook, which is all a renewal has to do.
-#
-# $1 = the lineage's renewal conf. Idempotent: a second run changes nothing.
-# The first run that changes something keeps a copy beside the file (a name
-# not ending in .conf, so certbot never reads it as a lineage).
-heal_renewal_conf() {
-    local conf="$1" tmp changed=0
-    [[ -f "${conf}" ]] || return 0
-    tmp="$(mktemp)"
-    cp "${conf}" "${tmp}"
-    if grep -qE '^[[:space:]]*installer[[:space:]]*=[[:space:]]*apache[[:space:]]*$' "${tmp}"; then
-        sed -i -E 's/^([[:space:]]*installer[[:space:]]*=[[:space:]]*)apache[[:space:]]*$/\1None/' "${tmp}"
-        changed=1
-    fi
-    if grep -q '^\[renewalparams\]' "${tmp}" \
-       && ! grep -qE '^[[:space:]]*renew_hook[[:space:]]*=' "${tmp}"; then
-        sed -i '/^\[renewalparams\]/a renew_hook = systemctl reload apache2' "${tmp}"
-        changed=1
-    fi
-    if [[ "${changed}" == 1 ]]; then
-        if ! ls "${conf}".before-render.* >/dev/null 2>&1; then
-            cp -p "${conf}" "${conf}.before-render.$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
-        fi
-        cat "${tmp}" > "${conf}"
-        say "renewal: ${conf} says installer = None with a reload hook; certbot will not edit the vhost again"
-    fi
-    rm -f "${tmp}"
-    return 0
-}
-heal_renewal_conf "${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal/${DOMAIN}.conf"
+# certbot's renewal configs are not this script's: host_housekeeping.sh heals
+# every lineage the machine renews through Apache, whatever its name
+# (host_files_heal_renewal_confs in _host_files.sh).
 
 # The placeholder the template's :443 host reads until a real certificate
 # lands. Minted before the render so the vhost written below has something to

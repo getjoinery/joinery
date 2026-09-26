@@ -2,6 +2,14 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.6 - rollback brings back the old container, not just its image (B25). What upgrades
+#                and the core installers had added in its own layer was gone: getjoinery's
+#                rollback came up without PHP apcu and sqlite3, without its agent and the
+#                host converger's cron, and with the image's pg_hba admitting 0.0.0.0/0.
+#                Once the old start command has run, rollback installs the PHP extensions
+#                the site's code declares plus every PHP package prepare recorded, runs
+#                every core installer as a current image's start command does, waits for
+#                the agent, and checks the manifest again.
 # Version: 1.5 - Two things the rebuild replaced outside the site's volumes, found moving
 #                joinerydemo. (1) The domain comes from the host vhost that proxies to the
 #                site's web port, not the container's DOMAIN_NAME: joinerydemo's said
@@ -249,6 +257,56 @@ save_host_vhosts() {
             cp -p "/etc/apache2/sites-enabled/${b}" "${d}/other/${b}"
         fi
     done
+}
+
+# A rolled-back container starts from the old image, and the old container was
+# more than its image. Upgrades had installed PHP extensions into its own
+# layer, and the core installers (the agent, the host converger's cron,
+# housekeeping's local-only pg_hba and PHP tuning) ran after it was created; an
+# image that predates them does not run them at start. So they are put back
+# the way a new container gets them: the extensions the site's code declares
+# (the loop Dockerfile.template and upgrade.php run) plus any other PHP package
+# the old container had, then every core installer, as the start command of a
+# current image runs them. Returns 1 when the agent is not running afterwards.
+restore_runtime() {
+    local extra="" i
+    if [ -s "${WORK}/php_packages.txt" ]; then
+        extra="$(paste -sd' ' "${WORK}/php_packages.txt")"
+    fi
+    say "Reinstalling the PHP extensions the site declares and the old container had"
+    docker exec -i "$SITE" bash -s -- "$SITE" $extra > "${WORK}/rollback_runtime.log" 2>&1 <<'EOS' || return 1
+site="$1"; shift
+installed=0
+apt_ready=0
+need() {  # install the first of the given packages when none is installed
+    local p
+    for p in "$@"; do dpkg -s "$p" > /dev/null 2>&1 && return 0; done
+    if [ "$apt_ready" = 0 ]; then apt-get update -qq || return 1; apt_ready=1; fi
+    for p in "$@"; do
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" > /dev/null 2>&1 && { echo "installed $p"; installed=1; return 0; }
+    done
+    echo "WARNING: could not install any of: $*"
+}
+for spec in $(php "/var/www/html/${site}/public_html/utils/list_dependencies.php" --apt 2>/dev/null); do
+    need "${spec%%|*}" "${spec##*|}"
+done
+for p in "$@"; do need "$p"; done
+if [ "$installed" = 1 ]; then
+    for s in /etc/init.d/php*-fpm; do [ -e "$s" ] && service "$(basename "$s")" restart; done
+fi
+true
+EOS
+    sed 's/^/  /' "${WORK}/rollback_runtime.log"
+    say "Running the core installers (the agent, the host converger, housekeeping)"
+    docker exec "$SITE" bash "/var/www/html/${SITE}/maintenance_scripts/install_tools/_plugin_installers_start.sh" "$SITE" \
+        > "${WORK}/rollback_installers.log" 2>&1 || true
+    grep -E '^core installers: .*: (ok|FAILED|failed)' "${WORK}/rollback_installers.log" | sed 's/^/  /' || true
+    # The agent is started by its cron supervisor, once a minute.
+    for i in $(seq 1 45); do
+        docker exec "$SITE" pgrep -x joinery-agent > /dev/null 2>&1 && return 0
+        sleep 2
+    done
+    return 1
 }
 
 restore_host_vhosts() {
@@ -629,7 +687,12 @@ if [ "$STAGE" = "rollback" ]; then
     # and leaving it would block the next swap.
     docker volume rm "$BACKUP_VOL" > /dev/null
     state_set stage rolled_back
+    # The old start command runs to its end (Apache) before anything is added.
     say "Front page through the container's port: HTTP $(wait_for_site)"
+    restore_runtime || say "WARNING: ${SITE}'s agent is not running after the core installers; see ${WORK}/rollback_installers.log"
+    MF_FAILED="$(manifest_failures)"
+    [ "$MF_FAILED" = "0" ] || say "WARNING: ${MF_FAILED} file(s) do not match the signed release manifest; the agent will refuse backups"
+    say "Front page after the installers: HTTP $(wait_for_site)"
     say "Rolled back: ${SITE} runs PostgreSQL ${FROM} on ${KEEP_IMAGE} again. Prepare again before another swap."
     exit 0
 fi

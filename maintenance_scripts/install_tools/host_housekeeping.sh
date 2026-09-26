@@ -4,6 +4,11 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.9 - Every certbot lineage the machine renews through Apache is healed at every
+#                converge (host_files_heal_renewal_confs): installer = None and a reload
+#                hook, so a renewal never edits a rendered vhost. render_vhost.sh healed
+#                only its own vhost's name and never ran for a Docker host's proxy
+#                vhosts (specs/fleet_ubuntu_2604_postgres_upgrade.md B23).
 # Version: 1.8 - A `publish <address>` line in config/postgres_access.conf is passed over: it
 #                tells install.sh where the host publishes the database port, and is no
 #                pg_hba line.
@@ -579,6 +584,13 @@ if [[ -f "${SCRIPT_DIR}/_host_files.sh" ]]; then
             systemctl restart "php${php_ver}-fpm" >/dev/null 2>&1 || warn "php${php_ver}-fpm could not be restarted - the settings apply at its next start"
         fi
     done
+
+    # certbot's renewal configs: every lineage renewed through Apache writes its
+    # certificate and reloads, and never edits a vhost. A machine with no
+    # /etc/letsencrypt (a container, a box with no certificate yet) has none.
+    while IFS= read -r line; do
+        say "${line}"
+    done < <(host_files_heal_renewal_confs "${FS_ROOT}/etc/letsencrypt")
 else
     warn "_host_files.sh is missing from ${SCRIPT_DIR} - host files not checked"
 fi

@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 60
-# covers: [maintenance_scripts/install_tools/host_housekeeping.sh, public_html/includes/cloudflare_ip_ranges.txt]
+# covers: [maintenance_scripts/install_tools/host_housekeeping.sh, maintenance_scripts/install_tools/_host_files.sh, public_html/includes/cloudflare_ip_ranges.txt]
 #
 # host_housekeeping.sh (specs/post_release_fleet_defects.md B2) run in its
 # override mode against a temporary /etc as an unprivileged user: it writes
@@ -282,6 +282,27 @@ printf '[Journal]\nSystemMaxUse=200M\n' > "$RJ/etc/systemd/journald.conf.d/size-
 JOINERY_HOUSEKEEPING_ROOT="$RJ" bash "$SCRIPT" >/dev/null 2>&1
 chk "an owner's own journal cap under another name is respected: ours is not added" "$([ -e "$RJ/etc/systemd/journald.conf.d/size-limit.conf" ] && echo added || echo absent)" "absent"
 chk "install.sh uses the same definitions" "$(grep -c 'host_files_write_mpm_event\|host_files_write_journald_limit\|host_files_tune_php_ini' "$SITE_ROOT/maintenance_scripts/install_tools/install.sh")" "3"
+
+echo "=== certbot's renewal configs: every Apache lineage on the machine, whatever its name ==="
+# specs/fleet_ubuntu_2604_postgres_upgrade.md B23: demo.getjoinery.com is no
+# site's vhost file name or DOMAIN_NAME, and on a Docker host nothing rendered
+# its vhost, so its lineage kept letting certbot edit the vhost.
+RL="$T/renewals"; mkdir -p "$RL/etc/letsencrypt/renewal"
+printf 'version = 2.9.0\n\n[renewalparams]\naccount = abc\nauthenticator = apache\ninstaller = apache\n' > "$RL/etc/letsencrypt/renewal/demo.getjoinery.com.conf"
+printf 'version = 2.9.0\n\n[renewalparams]\nauthenticator = dns-cloudflare\ninstaller = None\n' > "$RL/etc/letsencrypt/renewal/dns.example.com.conf"
+printf 'version = 2.9.0\n\n[renewalparams]\nauthenticator = apache\ninstaller = apache\nrenew_hook = /usr/local/bin/mine\n' > "$RL/etc/letsencrypt/renewal/mine.example.com.conf"
+cp "$RL/etc/letsencrypt/renewal/dns.example.com.conf" "$T/dns.before"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RL" bash "$SCRIPT" 2>&1)"; rc=$?
+chk "a lineage under a name no site carries: installer = None" "$(grep -c '^installer = None$' "$RL/etc/letsencrypt/renewal/demo.getjoinery.com.conf")" "1"
+chk "with a renew_hook that reloads Apache" "$(grep -c '^renew_hook = systemctl reload apache2$' "$RL/etc/letsencrypt/renewal/demo.getjoinery.com.conf")" "1"
+chk "an owner's renew_hook is kept, and only the installer changes" "$(grep -cE '^(installer = None|renew_hook = /usr/local/bin/mine)$' "$RL/etc/letsencrypt/renewal/mine.example.com.conf"):$(grep -c '^renew_hook' "$RL/etc/letsencrypt/renewal/mine.example.com.conf")" "2:1"
+chk "a lineage issued another way (DNS) is not touched" "$(cmp -s "$T/dns.before" "$RL/etc/letsencrypt/renewal/dns.example.com.conf" && echo same)" "same"
+chk "the run says so for each lineage it changed, and succeeds" "$rc:$(printf '%s\n' "$out" | grep -c 'housekeeping: renewal: .* says installer = None')" "0:2"
+chk "the originals are kept beside them under names certbot does not read" "$(ls "$RL/etc/letsencrypt/renewal" | grep -c '\.conf\.before-render\.')" "2"
+before="$(tree_sum "$RL")"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RL" bash "$SCRIPT" 2>&1)"
+chk "a second converge changes nothing and says nothing about renewals" "$( [ "$(tree_sum "$RL")" = "$before" ] && echo same):$(printf '%s\n' "$out" | grep -c 'renewal:')" "same:0"
+chk "render_vhost.sh no longer defines or runs its own copy of the rule" "$(grep -cE '^[[:space:]]*heal_renewal_conf(\(\)| )' "$SITE_ROOT/maintenance_scripts/install_tools/render_vhost.sh")" "0"
 
 echo "=== PostgreSQL answers only locally ==="
 mkpg() {  # $1 root, $2 listen_addresses, $3 pg_hba body

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.85 - A core-archive download from an upgrade server that does not answer falls
+#               back to the archive copy, as it always said it would. The metadata fetch
+#               was a plain assignment under set -e, so a failed curl ended the install
+#               with no message. Rebuilding getjoinery, the default upgrade server, while
+#               its writes were stopped hit it (specs/fleet_ubuntu_2604_postgres_upgrade.md B24).
 #VERSION 2.84 - The Docker base image is 2.0: Ubuntu 26.04, PHP 8.5, PostgreSQL 18. New sites are
 #              born on it. An existing site's rebuild is refused while its database is
 #              PostgreSQL 16, and rebase_site_container.sh moves it (rehearsed 2026-09-24).
@@ -1815,9 +1820,11 @@ download_core_archive() {
 
     print_step "Downloading fresh core archive from $UPGRADE_SERVER..."
 
-    # Fetch upgrade metadata
+    # Fetch upgrade metadata. `|| upgrade_info=""`: a plain assignment takes
+    # curl's exit status, and under set -e an unreachable server ended the
+    # whole install here with no message instead of falling back below.
     local upgrade_info
-    upgrade_info=$(curl -sf --max-time 30 "${UPGRADE_SERVER}/utils/upgrade?serve-upgrade=1" 2>/dev/null)
+    upgrade_info=$(curl -sf --max-time 30 "${UPGRADE_SERVER}/utils/upgrade?serve-upgrade=1" 2>/dev/null) || upgrade_info=""
     if [[ -z "$upgrade_info" ]]; then
         print_warning "Could not reach $UPGRADE_SERVER — building with archive copy as-is"
         return 0
