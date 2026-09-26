@@ -23,6 +23,8 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.5 - openRootWith(): a code, the phrase or another passkey opens the root for a passkey
+ *   that is catching up, with nothing posted (the code stays unused, no window is ended)
  * @version 1.4 - the one vault: the root, one touch, one set of codes, content vaults through the root
  * @version 1.3 - rotationPlan()/showRecoveryCodes()/sessionFrom() for a key rotation;
  *   ensureUnlocked({pending}) opens a rotation's new key; buildWrappings() shared with setup
@@ -1072,6 +1074,33 @@ window.VaultKeyring = (function () {
 	 * not yet the root (enrolled before the root existed, or just added):
 	 * secondOutput is that passkey's root output from its own touch.
 	 */
+	/**
+	 * Open the root without the passkey in hand (a passkey that opens the
+	 * account vault but not the root, specs/one_vault_experience.md § D5).
+	 * 'code' and 'passphrase' derive the root half here and try the root's own
+	 * wrappings from its keyring view; 'passkey' is a second touch for the
+	 * root's PRF context. Nothing is posted: the code is not used up and no
+	 * window or linked device is ended, because nothing was lost — one passkey
+	 * is catching up. Resolves a root session, or null when the value opens
+	 * no wrapping.
+	 */
+	async function openRootWith(st, method, value) {
+		var rootSt = st.root || {};
+		if (!rootSt.set_up) return null;
+		if (method === 'passkey') {
+			var d = await rootPasskeyKek();
+			return openRoot(rootSt, d.kek, 'passkey', d.credentialId);
+		}
+		if (method === 'passphrase') {
+			var p = await VaultCrypto.passphraseKeks(value, rootSt.salt, rootSt.kdf_params);
+			p.account.fill(0);
+			return openRoot(rootSt, p.root, 'passphrase');
+		}
+		var c = await VaultCrypto.codeKeks(value, rootSt.salt);
+		c.account.fill(0);
+		return openRoot(rootSt, c.root, 'recovery');
+	}
+
 	async function addRootPasskey(rootSession, credentialId, secondOutput) {
 		var kek = await prfKek(secondOutput);
 		var blob = await rootSession.wrapUnder(kek, 'passkey', credentialId);
@@ -1101,6 +1130,7 @@ window.VaultKeyring = (function () {
 		contentSession: contentSession,
 		addRootWrapping: addRootWrapping,
 		addRootPasskey: addRootPasskey,
+		openRootWith: openRootWith,
 		rootPasskeyKek: rootPasskeyKek,
 		passkeyUnlock: passkeyUnlock,
 		passphraseUnlock: passphraseUnlock,
