@@ -29,6 +29,8 @@
  * sites page offers an alternate name on its strength, and submitting one
  * clears it and returns the row to pending under the same paid-line guard.
  *
+ * @version 1.2 - park_for_removed_site(): a row still being bought or wired up is parked when its site is
+ *                removed from the dashboard
  * @version 1.1 - rdm_taken_time (specs/managed_hosting_phase1_purchase.md §7), offers_alternate() and take_alternate()
  * @version 1.0
  */
@@ -230,6 +232,31 @@ class RegisteredDomain extends SystemBase {
 		$this->set('rdm_status', self::STATUS_FAILED);
 		$this->set('rdm_error', mb_substr($message, 0, 4000));
 		$this->save();
+	}
+
+	/**
+	 * Park a row whose site was removed from the dashboard. Saves.
+	 *
+	 * Only a row still being bought or wired up: nothing is left to point it
+	 * at, and a person decides what happens to the name. An active domain
+	 * needs no server to stay the buyer's, so it is left as it is. The row is
+	 * never deleted — the buyer owns the name, and this record carries its
+	 * renewals and its hand-over.
+	 *
+	 * @return bool whether it parked the row.
+	 */
+	public function park_for_removed_site($node): bool {
+		$status = (string)$this->get('rdm_status');
+		if ($status !== self::STATUS_PENDING && $status !== self::STATUS_REGISTERED) {
+			return false;
+		}
+		$removed = (string)$node->get('mgn_delete_time');
+		$when = preg_match('/^\d{4}-\d{2}-\d{2}/', $removed) ? substr($removed, 0, 10) : gmdate('Y-m-d');
+		$site = (string)$node->get('mgn_name');
+		$this->fail($status === self::STATUS_PENDING
+			? "Not bought: its site {$site} was removed from the dashboard on {$when}. Buy it anyway or refund it."
+			: "Its site {$site} was removed from the dashboard on {$when}, so nothing points this name at a server. The buyer still owns it.");
+		return true;
 	}
 
 	/** Is the buyer being offered an alternate name for this row? */

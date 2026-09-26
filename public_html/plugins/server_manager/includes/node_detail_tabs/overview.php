@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.27 - Remove from Dashboard's confirmation says what else goes with the node, and what is kept
  * @version 1.26 - the Service box reads a DNS server's source_ok only; no DNS server reports db_connected
  * @version 1.25 - the Service box reads a DNS server's source_ok (site reachable/unreachable), and
  *                 db_connected only from a 1.8 server that reports it instead
@@ -282,7 +283,7 @@
 					<form method="post" action="<?php echo $base_url; ?>" id="delete_node_form" style="margin:0;">
 						<input type="hidden" name="action" value="delete_node">
 						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirm('Remove this site from the dashboard? The site keeps running on its host — only the tracking record is removed.', function(){ document.getElementById('delete_node_form').submit(); })">Remove from Dashboard</button>
+						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirm('Remove this site from the dashboard? The site keeps running on its host. Its tracking record goes, with any provisioning record and hosted trial from its hosting order; a domain bought for it is kept for its buyer.', function(){ document.getElementById('delete_node_form').submit(); })">Remove from Dashboard</button>
 					</form>
 				</li>
 			<?php endif; ?>

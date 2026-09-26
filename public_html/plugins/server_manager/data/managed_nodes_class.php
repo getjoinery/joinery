@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.27 - soft_delete() releases the site's records: its provisioning record and hosted trial go,
+ *                a domain still being bought or wired up is parked for a person, and a subscription still
+ *                billing is named (release_site_records(), removal_notes())
  * @version 1.26 - valid_web_root() and adopt_reported_web_root(): a web root the node's agent reports fills
  *                an empty mgn_web_root and never replaces a set one; a mismatch is logged
  * @version 1.25 - mgn_backup_keep_days: the site's own retention window, reported by its backup runs
@@ -494,6 +497,75 @@ class ManagedNode extends SystemBase {
 		}
 		$url = rtrim(trim((string)($state['url'] ?? '')), '/');
 		return $url === '' ? null : $url;
+	}
+
+	/** What removing this node also did, in plain words, for the page that asked. */
+	private $removal_notes = [];
+
+	/**
+	 * Removing a node ends the dashboard's work on its site.
+	 *
+	 * Both ways a node leaves the dashboard end here: Remove from Dashboard,
+	 * and the record's removal once a permanent deletion is verified. The
+	 * site's other records go first, so a failure leaves the node listed and
+	 * the removal can simply be asked again.
+	 */
+	function soft_delete() {
+		$this->removal_notes = $this->key ? $this->release_site_records() : [];
+		return parent::soft_delete();
+	}
+
+	public function removal_notes(): array {
+		return $this->removal_notes;
+	}
+
+	/**
+	 * Let go of what the provisioning task keeps working on for this site.
+	 *
+	 * Left alone, a removed site's hosting order kept its pipeline running:
+	 * seeding and install-password jobs for a node nobody tracks, a hosted
+	 * trial that would run out and try to power off a machine already gone,
+	 * and a domain step asking the removed node to prepare mail every tick.
+	 *
+	 * - The order's provisioning record and its hosted trial are removed.
+	 * - A domain bought for the site is kept: the buyer is its registrant,
+	 *   and the record carries its renewals and its hand-over. One still being
+	 *   bought or wired up is parked for a person on the Domains page, with
+	 *   the reason; an active one needs no server and is left as it is.
+	 * - Billing is never touched here. A subscription still charging for the
+	 *   hosting is named, so whoever removed the site can end it.
+	 *
+	 * Safe to run again: it only acts on what is still live.
+	 *
+	 * @return string[] one plain sentence per thing it did or found.
+	 */
+	public function release_site_records(): array {
+		$notes = [];
+		foreach (new MultiCustomerCloudProvision(['cvp_mgn_managed_node_id' => (int)$this->key, 'deleted' => false]) as $provision) {
+			$domain = (string)$provision->get('cvp_domain');
+			$trial = HostedTrial::for_provision($provision->key);
+			if ($trial !== null) {
+				$trial->soft_delete();
+			}
+			$provision->soft_delete();
+			$notes[] = 'The provisioning record for ' . $domain . ($trial !== null ? ' and its hosted trial were' : ' was') . ' removed.';
+
+			$item_id = (int)$provision->get('cvp_external_order_item_id');
+			if ($item_id > 0 && class_exists('OrderItem')) {
+				$item = new OrderItem($item_id, TRUE);
+				if ($item->key && $item->get('odi_is_subscription') && !$item->get('odi_subscription_cancelled_time')
+						&& in_array((string)$item->get('odi_subscription_status'), ['active', 'trialing', 'grace_period'], true)) {
+					$notes[] = 'Its hosting subscription (order ' . (int)$item->get('odi_ord_order_id')
+						. ') is still active and still bills the buyer: cancel it on that order if the hosting has ended.';
+				}
+			}
+		}
+		foreach (new MultiRegisteredDomain(['rdm_mgn_managed_node_id' => (int)$this->key, 'deleted' => false]) as $domain) {
+			if ($domain->park_for_removed_site($this)) {
+				$notes[] = $domain->get('rdm_domain') . ' is kept for its buyer and parked on the Domains page.';
+			}
+		}
+		return $notes;
 	}
 
 	function prepare() {

@@ -38,6 +38,7 @@
  * has four states rather than one call: waiting for an answer is a state the
  * phase already knew how to be in, because an unstamped step is simply retried.
  *
+ * @version 1.4 - a row whose site was removed from the dashboard is parked, never wired to the removed node
  * @version 1.3 - a name found taken after payment stamps rdm_taken_time, so the buyer's sites page
  *                can offer an alternate (specs/managed_hosting_phase1_purchase.md §7)
  * @version 1.2 - the mail plan is asked over the agent channel, as a job whose whole
@@ -121,6 +122,13 @@ class ProvisionManagedDomains {
 		$node = $this->resolve_node($row);
 		if ($node === null) {
 			return 0;
+		}
+		// A site removed from the dashboard is no box: asking it to prepare
+		// mail, or pointing DNS at it, is work for a machine nobody tracks.
+		// Removing a node parks its rows itself; this catches one removed
+		// before that, and a parked row retried while its site is still gone.
+		if ($node->get('mgn_delete_time')) {
+			return $row->park_for_removed_site($node) ? 1 : 0;
 		}
 		$ip = NodeDnsPlan::publicIp($node);
 		if ($ip === '') {
