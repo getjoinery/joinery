@@ -7,6 +7,10 @@
  * the network's current Stories as cards in the same list, newest-captured
  * first. New posts arrive hourly via FetchFeedTask; "Fetch now" triggers an
  * out-of-band fetch. Experimental; Facebook only.
+ *
+ * For labelling ads by hand, every post card has an Ad button (the owner's
+ * own verdict; a marked post leaves the page) and a "Reviewed down to here"
+ * menu item, and ?review=1 lists only the posts not yet reviewed.
  */
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getIncludePath('plugins/persona_browser/logic/feed_logic.php'));
@@ -50,6 +54,12 @@ $page->public_header(['title' => 'My Feed']);
         .pb-menu-item { display:block; width:100%; text-align:left; border:0; background:none; cursor:pointer; padding:.45rem .6rem; border-radius:6px; font-size:.9rem; }
         .pb-menu-item:hover { background:var(--jy-hover, #f1f2f4); }
         .pb-post.is-ad { opacity:.72; }
+        .pb-post.is-ad.is-owner-ad { opacity:1; }
+        .pb-adbtn { border:1px solid var(--jy-border, #d9dbe0); background:none; cursor:pointer; color:var(--jy-muted, #6b7280); font-size:.7rem; font-weight:700; letter-spacing:.03em; text-transform:uppercase; border-radius:4px; padding:.15rem .45rem; margin-right:.2rem; }
+        .pb-adbtn:hover { background:var(--jy-hover, #f1f2f4); color:inherit; }
+        .pb-adbtn[aria-pressed="true"] { color:#8a5a00; background:#ffe9b8; border-color:#f2d79b; }
+        .pb-reviewed { font-size:.8rem; color:#15803d; margin-right:.3rem; }
+        .pb-review-end { display:flex; justify-content:center; margin:1.5rem 0; }
         .pb-badge-ad { display:inline-block; font-size:.7rem; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:#8a5a00; background:#ffe9b8; border:1px solid #f2d79b; border-radius:4px; padding:.05rem .35rem; margin-right:.4rem; vertical-align:middle; }
         /* Network identity — a subtle per-network accent + glyph so cards from
            different feeds stay tellable apart as more networks are added. */
@@ -79,6 +89,11 @@ $page->public_header(['title' => 'My Feed']);
 
             <div class="pb-toolbar">
                 <span class="jy-muted" id="pb-count"><?php echo count($items); ?> item<?php echo count($items) === 1 ? '' : 's'; ?></span>
+                <?php if ($review): ?>
+                    <a href="/profile/persona_browser/feed">Back to the feed</a>
+                <?php else: ?>
+                    <a href="/profile/persona_browser/feed?review=1">Review for ads (<?php echo (int)$unreviewed; ?> not reviewed)</a>
+                <?php endif; ?>
                 <form method="post" action="/profile/persona_browser/feed">
                     <button class="jy-btn" type="submit" name="btn_fetch_now" value="1">&#8635; Refresh</button>
                 </form>
@@ -93,6 +108,9 @@ $page->public_header(['title' => 'My Feed']);
                     <strong>Not set up yet.</strong> Add the service endpoint and token under
                     <a href="/admin/admin_settings">Settings</a>, then use Fetch now.
                 </div>
+
+            <?php elseif (empty($items) && $review): ?>
+                <div class="pb-banner info">Every post has been reviewed.</div>
 
             <?php elseif (empty($items)): ?>
                 <div class="pb-banner info">No posts stored yet. Use <strong>Fetch now</strong>, or wait for the hourly pull.</div>
@@ -135,7 +153,7 @@ $page->public_header(['title' => 'My Feed']);
                 </article>
                 <?php continue; ?>
                 <?php endif; ?>
-                <article class="pb-post pb-net-<?php echo htmlspecialchars($post['persona']); ?><?php echo !empty($post['is_ad']) ? ' is-ad' : ''; ?>"
+                <article class="pb-post pb-net-<?php echo htmlspecialchars($post['persona']); ?><?php echo !empty($post['is_ad']) ? ' is-ad' : ''; ?><?php echo $post['owner_is_ad'] ? ' is-owner-ad' : ''; ?>"
                          data-item-id="<?php echo (int)$post['id']; ?>"
                          data-author="<?php echo htmlspecialchars($post['author']); ?>">
                     <div class="pb-head">
@@ -143,8 +161,8 @@ $page->public_header(['title' => 'My Feed']);
                             <?php if ($post['persona'] === 'facebook'): ?>
                                 <span class="pb-badge-net" title="Facebook"><svg viewBox="0 0 320 512" aria-hidden="true"><path d="M80 299.3V512H196V299.3h86.5l18-97.8H196V166.9c0-51.7 20.3-71.5 72.7-71.5c16.3 0 29.4 .4 37 1.2V7.9C291.4 4 256.4 0 236.2 0C129.3 0 80 50.5 80 159.4v42.1H14v97.8H80z"/></svg></span>
                             <?php endif; ?>
-                            <?php if (!empty($post['is_ad'])): ?>
-                                <span class="pb-badge-ad" title="<?php echo htmlspecialchars($post['ad_reason']); ?>">Ad</span>
+                            <?php if (!empty($post['is_ad']) && $post['owner_is_ad'] === null): ?>
+                                <span class="pb-badge-ad" title="AI: <?php echo htmlspecialchars($post['ad_reason']); ?>">Ad</span>
                             <?php endif; ?>
                             <?php echo htmlspecialchars($post['author'] !== '' ? $post['author'] : 'Unknown'); ?>
                         </span>
@@ -152,15 +170,21 @@ $page->public_header(['title' => 'My Feed']);
                             <?php if (!empty($post['seen'])): ?>
                                 <span class="pb-date" title="When this post was first captured"><?php echo htmlspecialchars($post['seen']); ?></span>
                             <?php endif; ?>
-                            <?php if ($post['author'] !== ''): ?>
+                            <?php if ($post['owner_is_ad'] !== null): ?>
+                                <span class="pb-reviewed" title="You reviewed this post">&#10003;</span>
+                            <?php endif; ?>
+                            <button type="button" class="pb-adbtn" aria-pressed="<?php echo $post['owner_is_ad'] ? 'true' : 'false'; ?>"
+                                    title="<?php echo $post['owner_is_ad'] ? 'Marked as an ad by you (click to undo)' : 'Mark this post as an ad and remove it from the feed'; ?>">Ad</button>
                             <span class="pb-menu">
                                 <button type="button" class="pb-iconbtn pb-menu-btn" aria-label="Post options" aria-haspopup="true" aria-expanded="false">&#8942;</button>
                                 <div class="pb-menu-pop" hidden>
+                                    <button type="button" class="pb-menu-item pb-reviewed-btn">Reviewed down to here</button>
+                                    <?php if ($post['author'] !== ''): ?>
                                     <button type="button" class="pb-menu-item pb-allow-btn">Allow sender</button>
                                     <button type="button" class="pb-menu-item pb-block-btn">Block sender</button>
+                                    <?php endif; ?>
                                 </div>
                             </span>
-                            <?php endif; ?>
                             <button type="button" class="pb-iconbtn pb-hide-btn" aria-label="Hide this post" title="Hide this post">&#10005;</button>
                         </span>
                     </div>
@@ -185,6 +209,11 @@ $page->public_header(['title' => 'My Feed']);
                     <?php endif; ?>
                 </article>
                 <?php endforeach; ?>
+                <?php if ($review && !empty($items)): ?>
+                    <div class="pb-review-end">
+                        <button type="button" class="jy-btn pb-review-all-btn">All of these reviewed &mdash; show the next ones</button>
+                    </div>
+                <?php endif; ?>
             <?php endif; ?>
 
         </div>
@@ -249,6 +278,51 @@ document.addEventListener('DOMContentLoaded', function () {
         msg.after(btn);
     });
 
+    var reviewMode = <?php echo $review ? 'true' : 'false'; ?>;
+
+    function addReviewedMark(card) {
+        if (card.querySelector('.pb-reviewed')) return;
+        var mark = document.createElement('span');
+        mark.className = 'pb-reviewed';
+        mark.title = 'You reviewed this post';
+        mark.innerHTML = '&#10003;';
+        card.querySelector('.pb-adbtn').before(mark);
+    }
+
+    // Record every post card from the top of the page down to (and including)
+    // this one as reviewed. Posts marked as ads keep their mark. In review
+    // mode the reviewed cards leave the page; when none are left, the next
+    // batch loads.
+    function reviewedDownTo(article) {
+        var ids = [], cards = [];
+        var all = feed.querySelectorAll('.pb-post[data-item-id]');
+        for (var i = 0; i < all.length; i++) {
+            ids.push(parseInt(all[i].dataset.itemId, 10));
+            cards.push(all[i]);
+            if (all[i] === article) break;
+        }
+        return callAction('feed_mark_reviewed', { item_ids: ids }).then(function () {
+            cards.forEach(function (card) {
+                if (reviewMode) { removePost(card); return; }
+                addReviewedMark(card);
+            });
+            if (reviewMode && !feed.querySelector('.pb-post[data-item-id]')) window.location.reload();
+        });
+    }
+
+    var reviewAll = feed.querySelector('.pb-review-all-btn');
+    if (reviewAll) {
+        reviewAll.addEventListener('click', function () {
+            var cards = feed.querySelectorAll('.pb-post[data-item-id]');
+            if (!cards.length) { window.location.reload(); return; }
+            reviewAll.disabled = true;
+            reviewedDownTo(cards[cards.length - 1]).catch(function (err) {
+                reviewAll.disabled = false;
+                alert(err.message);
+            });
+        });
+    }
+
     feed.addEventListener('click', function (e) {
         var menuBtn = e.target.closest('.pb-menu-btn');
         if (menuBtn) {
@@ -263,6 +337,30 @@ document.addEventListener('DOMContentLoaded', function () {
         var article = e.target.closest('.pb-post');
         if (!article || !article.dataset.itemId) return;   // story cards carry no actions
         var itemId = parseInt(article.dataset.itemId, 10);
+
+        var adBtn = e.target.closest('.pb-adbtn');
+        if (adBtn) {
+            var marking = adBtn.getAttribute('aria-pressed') !== 'true';
+            adBtn.disabled = true;
+            callAction('feed_mark_ad', { item_id: itemId, is_ad: marking }).then(function () {
+                // A post you mark as an ad leaves the page, as if hidden with the X.
+                if (marking) { removePost(article); return; }
+                adBtn.setAttribute('aria-pressed', 'false');
+                article.classList.remove('is-ad', 'is-owner-ad');
+                // Your mark replaces any AI badge; either way the post is reviewed.
+                var badge = article.querySelector('.pb-badge-ad');
+                if (badge) badge.remove();
+                addReviewedMark(article);
+            }).catch(function (err) { alert(err.message); })
+              .finally(function () { adBtn.disabled = false; });
+            return;
+        }
+
+        if (e.target.closest('.pb-reviewed-btn')) {
+            closeMenus();
+            reviewedDownTo(article).catch(function (err) { alert(err.message); });
+            return;
+        }
 
         if (e.target.closest('.pb-hide-btn')) {
             callAction('feed_hide_post', { item_id: itemId }).then(function () {
@@ -285,7 +383,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Allowing changes nothing on screen right now — their posts are
         // already showing — so the card just says it happened. From the next
-        // load they show without ad badges and never get hidden or blocked.
+        // load they show without the AI's ad badges and never get hidden or blocked.
         if (e.target.closest('.pb-allow-btn')) {
             closeMenus();
             var allowBtn = article.querySelector('.pb-allow-btn');
@@ -295,6 +393,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 var key = article.dataset.author.trim().toLowerCase();
                 feed.querySelectorAll('.pb-post').forEach(function (p) {
                     if ((p.dataset.author || '').trim().toLowerCase() !== key) return;
+                    if (p.classList.contains('is-owner-ad')) return;   // your own mark stands
                     p.classList.remove('is-ad');
                     var badge = p.querySelector('.pb-badge-ad');
                     if (badge) badge.remove();

@@ -1,6 +1,6 @@
 {
     "name": "Persona Browser",
-    "version": "0.11.74",
+    "version": "0.11.76",
     "host_installer": "provisioning/relocate_media_cache.sh",
     "description": "Reads your own social feed through a real logged-in browser on a Mac and shows it on a clean profile page. Experimental; Facebook only.",
     "author": "Joinery",
@@ -59,7 +59,15 @@
             "group": "display",
             "label": "Hide ads from the feed",
             "type": "checkbox",
-            "helptext": "When on, posts the ad-marking recipe flagged as advertisements are left out of the feed. Posts not yet judged still show."
+            "helptext": "When on, posts marked as advertisements are left out of the feed: ones you marked, and ones the AI judged when its verdicts are shown. Posts not yet judged still show."
+        },
+        {
+            "name": "persona_browser_show_ai_ad_verdicts",
+            "default": "1",
+            "group": "display",
+            "label": "Show the AI's ad verdicts",
+            "type": "checkbox",
+            "helptext": "When on, posts the ad-marking recipe judged to be advertisements carry an Ad badge (and are hidden when Hide ads is on). When off, only posts you marked as ads yourself do. Your own mark always wins over the AI's."
         },
         {
             "name": "persona_browser_hide_reels",
