@@ -161,6 +161,52 @@ pub struct SwapPair {
     /// of the edge. Read by the sealed oracle to say which leaks the workload
     /// moved out and which the engine published on its own.
     pub crossed_out: Option<Vec<u8>>,
+    /// Where a chaos swap was made, which the ledger cannot say: it follows
+    /// the workload's own hand by path, and this one is the harness's. Each
+    /// body now stands in the directory the other stood in, whoever put the
+    /// other there -- the user, or this device applying someone else's move.
+    /// `None` for the workload's own swaps.
+    pub stood_in: Option<StoodIn>,
+}
+
+/// The device a chaos swap was made on (its index in the world) and the
+/// directory each body stood in at that moment, by birth.
+#[derive(Clone, Copy, Debug)]
+pub struct StoodIn {
+    pub device: usize,
+    pub a: Option<u64>,
+    pub b: Option<u64>,
+}
+
+/// The chaos name-swapper's hand: two files exchange names through a temp
+/// name, the way a filesystem without an atomic swap forces every application
+/// to do it -- the window where the first name holds nothing is the whole
+/// point. Two different bodies are recorded as separated, with where each
+/// stood.
+fn swap_two_names(
+    disk: &MemFs,
+    device: usize,
+    a: &str,
+    b: &str,
+    parked: &str,
+    pairs: &std::sync::Mutex<Vec<SwapPair>>,
+) {
+    if let (Some(ba), Some(bb)) = (disk.peek(a), disk.peek(b)) {
+        if ba != bb {
+            let (sa, sb) = (disk.under_sealed_dir(a), disk.under_sealed_dir(b));
+            let crossed_out = match (sa, sb) {
+                (true, false) => Some(ba.clone()),
+                (false, true) => Some(bb.clone()),
+                _ => None,
+            };
+            let dir = |p: &str| disk.birth_of(p.rsplit_once('/').map(|(d, _)| d).unwrap_or(""));
+            let stood_in = Some(StoodIn { device, a: dir(a), b: dir(b) });
+            pairs.lock().unwrap().push(SwapPair { a: ba, b: bb, source: "chaos", sealed: sa || sb, crossed_out, stood_in });
+        }
+    }
+    disk.user_rename(a, parked);
+    disk.user_rename(b, a);
+    disk.user_rename(parked, b);
 }
 
 /// Which operating system's filesystem a device has.
@@ -378,7 +424,8 @@ impl World {
             if one_in > 1 && rng.below(one_in) != 0 {
                 return;
             }
-            let disk = &disks[rng.below(disks.len() as u64) as usize];
+            let device = rng.below(disks.len() as u64) as usize;
+            let disk = &disks[device];
             // Files only, for the reason the save hook gives: renaming a
             // directory over a file is not something a user can do, and the
             // engine is entitled to assume the harness will not invent it.
@@ -396,27 +443,23 @@ impl World {
                 return;
             }
             round += 1;
-            // Through a temp name, the way a filesystem without an atomic swap
-            // forces every application to do it. The window where the first
-            // name holds nothing is the whole point.
             let (a, b) = (a.clone(), b.clone());
-            if let (Some(ba), Some(bb)) = (disk.peek(&a), disk.peek(&b)) {
-                if ba != bb {
-                    let (sa, sb) = (disk.under_sealed_dir(&a), disk.under_sealed_dir(&b));
-                    let crossed_out = match (sa, sb) {
-                        (true, false) => Some(ba.clone()),
-                        (false, true) => Some(bb.clone()),
-                        _ => None,
-                    };
-                    pairs.lock().unwrap().push(SwapPair { a: ba, b: bb, source: "chaos", sealed: sa || sb, crossed_out });
-                }
-            }
-            let parked = format!(".swap-{round}.tmp");
-            disk.user_rename(&a, &parked);
-            disk.user_rename(&b, &a);
-            disk.user_rename(&parked, &b);
+            swap_two_names(disk, device, &a, &b, &format!(".swap-{round}.tmp"), &pairs);
             *seen.lock().unwrap() += 1;
         });
+    }
+
+    /// One chaos name swap on this device now, by the same hand and with the
+    /// same record as the mid-upload swapper: for pins of the oracles that
+    /// read that record.
+    pub fn swap_names_by_chaos(&self, device_name: &str, a: &str, b: &str) {
+        let device = self
+            .devices
+            .iter()
+            .position(|d| d.name == device_name)
+            .unwrap_or_else(|| panic!("no device called {device_name}"));
+        swap_two_names(&self.devices[device].fs, device, a, b, ".swap-pin.tmp", &self.swap_pairs);
+        *self.swaps_seen.lock().unwrap() += 1;
     }
 
     /// The user saves the very file a download is landing on, in the window
@@ -748,6 +791,7 @@ impl World {
                 source,
                 sealed,
                 crossed_out: None,
+                stood_in: None,
             });
         }
     }
@@ -1228,6 +1272,33 @@ pub fn assert_converged(world: &World) {
             })
             .collect();
         let held_back = |h: &Option<String>| h.as_ref().is_some_and(|h| declined.contains(h));
+        let held = held_outside_the_vault(device);
+        // Where a held record agrees its file stands here.
+        let held_path = |e: &jd_core::model::Entry| -> Option<String> {
+            let agreed = e.synced_placement.as_ref()?;
+            match agreed.parent {
+                None => Some(agreed.name.clone()),
+                Some(folder) => local_path_of_folder(device, folder).map(|d| format!("{d}/{}", agreed.name)),
+            }
+        };
+        // A held record's path is set aside for the held file, never for
+        // another record's: when its own file has left that path and a file
+        // some other record owns stands there, that file is judged against
+        // the server like any other (reset B8, kill2 75118).
+        let root = jd_vfs::Vfs::root(&device.fs);
+        let anothers_file_at = |held: &jd_core::model::Entry, path: &str| -> bool {
+            let Some(here) = root
+                .as_ref()
+                .and_then(|r| jd_vfs::Vfs::fingerprint(&device.fs, &r.join(path)).ok().flatten())
+                .map(|f| f.identity())
+            else {
+                return false;
+            };
+            !held.owns(here)
+                && entries
+                    .iter()
+                    .any(|o| o.id != held.id && o.id.entity_type == jd_core::EntityType::File && o.owns(here))
+        };
         // A file declared held stands at its own path by design and is
         // checked there, by path (below): the content excuse must not take it
         // first. A held file carrying the same bytes as a parked server file
@@ -1236,15 +1307,8 @@ pub fn assert_converged(world: &World) {
             let mut paths: std::collections::HashSet<String> =
                 held_never_sent(device).into_iter().map(|(_, p)| p).collect();
             paths.extend(held_waiting(device).into_iter().map(|(_, p)| p));
-            for id in held_outside_the_vault(device) {
-                let Some(agreed) = entries.iter().find(|e| e.id == id).and_then(|e| e.synced_placement.clone()) else {
-                    continue;
-                };
-                let here = match agreed.parent {
-                    None => Some(agreed.name.clone()),
-                    Some(folder) => local_path_of_folder(device, folder).map(|d| format!("{d}/{}", agreed.name)),
-                };
-                paths.extend(here);
+            for e in entries.iter().filter(|e| held.contains(&e.id)) {
+                paths.extend(held_path(e).filter(|p| !anothers_file_at(e, p)));
             }
             paths
         };
@@ -1478,25 +1542,27 @@ pub fn assert_converged(world: &World) {
         // server keeps it sealed where it was: declared per entity (see
         // `held_outside_the_vault`), and still required to BE at its path here.
         let mut disk = disk;
-        let held = held_outside_the_vault(device);
         let waiting = held_waiting(device);
         for e in entries.iter().filter(|e| held.contains(&e.id)) {
+            // Where the server keeps the sealed copy. Deleted there, it is kept
+            // nowhere, and a live file at that path is another's (reset B9).
+            let kept = if e.remote_deleted {
+                None
+            } else {
+                server_path_of(&entries, e).and_then(|p| expected_path(&p))
+            };
+            if let Some(q) = kept {
+                server.remove(&q);
+            }
             if let Some((_, path)) = waiting.iter().find(|(id, _)| *id == e.id) {
-                if let Some(q) = server_path_of(&entries, e).and_then(|p| expected_path(&p)) {
-                    server.remove(&q);
-                }
                 assert!(disk.remove(path).is_some(), "{}: the waiting file {path:?} is not on the disk", device.name);
                 continue;
             }
-            if let Some(q) = server_path_of(&entries, e).and_then(|p| expected_path(&p)) {
-                server.remove(&q);
+            assert!(e.synced_placement.is_some(), "a held record has an agreement");
+            let here = held_path(e).unwrap_or_default();
+            if anothers_file_at(e, &here) {
+                continue;
             }
-            let agreed = e.synced_placement.as_ref().expect("a held record has an agreement");
-            let here = match agreed.parent {
-                None => Some(agreed.name.clone()),
-                Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{}", agreed.name)),
-            };
-            let here = here.unwrap_or_default();
             assert!(
                 disk.remove(&here).is_some(),
                 "{}: {:?} {} is held outside its vault at {here:?}, and nothing stands there",
@@ -1547,7 +1613,9 @@ pub fn assert_converged(world: &World) {
 /// keeps them sealed inside it: sealed, carrying an open
 /// `held_outside_the_vault` issue, the server's parent a vault and the agreed
 /// parent a plain folder or the root. The one divergence between a record and
-/// the server that is a resting place, declared by entity.
+/// the server that is a resting place, declared by entity. One whose sealed
+/// copy the server has deleted is still held: the copy edited here stays on
+/// this device only, never sent (reset B9).
 pub fn held_outside_the_vault(device: &Device) -> Vec<jd_core::model::EntityId> {
     let open: std::collections::HashSet<jd_core::model::EntityId> = device
         .store
@@ -1571,7 +1639,7 @@ pub fn held_outside_the_vault(device: &Device) -> Vec<jd_core::model::EntityId> 
         .every_entry()
         .unwrap()
         .into_iter()
-        .filter(|e| open.contains(&e.id) && e.is_encrypted && !e.remote_deleted)
+        .filter(|e| open.contains(&e.id) && e.is_encrypted)
         .filter(|e| {
             e.synced_placement
                 .as_ref()

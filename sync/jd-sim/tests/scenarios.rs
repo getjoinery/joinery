@@ -3342,6 +3342,7 @@ fn a_held_file_renamed_and_edited_then_trashed_on_the_server_is_not_published() 
         told.len() == 1 && told[0].starts_with("r.txt was deleted on the server") && told[0].contains("not uploaded"),
         "{told:?}"
     );
+    assert_converged(&world);
 }
 
 /// A held file moved back into its vault and edited in the same pass comes
@@ -3962,7 +3963,9 @@ fn a_hold_survives_a_restart() {
 /// The server trashes the sealed copy while it is held. Unedited here, that is
 /// an ordinary remote delete. Edited here, the copy stays on this device only,
 /// with an issue, and is NEVER uploaded plain -- that would be the conversion
-/// on a drag the hold exists to refuse.
+/// on a drag the hold exists to refuse. Either way the device has converged:
+/// the kept copy is a declared resting place, not a file the server lacks
+/// (reset B9).
 fn the_server_trashes_a_held_file(edited: bool) {
     let (world, _, out) = a_vault_of_two(9_967, &["holder"]);
     let holder = world.device("holder");
@@ -3995,6 +3998,7 @@ fn the_server_trashes_a_held_file(edited: bool) {
     } else {
         assert!(!disk.contains_key("Plain/out.txt"), "a remote delete did not land: {disk:?}");
     }
+    assert_converged(&world);
 }
 
 #[test]
@@ -4005,6 +4009,46 @@ fn the_server_trashing_an_unedited_held_file_deletes_it_here() {
 #[test]
 fn the_server_trashing_an_edited_held_file_keeps_the_edit_here_unsent() {
     the_server_trashes_a_held_file(true);
+}
+
+/// The convergence check sets a held record's agreed path aside for the held
+/// file only. A file another record owns standing there is that record's, and
+/// is judged against the server like any other; set aside as the held file,
+/// it was hidden from the disk side and its server copy read as only on the
+/// server (reset B8). The sweep reaches this through a long chain on disks
+/// without births (kill2 75118: the path rule gave the held file's own file
+/// to another record, and a plain record's file came to stand at the held
+/// path), so the end state is set down here by hand: the held file's own file
+/// gone from its path, and a plain record's file standing there, agreed there
+/// with the server.
+#[test]
+fn a_file_another_record_owns_at_a_held_path_is_judged_as_that_records() {
+    use jd_core::model::EntityId;
+    let (world, _, _) = a_vault_of_two(9_949, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    holder.fs.user_write("Plain/other.txt", b"a plain file of its own");
+    assert!(world.settle().is_some());
+    assert_eq!(held_issues(holder).len(), 1);
+    let other = world
+        .server
+        .files()
+        .into_iter()
+        .find(|f| f.name == "other.txt" && !f.trashed)
+        .expect("other.txt went up");
+    world
+        .server
+        .action("drive_rename", &serde_json::json!({ "entity_type": "file", "entity_id": other.id, "name": "out.txt" }))
+        .expect("the server's plain folder has no out.txt");
+    holder.fs.user_remove("Plain/out.txt");
+    holder.fs.user_rename("Plain/other.txt", "Plain/out.txt");
+    let mut entry = holder.store.get_entry(EntityId::file(other.id)).unwrap().expect("other.txt's record");
+    entry.remote.name = "out.txt".into();
+    entry.synced_placement = Some(entry.remote.clone());
+    holder.store.put_entry(&entry).unwrap();
+    assert_eq!(held_issues(holder).len(), 1, "still held");
+    assert_converged(&world);
 }
 
 /// A peer moves the sealed copy to another vault folder while it is held
