@@ -15,7 +15,7 @@ developments to reconcile at build time:
 
 ## Overview
 
-Currently ScrollDaddy runs as a two-server architecture: a **web server** (Joinery PHP app in a Docker container) and a **DNS server** (Go binary). They share a PostgreSQL database via private network. (Current production IPs live in the Server Manager dashboard and Claude memory, not this spec.) This spec covers combining both onto a single server, analyzing what changes, and producing an installer that sets up the full stack.
+Currently ScrollDaddy runs as a two-server architecture: a **web server** (Joinery PHP app in a Docker container) and a **DNS server** (Go binary). The DNS server reads the site over HTTPS, through its resolver snapshot action and a scoped machine key (`specs/dns_resolvers_read_over_https.md`). (Current production IPs live in the Server Manager dashboard and Claude memory, not this spec.) This spec covers combining both onto a single server, analyzing what changes, and producing an installer that sets up the full stack.
 
 See [scrolldaddy-deployment.md](implemented/scrolldaddy-deployment.md) for the existing two-server deployment spec.
 
@@ -148,28 +148,20 @@ Instead, Apache serves both the web app and proxies the DNS DoH endpoint using m
 a2enmod proxy proxy_http
 ```
 
-### 2. Database Connection (Simpler)
+### 2. Site Connection (Unchanged)
 
-No private network, no remote DB user, no `pg_hba.conf` edits for remote access.
-
-| Two-server | Single-server |
-|-----------|---------------|
-| DNS connects to `10.0.0.2:5432` via VPC | DNS connects to `localhost:5432` |
-| Needs `scrolldaddy_reader` user with remote access | Can use same user or `scrolldaddy_reader` via localhost |
-| `pg_hba.conf`: allow from DNS server IP | `pg_hba.conf`: localhost only (default) |
-| PostgreSQL listens on VPC interface | PostgreSQL listens on localhost only (more secure) |
-
-The `scrolldaddy_reader` user is still recommended (principle of least privilege — DNS server should not be able to write), but the `pg_hba.conf` only needs the default `local all all peer` or `host all all 127.0.0.1/32 scram-sha-256` entry. (The resolver's multi-database support, `SCD_JOINERY_DB_URLS`, is irrelevant here — a combined install serves one database.)
+The DNS server reads the site the same way on one box as on two: over HTTPS, from
+the site's resolver snapshot action, with a key issued on the site's **DNS server
+access** panel. The key is restricted to the box's own public address, which the
+primary server IP setting names. Nothing reads the database from outside the site,
+so PostgreSQL keeps its default local-only `pg_hba.conf`, and no database user is
+created for the DNS server.
 
 ### 3. DNS Server Env Config
 
 ```bash
-# Database — localhost, no remote connection
-SCD_DB_HOST=localhost
-SCD_DB_PORT=5432
-SCD_DB_NAME=scrolldaddy
-SCD_DB_USER=scrolldaddy_reader
-SCD_DB_PASSWORD=<password>
+# The site, read over HTTPS with the key issued on its DNS server access panel
+SCD_JOINERY_SITES=https://scrolldaddy.app|public_…|secret_…
 
 # DoH — Apache proxies 443 → 8053
 SCD_DOH_PORT=8053
@@ -253,7 +245,7 @@ A single script that sets up the complete ScrollDaddy stack on a fresh Ubuntu 24
 **Phase 3: ScrollDaddy DNS Server**
 - Install pre-built `scrolldaddy-dns` binary to `/usr/local/bin/`
 - Create `/etc/scrolldaddy/` directory with env config
-- Create `scrolldaddy_reader` database user with SELECT-only grants
+- Issue the DNS server's key on the site's DNS server access panel (restricted to the box's public address)
 - Write systemd service unit
 - Create log directories (`/var/log/scrolldaddy/`, `/var/log/scrolldaddy/queries/`)
 
@@ -424,22 +416,12 @@ chmod 755 /usr/local/bin/scrolldaddy-dns
 mkdir -p /etc/scrolldaddy /var/log/scrolldaddy/queries
 chown scrolldaddy:scrolldaddy /var/log/scrolldaddy /var/log/scrolldaddy/queries
 
-# 4. Create read-only DB user
-psql -U postgres -d $DBNAME <<SQL
-  CREATE USER scrolldaddy_reader WITH PASSWORD '$READER_PASSWORD';
-  GRANT CONNECT ON DATABASE $DBNAME TO scrolldaddy_reader;
-  GRANT USAGE ON SCHEMA public TO scrolldaddy_reader;
-  GRANT SELECT ON ALL TABLES IN SCHEMA public TO scrolldaddy_reader;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO scrolldaddy_reader;
-SQL
+# 4. Issue the site's DNS server key (resolver_key_issue, as the settings panel
+#    does) and keep the SCD_JOINERY_SITES entry it returns; it is shown once.
 
 # 5. Write scrolldaddy.env (templated)
 cat > /etc/scrolldaddy/scrolldaddy.env <<EOF
-SCD_DB_HOST=localhost
-SCD_DB_PORT=5432
-SCD_DB_NAME=$DBNAME
-SCD_DB_USER=scrolldaddy_reader
-SCD_DB_PASSWORD=$READER_PASSWORD
+SCD_JOINERY_SITES=$SITE_ENTRY
 SCD_DOH_PORT=8053
 SCD_API_KEY=$API_KEY
 ...
@@ -542,7 +524,7 @@ Alternatively, `_dns_init.sh` downloads the latest release from a URL if the bin
 - Apache handles public TLS for both web and DoH domains via certbot
 - DNS API (:8053) is localhost-only (Apache proxies only `/resolve/*` and `/health`)
 - DNS binary runs as unprivileged `scrolldaddy` user with systemd hardening
-- `scrolldaddy_reader` DB user has SELECT-only access
+- The DNS server's key is read-only, scoped to the snapshot action, and restricted to the box's address
 - UFW blocks everything except SSH (22), HTTP (80, for certbot), HTTPS (443), and DoT (853)
 
 ## Limitations vs Two-Server

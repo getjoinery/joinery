@@ -2,7 +2,7 @@
 
 ScrollDaddy is a DNS filtering service. Devices (phone, laptop, etc.) query ScrollDaddy's DNS resolver instead of their ISP's, and the resolver decides block / allow / rewrite for every lookup based on the user's policy.
 
-This plugin (`public_html/plugins/dns_filtering/`) provides the admin UI and data model. The actual DNS resolver is a separate Go service at `/home/user1/scrolldaddy-dns/` that reads PostgreSQL databases from one or more Joinery deployments — see "Resolver Configuration" below.
+This plugin (`public_html/plugins/dns_filtering/`) provides the admin UI and data model. The actual DNS resolver is a separate Go service at `/home/user1/scrolldaddy-dns/` that reads each Joinery site it filters for over HTTPS, through the site's resolver snapshot action and a scoped machine key — see "Resolver Configuration" below.
 
 ## Block Model
 
@@ -131,28 +131,24 @@ behaves identically regardless of how the UID reached the device.
 
 ## DNS Resolver Flow
 
-The Go resolver (`/home/user1/scrolldaddy-dns/`) reads all block data from PostgreSQL every ~60 seconds via `LightReload()`. On each DNS query:
+The Go resolver (`/home/user1/scrolldaddy-dns/`) asks each site for its snapshot every `SCD_RELOAD_INTERVAL` seconds (60 by default), sending the version it already holds; an unchanged site answers with one small reply (`internal/source`). It downloads the category blocklists the snapshot names itself, one URL at a time, whenever a list is missing or older than `SCD_BLOCKLIST_REFRESH_HOURS` (24 by default); a list that fails to download or parses to too few domains keeps its previous copy. Every good snapshot and list is written to `/var/lib/scrolldaddy/cache/` and read back at startup, so a restarted server filters from its first query even while a site is unreachable (`/health` then answers 200 `stale`). On each DNS query:
 
 1. Identify the device from its resolver UID (unique per device, embedded in DoH/DoT URL or set in the config profile).
 2. Iterate the device's blocks. For each block, check `isBlockActive()` — always-on short-circuits to `true`, scheduled blocks evaluate the current time against their schedule + timezone.
 3. Merge policy from all active blocks into effective sets: categories to block, domains to block, domains to allow, SafeSearch trigger, SafeYouTube trigger.
 4. Apply precedence: allow rules > block rules > category blocklist > upstream DNS.
 
-Implementation: `resolver.go:Resolve()` handles the merge. `cache.go:LightReload()` handles the 60s refresh. `db.go:LoadScheduledBlocks()` is the single source query.
+Implementation: `internal/resolver/resolver.go:Resolve()` handles the merge; `internal/source/source.go` keeps the cache filled from the sites and the lists.
 
 ### Resolver Configuration
 
-The resolver is brand-neutral and can serve multiple Joinery deployments simultaneously. Each deployment has its own database; the resolver unions all of them in memory. Device resolver UIDs are 128-bit random values and are globally unique across deployments, so the union is collision-free.
+The resolver is brand-neutral and can serve multiple Joinery deployments simultaneously; it unions their snapshots in memory. Device resolver UIDs are 128-bit random values and are globally unique across deployments, so the union is collision-free.
 
-**Single deployment (current ScrollDaddy setup):** the legacy `SCD_DB_*` env vars still work.
-
-**Multiple deployments:** set `SCD_JOINERY_DB_URLS` to a comma-separated list of PostgreSQL DSNs:
+Each site is one `SCD_JOINERY_SITES` entry, comma-separated, in the form `{base URL}|{public key}|{secret}`:
 ```
-SCD_JOINERY_DB_URLS=host=scrolldaddy-db dbname=joinery user=scd password=xxx sslmode=disable,host=networksentry-db dbname=joinery user=scd password=xxx sslmode=disable
+SCD_JOINERY_SITES=https://scrolldaddy.app|public_…|secret_…,https://networksentry.example|public_…|secret_…
 ```
-Or URL form: `postgres://user:password@host/dbname,...`
-
-Each DB must be reachable from the resolver IPs (`45.56.103.84`, `97.107.131.227`). The resolver validates the schema of every configured DB at startup and retries if any fail. Blocklist domains are unioned from all DBs (both deployments share the same blocklist source, so this is typically a no-op).
+The entry is shown once, when the key is issued on that site's **DNS server access** panel (below). The base must be an `https://` origin with no path, and each site may be listed once. Nothing reads a site's database from another machine: a site's PostgreSQL answers only its own host.
 
 See the resolver's `README.md` and `/etc/scrolldaddy/OPS_GUIDE.md` for ops details.
 
@@ -165,7 +161,7 @@ See the resolver's `README.md` and `/etc/scrolldaddy/OPS_GUIDE.md` for ops detai
 - `blocklist_sources`: the category → URL list and the skip list from `blocklist_sources.json` (`BlocklistSources`), which the DNS servers download and parse themselves;
 - `version`: sha256 of the canonical JSON of those three, and `generated_at`.
 
-A caller sends the `if_version` it holds; when it still matches, the answer is `{version, unchanged: true}`. The rows selected match the resolver's database queries (`db.go`) exactly.
+A caller sends the `if_version` it holds; when it still matches, the answer is `{version, unchanged: true}`.
 
 Only a machine key scoped to this action can call it (`requires_scoped_key`; see `docs/api.md` § Scoped machine keys). The **DNS server access** panel under the plugin's settings (`includes/settings_actions.php`) mints one per configured server through `resolver_key_issue` and ends it through `resolver_key_revoke` (`DnsResolverAccess`):
 

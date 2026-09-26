@@ -114,8 +114,8 @@ The second deployment is currently named "NetworkSentry" in this spec. Substitut
 - [ ] Set tier-to-category mapping for NetworkSentry's subscription tiers
 
 ### Phase H — Resolver
-- [ ] Open firewall / pg_hba on NetworkSentry's PostgreSQL to accept connections from resolver IPs (`45.56.103.84`, `97.107.131.227`)
-- [ ] Add NetworkSentry's DB DSN to `SCD_JOINERY_DB_URLS` in `/etc/scrolldaddy/scrolldaddy.env` on each DNS server; `systemctl restart scrolldaddy-dns` on each
+- [ ] Set NetworkSentry's `dns_filtering_dns_server_ip` / `dns_filtering_dns_secondary_server_ip` to the resolver IPs (`45.56.103.84`, `97.107.131.227`), then issue one key per server on its **DNS server access** panel (plugin settings)
+- [ ] Append each key's `SCD_JOINERY_SITES` entry (`https://networksentry.com|public_…|secret_…`, shown once) to `/etc/scrolldaddy/scrolldaddy.env` on its DNS server; `systemctl restart scrolldaddy-dns` on each. NetworkSentry's database stays closed to other machines (`specs/dns_resolvers_read_over_https.md`)
 - [ ] Mint NetworkSentry API key on the resolver; store in NetworkSentry deployment's plugin settings
 - [ ] Smoke-test: create a NetworkSentry test device; verify DNS resolution applies expected blocks within the resolver's poll interval
 - [ ] Smoke-test: verify ScrollDaddy device behavior is unaffected

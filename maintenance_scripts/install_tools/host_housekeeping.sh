@@ -4,6 +4,11 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.10 - A container's pg_hba admits loopback and its gateway, and nothing else: the
+#                declared lines are gone (specs/dns_resolvers_read_over_https.md WP7).
+#                scrolldaddy's DNS resolvers read the site over HTTPS, so no machine reads
+#                a Joinery database over the network. A leftover config/postgres_access.conf
+#                gets one warning that it is not read.
 # Version: 1.9 - Every certbot lineage the machine renews through Apache is healed at every
 #                converge (host_files_heal_renewal_confs): installer = None and a reload
 #                hook, so a renewal never edits a rendered vhost. render_vhost.sh healed
@@ -605,13 +610,9 @@ fi
 #     standalone server that is the whole policy.
 #   - In a container, one rule is added for the Docker host: its gateway,
 #     the address the host's connections to the site's loopback-published
-#     database port arrive from. Other containers on the same host are
-#     refused. Then the lines the site declares in config/postgres_access.conf
-#     (a volume, so they survive a rebuild) are added, each checked: one
-#     named database, one named role that is not postgres, one address no
-#     wider than a /24 (IPv6 /64), md5 or scram-sha-256. A line that fails
-#     the check is named and left out. A `publish <address>` line is the
-#     host's (install.sh publishes the database port there) and is passed over.
+#     database port arrive from. Other containers on the same host, and every
+#     other machine, are refused. There is no way to declare another: a
+#     config/postgres_access.conf is not read, and one left behind is named.
 #   - A standalone server's listen_addresses is pinned to localhost by a
 #     conf.d drop-in, restarting PostgreSQL only when the setting it was
 #     running with was something else. A container keeps listening on its
@@ -633,25 +634,10 @@ pg_container_gateway() {
     [[ "${hex}" =~ ^[0-9A-Fa-f]{8}$ ]] || return 1
     printf '%d.%d.%d.%d' "0x${hex:6:2}" "0x${hex:4:2}" "0x${hex:2:2}" "0x${hex:0:2}"
 }
-pg_access_line_ok() {  # prints why a declared line is refused, or nothing
-    local t="$1" d="$2" u="$3" a="$4" m="$5" extra="$6" prefix
-    [[ -z "${extra}" ]] || { echo "more than five fields"; return; }
-    [[ "${t}" == "host" || "${t}" == "hostssl" ]] || { echo "type '${t}' is not host or hostssl"; return; }
-    [[ "${d}" =~ ^[A-Za-z0-9_]+$ ]] || { echo "database '${d}' is not one plain name"; return; }
-    case "${d}" in all|replication|sameuser|samerole) echo "database '${d}' is not one database"; return ;; esac
-    [[ "${u}" =~ ^[A-Za-z0-9_]+$ ]] || { echo "role '${u}' is not one plain name"; return; }
-    case "${u}" in all|postgres) echo "role '${u}' may not be admitted from the network"; return ;; esac
-    if [[ "${a}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})$ ]]; then
-        prefix="${BASH_REMATCH[2]}"; (( prefix >= 24 && prefix <= 32 )) || { echo "address ${a} is wider than a /24"; return; }
-    elif [[ "${a}" =~ ^[0-9A-Fa-f:]+/([0-9]{1,3})$ ]]; then
-        prefix="${BASH_REMATCH[1]}"; (( prefix >= 64 && prefix <= 128 )) || { echo "address ${a} is wider than a /64"; return; }
-    else
-        echo "address '${a}' is not an address/prefix"; return
-    fi
-    [[ "${m}" == "md5" || "${m}" == "scram-sha-256" ]] || { echo "method '${m}' is not md5 or scram-sha-256"; return; }
-}
-
 PG_ACCESS_FILE="${SITE_ROOT}/config/postgres_access.conf"
+if [[ -f "${PG_ACCESS_FILE}" ]]; then
+    warn "${PG_ACCESS_FILE} is not read: a Joinery database answers only its own machine; remove it"
+fi
 for pg_dir in "${FS_ROOT}"/etc/postgresql/*/main; do
     [[ -f "${pg_dir}/pg_hba.conf" ]] || continue
     hba="${pg_dir}/pg_hba.conf"
@@ -689,24 +675,6 @@ for pg_dir in "${FS_ROOT}"/etc/postgresql/*/main; do
         else
             warn "PostgreSQL ${pg_ver}: no default route in ${FS_ROOT}/proc/net/route, so the Docker host is not admitted"
         fi
-        if [[ -f "${PG_ACCESS_FILE}" ]]; then
-            n=0
-            while IFS= read -r line || [[ -n "${line}" ]]; do
-                n=$((n + 1))
-                [[ "${line}" =~ ^[[:space:]]*(#|$) ]] && continue
-                read -r f1 f2 f3 f4 f5 f6 <<< "${line}"
-                [[ "${f1}" == "publish" ]] && continue
-                why="$(pg_access_line_ok "${f1}" "${f2}" "${f3}" "${f4}" "${f5}" "${f6}")"
-                if [[ -n "${why}" ]]; then
-                    warn "postgres_access.conf line ${n} left out: ${why}"
-                    continue
-                fi
-                printf '# joinery-local-only: declared in config/postgres_access.conf\n' >> "${kept}"
-                printf '%-7s %-15s %-15s %-23s %s\n' "${f1}" "${f2}" "${f3}" "${f4}" "${f5}" >> "${kept}"
-            done < "${PG_ACCESS_FILE}"
-        fi
-    elif [[ -f "${PG_ACCESS_FILE}" ]]; then
-        warn "${PG_ACCESS_FILE} is ignored here: a standalone server's database answers only locally"
     fi
 
     if ! cmp -s "${kept}" "${hba}"; then

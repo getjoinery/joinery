@@ -34,7 +34,39 @@ public-html-9a, reviewer public-html-bb.
   - the same gates passed (health ok, baseline verdicts, IPv4 answers and IPv6 refused,
     public HTTPS 200, cache restart 200 `stale`, RSS 226 MB).
   - The check scripts are removed from both boxes.
-- **Next: WP7**, after both have served for a week (from about 2026-10-02).
+- **WP7, live, done 2026-09-26** (the owner brought it forward from 2026-10-02):
+  - **Evidence:** over one minute, no packets on any database-port rule, no connection to
+    scrolldaddy's database port, and no reader session. The DNS servers had read over
+    HTTPS since 2026-09-25.
+  - **scrolldaddy:** `config/postgres_access.conf` was set aside (kept in
+    `/root/rebase/scrolldaddy/` on docker-prod). Housekeeping rebuilt pg_hba as loopback
+    plus the Docker host. `DROP OWNED BY` and `DROP ROLE scrolldaddy_reader` ran with the
+    owner's yes; 0 such roles are left.
+  - **docker-prod's firewall:** install.sh's standard `DOCKER-USER` drop of 9080–9099 on
+    eth0 is in place. The tagged exemption, both hand-made ACCEPTs (97.107.131.227 and
+    192.168.128.0/17) and the narrower 9080–9087 drop are gone. Saved; the originals are
+    `rules.v4.pre-wp7` / `rules.v6.pre-wp7`.
+  - **Checked from outside:** 9087 is closed from the primary on docker-prod's private
+    and public addresses, and 9082 is closed from dev.
+  - **Both DNS servers:** the `SCD_DB_*` lines are removed (copy kept as
+    `scrolldaddy.env.pre-wp7`), and the `.pre-https` and `.pre-peer` copies are deleted.
+    Both restarted to health 200 ok, `source_ok`.
+  - scrolldaddy's container still has its database port bound on 192.168.206.198:9087
+    until its next rebuild. The firewall drops it and pg_hba admits no one from the
+    network.
+- **WP7, code, built 2026-09-26, uncommitted:**
+  - `install.sh` 2.86, `host_housekeeping.sh` 1.10, `rebase_site_container.sh` 1.7 and
+    `restore_database.sh` 3.9 (comments);
+  - dns_filtering 1.4.0 (the task, the data class and the setting are gone);
+  - migration 202 (`blocklist_domains_dropped.php`);
+  - server_manager 1.26.5 (`NodeHealthProbe` 1.3, overview 1.26);
+  - docs and the three other specs.
+  - Tests: installer_contract 774/774, host_housekeeping 109/109, node_health_probe
+    41/41. `db --changed` shows 508/510; the two failures are dev's own
+    `bld_blocklist_domains` table and setting row, which migration 202 removes.
+- **Next:** commit, release, and dev's `update_database` (drops dev's 549 MB table; needs
+  the owner's yes). Every site then takes the release: scrolldaddy's migration drops its
+  593 MB table.
 - **WP6** is live and needs the owner present.
 - **WP7's code, and WP4's site-side removals, stay out of the tree until WP6 is done on
   both DNS servers.** A release carrying them early would strip the resolvers' database

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.86 - A site's database port is published on 127.0.0.1, always. The declared
+#              exception is gone (specs/dns_resolvers_read_over_https.md WP7): scrolldaddy's
+#              DNS resolvers read the site over HTTPS with a scoped key, so no machine reads
+#              a Joinery database over the network. config/postgres_access.conf is no
+#              longer read, and the DOCKER-USER rule no longer counts exemptions.
 #VERSION 2.85 - A core-archive download from an upgrade server that does not answer falls
 #               back to the archive copy, as it always said it would. The metadata fetch
 #               was a plain assignment under set -e, so a failed curl ended the install
@@ -2224,10 +2229,6 @@ do_docker_install() {
     # official admin-rules hook (runs in FORWARD). --ctorigdstport matches the original
     # pre-NAT port recorded in conntrack. Loopback traffic bypasses eth0 and this rule,
     # so `ssh -L 908X:localhost:908X` tunnels still work.
-    # A site that declares its database is read from another machine gets an
-    # exemption for exactly that address and port (allow_declared_database_publish),
-    # which must stay above this rule, so the rule goes in below any exemption,
-    # and only once.
     # Toggle off: iptables -D DOCKER-USER -i <iface> -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP && netfilter-persistent save
     print_step "Blocking external access to Docker Postgres ports 9080-9099..."
     apt-get install -y iptables-persistent
@@ -2237,9 +2238,7 @@ do_docker_install() {
     elif iptables -C DOCKER-USER -i "$PUBLIC_IFACE" -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP 2>/dev/null; then
         print_success "Postgres ports 9080-9099 already blocked on $PUBLIC_IFACE"
     else
-        local EXEMPT
-        EXEMPT=$(iptables -S DOCKER-USER 2>/dev/null | grep -c 'joinery-declared-db-publish')
-        iptables -I DOCKER-USER $((EXEMPT + 1)) -i "$PUBLIC_IFACE" -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP
+        iptables -I DOCKER-USER -i "$PUBLIC_IFACE" -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP
         netfilter-persistent save
         print_success "Postgres ports 9080-9099 blocked on $PUBLIC_IFACE (tunnels still work)"
     fi
@@ -2927,9 +2926,8 @@ EOF
         # Container image: loopback only, like bare metal. It listens on its
         # own interface because the Docker host reaches the site's database
         # through the loopback-published port, and host_housekeeping.sh admits
-        # exactly that host (the container's gateway) at every start, plus any
-        # line the site declares in config/postgres_access.conf. Every other
-        # container on the host is refused.
+        # exactly that host (the container's gateway) at every start. Every
+        # other container on the host, and every other machine, is refused.
         PG_HOST_RULES="host    all             all             127.0.0.1/32            ${PG_AUTH_METHOD}"
         PG_LISTEN="*"
     else
@@ -3965,52 +3963,6 @@ refuse_database_major_mismatch() {
     exit 1
 }
 
-# Where the host publishes a site's database port: 127.0.0.1, unless the site
-# declares in config/postgres_access.conf, on its config volume, that another
-# machine reads it (a `publish <address>` line beside the pg_hba lines that
-# admit that machine; scrolldaddy's DNS resolvers read its database over the
-# private network). On the volume, the declaration survives every rebuild. The
-# address must be one of this host's own IPv4 addresses and never 0.0.0.0;
-# anything else is refused while the old container still runs. Sets
-# DB_PUBLISH in the caller.
-resolve_database_publish_address() {
-    local SITENAME="$1"
-    local MOUNTPOINT FILE ADDR
-    DB_PUBLISH="127.0.0.1"
-    MOUNTPOINT=$(docker volume inspect -f '{{ .Mountpoint }}' "${SITENAME}_config" 2>/dev/null) || return 0
-    FILE="${MOUNTPOINT}/postgres_access.conf"
-    [ -n "$MOUNTPOINT" ] && [ -f "$FILE" ] || return 0
-    ADDR="$(awk '$1 == "publish" { print $2; exit }' "$FILE")"
-    [ -n "$ADDR" ] || return 0
-    if ! [[ "$ADDR" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || [ "$ADDR" = "0.0.0.0" ] \
-        || ! ip -o -4 addr show 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4 }' | grep -qxF "$ADDR"; then
-        print_error "config/postgres_access.conf of '${SITENAME}' publishes its database on '${ADDR}', which is not an address of this host."
-        print_error "Name one of this host's own IPv4 addresses, never 0.0.0.0, or remove the line. Nothing was changed."
-        exit 1
-    fi
-    DB_PUBLISH="$ADDR"
-    print_info "Database port published on ${ADDR}, as config/postgres_access.conf declares"
-}
-
-# A declared database port must get past the rule `install.sh docker` puts in
-# DOCKER-USER, which drops the database port range arriving on the public
-# interface (a Linode's private address is on that interface too). One RETURN
-# rule for exactly this address and port goes above it, tagged so that rule is
-# placed below every exemption. Nothing else is opened; pg_hba still admits only
-# the declared machines. A host without the DOCKER-USER chain needs nothing.
-allow_declared_database_publish() {
-    local ADDR="$1" PORT="$2"
-    local RULE=(-p tcp -m conntrack --ctorigdst "$ADDR" --ctorigdstport "$PORT" -m comment --comment joinery-declared-db-publish -j RETURN)
-    iptables -S DOCKER-USER > /dev/null 2>&1 || return 0
-    iptables -C DOCKER-USER "${RULE[@]}" 2>/dev/null && return 0
-    if iptables -I DOCKER-USER 1 "${RULE[@]}"; then
-        command -v netfilter-persistent > /dev/null 2>&1 && netfilter-persistent save > /dev/null 2>&1
-        print_info "Firewall: ${ADDR}:${PORT} exempted from the database-port block, as declared"
-    else
-        print_warning "Could not exempt ${ADDR}:${PORT} in DOCKER-USER; the machines that read this database may be blocked"
-    fi
-}
-
 # Carry the agent's identity from a container that predates the _agent volume.
 # The credential it paired with lives in /etc/joinery-agent; in a container
 # built before the volume existed that is the writable layer, which `docker rm`
@@ -4325,12 +4277,9 @@ do_site_docker() {
 
     print_success "Archive structure verified"
 
-    # A kept database volume must be one this image's PostgreSQL can open, and
-    # a kept config volume says where its database port is published.
-    local DB_PUBLISH="127.0.0.1"
+    # A kept database volume must be one this image's PostgreSQL can open.
     if [ "$WIPE_DATA" -ne 1 ]; then
         refuse_database_major_mismatch "$SITENAME" "joinery-base:${BASE_IMAGE_VERSION}"
-        resolve_database_publish_address "$SITENAME"
     fi
 
     # Check for existing container
@@ -4610,7 +4559,7 @@ EOF
             --env-file "$ENV_FILE" \
             $MEMORY_OPTS \
             -p "${WEB_PUBLISH}${PORT}":80 \
-            -p "${DB_PUBLISH}:${DB_PORT}":5432 \
+            -p "127.0.0.1:${DB_PORT}":5432 \
             $CLONE_ENV_OPTS \
             -v "${SITENAME}_code":/var/www/html/"${SITENAME}"/public_html \
             -v "${SITENAME}_vendor":/var/www/html/"${SITENAME}"/vendor \
@@ -4636,7 +4585,7 @@ EOF
             --env-file "$ENV_FILE" \
             $MEMORY_OPTS \
             -p "${WEB_PUBLISH}${PORT}":80 \
-            -p "${DB_PUBLISH}:${DB_PORT}":5432 \
+            -p "127.0.0.1:${DB_PORT}":5432 \
             $CLONE_ENV_OPTS \
             -v "${SITENAME}_code":/var/www/html/"${SITENAME}"/public_html \
             -v "${SITENAME}_vendor":/var/www/html/"${SITENAME}"/vendor \
@@ -4662,7 +4611,6 @@ EOF
         print_error "Failed to start container"
         exit 1
     fi
-    [ "$DB_PUBLISH" = "127.0.0.1" ] || allow_declared_database_publish "$DB_PUBLISH" "$DB_PORT"
 
     # Create host-side logs directory for reverse proxy (used by manage_domain.sh)
     # Container has its own /var/www/html/{site}/ but host needs logs dir for proxy
@@ -4768,7 +4716,7 @@ EOF
         echo -e "Site Name:        ${GREEN}$SITENAME${NC}"
         echo -e "Domain:           ${GREEN}$DOMAIN_NAME${NC}"
         echo -e "Web Port:         ${GREEN}$PORT${NC}${WEB_PUBLISH:+ (on 127.0.0.1, behind the host proxy)}"
-        echo -e "Database Port:    ${GREEN}$DB_PORT${NC} (on $DB_PUBLISH)"
+        echo -e "Database Port:    ${GREEN}$DB_PORT${NC} (on 127.0.0.1)"
         echo ""
         if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
             echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"

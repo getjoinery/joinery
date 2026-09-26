@@ -56,9 +56,12 @@ Configuration does not have this problem. The intent to connect is written
 down whether or not a connection is open:
 
 ```
-/etc/scrolldaddy/scrolldaddy.env      SCD_DB_HOST=192.168.206.198
-/etc/scrolldaddy/OPS_GUIDE.md         ScrollDaddy DB ... port 9087
+/etc/scrolldaddy/scrolldaddy.env      SCD_JOINERY_SITES=https://scrolldaddy.app|public_…|secret_…
 ```
+
+The resolvers read the site over HTTPS (`specs/dns_resolvers_read_over_https.md`),
+so their configuration names the site's domain, not the host's address: the scan
+matches the names a node serves as well as its addresses.
 
 **Consequence for the design:** the check reports *declared* dependencies. It
 will miss a consumer that hardcodes an address in a compiled binary or fetches

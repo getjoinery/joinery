@@ -9,7 +9,9 @@ B19 and B20 (found finishing R1) are fixed in 0.8.430 (`specs/fleet_move_bug_fix
 **Stage 3 is done (2026-09-25/26, from 0.8.430): all eight Docker sites are on
 PostgreSQL 18** and pass every gate (§ Progress). scrolldaddy moved before
 `specs/dns_resolvers_read_over_https.md` WP7, with its database publish declared.
-`finish` (dropping the rollback copies) runs from 2026-10-03. Stage 4 waits on Ubuntu
+`finish` ran on all eight on 2026-09-26, at the owner's word, a week early: the rollback
+images, database copies and dumps are gone. With base images 1.0 and 1.2 and the build
+cache also removed, docker-prod went from 37 GB used to 19.8 GB. Stage 4 waits on Ubuntu
 (D3, D4). B23–B25, found during the moves, are fixed; B23 was also healed
 live on docker-prod.
 Two owner decisions open (D3, D4; D1 and D2 are in `specs/backup_database_incrementals.md`).
@@ -641,10 +643,9 @@ returns to `prepared`, so a retry needs a fresh `prepare`.
 6. getjoinery-orgs
 7. getjoinery-developers
 8. getjoinery — the production management node, so dispatch nothing from it while it moves.
-9. **scrolldaddy last, after `specs/dns_resolvers_read_over_https.md` WP7.** By then its
-   DNS resolvers read the site over HTTPS and its hand-made database port is reported
-   as dropped rather than refused, so it moves like the others. Confirm both resolvers
-   serve during and after the move.
+9. **scrolldaddy last.** Its DNS resolvers read the site over HTTPS
+   (`specs/dns_resolvers_read_over_https.md`), so no database access carries across a
+   move. Confirm both resolvers serve during and after the move.
 
 ## Stage 4 — The two standalone boxes (owner, by hand)
 

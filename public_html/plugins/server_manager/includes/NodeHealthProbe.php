@@ -19,6 +19,8 @@
  * node. They used to be separate code and could disagree about whether a
  * machine was reachable.
  *
+ * @version 1.3 - SERVICE_KEYS no longer carries db_connected: every DNS server reads its sites over
+ *                 HTTPS and reports source_ok (specs/dns_resolvers_read_over_https.md WP7)
  * @version 1.2 - SERVICE_KEYS carries source_ok (a 2.0 DNS server's snapshot sources)
  * @version 1.1 - MACHINE_KEYS carries swap_total_mb and swap_used_mb
  * @version 1.0
@@ -44,10 +46,9 @@ class NodeHealthProbe {
 	 * Keys a service may publish about ITSELF. For a DNS server, source_ok says
 	 * every Joinery site it filters for answered its snapshot request lately,
 	 * and status is ok, stale (filtering from its cached copy) or degraded
-	 * (passthrough, the only case it answers 503). db_connected is what a 1.8
-	 * DNS server reports instead of source_ok.
+	 * (passthrough, the only case it answers 503).
 	 */
-	const SERVICE_KEYS = ['status', 'source_ok', 'db_connected', 'uptime_seconds', 'last_reload'];
+	const SERVICE_KEYS = ['status', 'source_ok', 'uptime_seconds', 'last_reload'];
 
 	/**
 	 * Keys a service may publish about the MACHINE it runs on.

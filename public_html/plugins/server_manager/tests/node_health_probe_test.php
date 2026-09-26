@@ -58,7 +58,7 @@ check(NodeHealthProbe::MACHINE_KEYS === $machine_keys,
 // A real answer from a ScrollDaddy DNS box, machine facts included.
 $live = json_encode(array(
 	'status'             => 'ok',
-	'db_connected'       => true,
+	'source_ok'          => true,
 	'uptime_seconds'     => 2958346,
 	'last_reload'        => '2026-08-31T12:06:35Z',
 	'disk_usage_percent' => 20,
@@ -77,7 +77,7 @@ foreach ($machine_keys as $k) {
 	check(array_key_exists($k, $facts), "a health document contributes {$k}");
 }
 check($facts['disk_used'] === '4.7G', 'and the value arrives unaltered', var_export($facts['disk_used'] ?? null, true));
-check($facts['db_connected'] === true, 'a service fact arrives as its own type, not stringified');
+check($facts['source_ok'] === true, 'a service fact arrives as its own type, not stringified');
 
 // The status blob's uptime is a machine figure everywhere else in the fleet. A
 // daemon restart must not read as a rebooted box.
@@ -86,10 +86,10 @@ check(($facts['service_uptime_seconds'] ?? null) === 2958346,
 	'it is kept under its own name instead');
 
 // ---------------------------------------------------------------------------
-section('A 2.0 DNS server reports its sites instead of a database');
+section('A DNS server reports its sites');
 
-// scrolldaddy-dns 2.0 reads its sites over HTTPS: source_ok replaces
-// db_connected, and "stale" (200) means it filters from its cached copy.
+// scrolldaddy-dns reads its sites over HTTPS: source_ok says they answered,
+// and "stale" (200) means it filters from its cached copy.
 $v2 = NodeHealthProbe::facts_from_body(json_encode(array(
 	'status'             => 'stale',
 	'source_ok'          => false,
@@ -101,7 +101,9 @@ $v2 = NodeHealthProbe::facts_from_body(json_encode(array(
 )));
 check(($v2['source_ok'] ?? null) === false, 'source_ok arrives, as a boolean');
 check(($v2['status'] ?? null) === 'stale', 'the stale status arrives');
-check(!array_key_exists('db_connected', $v2), 'a 2.0 document invents no db_connected');
+check(!array_key_exists('db_connected', $v2), 'a document invents no db_connected');
+$old = NodeHealthProbe::facts_from_body(json_encode(array('status' => 'ok', 'db_connected' => true)));
+check(!array_key_exists('db_connected', $old), 'and a db_connected a document still carries is not a service fact');
 check(!array_key_exists('sources', $v2) && !array_key_exists('blocklists_missing', $v2),
 	'the per-site and per-list arrays are not folded as scalar facts');
 

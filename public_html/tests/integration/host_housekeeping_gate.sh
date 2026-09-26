@@ -20,7 +20,8 @@
 #
 # PostgreSQL answers only locally: a standalone server's pg_hba keeps its local
 # and loopback rules and gains the listen drop-in; a container admits its
-# gateway (the Docker host) and the lines its site declares, each checked.
+# gateway (the Docker host) and nothing else. A config/postgres_access.conf
+# left behind is not read, and is named once.
 
 set -u
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -324,20 +325,17 @@ chk "and keeps its local and loopback rules" "$(grep -cE '^(local|host +all +all
 chk "the original is kept beside it" "$(grep -c '0\.0\.0\.0/0' "$PG/etc/postgresql/16/main/pg_hba.conf.pre-local-only")" "1"
 chk "and PostgreSQL is restarted onto localhost" "$(printf '%s\n' "$out" | grep -c "was listening on '\*': restarting it on localhost only")" "1"
 
-PG="$T/pg-ctr"; mkpg "$PG" '*' 'local   all             postgres                                md5\nlocal   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             0.0.0.0/0               md5\nhost    all             all             ::1/128                 md5\n'
+PG="$T/pg-ctr"; mkpg "$PG" '*' 'local   all             postgres                                md5\nlocal   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             0.0.0.0/0               md5\nhost    all             all             ::1/128                 md5\n# joinery-local-only: declared in config/postgres_access.conf\nhost    scrolldaddy     scrolldaddy_reader 192.168.206.21/32       md5\n'
 touch "$PG/.dockerenv"; mkdir -p "$PG/proc/net" "$T/pg-ctr-site/config"
 printf 'Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\neth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n' > "$PG/proc/net/route"
-printf '# declared\nhost scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\nhost all all 10.0.0.5/32 md5\nhost scrolldaddy postgres 10.0.0.5/32 md5\nhost scrolldaddy reader 10.0.0.0/8 md5\nhost scrolldaddy reader 10.0.0.5/32 trust\npublish 192.168.206.198\n' > "$T/pg-ctr-site/config/postgres_access.conf"
+# The file a site used to declare a network reader in: left behind, it is read by nothing.
+printf 'host scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\npublish 192.168.206.198\n' > "$T/pg-ctr-site/config/postgres_access.conf"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-ctr-site" 2>&1)"
 HBA="$PG/etc/postgresql/16/main/pg_hba.conf"
 chk "a container loses the network-wide rule" "$(grep -c '0\.0\.0\.0/0' "$HBA")" "0"
 chk "and admits the Docker host, its gateway, with the image's own method" "$(grep -cE '^host +all +all +172\.17\.0\.1/32 +md5$' "$HBA")" "1"
-chk "and the declared resolver line" "$(grep -cE '^host +scrolldaddy +scrolldaddy_reader +192\.168\.206\.21/32 +md5$' "$HBA")" "1"
-chk "a declared line naming all databases is left out, by line" "$(printf '%s\n' "$out" | grep -c "line 3 left out: database 'all'")" "1"
-chk "one naming postgres is left out" "$(printf '%s\n' "$out" | grep -c "line 4 left out: role 'postgres'")" "1"
-chk "one wider than a /24 is left out" "$(printf '%s\n' "$out" | grep -c 'line 5 left out: address 10.0.0.0/8 is wider')" "1"
-chk "one asking for trust is left out" "$(printf '%s\n' "$out" | grep -c "line 6 left out: method 'trust'")" "1"
-chk "the publish line is the host's: passed over, not refused, not in pg_hba" "$(printf '%s\n' "$out" | grep -c 'line 7 left out'):$(grep -c '^publish' "$HBA")" "0:0"
+chk "and nothing else from the network: a once-declared reader line is removed" "$(grep -c 'scrolldaddy_reader\|declared' "$HBA")" "0"
+chk "a leftover postgres_access.conf is not read, and is named once" "$(printf '%s\n' "$out" | grep -c 'postgres_access.conf is not read')" "1"
 chk "the container keeps listening on its interface (how the host reaches it)" "$([ -e "$PG/etc/postgresql/16/main/conf.d/99-joinery-local-only.conf" ] && echo pinned || echo untouched)" "untouched"
 before="$(tree_sum "$PG")"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-ctr-site" 2>&1)"
@@ -360,7 +358,7 @@ chk "ALTER SYSTEM saying '*' outranks the drop-in: named, and the run fails" "$r
 PG="$T/pg-bm-access"; mkpg "$PG" localhost "$LOCAL_HBA"; mkdir -p "$T/pg-bm-site/config"
 printf 'host scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\n' > "$T/pg-bm-site/config/postgres_access.conf"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-bm-site" 2>&1)"
-chk "a standalone server ignores a declared access file, and says so" "$(grep -c scrolldaddy_reader "$PG/etc/postgresql/16/main/pg_hba.conf"):$(printf '%s\n' "$out" | grep -c 'answers only locally$')" "0:1"
+chk "a standalone server does not read an access file either, and names it once" "$(grep -c scrolldaddy_reader "$PG/etc/postgresql/16/main/pg_hba.conf"):$(printf '%s\n' "$out" | grep -c 'postgres_access.conf is not read')" "0:1"
 
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"
