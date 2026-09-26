@@ -4011,6 +4011,45 @@ fn the_server_trashing_an_edited_held_file_keeps_the_edit_here_unsent() {
     the_server_trashes_a_held_file(true);
 }
 
+/// The server deletes a file while the user saves it again with the same
+/// bytes, the way an editor saves: a new file under the old name. Nothing
+/// was edited, so the delete lands here. With births the scan binds the new
+/// file to the record (it replaced the old one), and the trash's identity
+/// check passes. Without them nothing rebinds the record's own file, so the
+/// trash acts on its path as it always has (`trusted_own_file`): checked by
+/// the old file id, it would refuse the new file on every pass and the device
+/// would never go quiet (`specs/drive_file_identity.md`, commit 3).
+fn a_server_delete_lands_on_a_file_saved_again_with_the_same_bytes(births: bool) {
+    let world = World::new(9_939, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.hide_births(!births);
+    let body = b"saved again, not changed";
+    laptop.fs.user_write("notes.txt", body);
+    assert!(world.settle().is_some());
+    let id = world.server.files().into_iter().find(|f| f.name == "notes.txt").expect("it went up").id;
+    let before = laptop.fs.file_id_of("notes.txt");
+    laptop.fs.user_remove("notes.txt");
+    laptop.fs.user_write("notes.txt", body);
+    assert_ne!(laptop.fs.file_id_of("notes.txt"), before, "construction: a new file under the old name");
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": id }))
+        .expect("the trash should be accepted");
+    assert!(world.settle().is_some(), "the device never went quiet");
+    assert!(laptop.fs.peek("notes.txt").is_none(), "the server's delete did not land");
+    assert_converged(&world);
+}
+
+#[test]
+fn a_server_delete_lands_on_a_file_saved_again_with_the_same_bytes_with_births() {
+    a_server_delete_lands_on_a_file_saved_again_with_the_same_bytes(true);
+}
+
+#[test]
+fn a_server_delete_lands_on_a_file_saved_again_with_the_same_bytes_without_births() {
+    a_server_delete_lands_on_a_file_saved_again_with_the_same_bytes(false);
+}
+
 /// The convergence check sets a held record's agreed path aside for the held
 /// file only. A file another record owns standing there is that record's, and
 /// is judged against the server like any other; set aside as the held file,

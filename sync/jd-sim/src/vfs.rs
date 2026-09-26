@@ -188,6 +188,11 @@ pub struct MemFs {
     #[allow(clippy::type_complexity)]
     landing: Arc<Mutex<Option<Box<dyn FnMut(&Path) + Send>>>>,
     dir_creating: Arc<Mutex<Option<Box<dyn FnMut(&Path) + Send>>>>,
+    /// The disk changes under the executor between two of its reads of one
+    /// path: the stored key, whether the first read has happened, and what
+    /// the disk does before the second (`MemFs::between_reads`).
+    #[allow(clippy::type_complexity)]
+    between_reads: Arc<Mutex<Option<(String, bool, Box<dyn FnOnce(&MemFs) + Send>)>>>,
 }
 
 impl std::fmt::Debug for MemFs {
@@ -234,6 +239,39 @@ impl MemFs {
             clock,
             landing: Arc::new(Mutex::new(None)),
             dir_creating: Arc::new(Mutex::new(None)),
+            between_reads: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Change the disk between two reads of one path: `f` runs at the start
+    /// of the next access to `path` after the next one, whatever either
+    /// access is. For pins of the rule that what the executor checks, hashes
+    /// and sends is one file (`specs/drive_file_identity.md`, T1-D): a
+    /// swap there lands after the executor's first look and before anything
+    /// it reads again by the path.
+    pub fn between_reads(&self, path: &str, f: impl FnOnce(&MemFs) + Send + 'static) {
+        *self.between_reads.lock().unwrap() = Some((self.store_path(path), false, Box::new(f)));
+    }
+
+    /// The hook above, at an access to `key`: the first access arms it, the
+    /// second runs it before it is served.
+    fn run_between_reads(&self, key: &str) {
+        let due = {
+            let mut slot = self.between_reads.lock().unwrap();
+            match slot.as_mut() {
+                Some((k, seen, _)) if k == key => {
+                    if *seen {
+                        slot.take().map(|(_, _, f)| f)
+                    } else {
+                        *seen = true;
+                        None
+                    }
+                }
+                _ => None,
+            }
+        };
+        if let Some(f) = due {
+            f(self);
         }
     }
 
@@ -807,6 +845,7 @@ impl MemFs {
 
     /// Consume a scheduled failure for this op/path, if one is due.
     fn check_failure(&self, op: FsOp, key: &str, path: &Path) -> VfsResult<()> {
+        self.run_between_reads(key);
         let mut st = self.state.lock().unwrap();
         if !st.root_available {
             return Err(VfsError::RootUnavailable(PathBuf::from("/sync")));
@@ -1127,6 +1166,21 @@ impl Vfs for MemFs {
             Some(Node::File { bytes, .. }) => Ok(Box::new(std::io::Cursor::new(bytes.clone()))),
             Some(Node::Dir) => Err(VfsError::NotADirectory(path.to_path_buf())),
             None => Err(VfsError::NotFound(path.to_path_buf())),
+        }
+    }
+
+    fn open_file(&self, path: &Path) -> VfsResult<Option<(Box<dyn jd_vfs::ReadSeek>, Fingerprint)>> {
+        let key = self.key_for(path)?;
+        self.check_failure(FsOp::OpenRead, &key, path)?;
+        // One look at the node: the bytes the handle reads and the
+        // fingerprint of the file they are, as a descriptor holds its file.
+        let st = self.state.lock().unwrap();
+        match st.nodes.get(&key) {
+            Some(Node::File { bytes, .. }) => {
+                let fingerprint = MemFs::fingerprint_of(&st, &key).expect("a file node has a fingerprint");
+                Ok(Some((Box::new(std::io::Cursor::new(bytes.clone())), fingerprint)))
+            }
+            Some(Node::Dir) | None => Ok(None),
         }
     }
 

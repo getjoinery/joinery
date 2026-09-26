@@ -33,7 +33,7 @@
 //! - **A failure is never silently absorbed.** It goes back in the journal with
 //!   a backoff, or it is withdrawn on the record because its premise is gone.
 
-use std::io::Write;
+use std::io::{Seek, Write};
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
@@ -1915,9 +1915,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     // (`specs/drive_file_identity.md`, T1-D). A candidate holding another
     // file is not this record's to send: a file swapped onto its path went up
     // as its next version, and the file itself stood elsewhere, minted new.
-    let own = entry
-        .own_file
-        .filter(|o| o.is_strong() && env.vfs.personality().stable_file_identity);
+    let own = trusted_own_file(env, &entry);
     let mut not_its_own = false;
     let mut vetoed = false;
     let mut found = None;
@@ -1934,13 +1932,16 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             continue;
         }
         match path_for(env, candidate)? {
+            // Opened once, and everything from here reads that handle: the
+            // identity checked, the bytes hashed and the bytes sent are one
+            // file's whatever the path holds by the time they are read.
             Placed::At(path) => {
-                if let Some(fp) = env.vfs.fingerprint(&path)? {
+                if let Some((reader, fp)) = env.vfs.open_file(&path)? {
                     if own.is_some_and(|own| fp.identity() != own) {
                         not_its_own = true;
                         continue;
                     }
-                    found = Some((path, fp));
+                    found = Some((path, fp, reader));
                     found_at = Some(candidate.clone());
                     break;
                 }
@@ -1951,7 +1952,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             Placed::Not(why) => unplaced = unplaced.or(Some(why)),
         }
     }
-    let Some((mut path, fingerprint)) = found else {
+    let Some((mut path, fingerprint, mut reader)) = found else {
         if let Some(why) = unplaced {
             return Ok(why.outcome());
         }
@@ -2021,7 +2022,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     {
         Some(s) => s,
         None => {
-            let s = env.vfs.hash(&path)?;
+            let s = hash_of(&mut *reader)?;
             env.store.cache_hash(
                 fingerprint,
                 &s,
@@ -2099,7 +2100,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         match encrypt_for_upload(
             env,
             &entry,
-            &path,
+            &mut *reader,
             &placement.name,
             fingerprint.size,
             file_id,
@@ -2150,7 +2151,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 env.api.upload(&params, &mut source)
             }
             None => {
-                let mut reader = env.vfs.open_read(&path)?;
+                reader.seek(std::io::SeekFrom::Start(0))?;
                 let mut source = Source(&mut *reader);
                 env.api.upload(&params, &mut source)
             }
@@ -2312,6 +2313,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         }
     };
     drop(ciphertext);
+    drop(reader);
 
     // The disk has to follow the server across a land-beside.
     //
@@ -2560,7 +2562,7 @@ impl<W: Write> Write for Tallied<W> {
 fn encrypt_for_upload(
     env: &ExecEnv,
     entry: &Entry,
-    path: &std::path::Path,
+    reader: &mut dyn jd_vfs::ReadSeek,
     name: &str,
     plain_size: u64,
     file_id: Option<i64>,
@@ -2658,7 +2660,9 @@ fn encrypt_for_upload(
         .map_err(|e| ExecError::Contract(format!("sealing file metadata: {e}")))?;
 
     let mut scratch = env.vfs.scratch()?;
-    let mut reader = env.vfs.open_read(path)?;
+    // From the upload's own handle, from its start: the file whose identity
+    // was checked and whose plaintext was hashed.
+    reader.seek(std::io::SeekFrom::Start(0))?;
     // Hashed on the way past rather than by reading the scratch back: these are
     // the exact bytes the upload will send, and re-reading them to hash would
     // be a second chance for the two to disagree.
@@ -2669,10 +2673,9 @@ fn encrypt_for_upload(
         };
         let mut encryptor =
             jd_crypto::drive::ContentEncryptor::new(tallied, &file_key, &content_id);
-        std::io::copy(&mut *reader, &mut encryptor)?;
+        std::io::copy(reader, &mut encryptor)?;
         hex(&encryptor.finish()?.hasher.finalize())
     };
-    drop(reader);
 
     Ok(Ok(Packed {
         bytes: scratch.finish()?,
@@ -2717,9 +2720,18 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
     };
-    if env.vfs.fingerprint(&from)?.is_none() {
+    let Some(here) = env.vfs.fingerprint(&from)? else {
         return Ok(OpOutcome::Overtaken(
             "the local copy is no longer there".into(),
+        ));
+    };
+    // The copy set aside is this record's own file (T1-D). Another file at
+    // the path -- swapped there in the pass -- is not this record's to rename
+    // or to hand its identity to; its own file stands elsewhere, and the next
+    // scan finds it there.
+    if trusted_own_file(env, &entry).is_some_and(|own| here.identity() != own) {
+        return Ok(OpOutcome::Overtaken(
+            "the file here is another file; deciding again from what is there now".into(),
         ));
     }
     // The name came from the plan, which can see neither the disk nor the
@@ -4129,6 +4141,19 @@ fn move_local(
         && !is_at(env, entry.id.entity_type, &from)?
         && is_at(env, entry.id.entity_type, &dest)?;
     if from != dest && !landed {
+        // The file this op moves is this record's own (T1-D). A swap in the
+        // pass can have put another file at the path the plan read, and the
+        // rename would carry that one off under this record's name -- a park
+        // too, which is a rename. The record's own file stands elsewhere, and
+        // the next scan finds it there by its identity.
+        if let Some(own) = trusted_own_file(env, &entry) {
+            if env.vfs.fingerprint(&from)?.is_some_and(|here| here.identity() != own) {
+                return Ok(OpOutcome::Overtaken(format!(
+                    "{} is another file; deciding again from what is there now",
+                    from.display(),
+                )));
+            }
+        }
         // The file at the destination is one this device is about to trash:
         // the server replaced it with this one. Setting it aside instead would
         // hand it a conflict name, and the trash would then find nothing at
@@ -5258,6 +5283,19 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         }
         Placed::Not(why) => return Ok(why.outcome()),
     };
+    // Only this record's own file goes to the trash (T1-D). A swap in the pass
+    // can have put another file at its path, and trashing that one took
+    // another record's file while the file left at that record's path read as
+    // its replacement (kill2 75129). The record stays, and the next scan
+    // decides from where its own file is.
+    if let Some(own) = trusted_own_file(env, &entry) {
+        if env.vfs.fingerprint(&path)?.is_some_and(|here| here.identity() != own) {
+            return Ok(OpOutcome::Overtaken(format!(
+                "{} is another file; deciding again from what is there now",
+                path.display(),
+            )));
+        }
+    }
     if op.entity.entity_type == EntityType::Folder {
         // A file standing at the folder's path is not the folder. The folder
         // went, something else took the name, and this op is not about it: the
@@ -5571,7 +5609,9 @@ fn adopt(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
     };
-    let Some(fingerprint) = env.vfs.fingerprint(&path)? else {
+    // One handle, as the upload reads: the fingerprint recorded below is the
+    // file whose bytes were hashed, whatever the path holds by then.
+    let Some((mut reader, fingerprint)) = env.vfs.open_file(&path)? else {
         return Ok(OpOutcome::Overtaken(
             "the file is no longer on this computer".into(),
         ));
@@ -5582,7 +5622,7 @@ fn adopt(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     {
         Some(s) => s,
         None => {
-            let s = env.vfs.hash(&path)?;
+            let s = hash_of(&mut *reader)?;
             env.store.cache_hash(
                 fingerprint,
                 &s,
@@ -5737,6 +5777,36 @@ fn apply_export(entry: &mut Entry, file: &Value) {
     if let Some(c) = file.get("head_change_id").and_then(Value::as_i64) {
         entry.head_change_id = c;
     }
+}
+
+/// The SHA-256 of what a handle reads, from its start, in the form
+/// `Vfs::hash` gives for a path. Left at the end; every reader after it seeks.
+fn hash_of(reader: &mut dyn jd_vfs::ReadSeek) -> Result<String, ExecError> {
+    reader.seek(std::io::SeekFrom::Start(0))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex(&hasher.finalize()))
+}
+
+/// This record's own file, where the volume can say which file that is: a
+/// strong identity on a volume whose ids can be trusted
+/// (`specs/drive_file_identity.md`, T1-D). An op that reads, moves or trashes
+/// a local file acts only on this one. `None` elsewhere, and there the op acts
+/// on its path, as it always has: on a weak volume nothing rebinds the own
+/// file, so an id kept from before a save with the same bytes would refuse
+/// that file for ever.
+fn trusted_own_file(env: &ExecEnv, entry: &Entry) -> Option<jd_vfs::FileIdentity> {
+    if entry.id.entity_type != EntityType::File {
+        return None;
+    }
+    entry.own_file.filter(|o| o.is_strong() && env.vfs.personality().stable_file_identity)
 }
 
 fn hex(bytes: &[u8]) -> String {

@@ -338,10 +338,9 @@ fn directory_id_of(path: &Path, _md: &fs::Metadata) -> u64 {
 #[cfg(windows)]
 fn file_index(path: &Path) -> Option<u64> {
     use std::os::windows::fs::OpenOptionsExt;
-    use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
-        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE,
     };
 
     let file = fs::OpenOptions::new()
@@ -351,6 +350,14 @@ fn file_index(path: &Path) -> Option<u64> {
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)
         .ok()?;
+    index_of_handle(&file)
+}
+
+/// The file index of the file an open handle reads.
+#[cfg(windows)]
+fn index_of_handle(file: &File) -> Option<u64> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
 
     // SAFETY: the handle is live for the duration of the call, and the struct is
     // plain old data the API fills in.
@@ -376,6 +383,24 @@ fn fingerprint_of(path: &Path, md: &fs::Metadata) -> Fingerprint {
         // unknown", which the fingerprint comparison treats as changed — the
         // safe direction: it costs a hash, where a wrong identity costs a file.
         file_id: file_index(path).unwrap_or(0),
+        birth_ns: birth_of(md),
+    }
+}
+
+/// The fingerprint of the file an open handle reads, whatever its path names
+/// by now: the same fields `fingerprint_of` reads, taken from the handle.
+#[cfg(unix)]
+fn fingerprint_of_handle(_file: &File, md: &fs::Metadata) -> Fingerprint {
+    fingerprint_of(Path::new(""), md)
+}
+
+#[cfg(windows)]
+fn fingerprint_of_handle(file: &File, md: &fs::Metadata) -> Fingerprint {
+    use std::os::windows::fs::MetadataExt;
+    Fingerprint {
+        size: md.len(),
+        mtime_ns: md.last_write_time().saturating_mul(100),
+        file_id: index_of_handle(file).unwrap_or(0),
         birth_ns: birth_of(md),
     }
 }
@@ -485,6 +510,30 @@ impl Vfs for OsVfs {
     fn open_read(&self, path: &Path) -> VfsResult<Box<dyn crate::ReadSeek>> {
         let f = File::open(path).map_err(|e| io_err(path, e))?;
         Ok(Box::new(BufReader::new(f)))
+    }
+
+    fn open_file(&self, path: &Path) -> VfsResult<Option<(Box<dyn crate::ReadSeek>, Fingerprint)>> {
+        // A symlink is not a file here, exactly as `fingerprint` says; asked
+        // of the path first because `File::open` follows one.
+        match path.symlink_metadata() {
+            Ok(md) if md.is_file() => {}
+            Ok(_) => return Ok(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(io_err(path, e)),
+        }
+        let file = match File::open(path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(io_err(path, e)),
+        };
+        // Of the handle: whatever has taken the path since it opened, this
+        // is the file it reads.
+        let md = file.metadata().map_err(|e| io_err(path, e))?;
+        if !md.is_file() {
+            return Ok(None);
+        }
+        let fingerprint = fingerprint_of_handle(&file, &md);
+        Ok(Some((Box::new(BufReader::new(file)), fingerprint)))
     }
 
     fn scratch(&self) -> VfsResult<Box<dyn crate::ScratchFile>> {
@@ -737,6 +786,33 @@ mod tests {
         let root = dir.path().join("root");
         fs::create_dir_all(&root).unwrap();
         OsVfs::new(root, dir.path().join("spool")).unwrap()
+    }
+
+    /// An opened file is the file it opened: its fingerprint is read from
+    /// the handle, and what it reads stays that file's after another file is
+    /// renamed over its path (`specs/drive_file_identity.md`, T1-D).
+    #[cfg(unix)]
+    #[test]
+    fn an_opened_file_stays_the_file_it_opened() {
+        use std::os::unix::fs::MetadataExt;
+        let d = TempDir::new("open-file");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let (a, b) = (root.join("a.txt"), root.join("b.txt"));
+        fs::write(&a, b"the file that was opened").unwrap();
+        fs::write(&b, b"the file renamed over it").unwrap();
+        let inode = fs::metadata(&a).unwrap().ino();
+        let (mut reader, fingerprint) = v.open_file(&a).unwrap().expect("a file stands there");
+        fs::rename(&b, &a).unwrap();
+        let mut read = Vec::new();
+        reader.read_to_end(&mut read).unwrap();
+        assert_eq!(read, b"the file that was opened");
+        assert_eq!(fingerprint.file_id, inode);
+        assert_eq!(fingerprint.size, b"the file that was opened".len() as u64);
+        assert_ne!(v.fingerprint(&a).unwrap().unwrap().file_id, inode, "the path now names the other file");
+        assert!(v.open_file(&root.join("missing.txt")).unwrap().is_none());
+        fs::create_dir_all(root.join("dir")).unwrap();
+        assert!(v.open_file(&root.join("dir")).unwrap().is_none(), "a directory is not a file here");
     }
 
     #[test]
