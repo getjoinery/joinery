@@ -146,6 +146,10 @@ class MarkAdvertisementsJob implements PipelineJobInterface {
 
     public function validateVerdict(array $verdict): void {}
 
+    public function deviceCapable(): bool {
+        return false;
+    }
+
     public function defaultPrompt(): string {
         return <<<'PROMPT'
 You are shown one post from a personal social media feed: the author's name,

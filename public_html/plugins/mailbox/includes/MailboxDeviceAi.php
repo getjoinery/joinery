@@ -22,6 +22,7 @@
  * on a mailbox the recipe covers. Without the owner check one member could
  * mark another's message judged and hide it from that member's own scan.
  *
+ * @version 1.6 - originTrust(): an https tailnet name (.ts.net) is the person's own network
  * @version 1.5 - pendingCount(), deviceQueues(), lastJudgedOnDevice(): what the AI panel says
  *   about a device recipe in place of a server run's last-ran line and queue notice
  * @version 1.4 - reasoningEffort(): each recipe carries the reasoning control a server run
@@ -299,6 +300,12 @@ class MailboxDeviceAi {
 	public static function originTrust(string $origin): string {
 		$host = strtolower((string)parse_url($origin, PHP_URL_HOST));
 		if ($host !== '' && MailboxDeviceAiHost::hostIsPrivate($host)) {
+			return 'local';
+		}
+		// A tailnet name resolves only inside the person's own tailnet, so a
+		// model behind `tailscale serve` (https, the route the docs give for a
+		// machine elsewhere on their network) is theirs, not a cloud.
+		if ($host !== '' && substr($host, -7) === '.ts.net') {
 			return 'local';
 		}
 		$trusted = strtolower((string)parse_url((string)Globalvars::get_instance()->get_setting('joinery_ai_fireworks_base_url'), PHP_URL_HOST));

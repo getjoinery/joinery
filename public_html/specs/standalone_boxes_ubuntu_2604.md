@@ -1,125 +1,169 @@
-# Standalone Boxes to Ubuntu 26.04 / PostgreSQL 18
+# Standalone Boxes to PostgreSQL 18 / PHP 8.5, on Ubuntu 24.04
 
-**Status:** Waiting on Ubuntu (2026-09-26). `meta-release-lts` still lists resolute 26.04.1 with
-`Supported: 0` (checked 2026-09-26). Two owner decisions open (D3, D4).
+**Status:** Active (2026-09-26). WP1 and WP2 (dev) under way; WP3 (jeremytunnell) next.
 **Related:** `specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md` — the fleet move this is the
-rest of. Its Stages 1–3 are done: all eight Docker sites run PostgreSQL 18 on Ubuntu 26.04 images, and
-new sites are born there. `specs/backup_database_incrementals.md` — the payoff: a node's nightly
-database backup can shrink only once it runs PostgreSQL 17+.
+rest of. All eight Docker sites run PostgreSQL 18 and PHP 8.5 on Ubuntu 26.04 images.
+`specs/backup_database_incrementals.md` — the payoff: a node's nightly database backup can shrink
+only once it runs PostgreSQL 17+.
 
 ## What this does for the owner
 
-Moves the last two boxes that run their own PostgreSQL — jeremytunnell and dev — onto Ubuntu 26.04,
-PostgreSQL 18 and PHP 8.5. For jeremytunnell that is the point of the whole fleet move: its nightly
-1.65 GB database upload can drop to a fraction of that. For dev it also lets the
-database-incrementals tests run in the ordinary gate.
+Moves the last two boxes that run their own PostgreSQL — dev and jeremytunnell — to PostgreSQL 18
+and PHP 8.5, without changing their operating system. For jeremytunnell that is the point of the
+whole fleet move: its nightly 1.65 GB database upload can drop to a fraction of that. For dev it also
+lets the database-incrementals tests run in the ordinary gate.
 
-Nothing else is left on Ubuntu 24.04 that needs to move. The docker-prod server, the relay and both
-ScrollDaddy DNS servers run no Joinery database and stay on 24.04 (supported to 2029); the relay and
-DNS boxes are rebuilt, never upgraded.
+**Why not the OS upgrade:** Ubuntu has not opened the 24.04 → 26.04 upgrade (`meta-release-lts`
+still lists resolute with `Supported: 0`, checked 2026-09-26) and gives no date. Ubuntu 24.04 is
+supported to 2029, so the OS move is no longer needed for anything; it becomes optional (Later,
+below).
 
-**Why it waits:** these two upgrade their own OS in place, and Ubuntu has not opened the 24.04 → 26.04
-upgrade. Press reports put the hold on regressions in 26.04's Rust coreutils. Nodes show "no upgrade
-offered" because `host_report.sh` reads `/var/lib/ubuntu-release-upgrader/release-upgrade-available`,
-which follows `meta-release-lts`.
+**How:** Ubuntu 24.04's own archive carries only PostgreSQL 16 and PHP 8.3, so both come from
+outside repositories:
+- PostgreSQL 18 from the PostgreSQL project's repository (apt.postgresql.org), which builds for 24.04.
+- PHP 8.5 from the ondrej PHP repository, which dev already uses for PHP 8.3.
+
+The operating system does not change, so the rules PostgreSQL sorts text by do not change either:
+the database moves with `pg_upgrade`, which copies its files, with no dump and no index rebuild. The
+old PostgreSQL 16 stays on the box, stopped, as the way back.
 
 ## For the executor — read this first
 
 - **Never commit, never `git add`.** The owner runs git.
-- **This is done on the boxes, in a shell, by the owner or with the owner present.** No agent job can
-  do it: nothing in the agent runs apt or `do-release-upgrade`, and the reboot would end the job.
-- **Installer files and the converger.** Stop the dev box's host converger before editing anything in
-  `install_tools/` on dev (WP13), and restart it after.
+- **The owner runs the root steps.** The executor has no sudo on dev, and nothing in the agent runs
+  apt. The executor prepares each step's commands, and checks the result between steps.
+- **Installer files and the converger.** Stop the dev box's host converger before editing anything
+  in `install_tools/` on dev (WP1), and restart it after.
 - **Docs describe the current state only.**
 
-## WP9 — Inventory both boxes (read-only)
+## Current state (checked 2026-09-26)
 
-Paste the output here: `ls /etc/apt/sources.list.d/`, `apt-mark showhold`,
-`dpkg -l 'php*' | grep ^ii`, `pg_lsclusters`, `df -h /`, `free -m`, and
-`systemctl list-units --type=service --state=running`. Known already: dev's PHP 8.3 comes from the
-ondrej PPA, and dev also has nodesource, chrome and tailscale sources. jeremytunnell's package sources
-are unverified.
+- **dev:** Ubuntu 24.04.4. PostgreSQL 16.15 (Ubuntu's), one cluster `16/main` on 5432 holding
+  `joinerytest` (408 MB), `integral_membership` (430 MB), `test_joinerytest` and `postgres`; no
+  extension but plpgsql in `joinerytest`. PHP 8.3.32 from ondrej, with apcu, imagick and imap beside
+  the platform's set; ondrej offers 8.5.11 for 24.04, apcu and imagick included, no separate opcache
+  package (8.5 builds it in). Apache runs PHP through `conf-enabled/php8.3-fpm.conf`. The FPM pool
+  (`/etc/php/8.3/fpm/pool.d/www.conf`) is hand-tuned to `pm = ondemand`; its php.ini is the tuned
+  one host housekeeping writes. No cron job or unit names a PHP version. 18 GB free on `/`.
+  Last backup 2026-09-26 04:45 (success); last verification 2026-09-22, level 3, pass.
+- **jeremytunnell:** Ubuntu 24.04.4, 2 GB memory, 32.7 GB free. Its PHP's source and version, its
+  FPM pool and its database sizes are not yet read (WP3).
+- **Our scripts already take a second version:** host housekeeping configures every
+  `/etc/postgresql/*/main` and `/etc/php/*/fpm`; `tune_postgres_memory.sh` picks the newest
+  PostgreSQL; `host_report.sh` and `restart_unit.sh` pick the active php-fpm unit; the backup and
+  restore scripts read the server's version rather than assuming one.
 
-## WP10 — Rehearse on a clone of jeremytunnell (R2)
+## Bugs found
 
-A Linode clone at the same plan (a clone's disk cannot be smaller than the source's). jeremytunnell is
-not in the account dev's Linode token reaches; the clone, its firewall and the console step to open
-SSH on it happen in jeremytunnell's own account.
-- **Before the clone's first boot, attach a Cloud Firewall that denies all outbound traffic and allows
-  inbound SSH only from the owner's address.** The clone boots as jeremytunnell: the same agent
-  identity, cron, relay pull and backup credentials. Unfenced, it would claim the node's jobs, pull the
-  node's mail off the relay and write into its backup storage.
-- Disable the agent, the host converger timer and path, and cron. Then open outbound 80/443 for apt only.
-- Run the runbook below with `do-release-upgrade -d`, then the gates, reaching the site through a
-  hosts-file entry. Record timings and surprises here, then delete the clone.
+**B1 — packages from outside repositories never get security updates.** Automatic updates
+(`50unattended-upgrades`, written by `install.sh`) allow only Ubuntu's own `-security` origins. Dev's
+PHP comes from ondrej: 8.3.32 is installed while 8.3.35 is offered, and the last PHP update was by
+hand. Moving PostgreSQL to its own repository would add the same gap. Fixed by WP1.
 
-## The runbook (rehearsed in WP10, then used for real in WP11 and WP12)
+## WP1 — Automatic updates cover the platform's outside repositories (fixes B1)
 
-1. A successful backup under 24 hours old with a level-2 verification. Take a provider snapshot if
-   Linode Backups is enabled on the box (unverified).
-2. Stop the agent, `joinery-host-converger.timer` and `.path`, so nothing converges packages
-   mid-upgrade.
-3. `do-release-upgrade` (non-interactive frontend), then reboot.
-4. `pg_upgradecluster 16 main` using the **default dump method**, not `-m upgrade`: a dump rebuilds
-   every index under 26.04's collation. The old cluster stays, stopped, on port 5433 as the rollback
-   until the gates pass for a week, and is then dropped.
-5. `a2disconf php8.3-fpm && a2enconf php8.5-fpm`. Purge PHP 8.3 first: `detect_php_version` prefers a
-   leftover `php` binary. Install the declared extensions. Host housekeeping then applies the
-   platform's `php.ini` settings (it tunes a `php.ini` byte-identical to its version's
-   `php.ini-production`).
-6. Re-enable the converger and the agent, run a host converge, then the gates.
+Host housekeeping writes `/etc/apt/apt.conf.d/51joinery-platform-repos` naming the origin of each
+outside repository the platform's own runtime comes from, when that repository is configured on the
+box:
+- ondrej PHP: `LP-PPA-ondrej-php:${distro_codename}`
+- PostgreSQL: `apt.postgresql.org:${distro_codename}-pgdg`
+
+With neither present the file is removed. Written whole, only when its content differs. Other
+outside repositories (Docker, Chrome, Node, Tailscale) stay out: an automatic Docker engine update
+restarts every site on the box.
+
+**Tests:** the host housekeeping gate — with each repository present, both, and neither; a second
+run changes nothing; the file names only origins, and `apt-config dump` on a real box shows them
+added to Ubuntu's.
+
+## The runbook (WP2 on dev, then WP3 on jeremytunnell)
+
+**Before:** a successful backup under 24 hours old, and the last verification passed. Stop the host
+converger (`joinery-host-converger.timer` and `.path`) so nothing converges mid-change. The executor
+records every table's row count and every non-default server setting.
+
+**PostgreSQL 18:**
+1. Add the repository: `/usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y`, then
+   `apt install -y postgresql-common` (the repository's newer one).
+2. Keep a later release from arriving on its own: `create_main_cluster = false` in
+   `/etc/postgresql-common/createcluster.conf`, and remove the unversioned `postgresql` and
+   `postgresql-contrib` packages, which always pull in the newest major version. Mark
+   `postgresql-16` and `postgresql-client-16` manual so the nightly autoremove keeps the way back.
+3. `apt install -y postgresql-18 postgresql-client-18`. No cluster is created.
+4. **The cutover (the site's database is down for a minute or two):**
+   `pg_upgradecluster -m upgrade 16 main`. The new `18/main` takes port 5432; `16/main` moves to 5433,
+   stopped, with automatic start off.
+5. The upgrade copies `postgresql.conf`, `pg_hba.conf` and `postgresql.auto.conf` but not `conf.d/`,
+   where the memory tuning (`50-minimal.conf` on dev) and host housekeeping's listen pin live: copy
+   `16/main/conf.d/*.conf` into `18/main/conf.d/`, then `pg_ctlcluster 18 main restart` (never
+   `systemctl restart postgresql`).
+6. Check: `pg_lsclusters`, the server version, row counts and settings against the record.
+
+**PHP 8.5:**
+1. `apt install -y php8.5-{fpm,cli,common,pgsql,xml,curl,gd,dev,mbstring,soap,zip,bcmath,intl,readline,sqlite3,apcu,imagick}`.
+   It starts `php8.5-fpm` on its own socket; Apache still uses 8.3. (imap is left out: nothing in the
+   platform uses it.)
+2. Carry the pool over: 8.3's `www.conf` with its socket renamed to `php8.5-fpm.sock`; keep the
+   packaged one as `www.conf.dist`.
+3. Run one host converge: it tunes 8.5's fresh php.ini and writes WP1's file.
+4. Switch: `update-alternatives --set php /usr/bin/php8.5` (manual mode, so a later PHP never takes
+   the `php` command over), `a2disconf php8.3-fpm`, `a2enconf php8.5-fpm`, reload Apache, then
+   `systemctl disable --now php8.3-fpm`.
+
+**After:** restart the converger.
 
 **Gates, per box:**
-- The front page, login and admin dashboard over HTTPS.
-- Every table's row count matches the old cluster's.
-- The agent is green on the management node, and a `check_status` job round-trips without re-pairing.
-- `php tests/run.php deploy` on the node.
-- One fleet backup and one level-2 verification succeed on the new stack.
+- The front page, login and admin dashboard over HTTPS; no new `Fatal` in the error log.
+- `php -v` and the modules `php -m` lists, for both the CLI and FPM.
+- Every table's row count and every setting match the record (tables written to during the
+  cutover are named, not failed).
+- The agent is green on the management node, and a `check_status` job round-trips.
+- `php tests/run.php deploy`.
+- One backup and one level-2 verification succeed on the new stack.
 - jeremytunnell: mail flow, rspamd and redis.
 
-## WP11 — jeremytunnell (per D3 and D4)
+**The way back** (writes after the cutover are lost):
+- PostgreSQL: stop `18/main`; swap the two clusters' ports; set `16/main`'s `start.conf` to `auto`;
+  start `16/main`.
+- PHP: `a2disconf php8.5-fpm`, `a2enconf php8.3-fpm`, `systemctl enable --now php8.3-fpm`,
+  `update-alternatives --set php /usr/bin/php8.3`, reload Apache.
 
-Postfix is off there, and inbound mail waits on the relay while the box is down
-(`mailbox_listener_decommission`). rspamd and redis are still there: check both after the upgrade.
+## WP2 — dev
 
-## WP12 — dev (per D4)
+First, because we use it all day and problems surface fast, and the way back is a restart. Dev is
+the management node: stay clear of 03:00–05:00 UTC, when it runs the fleet's backups. Other
+sessions working on dev see database errors during the cutover.
 
-Dev is also the management node: fleet backups are scheduled from here, so pick a window away from
-03:00–05:00 UTC. The PPA and third-party sources come back for resolute (or are dropped) after the
-upgrade. Once dev is on PostgreSQL 18, the database-incrementals integration tests run in the
-ordinary gate.
+## WP3 — jeremytunnell
 
-## WP13 — Cleanup, after both boxes move
+Read first: its package sources, `dpkg -l 'php*'`, `pg_lsclusters`, database sizes, its FPM pool and
+php.ini against the packaged templates. Add the ondrej repository if its PHP is Ubuntu's own. Postfix
+is off there, and inbound mail waits on the relay while the site is down; check rspamd and redis
+after.
 
-- Drop 24.04 from the installer's OS gate (`install.sh`, the supported-OS check) and move the
-  `installer_contract_test` assertion that pins it, fixing its stale "PHP 8.3 hardcoded" comment.
-  `--allow-unsupported-os` still covers a hand install.
-- Restate the docs as current state: `docs/installation.md` (supported OS), `docs/deploy_and_upgrade.md`
-  (supported OS), `INSTALL_README.md` (supported OS, and the log path that names
-  `postgresql-16-main.log`), and the Server Manager overview's OS expectations.
-- The relay birth flow on 26.04 (`RelayCloudProvisioner.php`) has never run. Rebuild a relay on it the
-  next time one is needed.
-- The PostGIS pin in the unbuilt `specs/geolocation_postgis_spec.md` moves to 18 when that spec is
-  built, not before.
+## WP4 — Cleanup, a week after each box passes its gates
 
-## Open decisions
+`pg_dropcluster 16 main`, then purge `postgresql-16`, `postgresql-client-16` and `php8.3*`.
 
-**D3 — When do the two boxes move?**
-- **Wait for Ubuntu to open the upgrade** (`Supported: 1`). Canonical has held it for regressions, so
-  the first run of the upgrade path is not ours. Catch: no date, and jeremytunnell — the box whose
-  backups shrink most — waits with it.
-- **Force it (`-d`) once the clone rehearsal (WP10) passes.** Catch: we run a path Ubuntu itself says
-  is not ready, on a box our installers drive with coreutils-heavy bash.
-- **Recommendation:** rehearse now, and wait for `Supported: 1` for the real upgrade.
+## Later — the OS move (optional)
 
-**D4 — Which box goes first?**
-- **jeremytunnell first:** the simpler box, and the one whose backups benefit most; the relay holds its
-  mail while it is down. Catch: it is your live site.
-- **dev first:** we use it all day, so problems surface fast, and the database-incremental tests start
-  running. Catch: it is the management node, and it carries four third-party package sources.
-- **Recommendation:** jeremytunnell first, after the clone rehearsal.
+When Ubuntu opens 24.04 → 26.04 (`Supported: 1`), a box can take `do-release-upgrade`. The newer C
+library changes how text sorts under a database that stays on 18, so after it: `REINDEX DATABASE`
+each database and `ALTER DATABASE … REFRESH COLLATION VERSION`. Then 26.04's own PostgreSQL 18 and
+PHP 8.5 replace the outside repositories' (same versions), and once no box runs 24.04:
+- drop 24.04 from the installer's OS gate (`install.sh`) and the `installer_contract_test` assertion
+  that pins it; restate `docs/installation.md`, `docs/deploy_and_upgrade.md`, `INSTALL_README.md`
+  (supported OS, and the `postgresql-16-main.log` path) and the Server Manager overview;
+- the relay birth flow on 26.04 (`RelayCloudProvisioner.php`) has never run: rebuild a relay on it
+  the next time one is needed.
 
-## Checking whether Ubuntu has opened it
+## Decisions
+
+- **D3 — When do the boxes move?** Decided 2026-09-26: now, on 24.04, from the outside repositories;
+  the OS upgrade is no longer needed for PostgreSQL 18.
+- **D4 — Which box first?** Decided 2026-09-26: dev.
+
+## Checking whether Ubuntu has opened the OS upgrade
 
 `curl -s https://changelogs.ubuntu.com/meta-release-lts` → the `Dist: resolute` block's
 `Supported:` line. `0` means wait; `1` means the upgrade is offered.

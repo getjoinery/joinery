@@ -1306,13 +1306,15 @@ domain; lifting it works at any level. The signing-stage DNS records (the sealed
 DKIM record and the forwarding subdomain) are prescribed only while the lock is asked
 for or on — a cancelled request's stored key publishes nothing.
 
-`LEVEL_FORTRESS` stays defined and reserved for end-to-end mail
-(specs/DEFERRED_client_custody_mail.md); `set_security_level()` refuses it. A row still
-holding it from before mailbox migration `ied_003_private_with_addons` reads as Private
-with both add-ons on (`is_unconverted()`), and the raw SQL sealing predicates keep
-matching it until that migration has run. The first write to such a row stores that
-conversion before applying the caller's change, so a flag the caller clears stays
-cleared.
+`LEVEL_FORTRESS` is end-to-end mail (specs/client_custody_mail.md): the domain's mail
+seals to the owner's browser-held `mail` vault, and the server never holds its key.
+`set_security_level()` accepts it and stamps `ied_level_set_time`. A row holding the
+value with no stamp is a legacy row from before mailbox migration
+`ied_003_private_with_addons` (`is_unconverted()`): it reads as Private with both add-ons
+on, and the raw SQL sealing predicates keep matching it until that migration has run.
+The first write to such a row stores that conversion before applying the caller's
+change, so a flag the caller clears stays cleared. A single mailbox is Fortress on its
+own when `iea_security_level` says so.
 
 **Where the level switches behavior:**
 
@@ -1917,7 +1919,7 @@ pages) and `AiPanelService::jobs()` lists each as a *Working now* entry,
 panel's job number, once a model is registered.
 
 **Consent.** `MailboxDeviceAi::originTrust()` classes the registered origin as
-`local` (a private host), `trusted` (the host of `joinery_ai_fireworks_base_url`)
+`local` (a private host, or a `.ts.net` name over https), `trusted` (the host of `joinery_ai_fireworks_base_url`)
 or `cloud`, and `consentRefusal()` compares it with the domain's
 `processingConsent()`. The panel shows the refusal; `entries()` pages nothing
 the domain forbids, and nothing when no origin is registered; the verdict

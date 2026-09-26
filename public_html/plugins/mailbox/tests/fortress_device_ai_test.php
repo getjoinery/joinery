@@ -22,6 +22,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_device_ai
  *
+ * @version 1.5 - an https tailnet name is the person's own network
  * @version 1.4 - the panel's numbers: pendingCount, deviceQueues, lastJudgedOnDevice
  * @version 1.3 - each recipe carries the reasoning control a server run would send
  * @version 1.2 - on demand: a verdict replaces an error, never a done; consent at the verdict write
@@ -158,6 +159,8 @@ try {
 
 	check(MailboxDeviceAi::originTrust('http://localhost:11434') === 'local' && MailboxDeviceAi::originTrust('http://100.69.1.2:11434') === 'local',
 		'a model on this computer or the owner\'s network is local');
+	check(MailboxDeviceAi::originTrust('https://studio.tail1.ts.net') === 'local' && MailboxDeviceAi::originTrust('https://ts.net') === 'cloud',
+		'a tailnet name over https is the person\'s own network; the bare suffix is not');
 	check(MailboxDeviceAi::originTrust('https://api.fireworks.ai') === 'trusted', 'the platform\'s trusted provider is trusted');
 	check(MailboxDeviceAi::originTrust('https://models.example.test') === 'cloud', 'anywhere else is cloud');
 	MailboxDeviceAiHost::setForUser($A, 'https://models.example.test');

@@ -28,6 +28,7 @@
  *
  * Run: php tests/run.php db --filter=promoted_row_repair
  *
+ * @version 1.1 - fixture domain and mailbox carry the harnesstest names the reclaim knows
  * @version 1.0
  */
 
@@ -84,7 +85,9 @@ $vault->save();
 harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$vault->key);
 
 $domain = new InboundEmailDomain(NULL);
-$domain->set('ied_domain', 'promrepair-' . bin2hex(random_bytes(4)) . '.example');
+// harnesstest- / harnesstest_: the names the boot-time reclaim knows, so a
+// killed run's mailbox is reclaimed with its user.
+$domain->set('ied_domain', 'harnesstest-promrepair-' . bin2hex(random_bytes(4)) . '.example');
 $domain->set('ied_owner_usr_user_id', $uid);
 $domain->set('ied_is_protected_identity', true);
 $domain->set('ied_security_level', 'private');
@@ -93,11 +96,11 @@ harness_register_row('ied_inbound_email_domains', 'ied_inbound_email_domain_id',
 
 $alias = new InboundEmailAlias(NULL);
 $alias->set('iea_ied_inbound_email_domain_id', (int)$domain->key);
-$alias->set('iea_alias', 'inbox');
+$alias->set('iea_alias', 'harnesstest_inbox');
 $alias->set('iea_delivery_mode', 'store');
 $alias->save();
 harness_register_row('iea_inbound_email_aliases', 'iea_inbound_email_alias_id', (int)$alias->key);
-$alias_addr = 'inbox@' . $domain->get('ied_domain');
+$alias_addr = 'harnesstest_inbox@' . $domain->get('ied_domain');
 
 $grant = new InboundEmailMailboxGrant(NULL);
 $grant->set('ieg_iea_inbound_email_alias_id', (int)$alias->key);

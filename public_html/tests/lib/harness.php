@@ -796,9 +796,9 @@ function harness_cleanup_stale_fixtures() {
 					$obj = new $cls($id, TRUE);
 					if (!$obj->key) { continue; }
 					$obj->permanent_delete();
-					echo "  reclaimed stale fixture row {$table}#{$id} (" . $row[$name_col] . ")\n";
+					harness_boot_note("  reclaimed stale fixture row {$table}#{$id} (" . $row[$name_col] . ")\n");
 				} catch (\Throwable $e) {
-					echo "  WARNING: could not reclaim {$table} row: " . $e->getMessage() . "\n";
+					harness_boot_note("  WARNING: could not reclaim {$table} row: " . $e->getMessage() . "\n");
 				}
 			}
 		} catch (\Throwable $e) {
@@ -815,15 +815,74 @@ function harness_cleanup_stale_fixtures() {
 		$q->execute(array($floor));
 		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 			try {
+				harness_reclaim_sole_held_mailboxes((int)$row['usr_user_id']);
 				$u = new User((int)$row['usr_user_id'], TRUE);
 				if ($u->key) { $u->permanent_delete(); }
-				echo "  reclaimed stale fixture user " . $row['usr_email'] . " (a killed run's leftover)\n";
+				harness_boot_note("  reclaimed stale fixture user " . $row['usr_email'] . " (a killed run's leftover)\n");
 			} catch (\Throwable $e) {
-				echo "  WARNING: could not reclaim stale fixture user " . $row['usr_email'] . ": " . $e->getMessage() . "\n";
+				harness_boot_note("  WARNING: could not reclaim stale fixture user " . $row['usr_email'] . ": " . $e->getMessage() . "\n");
 			}
 		}
 	} catch (\Throwable $e) {
-		echo "  WARNING: stale fixture user lookup failed: " . $e->getMessage() . "\n";
+		harness_boot_note("  WARNING: stale fixture user lookup failed: " . $e->getMessage() . "\n");
+	}
+}
+
+/**
+ * A line from the boot-time reclaim, to STDERR. Never stdout: harness_boot()
+ * runs before a suite starts its PHP session, and any stdout byte there makes
+ * session_start() fail with "headers already sent" — every vault suite then
+ * skips and reports a failure that has nothing to do with it.
+ */
+function harness_boot_note(string $line): void {
+	fwrite(STDERR, $line);
+}
+
+/**
+ * The mailboxes a stale fixture user alone holds, and the domains it owns
+ * that nothing else then uses — removed before the user. A protected mailbox
+ * refuses to lose its only holder (InboundEmailMailboxGrant::grant_set_error),
+ * so a killed run that made its own mailbox under any name leaves a user the
+ * reclaim cannot delete, and it would stay forever. Only a mailbox made after
+ * the fixture user was (its usr_terms_accepted_time stamps its birth), whose
+ * one grant is that user's, is taken: a real mailbox never has a harness user
+ * as its sole member. Deleting the alias through its model cascades its grants
+ * and feeds.
+ */
+function harness_reclaim_sole_held_mailboxes(int $user_id): void {
+	if (!class_exists('InboundEmailAlias') || !class_exists('InboundEmailDomain')) return;
+	$db = DbConnector::get_instance()->get_db_link();
+	try {
+		$q = $db->prepare("SELECT a.iea_inbound_email_alias_id, a.iea_ied_inbound_email_domain_id FROM iea_inbound_email_aliases a
+			JOIN usr_users u ON u.usr_user_id = ?
+			WHERE a.iea_create_time >= u.usr_terms_accepted_time
+			  AND EXISTS (SELECT 1 FROM ieg_inbound_email_mailbox_grants g WHERE g.ieg_iea_inbound_email_alias_id = a.iea_inbound_email_alias_id AND g.ieg_usr_user_id = ?)
+			  AND NOT EXISTS (SELECT 1 FROM ieg_inbound_email_mailbox_grants g WHERE g.ieg_iea_inbound_email_alias_id = a.iea_inbound_email_alias_id AND g.ieg_usr_user_id <> ?)");
+		$q->execute(array($user_id, $user_id, $user_id));
+		$domains = array();
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$alias = new InboundEmailAlias((int)$row['iea_inbound_email_alias_id'], TRUE);
+			if (!$alias->key) continue;
+			$label = $alias->get_full_address();
+			$alias->permanent_delete();
+			$domains[(int)$row['iea_ied_inbound_email_domain_id']] = true;
+			harness_boot_note("  reclaimed stale fixture mailbox {$label} (held by fixture user {$user_id} alone)\n");
+		}
+		foreach (array_keys($domains) as $domain_id) {
+			$d = $db->prepare("SELECT 1 FROM ied_inbound_email_domains d WHERE d.ied_inbound_email_domain_id = ? AND d.ied_owner_usr_user_id = ?
+				AND NOT EXISTS (SELECT 1 FROM iea_inbound_email_aliases a WHERE a.iea_ied_inbound_email_domain_id = d.ied_inbound_email_domain_id)");
+			$d->execute(array($domain_id, $user_id));
+			if ($d->fetchColumn()) {
+				$domain = new InboundEmailDomain($domain_id, TRUE);
+				if ($domain->key) {
+					$name = (string)$domain->get('ied_domain');
+					$domain->permanent_delete();
+					harness_boot_note("  reclaimed stale fixture domain {$name} (owned by fixture user {$user_id}, now empty)\n");
+				}
+			}
+		}
+	} catch (\Throwable $e) {
+		harness_boot_note("  WARNING: could not reclaim the mailboxes of fixture user {$user_id}: " . $e->getMessage() . "\n");
 	}
 }
 
