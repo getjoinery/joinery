@@ -8,20 +8,21 @@ model on a computer of your own.
 
 ## Setting it up
 
-1. **Say where your model answers.** Open Email settings and find *Your AI
-   model*. Paste the address your model's service gives you, for example
-   `https://api.fireworks.ai/inference/v1`, and save. You confirm it is you
-   with your passkey, because this decides where your mail may be sent. The
-   start of the address, up to the host name, is kept with your account; the
-   rest stays in this browser.
-2. **Enter the key and the model name.** Open your mail, and in the AI panel
-   find *Your AI, your model*. Enter the key (leave it empty if your model
-   needs none) and the model's name. These stay in this browser only, so you
-   enter them once on each computer you use.
-3. **Press Test.** It sends the security scan's real instructions with a
-   made-up sample message to your model and tells you what happened, in one
-   line, with the fix when something stopped it.
-4. **Turn the AI on for the mailbox.** In the same panel, turn on *Email
+1. **Choose your model.** Open Email settings and find *Your AI model*. When
+   the site runs a model of its own, *Use this site's model* is one click.
+   Otherwise, or to use another, choose *Enter a different model* and give
+   the address your model's service gives you (for example
+   `https://api.fireworks.ai/inference/v1`), its key (empty if it needs
+   none) and the model's name. You confirm it is you with your passkey,
+   because this decides where your mail may be sent. The start of the
+   address, up to the host name, is kept with your account; the rest, the key
+   and the model name stay in this browser, so on another computer you enter
+   those again in the AI panel on your mail.
+2. **Press Test.** Open your mail; in the AI panel, *Your AI, your model*
+   shows what you chose. Test sends the security scan's real instructions
+   with a made-up sample message to your model and tells you what happened,
+   in one line, with the fix when something stopped it.
+3. **Turn the AI on for the mailbox.** In the same panel, turn on *Email
    triage* for one-line summaries, *Email security scan* for the danger
    check, or both. On an end-to-end encrypted mailbox each card says *Runs on
    your device while this mailbox is open*.
@@ -43,8 +44,9 @@ AI. Nothing errors in the reader.
 ## The site's own model, with one click
 
 When the site you use runs its own model on hardware on its network, Email
-settings and the AI panel offer it: *Use this site's model*, naming the model
-and the address. One click fills the address and the model for you. You still
+settings offers it first, and the AI panel offers it too: *Use this site's
+model*, naming the model and the address. One click sets the address and the
+model for you. You still
 confirm with your passkey, because that confirmation is what allows the mail
 page to send your mail there. The offer says plainly who runs that machine:
 if you are not the site's operator, the operator could see mail sent to it,
