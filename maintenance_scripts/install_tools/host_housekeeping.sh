@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.11 - Automatic updates reach the ondrej PHP and apt.postgresql.org repositories
+#                when the box carries them: a drop-in names their origins beside Ubuntu's
+#                own (specs/standalone_boxes_ubuntu_2604.md B1).
 # Version: 1.10 - A container's pg_hba admits loopback and its gateway, and nothing else: the
 #                declared lines are gone (specs/dns_resolvers_read_over_https.md WP7).
 #                scrolldaddy's DNS resolvers read the site over HTTPS, so no machine reads
@@ -730,6 +733,46 @@ for pg_dir in "${FS_ROOT}"/etc/postgresql/*/main; do
         fi
     fi
 done
+
+# --- 6. Automatic updates reach the platform's outside repositories --------------
+# Automatic updates (install.sh's 50unattended-upgrades) take Ubuntu's own
+# security fixes and nothing else. A box whose PHP comes from the ondrej
+# repository, or whose PostgreSQL comes from apt.postgresql.org, would never get
+# a fix for either on its own (specs/standalone_boxes_ubuntu_2604.md B1). Their
+# origins are named in a drop-in, which unattended-upgrades adds to its own
+# list, while the box carries them. No other outside repository is named: an
+# automatic Docker engine update restarts every site on the box.
+APT_CONF_DIR="${FS_ROOT}/etc/apt/apt.conf.d"
+PLATFORM_REPOS_CONF="${APT_CONF_DIR}/51joinery-platform-repos"
+if [[ "${IN_CONTAINER}" == 0 && -d "${APT_CONF_DIR}" ]]; then
+    apt_sources=("${FS_ROOT}/etc/apt/sources.list" "${FS_ROOT}"/etc/apt/sources.list.d/*.list "${FS_ROOT}"/etc/apt/sources.list.d/*.sources)
+    platform_origins=()
+    # shellcheck disable=SC2016 # ${distro_codename} is unattended-upgrades' to expand
+    grep -qsE '^[^#]*ppa\.launchpad(content)?\.net/ondrej/php' "${apt_sources[@]}" \
+        && platform_origins+=('LP-PPA-ondrej-php:${distro_codename}')
+    # shellcheck disable=SC2016
+    grep -qsE '^[^#]*apt\.postgresql\.org/pub/repos/apt' "${apt_sources[@]}" \
+        && platform_origins+=('apt.postgresql.org:${distro_codename}-pgdg')
+
+    if [[ ${#platform_origins[@]} -gt 0 ]]; then
+        CANDIDATE="$(mktemp)"
+        {
+            echo '// Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive.'
+            echo "// Automatic updates for the outside repositories this box's PHP and PostgreSQL come"
+            echo "// from, added to the origins 50unattended-upgrades allows."
+            echo 'Unattended-Upgrade::Allowed-Origins {'
+            printf '    "%s";\n' "${platform_origins[@]}"
+            echo '};'
+        } > "${CANDIDATE}"
+        if install_file "${PLATFORM_REPOS_CONF}" "${CANDIDATE}"; then
+            say "wrote ${PLATFORM_REPOS_CONF}: automatic updates include ${platform_origins[*]}"
+        fi
+        rm -f "${CANDIDATE}"
+    elif [[ -e "${PLATFORM_REPOS_CONF}" ]]; then
+        rm -f "${PLATFORM_REPOS_CONF}"
+        say "removed ${PLATFORM_REPOS_CONF}: this box carries neither outside repository"
+    fi
+fi
 
 if [[ "${FAILED}" == 1 ]]; then
     exit 1

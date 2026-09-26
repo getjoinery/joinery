@@ -22,6 +22,12 @@
 # and loopback rules and gains the listen drop-in; a container admits its
 # gateway (the Docker host) and nothing else. A config/postgres_access.conf
 # left behind is not read, and is named once.
+#
+# Automatic updates reach the ondrej PHP and apt.postgresql.org repositories
+# (specs/standalone_boxes_ubuntu_2604.md B1): their origins are named in a
+# drop-in while the box carries them, no other outside repository ever is, and
+# the drop-in goes when both do. Where apt-config is installed, apt itself reads
+# the drop-in's origins onto its allowed list.
 
 set -u
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -359,6 +365,41 @@ PG="$T/pg-bm-access"; mkpg "$PG" localhost "$LOCAL_HBA"; mkdir -p "$T/pg-bm-site
 printf 'host scrolldaddy scrolldaddy_reader 192.168.206.21/32 md5\n' > "$T/pg-bm-site/config/postgres_access.conf"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-bm-site" 2>&1)"
 chk "a standalone server does not read an access file either, and names it once" "$(grep -c scrolldaddy_reader "$PG/etc/postgresql/16/main/pg_hba.conf"):$(printf '%s\n' "$out" | grep -c 'postgres_access.conf is not read')" "0:1"
+
+echo "=== Automatic updates reach the platform's outside repositories ==="
+AR="$T/apt"; mkdir -p "$AR/etc/apt/apt.conf.d" "$AR/etc/apt/sources.list.d"
+AF="$AR/etc/apt/apt.conf.d/51joinery-platform-repos"
+printf 'deb http://archive.ubuntu.com/ubuntu noble main\n' > "$AR/etc/apt/sources.list"
+printf 'deb [arch=amd64] https://download.docker.com/linux/ubuntu noble stable\n' > "$AR/etc/apt/sources.list.d/docker.list"
+printf '# deb https://apt.postgresql.org/pub/repos/apt noble-pgdg main\n' > "$AR/etc/apt/sources.list.d/old-pgdg.list"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$AR" bash "$SCRIPT" x "$T/apt-site" 2>&1)"
+chk "Ubuntu's own, Docker's and a commented-out line: no drop-in" "$([ -e "$AF" ] && echo written || echo none)" "none"
+printf 'Types: deb\nURIs: https://ppa.launchpadcontent.net/ondrej/php/ubuntu/\nSuites: noble\nComponents: main\n' > "$AR/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$AR" bash "$SCRIPT" x "$T/apt-site" 2>&1)"
+chk "the ondrej PHP repository: its origin is named, and nothing else" "$(grep -c '^    "' "$AF" 2>/dev/null):$(grep -c '"LP-PPA-ondrej-php:${distro_codename}";' "$AF" 2>/dev/null)" "1:1"
+chk "and the run says so" "$(printf '%s\n' "$out" | grep -c 'automatic updates include LP-PPA-ondrej-php')" "1"
+printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: noble-pgdg\nComponents: main\n' > "$AR/etc/apt/sources.list.d/pgdg.sources"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$AR" bash "$SCRIPT" x "$T/apt-site" 2>&1)"
+chk "and apt.postgresql.org beside it; Docker is never named" "$(grep -c '"apt.postgresql.org:${distro_codename}-pgdg";' "$AF"):$(grep -c '^    "' "$AF"):$(grep -ci docker "$AF")" "1:2:0"
+if command -v apt-config >/dev/null 2>&1; then
+    # apt reads the drop-in alone: without Dir::Etc pointing away from /etc,
+    # apt-config merges the box's own apt.conf.d, and a box that already carries
+    # the real drop-in (every box this has run on) counts an origin twice.
+    mkdir -p "$AR/noparts"
+    printf 'Dir::Etc::parts "%s";\nDir::Etc::main "%s";\n' "$AR/noparts" "$AR/nomain.conf" > "$AR/apt-isolated.conf"
+    merged="$(APT_CONFIG="$AR/apt-isolated.conf" apt-config -c "$AF" dump Unattended-Upgrade::Allowed-Origins 2>/dev/null)"
+    chk "apt reads the drop-in: both origins are on its allowed list" "$(printf '%s\n' "$merged" | grep -cE 'Allowed-Origins:: "(LP-PPA-ondrej-php:\$\{distro_codename\}|apt\.postgresql\.org:\$\{distro_codename\}-pgdg)";')" "2"
+fi
+before="$(tree_sum "$AR")"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$AR" bash "$SCRIPT" x "$T/apt-site" 2>&1)"
+chk "a second converge changes nothing and says nothing" "$( [ "$(tree_sum "$AR")" = "$before" ] && echo same):$(printf '%s\n' "$out" | grep -c '51joinery-platform-repos')" "same:0"
+rm -f "$AR/etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources" "$AR/etc/apt/sources.list.d/pgdg.sources"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$AR" bash "$SCRIPT" x "$T/apt-site" 2>&1)"
+chk "both repositories gone: the drop-in is removed, and the run says so" "$([ -e "$AF" ] && echo kept || echo removed):$(printf '%s\n' "$out" | grep -c 'removed .*51joinery-platform-repos')" "removed:1"
+AC="$T/apt-ctr"; mkdir -p "$AC/etc/apt/apt.conf.d" "$AC/etc/apt/sources.list.d"; touch "$AC/.dockerenv"
+printf 'deb https://apt.postgresql.org/pub/repos/apt noble-pgdg main\n' > "$AC/etc/apt/sources.list.d/pgdg.list"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$AC" bash "$SCRIPT" x "$T/apt-ctr-site" 2>&1)"
+chk "a container is left alone: its image is rebuilt, not updated" "$([ -e "$AC/etc/apt/apt.conf.d/51joinery-platform-repos" ] && echo written || echo none)" "none"
 
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"
