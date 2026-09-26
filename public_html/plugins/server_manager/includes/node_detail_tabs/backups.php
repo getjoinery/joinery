@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.15 - the Verify room is worked out from a listing that carries the manifest version and each
+ *                artifact's level, so a version-2 chain is planned per kind as the node plans it
  * @version 1.14 - retention: the site's own window, at least policy_keep_days; the tab says which applies
  * @version 1.13 - Recent runs from here: the last runs this plane dispatched, each with its outcome and,
  *                 when the run said, its level and size (BACKUP_LEVEL / BACKUP_BYTES)
@@ -562,10 +564,13 @@
 				// it. The room a rehearsal needs is worked out here from the runs'
 				// recorded sizes, the same arithmetic the node applies before it
 				// downloads anything.
-				$pseudo = ['chain_id' => $c['chain_id'], 'runs' => []];
+				$pseudo = ['chain_id' => $c['chain_id'], 'version' => (int)($c['version'] ?? 1), 'runs' => []];
 				foreach ($c['runs'] as $x) {
 					$arts = [];
-					foreach (($x['artifacts'] ?? []) as $kind => $b) { $arts[$kind] = ['name' => $kind, 'bytes' => (int)$b]; }
+					foreach (($x['artifacts'] ?? []) as $kind => $b) {
+						$arts[$kind] = ['name' => $kind, 'bytes' => (int)$b];
+						if (isset($x['levels'][$kind])) { $arts[$kind]['level'] = (int)$x['levels'][$kind]; }
+					}
 					$pseudo['runs'][] = ['seq' => $x['seq'], 'level' => $x['level'], 'artifacts' => $arts];
 				}
 				try { $needs = BackupVerifier::disk_needed($pseudo, (int)$r['seq'], BackupVerifier::LEVEL_REHEARSE); }

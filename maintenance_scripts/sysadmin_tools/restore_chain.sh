@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.5.0 - reads manifest versions 1 and 2. The plan is per kind, as BackupChain::restore_plan
+#                  makes it: each kind from its newest level 0 at or before the run. A version-2
+#                  chain's data archives are applied as a version-1 chain's files are; its code
+#                  archives (rooted at public_html) are applied into the site directory after them.
+#                  A physical database backup (pgdata) is refused before anything is written, unless
+#                  --skip-database.
 # Version: 1.4.1 - the offloaded-files step checks that the uploads owner can read the tree and
 #                  the index before running as that account, and says what to fix when not
 # Version: 1.4.0 - --objects DIR brings the run's offloaded files home after the database is
@@ -162,8 +168,9 @@ d = os.path.dirname(manifest_path)
 with open(manifest_path) as fh:
     m = json.load(fh)
 
-if int(m.get('version', 0)) != 1:
-    sys.exit("unsupported chain manifest version %s" % m.get('version'))
+version = int(m.get('version', 0))
+if version not in (1, 2):
+    sys.exit("unsupported chain manifest version %s; this script reads versions 1 and 2" % m.get('version'))
 
 runs = m.get('runs') or []
 if not runs:
@@ -172,8 +179,34 @@ if not runs:
 seq = (len(runs) - 1) if want == '' else int(want)
 if seq < 0 or seq >= len(runs):
     sys.exit("this chain has no run %d" % seq)
-if int(runs[0].get('level', 1)) != 0:
+if version == 1 and int(runs[0].get('level', 1)) != 0:
     sys.exit("this chain does not begin with a full backup")
+
+# The same rules as BackupChain::restore_plan. Version 1 has one level per
+# run, the files archive's; version 2 records a level on every artifact of a
+# kind that increments, so each kind goes back to its own newest full.
+TREES = {1: ['files'], 2: ['data', 'code']}
+INCREMENTS = ('files', 'code', 'data', 'pgdata')
+
+def level(run, kind):
+    if kind not in INCREMENTS:
+        return 0
+    if version < 2:
+        return int(run.get('level', 1)) if kind == 'files' else 0
+    return int(((run.get('artifacts') or {}).get(kind) or {}).get('level', 1))
+
+def chain(kind):
+    start = None
+    for i in range(seq, -1, -1):
+        arts = runs[i].get('artifacts') or {}
+        if kind not in arts:
+            sys.exit("run %d has no %s artifact" % (i, kind))
+        if level(runs[i], kind) == 0:
+            start = i
+            break
+    if start is None:
+        sys.exit("this chain has no full %s backup at or before run %d" % (kind, seq))
+    return [runs[i]['artifacts'][kind] for i in range(start, seq + 1)]
 
 def check(entry):
     path = os.path.join(d, entry['name'])
@@ -193,16 +226,20 @@ def check(entry):
                      % entry['name'])
     return path
 
+# A version-2 chain's data archive is rooted at the site directory, as a
+# version-1 files archive is, and is applied the same way; its code archive is
+# rooted at public_html and applied into the site directory after it.
+TAG = {'files': 'FILES', 'data': 'FILES', 'code': 'CODE'}
 lines = []
-for i in range(seq + 1):
-    run = runs[i]
-    arts = run.get('artifacts') or {}
-    if 'files' not in arts:
-        sys.exit("run %d has no files artifact" % i)
-    lines.append("FILES\t%s" % check(arts['files']))
+for kind in TREES[version]:
+    for entry in chain(kind):
+        lines.append("%s\t%s" % (TAG[kind], check(entry)))
 
 last = runs[seq].get('artifacts') or {}
-if 'db' in last:
+if 'pgdata' in last:
+    for entry in chain('pgdata'):
+        lines.append("PGDATA\t%s" % check(entry))
+elif 'db' in last:
     lines.append("DB\t%s" % check(last['db']))
 if 'meta' in last:
     lines.append("META\t%s" % check(last['meta']))
@@ -214,6 +251,8 @@ PY
 ) || { print_error "$PLAN"; exit 1; }
 
 FILES_ARCHIVES=()
+CODE_ARCHIVES=()
+PGDATA_ARCHIVES=()
 DB_ARCHIVE=""
 META_ARCHIVE=""
 CHAIN_ID=""
@@ -221,6 +260,8 @@ RESTORE_SEQ=""
 while IFS=$'\t' read -r kind value; do
     case "$kind" in
         FILES) FILES_ARCHIVES+=("$value") ;;
+        CODE)  CODE_ARCHIVES+=("$value") ;;
+        PGDATA) PGDATA_ARCHIVES+=("$value") ;;
         DB)    DB_ARCHIVE="$value" ;;
         META)  META_ARCHIVE="$value" ;;
         SEQ)   RESTORE_SEQ="$value" ;;
@@ -228,11 +269,20 @@ while IFS=$'\t' read -r kind value; do
     esac
 done <<< "$PLAN"
 
-print_success "Chain ${CHAIN_ID} verified: ${#FILES_ARCHIVES[@]} archive(s) to apply, restoring as at run ${RESTORE_SEQ}"
+print_success "Chain ${CHAIN_ID} verified: $(( ${#FILES_ARCHIVES[@]} + ${#CODE_ARCHIVES[@]} )) archive(s) to apply, restoring as at run ${RESTORE_SEQ}"
+
+# Refused before anything is written: a restore that brought the files back and
+# then could not load the database would leave the site half-restored.
+if [ "${#PGDATA_ARCHIVES[@]}" -gt 0 ] && [ "$SKIP_DATABASE" = false ]; then
+    print_error "This run's database is a physical backup (pgdata), which this script cannot restore."
+    print_error "Restore the files with --skip-database, or use a build that restores physical backups."
+    exit 1
+fi
 
 if [ "$DRY_RUN" = true ]; then
     print_dry "Would apply, in order:"
     for a in "${FILES_ARCHIVES[@]}"; do print_dry "  $(basename "$a")"; done
+    for a in ${CODE_ARCHIVES[@]+"${CODE_ARCHIVES[@]}"}; do print_dry "  $(basename "$a") (into the site directory)"; done
     [ -n "$DB_ARCHIVE" ] && print_dry "Then restore database from $(basename "$DB_ARCHIVE")"
     [ -n "$OBJECTS_DIR" ] && print_dry "Then bring offloaded files home from ${OBJECTS_DIR} (${OBJECTS_MODE})"
     echo "RESTORE_PLAN_OK"
@@ -275,6 +325,19 @@ if [ "$ARCHIVE_ROOT" != "$(basename "$PROJECT_DIR")" ]; then
     print_error "Requested: ${PROJECT_DIR}"
     print_error "Use:       --target-dir ${PARENT}/${ARCHIVE_ROOT}"
     exit 1
+fi
+
+# A code archive is rooted at public_html and extracted into the site
+# directory; anything else in that position would write somewhere unasked for.
+if [ "${#CODE_ARCHIVES[@]}" -gt 0 ]; then
+    CODE_ROOT="$( { ( openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 \
+                         -in "${CODE_ARCHIVES[0]}" 2>/dev/null \
+                       | tar tzf - 2>/dev/null ) 3< "$KEY_FILE" || true; } \
+                  | head -n 1 | cut -d/ -f1 || true )"
+    if [ "$CODE_ROOT" != "public_html" ]; then
+        print_error "The code archive $(basename "${CODE_ARCHIVES[0]}") is not rooted at public_html (it reads '${CODE_ROOT}'); not restoring."
+        exit 1
+    fi
 fi
 
 if [ "$FORCE" != true ]; then
@@ -372,6 +435,21 @@ for archive in "${FILES_ARCHIVES[@]}"; do
     ( set -o pipefail
       openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "$archive" 2>/dev/null \
         | ${SUDO} tar --incremental --warning=no-timestamp -xzf - -C "$PARENT" \
+    ) 3< "$KEY_FILE" || STATUS=$?
+    if [ "$STATUS" -ne 0 ]; then
+        print_error "Failed applying $(basename "$archive") (exit ${STATUS})."
+        print_error "The tree is part-restored; re-run from the start once the cause is fixed."
+        exit 1
+    fi
+    i=$((i+1))
+done
+i=0
+for archive in ${CODE_ARCHIVES[@]+"${CODE_ARCHIVES[@]}"}; do
+    print_info "Applying $(basename "$archive") into ${PROJECT_DIR} ($((i+1))/${#CODE_ARCHIVES[@]})"
+    STATUS=0
+    ( set -o pipefail
+      openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "$archive" 2>/dev/null \
+        | ${SUDO} tar --incremental --warning=no-timestamp -xzf - -C "$PROJECT_DIR" \
     ) 3< "$KEY_FILE" || STATUS=$?
     if [ "$STATUS" -ne 0 ]; then
         print_error "Failed applying $(basename "$archive") (exit ${STATUS})."

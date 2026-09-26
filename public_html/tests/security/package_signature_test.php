@@ -34,7 +34,7 @@ if (!class_exists('TreeManifestPublisher')) {
 	harness_finish();
 }
 
-$work = harness_scratch_dir('package_signature');
+$work = harness_scratch_dir('package_signature') . '/run-' . getmypid();   // this run's own: a concurrent run's rmtree would take it
 $rmtree = function ($p) use (&$rmtree) {
 	foreach (glob(rtrim($p, '/') . '/{,.}*', GLOB_BRACE) ?: array() as $f) {
 		if (basename($f) === '.' || basename($f) === '..') continue;
@@ -44,6 +44,7 @@ $rmtree = function ($p) use (&$rmtree) {
 };
 $rmtree($work);
 @mkdir($work, 0770, true);
+harness_defer(function () use ($work, $rmtree) { $rmtree($work); });
 
 // A throwaway key. The secret half lives in this process and nowhere else.
 $pair = sodium_crypto_sign_keypair();

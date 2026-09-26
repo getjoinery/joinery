@@ -35,8 +35,12 @@ require_once(PathHelper::getIncludePath('includes/BackupStaging.php'));
 require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
 require_once(PathHelper::getIncludePath('includes/BackupVerifier.php'));
 
-$work = harness_scratch_dir('backup_objects');
-foreach (glob($work . '/*') ?: array() as $p) { if (is_file($p)) { @unlink($p); } }
+// A directory of this run's own: two runs at once (another session's gate, a
+// parallel batch) sharing one scratch directory deleted each other's key file
+// mid-run.
+$work = harness_scratch_dir('backup_objects') . '/run-' . getmypid();
+@mkdir($work, 0700, true);
+harness_defer(function () use ($work) { exec('rm -rf ' . escapeshellarg($work)); });
 
 // ── Cipher ──────────────────────────────────────────────────────────────────
 section('The PHP cipher and openssl enc open each other\'s output');

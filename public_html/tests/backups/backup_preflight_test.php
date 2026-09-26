@@ -57,13 +57,15 @@ check(BackupRunner::expected_bytes(null, 0) === 0, 'no manifest expects nothing'
 $work = sys_get_temp_dir() . '/jy_preflight_' . getmypid();
 @mkdir($work, 0700, true);
 harness_defer(function () use ($work) { exec('rm -rf ' . escapeshellarg($work)); });
-file_put_contents($work . '/snar', str_repeat('s', 3000));
+file_put_contents($work . '/data.snar', str_repeat('s', 3000));
+file_put_contents($work . '/code.snar', str_repeat('c', 400));
 file_put_contents($work . '/manifest.json', str_repeat('m', 200));
-check(BackupRunner::local_need(array(), $work . '/snar', $work . '/manifest.json') === BackupRunner::PREFLIGHT_LOCAL_OVERHEAD + 3200,
-	'the local need is the snapshot plus the manifest plus the fixed overhead');
-check(BackupRunner::local_need(array(), '', '') === BackupRunner::PREFLIGHT_LOCAL_OVERHEAD,
+check(BackupRunner::local_need(array(), array($work . '/data.snar', $work . '/code.snar'), $work . '/manifest.json')
+	=== BackupRunner::PREFLIGHT_LOCAL_OVERHEAD + 2 * 3400 + 200,
+	'the local need is each snapshot twice (it is held aside while it runs), the manifest and the fixed overhead');
+check(BackupRunner::local_need(array(), array(), '') === BackupRunner::PREFLIGHT_LOCAL_OVERHEAD,
 	'a standalone run needs only the overhead');
-check(BackupRunner::local_need(array(), $work . '/missing', '') === BackupRunner::PREFLIGHT_LOCAL_OVERHEAD,
+check(BackupRunner::local_need(array(), array($work . '/missing'), '') === BackupRunner::PREFLIGHT_LOCAL_OVERHEAD,
 	'a missing file counts as nothing');
 
 section('A refused chain run writes nothing');

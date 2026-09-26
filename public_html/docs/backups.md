@@ -120,18 +120,34 @@ Two shapes, chosen by **How backups are taken**.
 
 **Incremental (default).** A chain: one full, then runs that carry only what
 changed. Measured on a real site, the first run's file archive was 193 MB and
-the next was 37 kB.
+the next was 37 kB. The site is archived as two parts, each with its own
+incremental history: **data**, the site directory less `public_html/`
+(uploads, config, static files), and **code**, `public_html/`.
 
 ```
 {path_prefix}/{slug}/{profile}/chain-{YYYYMMDD_HHMMSS}/
-    manifest.json           the restore contract — order, hashes, sealed keys
-    files-0000.tar.gz.enc   the full
+    manifest.json           the restore contract — order, levels, hashes, sealed keys
+    data-0000.tar.gz.enc    the site less public_html: the full
+    code-0000.tar.gz.enc    public_html, rooted at public_html: the full
     db-0000.sql.gz.enc
     meta-0000.tar.gz.enc    shape.json + virtualhost + a note of the run
-    files-0001.tar.gz.enc   an incremental
+    data-0001.tar.gz.enc    an incremental
+    code-0001.tar.gz.enc    a full again when an upgrade swapped the code
     db-0001.sql.gz.enc
     ...
 ```
+
+The manifest (version 2) records a `level` on every artifact of a kind that
+increments — `data`, `code`, and a physical database backup, `pgdata` — so one
+kind can start over inside a chain while the others carry on; a run's own
+`level` is 0 exactly when every kind in it is. A restore takes each kind from
+its newest level 0 at or before the run, forward to the run
+(`BackupChain::restore_plan()`; `restore_chain.sh` applies the same rule).
+A **version 1** manifest is a chain written before the split: one
+`files-NNNN.tar.gz.enc` a run, the whole site directory, and one `level` per
+run that is the files archive's. Every reader reads versions 1 and 2, and
+refuses a version it does not know, by name, rather than restoring part of a
+chain.
 
 **Full every time.** One self-contained archive per run:
 
@@ -144,7 +160,7 @@ A database-only backup is the same shape with `{database}-{YYYYMMDD_HHMMSS}.sql.
 as the archive. All three families carry the same stamp, which is what a
 management node's retention sorts backup storage by.
 
-**Nothing an engine produces lands on this disk.** The files archive, the
+**Nothing an engine produces lands on this disk.** The data and code archives, the
 standalone archive and the database dump are each one pipeline —
 `tar | openssl` or `pg_dump | gzip | openssl` — whose stdout the runner hands
 to `S3Signer::put_stream()`, which uploads it as it flows. What a run holds on
@@ -167,8 +183,8 @@ or 1 (or `pg_dump` 0), openssl 0, and at least 64 bytes went up — an openssl
 envelope around an empty stream is 32 bytes, and a backup of nothing is never
 recorded as a backup. Anything else aborts the upload: nothing partial or
 empty is ever in backup storage, and a chain run that fails this way is discarded
-under the ordinary rule (snapshot cleared, manifest restored, the run's other
-objects deleted where the credential can delete).
+under the ordinary rule (snapshots and manifest put back as they stood, the
+run's other objects deleted where the credential can delete).
 
 Everything is AES-256-CBC (PBKDF2, random salt). `slug` defaults to the project
 directory name — the same value a management node would use for this site — so a
@@ -388,9 +404,10 @@ arrives on its own.
 
 ## How chains work
 
-The files archive uses GNU tar's `--listed-incremental` against a snapshot file
-at `{working dir}/.{slug}.snar`, where the working directory is the profile's
-own. tar records each directory's full contents, so
+Each part's archive uses GNU tar's `--listed-incremental` against its own
+snapshot file, `{working dir}/.{slug}.data.snar` and `.{slug}.code.snar`,
+where the working directory is the profile's own. tar records each directory's
+full contents, so
 restoring replays **deletions** as well as additions — a file removed last
 Tuesday is absent when you restore to Wednesday, rather than rising from the
 dead.
@@ -411,8 +428,10 @@ matters.
 **The database is dumped in full on every run.** A dump is the small part, and a
 half-applied database is not something anyone wants to restore.
 
-A run starts a **new chain** when there is nothing to extend, when the snapshot
-file is missing or empty, when the chain is older than the configured interval
+A run starts a **new chain** when there is nothing to extend, when the chain is a
+version-1 chain (`layout_split`: it is not extended by a run that archives code
+and data apart, and its single `.{slug}.snar` is deleted), when a snapshot file
+is missing or empty, when the chain is older than the configured interval
 (measured with an hour's slack, so a weekly run on a fixed schedule rolls on the
 seventh day even when the tick lands a few seconds earlier in the minute than
 the run that started the chain), when one full is carrying more than 180 incrementals (a week of hourly runs), or when the chain's
@@ -422,30 +441,49 @@ or the local manifest — is therefore safe: the next run costs one extra full,
 and never produces a broken backup. The manifest records why its chain started
 (`started_because`).
 
-**A chain never spans a swap of the code tree.** An upgrade deploys by moving
+**An upgrade re-bases the code, not the chain.** An upgrade deploys by moving
 every directory in `public_html/` out and the staged ones in; the new
 directories can reuse inode numbers the snapshot recorded for other paths, and
-tar then records directory renames that no extraction can apply — every restore
-point after the upgrade would fail. So the files engine writes the identity of
-the tree it archived beside the snapshot (`.{slug}.snar.tree`: the inodes of
-`public_html` and of each directory directly inside it), and a run whose tree
-differs from that record — or that finds no record — starts a new chain
-(`tree_changed`). A restore that lays the tree down again counts the same way.
-If an upgrade lands while a run is extending a chain, the run fails and the
-next one starts the new chain.
+tar would then record directory renames that no extraction can apply. So each
+part's engine writes the identity of the tree it archived beside its snapshot
+(`.snar.tree`) — for the code, the inodes of `public_html` and of each
+directory directly inside it; for the data, the inodes of the site directory
+and of each directory directly inside it that the data archive carries — and a
+part whose tree differs from that record, or that finds no record, starts over
+from a full **inside the chain** (its artifact records
+`rebased_because: tree_changed`). The other part carries on incrementing, so
+the night after a release uploads a code full (about 0.1 GB) and only what
+changed in the data, not every upload again. A tree laid down fresh by a
+restore re-bases the same way; an in-place restore keeps the data's inodes and
+the data increments. A directory the data archive leaves out (`vendor/`,
+`cache/`, …) can be recreated without re-basing anything.
 
-A run that **fails** partway clears the snapshot for the same reason: the
-snapshot advances while tar runs, before the run is committed to the manifest
-and confirmed in the bucket, so carrying it past a failure would quietly leave
-the failed run's changes out of the chain. The next run starts a fresh chain
-instead — one extra full, never a silently broken backup. The failed run also
-removes what it made and puts the manifest back to its pre-run state: the
-metadata artifact on disk, and any object it had already streamed to backup storage
-where the credential can delete (the site profile). Under the manager profile's
-write-only credential an already-streamed files object stays until its chain is
-pruned whole — a bounded orphan the manifest never names. A local manifest
-describing a run the bucket never received must not survive to be uploaded by
-anything later.
+The data archive leaves out `public_html/`, `public_html_*` (an upgrade's
+rollback and failed trees) and `uploads/upgrades/` (its staging area, which
+holds a whole code tree mid-upgrade). These three are anchored to the site
+directory, so a `public_html` deeper in the tree — a worktree under `sync/`,
+say — is data and is archived. A code archive is rooted at `public_html` and
+extracts into the site directory, after the data.
+
+A run that **fails** partway puts every snapshot back as it stood before the
+run: a snapshot advances while tar runs, before the run is committed to the
+manifest and confirmed in the bucket, so carrying it past a failure would
+quietly leave the failed run's changes out of the chain. Each snapshot is held
+aside on disk before the engines run (`.snar.held`, or a `.snar.none` marker
+when there was none) and restored on failure (a snapshot truncated by a tar
+that died mid-run is healed the same way), so the next run is a correct
+increment on the last committed run and a transient failure costs no extra
+full. A run killed outright cannot undo itself; the next run finds what it held
+— runs are serialized, so anything held belongs to a dead run — and puts it
+back before deciding anything. If an upgrade lands while a run is incrementing the code, the run fails
+and the next one re-bases the code. The failed run also removes what it made
+and puts the manifest back to its pre-run state: the metadata artifact on disk,
+and any object it had already streamed to backup storage where the credential
+can delete (the site profile). Under the manager profile's write-only
+credential an already-streamed data or code object stays until its chain is
+pruned whole — a bounded orphan the manifest never names, overwritten if the
+next run reuses its run number. A local manifest describing a run the bucket
+never received must not survive to be uploaded by anything later.
 
 Runs are serialized with a lock in the working directory; a run that finds
 another in progress reports itself skipped rather than racing it for the
@@ -706,7 +744,7 @@ them on read for a row that still lacks either, writing the completed
 credential back once (a server-initiated reconciliation) so the signer never
 sees an incomplete B2 credential.
 
-**Streamed artifacts** — the files archive, the standalone archive, the
+**Streamed artifacts** — the data and code archives, the standalone archive, the
 database dump — go through `S3Signer::put_stream()`: an engine's stdout,
 unknown length, never re-readable. The stream is read one part at a time,
 hashed and counted as it goes. A stream that ends inside the first part is
@@ -804,9 +842,9 @@ match.
 - **Cloud** — keep `backup_retention_days` days of restore points (default
   28): every restore point that started inside the window, and the newest one
   that started before it, which is what a restore to the window's first day
-  replays from. The window is days rather than a count because every swap of
-  the code tree starts a new chain, so with frequent releases a count of chains
-  would cover only a few days. The rule is `BackupRunner::surplus()`, shared
+  replays from. The window is days rather than a count because chains differ in
+  length (the configured interval, a key rotation, a lost snapshot), so a count
+  of chains covers an unpredictable span. The rule is `BackupRunner::surplus()`, shared
   with the management node's retention. Older restore points are deleted,
   driven by this site's own run history rather than by a
   bucket listing, so it can only ever delete objects this site recorded writing.
@@ -1087,7 +1125,7 @@ here.
 The script works in `{site}/backups/{profile}/verify-{pid}/`, under the same
 two locks as a backup run (so it never reads a chain a run is writing), checks
 free disk before downloading anything (the set for level 2; the set plus twice
-the full's files archive plus three times the dump for level 3), and removes
+each tree archive's full plus three times the dump for level 3), and removes
 its working directory, scratch tree and throwaway database on every exit path,
 including a fatal. The local sweep removes any `verify-*` directory older than
 a day that a killed process left behind.
@@ -1253,11 +1291,12 @@ hands it one, and `--recovery-pub` is refused.
 | `site-key` | Prints this site's public key, minting the keypair if absent |
 
 `backup_files.sh` archives the file tree, incrementally when given a snapshot
-path. `restore_chain.sh` applies a chain in order. Both take an explicit
+path; `--part data` or `--part code` archives one part, and without it the whole
+site directory is one archive. `restore_chain.sh` applies a chain in order. Both take an explicit
 directory override so the incremental and deletion-replay behaviour is tested
 against a throwaway tree rather than a live site.
 
-Three guards keep a files archive honest:
+Three guards keep a tree archive honest:
 
 - **Elevation is a rule, not a credential.** An unprivileged run uses `sudo`
   only when `sudo -n -l` shows a `NOPASSWD: ALL` rule. An account holding one
@@ -1271,6 +1310,8 @@ Three guards keep a files archive honest:
 - **A full a tenth the size of the previous full is said out loud.** The run
   is kept — the archive is real — but its history row, the task message and
   the `BACKUP_WARNING` line a management node reads all carry the two sizes.
+  It compares data fulls (a version-1 run's files full counts as one), because
+  the data is the part a backup of nothing would shrink.
   The comparison is with the previous full only, so a site that really did
   shrink is flagged once and then measured against its new size
   (`BackupRunner::full_size_warning()`).
@@ -1279,11 +1320,12 @@ Three guards keep a files archive honest:
 to the bucket, so what a run lands on its own disk is the tar snapshot, the
 chain manifest and a few small files (the metadata artifact, the offloaded-files
 index, an envelope sidecar, the engine's reports). `BackupRunner::local_need()`
-adds those up — the current snapshot and manifest by size, the small files as a
-fixed 64 MiB — and the run refuses when free space is under that need plus a
+adds those up — each current snapshot twice (it is held aside while its engine
+runs) and the manifest by size, the small files as a fixed 64 MiB — and the run
+refuses when free space is under that need plus a
 fifth, plus 1 GiB kept free on top. The refusal names both figures (*"Not
 started: this run needs about 1.1 GB on disk and 800 MB is free."*) and, when the
-local chain manifest knows it, the size the files archive is expected to be.
+local chain manifest knows it, the size the tree archives are expected to be.
 It is thrown before a chain is minted, a snapshot cleared or a key file
 written, so a refused run leaves the chain exactly as it was, and it is
 recorded as a failed run like any other. A run that streams essentially never

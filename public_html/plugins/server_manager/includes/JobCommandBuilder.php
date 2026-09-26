@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.79 - shelf_newest_run() counts a run by any artifact kind BackupChain names, so a run carrying
+ *                only code, data and a database is not missed
  * @version 1.78 - stage_chain and verify_backup carry a whole long chain's links (agent 1.45.0: CHAIN_LINKS_MAX
  *                 under CHAIN_PARAMS_BYTES); a chain past that fails at build. The size check moved out of
  *                 sign_chain_links into the two builders that send the links (restore_objects sends none of
@@ -2696,7 +2698,7 @@ class JobCommandBuilder {
 	private static function shelf_newest_run(array $artifact_urls) {
 		$newest = null;
 		foreach (array_keys($artifact_urls) as $name) {
-			if (preg_match('/^(files|db|meta|objects)-(\d{4})\./', (string)$name, $m)) {
+			if (preg_match('/^(' . implode('|', BackupChain::KINDS) . ')-(\d{4})\./', (string)$name, $m)) {
 				$newest = max((int)$newest, (int)$m[2]);
 			}
 		}

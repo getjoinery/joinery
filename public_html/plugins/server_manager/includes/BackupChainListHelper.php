@@ -11,6 +11,8 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.5 - a chain carries its manifest version and each run the level of every artifact that records
+ *                one (manifest version 2), so a reader can plan a restore per kind from the listing
  * @version 1.4 - format_size() is BackupRunner::human(): decimal units, one format for every backup size
  * @version 1.3 - the listing is this node's own prefix, every page of it (S3Signer::list), not the first
  *                2000 keys of the whole target: ten thousand offloaded-file objects under one node's
@@ -152,9 +154,11 @@ class BackupChainListHelper {
 			foreach ($m['runs'] as $r) {
 				$bytes = 0;
 				$by_kind = [];
+				$levels = [];
 				foreach (($r['artifacts'] ?? []) as $kind => $a) {
 					$bytes += (int)($a['bytes'] ?? 0);
 					$by_kind[(string)$kind] = (int)($a['bytes'] ?? 0);
+					if (isset($a['level'])) { $levels[(string)$kind] = (int)$a['level']; }
 				}
 				$runs[] = [
 					'seq'       => (int)($r['seq'] ?? count($runs)),
@@ -162,11 +166,13 @@ class BackupChainListHelper {
 					'time'      => (string)($r['time'] ?? ''),
 					'bytes'     => $bytes,
 					'artifacts' => $by_kind,
+					'levels'    => $levels,
 				];
 			}
 
 			$chains[] = [
 				'chain_id' => (string)$chain_id,
+				'version'  => (int)($m['version'] ?? 1),
 				'profile'  => (string)($profiles[$chain_id] ?? BackupProfile::MANAGER),
 				'created'  => (string)($m['created'] ?? ''),
 				'updated'  => (string)($m['updated'] ?? ''),
