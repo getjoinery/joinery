@@ -566,6 +566,8 @@ struct Custody {
     /// time -- never learned, never recorded -- so a rescue from one cannot
     /// be attributed either way.
     removal_unattributed: usize,
+    /// Chaos swaps whose directories have been given handles.
+    swaps_noted: usize,
 }
 
 impl Custody {
@@ -705,6 +707,21 @@ impl Custody {
                 self.intents.push((w.sha256.clone(), key));
             }
         }
+    }
+
+    /// Every directory a chaos swap exchanged bodies across gets a handle, to
+    /// be learned at the next pass point on its device like any other: the
+    /// directory may be one the engine made, which the workload never wrote
+    /// into. Called before every learn.
+    fn note_swaps(&mut self, world: &World) {
+        let pairs = world.swap_pairs();
+        for p in &pairs[self.swaps_noted.min(pairs.len())..] {
+            let Some(s) = p.stood_in else { continue };
+            for birth in [s.a, s.b].into_iter().flatten() {
+                self.handles.entry((s.device, birth)).or_insert(None);
+            }
+        }
+        self.swaps_noted = pairs.len();
     }
 
     /// A pass point on this device: learn every handle of its that is still
@@ -884,8 +901,24 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
             incomplete.insert(b.clone());
         }
         if !ca.is_empty() || !cb.is_empty() {
-            candidates.entry(a).or_default().extend(cb.iter().copied());
-            candidates.entry(b).or_default().extend(ca.iter().copied());
+            candidates.entry(a.clone()).or_default().extend(cb.iter().copied());
+            candidates.entry(b.clone()).or_default().extend(ca.iter().copied());
+        }
+        // And the directory the other physically stood in, which is where
+        // this one now stands: the other may stand there only because the
+        // device applied someone else's move of it, which no intent of its
+        // own records (reset B7, plain2 75221). Unlearned, it is unknown.
+        let Some(s) = p.stood_in else { continue };
+        for (body, dir) in [(&a, s.b), (&b, s.a)] {
+            let Some(set) = candidates.get_mut(body) else { continue };
+            match dir.and_then(|birth| resolve(&(s.device, birth))) {
+                Some(id) => {
+                    set.insert(id);
+                }
+                None => {
+                    incomplete.insert(body.clone());
+                }
+            }
         }
     }
     let folders: BTreeMap<i64, jd_sim::server::FolderFact> =
@@ -1070,6 +1103,7 @@ fn workload_core_with(
     }
     let settled = world.settle();
     custody.attribute_harness_writes(&world);
+    custody.note_swaps(&world);
     for (di, d) in world.devices.iter().enumerate() {
         custody.learn(di, d, true);
     }
@@ -2023,6 +2057,58 @@ fn a_file_that_keeps_its_bytes_and_loses_its_folder() {
     );
 }
 
+/// A chaos swap lends each body the directory the other stood in at that
+/// moment. Here `y.txt` stands in `S` on pc only because pc applied a move
+/// no user made on any device of this world (the harness's hand on the
+/// server), and `S` is a directory the engine made there, never written into.
+/// The swap carries `x.txt`'s body into `S`, and the engine rightly keeps it
+/// there. Lent only the folders the ledger put `y.txt` in, the check read
+/// that as misplaced (reset B7, plain2 75221).
+#[test]
+fn a_chaos_swap_lends_each_body_the_directory_the_other_stood_in() {
+    let seed = 9_948;
+    let world = World::of(seed, &[("mac", Platform::Linux), ("pc", Platform::Linux)]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_mkdir("A");
+    mac.fs.user_write("A/x.txt", b"x, which the user put in A");
+    mac.fs.user_write("A/y.txt", b"y, which the user put in A");
+    assert!(world.settle().is_some());
+    let mut custody = Custody::default();
+    for (di, d) in world.devices.iter().enumerate() {
+        custody.adopt_standing(di, d);
+        custody.learn(di, d, false);
+    }
+    let pass = |custody: &mut Custody, di: usize| {
+        world.pass(&world.devices[di]);
+        custody.note_swaps(&world);
+        custody.learn(di, &world.devices[di], false);
+    };
+    mac.fs.user_mkdir("S");
+    pass(&mut custody, 0);
+    pass(&mut custody, 1);
+    let s = world.server.folder_id_at("S").expect("S went up");
+    let y = world.server.files().into_iter().find(|f| f.name == "y.txt").expect("y.txt is on the server");
+    world
+        .server
+        .action("drive_move", &serde_json::json!({ "entity_type": "file", "entity_id": y.id, "parent_id": s }))
+        .unwrap();
+    pass(&mut custody, 1);
+    assert!(pc.fs.exists("S/y.txt"), "pc took the move");
+    world.swap_names_by_chaos("pc", "A/x.txt", "S/y.txt");
+    pass(&mut custody, 1);
+    assert!(world.settle().is_some());
+    custody.attribute_harness_writes(&world);
+    custody.note_swaps(&world);
+    for (di, d) in world.devices.iter().enumerate() {
+        custody.learn(di, d, true);
+    }
+    let x_body = jd_sim::sha256_hex(b"x, which the user put in A");
+    let x = world.server.files().into_iter().find(|f| !f.trashed && f.sha256 == x_body).expect("x's body is on the server");
+    assert_eq!(x.folder, Some(s), "the engine keeps x's body where the swap carried it");
+    assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed);
+}
+
 /// The server never learned what anything in the vault is called.
 ///
 /// An encrypted file's real name lives inside its metadata blob and its stored
@@ -2327,6 +2413,7 @@ fn drive(
                 world.pass(device);
                 world.power_cycle(device);
             }
+            custody.note_swaps(world);
             custody.learn(di, device, false);
             trace(world, &format!("step {step} kill on {}", device.name));
         }
@@ -2666,6 +2753,7 @@ fn drive(
             _ => {
                 world.clock.advance_secs(20 * 60);
                 let out = world.pass(device);
+                custody.note_swaps(world);
                 custody.learn(di, device, false);
                 if std::env::var("OPS").is_ok() {
                     println!(

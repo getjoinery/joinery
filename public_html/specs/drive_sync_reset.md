@@ -1743,9 +1743,11 @@ belt in, before the belt lands.** B1 is what happens without this.
   and VALID (public-html-e9, 2026-09-25). Commit 1 (disk and record, read by
   nothing) NEEDED and VALID, its bar met: 420 of 420 traces byte-identical to
   `9b992a58`. Commit 2 (the scan) VALID 2026-09-25: leaked files under swaps
-  158 to 40, swaps off unchanged. Order from here (reviewer): the harness
-  fixes B7-B9 as their own commit, shown to move no engine verdict on the 420
-  seeds; then commit 3 (the executor), measured alone against commit 2; then
+  158 to 40, swaps off unchanged; committed `780ce2c7`. Order from here
+  (reviewer): the harness fixes B7-B9 as their own commit, shown to move no
+  engine verdict on the 420 seeds (NEEDED and VALID 2026-09-25; see "B7-B9
+  measured" below); then commit 3 (the executor), measured alone against the
+  B7-B9 commit with births hidden as the control; then B11; then
   B6, a file at a reserved download slot gets a record so the hold reaches
   it; then C9 part 2 with B4 and B5, the D1 park gap and C13. B3 waits for its
   prototype's three neighbour reds to be traced.
@@ -1810,24 +1812,53 @@ belt in, before the belt lands.** B1 is what happens without this.
   sent a sealed body in the clear. With no record there is no identity, and
   the hold for a file saved in a vault and moved out before it was sent
   (Q2) cannot reach it. Commit 1 has the same rule.
-- **B7, open (2026-09-25, traced in plain2 75221): the folder oracle lends a
-  chaos-swapped file only its partner body's recorded folders.** A landing
-  save set aside and then swapped into another folder is judged misplaced
-  when the partner body stood there because the device applied a peer's
-  move, not because the user put it there. The lend should be the folder
-  each side physically stood in at swap time. Harness, not engine (kill2
-  75118 shows the same for two landing saves).
-- **B8, open (2026-09-25, traced in kill2 75118, births hidden): the
-  convergence check drops a held record's agreed path from the disk map
-  whatever file stands there.** When the held record's own file has left
-  that path and a plain record's file stands at it, the plain file is hidden
-  and its server copy reads "only on the server" (kill2 75112, plat3 75413
-  the same shape). Harness; commit 1's check does the same.
-- **B9, open (2026-09-25, traced in plat3 75426, births hidden): the harness
-  does not declare a held file whose sealed copy the server deleted.** The
-  engine keeps the edited copy on this device only, as designed, and
-  `held_outside_the_vault` excludes server-deleted records, so it reads
-  "only on the disk". Harness.
+- **B7, fixed in the harness 2026-09-25, NEEDED and VALID (public-html-e9) (traced in plain2
+  75221): the folder oracle lent a chaos-swapped file only its partner
+  body's recorded folders.** A landing save set aside and then swapped into
+  another folder was judged misplaced when the partner body stood there
+  because the device applied a peer's move, not because the user put it
+  there. The swap now records the directory each body stood in, and each
+  body is lent the other's; a directory the engine made gets a handle,
+  learned at the next pass point like any other (`SwapPair::stood_in`,
+  `Custody::note_swaps`). Pin
+  `a_chaos_swap_lends_each_body_the_directory_the_other_stood_in`. Not kill2
+  75118's two landing saves, as first read: neither was ever in a chaos
+  swap; each stands in the other ring folder from the one it was written
+  into, the ring family of 909 and 912 on that seed.
+- **B8, fixed in the harness 2026-09-25, NEEDED and VALID (public-html-e9) (traced in kill2
+  75118, births hidden): the convergence check dropped a held record's
+  agreed path from the disk map whatever file stood there.** When the held
+  record's own file had left that path and a plain record's file stood at
+  it, the plain file was hidden and its server copy read "only on the
+  server" (kill2 75112, plat3 75413 the same shape). The path is now set
+  aside only when no other record owns the file there. Pin
+  `a_file_another_record_owns_at_a_held_path_is_judged_as_that_records`,
+  its end state set down by hand.
+- **B9, fixed in the harness 2026-09-25, NEEDED and VALID (public-html-e9) (traced in plat3
+  75426, births hidden): the harness did not declare a held file whose
+  sealed copy the server deleted.** The engine keeps the edited copy on
+  this device only, as designed, and `held_outside_the_vault` excluded
+  server-deleted records, so it read "only on the disk". It now declares
+  them, and the server path of a deleted copy is no longer taken out of
+  the server's side. The two pins of the server trashing a held file now
+  also assert convergence.
+- **B7-B9 measured, 2026-09-25:** all 840 journals (the 420 seeds with
+  births shown and hidden) byte-identical to `780ce2c7`. Verdicts: plain2
+  75221 red to green (B7); births hidden, the convergence fire gone from
+  kill2 75112, 75118, plat3 75413 (B8) and plat3 75426 (B9), and the folder
+  fire from kill2 75109 (B7), those five still red on other checks; three
+  folder fires lose lent files (plat3 75426, 75410, 75424). No new fire
+  anywhere, and each change returns under its own rule's knockout and no
+  other.
+- **B11, open (public-html-e9, 2026-09-25, instinct): with B8, a held record
+  whose path another record's file has taken is judged by nothing in the
+  convergence check.** B8 skips the path, so the held record's own file may
+  stand nowhere on the disk and the check still reads converged. Before B8
+  that state fired, with the wrong words; `own_files_astray`, which would
+  say so, prints only under `OWNFILE`. The rule: on that skip, the held
+  record's own file must stand somewhere on this disk, by identity, or the
+  check fires "held file gone". Harness only; its own commit, after commit
+  3, so that commit 3 is measured alone.
 - **D1 (2026-09-24), a sealed file dragged out of a vault is held, not
   converted. NEEDED and VALID (public-html-25), landed 0c66212d.** Post-commit
   reading 181843af -> 0c66212d: identical, seed for seed, to the reviewed

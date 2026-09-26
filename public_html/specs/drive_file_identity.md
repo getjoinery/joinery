@@ -10,8 +10,10 @@ differences, all of them `enc-` names, which differ between two runs of
 B10). Commit 2 (the scan, and the upload's half of T1-D) VALID 2026-09-25
 (freeze 609ad11f): against commit 1 on the same 420 seeds, swaps off
 identical; swaps on, leaked files 158 to 40 and swap-oracle fires 74 to 5;
-every G->R traced, to older gaps now filed as the reset's B2-B9. Commit 3
-(the executor) is next.**
+every G->R traced, to older gaps now filed as the reset's B2-B9; committed
+`780ce2c7`. The reset's harness fixes B7-B9 come first, as their own commit
+(NEEDED and VALID, public-html-e9, 2026-09-25). Commit 3 (the executor) is
+next, measured alone against that commit.**
 
 **Owner decision 2026-09-25: a file's own identity decides which record it belongs to, and its
 path decides only when that identity is gone. This settles the reset's AH
