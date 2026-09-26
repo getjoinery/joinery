@@ -167,8 +167,11 @@ date, `can_cancel`), the current tier from the user record, and a
 `none`) so the client knows which management affordances to show.
 
 The screen is read-only plus Cancel, which calls the existing
-`orders_recurring_action` — the same action the web page's cancel button
-uses. Upgrade, downgrade, reactivate, and billing management are routed by
+`orders_recurring_action` — the same action the web page's Cancel button
+posts to. The action accepts only a POST (the web button also carries a CSRF
+token), and cancels with the provider that bills the subscription: Stripe as
+asked, PayPal at once (PayPal's cancel takes no timing). `can_cancel` and the
+web page's button follow `OrderItem::subscription_cancel_blocker()`. Upgrade, downgrade, reactivate, and billing management are routed by
 source: web-billed subscriptions open the existing web pages in the app's
 authenticated webview ("Change Plan" / "Manage Billing"), while store-billed
 subscriptions (`app_store` / `play_store`) deep-link to the store's own

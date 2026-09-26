@@ -75,8 +75,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['numorders'] = $numorders;
 	$page_vars['orders'] = $orders;
 
-	$page_vars['user_subscribed_list'] = $user_subscribed_list;
-
 
 	return LogicResult::render($page_vars);
 }

@@ -1,4 +1,6 @@
 <?php
+	// @version 1.1 - Cancel is a POST button with a confirm (it was a link any site could send a buyer to);
+	//                an app-store subscription shows where its buyer cancels it
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -7,6 +9,8 @@
 	$page_vars = process_logic(subscriptions_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 	$page = new PublicPage();
+	// One token for every Cancel button on the page (single-button action forms).
+	$cancel_token = $page->getFormWriter('subscription_cancel')->getCSRFToken();
 	$page->public_header([
 		'is_valid_page' => $is_valid_page ?? false,
 		'title' => 'My Subscriptions',
@@ -62,7 +66,23 @@
                             $action = '';
                         } else {
                             $status = $subscription->get('odi_subscription_status') ?: 'Active';
-                            $action = '<a href="/profile/orders_recurring_action?order_item_id=' . $subscription->key . '" class="btn btn-ghost btn-sm jy-subs-cancel">Cancel</a>';
+                            $blocker = $subscription->subscription_cancel_blocker();
+                            if ($blocker !== null) {
+                                $action = '<span class="muted text-sm">' . htmlspecialchars($blocker) . '</span>';
+                            } else {
+                                // A POST, never a link: a link is a GET any site can send
+                                // this browser to. The browser's own confirm, so it works
+                                // under every theme.
+                                $confirm = $subscription->get_payment_source() === 'paypal'
+                                    ? 'Cancel this subscription? PayPal ends it now.'
+                                    : 'Cancel this subscription? It stays active until the end of the period you have paid for.';
+                                $action = '<form method="post" action="/profile/orders_recurring_action" class="jy-inline"'
+                                    . ' onsubmit="return confirm(' . htmlspecialchars(json_encode($confirm), ENT_QUOTES) . ');">'
+                                    . '<input type="hidden" name="order_item_id" value="' . (int)$subscription->key . '">'
+                                    . '<input type="hidden" name="_csrf_token" value="' . htmlspecialchars((string)$cancel_token) . '">'
+                                    . '<button type="submit" class="btn btn-ghost btn-sm jy-subs-cancel">Cancel</button>'
+                                    . '</form>';
+                            }
                         }
                         ?>
                         <div class="jy-subs-row">

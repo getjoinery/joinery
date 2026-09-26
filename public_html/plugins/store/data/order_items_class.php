@@ -17,6 +17,14 @@ require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php')
 
 class OrderItemException extends SystemBaseException {}
 
+/**
+ * OrderItem - one line of an order; a subscription line carries its billing state.
+ *
+ * @version 1.1 - cancel_subscription_order_item() cancels with the provider that bills the subscription
+ *                (Stripe or PayPal) and refuses an app-store one with where the buyer cancels it
+ *                (subscription_cancel_blocker()); it called Stripe for every provider
+ */
+
 class OrderItem extends SystemBase {	public static $prefix = 'odi';
 
 	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
@@ -230,22 +238,78 @@ function get_order() {
 		
 	}
 	
+	/**
+	 * Why this subscription cannot be cancelled from this site, or null when it can.
+	 *
+	 * A subscription bought in an app store is the buyer's to cancel there: the
+	 * merchant has no cancel for Apple's, and none is built for Google Play's.
+	 * One with no payment provider behind it has nothing to cancel.
+	 */
+	public function subscription_cancel_blocker() {
+		switch ($this->get_payment_source()) {
+			case 'stripe':
+			case 'paypal':
+				return null;
+			case 'app_store':
+				return 'Bought through the App Store: cancel it in your Apple ID\'s subscription settings.';
+			case 'play_store':
+				return 'Bought through Google Play: cancel it in the Play Store\'s subscriptions.';
+			default:
+				return 'This subscription is not linked to a payment provider. Please contact support.';
+		}
+	}
+
+	/** The Stripe client a cancel uses. A seam, so a test can stand in for it. */
+	protected function stripe_helper() {
+		return new StripeHelper();
+	}
+
+	/** The PayPal client a cancel uses. A seam, so a test can stand in for it. */
+	protected function paypal_helper() {
+		require_once(PathHelper::getIncludePath('plugins/store/includes/PaypalHelper.php'));
+		return new PaypalHelper();
+	}
+
+	/**
+	 * Cancel this subscription with the provider that bills it.
+	 *
+	 * Stripe cancels at the end of the paid period or at once, as asked.
+	 * PayPal's cancel takes no timing and stops billing at once, so the row
+	 * records it as cancelled now. An app-store subscription is refused with
+	 * where the buyer cancels it (subscription_cancel_blocker()).
+	 */
 	function cancel_subscription_order_item($send_email, $cancel_type){
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
-		$stripe_helper = new StripeHelper();
-		
+
 		$order = new Order($this->get('odi_ord_order_id'), TRUE);
 		$order_user = new User($this->get('odi_usr_user_id'), TRUE);
-		
+
 		$this->assert_can_write($session);
 
-		$stripe_subscription = $stripe_helper->cancel_subscription($this->get('odi_stripe_subscription_id'), $cancel_type);
-		if(!$stripe_subscription){
-			throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (".$this->get('odi_stripe_subscription_id').") Please contact the webmaster.");
-			exit;		
-		}		
-		$result = $stripe_helper->update_subscription_in_order_item($this);
+		$blocker = $this->subscription_cancel_blocker();
+		if ($blocker !== null) {
+			throw new SystemDisplayablePermanentError($blocker);
+		}
+
+		$provider_id = '';
+		if ($this->get_payment_source() === 'paypal') {
+			$provider_id = (string)$this->get('odi_paypal_subscription_id');
+			if (!$this->paypal_helper()->cancel_subscription($provider_id)) {
+				throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (" . $provider_id . ") Please contact the webmaster.");
+			}
+			$this->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
+			$this->set('odi_subscription_status', 'canceled');
+			$this->save();
+		}
+		else {
+			$provider_id = (string)$this->get('odi_stripe_subscription_id');
+			$stripe_helper = $this->stripe_helper();
+			if (!$stripe_helper->cancel_subscription($provider_id, $cancel_type)) {
+				throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (" . $provider_id . ") Please contact the webmaster.");
+			}
+			$stripe_helper->update_subscription_in_order_item($this);
+		}
 
 		//SEND NOTIFICATION
 		if($send_email){
@@ -254,7 +318,7 @@ function get_order() {
 				foreach($notify_emails as $notify_email){
 					try {
 						$notify_user = User::GetByEmail($notify_email);
-						$body = 'Subscription '.$this->get('odi_stripe_subscription_id').' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
+						$body = 'Subscription '.$provider_id.' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
 						$email_inner_template = $settings->get_setting('individual_email_inner_template');
 						EmailSender::sendTemplate($email_inner_template,
 							$notify_user->get('usr_email'),
@@ -264,13 +328,13 @@ function get_order() {
 								'recipient' => $notify_user->export_as_array()
 							]
 						);
-					}					
+					}
 					catch (Exception $e) {
 						//DO NOTHING
 						$error2 = "";
 					}
 				}
-			}	
+			}
 		}
 		return true;
 		

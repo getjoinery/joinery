@@ -1,4 +1,10 @@
 <?php
+/**
+ * Cancel a subscription, as its buyer (or an admin acting for them).
+ *
+ * @version 1.1 - refuses anything but a POST: the Cancel link let any site cancel a signed-in
+ *                buyer's subscription
+ */
 
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
@@ -12,6 +18,14 @@ function orders_recurring_action_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 	if (!$settings->get_setting('products_active')) {
 		return LogicResult::error('This feature is turned off');
+	}
+
+	// A cancel is a POST. It was a link, and a link is a GET that any other
+	// site can send a signed-in buyer's browser to, cookie and all; a
+	// cross-site POST carries no session cookie (SameSite=Lax). The API
+	// reaches this by POST too.
+	if (!LibraryFunctions::isFormSubmission()) {
+		return LogicResult::error('Cancel a subscription with the Cancel button on your subscriptions page.');
 	}
 
 	$session = SessionControl::get_instance();
