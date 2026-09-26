@@ -2,6 +2,13 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.7 - No database access can be declared (specs/dns_resolvers_read_over_https.md WP7):
+#                config/postgres_access.conf is not read. prepare refuses any pg_hba line
+#                admitting a network address other than the Docker host. A database port
+#                published on an address other than 127.0.0.1 is named in the plan as
+#                dropped, not refused: with no network pg_hba line nothing can use it, and
+#                the rebuild publishes it on 127.0.0.1. Any other hand-made binding still
+#                refuses.
 # Version: 1.6 - rollback brings back the old container, not just its image (B25). What upgrades
 #                and the core installers had added in its own layer was gone: getjoinery's
 #                rollback came up without PHP apcu and sqlite3, without its agent and the
@@ -78,8 +85,8 @@
 # prepare records what the move will need and refuses anything it cannot do:
 # the database's name, encoding and locale (refused when the new image lacks
 # the locale), every table's row count, the roles the container carries beyond
-# its image, pg_hba lines its config/postgres_access.conf does not declare (a
-# rebuild drops them), the old container's exact run arguments
+# its image, pg_hba lines admitting another machine (none may; a rebuild
+# drops them), the old container's exact run arguments
 # (for rollback), the name the host's vhost serves the site under (install.sh
 # rewrites that vhost for the name it is given), that every file matches the
 # site's signed release manifest, and a trial dump's size against the disk
@@ -182,22 +189,17 @@ save_run_args() {
     } >> "$out"
 }
 
-# pg_hba lines the container carries that its own image does not: somebody
-# added them by hand (a resolver reading this database over the network, say).
-# The rebuilt container starts from the new image's file, so these are what
-# must be carried across.
-hba_undeclared() {  # $1 major, $2 the site's postgres_access.conf
-    # The container's pg_hba lines admitting a network address, other than the
-    # Docker host, that the site's config/postgres_access.conf does not
-    # declare. host_housekeeping.sh rebuilds pg_hba from that file at every
-    # container start, so a rebuild keeps none of these.
+# The container's pg_hba lines admitting a network address other than the
+# Docker host (its gateway) and loopback. A Joinery database answers only its
+# own machine, and host_housekeeping.sh strips such lines at every container
+# start; one here was added by hand since, for something outside this machine,
+# and the rebuild would silently drop it.
+hba_network() {  # $1 major
     local f="/etc/postgresql/$1/main/pg_hba.conf" gw
     gw="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' "$SITE")"
-    comm -23 \
-        <(docker exec "$SITE" cat "$f" \
-            | awk -v gw="${gw}/32" '$1 ~ /^host/ && $4 !~ /^(127\.0\.0\.1|::1)(\/|$)/ && $4 != "localhost" && $4 != "samehost" && $4 != gw' \
-            | sed -E 's/[[:space:]]+/ /g; s/ $//' | sort -u) \
-        <({ [ -f "$2" ] && grep -E '^[[:space:]]*host' "$2"; } | sed -E 's/^[[:space:]]+//; s/[[:space:]]+/ /g; s/ $//' | sort -u)
+    docker exec "$SITE" cat "$f" \
+        | awk -v gw="${gw}/32" '$1 ~ /^host/ && $4 !~ /^(127\.0\.0\.1|::1)(\/|$)/ && $4 != "localhost" && $4 != "samehost" && $4 != gw' \
+        | sed -E 's/[[:space:]]+/ /g; s/ $//' | sort -u
 }
 
 # The enabled host vhosts that proxy to this site's web port, one path each.
@@ -455,25 +457,24 @@ if [ "$STAGE" = "prepare" ]; then
 
     # install.sh recreates exactly two bindings: the web port (127.0.0.1 behind
     # the host proxy, every interface for a site with no domain) and the
-    # database port (web + 1000) on 127.0.0.1, or on the address the site's
-    # config/postgres_access.conf publishes it on. Anything else was added by
-    # hand for something outside this machine, and the rebuild would silently
-    # drop it.
-    ACCESS_FILE="$(vol_mp "${SITE}_config")/postgres_access.conf"
-    DB_PUBLISH="$(awk '$1 == "publish" { print $2; exit }' "$ACCESS_FILE" 2>/dev/null || true)"
-    DB_PUBLISH="${DB_PUBLISH:-127.0.0.1}"
+    # database port (web + 1000) on 127.0.0.1. The database port on any other
+    # address is named and dropped: no pg_hba line admits another machine, so
+    # nothing can use it. Anything else was added by hand for something outside
+    # this machine, and the rebuild would silently drop it.
     EXTRA_PORTS=""
+    DROPPED_DB=""
     while IFS='|' read -r hip hport cport; do
         [ -z "$cport" ] && continue
         case "${cport%%/*}:${hip}:${hport}" in
             "80::${PORT}"|"80:0.0.0.0:${PORT}"|"80:127.0.0.1:${PORT}") ;;
-            "5432:127.0.0.1:$((PORT + 1000))"|"5432:${DB_PUBLISH}:$((PORT + 1000))") ;;
+            "5432:127.0.0.1:$((PORT + 1000))") ;;
+            "5432:"*":$((PORT + 1000))") DROPPED_DB="${DROPPED_DB:+${DROPPED_DB} }${hip:-0.0.0.0}:${hport}" ;;
             *) EXTRA_PORTS="${EXTRA_PORTS} ${hip:-0.0.0.0}:${hport}->${cport}" ;;
         esac
     done < <(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$SITE")
-    UNDECLARED_HBA="$(hba_undeclared "$HAVE" "$ACCESS_FILE")"
-    [ -z "$UNDECLARED_HBA" ] || die "${SITE}'s pg_hba admits from the network: $(printf '%s\n' "$UNDECLARED_HBA" | paste -sd ';' - | sed 's/;/; /g'). Its config/postgres_access.conf does not declare these, so the rebuild drops them. Declare the ones still needed, and remove the rest; nothing was changed."
-    [ -z "$EXTRA_PORTS" ] || die "${SITE} publishes${EXTRA_PORTS}, which install.sh does not recreate — the rebuild would drop it and whatever depends on it. A database read from another machine is declared with a publish line in config/postgres_access.conf; nothing was changed."
+    NETWORK_HBA="$(hba_network "$HAVE")"
+    [ -z "$NETWORK_HBA" ] || die "${SITE}'s pg_hba admits from the network: $(printf '%s\n' "$NETWORK_HBA" | paste -sd ';' - | sed 's/;/; /g'). A Joinery database answers only its own machine and the rebuild drops these; find what uses them and remove them first. Nothing was changed."
+    [ -z "$EXTRA_PORTS" ] || die "${SITE} publishes${EXTRA_PORTS}, which install.sh does not recreate — the rebuild would drop it and whatever depends on it. Nothing was changed."
     EXTRA_ENV="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE" | cut -d= -f1 \
         | grep -vxE 'PATH|DEBIAN_FRONTEND|SITENAME|DOMAIN_NAME|POSTGRES_PASSWORD|UPGRADE_SERVER|CLONE_FROM|CLONE_KEY|JOINERY_[A-Z_]+|BASE_IMAGE_VERSION|LANG|LC_ALL|TZ' || true)"
     # By id: install.sh rebuilds under the same name, so the name stops meaning
@@ -522,8 +523,11 @@ if [ "$STAGE" = "prepare" ]; then
     echo "  every file matches the signed release manifest"
     echo "  $(wc -l < "${WORK}/counts.prepare.tsv") tables; trial dump $(awk -v b="$DUMP_BYTES" 'BEGIN { printf "%.1f", b / 1000000 }') MB in $((T1 - T0)) s"
     echo "  roles beyond postgres: $(grep -c '^CREATE ROLE' "${WORK}/roles.sql" || true)"
-    DECLARED_HBA="$(grep -cE '^[[:space:]]*host' "$ACCESS_FILE" 2>/dev/null || true)"
-    echo "  database published on ${DB_PUBLISH}; ${DECLARED_HBA:-0} pg_hba line(s) declared in config/postgres_access.conf"
+    if [ -n "$DROPPED_DB" ]; then
+        echo "  database port published on ${DROPPED_DB}: dropped. The rebuild publishes it on 127.0.0.1 only; no pg_hba line admits another machine"
+    else
+        echo "  database published on 127.0.0.1"
+    fi
     if [ -n "$EXTRA_ENV" ]; then
         echo "  environment install.sh does not set (review; the rebuild drops it):"
         printf '%s\n' "$EXTRA_ENV" | sed 's/^/    /'

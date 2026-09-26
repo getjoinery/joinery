@@ -179,7 +179,7 @@ The container is not a security boundary, and a site is not a sealed appliance t
 - **The host is part of the site.** HTTPS terminates on the host's Apache, which proxies to the container over plain HTTP on loopback. The certificate, the proxy vhost and the site's DNS all live outside the container.
 - **`docker` access is access to every site.** Site data lives in named volumes on the host, `docker exec` opens a root shell in any container, and membership of the `docker` group is equivalent to root on the machine.
 - **Containers take Docker's defaults.** No user-namespace remapping, no read-only root filesystem, no dropped capabilities. Processes start as root inside the container; Apache and PHP-FPM drop their workers to `www-data`.
-- **A site's ports answer on the host itself.** A site with a domain publishes its web port on `127.0.0.1`, where the host proxy reaches it, so the proxy — HTTPS, the redirect to it, and the host's fail2ban — is the only way in. A site installed with no domain, or with `--no-ssl`, has no proxy: its web port is its only way in and answers on every interface, and since Docker's forwarding rules are consulted before UFW's, a UFW rule does not close it. The database port publishes on `127.0.0.1` unless the site declares another address (see [PostgreSQL access](#postgresql-access)), and `install.sh docker` adds a `DOCKER-USER` rule dropping ports 9080-9099 arriving on the public interface.
+- **A site's ports answer on the host itself.** A site with a domain publishes its web port on `127.0.0.1`, where the host proxy reaches it, so the proxy — HTTPS, the redirect to it, and the host's fail2ban — is the only way in. A site installed with no domain, or with `--no-ssl`, has no proxy: its web port is its only way in and answers on every interface, and since Docker's forwarding rules are consulted before UFW's, a UFW rule does not close it. The database port publishes on `127.0.0.1` (see [PostgreSQL access](#postgresql-access)), and `install.sh docker` adds a `DOCKER-USER` rule dropping ports 9080-9099 arriving on the public interface.
 
 `install.sh docker` installs the host's own agent (siteless, joining the management node given with `--management-node=URL --node-name=NAME`); it is the only moment a host agent is installed, and a host built before that step existed gets its agent by running the same command once from a current release tree. `install.sh docker` also does the host's housekeeping: fail2ban (see [fail2ban and the real client address](#fail2ban-and-the-real-client-address)), a 100M cap on the system journal, Docker BuildKit garbage collection, 1G of encrypted swap, apport off, and cleared failed-login logs. It does not configure UFW on a Docker host — the UFW rules in this guide belong to bare-metal server setup.
 
@@ -606,16 +606,7 @@ sudo apache2ctl configtest
 
 A site's database answers only on its own machine. On a standalone server PostgreSQL listens on `localhost`, and `pg_hba.conf` admits local and loopback connections only. In a Docker site the container's PostgreSQL admits its own loopback and the Docker host, which reaches it through the site's database port published on the host's `127.0.0.1`; every other container on the host is refused. `host_housekeeping.sh` holds this on every converge and at every container start: any rule admitting another address is removed (the first rewrite keeps the original as `pg_hba.conf.pre-local-only`), and a standalone server's `listen_addresses` is pinned by `conf.d/99-joinery-local-only.conf`.
 
-A Docker site that must be read from another machine declares it in `config/postgres_access.conf` on its config volume, one `pg_hba.conf` line each. A line must name one database and one role that is not `postgres`, from an address no wider than a /24 (IPv6 /64), with `md5` or `scram-sha-256`; any other line is named in the housekeeping output and left out. A standalone server ignores the file.
-
-A `publish <address>` line in the same file names the host address the database port is published on in place of `127.0.0.1`. `install.sh` reads it at every rebuild, so the other machine stays connected. The address must be one of the host's own IPv4 addresses and never `0.0.0.0`; anything else is refused before the running container is touched. `install.sh` exempts that one address and port from the `DOCKER-USER` block and opens nothing else.
-
-```
-# config/postgres_access.conf: the DNS resolvers read device profiles as scrolldaddy_reader
-host    scrolldaddy     scrolldaddy_reader  192.168.206.21/32       md5
-host    scrolldaddy     scrolldaddy_reader  97.107.131.227/32       md5
-publish 192.168.206.198
-```
+There is no exception. A machine that needs a site's data reads it through the site's API, over HTTPS, with a scoped machine key — as ScrollDaddy's DNS resolvers do (`plugins/dns_filtering/docs/overview.md`). A `config/postgres_access.conf` left on a config volume is not read; housekeeping names it in its output until it is removed.
 
 ```bash
 # Docker (the password is read inside the container, never on the host's command line)

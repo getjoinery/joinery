@@ -1596,3 +1596,15 @@
 	$migration['migration_file'] = 'vault_client_autolock_setting.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The DNS servers download the blocklists themselves, so the site's copy of
+	// them (bld_blocklist_domains, a dns_filtering table, with its sequence) and
+	// the dns_filtering_blocklist_version row go
+	// (specs/dns_resolvers_read_over_https.md WP7). Core, so a node where the
+	// plugin is inactive drops its stale table too.
+	$migration = array();
+	$migration['database_version'] = '202';
+	$migration['test'] = "SELECT CASE WHEN to_regclass('public.bld_blocklist_domains') IS NULL AND NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'dns_filtering_blocklist_version') THEN 1 ELSE 0 END AS count";
+	$migration['migration_file'] = 'blocklist_domains_dropped.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

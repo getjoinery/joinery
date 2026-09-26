@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#Version 3.9 - Comments only: the role a dump names is illustrated by the mailbox plugin's
+#              iemap_* role. scrolldaddy_reader, the earlier example, is gone
+#              (specs/dns_resolvers_read_over_https.md WP7)
 #Version 3.8 - Every role the dump names exists before the schema is dropped. A missing one is
 #              created without login; one that cannot be created is refused as
 #              RESTORE_ROLE_MISSING with the database untouched. A dump that grants to a role the
@@ -354,15 +357,15 @@ fi
 # A dump carries each object's owner and privileges (ALTER ... OWNER TO,
 # GRANT ... TO) but never the roles they name: roles belong to the server, not
 # to one database. On a server that lacks one, the first statement naming it
-# stops the load under ON_ERROR_STOP, after the schema drop. scrolldaddy's dump
-# names scrolldaddy_reader 143 times, so without this it restores only onto the
-# server it came from.
+# stops the load under ON_ERROR_STOP, after the schema drop. A site with the
+# mailbox plugin grants to its iemap_* role, so without this such a dump
+# restores only onto the server it came from.
 #
 # The names are read out of the staged dump now, with nothing touched yet, and
 # each role this server lacks is created unable to log in. It receives exactly
-# what the dump grants it. A dump holds no password, so anything that logged in
-# as the role (ScrollDaddy's DNS resolvers read as scrolldaddy_reader) needs its
-# login set again by the operator; the log names each role created. A --db-user
+# what the dump grants it. A dump holds no password, so anything that logs in
+# as the role needs its login set again (the mailbox plugin's installer does
+# this for iemap_* on every run); the log names each role created. A --db-user
 # that may not create roles is refused here, with the database untouched.
 dump_role_names() {
     local line list tok name
