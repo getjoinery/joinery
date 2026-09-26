@@ -3061,13 +3061,20 @@ if (preg_match('/^provision_origin_cert\(\) \{.*?^\}$/ms', $install_src, $m)) { 
 check($pfn !== '' && substr_count($pfn, "--deploy-hook 'systemctl reload apache2'") >= 2,
     'each issuance carries a deploy hook that reloads Apache, recorded as renew_hook for every renewal');
 
+// The heal is the machine's (_host_files.sh, run by host_housekeeping.sh over
+// every Apache lineage): render_vhost.sh healed only its own vhost's name, and
+// never ran for a Docker host's proxy vhosts (fleet_ubuntu_2604_postgres_upgrade.md B23).
+$host_files_src = (string)file_get_contents($tools_dir . '/_host_files.sh');
+$housekeeping_src = (string)file_get_contents($tools_dir . '/host_housekeeping.sh');
 $heal_fn = '';
 $plus_fn = '';
-if (preg_match('/^heal_renewal_conf\(\) \{.*?^\}$/ms', $render_src, $m)) { $heal_fn = $m[0]; }
+if (preg_match('/^host_files_heal_renewal_conf\(\) \{.*?^\}$/ms', $host_files_src, $m)) { $heal_fn = $m[0]; }
 if (preg_match('/^vhost_is_render_plus_certbot\(\) \{.*?^\}$/ms', $render_src, $m)) { $plus_fn = $m[0]; }
 check($heal_fn !== '' && $plus_fn !== '', 'the heal and the certbot-tolerant comparison are findable');
-check(strpos($render_src, 'heal_renewal_conf "${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal/${DOMAIN}.conf"') !== false,
-    'the renderer heals the site\'s own lineage on every run');
+check(strpos($housekeeping_src, 'done < <(host_files_heal_renewal_confs "${FS_ROOT}/etc/letsencrypt")') !== false,
+    'housekeeping heals every lineage on the machine on every run');
+check(preg_match('/^[[:space:]]*heal_renewal_conf(\(\)| )/m', $render_src) === 0,
+    'and the renderer keeps no second copy of the rule');
 
 $vh3 = harness_scratch_dir('vhost_certbot');
 @mkdir($vh3 . '/renewal', 0700, true);
@@ -3078,8 +3085,8 @@ file_put_contents($renewal, "# renew_before_expiry = 30 days\nversion = 2.9.0\n"
     . "server = https://acme-v02.api.letsencrypt.org/directory\n");
 $run_heal = function () use ($heal_fn, $vh3, $renewal): string {
     $script = $vh3 . '/heal.sh';
-    file_put_contents($script, "say() { echo \"vhost: \$*\"; }\n" . $heal_fn . "\n"
-        . 'heal_renewal_conf ' . escapeshellarg($renewal) . "\n");
+    file_put_contents($script, $heal_fn . "\n"
+        . 'host_files_heal_renewal_conf ' . escapeshellarg($renewal) . "\n");
     return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>&1'));
 };
 $out1 = $run_heal();
@@ -3635,6 +3642,96 @@ check(strpos($rebase_b21, 'save_host_vhosts') !== false && strpos($rebase_b21, '
 	'swap keeps the site\'s host vhost files and rollback puts them back');
 check(preg_match('/for b in \$OTHER; do rm -f "\/etc\/apache2\/sites-enabled\/\$\{b\}"; done/', $rebase_b21) === 1,
 	'swap disables the other vhost files on the site\'s port once install.sh has written its own');
+
+section('A core archive from an upgrade server that does not answer falls back (specs/fleet_ubuntu_2604_postgres_upgrade.md B24)');
+
+// Rebuilding getjoinery, install.sh's default upgrade server, while its writes
+// were stopped: the metadata fetch was a plain assignment under set -e, and the
+// failed curl ended the install with no message instead of the fallback.
+$install_b24 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
+$dca_b24 = '';
+if (preg_match('/^download_core_archive\(\) \{.*?^\}$/ms', $install_b24, $m)) { $dca_b24 = $m[0]; }
+check($dca_b24 !== '', 'download_core_archive is findable');
+$b24_dir = sys_get_temp_dir() . '/joinery_b24_' . getmypid();
+@mkdir($b24_dir . '/public_html', 0700, true);
+file_put_contents($b24_dir . '/run.sh', "set -e\n"
+	. "print_step() { echo \"STEP \$*\"; }; print_info() { echo \"INFO \$*\"; }\n"
+	. "print_warning() { echo \"WARN \$*\"; }; print_success() { echo \"OK \$*\"; }\n"
+	. "UPGRADE_SERVER=http://127.0.0.1:9\n"
+	. $dca_b24 . "\n"
+	. 'download_core_archive ' . escapeshellarg($b24_dir . '/public_html') . "\n"
+	. "echo 'the install goes on'\n");
+$b24_out = (string)shell_exec('bash ' . escapeshellarg($b24_dir . '/run.sh') . ' 2>&1');
+check(strpos($b24_out, 'the install goes on') !== false,
+	'under set -e, an upgrade server that refuses the connection does not end the install', $b24_out);
+check(strpos($b24_out, 'WARN Could not reach http://127.0.0.1:9') !== false,
+	'it says it builds with the archive copy instead', $b24_out);
+exec('rm -rf ' . escapeshellarg($b24_dir));
+
+section('A rollback brings back the old container, not just its image (specs/fleet_ubuntu_2604_postgres_upgrade.md B25)');
+
+// getjoinery's rollback came up without PHP apcu and sqlite3 (installed into the
+// old container's own layer by upgrades), without its agent, and with the old
+// image's pg_hba. restore_runtime runs once the old start command has finished.
+$rebase_b25 = (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/rebase_site_container.sh');
+// Up to the next function: the heredoc it feeds the container defines a
+// function of its own, whose closing brace also starts a line.
+$rr_b25 = '';
+if (preg_match('/^restore_runtime\(\) \{.*?^\}\n(?=\nrestore_host_vhosts\(\) \{)/ms', $rebase_b25, $m)) { $rr_b25 = $m[0]; }
+check($rr_b25 !== '', 'restore_runtime is findable');
+$rb_body = '';
+if (preg_match('/^if \[ "\$STAGE" = "rollback" \]; then.*?^fi$/ms', $rebase_b25, $m)) { $rb_body = $m[0]; }
+check(strpos($rb_body, 'restore_runtime ||') !== false
+	&& strpos($rb_body, 'restore_runtime ||') > strpos($rb_body, 'wait_for_site'),
+	'rollback restores the runtime after the old start command has brought Apache up');
+$b25_dir = sys_get_temp_dir() . '/joinery_b25_' . getmypid();
+@mkdir($b25_dir . '/bin', 0700, true);
+@mkdir($b25_dir . '/installed', 0700, true);
+@mkdir($b25_dir . '/work', 0700, true);
+foreach (array('php8.3-curl', 'php8.3-mbstring') as $p) { touch($b25_dir . '/installed/' . $p); }
+file_put_contents($b25_dir . '/available', "php8.3-apcu\nphp8.3-sqlite3\n");
+file_put_contents($b25_dir . '/work/php_packages.txt', "php8.3-curl\nphp8.3-mbstring\nphp8.3-sqlite3\nphp8.3-gone\n");
+$stubs = array(
+	'dpkg'    => "[ \"\$1\" = -s ] && [ -e \"$b25_dir/installed/\$2\" ]",
+	'apt-get' => "case \"\$1\" in update) exit 0 ;; esac\np=\"\${@: -1}\"\n"
+		. "grep -qx \"\$p\" \"$b25_dir/available\" || exit 100\ntouch \"$b25_dir/installed/\$p\"\necho \"\$p\" >> \"$b25_dir/apt.log\"",
+	'php'     => "echo 'php8.3-apcu|php-apcu php8.3-curl|php-curl'",
+	'service' => "echo \"\$*\" >> \"$b25_dir/service.log\"",
+);
+foreach ($stubs as $name => $body) {
+	file_put_contents($b25_dir . '/bin/' . $name, "#!/usr/bin/env bash\n" . $body . "\n");
+	chmod($b25_dir . '/bin/' . $name, 0755);
+}
+file_put_contents($b25_dir . '/run.sh', "set -euo pipefail\n"
+	. 'D=' . escapeshellarg($b25_dir) . "\nWORK=\"\$D/work\"; SITE=site\n"
+	. "say() { echo \"SAY \$*\"; }\nsleep() { :; }\n"
+	. "docker() {\n"
+	. "    if [ \"\$1\" = exec ] && [ \"\$2\" = -i ]; then shift 3; PATH=\"\$D/bin:\$PATH\" \"\$@\"; return; fi\n"
+	. "    case \"\$3\" in\n"
+	. "        bash) echo 'core installers: install_agent.sh: ok'; echo 'core installers: host_housekeeping.sh: ok' ;;\n"
+	. "        pgrep) [ -e \"\$D/agent_up\" ] ;;\n"
+	. "    esac\n"
+	. "}\n"
+	. $rr_b25 . "\n"
+	. "restore_runtime && echo 'agent running' || echo 'agent not running'\n");
+$b25_run = function () use ($b25_dir) { return (string)shell_exec('bash ' . escapeshellarg($b25_dir . '/run.sh') . ' 2>&1'); };
+touch($b25_dir . '/agent_up');
+$b25_out = $b25_run();
+$b25_apt = trim((string)@file_get_contents($b25_dir . '/apt.log'));
+check($b25_apt === "php8.3-apcu\nphp8.3-sqlite3",
+	'a declared extension and a package the old container had are installed, and only those', 'got: ' . $b25_apt);
+check(strpos($b25_out, 'WARNING: could not install any of: php8.3-gone') !== false,
+	'a package that cannot be installed is named, not silently skipped', $b25_out);
+check(strpos($b25_out, 'core installers: install_agent.sh: ok') !== false,
+	'the core installers run, and their lines are shown', $b25_out);
+check(strpos($b25_out, 'agent running') !== false && strpos($b25_out, 'agent not running') === false,
+	'a running agent afterwards is success', $b25_out);
+@unlink($b25_dir . '/apt.log');
+$b25_out2 = $b25_run();
+check(!file_exists($b25_dir . '/apt.log'), 'a second run installs nothing', (string)@file_get_contents($b25_dir . '/apt.log'));
+unlink($b25_dir . '/agent_up');
+check(strpos($b25_run(), 'agent not running') !== false, 'no agent after the installers is reported as a failure');
+exec('rm -rf ' . escapeshellarg($b25_dir));
 
 section('New Docker sites are born on Ubuntu 26.04 with PostgreSQL 18 (specs/fleet_ubuntu_2604_postgres_upgrade.md WP6)');
 

@@ -6,10 +6,12 @@ B10, B13–B17 and WP6 (base 2.0) are released in 0.8.426 (commits e98df32c, 4de
 every node runs 0.8.426 (checked 2026-09-25).
 R1 passed on the owner's test box, all gates (last two 2026-09-25). R2 waits on the owner.
 B19 and B20 (found finishing R1) are fixed in 0.8.430 (`specs/fleet_move_bug_fixes_2026_09_25.md`).
-**Stage 3 started 2026-09-25 from 0.8.430:** joinerydemo is on PostgreSQL 18 and passes
-every gate. Its public name was dark for 35 minutes after the move (B22) until the host
-vhost was put back. The move script 1.5 (B21, B22) runs every
-site after it.
+**Stage 3, 2026-09-25/26 from 0.8.430: seven of eight sites are on PostgreSQL 18**
+and pass every gate: joinerydemo, galactictribune, phillyzouk, mapsofwisdom,
+getjoinery_orgs, getjoinery_developers and getjoinery (§ Progress). scrolldaddy follows
+`specs/dns_resolvers_read_over_https.md` WP7. `finish` (dropping the rollback copies)
+runs from 2026-10-03. B23–B25, found during the moves, are fixed; B23 was also healed
+live on docker-prod.
 Two owner decisions open (D3, D4; D1 and D2 are in `specs/backup_database_incrementals.md`).
 **Date:** 2026-09-24 (rewritten from the 2026-08-01 draft after a fleet investigation;
 the code-side cutover items of `php_85_pg18_stack_cutover.md` are folded in here).
@@ -466,6 +468,79 @@ rewrote `/etc/apache2/sites-available/<site>.conf` for that name.
   - The site answers again: `/` 302, `/login` 200, 0.8.430, on its Let's Encrypt
     certificate.
 
+**B23 — three certificate lineages still let certbot edit the vhost** (found 2026-09-25
+moving getjoinery_developers). The renewal configs for `demo.getjoinery.com`,
+`developers.getjoinery.com` and `orgs.getjoinery.com` still say `installer = apache`, with
+no `renew_hook`.
+- The five others on docker-prod were healed on 2026-09-11 (`installer = None`, reload
+  hook). The three missed are the sites whose name differed from the container's
+  `DOMAIN_NAME` or vhost file name.
+- Only `render_vhost.sh` heals a renewal config, and on a Docker host nothing runs it
+  against the host's proxy vhosts. `install.sh` does not heal an existing lineage.
+- At the next renewal (developers expires 2026-11-17), certbot would edit the rendered
+  vhost again, which is the drift `specs/implemented/tls_and_origin_trust.md` WP1a ended.
+- **Healed live 2026-09-26 00:29 UTC** (owner approved): the three configs now say
+  `installer = None` with the reload hook. The originals are kept as
+  `.conf.before-render.20260926002949`. `certbot certificates` reads all eight lineages
+  as valid.
+- **Fix at root:**
+  - The rule moves from `render_vhost.sh` (1.9, which drops its copy) into `_host_files.sh`
+    1.3.
+  - `host_files_heal_renewal_confs` heals every lineage on the machine that renews through
+    Apache, whatever its name. Lineages issued by webroot or DNS are left alone, and an
+    owner's `renew_hook` is kept.
+  - `host_housekeeping.sh` 1.9 runs it at every converge: site mode on a standalone box,
+    machine mode on a Docker host (which is how docker-prod's own converger runs it), and
+    a no-op in a container.
+- **Tests:** a new section of the housekeeping gate covers a lineage under an unrelated
+  name, a DNS lineage, an owner's hook, and a second run (113/113). The contract's heal
+  checks run against `_host_files.sh` (772/772).
+
+**B24 — `install.sh` dies when its upgrade server does not answer** (found 2026-09-26
+moving getjoinery).
+- `download_core_archive` is meant to warn and build with the archive copy. But
+  `upgrade_info=$(curl -sf …)` is a plain assignment under `set -e`, so a failed curl ends
+  the script with no message. The theme download beside it survives only because
+  `local x=$(…)` hides the exit code.
+- getjoinery is `install.sh`'s default upgrade server and was the site being moved, with
+  its writes stopped, so its swap failed. It was rolled back after about 65 seconds of
+  downtime, then moved with `swap -- --upgrade-server=https://dev.getjoinery.com` (dev
+  serves the same 0.8.430).
+- **Fix** (`install.sh` 2.85, landed with the converger stopped, 2026-09-26):
+  `upgrade_info=$(curl …) || upgrade_info=""`. It was the only fallible plain assignment
+  in the download path; the theme fetches are `local` and the release-key fetch ends in
+  `|| true`.
+- **Test:** the contract runs `download_core_archive` under `set -e` against a closed
+  port; the install carries on with the fallback warning.
+
+**B25 — a rollback does not bring back the old container** (found 2026-09-26, the
+getjoinery rollback).
+- `rollback` recreates the container from the old image with its old arguments. Much of
+  what the old container was had been added at runtime and lived in its own layer:
+  - PHP `apcu` and `sqlite3`, installed by upgrades (Composer validation failed at start);
+  - the agent and the host converger cron entries;
+  - the local-only `pg_hba` (the image's `host all all 0.0.0.0/0` came back);
+  - the remoteip and `php.ini` tuning.
+- The old image's start command also calls the retired `_reconcile_stock_assets.sh`.
+- The site served pages, but its agent was dead: a status check waited unanswered. And
+  `prepare` refused its `pg_hba`.
+- Running `host_housekeeping.sh` through the installer runner restored `pg_hba` and the
+  tuning.
+- **Fix** (move script 1.6): once the old start command has brought Apache up,
+  `rollback` runs `restore_runtime`:
+  - installs the PHP extensions the site's code declares (the `list_dependencies.php --apt`
+    loop the image build and `upgrade.php` use), plus every PHP package `prepare`
+    recorded that is missing. A site prepared after a rollback records a list that is
+    already short, which is why the declared list comes first;
+  - restarts PHP-FPM when it installed anything;
+  - runs every core installer the way a current image's start command does;
+  - waits for the agent, and checks the manifest again.
+- **Tests:** the contract drives `restore_runtime` against stubs. It installs exactly the
+  missing declared extension and the missing recorded package, names one it cannot
+  install, reports a missing agent, and installs nothing on a second run.
+- Not yet run live. A rollback of a real site is downtime; test380s could rehearse it.
+  The script on docker-prod is 1.5 until 1.6 is committed and copied there.
+
 **B9 — the platform's PHP tuning loaded the PostgreSQL extensions twice** (fixed
 2026-09-24). `host_files_tune_php_ini()` enabled `extension=pdo_pgsql` and `extension=pgsql`
 in `php.ini`, but Ubuntu's php-pgsql package already loads both from `conf.d`. Every PHP
@@ -750,6 +825,42 @@ database-incrementals integration tests run in the ordinary gate.
   - Also found: `joinerydemo.site` is unregistered (available at the registry). Only the
     container's `DOMAIN_NAME` carries it; the site's name is `demo.getjoinery.com`, which
     `install.sh` sets at the next rebuild through move script 1.5.
+- **Stage 3, the next six — moved 2026-09-25/26** from 0.8.430, move script 1.5 (commit
+  63c3a829, copied into the release directory on docker-prod). Every site passed every
+  gate:
+  - pages over its public name;
+  - 0.8.430 on Ubuntu 26.04.1, PostgreSQL 18 and PHP 8.5.4;
+  - 0 manifest failures;
+  - ports on 127.0.0.1;
+  - a `check_status` round trip;
+  - the deploy tier 4/4;
+  - a full backup and a level-2 verification.
+
+  | Site | Down | Tables | Backup (verified) |
+  |---|---|---|---|
+  | galactictribune | 23:34:37–23:36:17 | 134/134 | 62 MB, 2,369 files |
+  | phillyzouk | 23:38:04–23:40:27 | 133/133 | 202.5 MB, 2,609 files |
+  | mapsofwisdom | 23:42:05–23:44:27 | 137/137 | 82.4 MB, 3,167 files |
+  | getjoinery_orgs | 23:46:40–23:49:09 | 137/137 | 60.1 MB, 2,655 files |
+  | getjoinery_developers | 23:51:26–23:53:57 | 153/153 | 214.9 MB, 2,582 files |
+  | getjoinery | 23:58:39–23:59:44, then 00:12:18–00:14:46 | 157/157 | 649.2 MB, 3,074 files |
+
+  - Each host vhost moved from template 1.03 to 1.04 (X-Forwarded-For appended). Nothing
+    else changed in it; the pre-move copies are in `/root/rebase/<site>/host_vhosts`.
+  - getjoinery_orgs: `prepare` named the stale `DOMAIN_NAME` (`getjoinery.com`), and the
+    rebuild used `orgs.getjoinery.com`; the container now says so too. Its layer carried
+    a `www-data` crontab duplicating `/etc/cron.d/scheduled-tasks` (so tasks ran twice
+    every 15 minutes since 2026-05-03); the rebuild dropped it.
+  - getjoinery_developers: its `-proxy.conf` and `-proxy-le-ssl.conf` (forwarding
+    `X-Forwarded-Proto "http"`) were disabled for the rendered `getjoinery_developers.conf`,
+    and are kept for rollback.
+  - getjoinery: the first swap failed (B24) and was rolled back (B25). Then
+    `host_housekeeping.sh`, a fresh `prepare`, and a swap with
+    `--upgrade-server=https://dev.getjoinery.com`. Nothing was in flight on it (0 jobs,
+    0 nodes of its own, no publish). The status check left waiting through the rollback
+    completed once the new agent came up.
+  - docker-prod afterwards: 36 of 78 GB used, 2.5 GB memory available, and seven
+    `pre-rebase-pg16` images and `_postgres_pg16` volumes kept until `finish`.
 
 ## Per-site gates (every site, both stages)
 
