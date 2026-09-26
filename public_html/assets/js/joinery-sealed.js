@@ -55,6 +55,7 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.8 - isPending(): the lock chip's unlock skips a scope whose own ceremony is under way
  * @version 1.7 - the one vault: content vaults open through the root; adopt(); openAllThroughRoot()
  * @version 1.6 - want(scope, label): a page names the vaults it reads, for the lock chip
  * @version 1.5 - an open scope survives a reload of the same tab (resume halves, `ready`);
@@ -673,6 +674,7 @@ window.JoinerySealed = (function () {
 		save: save,
 		session: session,
 		isOpen: isOpen,
+		isPending: function (scope) { return !!pending[scope]; },
 		openScopes: openScopes,
 		labelFor: labelFor,
 		idleMinutes: idleMinutes,

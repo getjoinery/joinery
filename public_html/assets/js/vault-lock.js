@@ -40,6 +40,8 @@
  * browser-held vault is open. It follows 'joinery:vault-scope-unlocked' /
  * 'joinery:vault-scope-locked' for those.
  *
+ * @version 2.2 - the one unlock finishes: a vault set up before the root (no root wrapping) is
+ *   opened by its own ceremony once more, with a line saying why, and joins the root
  * @version 2.1 - a passkey catching up on the root can prove the vault with a recovery code or the
  *   passphrase, not only with a passkey the root knows (which lives on the device the root was made on)
  * @version 2.0 - the one vault: one unlock opens the account vault, the root and every browser-held vault;
@@ -162,6 +164,7 @@
 					VaultKeyring.addRootPasskey(root, heal.credentialId, heal.second).catch(function () { /* asks again next time */ });
 				}
 				await JoinerySealed.openAllThroughRoot(status.content || {});
+				await joinStragglers();
 			}
 			render();
 			if (codes) {
@@ -188,6 +191,27 @@
 		} finally {
 			busy = false;
 			if (chip) { chip.classList.remove('jy-vault-lock--busy'); }
+		}
+	}
+
+	// A vault this page reads that was set up before the root existed has no
+	// root wrapping, so the root cannot open it (specs/one_vault_experience.md
+	// § D3): its own ceremony opens it once more, with a line saying why, and
+	// JoinerySealed.session() then teaches it to the root, so the next unlock
+	// is one touch. Without this the chip read "partly locked" and its Unlock
+	// reran the account unlock forever, never reaching the older vault. A
+	// scope whose own ceremony is already under way — the one that ran this
+	// unlock from inside its session() — is skipped, so nothing waits on
+	// itself; a cancelled ceremony leaves that vault shut and the chip says so.
+	async function joinStragglers() {
+		if (!window.JoinerySealed || !JoinerySealed.session) { return; }
+		var shut = clientShut().filter(function (s) {
+			return s !== VaultKeyring.ROOT && !(JoinerySealed.isPending && JoinerySealed.isPending(s));
+		});
+		for (var i = 0; i < shut.length; i++) {
+			try {
+				await JoinerySealed.session(shut[i], { reason: 'once more: it was set up before your vault became one, and this unlock joins it' });
+			} catch (e) { /* cancelled or failed: it stays shut, and the chip says so */ }
 		}
 	}
 

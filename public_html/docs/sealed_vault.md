@@ -94,7 +94,10 @@ from its keyring view alone (`VaultKeyring.openRootWith`); nothing is posted,
 so the code is not used up and the recovery kill-switch does not fire. The
 root then learns the passkey from the output already in hand
 (`vault_client_add_wrapping`, no step-up for a passkey the account vault
-already has).
+already has). A content vault set up before the root has no `root` wrapping,
+so the root cannot open it: the one unlock finishes by running that vault's
+own ceremony once more, with a line saying why, and `JoinerySealed.session()`
+then gives it a `root` wrapping, so the next unlock is one touch.
 
 **One set of recovery codes, never seen by the server.** The browser makes the
 codes (`VaultKeyring.makeCodeSet`) and derives two halves from each, both
