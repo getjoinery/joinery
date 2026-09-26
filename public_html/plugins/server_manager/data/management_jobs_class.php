@@ -2,6 +2,9 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.26 - stage_chain and verify_backup take a whole long chain (agent 1.45.0): up to CHAIN_LINKS_MAX
+ *                 links under CHAIN_PARAMS_BYTES; params_ceiling() names each word's ceiling and
+ *                 createPrimitiveJob checks it
  * @version 1.25 - file_head joins LOG_EXCERPT_TYPES: a configuration excerpt read behind the owner's switch ages
  *                 out on the same window.
  * @version 1.24 - unit_journal joins LOG_EXCERPT_TYPES: a unit's journal lines age out on the same
@@ -329,6 +332,28 @@ class ManagementJob extends SystemBase {
 	 */
 	const MAX_PARAMS_BYTES = 61440;
 
+	/**
+	 * The words that carry a whole backup chain's signed links, and their two
+	 * bounds, matched on the node (agent primitives.ChainParamsBytes and
+	 * chainLinksMax, 1.45.0). A chain job carries a link for every object in
+	 * the chain, runs × artifacts per run, so it outgrows MAX_PARAMS_BYTES long
+	 * before a chain is unreasonably long. 4 KiB under
+	 * AgentChannelEndpoint::MAX_CLAIM_BODY. An agent before 1.45.0 took 64
+	 * links (CHAIN_LINKS_BEFORE_CLAIM_BYTES) under MAX_PARAMS_BYTES, and is told
+	 * apart by the claim_bytes its claim does not carry.
+	 */
+	const CHAIN_WORDS                    = ['stage_chain', 'verify_backup'];
+	const CHAIN_PARAMS_BYTES             = 1044480;
+	const CHAIN_LINKS_MAX                = 1024;
+	const CHAIN_LINKS_BEFORE_CLAIM_BYTES = 64;
+
+	/** The params ceiling the node validates $primitive under. */
+	static function params_ceiling($primitive) {
+		return in_array((string)$primitive, self::CHAIN_WORDS, true)
+			? self::CHAIN_PARAMS_BYTES
+			: self::MAX_PARAMS_BYTES;
+	}
+
 	/** The outcomes a node agent may report. Anything else is refused at the endpoint. */
 	const AGENT_OUTCOMES = ['completed', 'failed', 'refused'];
 
@@ -396,10 +421,11 @@ class ManagementJob extends SystemBase {
 			]],
 		]);
 		$encoded_params = json_encode($params);
-		if (strlen($encoded_params) > self::MAX_PARAMS_BYTES) {
+		$ceiling = self::params_ceiling($primitive);
+		if (strlen($encoded_params) > $ceiling) {
 			throw new ManagementJobException(
 				'This job carries ' . strlen($encoded_params) . ' bytes of parameters, over the '
-				. self::MAX_PARAMS_BYTES . '-byte limit the node enforces. It would be refused there.');
+				. $ceiling . '-byte limit the node enforces. It would be refused there.');
 		}
 
 		$job = new ManagementJob(NULL);

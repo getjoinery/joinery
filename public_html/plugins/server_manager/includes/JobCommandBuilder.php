@@ -8,6 +8,10 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.78 - stage_chain and verify_backup carry a whole long chain's links (agent 1.45.0: CHAIN_LINKS_MAX
+ *                 under CHAIN_PARAMS_BYTES); a chain past that fails at build. The size check moved out of
+ *                 sign_chain_links into the two builders that send the links (restore_objects sends none of
+ *                 them, and was refused for a long chain it never had to describe)
  * @version 1.77 - build_install_node: a clone's export key rides the bootstrap's stdin (step stdin names
  *                'clone_key' after 'admin_password') into JOINERY_CLONE_KEY; the command carries only
  *                --clone-from (B7)
@@ -2564,7 +2568,30 @@ class JobCommandBuilder {
 
 	public static function build_stage_chain_primitive($node, $params = []) {
 		$signed = self::sign_chain_links($node, $params, 'stage_chain');
+		self::assert_chain_job_fits('stage_chain', $signed['params']);
 		return ['primitive' => 'stage_chain', 'params' => $signed['params']];
+	}
+
+	/**
+	 * Refuse, where the operator is standing, a chain job no agent would take:
+	 * more links than a chain word takes, or more bytes. An agent from before
+	 * 1.45.0 takes fewer; that is refused at dispatch, where the claim says
+	 * what the agent reads (AgentChannelEndpoint::dispatch_refusal).
+	 */
+	private static function assert_chain_job_fits($word, array $primitive_params) {
+		$max      = ManagementJob::CHAIN_LINKS_MAX;
+		$ceiling  = ManagementJob::params_ceiling($word);
+		$links    = count($primitive_params['artifact_urls'] ?? []);
+		$size     = strlen((string)json_encode($primitive_params));
+		$chain_id = (string)($primitive_params['chain_id'] ?? '');
+		if ($links <= $max && $size <= $ceiling) {
+			return;
+		}
+		$what = ($links > $max)
+			? "{$links} objects, over the {$max} links"
+			: "{$size} bytes of signed links, over the {$ceiling}-byte limit";
+		throw new Exception("{$chain_id} holds {$what} a single job can carry. "
+			. 'Start a fresh chain, or restore it from a shell.');
 	}
 
 	/**
@@ -2604,6 +2631,7 @@ class JobCommandBuilder {
 		$signed = self::sign_chain_links($node, $params, 'verify_backup');
 		$primitive_params = $signed['params'];
 		$primitive_params['level'] = $level;
+		self::assert_chain_job_fits('verify_backup', $primitive_params);
 
 		// The run's offloaded files (every agent at the floor accepts the links): the
 		// run's index is read here (one small GET), a link is signed per epoch
@@ -2618,11 +2646,7 @@ class JobCommandBuilder {
 				return self::sign_shelf_key($signed['target'], $base . $relname, $expires);
 			});
 			$primitive_params = array_merge($primitive_params, $links);
-			$size = strlen((string)json_encode($primitive_params));
-			if ($size > ManagementJob::MAX_PARAMS_BYTES) {
-				throw new Exception("Verifying {$primitive_params['chain_id']} would need {$size} bytes of signed links, over the "
-					. ManagementJob::MAX_PARAMS_BYTES . '-byte job limit.');
-			}
+			self::assert_chain_job_fits('verify_backup', $primitive_params);
 		}
 		return ['primitive' => 'verify_backup', 'params' => $primitive_params];
 	}
@@ -2891,17 +2915,9 @@ class JobCommandBuilder {
 			$primitive_params['seq'] = $seq;
 		}
 
-		// The node applies the same ceiling, byte for byte. Checked here so a
-		// chain too long to describe in one job fails where an operator is
-		// standing, naming the reason, rather than travelling to a node to be
-		// refused there.
-		$size = strlen((string)json_encode($primitive_params));
-		if ($size > ManagementJob::MAX_PARAMS_BYTES) {
-			throw new Exception("Staging {$chain_id} would need {$size} bytes of signed links, over the "
-				. ManagementJob::MAX_PARAMS_BYTES . '-byte job limit. This chain has grown longer than a '
-				. 'single staging job can describe — start a fresh chain, or restore it from a shell.');
-		}
-
+		// Whether the links fit the job is the sending builder's question
+		// (assert_chain_job_fits): restore_objects signs the same set to find
+		// one index in it and sends none of them.
 		return ['params' => $primitive_params, 'chain_key' => $chain_key, 'target' => $target];
 	}
 

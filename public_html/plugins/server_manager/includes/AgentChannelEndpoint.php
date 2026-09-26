@@ -36,6 +36,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.27 - a claim reports claim_bytes, the largest claim its agent reads (1.45.0); the job handed out
+ *                 is held to it, up to MAX_CLAIM_BODY, and a claim without it to MAX_JOB_BODY. A chain job
+ *                 an agent without it cannot take (over 64 links) fails at dispatch naming the update
  * @version 1.26 - a join carries the site's web root (agent 1.44.0): kept on the request when it is one
  *                (ManagedNode::valid_web_root), and approveJoin() fills an empty mgn_web_root from it, so a
  *                node made from a join hosts a site and is backed up
@@ -144,6 +147,40 @@ class AgentChannelEndpoint {
 	// numbers from its own side.
 	const MAX_REQUEST_BODY = 262144;  // 256 KiB — node → plane
 	const MAX_JOB_BODY     = 65536;   // 64 KiB — plane → node
+
+	// The most a claim may carry, to an agent that reports reading that much
+	// (claim_bytes; agentMaxClaimBody). A long backup chain's signed links do
+	// not fit under MAX_JOB_BODY. Every other answer keeps MAX_JOB_BODY, and so
+	// does a claim from an agent that reports nothing.
+	const MAX_CLAIM_BODY = 1048576; // 1 MiB — plane → node, claim only
+
+	/** The largest claim this agent reads: what its claim reports, bounded; MAX_JOB_BODY when it reports none. */
+	public static function claim_body_limit(array $claim) {
+		$reported = (int)($claim['claim_bytes'] ?? 0);
+		return ($reported > self::MAX_JOB_BODY) ? min($reported, self::MAX_CLAIM_BODY) : self::MAX_JOB_BODY;
+	}
+
+	/**
+	 * Why this job cannot go to an agent whose claim reports $claim, or '' when
+	 * it can. A chain job's link count is the one bound that is not bytes: an
+	 * agent that reports no claim_bytes predates 1.45.0 and takes 64 links.
+	 */
+	public static function dispatch_refusal(array $claim, $primitive, $params, int $encoded_bytes, $node) {
+		$limit = self::claim_body_limit($claim);
+		$older = !isset($claim['claim_bytes']);
+		$update = $older ? ' ' . AgentVocabulary::needs_newer_agent_text($node, []) : '';
+		if ($encoded_bytes > $limit) {
+			return 'This job is larger than the ' . $limit . '-byte limit this node\'s agent will read, '
+				. 'so it was never dispatched.' . $update;
+		}
+		$links = is_array($params) ? count((array)($params['artifact_urls'] ?? [])) : 0;
+		if ($older && in_array((string)$primitive, ManagementJob::CHAIN_WORDS, true)
+				&& $links > ManagementJob::CHAIN_LINKS_BEFORE_CLAIM_BYTES) {
+			return "This chain has {$links} objects; this node's agent takes "
+				. ManagementJob::CHAIN_LINKS_BEFORE_CLAIM_BYTES . ', so it was never dispatched.' . $update;
+		}
+		return '';
+	}
 
 	/** Log text kept from one result. Bounded by construction, like the params. */
 	const MAX_LOG_BYTES = 131072;
@@ -851,6 +888,9 @@ class AgentChannelEndpoint {
 		return [
 			'node_id'        => ['type' => 'int', 'required' => true],
 			'agent_version'  => ['type' => 'string', 'max' => 20],
+			// The largest claim this agent reads (1.45.0). Bounded again where
+			// it is used (claim_body_limit): believed only up to MAX_CLAIM_BODY.
+			'claim_bytes'    => ['type' => 'int'],
 			// The node's own account of what it can do. A comma-separated list
 			// rather than a JSON array on purpose: it validates under the
 			// rules this endpoint already applies to every string — a pattern
@@ -1054,11 +1094,10 @@ class AgentChannelEndpoint {
 		// The plane must not hand a node something the node will refuse for
 		// size — that would be a job that dies quietly on arrival.
 		$encoded = json_encode(['api_version' => '1.0', 'data' => ['job' => $payload]]);
-		if (strlen($encoded) > self::MAX_JOB_BODY) {
+		$refusal = self::dispatch_refusal($in, $payload['primitive'], $params, strlen($encoded), $node);
+		if ($refusal !== '') {
 			$job->set('mjb_status', 'failed');
-			$job->set('mjb_error_message',
-				'This job is larger than the ' . self::MAX_JOB_BODY . '-byte limit an agent will read, '
-				. 'so it was never dispatched.');
+			$job->set('mjb_error_message', $refusal);
 			$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
 			$job->save();
 			api_success(['job' => null], '', 200);
