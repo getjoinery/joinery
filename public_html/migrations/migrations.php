@@ -1608,3 +1608,15 @@
 	$migration['migration_file'] = 'blocklist_domains_dropped.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// An address belongs to its user (usa_usr_user_id is NOT NULL, and a user's
+	// deletion cascades to it). Rows written with no user before either held
+	// are attached to nothing: no table references an address, and nobody can
+	// reach them. They go, so update_database can apply the declared NOT NULL;
+	// column changes run before migrations, so it lands on the next run.
+	$migration = array();
+	$migration['database_version'] = '203';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM usa_users_addrs WHERE usa_usr_user_id IS NULL) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM usa_users_addrs WHERE usa_usr_user_id IS NULL";
+	$migrations[] = $migration;

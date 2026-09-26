@@ -6,6 +6,11 @@
  * This class extracts the core functionality from update_database.php to make it
  * reusable for plugin installations and system repairs.
  *
+ * @version 1.2 - a boolean or number default that differs from the spec is set to the spec's
+ *   value (upgrade and cleanup runs). Both sides have one spelling, so the difference is
+ *   real, not Postgres's normalization. dev's bkt_backup_targets.bkt_mint_run_keys
+ *   defaulted to true against a spec of false, left by an earlier version of the spec,
+ *   and was only ever reported. String and expression defaults are still only reported.
  * @version 1.1 - a primary key that moves to another column is dropped CASCADE: a
  *   foreign key on another table that depended on it goes with it, named in the
  *   transcript, and the declared ones come back in the foreign-key step after
@@ -542,12 +547,14 @@ class DatabaseUpdater {
             }
         }
 
-        // Reconcile a declared default the database is missing. Absent →
-        // present only: a live default that differs from the spec is warned
-        // about, never rewritten (comparing Postgres's normalized default
-        // expressions against PHP literals is fragile — fail toward inaction);
-        // a live default with no spec counterpart is hand-managed legacy and
-        // left alone silently. Dropping defaults is out of scope.
+        // Reconcile a declared default. One the database is missing is set. A
+        // boolean or number default that differs is set to the spec's value:
+        // both sides have one spelling, so the difference is real. A string or
+        // expression default that differs is warned about, never rewritten
+        // (comparing Postgres's normalized default expressions against PHP
+        // literals is fragile — fail toward inaction). A live default with no
+        // spec counterpart is hand-managed legacy and left alone silently.
+        // Dropping defaults is out of scope.
         if (isset($field_specs['default']) && empty($field_specs['serial'])) {
             $sql_default = $this->defaultToSqlLiteral($field_specs['default']);
             $live_default = $live_column_info['column_default'] ?? null;
@@ -560,6 +567,20 @@ class DatabaseUpdater {
                     $results['messages'][] = "Set missing column default: {$table_name}.{$field_name} DEFAULT {$sql_default}";
                 } catch (PDOException $e) {
                     $results['warnings'][] = "Could not set default for {$table_name}.{$field_name}: " . $e->getMessage();
+                }
+            } elseif (($live_scalar = $this->plainScalarDefault($field_specs['default'], $live_default)) !== null) {
+                // A boolean or number on both sides: compared exactly, and the
+                // spec's value wins, as it does for every other column property.
+                if ($live_scalar !== $sql_default) {
+                    $sql = "ALTER TABLE {$table_name} ALTER COLUMN {$field_name} SET DEFAULT {$sql_default}";
+                    try {
+                        $q = $dblink->prepare($sql);
+                        $q->execute();
+                        $results['columns_modified'][] = "{$table_name}.{$field_name} (default)";
+                        $results['messages'][] = "Changed column default: {$table_name}.{$field_name} DEFAULT {$sql_default} (was {$live_default})";
+                    } catch (PDOException $e) {
+                        $results['warnings'][] = "Could not change default for {$table_name}.{$field_name}: " . $e->getMessage();
+                    }
                 }
             } else {
                 // Loose equivalence to avoid false drift warnings: Postgres
@@ -723,6 +744,25 @@ class DatabaseUpdater {
         return $results;
     }
     
+    /**
+     * The live default rendered the way defaultToSqlLiteral() renders the
+     * spec's, when both are plain booleans or numbers; NULL otherwise, so
+     * the caller falls back to reporting. Postgres writes a boolean default as
+     * true/false, and a number as 5, '5'::numeric or (-1)::integer.
+     */
+    private function plainScalarDefault($spec_default, $live_default) {
+        $live = trim((string)$live_default);
+        if (is_bool($spec_default)) {
+            return preg_match('/^(true|false)$/i', $live) ? strtolower($live) : null;
+        }
+        if (is_int($spec_default) || is_float($spec_default)) {
+            if (preg_match("/^\\(?'?(-?\\d+(?:\\.\\d+)?)'?\\)?(?:::[a-z ]+(?:\\(\\d+(?:,\\d+)?\\))?)?$/i", $live, $m)) {
+                return ((float)$m[1] == (float)$spec_default) ? $this->defaultToSqlLiteral($spec_default) : $m[1];
+            }
+        }
+        return null;
+    }
+
     /**
      * Render a field-spec default (a plain PHP value: 'local', false, 0,
      * 'now()') as an SQL literal for the NULL backfill. Spec defaults are
