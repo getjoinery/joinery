@@ -22,6 +22,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_device_ai
  *
+ * @version 1.4 - the panel's numbers: pendingCount, deviceQueues, lastJudgedOnDevice
  * @version 1.3 - each recipe carries the reasoning control a server run would send
  * @version 1.2 - on demand: a verdict replaces an error, never a done; consent at the verdict write
  * @version 1.1 - the domain's consent, the recipes a device runs, a registered model per owner
@@ -137,6 +138,11 @@ try {
 	check(!$plain_leak, 'nothing in the page is readable content');
 	check(isset($e0['dkim_result']) || array_key_exists('dkim_result', $e0), 'the authentication results ride in the clear');
 	check($page['next_before_id'] === null, 'one page holds them all: no cursor');
+	check(MailboxDeviceAi::pendingCount($A, $T) === 3, 'the panel\'s count is the queue\'s length', MailboxDeviceAi::pendingCount($A, $T));
+	$queues = MailboxDeviceAi::deviceQueues($A);
+	check(count(array_filter($queues, function ($q) use ($T) { return $q['recipe_id'] === $T && $q['pending'] === 3; })) === 1,
+		'the device queues list this recipe with three waiting', json_encode($queues));
+	check(MailboxDeviceAi::lastJudgedOnDevice($T) === null, 'nothing judged on a device yet');
 	check(array_column(MailboxDeviceAi::entries($A, $T, 0, $m3)['entries'], 'id') === array($m2, $m1), 'the cursor pages below it');
 	check(array_column(MailboxDeviceAi::entries($A, $T, intval($a['alias']->key))['entries'], 'id') === array($m3, $m2, $m1),
 		'narrowed to the covered mailbox: the same');
@@ -196,6 +202,8 @@ try {
 	check(MailboxDeviceAi::recordVerdict($A, $T, $m3, array('iem_ai_summary' => $sum3)) === true, 'the triage verdict is recorded');
 	check(fortress_row($m3)['iem_ai_summary'] === $sum3 && fdai_log($T, $m3) === 'done', 'the sealed summary and the done row are both there');
 	check(!in_array($m3, array_column(MailboxDeviceAi::entries($A, $T)['entries'], 'id'), true), 'the judged message leaves the queue');
+	check(MailboxDeviceAi::pendingCount($A, $T) === 2 && MailboxDeviceAi::lastJudgedOnDevice($T) !== null,
+		'the count drops with it and the recipe now has a last-judged time');
 	$again = $seal($a, $m3, 'iem_ai_summary', 'A second opinion.');
 	check(MailboxDeviceAi::recordVerdict($A, $T, $m3, array('iem_ai_summary' => $again)) === false
 		&& fortress_row($m3)['iem_ai_summary'] === $sum3, 'a second post for the same message is a no-op and writes nothing');

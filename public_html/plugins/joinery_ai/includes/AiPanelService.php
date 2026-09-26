@@ -27,6 +27,8 @@ class AiPanelConfirmRequired extends Exception {}
  * arrives after one toggle, with no dashboard visit. Turning OFF only unbinds:
  * the recipe may still cover other mailboxes.
  *
+ * @version 1.6 - a device recipe's card says when it last judged on the owner's device, and its
+ *   queue joins the Working now list and the job count
  * @version 1.5 - a device job on a Fortress mailbox says it runs on the owner's device
  * @version 1.4
  * @changelog 1.4 - toggle-ON enables a Manually-only recipe on arrival instead
@@ -317,7 +319,7 @@ class AiPanelService {
             // On an end-to-end encrypted mailbox the server never runs it: the
             // owner's browser does, while the mailbox is open.
             'last_run'       => (method_exists($job, 'runsOnDeviceFor') && $job->runsOnDeviceFor($context))
-                ? 'Runs on your device while this mailbox is open'
+                ? self::deviceLastRunLine((int)$recipe->key)
                 : self::lastRunLine((int)$recipe->key),
             'dashboard_url'  => $permission >= 10
                 ? '/admin/joinery_ai/edit?rcp_recipe_id=' . (int)$recipe->key : null,
@@ -411,8 +413,24 @@ class AiPanelService {
                 'progress' => self::progressLine($recipe, (int)$row['rcr_recipe_run_id'], $running),
             ];
         }
+        $count = count($rows);
+        // A device recipe's queue is a job in flight too: mail waiting for the
+        // owner's browser to judge it, which happens while the mailbox is open
+        // (specs/fortress_mail_device_ai.md § R6). No run row exists for it.
+        if (class_exists('MailboxDeviceAi')) {
+            foreach (MailboxDeviceAi::deviceQueues($user_id) as $q) {
+                $count++;
+                if (count($jobs) >= $limit) continue;
+                $jobs[] = [
+                    'name'     => $q['name'],
+                    'state'    => 'waiting',
+                    'label'    => 'Judged on your device while the mailbox is open',
+                    'progress' => $q['pending'] . ' to go',
+                ];
+            }
+        }
 
-        return ['count' => count($rows), 'jobs' => $jobs];
+        return ['count' => $count, 'jobs' => $jobs];
     }
 
     /**
@@ -463,6 +481,14 @@ class AiPanelService {
     }
 
     /** "Last ran 20 minutes ago" / "Running now" / "Has not run yet". */
+    /** The device recipe's line: when its owner's browser last judged for it. */
+    private static function deviceLastRunLine(int $recipe_id): string {
+        $t = class_exists('MailboxDeviceAi') ? MailboxDeviceAi::lastJudgedOnDevice($recipe_id) : null;
+        return $t === null
+            ? 'Runs on your device while this mailbox is open; nothing judged yet'
+            : 'Last judged on your device ' . self::ago($t);
+    }
+
     private static function lastRunLine(int $recipe_id): string {
         $db = DbConnector::get_instance()->get_db_link();
         $q = $db->prepare(

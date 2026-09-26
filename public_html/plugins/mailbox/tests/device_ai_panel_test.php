@@ -18,6 +18,7 @@
  *     model refusing this site, a wrong key, a missing model, a context too
  *     small (in the model's own words), or reachable.
  *
+ * @version 1.3 - the automatic check's outcomes
  * @version 1.2 - the site's own model: offered to register, to prefill, or not at all
  * @version 1.1 - a missing-model answer checked against the model list
  * @version 1.0
@@ -75,6 +76,10 @@ file_put_contents($runner, "globalThis.window = globalThis;\n"
 	. "  c_ok_prose: L.classify({ status: 200, body: { choices: [{ message: { content: 'It looks safe.' } }] } }, true, 'm'),\n"
 	. "  c_empty: L.classify({ status: 200, body: { choices: [] } }, true, 'm').kind,\n"
 	. "  c_thought: L.classify({ status: 200, body: { choices: [{ message: { content: '', reasoning: 'hmm' }, finish_reason: 'length' }] } }, true, 'm').text,\n"
+	. "  p_ok: L.classifyProbe({ status: 200, body: { data: [] } }, true, 'm', 'h:1'),\n"
+	. "  p_key: L.classifyProbe({ status: 401, body: { error: { message: 'The API key you provided is invalid.' } } }, false, 'm', 'h').kind,\n"
+	. "  p_prompt: L.classifyProbe({ network: true, lna: 'prompt' }, true, 'm', 'h').kind,\n"
+	. "  p_500: L.classifyProbe({ status: 500, body: {} }, true, 'm', 'h').kind,\n"
 	. "};\n"
 	. "process.stdout.write(JSON.stringify(out));\n");
 $raw = trim((string)shell_exec(escapeshellarg($node) . ' ' . escapeshellarg($runner) . ' 2>&1'));
@@ -137,5 +142,10 @@ check($r['c_ok_prose']['kind'] === 'reachable' && strpos($r['c_ok_prose']['text'
 check($r['c_empty'] === 'error', 'an answer with nothing in it is an error');
 check(strpos((string)$r['c_thought'], 'spent its whole answer reasoning') !== false,
 	'an answer spent entirely on reasoning says so, and to choose a model that answers directly');
+
+section('The automatic check');
+check($r['p_ok']['kind'] === 'ok' && $r['p_ok']['text'] === 'Reachable: m at h:1.', 'a model list answered: reachable, naming the model and host');
+check($r['p_key'] === 'wrong_key' && $r['p_prompt'] === 'browser_asks' && $r['p_500'] === 'error',
+	'a bad key, the browser asking, and a server error are named as Test names them');
 
 harness_finish();

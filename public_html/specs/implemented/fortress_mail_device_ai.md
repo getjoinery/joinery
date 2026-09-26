@@ -1,8 +1,11 @@
 # Fortress mail AI on the person's own model
 
-**Status: BUILT 2026-09-26 (WP0–WP6), uncommitted; the live acceptance walks
-of WP1 (an Ollama on the person's computer), WP3 and WP4 need a model the
-owner owns and are pending the owner. Owner-directed; revised after review by
+**Status: IMPLEMENTED 2026-09-26.** Walked live by the owner on dev against
+the Mac Studio's Ollama from real Chrome: Test reachable (WP1), a Fortress
+message summarised and scanned by the drain with the sealed verdicts, the
+clear score and one done row per recipe (WP3); on demand (WP4) is pinned by
+the drain suite and the error-to-done replacement test rather than walked.
+Owner-directed; revised after review by
 public-html-bc (B1–B13, Q1–Q5 folded in), then after WP0 (closed 2026-09-25):
 the owner's direction is one generic endpoint the person enters, with a local
 model left to the person to configure and documented, so R2 is one kind.**
@@ -378,6 +381,23 @@ model":
 - One sentence of custody before the first save: "Your mail is sent from
   this browser to the model you name here. Joinery never sees it. Fireworks
   will."
+- **No click once set up (owner, 2026-09-26).** With a model saved in the
+  browser the section is one line naming it; the panel checks the model on
+  its own once per page load (`GET {base}/models`, the same gates Test
+  names, and the moment the browser asks to reach the person's network) and
+  only then starts the drain. The fields, Save and Test sit behind *Change*;
+  *Test again* runs the full Test. Once reachable, the section is one muted
+  line, "Your model X at host is reachable. Change", plus warnings and the
+  drain's line only while it has something to say (owner, 2026-09-26: the
+  ready section was a text blob in the rail). Why: after choosing the site's model and
+  turning a recipe on, the owner found a Save and a Test button still
+  waiting, and a drain that had silently stopped at the browser's prompt.
+- **The card and the queue notice (owner, 2026-09-26).** A Fortress card
+  says "Last judged on your device N ago" from the device log, and each
+  enabled device recipe's unjudged count is a *Working now* entry ("N to go",
+  state `waiting`) and part of the panel's job count. Why: the Private
+  card's "Last ran" line and the green queue notice had no device
+  counterpart, so a Fortress mailbox looked idle.
 - **The site's own model, offered (owner, 2026-09-26).** When the site's
   local provider (`joinery_ai_local_base_url`) sits on a private or tailnet
   IP host, with no key, the settings page and the panel offer it in one
