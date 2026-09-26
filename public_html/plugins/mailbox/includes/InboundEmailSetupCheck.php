@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.52 - a Fortress mailbox with a device AI recipe shows an INFO row (address.device_ai)
  * @version 1.51 - a Fortress mailbox shows its mail-vault step (address.mail_vault); the
  *   sealed-backlog row asks for the vault of the mailbox's seal scope
  * @version 1.50 - the signing-stage records are prescribed only while the
@@ -2626,6 +2627,10 @@ class InboundEmailSetupCheck {
 		// (specs/client_custody_mail.md § R1).
 		if ($alias && $alias->is_fortress()) {
 			$out[] = $this->fortressVaultRow($alias, $address);
+			$ai_row = $this->fortressDeviceAiRow($alias, $address);
+			if ($ai_row !== null) {
+				$out[] = $ai_row;
+			}
 		}
 
 		// End-to-end: has a real inbound message for this address arrived?
@@ -2687,6 +2692,38 @@ class InboundEmailSetupCheck {
 	 * offering a button an admin could press for them. Person-facing text says
 	 * "vault" (§ R5).
 	 */
+	/**
+	 * AI on a Fortress mailbox runs in its owner's browser against a model they
+	 * name (specs/fortress_mail_device_ai.md § R7). This check runs on the
+	 * server and cannot see a browser's settings, so the row only says where
+	 * it is set up: INFO, never pass or fail. Null when no AI recipe the owner
+	 * runs covers the mailbox.
+	 */
+	private function fortressDeviceAiRow(InboundEmailAlias $alias, string $address): ?array {
+		if (!PluginHelper::isPluginActive('joinery_ai')) {
+			return null;
+		}
+		$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
+		if ($owner_id === null) {
+			return null;
+		}
+		$covered = false;
+		foreach (new MultiRecipe(array('rcp_owner_user_id' => $owner_id, 'rcp_enabled' => true, 'deleted' => false)) as $recipe) {
+			$job = PipelineJobRegistry::get((string)$recipe->get('rcp_pipeline_job'));
+			if ($job && $job->deviceCapable()
+					&& in_array(strtolower($address), MailboxAliasConfig::listedAddresses(Recipe::decodeSourceConfig($recipe)), true)) {
+				$covered = true;
+				break;
+			}
+		}
+		if (!$covered) {
+			return null;
+		}
+		return $this->r('address.device_ai', $address, 'address', 'AI on your device', self::OPTIONAL, self::INFO,
+			'AI for this mailbox runs in the owner\'s browser against a model they name; it is set up in the mailbox\'s AI panel.',
+			'The server never reads end-to-end encrypted mail, so it cannot check that model from here.');
+	}
+
 	private function fortressVaultRow(InboundEmailAlias $alias, string $address): array {
 		$label = 'Vault (end-to-end)';
 		$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));

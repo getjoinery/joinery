@@ -1832,6 +1832,158 @@ during an unlock window and sends it to the configured model host. Overnight
 processing remains impossible on a sealed domain — summaries appear shortly
 after the owner opens their mail, never before they arrive.
 
+### AI on Fortress mail: the person's browser and their own model
+
+A Fortress mailbox is one the server cannot read, so the AI recipes bound to
+it (`email_triage`, `email_security_scan`) never run on the server: the
+candidate query excludes browser-sealed rows and every server reader refuses
+them (`fortress_server_readers_test.php`). The person's browser does the
+judging, against a model they name, after the one unlock — the way search
+works on Fortress mail. The server pages the work, stores the sealed results
+and records that an item was done. Person-facing setup notes are in
+[Using your own model](using_your_own_model.md).
+
+**Where the model answers.** `MailboxDeviceAiHost` (`mdh_mailbox_device_ai_hosts`,
+one row per user) holds the origin of the model's base URL, in the clear.
+`mailbox/device_ai_host {origin}` sets or changes it under a fresh step-up
+(the gate `vault_client_add_wrapping` uses, refusal `requires_stepup`);
+removing it, or re-saving the same origin, asks nothing. `normalizeOrigin()`
+keeps scheme, host and port only, and accepts plain http only for `localhost`
+and private or tailnet IP literals (`hostIsPrivate()`: 10/8, 172.16/12,
+192.168/16, 100.64/10, 127/8, ::1, fc00::/7); a hostname over plain http is
+refused. The Email settings page (`/profile/mailbox/settings#your-model`,
+`mailbox_device_ai_settings.js`) takes one pasted address and splits it: the
+origin goes to the server, the path stays in the browser. The mailbox page
+adds exactly that origin to its `connect-src`
+(`$page->allow_connect_origin()`, `PublicPageBase::csp_policy($extra_connect)`),
+so the page can reach that host and no other; `csp_header_test` pins the
+shape with and without a registered origin.
+
+**The site's own model, offered.** `MailboxDeviceAi::siteModel($operator)`
+names the joinery_ai local provider (`joinery_ai_local_base_url`, the first of
+`joinery_ai_local_model`) when a browser could call it: the host is a private
+or tailnet IP literal — never loopback, which is the server's own machine —
+and no `joinery_ai_local_api_key` is set, since the platform's keys never
+reach a browser. Both pages hand it to the scripts as `site_model` ({origin,
+path, model, host, operator}). The settings page shows *Use this site's
+model* whenever the registered origin is not already the site's; the panel
+section shows it while no origin is registered, and starts the path and
+model fields filled when the site's origin is registered and no model is
+saved in this browser. The click registers the origin like any other
+(`MailboxDeviceAi.registerOrigin()`, shared by both pages: the step-up, the
+CSP pin) and saves the path and model in this browser. The offer tells a
+member (`operator` false) that the operator runs that machine and could see
+mail sent to it; the Fortress promise is not loosened by the platform, only
+by a choice the person makes with that said.
+
+**What stays in the browser.** `localStorage` `jy_device_ai:{user_id}` holds
+`{origin, path, key, model}`. A saved entry for a different origin is not used
+against the registered one. The platform's own provider keys never reach a
+browser.
+
+**The panel section.** `mailbox_device_ai.js` builds "Your AI, your model" and
+the mail page docks it in the AI panel as its `hostSection`. It is hidden
+unless the open mailbox is Fortress; it links to the settings page while no
+origin is registered; otherwise it shows the origin, the path, key and model
+fields, **Test**, the drain's status line, and the docs link. Test posts
+`mailbox/device_ai_test_prompt {mailbox}` (the caller's scan recipe's system
+blocks, else the default, plus a made-up 4096-character digest — never real
+mail) to `{origin}{path}/chat/completions` and names the gate that stopped a
+call: the browser's Local Network Access permission (`prompt` or `denied`), a
+CORS refusal (Ollama's origins line), a bad key (a "no such model" answer is
+checked against `GET {base}/models`: 401/403 there means the key), a missing
+model, or a context overflow shown verbatim. `gradeModel()` grades the model
+name as `AiEndpointRegistry` does (the reference list's globs, else the size
+its tag announces) and warns when it is below a bound recipe's `min_tier`.
+The recipe cards on a Fortress mailbox say "Runs on your device while this
+mailbox is open" (`AiPanelService`, `runsOnDeviceFor()`).
+
+**Consent.** `MailboxDeviceAi::originTrust()` classes the registered origin as
+`local` (a private host), `trusted` (the host of `joinery_ai_fireworks_base_url`)
+or `cloud`, and `consentRefusal()` compares it with the domain's
+`processingConsent()`. The panel shows the refusal; `entries()` pages nothing
+the domain forbids, and nothing when no origin is registered; the verdict
+write re-checks it.
+
+**The server's half** is `MailboxDeviceAi`, behind four actions, each
+authorised the same way (`authorize()`: the recipe is the caller's own and
+`deviceCapable()`; the row is the caller's, sealed to the `mail` vault
+(`v1.edgeseal.mail.`, never a lowered row's `v1.edgeseal.user.`), and on a
+mailbox the recipe covers):
+
+- `mailbox/ai_device_recipes {mailbox}` — the caller's device-capable
+  recipes on that mailbox, each with the **full** `system_blocks` of
+  `PipelineRunner::buildSystem()` (judge framing, date, prompt, output
+  instruction, untrusted-input block) under a fresh nonce, the
+  `verdict_descriptor`, `max_tokens` (4096), `min_tier` and the
+  `reasoning_effort` a server run would send (the recipe's thinking level,
+  `off` as `none`; `MailboxDeviceAi::reasoningEffort()`), so a device run
+  judges with exactly the words and the same reasoning control a server run
+  would. The device budget is a quarter of the server's, so an answer spent
+  entirely on reasoning (empty content, `finish_reason` `length`) is asked
+  again once with `reasoning_effort` `none` before anything is recorded; the
+  Test button always sends `none`, since it asks only whether the model can
+  be reached and answers.
+- `mailbox/device_ai_entries {recipe_id, alias_id?, before_id?}` — 100
+  unjudged Fortress rows per page, newest first by id cursor, with the same
+  filters as `EmailJobCandidates` (live, not spam, not a draft, parsed,
+  unread, lookback) and no `aip_recipe_item_log` row for the recipe. Each
+  entry carries its clear authentication results and its sealed columns
+  (`ENTRY_COLUMNS`: sender, subject, bodies, raw headers, attachment manifest,
+  recipient) inside `sealed` with the row's `sealed_dek`, so one judgement
+  never fetches a thread.
+- `mailbox/device_ai_verdict {id, recipe_id, fields, danger_score?}` — writes
+  the sealed fields through `SystemBase::acceptBrowserSealedFields()`, the
+  clear `iem_ai_danger_score` and `iem_ai_scan_time` (the server's clock) for
+  the scan, and the recipe's `done` log row, in one transaction. The log
+  insert runs first, `ON CONFLICT DO NOTHING`, so a second tab's late post
+  writes nothing; the one exception is a `done` replacing an `error` (on
+  demand is how such a message is judged again).
+- `mailbox/ai_device_record {recipe_id, item_key}` — records `error` only,
+  for an answer the model gave that failed validation after the retry. A
+  transport failure records nothing, so the item is offered again next time.
+
+**The browser's half.** `assets/js/email-digest.js` ports
+`EmailSecurityDigest` and `EmailAttachmentDigest` (headers from the opened
+`iem_raw_headers`, `AUTHENTICATION` from the clear results, `URLS FOUND`,
+`BODY` capped at 4096, `ATTACHMENTS` from the manifest's metadata);
+`device_ai_digest_parity_test.php` requires byte-equal output against
+`EmailSecurityDigest::buildFromColumns()` and
+`EmailAttachmentDigest::buildFromManifest()`. `assets/js/verdict-check.js`
+ports the envelope wrap and marker neutralising under the issued nonce, the
+one retry with the validator's error, the `<think>` strip, the
+first-balanced-JSON extract, descriptor coercion and each job's
+`validateVerdict()`. `MailboxFortress.judgeEntry(entry, recipe, endpoint)`
+opens the entry, digests, calls the model, validates, seals the verdict under
+the row's DEK with the AD `mail:{id}:{field}`, and posts it; a lock epoch
+taken at the start is re-checked before the post, so a vault lock mid-call
+drops the item. The drain in `mailbox_device_ai.js` runs while the mailbox
+is open, the vault unlocked and the tab visible, in the one tab holding the
+Web Lock `jy-device-ai-drain`, newest first, 200 items per page load ("200
+judged; more next time"), pausing on lock and page hide. `messageActions(m)`
+is the Summarize / Scan now bar `mailbox_reader.js` appends under an opened
+Fortress message: the same one-item path, with a fresh nonce fetched per
+run, and the result shown at once.
+
+**What is stored.** `iem_ai_summary` holds the bare summary string, sealed;
+`iem_ai_scan` the JSON `{verdict, red_flags, summary, model, recipe_id}`,
+sealed, with the score kept out of it — the shape `recordVerdict()` writes
+for Private mail, so every row decodes the same way. Both are
+`$browser_appendable_fields`. The list and thread carry them (and
+`iem_raw_headers`) in `sealed` for `MailboxFortress` to open, with the clear
+score and time beside them; the danger banner says "judged by <model>"; the
+summary carries no model. The setup check's row `address.device_ai` is INFO
+and device-independent, since the server cannot see a browser's settings.
+
+**Tests.** `tests/vault/accept_browser_sealed_fields_test.php` (db);
+`plugins/mailbox/tests/fortress_device_ai_test.php`, `device_ai_host_test.php`,
+`device_ai_panel_test.php`, `device_ai_digest_parity_test.php` and
+`device_ai_drain_test.php` (the browser side under the harness's stub model:
+the request shape, the wrap, the retry, a sealed verdict opening to what the
+model said, a lock mid-call dropping the post, `error` after two invalid
+answers, a 401 stopping with nothing recorded, an opened message becoming a
+queue entry); `fortress_server_readers_test.php` stays green.
+
 ### Parsing the backlog
 
 Mail sealed at the relay that arrived while the owner was logged out is stored unparsed.

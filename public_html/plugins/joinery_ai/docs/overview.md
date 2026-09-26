@@ -328,6 +328,7 @@ interface PipelineJobInterface {
     public function verdictDescriptor(): array;
     public function defaultPrompt(): string;
     public function recordVerdict(string $item_key, array $verdict, Recipe $recipe, string $model): void;
+    public function deviceCapable(): bool;
 }
 ```
 
@@ -342,6 +343,7 @@ interface PipelineJobInterface {
 - **`verdictDescriptor()`** — the verdict contract, in the same descriptor shape `configDescriptor()` uses. The runner renders this into the model-facing output instruction and validates the model's answer against it, so the prompt half and the validator can't drift apart.
 - **`defaultPrompt()`** — the job's built-in instructions, used whenever the recipe's `rcp_prompt` is empty (the normal case — a non-technical admin creating a pipeline recipe touches only: job, the job's config fields, model, and schedule). A non-empty `rcp_prompt` replaces it entirely as a power-user override.
 - **`recordVerdict()`** — the only write path in pipeline mode. Owner and scope are fixed by the job, never by model output; model output only ever reaches this one validated handler, aimed by config.
+- **`deviceCapable()`** — whether the owner's browser may run this job, against a model the owner names, on mail the server cannot read (a Fortress mailbox). Default false; `email_triage` and `email_security_scan` return true. The browser judges with the job's own system blocks, verdict descriptor and `validateVerdict()`, and the verdict is stored sealed under the row's key — see `plugins/mailbox/docs/overview.md` § AI on Fortress mail.
 
 ### The per-item loop
 
@@ -445,6 +447,14 @@ acting user already *is* the owner — which is the only way a slice ever runs.
 Standard-tier bindings are unaffected: `requiresVaultScope()` returns null, and
 those recipes keep running unattended on their schedule.
 
+A **Fortress** mailbox is not a sealed subset of this kind. Its rows are sealed
+to the owner's browser-held `mail` vault, the candidate query excludes them
+(`iem_sealed_key LIKE 'v1.edgeseal.%'`), and no server run — cron, Run Now or
+an in-window slice — ever judges one. A `deviceCapable()` job bound to such a
+mailbox runs in the owner's browser against a model the owner names, with the
+same system blocks a server run would use; the mail plugin owns that path
+(`plugins/mailbox/docs/overview.md` § AI on Fortress mail).
+
 ## The area AI panel
 
 An area page (the mail reader; the calendar and drive pages mount the same
@@ -476,6 +486,13 @@ button that opens what is already open is a second copy of it. Where the panel
 has nowhere to dock (a host column dropped at narrow widths), the button comes
 back as the way in. A collapsed panel still shows its header and counts, so
 collapsing never brings the button back.
+
+**The host's own section.** `mount()` takes an optional `hostSection`, an
+element the host builds and keeps current itself, docked in the panel body.
+The mail reader docks "Your AI, your model" there for a Fortress mailbox (the
+person's own model: `plugins/mailbox/assets/mailbox_device_ai.js`). A recipe
+row on such a mailbox says "Runs on your device while this mailbox is open"
+in place of a last run (`runsOnDeviceFor()`).
 
 **The component.** `plugins/joinery_ai/assets/ai_panel.js` + `ai_panel.css` —
 vanilla JS/CSS, jy-ui styling. Host contract:

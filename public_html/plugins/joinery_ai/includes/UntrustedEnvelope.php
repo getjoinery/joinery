@@ -14,14 +14,18 @@
  * Every wrap site calls wrap() or wrapBlock(); none builds the markers by
  * hand, so a site added later cannot forget the rewrite.
  *
+ * @version 1.1 - invisible formatting characters inside a marker are rewritten too
  * @version 1.0
  */
 class UntrustedEnvelope {
 
     /** Either marker's opening, any case, with or without the closing slash
-     *  and with whitespace tolerated inside, because the model may read a
-     *  near-miss the same way it reads the real thing. */
-    const MARKER_PATTERN = '/<<\s*\/?\s*UNTRUSTED_/iu';
+     *  and with whitespace — or invisible formatting characters (zero-width
+     *  spaces and joiners, the byte-order mark, soft hyphen, direction marks)
+     *  — tolerated inside, because the model may read a near-miss the same way
+     *  it reads the real thing, and PCRE's \s does not count the invisible
+     *  ones. assets/js/email-digest.js mirrors it character for character. */
+    const MARKER_PATTERN = '/<<[\s\x{00AD}\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2064}\x{2066}-\x{206F}\x{FEFF}]*\/?[\s\x{00AD}\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2064}\x{2066}-\x{206F}\x{FEFF}]*UNTRUSTED_/iu';
 
     const MARKER_REPLACEMENT = '[marker removed]';
 

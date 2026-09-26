@@ -1050,7 +1050,8 @@ abstract class PublicPageBase {
 		// first switched on. See csp_header().
 		$csp = self::csp_header(
 			(bool)$settings->get_setting('enable_csp', false, true),
-			(bool)$settings->get_setting('csp_report_only', false, true)
+			(bool)$settings->get_setting('csp_report_only', false, true),
+			$this->csp_connect_origins
 		);
 		if ($csp !== null) {
 			header($csp[0] . ': ' . $csp[1]);
@@ -1083,11 +1084,17 @@ abstract class PublicPageBase {
 	 * Images and media stay open to any https host — operator content and
 	 * the mail reader load them from everywhere (security_inventory.md S8).
 	 *
+	 * A page that calls one more host from its own script names it with
+	 * allow_connect_origin(), and $extra_connect carries it into connect-src for
+	 * that render only. Nothing else in the policy moves.
+	 *
 	 * tests/security/csp_header_test.php pins the shape, including the
 	 * absence of a script CDN and of a bare https: in connect-src.
+	 *
+	 * @param string[] $extra_connect origins (scheme://host[:port]) this render adds to connect-src
 	 */
-	public static function csp_policy() {
-		return array(
+	public static function csp_policy(array $extra_connect = array()) {
+		$policy = array(
 			'default-src'     => array("'self'"),
 			'script-src'      => array("'self'", "'unsafe-inline'",
 				// Compiling WebAssembly, and nothing else: JS eval() stays
@@ -1144,6 +1151,44 @@ abstract class PublicPageBase {
 				'https://cloud.digitalocean.com', 'https://dnsimple.com'),
 			'frame-ancestors' => array("'self'"),
 		);
+		foreach ($extra_connect as $origin) {
+			$origin = self::normalize_connect_origin((string)$origin);
+			if ($origin !== null && !in_array($origin, $policy['connect-src'], true)) {
+				$policy['connect-src'][] = $origin;
+			}
+		}
+		return $policy;
+	}
+
+	/**
+	 * $origin in the one shape a connect-src source may take here —
+	 * scheme://host[:port], lower-case, http or https — or null for anything
+	 * else. A path, a query, a wildcard, a quote, whitespace or a semicolon
+	 * never reaches the header, so a stored value cannot widen the policy or
+	 * break out of it.
+	 */
+	public static function normalize_connect_origin(string $origin): ?string {
+		$origin = strtolower(trim($origin));
+		if (!preg_match('#^https?://([a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*|\[[0-9a-f:.]+\])(:[0-9]{1,5})?$#', $origin)) {
+			return null;
+		}
+		return $origin;
+	}
+
+	/** Origins this render adds to connect-src (allow_connect_origin()). */
+	protected $csp_connect_origins = array();
+
+	/**
+	 * Let this page's own script call $origin (scheme://host[:port]), before
+	 * public_header() / admin_header() sends the headers. For one page and one
+	 * person: the mailbox reader names the model host its owner registered. An
+	 * origin in any other shape is ignored (normalize_connect_origin()).
+	 */
+	public function allow_connect_origin(string $origin): void {
+		$origin = self::normalize_connect_origin($origin);
+		if ($origin !== null && !in_array($origin, $this->csp_connect_origins, true)) {
+			$this->csp_connect_origins[] = $origin;
+		}
 	}
 
 	/**
@@ -1154,14 +1199,15 @@ abstract class PublicPageBase {
 	 *                          which logs violations to the browser console and
 	 *                          blocks nothing, so a policy can be watched before
 	 *                          it is enforced
+	 * @param string[] $extra_connect origins this render adds to connect-src
 	 * @return array|null [header name, header value]
 	 */
-	public static function csp_header($enabled, $report_only) {
+	public static function csp_header($enabled, $report_only, array $extra_connect = array()) {
 		if (!$enabled) {
 			return null;
 		}
 		$parts = array();
-		foreach (self::csp_policy() as $directive => $sources) {
+		foreach (self::csp_policy($extra_connect) as $directive => $sources) {
 			$parts[] = $directive . ' ' . implode(' ', $sources);
 		}
 		return array(

@@ -20,6 +20,9 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log
  * Lives in includes/, NOT pipeline_jobs/ — PipelineJobRegistry instantiates
  * every class it discovers there, and an abstract class cannot be.
  *
+ * @version 1.7 - runsOnDeviceFor(): a device job on a Fortress mailbox runs in the browser
+ * @version 1.6 - includesAttachmentDigest(), public, for a browser run
+ * @version 1.5 - deviceCapable(), off for the family
  * @version 1.4
  * @changelog 1.4 - digestFor() so a job can rebuild what the model was shown
  * @changelog 1.3 - lookback_days config field: the shared mail-age floor
@@ -182,6 +185,32 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
             }
         }
         return $notes;
+    }
+
+    /** Whether this job's digest carries the ATTACHMENTS section — what a
+     *  browser run needs to know to build the same digest. */
+    public function includesAttachmentDigest(): bool {
+        return $this->includeAttachmentDigest();
+    }
+
+    /**
+     * Whether this job, on the mailbox in $context, runs in its owner's
+     * browser rather than here: a device-capable job on an end-to-end
+     * encrypted (Fortress) mailbox (specs/fortress_mail_device_ai.md § R7).
+     */
+    public function runsOnDeviceFor(array $context): bool {
+        if (!$this->deviceCapable()) return false;
+        $address = strtolower(trim((string)($context['mailbox'] ?? '')));
+        $alias_id = $address !== '' ? MailboxAliasConfig::resolveAliasId($address) : null;
+        if ($alias_id === null) return false;
+        $alias = new InboundEmailAlias($alias_id, TRUE);
+        return $alias->key && InboundEmailMessage::sealScopeFor($alias_id,
+            (int)$alias->get('iea_ied_inbound_email_domain_id') ?: null) === InboundEmailMessage::SEAL_SCOPE_FORTRESS;
+    }
+
+    /** Off for the family; the triage and the security scan turn it on. */
+    public function deviceCapable(): bool {
+        return false;
     }
 
     public function nextItem(array $config, Recipe $recipe, AiModelResolution $model): ?array {

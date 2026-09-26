@@ -5,6 +5,10 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
+ * @version 1.14.0 - hands the panel the site's own model to offer
+ * @version 1.13.0 - loads the digest and verdict checks the drain judges with
+ * @version 1.12.0 - names the member's registered model origin in the CSP and mounts
+ *                  "Your AI, your model" in the AI panel, when a Fortress mailbox is visible
  * @version 1.11.0 - loads the vault client when a visible mailbox is Fortress
  * @version 1.10.0 - an operator gets the setup banner here too: the check is turned on
  *                  for permission 5 and above, since this is where they read mail
@@ -27,6 +31,12 @@ $page = new PublicPage();
 $fortress_visible = !empty($initial_mailboxes) && mailbox_reader_fortress_visible($initial_mailboxes);
 if ($fortress_visible) {
 	$page->needs_vault_client();
+	// AI on Fortress mail runs in this browser against the member's own model
+	// (specs/fortress_mail_device_ai.md § R2): the page may call the one origin
+	// they registered under a second-factor confirmation, and no other.
+	if (!empty($device_ai_origin)) {
+		$page->allow_connect_origin($device_ai_origin);
+	}
 }
 $hoptions = array(
 	'title' => 'Email',
@@ -94,10 +104,29 @@ if (!$has_mailboxes) {
 		};
 		echo '<link rel="stylesheet" href="' . htmlspecialchars($aip_ver('ai_panel.css')) . '">';
 		echo '<script src="' . htmlspecialchars($aip_ver('ai_panel.js')) . '"></script>';
+		if ($fortress_visible) {
+			// "Your AI, your model": the section of the panel for Fortress
+			// mailboxes, where the member's own model is named and tested.
+			$dai_path = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_device_ai.js');
+			echo '<script>window.MAILBOX_DEVICE_AI = ' . json_encode(array(
+				'origin'       => $device_ai_origin ?: null,
+				'user_id'      => (int)SessionControl::get_instance()->get_user_id(),
+				'settings_url' => '/profile/mailbox/settings#your-model',
+				'site_model'   => $device_ai_site_model ?? null,
+			)) . ';</script>';
+			// The digest and verdict checks the browser judges with, byte-for-byte
+			// the server's (specs/fortress_mail_device_ai.md § R5).
+			foreach (array('html-entities.js', 'email-digest.js', 'verdict-check.js') as $js) {
+				$js_path = PathHelper::getIncludePath('assets/js/' . $js);
+				echo '<script src="/assets/js/' . $js . '?v=' . (is_file($js_path) ? filemtime($js_path) : '1') . '"></script>';
+			}
+			echo '<script src="/plugins/mailbox/assets/mailbox_device_ai.js?v=' . (is_file($dai_path) ? filemtime($dai_path) : '1') . '"></script>';
+		}
 		?>
 		<script>
 		JoineryAiPanel.mount({
 			area: 'mailbox',
+			hostSection: window.MailboxDeviceAi ? window.MailboxDeviceAi.section() : null,
 			getContext: function () {
 				return { mailbox: window.MailboxReader ? window.MailboxReader.currentAddress() : '' };
 			},

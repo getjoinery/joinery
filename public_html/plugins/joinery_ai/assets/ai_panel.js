@@ -10,8 +10,14 @@
  *       area: 'mailbox',
  *       getContext: function () { return { mailbox: currentAddress }; },
  *       anchor: headerElement,           // the AI button renders inside it
- *       container: sidebarSlot           // optional: dock the panel in here
+ *       container: sidebarSlot,          // optional: dock the panel in here
+ *       hostSection: element             // optional: the host's own section
  *   });
+ *
+ * A hostSection is an element the host builds and keeps current itself (the
+ * mail reader's "Your AI, your model" for end-to-end encrypted mailboxes); the
+ * panel places it after the automations and never looks inside it. It shows
+ * and hides itself with its own `hidden`.
  *
  * Given a container, the panel LIVES there — a docked panel in the host's own
  * sidebar, beside whatever else the host keeps there, and the AI button hides
@@ -45,7 +51,7 @@
  * the person as the blue circle — one is progress, the other is a request, and
  * they must not read as the same kind of number.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 2.8.0
+ * Vanilla JS, jy-ui styling, no framework. @version 2.9.0 - hostSection
  */
 (function () {
 	'use strict';
@@ -126,6 +132,9 @@
 		body.appendChild(workingBox);
 		body.appendChild(waitingBox);
 		body.appendChild(recipesBox);
+		if (opts.hostSection && opts.hostSection.nodeType === 1) {
+			body.appendChild(opts.hostSection);
+		}
 		// Pinned slot the future task composer fills; renders nothing today.
 		var footer = el('footer', 'aip-composer-slot');
 		panel.appendChild(head);

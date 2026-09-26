@@ -18,6 +18,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_cla
  * stays inline is the recipe's own workspace (OWN_STATE_TOOLS): nothing but
  * this recipe reads it, and it is wrapped as untrusted when it does.
  *
+ * @version 2.1 - resolveTimezone() is public, for a browser run's system prompt
  * @version 2.0 - queues writes for a tainted-capable agent recipe (S16);
  *   writeProvenance() for memories (S18)
  */
@@ -339,7 +340,8 @@ class RecipeRunContext implements ToolContext {
         }
     }
 
-    private static function resolveTimezone(int $user_id): string {
+    /** $user_id's timezone (usr_timezone), or the site default for no user; UTC when neither is set. */
+    public static function resolveTimezone(int $user_id): string {
         if ($user_id <= 0) {
             $settings = Globalvars::get_instance();
             return $settings->get_setting('default_timezone') ?: 'UTC';

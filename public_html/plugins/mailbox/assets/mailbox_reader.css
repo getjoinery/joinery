@@ -1,7 +1,10 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.45 — the Fortress list banner reuses the setup banner
+ * Vanilla CSS, no framework. @version 2.48 — .mbx-dai-ondemand (Summarize, Scan now)
+ * @version 2.47 — .mbx-danger-banner-model, .mbx-dai-info
+ * @version 2.46 — .mbx-dai ("Your AI, your model" in the AI panel)
+ * @version 2.45 — the Fortress list banner reuses the setup banner
  * @version 2.44 — .mbx-level-fortress (the Fortress chip)
  * @version 2.43 — .mbx-addcontact (header add-to-contacts icon)
  */
@@ -1717,3 +1720,21 @@ button.mbx-setup-banner-btn:disabled { opacity: 0.6; cursor: default; }
 .mbx-gear > summary .jy-btn-icon { display: inline-flex; }
 .mbx-gear > summary .jy-btn-label { display: none; }
 .mbx-gear > summary::after { content: none; }
+
+/* "Your AI, your model" — the AI panel section for an end-to-end encrypted
+   mailbox (mailbox_device_ai.js). */
+.mbx-dai { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--jy-border, #e2e2e2); }
+.mbx-dai[hidden] { display: none; }
+.mbx-dai-note { margin: 0 0 8px; font-size: 0.85em; color: var(--jy-muted, #666); overflow-wrap: anywhere; }
+.mbx-dai-field { display: block; margin: 0 0 8px; }
+.mbx-dai-label { display: block; font-size: 0.8em; font-weight: 600; margin-bottom: 2px; }
+.mbx-dai-input { width: 100%; box-sizing: border-box; }
+.mbx-dai-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 8px; }
+.mbx-dai-status { margin: 0; font-size: 0.85em; overflow-wrap: anywhere; }
+.mbx-dai-info { margin: 0 0 6px; font-size: 0.85em; overflow-wrap: anywhere; }
+.mbx-dai-warn { margin: 0 0 6px; font-size: 0.85em; color: var(--jy-danger, #b42318); overflow-wrap: anywhere; }
+.mbx-danger-banner-model { margin-top: 4px; font-size: 0.8em; opacity: 0.8; }
+.mbx-dai-ondemand { margin: 8px 0; }
+.mbx-dai-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+.mbx-dai-result { margin-top: 6px; font-size: 0.9em; overflow-wrap: anywhere; }
+.mbx-dai-result:empty { display: none; }

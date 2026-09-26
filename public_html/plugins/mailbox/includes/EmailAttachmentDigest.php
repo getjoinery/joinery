@@ -20,6 +20,8 @@
  *
  * specs/joinery_ai_email_attachments.md
  *
+ * @version 1.4 - buildFromManifest(): metadata lines from a Fortress manifest, for the
+ *   owner's browser to mirror (specs/fortress_mail_device_ai.md § R5)
  * @version 1.3 - refuses a Fortress message (server-side AI never reads one)
  * @version 1.2
  * @changelog 1.2 - the ICS EVENT block carries url and a capped description
@@ -84,9 +86,53 @@ class EmailAttachmentDigest {
 		return implode("\n", $lines);
 	}
 
+	/**
+	 * The ATTACHMENTS section from a Fortress message's attachment manifest
+	 * (the sealed iem_attachment_manifest, opened), metadata only: the owner's
+	 * browser has no text extraction for a part, so no text block follows a
+	 * line (specs/fortress_mail_device_ai.md § R5, R8). Same header, same
+	 * lines and the same "(+N more attachments)" as build(); inline parts are
+	 * left out as build() leaves them out. assets/js/email-digest.js mirrors
+	 * it and the parity suite holds the two byte-equal.
+	 *
+	 * @param array<array{filename?:string,content_type?:string,size?:int,inline?:bool}> $manifest
+	 */
+	public static function buildFromManifest(array $manifest): string {
+		$parts = array();
+		foreach ($manifest as $entry) {
+			if (is_array($entry) && empty($entry['inline'])) {
+				$parts[] = $entry;
+			}
+		}
+		$total = count($parts);
+		if ($total === 0) {
+			return '';
+		}
+		$lines = array('ATTACHMENTS (' . $total . '):');
+		$shown = 0;
+		foreach ($parts as $entry) {
+			if ($shown >= self::MAX_PARTS) {
+				break;
+			}
+			$shown++;
+			$lines[] = $shown . '. ' . self::metadataText((string)($entry['filename'] ?? ''),
+				(string)($entry['content_type'] ?? ''), (int)($entry['size'] ?? 0));
+		}
+		if ($total - $shown > 0) {
+			$lines[] = '(+' . ($total - $shown) . ' more attachments)';
+		}
+		return implode("\n", $lines);
+	}
+
 	/** "invoice.pdf — application/pdf, 48211 bytes" */
 	private static function metadataLine(InboundMessageAttachment $att): string {
-		$filename = trim((string)($att->get('ima_filename') ?: ''));
+		return self::metadataText((string)($att->get('ima_filename') ?: ''),
+			(string)($att->get('ima_content_type') ?: ''), (int)$att->get('ima_size_bytes'));
+	}
+
+	/** One part's metadata line, from its name, type and size. */
+	private static function metadataText(string $filename, string $content_type, int $size): string {
+		$filename = trim($filename);
 		$filename = self::collapseWhitespace($filename);
 		if ($filename === '') {
 			$filename = '(unnamed)';
@@ -94,12 +140,10 @@ class EmailAttachmentDigest {
 			$filename = mb_substr($filename, 0, self::FILENAME_CAP_CHARS, 'UTF-8');
 		}
 
-		$content_type = trim((string)($att->get('ima_content_type') ?: ''));
+		$content_type = trim($content_type);
 		if ($content_type === '') {
 			$content_type = 'application/octet-stream';
 		}
-
-		$size = (int)$att->get('ima_size_bytes');
 
 		return $filename . ' — ' . $content_type . ', ' . $size . ' bytes';
 	}

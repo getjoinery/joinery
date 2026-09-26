@@ -30,6 +30,7 @@
  * Writes and permanently deletes throwaway rows. Run:
  *   php tests/integration/joinery_ai_pipeline_runner_test.php
  *
+ * @version 1.2 - the fixture job states deviceCapable()
  * @version 1.1
  */
 
@@ -108,6 +109,7 @@ class FixtureJudgeJob implements PipelineJobInterface {
     }
 
     public function validateVerdict(array $verdict): void {}
+    public function deviceCapable(): bool { return false; }
 
     public function defaultPrompt(): string { return 'Judge the item. Respond keep or flag.'; }
 

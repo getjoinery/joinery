@@ -1,7 +1,8 @@
 /**
  * Area AI panel (ai_panel.js) — the same panel docked in a host's sidebar or
  * carried by the slide-over, so both are styled from one place. jy-ui
- * vocabulary, vanilla CSS, no framework. @version 2.4.0
+ * vocabulary, vanilla CSS, no framework. @version 2.5.0 - the slide-over scrolls
+ *   its body: the panel inside the drawer is the flex column
  */
 
 .jy-ui.aip-overlay {
@@ -66,6 +67,19 @@
 	cursor: pointer;
 	color: var(--jy-color-text-muted, #667085);
 	padding: 0.15rem 0.4rem;
+}
+
+/* In the slide-over the panel fills the drawer as a column of its own, so the
+   body below — not the whole drawer — is what scrolls when the panel is taller
+   than the window. */
+.aip-drawer > .aip-panel {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+.aip-drawer .aip-body {
+	min-height: 0;
 }
 
 /* Cards scroll; the composer slot below stays pinned so adding the composer

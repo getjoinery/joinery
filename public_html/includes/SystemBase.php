@@ -122,6 +122,16 @@ abstract class SystemBase {
 	public static $sealed_fields = array();
 
 	/**
+	 * $sealed_fields a browser may ADD to a row it already holds the key to,
+	 * one or two at a time, through acceptBrowserSealedFields() — derived
+	 * content computed where the plaintext lives, such as an AI verdict on
+	 * end-to-end encrypted mail. Never the row's own content: listing a body or
+	 * a sender here would let a page rewrite a received message under its
+	 * existing key. Empty by default.
+	 */
+	public static $browser_appendable_fields = array();
+
+	/**
 	 * Whether save() seals this model's $sealed_fields itself.
 	 *
 	 * On by default, because a model that declares sealed fields wants its
@@ -1391,6 +1401,90 @@ abstract class SystemBase {
 		$sets = array_merge($sets, $wrap['sets']);
 		$params = array_merge($params, $wrap['params']);
 		$sets[] = static::sealFlagColumn() . ' = true';
+		$params[] = $row_id;
+		$db->prepare('UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
+			. ' WHERE ' . static::$pkey_column . ' = ?')->execute($params);
+	}
+
+	/**
+	 * Why this row may not take a browser-appended field now, or null. The
+	 * model's own reason on top of acceptBrowserSealedFields()'s checks — a
+	 * mail row still waiting for its browser parse, say. Default: none.
+	 */
+	protected static function browserAppendRefusal(array $row): ?string {
+		return null;
+	}
+
+	/**
+	 * Add fields a browser sealed under a row's EXISTING key: the second write
+	 * door beside acceptBrowserSealed(), for derived content (an AI verdict on
+	 * end-to-end encrypted mail, specs/fortress_mail_device_ai.md § R4). The
+	 * browser opened the row with its DEK, computed the value, and sealed it
+	 * with the same DEK under the row's AD ({prefix}:{id}:{field}).
+	 *
+	 * Checks, each refusing with its own reason: the row exists and is sealed;
+	 * its stored key is `v1.edgeseal.{scope}.` for a client-custody scope (a
+	 * row lowered to a server scope is the server's to write); the model has no
+	 * reason of its own to refuse it now (browserAppendRefusal()); each field
+	 * is on $browser_appendable_fields and in $sealed_fields, holds content on
+	 * this row, and carries `v1.edge.` ciphertext.
+	 *
+	 * Writes those columns and nothing else. The row's key, key generation and
+	 * owner stay as they are: the DEK did not change, and a rotation of the
+	 * scope rewrites only the key columns, so a value appended mid-rotation
+	 * still opens after it commits — restamping the generation here would be
+	 * wrong while one is pending.
+	 *
+	 * AUTHORIZATION IS THE CALLER'S, as for acceptBrowserSealed(): the
+	 * consumer's action proves the caller owns the row before it calls this,
+	 * and may run it inside its own transaction.
+	 *
+	 * @param array<string,string> $fields column => `v1.edge.` ciphertext
+	 */
+	public static function acceptBrowserSealedFields(int $row_id, array $fields): void {
+		$cls = get_called_class();
+		if ($row_id <= 0 || !$fields) {
+			throw new RuntimeException($cls . '::acceptBrowserSealedFields() needs a persisted row id and at least one field.');
+		}
+		static::assertSealingDeclared(static::$sealed_fields[0] ?? '');
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute(array($row_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			throw new RuntimeException($cls . ': refused browser fields for row ' . $row_id . ': no such row.');
+		}
+		if (!static::rowArrayIsSealed($row)) {
+			throw new RuntimeException($cls . ': refused browser fields: row ' . $row_id . ' is not sealed.');
+		}
+		$scope = VaultCrypto::parseEdgeScope((string)($row[static::sealedKeyColumn()] ?? ''));
+		if ($scope === null || !VaultScopes::isClientCustody($scope)) {
+			throw new RuntimeException($cls . ': refused browser fields: row ' . $row_id
+				. ' is not sealed to a client-custody vault, so the browser does not hold its key.');
+		}
+		$reason = static::browserAppendRefusal($row);
+		if ($reason !== null) {
+			throw new RuntimeException($cls . ': refused browser fields: ' . $reason);
+		}
+		foreach ($fields as $col => $value) {
+			if (!in_array($col, static::$browser_appendable_fields, true) || !in_array($col, static::$sealed_fields, true)) {
+				throw new RuntimeException($cls . ': refused browser fields: "' . $col . '" is not a field a browser may add.');
+			}
+			if (!static::sealedFieldIsActive($col, $row)) {
+				throw new RuntimeException($cls . ': refused browser fields: "' . $col . '" is not sealed content on this row.');
+			}
+			if (!is_string($value) || !VaultCrypto::isEdgeField($value)) {
+				throw new RuntimeException($cls . ': refused browser fields: "' . $col . '" is not v1.edge. ciphertext.');
+			}
+		}
+
+		$sets = array();
+		$params = array();
+		foreach ($fields as $col => $value) {
+			$sets[] = $col . ' = ?';
+			$params[] = $value;
+		}
 		$params[] = $row_id;
 		$db->prepare('UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
 			. ' WHERE ' . static::$pkey_column . ' = ?')->execute($params);

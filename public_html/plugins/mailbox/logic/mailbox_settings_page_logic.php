@@ -11,6 +11,11 @@
  * signature they have set for it. Saving goes through the mailbox/signature_save
  * API action, which sanitizes and writes the caller's own grant.
  *
+ * Members with an end-to-end encrypted (Fortress) mailbox also set where their
+ * own AI model answers, through the mailbox/device_ai_host API action.
+ *
+ * @version 1.3.0 - device_ai_site_model: the site's own model, offered with one click
+ * @version 1.2.0 - has_fortress, device_ai_origin: where the member's own AI model answers
  * @version 1.1.0
  */
 
@@ -40,6 +45,7 @@ function mailbox_settings_page_logic(array $input): LogicResult {
 			'alias_id'  => intval($alias->key),
 			'address'   => (string)$alias->get_full_address(),
 			'signature' => InboundEmailMailboxGrant::signatureFor($user_id, intval($alias->key)),
+			'fortress'  => $alias->security_level() === InboundEmailDomain::LEVEL_FORTRESS,
 		);
 	}
 	usort($mailboxes, function ($a, $b) { return strcasecmp($a['address'], $b['address']); });
@@ -51,6 +57,12 @@ function mailbox_settings_page_logic(array $input): LogicResult {
 		// Importing old mail is a deployment switch, so the way to it only
 		// appears where there is something to reach.
 		'import_enabled' => (bool)$settings->get_setting('mailbox_import_enabled'),
+		// AI on end-to-end encrypted mail runs against the member's own model
+		// (specs/fortress_mail_device_ai.md § R2): where it answers is set here,
+		// and only a member with such a mailbox has a reason to.
+		'has_fortress'     => (bool)array_filter(array_column($mailboxes, 'fortress')),
+		'device_ai_origin' => MailboxDeviceAiHost::originForUser($user_id),
+		'device_ai_site_model' => MailboxDeviceAi::siteModel((int)$session->get_permission() >= 5),
 	));
 }
 ?>

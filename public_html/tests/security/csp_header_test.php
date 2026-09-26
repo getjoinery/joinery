@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php safe --filter=csp_header
  *
+ * @version 1.3 - a page may add one origin to connect-src (allow_connect_origin)
  * @version 1.2 - 'wasm-unsafe-eval' in script-src, never 'unsafe-eval'
  * @version 1.1 - no CDN, hosts not schemes, and the tree sweep that keeps the inventory current
  */
@@ -89,6 +90,34 @@ check(strpos($value, 'http:') === false, 'no plain-http source anywhere');
 check(!preg_match('/\*(?![.-])/', str_replace("'", '', $value)) || strpos($value, ' * ') === false, "no bare wildcard source");
 check(substr_count($value, ';') === count($policy) - 1 && strpos($value, 'default-src ') === 0, 'serialized as "directive sources; ..." starting with default-src');
 check(!preg_match('/[\r\n]/', $value), 'single header line');
+
+section('A page may add one origin to connect-src, and nothing else moves');
+// The mailbox reader names the model host its owner registered
+// (specs/fortress_mail_device_ai.md § R7): allow_connect_origin() on that one
+// page, csp_policy($extra) underneath.
+$origin = 'https://models.example.test:8443';
+$with = PublicPageBase::csp_policy(array($origin));
+check(in_array($origin, $with['connect-src'], true), 'the registered origin is in connect-src');
+check(array_values(array_diff($with['connect-src'], $policy['connect-src'])) === array($origin),
+	'connect-src gains exactly that origin');
+$others_same = true;
+foreach ($policy as $d => $sources) {
+	if ($d !== 'connect-src' && $with[$d] !== $sources) $others_same = false;
+}
+check($others_same && count($with) === count($policy), 'every other directive is unchanged');
+check(PublicPageBase::csp_policy() === $policy && PublicPageBase::csp_policy(array()) === $policy,
+	'with no registered origin the policy is the standard one');
+$hdr = PublicPageBase::csp_header(true, false, array($origin));
+check(strpos($hdr[1], 'connect-src ' . implode(' ', $with['connect-src']) . ';') !== false, 'the header carries it in connect-src');
+check(PublicPageBase::csp_policy(array('http://localhost:11434'))['connect-src'] === array_merge($policy['connect-src'], array('http://localhost:11434')),
+	'a plain-http origin is allowed only when a page adds it (a model on this computer)');
+foreach (array('https://evil.test/path', 'https://*.evil.test', "https://evil.test; script-src *", 'https:', '*', "'self'",
+	'javascript:alert(1)', "https://evil.test\r\nSet-Cookie: x=1", 'https://evil test', 'ftp://evil.test', 'https://user@evil.test') as $bad) {
+	check(PublicPageBase::csp_policy(array($bad))['connect-src'] === $policy['connect-src'],
+		'refused, never reaches the header: ' . json_encode($bad));
+}
+check(PublicPageBase::normalize_connect_origin('HTTPS://Models.Example.TEST') === 'https://models.example.test', 'origins are lower-cased');
+check(PublicPageBase::normalize_connect_origin('http://[::1]:11434') === 'http://[::1]:11434', 'an IPv6 loopback origin is accepted');
 
 section('Every external host the tree loads is in the policy (the standing inventory)');
 // Walk the browser-facing code for <script src>, stylesheet <link>, @import,

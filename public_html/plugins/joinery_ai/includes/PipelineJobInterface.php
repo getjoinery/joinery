@@ -256,4 +256,14 @@ interface PipelineJobInterface {
      */
     public function recordVerdict(string $item_key, array $verdict, Recipe $recipe, string $model): void;
 
+    /**
+     * Whether a person's own browser may run this job on content the server
+     * cannot read — end-to-end encrypted (Fortress) mail — against a model they
+     * name (specs/fortress_mail_device_ai.md § R5). True only for a job whose
+     * verdict is a sealed field on the item the browser already holds the key
+     * to, and whose prompt and verdict shape work unchanged there. False for
+     * every other job.
+     */
+    public function deviceCapable(): bool;
+
 }
