@@ -1319,7 +1319,7 @@ Either way, removing the node ends the provisioning task's work on its site (`Ma
 
 - The hosting order's provisioning record and its hosted trial are removed, so nothing seeds, retires a password on, sends mail setup to, or powers off a site nobody tracks.
 - A domain bought for the site is kept: the buyer is its registrant, and its record carries the renewals and the hand-over. One still being bought or wired up is parked on the Domains page with the reason (Retry parks it again while its site is still removed). An active domain needs no server and is left as it is; the domain watch sends a removed node no notice.
-- Billing is never touched. A subscription still charging for the hosting is named in the removal's message, so whoever removed the site can cancel it on its order.
+- Billing is never touched. A subscription still charging for the hosting is named in the removal's message, so whoever removed the site can cancel it from the buyer's user page (its Subscriptions panel).
 
 The page's message after Remove from Dashboard lists each of these; a permanent deletion records them in its job result.
 

@@ -2,10 +2,14 @@
 /**
  * SubscriptionsPanel — the admin user-detail "Subscriptions" panel (store-owned).
  *
- * Read-only: lists the user's active and cancelled subscriptions. Reconciles
- * each active subscription against Stripe during render (as the page always
- * has). Registered from the store's serve.php, so it appears on
- * /admin/admin_user only when the store plugin is active.
+ * Lists the user's active and cancelled subscriptions, each active one with a
+ * cancel button (a POST to the buyer's own cancel route). Reconciles each active
+ * subscription against Stripe during render (as the page always has).
+ * Registered from the store's serve.php, so it appears on /admin/admin_user only
+ * when the store plugin is active.
+ *
+ * @version 1.1 - cancel is a POST button with a confirm, and an app-store subscription shows where its
+ *                buyer cancels it; the cancel was a link, which any page an admin visited could follow
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminUserPanelRegistry.php'));
@@ -54,6 +58,10 @@ class SubscriptionsPanel implements AdminUserPanel {
 		$cancelled_subscriptions->load();
 		$cancelled_pager = new Pager(array('numrecords' => $num_cancelled_subscriptions, 'numperpage' => $list_limit ?: $num_cancelled_subscriptions));
 
+		// One token for every cancel button (single-button action forms); the
+		// cancel route checks it.
+		$cancel_token = $page->getFormWriter('subscription_cancel')->getCSRFToken();
+
 		ob_start();
 		?>
 		<div class="card mt-3">
@@ -79,7 +87,17 @@ class SubscriptionsPanel implements AdminUserPanel {
 								<?php if ($subscription->get('odi_subscription_period_end')): ?>
 									Period ends: <?php echo $subscription->get_local('odi_subscription_period_end'); ?><br>
 								<?php endif; ?>
-								<a href="/profile/orders_recurring_action?order_item_id=<?php echo $subscription->key; ?>" class="text-danger">cancel</a>
+								<?php $blocker = $subscription->subscription_cancel_blocker(); ?>
+								<?php if ($blocker !== null): ?>
+									<?php echo htmlspecialchars($blocker); ?>
+								<?php else: ?>
+									<?php echo AdminPage::action_button('cancel', '/profile/orders_recurring_action', array(
+										'hidden'  => array('order_item_id' => (int)$subscription->key, '_csrf_token' => (string)$cancel_token),
+										'confirm' => 'Cancel order ' . $subscription->get('odi_ord_order_id') . '\'s subscription for ' . $user->display_name() . '? '
+											. ($subscription->get_payment_source() === 'paypal' ? 'PayPal ends it now.' : 'It stays active until the end of the paid period.'),
+										'class'   => 'btn btn-link btn-sm p-0 text-danger',
+									)); ?>
+								<?php endif; ?>
 							</div>
 						</div>
 					<?php endforeach; ?>

@@ -533,7 +533,8 @@ class ManagedNode extends SystemBase {
 	 *   bought or wired up is parked for a person on the Domains page, with
 	 *   the reason; an active one needs no server and is left as it is.
 	 * - Billing is never touched here. A subscription still charging for the
-	 *   hosting is named, so whoever removed the site can end it.
+	 *   hosting is named, so whoever removed the site can cancel it from the
+	 *   buyer's user page (its Subscriptions panel).
 	 *
 	 * Safe to run again: it only acts on what is still live.
 	 *
@@ -556,7 +557,7 @@ class ManagedNode extends SystemBase {
 				if ($item->key && $item->get('odi_is_subscription') && !$item->get('odi_subscription_cancelled_time')
 						&& in_array((string)$item->get('odi_subscription_status'), ['active', 'trialing', 'grace_period'], true)) {
 					$notes[] = 'Its hosting subscription (order ' . (int)$item->get('odi_ord_order_id')
-						. ') is still active and still bills the buyer: cancel it on that order if the hosting has ended.';
+						. ') is still active and still bills the buyer: if the hosting has ended, cancel it on the buyer\'s user page, under Subscriptions.';
 				}
 			}
 		}

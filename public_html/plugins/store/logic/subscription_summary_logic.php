@@ -8,7 +8,7 @@
  * knows which management affordances to show. Shares
  * subscriptions_logic.php's query path.
  *
- * @version 1.1.0
+ * @version 1.2.0 - can_cancel reads OrderItem::subscription_cancel_blocker(), the cancel's own rule
  */
 
 
@@ -44,8 +44,9 @@ function subscription_summary_logic(array $input): LogicResult {
 			'price'         => $sub->get('odi_price'),
 			'status'        => $sub->get('odi_subscription_cancelled_time') ? 'cancelled' : ($sub->get('odi_subscription_status') ?: 'active'),
 			'renewal_or_end_date' => $sub->get('odi_subscription_cancelled_time') ?: $sub->get('odi_subscription_period_end'),
-			// Store-billed subscriptions cancel in their store, not here.
-			'can_cancel'    => !$sub->get('odi_subscription_cancelled_time') && !in_array($payment_source, array('app_store', 'play_store')),
+			// The cancel's own rule: store-billed subscriptions cancel in their
+			// store, and one with no provider has nothing to cancel.
+			'can_cancel'    => !$sub->get('odi_subscription_cancelled_time') && $sub->subscription_cancel_blocker() === null,
 			'payment_source' => $payment_source,
 		);
 	};
