@@ -33,6 +33,16 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.25 - a chain run archives the site as two parts, data and code (CHAIN_PARTS), each with its own
+ *                snapshot, into version-2 chains (specs/backup_database_incrementals.md WP3). A part whose
+ *                tree was swapped under its snapshot starts over alone inside the chain (rebased_because
+ *                tree_changed), so an upgrade re-bases the code and the data keeps incrementing; a
+ *                version-1 chain ends with layout_split. A failed run puts every snapshot back instead
+ *                of clearing it, so the next run increments on the last committed one; the snapshots are
+ *                held on disk, so a run killed outright is undone by the next (snapshot_recover). The run message
+ *                names code, data and database, and the full-size warning compares data fulls
+ * @version 1.24 - expected_bytes() sums the tree kinds of the manifest's version (files; or data and code),
+ *                each from its own newest level 0 for a full
  * @version 1.23 - MAX_INCREMENTALS is 180: a week of hourly runs fits one chain. Restoring or verifying a
  *                long chain from the management node takes agent 1.45.0, whose stage_chain / verify_backup
  *                carry a whole chain's links in one job
@@ -685,9 +695,19 @@ class BackupRunner {
 
 	// ----------------------------------------------------------------- chain
 
-	/** Where this site keeps the chain it is currently extending. */
-	private static function snar_path(array $plan) {
-		return rtrim($plan['output_dir'], '/') . '/.' . $plan['slug'] . '.snar';
+	/**
+	 * The tree kinds a chain run archives, in the order they run. Each has its
+	 * own snapshot and its own level, so an upgrade re-bases the code alone.
+	 */
+	const CHAIN_PARTS = array('data', 'code');
+
+	/**
+	 * Where this site keeps one part's snapshot of the chain it is extending.
+	 * Without a part: the single snapshot of a version-1 chain, which a
+	 * layout_split run deletes.
+	 */
+	private static function snar_path(array $plan, $part = '') {
+		return rtrim($plan['output_dir'], '/') . '/.' . $plan['slug'] . ($part !== '' ? '.' . $part : '') . '.snar';
 	}
 
 	/**
@@ -741,7 +761,7 @@ class BackupRunner {
 	 * is a no: a chain whose snapshot predates the record cannot show it spans
 	 * no swap, and an incremental across a swap cannot be extracted.
 	 */
-	private static function snapshot_matches_tree(array $plan, $snar) {
+	private static function snapshot_matches_tree(array $plan, $snar, $part) {
 		$recorded = is_file($snar . '.tree') ? trim((string)@file_get_contents($snar . '.tree')) : '';
 		if ($recorded === '') {
 			return false;
@@ -749,7 +769,11 @@ class BackupRunner {
 		$cmd = 'bash ' . escapeshellarg(PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/backup_files.sh')
 			. ' ' . escapeshellarg($plan['project'])
 			. ' --project-dir ' . escapeshellarg($plan['project_dir'] ?? PathHelper::getSiteRoot())
-			. ' --print-tree-id 2>&1';
+			. ' --part ' . escapeshellarg($part);
+		foreach (self::extra_excludes() as $x) {
+			$cmd .= ' --exclude ' . escapeshellarg($x);
+		}
+		$cmd .= ' --print-tree-id 2>&1';
 		$out = array(); $rc = 0;
 		exec($cmd, $out, $rc);
 		$current = '';
@@ -771,12 +795,19 @@ class BackupRunner {
 		$dir = $plan['output_dir'];
 		self::ensure_dir($dir);
 
-		$snar = self::snar_path($plan);
+		$snars = array();
+		foreach (self::CHAIN_PARTS as $part) {
+			$snars[$part] = self::snar_path($plan, $part);
+		}
+		self::snapshot_recover($snars);
+		$snars_present = true;
+		foreach ($snars as $s) {
+			$snars_present = $snars_present && is_file($s) && filesize($s) > 0;
+		}
 		list($chain_id, $manifest) = self::current_chain($plan);
 
-		$reason = BackupChain::should_start_new($manifest, is_file($snar) && filesize($snar) > 0,
-			$plan['full_days'], $plan['max_inc'], null, (string)$plan['recovery_fpr'],
-			self::snapshot_matches_tree($plan, $snar));
+		$reason = BackupChain::should_start_new($manifest, $snars_present,
+			$plan['full_days'], $plan['max_inc'], null, (string)$plan['recovery_fpr'], BackupChain::VERSION);
 		if ($reason === 'recovery_rotated') {
 			error_log('BackupRunner: the recovery key changed since chain ' . $chain_id
 				. ' started; starting a new chain sealed to the current key.');
@@ -805,7 +836,7 @@ class BackupRunner {
 		// what the run lands here? A refusal is thrown like any other failure,
 		// so it is recorded on the history row and reaches the notices.
 		$refusal = self::preflight_refusal(
-			self::local_need($plan, $snar, $chain_id ? self::chain_dir($plan, $chain_id) . '/' . BackupChain::MANIFEST_NAME : ''),
+			self::local_need($plan, array_values($snars), $chain_id ? self::chain_dir($plan, $chain_id) . '/' . BackupChain::MANIFEST_NAME : ''),
 			self::free_bytes($plan, $dir),
 			self::expected_bytes($manifest, $reason !== '' ? 0 : 1));
 		if ($refusal !== '') {
@@ -820,9 +851,38 @@ class BackupRunner {
 			$chain_id = BackupChain::new_chain_id();
 			$mint     = BackupEnvelope::mint($chain_id, $plan['recipients']);
 			$data_key = $mint['data_key'];
-			$manifest = BackupChain::start($chain_id, $plan['slug'], $mint['envelope'], $reason);
-			@unlink($snar);
+			$manifest = BackupChain::start($chain_id, $plan['slug'], $mint['envelope'], $reason, BackupChain::VERSION);
+			foreach ($snars as $s) { @unlink($s); @unlink($s . '.tree'); }
+			// A version-1 chain's single snapshot has no reader after this.
+			@unlink(self::snar_path($plan)); @unlink(self::snar_path($plan) . '.tree');
 			self::ensure_dir(self::chain_dir($plan, $chain_id));
+		}
+
+		// Each part's level, decided here: a new chain is a full of both; inside
+		// a chain, a part whose tree was swapped under its snapshot (an upgrade
+		// swaps the code; a tree laid down fresh changes the data) starts over
+		// alone, and the other carries on. Asked of every part before any
+		// snapshot is touched.
+		$planned = array();
+		$rebased = array();
+		foreach (self::CHAIN_PARTS as $part) {
+			$planned[$part] = ($reason !== '') ? 0 : 1;
+			if ($reason === '' && !self::snapshot_matches_tree($plan, $snars[$part], $part)) {
+				$planned[$part] = 0;
+				$rebased[$part] = 'tree_changed';
+			}
+		}
+
+		// Each snapshot as it stood before this run, so a failure can put it
+		// back — held before a re-based part's snapshot is cleared, so a failed
+		// run after an upgrade re-bases the code again next time rather than
+		// finding a snapshot missing and starting a whole new chain. tar
+		// advances a snapshot during its run, before the run is committed;
+		// restoring it makes the next run a correct increment on the last
+		// committed one.
+		$held = self::snapshot_hold($snars);
+		foreach (array_keys($rebased) as $part) {
+			@unlink($snars[$part]); @unlink($snars[$part] . '.tree');
 		}
 
 		$seq      = BackupChain::next_seq($manifest);
@@ -848,8 +908,13 @@ class BackupRunner {
 				// The files archive streams straight to the bucket: by the time
 				// run_files_engine() returns, the object is complete in backup storage
 				// and the artifact carries its key. It is never on this disk.
-				$artifacts['files'] = self::run_files_engine($plan, $chain_id, $chain_d, $seq, $snar, $key_file,
-					$objects ? $objects['exclude'] : '');
+				foreach (self::CHAIN_PARTS as $part) {
+					$artifacts[$part] = self::run_files_engine($plan, $chain_id, $chain_d, $seq, $snars[$part], $key_file,
+						($part === 'data' && $objects) ? $objects['exclude'] : '', $part);
+					if (isset($rebased[$part]) && (int)$artifacts[$part]['level'] === 0) {
+						$artifacts[$part]['rebased_because'] = $rebased[$part];
+					}
+				}
 				$artifacts['db']    = self::run_db_engine($plan, $chain_id, $chain_d, $seq, $key_file);
 				$meta = self::build_meta($plan, $chain_d, $seq, $key_file);
 				if ($meta) { $artifacts['meta'] = $meta; }
@@ -862,42 +927,44 @@ class BackupRunner {
 				if ($objects && $objects['exclude'] !== '') { @unlink($objects['exclude']); }
 			}
 
-			$level = ($reason !== '') ? 0 : 1;
-			if ($level === 0 && (int)$artifacts['files']['level'] !== 0) {
-				// The engine decides level from the snapshot; a disagreement means
-				// the snapshot survived a "start a new chain" decision, and this run
-				// would be an incremental filed as a full.
-				throw new BackupRunnerException(
-					'A new chain was started but the files engine produced an incremental. '
-					. 'The snapshot at ' . $snar . ' was not cleared.');
+			foreach (self::CHAIN_PARTS as $part) {
+				$got = (int)$artifacts[$part]['level'];
+				if ($planned[$part] === 0 && $got !== 0) {
+					// The engine decides level from the snapshot; a disagreement
+					// means the snapshot survived a decision to start this part
+					// over, and the run would file an incremental as a full.
+					throw new BackupRunnerException(
+						'This run was to start the ' . $part . ' over, but its engine produced an incremental. '
+						. 'The snapshot at ' . $snars[$part] . ' was not cleared.');
+				}
+				if ($planned[$part] === 1 && $got === 0) {
+					// The engine found the tree swapped after this run decided to
+					// increment it (an upgrade landed mid-backup). The run fails
+					// and its snapshots are put back, so the next run re-bases
+					// this part alone.
+					throw new BackupRunnerException(
+						'The ' . $part . ' tree changed while this backup ran (an upgrade or a restore), so chain '
+						. $chain_id . ' was not extended. The next run starts the ' . $part . ' over.');
+				}
 			}
-			if ($level === 1 && (int)$artifacts['files']['level'] === 0) {
-				// The engine found the code tree swapped after this run decided to
-				// extend the chain (an upgrade landed mid-backup). A full filed
-				// inside the chain is not what the chain describes; failing clears
-				// the snapshot, so the next run starts a new chain.
-				throw new BackupRunnerException(
-					'The code tree changed while this backup ran (an upgrade or a restore), so chain '
-					. $chain_id . ' was not extended. The next run starts a new chain.');
-			}
-			$level = (int)$artifacts['files']['level'];
 
-			$manifest = BackupChain::add_run($manifest, $seq, $level, $artifacts);
+			$manifest = BackupChain::add_run($manifest, $seq, 0, $artifacts);
+			$level = (int)$manifest['runs'][count($manifest['runs']) - 1]['level'];
 			BackupChain::write($manifest, $manifest_path);
 
 			$uploaded = self::upload_chain($plan, $chain_id, $artifacts, $manifest_path);
 		} catch (\Throwable $e) {
-			// The snapshot advances DURING the files engine, before this run is
-			// committed to the manifest and confirmed in the bucket. Carrying it
+			// The snapshots advance DURING the files engines, before this run is
+			// committed to the manifest and confirmed in the bucket. Carrying one
 			// past a failure corrupts the chain twice over: a retry reuses this
 			// sequence number and computes its incremental against the advanced
 			// snapshot, so the failed attempt's changes end up in no archive at
 			// all; and a failed upload leaves the local manifest one run ahead
-			// of the bucket, so the next upload publishes a manifest describing
-			// artifacts the bucket does not hold. Clearing the snapshot makes
-			// the next run start a fresh chain — one extra full, never a
-			// silently broken backup.
-			@unlink($snar);
+			// of the bucket. So each is put back as it stood before the run —
+			// the manifest is put back below — and the next run is a correct
+			// increment on the last committed run, costing no new full. A
+			// snapshot truncated by a tar that died mid-run is healed the same way.
+			self::snapshot_restore($held);
 			// And since the chain is now abandoned, this run's half-made output
 			// is deleted and the manifest put back the way it was. Local artifact
 			// deletion otherwise happens only after success, so a failed run of a
@@ -908,8 +975,10 @@ class BackupRunner {
 			throw $e;
 		}
 
-		$warning = ($level === 0)
-			? self::full_size_warning($plan, (int)$artifacts['files']['bytes'], (int)$history->key)
+		self::snapshot_release($held);
+
+		$warning = ((int)$artifacts['data']['level'] === 0)
+			? self::full_size_warning($plan, (int)$artifacts['data']['bytes'], (int)$history->key)
 			: '';
 
 		$history->set('bkh_chain_id', $chain_id);
@@ -920,6 +989,7 @@ class BackupRunner {
 		$history->set('bkh_finish_time', gmdate('Y-m-d H:i:s'));
 		$history->set('bkh_message', ($level === 0 ? 'Full' : 'Incremental') . ' run ' . $seq . ' of ' . $chain_id
 			. ($reason !== '' ? ' (new chain: ' . $reason . ')' : '')
+			. ($rebased ? ' (' . implode(' and ', array_keys($rebased)) . ' started over: tree changed)' : '')
 			. ($objects ? self::objects_note($objects) : '')
 			. ($warning !== '' ? ' — WARNING: ' . $warning : ''));
 		$history->save();
@@ -949,11 +1019,17 @@ class BackupRunner {
 		$swept  = self::sweep_local($plan);
 
 		// The size a person reads is the whole run — every artifact it put in
-		// backup storage — with the two parts that make it up named beside it.
+		// backup storage — with the parts that make it up named beside it, and
+		// which of them started over.
 		$total = 0;
 		foreach ($artifacts as $a) { $total += (int)($a['bytes'] ?? 0); }
+		$parts = array();
+		foreach (self::CHAIN_PARTS as $part) {
+			$parts[] = $part . ' ' . self::human($artifacts[$part]['bytes'])
+				. (($level !== 0 && (int)$artifacts[$part]['level'] === 0) ? ' full' : '');
+		}
 		$msg = ($level === 0 ? 'Full backup ' : 'Incremental backup ') . self::human($total)
-			. ' (files ' . self::human($artifacts['files']['bytes'])
+			. ' (' . implode(', ', $parts)
 			. ', database ' . self::human($artifacts['db']['bytes'] ?? 0) . ')'
 			. ' in ' . $chain_id . ' to ' . $plan['target']->get('bkt_name');
 		if ($objects) { $msg .= self::objects_message($objects, $released); }
@@ -983,35 +1059,43 @@ class BackupRunner {
 
 	/**
 	 * Bytes this run lands on local disk. Every archive and dump streams to the
-	 * bucket, so what is left is the tar snapshot (rewritten in full by every
-	 * chain run, so the current one's size is the estimate), the chain
-	 * manifest, and PREFLIGHT_LOCAL_OVERHEAD. A standalone run passes '' for
-	 * both paths.
+	 * bucket, so what is left is the tar snapshots (each rewritten in full by
+	 * every chain run, and held aside while it runs — so twice the current
+	 * size), the chain manifest, and PREFLIGHT_LOCAL_OVERHEAD. A standalone
+	 * run passes no snapshots and ''.
 	 */
-	public static function local_need(array $plan, $snar_path, $manifest_path): int {
+	public static function local_need(array $plan, array $snar_paths, $manifest_path): int {
 		$need = self::PREFLIGHT_LOCAL_OVERHEAD;
-		foreach (array($snar_path, $manifest_path) as $p) {
+		foreach ($snar_paths as $p) {
 			if ($p !== '' && is_file($p)) {
-				$need += (int)@filesize($p);
+				$need += 2 * (int)@filesize($p);
 			}
+		}
+		if ($manifest_path !== '' && is_file($manifest_path)) {
+			$need += (int)@filesize($manifest_path);
 		}
 		return $need;
 	}
 
 	/**
-	 * The size the run's files archive is expected to be, for the refusal's
-	 * wording: for a full, the newest full in the local chain manifest; for an
-	 * incremental, the newest run. 0 when the manifest has nothing to say.
+	 * The size the run's tree archives are expected to be, for the refusal's
+	 * wording: per tree kind (files; or data and code), for a full the newest
+	 * level 0 of that kind in the local chain manifest, for an incremental the
+	 * newest. 0 when the manifest has nothing to say.
 	 */
 	public static function expected_bytes(?array $manifest, int $level): int {
 		$runs = ($manifest && !empty($manifest['runs'])) ? $manifest['runs'] : array();
-		for ($i = count($runs) - 1; $i >= 0; $i--) {
-			if ($level === 0 && (int)($runs[$i]['level'] ?? 1) !== 0) {
-				continue;
+		$kinds = BackupChain::TREE_KINDS[(int)($manifest['version'] ?? 1)] ?? array('files');
+		$total = 0;
+		foreach ($kinds as $kind) {
+			for ($i = count($runs) - 1; $i >= 0; $i--) {
+				if (empty($runs[$i]['artifacts'][$kind])) { continue; }
+				if ($level === 0 && BackupChain::kind_level($manifest, $runs[$i], $kind) !== 0) { continue; }
+				$total += (int)($runs[$i]['artifacts'][$kind]['bytes'] ?? 0);
+				break;
 			}
-			return (int)($runs[$i]['artifacts']['files']['bytes'] ?? 0);
 		}
-		return 0;
+		return $total;
 	}
 
 	/**
@@ -1075,6 +1159,8 @@ class BackupRunner {
 
 	/** Bytes of the files archive in the most recent successful full of this slug and profile. */
 	private static function previous_full_bytes(array $plan, int $exclude_history_id): int {
+		// A version-2 run's data archive, or a version-1 run's files archive:
+		// the part of a full that is the site's own content.
 		$rows = new MultiBackupHistory(
 			array('outcome' => 'success', 'deleted' => false, 'slug' => $plan['slug'], 'type' => 'project',
 			      'profile' => $plan['profile']),
@@ -1082,7 +1168,7 @@ class BackupRunner {
 		foreach ($rows as $r) {
 			if ((int)$r->key === $exclude_history_id) { continue; }
 			foreach ($r->artifacts() as $a) {
-				if (($a['kind'] ?? '') === 'files' && (int)($a['level'] ?? -1) === 0) {
+				if (in_array(($a['kind'] ?? ''), array('data', 'files'), true) && (int)($a['level'] ?? -1) === 0) {
 					return (int)($a['bytes'] ?? 0);
 				}
 			}
@@ -1154,6 +1240,77 @@ class BackupRunner {
 	}
 
 	/**
+	 * Hold each snapshot (and its .tree) aside before a run's engines touch
+	 * them: a copy at FILE.held, or a FILE.none marker when there is no
+	 * snapshot, so that "there was none" can be put back too. On disk rather
+	 * than in memory so that a run killed outright (out of memory, a timeout)
+	 * is undone by the next one (snapshot_recover). Returns the files held.
+	 */
+	private static function snapshot_hold(array $snars) {
+		$held = array();
+		foreach ($snars as $s) {
+			foreach (array($s, $s . '.tree') as $f) {
+				if (is_file($f)) {
+					if (!@copy($f, $f . '.held')) {
+						throw new BackupRunnerException('Could not hold the snapshot ' . $f . ' aside before the run.');
+					}
+					@chmod($f . '.held', 0600);
+				} elseif (@file_put_contents($f . '.none', '') === false) {
+					throw new BackupRunnerException('Could not mark the snapshot ' . $f . ' as absent before the run.');
+				}
+				$held[] = $f;
+			}
+		}
+		return $held;
+	}
+
+	/** Put every snapshot back as it stood before the run: its copy, or nothing when there was none. */
+	private static function snapshot_restore(array $held) {
+		foreach ($held as $f) {
+			if (is_file($f . '.held')) {
+				if (!@rename($f . '.held', $f)) {
+					// A snapshot that cannot be put back must not stay advanced:
+					// gone, the next run reads snar_lost and starts a chain — the
+					// safe side.
+					@unlink($f);
+					@unlink($f . '.held');
+				}
+			} elseif (is_file($f . '.none')) {
+				@unlink($f);
+			}
+			@unlink($f . '.none');
+		}
+	}
+
+	/** The run committed: what was held is no longer needed. */
+	private static function snapshot_release(array $held) {
+		foreach ($held as $f) {
+			@unlink($f . '.held');
+			@unlink($f . '.none');
+		}
+	}
+
+	/**
+	 * Undo a run that died without undoing itself. Runs are serialized by the
+	 * lock, so anything still held when one starts belongs to a run that was
+	 * killed after its engines advanced a snapshot and before it committed or
+	 * put the snapshot back. Returns how many snapshots were put back.
+	 */
+	private static function snapshot_recover(array $snars) {
+		$left = array();
+		foreach ($snars as $s) {
+			foreach (array($s, $s . '.tree') as $f) {
+				if (is_file($f . '.held') || is_file($f . '.none')) { $left[] = $f; }
+			}
+		}
+		if ($left) {
+			error_log('BackupRunner: an earlier run died holding ' . count($left) . ' snapshot file(s); putting them back.');
+			self::snapshot_restore($left);
+		}
+		return count($left);
+	}
+
+	/**
 	 * Archive the file tree, incrementally when the chain is being extended,
 	 * streaming the encrypted archive straight into the bucket.
 	 *
@@ -1166,14 +1323,15 @@ class BackupRunner {
 	 * stream is 32 bytes; whatever produced fewer than 64 was not tar archiving
 	 * this tree, and a backup of nothing is never recorded as a backup.
 	 */
-	private static function run_files_engine(array $plan, $chain_id, $chain_d, $seq, $snar, $key_file, $exclude_file = '') {
+	private static function run_files_engine(array $plan, $chain_id, $chain_d, $seq, $snar, $key_file, $exclude_file, $part) {
 		$tools  = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools';
-		$name   = BackupChain::artifact_name('files', $seq);
-		$report = $chain_d . '/.files-report-' . getmypid();
+		$name   = BackupChain::artifact_name($part, $seq);
+		$report = $chain_d . '/.' . $part . '-report-' . getmypid();
 
 		$cmd = 'bash ' . escapeshellarg($tools . '/backup_files.sh')
 			. ' ' . escapeshellarg($plan['project'])
 			. ' --project-dir ' . escapeshellarg($plan['project_dir'] ?? PathHelper::getSiteRoot())
+			. ' --part ' . escapeshellarg($part)
 			. ' --archive - --report ' . escapeshellarg($report)
 			. ' --snar ' . escapeshellarg($snar)
 			. ' --key-file ' . escapeshellarg($key_file);
@@ -1188,7 +1346,7 @@ class BackupRunner {
 			$cmd .= ' --exclude-from ' . escapeshellarg($exclude_file);
 		}
 
-		$artifact = self::stream_engine($plan, $cmd, $report, $chain_id . '/', $name, 'files',
+		$artifact = self::stream_engine($plan, $cmd, $report, $chain_id . '/', $name, $part,
 			function (array $r, $bytes) {
 				$tar = (int)($r['TAR_RC'] ?? 2);
 				$enc = (int)($r['ENC_RC'] ?? 1);
@@ -1542,7 +1700,7 @@ class BackupRunner {
 			throw new BackupRunnerException("The backup directory {$dir} is not writable by " . self::whoami() . '.');
 		}
 
-		$refusal = self::preflight_refusal(self::local_need($plan, '', ''), self::free_bytes($plan, $dir), 0);
+		$refusal = self::preflight_refusal(self::local_need($plan, array(), ''), self::free_bytes($plan, $dir), 0);
 		if ($refusal !== '') {
 			throw new BackupRunnerException($refusal);
 		}

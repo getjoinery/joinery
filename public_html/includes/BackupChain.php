@@ -31,6 +31,24 @@
  *       db-0001.sql.gz.enc
  *       ...
  *
+ * That is a version-1 chain: one files archive per run, and the run's level is
+ * the files archive's. A version-2 chain gives every kind its own level. Its
+ * tree is two kinds, data (the site directory less public_html) and code
+ * (public_html), and its database is a dump (db) or a physical backup (pgdata)
+ * that increments on its own terms, so one kind can start over (level 0) in a
+ * run where the others increment. A run's own level is 0 exactly when every
+ * kind in it is: "this run restores on its own".
+ *
+ * @version 1.7 - should_start_new: a swapped tree no longer starts a chain (the runner re-bases that kind
+ *                inside it); layout_split does — a version-1 chain is not extended by a runner that writes
+ *                version 2 — and is checked before snar_lost, whose snapshots it would read as lost
+ * @version 1.6 - manifest version 2 (specs/backup_database_incrementals.md WP2): every artifact kind
+ *                carries its own level, so one kind can start over inside a chain while the others
+ *                continue. KINDS gains code, data and pgdata. restore_plan() plans per kind — the
+ *                newest level 0 of that kind at or before the run, then every one after it — and
+ *                returns the tree kinds and the database as lists; plan_artifacts() is the whole
+ *                plan in restore order. decode() reads versions 1 and 2; start() writes the version
+ *                it is given, 1 unless a caller asks for 2.
  * @version 1.5 - should_start_new breaks the chain when the code tree was swapped under the snapshot
  *                (tree_changed): an incremental across an upgrade records renames no extraction can
  *                apply. A manifest records why its chain started (`started_because`).
@@ -55,8 +73,17 @@ class BackupChainException extends Exception {}
 
 class BackupChain {
 
-	/** Manifest schema version. */
-	const VERSION = 1;
+	/** The newest manifest schema this build writes and reads. */
+	const VERSION = 2;
+
+	/** Every manifest schema decode() accepts. An older build refuses a newer one by name. */
+	const VERSIONS = array(1, 2);
+
+	/** The kinds that make up the site tree, in the order a restore applies them, by version. */
+	const TREE_KINDS = array(1 => array('files'), 2 => array('data', 'code'));
+
+	/** The kinds a run's database may be: a dump, whole every run, or a physical backup that increments. */
+	const DATABASE_KINDS = array('db', 'pgdata');
 
 	const MANIFEST_NAME = 'manifest.json';
 
@@ -71,8 +98,8 @@ class BackupChain {
 	 */
 	const AGE_GRACE_SECONDS = 3600;
 
-	/** The database is dumped in full every run — see the class comment. */
-	const KINDS = array('files', 'db', 'meta', 'objects');
+	/** Every artifact kind a manifest may name — see the class comment. */
+	const KINDS = array('files', 'db', 'meta', 'objects', 'code', 'data', 'pgdata');
 
 	// ------------------------------------------------------------------ shape
 
@@ -81,9 +108,12 @@ class BackupChain {
 	 * answer — why the previous chain was not extended — kept as
 	 * `started_because` so a reader of the chain can see it.
 	 */
-	public static function start($chain_id, $slug, array $envelope, $reason = '') {
+	public static function start($chain_id, $slug, array $envelope, $reason = '', $version = 1) {
+		if (!in_array((int)$version, self::VERSIONS, true)) {
+			throw new BackupChainException('There is no chain manifest version ' . (int)$version . '.');
+		}
 		return array(
-			'version'   => self::VERSION,
+			'version'   => (int)$version,
 			'chain_id'  => (string)$chain_id,
 			'slug'      => (string)$slug,
 			'started_because' => (string)$reason,
@@ -126,15 +156,21 @@ class BackupChain {
 		if ($kind === 'objects') {
 			return $kind . '-' . $n . '.json.gz';
 		}
-		$ext = ($kind === 'db') ? '.sql.gz' : '.tar.gz';
+		$ext = ($kind === 'db') ? '.sql.gz' : '.tar.gz';   // files, meta, code, data, pgdata
 		return $kind . '-' . $n . $ext . ($encrypted ? '.enc' : '');
 	}
 
 	/**
 	 * Record a completed run. $artifacts is [kind => ['name','bytes','sha256']].
-	 * Level 0 means this run is the chain's full.
+	 *
+	 * Version 1: $level is the run's, and the files archive's (0 = the chain's
+	 * full). Version 2: each artifact of a kind that increments (the tree kinds
+	 * and pgdata) carries its own 'level', and may carry why it started over
+	 * ('rebased_because'); pgdata also 'raw_bytes' and 'pg'. The run's level is
+	 * derived — 0 exactly when every kind in it is — and $level is not read.
 	 */
 	public static function add_run(array $manifest, $seq, $level, array $artifacts) {
+		$v2 = ((int)($manifest['version'] ?? 1) >= 2);
 		$run = array(
 			'seq'       => (int)$seq,
 			'level'     => (int)$level,
@@ -142,11 +178,27 @@ class BackupChain {
 			'artifacts' => array(),
 		);
 		foreach ($artifacts as $kind => $a) {
-			$run['artifacts'][$kind] = array(
+			$entry = array(
 				'name'   => (string)$a['name'],
 				'bytes'  => (int)$a['bytes'],
 				'sha256' => (string)$a['sha256'],
 			);
+			if ($v2 && self::increments($kind)) {
+				if (!isset($a['level'])) {
+					throw new BackupChainException("A version-2 run's {$kind} artifact must say its level.");
+				}
+				$entry['level'] = (int)$a['level'];
+				if (!empty($a['rebased_because'])) { $entry['rebased_because'] = (string)$a['rebased_because']; }
+				if (isset($a['raw_bytes']))        { $entry['raw_bytes'] = (int)$a['raw_bytes']; }
+				if (isset($a['pg']) && is_array($a['pg'])) { $entry['pg'] = $a['pg']; }
+			}
+			$run['artifacts'][$kind] = $entry;
+		}
+		if ($v2) {
+			$run['level'] = 0;
+			foreach (array_keys($run['artifacts']) as $kind) {
+				if (self::kind_level($manifest, $run, $kind) !== 0) { $run['level'] = 1; }
+			}
 		}
 		$manifest['runs'][] = $run;
 		$manifest['updated'] = gmdate('Y-m-d\TH:i:s\Z');
@@ -160,17 +212,21 @@ class BackupChain {
 	 *
 	 * Reasons, in the order they are checked:
 	 *   no_chain          nothing to extend
-	 *   snar_lost         the snapshot file is gone, so tar cannot produce a valid
+	 *   layout_split      the chain is in a layout this runner does not write (a
+	 *                     version-1 chain, one files archive a run, under a runner
+	 *                     that archives code and data apart). Checked before
+	 *                     snar_lost: that runner's snapshots live at other paths,
+	 *                     so they are always missing on its first run
+	 *   snar_lost         a snapshot file is gone, so tar cannot produce a valid
 	 *                     incremental — this is the safe degradation, not a failure
-	 *   tree_changed      the snapshot describes another code tree, or records
-	 *                     none: an upgrade or a restore swapped the tree since, and
-	 *                     tar's incremental across a swap records directory renames
-	 *                     that cannot be applied when the chain is extracted
 	 *   recovery_rotated  the chain's envelope is sealed to a recovery key that is
 	 *                     no longer this site's — extending it would keep filing
 	 *                     runs only the rotated-away key can open
 	 *   age               the chain is older than the configured full interval
 	 *   length            too many incrementals depend on one full
+	 *
+	 * A tree swapped under its snapshot (an upgrade, a restore) is not a reason
+	 * to start a chain: the runner re-bases that kind alone inside the chain.
 	 *
 	 * Returns '' when the current chain should simply continue.
 	 *
@@ -180,15 +236,15 @@ class BackupChain {
 	public static function should_start_new(?array $manifest = null, $snar_exists = false,
 	                                        $full_interval_days = 7, $max_incrementals = 30,
 	                                        $now_utc = null, $current_recovery_fpr = null,
-	                                        $tree_unchanged = true) {
+	                                        $writes_version = 1) {
 		if (!$manifest || empty($manifest['runs'])) {
 			return 'no_chain';
 		}
+		if ((int)($manifest['version'] ?? 1) !== (int)$writes_version) {
+			return 'layout_split';
+		}
 		if (!$snar_exists) {
 			return 'snar_lost';
-		}
-		if (!$tree_unchanged) {
-			return 'tree_changed';
 		}
 
 		// A chain has ONE data key, sealed when the chain starts. Rotating the
@@ -224,14 +280,46 @@ class BackupChain {
 
 	// ---------------------------------------------------------- verification
 
+	/** Whether a kind increments inside a chain: the tree kinds and pgdata. A dump, meta and objects are whole every run. */
+	public static function increments($kind) {
+		return in_array((string)$kind, array('files', 'code', 'data', 'pgdata'), true);
+	}
+
 	/**
-	 * The artifacts needed to restore a chain at a given run, in the order they
-	 * must be applied: the full first, then every incremental up to and
-	 * including $seq, plus that run's database, metadata and objects index.
+	 * The level of one kind in one run: 0 when that artifact restores without
+	 * any before it. Version 1 has one level per run, the files archive's;
+	 * version 2 records it on each artifact of a kind that increments. A kind
+	 * that is whole every run is 0.
+	 */
+	public static function kind_level(array $manifest, array $run, $kind) {
+		if (!self::increments($kind)) {
+			return 0;
+		}
+		if ((int)($manifest['version'] ?? 1) < 2) {
+			return ((string)$kind === 'files') ? (int)($run['level'] ?? 1) : 0;
+		}
+		return (int)($run['artifacts'][$kind]['level'] ?? 1);
+	}
+
+	/**
+	 * The artifacts needed to restore a chain at a given run, per kind, in the
+	 * order each must be applied.
+	 *
+	 * For a kind that increments: the newest level 0 of that kind at or before
+	 * the run, then every one of that kind after it, up to and including the
+	 * run. A version-1 chain's files are therefore its full and every
+	 * incremental after it; a version-2 chain's code may start over at an
+	 * upgrade while its data goes back to the chain's full. A dump is that
+	 * run's alone.
 	 *
 	 * Order is not cosmetic. tar's incremental extraction replays deletions from
 	 * each archive's directory listings, so applying them out of order, or
 	 * skipping one, produces a tree that never existed.
+	 *
+	 * @return array ['chain_id', 'seq', 'version',
+	 *                'trees'    => [kind => [artifact, ...]] in restore order,
+	 *                'database' => ['kind' => 'db'|'pgdata', 'artifacts' => [...]] or null,
+	 *                'meta' => artifact|null, 'objects' => artifact|null]
 	 */
 	public static function restore_plan(array $manifest, $seq = null) {
 		$runs = $manifest['runs'] ?? array();
@@ -242,31 +330,90 @@ class BackupChain {
 		if ($seq < 0 || $seq >= count($runs)) {
 			throw new BackupChainException('This chain has no run ' . $seq . '.');
 		}
-		if ((int)($runs[0]['level'] ?? 1) !== 0) {
+		$version = (int)($manifest['version'] ?? 1);
+		if (!isset(self::TREE_KINDS[$version])) {
+			throw new BackupChainException('Unsupported chain manifest version ' . $version . '.');
+		}
+		if ($version === 1 && (int)($runs[0]['level'] ?? 1) !== 0) {
 			throw new BackupChainException('This chain does not begin with a full backup.');
 		}
 
-		$files = array();
-		for ($i = 0; $i <= $seq; $i++) {
-			if (!isset($runs[$i])) {
-				throw new BackupChainException(
-					'Run ' . $i . ' is missing from this chain, so run ' . $seq . ' cannot be restored: '
-					. 'an incremental is only meaningful applied on top of everything before it.');
-			}
-			if (empty($runs[$i]['artifacts']['files'])) {
-				throw new BackupChainException('Run ' . $i . ' has no files artifact.');
-			}
-			$files[] = $runs[$i]['artifacts']['files'];
+		$trees = array();
+		foreach (self::TREE_KINDS[$version] as $kind) {
+			$trees[$kind] = self::kind_chain($manifest, $seq, $kind);
+		}
+
+		$database = null;
+		$last = $runs[$seq]['artifacts'] ?? array();
+		if (!empty($last['pgdata'])) {
+			$database = array('kind' => 'pgdata', 'artifacts' => self::kind_chain($manifest, $seq, 'pgdata'));
+		} elseif (!empty($last['db'])) {
+			$database = array('kind' => 'db', 'artifacts' => array($last['db']));
 		}
 
 		return array(
 			'chain_id' => (string)($manifest['chain_id'] ?? ''),
 			'seq'      => $seq,
-			'files'    => $files,
-			'db'       => $runs[$seq]['artifacts']['db'] ?? null,
-			'meta'     => $runs[$seq]['artifacts']['meta'] ?? null,
-			'objects'  => $runs[$seq]['artifacts']['objects'] ?? null,
+			'version'  => $version,
+			'trees'    => $trees,
+			'database' => $database,
+			'meta'     => $last['meta'] ?? null,
+			'objects'  => $last['objects'] ?? null,
 		);
+	}
+
+	/**
+	 * One kind's artifacts for a restore at $seq: its newest level 0 at or
+	 * before the run, then every one after it. Every run in that span must
+	 * carry the kind — an increment is only meaningful on top of everything
+	 * before it.
+	 */
+	private static function kind_chain(array $manifest, $seq, $kind) {
+		$runs = $manifest['runs'];
+		$start = null;
+		for ($i = $seq; $i >= 0; $i--) {
+			if (!isset($runs[$i])) {
+				throw new BackupChainException(
+					'Run ' . $i . ' is missing from this chain, so run ' . $seq . ' cannot be restored: '
+					. 'an incremental is only meaningful applied on top of everything before it.');
+			}
+			if (empty($runs[$i]['artifacts'][$kind])) {
+				throw new BackupChainException('Run ' . $i . ' has no ' . $kind . ' artifact.');
+			}
+			if (self::kind_level($manifest, $runs[$i], $kind) === 0) {
+				$start = $i;
+				break;
+			}
+		}
+		if ($start === null) {
+			throw new BackupChainException('This chain has no full ' . $kind . ' backup at or before run ' . $seq . '.');
+		}
+		$out = array();
+		for ($i = $start; $i <= $seq; $i++) {
+			$out[] = $runs[$i]['artifacts'][$kind];
+		}
+		return $out;
+	}
+
+	/**
+	 * Every artifact of a plan, in the order a restore applies them: the tree
+	 * kinds (each from its full forward), the database, the run's metadata and
+	 * its objects index. Each as ['kind' => ..., 'entry' => artifact].
+	 */
+	public static function plan_artifacts(array $plan) {
+		$out = array();
+		foreach ($plan['trees'] ?? array() as $kind => $list) {
+			foreach ($list as $a) { $out[] = array('kind' => (string)$kind, 'entry' => $a); }
+		}
+		if (!empty($plan['database'])) {
+			foreach ($plan['database']['artifacts'] as $a) {
+				$out[] = array('kind' => (string)$plan['database']['kind'], 'entry' => $a);
+			}
+		}
+		foreach (array('meta', 'objects') as $kind) {
+			if (!empty($plan[$kind])) { $out[] = array('kind' => $kind, 'entry' => $plan[$kind]); }
+		}
+		return $out;
 	}
 
 	/**
@@ -310,10 +457,10 @@ class BackupChain {
 		if (!is_array($data)) {
 			throw new BackupChainException('This chain manifest is not readable JSON.');
 		}
-		if ((int)($data['version'] ?? 0) !== self::VERSION) {
+		if (!in_array((int)($data['version'] ?? 0), self::VERSIONS, true)) {
 			throw new BackupChainException(
 				'Unsupported chain manifest version ' . (int)($data['version'] ?? 0)
-				. '; this build reads version ' . self::VERSION . '.');
+				. '; this build reads versions ' . implode(' and ', self::VERSIONS) . '.');
 		}
 		if (!isset($data['runs']) || !is_array($data['runs'])) {
 			throw new BackupChainException('This chain manifest lists no runs.');

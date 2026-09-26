@@ -255,6 +255,99 @@ chk "a wrong key fails the restore" "$RC" "1"
 chk "and says so, rather than leaving an empty tree behind" \
     "$(echo "$OUT" | grep -ci "could not read the archive")" "1"
 
+# ── Version 2: data and code, each with its own chain ───────────────────────
+#
+# A version-2 chain archives the site's data (the directory less public_html)
+# and its code (public_html) separately, each level recorded per artifact. An
+# upgrade-style swap re-bases the code alone while the data keeps incrementing.
+# restore_chain.sh's plan must match BackupChain::restore_plan: the data from
+# the chain's full, the code from its re-base — and the restored tree must be
+# the source, exactly, at every run.
+echo "== Version 2: data and code chains =="
+V=$W/v2; mkdir -p "$V/src/testsite/public_html/lib" "$V/src/testsite/uploads/u1" "$V/src/testsite/config" "$V/arts" "$V/at"
+echo one  > "$V/src/testsite/public_html/lib/a.php"
+echo idx  > "$V/src/testsite/public_html/index.php"
+echo up1  > "$V/src/testsite/uploads/u1/photo.jpg"
+echo cfg  > "$V/src/testsite/config/site.conf"
+enc() { openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 3< "$W/chain.key"; }
+v2_data() { tar --listed-incremental="$V/data.snar" --anchored --exclude='testsite/public_html' --no-anchored \
+               -czf - -C "$V/src" testsite | enc > "$V/arts/data-$1.tar.gz.enc"; }
+v2_code() { tar --listed-incremental="$V/code.snar" -czf - -C "$V/src/testsite" public_html | enc > "$V/arts/code-$1.tar.gz.enc"; }
+v2_data 0000; v2_code 0000; cp -a "$V/src/testsite" "$V/at/0"
+# Run 1: an upgrade swaps public_html (the code re-bases), and the site gains
+# and loses an upload (the data increments).
+mkdir -p "$V/stage/public_html/lib"; echo two > "$V/stage/public_html/lib/a.php"; echo new > "$V/stage/public_html/lib/b.php"
+mv "$V/src/testsite/public_html" "$V/src/testsite/public_html_last"; mv "$V/stage/public_html" "$V/src/testsite/public_html"
+rm -rf "$V/src/testsite/public_html_last"
+mkdir -p "$V/src/testsite/uploads/u2"; echo up2 > "$V/src/testsite/uploads/u2/photo.jpg"; rm -rf "$V/src/testsite/uploads/u1"
+rm -f "$V/code.snar"; v2_data 0001; v2_code 0001; cp -a "$V/src/testsite" "$V/at/1"
+# Run 2: ordinary changes to both.
+echo three > "$V/src/testsite/public_html/lib/a.php"; rm -f "$V/src/testsite/public_html/lib/b.php"; echo more > "$V/src/testsite/config/extra.conf"
+v2_data 0002; v2_code 0002; cp -a "$V/src/testsite" "$V/at/2"
+
+python3 - "$V/arts" <<'PY'
+import hashlib, json, os, sys
+d = sys.argv[1]
+def art(name, level=None):
+    p = os.path.join(d, name)
+    e = {'name': name, 'bytes': os.path.getsize(p), 'sha256': hashlib.sha256(open(p, 'rb').read()).hexdigest()}
+    if level is not None: e['level'] = level
+    return e
+levels = {0: (0, 0), 1: (1, 0), 2: (1, 1)}
+runs = []
+for seq, (dl, cl) in levels.items():
+    runs.append({'seq': seq, 'level': 0 if (dl, cl) == (0, 0) else 1, 'time': '2026-09-26T04:00:0%dZ' % seq,
+                 'artifacts': {'data': art('data-%04d.tar.gz.enc' % seq, dl), 'code': art('code-%04d.tar.gz.enc' % seq, cl)}})
+m = {'version': 2, 'chain_id': 'chain-20260926_040000', 'slug': 'testsite', 'started_because': 'no_chain',
+     'created': '2026-09-26T04:00:00Z', 'updated': '2026-09-26T04:00:02Z', 'envelope': {}, 'runs': runs}
+json.dump(m, open(os.path.join(d, 'manifest.json'), 'w'))
+PY
+
+OUT=$(bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts" --dry-run --skip-database 2>&1)
+chk "a version-2 plan applies the data from the full and the code from its re-base" \
+    "$(echo "$OUT" | grep -o '[a-z]*-000[0-9].tar.gz.enc' | tr '\n' ' ')" \
+    "data-0000.tar.gz.enc data-0001.tar.gz.enc data-0002.tar.gz.enc code-0001.tar.gz.enc code-0002.tar.gz.enc "
+PHP_PLAN=$(php -r 'require "'"$ROOT"'/public_html/includes/PathHelper.php"; require "'"$ROOT"'/public_html/includes/BackupChain.php";
+    $m = BackupChain::read($argv[1]); foreach (BackupChain::plan_artifacts(BackupChain::restore_plan($m)) as $i) echo $i["entry"]["name"], " ";' \
+    "$V/arts/manifest.json" 2>&1)
+chk "and BackupChain::restore_plan plans the same, in the same order" "$PHP_PLAN" \
+    "data-0000.tar.gz.enc data-0001.tar.gz.enc data-0002.tar.gz.enc code-0001.tar.gz.enc code-0002.tar.gz.enc "
+
+for seq in 0 1 2; do
+    rm -rf "$V/out"; mkdir -p "$V/out"
+    bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts" --key-file "$W/chain.key" \
+        --seq "$seq" --force --skip-database --skip-reconcile >/dev/null 2>&1
+    chk "restoring version-2 run $seq reproduces the tree exactly" \
+        "$(diff -r "$V/at/$seq" "$V/out/testsite" >/dev/null 2>&1 && echo same || echo differs)" "same"
+done
+
+# Over a live tree that has drifted: deletions replay in both kinds.
+rm -rf "$V/out"; mkdir -p "$V/out"; cp -a "$V/at/0" "$V/out/testsite"
+echo junk > "$V/out/testsite/uploads/u1/junk.txt"; echo junk > "$V/out/testsite/public_html/junk.php"
+bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts" --key-file "$W/chain.key" \
+    --force --skip-database --skip-reconcile >/dev/null 2>&1
+chk "restoring over a drifted live tree leaves exactly the newest run" \
+    "$(diff -r "$V/at/2" "$V/out/testsite" >/dev/null 2>&1 && echo same || echo differs)" "same"
+
+# A physical database backup is refused before anything is written.
+python3 - "$V/arts/manifest.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+last = m['runs'][2]['artifacts']
+last['pgdata'] = dict(last['data'], level=0)
+json.dump(m, open(sys.argv[1].replace('manifest.json', 'manifest.pg.json'), 'w'))
+m['version'] = 3
+json.dump(m, open(sys.argv[1].replace('manifest.json', 'manifest.v3.json'), 'w'))
+PY
+mkdir -p "$V/arts_pg" "$V/arts_v3"; cp "$V/arts/"*.enc "$V/arts_pg/"; cp "$V/arts/"*.enc "$V/arts_v3/"
+mv "$V/arts/manifest.pg.json" "$V/arts_pg/manifest.json"; mv "$V/arts/manifest.v3.json" "$V/arts_v3/manifest.json"
+rm -rf "$V/out"; mkdir -p "$V/out/testsite"; echo sentinel > "$V/out/testsite/KEEP"
+OUT=$(bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts_pg" --key-file "$W/chain.key" --force 2>&1) && RC=0 || RC=$?
+chk "a pgdata run without --skip-database is refused" "$RC" "1"
+chk "before anything is written" "$(ls "$V/out/testsite" | tr '\n' ' ')" "KEEP "
+OUT=$(bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts_v3" --dry-run --skip-database 2>&1) && RC=0 || RC=$?
+chk "a manifest version this script does not know is refused by name" "$(echo "$OUT" | grep -c 'unsupported chain manifest version 3')" "1"
+
 echo
 echo "RESULT: $([ $failed -eq 0 ] && echo PASS || echo FAIL) $passed $failed"
 [ $failed -eq 0 ]

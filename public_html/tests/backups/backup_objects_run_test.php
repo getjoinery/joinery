@@ -242,9 +242,10 @@ check(strpos((string)$result['message'], 'copied 3 offloaded files') !== false &
 	'the task message says what was copied and released', $result['message']);
 
 $chain_key = BackupEnvelope::open_as_site($manifest['envelope']);
-$files0 = s3fx_object($fx, 'bkt', '/' . $base . $chain_id . '/files-0000.tar.gz.enc');
+$files0 = s3fx_object($fx, 'bkt', '/' . $base . $chain_id . '/data-0000.tar.gz.enc');
 list($rc, $members) = $list_archive($files0, $chain_key);
-check($rc === 0 && in_array('site/public_html/kept.txt', $members, true), 'the archive carries the plain tree', 'rc ' . $rc);
+list($crc, $code_members) = $list_archive(s3fx_object($fx, 'bkt', '/' . $base . $chain_id . '/code-0000.tar.gz.enc'), $chain_key);
+check($rc === 0 && $crc === 0 && in_array('public_html/kept.txt', $code_members, true), 'the archives carry the plain tree', 'rc ' . $rc . '/' . $crc);
 $leaked = array_values(array_filter($members, function ($m) { return strpos($m, 'uploads/') !== false && preg_match('#/(a\.jpg|b\.bin|c\.pdf)$#', $m); }));
 check($leaked === array(), 'and none of the cloud blobs\' paths — original or variant', json_encode($leaked));
 check(in_array('site/static_files/uploads/thumb/', $members, true) || in_array('site/static_files/uploads/', $members, true), 'the uploads directories themselves are archived');
@@ -287,7 +288,7 @@ $index = $shelf_index($base . $chain_id . '/objects-0002.json.gz');
 $by = array(); foreach ($index['objects'] as $e) { $by[$e['name']] = $e; }
 check($by['a.jpg']['object_sha256'] === hash('sha256', $a_enc_before), 'the third index still carries a.jpg\'s hash');
 
-@unlink($plan['output_dir'] . '/.' . $slug . '.snar');
+@unlink($plan['output_dir'] . '/.' . $slug . '.data.snar');
 sleep(1);
 list($result, $error) = $run($plan);
 check($error === null && strpos((string)$result['message'], 'Full backup') === 0, 'a new chain starts after the snapshot is lost', (string)$error . ' ' . ($result['message'] ?? ''));
@@ -408,7 +409,7 @@ check(!is_dir($out . '/off/manager/objects'), 'no objects directory, no held.jso
 $m_off = BackupChain::read($chain_dir_of($off_plan) . '/manifest.json');
 check(!isset($m_off['runs'][0]['artifacts']['objects']), 'no index artifact in the manifest');
 check(is_file($up . '/h.bin'), 'h.bin\'s local bytes stay (this profile never held it)');
-$files_off = s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug_off . '/manager/' . basename($chain_dir_of($off_plan)) . '/files-0000.tar.gz.enc');
+$files_off = s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug_off . '/manager/' . basename($chain_dir_of($off_plan)) . '/data-0000.tar.gz.enc');
 list($rc, $members) = $list_archive($files_off, BackupEnvelope::open_as_site($m_off['envelope']));
 check(in_array('site/static_files/uploads/h.bin', $members, true), 'and its archive carries the waiting file, as it always did');
 @unlink($up . '/h.bin');
@@ -494,13 +495,13 @@ list($result, $error) = $run($full1, true);
 check($error === null && strpos((string)$result['message'], 'pruned 1 old restore point') !== false,
 	'the next standalone full retires the first, past the one covering the window', (string)$error . ' ' . ($result['message'] ?? ''));
 check(s3fx_object($fx, 'bkt', '/' . $base . 'objects/' . $epoch . '/b.bin.enc') !== null, 'b.bin stays: chain 2\'s older indexes still name it');
-@unlink($keep1['output_dir'] . '/.' . $slug . '.snar');
+@unlink($keep1['output_dir'] . '/.' . $slug . '.data.snar');
 sleep(1);
 list($result, $error) = $run($keep1);
 check($error === null && strpos((string)$result['message'], 'Full backup') === 0, 'a fresh chain starts', (string)$error . ' ' . ($result['message'] ?? ''));
 check(strpos((string)$result['message'], 'pruned') === false, 'chain 2 still covers the window', $result['message']);
 $age_history();
-@unlink($keep1['output_dir'] . '/.' . $slug . '.snar');
+@unlink($keep1['output_dir'] . '/.' . $slug . '.data.snar');
 sleep(1);
 list($result, $error) = $run($keep1);
 check($error === null && strpos((string)$result['message'], 'Full backup') === 0, 'another fresh chain starts', (string)$error . ' ' . ($result['message'] ?? ''));
@@ -532,7 +533,7 @@ foreach (new MultiBackupHistory(array('slug' => $slug, 'deleted' => false)) as $
 	if ((string)$r->get('bkh_chain_id') === $doomed) { $doomed_keys = array_merge($doomed_keys, $r->object_keys()); }
 }
 check($doomed !== '' && $doomed_keys, 'an older chain with objects is outside the window', json_encode($before));
-@unlink($keep1['output_dir'] . '/.' . $slug . '.snar');
+@unlink($keep1['output_dir'] . '/.' . $slug . '.data.snar');
 sleep(1);
 list($result, $error) = $run($make_plan($slug, array('keep_days' => 1, 'prunes_cloud' => false)));
 check($error === null && strpos((string)$result['message'], 'pruned') === false,

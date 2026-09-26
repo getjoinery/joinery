@@ -2,7 +2,9 @@
 
 **Status:** Ready for an executor — every decision made (D1 yes, D2 no, D3 yes,
 2026-09-26). Reviewed by public-html-a5 2026-09-26 (B1–B12 folded in). WP1 is done;
-WP7 is built (agent 1.45.0 and the plane, uncommitted). WP2 onward edits `BackupRunner`, which services phase 2
+WP7 is committed (a7325117; agent 0de2b90, 1.45.0). WP2 and WP3 are built, uncommitted:
+nothing is live until a release, and Phase 0 part 1 (a real site and a real upgrade on a
+scratch box) comes before the owner's live gate. WP2 onward edits `BackupRunner`, which services phase 2
 item 2b (the object-store seam) also edits: one session in that file at a time. 2b has
 not started, so this spec goes first and 2b builds on it. WP2 and WP3 (the code/data split) need no
 particular PostgreSQL and reach every node; WP4 onward (the physical database engine)
@@ -339,7 +341,15 @@ result count only the files archive, and label binary units "GB": jeremytunnell'
   comparable.
 - Tests: extend `backup_runner` for the message and figure.
 
-**WP2 — Manifest version 2: per-kind levels.** No behaviour change on its own.
+**WP2 — Manifest version 2: per-kind levels — BUILT 2026-09-26 (uncommitted).** No behaviour
+change on its own: the runner still starts version-1 chains (`BackupChain::start()` takes the
+version, default 1) until WP3 passes 2. Built as listed below, plus: `plan_artifacts()` is the
+one ordered list every reader walks; `restore_chain.sh` 1.5.0 already applies a version-2
+chain's data and code archives (code into the site directory, rooted at `public_html`) and
+refuses a pgdata run before writing unless `--skip-database`; a rehearsal of a pgdata run fails
+naming why (WP5 replaces that). Proven in `backup_chain_gate.sh` with a real hand-built
+version-2 chain across an upgrade-style swap: every run restores byte-identical, and the
+Python and PHP plans agree.
 - `BackupChain.php`: `VERSION = 2`, decode accepts 1|2 (`:308`); `KINDS` gains `code`,
   `data` and `pgdata`, all with extension `.tar.gz` (`:75`, `:121`); `add_run()` records each kind's level and
   derives the run level (`:137`); `restore_plan()` plans per kind (`:236`) and returns
@@ -359,7 +369,19 @@ result count only the files archive, and label binary units "GB": jeremytunnell'
   code rebase mid-chain; a `pgdata` chain; an old-version reader refusing version 2
   (shell gate over `restore_chain.sh --dry-run` with fixture manifests).
 
-**WP3 — Code and data as two archives; an upgrade re-bases the code only (D1, D3).**
+**WP3 — Code and data as two archives; an upgrade re-bases the code only (D1, D3) — BUILT
+2026-09-26 (uncommitted).** Built as listed below, plus: the held snapshots live on disk
+(`.snar.held`, or `.snar.none` when there was none), so a run killed outright is undone by the
+next run before it decides anything (`snapshot_recover()`); `should_start_new()`'s last argument
+is the manifest version the runner writes (`layout_split` when the chain's differs). Proven:
+`backup_tree_swap` (real tar: an upgrade-style swap re-bases the code, the data increments and
+carries only what changed, the result extracts byte-identical; a recreated `vendor/` does not
+re-base; a top-level data directory laid down again does), `backup_runner_stream` (a real runner
+run after a swap stays in the chain with the code re-based; a killed run is undone; a version-1
+chain ends with `layout_split`; failures put the snapshots back), `backup_chain_gate` (a
+version-2 chain restores byte-identical at every run). Four tests that shared one scratch
+directory across concurrent runs got one each (`backup_objects`, `package_signature`,
+`static_page_cache`, `backup_verify_site`).
 Needs no particular PostgreSQL: this is what removes the release-night full on every node.
 - `backup_files.sh` 1.5.0: `--part code|data` (§ Code and data are archived separately),
   each part with its own identity function and `.tree` file; `--print-tree-id` takes

@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.5.0 - `--part code|data`: the code (public_html, rooted at public_html) and the site's
+#                  data (the site directory less public_html, public_html_* and uploads/upgrades)
+#                  are archived separately, each with its own snapshot and identity, so an upgrade
+#                  re-bases the code alone (specs/backup_database_incrementals.md WP3). The data's
+#                  identity is the inode of the site directory and of each directory directly
+#                  inside it that the archive carries. Without --part the whole site is archived.
 # Version: 1.4.0 - a snapshot describes one code tree: SNAR.tree records its identity (the inodes of
 #                  public_html and of each directory directly inside it), and a snapshot whose
 #                  recorded identity is missing or differs is discarded and the run is a level 0.
@@ -61,10 +67,17 @@
 #   --output-dir DIR  Where to write the archive (required)
 #   --name NAME       Archive filename, without extension (required)
 #   --snar PATH       Snapshot file. Present and non-empty, with PATH.tree
-#                     naming this code tree -> incremental; otherwise this run
-#                     starts a chain and writes both.
-#   --print-tree-id   Print TREE_ID=<hex>, the identity of the code tree a
-#                     snapshot of this project would describe, and exit.
+#                     naming this tree -> incremental; otherwise this run
+#                     starts over from a full and writes both.
+#   --part code|data  Archive one part of the site: code is public_html,
+#                     rooted at public_html; data is the site directory less
+#                     public_html, public_html_* (an upgrade's rollback and
+#                     failed trees) and uploads/upgrades (its staging area).
+#                     Each has its own snapshot and identity. Without it the
+#                     whole site directory is one archive.
+#   --print-tree-id   Print TREE_ID=<hex>, the identity of the tree a
+#                     snapshot of this project (or of --part) would describe,
+#                     and exit.
 #   --key-file PATH   Encryption key. Omit only with --plaintext.
 #   --exclude NAME    Additional directory name to skip. Repeatable.
 #   --exclude-from F  A file of paths, relative to the project directory, one
@@ -96,7 +109,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.4.0"
+SCRIPT_VERSION="1.5.0"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
@@ -105,7 +118,7 @@ print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1" >&2; }
 print_error()   { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 show_help() {
-    sed -n '3,95p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,115p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 PROJECT_NAME=""
@@ -120,6 +133,7 @@ ENCRYPT=true
 STREAM=false
 REPORT_FILE=""
 PRINT_TREE_ID=false
+PART=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -136,6 +150,9 @@ while [[ $# -gt 0 ]]; do
             STREAM=true; shift 2 ;;
         --report)     REPORT_FILE="$2"; shift 2 ;;
         --print-tree-id) PRINT_TREE_ID=true; shift ;;
+        --part)
+            case "${2:-}" in code|data) PART="$2" ;; *) print_error "--part is code or data."; exit 1 ;; esac
+            shift 2 ;;
         --help|-h)    show_help; exit 0 ;;
         -*)           print_error "Unknown option: $1"; exit 1 ;;
         *)
@@ -160,13 +177,48 @@ PROJECT_DIR="${PROJECT_DIR%/}"
 # carry the inode of the directory it replaces, and this changes on EVERY swap —
 # a same-version redeploy included, which VERSION would miss. A restore that
 # lays the tree down again changes it the same way. Ordinary edits never do.
-tree_identity() {
+code_identity() {
     local code="${PROJECT_DIR}/public_html"
     [ -d "$code" ] || code="$PROJECT_DIR"
     local listing
     listing="$(stat -c '.:%i' "$code" && find "$code" -mindepth 1 -maxdepth 1 -type d -printf '%f:%i\n' | LC_ALL=C sort)" || return 1
     printf '%s\n' "$listing" | sha256sum | cut -d' ' -f1
 }
+
+# Top-level names no archive carries: excluded by name below, anywhere, and
+# (for the data part) the code and the upgrade's trees beside it.
+NAMED_EXCLUDES=(backups vendor node_modules target .git logs cache tmp sessions)
+
+# The identity of the data tree: the inode of the site directory and the name
+# and inode of each directory directly inside it that the data archive
+# carries. A directory the archive leaves out was never recorded in the
+# snapshot, so its inode cannot produce a rename record, and counting it would
+# re-base the data every time vendor/ is reinstalled or cache/ is wiped. An
+# in-place restore keeps these inodes; a tree laid down fresh (or a top-level
+# directory swapped by hand) changes them, and the data starts over.
+data_identity() {
+    local listing entry name skip x
+    listing="$(stat -c '.:%i' "$PROJECT_DIR")" || return 1
+    while IFS= read -r entry; do
+        name="${entry%:*}"
+        skip=false
+        case "$name" in public_html|public_html_*) skip=true ;; esac
+        for x in "${NAMED_EXCLUDES[@]}" ${EXTRA_EXCLUDES[@]+"${EXTRA_EXCLUDES[@]}"}; do
+            [ "$name" = "$x" ] && skip=true
+        done
+        [ "$skip" = true ] || listing+=$'\n'"$entry"
+    done < <(find "$PROJECT_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f:%i\n' | LC_ALL=C sort)
+    printf '%s\n' "$listing" | sha256sum | cut -d' ' -f1
+}
+
+tree_identity() {
+    if [ "$PART" = "data" ]; then data_identity; else code_identity; fi
+}
+
+if [ "$PART" = "code" ] && [ ! -d "${PROJECT_DIR}/public_html" ]; then
+    print_error "--part code archives public_html, and ${PROJECT_DIR} has none."
+    exit 1
+fi
 
 if [ "$PRINT_TREE_ID" = true ]; then
     ID="$(tree_identity)" || { print_error "Could not read the code tree under $PROJECT_DIR"; exit 1; }
@@ -231,7 +283,7 @@ else
         # carries renames onto paths that already exist and cannot be
         # extracted, so this run starts over from a full.
         LEVEL=0
-        print_warning "The code tree changed since the snapshot was taken — starting a new chain with a full backup."
+        print_warning "The tree changed since the snapshot was taken (an upgrade or a restore) — this archive starts over from a full."
         rm -f "$SNAR"
         [ ! -e "$SNAR" ] || { print_error "Could not discard the snapshot $SNAR"; exit 1; }
     fi
@@ -247,9 +299,21 @@ TAR_ARGS=(--warning=no-file-changed --warning=no-file-removed)
 # a few targets), and full of 0600 lock files the backup user cannot read —
 # which fails the whole run, since an unreadable file is treated as a backup
 # that would silently lie about what it holds.
-TAR_ARGS+=(--exclude='backups' --exclude='vendor' --exclude='node_modules'
-           --exclude='target' --exclude='.git' --exclude='logs'
-           --exclude='cache' --exclude='tmp' --exclude='sessions')
+PARENT="$(dirname "$PROJECT_DIR")"
+BASE="$(basename "$PROJECT_DIR")"
+
+# The data part leaves out the code and the upgrade's trees. Anchored to the
+# site root: an unanchored exclude drops every directory of that name at any
+# depth, and a site can hold worktrees under sync/ each with a public_html of
+# its own. The by-name exclusions after them stay unanchored on purpose.
+if [ "$PART" = "data" ]; then
+    TAR_ARGS+=(--anchored --exclude="${BASE}/public_html" --exclude="${BASE}/public_html_*"
+               --exclude="${BASE}/uploads/upgrades" --no-anchored)
+fi
+
+for x in "${NAMED_EXCLUDES[@]}"; do
+    TAR_ARGS+=(--exclude="$x")
+done
 
 for x in ${EXTRA_EXCLUDES[@]+"${EXTRA_EXCLUDES[@]}"}; do
     TAR_ARGS+=(--exclude="$x")
@@ -303,10 +367,13 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
 fi
 
-PARENT="$(dirname "$PROJECT_DIR")"
-BASE="$(basename "$PROJECT_DIR")"
+# What tar is pointed at: the site directory from its parent (whole or data),
+# or public_html from the site directory (code) — so a code archive is rooted
+# at public_html and extracts into the site directory.
+TAR_FROM="$PARENT"; TAR_WHAT="$BASE"
+if [ "$PART" = "code" ]; then TAR_FROM="$PROJECT_DIR"; TAR_WHAT="public_html"; fi
 
-print_info "Archiving ${PROJECT_DIR} (level ${LEVEL})"
+print_info "Archiving ${PROJECT_DIR}${PART:+ (${PART})} (level ${LEVEL})"
 
 # GNU tar exits 1 — not 0 — when a file changed while it was being read, even
 # with --warning=no-file-changed (the flag suppresses the message, not the
@@ -321,7 +388,7 @@ if [ "$ENCRYPT" = true ] && [ "$STREAM" = true ]; then
     # nothing lands on disk at all. tar's status is still known only after
     # the stream closes, which is what the report file is for.
     set +e +o pipefail
-    ${SUDO} tar "${TAR_ARGS[@]}" -czf - -C "$PARENT" "$BASE" \
+    ${SUDO} tar "${TAR_ARGS[@]}" -czf - -C "$TAR_FROM" "$TAR_WHAT" \
         | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 3< "$KEY_FILE"
     PIPE=("${PIPESTATUS[@]}")
     set -e -o pipefail
@@ -332,7 +399,7 @@ elif [ "$ENCRYPT" = true ]; then
     # disk. The key crosses on fd 3, never argv. A tar failure cannot leave a
     # valid-looking .enc of a truncated stream: TAR_RC >= 2 deletes the archive.
     set +e +o pipefail
-    ${SUDO} tar "${TAR_ARGS[@]}" -czf - -C "$PARENT" "$BASE" \
+    ${SUDO} tar "${TAR_ARGS[@]}" -czf - -C "$TAR_FROM" "$TAR_WHAT" \
         | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 -out "$ARCHIVE" 3< "$KEY_FILE"
     PIPE=("${PIPESTATUS[@]}")
     set -e -o pipefail
@@ -340,12 +407,12 @@ elif [ "$ENCRYPT" = true ]; then
     ENC_RC=${PIPE[1]:-1}
 elif [ "$STREAM" = true ]; then
     set +e
-    ${SUDO} tar "${TAR_ARGS[@]}" -czf - -C "$PARENT" "$BASE"
+    ${SUDO} tar "${TAR_ARGS[@]}" -czf - -C "$TAR_FROM" "$TAR_WHAT"
     TAR_RC=$?
     set -e
 else
     set +e
-    ${SUDO} tar "${TAR_ARGS[@]}" -czf "$ARCHIVE" -C "$PARENT" "$BASE"
+    ${SUDO} tar "${TAR_ARGS[@]}" -czf "$ARCHIVE" -C "$TAR_FROM" "$TAR_WHAT"
     TAR_RC=$?
     set -e
 fi

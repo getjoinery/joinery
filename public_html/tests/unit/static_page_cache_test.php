@@ -96,7 +96,7 @@ check(
 
 // ---------------------------------------------------------------------------
 // specs/post_release_fleet_defects.md B4.5: three defects in one class.
-$dir = harness_scratch_dir('static_cache');
+$dir = harness_scratch_dir('static_cache') . '/run-' . getmypid();   // this run's own: a concurrent run's cleanup would empty it
 @mkdir($dir, 0775, true);
 StaticPageCache::setCacheDirForTests($dir);
 harness_defer(function () use ($dir) {

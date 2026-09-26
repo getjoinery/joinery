@@ -32,6 +32,9 @@
  * the shape format_contract() prints; nothing here prints, and nothing here
  * accepts a key other than the file it is pointed at.
  *
+ * @version 1.4 - reads per-kind plans (manifest version 2): every tree kind is read and counted, the archive
+ *                root comes from the files or data archive, disk_needed() counts each tree kind's full and
+ *                a physical database's raw size, and a rehearsal of a pgdata run says it cannot load one
  * @version 1.3 - offloaded files at each level (specs/implemented/backup_offloaded_files.md § Verification): level 2
  *                opens every epoch envelope the run's index names with the site key, and 'objects' /
  *                'object_bytes' count the stored objects that proved; level 3 also opens the staged
@@ -191,17 +194,24 @@ class BackupVerifier {
 	public static function disk_needed(array $manifest, $seq, $level, $extra_bytes = 0, $staged = false) {
 		$plan = BackupChain::restore_plan($manifest, $seq);
 		$set = 0;
-		foreach ($plan['files'] as $a) { $set += (int)($a['bytes'] ?? 0); }
-		foreach (array('db', 'meta', 'objects') as $kind) {
-			if (!empty($plan[$kind])) { $set += (int)($plan[$kind]['bytes'] ?? 0); }
-		}
+		foreach (BackupChain::plan_artifacts($plan) as $item) { $set += (int)($item['entry']['bytes'] ?? 0); }
 		$needed = ($staged ? 0 : $set) + max(0, (int)$extra_bytes);
 		if ((int)$level < self::LEVEL_REHEARSE) {
 			return $needed;
 		}
-		$full_files = (int)($plan['files'][0]['bytes'] ?? 0);
-		$dump       = !empty($plan['db']) ? (int)($plan['db']['bytes'] ?? 0) : 0;
-		return $needed + ($full_files * 2) + ($dump * 3);
+		// The replayed tree: each tree kind's full, twice over.
+		$full_tree = 0;
+		foreach ($plan['trees'] as $list) { $full_tree += (int)($list[0]['bytes'] ?? 0); }
+		// The database: a dump three times over; a physical backup as its
+		// extracted artifacts plus the combined copy (the full's raw size).
+		$database = 0;
+		if (!empty($plan['database']) && $plan['database']['kind'] === 'db') {
+			$database = (int)($plan['database']['artifacts'][0]['bytes'] ?? 0) * 3;
+		} elseif (!empty($plan['database'])) {
+			foreach ($plan['database']['artifacts'] as $a) { $database += (int)($a['raw_bytes'] ?? $a['bytes'] ?? 0); }
+			$database += (int)($plan['database']['artifacts'][0]['raw_bytes'] ?? $plan['database']['artifacts'][0]['bytes'] ?? 0);
+		}
+		return $needed + ($full_tree * 2) + $database;
 	}
 
 	/**
@@ -274,14 +284,10 @@ class BackupVerifier {
 			return self::failed($result, 'the chain key at ' . basename((string)$key_file) . ' is not readable', $started);
 		}
 
-		// In restore order: the full, every incremental, then the run's dump,
-		// its metadata and its objects index. Same list a restore would apply,
-		// from the same code.
-		$ordered = array();
-		foreach ($plan['files'] as $a) { $ordered[] = array('kind' => 'files', 'entry' => $a); }
-		if (!empty($plan['db']))      { $ordered[] = array('kind' => 'db',      'entry' => $plan['db']); }
-		if (!empty($plan['meta']))    { $ordered[] = array('kind' => 'meta',    'entry' => $plan['meta']); }
-		if (!empty($plan['objects'])) { $ordered[] = array('kind' => 'objects', 'entry' => $plan['objects']); }
+		// In restore order: each tree kind from its full forward, the database,
+		// the run's metadata and its objects index. Same list a restore would
+		// apply, from the same code.
+		$ordered = BackupChain::plan_artifacts($plan);
 
 		$root = '';
 		foreach ($ordered as $item) {
@@ -318,9 +324,11 @@ class BackupVerifier {
 				$result['objects']      = $epochs['count'];
 				$result['object_bytes'] = $epochs['bytes'];
 			}
-			if ($item['kind'] === 'files') {
+			if (isset($plan['trees'][$item['kind']])) {
 				$result['files'] += (int)$read['entries'];
-				if ($root === '' && $read['root'] !== '') {
+				// The site directory's name: the files archive's root, or the
+				// data archive's. The code archive's root is public_html.
+				if ($root === '' && $item['kind'] !== 'code' && $read['root'] !== '') {
 					$root = $read['root'];
 				}
 			}
@@ -407,7 +415,12 @@ class BackupVerifier {
 		self::remove_tree($scratch);
 
 		// ── The database ────────────────────────────────────────────────
-		if (empty($plan['db']['name'])) {
+		if (!empty($plan['database']) && $plan['database']['kind'] !== 'db') {
+			return self::failed($result, 'this build cannot rehearse a physical database backup (pgdata); '
+				. 'level 2 reads it', $started);
+		}
+		$dump = $plan['database']['artifacts'][0] ?? null;
+		if (empty($dump['name'])) {
 			// A files-only run has no dump to load; the rehearsal is the tree,
 			// and the sample is opened with nothing to compare it to.
 			$sample = self::open_sample($work, $plan, $objects, null);
@@ -439,7 +452,7 @@ class BackupVerifier {
 		try {
 			$cmd = 'bash ' . escapeshellarg($tools . '/restore_database.sh')
 				. ' ' . escapeshellarg($db_name)
-				. ' ' . escapeshellarg($work . '/' . $plan['db']['name'])
+				. ' ' . escapeshellarg($work . '/' . $dump['name'])
 				. ' --non-interactive'
 				. ' --key-file ' . escapeshellarg($key_file)
 				. ' --db-user ' . escapeshellarg((string)($db['user'] ?? 'postgres'));

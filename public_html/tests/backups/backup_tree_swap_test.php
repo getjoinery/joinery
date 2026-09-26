@@ -7,16 +7,19 @@
  * timeout: 120
  */
 /**
- * A chain never spans a swap of the code tree.
+ * No incremental ever spans a swap of the code tree, and a swap re-bases the
+ * code alone.
  *
  * An upgrade deploys by moving every directory in public_html out and the
  * staged ones in. The new directories can reuse inode numbers the snapshot
  * recorded for other paths, and GNU tar's next incremental then records
  * directory renames no extraction can apply ("Cannot rename ... Directory not
  * empty"), so every restore point after the upgrade is lost. The files engine
- * records which tree its snapshot describes and starts over from a full when
- * the tree changed. Proved here with real tar against a scratch tree shaped
- * like a site: the swap is done the way utils/upgrade.php does it.
+ * records which tree its snapshot describes and starts that archive over from
+ * a full when the tree changed. A chain archives code and data apart
+ * (--part), so the swap re-bases the code while the data keeps incrementing.
+ * Proved here with real tar against a scratch tree shaped like a site: the
+ * swap is done the way utils/upgrade.php does it.
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -38,11 +41,12 @@ function tree_make($dir, $tag) {
 	file_put_contents($dir . '/VERSION', $tag . "\n");
 }
 
-/** One engine run: returns [level, archive path]. */
-function engine_run($engine, $site, $snar, $out_dir, $name) {
+/** One engine run: returns [level, archive path]. $part '' archives the whole site. */
+function engine_run($engine, $site, $snar, $out_dir, $name, $part = '') {
 	$cmd = 'bash ' . escapeshellarg($engine) . ' site --project-dir ' . escapeshellarg($site)
 		. ' --output-dir ' . escapeshellarg($out_dir) . ' --name ' . escapeshellarg($name)
-		. ' --snar ' . escapeshellarg($snar) . ' --plaintext 2>/dev/null';
+		. ' --snar ' . escapeshellarg($snar) . ' --plaintext'
+		. ($part !== '' ? ' --part ' . escapeshellarg($part) : '') . ' 2>/dev/null';
 	$lines = array(); $rc = 0;
 	exec($cmd, $lines, $rc);
 	$level = null; $archive = '';
@@ -59,6 +63,17 @@ function chain_extract(array $archives, $into) {
 	foreach ($archives as $a) {
 		$rc = 0; $o = array();
 		exec('tar --incremental --warning=no-timestamp -xzf ' . escapeshellarg($a) . ' -C ' . escapeshellarg($into) . ' 2>&1', $o, $rc);
+		if ($rc !== 0) { return $rc; }
+	}
+	return 0;
+}
+
+/** The same for a code archive, which is rooted at public_html and lands in the site directory. */
+function code_extract(array $archives, $site_dir) {
+	@mkdir($site_dir, 0700, true);
+	foreach ($archives as $a) {
+		$rc = 0; $o = array();
+		exec('tar --incremental --warning=no-timestamp -xzf ' . escapeshellarg($a) . ' -C ' . escapeshellarg($site_dir) . ' 2>&1', $o, $rc);
 		if ($rc !== 0) { return $rc; }
 	}
 	return 0;
@@ -86,8 +101,8 @@ check($l1 === 1, 'an ordinary edit extends the chain', var_export($l1, true));
 check(chain_extract(array($a0, $a1), $w . '/out1') === 0, 'the chain extracts');
 check(trees_equal($site, $w . '/out1/site'), 'the extracted chain is the tree as it stands');
 
-// ── A swap starts a new chain ───────────────────────────────────────────────
-section('A swapped tree starts a new chain');
+// ── A swap starts the archive over ──────────────────────────────────────────
+section('A swapped tree starts the whole-site archive over');
 
 $snar_before_swap = $w . '/snar-before-swap';
 copy($snar, $snar_before_swap);
@@ -123,23 +138,81 @@ echo '  (an incremental across this swap ' . ($across === 0 ? 'happened to extra
 	. ' — the case the new chain avoids)' . "\n";
 
 // ── A snapshot with no record of its tree ───────────────────────────────────
-section('A snapshot with no tree record starts a new chain');
+section('A snapshot with no tree record starts over');
 
 unlink($snar . '.tree');
 list($l4, ) = engine_run($engine, $site, $snar, $w, 'files-0004');
-check($l4 === 0, 'a chain from before the record rolls to a full', var_export($l4, true));
+check($l4 === 0, 'a snapshot from before the record rolls to a full', var_export($l4, true));
+
+// ── Code and data apart: a swap re-bases the code alone ─────────────────────
+section('A swap re-bases the code; the data keeps incrementing');
+
+$p = $w . '/parts';
+$ps = $p . '/site';
+tree_make($ps . '/public_html', 'v1');
+@mkdir($ps . '/uploads/photos', 0755, true);
+file_put_contents($ps . '/uploads/photos/a.jpg', "photo a\n");
+@mkdir($ps . '/config', 0755, true);
+file_put_contents($ps . '/config/site.conf', "conf\n");
+$ds = $p . '/.site.data.snar';
+$cs = $p . '/.site.code.snar';
+
+list($d0, $da0) = engine_run($engine, $ps, $ds, $p, 'data-0000', 'data');
+list($c0, $ca0) = engine_run($engine, $ps, $cs, $p, 'code-0000', 'code');
+check($d0 === 0 && $c0 === 0, 'the first run is a full of both parts');
+
+// The upgrade's swap, as utils/upgrade.php does it, and a new upload beside it.
+$pstage = $ps . '/uploads/upgrades/public_html';
+tree_make($pstage, 'v2');
+@mkdir($ps . '/public_html_last', 0755, true);
+exec('find ' . escapeshellarg($ps . '/public_html') . ' -mindepth 1 -maxdepth 1 -exec mv -t '
+	. escapeshellarg($ps . '/public_html_last') . ' {} +');
+exec('find ' . escapeshellarg($pstage) . ' -mindepth 1 -maxdepth 1 -exec mv -t '
+	. escapeshellarg($ps . '/public_html') . ' {} +');
+exec('rm -rf ' . escapeshellarg($ps . '/uploads/upgrades') . ' ' . escapeshellarg($ps . '/public_html_last'));
+file_put_contents($ps . '/uploads/photos/b.jpg', "photo b\n");
+
+list($d1, $da1) = engine_run($engine, $ps, $ds, $p, 'data-0001', 'data');
+list($c1, $ca1) = engine_run($engine, $ps, $cs, $p, 'code-0001', 'code');
+check($d1 === 1, 'the data increments across the upgrade', var_export($d1, true));
+check($c1 === 0, 'the code starts over at the upgrade', var_export($c1, true));
+check(filesize($da1) < filesize($da0) + 200, 'and the data increment carries only what changed, not the whole upload tree again');
+
+list($d2, $da2) = engine_run($engine, $ps, $ds, $p, 'data-0002', 'data');
+list($c2, $ca2) = engine_run($engine, $ps, $cs, $p, 'code-0002', 'code');
+check($d2 === 1 && $c2 === 1, 'the next run increments both');
+
+$restored = $p . '/restored';
+check(chain_extract(array($da0, $da1, $da2), $restored) === 0 && code_extract(array($ca1, $ca2), $restored . '/site') === 0,
+	'the data from its full and the code from its re-base extract');
+check(trees_equal($ps, $restored . '/site'), 'into exactly the tree as it stands');
+
+// A vendor reinstall or a wiped cache is not a new tree.
+@mkdir($ps . '/vendor', 0755, true);
+list($d3, ) = engine_run($engine, $ps, $ds, $p, 'data-0003', 'data');
+exec('rm -rf ' . escapeshellarg($ps . '/vendor')); @mkdir($ps . '/vendor', 0755, true);
+list($d4, ) = engine_run($engine, $ps, $ds, $p, 'data-0004', 'data');
+check($d4 === 1, 'a directory the data archive leaves out can be recreated without re-basing the data', var_export($d4, true));
+// A top-level data directory swapped by hand is.
+exec('mv ' . escapeshellarg($ps . '/config') . ' ' . escapeshellarg($ps . '/config.old') . ' && mkdir '
+	. escapeshellarg($ps . '/config') . ' && cp -a ' . escapeshellarg($ps . '/config.old') . '/. ' . escapeshellarg($ps . '/config')
+	. ' && rm -rf ' . escapeshellarg($ps . '/config.old'));
+list($d5, ) = engine_run($engine, $ps, $ds, $p, 'data-0005', 'data');
+check($d5 === 0, 'a top-level data directory laid down again re-bases the data', var_export($d5, true));
 
 // ── The decision ────────────────────────────────────────────────────────────
 section('The chain decision');
 
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
-$m = BackupChain::add_run(BackupChain::start('chain-20260901_000000', 'site', array('recipients' => array())),
+$m2 = BackupChain::add_run(BackupChain::start('chain-20260901_000000', 'site', array('recipients' => array()), '', 2),
 	0, 0, array());
-check(BackupChain::should_start_new($m, true, 7, 30, '2026-09-02 00:00:00', null, false) === 'tree_changed',
-	'a changed tree ends the chain');
-check(BackupChain::should_start_new($m, true, 7, 30, '2026-09-02 00:00:00', null, true) === '',
-	'an unchanged tree extends it');
-$started = BackupChain::start('chain-20260902_000000', 'site', array('recipients' => array()), 'tree_changed');
-check(($started['started_because'] ?? '') === 'tree_changed', 'the manifest says why its chain started');
+check(BackupChain::should_start_new($m2, true, 7, 30, '2026-09-02 00:00:00', null, 2) === '',
+	'a version-2 chain continues under a runner that writes version 2 — a swapped tree does not end it');
+$m1 = BackupChain::add_run(BackupChain::start('chain-20260901_000000', 'site', array('recipients' => array())),
+	0, 0, array());
+check(BackupChain::should_start_new($m1, false, 7, 30, '2026-09-02 00:00:00', null, 2) === 'layout_split',
+	'a version-1 chain ends with layout_split, named ahead of the snapshots its layout never had');
+$started = BackupChain::start('chain-20260902_000000', 'site', array('recipients' => array()), 'layout_split', 2);
+check(($started['started_because'] ?? '') === 'layout_split', 'the manifest says why its chain started');
 
 harness_finish();

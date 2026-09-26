@@ -138,10 +138,11 @@ section('A verify started from the page receives its request on stdin');
 // in the background gets /dev/null as stdin unless handed a descriptor
 // explicitly, in which case the verify reads nothing and refuses — and both
 // page buttons are silent no-ops. So: a script that writes what it read.
-$scratch = harness_scratch_dir('verify-detach');
+$scratch = harness_scratch_dir('verify-detach') . '/run-' . getmypid();   // this run's own: a concurrent run would read the other's answer
+@mkdir($scratch, 0700, true);
+harness_defer(function () use ($scratch) { exec('rm -rf ' . escapeshellarg($scratch)); });
 $probe   = $scratch . '/echo_stdin.php';
 $landed  = $scratch . '/stdin.txt';
-@unlink($landed);   // the scratch directory outlives a run; a stale file here would be read as the answer
 file_put_contents($probe, '<?php file_put_contents(' . var_export($landed, true) . ', stream_get_contents(STDIN));' . "\n");
 $payload = json_encode(array('chain_id' => 'chain-20260912_040000', 'level' => 2, 'artifact_urls' => array('files-0000.tar.gz.enc' => 'https://shelf.invalid/x?X-Amz-Signature=test')));
 BackupVerifyLauncher::detach($probe, $payload);

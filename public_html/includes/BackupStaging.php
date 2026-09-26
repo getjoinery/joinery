@@ -25,6 +25,8 @@
  * should use — 2 for a malformed request, 1 for a transfer, envelope or
  * integrity failure — and whose message is exactly what the script used to say.
  *
+ * @version 1.5 - wanted() lists a plan's artifacts in restore order from BackupChain::plan_artifacts, so a
+ *                version-2 chain's code, data and database kinds are staged as a version-1 chain's files are
  * @version 1.4 - an artifact the manifest needs with no link fails as `gone` (the links are a listing of
  *                backup storage), the outcome a link that answers 404 has
  * @version 1.3 - fetch_envelopes(), fetch_object() and fetch_index() stand alone, so the object
@@ -296,18 +298,15 @@ class BackupStaging {
 
 	/**
 	 * The artifact names a restore of this plan needs, in the order they are
-	 * applied: the full and every incremental up to the chosen run, then that
-	 * run's database dump, metadata and objects index. From the plan, so the
-	 * caller has no say in it.
+	 * applied (BackupChain::plan_artifacts): each tree kind from its full up to
+	 * the chosen run, the database, then that run's metadata and objects index.
+	 * From the plan, so the caller has no say in it.
 	 */
 	public static function wanted(array $plan) {
 		$wanted = array();
-		foreach ($plan['files'] as $a) {
-			$wanted[] = (string)$a['name'];
-		}
-		foreach (array('db', 'meta', 'objects') as $kind) {
-			if (!empty($plan[$kind]['name'])) {
-				$wanted[] = (string)$plan[$kind]['name'];
+		foreach (BackupChain::plan_artifacts($plan) as $item) {
+			if (!empty($item['entry']['name'])) {
+				$wanted[] = (string)$item['entry']['name'];
 			}
 		}
 		return $wanted;
