@@ -1,6 +1,7 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.80 — an opened Fortress message carries the on-demand AI bar (Summarize, Scan now).
+ * No framework. @version 2.81 — the Fortress banner's Unlock says why it failed instead of swallowing it.
+ * @version 2.80 — an opened Fortress message carries the on-demand AI bar (Summarize, Scan now).
  * @version 2.79 — MailboxReader.refreshList(); the danger banner names the model that judged.
  * @version 2.78 — MailboxReader.currentIsFortress() for the AI panel's own-model section.
  * @version 2.77 — one vault: "Unlock your vault"; the first unlock makes the mail key.
@@ -305,7 +306,13 @@
 				btn.disabled = true;
 				try {
 					if (await MailboxFortress.unlock()) { return; }   // the unlock listener re-renders
-				} catch (e) { /* cancelled or failed: the button comes back */ }
+				} catch (e) {
+					// A cancel is the person's choice; anything else is said, not swallowed.
+					var msg = (e && e.message) || '';
+					if (msg && !/cancel/i.test(msg)) {
+						if (window.JoineryModal) JoineryModal.alert(msg); else alert(msg);
+					}
+				}
 				btn.disabled = false;
 			});
 			li.appendChild(btn);
