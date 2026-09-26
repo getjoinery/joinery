@@ -89,6 +89,11 @@ class PersonaFeedItem extends SystemBase {
         'pfi_ad_reason' => array('type'=>'text'),
         'pfi_ad_judged_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
         'pfi_ad_model' => array('type'=>'varchar(80)'),
+        // The owner's own verdict, kept apart from the AI's so the two can be
+        // compared. NULL = the owner has not reviewed the post; TRUE = marked
+        // as an ad; FALSE = reviewed and left unmarked.
+        'pfi_owner_is_ad' => array('type'=>'bool', 'is_nullable'=>true),
+        'pfi_owner_reviewed_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
         'pfi_first_seen_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'pfi_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'pfi_update_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
@@ -110,6 +115,43 @@ class PersonaFeedItem extends SystemBase {
     /** Locally-cached media filenames for this post. */
     public function media_files(): array {
         return self::decode_media($this->get('pfi_media'));
+    }
+
+    /** Record the owner's verdict on this post, which also counts as reviewing it. */
+    public function set_owner_verdict(bool $is_ad): void {
+        $this->set('pfi_owner_is_ad', $is_ad);
+        $this->set('pfi_owner_reviewed_time', gmdate('Y-m-d H:i:s'));
+        $this->save();
+    }
+
+    /**
+     * The owner looked at this post and did not mark it: it is not an ad.
+     * A post the owner already gave a verdict keeps it.
+     */
+    public function mark_owner_reviewed(): void {
+        if ($this->get('pfi_owner_is_ad') !== null) return;
+        $this->set_owner_verdict(false);
+    }
+
+    /**
+     * How many live posts the owner has not reviewed yet, counting only what
+     * the feed would show: blocked authors are left out, and reels too when
+     * the feed hides them. $blocked is PersonaBlockedSender::blocked_author_set().
+     */
+    public static function owner_unreviewed_count(string $persona, bool $exclude_reels, array $blocked): int {
+        $sql = "SELECT lower(trim(coalesce(pfi_author, ''))) AS author_key, count(*) AS n
+                  FROM pfi_persona_feed_items
+                 WHERE pfi_owner_user_id = :owner AND pfi_persona = :persona
+                   AND pfi_delete_time IS NULL AND pfi_owner_is_ad IS NULL"
+             . ($exclude_reels ? " AND pfi_dedup_key NOT LIKE 'reel:%'" : '')
+             . " GROUP BY 1";
+        $q = DbConnector::get_instance()->get_db_link()->prepare($sql);
+        $q->execute(array(':owner' => self::OWNER_INSTANCE, ':persona' => $persona));
+        $total = 0;
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            if (!isset($blocked[$r['author_key']])) $total += (int)$r['n'];
+        }
+        return $total;
     }
 
     /** Decode a stored pfi_media JSON array into a list of filenames. */
@@ -205,6 +247,12 @@ class MultiPersonaFeedItem extends SystemMultiBase {
         }
         if (isset($this->options['dedup_key'])) {
             $filters['pfi_dedup_key'] = [$this->options['dedup_key'], PDO::PARAM_STR];
+        }
+        if (!empty($this->options['owner_unreviewed'])) {
+            $filters['pfi_owner_is_ad'] = 'IS NULL';
+        }
+        if (!empty($this->options['exclude_reels'])) {
+            $filters['(pfi_dedup_key'] = "NOT LIKE 'reel:%')";
         }
         return $this->_get_resultsv2('pfi_persona_feed_items', $filters, $this->order_by, $only_count, $debug);
     }
