@@ -1464,6 +1464,20 @@ four columns and the fields in one statement. **Authorization is the caller's**:
 the consumer's save logic proves the caller owns the row first. `save()` refuses
 a `v1.edge.` value, so ciphertext cannot be stored as though it were plaintext.
 
+A second, narrower door **adds fields to a row the browser already holds the
+key to**: `SystemBase::acceptBrowserSealedFields($row_id, $fields)`, for
+content the browser derives from a row it opened (an AI verdict on Fortress
+mail). It takes `column => v1.edge. ciphertext` sealed with the row's own DEK
+under the row's AD, and only for columns the model lists in
+`$browser_appendable_fields` (mail: `iem_ai_summary`, `iem_ai_scan`), which
+must also be `$sealed_fields`. It requires the row's stored key to be
+`v1.edgeseal.{scope}.` for a client-custody scope (a row lowered to a server
+scope is the server's to write), lets the model refuse for a reason of its
+own (`browserAppendRefusal()`: a mail row still awaiting its browser parse),
+and writes those columns and nothing else. The row's key, generation and
+owner stay as they are, so a value appended during a pending rotation still
+opens after the rotation commits. Authorization is the caller's, as above.
+
 ### The browser side
 
 ```js

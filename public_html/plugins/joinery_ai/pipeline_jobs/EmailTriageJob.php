@@ -18,6 +18,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailPipeli
  * panel contract all live in EmailPipelineJobBase, shared with the other two
  * email jobs.
  *
+ * @version 2.1 - deviceCapable()
  * @version 2.0
  * @changelog 2.0 - summary only: the label verdict field and the
  *   InboundLabelMember::apply() write are gone
@@ -48,6 +49,11 @@ class EmailTriageJob extends EmailPipelineJobBase {
                 'label' => 'Summary',
             ],
         ]];
+    }
+
+    /** Triage runs in the owner's browser on Fortress mail too (R5). */
+    public function deviceCapable(): bool {
+        return true;
     }
 
     /** No cross-field rule — the max_length in verdictDescriptor() is the

@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.45 - Fortress rows carry the AI verdicts and the header block sealed, and the
+ *   danger score and scan time in the clear (specs/fortress_mail_device_ai.md § R4)
  * @version 1.44 - Fortress (specs/client_custody_mail.md § R4): list and thread carry a
  *   browser-sealed message as `sealed` (its columns as stored) with the clear fields
  *   empty and `fortress` set; its parts are listed without names or URLs, and the
@@ -1468,7 +1470,7 @@ class MailboxService {
 				$entry = array('sender' => '', 'subject' => '', 'body_plain' => '', 'body_html' => '', 'ai_summary' => '');
 				if (isset($full[$mid])) {
 					$entry['sealed'] = InboundEmailMessage::sealedForBrowser($row,
-						array('iem_sender', 'iem_subject', 'iem_snippet'));
+						array('iem_sender', 'iem_subject', 'iem_snippet', 'iem_ai_summary'));
 					if ($pending) {
 						$entry['sealed']['pending'] = true;
 					}
@@ -1625,6 +1627,7 @@ class MailboxService {
 					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw,
 					(COALESCE(length(iem_raw_headers), 0) > 0) AS iem_has_raw_headers,
 					CASE WHEN iem_to IS NULL AND iem_cc IS NULL THEN iem_raw_headers END AS iem_raw_headers_for_lists,
+					CASE WHEN iem_sealed_key LIKE 'v1.edgeseal.%' THEN iem_raw_headers END AS iem_raw_headers,
 					iem_attachment_manifest
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
@@ -1744,8 +1747,11 @@ class MailboxService {
 		$mid = intval($r['iem_inbound_email_message_id']);
 		$direction = $r['iem_direction'] ?: 'inbound';
 		$pending = (bool)$this->pgBool($r['iem_pending_parse'] ?? false);
+		// The AI verdicts the owner's browser sealed, and the header block its
+		// digest reads, travel sealed too (specs/fortress_mail_device_ai.md § R4).
 		$sealed = InboundEmailMessage::sealedForBrowser($r, array('iem_sender', 'iem_subject', 'iem_body_plain',
-			'iem_body_html', 'iem_to', 'iem_cc', 'iem_recipient', 'iem_bcc', 'iem_attachment_manifest'));
+			'iem_body_html', 'iem_to', 'iem_cc', 'iem_recipient', 'iem_bcc', 'iem_attachment_manifest',
+			'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers'));
 		if ($pending) {
 			$sealed['pending'] = true;
 		}
@@ -1783,9 +1789,11 @@ class MailboxService {
 			'direction'         => $direction,
 			'body_plain'        => '',
 			'body_html'         => '',
-			'ai_danger_score'   => null,
+			// The score and scan time are clear metadata, as on a Private row;
+			// the scan itself is sealed and opened in the browser.
+			'ai_danger_score'   => ($r['iem_ai_danger_score'] !== null) ? intval($r['iem_ai_danger_score']) : null,
 			'ai_scan'           => null,
-			'ai_scan_time'      => null,
+			'ai_scan_time'      => $r['iem_ai_scan_time'],
 			'ai_summary'        => '',
 			// No raw is kept for a Fortress row, and its header block is sealed.
 			'original_source'   => 'none',

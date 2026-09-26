@@ -1,6 +1,9 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.77 — one vault: "Unlock your vault"; the first unlock makes the mail key.
+ * No framework. @version 2.80 — an opened Fortress message carries the on-demand AI bar (Summarize, Scan now).
+ * @version 2.79 — MailboxReader.refreshList(); the danger banner names the model that judged.
+ * @version 2.78 — MailboxReader.currentIsFortress() for the AI panel's own-model section.
+ * @version 2.77 — one vault: "Unlock your vault"; the first unlock makes the mail key.
  * @version 2.76 — a reload that reopens the mail vault renders open the first time.
  * @version 2.75 — opening the mail vault clears its banner at once and re-asks
  * the setup verdict past its cache.
@@ -754,7 +757,19 @@
 		});
 		return address;
 	}
-	window.MailboxReader = { currentAddress: currentMailboxAddress };
+	// Whether the mailbox open in the rail is end-to-end encrypted (Fortress).
+	// The AI panel's "Your AI, your model" section shows only then.
+	function currentMailboxIsFortress() {
+		if (!isRealMailbox(state.aliasId)) return false;
+		return (state.mailboxes || []).some(function (m) {
+			return String(m.alias_id) === String(state.aliasId) && m.security_level === 'fortress';
+		});
+	}
+	// A soft refresh of the list — selection kept — for a page component that
+	// changed what a row shows (a summary the owner's own model just wrote).
+	function refreshList() { listLoad(true, true); }
+	window.MailboxReader = { currentAddress: currentMailboxAddress, currentIsFortress: currentMailboxIsFortress,
+		refreshList: refreshList };
 
 	// ---- setup banner ----
 	// The Setup tab's own verdict for the open mailbox, fetched once per mailbox
@@ -2168,6 +2183,9 @@
 		var banner = el('div', 'mbx-danger-banner ' + tier);
 		banner.appendChild(el('div', 'mbx-danger-banner-head', head + ': ' + m.ai_danger_score + '/10'));
 		if (scan.summary) banner.appendChild(el('div', null, scan.summary));
+		// Which model judged it: the platform's, or the owner's own on a Fortress
+		// message (specs/fortress_mail_device_ai.md § R9).
+		if (scan.model) banner.appendChild(el('div', 'mbx-danger-banner-model', 'Judged by ' + scan.model));
 		if (tier !== 'safe' && Array.isArray(scan.red_flags) && scan.red_flags.length) {
 			var list = el('ul', 'mbx-danger-banner-flags');
 			scan.red_flags.forEach(function (flag) {
@@ -2300,6 +2318,14 @@
 		// the message is collapsed.
 		var banner = dangerBanner(m);
 		if (banner) wrap.appendChild(banner);
+
+		// An opened Fortress message: the owner's own model can summarize or scan
+		// it now (specs/fortress_mail_device_ai.md § R6). The AI panel's module
+		// builds the bar, or nothing when no model is set up in this browser.
+		if (m.sealed && !m.fortress_placeholder && window.MailboxDeviceAi && window.MailboxDeviceAi.messageActions) {
+			var aiBar = window.MailboxDeviceAi.messageActions(m);
+			if (aiBar) wrap.appendChild(aiBar);
+		}
 
 		// Why it is in Spam, when the reason is one only the user can overrule.
 		var reason = spamReasonBanner(m, threadKey);

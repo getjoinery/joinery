@@ -14,6 +14,14 @@
  * Declared as the plugin's settingsMenu entry, and linked from the gear on the
  * mailbox itself.
  *
+ * A member with an end-to-end encrypted (Fortress) mailbox also sets where
+ * their own AI model answers ("Your AI model"), through the
+ * mailbox/device_ai_host API action, which asks for a second-factor
+ * confirmation.
+ *
+ * @version 2.3 - "Your AI model" offers the site's own model with one click
+ * @version 2.2 - "Your AI model" links the page "Using your own model"
+ * @version 2.1 - "Your AI model" for members with a Fortress mailbox
  * @version 2.0
  */
 
@@ -78,6 +86,45 @@ $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signatur
 			<?php endif; ?>
 			</div>
 
+			<?php if (!empty($page_vars['has_fortress'])): ?>
+			<div class="jy-panel jy-form-actions" id="your-model">
+				<h2>Your AI model</h2>
+				<p class="jy-muted">AI summaries and the security scan for your end-to-end encrypted mail run in
+					your browser, against an AI model you choose: a service you have a key for, or one on a
+					computer of your own. Your mail is sent from your browser to that model; Joinery never sees
+					it. Enter where the model answers. The key and the model name go in the AI panel on your
+					mail, and stay in each browser you use.
+					<a href="/documentation?doc=plugin/mailbox/using_your_own_model" target="_blank" rel="noopener">Using your own model</a></p>
+				<p class="jy-muted">Choosing where your mail is sent asks you to confirm it is you.</p>
+				<?php
+				$current = (string)($page_vars['device_ai_origin'] ?? '');
+				$formwriter = $page->getFormWriter('device-ai-host-form', array('action' => '/profile/mailbox/settings'));
+				echo $formwriter->begin_form();
+				$formwriter->textinput('device_ai_address', 'Your model\'s address', array(
+					'value'       => $current,
+					'placeholder' => 'https://api.fireworks.ai/inference/v1',
+					'helptext'    => 'Paste the address your model\'s service gives you. The start of it, up to the host name, is kept with your account; the rest stays in this browser.',
+				));
+				?>
+				<p class="mbx-sig-note" data-device-ai-note hidden></p>
+				<?php
+				$formwriter->submitbutton('save_device_ai', 'Save address');
+				echo $formwriter->end_form();
+				?>
+				<?php if ($current !== ''): ?>
+					<p>Your mail may be sent to <code><?php echo htmlspecialchars($current); ?></code>.
+						<button type="button" class="btn btn-secondary" data-device-ai-remove>Remove</button></p>
+				<?php endif; ?>
+				<?php $site = $page_vars['device_ai_site_model'] ?? null; if (is_array($site) && $site['origin'] !== $current): ?>
+					<p class="jy-muted">This site runs its own model, <code><?php echo htmlspecialchars($site['model']); ?></code>
+						at <code><?php echo htmlspecialchars($site['host']); ?></code>.
+						<?php echo $site['operator'] ? 'It runs on hardware you operate.'
+							: 'The operator of this site runs that machine and could see mail sent to it.'; ?>
+						<button type="button" class="btn btn-secondary" data-device-ai-use-site>Use this site's model</button></p>
+				<?php endif; ?>
+			</div>
+			<?php endif; ?>
+
 			<div class="jy-panel jy-form-actions">
 				<h2>More</h2>
 				<ul class="mbx-settings-links">
@@ -106,6 +153,13 @@ $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signatur
 </section>
 </div>
 <script src="/plugins/mailbox/assets/mailbox_signature.js?v=<?php echo is_file($sig_asset) ? filemtime($sig_asset) : '1'; ?>"></script>
+<?php if (!empty($page_vars['has_fortress'])): $dai_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_device_ai_settings.js'); ?>
+<script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
+<script>window.MAILBOX_DEVICE_AI = <?php echo json_encode(array('origin' => ($page_vars['device_ai_origin'] ?? null) ?: null, 'user_id' => (int)$page_vars['session']->get_user_id(), 'site_model' => $page_vars['device_ai_site_model'] ?? null)); ?>;</script>
+<?php $dai_panel = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_device_ai.js'); ?>
+<script src="/plugins/mailbox/assets/mailbox_device_ai.js?v=<?php echo is_file($dai_panel) ? filemtime($dai_panel) : '1'; ?>"></script>
+<script src="/plugins/mailbox/assets/mailbox_device_ai_settings.js?v=<?php echo is_file($dai_asset) ? filemtime($dai_asset) : '1'; ?>"></script>
+<?php endif; ?>
 <?php
 $page->public_footer();
 ?>

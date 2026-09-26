@@ -27,6 +27,12 @@
  *
  * Nothing opened here is sent back to the server.
  *
+ * @version 1.7 - judgeEntry() sends the recipe's reasoning control, as a server run does; an
+ *   answer spent entirely on reasoning is asked again with reasoning off
+ * @version 1.6 - judgeEntry(): one AI judgement on the owner's own model, with the lock
+ *   epoch; selfCheck() runs it against a stub model (specs/fortress_mail_device_ai.md § R6)
+ * @version 1.5 - opens the AI verdicts (ai_summary, ai_scan) and the header block (raw_headers)
+ *   a device judgement wrote or reads (specs/fortress_mail_device_ai.md § R4)
  * @version 1.4 - one name: "your vault" (specs/one_vault_experience.md § R5)
  * @version 1.3 - names the mail vault to the lock chip (JoinerySealed.want)
  * @version 1.2 - ready(): waits for a reload's resume before treating the vault as shut
@@ -56,6 +62,10 @@ window.MailboxFortress = (function () {
 	var rowKeys = new Map();   // message id -> Promise<CryptoKey>, the row DEK
 	var objectUrls = [];       // every object URL handed out, revoked on lock
 	var lockHandlers = [];
+	// Bumped by every lock. A judgement in flight notes it before it starts and
+	// checks it before it seals or posts, so nothing is sealed or posted after
+	// the vault shut (specs/fortress_mail_device_ai.md § R6, B12).
+	var lockEpoch = 0;
 
 	function cfg() { return window.MAILBOX_READER || {}; }
 
@@ -166,6 +176,8 @@ window.MailboxFortress = (function () {
 				t.sender = o.iem_sender || '';
 				t.senders = t.sender;
 				t.snippet = o.iem_snippet || '';
+				// The summary the owner's own model wrote, sealed under the row.
+				t.ai_summary = o.iem_ai_summary || '';
 			} catch (e) {
 				placeholderThread(t, FAILED_NOTE);
 			}
@@ -206,6 +218,16 @@ window.MailboxFortress = (function () {
 		m.cc = o.iem_cc || '';
 		if (o.iem_recipient) m.recipient = o.iem_recipient;
 		if (o.iem_bcc) m.bcc = o.iem_bcc;
+		// What the owner's own model found, sealed under the row
+		// (specs/fortress_mail_device_ai.md § R4): the same shapes a Private row
+		// hands the reader, so the list preview and the danger banner need
+		// nothing new. The header block is what a device judgement reads.
+		m.ai_summary = o.iem_ai_summary || '';
+		m.ai_scan = null;
+		if (o.iem_ai_scan) {
+			try { var scan = JSON.parse(o.iem_ai_scan); m.ai_scan = (scan && typeof scan === 'object') ? scan : null; } catch (e) { m.ai_scan = null; }
+		}
+		m.raw_headers = o.iem_raw_headers || '';
 
 		var manifest = [];
 		try { manifest = JSON.parse(o.iem_attachment_manifest || '[]') || []; } catch (e) { manifest = []; }
@@ -345,12 +367,151 @@ window.MailboxFortress = (function () {
 		// "locked" while it is shut, even with the account vault open.
 		if (JoinerySealed.want) JoinerySealed.want(SCOPE, 'Vault');
 		JoinerySealed.onLock(SCOPE, function () {
+			lockEpoch++;
 			wipe();
 			lockHandlers.forEach(function (fn) {
 				try { fn(); } catch (e) { /* one handler must not stop the next */ }
 			});
 		});
 	}
+
+	// ---- one AI judgement on the owner's own model --------------------------------------
+
+	/**
+	 * Judge one Fortress message (an entry from mailbox/device_ai_entries) with
+	 * one recipe (from mailbox/ai_device_recipes) on the owner's own model, and
+	 * record the outcome (specs/fortress_mail_device_ai.md § R5, R6).
+	 *
+	 * Open the entry's sealed columns; build the digest exactly as the server
+	 * would (EmailDigest), with the ATTACHMENTS section when the recipe's digest
+	 * carries one; wrap it under the recipe's nonce; call the model with the
+	 * recipe's full system prompt; validate (VerdictCheck), and on a refusal ask
+	 * once more with the validator's words; seal the verdict under the row's own
+	 * key and AD; post it (mailbox/device_ai_verdict), or post `error` when the
+	 * answer is still invalid (mailbox/ai_device_record).
+	 *
+	 * endpoint: {url (…/chat/completions), key, model}. deps (tests): open,
+	 * key, fetch, post — each defaults to the real one.
+	 *
+	 * Resolves {status}: 'done' (with field, plaintext, model, recorded),
+	 * 'error' (answered twice, invalid both times; recorded), 'dropped' (the
+	 * vault shut mid-item: nothing sealed, nothing posted), or 'stop' (the model
+	 * did not answer usefully — unreachable, refused, wrong key, context too
+	 * small — nothing recorded, so the message comes back next time; the drain
+	 * stops and says why).
+	 */
+	async function judgeEntry(entry, recipe, endpoint, deps) {
+		deps = deps || {};
+		var open = deps.open || function (sealed) { return JoinerySealed.open(sealed); };
+		var keyOf = deps.key || function (e) { return rememberKey(e.id, e.sealed.sealed_dek); };
+		var doFetch = deps.fetch || function (u, o) { return window.fetch(u, o); };
+		var post = deps.post || function (a, b) { return window.joineryApi.post(a, b); };
+		var at = lockEpoch;
+
+		var o = await open(entry.sealed);
+		var digest = EmailDigest.build({
+			raw: o.iem_raw_headers || null,
+			sender: o.iem_sender || '',
+			recipient: o.iem_recipient || entry.recipient || '',
+			received_time: entry.received_time || '',
+			subject: o.iem_subject || '',
+			body_plain: o.iem_body_plain || '',
+			body_html: o.iem_body_html || '',
+			spf_result: entry.spf_result || '',
+			dkim_result: entry.dkim_result || '',
+			dmarc_result: entry.dmarc_result || '',
+			authserv_id: recipe.authserv_id || ''
+		});
+		if (recipe.attachments) {
+			var manifest = [];
+			try { manifest = JSON.parse(o.iem_attachment_manifest || '[]') || []; } catch (e) { manifest = []; }
+			var att = EmailDigest.attachments(manifest);
+			if (att !== '') digest += '\n\n' + att;
+		}
+		var messages = [
+			{ role: 'system', content: recipe.system },
+			{ role: 'user', content: EmailDigest.wrapBlock(digest, recipe.nonce) }
+		];
+		var headers = { 'Content-Type': 'application/json' };
+		if (endpoint.key) headers.Authorization = 'Bearer ' + endpoint.key;
+
+		var verdict = null, error = '', served = endpoint.model;
+		// The recipe's reasoning control, as a server run sends it. The device
+		// budget is a quarter of the server's, so a model that reasons at the
+		// recipe's level can spend all of it thinking and answer with nothing
+		// (finish_reason 'length', empty content): that is asked again with
+		// reasoning off, since the model never answered and the validator has
+		// nothing to say about it.
+		var effort = recipe.reasoning_effort || 'none';
+		for (var attempt = 1; attempt <= 2; attempt++) {
+			if (lockEpoch !== at) return { status: 'dropped' };
+			var res;
+			try {
+				res = await doFetch(endpoint.url, {
+					method: 'POST', headers: headers, credentials: 'omit',
+					body: JSON.stringify({ model: endpoint.model, messages: messages, max_tokens: recipe.max_tokens,
+						reasoning_effort: effort,
+						response_format: { type: 'json_object' }, stream: false })
+				});
+			} catch (e) {
+				return { status: 'stop', reason: 'unreachable' };
+			}
+			var text = await res.text();
+			var body = null;
+			try { body = JSON.parse(text); } catch (e) { body = null; }
+			if (!res.ok) {
+				var err = body && body.error;
+				return { status: 'stop', http: res.status,
+					reason: err ? (typeof err === 'string' ? err : (err.message || JSON.stringify(err))) : String(text).slice(0, 200) };
+			}
+			if (body && body.model) served = body.model;
+			var choice = body && body.choices && body.choices[0] ? body.choices[0] : null;
+			var content = choice && choice.message ? String(choice.message.content || '') : '';
+			if (!content && choice && choice.finish_reason === 'length' && effort !== 'none') {
+				effort = 'none';
+				error = 'The model spent its whole answer reasoning and never answered.';
+				continue;
+			}
+			var parsed = VerdictCheck.parse(content, recipe.verdict_descriptor, recipe.job_id);
+			if (parsed.verdict) { verdict = parsed.verdict; break; }
+			error = parsed.error;
+			if (attempt < 2) {
+				messages.push({ role: 'assistant', content: content });
+				messages.push({ role: 'user', content: VerdictCheck.retryMessage(error) });
+			}
+		}
+		if (lockEpoch !== at) return { status: 'dropped' };
+		if (!verdict) {
+			await post('mailbox/ai_device_record', { recipe_id: recipe.recipe_id, item_key: String(entry.id) });
+			return { status: 'error', error: error };
+		}
+
+		// The same shapes the server's jobs write (recordVerdict()): the triage's
+		// bare summary; the scan's JSON with the score kept out, in the clear.
+		var field, plaintext, score = null;
+		if (recipe.job_id === 'email_security_scan') {
+			field = 'iem_ai_scan';
+			plaintext = JSON.stringify({ verdict: verdict.verdict, red_flags: verdict.red_flags || [],
+				summary: verdict.summary || '', model: served, recipe_id: recipe.recipe_id });
+			score = verdict.score;
+		} else {
+			field = 'iem_ai_summary';
+			plaintext = String(verdict.summary || '');
+		}
+		var key = await keyOf(entry);
+		if (lockEpoch !== at) return { status: 'dropped' };
+		var sealedValue = EDGE_FIELD + await VaultCrypto.encrypt(plaintext, key,
+			String(entry.sealed.sealed_ad_prefix) + entry.id + ':' + field);
+		if (lockEpoch !== at) return { status: 'dropped' };
+		var fields = {};
+		fields[field] = sealedValue;
+		var payload = { id: entry.id, recipe_id: recipe.recipe_id, fields: fields };
+		if (score !== null) payload.danger_score = score;
+		var r = await post('mailbox/device_ai_verdict', payload);
+		return { status: 'done', recorded: !!(r && r.recorded), field: field, plaintext: plaintext, model: served };
+	}
+
+	function epoch() { return lockEpoch; }
 
 	// ---- self-check --------------------------------------------------------------------
 
@@ -389,7 +550,93 @@ window.MailboxFortress = (function () {
 		} catch (e) {
 			note('a gzip search text inflates', false);
 		}
+		if (window.EmailDigest && window.VerdictCheck) {
+			await selfCheckJudge(note);
+		}
 		return { ok: checks.every(function (c) { return c.ok; }), checks: checks };
+	}
+
+	/**
+	 * judgeEntry() against a stub model, with a throwaway key: an invalid first
+	 * answer is retried with the validator's words, the verdict posted is sealed
+	 * under the row's key and AD and opens back to what the model said, a lock
+	 * during the call drops the item unposted, an answer invalid twice records
+	 * `error`, and a refusal from the model stops with nothing recorded.
+	 */
+	async function selfCheckJudge(note) {
+		try {
+			var d = await VaultCrypto.newDek();
+			d.dekBytes.fill(0);
+			var entry = { id: 42, received_time: '2026-09-24 10:00:00', spf_result: 'pass', dkim_result: 'pass',
+				dmarc_result: 'pass', recipient: 'you@example.test',
+				sealed: { key: 42, sealed_scope: 'mail', sealed_dek: 'v1.edgeseal.mail.stub', sealed_ad_prefix: 'mail:' } };
+			var opened = { iem_raw_headers: 'From: Shop <s@shop.example>\nSubject: Your order', iem_sender: 'Shop <s@shop.example>',
+				iem_subject: 'Your order', iem_body_plain: 'It shipped. https://track.example/1', iem_body_html: '',
+				iem_attachment_manifest: '[{"filename":"label.pdf","content_type":"application/pdf","size":10}]' };
+			var recipe = { recipe_id: 7, job_id: 'email_triage', system: 'SYSTEM PROMPT', nonce: 'feedf00d', max_tokens: 99,
+				attachments: true, authserv_id: '',
+				verdict_descriptor: { input: { summary: { type: 'string', required: true, max_length: 280 } } } };
+			var endpoint = { url: 'https://stub.invalid/v1/chat/completions', key: 'stub-key', model: 'stub-model' };
+			function reply(content, status, finish) {
+				return { ok: !status || status < 300, status: status || 200,
+					text: function () { return Promise.resolve(JSON.stringify(status >= 300
+						? { error: { message: content } } : { model: 'stub-model', choices: [{ message: { content: content }, finish_reason: finish || 'stop' }] })); } };
+			}
+			function deps(answers, posts, calls, onCall) {
+				return {
+					open: function () { return Promise.resolve(opened); },
+					key: function () { return Promise.resolve(d.dekKey); },
+					post: function (a, b) { posts.push({ action: a, body: b }); return Promise.resolve({ recorded: true }); },
+					fetch: function (u, o) { calls.push({ url: u, body: JSON.parse(o.body), headers: o.headers });
+						if (onCall) onCall(); return Promise.resolve(answers.shift()); }
+				};
+			}
+
+			var posts = [], calls = [];
+			var out = await judgeEntry(entry, recipe, endpoint,
+				deps([reply('I think it is fine.'), reply('{"summary":"Your order shipped."}')], posts, calls));
+			var first = calls[0] ? calls[0].body : {};
+			note('the call carries the model, max_tokens, JSON mode, the reasoning control and the key',
+				first.model === 'stub-model' && first.max_tokens === 99 && first.response_format && first.response_format.type === 'json_object'
+				&& first.reasoning_effort === 'none' && calls[0].headers.Authorization === 'Bearer stub-key');
+			note('the digest goes wrapped under the recipe\'s nonce, attachments included',
+				first.messages && first.messages[0].content === 'SYSTEM PROMPT'
+				&& first.messages[1].content.indexOf('<<UNTRUSTED_feedf00d>>\n=== EMAIL DIGEST ===') === 0
+				&& first.messages[1].content.indexOf('ATTACHMENTS (1):') !== -1);
+			note('an invalid first answer is retried once with the validator\'s words',
+				calls.length === 2 && calls[1].body.messages.length === 4
+				&& calls[1].body.messages[3].content.indexOf('That response was invalid: no JSON object found') === 0);
+			var tposts = [], tcalls = [];
+			var thought = await judgeEntry(entry, Object.assign({}, recipe, { reasoning_effort: 'medium' }), endpoint,
+				deps([reply('', 200, 'length'), reply('{"summary":"Your order shipped."}')], tposts, tcalls));
+			note('an answer spent entirely on reasoning is asked again with reasoning off, not with the validator\'s words',
+				thought.status === 'done' && tcalls.length === 2 && tcalls[0].body.reasoning_effort === 'medium'
+				&& tcalls[1].body.reasoning_effort === 'none' && tcalls[1].body.messages.length === 2);
+			var p = posts[0] || { body: { fields: {} } };
+			var sealedValue = p.body.fields.iem_ai_summary || '';
+			var back = '';
+			try { back = await VaultCrypto.decrypt(sealedValue.slice(EDGE_FIELD.length), d.dekKey, 'mail:42:iem_ai_summary'); } catch (e) { back = ''; }
+			note('the verdict posted is sealed under the row\'s key and AD, and says what the model said',
+				out.status === 'done' && p.action === 'mailbox/device_ai_verdict' && p.body.id === 42 && p.body.recipe_id === 7
+				&& sealedValue.indexOf(EDGE_FIELD) === 0 && back === 'Your order shipped.');
+
+			posts = []; calls = [];
+			out = await judgeEntry(entry, recipe, endpoint,
+				deps([reply('{"summary":"x"}')], posts, calls, function () { lockEpoch++; }));
+			note('a lock during the call drops the item: nothing sealed, nothing posted', out.status === 'dropped' && posts.length === 0);
+
+			posts = []; calls = [];
+			out = await judgeEntry(entry, recipe, endpoint, deps([reply('nope'), reply('still nope')], posts, calls));
+			note('an answer invalid twice records error', out.status === 'error' && posts.length === 1
+				&& posts[0].action === 'mailbox/ai_device_record' && posts[0].body.item_key === '42');
+
+			posts = []; calls = [];
+			out = await judgeEntry(entry, recipe, endpoint, deps([reply('The API key you provided is invalid.', 401)], posts, calls));
+			note('a refusal from the model stops the drain with nothing recorded',
+				out.status === 'stop' && out.http === 401 && posts.length === 0 && out.reason.indexOf('API key') !== -1);
+		} catch (e) {
+			note('the judgement runs against a stub model (' + (e && e.message) + ')', false);
+		}
 	}
 
 	return {
@@ -405,6 +652,8 @@ window.MailboxFortress = (function () {
 		inlineRewrite: inlineRewrite,
 		inflateSearchText: inflateSearchText,
 		onLock: onLock,
+		judgeEntry: judgeEntry,
+		epoch: epoch,
 		selfCheck: selfCheck
 	};
 })();

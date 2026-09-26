@@ -103,6 +103,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.34 - $browser_appendable_fields (the AI verdicts) and browserAppendRefusal()
+ *   for SystemBase::acceptBrowserSealedFields() (specs/fortress_mail_device_ai.md § R4)
  * @version 1.33 - Fortress (specs/client_custody_mail.md): sealScopeForWrite()
  *   answers `mail` for a Fortress mailbox, isBrowserSealed(), and the sealed
  *   iem_search_text / iem_snippet / iem_attachment_manifest columns
@@ -247,6 +249,13 @@ class InboundEmailMessage extends SystemBase {
 	 * same "the safe thing is the thing you have to remember" shape this file's
 	 * updateContentColumns() note describes.
 	 */
+	/**
+	 * The AI verdicts a Fortress owner's browser computes and seals under the
+	 * row's own key (specs/fortress_mail_device_ai.md § R4), and nothing else —
+	 * never a body, a subject or a sender (SystemBase::acceptBrowserSealedFields()).
+	 */
+	public static $browser_appendable_fields = array('iem_ai_summary', 'iem_ai_scan');
+
 	public static $optional_sealed_fields = array('iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers', 'iem_to', 'iem_cc', 'iem_search_text', 'iem_snippet', 'iem_attachment_manifest');
 
 	// AI surface (docs/example_class.php § AI): recipes may read mail through the
@@ -1114,6 +1123,19 @@ class InboundEmailMessage extends SystemBase {
 	 * composed row. On an inbound row the recipient IS the routing alias, written
 	 * in the clear at insert, so a broad read must not try to open it.
 	 */
+	/**
+	 * A relay-sealed row still waiting for its browser parse takes no appended
+	 * field: the parse writes the whole row and would refuse a value it did not
+	 * write (acceptBrowserSealed()'s leaves-a-field-out rule).
+	 */
+	protected static function browserAppendRefusal(array $row): ?string {
+		$pending = $row['iem_pending_parse'] ?? false;
+		if ($pending === true || $pending === 't' || $pending === '1' || $pending === 1) {
+			return 'the message is still waiting to be read on the device.';
+		}
+		return null;
+	}
+
 	protected static function sealedFieldIsActive(string $field, array $row): bool {
 		if (!self::isComposeOnlyField($field)) {
 			return true;

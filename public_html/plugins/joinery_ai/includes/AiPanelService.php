@@ -27,6 +27,7 @@ class AiPanelConfirmRequired extends Exception {}
  * arrives after one toggle, with no dashboard visit. Turning OFF only unbinds:
  * the recipe may still cover other mailboxes.
  *
+ * @version 1.5 - a device job on a Fortress mailbox says it runs on the owner's device
  * @version 1.4
  * @changelog 1.4 - toggle-ON enables a Manually-only recipe on arrival instead
  *   of refusing; a card is On only when bound AND running automatically
@@ -313,7 +314,11 @@ class AiPanelService {
             'blocked_reason' => $blocked_reason,
             'blocked_text'   => $blocked_text,
             'other_count'    => max(0, $bound_total - ($covered ? 1 : 0)),
-            'last_run'       => self::lastRunLine((int)$recipe->key),
+            // On an end-to-end encrypted mailbox the server never runs it: the
+            // owner's browser does, while the mailbox is open.
+            'last_run'       => (method_exists($job, 'runsOnDeviceFor') && $job->runsOnDeviceFor($context))
+                ? 'Runs on your device while this mailbox is open'
+                : self::lastRunLine((int)$recipe->key),
             'dashboard_url'  => $permission >= 10
                 ? '/admin/joinery_ai/edit?rcp_recipe_id=' . (int)$recipe->key : null,
         ];

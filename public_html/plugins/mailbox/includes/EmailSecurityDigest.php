@@ -22,6 +22,8 @@
  * headers, and any format change requires a full re-score against the
  * labelled corpus.
  *
+ * @version 1.3 - buildFromColumns(): the digest from opened columns, which build() feeds and
+ *   the owner's browser mirrors (specs/fortress_mail_device_ai.md § R5)
  * @version 1.2 - refuses a Fortress message (server-side AI never reads one)
  * @version 1.1
  */
@@ -50,13 +52,41 @@ class EmailSecurityDigest {
 		} catch (VaultLockedException $e) {
 			$raw = null; // sealed raw, no window — the column fallbacks below apply
 		}
+		return self::buildFromColumns(array(
+			'raw'           => $raw,
+			'sender'        => (string)$msg->get('iem_sender'),
+			'recipient'     => (string)$msg->get('iem_recipient'),
+			'received_time' => (string)$msg->get('iem_received_time'),
+			'subject'       => (string)$msg->get('iem_subject'),
+			'body_plain'    => (string)$msg->get('iem_body_plain'),
+			'body_html'     => (string)$msg->get('iem_body_html'),
+			'spf_result'    => (string)$msg->get('iem_spf_result'),
+			'dkim_result'   => (string)$msg->get('iem_dkim_result'),
+			'dmarc_result'  => (string)$msg->get('iem_dmarc_result'),
+			'authserv_id'   => (string)Globalvars::get_instance()->get_setting('mailbox_mail_hostname'),
+		));
+	}
 
-		$from_raw       = $raw !== null ? self::extractHeader($raw, 'from') : (string)$msg->get('iem_sender');
+	/**
+	 * The digest from a message's columns as already opened — the one
+	 * implementation both paths run. build() feeds it from the model on the
+	 * server; the owner's browser runs the same steps (assets/js/email-digest.js)
+	 * on an end-to-end encrypted message it opened, and the parity suite holds
+	 * the two byte-equal (specs/fortress_mail_device_ai.md § R5).
+	 *
+	 * $c: raw (the RFC822 source or just its header block, or null), sender,
+	 * recipient, received_time, subject, body_plain, body_html, spf_result,
+	 * dkim_result, dmarc_result, authserv_id (our mail host, the only
+	 * Authentication-Results stamp trusted for the DKIM domain).
+	 */
+	public static function buildFromColumns(array $c): string {
+		$raw = isset($c['raw']) && $c['raw'] !== '' ? (string)$c['raw'] : null;
+		$from_raw       = $raw !== null ? self::extractHeader($raw, 'from') : (string)($c['sender'] ?? '');
 		$reply_to_raw   = $raw !== null ? self::extractHeader($raw, 'reply-to') : null;
 		$return_path_raw = $raw !== null ? self::extractHeader($raw, 'return-path') : null;
-		$to_raw         = $raw !== null ? self::extractHeader($raw, 'to') : (string)$msg->get('iem_recipient');
-		$date_raw       = $raw !== null ? self::extractHeader($raw, 'date') : (string)$msg->get('iem_received_time');
-		$subject_raw    = $raw !== null ? self::extractHeader($raw, 'subject') : (string)$msg->get('iem_subject');
+		$to_raw         = $raw !== null ? self::extractHeader($raw, 'to') : (string)($c['recipient'] ?? '');
+		$date_raw       = $raw !== null ? self::extractHeader($raw, 'date') : (string)($c['received_time'] ?? '');
+		$subject_raw    = $raw !== null ? self::extractHeader($raw, 'subject') : (string)($c['subject'] ?? '');
 
 		$from       = self::decodeHeaderValue((string)$from_raw);
 		$reply_to   = $reply_to_raw !== null && trim($reply_to_raw) !== '' ? self::decodeHeaderValue($reply_to_raw) : '(none)';
@@ -64,17 +94,17 @@ class EmailSecurityDigest {
 		$to         = self::decodeHeaderValue((string)$to_raw);
 		$date       = trim((string)$date_raw) !== '' ? trim((string)$date_raw) : '(unknown)';
 
-		$spf   = (string)($msg->get('iem_spf_result') ?: 'unverified');
-		$dkim  = (string)($msg->get('iem_dkim_result') ?: 'unverified');
-		$dmarc = (string)($msg->get('iem_dmarc_result') ?: 'unverified');
-		$dkim_domain = self::dkimSigningDomain($raw);
+		$spf   = (string)(($c['spf_result'] ?? '') ?: 'unverified');
+		$dkim  = (string)(($c['dkim_result'] ?? '') ?: 'unverified');
+		$dmarc = (string)(($c['dmarc_result'] ?? '') ?: 'unverified');
+		$dkim_domain = self::dkimSigningDomain($raw, (string)($c['authserv_id'] ?? ''));
 
 		$subject_decoded = self::decodeHeaderValue((string)$subject_raw);
 		[$subject_collapsed, $subject_removed] = self::collapseWhitespace($subject_decoded);
 		[$subject_text, $subject_total] = self::capSize($subject_collapsed, self::SUBJECT_CAP_CHARS);
 
-		$body_plain = (string)$msg->get('iem_body_plain');
-		$body_html  = (string)$msg->get('iem_body_html');
+		$body_plain = (string)($c['body_plain'] ?? '');
+		$body_html  = (string)($c['body_html'] ?? '');
 		[$body_source, $body_label] = self::selectBody($body_plain, $body_html);
 		[$body_collapsed, $body_removed] = self::collapseWhitespace($body_source);
 		[$body_text, $body_total] = self::capSize($body_collapsed, self::BODY_CAP_CHARS);
@@ -290,11 +320,9 @@ class EmailSecurityDigest {
 	 * line stamped by our own mail host. Empty when there's no raw message,
 	 * no configured hostname, or no trusted line.
 	 */
-	private static function dkimSigningDomain(?string $raw): string {
+	private static function dkimSigningDomain(?string $raw, string $authserv_id): string {
 		if ($raw === null) return '';
 		try {
-			$settings = Globalvars::get_instance();
-			$authserv_id = (string)$settings->get_setting('mailbox_mail_hostname');
 			$parsed = AuthenticationResults::fromMessage($raw, $authserv_id);
 			return $parsed !== null ? (string)($parsed->dkimDomain() ?? '') : '';
 		} catch (Throwable $e) {

@@ -25,7 +25,9 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  *   provider_error -> the provider stopped answering mid-drain; the items
  *     already judged and the tokens already spent travel with the result
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - systemText(): the system prompt as text, public, for a run
+ *   in the person's own browser (specs/fortress_mail_device_ai.md § R5)
  * @changelog 1.1 - the system prompt states the current date/time in the
  *   owner's timezone, so a judge asked about "past" events has a today
  */
@@ -164,7 +166,23 @@ class PipelineRunner {
      * providers that support it, free on local).
      */
     private static function buildSystem(Recipe $recipe, PipelineJobInterface $job, RecipeRunContext $ctx): array {
-        $instructions = trim((string)$recipe->get('rcp_prompt'));
+        $parts = self::systemText($recipe, $job, $ctx->owner_timezone, $ctx->untrustedNonce());
+        return AiPromptBuilder::systemBlocks($parts['text'], $parts['untrusted']);
+    }
+
+    /**
+     * The judge's system prompt as text: the framing, today's date in the
+     * owner's timezone, the recipe's instructions (its job's default prompt
+     * when the recipe has none, or when there is no recipe) and the verdict
+     * format, plus the untrusted-input block for $nonce when the job's digest
+     * carries outside text ('' otherwise). The one wording a server run and a
+     * run in the person's browser both use
+     * (specs/fortress_mail_device_ai.md § R5).
+     *
+     * @return array{text: string, untrusted: string}
+     */
+    public static function systemText(?Recipe $recipe, PipelineJobInterface $job, string $owner_timezone, string $nonce): array {
+        $instructions = $recipe ? trim((string)$recipe->get('rcp_prompt')) : '';
         if ($instructions === '') $instructions = $job->defaultPrompt();
 
         // The judge must know what day it is: an item carries its own dates
@@ -172,7 +190,7 @@ class PipelineRunner {
         // means nothing without today's to measure against. Stated once per
         // run — the prefix stays stable across the run's exchanges.
         $today_local = LibraryFunctions::convert_time(
-            gmdate('Y-m-d H:i:s'), 'UTC', $ctx->owner_timezone, 'l, F j, Y g:i A T');
+            gmdate('Y-m-d H:i:s'), 'UTC', $owner_timezone, 'l, F j, Y g:i A T');
 
         $text = "You are a Joinery AI pipeline judge. You are shown exactly one item "
               . "and must return a single verdict for it — nothing else about any other "
@@ -182,11 +200,11 @@ class PipelineRunner {
               . "## Output format\n\n" . DescriptorValidator::renderOutputInstruction($job->verdictDescriptor());
 
         $untrusted = $job->untrustedDigest()
-            ? AiPromptBuilder::untrustedInputBlock([], $ctx->untrustedNonce(),
+            ? AiPromptBuilder::untrustedInputBlock([], $nonce,
                 ['The item digest in the next message, which may contain content written by an external party.'])
             : '';
 
-        return AiPromptBuilder::systemBlocks($text, $untrusted);
+        return array('text' => $text, 'untrusted' => $untrusted);
     }
 
     /**

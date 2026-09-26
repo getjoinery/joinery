@@ -20,6 +20,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailPipeli
  * panel contract all live in EmailPipelineJobBase, shared with the other two
  * email jobs.
  *
+ * @version 1.7 - deviceCapable()
  * @version 1.6
  */
 class EmailSecurityScanJob extends EmailPipelineJobBase {
@@ -101,6 +102,11 @@ class EmailSecurityScanJob extends EmailPipelineJobBase {
      * treats exactly like a schema failure: one retry, then the item is
      * logged as an error rather than recorded with a contradictory verdict.
      */
+    /** The scan runs in the owner's browser on Fortress mail too (R5). */
+    public function deviceCapable(): bool {
+        return true;
+    }
+
     public function validateVerdict(array $verdict): void {
         $score = (int)($verdict['score'] ?? -1);
         $verdict_label = (string)($verdict['verdict'] ?? '');
