@@ -72,7 +72,7 @@ public-html-9a, reviewer public-html-bb.
   both DNS servers.** A release carrying them early would strip the resolvers' database
   access at scrolldaddy's next converge.
 **Date:** 2026-09-25.
-**Related:** `specs/fleet_ubuntu_2604_postgres_upgrade.md`. Its B8 found the resolvers'
+**Related:** `specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md`. Its B8 found the resolvers'
 database access; the owner asked for "Postgres completely shut off to any remote access"
 (2026-09-24) and, on 2026-09-25, for no one-off exception. This spec replaces that
 spec's `publish` line for scrolldaddy (its A2). scrolldaddy moves last there, after
@@ -489,7 +489,7 @@ A machine key that can call only the actions it names.
 housekeeping strips the reader lines at the next converge. Housekeeping runs inside
 each container from that site's own tree, so the other sites may take it earlier.
 **scrolldaddy moved to PostgreSQL 18 before this release** (2026-09-26,
-`specs/fleet_ubuntu_2604_postgres_upgrade.md` Stage 3). Its `postgres_access.conf` gained
+`specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md` Stage 3). Its `postgres_access.conf` gained
 `publish 192.168.206.198`, which declares the binding the direct read uses, so the rebuild
 kept it; `install.sh` now carries the tagged exemption for it. Moving the file aside here
 removes that line too. The container keeps the binding until it is next rebuilt; until

@@ -9,10 +9,12 @@ should pause and fix all of these bugs now before moving forward".
   yes; no other docker-prod site had it.
 - **Released in 0.8.430** (2026-09-25). Every docker-prod site and dev took it.
   getjoinery upgraded, then republished at 23:26 UTC. WP2's live check passed (below).
-- **Left:** updating jeremytunnell.com (on 0.8.429).
-- The PostgreSQL 18 site moves (`specs/fleet_ubuntu_2604_postgres_upgrade.md` Stage 3)
-  resumed after the release: joinerydemo moved 2026-09-25.
-**Related:** `specs/fleet_ubuntu_2604_postgres_upgrade.md` (B18–B20),
+- **Done 2026-09-26:** jeremytunnell.com took 0.8.431, so every managed node carries the fixes. WP2's
+  one-time list of two retired scripts has done its job (removed on every Docker site; jeremytunnell
+  never had them) and is gone from `upgrade.php` (1.5).
+- The PostgreSQL 18 site moves (`specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md` Stage 3)
+  resumed after the release and finished 2026-09-26.
+**Related:** `specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md` (B18–B20),
 `specs/dns_resolvers_read_over_https.md` (B4, B8).
 
 ## What this does for the owner

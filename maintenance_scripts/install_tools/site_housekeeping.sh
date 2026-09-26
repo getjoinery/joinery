@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 #
 # site_housekeeping.sh - the site's own files outside its tree: its log
-# rotation and, on bare metal, its scheduled-task cron entry.
+# rotation, on bare metal its scheduled-task cron entry, and in a container
+# its signed release manifest.
 #
+# Version: 1.1 - In a container, the release manifest at the site root is the
+#                one the code matches: a container recreated from its image got
+#                back the manifest the image was built with, and the agent then
+#                refused every script. The copy upgrade.php keeps in
+#                config/release_manifest/ is put back when the code matches it,
+#                and refreshed from the site root when that is the one it
+#                matches (specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md B21).
 # Version: 1.0 - specs/agent_recipes_and_vocabulary.md, "Host files": the two
 #                files _site_init.sh wrote once move into a re-runnable core
 #                installer, so install day and repair day run the same code.
@@ -18,6 +26,9 @@
 #     written when ABSENT - never inside a container, where the container's
 #     start command owns the cron entry (/etc/cron.d does not survive a
 #     rebuild), and never with --no-cron.
+#   - in a container, {site}/RELEASE_MANIFEST(.sig) and its kept copy in
+#     {site}/config/release_manifest/ agree, and are the release the code
+#     matches. Neither is ever replaced by one the code does not match.
 #
 # Absent-only, so an owner's edit survives every converge; moving a file
 # aside (the agent's reclaim_managed_file, which keeps a dated copy) is how it
@@ -105,6 +116,41 @@ elif [[ -d "$(dirname "${CRON}")" ]]; then
         || { warn "could not write ${CRON}"; FAILED=1; }
 else
     say "no /etc/cron.d on this machine - cron entry skipped"
+fi
+
+# --- the release manifest (a container) ----------------------------------------
+# The signed manifest the agent checks every script against sits at the site
+# root, in the container's own layer; the code it describes is on volumes. A
+# container recreated from its image gets back the manifest the image was built
+# with, whatever release the code has been upgraded to since. upgrade.php keeps
+# each release's copy on the config volume; whichever of the two the code
+# matches is kept in both places. A pair that matches nothing is named once,
+# not re-hashed on every converge.
+MANIFEST="${SITE_ROOT}/RELEASE_MANIFEST"
+HELD="${SITE_ROOT}/config/release_manifest"
+manifest_matches() {   # $1 = a RELEASE_MANIFEST beside its .sig: does the code match it?
+    [[ -f "$1" && -f "$1.sig" ]] && (cd "${SITE_ROOT}" && sha256sum -c --status "$1") 2>/dev/null
+}
+if [[ ! -f "${FS_ROOT}/.dockerenv" || ! -f "${MANIFEST}" || ! -d "${SITE_ROOT}/config" ]]; then
+    :   # on disk nothing puts an older manifest back; a site with no manifest has none to keep
+elif cmp -s "${MANIFEST}" "${HELD}/RELEASE_MANIFEST" && cmp -s "${MANIFEST}.sig" "${HELD}/RELEASE_MANIFEST.sig"; then
+    :   # the two agree
+else
+    PAIR_KEY="$(cat "${MANIFEST}" "${HELD}/RELEASE_MANIFEST" "${SITE_ROOT}/public_html/VERSION" 2>/dev/null | sha256sum | cut -c1-64)"
+    if [[ "$(cat "${HELD}/unmatched" 2>/dev/null)" == "${PAIR_KEY}" ]]; then
+        :   # named already; nothing has changed since
+    elif manifest_matches "${MANIFEST}"; then
+        mkdir -p "${HELD}" && install -m 644 "${MANIFEST}" "${MANIFEST}.sig" "${HELD}/" && rm -f "${HELD}/unmatched" \
+            && say "kept this release's manifest in config/release_manifest" \
+            || { warn "could not keep the release manifest in ${HELD}"; FAILED=1; }
+    elif manifest_matches "${HELD}/RELEASE_MANIFEST"; then
+        install -m 644 "${HELD}/RELEASE_MANIFEST" "${HELD}/RELEASE_MANIFEST.sig" "${SITE_ROOT}/" && rm -f "${HELD}/unmatched" \
+            && say "put back the release manifest the code matches; the site root held another release's" \
+            || { warn "could not put the release manifest back at ${SITE_ROOT}"; FAILED=1; }
+    else
+        warn "the code matches neither the release manifest at the site root nor the kept copy; the agent refuses scripts until the next upgrade"
+        mkdir -p "${HELD}" && printf '%s\n' "${PAIR_KEY}" > "${HELD}/unmatched"
+    fi
 fi
 
 [[ "${FAILED}" == 1 ]] && exit 1

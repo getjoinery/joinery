@@ -4,8 +4,9 @@
 after it waits on D1/D2, on services phase 2 item 2b (the object-store seam in
 `BackupRunner`), and — for its live proof — on a PostgreSQL 17+ box.
 **Date:** 2026-09-24
-**Related:** `specs/fleet_ubuntu_2604_postgres_upgrade.md` (gets the fleet onto
-PostgreSQL 18), `specs/backups_remaining_gaps.md` (listed this as gated on that campaign).
+**Related:** `specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md` (put the eight Docker
+sites on PostgreSQL 18, 2026-09-26), `specs/standalone_boxes_ubuntu_2604.md` (jeremytunnell and dev,
+waiting on Ubuntu), `specs/backups_remaining_gaps.md` (listed this as gated on that campaign).
 
 ## What this does for the owner
 
@@ -351,6 +352,6 @@ files *and* database. We released on 7 of the last 7 days.
   none of it changed. Archiving code and data as two kinds, each with its own snapshot,
   would make a release night a code full (about 0.1 GB) plus data and database
   increments. WP2's per-kind levels are the groundwork; it needs its own spec.
-- **Getting nodes onto PostgreSQL 18** is `specs/fleet_ubuntu_2604_postgres_upgrade.md`.
-  Every node today is on 24.04 / PostgreSQL 16, so nothing here changes a live backup
-  until that campaign moves one.
+- **Getting nodes onto PostgreSQL 18:** the eight Docker sites run it since 2026-09-26
+  (`specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md`). jeremytunnell and dev, still on
+  PostgreSQL 16, wait on `specs/standalone_boxes_ubuntu_2604.md`.

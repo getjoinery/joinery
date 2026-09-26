@@ -1,20 +1,12 @@
 # Fleet Move to Ubuntu 26.04 / PostgreSQL 18
 
-**Status:** Stage 1 is released in 0.8.424 (published 2026-09-24; commit 71277d44): WP1–WP5,
-WP3b/B7, B1, B9, B11, B12, Postgres local-only, and WP7 (the move script). B8's remainder,
-B10, B13–B17 and WP6 (base 2.0) are released in 0.8.426 (commits e98df32c, 4de2fdc3);
-every node runs 0.8.426 (checked 2026-09-25).
-R1 passed on the owner's test box, all gates (last two 2026-09-25). R2 waits on the owner.
-B19 and B20 (found finishing R1) are fixed in 0.8.430 (`specs/fleet_move_bug_fixes_2026_09_25.md`).
-**Stage 3 is done (2026-09-25/26, from 0.8.430): all eight Docker sites are on
-PostgreSQL 18** and pass every gate (§ Progress). scrolldaddy moved before
-`specs/dns_resolvers_read_over_https.md` WP7, with its database publish declared.
-`finish` ran on all eight on 2026-09-26, at the owner's word, a week early: the rollback
-images, database copies and dumps are gone. With base images 1.0 and 1.2 and the build
-cache also removed, docker-prod went from 37 GB used to 19.8 GB. Stage 4 waits on Ubuntu
-(D3, D4). B23–B25, found during the moves, are fixed; B23 was also healed
-live on docker-prod.
-Two owner decisions open (D3, D4; D1 and D2 are in `specs/backup_database_incrementals.md`).
+**Status:** Done 2026-09-26 for everything it can do now. Stages 1–2 released (0.8.424, 0.8.426);
+Stage 3 done: all eight Docker sites moved to Ubuntu 26.04 images with PostgreSQL 18 and PHP 8.5
+(2026-09-25/26, from 0.8.430), passed every gate, and `finish` ran on all eight. Every bug found on
+the way (B1–B25) is fixed; B19 and B20 in 0.8.430 (`specs/implemented/fleet_move_bug_fixes_2026_09_25.md`),
+B21's remainder in `site_housekeeping.sh` 1.1 and `upgrade.php` 1.5 (2026-09-26). The two standalone
+boxes (Stage 4) wait on Ubuntu opening the 24.04 → 26.04 upgrade, and the cleanup after them (Stage 5)
+waits on those: both moved to `specs/standalone_boxes_ubuntu_2604.md`, with decisions D3 and D4.
 **Date:** 2026-09-24 (rewritten from the 2026-08-01 draft after a fleet investigation;
 the code-side cutover items of `php_85_pg18_stack_cutover.md` are folded in here).
 **Related:** `specs/backup_database_incrementals.md` — the main payoff. It needs
@@ -29,11 +21,11 @@ PostgreSQL 18 can back up only what changed in the database, so jeremytunnell's 
 1.65 GB database upload can drop to a fraction of that. It also puts the fleet on the
 current Ubuntu LTS.
 
-**No existing site runs PostgreSQL 18 yet.** Every node reports Ubuntu 24.04 /
-PostgreSQL 16. New standalone installs land on 26.04 / PostgreSQL 18, and new Docker
-sites are born on it from 0.8.426 (WP6). Before that release a Docker site was built from
-`joinery-base:1.2` (Ubuntu 24.04): test380s — a 26.04 server — built its site on it (job
-23394, output line 303), so it runs PostgreSQL 16.
+**Where it ended (2026-09-26):** the eight Docker sites run Ubuntu 26.04.1 images with PostgreSQL 18
+and PHP 8.5.4. New standalone installs land on 26.04 / PostgreSQL 18, and new Docker sites are born
+on it (WP6). jeremytunnell and dev still run Ubuntu 24.04 / PostgreSQL 16 until Ubuntu opens the
+upgrade (`specs/standalone_boxes_ubuntu_2604.md`). test380s, a test box whose site was built on
+`joinery-base:1.2` before WP6, was retired on 2026-09-26.
 
 **Ubuntu has not opened the 24.04 → 26.04 upgrade.** `meta-release-lts` lists resolute
 26.04.1 with `Supported: 0` (checked 2026-09-24). Press reports put the hold on
@@ -45,10 +37,10 @@ without it.
 
 | Box | Runs | What moves it | Blocked on |
 |---|---|---|---|
-| 8 sites on docker-prod (galactictribune, getjoinery, getjoinery-developers, getjoinery-orgs, joinerydemo, mapsofwisdom, phillyzouk, scrolldaddy) | a container per site, each with its own PostgreSQL | rebuild the container on a 26.04 image, carrying its database across (Stage 3) | nothing: 0.8.426 carries the image and the move script |
-| new Docker sites (customer servers) | same | born on the 26.04 image (Stage 2, released in 0.8.426) | — |
-| jeremytunnell-vps | standalone | in-place OS upgrade, by hand (Stage 4) | Ubuntu opening the upgrade (D3) |
-| dev (management node) | standalone | in-place OS upgrade, by hand (Stage 4) | same |
+| 8 sites on docker-prod (galactictribune, getjoinery, getjoinery-developers, getjoinery-orgs, joinerydemo, mapsofwisdom, phillyzouk, scrolldaddy) | a container per site, each with its own PostgreSQL | rebuilt on a 26.04 image, database carried across (Stage 3) | **done 2026-09-25/26** |
+| new Docker sites (customer servers) | same | born on the 26.04 image (Stage 2, released in 0.8.426) | done |
+| jeremytunnell-vps | standalone | in-place OS upgrade, by hand | Ubuntu opening the upgrade: `specs/standalone_boxes_ubuntu_2604.md` |
+| dev (management node) | standalone | in-place OS upgrade, by hand | same |
 | docker-prod server, joinery-relay-1, both scrolldaddy-dns | no site database | **stay on 24.04** (supported to 2029) | — |
 
 docker-prod's own OS does not matter to its sites: a 26.04 container runs on a 24.04
@@ -435,8 +427,13 @@ manifest (the same bytes the unmoved sites carry) into the container: 0 files fa
   the new one, stopping unless every file matches. It checks again after the restart.
   `rollback` puts it into the old image's container too: that layer holds whatever release
   the old image was built from.
-- **Still open, outside the move:** any container rebuilt from its image gets the image's
-  manifest back, whatever the code volume holds. Recorded in the running to-do list.
+- **The rest, fixed 2026-09-26:** any container rebuilt from its image outside the move script got the
+  image's manifest back, whatever the code volume held. `upgrade.php` 1.5 keeps each release's
+  manifest on the config volume once it passes its deploy tier, and `site_housekeeping.sh` 1.1 (at
+  container start and every converge) puts back whichever copy the code matches, never one it does
+  not. Gate `site_housekeeping` (23 checks; the 5 new ones fail on the old script).
+- **Found beside it, recorded, not fixed here:** a deploy-tier rollback restores `public_html` only,
+  so the new release's manifest and `maintenance_scripts/` stay over the old code.
 
 **B22 — the move renders the host vhost for a stale name** (found 2026-09-25 moving
 joinerydemo). `prepare` read the domain from the container's `DOMAIN_NAME`, and `install.sh`
@@ -540,8 +537,8 @@ getjoinery rollback).
 - **Tests:** the contract drives `restore_runtime` against stubs. It installs exactly the
   missing declared extension and the missing recorded package, names one it cannot
   install, reports a missing agent, and installs nothing on a second run.
-- Not yet run live. A rollback of a real site is downtime; test380s could rehearse it.
-  The script on docker-prod is 1.5 until 1.6 is committed and copied there.
+- Proven against stubs only. scrolldaddy moved with 1.6 and needed no rollback; every site has since
+  moved and `finish` has run, so there is no site left to roll back. A live rollback is not rehearsed.
 
 **B9 — the platform's PHP tuning loaded the PostgreSQL extensions twice** (fixed
 2026-09-24). `host_files_tune_php_ini()` enabled `extension=pdo_pgsql` and `extension=pgsql`
@@ -566,7 +563,8 @@ pinning the template's default to `install.sh`'s version. Docs: `deploy_and_upgr
 - A routine `install.sh site` rebuild of that site keeps the agent's identity: same
   fingerprint and identity file, new container. The site was not yet approved, and a
   minute later its agent asked again with a new key (B19).
-- Not run, because it buys a Linode: the quick-deploy live gates with a customer provision.
+- Not run, because it buys a Linode: the quick-deploy live gates with a customer provision. That is
+  a general install test, not part of this move; it belongs with a release's own testing.
 - `Dockerfile.base:17` becomes `FROM ubuntu:26.04`; `BASE_IMAGE_VERSION` goes `1.2` → `2.0`
   (`install.sh:477`).
 - The first site install on each Docker host builds the new image (`install.sh:4103`–`:4108`).
@@ -596,8 +594,9 @@ recreate it exactly.
   is missing and cannot be built.
 - Read the site's database name and password from its `_config` volume.
 - Inventory the container's writable layer: roles other than `postgres`
-  (`pg_dumpall --roles-only`); refuse any `pg_hba.conf` network line the site's
-  `config/postgres_access.conf` does not declare; the `/etc/joinery-agent` directory; `/etc/cron.d` and crontabs; installed PHP
+  (`pg_dumpall --roles-only`); refuse any `pg_hba.conf` network line (1.7; until
+  `specs/dns_resolvers_read_over_https.md` WP7 retired `config/postgres_access.conf`, a declared
+  line was carried); the `/etc/joinery-agent` directory; `/etc/cron.d` and crontabs; installed PHP
   packages. Everything is written to `/root/rebase/<site>/` and printed, so an unexpected
   customization is seen before anything moves.
 - Record the source database's encoding and locale, and refuse if the new image lacks
@@ -620,8 +619,8 @@ recreate it exactly.
 - Recreate the inventoried roles, `createdb` with the recorded encoding and locale,
   then `pg_restore --exit-on-error`. The restore rebuilds every index under 26.04's
   collation, which is why this moves data by dump rather than by `pg_upgrade`.
-- `pg_hba.conf` comes from the site's `config/postgres_access.conf` (B8), rebuilt by
-  housekeeping at every start. Install the declared PHP extensions
+- `pg_hba.conf` is loopback plus the Docker host, rebuilt by housekeeping at every start (the
+  declared network lines of B8 were retired with `config/postgres_access.conf`). Install the declared PHP extensions
   (`utils/list_dependencies.php --apt`, as `utils/upgrade.php:1644` does).
 - Start Apache and cron.
 - Gates (§ Per-site gates). A failure prints the rollback command and stops.
@@ -631,7 +630,8 @@ recreate it exactly.
 database answers again, the copy is removed (the data is live again) and the stage
 returns to `prepared`, so a retry needs a fresh `prepare`.
 
-`finish` (after a week): remove `_pg16` and the dump.
+`finish` (after a week): remove `_pg16` and the dump. Run on all eight on 2026-09-26, early, at the
+owner's word.
 
 **WP8 — Order.** One site at a time, each passing its gates before the next starts:
 1. **Rehearse** on a scratch Docker host: 24.04 server, a site on base 1.2, rebase to 2.0.
@@ -647,69 +647,11 @@ returns to `prepared`, so a retry needs a fresh `prepare`.
    (`specs/dns_resolvers_read_over_https.md`), so no database access carries across a
    move. Confirm both resolvers serve during and after the move.
 
-## Stage 4 — The two standalone boxes (owner, by hand)
+## Stage 4 and Stage 5 — moved
 
-No agent job can do this: nothing in the agent runs apt or `do-release-upgrade`, and
-the reboot would end the job. It is a shell session on the box.
-
-**WP9 — Inventory both boxes** (read-only; paste the output into this spec):
-`ls /etc/apt/sources.list.d/`, `apt-mark showhold`, `dpkg -l 'php*' | grep ^ii`,
-`pg_lsclusters`, `df -h /`, `free -m`, and
-`systemctl list-units --type=service --state=running`. Known already: dev's PHP 8.3 comes
-from the ondrej PPA, and dev also has nodesource, chrome and tailscale sources.
-jeremytunnell's package sources are unverified.
-
-**WP10 — Rehearse on a clone of jeremytunnell.** Linode clone at the same plan (a
-clone's disk cannot be smaller than the source's).
-- **Before the clone's first boot, attach a Cloud Firewall that denies all outbound
-  traffic and allows inbound SSH only from the owner's address.** The clone boots as
-  jeremytunnell: the same agent identity, the same cron, the same relay pull and backup
-  credentials. Unfenced, it would claim the node's jobs, pull the node's mail off the
-  relay and write into its backup storage.
-- Disable the agent, the host converger timer and path, and cron. Then open outbound
-  80/443 for apt only.
-- Run the § Standalone runbook with `do-release-upgrade -d`, then the gates, reaching
-  the site through a hosts-file entry. Record timings and surprises here, then delete
-  the clone.
-
-**Standalone runbook** (rehearsed in WP10, then used for real in WP11/WP12):
-1. A successful backup under 24 hours old with a level-2 verification. Take a provider
-   snapshot if Linode Backups is enabled on the box (unverified).
-2. Stop the agent, `joinery-host-converger.timer` and `.path`, so nothing converges
-   packages mid-upgrade.
-3. `do-release-upgrade` (non-interactive frontend), then reboot.
-4. `pg_upgradecluster 16 main` using the **default dump method**, not `-m upgrade`: a
-   dump rebuilds every index under 26.04's collation. The old cluster stays, stopped, on
-   port 5433 as the rollback until the gates pass for a week, and is then dropped.
-5. `a2disconf php8.3-fpm && a2enconf php8.5-fpm`. Purge PHP 8.3 first:
-   `detect_php_version` prefers a leftover `php` binary. Install the declared extensions.
-   WP4 then applies the platform's `php.ini` settings.
-6. Re-enable the converger and the agent, run a host converge, then the gates.
-
-**WP11 — jeremytunnell for real** (per D3 and D4). Postfix is off there, and inbound mail
-waits on the relay while the box is down (`mailbox_listener_decommission`). The mail
-concern the old draft named is gone. rspamd and redis are still there: check both after
-the upgrade.
-
-**WP12 — dev** (per D4). Also the management node: fleet backups are scheduled from here,
-so pick a window away from 03:00–05:00 UTC. The PPA and third-party sources come back
-for resolute (or are dropped) after the upgrade. Once dev is on PostgreSQL 18, the
-database-incrementals integration tests run in the ordinary gate.
-
-## Stage 5 — Cleanup (dev tree, after the last Joinery site moves)
-
-**WP13 — Code-side cutover** (from `php_85_pg18_stack_cutover.md`):
-- Drop 24.04 from the installer's OS gate (`install.sh:2492`) and move the
-  `installer_contract_test` assertion (`:266`–`:279`), fixing its stale "PHP 8.3
-  hardcoded" comment (`:268`). `--allow-unsupported-os` still covers a hand install.
-- Restate the docs as current state: `docs/installation.md:5` and `:100`,
-  `docs/deploy_and_upgrade.md` (supported OS), `INSTALL_README.md:297` and `:515` (the
-  latter names `postgresql-16-main.log`), and the Server Manager overview's OS
-  expectations.
-- The PostGIS pin in the unbuilt `specs/geolocation_postgis_spec.md` (`:47`, `:578`) moves
-  to 18 when that spec is built, not before.
-- The relay birth flow on 26.04 (`RelayCloudProvisioner.php:101`) has never run. Rebuild
-  a relay on it the next time one is needed.
+The two standalone boxes (jeremytunnell and dev: inventory, the clone rehearsal R2, the runbook, the
+upgrades) and the cleanup after them (dropping 24.04 from the installer, the docs) wait on Ubuntu
+opening the upgrade. They are `specs/standalone_boxes_ubuntu_2604.md`, with decisions D3 and D4.
 
 ## Progress (2026-09-24)
 
@@ -792,23 +734,21 @@ database-incrementals integration tests run in the ordinary gate.
     unrenewed after an hour. So the WP6 gate line "no duplicate join request" held only
     for the first minute. An approved site is unaffected: its credential is promoted and a
     new ask is ignored. Fix: `agent_control.php --join` keeps the existing
-    `requested_time` when the same URL is already being asked. Not fixed.
+    `requested_time` when the same URL is already being asked. Fixed in 0.8.430
+    (`specs/implemented/fleet_move_bug_fixes_2026_09_25.md`).
   - **B20 — a site that joins by its agent is never backed up.** `adoptJoin` makes the
     node with no web root, and `hosts_site_from()` reads an empty web root as "no
     site". The node gets no recovery-key report, no nightly backup, and Run backup
     refuses "does not host a Joinery site" — silently, until someone types the path. The
     agent knows the path (`cfg.WebRoot`). Fix: the agent reports its web root (poll or
-    `check_status`) and the plane fills an empty `mgn_web_root` from it. Not fixed.
+    `check_status`) and the plane fills an empty `mgn_web_root` from it. Fixed in 0.8.430
+    (`specs/implemented/fleet_move_bug_fixes_2026_09_25.md`).
   - **For Stage 3:** a site takes the release carrying the new scripts first, then moves.
     Until it does, its container runs the scripts on its scripts volume, which is why
     housekeeping 1.7 there still refused the `publish` line.
   - The disk reached 11 of 25 GB with both base images; `prepare`'s disk check covers only
     the dump and the volume copy.
-  a Linode is a purchase and needs the owner's explicit approval. Docker is not on dev.
-- **Rehearsal R2 (jeremytunnell clone) — owner.** jeremytunnell is not in the account the
-  dev Linode token reaches (that account holds only the test boxes). The clone,
-  the firewall, and the console step to open SSH on the clone happen in jeremytunnell's
-  own account.
+- **Rehearsal R2 (jeremytunnell clone)** moved to `specs/standalone_boxes_ubuntu_2604.md` (WP10).
 - **Stage 3, joinerydemo — moved 2026-09-25** from 0.8.430 (`/root/rebase/release-0.8.430`
   on docker-prod, manifest verified). Move script 1.4.
   - `prepare` was re-run from 0.8.430. `swap` exited 0: the site was down from 22:46:54 to
@@ -911,21 +851,8 @@ database-incrementals integration tests run in the ordinary gate.
 
 ## Open decisions
 
-**D3 — When do the two standalone boxes move?**
-- **Wait for Ubuntu to open the upgrade** (`Supported: 1`). Canonical has held it for
-  regressions, so the first run of the upgrade path is not ours. Catch: no date, and
-  jeremytunnell — the box whose backups shrink most — waits with it.
-- **Force it (`-d`) once the clone rehearsal (WP10) passes.** Catch: we run a path Ubuntu
-  itself says is not ready, on a box our installers drive with coreutils-heavy bash.
-- **Recommendation:** rehearse now, and wait for `Supported: 1` for the real upgrade.
-
-**D4 — Which standalone box goes first?**
-- **jeremytunnell first:** the simpler box, and the one whose backups benefit most; the
-  relay holds its mail while it is down. Catch: it is your live site.
-- **dev first:** we use it all day, so problems surface fast, and the database-incremental
-  tests start running. Catch: it is the management node, and it carries four third-party
-  package sources.
-- **Recommendation:** jeremytunnell first, after the clone rehearsal.
+D3 (when the standalone boxes move) and D4 (which goes first) moved with Stage 4 to
+`specs/standalone_boxes_ubuntu_2604.md`. D1 and D2 are in `specs/backup_database_incrementals.md`.
 
 ## Evidence (2026-09-24)
 

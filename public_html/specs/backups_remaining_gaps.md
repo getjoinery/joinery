@@ -68,8 +68,8 @@ Recorded so they are not mistaken for gaps:
 
 - **PG 17+ incremental database backups** (`pg_basebackup --incremental` +
   `pg_combinebackup`) — specced in `specs/backup_database_incrementals.md`;
-  reaches a node once the OS campaign
-  (`specs/fleet_ubuntu_2604_postgres_upgrade.md`) moves it to PostgreSQL 17+.
+  can reach the eight Docker sites, on PostgreSQL 18 since 2026-09-26, and reaches
+  jeremytunnell and dev once `specs/standalone_boxes_ubuntu_2604.md` moves them.
 - **Per-table logical incrementals** — rejected. Change detection via stats
   counters is not crash-safe; audit-trigger approaches cost more than they save.
 - **restic/borg** — rejected for now. Replaces the archive format, key custody,

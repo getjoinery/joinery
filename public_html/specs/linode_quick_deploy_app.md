@@ -23,7 +23,7 @@ Ansible playbook, the 100–125 word description, the support URL, the technical
 documentation, the brand assets, and the pull request to
 `akamai-compute-marketplace/marketplace-apps`.
 
-One coupling to watch: WP6 of `specs/fleet_ubuntu_2604_postgres_upgrade.md`
+One coupling to watch: WP6 of `specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md`
 (the 26.04 container image) calls for re-running these live gates. The
 StackScript already targets 26.04 only and installs bare-metal, so submitting
 before that lands is safe.

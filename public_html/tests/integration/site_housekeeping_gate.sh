@@ -10,8 +10,10 @@
 # site_housekeeping.sh writes the site's logrotate file and, on bare metal, its
 # cron entry - each only when ABSENT, so an owner's edit survives every
 # converge and moving a file aside is the reset
-# (specs/agent_recipes_and_vocabulary.md, Host files). Driven unprivileged
-# against a fixture /etc through JOINERY_SITE_HOUSEKEEPING_ROOT.
+# (specs/agent_recipes_and_vocabulary.md, Host files). In a container it keeps
+# the release manifest at the site root the one the code matches, with a copy on
+# the config volume (B21). Driven unprivileged against a fixture /etc through
+# JOINERY_SITE_HOUSEKEEPING_ROOT.
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -58,6 +60,41 @@ chk "in a container the start command owns cron" "$([ -e "$R2/etc/cron.d/joinery
 R3="$T/fs3"; mkdir -p "$R3/etc/logrotate.d" "$R3/etc/cron.d"
 JOINERY_SITE_HOUSEKEEPING_ROOT="$R3" bash "$SCRIPT" --no-cron mysite "$SITE" >/dev/null 2>&1
 chk "--no-cron writes no cron entry" "$([ -e "$R3/etc/cron.d/joinery-mysite" ] && echo written || echo absent)" "absent"
+
+echo "=== A container: the release manifest the code matches is the one kept ==="
+UPG="$ROOT/public_html/utils/upgrade.php"
+R5="$T/fs5"; mkdir -p "$R5/etc/logrotate.d" "$R5/etc/cron.d"; touch "$R5/.dockerenv"
+S5="$T/html/mfsite"; mkdir -p "$S5/public_html" "$S5/maintenance_scripts" "$S5/config"
+H5="$S5/config/release_manifest"
+# A release: its code in the site's volumes, its signed manifest in $2.
+mf_release() {
+    local v="$1" dir="$2"; mkdir -p "$dir"
+    printf '%s\n' "$v" > "$S5/public_html/VERSION"; printf 'code %s\n' "$v" > "$S5/maintenance_scripts/run.sh"
+    (cd "$S5" && sha256sum public_html/VERSION maintenance_scripts/run.sh) > "$dir/RELEASE_MANIFEST"
+    printf 'sig %s\n' "$v" > "$dir/RELEASE_MANIFEST.sig"
+}
+hk5() { JOINERY_SITE_HOUSEKEEPING_ROOT="$R5" bash "$SCRIPT" mfsite "$S5" 2>&1; }
+mf_release A "$T/relA"; mf_release B "$T/relB"; cp "$T/relB/RELEASE_MANIFEST"* "$S5/"
+out="$(hk5)"; rc=$?
+chk "first converge keeps a copy of the manifest the code matches" "$rc:$(cmp -s "$S5/RELEASE_MANIFEST" "$H5/RELEASE_MANIFEST" && cmp -s "$S5/RELEASE_MANIFEST.sig" "$H5/RELEASE_MANIFEST.sig" && echo same)" "0:same"
+cp "$T/relA/RELEASE_MANIFEST"* "$S5/"   # recreated from an image built at release A
+out="$(hk5)"; rc=$?
+chk "a rebuilt container's older manifest is replaced by the kept one the code matches" "$rc:$(cat "$S5/RELEASE_MANIFEST.sig")" "0:sig B"
+chk "and it says so" "$(printf '%s' "$out" | grep -c 'put back the release manifest the code matches')" "1"
+mf_release C "$T/relC"; cp "$T/relC/RELEASE_MANIFEST"* "$S5/"   # an upgrade to C before this converge
+hk5 >/dev/null; chk "after an upgrade the kept copy follows the site root" "$(cat "$H5/RELEASE_MANIFEST.sig")" "sig C"
+out="$(hk5)"; chk "when the two agree nothing is said or hashed" "$(printf '%s' "$out" | grep -c 'manifest')" "0"
+printf 'D\n' > "$S5/public_html/VERSION"; cp "$T/relA/RELEASE_MANIFEST"* "$S5/"   # code no release describes
+out="$(hk5)"; rc=$?
+chk "a pair the code matches neither of is named, and nothing is swapped in" "$rc:$(printf '%s' "$out" | grep -c 'matches neither'):$(cat "$S5/RELEASE_MANIFEST.sig"):$(cat "$H5/RELEASE_MANIFEST.sig")" "0:1:sig A:sig C"
+out="$(hk5)"; chk "and it is named once, not on every converge" "$(printf '%s' "$out" | grep -c 'matches neither')" "0"
+R6="$T/fs6"; mkdir -p "$R6/etc/logrotate.d" "$R6/etc/cron.d"
+S6="$T/html/diskmf"; mkdir -p "$S6/public_html" "$S6/config"; cp "$T/relA/RELEASE_MANIFEST"* "$S6/"
+JOINERY_SITE_HOUSEKEEPING_ROOT="$R6" bash "$SCRIPT" diskmf "$S6" >/dev/null 2>&1
+chk "on bare metal the manifest is left alone and no copy is kept" "$([ -e "$S6/config/release_manifest" ] && echo kept || echo none)" "none"
+kept_at="$(grep -n "held_manifest_dir = " "$UPG" | head -1 | cut -d: -f1)"
+tier_at="$(grep -n "apply_result_rolled_back('deploy_tier'" "$UPG" | head -1 | cut -d: -f1)"
+chk "upgrade.php keeps its copy only after the deploy tier passed" "$([ -n "$kept_at" ] && [ -n "$tier_at" ] && [ "$kept_at" -gt "$tier_at" ] && echo after || echo "kept:${kept_at:-none} tier:${tier_at:-none}")" "after"
 
 echo "=== Refusals ==="
 out="$(bash "$SCRIPT" mysite "$SITE" 2>&1)"; rc=$?
