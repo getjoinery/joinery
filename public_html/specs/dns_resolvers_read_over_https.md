@@ -456,8 +456,12 @@ A machine key that can call only the actions it names.
 **This release must not reach scrolldaddy before WP6 is done on both servers.** Its
 housekeeping strips the reader lines at the next converge. Housekeeping runs inside
 each container from that site's own tree, so the other sites may take it earlier.
-**scrolldaddy's PostgreSQL 18 move waits for this release.** Before it, `prepare`
-refuses scrolldaddy's hand-made database port.
+**scrolldaddy moved to PostgreSQL 18 before this release** (2026-09-26,
+`specs/fleet_ubuntu_2604_postgres_upgrade.md` Stage 3). Its `postgres_access.conf` gained
+`publish 192.168.206.198`, which declares the binding the direct read uses, so the rebuild
+kept it; `install.sh` now carries the tagged exemption for it. Moving the file aside here
+removes that line too. The container keeps the binding until it is next rebuilt; until
+then pg_hba admits no network login, and the rebuild drops the binding.
 
 **Live (owner present; database writes confirmed):**
 - **scrolldaddy's database:** `DROP OWNED BY scrolldaddy_reader; DROP ROLE

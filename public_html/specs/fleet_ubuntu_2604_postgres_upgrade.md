@@ -6,11 +6,11 @@ B10, B13–B17 and WP6 (base 2.0) are released in 0.8.426 (commits e98df32c, 4de
 every node runs 0.8.426 (checked 2026-09-25).
 R1 passed on the owner's test box, all gates (last two 2026-09-25). R2 waits on the owner.
 B19 and B20 (found finishing R1) are fixed in 0.8.430 (`specs/fleet_move_bug_fixes_2026_09_25.md`).
-**Stage 3, 2026-09-25/26 from 0.8.430: seven of eight sites are on PostgreSQL 18**
-and pass every gate: joinerydemo, galactictribune, phillyzouk, mapsofwisdom,
-getjoinery_orgs, getjoinery_developers and getjoinery (§ Progress). scrolldaddy follows
-`specs/dns_resolvers_read_over_https.md` WP7. `finish` (dropping the rollback copies)
-runs from 2026-10-03. B23–B25, found during the moves, are fixed; B23 was also healed
+**Stage 3 is done (2026-09-25/26, from 0.8.430): all eight Docker sites are on
+PostgreSQL 18** and pass every gate (§ Progress). scrolldaddy moved before
+`specs/dns_resolvers_read_over_https.md` WP7, with its database publish declared.
+`finish` (dropping the rollback copies) runs from 2026-10-03. Stage 4 waits on Ubuntu
+(D3, D4). B23–B25, found during the moves, are fixed; B23 was also healed
 live on docker-prod.
 Two owner decisions open (D3, D4; D1 and D2 are in `specs/backup_database_incrementals.md`).
 **Date:** 2026-09-24 (rewritten from the 2026-08-01 draft after a fleet investigation;
@@ -861,6 +861,27 @@ database-incrementals integration tests run in the ordinary gate.
     completed once the new agent came up.
   - docker-prod afterwards: 36 of 78 GB used, 2.5 GB memory available, and seven
     `pre-rebase-pg16` images and `_postgres_pg16` volumes kept until `finish`.
+- **Stage 3, scrolldaddy — moved 2026-09-26** with move script 1.6 (commit 8078cd46),
+  before the DNS spec's WP7.
+  - `prepare` refused its database port on docker-prod's private address, which its
+    `postgres_access.conf` did not declare. `publish 192.168.206.198` was added to that
+    file (the original is kept in `/root/rebase/scrolldaddy/`), and `prepare` passed:
+    143 tables, one extra role (`scrolldaddy_reader`), and 2 declared pg_hba lines.
+  - The swap took the site down from 00:54:43 to 00:56:52, and 143/143 tables matched.
+  - Afterwards the database is published on 192.168.206.198:9087 behind the tagged
+    `joinery-declared-db-publish` exemption. The web port moved from every interface to
+    127.0.0.1 (B10's last site), and the reader's two pg_hba lines came across.
+  - **Both resolvers served throughout** (polled every 20 s): HTTP 200, status ok. Their
+    last read held at 00:54:37–39 while the site was down, and was advancing again from
+    00:57:37.
+  - Gates:
+    - pages;
+    - 0.8.430 on Ubuntu 26.04.1, PostgreSQL 18 and PHP 8.5.4;
+    - 0 manifest failures;
+    - `check_status` (job 37754);
+    - deploy tier 4/4;
+    - a full backup (192.5 MB, database 40.7 MB) and a level-2 verification (3,614
+      files, pass).
 
 ## Per-site gates (every site, both stages)
 
