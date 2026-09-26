@@ -22,6 +22,8 @@
  * on a mailbox the recipe covers. Without the owner check one member could
  * mark another's message judged and hide it from that member's own scan.
  *
+ * @version 1.5 - pendingCount(), deviceQueues(), lastJudgedOnDevice(): what the AI panel says
+ *   about a device recipe in place of a server run's last-ran line and queue notice
  * @version 1.4 - reasoningEffort(): each recipe carries the reasoning control a server run
  *   would send, so a thinking model does not spend the whole budget thinking
  * @version 1.3 - siteModel(): the site's own model, offered with one click where a browser
@@ -143,6 +145,127 @@ class MailboxDeviceAi {
 		$alias_ids = array_map('intval', array_keys(
 			MailboxAliasConfig::resolveBoundAliases(Recipe::decodeSourceConfig($recipe), $user_id)));
 		return array('recipe' => $recipe, 'job' => $job, 'alias_ids' => $alias_ids);
+	}
+
+	/**
+	 * The queue's WHERE: the same filters as EmailJobCandidates (live, not
+	 * spam, not a draft, parsed, unread, lookback) on the caller's rows sealed
+	 * to the mail vault on $alias_ids, minus items the recipe has logged.
+	 * entries() pages it; pendingCount() counts it, so the panel's number is
+	 * the drain's queue and nothing else.
+	 */
+	private static function queueWhere(int $user_id, Recipe $recipe, array $alias_ids, int $before_id, array &$params): string {
+		$params[':owner'] = $user_id;
+		$params[':aip_recipe_id'] = (int)$recipe->key;
+		$params[':mail_key'] = self::MAIL_KEY_PREFIX . '%';
+		$in = array();
+		foreach (array_values($alias_ids) as $i => $id) {
+			$in[] = ':alias_' . $i;
+			$params[':alias_' . $i] = (int)$id;
+		}
+		$lookback = EmailJobCandidates::lookbackDays(Recipe::decodeSourceConfig($recipe));
+		$where_time = '';
+		if ($lookback > 0) {
+			$where_time = ' AND iem_received_time >= :received_since';
+			$params[':received_since'] = gmdate('Y-m-d H:i:s', time() - $lookback * 86400);
+		}
+		$where_cursor = '';
+		if ($before_id > 0) {
+			$where_cursor = ' AND iem_inbound_email_message_id < :before_id';
+			$params[':before_id'] = $before_id;
+		}
+		return 'iem_iea_inbound_email_alias_id IN (' . implode(', ', $in) . ')
+				  AND iem_sealed_owner_user_id = :owner
+				  AND iem_sealed_key LIKE :mail_key
+				  AND iem_delete_time IS NULL
+				  AND iem_spam_verdict IS DISTINCT FROM \'spam\'
+				  AND iem_direction IS DISTINCT FROM \'draft\'
+				  AND iem_pending_parse IS NOT TRUE
+				  AND iem_is_read = false' . $where_time . $where_cursor . '
+				  AND ' . MultiAipRecipeItemLog::notExistsClause('iem_inbound_email_message_id::text');
+	}
+
+	/**
+	 * How many of the caller's messages $recipe_id has yet to judge on their
+	 * device: the drain's queue, counted, across every mailbox the recipe
+	 * covers whose domain's consent allows the registered model. Zero when no
+	 * model is registered, since nothing would judge them.
+	 *
+	 * @throws MailboxDeviceAiException
+	 */
+	public static function pendingCount(int $user_id, int $recipe_id): int {
+		$r = self::recipeFor($user_id, $recipe_id);
+		$alias_ids = array();
+		foreach ($r['alias_ids'] as $id) {
+			if (self::consentRefusal($user_id, (int)$id) === null) {
+				$alias_ids[] = (int)$id;
+			}
+		}
+		if (!$alias_ids) {
+			return 0;
+		}
+		$params = array();
+		$where = self::queueWhere($user_id, $r['recipe'], $alias_ids, 0, $params);
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT COUNT(*) FROM iem_inbound_email_messages WHERE ' . $where);
+		$stmt->execute($params);
+		return (int)$stmt->fetchColumn();
+	}
+
+	/**
+	 * The device queues the AI panel lists beside the server's runs in flight
+	 * (AiPanelService::jobs()): each of $user_id's device-capable recipes with
+	 * messages waiting for their browser, as {recipe_id, name, pending}.
+	 * Empty when the person has registered no model: nothing is waiting for a
+	 * device that will not come.
+	 *
+	 * @return array<int, array{recipe_id:int, name:string, pending:int}>
+	 */
+	public static function deviceQueues(int $user_id): array {
+		if ($user_id <= 0 || !PluginHelper::isPluginActive('joinery_ai')) {
+			return array();
+		}
+		if (MailboxDeviceAiHost::originForUser($user_id) === null) {
+			return array();
+		}
+		$job_ids = array();
+		foreach (array_keys(PipelineJobRegistry::all()) as $job_id) {
+			$job = PipelineJobRegistry::get((string)$job_id);
+			if ($job && $job->deviceCapable()) {
+				$job_ids[] = (string)$job_id;
+			}
+		}
+		if (!$job_ids) {
+			return array();
+		}
+		$out = array();
+		foreach (new MultiRecipe(array('owner_user_id' => $user_id, 'deleted' => false)) as $recipe) {
+			if (!in_array((string)$recipe->get('rcp_pipeline_job'), $job_ids, true) || !$recipe->get('rcp_enabled')) {
+				continue;
+			}
+			try {
+				$n = self::pendingCount($user_id, (int)$recipe->key);
+			} catch (MailboxDeviceAiException $e) {
+				continue;
+			}
+			if ($n > 0) {
+				$out[] = array('recipe_id' => (int)$recipe->key, 'name' => (string)$recipe->get('rcp_name'), 'pending' => $n);
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * When $recipe_id last judged a message on the owner's device (UTC), or
+	 * null: device log rows are the ones with no run id (D15).
+	 */
+	public static function lastJudgedOnDevice(int $recipe_id): ?string {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT MAX(aip_processed_time) FROM aip_recipe_item_log
+			  WHERE aip_rcp_recipe_id = ? AND aip_rcr_recipe_run_id IS NULL');
+		$stmt->execute(array($recipe_id));
+		$t = $stmt->fetchColumn();
+		return $t ? (string)$t : null;
 	}
 
 	/**
@@ -329,36 +452,12 @@ class MailboxDeviceAi {
 			return array('entries' => array(), 'next_before_id' => null);
 		}
 
-		$params = array(':owner' => $user_id, ':aip_recipe_id' => (int)$r['recipe']->key,
-			':mail_key' => self::MAIL_KEY_PREFIX . '%');
-		$in = array();
-		foreach (array_values($alias_ids) as $i => $id) {
-			$in[] = ':alias_' . $i;
-			$params[':alias_' . $i] = (int)$id;
-		}
-		$lookback = EmailJobCandidates::lookbackDays(Recipe::decodeSourceConfig($r['recipe']));
-		$where_time = '';
-		if ($lookback > 0) {
-			$where_time = ' AND iem_received_time >= :received_since';
-			$params[':received_since'] = gmdate('Y-m-d H:i:s', time() - $lookback * 86400);
-		}
-		$where_cursor = '';
-		if ($before_id > 0) {
-			$where_cursor = ' AND iem_inbound_email_message_id < :before_id';
-			$params[':before_id'] = $before_id;
-		}
+		$params = array();
+		$where = self::queueWhere($user_id, $r['recipe'], $alias_ids, $before_id, $params);
 		$sql = 'SELECT iem_inbound_email_message_id, iem_sealed_key, iem_received_time, iem_dkim_result,
 					iem_spf_result, iem_dmarc_result, iem_auth_source, ' . implode(', ', self::ENTRY_COLUMNS) . '
 				FROM iem_inbound_email_messages
-				WHERE iem_iea_inbound_email_alias_id IN (' . implode(', ', $in) . ')
-				  AND iem_sealed_owner_user_id = :owner
-				  AND iem_sealed_key LIKE :mail_key
-				  AND iem_delete_time IS NULL
-				  AND iem_spam_verdict IS DISTINCT FROM \'spam\'
-				  AND iem_direction IS DISTINCT FROM \'draft\'
-				  AND iem_pending_parse IS NOT TRUE
-				  AND iem_is_read = false' . $where_time . $where_cursor . '
-				  AND ' . MultiAipRecipeItemLog::notExistsClause('iem_inbound_email_message_id::text') . '
+				WHERE ' . $where . '
 				ORDER BY iem_inbound_email_message_id DESC
 				LIMIT ' . (self::PAGE_SIZE + 1);
 		$stmt = DbConnector::get_instance()->get_db_link()->prepare($sql);

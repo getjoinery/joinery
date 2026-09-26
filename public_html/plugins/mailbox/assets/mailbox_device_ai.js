@@ -43,7 +43,20 @@
  * same as the settings page) and the model saved here — with what the
  * operator can see said plainly to a member.
  *
- * Vanilla JS, jy-ui classes, no framework. @version 1.6 - Test sends the reasoning control
+ * Ready needs no click (R7): with a model saved here the section shows one
+ * line naming it, checks the model on its own once per page load (GET
+ * {base}/models, the same gates Test names, which is also when the browser
+ * asks to reach the person's network), and only then lets the drain run. The
+ * fields, Save and Test sit behind "Change"; "Test again" runs the full Test.
+ *
+ * Once the check says reachable the section is compact: one muted line
+ * ("Your model X at host is reachable. Change"), warnings, and the drain's
+ * line only while it has something to say. The title, the custody sentence,
+ * the fields, Save and Test all sit behind Change.
+ *
+ * Vanilla JS, jy-ui classes, no framework. @version 1.8 - compact once reachable
+ * @version 1.7 - the ready state is one line and an automatic check; the fields and buttons open on Change
+ * @version 1.6 - Test sends the reasoning control
  * @version 1.5 - the site's own model offered; registerOrigin() shared with the settings page
  * @version 1.4 - links the person-facing page "Using your own model"
  * @version 1.3 - on demand: Summarize and Scan now
@@ -269,6 +282,21 @@
 			+ '. Its verdicts may be unreliable.';
 	}
 
+	/**
+	 * The automatic check's outcome, as {kind, text}: r is {status, body} for
+	 * an answer to GET {base}/models, or {network: true, lna} when the fetch
+	 * itself failed. A list answered means the model can be reached and the
+	 * key is taken; anything else is what Test would say.
+	 */
+	function classifyProbe(r, local, model, host) {
+		if (r.network) return classify(r, local, model);
+		if (r.status === 401 || r.status === 403) return classify(r, local, model);
+		if (r.status >= 200 && r.status < 300) {
+			return { kind: 'ok', text: 'Reachable: ' + model + ' at ' + host + '.' };
+		}
+		return { kind: 'error', text: 'Your model answered with an error (' + r.status + '). Press Test again for the details.' };
+	}
+
 	// ---- this browser's settings ---------------------------------------------
 
 	function storeKey() {
@@ -385,7 +413,7 @@
 		root.textContent = '';
 		if (root.hidden) return;
 
-		root.appendChild(el('h3', 'aip-section-title', 'Your AI, your model'));
+		var title = el('h3', 'aip-section-title', 'Your AI, your model');
 		var note = el('p', 'mbx-dai-note',
 			'AI for this mailbox runs in this browser. Your mail is sent from here to the model you name. '
 			+ 'Joinery never sees it; whoever runs that model does. ');
@@ -394,7 +422,13 @@
 		docs.target = '_blank';
 		docs.rel = 'noopener';
 		note.appendChild(docs);
-		root.appendChild(note);
+		// Reachable and set: nothing to do here, so nothing to read either.
+		var compact = st.state === 'ready' && !!(probe.outcome && probe.outcome.kind === 'ok');
+		root.dataset.compact = compact ? '1' : '0';
+		if (!compact) {
+			root.appendChild(title);
+			root.appendChild(note);
+		}
 
 		if (st.state === 'no_origin') {
 			var p = el('p', 'mbx-dai-note');
@@ -409,14 +443,46 @@
 		}
 
 		var usable = st.usable || {};
+		var status = el('p', 'mbx-dai-status');
+		status.setAttribute('role', 'status');
+		var fieldsBox = el('div', 'mbx-dai-fields');
+		var hostName = (function () { try { return new URL(cfg.origin).host; } catch (e) { return cfg.origin; } })();
+		if (st.state === 'ready') {
+			// One line: the model, where, and the links. The rest waits behind Change.
+			var line = el('p', 'mbx-dai-note');
+			line.appendChild(document.createTextNode(compact ? 'Your model ' : 'Your model: '));
+			line.appendChild(el('code', null, usable.model));
+			line.appendChild(document.createTextNode(' at '));
+			line.appendChild(el('code', null, hostName));
+			line.appendChild(document.createTextNode(compact ? ' is reachable. ' : '. '));
+			var changeLink = el('button', 'mbx-dai-link', 'Change');
+			changeLink.type = 'button';
+			changeLink.addEventListener('click', function () { fieldsBox.hidden = !fieldsBox.hidden; });
+			line.appendChild(changeLink);
+			if (!compact) {
+				line.appendChild(document.createTextNode(' · '));
+				var testLink = el('button', 'mbx-dai-link', 'Test again');
+				testLink.type = 'button';
+				testLink.addEventListener('click', function () { testBtn.click(); });
+				line.appendChild(testLink);
+			}
+			root.appendChild(line);
+			fieldsBox.hidden = true;
+		}
+		if (compact) {
+			fieldsBox.appendChild(title);
+			fieldsBox.appendChild(note);
+		}
+		root.appendChild(fieldsBox);
+
 		var where = el('p', 'mbx-dai-note');
 		where.appendChild(document.createTextNode('Your model answers at '));
 		where.appendChild(el('code', null, cfg.origin));
 		where.appendChild(document.createTextNode(' '));
-		var change = el('a', null, 'Change');
+		var change = el('a', null, 'Change the address');
 		change.href = cfg.settings_url || '/profile/mailbox/settings';
 		where.appendChild(change);
-		root.appendChild(where);
+		fieldsBox.appendChild(where);
 
 		var path = el('input', 'mbx-dai-input');
 		path.type = 'text';
@@ -435,12 +501,10 @@
 		model.placeholder = 'e.g. accounts/fireworks/models/…';
 		model.value = usable.model || (prefill ? prefill.model : '');
 		model.autocomplete = 'off';
-		root.appendChild(field('Rest of the address', path));
-		root.appendChild(field('Key', key));
-		root.appendChild(field('Model', model));
+		fieldsBox.appendChild(field('Rest of the address', path));
+		fieldsBox.appendChild(field('Key', key));
+		fieldsBox.appendChild(field('Model', model));
 
-		var status = el('p', 'mbx-dai-status');
-		status.setAttribute('role', 'status');
 		var actions = el('div', 'mbx-dai-actions');
 		var saveBtn = el('button', 'btn btn-secondary', 'Save in this browser');
 		saveBtn.type = 'button';
@@ -448,11 +512,12 @@
 		testBtn.type = 'button';
 		actions.appendChild(saveBtn);
 		actions.appendChild(testBtn);
-		root.appendChild(actions);
-		root.appendChild(status);
+		fieldsBox.appendChild(actions);
+		(compact ? fieldsBox : root).appendChild(status);
 		root.appendChild(el('div', 'mbx-dai-infos'));
 		var drainLine = el('p', 'mbx-dai-status mbx-dai-drain', drain.status);
 		drainLine.setAttribute('role', 'status');
+		drainLine.hidden = compact && quietDrain(drain.status);
 		root.appendChild(drainLine);
 		var here = window.MailboxReader ? window.MailboxReader.currentAddress() : '';
 		if (here && drain.infoFor !== here) {
@@ -460,7 +525,14 @@
 		} else {
 			renderInfo();
 		}
-		setTimeout(tick, 0);
+		// The check runs by itself, once, before the drain: it is where the
+		// browser asks to reach the person's network, and what says why not.
+		if (st.state === 'ready') {
+			probeOnce({ url: callUrl(cfg.origin, usable.path), key: usable.key || '', model: usable.model })
+				.then(function () { tick(); });
+		} else {
+			setTimeout(tick, 0);
+		}
 
 		function collect() {
 			var p = normalizePath(path.value);
@@ -474,8 +546,9 @@
 		saveBtn.addEventListener('click', function () {
 			var entry = collect();
 			if (!entry) return;
-			status.textContent = save(entry) ? 'Saved in this browser.' : 'This browser would not keep it (private window?).';
-			root.dataset.state = sectionState({ origin: cfg.origin, fortress: true }, entry).state;
+			if (!save(entry)) { status.textContent = 'This browser would not keep it (private window?).'; return; }
+			probe.started = false;   // a new entry: check it again
+			render();
 		});
 
 		testBtn.addEventListener('click', function () {
@@ -555,16 +628,64 @@
 		});
 	}
 
+	// ---- the automatic check ---------------------------------------------------------
+
+	var probe = { started: false, outcome: null };
+
+	/** The check's line, on whatever render is current (the section re-renders
+	 *  on every unlock and mailbox change). */
+	function setProbeStatus(text, kind) {
+		var n = root && root.querySelector('.mbx-dai-status:not(.mbx-dai-drain)');
+		if (n) n.textContent = text;
+		if (root && kind) root.dataset.outcome = kind;
+	}
+
+	/** Once per page load (or per saved entry): can the model be reached with
+	 *  this key? Its outcome is the status line, kept across renders; never
+	 *  throws. */
+	function probeOnce(endpoint) {
+		if (probe.started || !endpoint.url) {
+			if (probe.outcome) setProbeStatus(probe.outcome.text, probe.outcome.kind);
+			else if (probe.started) setProbeStatus('Checking your model…');
+			return Promise.resolve();
+		}
+		probe.started = true;
+		probe.outcome = null;
+		var host = new URL(endpoint.url).hostname;
+		var local = isLocalHost(host);
+		var hostName = new URL(endpoint.url).host;
+		setProbeStatus('Checking your model…');
+		return fetch(endpoint.url.replace(/\/chat\/completions$/, '/models'), {
+			method: 'GET', headers: endpoint.key ? { Authorization: 'Bearer ' + endpoint.key } : {}, credentials: 'omit',
+		}).then(function (res) {
+			return res.text().then(function (t) { return classifyProbe({ status: res.status, body: parseBody(t) }, local, endpoint.model, hostName); });
+		}, function () {
+			return lnaState().then(function (s) { return classifyProbe({ network: true, lna: s }, local, endpoint.model, hostName); });
+		}).then(function (out) {
+			probe.outcome = out;
+			setProbeStatus(out.text, out.kind);
+			render();   // reachable collapses the section; anything else opens it
+		}, function () { /* the drain's own call says more */ });
+	}
+
 	// ---- the drain: judging new mail while the mailbox is open ------------------------
 
 	var DRAIN_CAP = 200;         // items per page load (R6)
 	var DRAIN_TICK_MS = 30000;   // how often an idle drain looks for new mail
 	var drain = { running: false, count: 0, status: '', stopped: false, info: null, infoFor: '' };
 
+	/** Drain text with nothing to act on, hidden in the compact section. */
+	function quietDrain(text) {
+		return !text || /^Up to date/.test(text);
+	}
+
 	function setDrainStatus(text) {
 		drain.status = text;
 		var n = root && root.querySelector('.mbx-dai-drain');
-		if (n) n.textContent = text;
+		if (n) {
+			n.textContent = text;
+			n.hidden = root.dataset.compact === '1' && quietDrain(text);
+		}
 	}
 
 	/** What the server says about this mailbox's device recipes (fresh nonces each time). */
@@ -618,7 +739,7 @@
 					if (out.status === 'dropped') { setDrainStatus('Paused while your vault is locked.'); return; }
 					if (out.status === 'stop') {
 						setDrainStatus('Your model did not answer' + (out.http ? ' (' + out.http + ')' : '') + ': '
-							+ (out.reason === 'unreachable' ? 'it could not be reached.' : out.reason) + ' AI waits until it does; use Test to check.');
+							+ (out.reason === 'unreachable' ? 'it could not be reached.' : out.reason) + ' AI waits until it does; press Test again to check.');
 						drain.stopped = true;
 						return;
 					}
@@ -664,8 +785,12 @@
 		if (!info || drain.infoFor !== mailbox) return;
 		if (info.consent_refusal) { box.appendChild(el('p', 'mbx-dai-warn', info.consent_refusal)); }
 		if (info.recipes.length) {
-			box.appendChild(el('p', 'mbx-dai-info', 'Runs on your device while this mailbox is open: '
-				+ info.recipes.map(function (r) { return r.label; }).join(', ') + '.'));
+			// The recipe cards above already say each runs on this device: the
+			// compact section does not say it again.
+			if (root.dataset.compact !== '1') {
+				box.appendChild(el('p', 'mbx-dai-info', 'Runs on your device while this mailbox is open: '
+					+ info.recipes.map(function (r) { return r.label; }).join(', ') + '.'));
+			}
 		} else {
 			box.appendChild(el('p', 'mbx-dai-info', 'No AI recipe is on for this mailbox. Turn one on above.'));
 		}
@@ -769,7 +894,7 @@
 		section: section,
 		messageActions: messageActions,
 		registerOrigin: registerOrigin,
-		logic: { isLocalHost: isLocalHost, normalizePath: normalizePath, callUrl: callUrl, sectionState: sectionState, siteOffer: siteOffer, classify: classify,
+		logic: { isLocalHost: isLocalHost, normalizePath: normalizePath, callUrl: callUrl, sectionState: sectionState, siteOffer: siteOffer, classify: classify, classifyProbe: classifyProbe,
 			gradeModel: gradeModel, paramsFromTag: paramsFromTag, floorWarning: floorWarning,
 			entryFromMessage: entryFromMessage, actionLabel: actionLabel },
 	};

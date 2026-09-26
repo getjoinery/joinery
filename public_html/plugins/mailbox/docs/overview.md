@@ -1886,8 +1886,16 @@ browser.
 **The panel section.** `mailbox_device_ai.js` builds "Your AI, your model" and
 the mail page docks it in the AI panel as its `hostSection`. It is hidden
 unless the open mailbox is Fortress; it links to the settings page while no
-origin is registered; otherwise it shows the origin, the path, key and model
-fields, **Test**, the drain's status line, and the docs link. Test posts
+origin is registered; with a model saved in this browser it is one line
+naming the model and host, an automatic check (`probeOnce()`: GET
+`{base}/models` with the key, once per page load, before the drain; it is
+where the browser asks to reach the person's network) whose outcome is the
+status line, and *Change* / *Test again* links, the fields and buttons
+behind *Change*; once the check says reachable the section is compact —
+that one line, warnings, and the drain's line only while it has something
+to say, the title and custody sentence behind *Change* too; otherwise the
+path, key and model fields with **Save in this browser** and **Test**. Test
+posts
 `mailbox/device_ai_test_prompt {mailbox}` (the caller's scan recipe's system
 blocks, else the default, plus a made-up 4096-character digest — never real
 mail) to `{origin}{path}/chat/completions` and names the gate that stopped a
@@ -1897,8 +1905,16 @@ checked against `GET {base}/models`: 401/403 there means the key), a missing
 model, or a context overflow shown verbatim. `gradeModel()` grades the model
 name as `AiEndpointRegistry` does (the reference list's globs, else the size
 its tag announces) and warns when it is below a bound recipe's `min_tier`.
-The recipe cards on a Fortress mailbox say "Runs on your device while this
-mailbox is open" (`AiPanelService`, `runsOnDeviceFor()`).
+The recipe cards on a Fortress mailbox carry the device's own history in
+place of a server run's: "Last judged on your device N minutes ago"
+(`MailboxDeviceAi::lastJudgedOnDevice()`, the newest device log row, the
+ones with no run id), or "Runs on your device while this mailbox is open;
+nothing judged yet" (`AiPanelService`, `runsOnDeviceFor()`). The queue
+itself is a job in flight: `deviceQueues()` counts each enabled device
+recipe's unjudged messages (`pendingCount()`, the same WHERE the drain
+pages) and `AiPanelService::jobs()` lists each as a *Working now* entry,
+"Judged on your device while the mailbox is open · N to go", counted in the
+panel's job number, once a model is registered.
 
 **Consent.** `MailboxDeviceAi::originTrust()` classes the registered origin as
 `local` (a private host), `trusted` (the host of `joinery_ai_fireworks_base_url`)

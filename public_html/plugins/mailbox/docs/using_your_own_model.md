@@ -18,10 +18,13 @@ model on a computer of your own.
    address, up to the host name, is kept with your account; the rest, the key
    and the model name stay in this browser, so on another computer you enter
    those again in the AI panel on your mail.
-2. **Press Test.** Open your mail; in the AI panel, *Your AI, your model*
-   shows what you chose. Test sends the security scan's real instructions
-   with a made-up sample message to your model and tells you what happened,
-   in one line, with the fix when something stopped it.
+2. **Open your mail.** The AI panel checks the model on its own. When it
+   can be reached, all that stays is one line, "Your model … is reachable",
+   with *Change* for the details. If your browser asks whether this site may
+   reach your computer or network, allow it. When something stopped the
+   check, the panel says what and the fix. Behind *Change*, *Test* sends the
+   security scan's real instructions with a made-up sample message, for when
+   you change something or want to check the context.
 3. **Turn the AI on for the mailbox.** In the same panel, turn on *Email
    triage* for one-line summaries, *Email security scan* for the danger
    check, or both. On an end-to-end encrypted mailbox each card says *Runs on
@@ -92,9 +95,9 @@ numbers; a name needs `https://`. `tailscale serve` gives an Ollama an
 Ollama's origins line too. Safari and Firefox may refuse a plain `http://`
 call from a secure page; the `https://` route avoids that.
 
-## What Test says, and what to do
+## What the check says, and what to do
 
-- **Reachable**, with the model's name: nothing to do.
+- **Reachable**, with the model's name and address: nothing to do.
 - **Your browser asks first** or **your browser blocked it**: allow the site
   to reach your computer in the browser's prompt or site settings.
 - **Your model refused this site**: add the site to Ollama's origins line and
