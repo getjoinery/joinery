@@ -299,6 +299,14 @@ pub trait Vfs: Send + Sync {
     /// earlier offset has to go back and read from there, and a source that
     /// cannot rewind turns every resync into starting the whole file again.
     fn open_read(&self, path: &Path) -> VfsResult<Box<dyn ReadSeek>>;
+
+    /// Open the FILE at this path for reading, with the fingerprint of the
+    /// file the handle reads. The fingerprint is taken from the open handle,
+    /// never from a second lookup of the path, so the identity checked, the
+    /// bytes hashed and the bytes sent are one file's whatever the path holds
+    /// by then (`specs/drive_file_identity.md`, T1-D). `None` for a directory
+    /// or for nothing.
+    fn open_file(&self, path: &Path) -> VfsResult<Option<(Box<dyn ReadSeek>, Fingerprint)>>;
 }
 
 #[cfg(test)]

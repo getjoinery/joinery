@@ -75,6 +75,38 @@ describes. When the create lands, the row is re-keyed to the real id — togethe
 with its children's parent pointers, its `local_index` rows, and its journal
 rows, in one transaction.
 
+### A file's own identity
+
+The server id says which entity a record is. A file's own identity says which
+file on this disk is that record's: the pair of its file id (the inode, or the
+volume file index on Windows) and its birth time. A rename or a move within the
+volume keeps both; a safe-save, a copy or a new file gets a new pair, and a
+recycled file number arrives with a new birth. Each file record keeps its own
+file (`own_file`): set when a scan mints the record, when a download or upload
+lands, and when the record takes a new file (a safe-save read as an edit);
+carried by every engine move; handed over, never copied, when the engine gives
+the file to another record.
+
+- **Strong and weak volumes.** A pair with both halves read, on a volume whose
+  ids survive a rename (`Personality::stable_file_identity`, which the
+  personality probe decides by renaming a probe file), is strong. FAT and
+  exFAT (positional ids), a volume that reports no birth or a birth that is
+  not the moment the file was made, one the probe catches changing an id or
+  that cannot number files uniquely (ReFS), and one the probe cannot write
+  to are weak.
+- **The scan pairs by identity first** on a strong volume: a record's own file
+  is that record's wherever it stands, and the path decides only for a file no
+  record owns. A weak volume pairs path-first.
+- **The executor acts only on the file it planned for.** On a strong volume a
+  move, a park, a trash or a conflict copy of a file stands down
+  (`Overtaken`) when the file at the path is not the record's own, and the
+  next scan decides from where that file is. An upload or an adoption opens
+  the file once (`Vfs::open_file`) and reads its identity, its hash and the
+  bytes it sends from that one handle, so a file renamed over the path part
+  way through cannot go up as this record's. On a weak volume every op acts
+  on its path, and a swap between the scan and the op is corrected only by
+  the next scan.
+
 ---
 
 ## One pass
@@ -596,8 +628,9 @@ edited while the download was in flight is not overwritten — the download is
 withdrawn and the local edit wins. A download's byte count comes from the bytes
 that reached the spool, never from a header.
 
-**Uploads** commit their hash at init. A file that changes mid-upload fails
-verification at completion and re-queues. After the transfer the fingerprint is
+**Uploads** commit their hash at init, read from the same open handle the
+bytes are sent from. A file whose bytes change mid-upload fails verification
+at completion and re-queues. After the transfer the fingerprint is
 re-checked: unchanged means record the agreement, changed means leave the entry
 pending so the newer content is still sent.
 

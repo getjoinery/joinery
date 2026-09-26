@@ -2542,3 +2542,169 @@ fn a_held_file_set_aside_by_a_download_on_its_own_path_keeps_its_record() {
         device.store.open_issues().unwrap()
     );
 }
+
+// ---------------------------------------------------------------------------
+// The executor acts only on the file it planned for
+// (`specs/drive_file_identity.md`, T1-D). A swap in the pass -- after the scan
+// read the disk and before the op runs -- puts another record's file at the
+// path an op was planned against. Each op below stands down for the next scan
+// rather than act on that file.
+// ---------------------------------------------------------------------------
+
+/// Two files trade names the way an application's Save As or a user's two
+/// renames do: through a temp name.
+fn swap_names(device: &Device, a: &str, b: &str) {
+    device.fs.user_rename(a, ".swap.tmp");
+    device.fs.user_rename(b, a);
+    device.fs.user_rename(".swap.tmp", b);
+}
+
+/// A synced record of the file at `name`, knowing that file as its own.
+fn owning(device: &Device, id: EntityId, name: &str) -> Entry {
+    let mut e = fresh(id, None, name, LocalStatus::Synced);
+    e.synced_placement = Some(Placement { parent: None, name: name.into() });
+    let fp = device.fs.fingerprint_at(name).expect("the file stands there");
+    e.synced_fingerprint = Some(fp);
+    e.own_file = Some(fp.identity());
+    e
+}
+
+/// The server deleted `gone.txt`; before its local trash ran, a swap put
+/// another record's file at its path. Trashing by the path took that file,
+/// and the file left at the other record's path read as its replacement
+/// (kill2 75129). Only the record's own file goes to the trash.
+#[test]
+fn a_local_trash_takes_only_the_records_own_file() {
+    let (_clock, _server, device) = world();
+    device.fs.user_write("gone.txt", b"deleted on the server");
+    device.fs.user_write("kept.txt", b"another record's file");
+    let id = EntityId::file(1);
+    let mut gone = owning(&device, id, "gone.txt");
+    gone.remote_deleted = true;
+    device.store.put_entry(&gone).unwrap();
+    device.store.put_entry(&owning(&device, EntityId::file(2), "kept.txt")).unwrap();
+    swap_names(&device, "gone.txt", "kept.txt");
+
+    let report = do_one(&device, id, Action::TrashLocal);
+    assert!(device.fs.trashed().is_empty(), "another record's file went to the trash: {:?}", device.fs.trashed());
+    assert_eq!(device.fs.peek("gone.txt").as_deref(), Some(&b"another record's file"[..]));
+    assert_eq!(device.fs.peek("kept.txt").as_deref(), Some(&b"deleted on the server"[..]));
+    assert!(device.store.get_entry(id).unwrap().is_some(), "the record waits for the next scan");
+    assert_eq!((report.done, report.overtaken), (0, 1), "the trash stands down");
+}
+
+/// The server renamed `a.txt` to `c.txt`; before the local move ran, a swap
+/// put another record's file at `a.txt`. The move would have carried that
+/// file to `c.txt` under this record's name. Only the record's own file is
+/// moved.
+#[test]
+fn a_local_move_carries_only_the_records_own_file() {
+    let (_clock, _server, device) = world();
+    device.fs.user_write("a.txt", b"the file the server renamed");
+    device.fs.user_write("b.txt", b"another record's file");
+    let id = EntityId::file(1);
+    let mut moving = owning(&device, id, "a.txt");
+    moving.remote.name = "c.txt".into();
+    device.store.put_entry(&moving).unwrap();
+    device.store.put_entry(&owning(&device, EntityId::file(2), "b.txt")).unwrap();
+    swap_names(&device, "a.txt", "b.txt");
+
+    let report = do_one(
+        &device,
+        id,
+        Action::ApplyRemoteMove { to: Placement { parent: None, name: "c.txt".into() } },
+    );
+    assert!(device.fs.peek("c.txt").is_none(), "another record's file was carried to the new name");
+    assert_eq!(device.fs.peek("a.txt").as_deref(), Some(&b"another record's file"[..]));
+    assert_eq!(device.fs.peek("b.txt").as_deref(), Some(&b"the file the server renamed"[..]));
+    assert_eq!((report.done, report.overtaken), (0, 1), "the move stands down");
+}
+
+/// A conflict sets this record's copy aside under a conflict name and hands
+/// it the record's identity; a swap in the pass put another record's file at
+/// the path. Only the record's own file is set aside.
+#[test]
+fn a_conflict_copy_sets_aside_only_the_records_own_file() {
+    let (_clock, _server, device) = world();
+    device.fs.user_write("a.txt", b"this record's edit");
+    device.fs.user_write("b.txt", b"another record's file");
+    let id = EntityId::file(1);
+    device.store.put_entry(&owning(&device, id, "a.txt")).unwrap();
+    device.store.put_entry(&owning(&device, EntityId::file(2), "b.txt")).unwrap();
+    swap_names(&device, "a.txt", "b.txt");
+
+    let report = do_one(&device, id, Action::PreserveLocalAs { name: "a (conflicted copy).txt".into() });
+    assert!(device.fs.peek("a (conflicted copy).txt").is_none(), "another record's file was set aside");
+    assert_eq!(device.fs.peek("a.txt").as_deref(), Some(&b"another record's file"[..]));
+    let records = device.store.every_entry().unwrap();
+    assert_eq!(records.len(), 2, "no rescued record was minted: {records:?}");
+    assert_eq!((report.done, report.overtaken), (0, 1), "the rescue stands down");
+}
+
+/// An upload opens its file once and reads everything from that handle. Here
+/// the disk swaps two files of one size right after the upload's first look
+/// at the path: read again by the path, the hash and the bytes sent were the
+/// other file's, sent up as this record's next version under this record's
+/// identity.
+#[test]
+fn an_upload_sends_the_file_it_checked_whatever_the_path_holds_by_then() {
+    let (_clock, server, device) = world();
+    let server_id = server.seed_file(None, "a.txt", b"the version the server has");
+    let edit = b"this record's edit, going up";
+    let other = b"another record's file, 28 by";
+    assert_eq!(edit.len(), other.len(), "construction: one size, so only the bytes tell them apart");
+    device.fs.user_write("a.txt", b"the version the server has");
+    device.fs.user_write("b.txt", other);
+    let id = EntityId::file(server_id);
+    let mut entry = owning(&device, id, "a.txt");
+    entry.synced_content = Some(ContentId {
+        sha256: sha256_hex(b"the version the server has"),
+        size: b"the version the server has".len() as u64,
+    });
+    device.store.put_entry(&entry).unwrap();
+    device.fs.user_write("a.txt", edit);
+    device.fs.between_reads("a.txt", |fs| {
+        fs.user_rename("a.txt", ".swap.tmp");
+        fs.user_rename("b.txt", "a.txt");
+        fs.user_rename(".swap.tmp", "b.txt");
+    });
+
+    let report = do_one(&device, id, Action::UploadVersion);
+    assert_eq!(device.fs.peek("a.txt").as_deref(), Some(&other[..]), "construction: the swap landed during the upload");
+    let on_server = server.files().into_iter().find(|f| f.id == server_id).expect("the file is on the server");
+    assert_ne!(on_server.sha256, sha256_hex(other), "another record's file went up as this record's version");
+    assert_eq!(on_server.sha256, sha256_hex(edit), "the server's version is not the file the upload checked");
+    assert_eq!(report.done, 1, "the upload goes through");
+}
+
+/// Adopting a match records the file's fingerprint beside the hash it
+/// matched on: one handle, so the two are one file's. Here the disk swaps
+/// after the first look; read again by the path, the hash was the other
+/// file's -- the server's bytes -- recorded beside this file's fingerprint,
+/// and the next scan would skip hashing a file whose bytes differ.
+#[test]
+fn an_adoption_records_the_fingerprint_of_the_file_it_hashed() {
+    let (_clock, server, device) = world();
+    let matching = b"the bytes the server has";
+    let server_id = server.seed_file(None, "a.txt", matching);
+    device.fs.user_write("a.txt", b"a different file, first at the path");
+    device.fs.user_write("b.txt", matching);
+    let id = EntityId::file(server_id);
+    let mut entry = fresh(id, None, "a.txt", LocalStatus::PendingDownload);
+    entry.remote_content = Some(ContentId { sha256: sha256_hex(matching), size: matching.len() as u64 });
+    device.store.put_entry(&entry).unwrap();
+    let first = device.fs.fingerprint_at("a.txt").unwrap();
+    device.fs.between_reads("a.txt", |fs| {
+        fs.user_rename("a.txt", ".swap.tmp");
+        fs.user_rename("b.txt", "a.txt");
+        fs.user_rename(".swap.tmp", "b.txt");
+    });
+
+    do_one(&device, id, Action::Adopt);
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert_ne!(
+        after.synced_fingerprint,
+        Some(first),
+        "the first file's fingerprint was recorded beside the other file's hash"
+    );
+}

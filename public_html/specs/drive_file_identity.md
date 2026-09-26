@@ -11,9 +11,16 @@ B10). Commit 2 (the scan, and the upload's half of T1-D) VALID 2026-09-25
 (freeze 609ad11f): against commit 1 on the same 420 seeds, swaps off
 identical; swaps on, leaked files 158 to 40 and swap-oracle fires 74 to 5;
 every G->R traced, to older gaps now filed as the reset's B2-B9; committed
-`780ce2c7`. The reset's harness fixes B7-B9 come first, as their own commit
-(NEEDED and VALID, public-html-e9, 2026-09-25). Commit 3 (the executor) is
-next, measured alone against that commit.**
+`780ce2c7`. The reset's harness fixes B7-B9 came first, as their own commit
+(NEEDED and VALID, public-html-e9, 2026-09-25). Commit 3 (the executor)
+NEEDED and VALID 2026-09-25 (freeze 9746bee1), measured alone against B7-B9:
+births hidden, 420 of 420 traces identical; swaps off identical; swaps on,
+leaked files 40 to 36, swap-oracle fires 5 to 3, three seeds red to green
+(hostile2 74414, kill2 75121, 75129) and none green to red. Every changed
+trace diverges first at a stand-down, and all 25 stood down at another
+record's own file or at a file no record owned yet. Conflict names on the
+server 4632 to 4645: seven of those seeds keep alive, under a conflict name,
+a file the base sent to the OS trash. Open: owner question Q2.**
 
 **Owner decision 2026-09-25: a file's own identity decides which record it belongs to, and its
 path decides only when that identity is gone. This settles the reset's AH
@@ -247,17 +254,23 @@ holding plain bytes).
 reads or moves a local file carries the identity the plan saw:
 
 - **Upload and version upload** open the file once and check the handle's
-  identity. Then they hash and send from that same handle. Today `upload`
-  fingerprints by path, hashes by path, then `open_read`s the path a third
-  time. On a mismatch, nothing is sent (`Overtaken`), and the next scan
-  re-reads.
+  identity. Then they hash and send from that same handle
+  (`Vfs::open_file`). On a mismatch, nothing is sent (`Overtaken`), and the
+  next scan re-reads. **Adopt** reads the fingerprint it records and the
+  hash it matched on from one handle the same way, so it never records one
+  file's fingerprint beside another's hash.
 - **`move_local`, `trash_local` and the conflict and park renames of a file**
   check the identity at `from` immediately before the rename, as the folder
   arm already asks the directory. POSIX has no conditional rename, so a
   window of microseconds remains. What a move there gets wrong, the next
   scan reads by identity. No bytes are sent from it.
-- **With a weak identity** the file id alone is checked: a mismatch costs a
-  pass. That is order, not identity, which is the doctrine.
+- **With a weak identity** nothing is checked and the op acts on its path,
+  as today: nothing rebinds a weak record's own file, so an id kept from
+  before a same-bytes save would refuse that file on every pass
+  (`a_server_delete_lands_on_a_file_saved_again_with_the_same_bytes_without_births`).
+  On a weak volume the swap-in-the-pass cases T1-D guards against are
+  unguarded; the scan's next pass is the only correction. One gate,
+  `trusted_own_file`, decides for the upload and every executor op.
 
 **A file moved over another's name (O2).** The strong scan reads it as the
 mover moved and the file it replaced deleted, in the same pass. Today's plan
@@ -612,16 +625,18 @@ is frozen (R5).
      caller.
 
    Measured alone against commit 1.
-3. **The executor checks it.** Measured alone against commit 1, then with
-   commit 2 (R7: each with its neighbour removed). What is left for it once
-   the upload's half moved into commit 2:
+3. **The executor checks it.** Built and measured alone against the B7-B9
+   commit, births hidden as the control (NEEDED and VALID 2026-09-25). What
+   was left for it once the upload's half moved into commit 2:
    - `move_local` checks the file at `from` is the record's own;
    - `trash_local` checks the same before it trashes: on a strong volume it
      trashes only the record's own file, and otherwise answers overtaken for
      the next scan to decide (kill2 75129: a swap in the pass put another
      record's file at the path, the trash took it, and that record read the
      unowned file left at its own path as its replacement);
-   - hashing and sending read one handle.
+   - the conflict copy (`preserve_local_as`) checks the same before it sets
+     the file aside;
+   - hashing and sending read one handle, and adopt's fingerprint and hash.
 
 **Simulator fidelity, known.** The simulated spool commit keeps the id
 of a file it lands on ("same inode, new content", by design), where a real

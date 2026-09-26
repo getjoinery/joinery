@@ -1747,7 +1747,8 @@ belt in, before the belt lands.** B1 is what happens without this.
   (reviewer): the harness fixes B7-B9 as their own commit, shown to move no
   engine verdict on the 420 seeds (NEEDED and VALID 2026-09-25; see "B7-B9
   measured" below); then commit 3 (the executor), measured alone against the
-  B7-B9 commit with births hidden as the control; then B11; then
+  B7-B9 commit with births hidden as the control (NEEDED and VALID
+  2026-09-25); then B11 and B12; then
   B6, a file at a reserved download slot gets a record so the hold reaches
   it; then C9 part 2 with B4 and B5, the D1 park gap and C13. B3 waits for its
   prototype's three neighbour reds to be traced.
@@ -1811,7 +1812,9 @@ belt in, before the belt lands.** B1 is what happens without this.
   download landed; the next pass minted it there as a new plain file and
   sent a sealed body in the clear. With no record there is no identity, and
   the hold for a file saved in a vault and moved out before it was sent
-  (Q2) cannot reach it. Commit 1 has the same rule.
+  (Q2) cannot reach it. Commit 1 has the same rule. Kill2 75129 is green
+  under file identity commit 3, whose trash check keeps the swapped file off
+  the trash; the rule this entry names is still open.
 - **B7, fixed in the harness 2026-09-25, NEEDED and VALID (public-html-e9) (traced in plain2
   75221): the folder oracle lent a chaos-swapped file only its partner
   body's recorded folders.** A landing save set aside and then swapped into
@@ -1859,6 +1862,13 @@ belt in, before the belt lands.** B1 is what happens without this.
   record's own file must stand somewhere on this disk, by identity, or the
   check fires "held file gone". Harness only; its own commit, after commit
   3, so that commit 3 is measured alone.
+- **B12, open (public-html-e9, 2026-09-25, instinct): `Vfs::open_file`
+  checks for a symlink on the path, and `File::open` follows one placed
+  between the two calls.** The handle then reads the link's target, with the
+  target's identity. On a strong volume the executor's identity check
+  refuses it; on a weak one nothing does. Opening with `O_NOFOLLOW` (Unix)
+  and `FILE_FLAG_OPEN_REPARSE_POINT` (Windows) closes it. Older than commit
+  3: a fingerprint then an `open_read` had the same window and no check.
 - **D1 (2026-09-24), a sealed file dragged out of a vault is held, not
   converted. NEEDED and VALID (public-html-25), landed 0c66212d.** Post-commit
   reading 181843af -> 0c66212d: identical, seed for seed, to the reviewed

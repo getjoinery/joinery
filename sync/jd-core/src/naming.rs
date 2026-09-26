@@ -1123,6 +1123,13 @@ mod tests {
         fn open_read(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Box<dyn jd_vfs::ReadSeek>> {
             unreachable!("naming does not transfer bytes")
         }
+        #[allow(clippy::type_complexity)]
+        fn open_file(
+            &self,
+            _p: &std::path::Path,
+        ) -> jd_vfs::VfsResult<Option<(Box<dyn jd_vfs::ReadSeek>, jd_vfs::Fingerprint)>> {
+            unreachable!("naming does not transfer bytes")
+        }
         fn scratch(&self) -> jd_vfs::VfsResult<Box<dyn jd_vfs::ScratchFile>> {
             unreachable!("naming does not transfer bytes")
         }
