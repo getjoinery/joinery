@@ -4079,7 +4079,10 @@ class SystemMultiBaseIncremental implements Iterator {
 		$this->incremental_position = 0;
 
 		$this->multi_base = $multi_base;
-		$this->original_limit = $multi_base->limit;
+		// The constructor stores an absent limit as 0, which the query builder
+		// reads as "no limit" — read it the same way here, or a collection
+		// built without a limit loads every row in one segment.
+		$this->original_limit = $multi_base->limit ?: NULL;
 		$this->original_offset = $multi_base->offset;
 
 		if ($this->original_limit !== NULL) {
