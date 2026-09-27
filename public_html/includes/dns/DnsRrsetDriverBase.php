@@ -3,7 +3,7 @@
  * DnsRrsetDriverBase - shared behaviour for providers that model DNS as record
  * SETS rather than individual records.
  *
- * Gandi, deSEC, Route 53, Google Cloud DNS, Azure DNS and GoDaddy all store one
+ * Gandi, deSEC, Hetzner, Route 53, Google Cloud DNS, Azure DNS and GoDaddy all store one
  * object per (name, type) holding a list of values. There are no per-record ids,
  * so creating one record means reading the set, adding a value and writing the
  * whole set back — and doing it any other way silently destroys the siblings

@@ -2,6 +2,7 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.15 - one approval panel for every scope (ApprovalChallengePanel)
  * @version 1.14 - retention reads as days of backups kept offsite; Recent backups lists only backups that
  *                still exist
  * @version 1.13 - the target form shows the key ID, region and endpoint; a stored secret is a locked field with Reset
@@ -50,8 +51,7 @@ $default_slug = $page_vars['default_slug'];
 $task         = $page_vars['task'];
 $is_managed   = $page_vars['is_managed'];
 $manager_url  = $page_vars['manager_url'];
-$approval     = $page_vars['approval'];
-$decommission_approval = $page_vars['decommission_approval'];
+$approvals    = $page_vars['approvals'];
 $inventory      = $page_vars['inventory'];
 $objects_source = $page_vars['objects_source'];
 $objects_status = $page_vars['objects_status'];
@@ -72,29 +72,25 @@ $when = function ($utc) use ($tz) {
 	return $utc ? LibraryFunctions::convert_time($utc, 'UTC', $tz, 'M j, Y g:i A T') : '—';
 };
 
-// ── A restore waiting on a person ───────────────────────────────────────────
-// FIRST, above everything, when there is one. This machine's own agent has
-// claimed a job that will erase live data, has run nothing, and is holding it
-// open until somebody here says yes with the recovery key. It is the most urgent
-// thing this page can be showing, and it is showing it because the machine
-// itself asked — not because a management node did.
-// A removal outranks a restore, and the page renders exactly one approval
-// ceremony at a time — recovery-readiness.js binds one window.rrApproval, and
-// two key boxes on one screen is how a person answers the wrong one. In the
-// unlikely case both are pending, the restore waits and says so.
-if ($decommission_approval) {
-	require_once(PathHelper::getIncludePath('includes/DecommissionApprovalPanel.php'));
-	$page->begin_box(array('title' => 'Approve the permanent removal of this site'));
-	DecommissionApprovalPanel::render($page, $decommission_approval);
-	if ($approval) {
-		echo '<p class="text-muted small mt-3">A restore approval is also waiting. It will be shown '
-		   . 'here once this removal request is answered or expires.</p>';
+// ── An act waiting on a person ──────────────────────────────────────────────
+// FIRST, above everything, when there is one. An agent has claimed a job that
+// will erase live data, has run nothing, and is holding it open until somebody
+// here says yes with the recovery key. It is the most urgent thing this page can
+// be showing, and it is showing it because the agent asked — not because a
+// management node did.
+//
+// The page renders exactly one approval ceremony at a time —
+// recovery-readiness.js binds one window.rrApproval, and two key boxes on one
+// screen is how a person answers the wrong one. all_pending() is in precedence
+// order (a removal outranks a restore); any other waits and says so.
+if ($approvals) {
+	$first = array_key_first($approvals);
+	$page->begin_box(array('title' => ApprovalChallenge::scope($first)['box_title']));
+	ApprovalChallengePanel::render($page, $first, $approvals[$first]);
+	if (count($approvals) > 1) {
+		echo '<p class="text-muted small mt-3">Another approval is also waiting. It will be shown '
+		   . 'here once this one is answered or expires.</p>';
 	}
-	$page->end_box();
-} elseif ($approval) {
-	require_once(PathHelper::getIncludePath('includes/RestoreApprovalPanel.php'));
-	$page->begin_box(array('title' => 'Approve a restore'));
-	RestoreApprovalPanel::render($page, $approval);
 	$page->end_box();
 }
 

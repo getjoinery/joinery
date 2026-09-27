@@ -1,10 +1,12 @@
 #!/bin/bash
 
 # Script to create Apache site configuration from template
+# Version: 2.3.0 - No server address: the template answers on any address (default_virtualhost.conf
+#                 2.08, specs/site_copy.md B25). A fourth argument is accepted and ignored
 # Version: 2.2.1 - VERSION is read from this header rather than restated below,
 #                 where the two had disagreed: the header said 2.0.0 while the
 #                 script printed 2.2.0
-# Usage: ./virtualhost_update_script.sh <filename> [site_name] [domain_name] [server_ip]
+# Usage: ./virtualhost_update_script.sh <filename> [site_name] [domain_name]
 
 # This script's version, taken from the header above so there is only one copy.
 VERSION="$(sed -n 's/^# Version: \([0-9][0-9.]*\).*/\1/p' "${BASH_SOURCE[0]}" | head -1)"
@@ -15,11 +17,11 @@ echo "=========================================="
 # Check if filename argument is provided
 if [ $# -eq 0 ]; then
     echo "Error: Please provide a filename as an argument"
-    echo "Usage: $0 <filename> [site_name] [domain_name] [server_ip]"
+    echo "Usage: $0 <filename> [site_name] [domain_name]"
     echo ""
     echo "Examples:"
     echo "  $0 scrolldaddy.conf"
-    echo "  $0 mysite.conf mysite mysite.com 192.168.1.100"
+    echo "  $0 mysite.conf mysite mysite.com"
     echo ""
     echo "If optional parameters are not provided, the script will attempt to extract them from existing config."
     exit 1
@@ -75,17 +77,15 @@ extract_or_use_param() {
 # Extract or use provided parameters
 SITE_NAME=$(extract_or_use_param "$2" "DocumentRoot" "s/.*\/\([^/]*\)\/public_html.*/\1/" "mysite")
 DOMAIN_NAME=$(extract_or_use_param "$3" "^[[:space:]]*ServerName" "s/^[[:space:]]*ServerName[[:space:]]\+\([^[:space:]]*\).*/\1/" "example.com")
-SERVER_IP=$(extract_or_use_param "$4" "<VirtualHost" "s/.*<VirtualHost[[:space:]]*\([^:]*\):.*/\1/" "127.0.0.1")
 
 # Validate extracted values - don't use defaults!
-if [ "$SITE_NAME" = "mysite" ] || [ "$DOMAIN_NAME" = "example.com" ] || [ "$SERVER_IP" = "127.0.0.1" ]; then
+if [ "$SITE_NAME" = "mysite" ] || [ "$DOMAIN_NAME" = "example.com" ]; then
     if [ -f "$CONFIG_FILE" ]; then
         echo "ERROR: Failed to extract configuration from existing file: $CONFIG_FILE"
         echo ""
         echo "Extracted values:"
         echo "  Site Name: $SITE_NAME"
         echo "  Domain Name: $DOMAIN_NAME"
-        echo "  Server IP: $SERVER_IP"
         echo ""
         echo "These appear to be default values, not actual configuration."
         echo ""
@@ -97,10 +97,10 @@ if [ "$SITE_NAME" = "mysite" ] || [ "$DOMAIN_NAME" = "example.com" ] || [ "$SERV
     fi
 
     echo "Please provide the parameters explicitly:"
-    echo "  $0 $FILENAME <site_name> <domain_name> <server_ip>"
+    echo "  $0 $FILENAME <site_name> <domain_name>"
     echo ""
     echo "Example:"
-    echo "  $0 galactictribune.conf galactictribune galactictribune.net 69.164.209.253"
+    echo "  $0 galactictribune.conf galactictribune galactictribune.net"
     echo ""
     exit 1
 fi
@@ -117,7 +117,7 @@ if [ -f "$CONFIG_FILE" ]; then
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             echo "Aborting. Please run with explicit parameters:"
-            echo "  $0 $FILENAME <site_name> <domain_name> <server_ip>"
+            echo "  $0 $FILENAME <site_name> <domain_name>"
             exit 1
         fi
     fi
@@ -126,7 +126,6 @@ fi
 echo "Configuration:"
 echo "  Site Name: $SITE_NAME"
 echo "  Domain Name: $DOMAIN_NAME"
-echo "  Server IP: $SERVER_IP"
 echo "  Config File: $CONFIG_FILE"
 echo "  Template: $TEMPLATE_FILE"
 echo ""
@@ -155,7 +154,6 @@ fi
 echo "Generating configuration from template..."
 sed -e "s/{{SITE_NAME}}/$SITE_NAME/g" \
     -e "s/{{DOMAIN_NAME}}/$DOMAIN_NAME/g" \
-    -e "s/{{SERVER_IP}}/$SERVER_IP/g" \
     "$TEMPLATE_FILE" > "$CONFIG_FILE"
 
 # Check if the file was created successfully

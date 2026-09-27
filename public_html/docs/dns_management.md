@@ -437,7 +437,7 @@ The instance half is `zoneFor()`, `listRecords()`, `createRecord()`,
 `deleteZone()`, `accounts()`, `afterPublish()` and `zoneNameservers()` — the
 names a registrar's nameserver setting should hold for the zone, defaulting to
 the vendor's fixed set; Cloudflare overrides it to read the account's assigned
-pair.
+pair, and Hetzner the nameservers its zone listing assigns the zone.
 
 ### Saying where the credential comes from
 
@@ -541,7 +541,7 @@ untested driver surfaces as a wrong diff to decline, never a silent bad write.
 | GoDaddy | sso-key pair |
 | Gandi LiveDNS | Personal access token |
 | Vultr DNS | Bearer PAT |
-| Hetzner DNS | API token |
+| Hetzner DNS | Hetzner Cloud API token with Read & Write, from the Hetzner Console project that holds the zone (Bearer auth on the Cloud API). Record sets go through `DnsRrsetDriverBase`; each write waits for the asynchronous Action Hetzner starts |
 | Porkbun | API key + secret key |
 | deSEC | API token |
 | Name.com | Username + API token |
@@ -647,5 +647,10 @@ gated-host callout (`dns_action=dns_move`, handled in
   offered destinations, the lived-in classification that decides whether the
   move is offered at all, the seed plan's merge rules, and the handover
   helpers.
+- `tests/dns/dns_hetzner_driver_test.php` — the Hetzner driver over a mocked
+  transport: sibling values surviving a create, a one-value update and a
+  one-value removal in a multi-value set, the last value deleting the set,
+  pagination, awaited Actions, a failed read never followed by a write, and
+  Hetzner's refusals in operator terms.
 
-All four are `safe` tier and need no credential or network.
+All five are `safe` tier and need no credential or network.

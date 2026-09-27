@@ -366,7 +366,7 @@ class JobCommandBuilder {
 
 	/**
 	 * The platform release that carries the decommission approval panel
-	 * (DecommissionApprovalPanel and its settings rows). A victim below this
+	 * (the decommission scope of ApprovalChallengePanel, and its settings rows). A victim below this
 	 * cannot RENDER the consent it would be asked for, so dispatch refuses
 	 * with the fix in the message rather than staging a ceremony into rows no
 	 * page reads.
@@ -3145,7 +3145,7 @@ class JobCommandBuilder {
 	 * destroyed and cannot outlive the work. The host runs the bundled,
 	 * self-verifying remove_account.sh; before anything is touched, the victim
 	 * approves its own removal on its own admin with its own recovery key
-	 * (DecommissionApprovalPanel). This plane is not in the approval path —
+	 * (ApprovalChallengePanel, decommission scope). This plane is not in the approval path —
 	 * the primitive declares no parameter an answer could travel through.
 	 *
 	 * Refusals, each naming the operator's next step:

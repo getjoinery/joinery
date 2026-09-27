@@ -2,15 +2,18 @@
 
 How to move the **local development environment** (this box) to a new host — Hetzner
 or any other provider. This is deliberately separate from migrating the *application*:
-the Server Manager `install_node` / `restore_project` jobs handle the app (database,
-project files, Apache config), and they have **zero awareness** of the developer
-environment described here. That part is a manual `rsync` + reinstall, documented below.
+the app moves by installing a fresh site on the new host and restoring its backup onto
+it (`docs/deploy_and_upgrade.md`, Rebuilding a site on new hardware). That keeps the
+database, files and uploads, but not sealed secrets: the new host has its own
+`secret_box_key`, so stored credentials are entered again until `specs/site_copy.md`
+lands. None of that tooling knows about the developer environment described here.
+That part is a manual `rsync` + reinstall, documented below.
 
 ## Scope: what this covers vs. what the app tooling covers
 
 | Concern | Owner | Notes |
 |---|---|---|
-| Site DB + project files + Apache vhost | Server Manager (`install_node` from-backup, `restore_project`) | Push-button; see `plugins/server_manager/docs/overview.md` |
+| Site DB + project files + Apache vhost | Install, then `restore_project.sh` / `restore_chain.sh` | By hand with the recovery key; sealed secrets re-entered (see `docs/deploy_and_upgrade.md`) |
 | PHP/Apache stack tuning (mpm_event + php-fpm ondemand) | Manual | Dev box runs a RAM-optimized stack the standard installer does not reproduce |
 | Claude Code / Gemini state, history, memory | **This runbook** | Manual rsync — path-keyed, see below |
 | Symlinks, theme working dirs, secrets, side repos | **This runbook** | Manual rsync — paths must match |

@@ -481,7 +481,7 @@ check(is_file($history_dir . '/default_virtualhost-2.05.conf'), 'vhost_history c
 // address — on a shared host, another site's certificate and content. So www
 // has its own :443 host under the same guard, on the same certificate,
 // answering only with a 308 to the apex.
-foreach (array('default_virtualhost.conf' => '2.07', 'default_proxy_vhost.conf' => '1.04') as $tpl => $ver) {
+foreach (array('default_virtualhost.conf' => '2.08', 'default_proxy_vhost.conf' => '1.04') as $tpl => $ver) {
     $t = (string)file_get_contents($tools_dir . '/' . $tpl);
     check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
     preg_match_all('/<VirtualHost [^>]*:443>(.*?)<\/VirtualHost>/s', $t, $hosts);
@@ -3021,6 +3021,34 @@ check($drive(str_replace("ServerName example.org\n", "ServerName example.org\n  
 check($drive(str_replace('AllowOverride All', 'AllowOverride None', $two)) === '',
     'one changed directive and no template matches');
 check($drive('') === '', 'an empty file matches nothing');
+
+// Every template up to 2.07 pinned the machine's first IP; the current one
+// answers on any address (specs/site_copy.md B25). A box still carrying a
+// pinned render is recognised through the address read off its own file, so
+// the re-render can move it - and the current template names no address at
+// all, so an IP change can never again leave a site answering on nothing.
+$drive_at = function (string $on_disk_text, string $ip) use ($render_fn, $match_fn, $vh2, $history_dir): string {
+    file_put_contents($vh2 . '/disk.conf', $on_disk_text);
+    $script = $vh2 . '/drive_ip.sh';
+    file_put_contents($script, "DOMAIN=example.org; SITENAME=site1; SERVER_IP=" . escapeshellarg($ip) . "; PORT=''\n"
+        . $render_fn . "\n" . $match_fn . "\n"
+        . 'vhost_matches_history ' . escapeshellarg($vh2 . '/disk.conf') . ' ' . escapeshellarg($history_dir) . "\n");
+    return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>/dev/null'));
+};
+$pinned = str_replace(array('{{DOMAIN_NAME}}', '{{SITE_NAME}}', '{{SERVER_IP}}', '{{PORT}}'),
+    array('example.org', 'site1', '203.0.113.9', ''), (string)@file_get_contents($history_dir . '/default_virtualhost-2.07.conf'));
+check(strpos($pinned, '<VirtualHost 203.0.113.9:443>') !== false, 'the 2.07 template in the history pins an address');
+check($drive_at($pinned, '203.0.113.9') === 'default_virtualhost-2.07.conf',
+    'a 2.07 render pinned to the machine\'s IP is recognised as ours, so the re-render moves it');
+$current = (string)file_get_contents($tools_dir . '/default_virtualhost.conf');
+check(strpos($current, '{{SERVER_IP}}') === false, 'the current bare-metal template has no address placeholder');
+preg_match_all('/<VirtualHost\s+([^>]+)>/', $current, $hosts_at);
+check(count($hosts_at[1]) > 0 && count(array_filter($hosts_at[1], function ($a) { return !preg_match('/^\*:(80|443)$/', $a); })) === 0,
+    'every host in it answers on any address (*:80 or *:443)', implode(', ', $hosts_at[1]));
+foreach (array('install_tools/install.sh', 'install_tools/_site_init.sh', 'sysadmin_tools/virtualhost_update_script.sh') as $renderer) {
+    $src = (string)file_get_contents(dirname($tools_dir) . '/' . $renderer);
+    check(strpos($src, '{{SERVER_IP}}') === false, "$renderer substitutes no address into a vhost");
+}
 
 // The adoption order: an exact history match is tried before the subset rule.
 check(strpos($render_src, 'vhost_matches_history "${CONF}"') !== false

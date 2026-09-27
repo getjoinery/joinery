@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.21 - The root runner lock file is 0600, created that way and tightened if found wider:
+#                 at 0644 any account could open it and hold the converger off (site_copy.md B28)
 # Version: 2.20 - The re-ownership sets the mode before the owner (fix_permissions.sh 4.5): owner
 #                  first left a tree file or config/*.php, between the two walks, owned by its new
 #                  owner at a mode the pool could not read.
@@ -423,6 +425,13 @@ if [[ "$(id -u)" == "0" ]]; then
     LOCK_DIR="/run/joinery"
     mkdir -p "${LOCK_DIR}" 2>/dev/null && chmod 755 "${LOCK_DIR}" 2>/dev/null
     LOCK_FILE="${LOCK_DIR}/host-installers.${SITENAME}.lock"
+    # 0600, created that way and tightened if found wider. flock needs only an
+    # open descriptor, so a lock file another account can read is one it can
+    # hold - and every run after that waits out its ten minutes and exits 0
+    # having done nothing (specs/site_copy.md B28). host_runner_lock.sh, which
+    # every restore takes, creates it the same way.
+    [[ -e "${LOCK_FILE}" ]] || ( umask 077; : >> "${LOCK_FILE}" ) 2>/dev/null
+    chmod 600 "${LOCK_FILE}" 2>/dev/null || true
 else
     LOCK_FILE="${SITE_ROOT}/cache/host_installers.lock"
     mkdir -p "${SITE_ROOT}/cache" 2>/dev/null || true

@@ -350,7 +350,7 @@ does." It clears itself when nothing waits.
 
 ## What a restore reconciles
 
-Every restore path — the archive, the chain, and a From-Backup clone — ends in
+Both restore paths — the archive and the chain — end in
 `reconcile_site.sh`, which makes the restored site agree with the machine it
 landed on. It reports each value it changed and refuses rather than papering
 over a mismatch it cannot fix.
@@ -1037,9 +1037,10 @@ than by care. A management node can dispatch a restore and can do nothing
 whatsoever to get it approved.
 
 The costs are deliberate and worth stating. Restoring in place requires the
-node's site to be up; a node whose site will not boot is rebuilt and restored
-(`install_mode = from_backup`), which needs no approval because there is no node
-yet to ask. An unanswered challenge expires and the job is refused, so a restore
+node's site to be up. A node whose site will not boot is rebuilt by hand: a fresh
+site installed on a new machine, then the backup restored onto it from a shell
+with the recovery key ([Rebuilding a site on new hardware](deploy_and_upgrade.md#rebuilding-a-site-on-new-hardware)).
+No approval is asked there, because holding the recovery key is the proof. An unanswered challenge expires and the job is refused, so a restore
 nobody is watching fails rather than pinning the node. And a support-driven
 restore requires the customer to be reachable: there is no unattended
 destructive path, including for us.

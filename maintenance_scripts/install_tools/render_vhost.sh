@@ -3,6 +3,9 @@
 # render_vhost.sh - keep this site's Apache vhost in step with the template the
 # deployed release ships.
 #
+# Version: 1.10 - The current template names no address, so a re-render moves a site off its
+#                pinned IP onto any address (default_virtualhost.conf 2.08, specs/site_copy.md
+#                B25). The address read from disk now serves only to match older renders.
 # Version: 1.9 - The renewal-config heal moves to _host_files.sh, run by host_housekeeping.sh
 #                over every lineage on the machine. Healing only the lineage named by this
 #                vhost's ServerName missed any certificate under another name, and a
@@ -142,6 +145,10 @@ fi
 DOMAIN="$(grep -m1 -oE '^[[:space:]]*ServerName[[:space:]]+\S+' "${SOURCE}" | awk '{print $2}')"
 [[ -n "${DOMAIN}" ]] || { say "no ServerName in ${SOURCE} - skipping"; exit 0; }
 
+# The address the file on disk names. The current templates name none (every
+# host answers on any address), so this is only for recognising an older
+# render: templates up to 2.07 pinned the machine's first IP, and a box whose
+# vhost is exactly such a render is adopted and moved to the new one.
 SERVER_IP="$(grep -m1 -oE '<VirtualHost[[:space:]]+[^:]+:' "${SOURCE}" | sed -E 's/<VirtualHost[[:space:]]+//; s/:$//')"
 [[ -n "${SERVER_IP}" ]] || SERVER_IP="*"
 

@@ -19,12 +19,14 @@
  * `pg_dump | gzip | openssl` with no seam to edit mid-stream, and the export
  * must never UPDATE the source. The dump is already encrypted in transit under
  * the clone key, so the source ciphertext it briefly carries is never exposed —
- * which is why scrubbing at the destination is safe. A genuine MOVE is
- * restore-from-backup, which carries config/ and the matching key, so nothing is
- * scrubbed there.
+ * which is why scrubbing at the destination is safe. A restore onto another
+ * machine does not run this, and does not carry the key either: it keeps the
+ * target's own config/Globalvars_site.php, so every value sealed on the source
+ * is dead there (see docs/sealed_secrets.md).
  *
  * Usage:  php utils/scrub_sealed_secrets.php [--verbose]
  *
+ * @version 1.1.1 - the header says what a restore onto another machine does to sealed values
  * @version 1.1 - logic in scrub_sealed_secrets() so tests can drive it in-process
  */
 

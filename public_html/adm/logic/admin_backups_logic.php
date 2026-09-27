@@ -6,6 +6,7 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.14 - approval answers go through ApprovalChallenge, one handler for every scope
  * @version 1.13 - retention is backup_retention_days, floored at one day, and a managed site saves it with
  *                save_retention; the history lists only backups that still exist, so a run retention
  *                deleted leaves Recent backups
@@ -95,16 +96,6 @@ function admin_backups_logic($input = array()) {
 	// that they are unset.
 	require_once(PathHelper::getIncludePath('includes/ManagementNodeStatus.php'));
 
-	// A restore this machine's own agent is holding open, waiting for a person
-	// here to authorize it. Read on every render rather than cached: the agent
-	// stages and clears it underneath a running process, and a stale copy would
-	// be an approval screen for a restore that is no longer running.
-	require_once(PathHelper::getIncludePath('includes/RestoreApproval.php'));
-
-	// A removal the HOST's agent is holding open — this site consenting to its
-	// own destruction. Same read-fresh rule, its own settings rows.
-	require_once(PathHelper::getIncludePath('includes/DecommissionApproval.php'));
-
 	return LogicResult::render(array(
 		'session'       => $session,
 		'settings'      => Globalvars::get_instance(),
@@ -120,8 +111,12 @@ function admin_backups_logic($input = array()) {
 		'task'          => _admin_backups_task_state(),
 		'is_managed'    => ManagementNodeStatus::is_managed(),
 		'manager_url'   => ManagementNodeStatus::manager_url(),
-		'approval'      => RestoreApproval::pending(),
-		'decommission_approval' => DecommissionApproval::pending(),
+		// Every act an agent is holding open, waiting for a person here to
+		// authorize it (a restore by this machine's agent, a removal by the
+		// host's). Read on every render rather than cached: the agent stages
+		// and clears it underneath a running process, and a stale copy would be
+		// an approval screen for an act that is no longer waiting.
+		'approvals'     => ApprovalChallenge::all_pending(),
 		// The daily file-store check: which offloaded files the file bucket
 		// cannot serve, and who brings them back on this site.
 		'inventory'      => CloudStoreInventory::current(),
@@ -192,49 +187,31 @@ function _admin_backups_handle($action, array $input, $session) {
 			// two are checked where the rest of this file's actions are not.
 			// ── Approving this site's own permanent removal ──
 			//
-			// The same shape as the restore pair below, under decommission's own
-			// names: the challenge was staged by the HOST's agent, the answer is
-			// a one-time secret only this site's recovery key could produce, and
-			// the host compares it in constant time. Token-checked for the same
-			// reason: DECLINE takes nothing but a printed job id, and a lured
-			// superadmin must not be able to refuse (or worse, be tricked into
-			// answering) a removal via a crafted link.
+			// An answer to an approval an agent staged: the challenge was sealed
+			// by the agent, the answer is a one-time secret only this site's
+			// recovery key could produce, and the agent compares it in constant
+			// time. Token-checked all the same: DECLINE takes nothing but a
+			// printed job id, and a lured superadmin must not be able to refuse
+			// (or be tricked into answering) a restore or a removal via a
+			// crafted link.
+			case 'approve_restore':
+			case 'decline_restore':
 			case 'approve_decommission':
 			case 'decline_decommission': {
-				require_once(PathHelper::getIncludePath('includes/DecommissionApproval.php'));
-				$form = ($action === 'approve_decommission') ? 'decommission_approval_form' : 'decommission_decline_form';
-				$fw = new FormWriterV2HTML5($form);
+				$which = ApprovalChallenge::for_action($action);
+				$scope = ApprovalChallenge::scope($which['scope']);
+				$fw = new FormWriterV2HTML5($which['approve'] ? $scope['approve_form'] : $scope['decline_form']);
 				if (!$fw->validateCSRF($input)) {
 					$say('That request could not be verified — reload the Backups page and try again.', false);
 					return $url;
 				}
 				$job_id = (int)($input['approval_job_id'] ?? 0);
-				if ($action === 'approve_decommission') {
-					DecommissionApproval::answer($job_id, (string)($input['approval_answer'] ?? ''));
-					$say('Approved. The host is checking your answer and will remove this site permanently.', true);
+				if ($which['approve']) {
+					ApprovalChallenge::answer($which['scope'], $job_id, (string)($input['approval_answer'] ?? ''));
+					$say($scope['approved_notice'], true);
 				} else {
-					DecommissionApproval::decline($job_id);
-					$say('Declined. Nothing was deleted, and the removal is reported refused.', true);
-				}
-				return $url;
-			}
-
-			case 'approve_restore':
-			case 'decline_restore': {
-				require_once(PathHelper::getIncludePath('includes/RestoreApproval.php'));
-				$form = ($action === 'approve_restore') ? 'restore_approval_form' : 'restore_decline_form';
-				$fw = new FormWriterV2HTML5($form);
-				if (!$fw->validateCSRF($input)) {
-					$say('That request could not be verified — reload the Backups page and try again.', false);
-					return $url;
-				}
-				$job_id = (int)($input['approval_job_id'] ?? 0);
-				if ($action === 'approve_restore') {
-					RestoreApproval::answer($job_id, (string)($input['approval_answer'] ?? ''));
-					$say('Approved. This machine is checking your answer and will start the restore.', true);
-				} else {
-					RestoreApproval::decline($job_id);
-					$say('Declined. Nothing was restored, and the job is reported refused.', true);
+					ApprovalChallenge::decline($which['scope'], $job_id);
+					$say($scope['declined_notice'], true);
 				}
 				return $url;
 			}

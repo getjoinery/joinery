@@ -1,26 +1,51 @@
 <?php
 /**
- * HetznerDnsDriver - Hetzner DNS Console, API v1.
+ * HetznerDnsDriver - Hetzner DNS through the Hetzner Cloud API (v1).
  *
- * No OAuth2; a Hetzner DNS API token is supplied at the publish moment and
- * discarded when the request returns.
+ * No OAuth2; a Hetzner Cloud project API token (Read & Write, Bearer auth) is
+ * supplied at the publish moment and discarded when the request returns. A zone
+ * belongs to one Cloud project, so the token has to come from that project.
  *
- * Vendor note: Hetzner bakes MX priority into the record value ("10
- * mail.example.com"), so the driver splits it out on read and folds it back in
- * on write — no caller ever sees the combined form.
+ * Hetzner stores record SETS: one RRSet per (name, type) holding a list of
+ * values and one TTL, addressed as /zones/{zone}/rrsets/{name}/{type} with the
+ * apex spelled '@'. There are no per-record ids, so writes go through
+ * DnsRrsetDriverBase's read-modify-write — changing one value of a multi-value
+ * set rewrites the set with its siblings intact. Values travel in zone-file
+ * spelling: TXT as quoted 255-byte strings, MX as "10 mail.example.com.", CNAME
+ * and SRV targets absolute (dotted) — exactly what the base's rrsetValue() makes.
  *
+ * Every write returns an asynchronous Action. The driver waits for it to finish
+ * before returning, so the next read sees the change and a second write to the
+ * same set is not refused as locked.
+ *
+ * @version 2.0 - Hetzner Cloud API: RRSets through DnsRrsetDriverBase, actions awaited, per-zone nameservers
  * @version 1.1 - SRV writes an absolute target so Hetzner cannot re-append the zone
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('includes/dns/DnsDriverBase.php'));
+require_once(PathHelper::getIncludePath('includes/dns/DnsRrsetDriverBase.php'));
 
-class HetznerDnsDriver extends DnsDriverBase {
+use GuzzleHttp\Exception\RequestException;
 
-	const API_BASE = 'https://dns.hetzner.com/api/v1/';
+class HetznerDnsDriver extends DnsRrsetDriverBase {
+
+	const API_BASE = 'https://api.hetzner.cloud/v1/';
+
+	/** Hetzner refuses a TTL below 60 seconds. */
+	const MIN_TTL = 60;
+
+	/** Listing page sizes: 50 is the API-wide maximum, 100 on the RRSet listing. */
+	const ZONES_PER_PAGE  = 50;
+	const RRSETS_PER_PAGE = 100;
+
+	/** How long a write waits for its Action, in one-second polls. */
+	const ACTION_MAX_POLLS = 15;
 
 	/** @var array<string,string>|null zone name => zone id. */
 	private $zones = null;
+
+	/** @var array<string,string[]> zone name => the nameservers Hetzner assigned it. */
+	private $zone_ns = array();
 
 	public static function getKey(): string { return 'hetzner'; }
 	public static function getLabel(): string { return 'Hetzner DNS'; }
@@ -35,8 +60,9 @@ class HetznerDnsDriver extends DnsDriverBase {
 	public static function credentialFields(): array {
 		return array(
 			'api_token' => array(
-				'label'  => 'Hetzner DNS API token',
-				'help'   => 'From the Hetzner DNS Console under API tokens. Used for this one publish and never stored.',
+				'label'  => 'Hetzner Cloud API token',
+				'help'   => 'A Read & Write API token from the Hetzner Console project that holds the zone '
+					. '(Security, then API tokens). Used for this one publish and never stored.',
 				'secret' => true,
 			),
 		);
@@ -44,14 +70,14 @@ class HetznerDnsDriver extends DnsDriverBase {
 
 	public static function credentialGuide(): ?array {
 		return array(
-			'title'     => 'Create a Hetzner DNS API token',
-			'url'       => 'https://dns.hetzner.com/settings/api-token',
-			'url_label' => 'Open Hetzner DNS API tokens',
+			'title'     => 'Create a Hetzner Cloud API token',
+			'url'       => 'https://console.hetzner.com/projects',
+			'url_label' => 'Open the Hetzner Console',
 			'steps'     => array(
-				'Sign in to the Hetzner DNS Console.',
-				'Open API tokens from the user menu, or Manage API tokens on the dashboard.',
-				'Name the token and choose Create access token.',
-				'Copy it now — Hetzner will not show it again.',
+				'Sign in to the Hetzner Console and open the project that holds the domain\'s DNS zone.',
+				'Choose Security in the left menu, then API tokens.',
+				'Choose Generate API token, enter a description, and select Read & Write.',
+				'Copy the token now — Hetzner will not show it again.',
 			),
 		);
 	}
@@ -69,71 +95,174 @@ class HetznerDnsDriver extends DnsDriverBase {
 		return null;
 	}
 
+	/** The nameservers Hetzner assigned this zone; its usual trio when the zone does not say. */
+	public function zoneNameservers(string $zone): array {
+		$this->zoneMap();
+		$assigned = $this->zone_ns[DnsRecord::normalizeName($zone)] ?? array();
+		return !empty($assigned) ? $assigned : static::nameservers();
+	}
+
 	public function createZone(string $domain): string {
 		$domain = DnsRecord::normalizeName($domain);
 		if ($this->zoneFor($domain) === $domain) {
 			return $domain;
 		}
-		$this->request('POST', self::API_BASE . 'zones', array('json' => array('name' => $domain)));
+		$this->write('POST', self::API_BASE . 'zones', array('name' => $domain, 'mode' => 'primary'));
 		$this->zones = null;
 		return $domain;
 	}
 
 	public function deleteZone(string $zone): void {
-		$this->request('DELETE', self::API_BASE . 'zones/' . rawurlencode($this->zoneId($zone)));
+		$this->write('DELETE', self::API_BASE . 'zones/' . rawurlencode($this->zoneId($zone)));
 		$this->zones = null;
 	}
 
 	public function listRecords(string $zone): array {
-		$body = $this->request('GET', self::API_BASE . 'records?zone_id=' . rawurlencode($this->zoneId($zone))
-			. '&per_page=1000');
+		$zone = DnsRecord::normalizeName($zone);
+		$base = $this->zoneUrl($zone) . '/rrsets?per_page=' . self::RRSETS_PER_PAGE;
 		$out = array();
-		foreach ((array)($body['records'] ?? array()) as $row) {
-			$record = $this->toRecord($zone, $row);
-			if ($record !== null) {
-				$out[] = $record;
+		$page = 1;
+		do {
+			$body = $this->request('GET', $base . '&page=' . $page);
+			foreach ((array)($body['rrsets'] ?? array()) as $rrset) {
+				if (!is_array($rrset)) {
+					continue;
+				}
+				$type = strtoupper((string)($rrset['type'] ?? ''));
+				$name = self::absoluteName((string)($rrset['name'] ?? '@'), $zone);
+				$ttl  = (int)($rrset['ttl'] ?? 0);
+				foreach ((array)($rrset['records'] ?? array()) as $row) {
+					$record = $this->recordFromValue($type, $name, (string)($row['value'] ?? ''),
+						$ttl > 0 ? $ttl : null);
+					if ($record !== null) {
+						$record->provider_id = (string)($rrset['id'] ?? ($name . '/' . $type));
+						$out[] = $record;
+					}
+				}
 			}
-		}
+			$page = self::nextPage($body, $page);
+		} while ($page !== null);
 		return $out;
 	}
 
-	public function createRecord(string $zone, DnsRecord $record): void {
-		$body = $this->toApi($zone, $record);
-		$body['zone_id'] = $this->zoneId($zone);
-		$this->request('POST', self::API_BASE . 'records', array('json' => $body));
+	// ------------------------------------------------------------------
+	// The three RRSet primitives
+	// ------------------------------------------------------------------
+
+	protected function readRrset(string $zone, string $name, string $type): ?array {
+		// The filtered listing answers an absent set with an empty list rather
+		// than a 404, so "not there" and "could not read" stay distinct: a read
+		// that fails throws, and the write it guards never happens.
+		$body = $this->request('GET', $this->zoneUrl($zone) . '/rrsets'
+			. '?name=' . rawurlencode(self::relativeName($name, $zone, '@'))
+			. '&type=' . rawurlencode(strtoupper($type)));
+		foreach ((array)($body['rrsets'] ?? array()) as $rrset) {
+			$values = array();
+			foreach ((array)($rrset['records'] ?? array()) as $row) {
+				$values[] = (string)($row['value'] ?? '');
+			}
+			if (!empty($values)) {
+				$ttl = (int)($rrset['ttl'] ?? 0);
+				return array('values' => $values, 'ttl' => $ttl > 0 ? $ttl : null);
+			}
+		}
+		return null;
 	}
 
-	public function updateRecord(string $zone, DnsRecord $live, DnsRecord $desired): void {
-		if ($live->provider_id === '') {
-			throw new DnsProviderException('Cannot update ' . $desired->describe() . ': no Hetzner record id.');
+	protected function writeRrset(string $zone, string $name, string $type, array $values, ?int $ttl): void {
+		$records = array();
+		foreach (array_values(array_unique($values)) as $value) {
+			$records[] = array('value' => (string)$value);
 		}
-		$body = $this->toApi($zone, $desired);
-		$body['zone_id'] = $this->zoneId($zone);
-		$this->request('PUT', self::API_BASE . 'records/' . rawurlencode($live->provider_id), array('json' => $body));
+		$ttl = $ttl !== null ? max(self::MIN_TTL, (int)$ttl) : null;
+		$existing = $this->readRrset($zone, $name, $type);
+
+		if ($existing === null) {
+			$body = array('name' => self::relativeName($name, $zone, '@'), 'type' => strtoupper($type),
+				'records' => $records);
+			if ($ttl !== null) {
+				$body['ttl'] = $ttl;
+			}
+			$this->write('POST', $this->zoneUrl($zone) . '/rrsets', $body);
+			return;
+		}
+
+		// An existing set: overwrite its values, then its TTL only when the plan
+		// asked for a different one. Leaving a null TTL alone keeps a set on the
+		// zone default.
+		$this->write('POST', $this->rrsetUrl($zone, $name, $type) . '/actions/set_records',
+			array('records' => $records));
+		if ($ttl !== null && $ttl !== $existing['ttl']) {
+			$this->write('POST', $this->rrsetUrl($zone, $name, $type) . '/actions/change_ttl',
+				array('ttl' => $ttl));
+		}
 	}
 
-	public function deleteRecord(string $zone, DnsRecord $live): void {
-		if ($live->provider_id === '') {
-			throw new DnsProviderException('Cannot delete ' . $live->describe() . ': no Hetzner record id.');
-		}
-		$this->request('DELETE', self::API_BASE . 'records/' . rawurlencode($live->provider_id));
+	protected function deleteRrset(string $zone, string $name, string $type): void {
+		$this->write('DELETE', $this->rrsetUrl($zone, $name, $type));
 	}
 
 	// ------------------------------------------------------------------
+
+	/**
+	 * Issue a write and wait for the Action it starts. Hetzner applies DNS
+	 * changes asynchronously; returning before the Action finishes would let the
+	 * next read see the old set and the next write to it be refused as locked.
+	 */
+	private function write(string $method, string $url, ?array $json = null): void {
+		$body = $this->request($method, $url, $json !== null ? array('json' => $json) : array());
+		$action = is_array($body['action'] ?? null) ? $body['action'] : null;
+		$polls = 0;
+		while ($action !== null) {
+			$status = (string)($action['status'] ?? 'success');
+			if ($status === 'success') {
+				return;
+			}
+			if ($status === 'error') {
+				$error = (array)($action['error'] ?? array());
+				throw new DnsProviderException('Hetzner could not apply the change: '
+					. (string)($error['message'] ?? ($error['code'] ?? 'the action failed')) . '.');
+			}
+			if ($polls >= self::ACTION_MAX_POLLS || empty($action['id'])) {
+				throw new DnsProviderException('Hetzner accepted the change but was still applying it after '
+					. self::ACTION_MAX_POLLS . ' seconds. Wait a minute, then publish again — the difference '
+					. 'will show whatever has not yet landed.');
+			}
+			$polls++;
+			$this->pause(1);
+			$next = $this->request('GET', self::API_BASE . 'zones/actions/' . rawurlencode((string)$action['id']));
+			$action = is_array($next['action'] ?? null) ? $next['action'] : null;
+		}
+	}
 
 	/** @return array<string,string> */
 	private function zoneMap(): array {
 		if ($this->zones !== null) {
 			return $this->zones;
 		}
-		$this->zones = array();
-		$body = $this->request('GET', self::API_BASE . 'zones?per_page=100');
-		foreach ((array)($body['zones'] ?? array()) as $row) {
-			$name = DnsRecord::normalizeName((string)($row['name'] ?? ''));
-			if ($name !== '' && !empty($row['id'])) {
-				$this->zones[$name] = (string)$row['id'];
+		$zones = array();
+		$page = 1;
+		do {
+			$body = $this->request('GET', self::API_BASE . 'zones?per_page=' . self::ZONES_PER_PAGE
+				. '&page=' . $page);
+			foreach ((array)($body['zones'] ?? array()) as $row) {
+				$name = DnsRecord::normalizeName((string)($row['name'] ?? ''));
+				if ($name === '' || empty($row['id'])) {
+					continue;
+				}
+				$zones[$name] = (string)$row['id'];
+				$assigned = array();
+				foreach ((array)($row['authoritative_nameservers']['assigned'] ?? array()) as $ns) {
+					$ns = DnsRecord::normalizeName((string)$ns);
+					if ($ns !== '') {
+						$assigned[] = $ns;
+					}
+				}
+				$this->zone_ns[$name] = $assigned;
 			}
-		}
+			$page = self::nextPage($body, $page);
+		} while ($page !== null);
+		$this->zones = $zones;
 		return $this->zones;
 	}
 
@@ -141,53 +270,64 @@ class HetznerDnsDriver extends DnsDriverBase {
 		$zones = $this->zoneMap();
 		$name = DnsRecord::normalizeName($zone);
 		if (!isset($zones[$name])) {
-			throw new DnsZoneNotFoundException('This Hetzner token can see no zone for ' . $zone . '.');
+			throw new DnsZoneNotFoundException('This Hetzner token can see no zone for ' . $zone
+				. '. The token has to come from the Hetzner Console project that holds the zone.');
 		}
 		return $zones[$name];
 	}
 
-	private function toRecord(string $zone, array $row): ?DnsRecord {
-		$type = strtoupper((string)($row['type'] ?? ''));
-		if (!in_array($type, DnsRecord::TYPES, true)) {
-			return null;
-		}
-		$value = (string)($row['value'] ?? '');
-		$priority = null;
-		if ($type === DnsRecord::TYPE_MX && preg_match('/^\s*(\d+)\s+(.+)$/', $value, $m)) {
-			$priority = (int)$m[1];
-			$value = $m[2];
-		}
-		$ttl = (int)($row['ttl'] ?? 0);
-		$record = new DnsRecord($type, self::absoluteName((string)($row['name'] ?? '@'), $zone),
-			$value, $ttl > 0 ? $ttl : null, $priority);
-		$record->provider_id = (string)($row['id'] ?? '');
-		return $record;
+	private function zoneUrl(string $zone): string {
+		return self::API_BASE . 'zones/' . rawurlencode($this->zoneId($zone));
 	}
 
-	private function toApi(string $zone, DnsRecord $record): array {
-		$value = $record->type === DnsRecord::TYPE_TXT
-			? $this->txtWireValue($record->value) : $record->value;
-		if ($record->type === DnsRecord::TYPE_MX) {
-			$value = ($record->priority !== null ? (int)$record->priority : 10) . ' ' . $record->value;
-		}
-		if ($record->type === DnsRecord::TYPE_SRV) {
-			// Hetzner takes the RDATA verbatim, so the target must be absolute or
-			// Hetzner reads it as relative and appends the zone.
-			$srv = self::parseSrv($record->value);
-			$value = $srv['priority'] . ' ' . $srv['weight'] . ' ' . $srv['port'] . ' ' . $srv['target'] . '.';
-		}
-		$body = array(
-			'type'  => $record->type,
-			'name'  => self::relativeName($record->name, $zone, '@'),
-			'value' => $value,
-		);
-		if ($record->ttl !== null) {
-			$body['ttl'] = (int)$record->ttl;
-		}
-		return $body;
+	private function rrsetUrl(string $zone, string $name, string $type): string {
+		return $this->zoneUrl($zone) . '/rrsets/' . rawurlencode(self::relativeName($name, $zone, '@'))
+			. '/' . rawurlencode(strtoupper($type));
+	}
+
+	/** The next page number from a listing's meta.pagination, or null on the last page. */
+	private static function nextPage(array $body, int $page): ?int {
+		$next = $body['meta']['pagination']['next_page'] ?? null;
+		return (is_numeric($next) && (int)$next > $page) ? (int)$next : null;
 	}
 
 	protected function authHeaders(): array {
-		return array('Auth-API-Token' => $this->cred('api_token'));
+		return array('Authorization' => 'Bearer ' . $this->cred('api_token'));
+	}
+
+	/**
+	 * Hetzner names every failure with a machine code beside its message; the
+	 * ones an operator can act on are said in their terms.
+	 */
+	protected function translateError(RequestException $e, string $method, string $url, int $status): DnsProviderException {
+		$code = '';
+		if ($e->getResponse()) {
+			$decoded = json_decode((string)$e->getResponse()->getBody(), true);
+			$code = (string)($decoded['error']['code'] ?? '');
+		}
+		$reason = $this->errorBody($e);
+		switch ($code) {
+			case 'unauthorized':
+				return new DnsProviderException('Hetzner refused the token (' . $status . '): ' . $reason
+					. ' — it has to be a Hetzner Cloud API token, generated under Security / API tokens in the '
+					. 'Hetzner Console project that holds the zone.', $status, $e);
+			case 'token_readonly':
+			case 'forbidden':
+				return new DnsProviderException('Hetzner refused the change (' . $status . '): ' . $reason
+					. ' — the token needs Read & Write permission. Generate a new one with Read & Write '
+					. 'in the project that holds the zone.', $status, $e);
+			case 'incorrect_zone_mode':
+				return new DnsProviderException('This Hetzner zone is in secondary mode: its records are copied '
+					. 'from another primary nameserver and cannot be written through Hetzner. Change them on '
+					. 'the primary instead. (' . $reason . ')', $status, $e);
+			case 'protected':
+				return new DnsManagedRecordException('Hetzner record protection',
+					'This record set is protected in the Hetzner Console; turn off its protection there, '
+					. 'then publish again. (' . $reason . ')');
+			case 'locked':
+				return new DnsProviderException('Hetzner is still applying an earlier change to this zone. '
+					. 'Wait a moment, then publish again. (' . $reason . ')', $status, $e);
+		}
+		return parent::translateError($e, $method, $url, $status);
 	}
 }

@@ -1,6 +1,17 @@
 # Site Copy — The Same Site on a New Server
 
-**Status:** Draft (2026-09-27, revised 2026-09-28). Researched, not reviewed, not started.
+**Status:** Building (started 2026-09-28).
+- **WP1 built:** the five documents, `reconcile_site.sh`, the scrub header and the Clone form label
+  say what is true today (no faithful move exists; a restore onto another machine kills every
+  sealed value).
+- **WP0 built:** B26 built (`restore_database.sh` 3.10 stages beside the archive); B27 built
+  (`host_runner_lock.sh`, held by `restore_chain.sh` 1.6.0 and `restore_project.sh` 1.6.0); the
+  approval fold built (`ApprovalChallenge` + `ApprovalChallengePanel`, one scope table). B24 built
+  (`HetznerDnsDriver` 2.0 on the Cloud API's record sets; mocked tests only, no Hetzner account).
+  B25 built (owner 2026-09-28: one bare-metal site per machine, Docker for several):
+  `default_virtualhost.conf` 2.08 answers on `*`, `render_vhost.sh` 1.10 moves a pinned 2.07 render
+  on its next converge; the installers and `virtualhost_update_script.sh` 2.3.0 substitute no
+  address. B28 built (`_plugin_installers_start.sh` 2.21: the root lock file is 0600).
 - Decided:
   - D1: a faithful copy, with switching over and deleting kept separate; the old Clone is retired.
   - D2: the backup chain carries the copy.
@@ -290,6 +301,13 @@ These are fixed whatever else happens.
     database would not fit on a 2 GB box.
   - This is a disaster-recovery bug today, on every 26.04 box.
   - Fix: stage beside the archive, on disk.
+- **B28 — Any account can hold the host converger off.** OBSERVED 2026-09-28.
+  - What happens: the converger creates `/run/joinery/host-installers.{site}.lock` with the default
+    umask (0644). `flock` needs only an open descriptor, so any local account, the web user
+    included, can open it read-only and hold it; every converger run then waits ten minutes and
+    exits 0 having done nothing. `user1` took dev's lock with `flock -n -s`.
+  - Fix: create the file 0600 and tighten an existing one (`host_runner_lock.sh` already creates
+    it 0600).
 - **B27 — A restore races the host converger.** READ.
   - What happens: `restore_chain.sh` takes no lock. The converger runs every minute, and when the
     release changes it runs the plugin installers and `site_housekeeping.sh`

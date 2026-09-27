@@ -335,4 +335,19 @@ check(empty($mine),
 	. ' — a key recovered from an envelope is as good as the archive, and a stranded copy of it '
 	. 'is a copy nobody knows exists');
 
+section('The dump stages beside the archive, and leaves nothing behind');
+
+// On Ubuntu 26.04 /tmp is a tmpfs sized from RAM: a plain dump staged there
+// cannot be larger than the machine's memory, so a large database could not be
+// restored at all. The stage lives beside the archive, on the disk holding it.
+check(is_file($gz), 'the compressed probe archive is still on disk to restore from');
+list($marker, $stderr) = rde_restore($engine, $scratch, $gz, $home, $db_user, $db_pass);
+check($marker === 'RESTORE_OK', 'a compressed archive restores', "marker '{$marker}'. stderr:\n" . $stderr);
+check(strpos($stderr, ' in ' . $backups . '/.jy_restore_') !== false,
+	'it staged beside the archive rather than in /tmp', $stderr);
+check((glob($backups . '/.jy_restore_*') ?: []) === [],
+	'and the stage beside the archive is gone afterwards');
+$recent_tmp = array_filter(glob('/tmp/jy_restore_????????') ?: [], function ($p) { return filemtime($p) >= (time() - 300); });
+check(empty($recent_tmp), 'nothing was staged in /tmp', implode(', ', $recent_tmp));
+
 harness_finish();
