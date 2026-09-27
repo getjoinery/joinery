@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.28 - copy_restore's claim budget: restore_chain's work (2h20m) and slack, with no approval
+ *                 window (site_copy.md WP2)
  * @version 1.27 - site_quiet's claim budget: 18m against the node's 16m (lock wait, then the wait for
  *                 command-line PHP) (site_copy.md WP5)
  * @version 1.26 - stage_chain and verify_backup take a whole long chain (agent 1.45.0): up to CHAIN_LINKS_MAX
@@ -279,6 +281,9 @@ class ManagementJob extends SystemBase {
 		'restore_database'      => 8400,  // 70m + 60m approval + slack
 		'restore_project'       => 8400,  // 70m + 60m approval + slack
 		'restore_chain'         => 15720, // 2h20m + 60m approval, with room
+		// A dormant copy's restore: the same script and work, and no approval
+		// to wait for (the owner approved at the source).
+		'copy_restore'          => 8700,  // 2h20m + slack
 		// Bringing a backup back from backup storage. Mirrors upload_backup's budget,
 		// because it is the same transfer in the other direction and S3Signer's
 		// window is what bounds both.

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.7.0 - --adopt-secret-key: this machine keeps its own Globalvars_site.php and takes
+#                  only the chain's secret_box_key into it, so what the source sealed opens here
+#                  (a copy onto new hardware; specs/site_copy.md WP2). --skip-ssl is passed to
+#                  the reconcile.
 # Version: 1.6.0 - holds the host runner lock (host_runner_lock.sh) from before the first write
 #                  until exit, so the host converger never runs installers against a half-restored
 #                  tree
@@ -79,6 +83,13 @@
 #                     all: every offloaded file (a site leaving its bucket).
 #   --epoch-key E=F   A recovered key file for epoch E, where this machine's own
 #                     key does not open its envelope (repeatable).
+#   --adopt-secret-key  Take the chain's secret_box_key into this machine's own
+#                     config, keeping everything else in it (the database
+#                     settings, the paths). For a copy of another machine's
+#                     site: without it, every secret the source sealed is dead
+#                     here. Refused when this machine has no config of its own.
+#   --skip-ssl        Passed to the reconcile: do not arm the certificate retry
+#                     (a copy that must not ask Let's Encrypt for anything)
 #   --skip-reconcile  Do not reconcile to this machine (files-only rehearsals and
 #                     restores into a scratch --target-dir)
 #   --dry-run         Verify the chain and report the plan; change nothing
@@ -89,11 +100,12 @@
 # config/Globalvars_site.php (this machine's database password and secret_box_key)
 # and config/backup_site_key (one machine's identity as a recipient of its own
 # backups). Inheriting either is how a clean-looking restore ends in
-# SQLSTATE[08006] on every page.
+# SQLSTATE[08006] on every page. --adopt-secret-key is the one exception, and it
+# takes one value out of the first, never the file.
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.6.0"
+SCRIPT_VERSION="1.7.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -113,6 +125,8 @@ FORCE=false
 SKIP_DATABASE=false
 DOMAIN=""
 SKIP_RECONCILE=false
+SKIP_SSL=false
+ADOPT_SECRET_KEY=false
 OBJECTS_DIR=""
 OBJECTS_MODE="missing"
 EPOCH_KEYS=()
@@ -126,6 +140,8 @@ while [[ $# -gt 0 ]]; do
         --domain)         DOMAIN="$2"; shift 2 ;;
         --domain=*)       DOMAIN="${1#*=}"; shift ;;
         --skip-reconcile) SKIP_RECONCILE=true; shift ;;
+        --skip-ssl)       SKIP_SSL=true; shift ;;
+        --adopt-secret-key) ADOPT_SECRET_KEY=true; shift ;;
         --skip-database)  SKIP_DATABASE=true; shift ;;
         --objects)        OBJECTS_DIR="$2"; shift 2 ;;
         --objects-mode)   OBJECTS_MODE="$2"; shift 2 ;;
@@ -343,6 +359,16 @@ if [ "${#CODE_ARCHIVES[@]}" -gt 0 ]; then
     fi
 fi
 
+# The key is spliced into this machine's own config, so there has to be one:
+# without it there is no database password to keep, and a restore that ends
+# with the source's config (or none) is the SQLSTATE[08006] this script exists
+# to prevent. Asked before anything is written.
+if [ "$ADOPT_SECRET_KEY" = true ] && [ ! -e "${PROJECT_DIR}/config/Globalvars_site.php" ]; then
+    print_error "--adopt-secret-key needs this machine's own ${PROJECT_DIR}/config/Globalvars_site.php to"
+    print_error "take the key into, and there is none. Install the site first; nothing was restored."
+    exit 1
+fi
+
 if [ "$FORCE" != true ]; then
     echo "About to restore ${PROJECT_DIR} from chain ${CHAIN_ID} at run ${RESTORE_SEQ}." >&2
     echo "Files deleted since the full backup will be deleted here too." >&2
@@ -487,6 +513,16 @@ if [ "$LEDGER_KEPT" = true ]; then
     fi
 fi
 
+# The chain's copy of the site config, taken before this machine's is put back
+# over it: --adopt-secret-key reads one value out of it below. Copied, not
+# moved, and into KEEP_TMP (this user's, 0700), because it holds the source
+# machine's database password too and nothing else of it is kept.
+CHAIN_CONFIG=""
+if [ "$ADOPT_SECRET_KEY" = true ] && ${SUDO} test -f "${PROJECT_DIR}/config/Globalvars_site.php"; then
+    CHAIN_CONFIG="${KEEP_TMP}/chain_Globalvars_site.php"
+    ( umask 077; ${SUDO} cat "${PROJECT_DIR}/config/Globalvars_site.php" > "$CHAIN_CONFIG" ) || CHAIN_CONFIG=""
+fi
+
 # Put this machine's own files back over whatever the chain brought.
 for rel in ${KEPT_FILES[@]+"${KEPT_FILES[@]}"}; do
     ${SUDO} mkdir -p "${PROJECT_DIR}/$(dirname "$rel")"
@@ -505,6 +541,87 @@ for rel in ${KEPT_FILES[@]+"${KEPT_FILES[@]}"}; do
 done
 if [ "${#KEPT_FILES[@]}" -gt 0 ]; then
     print_success "This machine's own ${KEPT_FILES[*]} kept"
+fi
+
+# ── --adopt-secret-key ──────────────────────────────────────────────────────
+#
+# A copy onto new hardware: this machine keeps its own config and takes the
+# source's secret_box_key into it, so every secret the source sealed opens here.
+# One value, never the file: the database settings, the paths and
+# deployment_environment are this machine's.
+#
+# The value is read out of the chain's copy by pattern, never by running it
+# (it is PHP from another machine), checked to be the 32-byte key SecretBox
+# requires, and written with var_export. The new file is linted before it
+# replaces the old one, and keeps its owner and mode. The key is never printed.
+if [ "$ADOPT_SECRET_KEY" = true ]; then
+    CONFIG="${PROJECT_DIR}/config/Globalvars_site.php"
+    SPLICED="${CONFIG}.adopt.$$"
+    ADOPT_STATUS=""
+    if [ -n "$CHAIN_CONFIG" ]; then
+        ADOPT_STATUS=$(${SUDO} php -- "$CHAIN_CONFIG" "$CONFIG" "$SPLICED" 2>/dev/null <<'PHP'
+<?php
+[, $src, $dst, $out] = $argv;
+$assign = '/^([ \t]*\$this->settings\[([\'"])secret_box_key\2\][ \t]*=[ \t]*)([\'"])([^\'"\n]*)\3[ \t]*;/m';
+$chain = @file_get_contents($src);
+$mine = @file_get_contents($dst);
+if ($chain === false || $mine === false) { echo "UNREADABLE"; exit(0); }
+// The last assignment is the one PHP would leave standing.
+if (!preg_match_all($assign, $chain, $m) || $m[4] === array()) { echo "NOKEY"; exit(0); }
+$key = end($m[4]);
+$raw = base64_decode($key, true);
+if ($raw === false || strlen($raw) !== 32) { echo "BADKEY"; exit(0); }
+if (preg_match_all($assign, $mine, $t) && $t[4] !== array() && end($t[4]) === $key) { echo "SAME"; exit(0); }
+$line = '$this->settings[\'secret_box_key\'] = ' . var_export($key, true) . ';';
+$count = 0;
+$new = preg_replace_callback($assign, function ($x) use ($line) { return $line; }, $mine, -1, $count);
+if ($count === 0) {
+	// Before a closing tag, where one exists: anything after it is page output.
+	$block = "\n// Key for SecretBox (secrets at rest), taken from the site this is a copy of.\n" . $line . "\n";
+	$at = strrpos($new, '?>');
+	$new = $at === false ? rtrim($new, "\n") . "\n" . $block : substr($new, 0, $at) . $block . "\n" . substr($new, $at);
+}
+$old = umask(077);
+$ok = file_put_contents($out, $new) === strlen($new);
+umask($old);
+if (!$ok) { @unlink($out); echo "UNWRITABLE"; exit(0); }
+@chmod($out, fileperms($dst) & 0777);
+if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+	@chown($out, fileowner($dst));
+	@chgrp($out, filegroup($dst));
+}
+echo "SPLICED";
+PHP
+        ) || ADOPT_STATUS="FAILED"
+    else
+        ADOPT_STATUS="NOCONFIG"
+    fi
+
+    case "$ADOPT_STATUS" in
+        SAME)
+            print_info "This machine's secret_box_key is already the chain's; nothing to adopt." ;;
+        SPLICED)
+            if ${SUDO} php -l "$SPLICED" >/dev/null 2>&1 && ${SUDO} mv -f "$SPLICED" "$CONFIG"; then
+                print_success "Adopted the chain's secret_box_key into this machine's own config"
+            else
+                ${SUDO} rm -f "$SPLICED"
+                print_error "The config with the chain's secret_box_key did not pass php -l; this machine's"
+                print_error "own config is unchanged, so what the source sealed will not open here."
+                exit 1
+            fi ;;
+        *)
+            ${SUDO} rm -f "$SPLICED" 2>/dev/null
+            case "$ADOPT_STATUS" in
+                NOCONFIG) why="the chain carries no config/Globalvars_site.php" ;;
+                NOKEY)    why="the chain's config names no secret_box_key" ;;
+                BADKEY)   why="the chain's secret_box_key is not 32 base64-encoded bytes" ;;
+                *)        why="the configs could not be read or written (${ADOPT_STATUS:-no answer})" ;;
+            esac
+            print_error "Could not adopt the chain's secret_box_key: ${why}."
+            print_error "The files are restored with this machine's own config and key, under which the"
+            print_error "source's sealed secrets do not open; the database is not restored."
+            exit 1 ;;
+    esac
 fi
 
 # The meta artifact holds shape.json and the captured virtualhost. Neither is
@@ -619,6 +736,7 @@ else
 
     RECONCILE_ARGS=("$PROJECT_NAME" --domain "$USE_DOMAIN")
     [ -n "$META_TMP" ] && RECONCILE_ARGS+=(--backup-meta "$META_TMP")
+    [ "$SKIP_SSL" = true ] && RECONCILE_ARGS+=(--skip-ssl)
 
     print_info "Reconciling the restored site to this machine..."
     if ! ${SUDO} bash "$RECONCILE" "${RECONCILE_ARGS[@]}"; then

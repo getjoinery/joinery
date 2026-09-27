@@ -3,6 +3,7 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.2 - clearing removes a copy's vouched record with its copy_of (site_copy.md WP2)
 # Version: 1.1 - review: the boot unit orders after nftables.service and firewalld.service (a stock
 #               nftables.conf flushes the ruleset); a copy_of record always means a copy
 # Version: 1.0
@@ -427,7 +428,7 @@ site_state_clear() {
 
     if [[ "${rc}" == "0" ]]; then
         rm -rf "${SS_HELD}"
-        rm -f "${SS_LOOK_FILE}" "${SS_DIR}/copy_of"
+        rm -f "${SS_LOOK_FILE}" "${SS_DIR}/copy_of" "${SS_DIR}/vouched"
         rmdir "${SS_DIR}" 2>/dev/null
     fi
     return "${rc}"
