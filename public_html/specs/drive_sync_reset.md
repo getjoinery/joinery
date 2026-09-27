@@ -1748,7 +1748,8 @@ belt in, before the belt lands.** B1 is what happens without this.
   engine verdict on the 420 seeds (NEEDED and VALID 2026-09-25; see "B7-B9
   measured" below); then commit 3 (the executor), measured alone against the
   B7-B9 commit with births hidden as the control (NEEDED and VALID
-  2026-09-25); then B11 and B12; then
+  2026-09-25, committed `d9ad1769`); then B11 and B12 (NEEDED and VALID
+  2026-09-26, two commits); then
   B6, a file at a reserved download slot gets a record so the hold reaches
   it; then C9 part 2 with B4 and B5, the D1 park gap and C13. B3 waits for its
   prototype's three neighbour reds to be traced.
@@ -1853,22 +1854,59 @@ belt in, before the belt lands.** B1 is what happens without this.
   folder fires lose lent files (plat3 75426, 75410, 75424). No new fire
   anywhere, and each change returns under its own rule's knockout and no
   other.
-- **B11, open (public-html-e9, 2026-09-25, instinct): with B8, a held record
-  whose path another record's file has taken is judged by nothing in the
-  convergence check.** B8 skips the path, so the held record's own file may
-  stand nowhere on the disk and the check still reads converged. Before B8
-  that state fired, with the wrong words; `own_files_astray`, which would
-  say so, prints only under `OWNFILE`. The rule: on that skip, the held
-  record's own file must stand somewhere on this disk, by identity, or the
-  check fires "held file gone". Harness only; its own commit, after commit
-  3, so that commit 3 is measured alone.
-- **B12, open (public-html-e9, 2026-09-25, instinct): `Vfs::open_file`
-  checks for a symlink on the path, and `File::open` follows one placed
-  between the two calls.** The handle then reads the link's target, with the
-  target's identity. On a strong volume the executor's identity check
-  refuses it; on a weak one nothing does. Opening with `O_NOFOLLOW` (Unix)
-  and `FILE_FLAG_OPEN_REPARSE_POINT` (Windows) closes it. Older than commit
-  3: a fingerprint then an `open_read` had the same window and no check.
+- **B11, fixed in the harness 2026-09-26 (public-html-e9,
+  2026-09-25, instinct): with B8, a held record whose path another record's
+  file has taken is judged by nothing in the convergence check.** B8 skips
+  the path, so the held record's own file may stand nowhere on the disk and
+  the check still reads converged. Before B8 that state fired, with the
+  wrong words; `own_files_astray`, which would say so, prints only under
+  `OWNFILE`. On that skip the held record's own file must now stand
+  somewhere on this disk, found by `Entry::owns`, or the check fires "held
+  file gone"; asked after the trees are compared, so the other record's
+  file is judged first. The path where it stands is not taken off the disk
+  side: it is either another record's, judged as that record's, or no
+  record's, which the unclaimed-file check fires on first. B8's pin now
+  ends in "held file gone" (its held file is deleted), red under either
+  rule's knockout; a converged state reaching the branch cannot be set
+  down by hand without a second claim on the held file. Measured against
+  `d9ad1769`: all 840 journals byte-identical, no verdict changed, the fire
+  never seen. The branch is reached four times, all with births hidden
+  (kill2 75112 on both devices, kill2 75118, plat3 75413), each time the
+  held file itself standing under a plain record's name (its real birth is
+  the held record's own): the double claim the sealed oracle already
+  reports as a leak on each of those seeds. NEEDED and VALID
+  (public-html-a5, 2026-09-26).
+- **B12, fixed 2026-09-26 (public-html-e9, 2026-09-25,
+  instinct): `Vfs::open_file` checks for a symlink on the path, and
+  `File::open` follows one placed between the two calls.** The handle then
+  reads the link's target, with the target's identity. On a strong volume
+  the executor's identity check refuses it; on a weak one nothing does.
+  Older than commit 3: a fingerprint then an `open_read` had the same window
+  and no check. The open itself now refuses a link (`real.rs`
+  `open_not_following`). Unix opens with `O_NOFOLLOW`, and with `O_NONBLOCK`
+  so that a FIFO put there in the same window is turned away rather than
+  waited on for ever. Windows opens the reparse point itself and refuses a
+  link; any other reparse point (a deduplicated file, a cloud placeholder)
+  would read as its stub that way, so it is opened the ordinary way and kept
+  only if the file index matches. Pins `the_open_never_follows_a_link_put_at_the_path`
+  (Unix, and Windows on NTFS in the test VM) and
+  `the_open_does_not_wait_on_a_fifo_put_at_the_path`, each red only without
+  its own flag. The Windows branch for a reparse point that is not a link
+  has not run: the VM has no deduplicated or placeholder file to open. On
+  Windows a directory put at the path in the window fails the open (no
+  backup semantics) and the op errors and retries where Unix answers
+  nothing stands there; the safe direction, left as is. NEEDED and VALID
+  (public-html-a5, 2026-09-26).
+- **B13, open (public-html-a5, 2026-09-26, read; consequence instinct): a
+  hash by path follows a link put at the path after the fingerprint.**
+  `Vfs::hash` and `open_read` still open by path and follow a link. The
+  scan fingerprints with `symlink_metadata` and then hashes by path
+  (`pass.rs`), and the executor hashes by path at six sites (`execute.rs`),
+  so a link put there between the two is hashed as its target and that
+  hash is recorded under the original file's fingerprint. Uploads read one
+  handle since file identity commit 3, so the bytes sent are right; the
+  recorded hash is not. The close: hash through the `open_file` handle, or
+  an `open_not_following` hash.
 - **D1 (2026-09-24), a sealed file dragged out of a vault is held, not
   converted. NEEDED and VALID (public-html-25), landed 0c66212d.** Post-commit
   reading 181843af -> 0c66212d: identical, seed for seed, to the reviewed
