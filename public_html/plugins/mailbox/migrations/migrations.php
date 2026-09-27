@@ -1184,4 +1184,58 @@ return [
 			return true;
 		},
 	],
+	[
+		// A browser's search index over Fortress mail catches up by when each
+		// message's search text was written (specs/client_custody_mail.md § R5,
+		// MailboxDeviceSearch::entries()): the owner's rows in (time, id) order.
+		// A composite index, which a data class cannot declare. Waits for the
+		// column, which the plugin's additive pass creates.
+		'id' => 'iem_017_search_written_time_index',
+		'version' => '1.123.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$q = $db->prepare(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'iem_inbound_email_messages'
+				   AND column_name IN ('iem_search_written_time', 'iem_sealed_owner_user_id')");
+			$q->execute();
+			if ((int)$q->fetchColumn() < 2) {
+				echo "iem_017: iem_search_written_time is not on iem_inbound_email_messages yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+			$db->exec(
+				"CREATE INDEX IF NOT EXISTS iem_search_written_idx
+				 ON iem_inbound_email_messages (iem_sealed_owner_user_id, iem_search_written_time, iem_inbound_email_message_id)
+				 WHERE iem_search_written_time IS NOT NULL");
+			echo "iem_017: index on the owner's search-text write times created.\n";
+			return true;
+		},
+	],
+	[
+		// Fortress rows sealed before iem_search_written_time existed carry
+		// search text and no stamp, so no browser's index would ever reach them
+		// (specs/client_custody_mail.md § R5). Stamp each with when it arrived:
+		// a browser's first build walks back from now and takes them in order.
+		'id' => 'iem_018_stamp_existing_search_text',
+		'version' => '1.123.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$q = $db->prepare(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'iem_inbound_email_messages'
+				   AND column_name IN ('iem_search_written_time', 'iem_search_text', 'iem_create_time')");
+			$q->execute();
+			if ((int)$q->fetchColumn() < 3) {
+				echo "iem_018: the search columns are not on iem_inbound_email_messages yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+			$n = $db->exec(
+				"UPDATE iem_inbound_email_messages
+				    SET iem_search_written_time = COALESCE(iem_create_time, now() AT TIME ZONE 'UTC')
+				  WHERE iem_search_written_time IS NULL
+				    AND iem_search_text IS NOT NULL AND iem_search_text <> ''");
+			echo "iem_018: " . (int)$n . " message(s) with search text stamped.\n";
+			return true;
+		},
+	],
 ];

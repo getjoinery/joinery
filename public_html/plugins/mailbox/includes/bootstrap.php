@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.19 - the mail rotation re-seals the Fortress search key (MailboxSearchKey)
  * @version 1.18
  * @changelog 1.18 - Fortress mail (specs/client_custody_mail.md): registers the
  *   `mail` client-custody reseal over InboundEmailMessage; the server-key
@@ -313,8 +314,10 @@ VaultUnlock::onReseal(VaultUnlock::modelReseal(array(MailboxContactIndexKey::cla
 // A Fortress row's DEK is sealed to the owner's `mail` vault, whose secret only
 // their browser holds, so rotating that vault is the browser's walk over these
 // rows (vault_client_reseal_rows / vault_row_reseal). Pending relay rows carry
-// the same key and are walked with them.
-VaultUnlock::clientReseal('mail', array(InboundEmailMessage::class));
+// the same key and are walked with them, and so is the search key every browser's
+// Fortress search index is sealed under (MailboxSearchKey, § R5): only its wrapping
+// moves, so no browser rebuilds its index after a rotation.
+VaultUnlock::clientReseal('mail', array(InboundEmailMessage::class, MailboxSearchKey::class));
 
 // --- Window-wipe callback (docs/sealed_vault.md § consumer contract) ---
 // Clears the /dev/shm FTS working copy when a window closes (explicit lock,

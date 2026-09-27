@@ -18,6 +18,14 @@
  * iem_snippet}, `pending` when not yet parsed) for the owner's browser to open;
  * the response carries `fortress: true` when any thread does.
  *
+ * `device_hits` (with `q`) carries the message ids the caller's browser found
+ * in its own index of their Fortress mail (§ R5), packed as
+ * MailboxDeviceSearch::decodeHits() reads them; they join the server's search.
+ * With `device_only` (every mailbox in view is Fortress) there is no `q`: the
+ * ids are the whole search, and the term never reaches the server.
+ *
+ * @version 1.6.0 - device_only: a search over end-to-end mail alone sends no term
+ * @version 1.5.0 - device_hits: a browser's search over its own Fortress index
  * @version 1.4.0 - Fortress threads travel sealed; `fortress` on the response
  * @version 1.3.1
  * @changelog 1.3.0 - sent param: the Sent pseudo-folder view
@@ -56,6 +64,24 @@ function thread_list_logic(array $input): LogicResult {
 		'trash'        => !empty($input['trash']),
 	);
 
+	// A search over end-to-end mail (§ R5): device_hits are the ids the
+	// caller's browser found. With device_only (every mailbox in view is
+	// end-to-end) no term comes at all, so the server never learns which of
+	// these messages hold which word.
+	$device_only = !empty($input['device_only']);
+	if (($filters['q'] !== '' || $device_only) && isset($input['device_hits']) && $input['device_hits'] !== null) {
+		try {
+			$filters['device_hits'] = MailboxDeviceSearch::decodeHits((string)$input['device_hits']);
+		} catch (MailboxDeviceSearchException $e) {
+			return LogicResult::error($e->getMessage());
+		}
+	}
+	if ($device_only) {
+		$filters['q'] = '';
+		$filters['device_search'] = true;
+		$filters['device_hits'] = $filters['device_hits'] ?? array();
+	}
+
 	$page = isset($input['page']) ? intval($input['page']) : 1;
 	$folder_id = isset($input['folder_id']) && $input['folder_id'] !== '' && $input['folder_id'] !== null
 		? intval($input['folder_id']) : null;
@@ -73,6 +99,8 @@ function thread_list_logic_descriptor() {
 		'input' => [
 			'alias_id' => ['type' => 'string', 'required' => false, 'label' => 'Mailbox alias ID, unmatched, or unmatched:{domain_id}'],
 			'q' => ['type' => 'string', 'required' => false, 'label' => 'Search text'],
+			'device_only' => ['type' => 'bool', 'required' => false, 'label' => 'A search over end-to-end mail alone: device_hits with no term (q is ignored)'],
+			'device_hits' => ['type' => 'string', 'required' => false, 'max_length' => 4000000, 'label' => 'Message ids the caller\'s browser found in its own index of their end-to-end mail (base64 of ascending ids as LEB128 differences); joins the search for q'],
 			'unread_only' => ['type' => 'bool', 'required' => false, 'label' => 'Unread only'],
 			'starred_only' => ['type' => 'bool', 'required' => false, 'label' => 'Starred only'],
 			'inbox' => ['type' => 'bool', 'required' => false, 'label' => 'Inbox view'],

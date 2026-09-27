@@ -1,7 +1,8 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.49 — .mbx-dai-link (Change / Test again in the one-line ready state)
+ * Vanilla CSS, no framework. @version 2.50 — .mbx-device-search-btn (Rebuild / Remove on the device-search note)
+ * @version 2.49 — .mbx-dai-link (Change / Test again in the one-line ready state)
  * @version 2.48 — .mbx-dai-ondemand (Summarize, Scan now)
  * @version 2.47 — .mbx-danger-banner-model, .mbx-dai-info
  * @version 2.46 — .mbx-dai ("Your AI, your model" in the AI panel)
@@ -1086,6 +1087,19 @@
 	color: var(--mbx-text-muted, #6b7280);
 	font-size: var(--mbx-text-sm);
 }
+/* A search over Fortress mail ran on this device: the line says how far the
+   index has got, with two quiet controls for this browser's copy. */
+.mbx-device-search-btn {
+	background: none;
+	border: none;
+	padding: 0;
+	margin-right: 0.75rem;
+	font: inherit;
+	color: var(--jy-color-primary, #2563eb);
+	text-decoration: underline;
+	cursor: pointer;
+}
+.mbx-device-search-btn:disabled { opacity: 0.6; cursor: default; }
 
 /* Search over an index still catching up on a backlog: informational, not an
    error and not actionable — the fold continues in the background. */
