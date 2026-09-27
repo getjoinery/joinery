@@ -3,6 +3,11 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.23 - The quiet gate fails closed: a quiet site whose tree lacks _site_state.sh runs
+#                 nothing (review R1)
+# Version: 2.22 - The quiet gate (specs/site_copy.md WP5): right after the lock, a quiet site's
+#                 measures are asserted and nothing else runs; its leftovers are cleared once
+#                 the state is gone. The converge record is declared ahead of it.
 # Version: 2.21 - The root runner lock file is 0600, created that way and tightened if found wider:
 #                 at 0644 any account could open it and hold the converger off (site_copy.md B28)
 # Version: 2.20 - The re-ownership sets the mode before the owner (fix_permissions.sh 4.5): owner
@@ -466,6 +471,73 @@ fi
 # nobody holds. flock is independent of content, so truncating is safe.
 printf '%s\n%s\n' "$$" "$(date -u +%s)" > "${LOCK_FILE}" 2>/dev/null || true
 
+# --- The converge record ------------------------------------------------------
+# The stamp and the record of the last run live in cache/, root-owned, readable
+# by the site so the admin notice and the health check can say when the
+# converger last ran. Declared here, ahead of the quiet gate, which records too.
+# Where the converge stamp lives. A site keeps it in its cache. A machine has
+# no cache that survives a bundle refresh (the tree is replaced whole), so
+# root keeps it under /var/lib/joinery/host; a fixture keeps it in ROOT/cache.
+STATE_DIR="${SITE_ROOT}/cache"
+if [[ "${MACHINE}" == "1" && "$(id -u)" == "0" ]]; then
+    STATE_DIR="/var/lib/joinery/host"
+fi
+STAMP_FILE="${STATE_DIR}/host_converger.stamp"
+LAST_FILE="${STATE_DIR}/host_converger.last"
+CONVERGE_MAX_AGE=86400
+
+record_last() {
+    mkdir -p "${STATE_DIR}" 2>/dev/null || true
+    printf '%s %s\n' "$(date -u +%s)" "$1" > "${LAST_FILE}.tmp" 2>/dev/null && chmod 644 "${LAST_FILE}.tmp" 2>/dev/null && mv -f "${LAST_FILE}.tmp" "${LAST_FILE}" 2>/dev/null || true
+}
+
+# --- A quiet site runs nothing (specs/site_copy.md WP5) -----------------------
+# While /etc/joinery/sites/<site>/state exists the site is a dormant copy or a
+# source frozen for a switch-over. This is the one place the runner reads it,
+# and it reads it first, whatever mode it was given: the quiet measures are
+# asserted (_site_state.sh: the firewall rule, the web drop-in, no cron file,
+# certbot's timer off, Postfix deferring) and nothing else runs - no installer,
+# core or plugin, and no root request. Every minute the timer ticks, so a
+# measure undone by hand is back within the minute. Once the state is gone, a
+# run that finds its measures still in place clears them and converges as on
+# any site. A machine has no site to be quiet.
+#
+# The state file is looked for before the helper, and a quiet site whose tree
+# lacks the helper (a copy restored from an older release, a damaged tree) runs
+# nothing: the gate fails closed. Its home is the tree a copy's restore
+# replaces, so a missing file must never read as a live site.
+# (A fixture's /etc, JOINERY_SITE_STATE_ROOT, counts only when this is not root.)
+QUIET_ETC="/etc"
+[[ "$(id -u)" != "0" && -n "${JOINERY_SITE_STATE_ROOT:-}" ]] && QUIET_ETC="${JOINERY_SITE_STATE_ROOT%/}/etc"
+if [[ "${MACHINE}" == "0" && ! -f "${TOOLS_DIR}/_site_state.sh" ]] \
+   && [[ -e "${QUIET_ETC}/joinery/sites/${SITENAME}/state" ]]; then
+    echo "host converger: ${SITENAME} is quiet, and ${TOOLS_DIR}/_site_state.sh is missing - nothing runs" >&2
+    record_last "quiet-no-helper"
+    exit 0
+fi
+if [[ "${MACHINE}" == "0" && -f "${TOOLS_DIR}/_site_state.sh" ]]; then
+    # shellcheck source=_site_state.sh
+    . "${TOOLS_DIR}/_site_state.sh"
+    if site_state_init "${SITENAME}"; then
+        QUIET_REASON="$(site_state_read)"
+        if [[ -n "${QUIET_REASON}" ]]; then
+            # No stamp while quiet: the first run after the state clears then
+            # converges in full, with nothing about the release having changed.
+            rm -f "${STAMP_FILE}" 2>/dev/null
+            if site_state_assert "${QUIET_REASON}"; then
+                record_last "quiet-${QUIET_REASON}"
+            else
+                echo "host converger: ${SITENAME} is quiet (${QUIET_REASON}) and a measure did not hold - retried next run" >&2
+                record_last "quiet-${QUIET_REASON}-incomplete"
+            fi
+            exit 0
+        elif site_state_leftovers; then
+            echo "host converger: ${SITENAME} is no longer quiet - putting back what the quiet state held"
+            site_state_clear || echo "host converger: WARNING - not everything came back; retried next run" >&2
+        fi
+    fi
+fi
+
 # --- The executable set belongs to root (specs/read_only_tree.md) ------------
 # This runs before the stamp check on purpose. A container started from an image
 # whose CMD still chowns the tree to www-data hands us a writable executable set
@@ -906,19 +978,8 @@ apply_tree_permissions
 # What a run converges is a function of the deployed release, this runner and
 # the installers it ships, and which plugins are active. Hash those; when the
 # hash matches the last run's and that run is under a day old, there is
-# nothing to do and the tick costs a few file reads. The stamp and the record
-# of the last run live in cache/, root-owned, readable by the site so the
-# admin notice and the health check can say when the converger last ran.
-# Where the converge stamp lives. A site keeps it in its cache. A machine has
-# no cache that survives a bundle refresh (the tree is replaced whole), so
-# root keeps it under /var/lib/joinery/host; a fixture keeps it in ROOT/cache.
-STATE_DIR="${SITE_ROOT}/cache"
-if [[ "${MACHINE}" == "1" && "$(id -u)" == "0" ]]; then
-    STATE_DIR="/var/lib/joinery/host"
-fi
-STAMP_FILE="${STATE_DIR}/host_converger.stamp"
-LAST_FILE="${STATE_DIR}/host_converger.last"
-CONVERGE_MAX_AGE=86400
+# nothing to do and the tick costs a few file reads. Where the stamp lives is
+# declared with the converge record, above.
 
 converge_hash() {
     {
@@ -936,11 +997,6 @@ converge_hash() {
         for m in "${PUBLIC_HTML}"/plugins/*/plugin.json; do [[ -f "${m}" ]] && cat "${m}"; done
         echo "${ACTIVE_PLUGINS_FOR_HASH:-}"
     } | sha256sum | cut -d' ' -f1
-}
-
-record_last() {
-    mkdir -p "${STATE_DIR}" 2>/dev/null || true
-    printf '%s %s\n' "$(date -u +%s)" "$1" > "${LAST_FILE}.tmp" 2>/dev/null && chmod 644 "${LAST_FILE}.tmp" 2>/dev/null && mv -f "${LAST_FILE}.tmp" "${LAST_FILE}" 2>/dev/null || true
 }
 
 # --- Declared PHP extensions (root only) -------------------------------------

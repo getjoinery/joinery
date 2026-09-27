@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.29 - a node in any install state (copy, switching, retired among them) is badged with its
+ *                 words and never polled for its status (ManagedNode::is_operational())
  * @version 1.28 - each node row shows its agent version, how far behind the agent this management node
  *                 ships, and a below-minimum badge under AgentVocabulary::FLOOR
  * @version 1.27 - the result sweep reads its terminal statuses from JobResultProcessor::TERMINAL_STATUSES
@@ -788,7 +790,7 @@ function render_node_row($node, $db, $session, $role_badge = '') {
 	}
 
 	$api_refreshable = !empty($node->get('mgn_site_url'))
-		&& !in_array($install_state, ['installing', 'install_failed'], true)
+		&& $node->is_operational()
 		&& !$node->get('mgn_delete_time'); // never poll a removed site
 
 	$ssl_state = $node->get('mgn_ssl_state');
@@ -810,10 +812,8 @@ function render_node_row($node, $db, $session, $role_badge = '') {
 				<?php if ($node->get('mgn_delete_time')): ?>
 					<span class="badge bg-secondary ms-1" title="Removed <?php echo htmlspecialchars($node->get_local('mgn_delete_time', 'M j, Y')); ?>">Removed</span>
 				<?php endif; ?>
-				<?php if ($install_state === 'installing'): ?>
-					<span class="badge bg-info ms-1">Installing…</span>
-				<?php elseif ($install_state === 'install_failed'): ?>
-					<span class="badge bg-danger ms-1">Install failed</span>
+				<?php if (!$node->is_operational()): ?>
+					<span class="badge bg-<?php echo JobCommandBuilder::install_state_color($install_state); ?> ms-1"><?php echo htmlspecialchars($node->install_state_label()); ?></span>
 				<?php endif; ?>
 				<?php if ($ssl_state === 'pending'): ?>
 					<span class="badge bg-warning ms-1">SSL pending</span>

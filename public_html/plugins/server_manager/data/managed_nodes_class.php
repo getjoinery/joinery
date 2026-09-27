@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.28 - is_operational() and INSTALL_STATES: every install state (installing, install_failed,
+ *                and the site copy's copy, switching and retired) is a node no automation acts on; one list,
+ *                asked by the fleet backups, rollouts, pruning, uptime checks and notices (site_copy.md WP5)
  * @version 1.27 - soft_delete() releases the site's records: its provisioning record and hosted trial go,
  *                a domain still being bought or wired up is parked for a person, and a subscription still
  *                billing is named (release_site_records(), removal_notes())
@@ -332,6 +335,51 @@ class ManagedNode extends SystemBase {
 	 * release — is dispatched to that row's agent, so the plane never needs
 	 * a job queue of its own.
 	 */
+	/**
+	 * Every install state a node row can be in, with the words the fleet list
+	 * shows for it. A working node has none (NULL).
+	 *
+	 *   installing, install_failed - a new site being installed, or whose
+	 *                                install did not complete;
+	 *   copy                       - a dormant copy of another node's site,
+	 *                                quiet on its own machine (specs/site_copy.md);
+	 *   switching                  - the source of a switch-over in progress;
+	 *   retired                    - the old machine after a switch-over, kept
+	 *                                powered off for the way back.
+	 */
+	const INSTALL_STATES = array(
+		'installing'     => 'Installing…',
+		'install_failed' => 'Install failed',
+		'copy'           => 'Copy — dormant',
+		'switching'      => 'Switching over',
+		'retired'        => 'Retired source',
+	);
+
+	/**
+	 * Is this node a working site that automation may act on? A node in any
+	 * install state is not: no scheduled backup, rollout, pruning, uptime
+	 * check or fleet notice touches it. It stays in every list, badged; only
+	 * what runs on its own is held off. An install state this code does not
+	 * know is not a working node either.
+	 */
+	public function is_operational(): bool {
+		return self::is_operational_from($this);
+	}
+
+	/** The rule is_operational() applies, over anything that answers get() for the column. */
+	public static function is_operational_from($node): bool {
+		return trim((string)$node->get('mgn_install_state')) === '';
+	}
+
+	/** The fleet list's words for this node's install state, or '' for a working node. */
+	public function install_state_label(): string {
+		$state = trim((string)$this->get('mgn_install_state'));
+		if ($state === '') {
+			return '';
+		}
+		return self::INSTALL_STATES[$state] ?? $state;
+	}
+
 	/**
 	 * Does this node have a Joinery site to ask about?
 	 *

@@ -12,6 +12,24 @@
   `default_virtualhost.conf` 2.08 answers on `*`, `render_vhost.sh` 1.10 moves a pinned 2.07 render
   on its next converge; the installers and `virtualhost_update_script.sh` 2.3.0 substitute no
   address. B28 built (`_plugin_installers_start.sh` 2.21: the root lock file is 0600).
+- **WP5 built (2026-09-28); the firewall rule proven as root on dev (web user and Postfix refused, root and loopback through); the reboot and clear-exactly checks wait for L0:** `_site_state.sh` 1.1 (the measures, set and cleared),
+  `site_quiet.sh` 1.0, `install.sh` 2.89 (`--dormant --copy-of`), agent 1.46.0 (`site_quiet`, the
+  quiet refusal in `Execute`, `backup_run` allowed under `switchover`), and on M
+  `ManagedNode::is_operational()` with the five states, and the converger gate
+  (`_plugin_installers_start.sh` 2.23: no stamp while quiet, so clearing converges in full; fails closed without its helper). Four
+  choices made while building, each recorded where it applies below:
+  - the dormant install runs its one installer pass as any site does, then sets `quiet copy`;
+  - Postfix defers at every smtpd service, not at the `joinery` transport;
+  - the firewall rejects rather than drops, and covers Postfix's own client too;
+  - the fleet badge reads "Copy — dormant" until WP8 links the copy row to S.
+  - **Review (public-html-a5, 2026-09-28):** R1, R4, R5, R6 and the low items fixed. Two limits
+    carried to WP8, and true until it lands:
+    - **Nothing on M sets `copy` yet.** A dormant install joined to M today is a row with no install
+      state: M treats it as live, and its backups, uptime checks and notices fail against the quiet
+      copy. Do not join a dormant install to M before WP8.
+    - **`install.sh` has no release pin.** `--dormant` installs whatever release the upgrade server
+      serves now, not S's. Until WP8 adds the pin, a copy is only correct when S is on the current
+      release.
 - Decided:
   - D1: a faithful copy, with switching over and deleting kept separate; the old Clone is retired.
   - D2: the backup chain carries the copy.
@@ -384,11 +402,11 @@ later is covered without anyone thinking about it.
 
 | What | While quiet (either reason) |
 |---|---|
-| Leaving the machine (mail sends, relay and IMAP pulls, Joinery Direct, payments, webhooks, AI calls, OAuth refresh, anything added later) | **a firewall rule drops all outgoing traffic from the web user**, except to the machine itself. All site PHP runs as that user, for web pages and for scheduled tasks. |
+| Leaving the machine (mail sends, relay and IMAP pulls, Joinery Direct, payments, webhooks, AI calls, OAuth refresh, anything added later) | **a firewall rule rejects all outgoing traffic from the web user and from Postfix's own client**, except to the machine itself. All site PHP runs as the web user, for web pages and for scheduled tasks; Postfix's client is covered because the site can hand mail to the local Postfix over loopback. Rejected rather than dropped, so a page the owner opens on a copy fails its outside calls at once instead of hanging on each. |
 | Site cron and scheduled tasks | the cron file is removed, and nothing writes it back |
 | The host converger's installers | none run, core or plugin; they run again when the state clears |
 | Web | one Apache drop-in, placed ahead of the site's vhost. `copy`: a per-copy secret cookie lets the owner look; everyone else gets 503. `switchover`: a maintenance page (later, forwarding to T). |
-| Inbound mail (Postfix) | deferred if Postfix is armed: the `joinery` transport answers 4xx, and senders retry. A copy never armed it. |
+| Inbound mail (Postfix) | every smtpd service answers 4xx (`smtpd_client_restrictions=defer` on its master.cf entry), so senders keep the mail and retry. Deferring at the `joinery` transport instead would accept the mail into S's queue, where it exists only on S. |
 | certbot renewal | timer off |
 | Agent | on; accepts only the copy and switch-over words and read-only words |
 
@@ -458,8 +476,10 @@ container target, which is out of scope. A container source is never dormant.
    - Either way:
      - T installs **S's exact release**, because `vendor/` is never in a backup
        (`backup_files.sh:190`), so T's installed dependencies must match S's code.
-     - T sets `quiet copy` before the installer pass, so no installer runs. It makes no certificate
-       attempt.
+     - T's install runs its one installer pass as any fresh site's does (that installs its agent,
+       its converger and its vhost), makes no certificate attempt, and ends by setting `quiet copy`.
+       From then no installer runs. The pass ran against an empty site: S's data arrives only by
+       `copy_restore`, which runs only under `quiet copy`.
      - T's agent asks to join. The owner approves it on S's node page by its fingerprint.
      - M records T as a copy row: a `mgn_managed_nodes` row linked to S, with `mgn_install_state`
        `copy`. It shows in the fleet list with a badge ("Copy of S — dormant"), the way an
@@ -644,6 +664,7 @@ ordinary delete.
 | Passkeys, vault wrappings | in the database; bound to the domain, which stays | owner sign-in |
 | Sessions, vault unlock windows | not carried | users sign in and unlock again |
 | Tailscale, redis data, hand-installed services, IPv6-bound facts | not carried | preflight lists them |
+| S's Postfix queue at the freeze (bounces, mail the site handed to a local Postfix) | not carried: the freeze rejects Postfix's outgoing traffic, so it stays in S's queue. Accepted: the platform sends through its provider's API, not the local Postfix | the owner, from S's queue, before deleting S |
 
 ## Part 3 — Copy from backups (Phase 2: the source is dead)
 
@@ -839,6 +860,13 @@ In build order. Each is built and tested on its own (design rule).
   - No forwarding, no TTL lowering, no resolver watch: those are WP7.
   - Its live test is L0, on a proxied record under `jeremytunnell.info` (Q3).
 - **WP8 — Copy and Switch Over on the management node.**
+  - Carried from WP5's review:
+    - M sets the copy row's install state to `copy` when it creates the row or approves its join;
+      `JobResultProcessor`'s install-success path (which writes NULL) must not clear it.
+    - `install.sh site --release=X.Y.Z`, with the upgrade server serving that release's archives,
+      so T installs S's exact release (vendor/ is never in the chain).
+    - The copy preflight refuses an S older than the WP5 release: the converger's quiet gate and
+      its helper live in the tree `copy_restore` lands on T.
   - **Copy to a new server:** preflight, then "create it for me" or "I'll bring a server", then
     steps 2–6, progress, Refresh and Discard.
   - **Switch over:** steps 7–10 and the way back.

@@ -6,6 +6,8 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.15 - every scope's approve and decline actions reach the one handler through
+ *                 ApprovalChallenge::for_action(), so a new scope needs no case label here
  * @version 1.14 - approval answers go through ApprovalChallenge, one handler for every scope
  * @version 1.13 - retention is backup_retention_days, floored at one day, and a managed site saves it with
  *                save_retention; the history lists only backups that still exist, so a run retention
@@ -150,8 +152,12 @@ function _admin_backups_handle($action, array $input, $session) {
 		));
 	};
 
+	// Every ApprovalChallenge scope's approve and decline actions, whatever
+	// the scope: the scope table names them, and one handler answers them all.
+	$approval = ApprovalChallenge::for_action((string)$action);
+
 	try {
-		switch ($action) {
+		switch ($approval !== null ? 'approval_challenge' : $action) {
 
 			case 'save_recovery_key':
 				BackupRecoveryKey::set_public_key((string)($input['backup_recovery_public_key'] ?? ''));
@@ -194,11 +200,8 @@ function _admin_backups_handle($action, array $input, $session) {
 			// printed job id, and a lured superadmin must not be able to refuse
 			// (or be tricked into answering) a restore or a removal via a
 			// crafted link.
-			case 'approve_restore':
-			case 'decline_restore':
-			case 'approve_decommission':
-			case 'decline_decommission': {
-				$which = ApprovalChallenge::for_action($action);
+			case 'approval_challenge': {
+				$which = $approval;
 				$scope = ApprovalChallenge::scope($which['scope']);
 				$fw = new FormWriterV2HTML5($which['approve'] ? $scope['approve_form'] : $scope['decline_form']);
 				if (!$fw->validateCSRF($input)) {

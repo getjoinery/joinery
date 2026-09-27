@@ -22,6 +22,9 @@
  * escaped here; the one link in each notice is the plane's own node page by
  * id.
  *
+ * @version 1.4 - a node in an install state is left out of every notice: a dormant copy refuses the
+ *                agent's repairs by design, and its units and recipes are not the fleet's to alarm on
+ *                (ManagedNode::is_operational())
  * @version 1.3 - failing_recipes says a check-only recipe (disk_headroom) repairs nothing and opens its
  *                case at once;
  *                failed_backups: a node whose last scheduled backup failed (MultiManagedNode
@@ -47,6 +50,7 @@ class FleetAttentionNotice {
 		// database answers that from the JSON, so a healthy fleet costs one
 		// empty query per admin page and no decoding.
 		foreach (new MultiManagedNode(['deleted' => false, 'reports_failed_units' => true], ['mgn_name' => 'ASC']) as $node) {
+			if (!$node->is_operational()) { continue; }
 			$report = $node->get('mgn_last_host_report');
 			if (is_string($report)) { $report = json_decode($report, true); }
 			if (!is_array($report)) { continue; }
@@ -86,6 +90,7 @@ class FleetAttentionNotice {
 		}
 		$failing = [];
 		foreach (new MultiManagedNode(['deleted' => false, 'reports_failing_recipe' => true], ['mgn_name' => 'ASC']) as $node) {
+			if (!$node->is_operational()) { continue; }
 			$modes = AgentChannelEndpoint::recipes_of($node);
 			$recipes = [];
 			foreach (AgentChannelEndpoint::recipe_verdicts_of($node) as $name => $verdict) {
@@ -189,6 +194,7 @@ class FleetAttentionNotice {
 		}
 		$failing = [];
 		foreach (new MultiManagedNode(['deleted' => false, 'reports_failed_backup' => true], ['mgn_name' => 'ASC']) as $node) {
+			if (!$node->is_operational()) { continue; }
 			$f = [
 				'name'   => (string)$node->get('mgn_name'),
 				'time'   => (string)$node->get('mgn_last_backup_time'),

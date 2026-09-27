@@ -22,6 +22,8 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.7 - prune() refuses a node in an install state: a copy's row names its source's storage
+ *                (site_copy.md WP5)
  * @version 1.6 - prune() keeps $keep_days days of restore points by BackupRunner::surplus(), the rule a
  *                site's own retention uses, instead of a count; newest_landed() is the backup storage
  *                listing taken after a node reports success
@@ -96,6 +98,14 @@ class FleetBackupRetention {
 		$now = ($now === null) ? time() : (int)$now;
 		$result = array('kept' => 0, 'pruned' => 0, 'deleted_objects' => 0, 'error' => '',
 			'listed' => false, 'newest_object_time' => '', 'bytes' => 0, 'objects' => array(), 'base' => '');
+
+		// A node in an install state is never pruned from here. A dormant
+		// copy's row names its source's storage, and pruning it would delete
+		// the source's restore points under the copy's schedule.
+		if (!ManagedNode::is_operational_from($node)) {
+			$result['error'] = 'not a working node (' . $node->get('mgn_install_state') . '), so its storage is not pruned';
+			return $result;
+		}
 
 		try {
 			$creds  = $target->get_credentials();

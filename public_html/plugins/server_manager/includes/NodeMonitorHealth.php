@@ -13,6 +13,8 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.18 - evaluate(): a node in an install state is not monitored and is no problem, as the
+ *                 uptime task skips it (ManagedNode::is_operational())
  * @version 1.17 - backup_runs_from_here rows carry `level` and `bytes` (null when the run did not say);
  *                 backup_run_figures() words them for the Backups tab's run list
  * @version 1.16 - a skip after a pass is recognised by BackupVerifier::is_attempt_message, the one rule
@@ -100,6 +102,10 @@ class NodeMonitorHealth {
 		if (!$node->get('mgn_enabled') || !$node->get('mgn_uptime_enabled')) {
 			return self::result(self::STATE_DISABLED, 'Monitoring off',
 				'Uptime monitoring is disabled for this node.', false);
+		}
+		if (!ManagedNode::is_operational_from($node)) {
+			return self::result(self::STATE_DISABLED, 'Not monitored',
+				'This node is not a working site (' . $node->get('mgn_install_state') . '), so its uptime is not checked.', false);
 		}
 
 		// Can this check type reach anything at all, as configured?

@@ -13,6 +13,8 @@
  * on that site's schedule, under its own key, and are not this management node's
  * to schedule, count or alarm about.
  *
+ * @version 1.4 - eligible_nodes() skips every node in an install state, not only one installing
+ *                (ManagedNode::is_operational(); site_copy.md WP5)
  * @version 1.3 - keep_days is the fewest days of backups kept for a node (7 by default); the site's
  *                own window, reported by its runs, decides above it (retention_days())
  * @version 1.2 - is_verify_due() keys the last verify on the ATTEMPT — the later of the node's stamp
@@ -94,7 +96,7 @@ class FleetBackupPolicy {
 		foreach ($nodes as $node) {
 			if (!$node->get('mgn_web_root')) continue;
 			if ($node->get('mgn_skip_joinery_checks')) continue;
-			if ($node->get('mgn_install_state') === 'installing') continue;
+			if (!$node->is_operational()) continue;
 			$out[] = $node;
 		}
 		return $out;
