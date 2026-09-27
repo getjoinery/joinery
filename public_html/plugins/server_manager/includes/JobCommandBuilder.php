@@ -8,6 +8,11 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.82 - install_state_color(): one colour map for the status dot and the fleet badge
+ * @version 1.81 - build_site_quiet / build_site_quiet_primitive (agent 1.46.0): freeze a site for a
+ *                 switch-over, or let it run again (site_copy.md WP5)
+ * @version 1.80 - status_color_for_node(): a node in an install state is blue, a retired source grey
+ *                 (ManagedNode::is_operational())
  * @version 1.79 - shelf_newest_run() counts a run by any artifact kind BackupChain names, so a run carrying
  *                only code, data and a database is not missed
  * @version 1.78 - stage_chain and verify_backup carry a whole long chain's links (agent 1.45.0: CHAIN_LINKS_MAX
@@ -755,10 +760,21 @@ class JobCommandBuilder {
 	 *                the node record it was just folded into.
 	 * $last_job_failed - true if the most recent check_status job failed (page-render path)
 	 */
-	public static function status_color_for_node($node, $status_data = null, $last_job_failed = false) {
-		$install_state = $node->get('mgn_install_state');
-		if ($install_state === 'installing')    return 'info';
+	/**
+	 * The colour of a node in an install state, for its status dot and its
+	 * fleet-list badge alike: a failed install red, a retired source grey,
+	 * every other state blue.
+	 */
+	public static function install_state_color($install_state): string {
 		if ($install_state === 'install_failed') return 'danger';
+		if ($install_state === 'retired')        return 'secondary';
+		return 'info';
+	}
+
+	public static function status_color_for_node($node, $status_data = null, $last_job_failed = false) {
+		if (!ManagedNode::is_operational_from($node)) {
+			return self::install_state_color($node->get('mgn_install_state'));
+		}
 
 		// Skip-Joinery infrastructure (a mail relay, a DNS box) is health-checked by
 		// its uptime probe, not by the SSH status check — a failed status check against
@@ -1997,6 +2013,31 @@ class JobCommandBuilder {
 				. implode(', ', array_keys(self::UNIT_JOURNAL_UNITS)) . '.');
 		}
 		return ['primitive' => 'reset_failed_unit', 'params' => ['unit' => $unit]];
+	}
+
+	/**
+	 * Freeze this node's site for a switch-over (on), or let it run again
+	 * (off). The node decides everything else: on never sets a copy's state,
+	 * and off over a dormant copy refuses until the copy holds its source's
+	 * node id (specs/site_copy.md WP5).
+	 *
+	 * @param string $action 'on' or 'off'
+	 */
+	public static function build_site_quiet($node, $action) {
+		if (!self::has_primitive($node, 'site_quiet')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be quieted. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['site_quiet']));
+		}
+		return self::build_site_quiet_primitive($node, $action);
+	}
+
+	public static function build_site_quiet_primitive($node, $action = 'on') {
+		$action = (string)$action;
+		if ($action !== 'on' && $action !== 'off') {
+			throw new Exception("site_quiet takes on or off, not '" . $action . "'.");
+		}
+		return ['primitive' => 'site_quiet', 'params' => ['action' => $action]];
 	}
 
 	/**

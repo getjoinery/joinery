@@ -1,4 +1,6 @@
 # Joinery Docker Template
+# VERSION 5.7 - The vhost render substitutes no address: the template has had no {{SERVER_IP}} since
+#               default_virtualhost.conf 2.08 (specs/site_copy.md B25)
 # VERSION 5.6 - BASE_IMAGE_VERSION's default follows install.sh to 2.0.
 # VERSION 5.5 - PostgreSQL's data and log directories are handed to this image's postgres user
 #               before it starts. Images give postgres different ids (1.2: 101/104,
@@ -232,7 +234,6 @@ RUN if [ -f "/var/www/html/${SITENAME}/public_html/composer.json" ]; then \
 
 # Create VirtualHost configuration during build (persists across restarts)
 RUN cp /var/www/html/${SITENAME}/maintenance_scripts/install_tools/default_virtualhost.conf /etc/apache2/sites-available/${SITENAME}.conf && \
-    sed -i "s/{{SERVER_IP}}/*/g" /etc/apache2/sites-available/${SITENAME}.conf && \
     sed -i "s/{{DOMAIN_NAME}}/${DOMAIN_NAME}/g" /etc/apache2/sites-available/${SITENAME}.conf && \
     sed -i "s/{{SITE_NAME}}/${SITENAME}/g" /etc/apache2/sites-available/${SITENAME}.conf && \
     mkdir -p /var/www/html/${SITENAME}_test/public_html && \

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#Version 3.11 - Comment only: the stage holds the gz and the dump together while gunzip runs
 #Version 3.10 - The dump stages beside the archive, not in /tmp. On Ubuntu 26.04 /tmp is a tmpfs
 #              sized from RAM, and a plain dump larger than it could not be restored at all
 #              (restore_project.sh 1.4.1 moved its extraction for the same reason). The
@@ -303,7 +304,10 @@ case "$INPUT_FILE" in
         # file that actually loads — a disk-full/I/O failure here would otherwise
         # stage a silently truncated dump that passes the non-empty check.
         gunzip -c "$GZ_TMP" > "$SQL_TMP" || stage_failed
-        # The stage never holds both: the plain dump is what loads.
+        # Both are on disk only while gunzip runs (at its peak the stage holds
+        # the gz and the growing dump, beside the archive); from here only the
+        # plain dump, which is what loads. A disk that fills meanwhile fails
+        # the gunzip above and nothing is loaded.
         rm -f "$GZ_TMP"; GZ_TMP=""
         ;;
     *.sql.gz)

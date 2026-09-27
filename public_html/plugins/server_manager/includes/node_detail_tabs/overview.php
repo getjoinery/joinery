@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.28 - a banner for each of the site copy's install states (copy, switching, retired), and the
+ *                 certificate card's DNS check skips any node in an install state
  * @version 1.27 - Remove from Dashboard's confirmation says what else goes with the node, and what is kept
  * @version 1.26 - the Service box reads a DNS server's source_ok only; no DNS server reports db_connected
  * @version 1.25 - the Service box reads a DNS server's source_ok (site reachable/unreachable), and
@@ -124,6 +126,16 @@
 		echo SmAdminCsrf::field();
 		echo '<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm(\'Before retrying: SSH to the target and remove any partial install (e.g. rm -rf /var/www/html/SITENAME, drop the DB). install.sh will refuse if the site directory already exists. Continue?\', function(){ document.getElementById(\'retry_install_form\').submit(); })">Retry Install</button></form></div>';
 		echo '</div>';
+	} elseif ($install_state === 'copy') {
+		echo '<div class="alert alert-info"><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
+			. 'This server holds a copy of another node\'s site. It is quiet: it serves no visitors, sends nothing and runs no scheduled task, '
+			. 'and no backup, upgrade or uptime check runs against it.</div>';
+	} elseif ($install_state === 'switching') {
+		echo '<div class="alert alert-warning"><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
+			. 'This site is frozen while it moves to its copy. Visitors see a maintenance page until the switch-over finishes or is undone.</div>';
+	} elseif ($install_state === 'retired') {
+		echo '<div class="alert alert-secondary"><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
+			. 'This is the old server of a site that has moved. It is kept, quiet, for the way back; removing it deletes the server.</div>';
 	}
 
 	// Status summary card
@@ -1185,7 +1197,7 @@
 		&& !filter_var($ssl_card_domain, FILTER_VALIDATE_IP)
 		&& $ssl_card_domain !== 'localhost';
 
-	if ($is_fqdn && $ssl_card_state !== 'active' && $install_state !== 'installing' && !$node->get('mgn_cert_expiry_ts')) {
+	if ($is_fqdn && $ssl_card_state !== 'active' && $node->is_operational() && !$node->get('mgn_cert_expiry_ts')) {
 		$host_ip     = $node->get('mgn_host');
 		require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 		try {

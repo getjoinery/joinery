@@ -20,6 +20,8 @@
  * expiry is near, and when www reaches the origin uncovered. See
  * check_cert_expiry().
  *
+ * @version 2.6 - a node in an install state is not probed: a dormant copy answers 503 by design, and
+ *                an uptime alarm on it would be noise (ManagedNode::is_operational())
  * @version 2.5 - a check_status is due when no check_status job completed inside the window, read
  *                from the job table: mgn_last_status_check is also stamped by the probe's health
  *                document, which kept every site looking fresh so the agent-only facts (plugin
@@ -90,6 +92,9 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 
 		foreach ($nodes as $node) {
 			if (!$node->get('mgn_enabled') || !$node->get('mgn_uptime_enabled')) {
+				continue;
+			}
+			if (!$node->is_operational()) {
 				continue;
 			}
 			// Whether this node can be probed at all depends on its check type,

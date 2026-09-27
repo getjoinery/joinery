@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.27 - site_quiet's claim budget: 18m against the node's 16m (lock wait, then the wait for
+ *                 command-line PHP) (site_copy.md WP5)
  * @version 1.26 - stage_chain and verify_backup take a whole long chain (agent 1.45.0): up to CHAIN_LINKS_MAX
  *                 links under CHAIN_PARAMS_BYTES; params_ceiling() names each word's ceiling and
  *                 createPrimitiveJob checks it
@@ -233,6 +235,9 @@ class ManagementJob extends SystemBase {
 		// ten minutes waiting for the runner lock behind the timer or an
 		// upgrade, then host_housekeeping.sh, which may apt-install fail2ban.
 		'host_converge'         => 1020,
+		// 16m + slack: site_quiet waits up to ten minutes for the runner lock,
+		// then up to five for the web user's command-line PHP to finish.
+		'site_quiet'            => 1080,
 		// 60m + slack. An upgrade downloads a release, deploys it, runs
 		// migrations, runs the deploy-tier suite against the deployed tree and
 		// then every host installer. Requeuing one that is still running would

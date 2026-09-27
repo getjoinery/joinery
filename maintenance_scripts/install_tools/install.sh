@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 2.89 - The dormant step holds the host runner lock while it writes and asserts the state
+#VERSION 2.88 - site takes --dormant --copy-of=NODE_ID (specs/site_copy.md WP5): a bare-metal install
+#               that makes no certificate attempt and ends quiet (`quiet copy`, _site_state.sh), the
+#               target of a site copy. Refused beside any other site on the machine.
 #VERSION 2.87 - write_universal_vhost substitutes no address: the bare-metal template answers on
 #               any address (default_virtualhost.conf 2.08, specs/site_copy.md B25)
 #VERSION 2.86 - A site's database port is published on 127.0.0.1, always. The declared
@@ -3386,6 +3390,8 @@ do_site_create() {
     local CLONE_FROM=""
     local CLONE_KEY=""
     local ADMIN_EMAIL=""
+    local DORMANT=false
+    local COPY_OF=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -3442,6 +3448,18 @@ do_site_create() {
             --no-ssl)
                 NO_SSL=true
                 shift
+                ;;
+            --dormant)
+                DORMANT=true
+                shift
+                ;;
+            --copy-of=*)
+                COPY_OF="${1#*=}"
+                shift
+                ;;
+            --copy-of)
+                COPY_OF="$2"
+                shift 2
                 ;;
             --management-node=*)
                 MANAGEMENT_NODE_URL="${1#*=}"
@@ -3532,6 +3550,10 @@ do_site_create() {
                 echo "  --enable-agent         Run the Joinery agent (installed either way; off by default)"
                 echo "  --management-node=URL  With --enable-agent: ask to join that management node"
                 echo "  --no-ssl               Skip automatic SSL certificate setup"
+                echo "  --dormant --copy-of=ID The target of a site copy: bare metal, alone on the"
+                echo "                         machine, no certificate attempt, and quiet when done"
+                echo "                         (no visitors, nothing sent, no cron, no installers)"
+                echo "                         until it takes over node ID's identity"
                 echo "  --memory=SIZE          Memory budget for the container (512m, 2g)."
                 echo "                         Unlimited by default. Set it on any host running"
                 echo "                         more than one site: PostgreSQL sizes its memory"
@@ -3609,6 +3631,23 @@ do_site_create() {
                 ;;
         esac
     done
+
+    # A dormant install is the target of a site copy (specs/site_copy.md): a
+    # site that will be replaced whole by its source's backups, and must never
+    # act before then. It says whose copy it is, it is bare metal and alone on
+    # the machine (the quiet state quiets the machine), and it makes no
+    # certificate attempt: the source's certificate travels with the copy.
+    if [ "$DORMANT" = true ] || [ -n "$COPY_OF" ]; then
+        if [ "$DORMANT" != true ] || ! [[ "$COPY_OF" =~ ^[1-9][0-9]{0,17}$ ]]; then
+            print_error "--dormant and --copy-of=NODE_ID go together, and NODE_ID is the source's node number"
+            exit 1
+        fi
+        if [ -n "$CLONE_FROM" ] || [ "$WITH_TEST_SITE" = true ] || [ "$FORCE_MODE" = "docker" ] || [ -n "$PORT" ]; then
+            print_error "A dormant copy is one bare-metal site alone on its machine: no --clone-from, --with-test-site, --docker or port"
+            exit 1
+        fi
+        NO_SSL=true
+    fi
 
     # What --enable-agent runs on the new site: switch the agent on and, given
     # a management node, ask to join it in the same step. agent_control.php
@@ -3747,8 +3786,32 @@ do_site_create() {
         fi
     fi
 
+    if [ "$DORMANT" = true ]; then
+        if [ "$MODE" != "bare-metal" ]; then
+            print_error "A dormant copy is bare metal; this machine would install it in Docker. Use --bare-metal."
+            exit 1
+        fi
+        local other_site
+        for other_site in /var/www/html/*/config/Globalvars_site.php; do
+            [ -f "$other_site" ] || continue
+            other_site="$(basename "$(dirname "$(dirname "$other_site")")")"
+            if [ "$other_site" != "$SITENAME" ]; then
+                print_error "This machine already hosts the site $other_site. A dormant copy is quiet machine-wide, so it goes on a machine of its own."
+                exit 1
+            fi
+        done
+        if is_docker_available && [ -n "$(docker ps -aq 2>/dev/null)" ]; then
+            print_error "This machine runs Docker containers. A dormant copy is quiet machine-wide, so it goes on a machine of its own."
+            exit 1
+        fi
+        export JOINERY_DORMANT_COPY_OF="$COPY_OF"
+    fi
+
     print_header "Creating Joinery Site: $SITENAME"
     print_info "Mode: $MODE"
+    if [ "$DORMANT" = true ]; then
+        print_info "Dormant: a copy of node $COPY_OF (no certificate attempt; quiet when installed)"
+    fi
     if [ -n "$ACTIVATE_THEME" ]; then
         print_info "Theme: $ACTIVATE_THEME"
     fi
@@ -4916,13 +4979,8 @@ do_site_baremetal() {
 
     # Same probe contract as the Docker path: ask for the site by its
     # configured domain, and refuse to call a redirect into a vhost that does
-    # not exist a healthy site.
-    # Probe the address the vhost is actually bound to. default_virtualhost.conf
-    # binds every VirtualHost to this box's primary IP, so a request arriving on
-    # 127.0.0.1 matches no vhost at all and falls through to the unmatched
-    # catch-all -- a 403 that reads as a broken install on a perfectly healthy
-    # one. Derived exactly as the bind address is, so the two cannot disagree;
-    # when that fell back to "*" there is no primary IP and localhost is right.
+    # not exist a healthy site. Every host answers on any address, so the
+    # machine's primary address is as good as any; localhost when it has none.
     PROBE_HOST=$(hostname -I 2>/dev/null | awk '{print $1}')
     [ -n "$PROBE_HOST" ] || PROBE_HOST="localhost"
     PROBE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" -H "Host: $DOMAIN_NAME" "http://${PROBE_HOST}/" 2>/dev/null || true)
@@ -4944,6 +5002,27 @@ do_site_baremetal() {
 
     # The certificate retry timer, armed whether or not this run is quiet.
     arm_ssl_deferred_retry "/var/www/html/$SITENAME/maintenance_scripts/sysadmin_tools/setup_ssl.sh"
+
+    # A dormant copy goes quiet now that it is proven to serve: from here it
+    # serves no visitor, sends nothing, runs no cron and no installer, until it
+    # takes over its source's node (_site_state.sh). Asserted here, at once,
+    # rather than left to the converger's next minute.
+    if [ -n "${JOINERY_DORMANT_COPY_OF:-}" ]; then
+        print_step "Making this site dormant: a copy of node ${JOINERY_DORMANT_COPY_OF}..."
+        # Under the host runner lock, as site_quiet.sh does: the converger's
+        # timer, installed a moment ago, must not assert the state beside us.
+        if ( . "${SCRIPT_DIR}/../sysadmin_tools/host_runner_lock.sh" \
+             && hold_host_runner_lock "$SITENAME" "/var/www/html/$SITENAME" "The site is not dormant yet." \
+             && . "${SCRIPT_DIR}/_site_state.sh" \
+             && site_state_init "$SITENAME" \
+             && site_state_write copy "$JOINERY_DORMANT_COPY_OF" \
+             && site_state_assert copy ); then
+            print_success "Dormant: quiet copy of node ${JOINERY_DORMANT_COPY_OF}"
+        else
+            print_error "The site is installed but could not be made fully dormant; the host converger retries every minute"
+            exit 1
+        fi
+    fi
 
     # Summary (always shown, even in quiet mode)
     if [ "$QUIET_MODE" -eq 1 ]; then

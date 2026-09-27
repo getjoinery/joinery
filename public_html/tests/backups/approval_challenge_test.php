@@ -250,7 +250,7 @@ section('Each scope matches the agent\'s approvalScope');
 $agent_dir = getenv('JOINERY_AGENT_SOURCE') ?: '/home/user1/joinery-agent';
 $go = @file_get_contents($agent_dir . '/approval.go');
 if ($go === false) {
-	check(true, 'no agent source on this box — nothing to compare against');
+	harness_skip('agent parity not applicable', "no agent source at {$agent_dir}");
 } else {
 	// Resolve the file's string constants, then read each scope literal.
 	preg_match_all('/^\s*(\w+)\s*=\s*"([^"]*)"/m', $go, $m, PREG_SET_ORDER);

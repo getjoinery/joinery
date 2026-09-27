@@ -38,6 +38,7 @@
  * has four states rather than one call: waiting for an answer is a state the
  * phase already knew how to be in, because an unstamped step is simply retried.
  *
+ * @version 1.5 - mail_dns waits on ManagedNode::is_operational_from(), the one rule for "not a working site"
  * @version 1.4 - a row whose site was removed from the dashboard is parked, never wired to the removed node
  * @version 1.3 - a name found taken after payment stamps rdm_taken_time, so the buyer's sites page
  *                can offer an alternate (specs/managed_hosting_phase1_purchase.md §7)
@@ -453,8 +454,8 @@ class ProvisionManagedDomains {
 	 * absent.
 	 */
 	private function mail_dns($row, $node): int {
-		if (trim((string)$node->get('mgn_install_state')) !== '') {
-			return 0;   // still installing
+		if (!ManagedNode::is_operational_from($node)) {
+			return 0;   // still installing, or not a working site
 		}
 
 		$domain = (string)$row->get('rdm_domain');

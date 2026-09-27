@@ -97,7 +97,7 @@ chk "per site, by name" "$(grep -c '^    LOCK_FILE="\${LOCK_DIR}/host-installers
 chk "an unprivileged run locks in the site's cache" "$(grep -c '^    LOCK_FILE="\${SITE_ROOT}/cache/host_installers.lock"$' "$RUNNER")" "1"
 # The record is written in place: a temp-and-rename would leave the flock on
 # an inode nobody opens again.
-chk "the holder record is written in place, never renamed in" "$(sed -n '/^if ! flock -w/,/^# --- The executable set/p' "$RUNNER" | grep -c 'mv ')" "0"
+chk "the holder record is written in place, never renamed in" "$(sed -n '/^if ! flock -w/,/^# --- The converge record/p' "$RUNNER" | grep -c 'mv ')" "0"
 
 echo "== two runners started together: the second waits and runs after the first =="
 # The compiled wait, not the hook: this is what root does. The first holds the

@@ -20,6 +20,7 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.2 - node_refusal() refuses a node in an install state (ManagedNode::is_operational())
  * @version 1.1 - review 2026-09-23: one mover at a time (a PostgreSQL advisory lock around start and
  *                every step, B16); a node whose apply has not finished in APPLY_WAIT_MINUTES halts the
  *                rollout by name, and the nodes after a halt or a stop are marked skipped (B17); the
@@ -69,6 +70,9 @@ class StagedRolloutRunner {
 		}
 		if (!$node->hosts_site()) {
 			return 'it hosts no Joinery site, so there is no release to apply';
+		}
+		if (!$node->is_operational()) {
+			return 'it is not a working site (' . $node->install_state_label() . ')';
 		}
 		$missing = AgentVocabulary::missing_words($node, self::DECLARED_WORDS);
 		if ($missing || !JobCommandBuilder::has_primitive($node, 'apply_update')) {

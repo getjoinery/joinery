@@ -59,6 +59,7 @@
  * Beyond that, a machine whose web tier you suspect is not a machine to
  * restore in place — it is a machine to rebuild.
  *
+ * @version 1.1 - the scope table says expiry_tail is markup, echoed as written
  * @version 1.0 - one class for every scope; restore and decommission were two copies
  */
 
@@ -79,7 +80,9 @@ class ApprovalChallenge {
 	 *   approve_action / decline_action   the Backups page's POST actions
 	 *   approve_form / decline_form       FormWriter ids, and so the CSRF token names
 	 *   id_prefix        DOM id prefix for the key box
-	 *   box_title … declined_notice       the screen, in reading order
+	 *   box_title … declined_notice       the screen, in reading order; plain text,
+	 *                    escaped by the panel, except expiry_tail, which is
+	 *                    markup written here and echoed as it is
 	 */
 	const SCOPES = array(
 		self::RESTORE => array(
