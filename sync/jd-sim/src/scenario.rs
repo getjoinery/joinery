@@ -1543,6 +1543,7 @@ pub fn assert_converged(world: &World) {
         // `held_outside_the_vault`), and still required to BE at its path here.
         let mut disk = disk;
         let waiting = held_waiting(device);
+        let mut gone = Vec::new();
         for e in entries.iter().filter(|e| held.contains(&e.id)) {
             // Where the server keeps the sealed copy. Deleted there, it is kept
             // nowhere, and a live file at that path is another's (reset B9).
@@ -1560,7 +1561,23 @@ pub fn assert_converged(world: &World) {
             }
             assert!(e.synced_placement.is_some(), "a held record has an agreement");
             let here = held_path(e).unwrap_or_default();
+            // Another record's file has taken the held path, and is judged as
+            // that record's. The held file itself must still stand somewhere
+            // on this disk, found by its own identity (reset B11): asked after
+            // the trees are compared, so that the other file is judged first.
             if anothers_file_at(e, &here) {
+                let stands = root.as_ref().is_some_and(|r| {
+                    device.fs.all_paths().into_iter().any(|p| {
+                        device.fs.peek(&p).is_some()
+                            && jd_vfs::Vfs::fingerprint(&device.fs, &r.join(&p))
+                                .ok()
+                                .flatten()
+                                .is_some_and(|f| e.owns(f.identity()))
+                    })
+                });
+                if !stands {
+                    gone.push(format!("{:?} {} (its path {here:?})", e.id.entity_type, e.id.server_id));
+                }
                 continue;
             }
             assert!(
@@ -1594,6 +1611,12 @@ pub fn assert_converged(world: &World) {
                 device.name
             );
         }
+        assert!(
+            gone.is_empty(),
+            "{}: held file gone: held outside its vault, another record's file stands at its \
+             path, and its own file stands nowhere on this disk: {gone:?}",
+            device.name
+        );
     }
 }
 
