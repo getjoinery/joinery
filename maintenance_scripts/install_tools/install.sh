@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.87 - write_universal_vhost substitutes no address: the bare-metal template answers on
+#               any address (default_virtualhost.conf 2.08, specs/site_copy.md B25)
 #VERSION 2.86 - A site's database port is published on 127.0.0.1, always. The declared
 #              exception is gone (specs/dns_resolvers_read_over_https.md WP7): scrolldaddy's
 #              DNS resolvers read the site over HTTPS with a scoped key, so no machine reads
@@ -1127,14 +1129,10 @@ write_universal_vhost() {
         return 1
     fi
 
-    # Substitute placeholders into the template.
-    local server_ip
-    server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    [ -z "$server_ip" ] && server_ip="*"
-
+    # Substitute placeholders into the template. Neither template names an
+    # address: every host answers on any address and is chosen by name.
     sed -e "s|{{DOMAIN_NAME}}|${domain}|g" \
         -e "s|{{SITE_NAME}}|${sitename}|g" \
-        -e "s|{{SERVER_IP}}|${server_ip}|g" \
         -e "s|{{PORT}}|${mode_arg}|g" \
         "$template" > "$conf"
 

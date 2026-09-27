@@ -11,6 +11,7 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.10 - the Clone option names what it carries (database, uploads, static files) and what it does not
  * @version 1.9 - the instance-type fallback and hint name the 1 GB nanode, the size every instance should be
  * @version 1.8 - a bare instance is encoded as docker_mode 'docker' (it is a Docker host with no site); the
  *                builder refused the bare-metal encoding this form used, so every bare provision failed
@@ -278,7 +279,7 @@ $formwriter->radioinput('install_mode', 'Install Type', [
 	'required' => true,
 	'options'  => [
 		'fresh'       => 'Fresh install — empty Joinery site with default schema and admin user',
-		'from_backup' => 'Clone — pull an existing managed node\'s database, uploads, themes and plugins over HTTPS',
+		'from_backup' => 'Clone — pull a running managed node\'s database, uploads and static files over HTTPS (stored credentials are not carried)',
 		'bare'        => 'Bare instance — no site install (infrastructure node, e.g. mail relay shard); cloud target only',
 	],
 ]);

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.8 - The bare-metal vhost is rendered with no address: the template answers on any
+#                address (default_virtualhost.conf 2.08, specs/site_copy.md B25)
 # VERSION: 3.7 - The release verification key is written before the plugin bundle installs:
 #               every package in it is verified against that key, and on a fresh site
 #               nothing had written it yet, so the bundle was refused on every install.
@@ -934,16 +936,9 @@ if [ "$DOCKER_MODE" = false ]; then
     log "Configuring Apache virtualhost..."
 
     if [ -f "$VIRTUALHOST_TEMPLATE" ]; then
-        # Detect server IP
-        SERVER_IP=$(hostname -I | awk '{print $1}')
-        if [ -z "$SERVER_IP" ]; then
-            SERVER_IP="*"
-        fi
-
         cp "$VIRTUALHOST_TEMPLATE" "/etc/apache2/sites-available/${SITENAME}.conf"
         sed -i "s/{{DOMAIN_NAME}}/${DOMAIN}/g" "/etc/apache2/sites-available/${SITENAME}.conf"
         sed -i "s/{{SITE_NAME}}/${SITENAME}/g" "/etc/apache2/sites-available/${SITENAME}.conf"
-        sed -i "s/{{SERVER_IP}}/${SERVER_IP}/g" "/etc/apache2/sites-available/${SITENAME}.conf"
 
         # Disable default site
         a2dissite 000-default.conf 2>/dev/null || true

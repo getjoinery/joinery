@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.6.0 - holds the host runner lock (host_runner_lock.sh) from before the first write
+#                  until exit, so the host converger never runs installers against a half-restored
+#                  tree
 # Version: 1.5.0 - reads manifest versions 1 and 2. The plan is per kind, as BackupChain::restore_plan
 #                  makes it: each kind from its newest level 0 at or before the run. A version-2
 #                  chain's data archives are applied as a version-1 chain's files are; its code
@@ -90,7 +93,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.4.1"
+SCRIPT_VERSION="1.6.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -354,6 +357,13 @@ SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1 && sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:space:]]*[A-Z]+:)*[[:space:]]*ALL([[:space:]]|$)'; then SUDO="sudo"; fi
 fi
+
+# One runner at a time: the host converger runs the plugin installers and
+# site_housekeeping.sh against this tree when the release changes, and must
+# never do it against a half-restored one. Held until this script exits.
+# shellcheck source=host_runner_lock.sh
+source "${SCRIPT_DIR}/host_runner_lock.sh"
+hold_host_runner_lock "$(basename "$PROJECT_DIR")" "$PROJECT_DIR" || exit 1
 
 mkdir -p "$PARENT"
 

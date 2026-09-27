@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.6.0 - holds the host runner lock (host_runner_lock.sh) from before the first write
+#                  until exit, so the host converger never runs installers against a half-restored
+#                  tree
 # Version: 1.5.3 - the sudo probe lists the rules and requires NOPASSWD: ALL (see backup_files.sh 1.1.2)
 # Version: 1.5.2 - the interactive replace branch carries config/backup-ledger across the move.
 #                  It moved the whole tree aside and made a fresh directory, so this machine's
@@ -269,6 +272,13 @@ if [ "$(id -u)" -ne 0 ]; then
         SUDO="sudo"
     fi
 fi
+
+# One runner at a time: the host converger runs the plugin installers and
+# site_housekeeping.sh against this tree when the release changes, and must
+# never do it against a half-restored one. Held until this script exits.
+# shellcheck source=host_runner_lock.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/host_runner_lock.sh"
+hold_host_runner_lock "$(basename "$PROJECT_DIR")" "$PROJECT_DIR" || exit 1
 
 # Create the extraction directory, beside the ARCHIVE rather than in /tmp.
 #

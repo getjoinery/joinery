@@ -112,9 +112,17 @@ driven by the registry table that travels **inside the dump**, so it needs no
 plugin code and no key. It runs on **import** — `_site_init.sh` calls it after a
 `clone_export` restore — because the export is a passthru `pg_dump` pipeline with
 no seam to scrub, and must never `UPDATE` the source. The copy lands **clean**
-(every sealed value `absent` = "not configured") rather than dead. A genuine
-*move* is restore-from-backup, which carries `config/` and the matching key, so
-nothing is scrubbed there.
+(every sealed value `absent` = "not configured") rather than dead.
+
+A restore onto **another machine** scrubs nothing, and keeps nothing sealed
+either. The backup carries the source's `config/`, but the restore keeps the
+target machine's own `config/Globalvars_site.php`, and with it the target's own
+`secret_box_key`. Every value sealed on the source is therefore **dead** on the
+target: the canary fails, the reconciler raises one batched key-mismatch alert,
+`regenerable` values are minted again (a new Joinery Direct signing key no longer
+matches its published DNS record, and outstanding signed file links stop
+working), and every `operator` value is entered again. A restore on the same
+machine is unaffected: the key is the same.
 
 ## Adding a sealed secret
 

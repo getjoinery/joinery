@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#Version 3.10 - The dump stages beside the archive, not in /tmp. On Ubuntu 26.04 /tmp is a tmpfs
+#              sized from RAM, and a plain dump larger than it could not be restored at all
+#              (restore_project.sh 1.4.1 moved its extraction for the same reason). The
+#              decrypted .gz is removed once the plain dump is written, so the stage never holds
+#              both. The unsealed archive key stays in /tmp: it is small, and RAM is where it
+#              belongs
 #Version 3.9 - Comments only: the role a dump names is illustrated by the mailbox plugin's
 #              iemap_* role. scrolldaddy_reader, the earlier example, is gone
 #              (specs/dns_resolvers_read_over_https.md WP7)
@@ -115,18 +121,23 @@ if [ ! -f "$INPUT_FILE" ]; then
 fi
 
 # --- Temp-file bookkeeping / cleanup ------------------------------------------
-# Staging files use a recognizable jy_restore_ prefix so stranded ones are
+# Staging uses a recognizable jy_restore_ prefix so stranded files are
 # identifiable. The EXIT trap covers every normal exit, but a hard kill
 # (SIGKILL — the agent's step timeout) runs no trap and can strand a decrypted
-# plaintext dump. Self-healing: every run deletes its own stale leftovers, so
+# plaintext dump. Self-healing: every run deletes its own stale leftovers, in
+# /tmp (the key, and older runs' dumps) and beside the archive (the stage), so
 # an orphan survives at most until the next backup/restore touches the box.
-find /tmp -maxdepth 1 -name 'jy_restore_*' -user "$(id -un)" -mmin +1440 -delete 2>/dev/null
+find /tmp -maxdepth 1 -type f -name 'jy_restore_*' -user "$(id -un)" -mmin +1440 -delete 2>/dev/null
+find /tmp "$(dirname "$INPUT_FILE")" -maxdepth 1 -type d -name '*jy_restore_????????' -user "$(id -un)" \
+    -mmin +1440 -exec rm -rf {} + 2>/dev/null
+STAGE_DIR=""
 GZ_TMP=""
 SQL_TMP=""
 KEY_TMP=""
 cleanup() {
     [ -n "$GZ_TMP" ]  && rm -f "$GZ_TMP"
     [ -n "$SQL_TMP" ] && rm -f "$SQL_TMP"
+    [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
     # An unsealed archive key must not outlive the restore that needed it.
     [ -n "$KEY_TMP" ] && rm -f "$KEY_TMP"
 }
@@ -250,7 +261,17 @@ info "Source:    $INPUT_FILE"
 info "========================================="
 
 # --- Stage 1: produce a verified plaintext SQL temp file, DB UNTOUCHED ---------
-SQL_TMP=$(mktemp --suffix=.sql /tmp/jy_restore_XXXXXXXX)
+# Beside the archive, on the disk that already holds it: on Ubuntu 26.04 /tmp is
+# a tmpfs sized from RAM, and a 2.8 GB database's plain dump does not fit in a
+# 2 GB machine's. /tmp only when the archive's directory is not writable here,
+# and then said.
+STAGE_DIR=$(mktemp -d "$(dirname "$INPUT_FILE")/.jy_restore_XXXXXXXX" 2>/dev/null) || STAGE_DIR=""
+if [ -z "$STAGE_DIR" ]; then
+    info "⚠️  Cannot stage beside the archive ($(dirname "$INPUT_FILE") is not writable); staging in /tmp."
+    info "    On a box where /tmp is a tmpfs, a dump larger than it will not fit."
+    STAGE_DIR=$(mktemp -d /tmp/jy_restore_XXXXXXXX)
+fi
+SQL_TMP="$STAGE_DIR/restore.sql"
 
 stage_failed() {
     info "✗ Could not stage the restore file (disk full or I/O error?). Database untouched."
@@ -266,7 +287,7 @@ case "$INPUT_FILE" in
             echo "BACKUP_KEY_MISSING"
             exit 3
         fi
-        GZ_TMP=$(mktemp --suffix=.sql.gz /tmp/jy_restore_XXXXXXXX)
+        GZ_TMP="$STAGE_DIR/restore.sql.gz"
         # Key crosses on stdin, never argv (visible in ps for the whole decrypt).
         if ! printf '%s\n' "$ENCRYPTION_KEY" | openssl enc -aes-256-cbc -d -pbkdf2 -pass stdin -in "$INPUT_FILE" -out "$GZ_TMP" 2>/dev/null; then
             info "✗ Decryption failed (wrong key or corrupt archive). Database untouched."
@@ -282,6 +303,8 @@ case "$INPUT_FILE" in
         # file that actually loads — a disk-full/I/O failure here would otherwise
         # stage a silently truncated dump that passes the non-empty check.
         gunzip -c "$GZ_TMP" > "$SQL_TMP" || stage_failed
+        # The stage never holds both: the plain dump is what loads.
+        rm -f "$GZ_TMP"; GZ_TMP=""
         ;;
     *.sql.gz)
         info "🔍 Compressed archive — verifying integrity."
@@ -323,7 +346,7 @@ case "$INPUT_FILE" in
         fi
         ;;
 esac
-info "✓ Archive verified and staged ($(ls -lh "$SQL_TMP" | awk '{print $5}'))."
+info "✓ Archive verified and staged ($(ls -lh "$SQL_TMP" | awk '{print $5}')) in $STAGE_DIR."
 
 # --- Stage 1b: refuse a dump this server is too old to load --------------------
 # pg_dump emits the settings and meta-commands of the version that WROTE the

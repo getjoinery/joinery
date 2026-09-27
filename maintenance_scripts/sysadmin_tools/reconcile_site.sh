@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # reconcile_site.sh - a site's SHAPE: read it, or make a site match this machine's
+# Version: 1.2.4 - the no-config message says a restore keeps the machine's own config, not that a
+#                  backup never carries one (it does)
 # Version: 1.2.3 - the --print-shape database probe reads stdin from /dev/null and skips a config
 #                  that names no database: a psql password prompt blocked the whole backup run
 # Version: 1.2.2 - the sudo probe lists the rules and requires NOPASSWD: ALL (see backup_files.sh 1.1.2)
@@ -141,7 +143,8 @@ CONFIG="${SITE_DIR}/config/Globalvars_site.php"
 if [ ! -f "$CONFIG" ]; then
     print_error "No site config at $CONFIG — there is nothing to reconcile."
     print_error "A restore must land on an INSTALLED site: the config is where this machine's"
-    print_error "database password and secret_box_key live, and a backup never carries them."
+    print_error "database password and secret_box_key live, and a restore keeps this machine's"
+    print_error "own copy of it over the one inside the backup."
     exit 1
 fi
 

@@ -27,6 +27,7 @@
  * to nothing — the exact silent failure that made Joinery Direct undiscoverable
  * on those providers. These checks make a mis-mapping fail here instead.
  *
+ * @version 1.1 - Hetzner is checked with the other record-set passthrough vendors
  * @version 1.0
  */
 
@@ -256,12 +257,13 @@ check($nc_mock->count() === 1,
 section('The set-value SRV target is absolute, so a passthrough vendor cannot re-append the zone');
 // ---------------------------------------------------------------------------
 
-// Gandi, deSEC, Route 53 and Google Cloud take the RDATA string verbatim. A
+// Gandi, deSEC, Route 53, Google Cloud and Hetzner take the RDATA string verbatim. A
 // target without a trailing dot reads as relative: Gandi appends the zone
 // (direct.example.com.example.com), deSEC and Google Cloud reject it. The one
 // set-value form the rrset base produces has to be absolute for all of them.
 foreach (array('gandi' => 'GandiDnsDriver', 'desec' => 'DesecDnsDriver',
-		'route53' => 'Route53DnsDriver', 'gcloud' => 'GoogleCloudDnsDriver') as $label => $class) {
+		'route53' => 'Route53DnsDriver', 'gcloud' => 'GoogleCloudDnsDriver',
+		'hetzner' => 'HetznerDnsDriver') as $label => $class) {
 	if (!class_exists($class)) { continue; }
 	$ref = new ReflectionClass($class);
 	$driver = $ref->newInstanceWithoutConstructor();
@@ -269,13 +271,6 @@ foreach (array('gandi' => 'GandiDnsDriver', 'desec' => 'DesecDnsDriver',
 	check($value === '0 5 443 direct.example.com.',
 		$label . ' sends the SRV RDATA with an absolute target', $value);
 }
-
-// Hetzner is passthrough too, but a per-record API rather than a record-set one,
-// so it dots the target in its own write body.
-$hetzner = new HetznerDnsDriver(array('api_token' => 'x'));
-$body = driver_call($hetzner, 'toApi', array($zone, new DnsRecord(DnsRecord::TYPE_SRV, SRV_NAME, SRV_VALUE)));
-check(($body['value'] ?? '') === '0 5 443 direct.example.com.',
-	'Hetzner sends the SRV RDATA with an absolute target', json_encode($body));
 
 // ---------------------------------------------------------------------------
 section('GoDaddy publishes one SRV service without destroying the host\'s others');

@@ -24,6 +24,7 @@
  * the unwrap against the user's own wrapping rows, report pass/fail. Nothing
  * is consumed and nothing secret is transmitted.
  *
+ * @version 1.3.1 - a comment names ApprovalChallengePanel, the one approval screen for every scope
  * @version 1.3.0 - the save call carries the generator config's rotate flag, so the
  *                  rotation screen replaces a proven key through the same ceremony
  * @version 1.2.1 - a failed generation probe reveals the no-WebCrypto line
@@ -450,7 +451,7 @@ window.recoveryReadiness = (function () {
 	// renders in several places and each one wiring its own listeners is how one
 	// of them ends up with a button that does nothing.
 	function attachPanel() {
-		// The restore-approval screen (RestoreApprovalPanel) uses the same
+		// The approval screen (ApprovalChallengePanel, every scope) uses the same
 		// ceremony — open a challenge sealed to the recovery key, submit what
 		// came out — under its OWN global. Separate because the two panels can
 		// appear on one page, and a second assignment to window.rrPanel would
