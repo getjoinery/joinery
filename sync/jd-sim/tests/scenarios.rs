@@ -4054,13 +4054,18 @@ fn a_server_delete_lands_on_a_file_saved_again_with_the_same_bytes_without_birth
 /// file only. A file another record owns standing there is that record's, and
 /// is judged against the server like any other; set aside as the held file,
 /// it was hidden from the disk side and its server copy read as only on the
-/// server (reset B8). The sweep reaches this through a long chain on disks
-/// without births (kill2 75118: the path rule gave the held file's own file
-/// to another record, and a plain record's file came to stand at the held
-/// path), so the end state is set down here by hand: the held file's own file
-/// gone from its path, and a plain record's file standing there, agreed there
-/// with the server.
+/// server (reset B8). The held record is still judged: its own file must
+/// stand somewhere on this disk, and here it was deleted, so the check reads
+/// it gone once the trees compare equal (reset B11); before B11 nothing
+/// judged the held record at all. The sweep reaches this through a long
+/// chain on disks without births (kill2 75118: the path rule gave the held
+/// file's own file to another record, and a plain record's file came to
+/// stand at the held path), so the end state is set down here by hand: the
+/// held file's own file gone, and a plain record's file standing at its
+/// path, agreed there with the server. Red under either rule's knockout: the
+/// trees differ without B8, nothing fires without B11.
 #[test]
+#[should_panic(expected = "held file gone")]
 fn a_file_another_record_owns_at_a_held_path_is_judged_as_that_records() {
     use jd_core::model::EntityId;
     let (world, _, _) = a_vault_of_two(9_949, &["holder"]);
