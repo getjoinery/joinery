@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.83 - build_copy_restore / build_copy_restore_primitive (agent 1.47.0): apply a staged chain of
+ *                 the site a dormant copy is a copy of, with that site's secret key (site_copy.md WP2)
  * @version 1.82 - install_state_color(): one colour map for the status dot and the fleet badge
  * @version 1.81 - build_site_quiet / build_site_quiet_primitive (agent 1.46.0): freeze a site for a
  *                 switch-over, or let it run again (site_copy.md WP5)
@@ -2038,6 +2040,45 @@ class JobCommandBuilder {
 			throw new Exception("site_quiet takes on or off, not '" . $action . "'.");
 		}
 		return ['primitive' => 'site_quiet', 'params' => ['action' => $action]];
+	}
+
+	/**
+	 * Apply a staged chain of the site this node is a dormant copy of
+	 * (specs/site_copy.md WP2). The node decides the rest: it runs only under
+	 * `quiet copy`, only for a manifest its source vouched for, and always
+	 * takes the source's secret key and arms no certificate retry. No approval:
+	 * the owner approved at the source, where the secrets leave.
+	 *
+	 * $params:
+	 *   chain_id  - e.g. chain-20260807_231507 (required)
+	 *   seq       - apply as at this run; default the newest in the manifest
+	 */
+	public static function build_copy_restore($node, $params) {
+		if (!self::has_primitive($node, 'copy_restore')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot apply a copy. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['copy_restore']));
+		}
+		return self::build_copy_restore_primitive($node, $params);
+	}
+
+	public static function build_copy_restore_primitive($node, $params) {
+		$chain_id = trim((string)($params['chain_id'] ?? ''));
+		if ($chain_id === '' || strlen($chain_id) > 64 || !preg_match('/^chain-[0-9_]+$/', $chain_id)) {
+			throw new Exception('A copy restore needs the chain id (for example chain-20260807_231507).');
+		}
+		$primitive_params = [
+			'project'  => self::restore_project_name($node),
+			'chain_id' => $chain_id,
+		];
+		if (isset($params['seq']) && $params['seq'] !== '') {
+			$seq = (int)$params['seq'];
+			if ($seq < 0 || $seq > 100000) {
+				throw new Exception('A chain run number must be between 0 and 100000.');
+			}
+			$primitive_params['seq'] = $seq;
+		}
+		return ['primitive' => 'copy_restore', 'params' => $primitive_params];
 	}
 
 	/**

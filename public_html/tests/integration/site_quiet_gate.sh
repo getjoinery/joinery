@@ -162,8 +162,10 @@ CONF="$R/etc/apache2/conf-available/joinery-quiet-qsite.conf"
 chk "the look path sets the cookie" "$(grep -c "<Location \"/.joinery-look/${secret}\">" "$CONF"):$(grep -c "Set-Cookie \"joinery_look=${secret};" "$CONF")" "1:1"
 chk "without the cookie, 503" "$(grep -c "HTTP_COOKIE} =~ /(?:^|;\\\\s\*)joinery_look=${secret}(?:;|\\$)/" "$CONF"):$(grep -c 'Redirect 503' "$CONF")" "1:1"
 chk "on --copy-promoted is refused" "$(bash "$Q" on --copy-promoted >/dev/null 2>&1; echo $?)" "2"
+# The runs its source vouched for (WP2) go with the copy's other records.
+printf '%s chain-20260927_120000\n' "$(printf '0%.0s' $(seq 64))" > "$SD/vouched"; chmod 600 "$SD/vouched"
 out="$(bash "$Q" off --copy-promoted 2>&1)"; rc=$?
-chk "off --copy-promoted clears a copy" "$rc:$([ -e "$SD" ] && echo left || echo gone)" "0:gone"
+chk "off --copy-promoted clears a copy, its vouched runs included" "$rc:$([ -e "$SD" ] && echo left || echo gone)" "0:gone"
 
 echo "=== A state file that says anything else is quiet, the strict way ==="
 site_state_write switchover; echo "garbage" > "$SD/state"

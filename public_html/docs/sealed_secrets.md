@@ -114,8 +114,8 @@ plugin code and no key. It runs on **import** — `_site_init.sh` calls it after
 no seam to scrub, and must never `UPDATE` the source. The copy lands **clean**
 (every sealed value `absent` = "not configured") rather than dead.
 
-A restore onto **another machine** scrubs nothing, and keeps nothing sealed
-either. The backup carries the source's `config/`, but the restore keeps the
+A restore onto **another machine** scrubs nothing, and by default keeps nothing
+sealed either. The backup carries the source's `config/`, but the restore keeps the
 target machine's own `config/Globalvars_site.php`, and with it the target's own
 `secret_box_key`. Every value sealed on the source is therefore **dead** on the
 target: the canary fails, the reconciler raises one batched key-mismatch alert,
@@ -123,6 +123,12 @@ target: the canary fails, the reconciler raises one batched key-mismatch alert,
 matches its published DNS record, and outstanding signed file links stop
 working), and every `operator` value is entered again. A restore on the same
 machine is unaffected: the key is the same.
+
+A chain restore with `restore_chain.sh --adopt-secret-key` keeps nothing dead: the
+target keeps its own config and takes the source's `secret_box_key` into it, so
+every value sealed on the source opens on the target, the canary included. This is
+how a copy of a site onto new hardware keeps its secrets (the `copy_restore` agent
+word always passes it).
 
 ## Adding a sealed secret
 

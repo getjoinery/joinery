@@ -508,7 +508,18 @@ is written**, so a truncated download fails while the live site is still intact.
 `--seq N` restores as at run N; the default is the newest. `--dry-run` reports
 the plan and needs no key. `--domain` names the domain the restored site is to
 answer to; without it the site keeps the domain this machine's config already
-names.
+names. `--skip-ssl` is passed to the reconcile, which then arms no certificate
+retry.
+
+**`--adopt-secret-key`** is for a chain from another machine. This machine keeps
+its own `config/Globalvars_site.php` and takes the chain's `secret_box_key` into
+it: read from the chain's copy of the file by pattern (never run), required to be
+32 base64-encoded bytes, written with `var_export`, and linted before it replaces
+the file, which keeps its owner and mode. Every value the source sealed then
+opens here, and the database password, the paths and the rest stay this
+machine's. It is refused before anything is written when this machine has no
+config of its own, and after the files when the chain's config carries no usable
+key (this machine's key is then left in place and the database is not loaded).
 
 **Offloaded files.** The archives carry no file the site offloaded to its
 file bucket; those are in backup storage under `objects/{epoch}/`, named by the

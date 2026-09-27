@@ -839,7 +839,7 @@ A node guarantees this to an owner who flips Cloudflare to Full (Strict), with n
 
 A backup carries the whole site tree, `config/` included, but a restore keeps the target machine's own `config/Globalvars_site.php` and `config/backup_site_key` over the copies inside the backup: the first holds the machine's database password and its `secret_box_key`, the second its identity as a recipient of its own backups, and all of that belongs to the machine. So a rebuild is **install, then restore onto the installed site**.
 
-**Sealed values do not survive a rebuild.** The new machine keeps its own `secret_box_key`, so every value sealed on the old one is dead there: stored credentials (the backup target, OAuth client secrets, IMAP passwords, cloud accounts) are entered again, and regenerable secrets are minted again, which changes the Joinery Direct signing key. See [Sealed Secrets](sealed_secrets.md#prevention--scrub-on-copy).
+**Sealed values survive a chain rebuild only with `--adopt-secret-key`.** By default the new machine keeps its own `secret_box_key`, so every value sealed on the old one is dead there: stored credentials (the backup target, OAuth client secrets, IMAP passwords, cloud accounts) are entered again, and regenerable secrets are minted again, which changes the Joinery Direct signing key. `restore_chain.sh --adopt-secret-key` keeps the new machine's config and takes only the old machine's `secret_box_key` into it, so everything sealed there opens here. `restore_project.sh` has no such flag. See [Sealed Secrets](sealed_secrets.md#prevention--scrub-on-copy).
 
 ```bash
 # 1. On the new box: server prerequisites, then the site
@@ -850,7 +850,7 @@ sudo ./install.sh -y site --bare-metal <site> --password-file=/root/.joinery_pos
 bash maintenance_scripts/sysadmin_tools/restore_project.sh <site> <archive> --domain <domain> --force
 #    or, for a chain:
 bash maintenance_scripts/sysadmin_tools/restore_chain.sh <site> \
-     --artifacts <chain dir> --key-file /tmp/k --domain <domain> --force
+     --artifacts <chain dir> --key-file /tmp/k --domain <domain> --adopt-secret-key --force
 ```
 
 The restore reconciles the result to the new box: the domain, the deployment shape (`docker` vs `baremetal`), the paths, a regenerated virtualhost, and an armed certificate retry. It **refuses** if the restored database will not open with the new machine's credentials, rather than leaving that to show up as `SQLSTATE[08006]` on every page. What it reconciles and why is in [Backups](backups.md#what-a-restore-reconciles).

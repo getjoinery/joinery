@@ -30,6 +30,25 @@
     - **`install.sh` has no release pin.** `--dormant` installs whatever release the upgrade server
       serves now, not S's. Until WP8 adds the pin, a copy is only correct when S is on the current
       release.
+- **WP2 built (2026-09-28); gate-tested on fixture chains, not yet on a real copy:** `restore_chain.sh`
+  1.7.0 (`--adopt-secret-key`, `--skip-ssl` passed to the reconcile), agent 1.47.0 (`copy_restore`),
+  and on M `build_copy_restore` with an 8700 s claim budget. Choices made while building:
+  - `copy_restore` is an **operate** word: a destructive word always asks for approval, and the
+    decision is that a dormant copy asks none.
+  - **The vouch is a record, not a check of the signature at restore time.** `copy_restore` applies
+    a staged manifest only when its hash is listed with its chain id in root's
+    `/etc/joinery/sites/{site}/vouched` (`<sha256> <chain id>` per line). It refuses when the record
+    is absent or writable by other accounts. This machine's own upload ledger does not count. WP4
+    writes the record (see WP4).
+  - The key is read out of the chain's config by pattern, never by running the file, and must be
+    32 base64-encoded bytes. The splice is written with `var_export` and linted before it replaces
+    the config, which keeps its owner and mode.
+  - It refuses before any write when T has no config of its own. After the files are in, it refuses
+    when the chain's config carries no usable key: T's own key stays, and the database is not loaded.
+  - `restore_statement.go` is not shared: with no approval, there is no statement to show.
+  - `_site_state.sh` 1.2: clearing removes `vouched` with `copy_of`.
+  - Open: the dev-chain-into-a-scratch-project test (the canary and every sealed secret open,
+    T's password kept, census equal) needs the census, so it runs with WP3.
 - Decided:
   - D1: a faithful copy, with switching over and deleting kept separate; the old Clone is retired.
   - D2: the backup chain carries the copy.
@@ -519,8 +538,8 @@ container target, which is out of scope. A container source is never dormant.
    - **Restoring.** `copy_restore`, allowed only under `quiet copy`, runs `restore_chain.sh
      --key-file … --adopt-secret-key`, with `--skip-ssl` passed through to the reconcile. The restore
      lock (B27) and on-disk staging (B26) are WP0 fixes to every restore, not a copy mode. On the
-     agent, `copy_restore` shares `restore_paths.go` and `restore_statement.go` with the ordinary
-     restore; it differs only in the vouch check (instead of the ledger), the state gate, and no
+     agent, `copy_restore` shares `restore_paths.go` (the workspace, the chain files, the project
+     check) with the ordinary restore; it differs only in the vouch check (instead of the ledger), the state gate, and no
      approval.
      - **`--adopt-secret-key`.** T keeps its own `Globalvars_site.php` and splices in S's
        `secret_box_key`, read from the chain's copy of the file before T's is put back
@@ -840,8 +859,8 @@ In build order. Each is built and tested on its own (design rule).
 - **WP2 — Restore onto a copy (B21).**
   - `restore_chain.sh --adopt-secret-key`, with `--skip-ssl` passed through to the reconcile. No other
     mode: staging and the lock are WP0's, for every restore.
-  - The `copy_restore` agent word, allowed only under `quiet copy`, sharing `restore_paths.go` and
-    `restore_statement.go` with the ordinary restore.
+  - The `copy_restore` agent word, allowed only under `quiet copy`, sharing `restore_paths.go` with
+    the ordinary restore.
 - **WP3 — Census.** No change to the backup format or to S's backup runs.
   - The census script with its one exclusion list, and the read-only `site_census` agent word.
   - M's compare: informational at copy time, exact at the final copy.
@@ -853,6 +872,12 @@ In build order. Each is built and tested on its own (design rule).
     builders serve the copy.
   - The agent's `SignBlob` with a domain prefix, and a libsodium-compatible seal
     (`golang.org/x/crypto/nacl/box`).
+  - **T's side of the export (carried from WP2).** `copy_restore` reads what this step leaves:
+    - each chain in the usual workspace, `restore_<chain id>` under the backup base, with
+      `manifest.json` and the chain data key opened from the bundle as `chain.key`;
+    - the vouch record `/etc/joinery/sites/{site}/vouched`, written whole each time with one
+      `<manifest sha256> <chain id>` line per vouched run, root-owned 0600, and written only after
+      the bundle's signature and seal check out.
 - **WP7a — Proxied origin change (the first switch built; L0).**
   - The preflight: every record naming S's address is proxied; list any proxy-only firewall on S.
   - The record change through M's DNS driver (Cloudflare first), the proof through the proxy, the
@@ -867,6 +892,9 @@ In build order. Each is built and tested on its own (design rule).
       so T installs S's exact release (vendor/ is never in the chain).
     - The copy preflight refuses an S older than the WP5 release: the converger's quiet gate and
       its helper live in the tree `copy_restore` lands on T.
+    - T installs under S's site name and S's domain: `restore_chain.sh` refuses a target whose
+      directory name differs from the one the archive carries, the project name is also the
+      database name, and `copy_restore` passes no `--domain`, so T keeps its config's own.
   - **Copy to a new server:** preflight, then "create it for me" or "I'll bring a server", then
     steps 2–6, progress, Refresh and Discard.
   - **Switch over:** steps 7–10 and the way back.
