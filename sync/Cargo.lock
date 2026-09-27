@@ -1448,6 +1448,7 @@ dependencies = [
 name = "jd-vfs"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "notify",
  "sha2",
  "thiserror 1.0.69",

@@ -304,8 +304,9 @@ pub trait Vfs: Send + Sync {
     /// file the handle reads. The fingerprint is taken from the open handle,
     /// never from a second lookup of the path, so the identity checked, the
     /// bytes hashed and the bytes sent are one file's whatever the path holds
-    /// by then (`specs/drive_file_identity.md`, T1-D). `None` for a directory
-    /// or for nothing.
+    /// by then (`specs/drive_file_identity.md`, T1-D). `None` for a directory,
+    /// for a symlink (never followed, even one put at the path while it
+    /// opens) or for nothing.
     fn open_file(&self, path: &Path) -> VfsResult<Option<(Box<dyn ReadSeek>, Fingerprint)>>;
 }
 
