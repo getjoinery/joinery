@@ -387,6 +387,53 @@ fn fingerprint_of(path: &Path, md: &fs::Metadata) -> Fingerprint {
     }
 }
 
+/// Open the file at `path` for reading without following a link: `None` when
+/// a symlink stands there. Whatever is put at the path between a check and
+/// this open, the handle is never the target of a link the user did not
+/// sync (reset B12). Non-blocking as well, so that a FIFO put there is
+/// opened and turned away rather than waited on for a writer; a regular
+/// file reads the same either way.
+#[cfg(unix)]
+fn open_not_following(path: &Path) -> std::io::Result<Option<File>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(f) => Ok(Some(f)),
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// The same on Windows: opened as the reparse point itself, a link is seen
+/// for what it is and refused. Any other reparse point (a deduplicated file,
+/// a cloud placeholder) keeps its bytes behind the filter that owns it, and
+/// read as the reparse point it would give the wrong ones: that file is
+/// opened the ordinary way and kept only if it is the same file.
+#[cfg(windows)]
+fn open_not_following(path: &Path) -> std::io::Result<Option<File>> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT};
+    let itself = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let md = itself.metadata()?;
+    if md.file_type().is_symlink() || !md.is_file() {
+        return Ok(None);
+    }
+    if md.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+        return Ok(Some(itself));
+    }
+    let file = File::open(path)?;
+    match (index_of_handle(&itself), index_of_handle(&file)) {
+        (Some(a), Some(b)) if a == b => Ok(Some(file)),
+        _ => Ok(None),
+    }
+}
+
 /// The fingerprint of the file an open handle reads, whatever its path names
 /// by now: the same fields `fingerprint_of` reads, taken from the handle.
 #[cfg(unix)]
@@ -513,16 +560,18 @@ impl Vfs for OsVfs {
     }
 
     fn open_file(&self, path: &Path) -> VfsResult<Option<(Box<dyn crate::ReadSeek>, Fingerprint)>> {
-        // A symlink is not a file here, exactly as `fingerprint` says; asked
-        // of the path first because `File::open` follows one.
+        // A symlink is not a file here, exactly as `fingerprint` says. Asked
+        // of the path first, so that nothing else is opened at all; the open
+        // itself then refuses a link put there since (`open_not_following`).
         match path.symlink_metadata() {
             Ok(md) if md.is_file() => {}
             Ok(_) => return Ok(None),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(io_err(path, e)),
         }
-        let file = match File::open(path) {
-            Ok(f) => f,
+        let file = match open_not_following(path) {
+            Ok(Some(f)) => f,
+            Ok(None) => return Ok(None),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(io_err(path, e)),
         };
@@ -813,6 +862,66 @@ mod tests {
         assert!(v.open_file(&root.join("missing.txt")).unwrap().is_none());
         fs::create_dir_all(root.join("dir")).unwrap();
         assert!(v.open_file(&root.join("dir")).unwrap().is_none(), "a directory is not a file here");
+    }
+
+    /// The open itself refuses a link, whatever the check before it saw: the
+    /// window between the two is where one can be put (reset B12).
+    #[cfg(unix)]
+    #[test]
+    fn the_open_never_follows_a_link_put_at_the_path() {
+        let d = TempDir::new("open-link");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let (target, link) = (root.join("target.txt"), root.join("a.txt"));
+        fs::write(&target, b"a file the link points at").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(open_not_following(&link).unwrap().is_none(), "the handle read the link's target");
+        assert!(v.open_file(&link).unwrap().is_none());
+        assert!(open_not_following(&target).unwrap().is_some());
+    }
+
+    /// The same on Windows: opened as the reparse point itself, a file link
+    /// is refused and its target is not read (reset B12). Making a link needs
+    /// the privilege to; without it there is nothing to test.
+    #[cfg(windows)]
+    #[test]
+    fn the_open_never_follows_a_link_put_at_the_path() {
+        let d = TempDir::new("open-link");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let (target, link) = (root.join("target.txt"), root.join("a.txt"));
+        fs::write(&target, b"a file the link points at").unwrap();
+        if std::os::windows::fs::symlink_file(&target, &link).is_err() {
+            eprintln!("no privilege to make a link here; skipped");
+            return;
+        }
+        assert!(open_not_following(&link).unwrap().is_none(), "the handle read the link's target");
+        assert!(v.open_file(&link).unwrap().is_none());
+        let mut read = Vec::new();
+        open_not_following(&target).unwrap().expect("a plain file opens").read_to_end(&mut read).unwrap();
+        assert_eq!(read, b"a file the link points at");
+    }
+
+    /// A FIFO put at the path is opened and turned away, not waited on for a
+    /// writer that never comes (reset B12).
+    #[cfg(unix)]
+    #[test]
+    fn the_open_does_not_wait_on_a_fifo_put_at_the_path() {
+        let d = TempDir::new("open-fifo");
+        let v = vfs(&d);
+        let fifo = v.root().unwrap().join("a.txt");
+        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: a valid NUL-terminated path; mkfifo reads nothing else.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let opened = open_not_following(&fifo).map(|f| f.map(|f| f.metadata().unwrap().is_file()));
+            let _ = tx.send(opened.ok().flatten());
+        });
+        let opened = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the open is still waiting for a writer");
+        assert_eq!(opened, Some(false), "opened, and not a file");
     }
 
     #[test]
