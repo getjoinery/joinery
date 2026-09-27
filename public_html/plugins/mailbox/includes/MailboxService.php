@@ -49,6 +49,10 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.47 - `device_search`: a search over end-to-end mail alone carries only the ids
+ *   the browser found, no term (review of 2026-09-27, B4)
+ * @version 1.46 - search takes `device_hits`: the message ids a Fortress owner's browser
+ *   found in its own index, unioned with the server's search (specs/client_custody_mail.md § R5)
  * @version 1.45 - Fortress rows carry the AI verdicts and the header block sealed, and the
  *   danger score and scan time in the clear (specs/fortress_mail_device_ai.md § R4)
  * @version 1.44 - Fortress (specs/client_custody_mail.md § R4): list and thread carry a
@@ -1071,7 +1075,9 @@ class MailboxService {
 		// scopes — Trash, Spam, Drafts, a label — still bound their own
 		// searches; the response says the widening happened (search_scope) so
 		// the reader can label it.
-		$searching = !empty($filters['q']);
+		// A device-only search (every mailbox in view end-to-end) is a search
+		// with no term: the browser found the ids and kept the words.
+		$searching = !empty($filters['q']) || !empty($filters['device_search']);
 		if (!$trash && !$sent && !empty($filters['inbox']) && !$searching) {
 			// "= false", not IS NOT TRUE: the column is NOT NULL, so they mean
 			// the same thing, and only the equality lets the planner seek the
@@ -1126,8 +1132,7 @@ class MailboxService {
 				$key = VaultUnlock::secretKey($viewer_id);
 				if ($key === null) {
 					$search_locked = true;
-					$where[] = $fts_sql;
-					$params[] = $filters['q'];
+					$search_sql = $fts_sql;
 				} else {
 					// Budgeted: fold a bounded slice of any backlog, then search
 					// what is indexed. A backlog too large for the slice (a bulk
@@ -1144,10 +1149,9 @@ class MailboxService {
 						);
 					}
 					$ids = $index->search($viewer_id, $filters['q']);
-					$where[] = '(' . (count($ids)
+					$search_sql = '(' . (count($ids)
 						? 'iem_inbound_email_message_id IN (' . implode(',', array_map('intval', $ids)) . ')'
 						: '1=0') . ' OR ' . $fts_sql . ')';
-					$params[] = $filters['q'];
 				}
 			} else {
 				// The expression MUST stay byte-identical to iem_016's GIN index
@@ -1155,9 +1159,25 @@ class MailboxService {
 				// predicate to its WHERE, or the planner will not use the index.
 				// websearch_to_tsquery tolerates arbitrary user input (stray
 				// quotes/operators won't raise).
-				$where[] = $fts_sql;
-				$params[] = $filters['q'];
+				$search_sql = $fts_sql;
 			}
+			// A Fortress owner's browser searched its own index of their end-to-end
+			// mail (specs/client_custody_mail.md § R5), which the server cannot
+			// read; its hits join the server's, exactly as MailboxIndex ids do. The
+			// scope conditions above are the authorization: an id outside them
+			// matches nothing.
+			if (isset($filters['device_hits']) && is_array($filters['device_hits'])) {
+				$search_sql = '(iem_inbound_email_message_id = ANY(?::bigint[]) OR ' . $search_sql . ')';
+				$params[] = '{' . implode(',', array_map('intval', $filters['device_hits'])) . '}';
+			}
+			$where[] = $search_sql;
+			$params[] = $filters['q'];
+		} elseif (!empty($filters['device_search'])) {
+			// Every mailbox in view is end-to-end, so the reader sent no term:
+			// sending it would tell the server which of these messages hold
+			// that word (specs/client_custody_mail.md § R5). The ids alone.
+			$where[] = 'iem_inbound_email_message_id = ANY(?::bigint[])';
+			$params[] = '{' . implode(',', array_map('intval', $filters['device_hits'] ?? array())) . '}';
 		}
 
 		// Thread-level filters.

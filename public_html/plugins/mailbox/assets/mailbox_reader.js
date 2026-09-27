@@ -1,6 +1,10 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.81 — the Fortress banner's Unlock says why it failed instead of swallowing it.
+ * No framework. @version 2.83 — a search over only end-to-end mailboxes sends the server no term
+ *   (device_only), and a search note no longer re-searches without progress.
+ * @version 2.82 — a search over Fortress mail runs on this device (MailboxSearch) and
+ *   its hits ride along as device_hits; a note says how far the index has got.
+ * @version 2.81 — the Fortress banner's Unlock says why it failed instead of swallowing it.
  * @version 2.80 — an opened Fortress message carries the on-demand AI bar (Summarize, Scan now).
  * @version 2.79 — MailboxReader.refreshList(); the danger banner names the model that judged.
  * @version 2.78 — MailboxReader.currentIsFortress() for the AI panel's own-model section.
@@ -211,13 +215,14 @@
 	// that cannot tell them apart states the wrong one confidently — a failed
 	// list read rendered as "No conversations.", which reads as data loss on a
 	// mailbox full of mail. Every caller handles its own failure below.
-	function apiGet(url) {
+	function apiGet(url, extra) {
 		var qpos = url.indexOf('?');
 		var base = qpos === -1 ? url : url.slice(0, qpos);
 		var payload = {};
 		if (qpos !== -1) {
 			new URLSearchParams(url.slice(qpos + 1)).forEach(function (v, k) { payload[k] = v; });
 		}
+		if (extra) Object.assign(payload, extra);
 		return joineryApi.post(base, payload);
 	}
 	function apiAction(payload) {
@@ -276,6 +281,63 @@
 	// and the vault shut: say so above the list, sealed rows or none. With no
 	// mail key yet, mail to the mailbox is held until one exists; the first
 	// unlock here makes it, silently (specs/one_vault_experience.md § R4).
+	// Search over Fortress mail runs on this device (MailboxSearch, § R5): its
+	// hits ride along with the server's search as device_hits.
+	function deviceSearchInView() {
+		return fortressReady() && !!window.MailboxSearch && MailboxSearch.supported() && fortressMailboxInView();
+	}
+	// Every mailbox in view is end-to-end: the search term stays in this browser.
+	// Sent with the hits it would tell the server which of these messages hold
+	// that word, and the server can search none of them anyway.
+	function fortressOnlyInView() {
+		if (!fortressReady()) return false;
+		// An all-access viewer's All mailboxes also holds unmatched mail, which
+		// is in no listed mailbox and which the server searches by the term.
+		if (state.aliasId == null && state.allAccess) return false;
+		var inView = (state.mailboxes || []).filter(function (m) {
+			return state.aliasId == null || String(m.alias_id) === String(state.aliasId);
+		});
+		return inView.length > 0 && inView.every(function (m) { return m.security_level === 'fortress'; });
+	}
+	function deviceSearchNote(r) {
+		var st = (r && r.status) || {};
+		var li = el('li', 'mbx-search-scope-note mbx-device-search-note');
+		var text;
+		if (st.failed === 'unsupported') {
+			li.appendChild(el('span', null, "This browser can't search end-to-end encrypted mail."));
+			return li;
+		}
+		if (st.failed === 'storage') {
+			li.appendChild(el('span', null, "Search couldn't save its index in this browser, so end-to-end encrypted mail was not searched."));
+			return li;
+		}
+		if (st.failed) {
+			text = 'Search on this device stopped (' + st.failed + '). Reload the page to try again, or rebuild it.';
+		} else if (st.building) {
+			text = 'Indexing mail on this device: ' + Math.min(st.indexed, st.total).toLocaleString() + ' of '
+				+ st.total.toLocaleString() + '. Results so far.';
+		} else {
+			text = 'End-to-end encrypted mail was searched on this device.';
+		}
+		li.appendChild(el('span', null, text + ' '));
+		var again = el('button', 'mbx-device-search-btn', 'Rebuild');
+		again.type = 'button';
+		again.title = 'Build this browser\'s search index again from your mail';
+		again.addEventListener('click', function () {
+			again.disabled = true;
+			MailboxSearch.rebuild().then(function () { refreshThreads(); }, function () { again.disabled = false; });
+		});
+		var drop = el('button', 'mbx-device-search-btn', 'Remove from this browser');
+		drop.type = 'button';
+		drop.title = 'Delete the search index this browser keeps; your next search here builds it again';
+		drop.addEventListener('click', function () {
+			drop.disabled = true;
+			MailboxSearch.remove().then(function () { li.remove(); }, function () { drop.disabled = false; });
+		});
+		li.appendChild(again);
+		li.appendChild(drop);
+		return li;
+	}
 	function fortressMailboxInView() {
 		return (state.mailboxes || []).some(function (m) {
 			if (m.security_level !== 'fortress') return false;
@@ -1235,7 +1297,25 @@
 			listEl.appendChild(loadingRow());
 		}
 		var seq = ++listSeq;
-		apiGet(buildListQuery()).then(fortressList).then(function (data) {
+		var deviceSearch = null;
+		var searching = state.search && !state.draftsView;
+		var onDevice = searching && deviceSearchInView();
+		var fortressOnly = searching && fortressOnlyInView();
+		var request = (onDevice || fortressOnly)
+			? (onDevice ? MailboxSearch.hits(state.search) : Promise.resolve(null)).then(function (r) {
+				deviceSearch = onDevice ? r : { status: { failed: 'unsupported' } };
+				var extra = (r && typeof r.packed === 'string') ? { device_hits: r.packed } : null;
+				if (fortressOnly) {
+					// No term leaves the browser; with the vault shut the list is
+					// empty under the unlock banner.
+					extra = extra || { device_hits: '' };
+					extra.device_only = '1';
+					extra.q = '';
+				}
+				return apiGet(buildListQuery(), extra);
+			})
+			: apiGet(buildListQuery());
+		request.then(fortressList).then(function (data) {
 			if (seq !== listSeq) { return; }   // superseded by a newer load
 			if (soft) {
 				// Keep only the ticks the refreshed list still shows — rows re-tick
@@ -1278,6 +1358,9 @@
 				listEl.insertBefore(el('li', 'mbx-search-scope-note',
 					'Searching all mail, including archived and sent.'), listEl.firstChild);
 			}
+			if (deviceSearch && reset) {
+				listEl.insertBefore(deviceSearchNote(deviceSearch), listEl.firstChild);
+			}
 			if (data.search_indexing) {
 				// The index does not cover the whole mailbox yet (it catches up in
 				// the background while the vault is open) — without this, mail the
@@ -1318,7 +1401,7 @@
 				if (prior) { prior.remove(); }
 				var notice = errorRow(
 					'Could not refresh this mailbox' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
-					function () { refreshThreads(); });
+					function () { refreshThreads(); }, err);
 				notice.classList.add('mbx-list-refresh-error');
 				listEl.insertBefore(notice, listEl.firstChild);
 				syncSelectionUI();
@@ -1327,7 +1410,7 @@
 			if (reset) { listEl.innerHTML = ''; }
 			listEl.appendChild(errorRow(
 				'Could not load this mailbox' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
-				function () { listLoad(reset, soft); }));
+				function () { listLoad(reset, soft); }, err));
 			$('#mbx-more').hidden = true;
 			syncSelectionUI();
 		});
@@ -1395,9 +1478,12 @@
 
 	// A list that could not be read says so, and offers the retry — never the
 	// empty-state wording, which would claim the mail is gone.
-	function errorRow(text, retry) {
+	// err: the rejected call; a recorded server error adds "Report a problem".
+	function errorRow(text, retry, err) {
 		var li = el('li', 'mbx-loading mbx-load-error');
 		li.appendChild(el('span', 'mbx-load-error-text', text));
+		var report = window.joineryApi.reportLink(err);
+		if (report) { li.appendChild(report); }
 		if (retry) {
 			var btn = el('button', 'mbx-unlock-btn', 'Retry');
 			btn.type = 'button';
@@ -1729,7 +1815,7 @@
 			pane.innerHTML = '';
 			pane.appendChild(errorRow(
 				'Could not open this conversation' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
-				function () { openThread(t, rowEl); }));
+				function () { openThread(t, rowEl); }, err));
 		});
 	}
 
@@ -4445,9 +4531,13 @@
 		if (c) { c.hidden = true; $('.mbx-main').appendChild(c); }
 	}
 
-	function showComposeError(msg) {
+	// err: the failed call ({errorRef}); a recorded server error adds a
+	// "Report a problem" link.
+	function showComposeError(msg, err) {
 		var e = $('#mbx-compose-error');
 		e.textContent = msg;
+		var report = window.joineryApi.reportLink(err);
+		if (report) { e.appendChild(document.createTextNode(' ')); e.appendChild(report); }
 		e.hidden = false;
 	}
 	function hideComposeError() {
@@ -4546,7 +4636,8 @@
 				if (await unlockVault()) { hideComposeError(); submitCompose(e); }
 				else { showComposeError('Unlock is needed to send from this address.'); }
 			} else {
-				showComposeError((env && env.error) || 'The message could not be sent.');
+				showComposeError((env && env.error) || 'The message could not be sent.',
+					{ errorRef: (env && env.error_ref) || null });
 			}
 		}).catch(function () {
 			if (btn) btn.disabled = false;
@@ -4791,6 +4882,13 @@
 				}
 			};
 			MailboxFortress.onLock(fortressRerender);
+			// A first build saves every few thousand messages: fill the results
+			// in as it goes, while the search that started it is on screen.
+			if (window.MailboxSearch) {
+				MailboxSearch.onStatus(function () {
+					if (state.search && document.querySelector('.mbx-device-search-note')) refreshThreads();
+				});
+			}
 			document.addEventListener('joinery:vault-scope-unlocked', function (e) {
 				if (!(e && e.detail && e.detail.scope === 'mail')) return;
 				// A reload's resume lands before the first render reads the vault

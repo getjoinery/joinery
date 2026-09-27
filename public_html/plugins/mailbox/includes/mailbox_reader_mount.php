@@ -37,6 +37,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.24.0 - Fortress search: mailbox_search.js, and the worker and index-code URLs in the config
  * @version 1.23.0 - Fortress mail (specs/client_custody_mail.md § R4): `fortress` loads
  *   mailbox_fortress.js, which the reader calls to open browser-sealed rows;
  *   mailbox_reader_fortress_visible() tells a page to load the vault client
@@ -150,6 +151,13 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'maxTotalBytes'     => MailboxSender::MAX_TOTAL_BYTES,
 		'fortress'          => !empty($opts['fortress']),
 	);
+	if (!empty($opts['fortress'])) {
+		// Search over Fortress mail runs on the device (specs/client_custody_mail.md
+		// § R5): the worker that keeps this browser's index, and the pure index
+		// code it loads.
+		$config['searchWorkerUrl'] = $asset_ver('mailbox_search_worker.js');
+		$config['searchCoreUrl'] = $asset_ver('mailbox_search_core.js');
+	}
 	echo '<script>window.MAILBOX_READER = ' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
 	?>
 <div id="mbx-reader" class="mbx-reader">
@@ -356,6 +364,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
 <?php if (!empty($opts['fortress'])): ?>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_fortress.js')); ?>"></script>
+<script src="<?php echo htmlspecialchars($asset_ver('mailbox_search.js')); ?>"></script>
 <?php endif; ?>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_reader.js')); ?>"></script>
 	<?php

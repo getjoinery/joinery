@@ -28,10 +28,17 @@
  * cookie and, if the server rotated it, retries the request once with the new
  * token. The token-changed guard keeps genuine denials from looping.
  *
+ * Error references: an error envelope for a recorded error carries
+ * `error_ref` ({id, hash, report_url}); the rejection carries it as
+ * err.errorRef. window.joineryApi.reportLink(err) turns it into a "Report a
+ * problem" link element, or null when there is nothing to report (no recorded
+ * error, or a guest, who is given no report_url). A page's notice helper
+ * appends that element after the message.
+ *
  * Loaded unconditionally by PublicPageBase::public_header() on every page,
  * before any inline page script.
  *
- * @version 1.2.0
+ * @version 1.3.0 - err.errorRef and reportLink()
  */
 (function () {
 	'use strict';
@@ -94,6 +101,7 @@
 					// turn "prove it is you" into "something went wrong".
 					err.data = (env && env.data) || {};
 					err.validationErrors = env && env.validation_errors;
+					err.errorRef = (env && env.error_ref) || null;
 					throw err;
 				}
 				return (env && env.data !== undefined) ? env.data : env;
@@ -101,5 +109,16 @@
 		});
 	}
 
-	window.joineryApi = { post: post, postForm: postForm, csrf: csrf };
+	// A "Report a problem" link for a rejected call, or null.
+	function reportLink(err) {
+		var ref = err && err.errorRef;
+		if (!ref || !ref.report_url) return null;
+		var a = document.createElement('a');
+		a.href = ref.report_url;
+		a.className = 'jy-report-link';
+		a.textContent = 'Report a problem';
+		return a;
+	}
+
+	window.joineryApi = { post: post, postForm: postForm, csrf: csrf, reportLink: reportLink };
 })();

@@ -27,6 +27,8 @@
  *
  * Nothing opened here is sent back to the server.
  *
+ * @version 1.8 - subscribes to the mail vault's lock once the deferred vault modules have run
+ *   (it loads before them, so the load-time check subscribed to nothing and a lock wiped nothing)
  * @version 1.7 - judgeEntry() sends the recipe's reasoning control, as a server run does; an
  *   answer spent entirely on reasoning is asked again with reasoning off
  * @version 1.6 - judgeEntry(): one AI judgement on the owner's own model, with the lock
@@ -362,7 +364,16 @@ window.MailboxFortress = (function () {
 	/** fn() runs after a lock has dropped every key and object URL. */
 	function onLock(fn) { lockHandlers.push(fn); }
 
-	if (window.JoinerySealed) {
+	// Subscribe to the mail vault's lock once JoinerySealed exists. The vault
+	// modules load deferred in the page head, and this file loads in the body
+	// without defer, so it runs FIRST: a check made only at load found no
+	// JoinerySealed, subscribed to nothing, and a lock left every opened key,
+	// object URL and decrypted row on screen. Deferred scripts all run before
+	// DOMContentLoaded, so that event is the latest this can be.
+	var hooked = false;
+	function hookVault() {
+		if (hooked || !window.JoinerySealed) return;
+		hooked = true;
 		// This page reads the mail vault: the lock chip lists it and reads
 		// "locked" while it is shut, even with the account vault open.
 		if (JoinerySealed.want) JoinerySealed.want(SCOPE, 'Vault');
@@ -374,6 +385,8 @@ window.MailboxFortress = (function () {
 			});
 		});
 	}
+	hookVault();
+	if (!hooked) document.addEventListener('DOMContentLoaded', hookVault);
 
 	// ---- one AI judgement on the owner's own model --------------------------------------
 
@@ -553,6 +566,7 @@ window.MailboxFortress = (function () {
 		if (window.EmailDigest && window.VerdictCheck) {
 			await selfCheckJudge(note);
 		}
+		note('subscribed to the mail vault\'s lock, whatever order the scripts loaded in', hooked);
 		return { ok: checks.every(function (c) { return c.ok; }), checks: checks };
 	}
 

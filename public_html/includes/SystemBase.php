@@ -909,6 +909,32 @@ abstract class SystemBase {
 	}
 
 	/**
+	 * Plain columns a model sets in the same UPDATE that writes sealed values,
+	 * given the sealed columns that UPDATE gives a non-empty value. A marker
+	 * that describes a sealed value (when it was written) must never disagree
+	 * with it, and a second statement could fail between the two. Raw SQL
+	 * assignments with no parameters, e.g. "x_written_time = clock_timestamp()".
+	 * The default is none. Honoured by sealColumns() and acceptBrowserSealed().
+	 *
+	 * @param string[] $columns
+	 * @return string[]
+	 */
+	protected static function sealedWriteMarks(array $columns): array {
+		return array();
+	}
+
+	/** The sealedWriteMarks() for the columns of $values that hold something. */
+	private static function sealedWriteMarksFor(array $values): array {
+		$written = array();
+		foreach ($values as $col => $value) {
+			if ($value !== null && $value !== '') {
+				$written[] = (string)$col;
+			}
+		}
+		return $written ? static::sealedWriteMarks($written) : array();
+	}
+
+	/**
 	 * Seal content onto an existing row and persist it — the ONLY supported
 	 * writer for a $sealed_fields column, and the write-side half of the Layer 0
 	 * contract (specs/implemented/sealed_content_egress.md): save() skips sealed columns on a
@@ -987,6 +1013,7 @@ abstract class SystemBase {
 			$sets = array_merge($sets, $wrap['sets']);
 			$params = array_merge($params, $wrap['params']);
 		}
+		$sets = array_merge($sets, self::sealedWriteMarksFor($values));
 		$sets[] = static::sealFlagColumn() . ' = true';
 		$params[] = $row_id;
 
@@ -1400,6 +1427,7 @@ abstract class SystemBase {
 		$wrap = static::sealKeyAssignments($sealed_dek, $vault, $generation);
 		$sets = array_merge($sets, $wrap['sets']);
 		$params = array_merge($params, $wrap['params']);
+		$sets = array_merge($sets, self::sealedWriteMarksFor($fields));
 		$sets[] = static::sealFlagColumn() . ' = true';
 		$params[] = $row_id;
 		$db->prepare('UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)

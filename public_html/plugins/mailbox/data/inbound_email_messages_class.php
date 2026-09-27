@@ -103,6 +103,9 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.35 - search text capped at 32768 characters; iem_search_written_time, set by
+ *   sealedWriteMarks() in the UPDATE that writes iem_search_text: what a browser's search
+ *   index catches up by (specs/client_custody_mail.md § R5)
  * @version 1.34 - $browser_appendable_fields (the AI verdicts) and browserAppendRefusal()
  *   for SystemBase::acceptBrowserSealedFields() (specs/fortress_mail_device_ai.md § R4)
  * @version 1.33 - Fortress (specs/client_custody_mail.md): sealScopeForWrite()
@@ -454,9 +457,10 @@ class InboundEmailMessage extends SystemBase {
 		// column holds the sealed form, which outgrows any varchar sized for the
 		// plaintext.
 		//   iem_search_text — what the server's search index would fold (sender,
-		//     subject, bodies' readable text, attachment names), capped at 8192
-		//     characters; 'gz:' + base64(gzip) when that saves a third or more.
-		//     The browser matches search terms against it.
+		//     subject, bodies' readable text, attachment names), capped at
+		//     SEARCH_TEXT_MAX_CHARS; 'gz:' + base64(gzip) when that saves a third
+		//     or more. Each of the owner's browsers reads it once, into its own
+		//     search index (MailboxDeviceSearch).
 		//   iem_snippet — the first 240 characters of the readable body: the
 		//     list preview.
 		//   iem_attachment_manifest — JSON [{id, filename, content_type,
@@ -465,6 +469,11 @@ class InboundEmailMessage extends SystemBase {
 		'iem_search_text'         => array('type'=>'text', 'is_nullable'=>true),
 		'iem_snippet'             => array('type'=>'text', 'is_nullable'=>true),
 		'iem_attachment_manifest' => array('type'=>'text', 'is_nullable'=>true),
+		// When iem_search_text was last written (UTC), set in the same UPDATE
+		// (sealedWriteMarks). A browser's index catches up by it, not by id: a
+		// row's search text can come long after the row (a relay message parsed
+		// on the device, a raise to Fortress, a draft becoming its Sent row).
+		'iem_search_written_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
 		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed
@@ -780,13 +789,20 @@ class InboundEmailMessage extends SystemBase {
 		return VaultClientCustody::loadVault($owner_id, $scope);
 	}
 
+	/** Stamp iem_search_written_time whenever iem_search_text is written (SystemBase::sealedWriteMarks). */
+	protected static function sealedWriteMarks(array $columns): array {
+		return in_array('iem_search_text', $columns, true)
+			? array("iem_search_written_time = (clock_timestamp() AT TIME ZONE 'UTC')")
+			: array();
+	}
+
 	/** True when $vault is a client-custody vault: what it seals, only the owner's devices open. */
 	public static function isBrowserVault($vault): bool {
 		return static::vaultIsClientCustody($vault);
 	}
 
 	/** Search text longer than this is cut before sealing (specs/client_custody_mail.md § R2). */
-	const SEARCH_TEXT_MAX_CHARS = 8192;
+	const SEARCH_TEXT_MAX_CHARS = 32768;
 	/** The list preview a Fortress row carries in iem_snippet. */
 	const SNIPPET_MAX_CHARS = 240;
 	/** The content type a Fortress attachment's File is stored as: the real one is in the manifest. */

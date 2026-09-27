@@ -8,7 +8,10 @@ scope session in core, per-scope device handoff, client-scope rotation) and
 `specs/implemented/protection_levels_fold.md` (mail's two cards and add-ons).
 Level doctrine: `specs/protection_levels_platform.md` (R4: Fortress means
 end-to-end, nothing less). The four decisions this spec needed were taken with
-the owner on 2026-09-24 and are the last section.
+the owner on 2026-09-24 and are the last section. **Search (R5, WP3) was
+redesigned with the owner on 2026-09-27** for 10 GB mailboxes: a sealed word
+index kept in each browser, not a per-search download (§ Decisions
+2026-09-27). WP0–WP2b are built (fb0a830c); WP3 is built and walked on dev.
 
 ## For the executor — read this first
 
@@ -64,7 +67,9 @@ tree wins: stop, note the difference in your hand-back, proceed on the tree.
 **Stop points** (hand back; do not work around):
 
 1. Before `php utils/update_database.php` in WP0 (three columns on
-   `iem_inbound_email_messages`, one on `iea_inbound_email_aliases`).
+   `iem_inbound_email_messages`, one on `iea_inbound_email_aliases`), and
+   again in WP3 (one column and one index on `iem_inbound_email_messages`,
+   the new `msk_mailbox_search_keys` table).
 2. After WP2, with the browser proof: a message that arrived at a Fortress
    alias on dev opens in the reader after the mail-vault unlock, and the
    same row read through psql shows only `v1.edge.` ciphertext.
@@ -354,7 +359,8 @@ handoff. Lowering the level is possible and honest: the member's own browser
 hands the mail back to the server.
 
 What it costs, stated on the card: no server-side AI over this domain, no
-server search (search runs on the device, over one field per message), mail
+server search (search runs on the device, over a sealed word index each
+browser builds once and keeps up to date), mail
 rules run only as mail arrives, the native apps hand off to the browser, and
 mail that arrives while the server is compromised can be read at that
 instant unless the relay add-on seals it at the edge.
@@ -394,9 +400,12 @@ Same columns as a Private row; different formats, three more fields.
 - **Three new optional sealed fields**, written by whoever seals the row:
   - `iem_search_text` (text): what `MailboxIndex::rowContent()` folds today
     (sender, subject, plain body, readable text of the HTML body, attachment
-    names), capped at 8192 characters after whitespace folding, gzip-compressed
+    names), capped at 32768 characters after whitespace folding (owner,
+    2026-09-27; `SEARCH_TEXT_MAX_CHARS`), gzip-compressed
     when that saves a third or more (value prefixed `gz:` + base64 before
     sealing; the browser uses `DecompressionStream('gzip')`, PHP `gzencode`).
+    It is what a browser reads once to build its search index (R5), never
+    per search.
   - `iem_snippet` (varchar 255): the first 240 characters of the readable
     body, the list preview.
   - `iem_attachment_manifest` (text, JSON): `[{id, filename, content_type,
@@ -420,6 +429,11 @@ Same columns as a Private row; different formats, three more fields.
   **sealing alias (Private or Fortress)** carries the envelope sender
   address only, never the From header's display name (WP0 fixes today's
   leak for both levels).
+- One more server-readable column, WP3: `iem_search_written_time`
+  (timestamp(6), nullable), when `iem_search_text` was last written on the
+  row. It is what a browser's index catches up by (R5), because a row's
+  search text can arrive long after its id (relay parse, a raise, a draft
+  turning into its Sent row in place).
 
 ### R3. Arrival without the relay
 
@@ -465,9 +479,11 @@ in the sealed-for-browser shape and is opened with `JoinerySealed.open`.
   and no same-origin. Readable text for search and snippet is taken in the
   browser with `DOMParser` (`text/html`) `body.textContent`; nothing is
   executed or fetched.
-- **Lock.** `JoinerySealed.onLock('mail', …)` blanks every rendered body,
-  revokes every blob URL, drops opened rows and search entries, and returns
-  the list to placeholders. The core idle lock is the timer. Unlock re-opens
+- **Lock.** `JoinerySealed.onLock('mail', …)` (subscribed once the deferred
+  vault modules have run; the file loads before them) blanks every rendered body,
+  revokes every blob URL, drops opened rows, ends the search worker (R5:
+  its key and every opened index record go with it; the saved index stays
+  sealed on disk), and returns the list to placeholders. The core idle lock is the timer. Unlock re-opens
   from the server copies.
 - **Mixed mailboxes.** A domain converting up or down holds rows of both
   custodies; the reader handles each row by its shape (plain,
@@ -515,25 +531,224 @@ reloads in the same tab without handing the server anything it can open.
 - Core, not mail-only: Drive's client-custody folders and the password vault
   get the same behaviour.
 
-### R5. Search runs in the browser
+### R5. Search runs on the device, over an index each browser keeps
 
-New action `mailbox/search_entries` (browser session): pages the caller's
-Fortress rows for the requested scope (`alias_id` or all mail, same scoping
-as `thread_list`) by id cursor, 200 per page: `[{id, thread_key, sealed_dek,
-sealed_ad_prefix, iem_search_text, direction}]`. Drafts excluded. The
-browser opens each entry into memory once per unlock and per scope (a
-`Map` id → text; refreshed incrementally by `after_id` on later searches),
-lower-cases, and matches every whitespace-separated token of the query as a
-literal substring, the same rule `sanitizeFtsQuery` gives the server. The
-matching thread keys go to `thread_list` as a new `thread_keys[]` parameter
-(max 500), which replaces `q` for that request; the server orders and pages
-them as it does any list. `MailboxService` skips `MailboxIndex::fold` and
-`search` for a Fortress scope and returns `search_scope: 'device'`. Entries
-are per message and idempotent: two devices never reconcile anything.
+**Why an index.** 10 GB of mail is about 105,000 messages (dev averages
+95 KB a message). Opening every message's search text on each search would
+download a few hundred MB, spend 30–60 s decrypting, and hold ~500 MB of
+text in the tab, on every page load. So each browser builds a word index
+**once**, keeps it sealed in its own storage, and afterwards adds only new
+mail. A search then opens one small index record per word.
 
-If opening one DEK per message proves slow on a very large mailbox, the
-recorded follow-up is one per-mailbox search key wrapped to the `mail`
-scope; the shape does not change.
+**Once per browser.** The saved index survives closing the tab or browser,
+signing out and in, restarting, and lock/unlock. A full build happens only
+in a new browser or device, after the site data is cleared, after a format
+change (the `FORMAT` rule of `MailboxIndex`: rebuild, never an error), or
+when the person asks ("Rebuild"). Key rotation does
+**not** rebuild (the search key survives it, below).
+
+**Shape: the Private index's rules** (`MailboxIndex` § SHAPE: contentless,
+no positions; measured 799 MB → ~105 MB for 101k messages, identical
+results), plus four of its own:
+
+- **Word → message numbers, nothing else.** No text is stored and no word
+  positions; a query is whole words that must all be present, the rule
+  `sanitizeFtsQuery` gives the server.
+- **Dense numbers.** Each browser numbers messages 0, 1, 2… in the order it
+  indexes them; a word's list is ascending numbers stored as gaps in
+  unsigned LEB128 varints (mostly one byte each). The `ids` record maps
+  number → message id. Server ids are shared by every user's mail, so their
+  gaps would be large.
+- **List or bitmap, whichever is smaller,** per word: a bitmap of
+  ⌈count/8⌉ bytes wins for a word in more than about one message in eight.
+- **No word over 40 characters** is indexed (tracking codes, encoded blobs:
+  most of the vocabulary of marketing mail, and never searched).
+- **256 shards,** by the low 8 bits of FNV-1a-32 of the word's UTF-8 bytes.
+  A shard is its words in byte order, each written as the bytes it shares
+  with the word before plus the rest, then its list or bitmap. A word's count
+  and last message are read from its list or bitmap, not stored: most words
+  are in one message, and every stored byte is paid per word. Each saved
+  record is gzip (`CompressionStream`) then AES-256-GCM.
+
+Target, pinned by the WP3 benchmark: **at most 60 MB saved per 100,000
+messages** at the 32 KB search-text cap (the Private index for the same mail
+is ~105 MB, uncapped bodies). Measured 2026-09-27: 51.7 MB for 100,000
+synthetic messages (234 MB of search text, pessimistic on rare words), the
+slowest two-word query 20 ms in node; dev's 2,018 real messages cost 186
+bytes each (short test mail).
+
+**Tokenizer.** Mirrors SQLite FTS5 `unicode61` with its default
+`remove_diacritics`: NFKD, drop combining marks, lower-case, split on
+anything not a letter or number (`/[^\p{L}\p{N}]+/u`), drop empties. The
+query goes through the same function; a query word that splits
+("e-mail") requires every piece, since there are no positions.
+
+**The search key.** One random 32-byte key per user, sealed to the `mail`
+scope and held by the server, which cannot open it. Model
+`MailboxSearchKey` (`plugins/mailbox/data/mailbox_search_keys_class.php`,
+table `msk_mailbox_search_keys`): `msk_usr_user_id` (unique, cascade),
+`msk_sealed_key` (`v1.edgeseal.mail.…`), `msk_key_generation`,
+`msk_sealed_owner_user_id`, create time. The pattern is the password vault's
+store key (`plugins/vault/data/vault_keyring_class.php`,
+`keyring_save_logic.php`): **create-only**; the first browser that needs one
+makes it (`session.sealTo`) and posts it; a second browser racing it gets
+"already set up" and fetches. Those three `msk_` columns are what
+`SystemBase::browserResealPage` walks, so the bootstrap registers
+`VaultUnlock::clientReseal('mail', [InboundEmailMessage::class,
+MailboxSearchKey::class])` and a rotation re-seals it with no script of its
+own; commit refuses while it sits on the old generation, as for messages.
+The key itself does not change, so no browser rebuilds. That leaks nothing:
+the key opens only a browser's saved index, whose words that browser
+already held. Each record's AES key is `HKDF-SHA256(search key, salt '',
+info 'mailbox-search:v1')` (non-extractable); AD
+`mailsearch:{user_id}:{record}:{FORMAT}`. A `head` record in the clear
+carries the format and a fingerprint of the key (`HKDF` info
+`'mailbox-search:fp'`, first 16 bytes); a different key or format, or records
+that will not open, clear the database and rebuild.
+
+**Where it is kept.** IndexedDB database `jy_mailsearch_{user_id}` on the
+site's origin (two people on one browser never share one). Records: `head`,
+`meta` (`{seq, doc_count, catchup, backfill, backfill_done, build_started,
+total}`), `ids`, `shard:00` … `shard:ff`, `tail`. One save writes every
+record it changed in one transaction. Two tabs share the database: each
+operation runs under a Web Lock (exclusive to write, shared to search) and
+reloads first when another tab saved since (`seq`, a random stamp per save);
+cursors only move forward; one tab at a time runs the first build (a second
+Web Lock). The
+first build calls `navigator.storage.persist()`, so the browser does not
+clear it to free space. No path of its own for private windows: current
+browsers give them IndexedDB and delete it when the window closes, so the
+index builds as anywhere else and is gone with the window. If IndexedDB
+will not open or a write fails, the search box says "Search couldn't save
+its index in this browser" and search stops there. The reader has no
+settings menu, so the controls sit on the line a Fortress search puts above
+its results: "Rebuild" and "Remove from this browser" (clears the database;
+the next search here builds again). Signing out does not delete it; it is
+sealed, and the next unlock reuses it.
+
+**Server side.**
+
+- `iem_search_written_time` (R2) is set with `clock_timestamp()` in the
+  **same UPDATE** that writes `iem_search_text`: `sealFortressDerived`
+  (ingest, Joinery Direct, the Sent copy), `fortress_parse_store` (WP7),
+  `convertToFortress` (WP5). A draft that turns into its Sent row in place
+  gets a fresh value at send. Each of these commits within minutes of its
+  stamp (the bound below). The hook is
+  `SystemBase::sealedWriteMarks()` (honoured by `sealColumns()` and
+  `acceptBrowserSealed()`), which `InboundEmailMessage` answers for
+  `iem_search_text`. Index `iem_search_written_idx`
+  `(iem_sealed_owner_user_id, iem_search_written_time,
+  iem_inbound_email_message_id) WHERE iem_search_written_time IS NOT NULL`
+  (migration `iem_017`: a data class cannot declare a composite index).
+- `mailbox/search_entries` (browser session): the caller's rows with
+  `iem_sealed_key LIKE 'v1.edgeseal.mail.%'` (escaped as
+  `browserResealPage` does), `iem_sealed_owner_user_id` = caller,
+  `iem_search_written_time IS NOT NULL`, direction not `draft`, in every
+  alias, folder and delete state (the Private COVERAGE rule: the read scope
+  decides what a search returns, so restore works). Two modes, 200 rows a
+  page: `order: 'new'` after a `since` cursor `(time, id)` ascending
+  (catch-up); `order: 'old'` before a `before` cursor descending (the first
+  build, newest first). Each row `{id, sealed}`, `sealed` being
+  `{key, sealed_scope, sealed_dek, sealed_ad_prefix, iem_search_text}`; the
+  page adds `next` (the cursor, null on the last page), `last` (where a
+  caught-up walk got to), `total` with `with_total` (rows that match without
+  the cursor) and `server_time`. `overlap` on a catch-up's first page reaches
+  ten minutes behind the cursor. Rules in `MailboxDeviceSearch`.
+- `mailbox/search_key`: `op: 'get'` returns `{set_up, sealed_key, user_id}`;
+  `op: 'create'` takes `sealed_key` and `public_key`, refuses a blob that is
+  not `v1.edgeseal.mail.`, takes the generation from `public_key` (current
+  or pending, as `acceptBrowserSealed` does), and refuses when a row exists.
+- `thread_list` takes `device_hits`: base64 of the ascending hit message
+  ids as delta varints (the index's own encoder; a PHP decoder beside it),
+  up to 500,000 ids (more is a 400). It is unioned with the server's search
+  exactly as `MailboxIndex` ids are today, `(iem_inbound_email_message_id
+  IN (…) OR <server search>)`, so a mailbox part way through a raise finds
+  its Private rows in the server window and its Fortress rows on the
+  device. The scope WHERE is the authorization; nothing is cut at 500.
+  `MailboxIndex` already skips Fortress rows (its 1.12). The response adds
+  nothing: the reader knows it searched on the device.
+- **No term when every mailbox in view is Fortress** (review 2026-09-27,
+  B4). `q` with `device_hits` would tell the server which Fortress messages
+  hold which word, search after search. So when every mailbox in view is
+  Fortress the reader sends `device_only` and no term (an all-access
+  viewer's All mailboxes is never "every mailbox Fortress": it also holds
+  unmatched mail the server searches; review B9); `thread_list` drops
+  any `q` that comes with it, and `MailboxService` runs the search as the ids
+  alone (`device_search`), inside the same scope. With the vault shut, or a
+  browser that cannot search on the device, the list is empty under the
+  unlock banner (or says the browser cannot search): the term still stays in
+  the browser. **Residual, stated in `plugins/mailbox/docs/overview.md`:** in
+  a view mixing Fortress and server-searchable mailboxes the term goes with
+  the ids, since the server searches its half; the server then sees which of
+  the Fortress messages in view hold the word. The server still never sees a
+  Fortress message's content.
+- **The writers' transactions are bounded by the overlap** (review
+  2026-09-27, B5). A catch-up reaches `OVERLAP_SECONDS` (ten minutes) behind
+  its cursor. A writer that stamps `iem_search_written_time` and commits more
+  than ten minutes later can land behind a cursor that has already passed,
+  and no browser indexes that row. Every writer commits per row or per short
+  batch: ingest and the Sent copy do today; WP5's raise batch and WP7's
+  parse store must too.
+
+**Browser.** `plugins/mailbox/assets/mailbox_search.js`
+(`window.MailboxSearch`, page side), `mailbox_search_worker.js` (a Web
+Worker; `worker-src 'self'` is in the CSP), and
+`mailbox_search_core.js` (pure functions: tokenizer, varint and bitmap
+codecs, shard build, merge, query; loaded by the worker with
+`importScripts` and by node in the WP3 gate).
+
+- **Split.** The page holds the `mail` session: it fetches pages, opens
+  each row's DEK and its `iem_search_text` field (the session and
+  `VaultCrypto` directly: `JoinerySealed.open` keeps every plaintext it opens
+  for the tab's life, which would hold the whole mailbox), inflates `gz:`, and
+  posts `{id, text}` batches to the worker. A row that will not open is left
+  out; a page where none opens stops the walk, so a vault that changed under
+  it is retried rather than indexed as empty. It
+  opens the search key once, derives the record key and posts that
+  non-extractable `CryptoKey` to the worker (structured clone). The worker
+  tokenizes, builds, merges, seals, reads and writes IndexedDB, and answers
+  queries, so the page never stalls.
+- **First build.** `meta.build_started = server_time`; the catch-up cursor
+  starts at `build_started − 10 minutes`; the backfill walks `order: 'old'`
+  from `build_started`, newest first. It saves after the first page (the
+  newest mail is searchable in seconds) and then every 5,000 messages, with
+  the cursors in the same save, so a reload, a lock or a closed tab
+  resumes it. While it runs, a search answers over what is indexed and the
+  list says "Indexing mail on this device: 42,000 of 105,000. Results so
+  far." (`total` from the first page), and the results refresh at each
+  save.
+- **Notices.** The reader refreshes its results when the index reports
+  progress, and a refresh searches again; so a notice comes only from a save
+  or from a build that ends or fails, never from a build that did not start
+  because another tab holds it (review 2026-09-27, B1). A failed build is not
+  retried until a reload, an unlock or Rebuild. A search asks the worker
+  first, so the tab knows whether another tab finished the build before it
+  decides to build (B3). An add that changes nothing saves nothing (B2).
+- **Keeping up.** On unlock and before each search, the page fetches
+  `order: 'new'` from the catch-up cursor minus 10 minutes (the overlap
+  covers a row whose write committed after a later one); the worker skips an
+  id already in `ids` (ten minutes' worth is opened again, a handful). An
+  indexed row is never indexed
+  again (search text is written once per row; drafts are never indexed).
+  New messages go into `tail` (kept in the worker and saved sealed). Past
+  2,000 messages the worker merges the tail into the shards it touches; the
+  shards, the emptied tail, `ids` and the advanced cursor are one save.
+- **Query.** Tokenize; per word, open its shard (opened shards kept in the
+  worker, at most 32, least recently used dropped) and take its list plus
+  the tail's; intersect; numbers → ids; ascending; encode; `thread_list`
+  with `device_hits` and `q`. A word the index has never seen answers
+  nothing without opening a shard beyond its own.
+- **Deleted mail** stays in the index; the server's scope drops it, as in
+  Private. A purge never touches the index; a rebuild sheds dead entries.
+- **Lock** ends the worker (R4); the next unlock starts a new one from the
+  saved records.
+
+**What it costs**, stated in `plugins/mailbox/docs/overview.md` and on the
+"Remove from this browser" control: every browser that searches Fortress mail keeps a sealed
+word index of it on its disk, unreadable without the mail vault. The first
+search in a new browser downloads each message's search text once (a few
+hundred MB for 10 GB of mail) and indexes in the background for a few
+minutes.
 
 ### R6. Compose, Sent copies and drafts
 
@@ -764,10 +979,10 @@ mailbox page):
 ### R11. Rotation, devices, recovery
 
 `plugins/mailbox/includes/bootstrap.php` registers
-`VaultUnlock::clientReseal('mail', ['InboundEmailMessage'],
-['plugins/mailbox/assets/mailbox-reseal.js'])`. The rotation walk covers
-every row under the scope, pending rows included (they carry a
-`v1.edgeseal.mail.` key). The hook re-MACs relay pins (R10). The device
+`VaultUnlock::clientReseal('mail', ['InboundEmailMessage',
+'MailboxSearchKey'], ['plugins/mailbox/assets/mailbox-reseal.js'])`. The
+rotation walk covers every row under the scope, pending rows included (they
+carry a `v1.edgeseal.mail.` key), and the search key (R5). The hook re-MACs relay pins (R10). The device
 handoff offers `mail` automatically; the recovery-readiness ledger and the
 security page card appear per vault row. A rotation re-pushes the relay map
 at begin and commit.
@@ -780,7 +995,8 @@ at begin and commit.
 - Protects: "Only your devices can read stored mail. A stolen database or a
   hacked server gets nothing it can open."
 - Costs: "No server-side AI or server search on this domain; search runs on
-  your device. Mail rules run only as mail arrives. Phone apps open this
+  your device, and the first search in each browser takes a few minutes to
+  prepare. Mail rules run only as mail arrives. Phone apps open this
   mailbox in the browser."
 - Note (relay add-on off): "New mail is encrypted the moment it arrives; a
   server hacked while mail is arriving could read what arrives then."
@@ -925,20 +1141,75 @@ padlock state, one setup, one name ("Vault"). Until it lands, a Fortress
 mailbox needs its own unlock and setup, and the strings "mail vault" / "Set
 up mail vault" in WP0–WP2b change to "your vault" there.
 
-### WP3. Search on the device
+### WP3. Search on the device (R5, revised 2026-09-27) — built and walked on dev 2026-09-27
 
-- `mailbox/search_entries` action, `thread_keys[]` on `thread_list`,
-  `MailboxService` skipping the server index for a Fortress scope,
-  `search_scope: 'device'`.
-- `mailbox_fortress.js`: the entry cache, incremental refresh, token match,
-  and the reader's search box routed through it when
-  `MAILBOX_READER.fortress`.
-- **Tests:** `plugins/mailbox/tests/fortress_search_test.php` (`test-db`):
-  entries page by cursor, drafts excluded, another user's rows never
-  returned; `thread_list` with `thread_keys[]` returns exactly those threads
-  and ignores `q`. `mailbox_search_scope` suite stays green.
-- **Acceptance:** search a word from a Fortress message body and from an
-  attachment name; both hit. Screenshot.
+Built and green: `fortress_search` (39), `search_index_gate.sh` (21, the
+benchmark), `MailboxSearch.selfCheck()` in the browser (12: the real worker,
+IndexedDB and crypto against a stand-in server — build, search, reopen
+without rebuilding, catch up, two tabs, a changed key, rebuild, remove).
+Migration `iem_018` stamps rows sealed before the column existed.
+Walked on dev 2026-09-27 as a fresh test user (143105, mailbox
+`claude-search@dev.getjoinery.com`, vault set up in the browser with a
+virtual passkey): first search builds and fills in; a body word, an
+attachment name and a later-arriving message each hit; a reload and a
+lock/unlock search again with no rebuild; no search word appears in any
+request (`device_only`). The walk found **B11** in WP2's lock teardown
+(R4): `mailbox_fortress.js` loads before the deferred vault modules, so its
+load-time check subscribed to nothing and a lock wiped no key, URL or row.
+It now subscribes once they have run (1.8), and its `selfCheck()` pins it.
+
+- **Cap.** `InboundEmailMessage::SEARCH_TEXT_MAX_CHARS` 8192 → 32768.
+  Fortress rows already on dev keep their 8 KB text (no production users;
+  nothing to backfill).
+- **Schema.** `iem_search_written_time` (timestamp(6), nullable) and the
+  index `iem_search_written_idx` (migration `iem_017`);
+  `MailboxSearchKey` model and table. **Stop point 1** before
+  `update_database`. Set the time in `sealFortressDerived`'s UPDATE (and
+  leave a line in WP5 and WP7 for their writers).
+- **Server.** `logic/search_entries_logic.php`,
+  `logic/search_key_logic.php` (both `requires_browser_session`), the
+  `device_hits` decoder and union in `MailboxService::listThreads`,
+  the `thread_list` descriptor documenting
+  `device_hits`. Bootstrap registers `MailboxSearchKey` for rotation.
+- **Browser.** `mailbox_search_core.js`, `mailbox_search_worker.js`,
+  `mailbox_search.js` per R5; the reader's search box routed through
+  `MailboxSearch` when `MAILBOX_READER.fortress`; the indexing line, the
+  storage-failure line, "Rebuild" and "Remove from this browser" on the
+  device-search line above the results; the lock teardown.
+- **Tests:**
+  - `plugins/mailbox/tests/fortress_search_test.php` (`test-db`):
+    `search_entries` pages both ways by `(time, id)` with no row twice and
+    none skipped across a page edge; drafts excluded; another user's rows
+    and Private rows never returned; a row whose search text is written
+    after the cursor passed its id is returned by the next `order: 'new'`
+    page; `search_key` create-only (second create refused, wrong scope
+    refused, generation from `public_key`); `thread_list` with
+    `device_hits` returns exactly those messages' threads within the scope,
+    ignores ids outside it, unions with `q` over a Private row, 400 over
+    500,000 ids; the PHP decoder reads what the JS encoder wrote (a shared
+    vector file in `plugins/mailbox/tests/fixtures/`). A `mail` rotation
+    re-seals the search key (extend `fortress_rotation` when WP6 lands; until
+    then drive `browserResealPage` on `MailboxSearchKey` directly).
+    `mailbox_search_scope` stays green.
+  - `plugins/mailbox/tests/search_index_gate.sh` running
+    `search_index.mjs` (node, the `timestamp_ladder_gate.sh` pattern) over
+    `mailbox_search_core.js`: tokenizer cases (diacritics, case, punctuation,
+    the 40-character rule, a split query word); varint and bitmap round
+    trips and the smaller-wins choice; merge of a tail into shards equals a
+    build from scratch; query results equal a brute-force scan over the same
+    corpus. **Benchmark:** a synthetic corpus of 100,000 messages (Zipf word
+    frequencies, lengths drawn to the 32 KB cap, long junk tokens mixed
+    in); gzip-compressed shards + `ids` + `meta` at most **60 MB**; a
+    two-word query under 50 ms in node. Print the measured numbers.
+- **Self-check:** `MailboxSearch.selfCheck()` on the mailbox page.
+- **Acceptance:** on dev, as user 4500: first search on a Fortress mailbox
+  builds (indexing line with a count), search a word from a message body and
+  from an attachment name, both hit; reload and search again without a
+  rebuild (network log: one catch-up page, no backfill); send a new message
+  to the alias, search a word from it, it hits; lock and unlock, no rebuild;
+  report the saved size from `navigator.storage.estimate()`. Screenshots.
+  If the benchmark or the dev size misses the 60 MB target, stop and report
+  before tuning.
 
 ### WP4. Compose, Sent copy, drafts
 
@@ -973,7 +1244,10 @@ first), and lift the refusal in WP7.
   `browserCustodyBacklog`, `acceptBrowserCustodyChange` in `SystemBase`;
   `logic/vault_custody_rows_logic.php`, `logic/vault_row_custody_logic.php`;
   `JoinerySealed.changeCustody`; `VaultKey::unsealEdge` is already there.
-- Mail: `InboundEmailMessage::convertToFortress`, deferred work
+- Mail: `InboundEmailMessage::convertToFortress` (sets
+  `iem_search_written_time` in the UPDATE that writes the search text, and
+  commits per row or per short batch, never one long transaction: R5's
+  overlap bound), deferred work
   `mailbox_fortress_raise`, `mailbox_fortress_backlog_count`, the domain
   editor (vault client loaded, `ensureUnlocked('mail')` before the step-up
   POST on choosing Fortress, the receipt running the raise count or the
@@ -1022,7 +1296,9 @@ first), and lift the refusal in WP7.
 - PHP: `RelayMapExporter` per R9, `RelaySpoolConsumer::ingestOne` storing the
   client pending row, `ownerByPublicKey` over client vaults,
   `DeferredIngest` skipping browser-sealed rows, `mailbox/fortress_parse_store`
-  (multipart; `classifySpam` from posted headers), the pending banner and
+  (multipart; `classifySpam` from posted headers; sets
+  `iem_search_written_time` with the search text and commits per message:
+  R5's overlap bound), the pending banner and
   drain in `mailbox_fortress.js`, `mailbox_mime.js` with its gate.
 - **Tests:** `plugins/mailbox/tests/fortress_relay_pull_test.php`
   (`test-db`): a spool entry with `key_kind: client` (made in PHP with the
@@ -1069,7 +1345,7 @@ New: `fortress_scope`, `fortress_ingest`, `fortress_reader_api`,
 `fortress_server_readers`, `fortress_search`, `fortress_compose`,
 `fortress_level_change`, `fortress_rotation`, `fortress_relay_pull`,
 `fortress_relay_pin` under `plugins/mailbox/tests/`; `tests/vault/custody_change_test.php`;
-`mime_parser_gate.sh` + `.mjs`; Go `sealer_test.go` cases. Changed:
+`mime_parser_gate.sh` + `.mjs`; `search_index_gate.sh` + `.mjs`; Go `sealer_test.go` cases. Changed:
 `sealed_read_paths_test.php`, `inbound_raw_storage_test.php`,
 `roundtrip_test.sh`. Browser walks at each WP's acceptance line with
 screenshots. Before hand-back: `php tests/run.php db --changed` green and
@@ -1086,7 +1362,8 @@ that up for the mailboxes that opt in; the card says so.
 
 **What survives:** reading and rendering (the sandboxed iframe already
 exists), attachments and previews (in the browser), search (one sealed
-field per message, matched on the device), compose and send (plaintext to
+field per message, indexed once per browser into a sealed word index; R5),
+compose and send (plaintext to
 the server for transport; the server signs in-window under the sending lock
 and never stores a plaintext copy), threading, sorting and listing
 (cleartext operational metadata).
@@ -1097,7 +1374,9 @@ notifications (none exist; none may be built); spam learning (the stateless
 verdict survives); mail rules on relay-sealed mail.
 
 **Residuals, stated honestly:** decrypted content lives in browser memory
-while unlocked and on a linked phone behind its biometric gate; cleartext
+while unlocked and on a linked phone behind its biometric gate; a sealed
+word index on the disk of each browser that searched (opens only with the
+mail vault); cleartext
 metadata (Message-ID, references, envelope recipient and sender, times,
 sizes); mail arriving during a server compromise on the no-relay path;
 served JavaScript (native or extension clients would close it; the device
@@ -1132,3 +1411,22 @@ down.
   to Fortress only when the acting admin is the single owner of every
   mailbox on it (lifting it needs a "requested, waiting for owners' vaults"
   state, recorded, not built).
+
+## Decisions 2026-09-27 (owner)
+
+- **Search keeps a sealed index in each browser (R5).** The design it
+  replaces opened every message's search text into tab memory on each page
+  load: at 10 GB (~105,000 messages) a few hundred MB downloaded, 30–60 s of
+  decrypting and ~500 MB of memory per search session. Rejected
+  alternatives: an encrypted index kept on the server (it sees which parts
+  each search opens, and two devices must merge into one index); searching
+  only recent mail by default (hides the cost, full search still slow).
+  The index reuses the Private index's size rules (no text, no positions)
+  and adds dense numbering, list-or-bitmap, a 40-character word limit and
+  256 sealed shards.
+- **Search text cap 8 KB → 32 KB.** Coverage close to Private's, which
+  indexes whole bodies; the cost is paid once per browser at the first
+  build.
+- **The 500-thread cap is gone.** `thread_keys[]` (max 500) cut common
+  words' results silently; `device_hits` carries every hit, as the Private
+  index's ids do.
