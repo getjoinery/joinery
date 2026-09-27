@@ -153,7 +153,8 @@ class FetchFeedTask implements ScheduledTaskInterface {
      * Mirror the capture's Stories tray into pss_persona_stories: insert what
      * appeared, refresh what's still showing, permanently delete what's gone
      * (stories expire within a day, so a vanished entry is a dead link). A
-     * capture with no tray leaves the stored set alone — the scroll may simply
+     * story the owner hid keeps its row, still hidden, until it leaves the tray.
+     * A capture with no tray leaves the stored set alone — the scroll may simply
      * have started past it. Returns a summary fragment for the fetch message.
      */
     private static function syncStories(string $persona, array $stories, PersonaBrowserClient $client, string $cache_dir): string {
@@ -170,9 +171,10 @@ class FetchFeedTask implements ScheduledTaskInterface {
                 'owner_user_id' => PersonaFeedItem::OWNER_INSTANCE,
                 'persona'       => $persona,
                 'story_key'     => $key,
-                'deleted'       => false,
             ]);
             foreach ($lookup as $row) { $existing = $row; break; }
+            // Hidden by the owner — leave it be; it goes once the tray drops it.
+            if ($existing && $existing->get('pss_delete_time')) continue;
 
             $target = $existing ?: new PersonaStory(NULL);
             if (!$existing) {
@@ -197,12 +199,11 @@ class FetchFeedTask implements ScheduledTaskInterface {
             $target->save();
         }
 
-        // Entries the tray no longer shows are expired — remove them and any
-        // cached image nothing else references.
+        // Entries the tray no longer shows are expired — remove them, hidden
+        // ones included, and any cached image nothing else references.
         $current = new MultiPersonaStory([
             'owner_user_id' => PersonaFeedItem::OWNER_INSTANCE,
             'persona'       => $persona,
-            'deleted'       => false,
         ]);
         $expired = [];
         $kept_files = [];

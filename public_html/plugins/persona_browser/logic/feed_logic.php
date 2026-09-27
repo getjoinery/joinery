@@ -59,16 +59,17 @@ function persona_browser_feed_logic(array $input): LogicResult {
     $page_size = 60;
     $options = ['owner_user_id' => PersonaFeedItem::OWNER_INSTANCE, 'persona' => 'facebook', 'deleted' => false];
     if ($review) {
-        // Blocked authors are dropped below, after the query, so read past
-        // the page size to still fill a page.
         $options['owner_unreviewed'] = true;
         $options['exclude_reels'] = $hide_reels;
     }
-    $rows = new MultiPersonaFeedItem($options, ['pfi_first_seen_time' => 'DESC'], $review ? $page_size * 5 : $page_size);
+    $rows = new MultiPersonaFeedItem($options, ['pfi_first_seen_time' => 'DESC', 'pfi_persona_feed_item_id' => 'DESC']);
 
+    // Hidden ads, reels and blocked authors are dropped below, after the
+    // query, so read in batches until the page is full or the posts run out:
+    // a run of hidden posts at the top must not leave the page empty.
     $items = [];
-    foreach ($rows as $row) {
-        if ($review && count($items) >= $page_size) break;
+    foreach ($rows->incremental_iterator($page_size) as $row) {
+        if (count($items) >= $page_size) break;
         $author = (string)$row->get('pfi_author');
         $author_key = mb_strtolower(trim($author));
         $is_allowed = isset($allowed[$author_key]);

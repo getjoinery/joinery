@@ -119,6 +119,7 @@ $page->public_header(['title' => 'My Feed']);
                 <?php foreach ($items as $post): ?>
                 <?php if ($post['kind'] === 'story'): ?>
                 <article class="pb-post pb-net-<?php echo htmlspecialchars($post['persona']); ?> pb-story-card"
+                         data-story-id="<?php echo (int)$post['id']; ?>"
                          data-author="<?php echo htmlspecialchars($post['author']); ?>">
                     <div class="pb-head">
                         <span class="pb-author">
@@ -132,6 +133,7 @@ $page->public_header(['title' => 'My Feed']);
                             <?php if (!empty($post['seen'])): ?>
                                 <span class="pb-date" title="When this story was first captured"><?php echo htmlspecialchars($post['seen']); ?></span>
                             <?php endif; ?>
+                            <button type="button" class="pb-iconbtn pb-hide-story-btn" aria-label="Hide this story" title="Hide this story">&#10005;</button>
                         </span>
                     </div>
                     <a class="pb-story-frame" href="<?php echo htmlspecialchars($post['link']); ?>" target="_blank" rel="noopener noreferrer"
@@ -335,7 +337,18 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         var article = e.target.closest('.pb-post');
-        if (!article || !article.dataset.itemId) return;   // story cards carry no actions
+        if (!article) return;
+
+        // A story card's only action is its X.
+        if (article.dataset.storyId) {
+            if (e.target.closest('.pb-hide-story-btn')) {
+                callAction('feed_hide_story', { story_id: parseInt(article.dataset.storyId, 10) }).then(function () {
+                    removePost(article);
+                }).catch(function (err) { alert(err.message); });
+            }
+            return;
+        }
+        if (!article.dataset.itemId) return;
         var itemId = parseInt(article.dataset.itemId, 10);
 
         var adBtn = e.target.closest('.pb-adbtn');
