@@ -619,7 +619,7 @@
 			$sql_source = $full_site_dir . '/uploads/joinery-install-' . $version . '.sql.gz';
 
 			if (!file_exists($sql_source)) {
-				publish_output("ERROR: Generated SQL file not found at $sql_source");
+				publish_output("ERROR: Generated SQL file not found at $sql_source\n" . implode("\n", $output));
 				exit(1);
 			}
 
