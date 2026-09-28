@@ -25,6 +25,8 @@
  * is what the setup-wizard pill and the management-node stats blob read, so
  * neither has to walk a live decrypt of every row on every admin request.
  *
+ * @version 1.3 - the locator path asks for a table only when it exists (to_regclass), so a plugin
+ *   never activated here leaves no ERROR in the PostgreSQL log on every census
  * @version 1.2 - census(): the read-only count of stored and dead secrets and the canary's
  *                state, for SiteCensus; the key is opened once per run, not once per category
  * @version 1.1 - an enumerator is consulted only while its plugin is active, and one that
@@ -350,7 +352,11 @@ class SecretReconciler {
 			$classify(($v = $q->fetchColumn()) === false ? null : (string)$v);
 		} else {
 			list($table, $column) = explode('.', $locator, 2);
-			if (preg_match('/^[a-z0-9_]+$/i', $table) && preg_match('/^[a-z0-9_]+$/i', $column)) {
+			// A plugin never activated here never created its table: asking for it
+			// would be caught below, but PostgreSQL logs every such ERROR, and its
+			// log is where a real database failure has to stand out.
+			if (preg_match('/^[a-z0-9_]+$/i', $table) && preg_match('/^[a-z0-9_]+$/i', $column)
+					&& $dblink->query("SELECT to_regclass('" . $table . "') IS NOT NULL")->fetchColumn()) {
 				try {
 					$q = $dblink->query("SELECT \"{$column}\" FROM \"{$table}\" WHERE \"{$column}\" IS NOT NULL");
 					foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $v) {

@@ -37,6 +37,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.25.0 - the unseal convergence probe is mailbox_protection_owner_has_unseal_work()
  * @version 1.24.0 - Fortress search: mailbox_search.js, and the worker and index-code URLs in the config
  * @version 1.23.0 - Fortress mail (specs/client_custody_mail.md § R4): `fortress` loads
  *   mailbox_fortress.js, which the reader calls to open browser-sealed rows;
@@ -438,17 +439,7 @@ function mailbox_reader_emit_unseal_convergence(): void {
 		// "No longer sealed" is the MAILBOX's answer (specs/mailbox_connect_flow.md
 		// § D) — the same predicate the unseal pass itself uses, so this probe can
 		// never start a loop with nothing to converge, or miss one that has work.
-		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare(
-			"SELECT 1 FROM iem_inbound_email_messages m
-			 " . mailbox_protection_posture_join() . "
-			 WHERE m.iem_sealed_owner_user_id = ?
-			   AND (m.iem_content_sealed = true OR m.iem_pending_parse = true)
-			   AND m.iem_delete_time IS NULL
-			   AND NOT (" . mailbox_protection_seals_sql() . ")
-			 LIMIT 1");
-		$stmt->execute(array($user_id));
-		if (!$stmt->fetchColumn()) {
+		if (!mailbox_protection_owner_has_unseal_work($user_id)) {
 			return;
 		}
 	} catch (\Throwable $e) {

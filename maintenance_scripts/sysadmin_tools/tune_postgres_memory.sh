@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # tune_postgres_memory.sh - size PostgreSQL's memory settings from the machine
+# Version: 1.3.0 - max_parallel_workers_per_gather scales with the CPUs: half of them, capped at
+#                  4 (1 CPU: 0, 2-3: 1, 4-5: the default 2, 6-7: 3, 8+: 4), written only
+#                  where it differs from the default, so a 4-5 CPU machine's drop-in is unchanged
+# Version: 1.2.0 - on a machine with one CPU, max_parallel_workers_per_gather = 0: a parallel
+#                  plan's workers share the one core with their leader (a 99k-row count ran
+#                  25% slower in parallel on jeremytunnell)
 # Version: 1.1.0
 #
 # Description:
@@ -13,6 +19,20 @@
 #                           kept modest because Apache and PHP share the box
 #     effective_cache_size  50% of RAM (floor 128MB) — a planner hint, not an
 #                           allocation: how much of the OS cache it may assume
+#
+#   and max_parallel_workers_per_gather, from the CPUs this machine owns (the
+#   smaller of nproc and a cgroup CPU quota): half of them, capped at 4.
+#
+#     CPUs   workers per query
+#     1      0   parallel workers would only take turns on the leader's core
+#     2-3    1
+#     4-5    2   PostgreSQL's default, so nothing is written
+#     6-7    3
+#     8+     4
+#
+#   Half, because a web server runs many requests at once and one query should
+#   not take every core from the rest. The line is written only when it differs
+#   from the default, so re-running on a 4-5 CPU machine changes nothing.
 #
 #   "RAM this machine actually owns" is the whole point, and it is the one
 #   thing a container cannot read off /proc/meminfo — which reports the host's
@@ -156,6 +176,24 @@ shared_mb=$(( ram_mb / 5 ))
 cache_mb=$(( ram_mb / 2 ))
 [ "$cache_mb" -lt 128 ] && cache_mb=128
 
+# ---- how many CPUs are really ours -----------------------------------------
+# nproc honours a cpuset but not a CPU quota (docker run --cpus=1), which
+# cgroup v2 states in cpu.max as "quota period", or "max" for none.
+cpus=$(nproc 2>/dev/null || echo 1)
+if [ -r /sys/fs/cgroup/cpu.max ]; then
+    read -r cpu_quota cpu_period < /sys/fs/cgroup/cpu.max || true
+    if [[ "${cpu_quota:-}" =~ ^[0-9]+$ ]] && [[ "${cpu_period:-}" =~ ^[0-9]+$ ]] && [ "$cpu_period" -gt 0 ]; then
+        quota_cpus=$(( (cpu_quota + cpu_period - 1) / cpu_period ))
+        [ "$quota_cpus" -lt "$cpus" ] && cpus=$quota_cpus
+    fi
+fi
+per_gather=$(( cpus / 2 ))
+[ "$per_gather" -gt 4 ] && per_gather=4
+parallel_line=""
+if [ "$per_gather" -ne 2 ]; then
+    parallel_line="max_parallel_workers_per_gather = ${per_gather}"
+fi
+
 # ---- where the cluster keeps its configuration -----------------------------
 PG_VERSION="${PG_VERSION:-$(ls /etc/postgresql 2>/dev/null | sort -n | tail -1)}"
 PG_CONFIG_DIR="/etc/postgresql/${PG_VERSION}/main"
@@ -172,8 +210,13 @@ shared_buffers = ${shared_mb}MB
 effective_cache_size = ${cache_mb}MB
 CONF
 )
+if [ -n "$parallel_line" ]; then
+    content="${content}
+# ${cpus} CPU(s): at most half of them on one query (PostgreSQL's default is 2).
+${parallel_line}"
+fi
 
-echo "RAM available: ${ram_mb} MB (${ram_source}) -> shared_buffers ${shared_mb}MB, effective_cache_size ${cache_mb}MB (${DROPIN})"
+echo "RAM available: ${ram_mb} MB (${ram_source}) -> shared_buffers ${shared_mb}MB, effective_cache_size ${cache_mb}MB; CPUs: ${cpus} -> ${per_gather} parallel worker(s) per query (${DROPIN})"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "$content"

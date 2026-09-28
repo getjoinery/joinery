@@ -101,6 +101,52 @@ chk "stubbed run: three lines" "$(jv "$T/stub.json" journal count)" "3"
 chk "quotes and backslashes survive as text, not as syntax" "$(jv "$T/stub.json" journal.0)" 'a line with "double quotes" and a \backslash\'
 chk "the ENOSPC line is readable" "$(jv "$T/stub.json" journal.2 | grep -c 'No space left on device')" "1"
 
+echo "=== postgresql reads the cluster unit, not the umbrella ==="
+# The umbrella postgresql.service is a /bin/true oneshot with no journal; the
+# database's lines are under postgresql@<version>-main.service.
+mkdir -p "$T/pg"
+cat > "$T/pg/systemctl" <<'STUB'
+#!/bin/bash
+case "$*" in
+    *list-units*--state=active*) echo "postgresql@16-main.service loaded active running PostgreSQL Cluster 16-main" ;;
+    *list-units*) echo "postgresql@16-main.service loaded active running PostgreSQL Cluster 16-main" ;;
+    *LoadState*)   echo loaded ;;
+    *ActiveState*) echo active ;;
+    *SubState*)    echo running ;;
+    *Result*)      echo success ;;
+    *) echo "" ;;
+esac
+STUB
+cat > "$T/pg/journalctl" <<'STUB'
+#!/bin/bash
+echo "journalctl $*"
+STUB
+chmod +x "$T/pg/systemctl" "$T/pg/journalctl" 2>/dev/null || true
+PATH="$T/pg:$PATH" bash "$SCRIPT" postgresql 5 > "$T/pg.json" 2>/dev/null
+chk "the unit read is the active cluster" "$(jv "$T/pg.json" unit)" "postgresql@16-main.service"
+chk "its journal is the one asked for" "$(jv "$T/pg.json" journal.0 | grep -c -- '-u postgresql@16-main.service')" "1"
+cat > "$T/pg/systemctl" <<'STUB'
+#!/bin/bash
+case "$*" in
+    *list-units*--state=active*) echo "" ;;
+    *list-units*) printf '%s\n' "postgresql@14-main.service loaded failed failed X" "postgresql@16-main.service loaded inactive dead X" ;;
+    *LoadState*) echo loaded ;;
+    *) echo "" ;;
+esac
+STUB
+PATH="$T/pg:$PATH" bash "$SCRIPT" postgresql 5 > "$T/pg2.json" 2>/dev/null
+chk "with none active, the newest cluster is read" "$(jv "$T/pg2.json" unit)" "postgresql@16-main.service"
+cat > "$T/pg/systemctl" <<'STUB'
+#!/bin/bash
+case "$*" in
+    *list-units*) echo "postgresql@x;reboot.service loaded active running X" ;;
+    *LoadState*) echo loaded ;;
+    *) echo "" ;;
+esac
+STUB
+PATH="$T/pg:$PATH" bash "$SCRIPT" postgresql 5 > "$T/pg3.json" 2>/dev/null
+chk "a name that is not a cluster unit falls back to the umbrella" "$(jv "$T/pg3.json" unit)" "postgresql.service"
+
 echo "=== An argument it did not ask for, and stdin, change nothing ==="
 echo "some stdin the script must ignore" | bash "$SCRIPT" cron 5 /etc/passwd --follow > "$T/extra.json" 2>/dev/null
 chk "the third argument is ignored" "$(jv "$T/extra.json" "" keys)" "$KEYS"
@@ -112,7 +158,7 @@ chk "sshd is not one of them" "$(sed -n '/^UNITS=(/,/^)/p' "$SCRIPT" | grep -c -
 chk "the line cap is 200" "$(grep -c '^MAX_LINES=200' "$SCRIPT")" "1"
 chk "every command runs under the per-command timeout" "$(grep -c '^run() { timeout "\$CMD_TIMEOUT"' "$SCRIPT")" "1"
 chk "journalctl is read-only and bounded" "$(grep -c 'run journalctl -u "\$SERVICE" -n "\$LINES"' "$SCRIPT")" "1"
-chk "no systemctl verb but show" "$(grep -o 'systemctl [a-z-]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "systemctl show "
+chk "no systemctl verb but show and list-units" "$(grep -o 'systemctl [a-z-]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "systemctl list-units systemctl show "
 chk "nothing writes: no tee, no redirect into /etc or /var, no rm, no mv" "$(grep -c -E '\btee\b|> */(etc|var)|\brm |\bmv |\bcp ' "$SCRIPT")" "0"
 chk "no reset-failed here: clearing a unit is a different word" "$(grep -c 'reset-failed' "$SCRIPT")" "0"
 chk "exit 0 is the last thing it does" "$(tail -n 1 "$SCRIPT")" "exit 0"

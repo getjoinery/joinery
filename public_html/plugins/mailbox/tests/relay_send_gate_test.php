@@ -84,6 +84,8 @@ check($v['allowed'] === false && ($v['probe']['state'] ?? '') === 'failed' && st
 harness_set_setting_mem('email_service', 'mailgun');
 $v = InboundEmailHealth::hiddenOriginSendAllowed();
 check($v['allowed'] === true, 'a failed probe does not stop an API provider');
+check(array_key_exists('probe', $v) && $v['probe'] === null,
+	'and the API answer never reads the probe: finding it searches recent raw mail, once per mailbox per reader load');
 
 // ---------------------------------------------------------------------------
 section('The setup check reads the same verdict');

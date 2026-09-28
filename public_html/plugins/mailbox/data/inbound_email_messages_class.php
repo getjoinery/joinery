@@ -103,6 +103,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.37 - index on sealed live rows by (owner, mailbox, domain), for the reader's
+ *   per-load unseal question
  * @version 1.36 - isBrowserSealed() and unwrapDekInWindow() go by the key's custody, so a
  *   row moved back off end-to-end (v1.edgeseal.user.) reads in the window; its
  *   v1.edge. fields unseal and an outbound recipient in that format is sealed;
@@ -557,6 +559,15 @@ class InboundEmailMessage extends SystemBase {
 		// Trash by mailbox: the discarded rows are a sliver of the table and
 		// the Trash view must not scan the live 99.9% to find them.
 		array('columns' => array('iem_iea_inbound_email_alias_id'), 'where' => 'iem_delete_time IS NOT NULL'),
+		// Sealed live rows by owner, then (mailbox, domain): the reader asks on every
+		// page load whether any of the viewer's sealed mail sits in a mailbox that no
+		// longer seals (mailbox_protection_owner_has_unseal_work). The answer turns on
+		// the few distinct pairs, which this lets it skip-scan — one probe per pair —
+		// where the rows themselves are the whole mailbox (300-900 ms on 99k sealed
+		// messages, on one CPU).
+		array('columns' => array('iem_sealed_owner_user_id', 'iem_iea_inbound_email_alias_id',
+			'iem_ied_inbound_email_domain_id'),
+			'where' => '(iem_content_sealed = true OR iem_pending_parse = true) AND iem_delete_time IS NULL'),
 		// The no-Message-ID dedup lookup (F6) — per feed, only rows that have a key.
 		array('columns' => array('iem_iia_inbound_imap_account_id', 'iem_source_message_key'),
 			'where' => 'iem_source_message_key IS NOT NULL'),
