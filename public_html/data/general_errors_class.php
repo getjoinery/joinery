@@ -89,6 +89,8 @@ function display_time($session) {
 	 * @param \Throwable $exception The exception to log
 	 * @param array $session Session data (optional)
 	 * @param array $request Request data (optional)
+	 * @return int|null The saved row's id, which an error page or envelope
+	 *                  carries as its error reference (ErrorReference)
 	 */
 	public function logError(\Throwable $exception, $session = [], $request = []) {
 		$session_obj = SessionControl::get_instance();
@@ -155,6 +157,7 @@ function display_time($session) {
 		// opt-in, every error on a GET logs a second entry complaining that
 		// the first one persisted data.
 		SystemBase::server_initiated_write(function () { $this->save(); });
+		return $this->key ? intval($this->key) : null;
 	}
 
 	/**

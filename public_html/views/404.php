@@ -57,6 +57,9 @@ $page->public_header([
                 <div class="jy-e404-btns">
                     <a href="/" class="btn btn-primary">&#8962; Go Home</a>
                     <a href="/contact" class="btn btn-outline">Contact Support</a>
+                    <?php if (ErrorReference::reporterSignedIn()): ?>
+                    <a href="<?php echo htmlspecialchars(ErrorReference::reportUrl(null, ErrorReference::requestPath(), 'Page not found'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline">Report a problem</a>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Helpful Links -->

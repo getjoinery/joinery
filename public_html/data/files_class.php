@@ -45,7 +45,9 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.12.0
+ * @version 1.13.0
+ * @changelog 1.13.0 - SOURCE_PROBLEM_REPORT and SOURCE_BUG_REPORT_IMAGE: images
+ *   attached to problem reports, sent and received (specs/bug_reports.md).
  * @changelog 1.12.0 - get_url() always mints a local /uploads/* URL: a public
  *   file is a local file, and nothing on a page is served from the bucket
  *   (specs/implemented/cloud_storage_private_only.md).
@@ -100,6 +102,8 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	const SOURCE_MAILBOX_SEARCH_INDEX = 'mailbox_search_index'; // sealed FTS5 blob (MailboxIndex) — read server-side only, never streamed via serve_from_path
 	const SOURCE_MAIL_IMPORT_ARCHIVE  = 'mail_import_archive';  // mbox/zip/tar uploaded to be imported into a mailbox — held for the life of the run, not a Drive item
 	const SOURCE_MESSENGER_ATTACHMENT = 'messenger_attachment'; // photo or file sent in a messenger conversation
+	const SOURCE_PROBLEM_REPORT       = 'problem_report';       // image a member attached to a problem report this site sent (prr_problem_reports)
+	const SOURCE_BUG_REPORT_IMAGE     = 'bug_report_image';     // image that arrived with a problem report from another site (bug_reports plugin)
 
 	/** The catalog key standing in for "no origin tag" (legacy rows). */
 	const SOURCE_UNCLASSIFIED = '_none';
@@ -138,6 +142,10 @@ class File extends SystemBase {	public static $prefix = 'fil';
 			self::SOURCE_EMAIL_ATTACHMENT   => array('label' => 'Mail attachments',     'internal' => false, 'default_view' => false),
 			self::SOURCE_AI_CHAT_UPLOAD     => array('label' => 'AI chat uploads',      'internal' => false, 'default_view' => false),
 			self::SOURCE_MESSENGER_ATTACHMENT => array('label' => 'Message attachments', 'internal' => false, 'default_view' => false),
+			// Someone attached these deliberately, and they take space until the
+			// report's retention window removes them, so they stay listable.
+			self::SOURCE_PROBLEM_REPORT     => array('label' => 'Problem report images', 'internal' => false, 'default_view' => false),
+			self::SOURCE_BUG_REPORT_IMAGE   => array('label' => 'Received bug report images', 'internal' => false, 'default_view' => false),
 			self::SOURCE_DRIVE              => array('label' => 'Drive',                'internal' => false, 'default_view' => false),
 			// Not internal on purpose: someone uploaded this mbox deliberately.
 			// Either the import run cleans it up or it is sitting there consuming

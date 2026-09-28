@@ -467,7 +467,7 @@ contract for sync clients:
    existence oracle. Otherwise it creates a `FileUpload` and returns
    `{upload_token, chunk_bytes}` (the raw token; only its hash is stored).
 2. **`PUT /api/v1/drive_upload/{token}`** — the raw-body chunk transport (a
-   pre-CRUD branch in `api/apiv1.php`, the inbound twin of `management/backups/fetch`).
+   pre-CRUD branch in `api/apiv1.php` that reads its own body and writes its own response).
    Chunks are **sequential only**: the request carries `Content-Range: bytes
    <start>-<end>/<total>`, and `<start>` must equal the server's `received_bytes`
    or the response is **409** with `{received_bytes}` so the client resumes from

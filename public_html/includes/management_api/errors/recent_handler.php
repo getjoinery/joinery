@@ -11,8 +11,15 @@
  * rather than failing, so the caller can distinguish "no recent errors" from
  * "endpoint broken" by consulting `log_readable`.
  *
+ * Every line is masked with LogRedactor::text() before it leaves: secrets,
+ * the personal half of email addresses, IP literals and opaque tokens. What
+ * may leave a node is decided on the node (specs/implemented/agent_on_node_architecture.md
+ * §3.5 rule 2), not by the management node that asked.
+ *
  * Query params:
  *   limit   — max number of lines to return (default 20, hard cap 200)
+ *
+ * @version 1.1 - lines are masked with LogRedactor::text()
  */
 
 function errors_recent_handler_api() {
@@ -53,7 +60,7 @@ function errors_recent_handler($request) {
 	$matched = [];
 	foreach (array_reverse($lines) as $line) {
 		if (preg_match('/fatal|exception|error/i', $line)) {
-			$matched[] = rtrim($line);
+			$matched[] = LogRedactor::text(rtrim($line));
 			if (count($matched) >= $limit) break;
 		}
 	}

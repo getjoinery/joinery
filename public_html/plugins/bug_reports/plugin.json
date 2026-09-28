@@ -1,0 +1,29 @@
+{
+    "name": "Bug Reports",
+    "version": "1.0.0",
+    "description": "Receives problem reports from the sites that upgrade from this one: files each report, groups the same error across sites, checks that the sender is a Joinery site, and shows the reports to administrators. Install it on an upgrade source only.",
+    "author": "System Developer",
+    "license": "PolyForm-Noncommercial-1.0.0",
+    "status": "experimental",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "bootstrap": "includes/bootstrap.php",
+    "settingsGroups": {
+        "bug_reports": "Received bug reports"
+    },
+    "settings": [
+        { "name": "bug_reports_rate_limit_requests", "default": "20", "group": "bug_reports", "label": "Reports accepted per hour from one address", "type": "number", "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}}, "helptext": "A sender over this many reports in an hour is refused until the hour passes. Reports from one site all come from its address." },
+        { "name": "bug_reports_notify_email", "default": "", "group": "bug_reports", "label": "Email about new problems", "type": "text", "helptext": "When set, one email a day for each error not seen in the last day, naming the site, version and where the error is. Empty sends none." },
+        { "name": "bug_reports_retention_days", "default": "365", "group": "bug_reports", "label": "Days to keep closed reports", "type": "number", "validation": {"number": true, "min": 0}, "helptext": "Closed reports older than this are deleted with their images by the daily retention sweep. Open reports are kept. 0 keeps closed reports indefinitely." }
+    ],
+    "adminMenu": [
+        {
+            "slug": "bug-reports",
+            "title": "Bug Reports",
+            "url": "/plugins/bug_reports/admin/admin_bug_reports",
+            "icon": "question-circle",
+            "order": 79,
+            "permission": 9
+        }
+    ]
+}

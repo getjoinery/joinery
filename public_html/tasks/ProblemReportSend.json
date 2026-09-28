@@ -1,0 +1,7 @@
+{
+    "name": "Problem Reports: Send",
+    "description": "Sends problem reports that did not reach the upgrade source when they were made, retrying each up to five times.",
+    "activate_on_install": true,
+    "default_frequency": "hourly",
+    "config_fields": {}
+}

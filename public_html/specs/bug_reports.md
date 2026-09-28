@@ -1,6 +1,6 @@
 # Problem Reports: a node reports a bug to its upgrade source
 
-**Status:** Spec, 2026-09-25. D1–D6 decided the same day; Q1 open. Not started.
+**Status:** WP1–WP5 built 2026-09-27, uncommitted; WP6 (live gate) not run. D1–D4 and D6 decided 2026-09-25; D5, D7 and D8 decided 2026-09-27. B5 fixed 2026-09-27 (endpoint removed). Open: the owner steps under **Build status**.
 **Date:** 2026-09-25.
 **Related:** `specs/implemented/agent_on_node_architecture.md` §3.5 (what may leave a
 node), `specs/agent_recipes_and_vocabulary.md` rule 8 (what private means),
@@ -36,7 +36,9 @@ team has been notified", which is not true: nobody is.
 | D3 | Any signed-in member may send. Guests may not. | 2026-09-25 |
 | D4 | One report page, no modal. Error pages and JSON envelopes link to it. It renders in an app webview unchanged. | 2026-09-25 |
 | D6 | The Request section keeps the full URL path. A member's name in a path segment is not a shape the redactor catches; the reporter is that member and sees it in the preview. | 2026-09-25 |
-| D5 | Settings and secrets go in as **counts and names**, never values. There is no "everything except `secret:true`" dump; that flag is an incomplete blocklist (`clone_export_key`, `mailjet_api_key`, `cloud_storage_access_key` and others are unflagged). | proposed |
+| D7 | The admin menu's **Report a problem** sits beside **Admin Help** (top level, just after it), since it is for people, not operators. | 2026-09-27 |
+| D8 | B5: remove the management API's `backups/fetch` endpoint rather than restrict it to sealed files. Nothing calls it, and a future download button belongs on backup storage, where every copy is sealed. | 2026-09-27 |
+| D5 | Settings and secrets go in as **counts and names**, never values. There is no "everything except `secret:true`" dump; that flag is an incomplete blocklist (`clone_export_key`, `mailjet_api_key`, `cloud_storage_access_key` and others are unflagged). A hand-picked list of settings safe to send by value may be added later if debugging keeps needing values. | 2026-09-27 |
 
 ## Today (checked 2026-09-25)
 
@@ -82,6 +84,14 @@ core PHP masker for personal data.
 - **B3** `GeneralError::logError()` returns void; nothing can reference an error.
 - **B4** §3.5 rule 4 promises a gate test that fails when a management-API endpoint is
   added. None exists.
+- **B5** (found 2026-09-27 by the B4 gate) `includes/management_api/backups/fetch_handler.php`
+  streams any `.sql.gz`, `.sql.gz.enc` or `.tar.gz` under `/backups/` to a management-key
+  holder, including an unencrypted database dump. That is content, not status, against
+  §3.5 rule 4. Nothing in the platform or the agent calls it. **Fixed 2026-09-27 (D8):**
+  removed. It was added 2026-04-20 for the SCP-replacing `fetch_backup` job, which was
+  deleted 2026-07-22; sites now seal their own backups into backup storage, and the
+  management node never pulls a file off a machine. With it went the router's streaming
+  path (`ManagementApiRouter` 1.3): every management handler returns an array.
 
 ## Design
 
@@ -112,7 +122,7 @@ Every surface carries the reference:
 keeps the `RequestLogger` row, and answers a generic message plus `error_ref` unless the
 exception is a `Displayable*` one, matching the web path.
 
-### What a report contains (core: `BugReportBundle`)
+### What a report contains (core: `ProblemReportBundle`)
 
 An explicit allowlist. Each item is a named collector with a fixed output shape (§3.5
 rule 3); there is no free-form dump.
@@ -183,7 +193,7 @@ user id, error id and hash, comment, bundle JSON, image `fil_file_id` (private, 
 (`queued | sent | failed | kept`), attempts, last attempt time and reason, remote report
 id, create time. Soft delete with the file cascading.
 
-`includes/ProblemReportSender.php` posts a multipart body (`bundle` JSON, `comment`,
+`ProblemReport::send()` posts a multipart body (`bundle` JSON, `comment`,
 `image`) to `{upgrade_source}/api/v1/action/bug_reports/report_submit` with
 `SafeHttpClient` (`allow_redirects=false`, 20 s, 64 KiB response cap). A 2xx marks the
 row `sent` with the remote id; anything else marks `failed` with the reason. A
@@ -200,7 +210,7 @@ Settings (core `settings.json`, group `problem_reports`):
   this are deleted by the send task.
 
 Entry points:
-- `admin_menus.json`: **Report a problem** under Help (or System) → `/report_problem`;
+- `admin_menus.json`: **Report a problem** as a top-level item directly after **Admin Help** (D7) → `/report_problem`;
   **Problem Reports** under System → `/admin/admin_problem_reports` (permission 5): the
   local list with status, reason, and a link to the reported error in `admin_errors`.
 - `profileMenu`: **Report a problem** → `/report_problem`. This also appears in both
@@ -273,7 +283,7 @@ past it, images cascading.
 |---|---|---|
 | WP1 | Error reference: `logError()` returns id, `ErrorContext` fields, shared hash, buttons on web/admin/404 pages, `error_ref` in all four JSON paths, `joinery-api.js` `errorRef`, flash link in both renderers, `DisplayMessage` reference, the seven JS helper sweep, `ApiLogicEndpoint` catch | B2, B3 |
 | WP2 | `LogRedactor` core port; `SmSecretRedactor` delegates; parity test retargeted; `recent_handler` masked; management-API surface gate test | B1, B4 |
-| WP3 | `BugReportBundle` collectors, `prr_problem_reports`, `File::SOURCE_PROBLEM_REPORT`, report page + logic + `report_problem_submit` action, `ProblemReportSender`, `ProblemReportSend` task, settings, menus, `admin_problem_reports` | |
+| WP3 | `ProblemReportBundle` collectors, `prr_problem_reports`, `File::SOURCE_PROBLEM_REPORT`, report page + logic + `report_problem_submit` action, sending on the `ProblemReport` model, `ProblemReportSend` task, settings, menus, `admin_problem_reports` | |
 | WP4 | Plugin `bug_reports`: data class, intake action with bucket + callback, admin list/detail, notice, email, prune task, plugin.json, docs/overview.md | |
 | WP5 | Docs: `docs/error_handling.md` (or the consolidation doc's home) gains the reference and the report link; `docs/api.md` gains `error_ref`; `docs/photo_system.md` two source rows; `docs/settings.md` if the group needs a mention. Current-state wording only. | |
 | WP6 | Live gate: getjoinery.com (`upgrade_source` = dev) sends a report to dev running the plugin; dev's IP allowlist makes the callback file it `unverified`, which is the expected verdict and is checked | |
@@ -300,7 +310,57 @@ past it, images cascading.
 - `tests/unit/core_api_mechanical_test.php` is not touched: every write here is a POST or
   a task.
 
+## Build status (2026-09-27)
+
+WP1–WP5 are built and their suites pass: `error_reference` 36/36, `log_redactor` 71/71,
+`agent_redactor_parity` 6/6, `management_api_surface` 3/3, `problem_report_bundle` 41/41.
+The existing suites the change touches pass too (`error_handling`, `core_api_mechanical`,
+`retention_registry`, `declared_settings`, `secret_redactor`, and others).
+
+**Where the build differs from the design above, and why:**
+
+- **Operator-only sections.** Recent errors, runtime, plugins, settings and health go only
+  into a report from permission 9 and above. D3 lets any member report, and the preview
+  shows every line, so a member's preview would otherwise show other members' errors and
+  the site's configuration.
+- **A member attaches only their own error.** `?ref=` naming another account's error row
+  is dropped, and the report falls back to the message the member saw. Otherwise any
+  member could read any error by number.
+- **No `err_hash` column.** "Errors sharing the hash in 7 days" became "errors at the same
+  file and line in 7 days". Adding a column to `err_general_errors` breaks error logging
+  on any box until `update_database` runs there. The hash is computable from the row
+  instead (`ErrorReference::hashForRow()`), and it no longer includes the exception class.
+  It uses the file path relative to `public_html`, so installs in different directories
+  group together.
+- **Retention through `RetentionSweep`**, by `$retention_policy` on both models, not in the
+  send task.
+- **The callback is a HEAD request.** A GET of a full front page exceeds the 4 KiB cap and
+  loses the header. `SafeHttpClient` gained `head()`.
+- **Fewer core files (owner, 2026-09-28).** Making, sending and retrying a report are
+  methods of the `ProblemReport` model, not separate `ProblemReports` and
+  `ProblemReportSender` classes; `ErrorReference` lives in `includes/ErrorHandler.php` with
+  the classes that record errors; the bundle is `ProblemReportBundle`, and its health
+  section reads the management API's `stats_handler()`. The plugin's new-reports banner is
+  `ReceivedBugReport::admin_notice()`.
+- **The screenshot field is a file input.** FormWriter's `imageinput` picks existing site
+  images and does not upload.
+- **Menu placement (D7).** Admin Help is a `profileMenu` item, not an admin-menu group, so
+  **Report a problem** is one `profileMenu` item at order 115 for every signed-in member.
+  It sits after Admin Help for admins and before Sign out for everyone else. **Problem
+  Reports** is under System at permission 9, matching the error log.
+- **Flash links also go into the six plugin pages that render messages by hand**
+  (server_manager ×5, store checkout).
+- **FormWriter's upload `showToast` is not swept.** It posts to a legacy admin endpoint,
+  never through `joineryApi`, so no error reference can reach it.
+
+**Owner steps before this is live:**
+
+1. ~~Run `update_database` on dev.~~ Done 2026-09-27: menu entries seeded,
+   `ProblemReportSend` active.
+2. ~~Install and activate the `bug_reports` plugin on dev.~~ Done 2026-09-27;
+   `models_crud`, `multi_models_crud` and `bug_reports_intake` pass.
+3. Commit, release, and run WP6.
+
 ## Open questions
 
-- **Q1** Should the standing menu entry be under Help or System in the admin menu?
-  Proposed: Help, next to the docs link, since it is for people, not operators.
+None. Q1 (admin menu placement) is decided as D7; Q2 (B5) as D8, remove the endpoint.

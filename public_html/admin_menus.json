@@ -382,6 +382,14 @@
             "parent": "system"
         },
         {
+            "slug": "problem-reports",
+            "title": "Problem Reports",
+            "url": "admin_problem_reports",
+            "order": 12,
+            "permission": 9,
+            "parent": "system"
+        },
+        {
             "slug": "cloud-storage",
             "title": "Cloud Storage",
             "url": "admin_cloud_storage",
@@ -471,6 +479,15 @@
             "order": 110,
             "permission": 5,
             "icon": "question-circle"
+        },
+        {
+            "slug": "core-report-problem",
+            "title": "Report a problem",
+            "url": "/report_problem",
+            "order": 115,
+            "permission": 0,
+            "icon": "question-circle",
+            "visibility": "in"
         },
         {
             "slug": "core-admin-settings",

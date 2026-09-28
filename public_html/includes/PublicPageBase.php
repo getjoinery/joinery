@@ -1329,9 +1329,11 @@ abstract class PublicPageBase {
 
 		$out = '';
 		foreach ($messages as $message) {
+			// An error message ends with a "Report a problem" link.
+			$report = $message->report_link_html();
 			$out .= static::alert(
 				$message->message_title,
-				$message->message,
+				$message->message . ($report !== '' ? ' ' . $report : ''),
 				$message->get_message_class()
 			);
 		}

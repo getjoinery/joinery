@@ -41,7 +41,7 @@ This section pins what clients — including store-shipped app binaries — may 
 
 ### Response envelope
 
-Every response is a JSON object carrying `api_version: "1.0"` (the only exception is `management/backups/fetch`, which streams binary). Success and error envelopes are distinguished by their keys:
+Every response is a JSON object carrying `api_version: "1.0"`. Success and error envelopes are distinguished by their keys:
 
 **Success:**
 
@@ -62,6 +62,7 @@ Every response is a JSON object carrying `api_version: "1.0"` (the only exceptio
 | `error` | string — the human-readable message itself, no prefix or decoration | always |
 | `data` | object (usually empty; may carry action-specific detail) | always |
 | `validation_errors` | object: field name → message | `ValidationError` only |
+| `error_ref` | object `{id, hash, report_url}` | when the request recorded an error (see [Error references](#error-references)) |
 
 The `errortype` vocabulary is closed: `AuthenticationError`, `TransactionError`, `ActionError`, `ValidationError`, `SecurityError`, `UpgradeRequired`, `RateLimitError`, `NotFound`. Clients branch on `errortype` plus HTTP status (tables under [Error Handling](#error-handling)); the `error` string is for display and logs, never for matching.
 
@@ -185,9 +186,16 @@ Page JS never hand-rolls this transport. `assets/js/joinery-api.js` is loaded on
 
 ```js
 // Resolves with the success envelope's `data`; rejects with an Error carrying
-// .status and .errorType on an error envelope or network failure. Logic-level
-// soft failures the action returns inside `data` (e.g. {ok: false}) resolve.
+// .status, .errorType, .data, .validationErrors and .errorRef on an error
+// envelope or network failure. Logic-level soft failures the action returns
+// inside `data` (e.g. {ok: false}) resolve.
 const data = await joineryApi.post('contact_preferences', { ... });
+
+// A notice that reports a failed call appends the "Report a problem" link:
+// an <a> element when the error was recorded and the visitor is signed in,
+// otherwise null.
+const link = joineryApi.reportLink(err);
+if (link) notice.appendChild(link);
 
 // Accepts '{plugin}/{action}' names and full endpoint URLs alike:
 await joineryApi.post('store/checkout_apply_coupon', { code: code });
@@ -724,6 +732,34 @@ revoke are actions, not CRUD writes — see [Passkeys](passkeys.md).
 | 426 | UpgradeRequired | `client_version` below the configured minimum for this `client_app` |
 | 429 | RateLimitError | Rate limit exceeded |
 
+### Error references
+
+When a request fails because something went wrong on the server, the error is recorded
+in `err_general_errors`, and the envelope carries a reference to the recorded row:
+
+```json
+{
+    "api_version": "1.0",
+    "errortype": "ActionError",
+    "error": "Something went wrong while doing that.",
+    "data": {},
+    "error_ref": {"id": 92058, "hash": "e44d85d33874577ce1edd1fe657780dd", "report_url": "/report_problem?ref=92058&from=%2Fapi%2Fv1%2Faction%2Fexample"}
+}
+```
+
+| Key | Meaning |
+|-----|---------|
+| `id` | The `err_general_errors` row. An administrator finds the error by it. |
+| `hash` | The grouping hash: the same fault has the same hash on any site. |
+| `report_url` | The page where the signed-in member can report the problem. Absent for a guest, who cannot send a report. |
+
+An expected refusal (a validation failure, a permission denial, a rate limit) records
+nothing and carries no `error_ref`. An exception that escapes an action's logic is
+recorded like any uncaught error; the caller is told a user-safe message: the message
+itself when the exception is a `Displayable*` one, the user message of a displayable
+`BaseException`, the raw text when the site shows errors (`show_errors`), and a generic
+sentence otherwise. See [Error Handling and Problem Reports](error_handling.md).
+
 ## Rate Limiting
 
 Who is counted depends on the credential:
@@ -1111,17 +1147,16 @@ Management endpoints reuse the existing `apk_api_keys` table unchanged. Two gate
 
 ### Endpoints
 
-All under `/api/v1/management/`, all `GET`, all return the standard success envelope except `backups/fetch` which streams a binary file.
+All under `/api/v1/management/`, all `GET`, all return the standard success envelope.
 
 | Endpoint | Description |
 |----------|-------------|
-| `health` | Liveness probe: `{ok: true, version: "…"}` — used by `JobCommandBuilder::has_api()` |
+| `health` | Liveness probe: `{ok: true, version: "…"}` — used by `JobCommandBuilder::probe_api_health()` |
 | `stats` | Disk, memory, load, uptime, PostgreSQL liveness, Joinery version, DB list, cron health, and a `backups` block reporting each backup profile (`site`, `manager`) — whether it is scheduled, its last run and outcome, whether that run reached the bucket, and the fingerprint of the recovery key it sealed to |
 | `version` | System version, schema version, per-plugin versions |
 | `databases` | List of PostgreSQL databases accessible to the site |
 | `errors/recent` | Last N error.log lines matching Fatal/Exception/Error (default 20, cap 200) |
 | `backups/list` | Files in `/backups/` with size and date |
-| `backups/fetch?path=…` | Streams a backup file as `application/octet-stream` (path must be under `/backups/`) |
 
 Discovery: `GET /api/v1/management` lists every endpoint with its method and description. Parallels `/api/v1/actions`.
 
@@ -1144,7 +1179,7 @@ function my_thing_handler_api() {
 }
 ```
 
-`$request` is an associative array: `method`, `path`, `query` (`$_GET`), `body` (decoded JSON for non-GET), `headers`. Handlers should use `$request` rather than touching `$_GET`/`$_POST` directly. For streaming endpoints (`backups/fetch`), write bytes yourself and return `null` — the router will not append an envelope.
+`$request` is an associative array: `method`, `path`, `query` (`$_GET`), `body` (decoded JSON for non-GET), `headers`. Handlers should use `$request` rather than touching `$_GET`/`$_POST` directly. A handler returns an array; the router wraps it in the success envelope.
 
 Nested paths mirror subdirectories: `includes/management_api/backups/list_handler.php` → `GET /api/v1/management/backups/list` → function `backups_list_handler()`.
 

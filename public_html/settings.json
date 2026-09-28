@@ -30,6 +30,7 @@
     "api": "API",
     "api_rate_limits": "API rate limiting",
     "logging": "Data retention",
+    "problem_reports": "Problem reports",
     "backups": "Backups",
     "upgrade": "Upgrade settings",
     "cloud_storage": "Cloud storage",
@@ -944,6 +945,25 @@
         "min": 0
       },
       "helptext": "The daily retention sweep deletes anything older. 0 keeps them indefinitely."
+    },
+    {
+      "name": "problem_reports_send",
+      "default": "1",
+      "group": "problem_reports",
+      "label": "Send problem reports to the upgrade source",
+      "type": "checkbox",
+      "helptext": "Members and administrators can report an error from any error page or error message. A report carries versions, the error, and the reporter's comment and image, and from an administrator also masked log lines and a list of changed setting names. It never carries member data, addresses or setting values, and the reporter sees all of it before sending. Off keeps reports on this site only."
+    },
+    {
+      "name": "problem_reports_retention_days",
+      "default": "90",
+      "group": "problem_reports",
+      "label": "Days to keep problem reports",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "Reports this site sent or kept, with their images. The daily retention sweep deletes anything older. 0 keeps them indefinitely."
     },
     {
       "name": "notification_retention_days",

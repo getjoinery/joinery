@@ -192,7 +192,7 @@ class ErrorHandlingTester {
             
             $this->assert($exception->getMessage() === 'Memory limit exceeded', 'SystemException message');
             $this->assert($exception->getComponent() === 'php_engine', 'SystemException component');
-            $this->assert($exception->getUserMessage() === 'A system error occurred. Our team has been notified.', 'SystemException user message');
+            $this->assert($exception->getUserMessage() === 'A system error occurred.', 'SystemException user message');
         } catch (Throwable $e) {
             check(false, 'SystemException tests', 'unexpected exception: ' . $e->getMessage());
         }

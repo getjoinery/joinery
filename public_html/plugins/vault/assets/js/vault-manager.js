@@ -9,6 +9,7 @@
  * the encrypted entries, and wipes them in its onLock handler: every
  * plaintext lives only in this tab's memory and the lock discards it.
  *
+ * @version 2.1 - a failed call's toast carries the "Report a problem" link (joineryApi.reportLink).
  * @version 2.0 - the ceremony, the session and the idle lock are core's
  * @version 1.1 - lock() clears the clipboard it filled; a bfcache restore locks.
  */
@@ -42,11 +43,19 @@
 		if (!el) return;
 		if (msg) { el.textContent = msg; el.hidden = false; } else { el.textContent = ''; el.hidden = true; }
 	}
-	function toast(msg) {
+	// err: the rejected call, when the notice reports one. A recorded server
+	// error adds a "Report a problem" link and keeps the notice up long enough
+	// to reach it.
+	var toastTimer = null;
+	function toast(msg, err) {
 		var t = $('jy-vault-toast');
 		if (!t) return;
-		t.textContent = msg; t.hidden = false; t.classList.add('is-visible');
-		setTimeout(function () { t.classList.remove('is-visible'); setTimeout(function () { t.hidden = true; }, 250); }, 2000);
+		t.textContent = msg;
+		var link = joineryApi.reportLink(err);
+		if (link) { t.appendChild(document.createTextNode(' ')); t.appendChild(link); }
+		t.hidden = false; t.classList.add('is-visible');
+		clearTimeout(toastTimer);
+		toastTimer = setTimeout(function () { t.classList.remove('is-visible'); setTimeout(function () { t.hidden = true; }, 250); }, link ? 10000 : 2000);
 	}
 
 	// ==========================================================================
@@ -333,7 +342,7 @@
 		} catch (e) {
 			// A silent failure here means a password the user believes is stored
 			// is not. Say so, and leave the editor open with the text intact.
-			toast('Could not save - check your connection or sign-in, then try again.');
+			toast('Could not save - check your connection or sign-in, then try again.', e);
 			return;
 		}
 		var newId = res.id;
@@ -354,7 +363,7 @@
 		try {
 			await joineryApi.post('vault/entry_delete', { id: id });
 		} catch (e) {
-			toast('Could not delete - check your connection or sign-in, then try again.');
+			toast('Could not delete - check your connection or sign-in, then try again.', e);
 			return;
 		}
 		entries = entries.filter(function (e) { return e.id !== id; });
@@ -371,7 +380,7 @@
 		if (trashMode) { exitTrash(); return; }
 		var res;
 		try { res = await joineryApi.post('vault/entries_list', { trashed: 1 }); }
-		catch (e) { toast('Could not load the trash - try again.'); return; }
+		catch (e) { toast('Could not load the trash - try again.', e); return; }
 		trashEntries = [];
 		trashUndecryptable = 0;
 		for (var i = 0; i < res.entries.length; i++) {
@@ -402,7 +411,7 @@
 	}
 	async function restoreEntry(entry) {
 		try { await joineryApi.post('vault/entry_restore', { id: entry.id }); }
-		catch (e) { toast('Could not restore - check your connection or sign-in, then try again.'); return; }
+		catch (e) { toast('Could not restore - check your connection or sign-in, then try again.', e); return; }
 		trashEntries = trashEntries.filter(function (t) { return t.id !== entry.id; });
 		entries.push(entry);
 		entries.sort(byTitle);
@@ -537,7 +546,7 @@
 			downloadText(JSON.stringify(backup, null, 2), 'joinery-vault-backup.json', 'application/json');
 			toast('Encrypted backup downloaded.');
 		} catch (e) {
-			toast('Could not create the backup - ' + ((e && e.message) || 'try again.'));
+			toast('Could not create the backup - ' + ((e && e.message) || 'try again.'), e);
 		}
 	}
 
@@ -571,7 +580,7 @@
 		} catch (e) {
 			entries.sort(byTitle);
 			renderList($('jy-vault-search').value);
-			toast('Import stopped after ' + n + ' of ' + records.length + ' entries - check your connection or sign-in, then re-import (already-imported entries will duplicate).');
+			toast('Import stopped after ' + n + ' of ' + records.length + ' entries - check your connection or sign-in, then re-import (already-imported entries will duplicate).', e);
 			return;
 		}
 		entries.sort(byTitle);

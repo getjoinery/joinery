@@ -85,6 +85,8 @@ The value is opaque to `File` — it stores and filters on the string but attach
 | `drive` | `File::SOURCE_DRIVE` | member Drive item — the whole Drive surface (listings, trash, purge, quota) scopes to this tag |
 | `mailbox_search_index` | `File::SOURCE_MAILBOX_SEARCH_INDEX` | sealed FTS5 blob (`MailboxIndex`), read server-side only |
 | `mail_import_archive` | `File::SOURCE_MAIL_IMPORT_ARCHIVE` | mbox/zip/tar uploaded to be imported into a mailbox (`MailImportService`) |
+| `problem_report` | `File::SOURCE_PROBLEM_REPORT` | image a member attached to a problem report this site sends (`report_problem_submit_logic.php`) |
+| `bug_report_image` | `File::SOURCE_BUG_REPORT_IMAGE` | image that arrived with a problem report from another site (`bug_reports` plugin intake) |
 
 The tag is what keeps surfaces from bleeding into each other. Drive lists only `drive`, so a mail attachment or an import archive never appears there or counts against a member's quota, even though all three belong to the same user.
 

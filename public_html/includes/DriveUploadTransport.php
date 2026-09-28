@@ -3,9 +3,8 @@ require_once(__DIR__ . '/PathHelper.php');
 
 /**
  * DriveUploadTransport — the raw-body chunk endpoint for Drive uploads
- * (PUT/GET /api/v1/drive_upload/{token}). The inbound twin of the management
- * backups/fetch streamer: it reads its own body and writes its own response,
- * then exits.
+ * (PUT/GET /api/v1/drive_upload/{token}). It reads its own body and writes its
+ * own response, then exits.
  *
  * Sequential chunks only. The client sends Content-Range: bytes <start>-<end>/
  * <total>; <start> must equal the server's received_bytes, else HTTP 409 with
