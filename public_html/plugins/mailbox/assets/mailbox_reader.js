@@ -1,6 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.84 — end-to-end (Fortress) compose: drafts are sealed in this browser
+ * No framework. @version 2.85 — the header icons, compose autocomplete and the contacts panel share one
+ *   contacts request per mailbox (held 60 s, forgotten on a change here); opening a message asked twice.
+ * @version 2.84 — end-to-end (Fortress) compose: drafts are sealed in this browser
  *   (MailboxFortress.saveDraft), a reopened one is opened here, and a send carries the saved parts,
  *   the quote of an end-to-end source and a forward's parts (specs/client_custody_mail.md § R6);
  *   reply chips on an opened end-to-end message; composerHtml() clones into an inert document.
@@ -3546,7 +3548,7 @@
 	// not a contact re-reads from the server: the header icons, compose
 	// autocomplete, and this panel.
 	function contactAdded(aliasId) {
-		forgetContactSet(aliasId);
+		forgetContactList(aliasId);
 		syncContactIcons();
 		loadContacts(aliasId);
 		contextCache = {};
@@ -3563,31 +3565,49 @@
 	// offering adds that cannot land. The viewer's own mailbox addresses never
 	// get one, and neither does mail belonging to no mailbox: there is no store
 	// to add it to.
-	var contactSets = {}; // alias id -> promise of {address: true}, or of null when unreadable
+	// One request per mailbox for its contact list, shared by everything that
+	// reads it — these icons, compose autocomplete and the contacts panel — so
+	// opening a conversation asks once, not once per reader. An answer is reused
+	// for CONTACT_LIST_FRESH_MS (contacts also fill in as mail is sent and read,
+	// on the server); a change made here forgets it at once.
+	var CONTACT_LIST_FRESH_MS = 60000;
+	var contactLists = {}; // alias id -> {p: promise of the contacts answer, at: ms}
 
-	function contactSet(aliasId) {
+	function contactList(aliasId) {
 		var key = String(aliasId);
-		if (contactSets[key]) return contactSets[key];
+		var held = contactLists[key];
+		if (held && Date.now() - held.at < CONTACT_LIST_FRESH_MS) return held.p;
 		var p = joineryApi.post(CFG.contactsUrl, { alias_id: key }).then(function (data) {
 			data = data || {};
-			if (data.locked || !data.contacts) { dropContactSet(key, p); return null; }
-			var set = {};
-			data.contacts.forEach(function (c) { set[String(c.address).toLowerCase()] = true; });
-			return set;
-		}).catch(function () { dropContactSet(key, p); return null; });
-		contactSets[key] = p;
+			if (data.locked || !data.contacts) dropContactList(key, p);
+			return data;
+		}, function (err) {
+			dropContactList(key, p);
+			throw err;
+		});
+		contactLists[key] = { p: p, at: Date.now() };
 		return p;
 	}
 
-	// A locked or failed answer is not kept, so the next render (after an
+	// A locked or failed answer is not kept, so the next read (after an
 	// unlock, say) asks again — unless a newer request has already replaced it.
-	function dropContactSet(key, p) {
-		if (contactSets[key] === p) delete contactSets[key];
+	function dropContactList(key, p) {
+		if (contactLists[key] && contactLists[key].p === p) delete contactLists[key];
 	}
 
 	/** This mailbox's contacts changed here; the next read of them goes to the server. */
-	function forgetContactSet(aliasId) {
-		delete contactSets[String(aliasId)];
+	function forgetContactList(aliasId) {
+		delete contactLists[String(aliasId)];
+	}
+
+	// Promise of {address: true}, or of null when the list is unreadable.
+	function contactSet(aliasId) {
+		return contactList(aliasId).then(function (data) {
+			if (data.locked || !data.contacts) return null;
+			var set = {};
+			data.contacts.forEach(function (c) { set[String(c.address).toLowerCase()] = true; });
+			return set;
+		}).catch(function () { return null; });
 	}
 
 	// Show or hide every icon in the open conversation against its mailbox's list.
@@ -3820,8 +3840,7 @@
 	function loadContacts(aliasId) {
 		var target = (aliasId != null) ? aliasId : state.draftAlias;
 		if (!isRealMailbox(target)) { state.contacts = []; return Promise.resolve(); }
-		return joineryApi.post(CFG.contactsUrl, { alias_id: String(target) }).then(function (data) {
-			data = data || {};
+		return contactList(target).then(function (data) {
 			// A slow response for a mailbox the user has since switched away from must
 			// not overwrite the list they are now typing against.
 			if (String(data.alias_id) !== String(target)) { return; }
@@ -3998,8 +4017,7 @@
 		body.appendChild(el('div', 'mbx-loading', 'Loading contacts…'));
 		panel.appendChild(body);
 
-		joineryApi.post(CFG.contactsUrl, { alias_id: String(aliasId) }).then(function (data) {
-			data = data || {};
+		contactList(aliasId).then(function (data) {
 			// The mailbox may have changed while this was in flight.
 			if (String(state.aliasId) !== String(aliasId)) { return; }
 			body.innerHTML = '';
@@ -4029,7 +4047,7 @@
 				joineryApi.post(CFG.contactsImportUrl, { address: v, alias_id: String(aliasId) })
 					.then(function () {
 						addInput.value = ''; addBtn.disabled = false;
-						forgetContactSet(aliasId);
+						forgetContactList(aliasId);
 						renderContactsPanel();
 					})
 					.catch(function (err) {
@@ -4057,7 +4075,7 @@
 					.then(function (r) { return r.json(); }).then(function (env) {
 						var d = (env && env.data) ? env.data : {};
 						alert('Imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0) + '.');
-						forgetContactSet(aliasId);
+						forgetContactList(aliasId);
 						renderContactsPanel();
 					}).catch(function () { alert('Import failed.'); });
 			});
@@ -4079,7 +4097,7 @@
 				var del = el('button', 'mbx-contact-del', '×'); del.type = 'button'; del.title = 'Delete';
 				del.addEventListener('click', function () {
 					joineryApi.post(CFG.contactDeleteUrl, { contact_id: String(c.id) })
-						.then(function () { rowEl.parentNode.removeChild(rowEl); forgetContactSet(aliasId); })
+						.then(function () { rowEl.parentNode.removeChild(rowEl); forgetContactList(aliasId); })
 						.catch(function () {});
 				});
 				rowEl.appendChild(del);

@@ -30,6 +30,9 @@
  *     and counted past it (`truncated`).
  *   - Exit 0 whenever the object was printed; exit 2 for a refused argument.
  *
+ * @version 1.2 - the throwaway viewer is saved without the email domain check: on a site
+ *               with email_validation_mx_check on, `.invalid` failed it and every member
+ *               and admin probe answered "could not run: DisplayableUserException"
  * @version 1.1 - review 2026-09-23: failed assets named only when the file is in the release tree
  *               (B4); the body is held to 4 MiB and counted past it (B21)
  * @version 1.0
@@ -108,7 +111,9 @@ try {
 		$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
 		$user->set('usr_is_activated', true);
 		$user->set('usr_setup_dismissed_time', gmdate('Y-m-d H:i:s'));
-		$user->save();
+		// `.invalid` has no DNS by design, so a site checking that an address's
+		// domain accepts mail would refuse this account.
+		LibraryFunctions::withoutEmailDomainCheck(function () use ($user) { $user->save(); });
 		$user->load();
 	}
 	$token = bin2hex(random_bytes(32));

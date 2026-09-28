@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.44 - process_page_probe keeps the node's `error` (a probe that could not run) and fails the
+ *                 job with it, where it had recorded a completed job with status 0 and no reason
  * @version 1.43 - process_site_census keeps the census a node counted; census_of() reads it back
  * @version 1.42 - process_decommission_node records what removing the node also did ('also')
  * @version 1.41 - process_check_status fills an empty mgn_web_root from the web root the agent reports
@@ -2735,11 +2737,21 @@ HTML;
 			'structure_hash' => preg_match('/^[a-f0-9]{64}$/', (string)($d['structure_hash'] ?? '')) ? $d['structure_hash'] : '',
 			'reported'       => !empty($d['reported']),
 			'cleanup'        => substr((string)($d['cleanup'] ?? ''), 0, 200),
+			// Why the render never happened: the node's own sentence and an
+			// exception's class name, never its message.
+			'error'          => substr(preg_replace('#[^A-Za-z0-9 _.:\\\\-]#', '', (string)($d['error'] ?? '')), 0, 200),
 		];
 		$job->set('mjb_result', json_encode($result));
-		if ($result['cleanup'] !== 'done' && $job->get('mjb_status') === 'completed') {
+		$problems = [];
+		if ($result['error'] !== '') {
+			$problems[] = $result['error'];
+		}
+		if ($result['cleanup'] !== 'done') {
+			$problems[] = 'the probe could not clean up after itself: ' . $result['cleanup'];
+		}
+		if ($problems && $job->get('mjb_status') === 'completed') {
 			$job->set('mjb_status', 'failed');
-			$job->set('mjb_error_message', 'the probe could not clean up after itself: ' . $result['cleanup']);
+			$job->set('mjb_error_message', implode('; ', $problems));
 		}
 		$job->save();
 	}

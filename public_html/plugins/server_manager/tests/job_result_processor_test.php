@@ -921,6 +921,40 @@ check(!JobResultProcessor::adopt_reported_verify($adopt_node, array(
 	'a skip is never adopted — nothing was proven either way');
 
 // ---------------------------------------------------------------------------
+section('page_probe: a probe that could not run fails the job with the node\'s reason');
+
+$jrp_probe_node = jrp_node();
+// The shape jeremytunnell returned on 2026-09-28 for a member probe.
+$probe_env = function (array $over) {
+	return json_encode(['api_version' => '1.0', 'data' => ['output' => json_encode(array_merge([
+		'page' => '/profile', 'viewer' => 'member', 'status' => 0, 'bytes' => 0, 'render_ms' => null,
+		'statements' => null, 'peak_memory' => null, 'warnings' => [], 'failed_assets' => [],
+		'landmarks' => ['header' => false, 'main' => false, 'footer' => false, 'forms' => 0],
+		'structure_hash' => '', 'reported' => false, 'cleanup' => 'done', 'swept' => 0,
+		'failed_assets_unnamed' => 0, 'truncated' => false,
+	], $over)) . "\n"]]);
+};
+$pj = jrp_job($jrp_probe_node, 'page_probe', $probe_env(['error' => 'the probe could not run: DisplayableUserException']));
+JobResultProcessor::process($pj);
+$pr = json_decode((string)$pj->get('mjb_result'), true);
+check(($pr['error'] ?? null) === 'the probe could not run: DisplayableUserException',
+	'the node\'s error is kept on the result', json_encode($pr));
+check($pj->get('mjb_status') === 'failed'
+	&& $pj->get('mjb_error_message') === 'the probe could not run: DisplayableUserException',
+	'and the job is failed with it, not recorded as a completed render', $pj->get('mjb_status') . ' / ' . $pj->get('mjb_error_message'));
+
+$pj2 = jrp_job($jrp_probe_node, 'page_probe', $probe_env(['error' => 'the probe could not run: X<script>', 'cleanup' => 'the user is still there']));
+JobResultProcessor::process($pj2);
+check($pj2->get('mjb_error_message') === 'the probe could not run: Xscript; the probe could not clean up after itself: the user is still there',
+	'an error is reduced to plain characters, and a failed cleanup is named beside it', (string)$pj2->get('mjb_error_message'));
+
+$pj3 = jrp_job($jrp_probe_node, 'page_probe', $probe_env(['status' => 200, 'bytes' => 900, 'render_ms' => 40, 'reported' => true]));
+JobResultProcessor::process($pj3);
+$pr3 = json_decode((string)$pj3->get('mjb_result'), true);
+check($pj3->get('mjb_status') === 'completed' && ($pr3['error'] ?? null) === '' && $pr3['render_ms'] === 40,
+	'a probe that ran stays completed with no error', json_encode($pr3));
+
+// ---------------------------------------------------------------------------
 section('site_log / log_table_tail: the envelope becomes a bounded result the job page renders');
 
 $jrp_log_node = jrp_node();

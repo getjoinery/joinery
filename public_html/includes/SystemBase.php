@@ -2769,10 +2769,9 @@ abstract class SystemBase {
 									$is_valid = false;
 									$error_message = $custom_messages['email'] ?? "Field '$field_name' must be a valid email address.";
 								}
-								// Step 2: DNS MX record check (fail-open) — skip when email_validation_mx_check is off.
+								// Step 2: DNS MX record check (fail-open), when it applies.
 								else {
-									$_mx_settings = Globalvars::get_instance();
-									if ((string)$_mx_settings->get_setting('email_validation_mx_check') !== '0') {
+									if (LibraryFunctions::emailDomainCheckApplies()) {
 										require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 										$domain = substr($field_value, strrpos($field_value, '@') + 1);
 										if (!DnsResolver::domainAcceptsMail($domain)) {

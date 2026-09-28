@@ -63,6 +63,51 @@ ok(
 	LibraryFunctions::IsValidEmail('someone@example.test') === false
 );
 
+// withoutEmailDomainCheck(): the DNS half is off for the call only, syntax stays.
+// page_probe saves its throwaway viewer at `.invalid` inside it; without it a
+// site with the check on refused every member and admin probe.
+ok(
+	'MX on: probe.invalid rejected by IsValidEmail outside the scope',
+	LibraryFunctions::IsValidEmail('probe-abc@probe.invalid') === false
+);
+ok(
+	'MX on: probe.invalid accepted inside withoutEmailDomainCheck',
+	LibraryFunctions::withoutEmailDomainCheck(function () {
+		return LibraryFunctions::IsValidEmail('probe-abc@probe.invalid');
+	}) === true
+);
+ok(
+	'MX on: malformed address still rejected inside withoutEmailDomainCheck',
+	LibraryFunctions::withoutEmailDomainCheck(function () {
+		return LibraryFunctions::IsValidEmail('not-an-email');
+	}) === false
+);
+$scoped_prepare_error = null;
+LibraryFunctions::withoutEmailDomainCheck(function () use (&$scoped_prepare_error) {
+	$u = new User(NULL);
+	$u->set('usr_email', 'probe-abc@probe.invalid');
+	try {
+		$u->prepare();
+	} catch (DisplayableUserException $e) {
+		$scoped_prepare_error = $e->getMessage();
+	}
+});
+ok(
+	'MX on: model prepare() accepts probe.invalid inside withoutEmailDomainCheck',
+	$scoped_prepare_error === null
+);
+$thrown_out = false;
+try {
+	LibraryFunctions::withoutEmailDomainCheck(function () { throw new RuntimeException('x'); });
+} catch (RuntimeException $e) {
+	$thrown_out = true;
+}
+ok(
+	'MX on: the check is back on after the scope, even when it threw',
+	$thrown_out && LibraryFunctions::emailDomainCheckApplies() === true
+		&& LibraryFunctions::IsValidEmail('probe-abc@probe.invalid') === false
+);
+
 // --- MX check OFF (syntax-only mode) ---
 set_mx_check('0');
 
