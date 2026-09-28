@@ -55,6 +55,9 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.10 - resealScope() rotates a vault that opens through the root under the root,
+ *   and proves the stored new wrapping opens before moving anything (proveThroughRoot); a
+ *   committed rotation leaves the new key open in the old one's place
  * @version 1.9 - changeCustody(scope): move rows off a client-custody vault to the one their hook names
  * @version 1.8 - isPending(): the lock chip's unlock skips a scope whose own ceremony is under way
  * @version 1.7 - the one vault: content vaults open through the root; adopt(); openAllThroughRoot()
@@ -579,6 +582,33 @@ window.JoinerySealed = (function () {
 	 * { key_generation }; rejects 'Rotation cancelled.' when stopped before
 	 * anything was written. opts.progress(text) reports as it goes.
 	 */
+	/**
+	 * Prove the stored `root` wrapping of a rotation's pending key opens the
+	 * new key: open it from the server's copy through the root, as the next
+	 * reload will, and round-trip a random value sealed to the new public key.
+	 * A vault that opens through the root has no other way into its new key,
+	 * so nothing moves onto that key until this passes.
+	 */
+	async function proveThroughRoot(root, scope, publicKeyB64) {
+		// Unreachable unless the stored copy differs from what was posted: the
+		// blob was proved before it was sent (VaultKeyring.rotationPlan).
+		var fail = new Error('The new key of this vault was not stored in a form your vault can open, so nothing was moved onto it. Please report this problem.');
+		var s;
+		try {
+			s = await VaultKeyring.openThroughRoot(root, scope, VaultKeyring.pendingStatus(await VaultKeyring.status(scope)));
+		} catch (e) { throw fail; }
+		if (!s) throw fail;
+		try {
+			var probe = VaultCrypto.randomBytes(32);
+			var back = await s.openSealed(await VaultCrypto.sealToPublicKey(probe, publicKeyB64));
+			if (back.length !== probe.length || !back.every(function (b, i) { return b === probe[i]; })) throw fail;
+		} catch (e) {
+			throw fail;
+		} finally {
+			s.lock();
+		}
+	}
+
 	async function resealScope(scope, opts) {
 		opts = opts || {};
 		var report = opts.progress || function () {};
@@ -587,24 +617,35 @@ window.JoinerySealed = (function () {
 		var oldSession = await session(scope, { reason: 'to rotate its key' });
 		var newSession, newPublicKey;
 
+		// A vault that opens through the root rotates under it: its new key is
+		// wrapped with the root open, and opened the same way to finish.
+		var root = st.root_wrapped ? await needRoot({ reason: 'to rotate its key' }) : null;
+
 		if (st.pending_key_generation == null) {
 			// Refusals (a step-up due, a consumer unable to re-seal) come before the
 			// passkey taps and the passphrase, not after them.
 			await joineryApi.post('vault_client_rotate_begin', { scope: scope, dry_run: 1 });
 			var pair = await VaultCrypto.generateVaultKeypair();
-			var plan = await VaultKeyring.rotationPlan(scope, st, pair.secretKeyBytes);
+			var plan = await VaultKeyring.rotationPlan(scope, st, pair.secretKeyBytes, root);
 			report('Saving the new key…');
 			await joineryApi.post('vault_client_rotate_begin', { scope: scope, public_key: pair.publicKeyB64, wrappings: plan.wrappings });
-			await VaultKeyring.showRecoveryCodes(scope, st.label || 'vault', plan.recoveryCodes,
-				'These open the new key of your ' + (st.label || 'vault') + ' once each, if you lose your passkey and passphrase. '
-				+ 'Your old codes stop working when the rotation finishes. This is the only time they are shown.');
+			if (root) await proveThroughRoot(root, scope, pair.publicKeyB64);
+			if (plan.recoveryCodes) {
+				await VaultKeyring.showRecoveryCodes(scope, st.label || 'vault', plan.recoveryCodes,
+					'These open the new key of your ' + (st.label || 'vault') + ' once each, if you lose your passkey and passphrase. '
+					+ 'Your old codes stop working when the rotation finishes. This is the only time they are shown.');
+			}
 			newSession = VaultKeyring.sessionFrom(scope, pair.secretKeyBytes, pair.publicKeyB64);
 			newPublicKey = pair.publicKeyB64;
 		} else {
-			newSession = await VaultKeyring.ensureUnlocked(scope, { pending: true, reason: 'to finish rotating its key' });
+			newSession = root
+				? await VaultKeyring.openThroughRoot(root, scope, VaultKeyring.pendingStatus(st))
+				: await VaultKeyring.ensureUnlocked(scope, { pending: true, reason: 'to finish rotating its key' });
+			if (!newSession) throw new Error('The new key of your ' + (st.label || 'vault') + ' did not open. Reload the page and try again.');
 			newPublicKey = st.pending_public_key;
 		}
 
+		var committed = false;
 		try {
 			// Rows of the registered models: the server lists only rows still on
 			// the old key, so a walk that stopped picks up where it was.
@@ -638,10 +679,19 @@ window.JoinerySealed = (function () {
 			report('Finishing…');
 			var result = await joineryApi.post('vault_client_rotate_commit', { scope: scope });
 			result.skipped = skipped;
+			committed = true;
 			return result;
 		} finally {
-			newSession.lock();
+			// The old key is retired either way. A committed rotation leaves the
+			// new key open in its place, so the next page reads the vault without
+			// asking again; one that stopped holds nothing.
 			lock(scope);
+			if (committed) {
+				newSession.label = st.label;
+				adopt(scope, newSession);
+			} else {
+				newSession.lock();
+			}
 		}
 	}
 

@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.21 - a `mail` rotation pushes the relay routing map at begin and commit
  * @version 1.20 - deferred work mailbox_fortress_raise and mailbox_fortress_lowered (R8);
  *   the server rotation re-seals a row moved back off end-to-end (v1.edgeseal.user.)
  * @version 1.19 - the mail rotation re-seals the Fortress search key (MailboxSearchKey)
@@ -322,6 +323,20 @@ VaultUnlock::onReseal(VaultUnlock::modelReseal(array(MailboxContactIndexKey::cla
 // Fortress search index is sealed under (MailboxSearchKey, § R5): only its wrapping
 // moves, so no browser rebuilds its index after a rotation.
 VaultUnlock::clientReseal('mail', array(InboundEmailMessage::class, MailboxSearchKey::class));
+
+// The relay routing map names the key each alias's mail is sealed to. Once the
+// relay seals Fortress mail to the `mail` key (RelayMapExporter::sealTargetForAlias,
+// WP7) that key is UserEncryptionVault::sealingPublicKey(), which turns to the
+// pending key when a rotation begins; the commit makes that same key current, so
+// its push is the begin push again and RelayMapSync::onChange() skips it (as it
+// does everything without a relay). A failed push is logged and the reconcile
+// retries it. Until it lands the relay seals to the old key: harmless while the
+// rotation is pending (the walk moves those rows), and WP7's commit guard (B33)
+// keeps a commit from retiring the old key while the relay still names it.
+VaultUnlock::onClientRotation('mail', function (int $user_id, string $phase) {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayMapSync.php'));
+	RelayMapSync::onChange();
+});
 
 // --- Window-wipe callback (docs/sealed_vault.md § consumer contract) ---
 // Clears the /dev/shm FTS working copy when a window closes (explicit lock,

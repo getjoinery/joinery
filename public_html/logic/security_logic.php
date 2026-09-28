@@ -439,6 +439,13 @@ function security_logic(array $input): LogicResult{
 	} catch (Throwable $e) {
 		$page_vars['recovery_items'] = array();
 	}
+	// Content vaults that open through the root have no recovery card; their
+	// rotate controls are listed apart (specs/client_custody_mail.md WP6).
+	try {
+		$page_vars['through_root_vaults'] = VaultClientCustody::throughRootVaults((int)$user->key);
+	} catch (Throwable $e) {
+		$page_vars['through_root_vaults'] = array();
+	}
 	$page_vars['recovery_stepup'] = array(
 		'needed'  => $page_vars['has_second_factor'] && !$session->has_recent_second_factor(),
 		'passkey' => $live_passkey_count > 0,

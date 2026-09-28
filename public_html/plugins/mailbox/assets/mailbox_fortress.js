@@ -34,6 +34,7 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.9.2 - another person's rows (an all-access viewer) say only the owner's devices open them
  * @version 1.9.1 - review of 2026-09-27: a part removed during a save stays removed (B4); an inline
  *   image that will not open fails the draft's open rather than being dropped at the next save (B5)
  * @version 1.9 - compose: sealed drafts (saveDraft, openDraft, draftFiles), and the quote and
@@ -62,6 +63,7 @@ window.MailboxFortress = (function () {
 	var PENDING_NOTE = 'Waiting to be opened on this device.';
 	var LOCKED_NOTE = 'End-to-end encrypted. Unlock your vault to read it.';
 	var FAILED_NOTE = 'This message could not be opened on this device.';
+	var FOREIGN_NOTE = 'End-to-end encrypted. Only the mailbox owner\'s devices can open it.';
 	// Inline images rendered in a message body. Anything else stays an
 	// unresolved cid: reference.
 	var INLINE_IMAGE_TYPES = {
@@ -174,6 +176,10 @@ window.MailboxFortress = (function () {
 		var threads = (data && data.threads) || [];
 		var sealed = threads.filter(function (t) { return t && t.sealed; });
 		if (!sealed.length) return data;
+		// Another person's rows (an all-access viewer): no unlock here opens them.
+		sealed.forEach(function (t) { if (t.sealed.foreign) placeholderThread(t, FOREIGN_NOTE); });
+		sealed = sealed.filter(function (t) { return !t.sealed.foreign; });
+		if (!sealed.length) return data;
 		await ready();
 		if (!isOpen()) {
 			sealed.forEach(function (t) {
@@ -282,6 +288,7 @@ window.MailboxFortress = (function () {
 		var locked = !isOpen();
 		for (var i = 0; i < sealed.length; i++) {
 			var m = sealed[i];
+			if (m.sealed.foreign) { placeholderMessage(m, FOREIGN_NOTE); continue; }
 			if (m.sealed.pending) { placeholderMessage(m, PENDING_NOTE); continue; }
 			if (locked) { placeholderMessage(m, LOCKED_NOTE); data.fortress_locked = true; continue; }
 			try {

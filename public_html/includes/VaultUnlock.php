@@ -27,7 +27,9 @@
  * is the only durable trace a window leaves — see docs/sealed_vault.md
  * § The audit log.
  *
- * @version 1.13
+ * @version 1.14
+ * @changelog 1.14 - onClientRotation()/clientRotationChanged(): a consumer hears a
+ *   client-custody rotation begin and commit.
  * @changelog 1.13 - clientReseal()/clientResealsFor(): what a client-custody
  *   scope's browser-run rotation re-seals.
  * @changelog 1.12 - the last-passkey refusal names what the rule guards: sign-in to
@@ -727,6 +729,36 @@ class VaultUnlock {
 	/** Forget test-registered client resealers. Tests only. */
 	public static function resetClientResealsForTests(): void {
 		self::$client_reseals = array();
+	}
+
+	/** @var array<string,callable[]> client-custody rotation listeners by scope */
+	private static $client_rotation_callbacks = array();
+
+	/**
+	 * Be told when a rotation of client-custody $scope begins and when it
+	 * commits: $callback(int $user_id, string $phase), $phase 'begin' or
+	 * 'commit', called after the change is stored. For a consumer that
+	 * publishes the scope's sealing key elsewhere (mail's relay routing map),
+	 * which changes at begin (UserEncryptionVault::sealingPublicKey() turns to
+	 * the pending key) and again at commit.
+	 */
+	public static function onClientRotation(string $scope, callable $callback): void {
+		self::$client_rotation_callbacks[$scope][] = $callback;
+	}
+
+	/**
+	 * Tell $scope's rotation listeners. The rotation is already stored, so a
+	 * listener that fails is logged and never undoes or refuses it.
+	 */
+	public static function clientRotationChanged(int $user_id, string $scope, string $phase): void {
+		self::loadConsumerBootstraps();
+		foreach (self::$client_rotation_callbacks[$scope] ?? array() as $callback) {
+			try {
+				$callback($user_id, $phase);
+			} catch (\Throwable $e) {
+				error_log('Client vault rotation listener (' . $scope . ', ' . $phase . ') failed: ' . $e->getMessage());
+			}
+		}
 	}
 
 	/** @return callable[] */

@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_reader_api
  *
+ * @version 1.3 - another person's rows are marked `foreign` for an all-access viewer (WP6 B32)
  * @version 1.2 - reply and forward take a Fortress source the browser opened (WP4)
  * @version 1.1 - reply and forward refuse a Fortress source
  * @version 1.0
@@ -98,6 +99,21 @@ try {
 		'and the body opens under the owner\'s key');
 	$found = $clean($messages);
 	check(empty($found), 'no plaintext of the message is in the thread payload', implode(', ', $found));
+
+	// ---------------------------------------------------------------- someone else's
+	section('an all-access viewer sees another person\'s rows marked as theirs');
+
+	check(empty($thread['sealed']['foreign']) && empty($m['sealed']['foreign']), 'the owner\'s own rows are not marked');
+	$admin = make_user('FortressApiAdmin');
+	$oversight = new MailboxService(MailboxViewer::forUser(intval($admin->key), 10));
+	$olist = $oversight->listThreads($alias_id, array('inbox' => true));
+	$ot = null;
+	foreach ($olist['threads'] as $t) { if (intval($t['latest_id']) === $mid) { $ot = $t; } }
+	check($ot !== null && !empty($ot['sealed']['foreign']), 'the list marks the row foreign for a superadmin');
+	$om = $oversight->withSignedTransport($oversight->getThread($alias_id, (string)$thread['thread_key']));
+	check(!empty($om[0]['sealed']['foreign']), 'and so does the thread');
+	$found = $clean(array($olist, $om));
+	check(empty($found), 'and it carries no plaintext either', implode(', ', $found));
 
 	check(count($m['attachments']) === 3, 'three parts listed, the inline image included');
 	$inline = array_values(array_filter($m['attachments'], function ($a) { return !empty($a['inline']); }));

@@ -1611,12 +1611,28 @@ URLs.
 
 ### Rotating a client-custody key
 
-Only the browser holds the secret, so only the browser can rotate it, and it
-costs: **new recovery codes** (the browser never held the old ones), the
-**passphrase again** if there is one, **one passkey tap per enrolled passkey**,
-and every **linked device must re-link** (it holds the old secret). The
-security page's card for each browser-held vault offers it
-(`JoinerySealed.resealScope(scope)`):
+Only the browser holds the secret, so only the browser can rotate it
+(`JoinerySealed.resealScope(scope)`). Every **linked device must re-link**
+afterwards (it holds the old secret). What else it costs depends on how the
+vault opens:
+
+- **A content vault that opens through the root** (every one made since the
+  root exists; `VaultClientCustody::opensThroughRoot()`) costs nothing more
+  than the root being open. The new key takes one `root` wrapping, made with
+  the root's `scopeKek(scope)`, and nothing else; the root's passkeys, phrase
+  and codes are its way back in and do not change. The Security page lists
+  these vaults under **Vault Keys** (`VaultClientCustody::throughRootVaults()`),
+  since they have no recovery card of their own. A vault made before the root
+  and since given its `root` wrapping rotates the same way: the passkeys and
+  codes it kept of its own open only the old key and retire with it. The
+  browser proves the new wrapping before it is sent, and again from the stored
+  copy (opened through the root, as the next page will) before anything moves
+  onto the new key. A committed rotation leaves the new key open in the tab.
+- **A vault with unlockers of its own** costs **new recovery codes** (the
+  browser never held the old ones), the **passphrase again** if there is one,
+  and **one passkey tap per enrolled passkey**. Its recovery card offers it.
+
+The steps are the same for both:
 
 1. `vault_client_rotate_begin` stores the new public key and its wrappings as
    generation N+1, **pending**. The key in use and all its unlockers keep
@@ -1650,6 +1666,12 @@ session opens — unreadable before the rotation too — is left and reported wi
 manager its store key through `vault/keyring_replace` (accepted only while a
 rotation is pending; `keyring_save` stays create-only).
 
+A consumer that publishes a scope's sealing key somewhere else hears the
+rotation through `VaultUnlock::onClientRotation($scope, fn(int $user_id, string
+$phase))`, called with `'begin'` and `'commit'` once each is stored; a listener
+that throws is logged and changes nothing. The mailbox uses it to push the
+relay routing map for `mail`.
+
 **While a rotation is pending, new material seals to the pending key**
 (`UserEncryptionVault::sealingPublicKey()`): the server sealer, the keys
 `drive_public_keys` hands out, and `JoinerySealed.seal()` all use it, and a
@@ -1657,13 +1679,19 @@ browser write names the key it sealed to (`acceptBrowserSealed(..., $public_key)
 so the row is stamped with that key's generation. Nothing sealed during the
 rotation is left on the key the commit retires.
 
+The one rotation an operator may discard is a through-root one whose stored
+wrapping failed the browser's proof: the browser moved nothing onto that key,
+so once no row carries the pending generation, clearing the vault's
+`uev_pending_public_key` and `uev_pending_key_generation` and soft-deleting the
+pending generation's wrappings returns it to the key in use.
+
 A rotation that stops part way is **finished, never discarded**: what it moved
 opens only with the new key, and keys a consumer's hook moved (Drive's grants,
 the password store key) carry no generation the server could count, so there is
 no telling "nothing moved" from "everything moved". The card then says that
 what moved will not open until the rotation is finished and offers "Finish
-rotating", which unlocks both keys (the new one with the unlockers it was given)
-and runs the batch again — everything in it resumes. A new begin is refused
+rotating", which unlocks both keys (the new one with the unlockers it was given,
+or through the root) and runs the batch again — everything in it resumes. A new begin is refused
 while one is pending. The status payload lists the key in use's wrappings in
 `wrappings` and the pending ones apart in `pending_wrappings`.
 
