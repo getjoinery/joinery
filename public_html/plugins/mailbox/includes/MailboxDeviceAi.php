@@ -47,7 +47,7 @@ class MailboxDeviceAi {
 	const MAX_TOKENS = 4096;
 
 	/** The key prefix of a row the member's browser holds the key to. */
-	const MAIL_KEY_PREFIX = 'v1.edgeseal.mail.';
+	const MAIL_KEY_PREFIX = InboundEmailMessage::MAIL_KEY_PREFIX;
 
 	/** Columns one judgement needs, sealed, per entry. */
 	const ENTRY_COLUMNS = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html',

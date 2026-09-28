@@ -30,6 +30,8 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.3 - mailbox_fortress_receipt_render(); the Private seal backlog and batch leave
+ *   Fortress mail to MailboxFortressLevel; the unseal pass leaves only the mail key's rows
  * @version 2.2
  * @changelog 2.2 - the unseal batch leaves Fortress rows for the browser's custody walk;
  *   mailbox_protected_grant_error() checks the vault of the mailbox's seal
@@ -407,7 +409,8 @@ function mailbox_protection_backlog_count(int $domain_id, int $alias_scope_id = 
 		 WHERE m.iem_ied_inbound_email_domain_id = ?
 		   AND m.iem_content_sealed = false AND m.iem_pending_parse = false
 		   AND m.iem_delete_time IS NULL
-		   AND " . mailbox_protection_seals_sql()
+		   -- Private only: Fortress mail moves in its owner's window (MailboxFortressLevel).
+		   AND " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " = '" . InboundEmailDomain::LEVEL_PRIVATE . "'"
 		. mailbox_protection_alias_scope_sql($alias_scope_id, 'm'));
 	$stmt->execute(array($domain_id));
 	return intval($stmt->fetchColumn());
@@ -480,7 +483,8 @@ function mailbox_protection_seal_batch(InboundEmailDomain $domain, int $limit = 
 		 WHERE m.iem_ied_inbound_email_domain_id = ?
 		   AND m.iem_content_sealed = false AND m.iem_pending_parse = false
 		   AND m.iem_delete_time IS NULL
-		   AND " . mailbox_protection_seals_sql()
+		   -- Private only: Fortress mail moves in its owner's window (MailboxFortressLevel).
+		   AND " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " = '" . InboundEmailDomain::LEVEL_PRIVATE . "'"
 		. mailbox_protection_alias_scope_sql($alias_scope_id, 'm') . "
 		 ORDER BY m.iem_inbound_email_message_id ASC LIMIT " . intval($limit));
 	$stmt->execute(array(intval($domain->key)));
@@ -605,7 +609,7 @@ function mailbox_protection_unseal_batch(?InboundEmailDomain $domain, int $calle
 		   AND m.iem_delete_time IS NULL
 		   -- A Fortress row reaches the server key through its owner's browser
 		   -- first (JoinerySealed.changeCustody); until then it stays counted.
-		   AND m.iem_sealed_key NOT LIKE 'v1.edgeseal.%'
+		   AND NOT " . InboundEmailMessage::mailKeySql('m.iem_sealed_key') . "
 		 ORDER BY m.iem_inbound_email_message_id ASC LIMIT " . intval($limit));
 	$stmt->execute(array($caller_user_id));
 	$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
@@ -623,6 +627,68 @@ function mailbox_protection_unseal_batch(?InboundEmailDomain $domain, int $calle
 
 	$c = $counts();
 	return array('unsealed' => $unsealed, 'own_remaining' => $c['own'], 'others_remaining' => $c['others']);
+}
+
+/**
+ * The Fortress receipt (specs/client_custody_mail.md § R8), one card for both
+ * directions, driven in place by mailbox_fortress_level.js:
+ *   - at Fortress: new mail seals to the owner's device key; earlier messages
+ *     move to it in their unlock window as the vault's deferred work, and the
+ *     card follows the count (mailbox/fortress_backlog);
+ *   - off Fortress: messages still on the device key wait for the owner's
+ *     browser to move them back (JoinerySealed.changeCustody), one button.
+ * $state: raise_backlog, lower_backlog, window_open, is_fortress.
+ */
+function mailbox_fortress_receipt_render(InboundEmailDomain $domain, array $state): string {
+	$raise = intval($state['raise_backlog'] ?? 0);
+	$lower = intval($state['lower_backlog'] ?? 0);
+	$is_fortress = !empty($state['is_fortress']);
+	$window_open = !empty($state['window_open']);
+	$dot = function ($status) {
+		$color = array('pass' => '#28a745', 'fail' => '#dc3545', 'warn' => '#ffc107', 'info' => '#6c757d');
+		return '<span class="receipt-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
+			. ($color[$status] ?? '#6c757d') . ';margin-right:8px;flex:none;"></span>';
+	};
+	$plural = function (int $n, string $one) { return $n . ' ' . $one . ($n === 1 ? '' : 's'); };
+	$row = function (string $id, string $status, string $text) use ($dot) {
+		return '<li id="' . $id . '" style="display:flex;align-items:baseline;margin:.5rem 0;">' . $dot($status)
+			. '<div class="fortress-receipt-text">' . $text . '</div></li>';
+	};
+
+	$html = '<div id="fortress-receipt" style="border:1px solid #d8dee4;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem;"'
+		. ' data-domain-id="' . intval($domain->key) . '"'
+		. ' data-direction="' . ($is_fortress ? 'raise' : 'lower') . '"'
+		. ' data-backlog="' . ($is_fortress ? $raise : $lower) . '">';
+	$html .= '<h3 style="margin-top:0;">This domain is now ' . htmlspecialchars(ucfirst($domain->security_level())) . '</h3>';
+	$html .= '<ul style="list-style:none;padding:0;margin:0;">';
+	if ($is_fortress) {
+		$html .= $row('fortress-new-row', 'pass', 'New mail is sealed to your devices\' key as it arrives');
+		if ($raise === 0) {
+			$html .= $row('fortress-move-row', 'pass', 'Every earlier message is on your device key');
+		} elseif ($window_open) {
+			$html .= $row('fortress-move-row', 'warn', 'Moving earlier messages to your device key — '
+				. $plural($raise, 'message') . ' to go&hellip;');
+		} else {
+			$html .= $row('fortress-move-row', 'warn', $plural($raise, 'earlier message') . ' still to move to your device key. '
+				. 'They move while you are signed in with your vault unlocked; until then they read as before.');
+		}
+	} else {
+		if ($lower === 0) {
+			$html .= $row('fortress-move-row', 'pass', 'Every message is back on this server\'s key');
+		} else {
+			$html .= $row('fortress-move-row', 'warn', $plural($lower, 'message') . ' can still be opened only on your devices. '
+				. 'Your browser moves ' . ($lower === 1 ? 'it' : 'them') . ' back to this server\'s key.');
+		}
+	}
+	$html .= '</ul>';
+	$html .= '<div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;">';
+	if (!$is_fortress && $lower > 0) {
+		$html .= '<button type="button" id="fortress-lower-button" class="btn btn-primary">Move them now</button>';
+	}
+	// The member mailbox page carries the vault client that opens end-to-end mail.
+	$html .= '<a class="btn btn-secondary" href="/profile/mailbox/mailbox">Open mailbox</a>';
+	$html .= '</div></div>';
+	return $html;
 }
 
 /**

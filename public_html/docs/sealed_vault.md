@@ -1440,6 +1440,16 @@ AI surface uses — throws `VaultSealedForBrowserException` for a sealed field o
 a client-custody row. Not "wait for the window": no server code reads that row,
 open window or not. The one place it is caught is the API export.
 
+What makes a row the browser's is the **scope its key is sealed to**, not the
+frame: `VaultCrypto::clientCustodyScope($sealed_key)` names the scope when it is
+client custody (or declared by nothing active) and is null otherwise. A key in
+the browser's format sealed to a server scope — `v1.edgeseal.user.`, what a row
+moved off client custody carries, since the browser cannot write libsodium's
+sealed box — opens in the window like a `v1.seal.` key, and its `v1.edge.`
+fields open with it. Every "only the browser opens this" check asks
+`clientCustodyScope()`; a consumer's SQL names its client scope
+(`iem_sealed_key LIKE 'v1.edgeseal.mail.%'`), never the bare frame.
+
 **The API representation.** `export_for_api()` hands such a row to the browser
 as stored: every plain column normally, each sealed field as its ciphertext,
 plus three derived keys — `sealed_scope`, `sealed_dek` (the key column's value;
@@ -1481,6 +1491,44 @@ own (`browserAppendRefusal()`: a mail row still awaiting its browser parse),
 and writes those columns and nothing else. The row's key, generation and
 owner stay as they are, so a value appended during a pending rotation still
 opens after the rotation commits. Authorization is the caller's, as above.
+
+### Moving rows between custodies
+
+A row changes custody when its `sealScopeForWrite()` answer changes (a mailbox
+raised to Fortress, or lowered from it). The DEK never changes, so anything
+else sealed under it (a consumer's files) stays addressable; only the fields'
+format and whose key wraps the DEK move.
+
+- **The raise** is the server's, row by row in the owner's window:
+  `SystemBase::convertRowToClientCustody($row_id, $old_key, $scope_vault)` opens
+  the DEK with the server key, re-encrypts every populated sealed field into
+  `v1.edge.` under the same DEK and AD, seals the DEK to the client vault's key
+  (the pending one during a rotation), and writes fields, key, generation and
+  owner in one UPDATE. It refuses a row not sealed, one already under a
+  client-custody vault, a vault that is not client custody or not the owner's,
+  and a scope the row's hook does not name, and returns the DEK so the consumer
+  can re-encrypt its own blobs.
+- **The lowering** is the browser's, since only it opens the DEK.
+  `JoinerySealed.changeCustody(scope, {progress, reason})` walks
+  `vault_custody_rows` (`VaultCustodyChange::page()`: the caller's rows of the
+  models `clientReseal()` registered for the scope, whose hook **now** names
+  another vault, each with that vault's public key), opens each DEK with the
+  scope's session, seals it to the target key and posts `vault_row_custody`.
+  `SystemBase::acceptBrowserCustodyChange()` checks the row is the caller's,
+  under a client-custody key, that its hook names another vault and that the
+  key is sealed to exactly that one; with the owner's server window open it
+  also opens a field with the key first, so a wrong key never replaces a good
+  one. The UPDATE is conditional on the key it read. A moved row is not listed
+  again, so the walk resumes wherever it stopped. The row is left with a
+  `v1.edgeseal.user.` key and its `v1.edge.` fields (see Reading on the server).
+  `browserCustodyPage()` asks the hook of every row the scope holds. Its
+  count, `browserCustodyBacklog()`, is null unless a model overrides it: a
+  model with many rows overrides both with SQL that states the hook's rule
+  (mail does), and the walk's first page carries `remaining` only when every
+  model can count.
+- **Rotation.** A server rotation re-seals a lowered row's key into `v1.seal.`;
+  `resealRows()` leaves a row under a client-custody key to the browser's
+  rotation.
 
 ### The browser side
 

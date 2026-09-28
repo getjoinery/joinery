@@ -1,6 +1,9 @@
 <?php
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
+// @version 1.2 - Fortress is settable (specs/client_custody_mail.md § R8, WP5): its own
+//   receipt for both directions, Seal at the relay refused with it until WP7, and a
+//   lowering off Fortress to Private needs no server window (the browser moves the keys)
 // @version 1.1 - the Fortress refusals (specs/client_custody_mail.md § R8)
 
 /**
@@ -15,12 +18,21 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  *     mailbox, so sealing the copy here protects nothing;
  *   - a group mailbox, or one with no owner: there is no one person to seal to;
  *   - a mailbox or the domain owned by someone else: only they can set up the
- *     key their mail would seal to.
+ *     key their mail would seal to;
+ *   - Seal at the relay switched on ($relay_on), until WP7 teaches the relay
+ *     the owner's mail key.
  * The first reason found is returned, worded for the page.
  */
-function admin_mailbox_domains_fortress_refusal(InboundEmailDomain $domain, int $acting_user_id): ?string {
+function admin_mailbox_domains_fortress_refusal(InboundEmailDomain $domain, int $acting_user_id, bool $relay_on = false): ?string {
 	if (!$domain->key) {
 		return 'Save the domain first, then set it to Fortress.';
+	}
+	// Relay mail reaches a Fortress mailbox sealed to the relay's key, not the
+	// owner's, until the relay learns the owner's mail key
+	// (specs/client_custody_mail.md WP7), so the add-on's promise would not hold.
+	if ($relay_on) {
+		return 'Seal at the relay does not work with Fortress yet. Switch it off to use Fortress, '
+			. 'or keep this domain Private.';
 	}
 	if ($domain->is_imap_source()) {
 		return 'A mailbox collected from another provider cannot be Fortress: the server holds a password '
@@ -62,8 +74,8 @@ function admin_mailbox_domains_fortress_refusal(InboundEmailDomain $domain, int 
 	}
 
 	if (VaultClientCustody::loadVault($acting_user_id, InboundEmailMessage::SEAL_SCOPE_FORTRESS) === null) {
-		return 'Open your mailbox and unlock your vault once before choosing Fortress: that makes the key '
-			. 'Fortress mail is sealed to, and it has to exist first.';
+		return 'Your mail key is not set up yet, and Fortress mail is sealed to it. Choose Fortress again and '
+			. 'follow the prompt: it makes the key before saving.';
 	}
 	return null;
 }
@@ -263,11 +275,6 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// --- Protection level (specs/mailbox_security_levels.md Phase 2) ---
 		$old_level = $domain->key ? $domain->security_level() : InboundEmailDomain::LEVEL_STANDARD;
 		$new_level = strtolower(trim((string)($input['ied_security_level'] ?? InboundEmailDomain::LEVEL_STANDARD)));
-		// The end-to-end level is refused below until the level change is wired
-		// (specs/client_custody_mail.md WP5); a POST naming it is refused, never
-		// quietly read as something else. Its own refusals come first, so the
-		// page names what stands in the way.
-		$refused_level = ($new_level === InboundEmailDomain::LEVEL_FORTRESS);
 		if (!isset($level_rank[$new_level])) {
 			$new_level = InboundEmailDomain::LEVEL_STANDARD;
 		}
@@ -309,15 +316,12 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			));
 		};
 
-		if ($new_level === InboundEmailDomain::LEVEL_FORTRESS && $old_level !== InboundEmailDomain::LEVEL_FORTRESS) {
-			$fortress_refusal = admin_mailbox_domains_fortress_refusal($domain, intval($session->get_user_id()));
+		if ($new_level === InboundEmailDomain::LEVEL_FORTRESS
+				&& ($old_level !== InboundEmailDomain::LEVEL_FORTRESS || $new_relay_on)) {
+			$fortress_refusal = admin_mailbox_domains_fortress_refusal($domain, intval($session->get_user_id()), $new_relay_on);
 			if ($fortress_refusal !== null) {
 				return $level_error($fortress_refusal);
 			}
-		}
-		if ($refused_level) {
-			return $level_error('A mail domain can be Standard or Private. End-to-end protection for mail '
-				. 'is not available yet.');
 		}
 
 		// An enforcing sending lock does not stop at Standard: its records still
@@ -382,10 +386,12 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		if (!mailbox_protection_required_ok($gate_rows)) {
 			return $level_error(mailbox_protection_first_failure($gate_rows));
 		}
-		// Lowering a sealing level needs the acting user's key open — an idle
-		// admin session must not quietly downgrade protection.
+		// Lowering to Standard needs the acting user's key open — an idle admin
+		// session must not quietly downgrade protection, and the unseal runs in
+		// that window. Fortress to Private needs no server window: the owner's
+		// browser moves the keys (specs/client_custody_mail.md § R8).
 		$acting_vault = ($acting_user_id > 0) ? UserEncryptionVault::loadForUser($acting_user_id) : null;
-		if ($lowering && $old_seals && $acting_vault !== null && !VaultUnlock::isOpen($acting_user_id)) {
+		if ($lowering && $old_seals && !$new_seals && $acting_vault !== null && !VaultUnlock::isOpen($acting_user_id)) {
 			return $level_error('Unlock your vault before lowering protection on this domain.');
 		}
 
@@ -406,8 +412,8 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// than giving it.
 		$old_ai = $domain->key ? (bool)$domain->get('ied_ai_processing_enabled') : false;
 		$new_ai = isset($input['ied_ai_processing_enabled']);
-		if ($new_ai && !$new_seals) {
-			$new_ai = false;   // meaningless at Standard; never store a stale yes
+		if ($new_ai && (!$new_seals || $new_level === InboundEmailDomain::LEVEL_FORTRESS)) {
+			$new_ai = false;   // meaningless at Standard, and no server AI reads Fortress mail (R7)
 		}
 
 		// The travel consent: how far may the mail go to be read? On a sealed
@@ -528,6 +534,16 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			// do, when what the operator wants next is the account they came to
 			// add. A domain created this way goes back to Accounts like any other
 			// save; the receipt is for domains that already held mail.
+			// Fortress, either way, lands on its own receipt: the raise moves the
+			// stored mail to the owner's device key in their window, the lowering
+			// has their browser move it back (specs/client_custody_mail.md § R8).
+			// A Fortress → Standard lowering shows the browser's step first and
+			// the unseal after it.
+			if (!$is_new_domain && ($new_level === InboundEmailDomain::LEVEL_FORTRESS) !== ($old_level === InboundEmailDomain::LEVEL_FORTRESS)) {
+				return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . (int)$domain->key
+					. ($new_level === InboundEmailDomain::LEVEL_FORTRESS ? '&fortress_now=1' : '&fortress_lowered=1'));
+			}
+
 			if ($raising && $new_seals && !$is_new_domain) {
 				$send_handoff = $domain->send_lock_outstanding();
 				if (mailbox_protection_backlog_count((int)$domain->key) > 0 || !$send_handoff) {
@@ -750,6 +766,18 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 				&& ($backlog > 0 || !empty($input['sealed_now'])),
 			'editor_url' => $editor_base . '?ied_inbound_email_domain_id=' . intval($edit_domain->key),
 		);
+		// Fortress receipt state (specs/client_custody_mail.md § R8): at Fortress,
+		// the acting owner's messages still to move to their device key; off it,
+		// the ones still on that key for their browser to move back.
+		if ($edit_domain->is_fortress()) {
+			$ceremony['fortress_raise_backlog'] = MailboxFortressLevel::backlogCount($acting_user_id, intval($edit_domain->key));
+			$ceremony['fortress_lower_backlog'] = 0;
+		} else {
+			$ceremony['fortress_raise_backlog'] = 0;
+			$ceremony['fortress_lower_backlog'] = MailboxFortressLevel::loweringBacklogCount($acting_user_id, intval($edit_domain->key));
+		}
+		$ceremony['fortress_active'] = !empty($input['fortress_now']) || !empty($input['fortress_lowered'])
+			|| $ceremony['fortress_raise_backlog'] > 0 || $ceremony['fortress_lower_backlog'] > 0;
 		// Lowering receipt state (specs/mailbox_lowering_unseal.md): a domain
 		// that no longer seals but still carries sealed history converges it —
 		// on arrival from the lowering (unsealed_now) or any later visit while
@@ -758,8 +786,10 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			$unseal_counts = mailbox_protection_unseal_counts($edit_domain, $acting_user_id);
 			$ceremony['unseal_own_backlog'] = $unseal_counts['own'];
 			$ceremony['unseal_others_backlog'] = $unseal_counts['others'];
-			$ceremony['unseal_active'] = ($unseal_counts['own'] + $unseal_counts['others'] > 0)
-				|| !empty($input['unsealed_now']);
+			// The unseal waits for the browser's step: a message still on the
+			// device key is not the server's to unseal.
+			$ceremony['unseal_active'] = $ceremony['fortress_lower_backlog'] === 0
+				&& (($unseal_counts['own'] + $unseal_counts['others'] > 0) || !empty($input['unsealed_now']));
 			$ceremony['window_open'] = ($acting_user_id > 0) && VaultUnlock::isOpen($acting_user_id);
 		} else {
 			$ceremony['unseal_active'] = false;

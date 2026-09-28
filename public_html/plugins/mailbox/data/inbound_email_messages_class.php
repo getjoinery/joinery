@@ -103,6 +103,13 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.36 - isBrowserSealed() and unwrapDekInWindow() go by the key's custody, so a
+ *   row moved back off end-to-end (v1.edgeseal.user.) reads in the window; its
+ *   v1.edge. fields unseal and an outbound recipient in that format is sealed;
+ *   unsealing such a row puts its attachment names back first and leaves no Fortress-only
+ *   column behind (FORTRESS_DERIVED); browserCustodyPage() and browserCustodyBacklog()
+ *   answer the lowering walk in SQL; MAIL_KEY_PREFIX / mailKeySql() are the one spelling of
+ *   "sealed to the mail key"; iem_fortress_move_attempt_time
  * @version 1.35 - search text capped at 32768 characters; iem_search_written_time, set by
  *   sealedWriteMarks() in the UPDATE that writes iem_search_text: what a browser's search
  *   index catches up by (specs/client_custody_mail.md § R5)
@@ -228,10 +235,11 @@ class InboundEmailMessage extends SystemBase {
 	// on EVERY direction — who else a received message went to is as much the
 	// owner's business as who they wrote to — so they seal like iem_sender, with no
 	// direction guard.
-	// iem_search_text / iem_snippet / iem_attachment_manifest exist only on a
-	// Fortress row (specs/client_custody_mail.md § R2), where the server can open
-	// nothing: they carry what the server derives from the plaintext on every
-	// other row (the search index input, the list preview, the attachment names).
+	// iem_search_text / iem_snippet / iem_attachment_manifest (FORTRESS_DERIVED)
+	// exist only on a Fortress row (specs/client_custody_mail.md § R2), where the
+	// server can open nothing: they carry what the server derives from the
+	// plaintext on every other row (the search index input, the list preview, the
+	// attachment names). A row leaving Fortress drops them.
 	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers', 'iem_to', 'iem_cc', 'iem_search_text', 'iem_snippet', 'iem_attachment_manifest');
 
 	// Sealing runs through this class's own sealAndPersistContent() /
@@ -474,6 +482,10 @@ class InboundEmailMessage extends SystemBase {
 		// row's search text can come long after the row (a relay message parsed
 		// on the device, a raise to Fortress, a draft becoming its Sent row).
 		'iem_search_written_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		// When a move to the mail key last failed for this row
+		// (MailboxFortressLevel): the raise passes it by for a while, so one
+		// message that cannot move never holds up the ones behind it.
+		'iem_fortress_move_attempt_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
 		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed
@@ -765,6 +777,47 @@ class InboundEmailMessage extends SystemBase {
 			($level === InboundEmailDomain::LEVEL_FORTRESS) ? self::SEAL_SCOPE_FORTRESS : UserEncryptionVault::SCOPE_USER;
 	}
 
+	/**
+	 * The lowering walk over mail (SystemBase::browserCustodyPage()), in SQL:
+	 * the caller's rows on the mail key whose mailbox is no longer Fortress
+	 * (InboundEmailAlias::effectiveLevelSql(), the hook's own rule), reading only
+	 * the columns the walk needs. The generic walk reads every row the scope
+	 * holds, bodies and all, to ask the hook; a large Fortress mailbox beside a
+	 * small lowered one would make that the cost of every page.
+	 */
+	public static function browserCustodyPage(int $user_id, string $scope, int $after_id, int $limit): array {
+		if ($scope !== self::SEAL_SCOPE_FORTRESS) {
+			return parent::browserCustodyPage($user_id, $scope, $after_id, $limit);
+		}
+		$limit = max(1, min(self::CUSTODY_SCAN_MAX, $limit));
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT m.iem_inbound_email_message_id, m.iem_sealed_key,
+				m.iem_iea_inbound_email_alias_id, m.iem_ied_inbound_email_domain_id
+			FROM iem_inbound_email_messages m
+			LEFT JOIN iea_inbound_email_aliases a ON a.iea_inbound_email_alias_id = m.iem_iea_inbound_email_alias_id
+			JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = m.iem_ied_inbound_email_domain_id
+			WHERE m.iem_sealed_owner_user_id = ? AND ' . self::mailKeySql('m.iem_sealed_key') . '
+			  AND ' . InboundEmailAlias::effectiveLevelSql('a', 'd') . ' <> \'' . InboundEmailDomain::LEVEL_FORTRESS . '\'
+			  AND m.iem_inbound_email_message_id > ?
+			ORDER BY m.iem_inbound_email_message_id LIMIT ' . $limit);
+		$stmt->execute(array($user_id, $after_id));
+		$rows = array();
+		$last = $after_id;
+		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			$last = intval($r['iem_inbound_email_message_id']);
+			$rows[] = array('id' => $last, 'sealed_dek' => (string)$r['iem_sealed_key'],
+				'target_scope' => static::resolveSealScope($r));
+		}
+		return array('rows' => $rows, 'last_id' => $last, 'done' => count($rows) < $limit);
+	}
+
+	/** How many of the caller's messages the lowering walk would list (browserCustodyPage()). */
+	public static function browserCustodyBacklog(int $user_id, string $scope): ?int {
+		if ($scope !== self::SEAL_SCOPE_FORTRESS) {
+			return parent::browserCustodyBacklog($user_id, $scope);
+		}
+		return MailboxFortressLevel::loweringBacklogCount($user_id);
+	}
+
 	/** Forget sealScopeFor()'s memo — any level, mailbox or grant may have changed. */
 	public static function forgetSealScopes(): void {
 		self::$seal_scope_memo = array();
@@ -772,6 +825,17 @@ class InboundEmailMessage extends SystemBase {
 
 	/** The client-custody vault scope Fortress mail seals to (plugin.json vaultScopes). */
 	const SEAL_SCOPE_FORTRESS = 'mail';
+
+	/** How a message key sealed to the mail key begins. */
+	const MAIL_KEY_PREFIX = VaultCrypto::EDGE_SEAL_PREFIX . self::SEAL_SCOPE_FORTRESS . '.';
+
+	/** The columns only a Fortress row carries (see $sealed_fields). */
+	const FORTRESS_DERIVED = array('iem_search_text', 'iem_snippet', 'iem_attachment_manifest');
+
+	/** SQL: $col holds a key sealed to the mail key (a Fortress message). */
+	public static function mailKeySql(string $col = 'iem_sealed_key'): string {
+		return $col . " LIKE '" . self::MAIL_KEY_PREFIX . "%'";
+	}
 
 	/**
 	 * $owner_id's vault for $scope (a sealScopeFor() answer), or null when they
@@ -924,8 +988,10 @@ class InboundEmailMessage extends SystemBase {
 	}
 
 	/**
-	 * True when this row's content is sealed to a browser-held key: its DEK is a
-	 * `v1.edgeseal.` blob, which nothing on the server can open. The one
+	 * True when this row's content is sealed to a browser-held key: its DEK is
+	 * sealed to the client-custody `mail` vault, which nothing on the server can
+	 * open. A key in the browser's format sealed to the server's `user` vault
+	 * (a mailbox moved back off end-to-end, R8) is not: the window opens it. The one
 	 * predicate every server-side reader of message content checks before it
 	 * touches a row (specs/client_custody_mail.md § R7) — such a row is left
 	 * out, never opened and never an error.
@@ -934,7 +1000,7 @@ class InboundEmailMessage extends SystemBase {
 	 */
 	public static function isBrowserSealed($row): bool {
 		$key = is_array($row) ? ($row['iem_sealed_key'] ?? '') : (is_object($row) ? $row->get('iem_sealed_key') : '');
-		return strncmp((string)$key, 'v1.edgeseal.', 12) === 0;
+		return VaultCrypto::clientCustodyScope((string)$key) !== null;
 	}
 
 	/**
@@ -1188,7 +1254,7 @@ class InboundEmailMessage extends SystemBase {
 		if ($field === 'iem_recipient'
 				&& ($row['iem_direction'] ?? '') === 'outbound'
 				&& is_string($ciphertext) && $ciphertext !== ''
-				&& strpos($ciphertext, 'v1.aead.') !== 0
+				&& strpos($ciphertext, 'v1.aead.') !== 0 && !VaultCrypto::isEdgeField($ciphertext)
 				&& static::rowArrayIsSealed($row)) {
 			return $ciphertext;
 		}
@@ -1276,7 +1342,7 @@ class InboundEmailMessage extends SystemBase {
 	 * already-persisted draft attachments (sealed under that DEK) readable.
 	 */
 	public static function unwrapDekInWindow(int $owner_id, string $sealed_key): ?string {
-		if (strncmp($sealed_key, 'v1.edgeseal.', 12) === 0) {
+		if (VaultCrypto::clientCustodyScope($sealed_key) !== null) {
 			return null;   // a Fortress row: no window here opens it
 		}
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -1472,6 +1538,25 @@ class InboundEmailMessage extends SystemBase {
 		if (!$row || empty($row['iem_sealed_key']) || $owner_id === null) {
 			return false;
 		}
+		// A row moved off end-to-end whose attachment names are still only in
+		// its sealed manifest gets them back first; unsealed, the manifest would
+		// no longer be read, and the parts would stay nameless. (A manifest on a
+		// row not on the mail key is exactly that: the frame of its key may
+		// have changed since, by a rotation.)
+		if ((string)($row['iem_attachment_manifest'] ?? '') !== '') {
+			$window = VaultUnlock::secretKey($owner_id);
+			if ($window === null) {
+				return false;
+			}
+			try {
+				MailboxFortressLevel::settleLowered($message_id, $window);
+			} catch (\Throwable $e) {
+				error_log('unsealAndPersistContent: settling message ' . $message_id . ' failed: ' . $e->getMessage());
+				return false;
+			}
+			$stmt->execute(array($message_id));
+			$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		}
 		$dek = self::unwrapDekInWindow($owner_id, (string)$row['iem_sealed_key']);
 		if ($dek === null) {
 			return false; // window closed — locked, not an error
@@ -1485,7 +1570,7 @@ class InboundEmailMessage extends SystemBase {
 			$composed = self::isComposedDirection((string)($row['iem_direction'] ?? 'inbound'));
 			$columns = array();
 			foreach (static::$sealed_fields as $field) {
-				if (self::isComposeOnlyField($field) && !$composed) {
+				if ((self::isComposeOnlyField($field) && !$composed) || in_array($field, self::FORTRESS_DERIVED, true)) {
 					continue;
 				}
 				$stored = (string)($row[$field] ?? '');
@@ -1493,7 +1578,7 @@ class InboundEmailMessage extends SystemBase {
 				// nothing (an empty body, an optional column never written) —
 				// the seal path skips those, so the unseal path must too, or a
 				// row with one empty content column can never be lowered.
-				if ($stored === '' || strpos($stored, 'v1.aead.') !== 0) {
+				if ($stored === '' || (strpos($stored, 'v1.aead.') !== 0 && !VaultCrypto::isEdgeField($stored))) {
 					continue;
 				}
 				$columns[$field] = $crypto->openField($stored, $dek, self::sealAd($message_id, $field));
@@ -1568,6 +1653,12 @@ class InboundEmailMessage extends SystemBase {
 				RawMessageStore::write($message_id, $raw_plain);
 				$columns['iem_raw_sealed'] = false;
 			}
+			// No Fortress-only column outlives the row's sealing: on a plaintext
+			// row nothing reads them, and opened they would be a second copy.
+			foreach (self::FORTRESS_DERIVED as $field) {
+				$columns[$field] = null;
+			}
+			$columns['iem_search_written_time'] = null;
 			$columns['iem_content_sealed'] = false;
 			$columns['iem_sealed_key'] = null;
 			$columns['iem_sealed_owner_user_id'] = null;

@@ -1647,7 +1647,7 @@ class MailboxService {
 					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw,
 					(COALESCE(length(iem_raw_headers), 0) > 0) AS iem_has_raw_headers,
 					CASE WHEN iem_to IS NULL AND iem_cc IS NULL THEN iem_raw_headers END AS iem_raw_headers_for_lists,
-					CASE WHEN iem_sealed_key LIKE 'v1.edgeseal.%' THEN iem_raw_headers END AS iem_raw_headers,
+					CASE WHEN " . InboundEmailMessage::mailKeySql() . " THEN iem_raw_headers END AS iem_raw_headers,
 					iem_attachment_manifest
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)

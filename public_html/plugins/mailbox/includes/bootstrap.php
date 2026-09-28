@@ -22,6 +22,8 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.20 - deferred work mailbox_fortress_raise and mailbox_fortress_lowered (R8);
+ *   the server rotation re-seals a row moved back off end-to-end (v1.edgeseal.user.)
  * @version 1.19 - the mail rotation re-seals the Fortress search key (MailboxSearchKey)
  * @version 1.18
  * @changelog 1.18 - Fortress mail (specs/client_custody_mail.md): registers the
@@ -177,12 +179,14 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 		// come back permanently unreadable. A Fortress row's key belongs to the
 		// `mail` vault, whose generations are counted separately and which only
 		// the browser can re-seal (the `mail` client reseal below), so it is
-		// never this rotation's to touch.
+		// never this rotation's to touch. One moved back off end-to-end keeps
+		// its key in the browser's format sealed to this vault
+		// (`v1.edgeseal.user.`) and is re-sealed here like the rest.
 		$stmt = $db->prepare(
 			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 			 WHERE iem_iea_inbound_email_alias_id IN ($in)
 			 AND iem_content_sealed = true AND iem_key_generation = ?
-			 AND iem_sealed_key NOT LIKE 'v1.edgeseal.%'");
+			 AND NOT " . InboundEmailMessage::mailKeySql());
 		$stmt->execute(array($old_key_generation));
 		$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
@@ -364,6 +368,31 @@ VaultDeferredWork::register(
 	},
 	function (int $user_id, VaultKey $key, float $deadline): int {
 		return PromotedRowRepair::drainForUser($user_id, $key, PromotedRowRepair::DEFAULT_MAX, $deadline);
+	}
+);
+
+// A mailbox raised to Fortress moves its stored mail to the owner's device key
+// in their window (specs/client_custody_mail.md § R8); one lowered from it has
+// its attachment names put back and joins the server index. After parsing and
+// row repair (both touch the rows these move), before the search fold (which
+// drops a raised row and folds a lowered one).
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxFortressLevel.php'));
+VaultDeferredWork::register(
+	'mailbox_fortress_raise',
+	function (int $user_id): bool {
+		return MailboxFortressLevel::hasRaiseWork($user_id);
+	},
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return MailboxFortressLevel::drainRaise($user_id, $key, $deadline);
+	}
+);
+VaultDeferredWork::register(
+	'mailbox_fortress_lowered',
+	function (int $user_id): bool {
+		return MailboxFortressLevel::hasSettleWork($user_id);
+	},
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return MailboxFortressLevel::drainSettle($user_id, $key, $deadline);
 	}
 );
 

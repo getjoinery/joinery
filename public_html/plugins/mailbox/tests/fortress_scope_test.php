@@ -21,6 +21,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_scope
  *
+ * @version 1.3 - Seal at the relay is refused with Fortress (WP5, until WP7)
  * @version 1.2 - the Setup page's mail-vault step
  * @version 1.1 - feed refusal on a Fortress mailbox; the relay exporter never gives it the server key
  * @version 1.0
@@ -229,6 +230,8 @@ try {
 	fsc_alias($ok_domain, 'fwd', null, InboundEmailAlias::MODE_FORWARD);   // forwards store nothing
 	check($refusal($ok_domain, $owner_id) === null,
 		'the single owner of every mailbox, holding a mail vault, is not refused');
+	$r = admin_mailbox_domains_fortress_refusal(new InboundEmailDomain(intval($ok_domain->key), TRUE), $owner_id, true);
+	check($r !== null && stripos($r, 'relay') !== false, 'with Seal at the relay on it is refused until WP7', (string)$r);
 
 	$other = make_user('FscOther');
 	$other_id = intval($other->key);
@@ -271,7 +274,7 @@ try {
 	$novault_box = fsc_alias($novault_domain, 'novault');
 	fsc_grant_raw(intval($novault_box->key), array(intval($novault->key)));
 	$r = $refusal($novault_domain, intval($novault->key));
-	check($r !== null && stripos($r, 'unlock your vault') !== false, 'an owner without a mail key is refused, told to unlock their vault once', (string)$r);
+	check($r !== null && stripos($r, 'mail key is not set up') !== false, 'an owner without a mail key is refused, told the save makes it', (string)$r);
 
 	// -----------------------------------------------------------------------
 	section('the Setup page shows the mail-vault step');

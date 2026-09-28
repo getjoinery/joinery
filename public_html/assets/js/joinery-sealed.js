@@ -55,6 +55,7 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.9 - changeCustody(scope): move rows off a client-custody vault to the one their hook names
  * @version 1.8 - isPending(): the lock chip's unlock skips a scope whose own ceremony is under way
  * @version 1.7 - the one vault: content vaults open through the root; adopt(); openAllThroughRoot()
  * @version 1.6 - want(scope, label): a page names the vaults it reads, for the lock chip
@@ -644,6 +645,42 @@ window.JoinerySealed = (function () {
 		}
 	}
 
+	/**
+	 * Move every row the server lists off `scope` to the vault its hook now
+	 * names (specs/client_custody_mail.md § R8, the lowering): open each DEK
+	 * with this scope's session, seal it to the target's public key, post. The
+	 * content is untouched; only whose key wraps its DEK changes. A walk that
+	 * stopped resumes, since a moved row is not listed again. Resolves
+	 * { moved }. opts.progress(moved, total) reports as it goes (total is
+	 * the count at the start).
+	 */
+	async function changeCustody(scope, opts) {
+		opts = opts || {};
+		var report = opts.progress || function () {};
+		var s = await session(scope, { reason: opts.reason || 'to move your messages off it' });
+		var moved = 0, total = null, cursor = { model: '', after_id: 0 };
+		for (;;) {
+			var page = await joineryApi.post('vault_custody_rows', { scope: scope, model: cursor.model, after_id: cursor.after_id, limit: 100 });
+			if (page.remaining != null) total = page.remaining;
+			if (page.rows && page.rows.length) {
+				var out = [];
+				for (var i = 0; i < page.rows.length; i++) {
+					var r = page.rows[i];
+					var dek = await s.openSealed(stripEdgeSeal(r.sealed_dek));
+					out.push({ model: r.model, id: r.id,
+						sealed_dek: EDGE_SEAL + r.target_scope + '.' + await s.sealTo(dek, r.target_public_key) });
+					dek.fill(0);
+				}
+				await joineryApi.post('vault_row_custody', { scope: scope, rows: out });
+				moved += out.length;
+				report(moved, total);
+			}
+			if (!page.next) break;
+			cursor = page.next;
+		}
+		return { moved: moved };
+	}
+
 	// ---- self-check ----------------------------------------------------------
 
 	// Seal a row to a fresh keypair and open it through the same path open()
@@ -681,6 +718,7 @@ window.JoinerySealed = (function () {
 		setIdleMinutes: setIdleMinutes,
 		onReseal: onReseal,
 		resealScope: resealScope,
+		changeCustody: changeCustody,
 		onLock: onLock,
 		lock: lock,
 		lockAll: lockAll,
