@@ -62,6 +62,7 @@
  * egressGated() (hot OR a caller-declared durable restriction), while the
  * write-guard keeps asking isHot() alone.
  *
+ * @version 1.3 - the browser's format (v1.edge., v1.edgeseal.) is sealed too
  * @version 1.2 - a list of integers is a reference, not content, whatever its length
  * @version 1.1
  */
@@ -88,11 +89,12 @@ class SealedEgressGuard {
 
 	/**
 	 * The blob prefixes SealedBox stamps: content sealed under a per-item DEK,
-	 * and the DEK itself sealed to a vault public key. Both are already
-	 * protected, so both pass — writing a sealed DEK is what sealColumns() does
-	 * on every seal, and it is longer than the threshold.
+	 * and the DEK itself sealed to a vault public key, in the server's format
+	 * and in the browser's (v1.edge. content, v1.edgeseal.{scope}. key). All
+	 * are already protected, so all pass — writing a sealed DEK is what
+	 * sealColumns() does on every seal, and it is longer than the threshold.
 	 */
-	const SEALED_PREFIXES = array('v1.aead.', 'v1.seal.');
+	const SEALED_PREFIXES = array('v1.aead.', 'v1.seal.', 'v1.edge.', 'v1.edgeseal.');
 
 	/** How many distinct source descriptions an exception message reports. */
 	const SOURCES_REPORTED = 5;

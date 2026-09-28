@@ -31,6 +31,8 @@
  * reported as not sent — everything after the hand-off comes back as a
  * result — with a reference that finds its line in the error log.
  *
+ * @version 1.5.1 - upload_count
+ * @version 1.5 - source_open: an end-to-end source as the browser opened it, for the quote
  * @version 1.4 - `sent` and `warning` on success; an unexpected failure says the message was
  *   not sent and names a log reference
  * @version 1.3.2 - comment wording: Private plus the relay-sealing and sending-lock add-ons
@@ -66,6 +68,10 @@ function send_logic(array $input): LogicResult {
 		'body_html'       => $input['body_html'] ?? '',
 		'inline_manifest' => $input['inline_manifest'] ?? '',
 		'draft_id'        => $input['draft_id'] ?? 0,
+		// What the browser opened of an end-to-end source, for the quote.
+		'source_open'     => $input['source_open'] ?? null,
+		// How many files the client posted, so a send PHP cut short is refused.
+		'upload_count'    => $input['upload_count'] ?? -1,
 	);
 
 	$sender = new MailboxSender($viewer);
@@ -112,6 +118,8 @@ function send_logic_descriptor() {
 			'subject' => ['type' => 'string', 'required' => false, 'label' => 'Subject'],
 			'body' => ['type' => 'text', 'required' => false, 'label' => 'Plain-text body'],
 			'body_html' => ['type' => 'text', 'required' => false, 'label' => 'HTML body'],
+			'upload_count' => ['type' => 'int', 'required' => false, 'label' => 'How many files the client attached to this request'],
+			'source_open' => ['type' => 'text', 'required' => false, 'label' => 'JSON: an end-to-end source as the browser opened it ({sender, subject, recipient, body_html, body_plain}), for the reply or forward quote'],
 			'inline_manifest' => ['type' => 'string', 'required' => false, 'label' => 'Inline image manifest (local-id => filename)'],
 		],
 	];

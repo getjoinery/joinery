@@ -15,7 +15,12 @@
  *                     a sandboxed, opaque-origin frame, which cannot load a
  *                     blob: URL of this page's origin);
  *   attachmentBlob(att) / download(att)  fetch a part's ciphertext and open
- *                     it under the row DEK with the MIME-part AD.
+ *                     it under the row DEK with the MIME-part AD;
+ *   saveDraft / openDraft / draftFiles / sourceOpen / sourceFiles  the
+ *                     compose half (§ R6): a draft is sealed here under one
+ *                     DEK for its life and posted as ciphertext; a reply or
+ *                     forward of an end-to-end message quotes and re-attaches
+ *                     what this browser opened, since the server cannot.
  *
  * None of these starts an unlock: a content action does, through unlock().
  * While the mail vault is shut, rows get placeholders and the response says
@@ -25,8 +30,15 @@
  * key and revokes every object URL handed out; the reader's onLock handler
  * re-renders from the server copies, which are ciphertext.
  *
- * Nothing opened here is sent back to the server.
+ * Nothing opened here is sent back to the server, except what the person
+ * sends: a message leaves as plaintext for its recipients (B10), so a reply
+ * carries the quoted source and a forward its parts.
  *
+ * @version 1.9.1 - review of 2026-09-27: a part removed during a save stays removed (B4); an inline
+ *   image that will not open fails the draft's open rather than being dropped at the next save (B5)
+ * @version 1.9 - compose: sealed drafts (saveDraft, openDraft, draftFiles), and the quote and
+ *   parts of an end-to-end source for a reply or forward (sourceOpen, sourceFiles)
+ * @version 1.8.1 - the load-time lock hook needs a document only when it waits for one (node gates), and its self-check line runs only on a page
  * @version 1.8 - subscribes to the mail vault's lock once the deferred vault modules have run
  *   (it loads before them, so the load-time check subscribed to nothing and a lock wiped nothing)
  * @version 1.7 - judgeEntry() sends the recipe's reasoning control, as a server run does; an
@@ -252,6 +264,10 @@ window.MailboxFortress = (function () {
 		});
 		m.attachments = parts.filter(function (a) { return !a.inline; });
 		var inline = parts.filter(function (a) { return a.inline && a.content_id; });
+		// As the sender wrote them, for a reply's quote and a forward's parts:
+		// the rendered body's cid: images become data: URLs below.
+		m.body_html_source = m.body_html;
+		m.inline_parts = inline;
 		if (m.body_html && inline.length) {
 			m.body_html = await inlineRewrite(inline, m.body_html);
 		}
@@ -342,6 +358,269 @@ window.MailboxFortress = (function () {
 		});
 	}
 
+	// ---- compose (specs/client_custody_mail.md § R6) -----------------------------------
+	//
+	// A draft is a Fortress row the browser seals: one DEK for the draft's life
+	// (its saved parts stay openable across saves), sealed afresh to the mail
+	// key on each save, every field and part under it. The reader holds the
+	// draft state `d` = {id, adPrefix, dekBytes, dek, parts[]}, where each part
+	// is {mime_part, filename, content_type, content_id, inline, size, id}.
+
+	function newDraftState() {
+		return { id: null, adPrefix: null, dekBytes: null, dek: null, parts: [], threadKey: '' };
+	}
+
+	function hex(n) {
+		return Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(n)),
+			function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+	}
+
+	// Bytes under `key` bound to `ad`, in the v1.edge. format openEdgeBytes reads.
+	async function sealEdgeBytes(bytes, key, ad) {
+		var iv = crypto.getRandomValues(new Uint8Array(12));
+		var ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv, additionalData: new TextEncoder().encode(ad) },
+			key, bytes);
+		var out = new Uint8Array(12 + ct.byteLength);
+		out.set(iv, 0);
+		out.set(new Uint8Array(ct), 12);
+		return EDGE_FIELD + VaultCrypto.b64encode(out);
+	}
+
+	// The list preview, as the server derives it for a Fortress row.
+	function snippetOf(plain) {
+		return String(plain || '').slice(0, 4000).replace(/\s+/g, ' ').trim().slice(0, 240);
+	}
+
+	// The key new material seals to: the pending key during a rotation.
+	async function mailPublicKey() {
+		var st = await VaultKeyring.status(SCOPE);
+		if (!st || !st.set_up) throw new Error('Set up your vault to write from an end-to-end encrypted mailbox.');
+		return st.pending_public_key || st.public_key;
+	}
+
+	// POST a FormData to an API action and unwrap its envelope.
+	async function postForm(url, body) {
+		var res = await fetch(url, { method: 'POST', credentials: 'same-origin',
+			headers: { 'X-Joinery-Csrf': joineryApi.csrf() }, body: body });
+		var env = await res.json().catch(function () { return null; });
+		if (!env || env.errortype || !res.ok) {
+			var err = new Error((env && env.error) || 'The draft could not be saved.');
+			err.errorRef = (env && env.error_ref) || null;
+			throw err;
+		}
+		return env.data || {};
+	}
+
+	/**
+	 * Save a draft. c = {alias_id, mode, source_id, sender, to, cc, bcc,
+	 * subject, body_html, body_plain, files: [File], inline: [{localId, file}],
+	 * keep: [mime_part]} — files and inline are the parts not saved yet; keep
+	 * names the saved parts still wanted. Updates `d` in place; resolves the
+	 * server's answer. No plaintext leaves this function.
+	 */
+	async function saveDraft(d, c) {
+		var url = cfg().draftSaveUrl;
+		var clear = function (body) {
+			body.append('fortress', '1');
+			body.append('alias_id', String(c.alias_id || ''));
+			body.append('mode', String(c.mode || 'new'));
+			body.append('source_id', String(c.source_id || ''));
+			if (d.id) body.append('draft_id', String(d.id));
+			return body;
+		};
+		if (!d.id) {
+			var first = await postForm(url, clear(new FormData()));
+			d.id = first.draft_id;
+			d.adPrefix = first.sealed_ad_prefix;
+		}
+		if (!d.dek) {
+			var fresh = await VaultCrypto.newDek();
+			d.dekBytes = fresh.dekBytes;
+			d.dek = fresh.dekKey;
+		}
+		var publicKey = await mailPublicKey();
+		var body = clear(new FormData());
+		var added = [], uploads = [];
+		var add = async function (file, inline, contentId) {
+			var part = 'draft' + (inline ? 'inl' : '') + ':' + hex(12);
+			var bytes = new Uint8Array(await file.arrayBuffer());
+			var sealed = await sealEdgeBytes(bytes, d.dek, String(d.adPrefix) + d.id + ':att:' + part);
+			body.append('attachments[]', new Blob([sealed], { type: 'application/octet-stream' }), part);
+			uploads.push({ mime_part: part, size: bytes.length, inline: inline });
+			added.push({ mime_part: part, filename: file.name || 'attachment',
+				content_type: file.type || 'application/octet-stream', content_id: contentId || '',
+				inline: inline, size: bytes.length, id: null });
+		};
+		for (var i = 0; i < (c.files || []).length; i++) await add(c.files[i], false, '');
+		for (var j = 0; j < (c.inline || []).length; j++) await add(c.inline[j].file, true, c.inline[j].localId);
+
+		var keep = {};
+		(c.keep || []).forEach(function (p) { keep[p] = true; });
+		var parts = d.parts.filter(function (p) { return keep[p.mime_part]; }).concat(added);
+		var values = {
+			iem_sender: c.sender || '',
+			iem_recipient: [c.to, c.cc].filter(function (v) { return v; }).join(', '),
+			iem_to: c.to || '', iem_cc: c.cc || '', iem_bcc: c.bcc || '',
+			iem_subject: c.subject || '', iem_body_html: c.body_html || '', iem_body_plain: c.body_plain || '',
+			iem_draft_state: JSON.stringify({ mode: c.mode || 'new', source_id: Number(c.source_id) || 0,
+				to: c.to || '', cc: c.cc || '' }),
+			iem_snippet: snippetOf(c.body_plain),
+			iem_attachment_manifest: parts.length ? JSON.stringify(parts.map(function (p) {
+				return { mime_part: p.mime_part, filename: p.filename, content_type: p.content_type,
+					content_id: p.content_id, inline: p.inline, size: p.size };
+			})) : ''
+		};
+		var fields = {};
+		var names = Object.keys(values);
+		for (var k = 0; k < names.length; k++) {
+			var v = values[names[k]];
+			// Empty stays bare, as the server stores it.
+			fields[names[k]] = v === '' ? '' : EDGE_FIELD + await VaultCrypto.encrypt(v, d.dek,
+				String(d.adPrefix) + d.id + ':' + names[k]);
+		}
+		body.append('sealed_dek', EDGE_SEAL + SCOPE + '.' + await VaultCrypto.sealToPublicKey(d.dekBytes, publicKey));
+		body.append('public_key', publicKey);
+		body.append('fields', JSON.stringify(fields));
+		body.append('parts', JSON.stringify(uploads));
+		body.append('keep', JSON.stringify(parts.map(function (p) { return p.mime_part; })));
+		var answer = await postForm(url, body);
+		var ids = {};
+		(answer.parts || []).forEach(function (p) { ids[p.mime_part] = p.id; });
+		// What the server holds after this save, and nothing else: a part removed
+		// while the save was in flight must not come back.
+		parts.forEach(function (p) { if (ids[p.mime_part] != null) p.id = ids[p.mime_part]; });
+		d.parts = parts.filter(function (p) { return ids[p.mime_part] != null; });
+		return answer;
+	}
+
+	/**
+	 * Open a draft_get answer for a Fortress draft. Resolves {d, fields} where
+	 * fields is the compose state (to, cc, bcc, subject, body_html, mode,
+	 * source_id), attachments are the saved regular parts for the chips, and
+	 * inline the saved inline images as {content_id, url, file, mime_part}.
+	 * The draft's key stays in `d` for the compose's life: it protects what
+	 * is on screen in that compose, and its saved parts need it to stay
+	 * openable at the next save.
+	 */
+	async function openDraft(data) {
+		var d = newDraftState();
+		d.id = data.draft_id;
+		d.adPrefix = data.sealed_ad_prefix;
+		d.threadKey = data.thread_key || '';
+		var out = { draft_id: data.draft_id, alias_id: data.alias_id, mode: 'new', source_id: 0, to: '', cc: '',
+			bcc: '', subject: '', body_html: '', attachments: [], inline: [] };
+		if (!data.sealed) return { d: d, fields: out };
+
+		var parsed = String(data.sealed.sealed_dek || '');
+		var prefix = EDGE_SEAL + SCOPE + '.';
+		if (parsed.indexOf(prefix) !== 0) throw new Error('This draft is not sealed to your vault.');
+		var session = await JoinerySealed.session(SCOPE, { reason: 'to open this draft' });
+		d.dekBytes = await session.openSealed(parsed.slice(prefix.length));
+		d.dek = await VaultCrypto.importDek(d.dekBytes);
+		var open = async function (col) {
+			var v = data.sealed[col];
+			if (typeof v !== 'string' || v.indexOf(EDGE_FIELD) !== 0) return '';
+			return VaultCrypto.decrypt(v.slice(EDGE_FIELD.length), d.dek, String(d.adPrefix) + d.id + ':' + col);
+		};
+		var state = {};
+		try { state = JSON.parse(await open('iem_draft_state') || '{}') || {}; } catch (e) { state = {}; }
+		var manifest = [];
+		try { manifest = JSON.parse(await open('iem_attachment_manifest') || '[]') || []; } catch (e) { manifest = []; }
+		var named = {};
+		manifest.forEach(function (e) { if (e && e.mime_part) named[e.mime_part] = e; });
+
+		out.mode = state.mode || 'new';
+		out.source_id = Number(state.source_id) || 0;
+		out.to = state.to || '';
+		out.cc = state.cc || '';
+		out.bcc = await open('iem_bcc');
+		out.subject = await open('iem_subject');
+		out.body_html = await open('iem_body_html');
+
+		for (var i = 0; i < (data.parts || []).length; i++) {
+			var p = data.parts[i];
+			var e = named[p.mime_part] || {};
+			var part = { id: p.id, mime_part: p.mime_part, filename: e.filename || 'attachment',
+				content_type: e.content_type || 'application/octet-stream', content_id: e.content_id || '',
+				inline: !!p.inline, size: p.size_bytes };
+			d.parts.push(part);
+			if (!part.inline) {
+				out.attachments.push({ id: part.id, filename: part.filename, content_type: part.content_type,
+					size_bytes: part.size, mime_part: part.mime_part });
+				continue;
+			}
+			if (!part.content_id) continue;
+			// An image that will not open fails the whole open: opened without it,
+			// the next save would drop it from the draft.
+			var file = await draftPartFile(d, part);
+			out.inline.push({ content_id: part.content_id, url: adoptObjectUrl(URL.createObjectURL(file)), file: file,
+				mime_part: part.mime_part });
+		}
+		return { d: d, fields: out };
+	}
+
+	// One saved part of the draft, opened, as a File named from the manifest.
+	async function draftPartFile(d, part) {
+		var res = await fetch(cfg().attachmentUrlBase + '?ima_inbound_message_attachment_id='
+			+ encodeURIComponent(part.id), { credentials: 'same-origin' });
+		var type = res.headers.get('content-type') || '';
+		if (!res.ok || /text\/html/i.test(type)) throw new Error('An attachment of this draft could not be fetched.');
+		var bytes = await openEdgeBytes(await res.text(), d.dek, String(d.adPrefix) + d.id + ':att:' + part.mime_part);
+		return new File([bytes], part.filename || 'attachment', { type: part.content_type || 'application/octet-stream' });
+	}
+
+	/** The draft's saved regular parts named in `keep`, opened, for a send. */
+	async function draftFiles(d, keep) {
+		var want = {};
+		(keep || []).forEach(function (p) { want[p] = true; });
+		var out = [];
+		for (var i = 0; i < d.parts.length; i++) {
+			var p = d.parts[i];
+			if (p.inline || !want[p.mime_part]) continue;
+			out.push(await draftPartFile(d, p));
+		}
+		return out;
+	}
+
+	/**
+	 * What a reply or forward quotes of an opened end-to-end message, for
+	 * mailbox/send's source_open. Null when the message is not open here.
+	 */
+	function sourceOpen(m) {
+		if (!m || !m.sealed || m.fortress_placeholder) return null;
+		return { sender: m.sender || '', subject: m.subject || '', recipient: m.recipient || '',
+			body_html: m.body_html_source != null ? m.body_html_source : (m.body_html || ''),
+			body_plain: m.body_plain || '' };
+	}
+
+	/**
+	 * An opened end-to-end message's parts for a forward: {files: [File],
+	 * inline: {localId: name}} — each inline part named uniquely and keyed by
+	 * its Content-ID, which the server turns into a fresh one in the quote.
+	 */
+	async function sourceFiles(m) {
+		var out = { files: [], inline: {} };
+		if (!m || !m.sealed || m.fortress_placeholder) return out;
+		var regular = m.attachments || [];
+		for (var i = 0; i < regular.length; i++) {
+			var a = regular[i];
+			if (!a.fortress) continue;
+			var bytes = await attachmentBytes(a);
+			out.files.push(new File([bytes], a.filename || 'attachment', { type: a.content_type || 'application/octet-stream' }));
+		}
+		var inline = m.inline_parts || [];
+		for (var j = 0; j < inline.length; j++) {
+			var p = inline[j];
+			var cid = String(p.content_id || '').replace(/^<|>$/g, '');
+			if (!cid) continue;
+			var pb = await attachmentBytes(p);
+			var name = 'fwdinl' + j + '-' + String(p.filename || 'image').replace(/[^A-Za-z0-9._-]/g, '_');
+			out.files.push(new File([pb], name, { type: p.content_type || 'application/octet-stream' }));
+			out.inline[cid] = name;
+		}
+		return out;
+	}
+
 	// ---- search text (the sealed iem_search_text) ------------------------------
 
 	/** A search text as stored, 'gz:' + base64(gzip) or plain, to its text. */
@@ -386,7 +665,8 @@ window.MailboxFortress = (function () {
 		});
 	}
 	hookVault();
-	if (!hooked) document.addEventListener('DOMContentLoaded', hookVault);
+	// A page always has a document; the node gates that load this file do not.
+	if (!hooked && typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', hookVault);
 
 	// ---- one AI judgement on the owner's own model --------------------------------------
 
@@ -566,7 +846,10 @@ window.MailboxFortress = (function () {
 		if (window.EmailDigest && window.VerdictCheck) {
 			await selfCheckJudge(note);
 		}
-		note('subscribed to the mail vault\'s lock, whatever order the scripts loaded in', hooked);
+		// A page holds the vault client; the node gates that load this file do not.
+		if (window.JoinerySealed) {
+			note('subscribed to the mail vault\'s lock, whatever order the scripts loaded in', hooked);
+		}
 		return { ok: checks.every(function (c) { return c.ok; }), checks: checks };
 	}
 
@@ -665,6 +948,12 @@ window.MailboxFortress = (function () {
 		adoptObjectUrl: adoptObjectUrl,
 		inlineRewrite: inlineRewrite,
 		inflateSearchText: inflateSearchText,
+		newDraftState: newDraftState,
+		saveDraft: saveDraft,
+		openDraft: openDraft,
+		draftFiles: draftFiles,
+		sourceOpen: sourceOpen,
+		sourceFiles: sourceFiles,
 		onLock: onLock,
 		judgeEntry: judgeEntry,
 		epoch: epoch,

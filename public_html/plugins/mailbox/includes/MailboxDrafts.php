@@ -22,6 +22,17 @@
  * mailbox they hold a grant for. Discard is a hard delete (row + ima_ manifest + Files) —
  * there is no draft trash.
  *
+ * End-to-end (Fortress) mailboxes (specs/client_custody_mail.md § R6): the server never
+ * sees a draft. The browser seals the fields and the attachment bytes under the draft's
+ * own DEK and posts ciphertext (saveFortressDraft); getDraft hands the sealed shape back
+ * for the browser to open. saveDraft refuses such a mailbox, so a plaintext draft
+ * cannot land there.
+ *
+ * @version 1.3.2 - a new part may not repeat a part name (review by public-html-91, B15)
+ * @version 1.3.1 - review of 2026-09-27: only a browser-sealed or truly hollow draft is a Fortress
+ *   draft (B2, B9); the part limits count the parts a save keeps (B7)
+ * @version 1.3 - Fortress drafts: saveFortressDraft() stores what the browser sealed, getDraft()
+ *   returns the sealed shape, saveDraft() refuses a Fortress mailbox or draft
  * @version 1.2.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.2 - the sealing posture comes from the mailbox (MailboxSender::sealTargetFor),
  *   not from whether its owner holds a vault, so a Standard mailbox's drafts stay plaintext
@@ -76,6 +87,11 @@ class MailboxDrafts {
 			if ($existing === null) {
 				throw new MailboxDraftsException('That draft no longer exists.');
 			}
+		}
+		// A Fortress draft is sealed in the browser (saveFortressDraft); this path
+		// would carry its words to the server in the clear.
+		if (self::isFortressAlias($alias) || ($existing !== null && InboundEmailMessage::isBrowserSealed($existing))) {
+			throw new MailboxDraftsException(self::FORTRESS_REFUSAL);
 		}
 
 		// Compose state.
@@ -230,6 +246,10 @@ class MailboxDrafts {
 		}
 		$alias_id = intval($row->get('iem_iea_inbound_email_alias_id'));
 
+		if (InboundEmailMessage::isBrowserSealed($row) || $this->isHollowFortressDraft($row)) {
+			return $this->fortressDraftShape($row);
+		}
+
 		if ($row->get('iem_content_sealed')) {
 			$owner_id = intval($row->get('iem_sealed_owner_user_id'));
 			if ($owner_id <= 0) {
@@ -264,6 +284,365 @@ class MailboxDrafts {
 			'body_html'   => $body_html,
 			'attachments' => $this->draftAttachments($draft_id),
 			'inline'      => $this->draftInline($draft_id),
+		);
+	}
+
+	// ── Fortress drafts (specs/client_custody_mail.md § R6) ──────────────────
+
+	const FORTRESS_REFUSAL = 'This mailbox is end-to-end encrypted, so its drafts are sealed in your browser. '
+		. 'Reload the page and try again.';
+
+	/** The sealed columns a Fortress draft carries; the browser seals each one. */
+	const FORTRESS_DRAFT_FIELDS = array('iem_sender', 'iem_recipient', 'iem_subject', 'iem_body_plain',
+		'iem_body_html', 'iem_to', 'iem_cc', 'iem_bcc', 'iem_draft_state', 'iem_snippet', 'iem_attachment_manifest');
+
+	/** A draft part's MIME-part name, chosen by the browser before it seals the bytes. */
+	const FORTRESS_PART_PATTERN = '/^draft(inl)?:[0-9a-f]{12,32}$/';
+
+	/** True when this mailbox's drafts are sealed in the browser. */
+	public static function isFortressAlias(InboundEmailAlias $alias): bool {
+		return InboundEmailMessage::isBrowserVault(MailboxSender::sealTargetFor($alias)['vault']);
+	}
+
+	/**
+	 * Save a Fortress draft from what the browser sealed. Two calls, as
+	 * JoinerySealed.save makes them:
+	 *
+	 *  - without sealed_dek: create the row with its clear columns only (the
+	 *    mailbox, the conversation it joins) and answer {draft_id, id,
+	 *    sealed_ad_prefix} so the browser can seal for it;
+	 *  - with sealed_dek: the draft's DEK sealed to the owner's mail key, every
+	 *    field as v1.edge. ciphertext, and any new attachment as bytes the
+	 *    browser sealed under the same DEK (AD mail:{id}:att:{part}), stored as
+	 *    they came. `keep` names every part the draft still has; the rest go.
+	 *
+	 * The browser keeps one DEK for the draft's life, so saved parts stay
+	 * openable across saves. Nothing here can open any of it.
+	 *
+	 * $params: alias_id, draft_id, mode, source_id, sealed_dek, public_key,
+	 * fields (column => ciphertext), parts ([{mime_part, size, inline}] for the
+	 * uploads, each file named by its part), keep ([mime_part]).
+	 */
+	public function saveFortressDraft(array $params, array $files = array()): array {
+		$alias_id = intval($params['alias_id'] ?? 0);
+		if ($alias_id <= 0 || !$this->viewer->canAccess($alias_id)) {
+			throw new MailboxDraftsException('You do not have access to this mailbox.');
+		}
+		$alias = new InboundEmailAlias($alias_id, TRUE);
+		if (!$alias->key || $alias->get('iea_delete_time')) {
+			throw new MailboxDraftsException('That mailbox no longer exists.');
+		}
+		if (!self::isFortressAlias($alias)) {
+			throw new MailboxDraftsException('This mailbox is not end-to-end encrypted; save the draft as usual.');
+		}
+
+		$existing = null;
+		$draft_id = intval($params['draft_id'] ?? 0);
+		if ($draft_id > 0) {
+			$existing = $this->loadDraftInScope($draft_id);
+			if ($existing === null) {
+				throw new MailboxDraftsException('That draft no longer exists.');
+			}
+			// A draft saved another way (in the clear, or sealed by the server)
+			// holds content and parts the browser does not: it stays where it is.
+			if (!InboundEmailMessage::isBrowserSealed($existing) && !self::isHollowDraft($existing)) {
+				throw new MailboxDraftsException('This draft was saved in a mailbox that is not end-to-end encrypted. '
+					. 'Start a new message to write from this one.');
+			}
+		}
+
+		$mode = (string)($params['mode'] ?? 'new');
+		if (!in_array($mode, array('reply', 'reply_all', 'forward', 'new'), true)) {
+			$mode = 'new';
+		}
+		$clear = array(
+			'iem_iea_inbound_email_alias_id'  => $alias_id,
+			'iem_ied_inbound_email_domain_id' => intval($alias->get('iea_ied_inbound_email_domain_id')),
+			'iem_thread_key'    => $this->sourceThreadKey($mode, intval($params['source_id'] ?? 0)),
+			'iem_received_time' => gmdate('Y-m-d H:i:s'),
+			'iem_is_read'       => true,
+		);
+
+		$sealed_dek = (string)($params['sealed_dek'] ?? '');
+		if ($sealed_dek === '') {
+			if ($existing !== null) {
+				InboundEmailMessage::updateColumns(intval($existing->key), $clear);
+				$message_id = intval($existing->key);
+			} else {
+				$row = new InboundEmailMessage(NULL);
+				$row->set('iem_direction', 'draft');
+				$row->set('iem_message_id_header', null);
+				$row->set('iem_draft_author_user_id', $this->viewer->getUserId());
+				foreach ($clear as $col => $val) {
+					$row->set($col, $val);
+				}
+				foreach (array('iem_sender', 'iem_recipient', 'iem_subject', 'iem_body_plain', 'iem_body_html') as $col) {
+					$row->set($col, '');
+				}
+				$row->save();
+				$message_id = intval($row->key);
+			}
+			return array('draft_id' => $message_id, 'id' => $message_id,
+				'sealed_ad_prefix' => InboundEmailMessage::sealedAdPrefix());
+		}
+
+		if ($existing === null) {
+			throw new MailboxDraftsException('Save the draft before sealing it.');
+		}
+		$message_id = intval($existing->key);
+
+		// Everything is checked before anything is written.
+		$fields = is_array($params['fields'] ?? null) ? $params['fields'] : array();
+		foreach ($fields as $col => $value) {
+			if (!in_array($col, self::FORTRESS_DRAFT_FIELDS, true)) {
+				throw new MailboxDraftsException('A draft does not carry "' . $col . '".');
+			}
+			if ($value !== null && $value !== '' && (!is_string($value) || strncmp($value, 'v1.edge.', 8) !== 0)) {
+				throw new MailboxDraftsException(self::FORTRESS_REFUSAL);
+			}
+		}
+		$keep = array();
+		foreach ((array)($params['keep'] ?? array()) as $part) {
+			$keep[(string)$part] = true;
+		}
+		$uploads = $this->fortressUploads($message_id, $params['parts'] ?? array(), $files, $keep);
+		foreach ($uploads as $u) {
+			$keep[$u['mime_part']] = true;
+		}
+
+		// New parts first, then the row in one transaction; parts the draft no
+		// longer has go last, once the save is kept. A refused save removes the
+		// parts it added and leaves the draft as it was.
+		$made = array();
+		$db = DbConnector::get_instance()->get_db_link();
+		try {
+			foreach ($uploads as $u) {
+				$made[] = $this->persistFortressPart($message_id, $u);
+			}
+			$db->beginTransaction();
+			InboundEmailMessage::updateColumns($message_id, $clear);
+			InboundEmailMessage::acceptBrowserSealed($message_id, $sealed_dek, $fields,
+				(string)($params['public_key'] ?? '') ?: null);
+			$db->commit();
+		} catch (Throwable $e) {
+			if ($db->inTransaction()) { $db->rollBack(); }
+			foreach ($made as $m) {
+				try { $m['file']->permanent_delete(); } catch (Throwable $e2) { /* best-effort */ }
+				try { $m['att']->permanent_delete(); } catch (Throwable $e2) { /* best-effort */ }
+			}
+			error_log('MailboxDrafts: Fortress draft ' . $message_id . ' refused: ' . $e->getMessage());
+			throw new MailboxDraftsException('The draft could not be saved.');
+		}
+		$this->dropFortressParts($message_id, $keep);
+		return array('draft_id' => $message_id, 'parts' => $this->fortressParts($message_id));
+	}
+
+	/** The conversation a reply or forward draft files into (a clear column). */
+	private function sourceThreadKey(string $mode, int $source_id): ?string {
+		if ($mode === 'new' || $source_id <= 0) {
+			return null;
+		}
+		$src = new InboundEmailMessage($source_id, TRUE);
+		if (!$src->key) {
+			return null;
+		}
+		$alias_id = intval($src->get('iem_iea_inbound_email_alias_id'));
+		if ($alias_id <= 0 || !$this->viewer->canAccess($alias_id)) {
+			return null;
+		}
+		$tk = trim((string)$src->get('iem_thread_key'));
+		return $tk !== '' ? substr($tk, 0, 255) : null;
+	}
+
+	/**
+	 * The new parts of a Fortress draft save, matched to their uploads and
+	 * checked: a part name the browser chose, ciphertext in the browser's
+	 * format, and the plaintext size it declares within the compose limits.
+	 */
+	private function fortressUploads(int $message_id, $parts, array $files, array $keep): array {
+		$by_name = array();
+		foreach ($files as $f) {
+			if (($f['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+				continue;
+			}
+			if (($f['error'] ?? 1) !== UPLOAD_ERR_OK) {
+				throw new MailboxDraftsException('An attachment failed to upload.');
+			}
+			$by_name[(string)($f['name'] ?? '')] = $f;
+		}
+		// The limits count what the draft will hold: the parts it keeps, and these.
+		$count = 0;
+		$running = 0;
+		foreach ($this->fortressParts($message_id) as $held) {
+			if (isset($keep[$held['mime_part']])) {
+				$count++;
+				$running += $held['size_bytes'];
+			}
+		}
+		$held = array();
+		foreach ($this->fortressParts($message_id) as $h) {
+			$held[$h['mime_part']] = true;
+		}
+		$out = array();
+		foreach ((is_array($parts) ? $parts : array()) as $p) {
+			$part = (string)($p['mime_part'] ?? '');
+			if (!preg_match(self::FORTRESS_PART_PATTERN, $part) || !isset($by_name[$part])) {
+				throw new MailboxDraftsException('An attachment could not be read.');
+			}
+			// One part, one file: a name listed twice, or one the draft already holds.
+			if (isset($held[$part])) {
+				throw new MailboxDraftsException('An attachment could not be read.');
+			}
+			$held[$part] = true;
+			$tmp = (string)($by_name[$part]['tmp_name'] ?? '');
+			if ($tmp === '' || !is_uploaded_file($tmp)) {
+				throw new MailboxDraftsException('An attachment could not be read.');
+			}
+			$size = intval($p['size'] ?? -1);
+			$stored = intval($by_name[$part]['size'] ?? 0);
+			// base64 of IV + ciphertext + tag, behind the v1.edge. prefix.
+			if ($size < 0 || $stored !== 8 + 4 * intval(ceil(($size + 28) / 3))) {
+				throw new MailboxDraftsException('An attachment could not be read.');
+			}
+			if ($size > MailboxSender::MAX_UPLOAD_BYTES) {
+				throw new MailboxDraftsException('An attachment exceeds the per-file size limit.');
+			}
+			if (++$count > MailboxSender::MAX_UPLOAD_FILES) {
+				throw new MailboxDraftsException('Too many attachments on this draft.');
+			}
+			$running += $size;
+			if ($running > MailboxSender::MAX_TOTAL_BYTES) {
+				throw new MailboxDraftsException('The draft attachments exceed the total size limit.');
+			}
+			$bytes = file_get_contents($tmp);
+			if ($bytes === false || strncmp($bytes, 'v1.edge.', 8) !== 0) {
+				throw new MailboxDraftsException(self::FORTRESS_REFUSAL);
+			}
+			$out[] = array('mime_part' => $part, 'bytes' => $bytes, 'size' => $size,
+				'inline' => !empty($p['inline']) && $p['inline'] !== 'false');
+		}
+		return $out;
+	}
+
+	/** Store one part as it came: a File named by message and part, and a blank ima_ row. */
+	private function persistFortressPart(int $message_id, array $u): array {
+		$file = File::createFromBytes($u['bytes'],
+			InboundEmailMessage::fortressAttachmentName($message_id, $u['mime_part']),
+			InboundEmailMessage::FORTRESS_FILE_TYPE, $this->viewer->getUserId(), array(
+				'fil_private' => true,
+				'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
+			));
+		// Magic-byte detection on save() saw ciphertext — keep the stored type.
+		$file->set('fil_type', InboundEmailMessage::FORTRESS_FILE_TYPE);
+		$file->save();
+		$att = InboundMessageAttachment::CreateEntry(array(
+			'ima_iem_inbound_email_message_id' => $message_id,
+			'ima_filename'     => '',
+			'ima_content_type' => '',
+			'ima_size_bytes'   => $u['size'],
+			'ima_mime_part'    => $u['mime_part'],
+			'ima_content_id'   => '',
+			'ima_is_inline'    => $u['inline'],
+			'ima_fil_file_id'  => (int)$file->key,
+			'ima_is_sealed'    => true,
+		));
+		return array('file' => $file, 'att' => $att);
+	}
+
+	/** Remove every part of the draft not named in $keep (mime_part => true). */
+	private function dropFortressParts(int $message_id, array $keep): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT ima_inbound_message_attachment_id, ima_mime_part, ima_fil_file_id
+			FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = ?');
+		$stmt->execute(array($message_id));
+		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			if (isset($keep[(string)$r['ima_mime_part']])) {
+				continue;
+			}
+			$fil_id = intval($r['ima_fil_file_id']);
+			if ($fil_id > 0) {
+				$file = new File($fil_id, TRUE);
+				if ($file->key) {
+					try { $file->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
+				}
+			}
+			$att = new InboundMessageAttachment(intval($r['ima_inbound_message_attachment_id']), TRUE);
+			if ($att->key) {
+				try { $att->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
+			}
+		}
+	}
+
+	/** A Fortress draft's parts, as the browser needs them to fetch and open each. */
+	private function fortressParts(int $message_id): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT ima_inbound_message_attachment_id, ima_mime_part, ima_size_bytes, ima_is_inline
+			FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = ?
+			ORDER BY ima_inbound_message_attachment_id ASC');
+		$stmt->execute(array($message_id));
+		$out = array();
+		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			$inline = $r['ima_is_inline'];
+			$out[] = array(
+				'id'         => intval($r['ima_inbound_message_attachment_id']),
+				'mime_part'  => (string)$r['ima_mime_part'],
+				'size_bytes' => intval($r['ima_size_bytes']),
+				'inline'     => ($inline === true || $inline === 't' || $inline === 1 || $inline === '1'),
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * A draft the first Fortress call created and no sealed save has filled
+	 * yet: nothing sealed, no compose state (every other save writes one), no
+	 * content, no parts. Anything else holds something the browser must not
+	 * overwrite.
+	 */
+	public static function isHollowDraft(InboundEmailMessage $row): bool {
+		if ($row->get('iem_content_sealed') || InboundEmailMessage::isBrowserSealed($row)
+				|| $row->get('iem_draft_state') !== null
+				|| (string)$row->get('iem_subject') !== '' || (string)$row->get('iem_body_plain') !== ''
+				|| (string)$row->get('iem_body_html') !== '') {
+			return false;
+		}
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT 1 FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = ? LIMIT 1');
+		$q->execute(array(intval($row->key)));
+		return !$q->fetchColumn();
+	}
+
+	/** A hollow draft on a mailbox whose drafts are sealed in the browser. */
+	private function isHollowFortressDraft(InboundEmailMessage $row): bool {
+		if (!self::isHollowDraft($row)) {
+			return false;
+		}
+		$alias = new InboundEmailAlias(intval($row->get('iem_iea_inbound_email_alias_id')), TRUE);
+		try {
+			return $alias->key && self::isFortressAlias($alias);
+		} catch (Throwable $e) {
+			return false;   // no seal target: not a Fortress mailbox this draft can be saved to
+		}
+	}
+
+	/** getDraft()'s answer for a Fortress draft: the sealed columns, for the browser to open. */
+	private function fortressDraftShape(InboundEmailMessage $row): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT * FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
+		$stmt->execute(array(intval($row->key)));
+		$raw = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+		return array(
+			'draft_id' => intval($row->key),
+			'alias_id' => intval($row->get('iem_iea_inbound_email_alias_id')),
+			'fortress' => true,
+			'sealed_ad_prefix' => InboundEmailMessage::sealedAdPrefix(),
+			// The conversation a reply or forward draft joins, for the browser to
+			// open its source again when it sends.
+			'thread_key' => (string)($raw['iem_thread_key'] ?? ''),
+			// A hollow draft has nothing sealed yet: the browser opens an empty compose.
+			'sealed'   => InboundEmailMessage::isBrowserSealed($raw)
+				? InboundEmailMessage::sealedForBrowser($raw, self::FORTRESS_DRAFT_FIELDS) : null,
+			'parts'    => $this->fortressParts(intval($row->key)),
 		);
 	}
 

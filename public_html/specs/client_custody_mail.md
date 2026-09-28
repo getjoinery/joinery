@@ -11,7 +11,8 @@ end-to-end, nothing less). The four decisions this spec needed were taken with
 the owner on 2026-09-24 and are the last section. **Search (R5, WP3) was
 redesigned with the owner on 2026-09-27** for 10 GB mailboxes: a sealed word
 index kept in each browser, not a per-search download (§ Decisions
-2026-09-27). WP0–WP2b are built (fb0a830c); WP3 is built and walked on dev.
+2026-09-27). WP0–WP2b are built (fb0a830c); WP3 is built and walked on dev
+(8e008eeb); WP4 is built, reviewed and walked on dev (2026-09-28).
 
 ## For the executor — read this first
 
@@ -762,7 +763,8 @@ minutes.
   (feeds are refused at Fortress); `logRefusedSend` writes the envelope
   addresses, not the subject, for a Fortress alias.
 - **Drafts are sealed by the browser.** `draft_save` becomes a two-step
-  `JoinerySealed.save` on a Fortress alias: step one the plain columns and
+  save on a Fortress alias, in `JoinerySealed.save`'s shape but with one DEK
+  for the draft's life (WP4 § As built): step one the plain columns and
   the reply `{draft_id, sealed_ad_prefix}`, step two `{id, sealed_dek,
   fields, public_key}` into `acceptBrowserSealed` with `iem_body_plain,
   iem_body_html, iem_subject, iem_to, iem_cc, iem_bcc, iem_draft_state,
@@ -1211,7 +1213,102 @@ It now subscribes once they have run (1.8), and its `selfCheck()` pins it.
   If the benchmark or the dev size misses the 60 MB target, stop and report
   before tuning.
 
-### WP4. Compose, Sent copy, drafts
+### WP4. Compose, Sent copy, drafts — built, reviewed and walked on dev 2026-09-28
+
+**As built.** The Sent copy was already sealed to the mail key (WP1); WP4
+adds the browser's half.
+
+- **Drafts.** `mailbox/draft_save` with `fortress=1` is two calls: the first
+  (no `sealed_dek`) makes the row with its clear columns only and answers
+  `{draft_id, id, sealed_ad_prefix}`; the second posts `sealed_dek`,
+  `public_key`, `fields` (the eleven columns in
+  `MailboxDrafts::FORTRESS_DRAFT_FIELDS`, no search text: drafts are outside
+  device search), `parts` and `keep`, and goes through `acceptBrowserSealed`
+  in one transaction with the clear columns. Later saves are the second call
+  alone. `JoinerySealed.save` is not used: it mints a DEK per call, and a
+  draft keeps **one DEK for its life** (re-sealed to the current mail key each
+  save), or its saved parts would stop opening. `MailboxFortress.saveDraft`
+  does the sealing.
+- **Draft parts.** The browser picks the part name (`draft:` or `draftinl:`
+  + 24 hex), seals the bytes under the draft DEK (AD `mail:{id}:att:{part}`)
+  and posts them named by part; the server checks the name, the `v1.edge.`
+  prefix and that the stored length matches the declared plaintext size (so
+  the size caps hold), and stores a nameless File and `ima_` row. The sealed
+  manifest names parts by MIME part. `keep` is authoritative: a saved part
+  the post does not list is deleted after the save commits.
+- **Reopen.** `draft_get` answers `{fortress, sealed_ad_prefix, thread_key,
+  sealed, parts}`; `MailboxFortress.openDraft` opens the fields and the inline
+  images (object URLs) and keeps the DEK in the compose.
+- **Send.** Plaintext to the server, as B10 settled. For an end-to-end source
+  the browser posts `source_open` ({sender, subject, recipient, body_html,
+  body_plain} as it opened them) and `MailboxSender::buildBody` quotes it with
+  the one template; the source's received time is the row's own. A forward
+  posts the original's parts, opened here, as uploads (inline ones keyed by
+  Content-ID, rewritten to fresh ones in the quote); the file cap grows by the
+  source's real part count. A Fortress draft's saved parts are opened and
+  posted with the send; the Sent row is a fresh one and the draft is deleted
+  after it is stored (never morphed). A draft sent from a mailbox of the
+  other custody is refused; the reader starts a new draft when the From
+  changes custody, leaving the old one in Drafts.
+- The plaintext `saveDraft` refuses a Fortress mailbox and a Fortress draft.
+  The reader offers Reply / Forward on an end-to-end message it opened, none
+  on a placeholder.
+- **Walked on dev** (user 143105, alias 45242): a reply with an attachment to
+  the WP3 walk message autosaved as ciphertext only (request fields checked
+  in the page: no body, recipient or file text), reopened from Drafts after a
+  reload with its attachment, sent (addressed to the mailbox itself: dev
+  sends through Mailgun), and opened in its conversation with the quote and
+  the attachment; the draft and its part were gone. A forward carried the
+  original's CSV. A pasted inline image saved, reopened, sent, and rendered
+  in the Sent copy. Discard removed the draft and its Files. No walk word
+  appears in any table or the error log. Screenshots
+  `/tmp/playwright-mcp/wp4-0*.png`.
+- Found and fixed on the way: `composerHtml()` cloned the editor into the
+  live document, where an `<img>` with a `cid:` src starts a load the CSP
+  refuses (a console error on every save with a pasted image, Private too);
+  it clones into an inert document.
+- **Self-review 2026-09-27** (a read-only review agent on the WP4 diff, not
+  the reviewer session), all fixed:
+  B1 opening a draft from Drafts kept the previous compose's key and id, so a
+  save could seal one draft's words into another and drop its parts
+  (`openDraft` now saves a dirty compose to its own draft, then resets);
+  B2 a Standard draft sent or continued from a Fortress mailbox was taken for a
+  Fortress one and its parts lost (only a browser-sealed or truly hollow draft,
+  `MailboxDrafts::isHollowDraft`, is Fortress; the rest are refused);
+  B3 a custody change during an in-flight first save kept the other custody's
+  draft id (any custody change bumps the generation and starts a new draft);
+  B4 a part removed during a save came back (`d.parts` is what the server
+  answered); B5 an inline image that would not open was dropped at the next
+  save (the open fails instead); B6 PHP drops files past `max_file_uploads`
+  (20) with only a warning, so a big forward could leave without some
+  (`upload_count` on every send, a short count refused); B7 a Fortress save
+  was all-or-nothing and silent (text first, then one request per new part;
+  the part limits count only the parts kept; failures are shown); B8 the
+  no-module fallback did not mark a placeholder, so reply chips showed; B9 an
+  unsealed draft on a mailbox now Fortress opened empty and would be
+  overwritten (hollow means empty); B10 a failed send was not recorded on a
+  Fortress draft. Re-walked on dev: two Fortress drafts switched back and forth
+  in Drafts keep their own words and parts; one sent, the other intact.
+- **Review by public-html-91, 2026-09-28** (not yet valid; server half and the
+  guard change traced sound): B13 closing a compose (or opening another draft)
+  bumped the compose generation, which stopped a Fortress save chain after its
+  text step, so files and pasted images added since the last save were lost
+  silently (the chain now finishes on its own snapshot and draft state, touches
+  the screen only while its compose is open, and reports a failure even after
+  close); B14 a lock left a Fortress compose, a draft opened from Drafts
+  above all, on screen with its key and image bytes (a lock now saves and
+  closes it, empties the fields and returns a Drafts view to the list); B15 a
+  new part could repeat a part name (refused). `draftSaving` belongs to the
+  open compose (a reset clears it; a stale save no longer clears a newer one).
+  Re-trace 2026-09-28: B13–B15 VALID. B16 (read): a chain outlives its compose,
+  so reopening the same draft while it still posted a part let two composes
+  each drop the other's parts; `openDraft` now waits for that draft's chains
+  (`fortressChains`). B16 traced VALID; review closed. Re-walked on dev 2026-09-28 as user 145198 (alias 45924): attach + type + close inside the autosave delay kept the attachment (B13); a lock with a Drafts-view draft open saved it (words, pasted image, attachment) and cleared the screen (B14); reopening a draft while an 8 MB part was still posting waited for it (draft_get after the part save) and a later edit kept all three parts (B16); the draft then sent with all three (upload_count).
+- Not covered by an automated test: the upload path itself
+  (`is_uploaded_file` cannot pass in the CLI) and a whole send; the walk
+  covers both.
+
+**As specified:**
 
 - Reader: quoting in the browser for a Fortress source; drafts through
   `JoinerySealed.save('mailbox/draft_save', …)` with browser-sealed uploads;
@@ -1230,6 +1327,37 @@ It now subscribes once they have run (1.8), and its `selfCheck()` pins it.
   the request bodies in the browser's network log). Screenshot.
 
 ### WP5. Level changes (R8)
+
+**Started 2026-09-27 (its code lands with the rest of WP5):** `SystemBase::convertRowToClientCustody()`
+(the raise; returns the DEK for the consumer's own blobs) with
+`tests/vault/custody_change_test.php` (12 checks: the raise, same DEK and AD,
+generation and owner, the refusals). Building it found that
+`SealedEgressGuard` counted the browser's formats (`v1.edge.`,
+`v1.edgeseal.`) as plaintext, so a process that had opened sealed content
+could not write browser ciphertext to a row not already sealed to that owner;
+fixed (guard 1.3, `docs/sealed_vault.md`, a check in
+`sealed_egress_guard_test`). Not started: the lowering (B12 first), mail's
+`convertToFortress`, the deferred work, the domain editor and banner, the
+`ied_level_set_time` column (needs `update_database`: stop point).
+
+**Found before building (2026-09-27, B12, traced).** R8's lowering leaves a
+row's key as `v1.edgeseal.user.` (the DEK sealed in the edge format to the
+server-custody `user` vault) and its fields as `v1.edge.`. Every read path
+today decides "only the browser opens this" from the `v1.edgeseal.` prefix
+alone, whatever the scope: `SystemBase`'s field read throws
+`VaultSealedForBrowserException` when `VaultCrypto::parseEdgeScope()` returns
+any scope (`includes/SystemBase.php` ~:890), its save guard does the same
+(~:1264), and `InboundEmailMessage::isBrowserSealed()` (29 callers across the
+mailbox) and `unwrapDekInWindow()` test the bare prefix. A lowered row would
+read as Fortress everywhere and open nowhere on the server. WP5 must first make
+"browser custody" mean "sealed to a scope `VaultScopes::isClientCustody()`
+names" at each of those places, and route a `v1.edgeseal.user.` key through
+`VaultKey::unsealEdge` in the window (fields through `openField`, which
+already takes `v1.edge.`), with a test that a lowered row reads in-window,
+locks out of it, and is not offered to the browser. Owner to confirm this
+reading of R8 before WP5 starts; the alternative (the server re-wraps the DEK
+in its own format at acceptance, which needs the owner's window open, against
+R8's "the browser does the work") is worse.
 
 **Ordering constraint (review of WP0–WP2, B11).** Until WP7 lands,
 `RelayMapExporter::sealTargetForAlias()` gives a Fortress mailbox the relay's

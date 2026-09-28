@@ -53,6 +53,12 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.23.1 - review of 2026-09-27: a Fortress mailbox sends only a browser-sealed or hollow
+ *   draft (B2); a failed send is recorded on a Fortress draft (B10); upload_count refuses a send
+ *   PHP cut short (B6)
+ * @version 1.23 - a Fortress source is quoted from what the browser opened (source_open), a forward
+ *   carries the parts the browser re-uploads, and a Fortress draft is sent from what the browser
+ *   posts and then deleted, never morphed (specs/client_custody_mail.md § R6)
  * @version 1.22 - a Fortress source is refused for reply and forward, with a clear message
  * @version 1.21 - a Fortress Sent copy: attachments seal in the browser format with nothing
  *   about the file in the clear, search text / snippet / manifest are sealed beside it,
@@ -214,8 +220,9 @@ class MailboxSender {
 			? MailboxHtmlSanitizer::sanitize($body_html_param, true)
 			: $this->textToHtml((string)($params['body'] ?? ''));
 		try {
+			$quote = $source !== null ? $this->sourceQuote($source, $params['source_open'] ?? null) : null;
 			$subject = $this->normalizeSubject((string)($params['subject'] ?? ''), $mode,
-				$source !== null ? (string)$source->get('iem_subject') : '');
+				$quote !== null ? $quote['subject'] : '');
 		} catch (VaultLockedException $e) {
 			throw new MailboxLockedException('Your vault is locked — unlock it to reply to or forward this message.');
 		}
@@ -241,19 +248,29 @@ class MailboxSender {
 		// Forward re-attaches the original's attachments; uploads ride along in
 		// every mode. Inline (cid:) images among the uploads are embedded and their
 		// placeholder cid rewritten into the user's HTML before it is quoted/sent.
+		// An end-to-end source's parts are opened in the browser, which posts them
+		// with the uploads (inline ones under their Content-ID as the local id).
 		$total = 0;
-		if ($mode === self::MODE_FORWARD) {
+		if ($mode === self::MODE_FORWARD && !InboundEmailMessage::isBrowserSealed($source)) {
 			$total += $this->attachOriginal($email, $source);
 		}
 		// Draft-morph (specs/mailbox_compose_maturity.md § Phase 2): sending from a
 		// saved draft reuses its row and its already-persisted attachments in place.
 		// Re-attach those stored parts to the outgoing message (they were uploaded on
 		// an earlier autosave, so they are not in this request's $files).
+		//
+		// A Fortress draft is sealed in the browser, which re-posts its parts with
+		// this send; its Sent row is a fresh one, and the draft is deleted after.
 		$draft = null;
 		$draft_id = intval($params['draft_id'] ?? 0);
 		$morph_dek = null;
+		$fortress_draft = null;
 		if ($draft_id > 0) {
 			$draft = $this->loadDraftInScope($draft_id);
+			if ($draft !== null && $this->isFortressDraft($draft, $alias)) {
+				$fortress_draft = $draft;
+				$draft = null;
+			}
 			if ($draft !== null) {
 				// Unwrap the sealed draft's DEK ONCE, up front (Fix 2): a sealed draft
 				// with a closed window fails here — before anything reaches the wire —
@@ -265,16 +282,30 @@ class MailboxSender {
 			}
 		}
 
+		// PHP drops files past max_file_uploads with only a warning; a send that
+		// says how many it posted is refused rather than sent without some.
+		$declared = intval($params['upload_count'] ?? -1);
+		if ($declared >= 0 && $declared !== count($files)) {
+			throw new MailboxSenderException('Too many files for one message: this server takes '
+				. intval(ini_get('max_file_uploads')) . '. Nothing was sent.');
+		}
 		$inline_manifest = self::parseInlineManifest($params['inline_manifest'] ?? '');
-		$uploads = $this->attachUploads($email, $files, $total, $inline_manifest);
+		// A forward of an end-to-end message posts the original's parts as uploads,
+		// so the file count allows as many more as the original really has.
+		$forwarded_parts = ($mode === self::MODE_FORWARD && InboundEmailMessage::isBrowserSealed($source))
+			? count(new MultiInboundMessageAttachment(array('message_id' => intval($source->key)))) : 0;
+		$uploads = $this->attachUploads($email, $files, $total, $inline_manifest, $forwarded_parts);
 		if (!empty($uploads['cid_replace'])) {
 			$userHtml = strtr($userHtml, $uploads['cid_replace']);
+			if ($quote !== null && $quote['from_browser']) {
+				$quote['html'] = strtr($quote['html'], $uploads['cid_replace']);
+			}
 		}
 
 		// Wrap the (cid-rewritten) user HTML with the server-side quote/forward
 		// block, then derive the stored plaintext from the final HTML.
 		try {
-			$body_html = $this->buildBody($mode, $userHtml, $source);
+			$body_html = $this->buildBody($mode, $userHtml, $quote);
 		} catch (VaultLockedException $e) {
 			throw new MailboxLockedException('Your vault is locked — unlock it to reply to or forward this message.');
 		}
@@ -290,7 +321,8 @@ class MailboxSender {
 			$this->recordAttempt($sender->lastSendReport(), $outcome, $error, $row_id, $sent_copy,
 				$alias, $account, $transport, $source, $draft, $message_id, $from_address, $to, $cc, $bcc);
 		};
-		$draft_row_id = $draft !== null ? intval($draft->key) : null;
+		$draft_row_id = $draft !== null ? intval($draft->key)
+			: ($fortress_draft !== null ? intval($fortress_draft->key) : null);
 
 		// One pipeline, synchronous (no retry-queue): success/failure is shown now.
 		try {
@@ -356,6 +388,13 @@ class MailboxSender {
 		}
 		$attempt(MailboxSendAttempt::OUTCOME_SENT, null, intval($stored['id']), $sent_copy);
 		$this->storeCopyParts($stored, $uploads, $from_address, $subject, $email);
+		if ($fortress_draft !== null) {
+			try {
+				$fortress_draft->permanent_delete();
+			} catch (Throwable $e) {
+				error_log('MailboxSender: sent draft ' . $fortress_draft->key . ' could not be deleted: ' . $e->getMessage());
+			}
+		}
 
 		// A draft morphed IN PLACE into the Sent row (same id, now at-or-below every
 		// index's high-water mark), so a plain `id > since` fold never revisits it.
@@ -413,12 +452,6 @@ class MailboxSender {
 		}
 		if (!$this->viewer->canAccess($alias_id)) {
 			throw new MailboxSenderException('You do not have access to this mailbox.');
-		}
-		// A reply or forward quotes its source on the server, which cannot read an
-		// end-to-end message (specs/client_custody_mail.md § R6).
-		if (InboundEmailMessage::isBrowserSealed($source)) {
-			throw new MailboxSenderException('This message is end-to-end encrypted, so it cannot be replied to or '
-				. 'forwarded from here yet. Write a new message instead.');
 		}
 		return $source;
 	}
@@ -503,20 +536,20 @@ class MailboxSender {
 	 * body. A new message ($source === null) carries only that portion — there is
 	 * nothing to quote.
 	 */
-	private function buildBody(string $mode, string $userHtml, ?InboundEmailMessage $source): string {
-		if ($mode === self::MODE_NEW) {
+	private function buildBody(string $mode, string $userHtml, ?array $quote): string {
+		if ($mode === self::MODE_NEW || $quote === null) {
 			return '<div>' . $userHtml . '</div>';
 		}
-		$origHtml = trim((string)$source->get('iem_body_html'));
-		$origPlain = trim((string)$source->get('iem_body_plain'));
+		$origHtml = trim($quote['html']);
+		$origPlain = trim($quote['plain']);
 		$quoted = $origHtml !== '' ? $origHtml : ($origPlain !== '' ? $this->textToHtml($origPlain) : '');
 
-		$sender = htmlspecialchars((string)$source->get('iem_sender'));
-		$date = htmlspecialchars($this->displayDate((string)$source->get('iem_received_time')));
+		$sender = htmlspecialchars($quote['sender']);
+		$date = htmlspecialchars($this->displayDate($quote['received_time']));
 
 		if ($mode === self::MODE_FORWARD) {
-			$subject = htmlspecialchars((string)$source->get('iem_subject'));
-			$to = htmlspecialchars((string)$source->get('iem_recipient'));
+			$subject = htmlspecialchars($quote['subject']);
+			$to = htmlspecialchars($quote['recipient']);
 			return '<div>' . $userHtml . '</div><br>'
 				. '<div class="gmail_quote">---------- Forwarded message ----------<br>'
 				. 'From: ' . $sender . '<br>Date: ' . $date . '<br>'
@@ -528,6 +561,64 @@ class MailboxSender {
 			. '<div class="gmail_quote">On ' . $date . ', ' . $sender . ' wrote:<br>'
 			. '<blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">'
 			. $quoted . '</blockquote></div>';
+	}
+
+	/**
+	 * What a reply or forward quotes of its source. A server-readable source is
+	 * read here; an end-to-end one is opened only in the owner's browser, which
+	 * posts what it opened as `source_open` ({sender, subject, recipient,
+	 * body_html, body_plain}) — the same values, which the server could not
+	 * read itself. Its HTML is quoted as the sender wrote it, as a
+	 * server-readable source's is.
+	 */
+	private function sourceQuote(InboundEmailMessage $source, $source_open): array {
+		$received = (string)$source->get('iem_received_time');
+		if (!InboundEmailMessage::isBrowserSealed($source)) {
+			return array(
+				'sender' => (string)$source->get('iem_sender'), 'subject' => (string)$source->get('iem_subject'),
+				'recipient' => (string)$source->get('iem_recipient'), 'html' => (string)$source->get('iem_body_html'),
+				'plain' => (string)$source->get('iem_body_plain'), 'received_time' => $received, 'from_browser' => false,
+			);
+		}
+		if (is_string($source_open)) {
+			$source_open = json_decode($source_open, true);
+		}
+		if (!is_array($source_open)) {
+			throw new MailboxSenderException('This message is end-to-end encrypted. Open it again, then reply or forward.');
+		}
+		$field = function (string $name) use ($source_open): string {
+			$v = $source_open[$name] ?? '';
+			return is_scalar($v) ? (string)$v : '';
+		};
+		return array(
+			'sender' => $field('sender'), 'subject' => $field('subject'), 'recipient' => $field('recipient'),
+			'html' => $field('body_html'), 'plain' => $field('body_plain'), 'received_time' => $received,
+			'from_browser' => true,
+		);
+	}
+
+	/**
+	 * Is this draft sealed in the browser? A browser-sealed draft is; so is one
+	 * the first Fortress save created and nothing sealed yet. A draft whose
+	 * custody does not match the mailbox it is sent from is refused: its parts
+	 * are under a key the other side does not hold.
+	 */
+	private function isFortressDraft(InboundEmailMessage $draft, InboundEmailAlias $alias): bool {
+		$browser = InboundEmailMessage::isBrowserSealed($draft);
+		$fortress_alias = $alias->is_fortress();
+		if ($browser && !$fortress_alias) {
+			throw new MailboxSenderException('This draft is end-to-end encrypted. Send it from its own mailbox.');
+		}
+		if (!$fortress_alias) {
+			return false;
+		}
+		// From a Fortress mailbox the browser posts everything the draft holds,
+		// which it can only do for a draft it sealed (or one still empty).
+		if (!$browser && !MailboxDrafts::isHollowDraft($draft)) {
+			throw new MailboxSenderException('This draft was saved in a mailbox that is not end-to-end encrypted. '
+				. 'Send it from that mailbox, or start a new message.');
+		}
+		return true;
 	}
 
 	private function textToHtml(string $text): string {
@@ -904,7 +995,8 @@ class MailboxSender {
 	 *               inline: array<int,array{bytes:string,name:string,type:string,cid:string}>,
 	 *               cid_replace: array<string,string>}
 	 */
-	private function attachUploads(EmailMessage $email, array $files, int $runningTotal, array $inline_manifest = array()): array {
+	private function attachUploads(EmailMessage $email, array $files, int $runningTotal, array $inline_manifest = array(),
+			int $extra_files = 0): array {
 		$count = 0;
 		$regular = array();
 		$inline = array();
@@ -926,7 +1018,7 @@ class MailboxSender {
 			if ($size > self::MAX_UPLOAD_BYTES) {
 				throw new MailboxSenderException('An attachment exceeds the ' . (self::MAX_UPLOAD_BYTES / 1048576) . ' MB per-file limit.');
 			}
-			if (++$count > self::MAX_UPLOAD_FILES) {
+			if (++$count > self::MAX_UPLOAD_FILES + $extra_files) {
 				throw new MailboxSenderException('Too many attachments (max ' . self::MAX_UPLOAD_FILES . ').');
 			}
 			$runningTotal += $size;
