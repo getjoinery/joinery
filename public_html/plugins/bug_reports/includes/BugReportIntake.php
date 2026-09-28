@@ -15,7 +15,7 @@
  *   4. an automatic report (bundle scope "automatic") of a fault already
  *      stored as an automatic report for the same site and version is not
  *      stored again: its count is added to that report, which reopens if it
- *      was closed (specs/bug_reports.md, Part 2, D12);
+ *      was closed (specs/implemented/bug_reports.md, Part 2, D12);
  *   5. keep the image when it passes the same checks a member upload does,
  *      and note why when it does not (a bad image never refuses the report);
  *   6. save the row, and email the operator about a new error when asked to.

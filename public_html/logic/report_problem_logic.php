@@ -9,7 +9,7 @@
  * reporter reads what will leave, then decides. Sending is the
  * report_problem_submit action. A guest is sent to sign in and brought back.
  *
- * See specs/bug_reports.md.
+ * See specs/implemented/bug_reports.md.
  *
  * @version 1.0.0
  */
