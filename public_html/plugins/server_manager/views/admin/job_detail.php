@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.12 - a page_probe that could not run shows the node's reason instead of "no report"
  * @version 1.11 - an apply_update job renders its structured apply result (versions, migrations, schema
  *                changes, plugins, deploy tier, rollback); restart_unit/_container, run_installer,
  *                file_head and schema_probe results render as cards
@@ -507,7 +508,9 @@ if ($result) {
 		echo '<div>Landmarks: header ' . ($lm['header'] ? 'yes' : '<strong>no</strong>') . ', main ' . ($lm['main'] ? 'yes' : '<strong>no</strong>')
 			. ', footer ' . ($lm['footer'] ? 'yes' : '<strong>no</strong>') . '; ' . (int)$lm['forms'] . ' form(s)</div>';
 		echo '<div class="small text-muted">Structure hash ' . $h(substr($result_data['structure_hash'], 0, 16)) . ' — the same page renders to the same hash while its structure is unchanged.</div>';
-		if (!$result_data['reported']) {
+		if (!empty($result_data['error'])) {
+			echo '<div class="text-danger small">The page was never rendered — ' . $h($result_data['error']) . '.</div>';
+		} elseif (!$result_data['reported']) {
 			echo '<div class="text-warning small">The render left no report (it may have died before its end); timing, queries and warnings are unknown.</div>';
 		}
 		if ($result_data['warnings']) {

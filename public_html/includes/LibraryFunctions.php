@@ -540,13 +540,43 @@ class LibraryFunctions {
 		if (preg_match('/^[A-Z0-9._%+\\-\\#!$%&\'*\/=?^_`{}|~]+@[A-Z0-9.-]+\.[A-Z]{2,10}$/i', $email) === 0) {
 			return false;
 		}
-		// DNS MX-with-A-fallback check (fail-open) — skip when email_validation_mx_check is off.
-		$domain = substr($email, strrpos($email, '@') + 1);
-		$settings = Globalvars::get_instance();
-		if ((string)$settings->get_setting('email_validation_mx_check') === '0') {
+		// DNS MX-with-A-fallback check (fail-open), when it applies.
+		if (!self::emailDomainCheckApplies()) {
 			return true;
 		}
+		$domain = substr($email, strrpos($email, '@') + 1);
 		return DnsResolver::domainAcceptsMail($domain);
+	}
+
+	/** Set only for the duration of withoutEmailDomainCheck(). */
+	private static $email_domain_check_suspended = false;
+
+	/**
+	 * Whether an address's domain must be shown to accept mail: the DNS half of
+	 * email validation, which catches a person mistyping their domain. Off when
+	 * the site turns email_validation_mx_check off, and inside
+	 * withoutEmailDomainCheck(). The syntax half always applies.
+	 */
+	public static function emailDomainCheckApplies(): bool {
+		if (self::$email_domain_check_suspended) {
+			return false;
+		}
+		return (string)Globalvars::get_instance()->get_setting('email_validation_mx_check') !== '0';
+	}
+
+	/**
+	 * Run $fn with the DNS half of email validation off, for an account the
+	 * server makes for itself under an address no person typed and no mail is
+	 * sent to (page_probe's throwaway viewer, at `.invalid`). Returns $fn's value.
+	 */
+	public static function withoutEmailDomainCheck(callable $fn) {
+		$previous = self::$email_domain_check_suspended;
+		self::$email_domain_check_suspended = true;
+		try {
+			return $fn();
+		} finally {
+			self::$email_domain_check_suspended = $previous;
+		}
 	}
 
 	
