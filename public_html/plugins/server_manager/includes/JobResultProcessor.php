@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.43 - process_site_census keeps the census a node counted; census_of() reads it back
  * @version 1.42 - process_decommission_node records what removing the node also did ('also')
  * @version 1.41 - process_check_status fills an empty mgn_web_root from the web root the agent reports
  *                 (ManagedNode::adopt_reported_web_root), before the recovery-key report is considered
@@ -2311,6 +2312,41 @@ HTML;
 
 		$job->set('mjb_result', json_encode(array_merge(['measured' => true], $recovery)));
 		$job->save();
+	}
+
+	/**
+	 * A site_census job: the node's count of its rows, files and sealed secrets
+	 * (SiteCensus), kept in mjb_result for SiteCensus::compare() against another
+	 * node's. It is the node's word about itself, and is only ever compared,
+	 * never folded into the node's stored status.
+	 *
+	 * An answer with no census line (an error, an older node) records that it
+	 * was asked and got none, with the script's own error line if it printed one.
+	 */
+	private static function process_site_census($job) {
+		$output = $job->get('mjb_output') ?: '';
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && isset($data['output'])) {
+			$output = (string)$data['output'];
+		}
+		$census = SiteCensus::parse_output($output);
+		if ($census === null) {
+			$error = preg_match('/^ERROR: (.{1,500})$/m', $output, $m) ? $m[1] : '';
+			$job->set('mjb_result', json_encode(['measured' => false, 'error' => $error]));
+		} else {
+			$job->set('mjb_result', json_encode(['measured' => true, 'census' => $census]));
+		}
+		$job->save();
+	}
+
+	/** The census a finished site_census job kept, or null when it has none. */
+	public static function census_of($job): ?array {
+		if ((string)$job->get('mjb_job_type') !== 'site_census') {
+			return null;
+		}
+		$result = json_decode((string)$job->get('mjb_result'), true);
+		return (is_array($result) && !empty($result['measured']) && is_array($result['census'] ?? null))
+			? $result['census'] : null;
 	}
 
 	/**

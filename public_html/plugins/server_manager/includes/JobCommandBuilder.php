@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.84 - build_site_census / build_site_census_primitive (agent 1.48.0): count a site's rows, files
+ *                 and sealed secrets, for checking a copy against its source (site_copy.md WP3)
  * @version 1.83 - build_copy_restore / build_copy_restore_primitive (agent 1.47.0): apply a staged chain of
  *                 the site a dormant copy is a copy of, with that site's secret key (site_copy.md WP2)
  * @version 1.82 - install_state_color(): one colour map for the status dot and the fleet badge
@@ -1554,6 +1556,27 @@ class JobCommandBuilder {
 
 	public static function build_recovery_key_report_primitive($node) {
 		return ['primitive' => 'recovery_key_report', 'params' => []];
+	}
+
+	/**
+	 * Count what a site holds: the rows in every table, the files and bytes
+	 * under each top-level directory, and whether its sealed secrets open
+	 * (SiteCensus). Run on a source and its copy, SiteCensus::compare() says
+	 * what differs. The node's own site_census.php does the counting, so there
+	 * is one list of what is counted and what each machine keeps as its own.
+	 * Read-only: it runs on a dormant copy and a frozen source alike.
+	 */
+	public static function build_site_census($node) {
+		if (!self::has_primitive($node, 'site_census')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot count its site. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['site_census']));
+		}
+		return self::build_site_census_primitive($node);
+	}
+
+	public static function build_site_census_primitive($node) {
+		return ['primitive' => 'site_census', 'params' => []];
 	}
 
 	/**

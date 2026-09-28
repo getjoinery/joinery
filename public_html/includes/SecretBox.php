@@ -34,6 +34,7 @@
  * database or a rotated key is a fact a consumer can handle rather than an
  * exception that takes down a feature.
  *
+ * @version 1.4 - canaryState() takes the box to open with
  * @version 1.3 - ensureConfigKey() is checkConfigKey(): it reports, and never
  *   writes config/Globalvars_site.php. Minting the key is a root step at the
  *   host installers' moments (specs/implemented/read_only_tree.md)
@@ -296,8 +297,9 @@ class SecretBox {
      * The canary's health right now: OPEN_OK (key is fine — an individual dead
      * secret is corrupt), OPEN_DEAD (the key is wrong — every sealed value is
      * dead), or OPEN_ABSENT (no canary minted yet). Cheap: one row, one decrypt.
+     * $box opens it with another key (SecretReconciler::census); this site's by default.
      */
-    public static function canaryState(): string {
+    public static function canaryState(?self $box = null): string {
         $dblink = DbConnector::get_instance()->get_db_link();
         $q = $dblink->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
         $q->execute(array(self::CANARY_SETTING));
@@ -305,7 +307,7 @@ class SecretBox {
         if ($stored === false || $stored === '') {
             return self::OPEN_ABSENT;
         }
-        $result = (new self())->open((string)$stored);
+        $result = ($box ?? new self())->open((string)$stored);
         if ($result['state'] === self::OPEN_OK && $result['value'] !== self::CANARY_PLAINTEXT) {
             // Decrypts but is not the constant we sealed — corrupt, not our key.
             return self::OPEN_DEAD;

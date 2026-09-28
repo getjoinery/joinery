@@ -511,6 +511,11 @@ answer to; without it the site keeps the domain this machine's config already
 names. `--skip-ssl` is passed to the reconcile, which then arms no certificate
 retry.
 
+Extraction replays the chain the way it was taken: anything in the target that
+the archive does not list is removed, at any depth, including a directory the
+files engine never archives (`vendor/`, say) when the source had none of that
+name. A directory the source had but the archive left out (`logs/`) is kept.
+
 **`--adopt-secret-key`** is for a chain from another machine. This machine keeps
 its own `config/Globalvars_site.php` and takes the chain's `secret_box_key` into
 it: read from the chain's copy of the file by pattern (never run), required to be
@@ -566,6 +571,49 @@ job record. Once it completes, the run's offloaded files follow in `missing`
 mode as the paged `restore_objects` jobs described under *Restoring a managed
 node* below. A chain taken by a machine that no longer exists is
 restored from a shell with the recovery key, as above.
+
+### Checking a restore: the census
+
+A restore onto another machine is checked by counting what each side holds and
+comparing the counts. `maintenance_scripts/sysadmin_tools/site_census.php` (no
+arguments, run as root so it can read every directory) prints one `CENSUS=`
+line with a JSON object:
+
+- `tables`: the rows in every table (a table outside `public` is named
+  `schema.table`);
+- `files`: for each top-level directory of the site, the files, directories and
+  bytes, and a digest over every path with its size, so a renamed file or two
+  sizes that changed by amounts that cancel still show; loose files at the site
+  root are counted under `.`;
+- `secrets`: whether the key canary opens (`ok`, `dead`, `absent`, or `nokey`
+  when the site has no `secret_box_key`), and how many registered sealed
+  secrets are stored and how many of them are dead, by where they live.
+
+It also counts the files offloaded to the file bucket and asks the bucket about
+20 of them, one metadata request each (`offloaded`: total, sampled, answered, and
+the names of any that did not answer).
+
+It reads and writes nothing (`SecretReconciler::census()` is the reconciler's
+read-only pass). It counts what a backup chain carries and leaves out what each
+machine keeps as its own: the names the files engine never archives, at any
+depth, and the site's `backup_exclude` names (a pattern matched as tar matches
+it: any tail of the path that starts at a name, `*` crossing `/`); `public_html_*` and
+`uploads/upgrades`; the local copies of offloaded files; this machine's
+`config/Globalvars_site.php`, `config/backup_site_key` and
+`config/backup-ledger`; and the rows of `bkh_backup_history`, which a backup
+run writes after its dump. The list lives in `includes/SiteCensus.php`, and
+`tests/backups/site_census_test.php` holds its names equal to
+`backup_files.sh`'s.
+
+`SiteCensus::compare($source, $copy, $exact)` lists every difference. A canary
+that opens on the source and not on the copy, or more dead secrets on the copy,
+always blocks. A difference in rows, files, bytes or stored secrets blocks only
+when `$exact` is true, which is the right setting once the source has stopped
+changing; while the source is live they are reported and do not block.
+
+From a management node, the `site_census` job runs the same script over the
+agent (read-only, so it runs on a dormant copy and a frozen source too), and
+`JobResultProcessor::census_of($job)` returns the count it kept.
 
 ## Key model: one envelope per backup
 

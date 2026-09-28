@@ -25,6 +25,8 @@
  * is what the setup-wizard pill and the management-node stats blob read, so
  * neither has to walk a live decrypt of every row on every admin request.
  *
+ * @version 1.2 - census(): the read-only count of stored and dead secrets and the canary's
+ *                state, for SiteCensus; the key is opened once per run, not once per category
  * @version 1.1 - an enumerator is consulted only while its plugin is active, and one that
  *                throws falls back to the code-free locator path instead of aborting the run
  * @version 1.0
@@ -75,6 +77,9 @@ class SecretReconciler {
 		);
 		$newly_dead = array();   // categories that transitioned into dead this run
 
+		$box = null;
+		try { $box = new SecretBox(); } catch (\Throwable $e) { /* no key: everything dead */ }
+
 		$rows = new MultiSealedSecretRegistry(array(), array('ssr_locator' => 'ASC'));
 		foreach ($rows as $row) {
 			$locator   = (string)$row->get('ssr_locator');
@@ -82,7 +87,7 @@ class SecretReconciler {
 			$prior     = (string)$row->get('ssr_last_state');
 			$is_orphan = $row->is_orphan();
 
-			$inspect = self::inspect_category($row, $is_orphan);
+			$inspect = self::inspect_category($row, $is_orphan, $box);
 			$new_state = $inspect['dead'] > 0 ? SealedSecretRegistry::STATE_DEAD
 				: ($inspect['present'] > 0 ? SealedSecretRegistry::STATE_OK : SealedSecretRegistry::STATE_ABSENT);
 
@@ -155,6 +160,36 @@ class SecretReconciler {
 			. ($out['dead_low'] ? " (+{$out['dead_low']} low)" : '')
 			. ($out['discarded'] ? ", discarded {$out['discarded']} stale" : '')
 			. ($cold ? '' : ' (ran hot — heals/mints deferred to a cold pass)');
+		return $out;
+	}
+
+	/**
+	 * Count the stored and the dead sealed secrets, and read the canary, writing
+	 * nothing: no heal, no cached verdict, no alert. What SiteCensus reports, so
+	 * a copy of a site can be checked against its source.
+	 *
+	 * @param SecretBox|null $box the key to open with; this site's own when null.
+	 *                            Tests pass another to see every secret dead.
+	 * @return array{canary:string, present:int, dead:int, dead_locators:array<string,int>}
+	 *               canary is a SecretBox::OPEN_* state, or 'nokey' when this site has no key
+	 */
+	public static function census(?SecretBox $box = null): array {
+		if ($box === null) {
+			try { $box = new SecretBox(); } catch (\Throwable $e) { /* no key: everything dead */ }
+		}
+		$out = array('canary' => 'nokey', 'present' => 0, 'dead' => 0, 'dead_locators' => array());
+		if ($box !== null) {
+			$out['canary'] = SecretBox::canaryState($box);
+		}
+		$rows = new MultiSealedSecretRegistry(array(), array('ssr_locator' => 'ASC'));
+		foreach ($rows as $row) {
+			$inspect = self::inspect_category($row, $row->is_orphan(), $box);
+			$out['present'] += $inspect['present'];
+			$out['dead'] += $inspect['dead'];
+			if ($inspect['dead'] > 0) {
+				$out['dead_locators'][(string)$row->get('ssr_locator')] = $inspect['dead'];
+			}
+		}
 		return $out;
 	}
 
@@ -260,11 +295,9 @@ class SecretReconciler {
 	 *
 	 * @return array{present:int, dead:int}
 	 */
-	private static function inspect_category($row, bool $is_orphan): array {
+	private static function inspect_category($row, bool $is_orphan, ?SecretBox $box): array {
 		$locator = (string)$row->get('ssr_locator');
 		$present = 0; $dead = 0;
-		$box = null;
-		try { $box = new SecretBox(); } catch (\Throwable $e) { /* no key: everything dead */ }
 
 		$classify = function (?string $blob) use (&$present, &$dead, $box) {
 			if ($blob === null || $blob === '') return;         // absent — not counted as present

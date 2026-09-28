@@ -1314,4 +1314,40 @@ section('reset_failed_unit: before and after, and a fresh host report behind an 
 }
 
 
+section('site_census: the node\'s count is kept for comparing, and nothing else changes');
+
+// specs/site_copy.md WP3. The census is what the node printed as root, inside
+// the agent's envelope, with whatever warnings PHP printed around it.
+$sc_census = array('version' => SiteCensus::VERSION, 'tables' => array('usr_users' => 3),
+	'files' => array('uploads' => array('files' => 2, 'dirs' => 1, 'bytes' => 150, 'digest' => str_repeat('a', 64))),
+	'secrets' => array('canary' => 'ok', 'present' => 4, 'dead' => 0, 'dead_locators' => array()),
+	'offloaded' => array('total' => 0, 'sampled' => 0, 'answered' => 0, 'missing' => array(), 'error' => ''));
+$sc_env = function ($text) {
+	return "=== [Step 1/1] site_census ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+		'output' => $text, 'output_bytes' => strlen($text)))) . "\n[Step 1/1 OK]";
+};
+$sc_node = jrp_node();
+$sc_status_before = (string)$sc_node->get('mgn_last_status_data');
+$sc_job = jrp_job($sc_node, 'site_census', $sc_env("PHP Deprecated: x\n" . SiteCensus::format_output($sc_census)));
+JobResultProcessor::process($sc_job);
+check(JobResultProcessor::census_of($sc_job) === $sc_census, 'the census comes back as the node counted it',
+	(string)$sc_job->get('mjb_result'));
+$sc_node->load();
+check((string)$sc_node->get('mgn_last_status_data') === $sc_status_before, 'and the node\'s stored status is untouched');
+
+$sc_bad = jrp_job($sc_node, 'site_census', $sc_env("ERROR: the census could not be taken: cannot read /x\n"));
+JobResultProcessor::process($sc_bad);
+$sc_r = json_decode((string)$sc_bad->get('mjb_result'), true);
+check(JobResultProcessor::census_of($sc_bad) === null && ($sc_r['measured'] ?? null) === false
+	&& strpos((string)($sc_r['error'] ?? ''), 'cannot read /x') !== false,
+	'a census that failed is recorded as none, with the node\'s reason', (string)$sc_bad->get('mjb_result'));
+$sc_other = jrp_job($sc_node, 'host_report', $sc_env(SiteCensus::format_output($sc_census)));
+check(JobResultProcessor::census_of($sc_other) === null, 'only a site_census job carries a census');
+$sc_threw = false;
+try { JobCommandBuilder::build_site_census($sc_node); } catch (Exception $e) { $sc_threw = true; }
+check($sc_threw, 'a node with no agent is not asked');
+$sc_cmd = JobCommandBuilder::build_site_census(jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)))));
+check($sc_cmd === array('primitive' => 'site_census', 'params' => array()), 'the job names the word and nothing else',
+	var_export($sc_cmd, true));
+
 harness_finish();
