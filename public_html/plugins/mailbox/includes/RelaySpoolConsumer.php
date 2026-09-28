@@ -27,6 +27,13 @@
  * pinned to the relay's identity, and the relay scopes every path to this
  * tenant's own spool: ids only, no paths, no root.
  *
+ * @version 1.15 - a pull that drains the listing stamps mrl_last_pull_drained_time (B41); an
+ *                unopenable client entry is stored marked, not held (B40); the key's
+ *                own vault is used only while its owner still holds the mailbox (B42)
+ * @version 1.14 - a key_kind=client entry (a Fortress mailbox, sealed at the relay in the
+ *                browser's format) is stored pending with the relay's DEK as its key;
+ *                one that is not in that format is held, never stored
+ *                (specs/client_custody_mail.md WP7, B35)
  * @version 1.13.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.13 - a relay row without an identity pin is an ERROR, not a skip: its mail
  *                 is accumulating on a machine this server cannot reach
@@ -133,7 +140,7 @@ class RelaySpoolConsumer {
 			// oldest first; each is fetched into the staging directory the ingest
 			// below reads.
 			try {
-				$this->fetchOverApi($stage, $max);
+				$exhausted = $this->fetchOverApi($stage, $max);
 			} catch (RelayClientException $e) {
 				return array('status' => 'error', 'message' => 'relay API pull failed (' . $e->failure_class . '): ' . $e->getMessage());
 			}
@@ -145,11 +152,13 @@ class RelaySpoolConsumer {
 			$seals = array_merge(glob($stage . '/*.seal') ?: array(), glob($stage . '/*.direct') ?: array());
 			$stored = 0; $pending = 0; $errors = 0; $held = 0;
 			$acked_ids = array();
+			$processed = 0;
 
 			foreach ($seals as $seal_path) {
 				if (($stored + $pending + $errors + $held) >= $max) {
 					break;
 				}
+				$processed++;
 				$is_direct = (substr($seal_path, -7) === '.direct');
 				$spool_id = basename($seal_path, $is_direct ? '.direct' : '.seal');
 				$meta_path = $stage . '/' . $spool_id . '.meta';
@@ -185,12 +194,17 @@ class RelaySpoolConsumer {
 				// One aggregate line per pass — never per-blob (the pull runs every
 				// cron pass and held blobs persist across passes).
 				error_log('RelaySpoolConsumer: ' . $held . ' blob(s) HELD on the relay '
-					. '(domain disabled/unconfigured, owner of relay-sealed mail unresolved, or a protected '
-					. 'mailbox with no key to seal to) — recoverable; the Setup tab names a '
-					. 'sealing mailbox that needs repair.');
+					. '(domain disabled/unconfigured, owner of relay-sealed mail unresolved, a protected '
+					. 'mailbox with no key to seal to, or end-to-end mail sealed in a form or to a key '
+					. 'no vault here holds) — the Setup tab names a sealing mailbox that needs repair.');
 			}
 
 			$this->relay->set('mrl_last_pull_time', gmdate('Y-m-d H:i:s'));
+			// Drained: the listing was read to its end and every entry on it was
+			// stored, acked or held — none left unread behind a cap or an error.
+			if ($exhausted && $errors === 0 && $processed === count($seals)) {
+				$this->relay->set('mrl_last_pull_drained_time', gmdate('Y-m-d H:i:s'));
+			}
 			$this->relay->set('mrl_last_pull_held', $held);
 			$this->relay->save();
 
@@ -324,6 +338,10 @@ class RelaySpoolConsumer {
 		}
 		$alias = $this->router->lookupAlias($local, $domain);
 
+		if ($key_kind === 'client') {
+			return $this->ingestClient($meta, $sealed_raw, $spool_id, $domain, $alias, $recipient);
+		}
+
 		if ($key_kind === 'user') {
 			$owner_id = ($alias !== null) ? InboundEmailMessage::singleOwnerUserId(intval($alias->key)) : null;
 			if ($owner_id === null) {
@@ -387,6 +405,90 @@ class RelaySpoolConsumer {
 			return 'stored';
 		}
 		return $result['dedup'] ? 'dedup' : 'stored';
+	}
+
+	/**
+	 * A Fortress arrival the relay sealed to the owner's browser-held mail key
+	 * (specs/client_custody_mail.md § R9). Nothing here can open it: the row is
+	 * stored pending, the relay's sealed DEK becomes its key, and the first of
+	 * the owner's browsers to unlock parses it (mailbox/fortress_parse_store).
+	 *
+	 * The key normally belongs to the mailbox owner's mail vault, current or
+	 * pending generation. When the grants changed since the relay sealed it, the
+	 * key may be another person's who still holds the mailbox (a shared one):
+	 * the row is theirs to parse (B42). When nobody who holds the mailbox has
+	 * that key — a retired generation, a vault since set up again, an owner who
+	 * no longer has the mailbox — the message is stored anyway, under the
+	 * owner's name at generation 0, which marks it as arrived sealed to a key
+	 * their vault does not hold (B40). It shows as such and can be deleted, and
+	 * the ciphertext is kept. Holding it on the relay instead would put it in
+	 * front of every later arrival for good: the listing is oldest first.
+	 *
+	 * Two cases still HOLD, with no age-out: an entry not in the browser's
+	 * format (only an older relay program writes one, and the exporter never
+	 * names a client key to one, B35), and a mailbox with no owner holding a
+	 * mail vault, which Fortress mail waits for like any Fortress arrival.
+	 */
+	private function ingestClient(array $meta, string $sealed_raw, string $spool_id, $domain, $alias, string $recipient): string {
+		$scope = (string)($meta['key_scope'] ?? '');
+		$sealed_dek = (string)($meta['sealed_dek'] ?? '');
+		if ($scope !== InboundEmailMessage::SEAL_SCOPE_FORTRESS
+				|| VaultCrypto::parseEdgeScope($sealed_dek) !== $scope
+				|| !VaultCrypto::isEdgeField($sealed_raw)) {
+			return 'hold';
+		}
+
+		$public_key = (string)($meta['public_key'] ?? '');
+		$owner_id = ($alias !== null) ? InboundEmailMessage::singleOwnerUserId(intval($alias->key)) : null;
+		$vault = ($owner_id !== null) ? UserEncryptionVault::loadForUser($owner_id, $scope) : null;
+		$generation = ($vault !== null) ? $this->generationOf($vault, $public_key) : null;
+		$holder = ($generation === null && $alias !== null) ? $this->clientVaultByPublicKey($public_key, $scope) : null;
+		if ($holder !== null && in_array(intval($holder->get('uev_usr_user_id')),
+				InboundEmailMailboxGrant::user_ids_for_alias(intval($alias->key)), true)) {
+			$vault = $holder;
+			$generation = $this->generationOf($holder, $public_key);
+		}
+		if ($vault === null) {
+			return 'hold';
+		}
+		if ($generation === null) {
+			error_log('RelaySpoolConsumer: relay-sealed Fortress message ' . $spool_id
+				. ' is sealed to a key no vault holding its mailbox has; stored marked unopenable.');
+			$generation = 0;
+		}
+
+		$result = $this->router->storeRelayPending($meta, $sealed_raw, $domain, $alias,
+			intval($vault->get('uev_usr_user_id')), $this->relayAuthservId(),
+			array('sealed_dek' => $sealed_dek, 'vault' => $vault, 'generation' => $generation));
+		return $result['dedup'] ? 'dedup' : 'pending';
+	}
+
+	/** The generation of $vault whose public key is $public_key (current or pending), or null. */
+	private function generationOf(UserEncryptionVault $vault, string $public_key): ?int {
+		if ($public_key === '') {
+			return null;
+		}
+		if (hash_equals((string)$vault->get('uev_public_key'), $public_key)) {
+			return intval($vault->get('uev_key_generation'));
+		}
+		if ($vault->get('uev_pending_key_generation') !== null
+				&& hash_equals((string)$vault->get('uev_pending_public_key'), $public_key)) {
+			return intval($vault->get('uev_pending_key_generation'));
+		}
+		return null;
+	}
+
+	/** The live $scope vault whose current or pending public key is $public_key, or null. */
+	private function clientVaultByPublicKey(string $public_key, string $scope): ?UserEncryptionVault {
+		if ($public_key === '') {
+			return null;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare("SELECT uev_usr_user_id FROM uev_user_encryption_vaults
+			WHERE uev_scope = ? AND (uev_public_key = ? OR uev_pending_public_key = ?) LIMIT 2");
+		$stmt->execute(array($scope, $public_key, $public_key));
+		$owners = $stmt->fetchAll(PDO::FETCH_COLUMN);
+		return (count($owners) === 1) ? UserEncryptionVault::loadForUser(intval($owners[0]), $scope) : null;
 	}
 
 	private function transportSecret(): string {
@@ -473,9 +575,10 @@ class RelaySpoolConsumer {
 	 * Fetch up to $max complete entries off the relay API into the staging
 	 * directory: the artifact (.seal or .direct) and its .meta, paged oldest
 	 * first, on one keep-alive connection. A fetch that fails mid-entry removes
-	 * what it wrote, so a torn pair is never staged.
+	 * what it wrote, so a torn pair is never staged. Returns whether the
+	 * listing was read to its end with nothing torn (B41).
 	 */
-	private function fetchOverApi(string $stage, int $max): void {
+	private function fetchOverApi(string $stage, int $max): bool {
 		// The listing is where a pin mismatch surfaces; withApi re-fetches a
 		// hosted slot's coordinates once and retries. The fetches below reuse the
 		// client the retry settled on.
@@ -485,13 +588,16 @@ class RelaySpoolConsumer {
 			return $c->spoolList('', 1);
 		});
 		if (empty($first['entries'])) {
-			return;
+			return true;
 		}
 		$after = '';
 		$fetched = 0;
+		$exhausted = false;
+		$torn = false;
 		while ($fetched < $max) {
 			$page = $client->spoolList($after, min(200, $max - $fetched));
 			if (empty($page['entries'])) {
+				$exhausted = true;
 				break;
 			}
 			foreach ($page['entries'] as $entry) {
@@ -508,6 +614,7 @@ class RelaySpoolConsumer {
 					// a .seal without one is a torn pair and is left for the next pull.
 					if ($kind === 'seal') {
 						@unlink($stage . '/' . $id . '.seal');
+						$torn = true;
 						continue;
 					}
 				}
@@ -518,9 +625,13 @@ class RelaySpoolConsumer {
 				}
 			}
 			if (empty($page['more'])) {
+				$exhausted = true;
 				break;
 			}
 		}
+		// True when the listing ended before the cap and nothing on it was left
+		// behind: the pull saw everything the relay had.
+		return $exhausted && !$torn;
 	}
 
 	/**

@@ -20,6 +20,8 @@
  * (specs/in_window_deferred_work.md), so the backlog also drains while the
  * owner is anywhere else on the site with their vault open.
  *
+ * @version 1.3 - skips a pending row whose key the owner's browser holds (a relay-sealed
+ *               Fortress arrival): the browser parses it, the window cannot
  * @version 1.2.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.2
  */
@@ -45,6 +47,7 @@ class DeferredIngest {
 			  WHERE iem_pending_parse = true
 			    AND iem_sealed_owner_user_id = ?
 			    AND iem_delete_time IS NULL
+			    AND (iem_sealed_key IS NULL OR NOT " . InboundEmailMessage::mailKeySql() . ")
 			  LIMIT 1"
 		);
 		$stmt->execute(array($user_id));
@@ -119,6 +122,7 @@ class DeferredIngest {
 			  WHERE iem_pending_parse = true
 			    AND iem_sealed_owner_user_id = ?
 			    AND iem_delete_time IS NULL
+			    AND (iem_sealed_key IS NULL OR NOT " . InboundEmailMessage::mailKeySql() . ")
 			  ORDER BY iem_received_time DESC
 			  LIMIT ?"
 		);

@@ -17,6 +17,9 @@
  * periodic reconcile (the relay reconcile scheduled task), so freshness beats the
  * reject_unmatched gate.
  *
+ * @version 2.5 - rotationRefusal(): a mail key rotation does not commit while the relay
+ *                may still seal to the old key, or may still hold mail sealed to it
+ *                (specs/client_custody_mail.md B33, B41)
  * @version 2.4 - a relay row without an identity pin is an ERROR, not a skip
  * @version 2.3 - the ssh era is over: the API is the only push path
  * @version 2.2 - a relay with an identity pin takes the fragment as a signed
@@ -47,6 +50,49 @@ class RelayMapSync {
 		} catch (\Throwable $e) {
 			error_log('RelayMapSync::onChange push failed: ' . $e->getMessage());
 		}
+	}
+
+	/**
+	 * Why a rotation of the `mail` key may not commit yet, or null
+	 * (specs/client_custody_mail.md B33).
+	 *
+	 * The commit retires the old key. A relay that seals Fortress mail to the
+	 * mail key names the NEW one once the begin push has landed; until then it
+	 * still seals to the old one, and mail sealed to a retired key is lost. So
+	 * the commit waits for two things: the relay has accepted the map as it
+	 * stands now (its recorded hash is this map's; commit does not push, the
+	 * begin listener and the reconcile do), and a pull has DRAINED the relay's
+	 * listing since that push (mrl_last_pull_drained_time: read to its end, not
+	 * stopped at its cap), so everything it sealed to the old key before the
+	 * switch is stored and on the rotation's walk (B41). Nothing to wait for without a relay, or with one that
+	 * seals Fortress mail to the transport key (RelayVersion::sealsForBrowsers).
+	 */
+	public static function rotationRefusal(): ?string {
+		$relay = MailboxRelay::active();
+		if ($relay === null || !RelayVersion::sealsForBrowsers($relay)) {
+			return null;
+		}
+		$wait = 'Your mail relay has not switched to your new key yet. Try again in a minute: '
+			. 'finishing now would leave mail it is still sealing to the old key unreadable.';
+		try {
+			$hash = self::contentHash((new RelayMapExporter($relay))->build());
+		} catch (\Throwable $e) {
+			error_log('RelayMapSync::rotationRefusal: map build failed: ' . $e->getMessage());
+			return $wait;
+		}
+		if ($hash !== (string)$relay->get('mrl_map_content_hash')) {
+			return $wait;
+		}
+		$when = function (string $col) use ($relay) {
+			$v = trim((string)$relay->get($col));
+			return ($v === '') ? false : strtotime($v . ' UTC');
+		};
+		$pushed = $when('mrl_last_push_time');
+		$drained = $when('mrl_last_pull_drained_time');
+		if ($pushed !== false && ($drained === false || $drained <= $pushed)) {
+			return $wait;
+		}
+		return null;
 	}
 
 	/**

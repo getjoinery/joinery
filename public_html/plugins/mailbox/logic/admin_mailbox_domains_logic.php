@@ -1,6 +1,9 @@
 <?php
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
+// @version 1.4 - the Fortress receipt counts relay-sealed mail still waiting to be opened (B46)
+// @version 1.3 - Seal at the relay works with Fortress on a relay that reports it can
+//               seal for browsers (specs/client_custody_mail.md B38)
 // @version 1.2 - Fortress is settable (specs/client_custody_mail.md § R8, WP5): its own
 //   receipt for both directions, Seal at the relay refused with it until WP7, and a
 //   lowering off Fortress to Private needs no server window (the browser moves the keys)
@@ -27,12 +30,16 @@ function admin_mailbox_domains_fortress_refusal(InboundEmailDomain $domain, int 
 	if (!$domain->key) {
 		return 'Save the domain first, then set it to Fortress.';
 	}
-	// Relay mail reaches a Fortress mailbox sealed to the relay's key, not the
-	// owner's, until the relay learns the owner's mail key
-	// (specs/client_custody_mail.md WP7), so the add-on's promise would not hold.
+	// Under the add-on the relay seals Fortress mail to the owner's device key
+	// (specs/client_custody_mail.md § R9), which only a relay running the
+	// program that writes the browser's format can do. An older one would
+	// carry on sealing to its own key, and the add-on's promise would not hold.
 	if ($relay_on) {
-		return 'Seal at the relay does not work with Fortress yet. Switch it off to use Fortress, '
-			. 'or keep this domain Private.';
+		$relay = MailboxRelay::active();
+		if ($relay !== null && !RelayVersion::sealsForBrowsers($relay)) {
+			return 'Your mail relay runs an older version that cannot seal Fortress mail to your devices. '
+				. 'Update the relay, or switch Seal at the relay off to use Fortress.';
+		}
 	}
 	if ($domain->is_imap_source()) {
 		return 'A mailbox collected from another provider cannot be Fortress: the server holds a password '
@@ -776,8 +783,14 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			$ceremony['fortress_raise_backlog'] = 0;
 			$ceremony['fortress_lower_backlog'] = MailboxFortressLevel::loweringBacklogCount($acting_user_id, intval($edit_domain->key));
 		}
+		// Relay-sealed mail still waiting for the owner's browser to open it
+		// (specs/client_custody_mail.md B46): not on the lowering walk until it
+		// has been, so the receipt counts it apart rather than reading done.
+		$ceremony['fortress_waiting'] = $edit_domain->is_fortress() ? 0
+			: MailboxFortressParse::pendingCount($acting_user_id, intval($edit_domain->key));
 		$ceremony['fortress_active'] = !empty($input['fortress_now']) || !empty($input['fortress_lowered'])
-			|| $ceremony['fortress_raise_backlog'] > 0 || $ceremony['fortress_lower_backlog'] > 0;
+			|| $ceremony['fortress_raise_backlog'] > 0 || $ceremony['fortress_lower_backlog'] > 0
+			|| $ceremony['fortress_waiting'] > 0;
 		// Lowering receipt state (specs/mailbox_lowering_unseal.md): a domain
 		// that no longer seals but still carries sealed history converges it —
 		// on arrival from the lowering (unsealed_now) or any later visit while
@@ -788,7 +801,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			$ceremony['unseal_others_backlog'] = $unseal_counts['others'];
 			// The unseal waits for the browser's step: a message still on the
 			// device key is not the server's to unseal.
-			$ceremony['unseal_active'] = $ceremony['fortress_lower_backlog'] === 0
+			$ceremony['unseal_active'] = $ceremony['fortress_lower_backlog'] === 0 && $ceremony['fortress_waiting'] === 0
 				&& (($unseal_counts['own'] + $unseal_counts['others'] > 0) || !empty($input['unsealed_now']));
 			$ceremony['window_open'] = ($acting_user_id > 0) && VaultUnlock::isOpen($acting_user_id);
 		} else {

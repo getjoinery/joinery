@@ -34,6 +34,12 @@ type spoolMeta struct {
 	PublicKey   string `json:"public_key"`
 	MapVersion  int64  `json:"map_version"`
 	ReceivedUTC string `json:"received_utc"`
+	// key_kind=client only: the message's DEK sealed to the recipient's
+	// browser-held key ("v1.edgeseal.{scope}."), the scope, and the key
+	// generation the map named. The .seal holds the body under that DEK.
+	SealedDEK     string `json:"sealed_dek,omitempty"`
+	KeyScope      string `json:"key_scope,omitempty"`
+	KeyGeneration int    `json:"key_generation,omitempty"`
 }
 
 // extractMeta pulls the operational header set out of the raw RFC822 message. It

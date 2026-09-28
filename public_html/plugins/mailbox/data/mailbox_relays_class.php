@@ -35,6 +35,7 @@
  * coordinates the fleet service returned at enrollment. Either way this row
  * remains the deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.8 - mrl_last_pull_drained_time: the last pull that emptied the relay's listing
  * @version 1.7.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.7 - mrl_pickup_alarm_time and pickupTransition(): the reconcile pass announces
  *                once when mail stops being picked up off the relay, and once when it resumes
@@ -120,6 +121,12 @@ class MailboxRelay extends SystemBase {
 		'mrl_map_content_hash'   => array('type'=>'varchar(64)'),
 		'mrl_last_push_time'     => array('type'=>'timestamp(6)'),
 		'mrl_last_pull_time'     => array('type'=>'timestamp(6)'),
+		// The last pull that read the relay's listing to its end (not stopped at its
+		// cap, no torn or failed entry) and processed all of it: everything the
+		// relay had spooled before that pull began is now stored or held. A mail
+		// key rotation's commit waits for one after the push that named the new
+		// key (RelayMapSync::rotationRefusal, specs/client_custody_mail.md B41).
+		'mrl_last_pull_drained_time' => array('type'=>'timestamp(6)'),
 		// When the reconcile pass announced that pickup had stopped; NULL while
 		// pickup is healthy. The alarm is raised once and cleared on the next pull
 		// that reaches the relay, so a relay that stays broken is not re-announced.

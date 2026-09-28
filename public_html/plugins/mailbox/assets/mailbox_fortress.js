@@ -20,7 +20,11 @@
  *                     compose half (§ R6): a draft is sealed here under one
  *                     DEK for its life and posted as ciphertext; a reply or
  *                     forward of an end-to-end message quotes and re-attaches
- *                     what this browser opened, since the server cannot.
+ *                     what this browser opened, since the server cannot;
+ *   drainPending()    parses what a relay sealed to this key (§ R9): the
+ *                     message is opened and parsed here (MailboxMime) and its
+ *                     fields and parts go back sealed under the row's own DEK.
+ *                     It runs whenever the mail vault opens.
  *
  * None of these starts an unlock: a content action does, through unlock().
  * While the mail vault is shut, rows get placeholders and the response says
@@ -34,6 +38,12 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.10.1 - review of 2026-09-28: parts go as one bundle upload (B37); a stale key is
+ *                fetched once more (B44); the banner says when this device could not open
+ *                them (B43); a row sealed to a key the vault does not hold says so (B40)
+ * @version 1.10 - drainPending(): relay-sealed arrivals are opened, parsed (MailboxMime), sealed
+ *                under their own DEK and stored from here (specs/client_custody_mail.md § R9);
+ *                a browser-parsed manifest names parts by number
  * @version 1.9.2 - another person's rows (an all-access viewer) say only the owner's devices open them
  * @version 1.9.1 - review of 2026-09-27: a part removed during a save stays removed (B4); an inline
  *   image that will not open fails the draft's open rather than being dropped at the next save (B5)
@@ -64,6 +74,7 @@ window.MailboxFortress = (function () {
 	var LOCKED_NOTE = 'End-to-end encrypted. Unlock your vault to read it.';
 	var FAILED_NOTE = 'This message could not be opened on this device.';
 	var FOREIGN_NOTE = 'End-to-end encrypted. Only the mailbox owner\'s devices can open it.';
+	var UNOPENABLE_NOTE = 'This message arrived sealed to a key your vault does not hold, so it cannot be opened. You can delete it.';
 	// Inline images rendered in a message body. Anything else stays an
 	// unresolved cid: reference.
 	var INLINE_IMAGE_TYPES = {
@@ -178,7 +189,9 @@ window.MailboxFortress = (function () {
 		if (!sealed.length) return data;
 		// Another person's rows (an all-access viewer): no unlock here opens them.
 		sealed.forEach(function (t) { if (t.sealed.foreign) placeholderThread(t, FOREIGN_NOTE); });
-		sealed = sealed.filter(function (t) { return !t.sealed.foreign; });
+		// Sealed to a key no vault here holds: no unlock opens it either.
+		sealed.forEach(function (t) { if (!t.sealed.foreign && t.sealed.unopenable) placeholderThread(t, UNOPENABLE_NOTE); });
+		sealed = sealed.filter(function (t) { return !t.sealed.foreign && !t.sealed.unopenable; });
 		if (!sealed.length) return data;
 		await ready();
 		if (!isOpen()) {
@@ -251,12 +264,17 @@ window.MailboxFortress = (function () {
 
 		var manifest = [];
 		try { manifest = JSON.parse(o.iem_attachment_manifest || '[]') || []; } catch (e) { manifest = []; }
-		var byId = {};
-		manifest.forEach(function (e) { if (e && e.id != null) byId[String(e.id)] = e; });
+		var byId = {}, byPart = {};
+		manifest.forEach(function (e) {
+			if (e && e.id != null) byId[String(e.id)] = e;
+			// A browser-parsed row names its parts by number: it sealed the
+			// manifest before the server gave them ids (drainPending).
+			else if (e && e.mime_part) byPart[String(e.mime_part)] = e;
+		});
 
 		rememberKey(m.id, m.sealed.sealed_dek);
 		var parts = (m.attachments || []).map(function (a) {
-			var e = byId[String(a.id)] || {};
+			var e = byId[String(a.id)] || byPart[String(a.mime_part)] || {};
 			a.filename = e.filename || 'attachment';
 			a.content_type = e.content_type || 'application/octet-stream';
 			a.content_id = e.content_id || '';
@@ -289,6 +307,7 @@ window.MailboxFortress = (function () {
 		for (var i = 0; i < sealed.length; i++) {
 			var m = sealed[i];
 			if (m.sealed.foreign) { placeholderMessage(m, FOREIGN_NOTE); continue; }
+			if (m.sealed.unopenable) { placeholderMessage(m, UNOPENABLE_NOTE); continue; }
 			if (m.sealed.pending) { placeholderMessage(m, PENDING_NOTE); continue; }
 			if (locked) { placeholderMessage(m, LOCKED_NOTE); data.fortress_locked = true; continue; }
 			try {
@@ -628,6 +647,173 @@ window.MailboxFortress = (function () {
 		return out;
 	}
 
+	// ---- relay-sealed arrivals (§ R9) --------------------------------------------------
+	//
+	// A relay that fronts a Fortress mailbox seals each message to this vault's
+	// key: the raw message under a DEK only this key opens. The server stores it
+	// pending and cannot read it, so the first of the owner's devices to unlock
+	// parses it here and posts back the fields and parts, sealed under that same
+	// DEK. Newest first; a message this device cannot read is skipped, not
+	// retried in a loop, and stays pending for another device or a later visit.
+
+	var FORTRESS_FIELD_MAX = { iem_subject: 4000, iem_sender: 500 };
+	var draining = null;
+
+	/** Parse and store every relay-sealed message waiting for this vault. Resolves the count stored. */
+	function drainPending() {
+		if (draining) return draining;
+		draining = (async function () {
+			var epoch0 = lockEpoch, stored = 0, skip = [], refetched = {};
+			try {
+				while (isOpen() && lockEpoch === epoch0) {
+					var d = await window.joineryApi.post('mailbox/fortress_pending', { skip: skip.join(',') });
+					var item = d && d.item;
+					// What is left once this device has given up on some: those
+					// stay waiting for another device, and the banner says so.
+					pendingBanner(d ? d.remaining : 0, item ? 0 : skip.length);
+					if (!item) break;
+					try {
+						var outcome = await parsePending(item, epoch0);
+						if (outcome === 'dropped') break;
+						// A rotation re-wrapped the row's key after the fetch: fetch
+						// it once more, then leave it for the next visit.
+						if (outcome === 'stale') {
+							if (refetched[item.id]) skip.push(item.id);
+							refetched[item.id] = true;
+							continue;
+						}
+						stored++;
+					} catch (e) {
+						skip.push(item.id);
+						if (window.console) console.warn('MailboxFortress: message ' + item.id + ' could not be parsed here: '
+							+ (e && e.message));
+					}
+				}
+			} finally {
+				draining = null;
+				if (stored && window.MailboxReader && MailboxReader.refreshList) MailboxReader.refreshList();
+			}
+			return stored;
+		})();
+		return draining;
+	}
+
+	/**
+	 * The banner's count, as the last fetch said; gone at none. `failed` of
+	 * them could not be opened on this device (the drain skipped them), which
+	 * the banner says instead of promising they are on their way.
+	 */
+	function pendingBanner(n, failed) {
+		if (typeof document === 'undefined') return;
+		var el = document.querySelector('[data-fortress-pending]');
+		if (!el) return;
+		// The banner's own display rule outranks the hidden attribute.
+		if (!(n > 0)) { el.parentNode.removeChild(el); return; }
+		var text = el.querySelector('[data-fortress-pending-text]');
+		if (!text) return;
+		var plural = function (k) { return k + ' new end-to-end message' + (k === 1 ? '' : 's'); };
+		text.textContent = failed >= n
+			? plural(n) + ' could not be opened on this device. Another of your devices may open '
+				+ (n === 1 ? 'it' : 'them') + '; if none can, please report this problem.'
+			: plural(n) + ' being opened on this device.';
+	}
+
+	/**
+	 * One pending row: open the message under the row's DEK, parse it, seal
+	 * every field and part under the same DEK, and post the lot. Resolves
+	 * 'stored', 'already' (another device got there first), 'stale' (a
+	 * rotation re-wrapped its key after the fetch: nothing stored) or 'dropped'
+	 * (the vault shut part way: nothing was posted).
+	 */
+	async function parsePending(item, epoch0) {
+		var key = await importRowKey(item.sealed_dek);
+		var raw = await openEdgeBytes(item.sealed_raw, key, item.raw_ad);
+		// The parser hands back views into these bytes for parts that need no
+		// decoding, so they are wiped only once everything is sealed.
+		try {
+			return await sealAndStore(item, key, MailboxMime.parse(raw), epoch0);
+		} finally {
+			raw.fill(0);
+		}
+	}
+
+	async function sealAndStore(item, key, p, epoch0) {
+		var readable = readableText(p.textHtml);
+		var names = p.attachments.map(function (a) { return a.filename; }).filter(function (n) { return n; });
+		var values = {
+			iem_sender: p.from,
+			iem_subject: p.subject,
+			iem_body_plain: p.textPlain,
+			iem_body_html: p.textHtml,
+			iem_raw_headers: p.headers,
+			iem_to: p.to,
+			iem_cc: p.cc,
+			iem_snippet: snippetOf(p.textPlain) || readable.replace(/\s+/g, ' ').trim().slice(0, 240),
+			iem_search_text: await packSearchText([p.from, p.subject, names.join(' '), p.textPlain, readable].join(' ')),
+			iem_attachment_manifest: p.attachments.length ? JSON.stringify(p.attachments.map(function (a) {
+				return { mime_part: a.mimePart, filename: a.filename, content_type: a.contentType,
+					content_id: a.contentId, inline: !!a.inline, size: a.bytes.length };
+			})) : ''
+		};
+		var prefix = String(item.sealed_ad_prefix) + item.id;
+		var fields = {};
+		var cols = Object.keys(values);
+		for (var i = 0; i < cols.length; i++) {
+			var v = String(values[cols[i]] || '');
+			if (FORTRESS_FIELD_MAX[cols[i]]) v = v.slice(0, FORTRESS_FIELD_MAX[cols[i]]);
+			// Empty stays bare, as the server stores it.
+			fields[cols[i]] = v === '' ? '' : EDGE_FIELD + await VaultCrypto.encrypt(v, key, prefix + ':' + cols[i]);
+		}
+		var body = new FormData();
+		body.append('id', String(item.id));
+		body.append('sealed_dek', item.sealed_dek);
+		body.append('fields', JSON.stringify(fields));
+		// Every part in ONE upload, each at its offset: the server takes at most
+		// 20 files per request, and a message can have more parts than that.
+		var parts = [], chunks = [], offset = 0;
+		for (var j = 0; j < p.attachments.length; j++) {
+			var a = p.attachments[j];
+			var sealed = await sealEdgeBytes(a.bytes, key, prefix + ':att:' + a.mimePart);
+			chunks.push(sealed);
+			parts.push({ mime_part: a.mimePart, size: a.bytes.length, inline: !!a.inline,
+				offset: offset, length: sealed.length });
+			offset += sealed.length;   // ASCII: one byte per character
+		}
+		if (chunks.length) body.append('bundle', new Blob(chunks, { type: 'application/octet-stream' }), 'parts');
+		body.append('parts', JSON.stringify(parts));
+		body.append('spam_headers', JSON.stringify({
+			x_spam: MailboxMime.headerValue(p, 'X-Spam'),
+			x_spam_flag: MailboxMime.headerValue(p, 'X-Spam-Flag'),
+			x_spam_score: MailboxMime.headerValue(p, 'X-Spam-Score'),
+			x_spam_status: MailboxMime.headerValue(p, 'X-Spam-Status')
+		}));
+		if (lockEpoch !== epoch0 || !isOpen()) return 'dropped';
+		var answer = await postForm('/api/v1/action/mailbox/fortress_parse_store', body);
+		return answer.stored ? 'stored' : (answer.stale ? 'stale' : 'already');
+	}
+
+	/** An HTML body's readable text, for search and the preview. Parsing runs no script. */
+	function readableText(html) {
+		if (!html || typeof DOMParser === 'undefined') return '';
+		var doc = new DOMParser().parseFromString(String(html), 'text/html');
+		Array.prototype.forEach.call(doc.querySelectorAll('script,style,head'), function (n) { n.remove(); });
+		return (doc.body ? doc.body.textContent : '') || '';
+	}
+
+	/**
+	 * A search text as the server stores one (InboundEmailMessage::searchTextFor):
+	 * whitespace folded, cut at 32768 characters, and 'gz:' + base64(gzip) when
+	 * that is a third or more shorter.
+	 */
+	async function packSearchText(text) {
+		text = Array.from(String(text).replace(/\s+/g, ' ').trim()).slice(0, 32768).join('');
+		if (text === '' || typeof CompressionStream === 'undefined') return text;
+		var plain = new TextEncoder().encode(text);
+		var stream = new Blob([plain]).stream().pipeThrough(new CompressionStream('gzip'));
+		var gz = 'gz:' + VaultCrypto.b64encode(new Uint8Array(await new Response(stream).arrayBuffer()));
+		return (gz.length * 3 <= plain.length * 2) ? gz : text;
+	}
+
 	// ---- search text (the sealed iem_search_text) ------------------------------
 
 	/** A search text as stored, 'gz:' + base64(gzip) or plain, to its text. */
@@ -663,6 +849,11 @@ window.MailboxFortress = (function () {
 		// This page reads the mail vault: the lock chip lists it and reads
 		// "locked" while it is shut, even with the account vault open.
 		if (JoinerySealed.want) JoinerySealed.want(SCOPE, 'Vault');
+		// Relay-sealed mail waits for an open vault; open is when it is parsed.
+		document.addEventListener('joinery:vault-scope-unlocked', function (e) {
+			if (e && e.detail && e.detail.scope === SCOPE) drainPending().catch(function () {});
+		});
+		ready().then(function () { if (isOpen()) drainPending().catch(function () {}); });
 		JoinerySealed.onLock(SCOPE, function () {
 			lockEpoch++;
 			wipe();
@@ -962,6 +1153,7 @@ window.MailboxFortress = (function () {
 		sourceOpen: sourceOpen,
 		sourceFiles: sourceFiles,
 		onLock: onLock,
+		drainPending: drainPending,
 		judgeEntry: judgeEntry,
 		epoch: epoch,
 		selfCheck: selfCheck

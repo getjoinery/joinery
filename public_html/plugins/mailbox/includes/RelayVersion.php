@@ -13,6 +13,7 @@
  * already the source of truth. Parsing it here rather than duplicating it means a
  * version bump has exactly one place to happen.
  *
+ * @version 1.1 - sealsForBrowsers(): the relay version that writes the browser's format
  * @version 1.0
  */
 
@@ -90,6 +91,24 @@ class RelayVersion {
 	 */
 	public static function forRelay(MailboxRelay $relay): string {
 		return self::compare($relay->provisionedVersion());
+	}
+
+	/** The first relay version whose sealer writes the browser's format (key_kind=client). */
+	const SEALS_FOR_BROWSERS = '3.1';
+
+	/**
+	 * Can this relay seal a Fortress mailbox's mail to its browser-held key?
+	 *
+	 * Read from the relay's own last health answer. A relay that has not said,
+	 * or runs an older program, cannot: an older sealer reads a client entry as
+	 * any other key and writes the server format under a client label, which no
+	 * browser and no server opens (specs/client_custody_mail.md B35). Such a
+	 * relay keeps the transport key until its health answer reports the version.
+	 */
+	public static function sealsForBrowsers(MailboxRelay $relay): bool {
+		$running = trim($relay->provisionedVersion());
+		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
+			&& version_compare($running, self::SEALS_FOR_BROWSERS, '>=');
 	}
 
 	/**

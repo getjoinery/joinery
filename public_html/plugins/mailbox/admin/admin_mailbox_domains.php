@@ -12,6 +12,8 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.5 - the Fortress receipt names relay-sealed mail still waiting to be opened (B46)
+ * @version 4.4 - the Fortress card says, under Seal at the relay, that this server never sees the mail (B38)
  * @version 4.3 - Fortress (specs/client_custody_mail.md § R8, R12): its card and notes, the
  *   Fortress receipt for both directions, the mail vault opened before a save that
  *   chooses Fortress; the AI switches hide at Fortress
@@ -125,6 +127,7 @@ if ($show_form) {
 			'is_fortress'   => $edit_domain->is_fortress(),
 			'raise_backlog' => $ceremony['fortress_raise_backlog'],
 			'lower_backlog' => $ceremony['fortress_lower_backlog'],
+			'waiting'       => $ceremony['fortress_waiting'],
 			'window_open'   => VaultUnlock::isOpen(intval($ceremony['acting_user_id'])),
 		));
 		echo '<script defer src="/plugins/mailbox/assets/mailbox_fortress_level.js?v='
@@ -229,11 +232,15 @@ if ($show_form) {
 		$relay_addon['note'] = 'It needs a relay in front of this server first.';
 		$relay_addon['link'] = ['/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section', 'Set up a relay'];
 	}
-	// What only this page knows about Fortress, under its card (R12): that
-	// mail arriving directly is seen as it arrives, and that an account which
-	// unlocks by passphrase is as safe as its passphrase.
-	$fortress_notes = ['New mail is encrypted the moment it arrives; a server hacked while mail is arriving '
-		. 'could read what arrives then.'];
+	// What only this page knows about Fortress, under its card (R12): whether
+	// mail is seen as it arrives (it is, unless the relay seals it for your
+	// devices under Seal at the relay, and then mail rules do not run on it),
+	// and that an account which unlocks by passphrase is as safe as its
+	// passphrase.
+	$fortress_notes = [($relay_value && $relay_offered)
+		? 'This server never sees your mail, not even as it arrives. Mail rules do not run on mail the relay seals.'
+		: 'New mail is encrypted the moment it arrives; a server hacked while mail is arriving '
+			. 'could read what arrives then.'];
 	$root_vault = UserEncryptionVault::loadForUser((int)$session->get_user_id(), VaultScopes::ROOT_SCOPE);
 	if ($root_vault !== null && (new MultiUserEncryptionWrapping(['vault_id' => (int)$root_vault->key,
 			'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE, 'deleted' => false]))->count() > 0) {

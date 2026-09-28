@@ -31,6 +31,7 @@
  * vault client drives on every page while the window is open; the receipt and
  * the mailbox banner only count (mailbox/fortress_backlog).
  *
+ * @version 1.1 - the lowering count leaves out relay-sealed rows still waiting to be parsed (B45)
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/attachment_retrieval.php'));
@@ -431,7 +432,9 @@ class MailboxFortressLevel {
 	/**
 	 * How many of $user_id's messages on $domain_id are still sealed to their
 	 * mail key after the domain left Fortress: what the lowering banner and
-	 * receipt count until the browser has moved them.
+	 * receipt count until the browser has moved them. A relay-sealed message
+	 * still waiting to be parsed is not one yet: the browser parses it first
+	 * (MailboxFortressParse), and then it counts (B45).
 	 */
 	public static function loweringBacklogCount(int $user_id, int $domain_id = 0): int {
 		if ($user_id <= 0) {
@@ -442,7 +445,8 @@ class MailboxFortressLevel {
 			LEFT JOIN iea_inbound_email_aliases a ON a.iea_inbound_email_alias_id = m.iem_iea_inbound_email_alias_id
 			JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = m.iem_ied_inbound_email_domain_id
 			WHERE " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " <> '" . InboundEmailDomain::LEVEL_FORTRESS . "'
-			  AND m.iem_sealed_owner_user_id = ? AND " . InboundEmailMessage::mailKeySql('m.iem_sealed_key')
+			  AND m.iem_sealed_owner_user_id = ? AND " . InboundEmailMessage::mailKeySql('m.iem_sealed_key') . "
+			  AND m.iem_pending_parse = false"
 			. ($domain_id > 0 ? ' AND m.iem_ied_inbound_email_domain_id = ' . intval($domain_id) : ''));
 		$stmt->execute(array($user_id));
 		return intval($stmt->fetchColumn());

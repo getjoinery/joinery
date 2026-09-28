@@ -30,6 +30,7 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.5 - the Fortress receipt has a row for relay-sealed mail waiting to be opened (B46)
  * @version 2.4 - mailbox_protection_owner_has_unseal_work(): the reader's per-load question, asked
  *   of the distinct (mailbox, domain) pairs of the owner's sealed rows rather than the rows
  * @version 2.3 - mailbox_fortress_receipt_render(); the Private seal backlog and batch leave
@@ -698,11 +699,15 @@ function mailbox_protection_unseal_batch(?InboundEmailDomain $domain, int $calle
  *     card follows the count (mailbox/fortress_backlog);
  *   - off Fortress: messages still on the device key wait for the owner's
  *     browser to move them back (JoinerySealed.changeCustody), one button.
- * $state: raise_backlog, lower_backlog, window_open, is_fortress.
+ *   Off Fortress, relay-sealed messages still waiting to be opened (`waiting`)
+ *   have their own row: the browser opens them first, and only then can they
+ *   move back (specs/client_custody_mail.md B46).
+ * $state: raise_backlog, lower_backlog, waiting, window_open, is_fortress.
  */
 function mailbox_fortress_receipt_render(InboundEmailDomain $domain, array $state): string {
 	$raise = intval($state['raise_backlog'] ?? 0);
 	$lower = intval($state['lower_backlog'] ?? 0);
+	$waiting = intval($state['waiting'] ?? 0);
 	$is_fortress = !empty($state['is_fortress']);
 	$window_open = !empty($state['window_open']);
 	$dot = function ($status) {
@@ -734,7 +739,14 @@ function mailbox_fortress_receipt_render(InboundEmailDomain $domain, array $stat
 				. 'They move while you are signed in with your vault unlocked; until then they read as before.');
 		}
 	} else {
-		if ($lower === 0) {
+		if ($waiting > 0) {
+			$html .= $row('fortress-waiting-row', 'warn', $plural($waiting, 'new message') . ' sealed at the relay '
+				. ($waiting === 1 ? 'is' : 'are') . ' waiting to be opened on your device. Open the mailbox with your vault '
+				. 'unlocked; then ' . ($waiting === 1 ? 'it moves' : 'they move') . ' back like the rest.');
+		}
+		if ($lower === 0 && $waiting > 0) {
+			$html .= $row('fortress-move-row', 'info', 'Every message already opened is back on this server\'s key');
+		} elseif ($lower === 0) {
 			$html .= $row('fortress-move-row', 'pass', 'Every message is back on this server\'s key');
 		} else {
 			$html .= $row('fortress-move-row', 'warn', $plural($lower, 'message') . ' can still be opened only on your devices. '
