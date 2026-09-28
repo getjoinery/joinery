@@ -17,10 +17,13 @@
  *    no name, and no signed URL once the native transport pass has run;
  *  - the attachment download hands over the stored ciphertext, flagged, and
  *    the server-side opener refuses the row; text preview is not offered;
- *  - the inline-image rewrite leaves a Fortress body's cid: references alone.
+ *  - the inline-image rewrite leaves a Fortress body's cid: references alone;
+ *  - reply and forward take a Fortress source, and the reader offers them on
+ *    a message it opened (WP4).
  *
  * Run: php tests/run.php test-db --filter=fortress_reader_api
  *
+ * @version 1.2 - reply and forward take a Fortress source the browser opened (WP4)
  * @version 1.1 - reply and forward refuse a Fortress source
  * @version 1.0
  */
@@ -126,17 +129,17 @@ try {
 		'the stream names no file for a browser-sealed part');
 
 	// ---------------------------------------------------------------- reply
-	section('reply and forward refuse a Fortress source until the browser writes them');
+	section('reply and forward take a Fortress source the browser opened');
 
 	$sender = new MailboxSender(MailboxViewer::forUser($fx['owner_id'], 0));
 	$load = new ReflectionMethod('MailboxSender', 'loadSourceInScope');
-	$refused = null;
-	try { $load->invoke($sender, $mid); } catch (MailboxSenderException $e) { $refused = $e->getMessage(); }
-	check($refused !== null && stripos($refused, 'end-to-end') !== false,
-		'the sender refuses the source with a clear message', (string)$refused);
+	$loaded = null;
+	try { $loaded = $load->invoke($sender, $mid); } catch (MailboxSenderException $e) { $loaded = $e->getMessage(); }
+	check($loaded instanceof InboundEmailMessage && intval($loaded->key) === $mid,
+		'the sender loads the source (the quote comes from source_open: fortress_compose)', is_string($loaded) ? $loaded : '');
 	$reader_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_reader.js'));
-	check(strpos($reader_src, "latest.alias_id != null && !latest.sealed") !== false,
-		'and the reader offers no reply chips on one');
+	check(strpos($reader_src, "latest.alias_id != null && !latest.fortress_placeholder") !== false,
+		'and the reader offers reply chips on one it opened, none on one it could not');
 
 	// ---------------------------------------------------------------- inline images
 	section('the inline-image rewrite leaves a Fortress body alone');

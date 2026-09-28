@@ -9,6 +9,11 @@
  * one-tap unlock affordance, same as reading sealed mail). Scope is enforced in
  * MailboxDrafts — a draft outside the viewer's grants returns an empty result.
  *
+ * An end-to-end (Fortress) draft comes back sealed, for the browser to open:
+ * {draft_id, alias_id, fortress: true, sealed_ad_prefix, thread_key, sealed: {key, sealed_dek, sealed_ad_prefix, iem_*}
+ * or null before its first sealed save, parts: [{id, mime_part, size_bytes, inline}]}.
+ *
+ * @version 1.1 - the Fortress draft's sealed shape
  * @version 1.0.1
  */
 

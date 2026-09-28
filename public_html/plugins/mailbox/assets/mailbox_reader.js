@@ -1,6 +1,16 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.83 — a search over only end-to-end mailboxes sends the server no term
+ * No framework. @version 2.84 — end-to-end (Fortress) compose: drafts are sealed in this browser
+ *   (MailboxFortress.saveDraft), a reopened one is opened here, and a send carries the saved parts,
+ *   the quote of an end-to-end source and a forward's parts (specs/client_custody_mail.md § R6);
+ *   reply chips on an opened end-to-end message; composerHtml() clones into an inert document.
+ *   Review of 2026-09-27: opening a draft resets the compose (B1); any custody change starts a new
+ *   draft (B3); a Fortress save keeps the text first and shows a failure (B7); upload_count (B6);
+ *   the no-module fallback marks a placeholder (B8).
+ *   Review by public-html-91: a Fortress save chain finishes after its compose closes (B13); a
+ *   vault lock saves and closes an end-to-end compose and empties it (B14); reopening a draft waits
+ *   for its own save still in flight (B16).
+ * @version 2.83 — a search over only end-to-end mailboxes sends the server no term
  *   (device_only), and a search note no longer re-searches without progress.
  * @version 2.82 — a search over Fortress mail runs on this device (MailboxSearch) and
  *   its hits ride along as device_hits; a note says how far the index has got.
@@ -73,6 +83,7 @@
 		draftDirty: false,    // unsaved changes since the last autosave
 		draftSaving: false,   // an autosave is in flight
 		draftAttachments: [], // server-side attachments of a reopened draft (read-only chips)
+		fortressDraft: null,  // an end-to-end draft's key and parts (MailboxFortress), else null
 		contacts: [],         // the OPEN MAILBOX's contacts (§ Phase 4), for autocomplete
 		setupStatus: {},      // alias id → the Setup tab's verdict for that mailbox
 		// List multi-select: thread_key → the thread payload of every ticked row.
@@ -253,7 +264,7 @@
 	function fortressThread(data) {
 		if (fortressReady()) return MailboxFortress.openThread(data);
 		((data && data.messages) || []).forEach(function (m) {
-			if (m && m.sealed) { m.body_plain = 'End-to-end encrypted.'; m.attachments = []; }
+			if (m && m.sealed) { m.body_plain = 'End-to-end encrypted.'; m.attachments = []; m.fortress_placeholder = true; }
 		});
 		return data;
 	}
@@ -1935,10 +1946,10 @@
 		// conversation. They act on the latest message and only show for a real
 		// mailbox (not the superadmin "Unmatched" view).
 		var latest = lastInboundOrLast(messages);
-		// An end-to-end message is quoted on the server, which cannot read it,
-		// so it offers no reply or forward until the browser writes the reply
-		// itself (specs/client_custody_mail.md WP4).
-		if (latest && latest.alias_id != null && !latest.sealed) {
+		// An end-to-end message is quoted from what this browser opened
+		// (specs/client_custody_mail.md § R6), so one not opened here — the vault
+		// shut, or still waiting to be opened — offers no reply until it is.
+		if (latest && latest.alias_id != null && !latest.fortress_placeholder) {
 			var chips = el('div', 'mbx-reply-actions');
 			chips.appendChild(replyChip('↩ Reply', function () { openCompose('reply', t, latest); }));
 			chips.appendChild(replyChip('↩ Reply All', function () { openCompose('reply_all', t, latest); }));
@@ -2967,6 +2978,11 @@
 		}).then(function (data) {
 			if (data && data.deleted) {
 				state.draftAttachments = (state.draftAttachments || []).filter(function (a) { return a.id !== attId; });
+				if (state.fortressDraft) {
+					// The sealed manifest still names it until the next save rewrites it.
+					state.fortressDraft.parts = state.fortressDraft.parts.filter(function (p) { return p.id !== attId; });
+					markDraftDirty();
+				}
 				renderAttachStrip();
 			}
 		}).catch(function () {});
@@ -3067,10 +3083,12 @@
 
 	// The outgoing HTML: clone the editor, swap each inline image's display blob
 	// URL for its cid: placeholder, and drop the editing-only data attribute.
+	// The clone lives in an inert document: in this one, an <img> given a cid:
+	// src starts a load, which the page's CSP refuses with a console error.
 	function composerHtml() {
 		var r = richEl();
 		if (!r) return '';
-		var clone = r.cloneNode(true);
+		var clone = document.implementation.createHTMLDocument('').importNode(r, true);
 		Array.prototype.forEach.call(clone.querySelectorAll('img'), function (img) {
 			var lid = img.getAttribute('data-mbx-cid');
 			if (lid) { img.setAttribute('src', 'cid:' + lid); img.removeAttribute('data-mbx-cid'); }
@@ -4365,6 +4383,9 @@
 	// save resolves.
 	function autosaveDraft(sync, cb) {
 		if (!hasComposeContent() || state.draftSaving) { if (cb) cb(); return; }
+		// An end-to-end mailbox's draft is sealed here first; on the way out of the
+		// page that is a best effort, as the sealing is asynchronous.
+		if (composeIsFortress()) { autosaveFortress(cb); return; }
 		// The compose the resolve handler is allowed to mutate (Fix 4): if the panel
 		// was reset/reopened while the save was in flight, the resolved id belongs to
 		// a compose that no longer exists — clear draftSaving but touch nothing else.
@@ -4377,8 +4398,8 @@
 			headers: { 'X-Joinery-Csrf': joineryApi.csrf() }, body: body };
 		if (sync) opts.keepalive = true;
 		fetch(CFG.draftSaveUrl, opts).then(function (r) { return r.json(); }).then(function (env) {
-			state.draftSaving = false;
 			if (gen !== composeGen) { if (cb) cb(); return; }   // stale — see above
+			state.draftSaving = false;
 			var data = (env && env.data) ? env.data : {};
 			if (data.draft_id) {
 				state.draftId = data.draft_id;
@@ -4395,7 +4416,7 @@
 				renderAttachStrip();
 			}
 			if (cb) cb();
-		}).catch(function () { state.draftSaving = false; if (cb) cb(); });
+		}).catch(function () { if (gen === composeGen) state.draftSaving = false; if (cb) cb(); });
 	}
 
 	function resetDraftState() {
@@ -4407,19 +4428,262 @@
 		state.draftAlias = null;
 		state.draftDirty = false;
 		state.draftAttachments = [];
+		// Dropped, not wiped: a save still in flight holds it until it finishes.
+		state.fortressDraft = null;
+		// A save still in flight belongs to the compose just reset; it no longer
+		// holds this one's saves back.
+		state.draftSaving = false;
+	}
+
+	// ---- end-to-end (Fortress) compose (specs/client_custody_mail.md § R6) ----
+	// The server never sees a Fortress draft: MailboxFortress seals it here and
+	// posts ciphertext. Sending is plaintext to the server (it signs and hands
+	// the message on), so a send carries what this browser holds: the draft's
+	// saved parts opened, and for an end-to-end source its quote and, on a
+	// forward, its parts.
+
+	function mailboxFor(aliasId) {
+		for (var i = 0; i < state.mailboxes.length; i++) {
+			if (String(state.mailboxes[i].alias_id) === String(aliasId)) return state.mailboxes[i];
+		}
+		return null;
+	}
+
+	function composeIsFortress() {
+		var m = mailboxFor(composeAliasId());
+		return !!(m && m.security_level === 'fortress');
+	}
+
+	// The saved parts this compose still wants: every chip, and each inline
+	// image still in the body.
+	function fortressKeep() {
+		var html = composerHtml();
+		var keep = (state.draftAttachments || []).map(function (a) { return a.mime_part; }).filter(Boolean);
+		inlineImages.forEach(function (im) {
+			if (im.saved && im.part && html.indexOf('cid:' + im.localId) !== -1) keep.push(im.part);
+		});
+		return keep;
+	}
+
+	function fortressCompose() {
+		var aliasId = composeAliasId();
+		return {
+			alias_id: aliasId,
+			mode: document.getElementById('mbx_mode').value,
+			source_id: document.getElementById('mbx_source_id').value,
+			sender: addressForAlias(aliasId) || '',
+			to: document.getElementById('mbx_to').value,
+			cc: document.getElementById('mbx_cc').value,
+			bcc: (document.getElementById('mbx_bcc') || {}).value || '',
+			subject: document.getElementById('mbx_subject').value,
+			body_html: composerHtml(),
+			body_plain: composerText()
+		};
+	}
+
+	// Save chains still running, each with the draft state it writes. A chain
+	// outlives its compose (below), so reopening that draft waits for it: two
+	// composes saving one draft would each drop the parts the other added.
+	var fortressChains = [];
+
+	// One sealed save for the text, then one per new part, so a part that
+	// cannot be saved (a limit, a request too large) never costs the words.
+	// The chain finishes whatever happens to the compose meanwhile (closing it,
+	// opening another draft): it works from its own snapshot and its own draft
+	// state `d`, and touches the screen only while its compose is still the one
+	// open. A failure is shown: nothing else would tell the writer.
+	function autosaveFortress(cb) {
+		if (!fortressReady()) { if (cb) cb(); return; }
+		var gen = composeGen;
+		var mine = function () { return gen === composeGen; };
+		if (!state.fortressDraft) state.fortressDraft = MailboxFortress.newDraftState();
+		var d = state.fortressDraft;
+		var base = fortressCompose();
+		var files = pendingFiles.slice();
+		var inline = inlineImages.filter(function (im) {
+			return !im.saved && base.body_html.indexOf('cid:' + im.localId) !== -1;
+		});
+		var steps = [{ files: [], inline: [] }];
+		files.forEach(function (f) { steps.push({ files: [f], inline: [] }); });
+		inline.forEach(function (im) { steps.push({ files: [], inline: [im] }); });
+		// The first save keeps what this compose still wants; each later one
+		// keeps everything the draft holds by then, its own additions included.
+		var firstKeep = fortressKeep();
+		state.draftSaving = true;
+		var run = function (i) {
+			if (i >= steps.length) return Promise.resolve();
+			var c = Object.assign({}, base, {
+				files: steps[i].files,
+				inline: steps[i].inline.map(function (im) { return { localId: im.localId, file: im.file }; }),
+				keep: i === 0 ? firstKeep : d.parts.map(function (p) { return p.mime_part; })
+			});
+			return MailboxFortress.saveDraft(d, c).then(function () {
+				steps[i].inline.forEach(function (im) {
+					var part = d.parts.filter(function (p) { return p.inline && p.content_id === im.localId; })[0];
+					if (part) { im.saved = true; im.part = part.mime_part; }
+				});
+				if (mine()) {
+					state.draftId = d.id;
+					steps[i].files.forEach(function (f) {
+						var at = pendingFiles.indexOf(f);
+						if (at !== -1) pendingFiles.splice(at, 1);
+					});
+					state.draftAttachments = fortressChips(d);
+					renderAttachStrip();
+				}
+				return run(i + 1);
+			});
+		};
+		var chain = run(0);
+		var entry = { d: d, done: chain.catch(function () {}) };
+		fortressChains.push(entry);
+		entry.done.then(function () { fortressChains.splice(fortressChains.indexOf(entry), 1); });
+		chain.then(function () {
+			if (mine()) { state.draftSaving = false; state.draftDirty = false; }
+			if (cb) cb();
+		}, function (err) {
+			var message = 'This draft could not be saved: ' + ((err && err.message) || 'unknown error');
+			if (mine()) {
+				state.draftSaving = false;
+				// The row may exist though a sealed save failed: keep its id so the
+				// next save fills it instead of starting another.
+				if (d.id) state.draftId = d.id;
+				if (!composeHidden()) showComposeError(message, err);
+				else alert(message);
+			} else {
+				// Its compose is gone; the draft in Drafts is what was kept.
+				alert(message + ' Open it from Drafts to check what was kept.');
+			}
+			if (cb) cb();
+		});
+	}
+
+	function fortressChips(d) {
+		return d.parts.filter(function (p) { return !p.inline; }).map(function (p) {
+			return { id: p.id, filename: p.filename, content_type: p.content_type, size_bytes: p.size, mime_part: p.mime_part };
+		});
+	}
+
+	// The message a reply or forward answers, as this browser opened it: from
+	// the open conversation, or, for a draft reopened from Drafts, its
+	// conversation fetched and opened again.
+	async function composeSource(sourceId) {
+		if (!sourceId) return null;
+		var match = function (list) {
+			return (list || []).filter(function (m) { return String(m.id) === String(sourceId); })[0] || null;
+		};
+		var m = match(state.messages);
+		if (m) return m;
+		var tk = state.fortressDraft && state.fortressDraft.threadKey;
+		if (!tk) return null;
+		var data = await apiGet(CFG.threadUrl + '?thread_key=' + encodeURIComponent(tk)
+			+ '&alias_id=' + encodeURIComponent(composeAliasId())).then(fortressThread);
+		return match(data.messages);
+	}
+
+	/**
+	 * What a send adds for end-to-end mail: the quote of an end-to-end source
+	 * (source_open), a forward's parts, and on a Fortress draft every part it
+	 * holds opened — the server holds none of them readable. Appends to `body`.
+	 */
+	async function addFortressSendParts(body) {
+		var fortress = composeIsFortress();
+		var mode = document.getElementById('mbx_mode').value;
+		var manifest = {};
+		var src = mode !== 'new' ? await composeSource(document.getElementById('mbx_source_id').value) : null;
+		if (src && src.sealed) {
+			if (!fortressReady()) throw new Error('This page cannot open end-to-end encrypted mail.');
+			var open = MailboxFortress.sourceOpen(src);
+			if (!open) throw new Error('Unlock your vault, open the message again, then send.');
+			body.append('source_open', JSON.stringify(open));
+			if (mode === 'forward') {
+				var fwd = await MailboxFortress.sourceFiles(src);
+				fwd.files.forEach(function (f) { body.append('attachments[]', f, f.name); });
+				Object.keys(fwd.inline).forEach(function (k) { manifest[k] = fwd.inline[k]; });
+			}
+		}
+		if (!fortress) return manifest;
+		// Not yet saved: as a Private send posts them.
+		pendingFiles.forEach(function (f) { body.append('attachments[]', f, f.name); });
+		// Saved on the draft: opened here and posted with the rest.
+		if (state.fortressDraft && state.fortressDraft.dek) {
+			var saved = await MailboxFortress.draftFiles(state.fortressDraft,
+				(state.draftAttachments || []).map(function (a) { return a.mime_part; }));
+			saved.forEach(function (f) { body.append('attachments[]', f, f.name); });
+		}
+		// Every inline image still in the body, saved or not.
+		var html = composerHtml();
+		inlineImages.forEach(function (im) {
+			if (html.indexOf('cid:' + im.localId) === -1 || !im.file) return;
+			manifest[im.localId] = im.file.name;
+			body.append('attachments[]', im.file, im.file.name);
+		});
+		return manifest;
+	}
+
+	function aliasIsFortress(aliasId) {
+		var m = mailboxFor(aliasId);
+		return !!(m && m.security_level === 'fortress');
+	}
+
+	// A From change across custody: the saved draft's parts are under a key the
+	// other side does not use, so the compose continues as a new draft and the
+	// old one stays in Drafts as it was. A save still in flight belongs to the
+	// old draft (the generation bump makes it touch nothing here), so this runs
+	// whether or not a draft id has come back yet.
+	function startFreshDraftIfCustodyChanged(fromAliasId, toAliasId) {
+		if (aliasIsFortress(fromAliasId) === aliasIsFortress(toAliasId)) return;
+		composeGen++;
+		state.draftSaving = false;
+		state.draftId = null;
+		state.fortressDraft = null;
+		// Saved chips live on the old draft; they are not part of the new one.
+		state.draftAttachments = [];
+		inlineImages.forEach(function (im) { im.saved = false; im.part = null; });
+		renderAttachStrip();
 	}
 
 	// Open a saved draft from the Drafts list into the composer.
 	function openDraft(draftId) {
-		joineryApi.post(CFG.draftGetUrl, { draft_id: String(draftId) }).then(async function (data) {
+		// A clean compose first: the one on screen must not lend this draft its
+		// id, its key, its images or a save still in flight. Its own unsaved
+		// words are saved to its own draft, as closing it would.
+		clearTimeout(draftTimer);
+		if (!composeHidden() && state.draftDirty && hasComposeContent()) autosaveDraft(false);
+		resetDraftState();
+		clearComposer();
+		clearPendingFiles();
+		var saving = fortressChains.filter(function (c) { return String(c.d.id) === String(draftId); })
+			.map(function (c) { return c.done; });
+		Promise.all(saving).then(function () {
+			return joineryApi.post(CFG.draftGetUrl, { draft_id: String(draftId) });
+		}).then(async function (data) {
 			data = data || {};
 			if (data.locked) {
 				if (await unlockVault()) { openDraft(draftId); }
 				return;
 			}
 			if (!data.draft_id) { alert('This draft could not be opened.'); return; }
+			if (data.fortress) { openFortressDraft(data); return; }
 			showDraftComposer(data);
 		}).catch(function () { alert('This draft could not be opened.'); });
+	}
+
+	// An end-to-end draft opens here: its fields, its saved parts, its key.
+	function openFortressDraft(data) {
+		if (!fortressReady()) { alert('This page cannot open end-to-end encrypted drafts.'); return; }
+		MailboxFortress.openDraft(data).then(function (r) {
+			showDraftComposer(r.fields);
+			state.fortressDraft = r.d;
+			state.draftAttachments = r.fields.attachments;
+			renderAttachStrip();
+			revokeInlineUrls();
+			inlineImages = r.fields.inline.map(function (im) {
+				return { localId: im.content_id, file: im.file, url: im.url, saved: true, part: im.mime_part };
+			});
+		}).catch(function (err) {
+			alert((err && err.message) || 'This draft could not be opened.');
+		});
 	}
 
 	// Render the reading pane as just the composer (a draft has no conversation).
@@ -4589,13 +4853,36 @@
 		})();
 	}
 
-	function sendComposeNow(e, btn) {
-		// The shared compose payload (rich HTML + plaintext + attachments + inline
-		// manifest), plus draft_id (a saved draft morphs into the Sent row, reusing
-		// its already-uploaded attachments).
-		var body = buildComposeBody(true).body;
+	// The send payload: the shared compose payload (rich HTML + plaintext +
+	// attachments + inline manifest) plus draft_id (a saved draft morphs into the
+	// Sent row, reusing its already-uploaded attachments). End-to-end mail adds
+	// what only this browser holds (addFortressSendParts); a Fortress draft's
+	// parts all ride along, so its fields-only shape is built instead.
+	async function sendBody() {
+		var fortress = composeIsFortress();
+		var body = buildComposeBody(!fortress).body;
 		if (state.draftId) body.append('draft_id', String(state.draftId));
+		var manifest = await addFortressSendParts(body);
+		body.append('upload_count', String(body.getAll('attachments[]').length));
+		if (Object.keys(manifest).length) {
+			var existing = body.get('inline_manifest');
+			if (existing) {
+				var prior = JSON.parse(existing);
+				Object.keys(prior).forEach(function (k) { manifest[k] = prior[k]; });
+			}
+			body.set('inline_manifest', JSON.stringify(manifest));
+		}
+		return body;
+	}
 
+	function sendComposeNow(e, btn) {
+		sendBody().then(function (body) { postSend(e, btn, body); }, function (err) {
+			if (btn) btn.disabled = false;
+			showComposeError((err && err.message) || 'The message could not be prepared for sending.');
+		});
+	}
+
+	function postSend(e, btn, body) {
 		// Multipart send (attachments) — joineryApi.post is JSON-only, so this
 		// keeps a direct fetch and borrows only the shared CSRF read.
 		fetch(CFG.sendUrl, {
@@ -4881,7 +5168,23 @@
 					openThread(state.openThread, $('.mbx-thread-item.active'));
 				}
 			};
-			MailboxFortress.onLock(fortressRerender);
+			// A lock takes an end-to-end compose off the screen too: it is saved
+			// (sealing needs only the public key and the draft's own key, which the
+			// save holds until it finishes) and closed, its fields emptied, and a
+			// draft opened from Drafts goes back to the list.
+			MailboxFortress.onLock(function () {
+				if (!composeHidden() && composeIsFortress()) {
+					if (state.draftsView && state.threadKey == null) closeThread();
+					else closeCompose();
+					['mbx_to', 'mbx_cc', 'mbx_bcc', 'mbx_subject'].forEach(function (id) {
+						var f = document.getElementById(id);
+						if (f) f.value = '';
+					});
+					clearComposer();
+					clearPendingFiles();
+				}
+				fortressRerender();
+			});
 			// A first build saves every few thousand messages: fill the results
 			// in as it goes, while the search that started it is on screen.
 			if (window.MailboxSearch) {
@@ -4931,7 +5234,9 @@
 		if (toField) toField.addEventListener('input', queueDirectHint);
 		var aliasSel = document.getElementById('mbx_alias_id');
 		if (aliasSel) aliasSel.addEventListener('change', function () {
+			var fromAlias = state.draftAlias;
 			state.draftAlias = aliasSel.value;
+			startFreshDraftIfCustodyChanged(fromAlias, aliasSel.value);
 			// Swap the signature to the newly-chosen From, but only when the user
 			// hasn't started writing (never clobber real content).
 			if (isComposerEmptyExceptSignature()) { insertSignature(aliasSel.value); }

@@ -202,6 +202,14 @@ try {
 	$plain = new ApiIdempotencyKey(NULL);
 	check(!$plain->rowIsSealed(), 'and a row with no flag set reports unsealed, whatever spelling the default uses');
 
+	// The browser's format is sealed too: a Fortress row's fields and its
+	// edge-sealed DEK, written by a hot process (a raise to end-to-end).
+	check(SealedEgressGuard::isSealedBlob('v1.edge.' . base64_encode(random_bytes(80)))
+		&& SealedEgressGuard::isSealedBlob('v1.edgeseal.mail.' . base64_encode(random_bytes(80))),
+		'browser-format content and keys count as sealed');
+	check(!SealedEgressGuard::isSealedBlob('v1.edgy plaintext ' . seg_long('e')),
+		'and a near-miss prefix does not');
+
 	// =====================================================================
 	section('a list of integer ids is a reference, not content');
 
