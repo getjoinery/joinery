@@ -47,7 +47,7 @@ interface FileStreamingDecryptor {
  *
  * @version 1.13.0
  * @changelog 1.13.0 - SOURCE_PROBLEM_REPORT and SOURCE_BUG_REPORT_IMAGE: images
- *   attached to problem reports, sent and received (specs/bug_reports.md).
+ *   attached to problem reports, sent and received (specs/implemented/bug_reports.md).
  * @changelog 1.12.0 - get_url() always mints a local /uploads/* URL: a public
  *   file is a local file, and nothing on a page is served from the bucket
  *   (specs/implemented/cloud_storage_private_only.md).

@@ -451,7 +451,7 @@ class ErrorManager {
  * renders can link to the row.
  *
  * Report links are offered only to a signed-in member: guests cannot send a
- * report (specs/bug_reports.md D3), so a link would only lead to a sign-in
+ * report (specs/implemented/bug_reports.md D3), so a link would only lead to a sign-in
  * page.
  *
  * @version 1.1.0 - recorded(): records the reference and notes an automatic problem report

@@ -11,7 +11,7 @@
  * rest and says why when it refuses. Answers {report_id}, which the sender
  * keeps as the remote id.
  *
- * See specs/bug_reports.md and plugins/bug_reports/docs/overview.md.
+ * See specs/implemented/bug_reports.md and plugins/bug_reports/docs/overview.md.
  *
  * @version 1.1.0 - comment optional here: an automatic report has none
  * @version 1.0.0

@@ -9,7 +9,7 @@
  * upgrade source. The answer says what happened: sent, queued for another
  * try, or kept on this site because the operator switched sending off.
  *
- * See specs/bug_reports.md.
+ * See specs/implemented/bug_reports.md.
  *
  * @version 1.0.0
  */

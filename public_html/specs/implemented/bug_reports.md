@@ -1,6 +1,6 @@
 # Problem Reports: a node reports a bug to its upgrade source
 
-**Status:** Part 1 (member reports) implemented 2026-09-28: committed (b77cb344, ddd52a62), released in 0.8.436, WP6 passed live dev → getjoinery.com (`verified`). Part 2 (automatic reports and duplicates, D10–D14, WP7–WP9) built 2026-09-28, uncommitted; schema applied on dev; needs a release and the live check under Part 2's build status. D1–D4 and D6 decided 2026-09-25; D5, D7 and D8 2026-09-27; D9–D14 2026-09-28.
+**Status:** Part 1 (member reports) implemented 2026-09-28: committed (b77cb344, ddd52a62), released in 0.8.436, WP6 passed live dev → getjoinery.com (`verified`). Part 2 (automatic reports and duplicates, D10–D14, WP7–WP9) implemented 2026-09-28: committed (e4046bec), released in 0.8.437, live check passed dev → getjoinery.com. D1–D4 and D6 decided 2026-09-25; D5, D7 and D8 2026-09-27; D9–D14 2026-09-28.
 **Date:** 2026-09-25.
 **Related:** `specs/implemented/agent_on_node_architecture.md` §3.5 (what may leave a
 node), `specs/agent_recipes_and_vocabulary.md` rule 8 (what private means),
@@ -503,15 +503,15 @@ The receiver pages were checked in the browser on dev.
 - **Old rows group by their hash.** The grouped view and its filter key on the fingerprint,
   else the Part 1 hash, so reports filed before fingerprints stay grouped.
 
-**To finish:**
+**Live check, passed 2026-09-28** (dev → getjoinery.com, both on 0.8.437, with
+`problem_reports_auto_send` switched on for the check and off after):
 
-1. Commit, release, and let getjoinery.com take the plugin's 1.1.0 (its sync adds the columns).
-   An automatic report sent to a receiver still on 1.0.0 is refused for having no
-   description; the sender retries, so order does not lose anything, but release the
-   receiver first.
-2. Live check: turn `problem_reports_auto_send` on for dev, trigger one unexpected error
-   twice, run the send task, and confirm getjoinery.com shows one automatic report with
-   times seen 2; trigger it again, run the task, and confirm 3 on the same report.
+1. The same unexpected error raised twice on dev made one automatic report (#94) seen
+   twice, not two reports.
+2. The send was accepted as getjoinery.com's report #2, carrying a count of 2.
+3. A third occurrence counted to 3 on dev; the next send carried the one new occurrence
+   and getjoinery.com answered with report #2 again, the stored report it added to.
+   Dev shows 3 counted and 3 sent.
 
 ## Open questions
 

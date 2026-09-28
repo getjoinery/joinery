@@ -7,7 +7,7 @@
  * now" (POST) tries a queued or failed report again at once instead of
  * waiting for the hourly task.
  *
- * See specs/bug_reports.md.
+ * See specs/implemented/bug_reports.md.
  *
  * @version 1.1.0 - an automatic report has no reporter
  * @version 1.0.0

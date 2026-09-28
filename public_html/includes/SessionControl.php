@@ -111,7 +111,7 @@ class DisplayMessage {
 
 /**
  * @version 1.7 - DisplayMessage carries an optional error reference and renders the
- *                "Report a problem" link that follows an error message (specs/bug_reports.md)
+ *                "Report a problem" link that follows an error message (specs/implemented/bug_reports.md)
  * @version 1.6 - the vault re-enrollment gate's message says what the factor is for: signing
  *                in to an account that holds a vault, never opening the vault
  * @version 1.5 - the vault re-enrollment gate's message states the rule (a vault needs a

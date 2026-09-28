@@ -18,7 +18,7 @@
  * request goes through SafeHttpClient: no redirects, a short timeout, and a
  * small response cap, since the answer is only a report id.
  *
- * Automatic reports (specs/bug_reports.md, Part 2): with the operator's
+ * Automatic reports (specs/implemented/bug_reports.md, Part 2): with the operator's
  * problem_reports_auto_send switch on, noteError() keeps one row per fault
  * (ProblemReportBundle::fingerprint()) and version for every unexpected error
  * recorded, counting each recurrence. It never sends from the failing request;
@@ -33,7 +33,7 @@
  *   kept    this site does not send reports (problem_reports_send is off);
  *           kept here only
  *
- * See specs/bug_reports.md.
+ * See specs/implemented/bug_reports.md.
  *
  * @version 1.1.0 - automatic reports: noteError(), counts, and the count update on send
  * @version 1.0.0

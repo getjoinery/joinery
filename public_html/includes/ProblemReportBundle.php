@@ -8,7 +8,7 @@
  * page renders the bundle for the reporter before anything is sent, so what
  * they read is what leaves.
  *
- * Who sees what. Any signed-in member may report (specs/bug_reports.md D3),
+ * Who sees what. Any signed-in member may report (specs/implemented/bug_reports.md D3),
  * and the reporter reads every line of the bundle. So the sections that
  * describe the whole site — its other errors, its runtime, its plugins, its
  * settings, its health — go only into an operator's report (permission
@@ -98,7 +98,7 @@ class ProblemReportBundle {
 
 	/**
 	 * The bundle a site sends on its own when an unexpected error is recorded
-	 * (specs/bug_reports.md, Part 2). Nobody reads it before it goes, so it
+	 * (specs/implemented/bug_reports.md, Part 2). Nobody reads it before it goes, so it
 	 * carries less than an operator's: no reporter, no other requests' log
 	 * lines, the page's path masked to its shape, and quoted text in the
 	 * message masked. Built from the saved row, never the live exception, so
@@ -154,7 +154,7 @@ class ProblemReportBundle {
 	}
 
 	/**
-	 * The same-fault key (specs/bug_reports.md D11): the error's kind, the
+	 * The same-fault key (specs/implemented/bug_reports.md D11): the error's kind, the
 	 * file it was thrown in, and the files and function names of its stack
 	 * frames, with every line number dropped so small edits do not split a
 	 * group. With no frames, the message with numbers, quoted text and long
