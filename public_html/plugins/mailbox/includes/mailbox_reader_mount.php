@@ -97,7 +97,53 @@ function mailbox_reader_fortress_visible(array $initial_mailboxes): bool {
 			}
 		}
 	}
-	return false;
+	// A mailbox moved off Fortress whose messages are not all back on the
+	// server's key: the browser still opens those, and moves them (R8).
+	return MailboxFortressLevel::loweringBacklogCount((int)SessionControl::get_instance()->get_user_id()) > 0;
+}
+
+/**
+ * The banner over the reader while the viewer's mail is moving onto or off
+ * end-to-end (specs/client_custody_mail.md § R8), driven by
+ * mailbox_fortress_level.js: "N messages still being moved to your device key"
+ * (the moving runs while the page is open and the vault unlocked), or "Finish
+ * moving this mailbox off end-to-end: N messages" with the one button that has
+ * this browser move them.
+ */
+function mailbox_reader_emit_fortress_banner(callable $asset_ver, bool $vault_client): void {
+	$user_id = (int)SessionControl::get_instance()->get_user_id();
+	if (!$user_id) {
+		return;
+	}
+	try {
+		$raise = MailboxFortressLevel::backlogCount($user_id);
+		$lower = MailboxFortressLevel::loweringBacklogCount($user_id);
+	} catch (\Throwable $e) {
+		return; // a probe failure must never break the reader
+	}
+	if ($raise === 0 && $lower === 0) {
+		return;
+	}
+	$plural = function (int $n) { return $n . ' message' . ($n === 1 ? '' : 's'); };
+	if ($lower > 0 && !$vault_client) {
+		// This page does not carry the vault client (the admin mount); the
+		// member's mailbox page does, and says so there.
+		$lower = 0;
+		if ($raise === 0) {
+			return;
+		}
+	}
+	if ($lower > 0) {
+		echo '<div class="mbx-catchup-banner" data-fortress-level data-direction="lower" data-backlog="' . $lower . '">'
+			. '<span class="mbx-catchup-text" data-fortress-text>Finish moving this mailbox off end-to-end: '
+			. htmlspecialchars($plural($lower)) . '.</span>'
+			. '<button type="button" class="mbx-catchup-btn" data-fortress-lower>Move them</button></div>';
+	} else {
+		echo '<div class="mbx-catchup-banner" data-fortress-level data-direction="raise" data-backlog="' . $raise . '">'
+			. '<span class="mbx-catchup-text" data-fortress-text>' . htmlspecialchars($plural($raise))
+			. ' still being moved to your device key. Until then they read as before.</span></div>';
+	}
+	echo '<script src="' . htmlspecialchars($asset_ver('mailbox_fortress_level.js')) . '"></script>';
 }
 
 function mailbox_render_mailbox_reader($page, array $opts): void {
@@ -368,6 +414,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 <?php endif; ?>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_reader.js')); ?>"></script>
 	<?php
+	mailbox_reader_emit_fortress_banner($asset_ver, !empty($opts['fortress']));
 	mailbox_reader_emit_unseal_convergence();
 	mailbox_reader_emit_ai_catchup();
 }

@@ -31,6 +31,7 @@
  * refuses while one is pending, and the way out is to finish it — the new key
  * opens with the unlockers it was given.
  *
+ * @version 1.3 - a re-sealed key must name a client-custody scope (VaultCrypto::clientCustodyScope)
  * @version 1.2 - the root vault's key is refused (rotating it would orphan every content vault)
  * @version 1.1 - no abandon (it could not see what the hooks moved); assertCanBegin()
  *   for the browser to ask before collecting taps; one vault load per scope
@@ -195,9 +196,9 @@ class VaultClientRotation {
 		$vaults = array();   // scope => its vault, loaded once per request
 		foreach ($rows as $r) {
 			$sealed = (string)($r['sealed_dek'] ?? '');
-			$scope = VaultCrypto::parseEdgeScope($sealed);
+			$scope = VaultCrypto::clientCustodyScope($sealed);
 			if ($scope === null) {
-				throw new VaultClientCustodyException('A re-sealed key is not a browser-sealed key.');
+				throw new VaultClientCustodyException('A re-sealed key is not sealed to a client-custody vault.');
 			}
 			$vault = $vaults[$scope] ?? ($vaults[$scope] = self::pendingVault($user_id, $scope));
 			$model = (string)($r['model'] ?? '');

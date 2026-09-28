@@ -12,6 +12,9 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.3 - Fortress (specs/client_custody_mail.md § R8, R12): its card and notes, the
+ *   Fortress receipt for both directions, the mail vault opened before a save that
+ *   chooses Fortress; the AI switches hide at Fortress
  * @version 4.2 - the Extra protection block states the short unlock window only; neither add-on
  *   asks for a second factor
  * @version 4.1 - the level cards and the Extra protection switches render
@@ -41,6 +44,11 @@ extract($page_vars);
 $ceremony = $ceremony ?? null;
 
 $page = new AdminPage();
+// The Fortress choice opens the owner's mail vault before it saves, and the
+// Fortress receipt moves messages with it (specs/client_custody_mail.md § R8).
+if (!empty($edit_domain)) {
+	$page->needs_vault_client();
+}
 $page->admin_header(
 	array(
 		'menu-id' => 'incoming',
@@ -108,6 +116,19 @@ if ($show_form) {
 			'window_open' => $ceremony['window_open'],
 			'editor_url' => $ceremony['editor_url'],
 		));
+	}
+
+	// The Fortress receipt (specs/client_custody_mail.md § R8): on arrival from
+	// a change to or from Fortress, and while messages remain to move either way.
+	if ($ceremony !== null && !empty($ceremony['fortress_active'])) {
+		echo mailbox_fortress_receipt_render($edit_domain, array(
+			'is_fortress'   => $edit_domain->is_fortress(),
+			'raise_backlog' => $ceremony['fortress_raise_backlog'],
+			'lower_backlog' => $ceremony['fortress_lower_backlog'],
+			'window_open'   => VaultUnlock::isOpen(intval($ceremony['acting_user_id'])),
+		));
+		echo '<script defer src="/plugins/mailbox/assets/mailbox_fortress_level.js?v='
+			. (@filemtime(PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_fortress_level.js')) ?: '1') . '"></script>';
 	}
 
 	$page->begin_box(array('title' => $form_title));
@@ -208,11 +229,24 @@ if ($show_form) {
 		$relay_addon['note'] = 'It needs a relay in front of this server first.';
 		$relay_addon['link'] = ['/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section', 'Set up a relay'];
 	}
+	// What only this page knows about Fortress, under its card (R12): that
+	// mail arriving directly is seen as it arrives, and that an account which
+	// unlocks by passphrase is as safe as its passphrase.
+	$fortress_notes = ['New mail is encrypted the moment it arrives; a server hacked while mail is arriving '
+		. 'could read what arrives then.'];
+	$root_vault = UserEncryptionVault::loadForUser((int)$session->get_user_id(), VaultScopes::ROOT_SCOPE);
+	if ($root_vault !== null && (new MultiUserEncryptionWrapping(['vault_id' => (int)$root_vault->key,
+			'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE, 'deleted' => false]))->count() > 0) {
+		$fortress_notes[] = 'You unlock with a passphrase, so this mail is as safe from a hacked server as your '
+			. 'passphrase is hard to guess. A passkey that can hold a key makes it only-your-devices.';
+	}
+
 	ProtectionLevelPicker::render($formwriter, 'ied_security_level', [
 		'service' => ProtectionLevelPicker::SERVICE_MAIL,
 		'levels'  => InboundEmailDomain::SETTABLE_LEVELS,
 		'value'   => $level_value,
 		'label'   => 'Protection level',
+		'notes'   => [InboundEmailDomain::LEVEL_FORTRESS => $fortress_notes],
 		// The AI READ switch only means something once mail is encrypted at
 		// rest: on Standard the server already reads it, so there is nothing to
 		// consent to (specs/in_window_deferred_work.md). The TRAVEL consent
@@ -223,6 +257,8 @@ if ($show_form) {
 			InboundEmailDomain::LEVEL_STANDARD => ['show' => ['ied_ai_processing_consent'],
 				'hide' => ['ied_ai_processing_enabled']],
 			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent']],
+			// No server-side AI reads Fortress mail (R7): nothing to consent to.
+			InboundEmailDomain::LEVEL_FORTRESS => ['hide' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent']],
 		],
 		// Either add-on shortens the unlock window (§ Add-ons rule 5).
 		'addons_note' => 'Either one keeps your unlock window short (2 hours idle, 24 hours at most).',
@@ -341,6 +377,38 @@ if ($show_form) {
 	echo $formwriter->end_form();
 
 	$page->end_box();
+
+	// Choosing Fortress opens the owner's mail vault first — making it, with
+	// recovery codes, on first use — because the save refuses a Fortress domain
+	// with no key to seal to (specs/client_custody_mail.md § R8). The submit is
+	// held, the vault opened, and the same submit asked for again; the validator
+	// re-dispatches too, so this lets a prevented event pass and runs once.
+	if ($edit_domain && !$edit_domain->is_fortress()) {
+		?>
+		<script>
+		(function () {
+			var form = document.getElementById('domain_form');
+			if (!form) return;
+			var opened = false, opening = false;
+			form.addEventListener('submit', function (e) {
+				if (opened || e.defaultPrevented) return;
+				var picked = form.querySelector('input[name="ied_security_level"]:checked');
+				if (!picked || picked.value !== 'fortress') return;
+				e.preventDefault();
+				if (opening) return;
+				opening = true;
+				var submitter = e.submitter || null;
+				JoinerySealed.session('mail', { reason: 'to make the key Fortress mail is sealed to' }).then(function () {
+					opened = true;
+					form.requestSubmit(submitter && submitter.form === form ? submitter : undefined);
+				}, function () {
+					// Cancelled or refused: nothing saved, the form stays as it was.
+				}).then(function () { opening = false; });
+			});
+		})();
+		</script>
+		<?php
+	}
 
 	// Receipt sealing loop (specs/mailbox_raise_receipt.md): the card carries the
 	// shared batch driver's configuration (assets/js/ceremony-batch.js), which

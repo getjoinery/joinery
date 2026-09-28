@@ -226,7 +226,7 @@ class EmailJobCandidates {
 			  AND iem_pending_parse IS NOT TRUE
 			  -- Fortress mail: sealed to a key only the owner's devices hold, and
 			  -- never read by server-side AI (specs/client_custody_mail.md § R7).
-			  AND (iem_sealed_key IS NULL OR iem_sealed_key NOT LIKE 'v1.edgeseal.%')
+			  AND (iem_sealed_key IS NULL OR iem_sealed_key NOT LIKE 'v1.edgeseal.mail.%')
 			  AND iem_is_read = false
 			  " . ($lookback_days > 0 ? 'AND iem_received_time >= :received_since' : '') . "
 			  " . ($sealed_readable ? '' : 'AND iem_content_sealed IS NOT TRUE') . "

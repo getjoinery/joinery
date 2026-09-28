@@ -31,6 +31,9 @@
  * Writers emit the format their custody dictates; readers here open whichever
  * prefix they find.
  *
+ * @version 1.7 - clientCustodyScope(): a `v1.edgeseal.` key is the browser's
+ *   alone when its scope is client custody; one sealed in that format to a
+ *   server-custody scope (a row moved back off end-to-end) opens in the window
  * @version 1.6 - the browser format: sealItemDekToBrowserKey(),
  *   sealFieldForBrowser(), parseEdgeScope(); openItemDek(s)() and openField()
  *   open either prefix
@@ -107,6 +110,20 @@ class VaultCrypto {
 		}
 		$scope = substr($rest, 0, $dot);
 		return preg_match('/^[a-z0-9_]{1,32}$/', $scope) ? $scope : null;
+	}
+
+	/**
+	 * The client-custody scope a key is sealed to, or null when a server key
+	 * opens it. This, not the frame, is what makes a row the browser's alone:
+	 * a row moved back off end-to-end keeps its DEK sealed in the browser's
+	 * format to the server-custody `user` scope (`v1.edgeseal.user.`, the
+	 * browser cannot write libsodium's), and openItemDek() opens that in the
+	 * window like any `v1.seal.` key. A scope nothing declares (its plugin
+	 * inactive) counts as the browser's: the server holds no key for it.
+	 */
+	public static function clientCustodyScope(string $sealed): ?string {
+		$scope = self::parseEdgeScope($sealed);
+		return ($scope !== null && VaultScopes::custodyFor($scope) !== VaultScopes::CUSTODY_SERVER) ? $scope : null;
 	}
 
 	/** Is this a browser-format field value (`v1.edge.`)? */

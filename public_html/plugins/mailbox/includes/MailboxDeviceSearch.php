@@ -44,7 +44,7 @@ class MailboxDeviceSearch {
 	const MAX_HITS = 500000;
 
 	/** A Fortress row's key column starts with this ('mail' holds no LIKE wildcard). */
-	const MAIL_KEY_PREFIX = 'v1.edgeseal.mail.';
+	const MAIL_KEY_PREFIX = InboundEmailMessage::MAIL_KEY_PREFIX;
 
 	/**
 	 * One page of $user_id's Fortress messages with their sealed search text.

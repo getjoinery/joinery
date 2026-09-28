@@ -32,6 +32,7 @@
  *
  * Run: php tests/run.php db --filter=protection_addons
  *
+ * @version 1.4 - the editor offers the Fortress card, its copy from the catalog (WP5)
  * @version 1.3 - Fortress is a settable level (specs/client_custody_mail.md); a
  *   legacy value is told apart by ied_level_set_time
  * @version 1.2
@@ -295,7 +296,9 @@ check(strpos($view, "checkboxinput('ied_send_lock_requested'") === false
 	'no hand-rolled add-on checkboxes');
 check(strpos($view, 'Cost: new mail waits') === false && strpos($view, "Seal at the relay</strong>") === false,
 	'no add-on sentence is restated in the editor');
-check(strpos($view, "InboundEmailDomain::LEVEL_FORTRESS") === false, 'the level picker has no third card');
+check(strpos($view, "'levels'  => InboundEmailDomain::SETTABLE_LEVELS") !== false
+		&& strpos(ProtectionLevelPicker::copy(InboundEmailDomain::LEVEL_FORTRESS, ProtectionLevelPicker::SERVICE_MAIL)[0], 'Only your devices') === 0,
+	'the picker offers Fortress, with the mail card copy (specs/client_custody_mail.md § R12)');
 
 // Render it the way the editor does and read what a member sees.
 function pa_render_picker(bool $relay_offered, bool $send): string {

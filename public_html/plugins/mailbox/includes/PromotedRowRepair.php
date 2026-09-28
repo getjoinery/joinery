@@ -36,6 +36,8 @@
  * repair's: it is sealed whole by whoever wrote it, and its key opens only on
  * its owner's devices (specs/client_custody_mail.md § R7).
  *
+ * @version 1.2 - a recipient in the browser's format (v1.edge., a mailbox moved
+ *   back off end-to-end) is sealed, not debt; Fortress means the mail vault
  * @version 1.1 - leaves Fortress rows out; their `v1.edge.` recipient read as debt
  * @version 1.0
  */
@@ -69,10 +71,11 @@ class PromotedRowRepair {
 			    AND iem_content_sealed = true
 			    AND iem_sealed_owner_user_id = ?
 			    AND iem_delete_time IS NULL
-			    AND iem_sealed_key NOT LIKE 'v1.edgeseal.%'
+			    AND NOT " . InboundEmailMessage::mailKeySql() . "
 			    AND (iem_reseal_pending = true
 			         OR (iem_recipient IS NOT NULL AND iem_recipient <> ''
-			             AND iem_recipient NOT LIKE 'v1.aead.%'))
+			             AND iem_recipient NOT LIKE 'v1.aead.%'
+			             AND iem_recipient NOT LIKE 'v1.edge.%'))
 			  LIMIT 1");
 		$stmt->execute(array($user_id));
 		return (bool)$stmt->fetchColumn();
@@ -128,10 +131,11 @@ class PromotedRowRepair {
 			    AND iem_content_sealed = true
 			    AND iem_sealed_owner_user_id = ?
 			    AND iem_delete_time IS NULL
-			    AND iem_sealed_key NOT LIKE 'v1.edgeseal.%'
+			    AND NOT " . InboundEmailMessage::mailKeySql() . "
 			    AND (iem_reseal_pending = true
 			         OR (iem_recipient IS NOT NULL AND iem_recipient <> ''
-			             AND iem_recipient NOT LIKE 'v1.aead.%'))
+			             AND iem_recipient NOT LIKE 'v1.aead.%'
+			             AND iem_recipient NOT LIKE 'v1.edge.%'))
 			  ORDER BY iem_inbound_email_message_id ASC
 			  LIMIT " . intval($max));
 		$stmt->execute(array($user_id));
@@ -156,7 +160,7 @@ class PromotedRowRepair {
 		// read path returns ''/null verbatim on a sealed row).
 		$recipient = $row['iem_recipient'];
 		$needs_seal = is_string($recipient) && $recipient !== ''
-			&& strpos($recipient, 'v1.aead.') !== 0;
+			&& strpos($recipient, 'v1.aead.') !== 0 && !VaultCrypto::isEdgeField($recipient);
 		if ($needs_seal) {
 			$sealed_key = (string)($row['iem_sealed_key'] ?? '');
 			if ($sealed_key === '') {
@@ -215,7 +219,7 @@ class PromotedRowRepair {
 			    AND iem_direction = 'outbound'
 			    AND iem_inbound_email_message_id <> ?
 			    AND iem_delete_time IS NULL
-			    AND iem_recipient LIKE 'v1.aead.%'
+			    AND (iem_recipient LIKE 'v1.aead.%' OR iem_recipient LIKE 'v1.edge.%')
 			  ORDER BY iem_inbound_email_message_id ASC
 			  LIMIT 1");
 		$stmt->execute(array(intval($alias_id), substr($header, 0, 255), $id));

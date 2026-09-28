@@ -12,7 +12,8 @@ the owner on 2026-09-24 and are the last section. **Search (R5, WP3) was
 redesigned with the owner on 2026-09-27** for 10 GB mailboxes: a sealed word
 index kept in each browser, not a per-search download (§ Decisions
 2026-09-27). WP0–WP2b are built (fb0a830c); WP3 is built and walked on dev
-(8e008eeb); WP4 is built, reviewed and walked on dev (2026-09-28).
+(8e008eeb); WP4 is built, reviewed and walked on dev (75b9501a). WP5 is
+built, tested and walked on dev (2026-09-28, uncommitted; § WP5 As built).
 
 ## For the executor — read this first
 
@@ -388,9 +389,10 @@ A Fortress alias whose owner holds no `mail` vault is a missing seal target:
 mail is held (exit 75 / relay hold), exactly as a Private alias without a
 vault. The level change refuses to create that state (R8).
 
-`InboundEmailMessage::isBrowserSealed(array|self $row): bool` (the key column
-starts with `v1.edgeseal.`) is the one predicate every server-side reader
-gates on (R7).
+`InboundEmailMessage::isBrowserSealed(array|self $row): bool` (the key is
+sealed to a client-custody scope, `VaultCrypto::clientCustodyScope()`; a
+lowered row's `v1.edgeseal.user.` key is the server's, B12) is the one
+predicate every server-side reader gates on (R7).
 
 ### R2. The Fortress row
 
@@ -632,7 +634,7 @@ sealed, and the next unlock reuses it.
 - `iem_search_written_time` (R2) is set with `clock_timestamp()` in the
   **same UPDATE** that writes `iem_search_text`: `sealFortressDerived`
   (ingest, Joinery Direct, the Sent copy), `fortress_parse_store` (WP7),
-  `convertToFortress` (WP5). A draft that turns into its Sent row in place
+  the raise (`MailboxFortressLevel::convertRow`, WP5). A draft that turns into its Sent row in place
   gets a fresh value at send. Each of these commits within minutes of its
   stamp (the bound below). The hook is
   `SystemBase::sealedWriteMarks()` (honoured by `sealColumns()` and
@@ -1328,38 +1330,133 @@ adds the browser's half.
 
 ### WP5. Level changes (R8)
 
-**Started 2026-09-27 (its code lands with the rest of WP5):** `SystemBase::convertRowToClientCustody()`
-(the raise; returns the DEK for the consumer's own blobs) with
-`tests/vault/custody_change_test.php` (12 checks: the raise, same DEK and AD,
-generation and owner, the refusals). Building it found that
-`SealedEgressGuard` counted the browser's formats (`v1.edge.`,
-`v1.edgeseal.`) as plaintext, so a process that had opened sealed content
-could not write browser ciphertext to a row not already sealed to that owner;
-fixed (guard 1.3, `docs/sealed_vault.md`, a check in
-`sealed_egress_guard_test`). Not started: the lowering (B12 first), mail's
-`convertToFortress`, the deferred work, the domain editor and banner, the
-`ied_level_set_time` column (needs `update_database`: stop point).
+**As built 2026-09-28.** Tests: `custody_change` (34, db), `fortress_level_change` (43, test-db),
+`fortress_scope` 1.3 (+ the relay refusal), `protection_addons` 1.4, `sealed_serve_grant` 1.2
+(see B17); the `db --changed` gate green. **Not yet walked on dev** (the acceptance below): it
+needs a test admin who owns a domain of their own with Private mail, a passkey and both vaults,
+which is database writes the owner approves first.
 
-**Found before building (2026-09-27, B12, traced).** R8's lowering leaves a
-row's key as `v1.edgeseal.user.` (the DEK sealed in the edge format to the
-server-custody `user` vault) and its fields as `v1.edge.`. Every read path
-today decides "only the browser opens this" from the `v1.edgeseal.` prefix
-alone, whatever the scope: `SystemBase`'s field read throws
-`VaultSealedForBrowserException` when `VaultCrypto::parseEdgeScope()` returns
-any scope (`includes/SystemBase.php` ~:890), its save guard does the same
-(~:1264), and `InboundEmailMessage::isBrowserSealed()` (29 callers across the
-mailbox) and `unwrapDekInWindow()` test the bare prefix. A lowered row would
-read as Fortress everywhere and open nowhere on the server. WP5 must first make
-"browser custody" mean "sealed to a scope `VaultScopes::isClientCustody()`
-names" at each of those places, and route a `v1.edgeseal.user.` key through
-`VaultKey::unsealEdge` in the window (fields through `openField`, which
-already takes `v1.edge.`), with a test that a lowered row reads in-window,
-locks out of it, and is not offered to the browser. Owner to confirm this
-reading of R8 before WP5 starts; the alternative (the server re-wraps the DEK
-in its own format at acceptance, which needs the owner's window open, against
-R8's "the browser does the work") is worse.
+- **B12, resolved as recommended (owner's go-ahead 2026-09-28, "continue working on the next
+  part").** Custody is the key's scope, not its frame: `VaultCrypto::clientCustodyScope()`
+  (1.7) names the scope when it is client custody (or declared by nothing active), null
+  otherwise. Every "only the browser opens this" check asks it: `SystemBase`'s field read,
+  save guard, `convertRowToClientCustody` and the sealed-for-browser export;
+  `VaultClientRotation::resealRows` (1.3); `InboundEmailMessage::isBrowserSealed()` and
+  `unwrapDekInWindow()`; `ModelQueryExecutor` (1.2, by the row's key). Mailbox SQL names the mail
+  scope (`LIKE 'v1.edgeseal.mail.%'`): `PromotedRowRepair` (1.2), the unseal pass, the server
+  rotation (`bootstrap` 1.20), the raw-headers read, `EmailJobCandidates`. Found while fixing it:
+  the mailbox server rotation skipped every `v1.edgeseal.` row, so a lowered row would have been
+  stranded on a retired key; the generic `resealRows()` tried client-custody rows it cannot
+  open; `PromotedRowRepair` would have sealed a lowered row's `v1.edge.` recipient as though it
+  were plaintext; the unseal pass skipped `v1.edge.` fields; the outbound-recipient read handed
+  a `v1.edge.` recipient back as plaintext. All fixed.
+- **Core.** `SystemBase::convertRowToClientCustody()` (the raise, returns the DEK),
+  `browserCustodyPage()` / `browserCustodyBacklog()` / `acceptBrowserCustodyChange()` (the
+  lowering; with the server window open the key must open a field first; the UPDATE is
+  conditional on the key read), `assertBrowserCustodyColumns()`. `VaultCustodyChange` (new):
+  pages across the models `clientReseal()` registered, each row with its target vault's public
+  key in standard base64; `remaining` on the first page only, and only when every model counts
+  in SQL (the generic `browserCustodyBacklog()` answers null rather than read every row).
+  `clientCustodyKeyLike()`: the one escaped LIKE for a scope's keys. Actions
+  `vault_custody_rows`, `vault_row_custody`. `JoinerySealed.changeCustody(scope, {progress,
+  reason})` (joinery-sealed.js 1.9). `docs/sealed_vault.md` § Moving rows between custodies.
+- **Mail.** `MailboxFortressLevel` (new) in place of `InboundEmailMessage::convertToFortress`:
+  `convertRow()` takes a Private or a Standard row (reads parts through
+  `mailbox_retrieve_attachment_bytes`, so both sealed shapes and the stored raw; a raw with no
+  manifest rows gets rows; a part nowhere to be had stays listed without a file), converts
+  (`convertRowToClientCustody` or `sealExistingRow` to the mail vault), re-stores every part as
+  shape (a) nameless, seals search text, snippet and manifest (`sealFortressDerived`, which
+  stamps `iem_search_written_time`), drops the raw, one transaction per row under a row lock
+  that re-checks the key; old Files and the stored raw go after the commit; the server index
+  refolds the row. Deferred work `mailbox_fortress_raise` (100 rows or 64 MiB a pass; a row that
+  fails is stamped `iem_fortress_move_attempt_time` and passed by for an hour; a row sealed to
+  another owner's key is not taken) and `mailbox_fortress_lowered` (`settleLowered()`: the
+  manifest's names back onto the ima_ rows, the Fortress-only columns cleared, a refold, all
+  conditional on the key it read); the unseal pass settles first and leaves no Fortress-only
+  column. Both run only as deferred work, driven by the vault client. `backlogCount()` (all, or
+  `$ready`), `loweringBacklogCount()`. `InboundEmailAlias::effectiveLevelSql()` reads a legacy
+  unconverted Fortress domain as Private, so it is the one level rule in SQL (the Private seal
+  batch and backlog are `= 'private'`). `InboundEmailMessage::MAIL_KEY_PREFIX` / `mailKeySql()`
+  (the one spelling of "on the mail key"; joinery_ai's `EmailJobCandidates` keeps its literal,
+  so it does not depend on a mailbox class) and `FORTRESS_DERIVED`.
+  `InboundEmailMessage::browserCustodyPage()`/`Backlog()` answer the walk in SQL.
+  Action `mailbox/fortress_backlog` (counts only: all, ready, lowering, window open). Domain editor (4.3) and logic (1.2): the Fortress card (R12 copy in
+  `ProtectionLevelPicker` 1.4.0, notes: arrival without the relay, passphrase accounts), the
+  mail vault opened before a save that chooses Fortress (`JoinerySealed.session('mail')`, then
+  `requestSubmit`), the relay refusal (below), AI switches hidden and off at Fortress, the
+  window rule only for a lowering to Standard, `mailbox_fortress_receipt_render()` for both
+  directions with `mailbox_fortress_level.js` (the raise card follows the count, and keeps
+  following it while locked so an unlock carries on;
+  the lowering is one button), the unseal card waiting for the browser's step. The mailbox page
+  banner (`mailbox_reader_emit_fortress_banner`), and the vault client loaded there while
+  messages remain to move back. Mailbox plugin 1.125.0.
+- **The acceptance walk (done 2026-09-28).** As test user 146345 (permission 5), owning
+  `claude-levels.example` (domain 37640) with one store mailbox `box@` (alias 46267); passkey and
+  vaults made in the browser; two messages delivered at Standard, two at Private (each with a
+  PDF and an inline image). Standard → Private sealed the two. Private → Fortress from the
+  editor: the mail key was made in the save, the receipt moved all four (fields in the browser's
+  format, parts nameless, raw emptied, search written). An old Standard-era message opened on
+  /profile/mailbox/mailbox, its PDF downloading under its name with the exact bytes. The AI
+  setting was hidden at Fortress. Fortress → Private with the receipt's button: "Moved 4 of 4",
+  every key on the server's user key, names back from the manifest, the message read through
+  the server window, and server search found a word again. Private → Standard unsealed all four
+  with their names. Then Standard → Fortress straight (raising Standard rows), and a lowering
+  from the mailbox page's banner, both clean. No console errors.
 
-**Ordering constraint (review of WP0–WP2, B11).** Until WP7 lands,
+**Found while building (2026-09-28).**
+
+- **B17 (fixed).** `sealed_serve_grant` failed on dev: its 1×1 PNG deduplicated onto a blob a
+  bug-report intake had made at 00:28, since moved to cloud storage, and the test read the
+  local path directly. It reads through `File::read_bytes()` now (test 1.2).
+- **B18 (fixed).** The receipt's raise pass and the heartbeat's deferred work could move the
+  same message at once: the second could read parts after the first deleted the old Files and
+  record them missing. The card no longer moves anything (the review's S4: the deferred work is
+  the one driver), and `convertRow` re-checks the key under a row lock before writing.
+- **B19 (fixed, found by the walk).** The receipt's progress went into its first status line
+  (the new-mail row), so a finished raise read "Every earlier message is on your device key"
+  above a stale "4 messages to go". `mailbox_fortress_level.js` 1.1 writes only to the
+  `#fortress-move-row` line (or a banner's `[data-fortress-text]`).
+- **B20 (fixed, found by the walk, not WP5's).** Every load of the domain editor logged
+  "Undefined array key readable_title" (`AdminPage.php`): `admin_header()` read the option
+  unguarded, and about 77 admin pages omit it. It passes `BeginPage`'s own default now
+  (AdminPage 1.3).
+
+**Review by public-html-91 (2026-09-28).** NOT YET VALID on first read; all taken:
+
+- **B22 (fixed).** The settle and the unseal's settle-first keyed on the `v1.edgeseal.user.`
+  frame, which a server rotation rewrites to `v1.seal.`: such a row never settled, stayed
+  nameless, and an unseal would write its manifest out as plaintext. The marker is now "a
+  manifest on a row not on the mail key".
+- **B23 (fixed).** A settle racing a re-raise could null the new Fortress row's manifest and put
+  its names on the parts. The settle locks the row and writes only if the key is the one it read.
+- **B24 (fixed).** A row that fails every pass was retried every beat and, 100 of them, starved
+  the rest. Failures are stamped and passed by for an hour; rows sealed to a previous owner's
+  key are left out of the work (they count as not moved, and the card says so).
+- **B25 (fixed).** Unsealing to Standard wrote search text, snippet and manifest out in
+  plaintext. The unseal and the settle clear `FORTRESS_DERIVED`.
+- **B26 (fixed by S4).** The raise card said "the server log says why" when the window closed
+  mid-pass, and never woke after an unlock. It now follows the count, locked or not.
+- **Simplifications.** S1 `mailKeySql()` (nine literals), S2 `FORTRESS_DERIVED`, S3 the legacy
+  rule inside `effectiveLevelSql()` (`fortressSql()` gone), S4 the card counts and the deferred
+  work moves (`runNow`, `busy` and the retry loop gone), S5 the generic count is optional. S6's
+  redirect-flag merge was not taken: it would rework the older Private receipts
+  (`sealed_now` / `unsealed_now`) and their tests for four lines.
+- **Found while testing the fixes.** S5 left the mail walk's total blank: `MailboxSearchKey` (also
+  registered for the `mail` scope) had no count. It never leaves the mail vault, so it now lists
+  nothing and counts 0 (`mailbox_search_keys_class` 1.2). Schema: `iem_fortress_move_attempt_time`
+  (update_database, owner-approved). Gate 486/486; fortress_level_change 51, custody_change 34.
+- **B28 (fixed, 91's re-trace).** The unseal called `settleLowered()` unguarded, so one lowered
+  row whose key or manifest would not open threw out of the unseal batch, and headed every later
+  pass: the domain never finished going to Standard. The settle is caught, logged and the row
+  left, like a failed decrypt. Re-trace: B22–B26 and S1–S5 VALID; VALID with B28 guarded.
+- **Re-walked on dev after the fixes** (a `walk_fixture.php` user, specs/dev_walk_fixtures.md):
+  Standard → Private sealed two; two more at Private; Private → Fortress, the card counting while
+  the vault client's background pass moved them (4 to go at 0 s, done at 16 s); lowered with the
+  button, and the background settle put every name back and left no Fortress-only column.
+
+
+**Ordering constraint (review of WP0–WP2, B11), built as a refusal:** `admin_mailbox_domains_fortress_refusal()`
+refuses Fortress with Seal at the relay on; WP7 lifts it. Until WP7 lands,
 `RelayMapExporter::sealTargetForAlias()` gives a Fortress mailbox the relay's
 transport key (never the owner's server key, which would store relay mail as a
 Private row). Mail is then sealed to the mail key at pull, but the relay add-on's

@@ -25,6 +25,8 @@
  *
  * Run: php tests/run.php db --filter=sealed_serve_grant
  *
+ * @version 1.2 - stored bytes read through File::read_bytes(): a File can share a blob
+ *   already moved to cloud storage, which has no local path
  * @version 1.1 - the ingest-adopted message is registered for teardown
  * @version 1.0
  */
@@ -177,7 +179,7 @@ $sealed_file = DriveSealed::createSealedFile($tmp, 'selfsealed.png', 'image/png'
 harness_register_model('File', (int)$sealed_file->key);
 $att_a = $make_att_row($msg_a, 'selfsealed', '2', (int)$sealed_file->key, false);
 
-$container_bytes = file_get_contents($sealed_file->get_filesystem_path('original'));
+$container_bytes = $sealed_file->read_bytes('original');
 check(is_string($container_bytes) && $container_bytes !== '' && $container_bytes !== $png,
 	'the stored bytes are a sealed container, not the image');
 
@@ -370,7 +372,7 @@ check($fil_id !== null && intval($fil_id) > 0, 'the raw-backed part is file-back
 if ($fil_id) {
 	harness_register_model('File', intval($fil_id));
 	$adopted = new File(intval($fil_id), TRUE);
-	$adopted_bytes = file_get_contents($adopted->get_filesystem_path('original'));
+	$adopted_bytes = $adopted->read_bytes('original');
 	check($adopted_bytes === $png, 'the adopted bytes are the image (unsealed message → plain File)');
 }
 

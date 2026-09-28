@@ -44,6 +44,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  *   field_min       -> field >= value     (numerics)
  *   field_max       -> field <= value
  *
+ * @version 1.2 - browser-format values under a server key (a row moved back off
+ *   end-to-end) open like any sealed value; only a client-custody key excludes
  * @version 1.1 - a row holding browser-sealed (`v1.edge.`) values is excluded, never opened
  */
 class ModelQueryExecutor {
@@ -217,17 +219,22 @@ class ModelQueryExecutor {
             $locked = false;
             foreach ($sealed as $field) {
                 if (!array_key_exists($field, $row) || $row[$field] === null) continue;
-                // A browser-sealed value (`v1.edge.`, a client-custody row such as
-                // Fortress mail) opens only on its owner's devices — no window here
-                // ever opens it, so the row is left out rather than failing the query.
-                if (VaultCrypto::isEdgeField((string)$row[$field])) {
+                // A browser-sealed value (`v1.edge.`) on a row sealed to a
+                // client-custody scope (Fortress mail) opens only on its owner's
+                // devices — no window here ever opens it, so the row is left out
+                // rather than failing the query. The same format under a server
+                // key (a row moved back off end-to-end) opens like any other.
+                $edge = VaultCrypto::isEdgeField((string)$row[$field]);
+                $key_col = $class::sealedKeyColumn();
+                if ($edge && (!array_key_exists($key_col, $row)
+                        || VaultCrypto::clientCustodyScope((string)$row[$key_col]) !== null)) {
                     $locked = true;
                     break;
                 }
                 // Surface confined to protected contexts (a standard chat): never
                 // open actually-sealed content. Exclude the row exactly as a locked
                 // vault does, so the turn never goes hot and no plaintext escapes.
-                if (!$reads_allowed && strpos((string)$row[$field], 'v1.aead.') === 0) {
+                if (!$reads_allowed && ($edge || strpos((string)$row[$field], 'v1.aead.') === 0)) {
                     $locked = true;
                     break;
                 }

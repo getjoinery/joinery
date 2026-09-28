@@ -18,6 +18,8 @@
  * decision asks the alias; domain identity (DKIM, protected identity, DNS shape,
  * relay export) keeps asking the domain.
  *
+ * @version 1.8 - effectiveLevelSql() reads a legacy unconverted Fortress domain as
+ *   Private, as InboundEmailDomain::security_level() does
  * @version 1.7 - Fortress: an own 'fortress' reads as Fortress, seals_content() covers
  *   Private and Fortress, is_fortress(), iea_relay_identity_pin
  * @version 1.6 - two settable levels, Standard and Private; the reserved
@@ -279,14 +281,18 @@ class InboundEmailAlias extends SystemBase {
 	 *
 	 * $alias_tbl / $domain_tbl are the query's table aliases. A message with no
 	 * mailbox (the catch-all) has no alias row, so the LEFT JOIN's NULL falls
-	 * through to the domain — which is exactly whose mail it is.
+	 * through to the domain — which is exactly whose mail it is. A domain's
+	 * legacy unconverted 'fortress' (InboundEmailDomain::is_unconverted()) reads
+	 * as Private, as its PHP resolver reads it.
 	 */
 	static function effectiveLevelSql(string $alias_tbl, string $domain_tbl): string {
 		// LOWER/TRIM mirror the PHP resolver's normalisation, so a value that
 		// only a hand edit could have miscased still reads as the same level
 		// here as it does there.
 		return "COALESCE(NULLIF(LOWER(TRIM($alias_tbl.iea_security_level)), ''),"
-			. " LOWER(TRIM($domain_tbl.ied_security_level)))";
+			. " CASE WHEN LOWER(TRIM($domain_tbl.ied_security_level)) = '" . InboundEmailDomain::LEVEL_FORTRESS . "'"
+			. " AND $domain_tbl.ied_level_set_time IS NULL THEN '" . InboundEmailDomain::LEVEL_PRIVATE . "'"
+			. " ELSE LOWER(TRIM($domain_tbl.ied_security_level)) END)";
 	}
 
 	/**

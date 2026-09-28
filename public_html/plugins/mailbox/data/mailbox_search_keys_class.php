@@ -21,6 +21,8 @@
  * msk_sealed_key / msk_key_generation / msk_sealed_owner_user_id like a
  * message row's.
  *
+ * @version 1.2 - a lowering never moves it: browserCustodyPage() lists nothing and
+ *   browserCustodyBacklog() counts 0
  * @version 1.1 - authenticate_write refuses: acceptBrowserKey() is the only way a key is written
  * @version 1.0
  */
@@ -62,6 +64,16 @@ class MailboxSearchKey extends SystemBase {
 
 	protected static function sealScopeForWrite(array $row): string {
 		return self::SCOPE;
+	}
+
+	/** The key stays in the mail vault whatever the mailboxes' levels
+	 *  (sealScopeForWrite()), so a lowering's walk has nothing of it to move. */
+	public static function browserCustodyPage(int $user_id, string $scope, int $after_id, int $limit): array {
+		return array('rows' => array(), 'last_id' => $after_id, 'done' => true);
+	}
+
+	public static function browserCustodyBacklog(int $user_id, string $scope): ?int {
+		return 0;
 	}
 
 	/** The user's sealed search key (`v1.edgeseal.mail.…`), or null before their first browser made one. */

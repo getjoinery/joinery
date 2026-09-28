@@ -13,6 +13,7 @@ if (!class_exists('PublicPage', false)) {
 /**
  * AdminPage — the admin interface's page object.
  *
+ * @version 1.3 - readable_title is optional (BeginPage's own default)
  * @version 1.2 - an error flash message carries a "Report a problem" link
  * @version 1.1 - root_request_panel() takes the URL to open when an
  *                install_package request is refused as unverified (exit 3),
@@ -234,7 +235,7 @@ HTML;
 		if (isset($options['no_page_card']) && $options['no_page_card'] === true) {
 			echo AdminPage::BeginPageNoCard($options);
 		} else {
-			echo AdminPage::BeginPage($options['readable_title'], $options);
+			echo AdminPage::BeginPage($options['readable_title'] ?? '', $options);
 		}
 
 		// Pending session flash messages (e.g. process_logic()'s error path)

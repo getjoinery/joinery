@@ -887,8 +887,10 @@ abstract class SystemBase {
 		}
 		// A row sealed to a client-custody scope is the browser's to read. Not
 		// "wait for the window": no server code holds that secret, so this is
-		// the same answer with the window open or closed.
-		$scope = VaultCrypto::parseEdgeScope((string)($row[static::sealedKeyColumn()] ?? ''));
+		// the same answer with the window open or closed. A key in the browser's
+		// format sealed to a server scope (a row moved back off end-to-end) is
+		// not that: it opens below like any other.
+		$scope = VaultCrypto::clientCustodyScope((string)($row[static::sealedKeyColumn()] ?? ''));
 		if ($scope !== null) {
 			throw new VaultSealedForBrowserException(get_called_class() . '.' . $field
 				. ' is sealed to the "' . $scope . '" vault, which only the browser opens.');
@@ -1255,7 +1257,7 @@ abstract class SystemBase {
 		// nothing records any more, so it is refused.
 		$reuse_dek = null;
 		if ($this->key !== NULL && $this->rowIsSealedInDb()) {
-			$stored_scope = VaultCrypto::parseEdgeScope($this->storedSealedKey());
+			$stored_scope = VaultCrypto::clientCustodyScope($this->storedSealedKey());
 			if ($stored_scope === null && !static::vaultIsClientCustody($vault)) {
 				$reuse_dek = $this->existingRowDek($owner_id);
 			} else {
@@ -1537,9 +1539,7 @@ abstract class SystemBase {
 					. '{prefix}_sealed_key, {prefix}_key_generation and {prefix}_sealed_owner_user_id columns.');
 			}
 		}
-		// A scope name may hold '_', which LIKE reads as "any one character": a
-		// sibling scope's rows would match. Escape it (and '%', and the escape).
-		$like = 'v1.edgeseal.' . str_replace(array('\\', '%', '_'), array('\\\\', '\\%', '\\_'), $scope) . '.%';
+		$like = static::clientCustodyKeyLike($scope);
 		$where = $key_col . " LIKE ? ESCAPE '\\' AND " . $gen_col . ' = ? AND ' . $owner_col . ' = ?';
 		$params = array($like, $generation, $user_id);
 		$db = DbConnector::get_instance()->get_db_link();
@@ -1604,6 +1604,218 @@ abstract class SystemBase {
 	/** How many of $user_id's rows sit on $generation of client-custody $scope. */
 	public static function browserSealedRowCount(int $user_id, string $scope, int $generation): int {
 		return static::browserResealPage($user_id, $scope, $generation, PHP_INT_MAX, 1)['remaining'];
+	}
+
+	/**
+	 * Move one server-sealed row into a client-custody scope: the raise to
+	 * end-to-end (specs/client_custody_mail.md § R8). The row's DEK is opened
+	 * with $old_key (its owner's server key, in-window), every populated
+	 * sealed field is re-encrypted from the server's format into the
+	 * browser's under the SAME DEK and the same AD, and the DEK is sealed to
+	 * $scope_vault's key (the pending one during a rotation). One UPDATE:
+	 * fields, key, generation, owner. Keeping the DEK keeps anything else
+	 * sealed under it (a consumer's files) addressable; the consumer
+	 * re-encrypts those itself with the DEK this returns.
+	 *
+	 * Refuses a row that is not sealed, one already in the browser's format,
+	 * a vault that is not client custody or not the row owner's, and a scope
+	 * the row's hook does not name.
+	 *
+	 * @return string the row's DEK (raw bytes), for the consumer's own blobs
+	 */
+	public static function convertRowToClientCustody(int $row_id, VaultKey $old_key, $scope_vault): string {
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		$cls = get_called_class();
+		static::assertSealingDeclared(static::$sealed_fields[0] ?? '');
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute(array($row_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			throw new RuntimeException($cls . ': no row ' . $row_id . ' to move.');
+		}
+		$sealed_key = (string)($row[static::sealedKeyColumn()] ?? '');
+		if (!static::rowArrayIsSealed($row) || $sealed_key === '') {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' is not sealed, so there is nothing to move.');
+		}
+		if (VaultCrypto::clientCustodyScope($sealed_key) !== null) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' is already sealed to a client-custody vault.');
+		}
+		if (!static::vaultIsClientCustody($scope_vault)) {
+			throw new RuntimeException($cls . ': a row moves to a client-custody vault only.');
+		}
+		$scope = (string)$scope_vault->get('uev_scope');
+		if (static::resolveSealScope($row) !== $scope) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' does not belong to the "' . $scope . '" vault.');
+		}
+		$owner_id = static::sealedOwnerUserIdFor($row);
+		if ($owner_id === null || $owner_id !== intval($scope_vault->get('uev_usr_user_id'))) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' is not the vault owner\'s.');
+		}
+
+		$crypto = new VaultCrypto();
+		$dek = $crypto->openItemDek($sealed_key, $old_key);
+		$sets = array();
+		$params = array();
+		$moved = array();
+		foreach (static::$sealed_fields as $col) {
+			$value = $row[$col] ?? null;
+			if ($value === null || $value === '' || !static::sealedFieldIsActive($col, $row)) {
+				continue;
+			}
+			$ad = static::sealAd($row_id, $col);
+			$sets[] = $col . ' = ?';
+			$params[] = $crypto->sealFieldForBrowser($crypto->openField((string)$value, $dek, $ad), $dek, $ad);
+			$moved[$col] = true;
+		}
+		$wrap = static::sealWrappingAssignments($crypto, $scope_vault, $dek);
+		$sets = array_merge($sets, $wrap['sets'], self::sealedWriteMarksFor($moved));
+		$params = array_merge($params, $wrap['params']);
+		$params[] = $row_id;
+		$db->prepare('UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
+			. ' WHERE ' . static::$pkey_column . ' = ?')->execute($params);
+		return $dek;
+	}
+
+	/** Rows scanned per call of browserCustodyPage(), matched or not. */
+	const CUSTODY_SCAN_MAX = 200;
+
+	/**
+	 * One page of $user_id's rows sealed to client-custody $scope whose hook
+	 * now names another vault: what the browser moves off end-to-end
+	 * (specs/client_custody_mail.md § R8, VaultCustodyChange). The hook is
+	 * asked per row, so a row still belonging to $scope is never listed and the
+	 * walk ends. At most CUSTODY_SCAN_MAX rows are read per call, so a page can
+	 * come back empty with `done` false: carry on from `last_id`.
+	 *
+	 * @return array{rows: array<int,array{id:int,sealed_dek:string,target_scope:string}>, last_id:int, done:bool}
+	 */
+	public static function browserCustodyPage(int $user_id, string $scope, int $after_id, int $limit): array {
+		static::assertBrowserCustodyColumns('change custody');
+		if (!VaultScopes::isClientCustody($scope)) {
+			throw new RuntimeException(get_called_class() . ': "' . $scope . '" is not a client-custody vault.');
+		}
+		$limit = max(1, min(self::CUSTODY_SCAN_MAX, $limit));
+		$like = static::clientCustodyKeyLike($scope);
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT * FROM ' . static::$tablename
+			. ' WHERE ' . static::sealedKeyColumn() . " LIKE ? ESCAPE '\\' AND " . static::sealedOwnerColumn() . ' = ?'
+			. ' AND ' . static::$pkey_column . ' > ? ORDER BY ' . static::$pkey_column . ' LIMIT ' . self::CUSTODY_SCAN_MAX);
+		$stmt->execute(array($like, $user_id, $after_id));
+		$scanned = $stmt->fetchAll(PDO::FETCH_ASSOC);
+		$rows = array();
+		$last = $after_id;
+		foreach ($scanned as $row) {
+			$last = (int)$row[static::$pkey_column];
+			$target = static::resolveSealScope($row);
+			if ($target !== $scope) {
+				$rows[] = array('id' => $last, 'sealed_dek' => (string)$row[static::sealedKeyColumn()], 'target_scope' => $target);
+				if (count($rows) >= $limit) {
+					return array('rows' => $rows, 'last_id' => $last, 'done' => false);
+				}
+			}
+		}
+		return array('rows' => $rows, 'last_id' => $last, 'done' => count($scanned) < self::CUSTODY_SCAN_MAX);
+	}
+
+	/**
+	 * How many of $user_id's rows under client-custody $scope browserCustodyPage()
+	 * would list, or null when the model cannot say cheaply: the generic walk
+	 * would have to ask the hook of every row. A model that can answer in SQL
+	 * overrides this.
+	 */
+	public static function browserCustodyBacklog(int $user_id, string $scope): ?int {
+		return null;
+	}
+
+	/**
+	 * The LIKE pattern (with ESCAPE '\\') for a key column sealed to client-custody
+	 * $scope. A scope name may hold '_', which LIKE reads as "any one character":
+	 * a sibling scope's rows would match. It is escaped (and '%', and the escape).
+	 */
+	protected static function clientCustodyKeyLike(string $scope): string {
+		return VaultCrypto::EDGE_SEAL_PREFIX . str_replace(array('\\', '%', '_'), array('\\\\', '\\%', '\\_'), $scope) . '.%';
+	}
+
+	/**
+	 * Store the DEK of a row moving off client custody, re-sealed by its owner's
+	 * browser to the vault the row's hook now names (the lowering, R8). The
+	 * browser writes the edge format only, so a row moved to the server's
+	 * `user` vault keeps a `v1.edgeseal.user.` key and its `v1.edge.` fields:
+	 * the window opens both (VaultCrypto::clientCustodyScope()). Nothing but
+	 * the key, its generation and owner is written.
+	 *
+	 * Refuses a row that is not $user_id's, one not under a client-custody
+	 * vault, one its hook still keeps there, a key for another vault than the
+	 * hook names, and a target vault the owner does not have. With the owner's
+	 * server window open, the key must open the row's own content first, so a
+	 * bad key never replaces a good one; without it the key is taken as the
+	 * rotation takes one (acceptBrowserReseal()). The UPDATE is conditional on
+	 * the key read, so a row that changed meanwhile is refused, not overwritten.
+	 */
+	public static function acceptBrowserCustodyChange(int $user_id, int $row_id, string $sealed_dek): void {
+		static::assertBrowserCustodyColumns('change custody');
+		$cls = get_called_class();
+		$key_col = static::sealedKeyColumn();
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute(array($row_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			throw new RuntimeException($cls . ': no row ' . $row_id . ' to move.');
+		}
+		if (static::sealedOwnerUserIdFor($row) !== $user_id) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' is not yours to move.');
+		}
+		$stored = (string)($row[$key_col] ?? '');
+		$from = VaultCrypto::clientCustodyScope($stored);
+		if ($from === null) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' is not sealed to a client-custody vault.');
+		}
+		$target = static::resolveSealScope($row);
+		if ($target === $from) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' still belongs to the "' . $from . '" vault.');
+		}
+		if (VaultCrypto::parseEdgeScope($sealed_dek) !== $target) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' moves to the "' . $target . '" vault; this key is sealed to another.');
+		}
+		$vault = UserEncryptionVault::loadForUser($user_id, $target);
+		if (!$vault) {
+			throw new RuntimeException($cls . ': there is no "' . $target . '" vault to move row ' . $row_id . ' to.');
+		}
+		$generation = static::vaultIsClientCustody($vault) ? $vault->sealingKeyGeneration() : (int)$vault->get('uev_key_generation');
+
+		if (!static::vaultIsClientCustody($vault)) {
+			$key = VaultUnlock::secretKey($user_id, $target);
+			if ($key !== null) {
+				$crypto = new VaultCrypto();
+				$dek = $crypto->openItemDek($sealed_dek, $key);   // throws: not sealed to this vault
+				foreach (static::$sealed_fields as $col) {
+					$value = $row[$col] ?? null;
+					if ($value !== null && $value !== '' && static::sealedFieldIsActive($col, $row)) {
+						$crypto->openField((string)$value, $dek, static::sealAd($row_id, $col));   // throws: not this row's DEK
+						break;
+					}
+				}
+			}
+		}
+
+		$update = $db->prepare('UPDATE ' . static::$tablename . ' SET ' . $key_col . ' = ?, '
+			. static::sealedGenerationColumn() . ' = ?, ' . static::sealedOwnerColumn() . ' = ? WHERE '
+			. static::$pkey_column . ' = ? AND ' . $key_col . ' = ?');
+		$update->execute(array($sealed_dek, $generation, $user_id, $row_id, $stored));
+		if ($update->rowCount() !== 1) {
+			throw new RuntimeException($cls . ': row ' . $row_id . ' changed while it was being moved; ask for it again.');
+		}
+	}
+
+	/** The key, generation and owner columns a browser-custody walk needs, or a refusal naming $what. */
+	protected static function assertBrowserCustodyColumns(string $what): void {
+		foreach (array(static::sealedKeyColumn(), static::sealedGenerationColumn(), static::sealedOwnerColumn()) as $col) {
+			if ($col === '' || !array_key_exists($col, static::$field_specifications)) {
+				throw new RuntimeException(get_called_class() . ' cannot ' . $what . ': it needs '
+					. '{prefix}_sealed_key, {prefix}_key_generation and {prefix}_sealed_owner_user_id columns.');
+			}
+		}
 	}
 
 	/**
@@ -1702,6 +1914,9 @@ abstract class SystemBase {
 			}
 			if (static::sealedOwnerUserIdFor($row) !== $user_id) {
 				continue;   // matched the loose owner predicate but is not this member's
+			}
+			if (VaultCrypto::clientCustodyScope($sealed) !== null) {
+				continue;   // sealed to a client-custody vault: the browser re-seals it (VaultClientRotation)
 			}
 			$attempted++;
 			$row_id = intval($row[static::$pkey_column] ?? 0);
@@ -2102,7 +2317,7 @@ abstract class SystemBase {
 	 */
 	function export_for_api_sealed_for_browser() {
 		$sealed_dek = (string)($this->data->{static::sealedKeyColumn()} ?? '');
-		$scope = VaultCrypto::parseEdgeScope($sealed_dek);
+		$scope = VaultCrypto::clientCustodyScope($sealed_dek);
 		if ($scope === null) {
 			throw new RuntimeException(get_called_class() . ' row ' . $this->key . ' is not sealed for the browser.');
 		}
