@@ -4,6 +4,9 @@
 # object on stdout: the unit's state, the result systemd recorded, its exit
 # status, when it last ran, and the last N lines of its journal.
 #
+# Version: 1.1 - postgresql reads the cluster unit (postgresql@16-main): the umbrella
+#                postgresql.service is a /bin/true oneshot with no journal, so the word
+#                answered -- No entries -- for the database on every node
 # Version: 1.0 - the unit_journal observe word of
 #                specs/disk_headroom_and_unit_diagnosis.md § 8. The agent runs
 #                this file, verified against the release manifest, with two
@@ -28,7 +31,7 @@
 #     A tab becomes a space and every other control character is dropped: an
 #     unescaped control character inside a JSON string is what makes an object
 #     unparseable at the other end.
-#   - READ ONLY: systemctl show, journalctl. Nothing here starts, stops or
+#   - READ ONLY: systemctl show and list-units, journalctl. Nothing here starts, stops or
 #     resets anything.
 #
 # Runs on: any systemd host. A machine without systemd prints the object with
@@ -87,7 +90,21 @@ fi
 (( LINES >= 1 )) || LINES=1
 (( LINES <= MAX_LINES )) || LINES=$MAX_LINES
 
-SERVICE="${UNIT}.service"
+# postgresql is the packaging's umbrella unit, a oneshot /bin/true that never
+# writes a journal line: the database runs as a cluster unit
+# (postgresql@16-main.service). The ACTIVE cluster is read, else the newest
+# one systemd has loaded — the rule restart_unit.sh applies to php-fpm — and
+# the umbrella only when there is no cluster unit at all. list-units, not
+# list-unit-files: a cluster is an instance of a template, not a unit file.
+if [[ "$UNIT" == "postgresql" ]]; then
+    SERVICE="$(run systemctl list-units 'postgresql@*.service' --state=active --plain --no-legend --no-pager | awk 'NR==1 {print $1}')"
+    if [[ -z "$SERVICE" ]]; then
+        SERVICE="$(run systemctl list-units 'postgresql@*.service' --all --plain --no-legend --no-pager | awk '{print $1}' | sort -V | tail -n 1)"
+    fi
+    [[ "$SERVICE" =~ ^postgresql@[A-Za-z0-9._-]+\.service$ ]] || SERVICE="postgresql.service"
+else
+    SERVICE="${UNIT}.service"
+fi
 
 # ---------------------------------------------------------------------------
 # What systemd says about the unit. ExecMainStatus is the number that answers

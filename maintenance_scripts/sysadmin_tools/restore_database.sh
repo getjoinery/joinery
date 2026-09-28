@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#Version 3.12 - A loaded dump is analyzed before RESTORE_OK: a dump carries no planner statistics
 #Version 3.11 - Comment only: the stage holds the gz and the dump together while gunzip runs
 #Version 3.10 - The dump stages beside the archive, not in /tmp. On Ubuntu 26.04 /tmp is a tmpfs
 #              sized from RAM, and a plain dump larger than it could not be restored at all
@@ -522,6 +523,14 @@ fi
 
 info "📥 Loading dump under ON_ERROR_STOP..."
 if psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
+    # A dump carries no planner statistics: until ANALYZE, every table reads as
+    # never analyzed and the site plans its queries blind (the nightly Database
+    # maintenance task would catch it, up to a day later). The restore has
+    # already succeeded, so a failure here only warns.
+    info "📊 Analyzing the restored tables..."
+    if ! psql -U "$DB_USER" -d "$DB_NAME" -XqAc 'ANALYZE' 1>&2; then
+        info "⚠ ANALYZE did not complete; the nightly Database maintenance task will analyze these tables."
+    fi
     info "✅ Restore of '$DB_NAME' complete."
     echo "RESTORE_OK"
     exit 0

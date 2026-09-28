@@ -27,6 +27,8 @@
  * @version 1.20 - checkSearchIndexStorage() also counts the File era's index bytes no File
  *                 holds any more (a leaked blob, or a file no row names), and the check is
  *                 reported to a management node (fleet_report in plugin.json)
+ * @version 1.20 - hiddenOriginSendAllowed() reads the origin-leak probe only for a provider that
+ *                 needs it; an API provider or none answers without the raw-mail search
  * @version 1.19 - checkSearchIndexStorage(): the search index is one file per owner,
  *                 and a count that says otherwise is named before a disk fills
  *                 (specs/implemented/mailbox_search_index_blob_leak.md)
@@ -745,20 +747,24 @@ class InboundEmailHealth {
      * submission Received line, runs the probe, and sends; if they got it wrong
      * the probe catches it before any real mail leaks.
      *
-     * @return array{allowed:bool, reason:string, probe:array}
+     * The probe is read only when the answer turns on it (an SMTP provider):
+     * finding it searches the raw text of recent mail, and the reader asks this
+     * once per mailbox on every page load.
+     *
+     * @return array{allowed:bool, reason:string, probe:?array} probe is null when not consulted
      */
     public static function hiddenOriginSendAllowed(): array {
         require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
         require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-        $probe = self::originProbeVerdict();
         $provider = EmailSender::getActiveProvider();
         if ($provider === null) {
-            return array('allowed' => false, 'probe' => $probe,
+            return array('allowed' => false, 'probe' => null,
                 'reason' => 'No outbound email provider is configured - hidden-origin compose mail has nothing to leave through.');
         }
         if ($provider instanceof ApiSubmissionRelay) {
-            return array('allowed' => true, 'probe' => $probe, 'reason' => '');
+            return array('allowed' => true, 'probe' => null, 'reason' => '');
         }
+        $probe = self::originProbeVerdict();
         $label = method_exists($provider, 'getLabel') ? $provider::getLabel() : get_class($provider);
         if ($probe['state'] === 'passed') {
             return array('allowed' => true, 'probe' => $probe, 'reason' => '');

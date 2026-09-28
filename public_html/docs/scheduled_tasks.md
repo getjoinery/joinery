@@ -355,6 +355,32 @@ plaintext nobody asked for, so there is no window to wait out.
 Adding a retention window means adding a declaration and a setting. It never
 means another task, another schedule, or another row in the admin list.
 
+## Database maintenance
+
+`DatabaseMaintenance` (daily, 03:30, activated on install) keeps PostgreSQL's
+per-table bookkeeping current, so counts and lookups stay fast. It has **no list
+of tables**: `DatabaseUpkeep::plan()` reads every user table's statistics
+(`pg_stat_user_tables`, `pg_class`) each run and decides from them.
+
+| Action | When |
+|---|---|
+| `VACUUM (ANALYZE)` | the table has at least 128 pages and under 90% of them are marked all-visible, or its dead rows pass 1000 + 2% of its rows |
+| `ANALYZE` | the table has never been analyzed, or its rows changed since the last analyze pass 1000 + 2% of its rows |
+
+Vacuums run first, the table with the most unmarked pages first; analyzes
+follow, largest first. The run is throttled like autovacuum
+(`vacuum_cost_delay` 2 ms, reset afterwards) and starts no table after ten
+minutes; the rest go first next run. It is always plain `VACUUM`, which never
+blocks reads or writes.
+
+Why it exists beside autovacuum: autovacuum acts after 20% of a table changes,
+which on a large, slowly changing table can be weeks, and an index-only count
+reads the table for every page not marked all-visible. PostgreSQL also discards
+all statistics after an unclean restart, and a restore loads none, which leaves
+every table looking never analyzed. A new table needs nothing: it is in the
+statistics the day it exists. The task's **Dry Run** lists what it would do and
+why.
+
 ## Data Model
 
 **Table:** `sct_scheduled_tasks`

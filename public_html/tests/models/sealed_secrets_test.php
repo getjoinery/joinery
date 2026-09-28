@@ -154,6 +154,27 @@ $q->execute();
 check((string)$q->fetchColumn() === SealedSecretRegistry::STATE_DEAD,
 	'and the category was still judged through its locator (the planted dead blob is seen)');
 
+// --- A locator whose table was never created ---------------------------------
+section('Reconcile — a table that does not exist is not queried');
+// An inactive plugin's category falls to the locator path; its table was never
+// created here. Asking for it was caught, but left an ERROR in the PostgreSQL
+// log on every census (jeremytunnell, 2026-09-26). Only the existence check runs.
+$ghost = new SealedSecretRegistry(NULL);
+$ghost->set('ssr_locator', 'zz_never_created_' . bin2hex(random_bytes(3)) . '.secret_col');
+$ghost->set('ssr_enumerator', '');
+$ghost->set('ssr_source', '');
+$inspect = new ReflectionMethod('SecretReconciler', 'inspect_category');
+$inspect->setAccessible(true);
+// Inside a transaction, any statement that errors aborts it and the next one
+// fails: a healthy transaction afterwards means no query hit the missing table.
+$dblink->beginTransaction();
+$counts = $inspect->invoke(null, $ghost, false, null);
+$healthy = true;
+try { $dblink->query('SELECT 1')->fetchColumn(); } catch (\Throwable $e) { $healthy = false; }
+$dblink->rollBack();
+check($counts === array('present' => 0, 'dead' => 0), 'a missing table counts nothing', json_encode($counts));
+check($healthy, 'and no statement against it failed (the transaction is not aborted)');
+
 // --- Import scrub -------------------------------------------------------------
 section('Import scrub');
 $plant_setting('oauth_google_client_secret', $DEAD_BLOB);   // re-plant (heal never runs on operator)

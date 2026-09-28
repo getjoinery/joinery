@@ -30,6 +30,8 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.4 - mailbox_protection_owner_has_unseal_work(): the reader's per-load question, asked
+ *   of the distinct (mailbox, domain) pairs of the owner's sealed rows rather than the rows
  * @version 2.3 - mailbox_fortress_receipt_render(); the Private seal backlog and batch leave
  *   Fortress mail to MailboxFortressLevel; the unseal pass leaves only the mail key's rows
  * @version 2.2
@@ -432,6 +434,65 @@ function mailbox_protection_seals_sql(): string {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 	return InboundEmailAlias::effectiveLevelSql('a', 'd') . " IN ('"
 		. InboundEmailDomain::LEVEL_PRIVATE . "','" . InboundEmailDomain::LEVEL_FORTRESS . "')";
+}
+
+/**
+ * Does $user_id own a sealed (or pending-parse) live row whose mailbox no
+ * longer seals — the work mailbox/unseal_batch converges? The reader asks on
+ * every page load, and the answer is almost always no.
+ *
+ * Posture is a property of a row's (mailbox, domain) pair, so the question is
+ * asked of the distinct pairs the owner's sealed rows carry — a handful — and
+ * never of the rows themselves. The pairs are read by skip-scanning the owner
+ * index (InboundEmailMessage's sealed-rows-by-owner index): one index probe
+ * per pair, however many rows each holds. Pairs, not mailboxes: a Sent copy of
+ * a reply is filed under the From mailbox with the SOURCE's domain, so a
+ * mailbox's rows may carry a domain other than its own, and an inherited level
+ * then comes from that domain. Rows with no domain are outside the posture join
+ * and so never work.
+ */
+function mailbox_protection_owner_has_unseal_work(int $user_id): bool {
+	if ($user_id <= 0) {
+		return false;
+	}
+	// Spelled exactly as the index's predicate, so the planner uses it.
+	$rows = "FROM iem_inbound_email_messages
+		WHERE iem_sealed_owner_user_id = ?
+		  AND (iem_content_sealed = true OR iem_pending_parse = true) AND iem_delete_time IS NULL
+		  AND iem_ied_inbound_email_domain_id IS NOT NULL";
+	$db = DbConnector::get_instance()->get_db_link();
+	$stmt = $db->prepare(
+		"WITH RECURSIVE pairs(alias_id, domain_id) AS (
+			(SELECT iem_iea_inbound_email_alias_id, iem_ied_inbound_email_domain_id $rows
+			   AND iem_iea_inbound_email_alias_id IS NOT NULL
+			 ORDER BY 1, 2 LIMIT 1)
+			UNION ALL
+			SELECT n.alias_id, n.domain_id FROM pairs p CROSS JOIN LATERAL (
+				SELECT iem_iea_inbound_email_alias_id AS alias_id, iem_ied_inbound_email_domain_id AS domain_id $rows
+				  AND iem_iea_inbound_email_alias_id IS NOT NULL
+				  AND (iem_iea_inbound_email_alias_id, iem_ied_inbound_email_domain_id) > (p.alias_id, p.domain_id)
+				ORDER BY 1, 2 LIMIT 1) n
+		), bare(domain_id) AS (
+			(SELECT iem_ied_inbound_email_domain_id $rows
+			   AND iem_iea_inbound_email_alias_id IS NULL
+			 ORDER BY 1 LIMIT 1)
+			UNION ALL
+			SELECT n.domain_id FROM bare b CROSS JOIN LATERAL (
+				SELECT iem_ied_inbound_email_domain_id AS domain_id $rows
+				  AND iem_iea_inbound_email_alias_id IS NULL
+				  AND iem_ied_inbound_email_domain_id > b.domain_id
+				ORDER BY 1 LIMIT 1) n
+		), scope AS (
+			SELECT alias_id, domain_id FROM pairs
+			UNION ALL SELECT NULL::bigint, domain_id FROM bare
+		)
+		SELECT 1 FROM scope s
+		LEFT JOIN iea_inbound_email_aliases a ON a.iea_inbound_email_alias_id = s.alias_id
+		JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = s.domain_id
+		WHERE NOT (" . mailbox_protection_seals_sql() . ")
+		LIMIT 1");
+	$stmt->execute(array($user_id, $user_id, $user_id, $user_id));
+	return (bool)$stmt->fetchColumn();
 }
 
 /** Sealed, live rows on a domain — the receipt's "N earlier messages sealed"

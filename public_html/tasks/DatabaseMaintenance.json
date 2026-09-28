@@ -1,0 +1,7 @@
+{
+    "name": "Database maintenance",
+    "description": "Keeps PostgreSQL's per-table bookkeeping current so counts and lookups stay fast: vacuums any table where too many pages are not marked all-visible or dead rows have built up, and analyzes any table never analyzed or changed enough since. Reads the plan from the database's own statistics each run, so every table is covered, including ones added later. Plain VACUUM only, throttled, and stopped after ten minutes; what is left goes first next run.",
+    "activate_on_install": true,
+    "default_frequency": "daily",
+    "default_time": "03:30:00"
+}
