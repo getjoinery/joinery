@@ -13,6 +13,7 @@
  *
  * See specs/bug_reports.md and plugins/bug_reports/docs/overview.md.
  *
+ * @version 1.1.0 - comment optional here: an automatic report has none
  * @version 1.0.0
  */
 
@@ -61,7 +62,8 @@ function report_submit_logic_descriptor(): array {
 		'mutates'          => true,
 		'input'            => array(
 			'bundle'  => array('type' => 'text', 'required' => true, 'label' => 'Bundle', 'max_length' => 262144),
-			'comment' => array('type' => 'text', 'required' => true, 'label' => 'Comment', 'max_length' => 5000),
+			// Required of a member's report, not an automatic one; the intake decides.
+			'comment' => array('type' => 'text', 'required' => false, 'label' => 'Comment', 'max_length' => 5000),
 		),
 	);
 }

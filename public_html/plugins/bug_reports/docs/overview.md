@@ -10,6 +10,10 @@ error message. Their site builds a report, shows them all of it, and sends it to
 end: it files each report, checks that the sender is a Joinery site, groups the same
 error across sites, and shows the reports to administrators.
 
+A site whose operator turns on `problem_reports_auto_send` also reports unexpected errors
+on its own. Those arrive with `scope: automatic`, no description, and an `occurrences`
+count; the same fault from the same site and version is filed once and its count grows.
+
 ## Intake
 
 `POST /api/v1/action/bug_reports/report_submit`, multipart form data:
@@ -17,7 +21,7 @@ error across sites, and shows the reports to administrators.
 | Field | Contents |
 |---|---|
 | `bundle` | The report as JSON, at most 256 KiB. Must be an object whose `site` section names a `host` and a `version`. |
-| `comment` | The reporter's words, at most 5,000 characters. |
+| `comment` | The reporter's words, at most 5,000 characters. Required unless the bundle's `scope` is `automatic`. |
 | `image` | Optional. PNG, JPEG, WebP or GIF, at most 5 MB, judged by its bytes. |
 
 The action is sessionless (`requires_session => false`): the sending site has no
@@ -42,11 +46,18 @@ In order, `BugReportIntake::receive()`:
 
    A report is stored whatever the verdict, except that an `unverified` report from an
    address that already sent three unverified reports in the hour is refused with 429.
-4. **Image.** Kept privately (`File::SOURCE_BUG_REPORT_IMAGE`) when it passes the size
+4. **Same fault, already filed.** Every report with an error gets a fingerprint, computed
+   here from its error section (`ProblemReportBundle::fingerprint()`: kind, the file it
+   was thrown in, and the files and functions of its stack frames, line numbers dropped).
+   An automatic report whose fingerprint, host and version match a stored automatic
+   report is not stored again: its `occurrences` (1 to 1,000,000; 1 when missing) are
+   added to that report in one UPDATE, last-seen moves, a closed report reopens as `new`,
+   and the answer is that report's id. No email. A member's report is always stored.
+5. **Image.** Kept privately (`File::SOURCE_BUG_REPORT_IMAGE`) when it passes the size
    and type checks. A refused image never refuses the report; the row says why it was
    not kept.
-5. **Save and notify.** The row is saved as `new`. When `bug_reports_notify_email` is
-   set, one email goes out for an error not reported in the last day, carrying only the
+6. **Save and notify.** The row is saved as `new`. When `bug_reports_notify_email` is
+   set, one email goes out for a fault not reported in the last day, carrying only the
    host, version, error kind and place.
 
 Everything in a report came from another machine. It is stored as text, escaped on
@@ -56,12 +67,14 @@ the callback only.
 ## Admin pages
 
 - **Bug Reports** (`/plugins/bug_reports/admin/admin_bug_reports`, permission 9). Grouped
-  by error hash by default: how many sites and reports, how many open, the newest
-  version seen, and when first and last reported. **Every report** lists them singly
-  and filters by host, version, verdict, status and hash. **Mark all seen** clears the
+  by fingerprint by default (reports filed before fingerprints group by their error
+  hash): how many sites and reports, **times seen** (the sum of the counts), how many
+  open, the newest version seen, and when first and last seen. **Every report** lists
+  them singly with their counts and filters by host, version, verdict, status and group. **Mark all seen** clears the
   notice.
-- **One report** (`admin_bug_report`). The member's words, the image, the verdict and
-  its reason, and every bundle section. **Mark seen**, **Mark closed** and **Reopen**
+- **One report** (`admin_bug_report`). Who sent it (a member, or the site
+  automatically), times seen and when last, the member's words, the image, the verdict
+  and its reason, and every bundle section. **Mark seen**, **Mark closed** and **Reopen**
   are POST buttons.
 
 A notice above every admin page says how many reports are `new`, for admins at
@@ -71,8 +84,9 @@ permission 9.
 
 `rbr_received_bug_reports` (`ReceivedBugReport`): received time, sender address (the one
 personal datum kept, for abuse handling), claimed host and version, verdict and reason,
-error hash, kind, place and message, comment, bundle, image, and status
-(`new | seen | closed`) with who closed it and when.
+error hash, fingerprint, kind, place and message, comment, bundle, image, whether it
+came automatically, times seen and when last, and status (`new | seen | closed`) with
+who closed it and when.
 
 Closed reports older than `bug_reports_retention_days` (default 365) are deleted with
 their images by the daily retention sweep. Open reports are kept.

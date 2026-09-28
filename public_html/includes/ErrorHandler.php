@@ -301,7 +301,7 @@ class ErrorManager {
             // response rendered next links to it.
             $context->setErrorReference(null, ErrorReference::hash($exception));
             $this->logError($exception, $context);
-            ErrorReference::record($context->getErrorId(), $context->getErrorHash());
+            ErrorReference::recorded($exception, $context->getErrorId(), $context->getErrorHash());
 
             $handler = $this->selectHandler($context);
             $response = $handler->handle($exception, $context);
@@ -454,6 +454,7 @@ class ErrorManager {
  * report (specs/bug_reports.md D3), so a link would only lead to a sign-in
  * page.
  *
+ * @version 1.1.0 - recorded(): records the reference and notes an automatic problem report
  * @version 1.0.0
  */
 class ErrorReference {
@@ -534,8 +535,25 @@ class ErrorReference {
 				error_log('Error reference: an error logger failed: ' . $e->getMessage());
 			}
 		}
-		self::record($context->getErrorId(), $context->getErrorHash());
+		self::recorded($exception, $context->getErrorId(), $context->getErrorHash());
 		return $context->getErrorId();
+	}
+
+	/**
+	 * An error was just recorded: make it this request's reference, and let an
+	 * automatic problem report count it (ProblemReport::noteError(), which does
+	 * nothing unless the operator switched automatic reports on). Nothing here
+	 * may break error handling.
+	 */
+	public static function recorded(\Throwable $exception, ?int $id, string $hash): void {
+		self::record($id, $hash);
+		try {
+			if (class_exists('ProblemReport')) {
+				ProblemReport::noteError($exception, $id);
+			}
+		} catch (\Throwable $e) {
+			error_log('Error reference: an automatic problem report was not noted: ' . $e->getMessage());
+		}
 	}
 
 	/** Make ($id, $hash) this request's reference. */

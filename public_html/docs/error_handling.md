@@ -74,7 +74,8 @@ The page shows, top to bottom:
    software is upgraded from. When the operator has switched sending off, it says the
    report stays on this site.
 2. **The form**: a description (required, up to 5,000 characters) and an optional
-   screenshot (PNG, JPEG, WebP or GIF, up to 5 MB).
+   screenshot (PNG, JPEG, WebP or GIF, up to 5 MB). A line above the description asks for
+   the steps, what was expected and what happened, the page, and how often it happens.
 3. **What will be sent**: the bundle, built live for this member and this error, shown in
    full. The reporter reads what leaves before deciding to send it.
 
@@ -137,15 +138,49 @@ redirects, 20 s, 64 KiB answer). The receiving end is the `bug_reports` plugin
 | `kept` | Sending is switched off; the report stays on this site |
 
 The hourly `ProblemReportSend` task retries `queued` and `failed` reports, up to five
-tries in all. **System › Problem Reports** (`/admin/admin_problem_reports`, permission 9)
-lists every report with its status and reason, opens one to its full bundle, and has a
+tries in all, and sends automatic reports and their counts. **System › Problem Reports** (`/admin/admin_problem_reports`, permission 9)
+lists every report with its status and reason (automatic ones with how often the error
+happened), opens one to its full bundle, and has a
 **Send now** button for one that has not gone through.
+
+### Automatic reports
+
+With `problem_reports_auto_send` on (and sending on), the site reports unexpected errors
+itself. `ErrorReference::recorded()` runs after every recorded error on both paths and
+calls `ProblemReport::noteError()`, which:
+
+- skips errors that are people meeting a wall rather than bugs: a message marked safe to
+  show (the `Displayable*` family, a displayable `BaseException`), a permission refusal,
+  a sign-in requirement, a validation failure (`ProblemReport::isUnexpected()`);
+- works out the fault's key, `ProblemReportBundle::fingerprint()`: the error's kind, the
+  file it was thrown in, and the files and function names of its first five stack frames,
+  with line numbers dropped. With no frames, the message with numbers, quoted text and
+  long hex runs blanked stands in;
+- keeps **one automatic report per fault and version**, adding 1 to its count
+  (`prr_occurrences`) on every recurrence, and starts at most 20 new ones a day;
+- never sends from the failing request and never throws. While the process holds sealed
+  content it only counts, since a new report's text is a long write the sealed-content
+  guard refuses.
+
+The hourly `ProblemReportSend` task sends a new automatic report, then sends it again
+whenever it has counted recurrences the receiver has not heard; each send carries
+`occurrences`, the recurrences since the last one (`prr_occurrences_sent` records what
+was heard).
+
+Nobody reads an automatic report before it goes, so it carries less than an operator's
+(`ProblemReportBundle::automatic()`): site, runtime, plugins, settings and health as
+usual; the request with its path masked to its shape (a segment that is not a number or a
+lowercase word becomes `…`) and no time zone; the error from its recorded row plus the
+exception class, with quoted text in the message masked. No reporter section and no log
+lines. It is built from the saved row, so an error recorded while sealed content was open
+carries only the row's withheld reference.
 
 ### Settings
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `problem_reports_send` | on | Send reports to the upgrade source. Off keeps them on this site. |
+| `problem_reports_auto_send` | off | Report unexpected errors automatically, with no one reviewing the report first. Needs sending on. |
 | `problem_reports_retention_days` | 90 | Days to keep reports and their images; the daily retention sweep deletes older ones. 0 keeps them. |
 
 Both are under **Settings › Problem reports**. The menu entry **Report a problem** is in

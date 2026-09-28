@@ -12,15 +12,20 @@
  *      verdict — verified, version_mismatch or unverified;
  *   3. refuse, instead of storing, an unverified report from an address that
  *      already sent UNVERIFIED_PER_HOUR unverified reports in the hour;
- *   4. keep the image when it passes the same checks a member upload does,
+ *   4. an automatic report (bundle scope "automatic") of a fault already
+ *      stored as an automatic report for the same site and version is not
+ *      stored again: its count is added to that report, which reopens if it
+ *      was closed (specs/bug_reports.md, Part 2, D12);
+ *   5. keep the image when it passes the same checks a member upload does,
  *      and note why when it does not (a bad image never refuses the report);
- *   5. save the row, and email the operator about a new error when asked to.
+ *   6. save the row, and email the operator about a new error when asked to.
  *
  * Everything in a report is untrusted input from another machine: stored as
  * text, escaped on display, never executed, resolved, or used as a path. The
  * claimed host is used for exactly one thing, the callback, and that goes
  * through SafeHttpClient, which refuses private and internal addresses.
  *
+ * @version 1.1.0 - fingerprints; automatic reports merge into the stored one and add their count
  * @version 1.0.0
  */
 class BugReportRefusal extends Exception {
@@ -42,6 +47,9 @@ class BugReportIntake {
 
 	/** Longest value kept in a summary column. */
 	const COLUMN_CAP = 1000;
+
+	/** Largest count one automatic report may add. */
+	const OCCURRENCES_MAX = 1000000;
 
 	/** @var SafeHttpClient|null A stand-in client for the callback, for tests. */
 	private static $client = null;
@@ -76,8 +84,9 @@ class BugReportIntake {
 		if (!preg_match('/^[0-9A-Za-z][0-9A-Za-z.+\-]{0,63}$/', $version)) {
 			throw new BugReportRefusal('The bundle does not name the version the site runs.');
 		}
+		$automatic = ($bundle['scope'] ?? null) === 'automatic';
 		$comment = trim($comment);
-		if ($comment === '') {
+		if ($comment === '' && !$automatic) {
 			throw new BugReportRefusal('The report has no description.');
 		}
 		$comment = mb_substr($comment, 0, self::COMMENT_MAX);
@@ -87,6 +96,16 @@ class BugReportIntake {
 		if ($verdict === ReceivedBugReport::VERDICT_UNVERIFIED
 				&& self::unverifiedFrom($sender_ip) >= self::UNVERIFIED_PER_HOUR) {
 			throw new BugReportRefusal('Too many reports from this address could not be traced to a Joinery site. Try again in an hour.', 429);
+		}
+
+		$error = is_array($bundle['error'] ?? null) ? $bundle['error'] : array();
+		$fingerprint = ProblemReportBundle::fingerprint($error);
+		$occurrences = self::occurrences($bundle);
+		if ($automatic && $fingerprint !== null) {
+			$stored = self::addToStored($fingerprint, $host, $version, $occurrences);
+			if ($stored !== null) {
+				return $stored;
+			}
 		}
 
 		$file = null;
@@ -99,7 +118,6 @@ class BugReportIntake {
 			}
 		}
 
-		$error = is_array($bundle['error'] ?? null) ? $bundle['error'] : array();
 		$location = isset($error['file']) ? $error['file'] . (isset($error['line']) ? ':' . $error['line'] : '') : null;
 		$hash = (isset($error['hash']) && is_string($error['hash']) && preg_match('/^[0-9a-f]{32}$/', $error['hash']))
 			? $error['hash'] : null;
@@ -119,10 +137,50 @@ class BugReportIntake {
 		$report->set('rbr_fil_file_id', $file ? (int)$file->key : null);
 		$report->set('rbr_image_note', $image_note);
 		$report->set('rbr_status', ReceivedBugReport::STATUS_NEW);
+		$report->set('rbr_fingerprint', $fingerprint);
+		$report->set('rbr_automatic', $automatic);
+		$report->set('rbr_occurrences', $automatic ? $occurrences : 1);
+		$report->set('rbr_last_seen_time', gmdate('Y-m-d H:i:s'));
 		$report->save();
 
 		self::notify($report);
 		return $report;
+	}
+
+	/** How many times an automatic report says the fault happened: 1 to OCCURRENCES_MAX, 1 when missing. */
+	public static function occurrences(array $bundle): int {
+		$n = $bundle['occurrences'] ?? 1;
+		if (!is_int($n) && !(is_string($n) && ctype_digit($n))) {
+			return 1;
+		}
+		return max(1, min(self::OCCURRENCES_MAX, (int)$n));
+	}
+
+	/**
+	 * Add $occurrences to the stored automatic report of this fault from this
+	 * site and version, and reopen it if it was closed. One UPDATE, so two
+	 * count updates arriving together both land. NULL when there is none.
+	 */
+	public static function addToStored(string $fingerprint, string $host, string $version, int $occurrences): ?ReceivedBugReport {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			"UPDATE rbr_received_bug_reports
+			    SET rbr_occurrences = LEAST(rbr_occurrences::int8 + :n, 2147483647),
+			        rbr_last_seen_time = now(),
+			        rbr_status = CASE WHEN rbr_status = 'closed' THEN 'new' ELSE rbr_status END,
+			        rbr_closed_usr_user_id = CASE WHEN rbr_status = 'closed' THEN NULL ELSE rbr_closed_usr_user_id END,
+			        rbr_closed_time = CASE WHEN rbr_status = 'closed' THEN NULL ELSE rbr_closed_time END
+			  WHERE rbr_received_bug_report_id = (
+			        SELECT rbr_received_bug_report_id FROM rbr_received_bug_reports
+			         WHERE rbr_automatic AND rbr_fingerprint = :fp AND rbr_claimed_host = :host AND rbr_claimed_version = :version
+			         ORDER BY rbr_received_bug_report_id ASC LIMIT 1)
+			RETURNING rbr_received_bug_report_id");
+		$stmt->bindValue(':n', $occurrences, PDO::PARAM_INT);
+		$stmt->bindValue(':fp', $fingerprint);
+		$stmt->bindValue(':host', $host);
+		$stmt->bindValue(':version', $version);
+		$stmt->execute();
+		$id = $stmt->fetchColumn();
+		return $id === false ? null : new ReceivedBugReport((int)$id, TRUE);
 	}
 
 	/**
@@ -194,13 +252,13 @@ class BugReportIntake {
 		if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
 			return;
 		}
-		$hash = $report->get('rbr_error_hash');
+		$group = $report->group_key();
 		$db = DbConnector::get_instance()->get_db_link();
-		if ($hash) {
+		if ($group !== '') {
 			$stmt = $db->prepare("SELECT COUNT(*) FROM rbr_received_bug_reports
-				WHERE rbr_error_hash = ? AND rbr_received_bug_report_id <> ?
+				WHERE " . ReceivedBugReport::GROUP_KEY . " = ? AND rbr_received_bug_report_id <> ?
 				  AND rbr_received_time > now() - INTERVAL '1 day'");
-			$stmt->execute(array($hash, (int)$report->key));
+			$stmt->execute(array($group, (int)$report->key));
 			if ((int)$stmt->fetchColumn() > 0) {
 				return;
 			}

@@ -23,6 +23,7 @@
  * sealed. Building a bundle opens no sealed content: settings are compared as
  * stored, never decrypted.
  *
+ * @version 1.1.0 - automatic(): the bundle a site sends on its own; fingerprint(): the same-fault key
  * @version 1.0.1
  */
 class ProblemReportBundle {
@@ -93,6 +94,99 @@ class ProblemReportBundle {
 		}
 
 		return $bundle;
+	}
+
+	/**
+	 * The bundle a site sends on its own when an unexpected error is recorded
+	 * (specs/bug_reports.md, Part 2). Nobody reads it before it goes, so it
+	 * carries less than an operator's: no reporter, no other requests' log
+	 * lines, the page's path masked to its shape, and quoted text in the
+	 * message masked. Built from the saved row, never the live exception, so
+	 * an error recorded while sealed content was open carries only the row's
+	 * withheld reference.
+	 *
+	 * @param GeneralError $row   the recorded error
+	 * @param string       $class the exception's class
+	 * @param string       $from  the path and query of the failing request
+	 */
+	public static function automatic(GeneralError $row, string $class, string $from): array {
+		$error = self::errorFromRow($row);
+		$error['class'] = self::clean($class);
+		$error['message'] = self::maskQuoted($error['message']);
+		$request = self::request(self::pathShape($from));
+		unset($request['timezone']);
+		if (php_sapi_name() === 'cli') {
+			$request['surface'] = 'cli';
+		}
+		return array(
+			'format'   => self::FORMAT,
+			'created'  => gmdate('Y-m-d\TH:i:s\Z'),
+			'scope'    => 'automatic',
+			'site'     => self::site(),
+			'request'  => $request,
+			'error'    => $error,
+			'runtime'  => self::runtime(),
+			'plugins'  => self::plugins(),
+			'settings' => self::settings(),
+			'health'   => self::health(),
+		);
+	}
+
+	/**
+	 * A path masked to its shape: a segment that is not a number or a
+	 * lowercase word (letters, digits, underscores) becomes "…". Slugs, names
+	 * and addresses in a path go; the route stays. The query is kept for
+	 * request(), which masks every value but a plain number.
+	 */
+	public static function pathShape(string $from): string {
+		$path = (string)parse_url($from, PHP_URL_PATH);
+		$query = (string)parse_url($from, PHP_URL_QUERY);
+		$segments = array();
+		foreach (explode('/', $path) as $segment) {
+			$segments[] = ($segment === '' || preg_match('/^[a-z][a-z0-9_]{0,63}$|^\d{1,18}$/', $segment)) ? $segment : '…';
+		}
+		return implode('/', $segments) . ($query !== '' ? '?' . $query : '');
+	}
+
+	/** Quoted text in a message masked: 'bob' and "bob" become '…' and "…". */
+	public static function maskQuoted(string $message): string {
+		return preg_replace(array("/'[^']*'/u", '/"[^"]*"/u'), array("'…'", '"…"'), $message);
+	}
+
+	/**
+	 * The same-fault key (specs/bug_reports.md D11): the error's kind, the
+	 * file it was thrown in, and the files and function names of its stack
+	 * frames, with every line number dropped so small edits do not split a
+	 * group. With no frames, the message with numbers, quoted text and long
+	 * hex runs blanked stands in. NULL when the error names neither a place
+	 * nor a message.
+	 *
+	 * Computed from a bundle's error section, so the receiver can compute it
+	 * for any report, from any version, without trusting the sender's own.
+	 */
+	public static function fingerprint(array $error): ?string {
+		$kind = is_scalar($error['kind'] ?? null) ? (string)$error['kind'] : '';
+		$file = is_scalar($error['file'] ?? null) ? (string)$error['file'] : '';
+		$frames = array();
+		foreach ((is_array($error['trace'] ?? null) ? $error['trace'] : array()) as $frame) {
+			if (!is_string($frame)) {
+				continue;
+			}
+			// "#0 lib/x.php(12): Class->method()" -> "lib/x.php: Class->method()"
+			$frame = preg_replace('/^#\d+\s+/', '', trim($frame));
+			$frame = preg_replace('/\(\d+\):/', ':', $frame);
+			$frames[] = $frame;
+		}
+		if ($frames) {
+			return md5('v1|' . $kind . '|' . $file . '|' . implode('|', $frames));
+		}
+		$message = is_scalar($error['message'] ?? null) ? (string)$error['message'] : '';
+		if ($file === '' && trim($message) === '') {
+			return null;
+		}
+		$message = self::maskQuoted($message);
+		$message = preg_replace(array('/[0-9a-f]{8,}/i', '/\d+/', '/\s+/'), array('H', 'N', ' '), $message);
+		return md5('v1|' . $kind . '|' . $file . '|' . trim($message));
 	}
 
 	/**
@@ -459,6 +553,7 @@ class ProblemReportBundle {
 		'load_1m'                   => 'Load (1 minute)',
 		'cron_last_run_minutes_ago' => 'Scheduled tasks last ran (minutes ago)',
 		'id'                        => 'Error id',
+		'class'                     => 'Exception class',
 	);
 
 	/**
