@@ -121,9 +121,16 @@
 		return window.joineryApi.post('messenger/' + action, body);
 	}
 
+	// A recorded server error adds a "Report a problem" link and stays up long
+	// enough to reach it.
 	function fail(err) {
 		el.error.textContent = (err && err.message) || 'Something went wrong.';
-		setTimeout(function () { el.error.textContent = ''; }, 6000);
+		var link = window.joineryApi.reportLink(err);
+		if (link) {
+			el.error.appendChild(document.createTextNode(' '));
+			el.error.appendChild(link);
+		}
+		setTimeout(function () { el.error.textContent = ''; }, link ? 12000 : 6000);
 	}
 
 	function node(tag, className, text) {

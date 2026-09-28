@@ -7,10 +7,11 @@
  * needs: []
  */
 /**
- * The agent's redact package and the plane's SmSecretRedactor mask the same
- * credential key names (specs/agent_log_access.md §3). One list read two ways
- * is how a secret gets masked on the plane's screen and not on the node's
- * wire, so the two lists are pinned equal here.
+ * The agent's redact package and the platform's LogRedactor mask the same
+ * credential key names (specs/agent_log_access.md §3). LogRedactor is what
+ * the plane's SmSecretRedactor and a problem report's bundle both mask with.
+ * One list read two ways is how a secret gets masked on one side and not the
+ * other, so the two lists are pinned equal here.
  *
  * Reads the Go source from the agent checkout the management node publishes
  * from (server_manager_agent_source_path, or its default), the way
@@ -19,6 +20,7 @@
  *
  * Run: php tests/unit/agent_redactor_parity_test.php
  *
+ * @version 1.1 - compares against core LogRedactor, which holds the list
  * @version 1.0
  */
 
@@ -32,7 +34,7 @@ if ($source === '') {
 }
 $keys_go = rtrim($source, '/') . '/redact/keys.go';
 
-section('The agent\'s secret-key list equals SmSecretRedactor\'s');
+section('The agent\'s secret-key list equals LogRedactor\'s');
 
 if (!is_file($keys_go)) {
 	check(true, 'skipped: no agent checkout at ' . $keys_go . ' (nothing to compare on this box)');
@@ -48,15 +50,15 @@ if (!empty($m[1])) {
 	$go_keys = $mm[1];
 }
 
-$ref = new ReflectionClass('SmSecretRedactor');
-$prop = $ref->getProperty('secret_keys');
-$prop->setAccessible(true);
-$php_keys = array_values($prop->getValue());
+$php_keys = array_values(LogRedactor::secretKeys());
 
 $missing_in_go  = array_values(array_diff($php_keys, $go_keys));
 $missing_in_php = array_values(array_diff($go_keys, $php_keys));
-check($missing_in_go === array(), 'every key SmSecretRedactor masks is in the agent\'s list', 'missing in Go: ' . implode(', ', $missing_in_go));
-check($missing_in_php === array(), 'every key the agent masks is in SmSecretRedactor\'s list', 'missing in PHP: ' . implode(', ', $missing_in_php));
+check($missing_in_go === array(), 'every key LogRedactor masks is in the agent\'s list', 'missing in Go: ' . implode(', ', $missing_in_go));
+check($missing_in_php === array(), 'every key the agent masks is in LogRedactor\'s list', 'missing in PHP: ' . implode(', ', $missing_in_php));
 check(count($go_keys) > 5, 'the Go list is not empty (' . count($go_keys) . ' keys)');
+check($go_keys === $php_keys, 'the two lists are in the same order (longer names before their prefixes)');
+check(SmSecretRedactor::redact("'password' => 'x'") === "'password' => '" . LogRedactor::MASK . "'",
+	'the plane\'s SmSecretRedactor masks with LogRedactor\'s list');
 
 harness_finish();

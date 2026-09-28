@@ -13,6 +13,7 @@ if (!class_exists('PublicPage', false)) {
 /**
  * AdminPage — the admin interface's page object.
  *
+ * @version 1.2 - an error flash message carries a "Report a problem" link
  * @version 1.1 - root_request_panel() takes the URL to open when an
  *                install_package request is refused as unverified (exit 3),
  *                so the warning page follows the refusal (specs/package_signing.md WP6)
@@ -272,6 +273,8 @@ HTML;
 			$out .= '<div class="alert ' . $alert_class . '" role="alert">';
 			if ($msg->message_title) $out .= '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
 			$out .= htmlspecialchars($msg->message);
+			$report = $msg->report_link_html();
+			if ($report !== '') $out .= ' ' . $report;
 			$out .= '<button type="button" class="alert-close" aria-label="Close">&times;</button>';
 			$out .= '</div>';
 		}

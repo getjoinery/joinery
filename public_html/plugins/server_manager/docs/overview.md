@@ -1847,11 +1847,11 @@ header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 | `on_host` | No | If `true`, run on the SSH host directly, not inside the Docker container. Used for `docker stats`, etc. |
 | `direction` | scp | `upload` (local to remote) or `download` (remote to local) |
 | `remote_path` | scp | File path on the remote host |
-| `local_path` | scp/api | File path on the management node (for `api`, set to stream the response body to a file instead of appending to job output — used by `backups/fetch`) |
+| `local_path` | scp/api | File path on the management node |
 | `method` | api | HTTP method: `GET`, `POST`, `PUT`, `DELETE` (in practice always `GET` — the management API is read-only) |
-| `endpoint` | api | Path relative to `/api/v1/management/` — e.g. `stats`, `backups/list`, `backups/fetch` |
+| `endpoint` | api | Path relative to `/api/v1/management/` — e.g. `stats`, `backups/list` |
 | `expect_status` | api | HTTP status code that counts as success (default 200) |
-| `query` | api | Object of query-string params (e.g. `{"path": "/backups/foo.sql.gz"}`) |
+| `query` | api | Object of query-string params (e.g. `{"limit": 50}`) |
 | `body` | api | Request body object (serialized as JSON; ignored for GET/DELETE) |
 | `continue_on_error` | No | If `true`, don't abort the job when this step fails |
 | `timeout` | No | Max seconds for this step (default: 1800 = 30 minutes; teardown steps carry 120) |
@@ -1861,7 +1861,7 @@ header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 
 Every Joinery instance exposes a namespaced read-only HTTP surface at `/api/v1/management/*`. The management node prefers this over SSH for observability operations (`check_status`, `list_backups`) because it's faster, parallelizable, and auditable.
 
-**Endpoints** (all under `/api/v1/management/`, all `GET`, all JSON except `backups/fetch` which streams binary):
+**Endpoints** (all under `/api/v1/management/`, all `GET`, all JSON):
 
 | Endpoint | Replaces SSH step(s) |
 |----------|----------------------|
@@ -1871,7 +1871,6 @@ Every Joinery instance exposes a namespaced read-only HTTP surface at `/api/v1/m
 | `databases` | `List databases` |
 | `errors/recent` | `Recent errors` |
 | `backups/list` | `list_backups` |
-| `backups/fetch?path=...` | (no management-node consumer — streams a backup file as binary) |
 
 Discovery: `GET /api/v1/management` returns every endpoint with its description.
 

@@ -2,7 +2,10 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.20
+ * @version 2.21
+ * @changelog 2.21 - api_error() and a logic action's error envelope carry
+ *   `error_ref` ({id, hash, report_url}) when an error was recorded on this
+ *   request (ErrorReference).
  * @changelog 2.20 - A scoped machine key is refused on every route family but
  *   action dispatch (ApiAuth::refuseScopedKeyOutsideActions()).
  * @changelog 2.19 - Sessioned actions dispatch before the CRUD model list is
@@ -85,12 +88,18 @@ $api_start_time = microtime(true);
 function api_error($message, $error_type = 'TransactionError', $status_code = 400, $data = array()) {
 	header("Content-Type: application/json");
 	http_response_code($status_code);
-	echo json_encode(array(
+	$envelope = array(
 		'api_version' => '1.0',
 		'errortype' => $error_type,
 		'error' => $message,
 		'data' => $data ? $data : new stdClass()
-	)) . PHP_EOL;
+	);
+	// An error recorded on this request is what the caller can report.
+	$ref = ErrorReference::forEnvelope();
+	if ($ref !== null) {
+		$envelope['error_ref'] = $ref;
+	}
+	echo json_encode($envelope) . PHP_EOL;
 	exit;
 }
 
@@ -162,6 +171,13 @@ function api_translate_logic_result($result, $action_name) {
 
 		if (!empty($result->validation_errors)) {
 			$response['validation_errors'] = $result->validation_errors;
+		}
+
+		// An error recorded on this request (an exception the action threw)
+		// is what the caller can report.
+		$ref = ErrorReference::forEnvelope();
+		if ($ref !== null) {
+			$response['error_ref'] = $ref;
 		}
 
 		return array('response' => $response, 'status_code' => 422);
@@ -566,8 +582,8 @@ if (strtolower($url_segments[2] ?? '') === 'app') {
 	// dispatchAuthenticated() always exits.
 }
 
-// Drive chunk transport (PUT/GET /api/v1/drive_upload/{token}) — raw-body upload,
-// the inbound twin of management/backups/fetch. Its own rate-limit bucket keeps a
+// Drive chunk transport (PUT/GET /api/v1/drive_upload/{token}) — raw-body upload
+// that reads its own body and writes its own response. Its own rate-limit bucket keeps a
 // multi-GB upload from exhausting the general 1000/hr API budget for other calls.
 if (strtolower($url_segments[2] ?? '') === 'drive_upload') {
 	$up_limit  = (int)($settings->get_setting('api_upload_rate_limit_requests') ?: 10000);

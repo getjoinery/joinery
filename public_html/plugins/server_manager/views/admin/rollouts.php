@@ -81,6 +81,7 @@ $display_messages = $session->get_messages('/admin/server_manager');
 foreach ($display_messages as $msg) {
 	$cls = ($msg->display_type == DisplayMessage::MESSAGE_ERROR) ? 'alert-danger' : 'alert-success';
 	echo '<div class="alert ' . $cls . '" role="alert">' . htmlspecialchars($msg->message)
+		. ($msg->report_link_html() !== '' ? ' ' . $msg->report_link_html() : '')
 		. '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 }
 $session->mark_shown($display_messages);

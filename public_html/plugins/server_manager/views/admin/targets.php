@@ -358,6 +358,7 @@ if (!empty($display_messages)) {
 		$alert_class = $msg->display_type == DisplayMessage::MESSAGE_ERROR ? 'alert-danger' : 'alert-success';
 		echo '<div class="alert ' . $alert_class . '">';
 		echo htmlspecialchars($msg->message);
+		echo ' ' . $msg->report_link_html();
 		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 	}
 	// Rendered above, so these are spent; the footer drops them.

@@ -61,11 +61,19 @@
 		return isNaN(d) ? '' : d.toLocaleDateString();
 	}
 
-	function toast(msg) {
+	// err: the rejected call, when the notice reports one. A recorded server
+	// error adds a "Report a problem" link and keeps the notice up long enough
+	// to reach it.
+	function toast(msg, err) {
 		var t = el('div', 'drv-toast', msg);
 		t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:.6rem 1rem;border-radius:8px;z-index:1000;font-size:.9rem';
+		var link = api.reportLink(err);
+		if (link) {
+			link.style.cssText = 'color:#fff;text-decoration:underline;margin-left:.5rem';
+			t.appendChild(link);
+		}
 		document.body.appendChild(t);
-		setTimeout(function () { t.remove(); }, 3200);
+		setTimeout(function () { t.remove(); }, link ? 10000 : 3200);
 	}
 
 	// ---- vault unlock (client-custody, scope 'drive') ----------------------
@@ -376,7 +384,7 @@
 		var body = { view: state.view };
 		if (state.view === 'mine') body.folder_id = state.folderId;
 		if (state.view === 'source') body.source = state.source;
-		return api.post('drive_list', body).then(render).catch(function (e) { toast(e.message || 'Could not load Drive.'); });
+		return api.post('drive_list', body).then(render).catch(function (e) { toast(e.message || 'Could not load Drive.', e); });
 	}
 
 	function openFolder(id) {
@@ -418,7 +426,7 @@
 			if (r.status !== 423) { follow(); return; }
 			if (!window.JoinerySealed) { toast('Unlock your vault to open this file.'); return; }
 			return JoinerySealed.open({ content_locked: true }, follow).catch(function (e) {
-				if (!/cancel/i.test(e.message || '')) toast(e.message || 'Unlock your vault to open this file.');
+				if (!/cancel/i.test(e.message || '')) toast(e.message || 'Unlock your vault to open this file.', e);
 			});
 		}, function () {
 			// A HEAD that cannot be made is not a reason to refuse the download;
@@ -443,7 +451,7 @@
 			a.href = url; a.download = entry.meta.name || 'download';
 			document.body.appendChild(a); a.click(); a.remove();
 			setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-		} catch (e) { toast(e.message || 'Could not decrypt file.'); }
+		} catch (e) { toast(e.message || 'Could not decrypt file.', e); }
 	}
 
 	function toggleStar(it, btn) {
@@ -453,7 +461,7 @@
 				btn.classList.toggle('off', !it.starred);
 				if (state.view === 'starred' && !it.starred) load();
 			})
-			.catch(function (e) { toast(e.message || 'Could not update star.'); });
+			.catch(function (e) { toast(e.message || 'Could not update star.', e); });
 	}
 
 	// ---- context menu ------------------------------------------------------
@@ -502,11 +510,11 @@
 	// ---- mutations ---------------------------------------------------------
 	function doTrash(it) {
 		api.post('drive_trash', { entity_type: it.entity_type, entity_id: it.id })
-			.then(load).catch(function (e) { toast(e.message || 'Delete failed.'); });
+			.then(load).catch(function (e) { toast(e.message || 'Delete failed.', e); });
 	}
 	function doRestore(it) {
 		api.post('drive_restore', { entity_type: it.entity_type, entity_id: it.id })
-			.then(load).catch(function (e) { toast(e.message || 'Restore failed.'); });
+			.then(load).catch(function (e) { toast(e.message || 'Restore failed.', e); });
 	}
 	function confirmDelete(it) {
 		api.post('drive_delete_forever', { entity_type: it.entity_type, entity_id: it.id })
@@ -517,11 +525,11 @@
 				$('drvConfirmOk').onclick = function () {
 					api.post('drive_delete_forever', { entity_type: it.entity_type, entity_id: it.id, confirm: true })
 						.then(function () { dlg.close(); load(); })
-						.catch(function (e) { toast(e.message || 'Delete failed.'); });
+						.catch(function (e) { toast(e.message || 'Delete failed.', e); });
 				};
 				dlg.showModal();
 			})
-			.catch(function (e) { toast(e.message || 'Delete failed.'); });
+			.catch(function (e) { toast(e.message || 'Delete failed.', e); });
 	}
 
 	// ---- dialogs -----------------------------------------------------------
@@ -583,14 +591,14 @@
 		var proceed = function () {
 			api.post('drive_folder_create', body)
 				.then(function () { $('drvNewFolderDialog').close(); load(); })
-				.catch(function (e) { toast(e.message || 'Could not create folder.'); });
+				.catch(function (e) { toast(e.message || 'Could not create folder.', e); });
 		};
 		// Fortress needs the Drive vault this browser holds (set up here if it is
 		// not yet). Private seals to the server-custody vault instead, which the
 		// server checks for itself and names in its refusal.
 		if (body.protection_level === 'fortress') {
 			ensureUnlocked().then(proceed).catch(function (e) {
-				if (!/cancel/i.test((e && e.message) || '')) toast(e.message || 'Vault unlock needed.');
+				if (!/cancel/i.test((e && e.message) || '')) toast(e.message || 'Vault unlock needed.', e);
 			});
 		} else {
 			proceed();
@@ -710,7 +718,7 @@
 			post = api.post('drive_rename', { entity_type: it.entity_type, entity_id: it.id, name: name });
 		}
 		post.then(function () { $('drvRenameDialog').close(); load(); })
-			.catch(function (e) { toast(e.message || 'Rename failed.'); });
+			.catch(function (e) { toast(e.message || 'Rename failed.', e); });
 	}
 
 	var moveTarget = null;
@@ -726,7 +734,7 @@
 				sel.appendChild(o);
 			});
 			$('drvMoveDialog').showModal();
-		}).catch(function (e) { toast(e.message || 'Could not load folders.'); });
+		}).catch(function (e) { toast(e.message || 'Could not load folders.', e); });
 	}
 	function submitMove(e) {
 		e.preventDefault();
@@ -734,7 +742,7 @@
 		var pid = parseInt($('drvMoveParent').value, 10) || 0;
 		api.post('drive_move', { entity_type: moveTarget.entity_type, entity_id: moveTarget.id, parent_id: pid })
 			.then(function () { $('drvMoveDialog').close(); load(); })
-			.catch(function (e) { toast(e.message || 'Move failed.'); });
+			.catch(function (e) { toast(e.message || 'Move failed.', e); });
 	}
 
 	// ---- sharing -----------------------------------------------------------
@@ -764,7 +772,7 @@
 				var noFolderLink = shareTarget.encrypted && shareTarget.entity_type === 'folder';
 				$('drvShareLinksSection').hidden = !r.share_links_enabled || noFolderLink;
 			})
-			.catch(function (e) { toast(e.message || 'Could not load sharing.'); });
+			.catch(function (e) { toast(e.message || 'Could not load sharing.', e); });
 	}
 
 	function grantMap(extra) {
@@ -786,7 +794,7 @@
 				// re-wrap the file key(s) to exactly the current set of grantees.
 				if (shareTarget.encrypted) { return syncEncryptedKeys(); }
 			})
-			.catch(function (e) { toast(e.message || 'Update failed.'); });
+			.catch(function (e) { toast(e.message || 'Update failed.', e); });
 	}
 
 	// Re-wrap encrypted file keys to the current grantee set (file, or every
@@ -829,7 +837,7 @@
 			if (Object.keys(fileKeys).length) {
 				await api.post('drive_key_grants_sync', { file_keys: fileKeys });
 			}
-		} catch (e) { toast(e.message || 'Could not update encrypted access.'); }
+		} catch (e) { toast(e.message || 'Could not update encrypted access.', e); }
 	}
 
 	// Walk a folder subtree, collecting every encrypted file (with the caller's
@@ -891,7 +899,7 @@
 			row.appendChild(el('span', '', 'Active link · ' + l.access_count + ' view(s)' + (l.has_password ? ' · 🔒' : '') + (l.expires_time ? ' · expires ' + fmtDate(l.expires_time) : '')));
 			var rm = el('button', 'drv-link-del', 'Revoke');
 			rm.type = 'button';
-			rm.onclick = function () { api.post('drive_link_revoke', { link_id: l.link_id }).then(loadShares).catch(function (e) { toast(e.message || 'Revoke failed.'); }); };
+			rm.onclick = function () { api.post('drive_link_revoke', { link_id: l.link_id }).then(loadShares).catch(function (e) { toast(e.message || 'Revoke failed.', e); }); };
 			row.appendChild(rm);
 			box.appendChild(row);
 		});
@@ -933,7 +941,7 @@
 				inp.onclick = function () { inp.select(); };
 				nl.appendChild(inp);
 				loadShares();
-			}).catch(function (e) { toast(e.message || 'Could not create link.'); });
+			}).catch(function (e) { toast(e.message || 'Could not create link.', e); });
 		};
 
 		// For an encrypted file the link must carry the file key in its fragment
@@ -943,7 +951,7 @@
 				return session.openSealed(shareTarget.wrapped_file_key);
 			}).then(function (fkBytes) {
 				mint('#' + bytesToB64url(fkBytes));
-			}).catch(function (e) { toast(e.message || 'Could not prepare the encrypted link.'); });
+			}).catch(function (e) { toast(e.message || 'Could not prepare the encrypted link.', e); });
 		} else {
 			mint('');
 		}
@@ -973,7 +981,7 @@
 				b.onclick = function () {
 					api.post('drive_version_restore', { file_id: it.id, version_id: v.version_id })
 						.then(function () { dlg.close(); load(); })
-						.catch(function (e) { toast(e.message || 'Restore failed.'); });
+						.catch(function (e) { toast(e.message || 'Restore failed.', e); });
 				};
 				row.appendChild(b);
 				body.appendChild(row);
@@ -1119,7 +1127,7 @@
 			// spans the member's Drive files and what is shared with them.
 			var body = { search: q };
 			if (state.view === 'source') { body.view = 'source'; body.source = state.source; }
-			api.post('drive_list', body).then(render).catch(function (e) { toast(e.message || 'Search failed.'); });
+			api.post('drive_list', body).then(render).catch(function (e) { toast(e.message || 'Search failed.', e); });
 		}, 300);
 	}
 

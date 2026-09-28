@@ -1286,6 +1286,7 @@
 					echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
 				}
 				echo htmlspecialchars($msg->message);
+				echo ' ' . $msg->report_link_html();
 				echo '<button type="button" class="alert-close" aria-label="Close">&times;</button>';
 				echo '</div>';
 			}

@@ -823,15 +823,29 @@ class ModelTester {
 
     /**
      * Create a real parent row through the target model and register it for
-     * teardown. Unique string fields are uniquified so a deterministic pattern
-     * can never collide with real data or residue. Returns the new key, or
-     * null when the parent cannot be created.
+     * teardown. Unique string fields, alone or in a unique_with group, are
+     * uniquified so a deterministic pattern can never collide with real data
+     * or residue. Returns the new key, or null when the parent cannot be
+     * created.
      */
     protected function create_parent_row($target_class) {
         self::$fk_creation_stack[$target_class] = true;
         try {
             $parent_tester = new ModelTester($target_class);
             $data = $parent_tester->generate_valid_test_data();
+
+            // A field in a composite unique (unique_with) collides as surely as
+            // a unique one: a second fresh parent under the same cached
+            // grandparent repeats every deterministic value.
+            $composite = array();
+            foreach ($target_class::$field_specifications as $f => $s) {
+                if (is_array($s) && !empty($s['unique_with'])) {
+                    $composite[$f] = true;
+                    foreach ((array)$s['unique_with'] as $other) {
+                        $composite[$other] = true;
+                    }
+                }
+            }
 
             foreach ($target_class::$field_specifications as $f => $s) {
                 if (!is_array($s) || !isset($data[$f]) || !is_string($data[$f])) {
@@ -844,7 +858,7 @@ class ModelTester {
                 }
                 if (strpos(strtolower($f), 'email') !== false) {
                     $data[$f] = 'mt_' . substr(uniqid('', true), -10) . '@modeltester.test';
-                } elseif (!empty($s['unique'])) {
+                } elseif (!empty($s['unique']) || isset($composite[$f])) {
                     preg_match('/\((\d+)\)/', $type, $m);
                     $max_length = isset($m[1]) ? (int)$m[1] : 255;
                     $data[$f] = substr('mt_' . str_replace('.', '', uniqid('', true)), 0, $max_length);

@@ -351,6 +351,7 @@ foreach ($display_messages as $msg) {
 	echo '<div class="alert ' . $alert_class . '" role="alert">';
 	if ($msg->message_title) echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
 	echo htmlspecialchars($msg->message);
+	echo ' ' . $msg->report_link_html();
 	echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 }
 // Rendered above, so these are spent; the footer drops them.

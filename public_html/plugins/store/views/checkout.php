@@ -44,6 +44,7 @@
         <div>
             <?php if ($msg->message_title): ?><strong><?php echo htmlspecialchars($msg->message_title, ENT_QUOTES, 'UTF-8'); ?>:</strong> <?php endif; ?>
             <?php echo htmlspecialchars($msg->message, ENT_QUOTES, 'UTF-8'); ?>
+            <?php echo $msg->report_link_html(); ?>
         </div>
     </div>
     <?php

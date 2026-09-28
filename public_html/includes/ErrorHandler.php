@@ -108,15 +108,15 @@ class DatabaseErrorLogger implements ErrorLoggerInterface {
         try {
             require_once(PathHelper::getIncludePath('data/general_errors_class.php'));
             
-            // Create new instance using standard pattern
             $errorLog = new GeneralError(NULL);
-            
-            // Use the new instance method
-            $errorLog->logError(
+            $id = $errorLog->logError(
                 $exception,
                 $_SESSION ?? [],
                 $_REQUEST ?? []
             );
+
+            // The saved row is the error reference the page links to.
+            $context->setErrorReference($id, $context->getErrorHash() ?? ErrorReference::hash($exception));
             
         } catch (\Throwable $e) {
             // Fallback logging to file if database fails
@@ -144,7 +144,8 @@ class FileErrorLogger implements ErrorLoggerInterface {
                 'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN',
                 'ip_address' => $context->getIpAddress(),
                 'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
-                'hash' => $this->generateErrorHash($exception)
+                'hash' => $context->getErrorHash() ?? ErrorReference::hash($exception),
+                'error_id' => $context->getErrorId(),
             ];
             
             // Add context if available
@@ -192,18 +193,6 @@ class FileErrorLogger implements ErrorLoggerInterface {
         }
         return 'ERROR';
     }
-    
-    private function generateErrorHash(\Throwable $exception): string {
-        // Create a hash to identify similar errors
-        // Based on type + message + file + line (excluding dynamic parts)
-        $message = preg_replace('/\d+/', 'N', $exception->getMessage()); // Replace numbers with N
-        $identifier = $exception->getCode() . '::' . 
-                     get_class($exception) . '::' . 
-                     $message . '::' . 
-                     $exception->getFile() . '::' . 
-                     $exception->getLine();
-        return md5($identifier);
-    }
 }
 
 // ================================
@@ -249,6 +238,24 @@ class ErrorContext {
     public function getTimestamp(): int {
         return $this->data['timestamp'] ?? time();
     }
+
+    /**
+     * The error reference: the err_general_errors row this error was saved
+     * as, and its grouping hash. Set while the error is logged, which happens
+     * before the response is rendered, so the response can link to it.
+     */
+    public function setErrorReference(?int $id, string $hash): void {
+        $this->data['error_id'] = $id;
+        $this->data['error_hash'] = $hash;
+    }
+
+    public function getErrorId(): ?int {
+        return $this->data['error_id'] ?? null;
+    }
+
+    public function getErrorHash(): ?string {
+        return $this->data['error_hash'] ?? null;
+    }
     
     public function toArray(): array {
         return $this->data;
@@ -289,10 +296,15 @@ class ErrorManager {
     public function handleException(\Throwable $exception): void {
         try {
             $context = $this->buildContext($exception);
+
+            // Log first: the saved row is the error reference, and the
+            // response rendered next links to it.
+            $context->setErrorReference(null, ErrorReference::hash($exception));
+            $this->logError($exception, $context);
+            ErrorReference::record($context->getErrorId(), $context->getErrorHash());
+
             $handler = $this->selectHandler($context);
             $response = $handler->handle($exception, $context);
-
-            $this->logError($exception, $context);
             $response->send();
 
         } catch (\Throwable $handlerException) {
@@ -419,4 +431,196 @@ class ErrorManager {
             echo '</body></html>';
         }
     }
+}
+
+// ================================
+// ERROR REFERENCE
+// ================================
+
+/**
+ * ErrorReference — the handle a person uses to report an error.
+ *
+ * When an error is recorded, the page, JSON envelope or flash message that
+ * tells the user about it carries a reference to the recorded row: its id in
+ * err_general_errors and a grouping hash that is the same for the same fault
+ * on any site. The reference is what the "Report this problem" link points
+ * at, so the report page can say exactly which error is being reported.
+ *
+ * One reference per request: the most recent error recorded in this process.
+ * The error handler records it before it renders, which is how the page it
+ * renders can link to the row.
+ *
+ * Report links are offered only to a signed-in member: guests cannot send a
+ * report (specs/bug_reports.md D3), so a link would only lead to a sign-in
+ * page.
+ *
+ * @version 1.0.0
+ */
+class ErrorReference {
+
+	/** Path of the report page. */
+	const REPORT_PATH = '/report_problem';
+
+	/** Longest message carried in a report link's query string. */
+	const MESSAGE_CAP = 300;
+
+	/** @var array{id: ?int, hash: string}|null */
+	private static $current = null;
+
+	/**
+	 * The grouping hash: same fault, same hash, on any site. Built from the
+	 * error code, the message with digits folded, and the file and line
+	 * relative to the site's public_html, so two installs in different
+	 * directories group together. Everything in it is stored on the
+	 * err_general_errors row, so a report built later from the row computes
+	 * the same hash (hashForRow()).
+	 */
+	public static function hash(\Throwable $exception): string {
+		return self::hashFor($exception->getCode(), $exception->getMessage(),
+			$exception->getFile(), $exception->getLine());
+	}
+
+	/** The grouping hash of a recorded err_general_errors row. */
+	public static function hashForRow(GeneralError $row): string {
+		return self::hashFor($row->get('err_code'), (string)$row->get('err_message'),
+			(string)$row->get('err_file'), $row->get('err_line'));
+	}
+
+	/** The grouping hash from its four parts. */
+	public static function hashFor($code, string $message, string $file, $line): string {
+		return md5((string)$code . '::'
+			. preg_replace('/\d+/', 'N', $message) . '::'
+			. self::relativeFile($file) . '::'
+			. (string)$line);
+	}
+
+	/**
+	 * A file path relative to public_html when it lies inside it, otherwise
+	 * unchanged.
+	 */
+	public static function relativeFile(string $file): string {
+		$root = rtrim(PathHelper::getRootDir(), '/') . '/';
+		if (strpos($file, $root) === 0) {
+			return substr($file, strlen($root));
+		}
+		return $file;
+	}
+
+	/**
+	 * Record an exception in err_general_errors and make it this request's
+	 * reference. Returns the saved row id, or NULL when the row could not be
+	 * saved (the hash is still recorded, so the reference still groups).
+	 */
+	public static function log(\Throwable $exception): ?int {
+		$user_id = null;
+		try {
+			$user_id = SessionControl::get_instance()->get_user_id() ?: null;
+		} catch (\Throwable $e) {
+			// No session: the error is still recorded, unattributed.
+		}
+		// The same two loggers, in the same order, as an uncaught exception.
+		$context = new ErrorContext(array(
+			'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
+			'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'GET',
+			'user_id' => $user_id !== null ? intval($user_id) : null,
+			'timestamp' => time(),
+			'ip_address' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+		));
+		$context->setErrorReference(null, self::hash($exception));
+		foreach (array(new DatabaseErrorLogger(), new FileErrorLogger()) as $logger) {
+			try {
+				$logger->log($exception, $context);
+			} catch (\Throwable $e) {
+				error_log('Error reference: an error logger failed: ' . $e->getMessage());
+			}
+		}
+		self::record($context->getErrorId(), $context->getErrorHash());
+		return $context->getErrorId();
+	}
+
+	/** Make ($id, $hash) this request's reference. */
+	public static function record(?int $id, string $hash): void {
+		self::$current = array('id' => $id, 'hash' => $hash);
+	}
+
+	/** This request's reference, or NULL when no error has been recorded. */
+	public static function current(): ?array {
+		return self::$current;
+	}
+
+	/** Forget this request's reference. For tests. */
+	public static function reset(): void {
+		self::$current = null;
+	}
+
+	/** Whether the person on this request may send a report. */
+	public static function reporterSignedIn(): bool {
+		try {
+			return intval(SessionControl::get_instance()->get_user_id()) > 0;
+		} catch (\Throwable $e) {
+			return false;
+		}
+	}
+
+	/**
+	 * The report page URL.
+	 *
+	 * @param int|null    $id      err_general_errors row, when there is one
+	 * @param string|null $from    the path and query where the problem showed
+	 * @param string|null $message the message the user saw, when there is no row
+	 */
+	public static function reportUrl(?int $id = null, ?string $from = null, ?string $message = null): string {
+		$query = array();
+		if ($id) {
+			$query['ref'] = $id;
+		}
+		if ($from !== null && $from !== '') {
+			$query['from'] = $from;
+		}
+		if (!$id && $message !== null && $message !== '') {
+			$query['msg'] = mb_substr($message, 0, self::MESSAGE_CAP);
+		}
+		return self::REPORT_PATH . ($query ? '?' . http_build_query($query) : '');
+	}
+
+	/**
+	 * The `error_ref` member of a JSON error envelope, or NULL when nothing
+	 * was recorded on this request. The report URL is present only for a
+	 * signed-in member.
+	 */
+	public static function forEnvelope(): ?array {
+		if (self::$current === null) {
+			return null;
+		}
+		$ref = array(
+			'id' => self::$current['id'],
+			'hash' => self::$current['hash'],
+		);
+		if (self::reporterSignedIn()) {
+			$ref['report_url'] = self::reportUrl(self::$current['id'], self::requestPath());
+		}
+		return $ref;
+	}
+
+	/**
+	 * The HTML "Report a problem" link that follows an error message, or ''
+	 * for a guest.
+	 *
+	 * @param int|null    $id      error row, when there is one
+	 * @param string|null $message the message the user saw, when there is none
+	 * @param string      $class   CSS class for the link
+	 */
+	public static function reportLinkHtml(?int $id = null, ?string $message = null, string $class = 'jy-report-link'): string {
+		if (!self::reporterSignedIn()) {
+			return '';
+		}
+		$url = self::reportUrl($id, self::requestPath(), $message);
+		return '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" class="'
+			. htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '">Report a problem</a>';
+	}
+
+	/** The path and query of this request, or '' on the command line. */
+	public static function requestPath(): string {
+		return (string)($_SERVER['REQUEST_URI'] ?? '');
+	}
 }

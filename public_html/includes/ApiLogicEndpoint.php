@@ -30,7 +30,11 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.5.2
+ * @version 1.6.0
+ * @changelog 1.6.0 - An exception escaping a logic file or a form builder is
+ *   recorded in err_general_errors (and the file log) like any uncaught error,
+ *   and the caller gets a user-safe message plus `error_ref` instead of the raw
+ *   exception text. Displayable* exceptions keep their message, as on the web.
  * @changelog 1.5.2 - Action dispatch passes the action's name to
  *   ApiAuth::authorize(), so a scoped machine key reaches only its actions.
  * @changelog 1.5.1 - Header and boundary-validation comments describe the
@@ -312,7 +316,8 @@ class ApiLogicEndpoint {
 				'error_type' => 'ActionError',
 				'note' => $e->getMessage()
 			]);
-			$result = LogicResult::error($e->getMessage());
+			self::recordException($e);
+			$result = LogicResult::error(self::userSafeMessage($e, 'Something went wrong while doing that.'));
 		} finally {
 			// Clean up session simulation. Must be finally, not post-try: with
 			// auth.session_write the session is open through logic execution,
@@ -587,6 +592,46 @@ class ApiLogicEndpoint {
 		}
 	}
 
+	/**
+	 * Record an exception that escaped a logic file, the way an uncaught one
+	 * is recorded, so it has an error reference the caller can report. An
+	 * exception marked NoLog is an expected refusal and is not recorded.
+	 */
+	protected static function recordException(\Throwable $e) {
+		if ($e instanceof \DisplayableErrorMessageNoLog
+				|| $e instanceof \DisplayablePermanentErrorMessageNoLog) {
+			return;
+		}
+		ErrorReference::log($e);
+	}
+
+	/**
+	 * What the caller may be told about an exception: the message itself when
+	 * the thrower marked it as user-safe, the user message of a displayable
+	 * BaseException, the raw text on a site that shows errors (show_errors),
+	 * and $generic otherwise. Raw exception text can carry query fragments,
+	 * paths and values that are not the caller's to see.
+	 */
+	protected static function userSafeMessage(\Throwable $e, $generic) {
+		if ($e instanceof \DisplayableErrorMessage
+				|| $e instanceof \DisplayableErrorMessageNoLog
+				|| $e instanceof \DisplayablePermanentErrorMessage
+				|| $e instanceof \DisplayablePermanentErrorMessageNoLog) {
+			return $e->getMessage();
+		}
+		if ($e instanceof \BaseException && $e->shouldDisplay()) {
+			return $e->getUserMessage();
+		}
+		try {
+			if (Globalvars::get_instance()->get_setting('show_errors')) {
+				return $e->getMessage();
+			}
+		} catch (\Throwable $ignored) {
+			// No settings: fall through to the generic message.
+		}
+		return $generic;
+	}
+
 	// ====================================================================
 	// Form face — GET /api/v1/form/{name}
 	// ====================================================================
@@ -689,7 +734,8 @@ class ApiLogicEndpoint {
 				'error_type' => 'ActionError',
 				'note' => $e->getMessage()
 			]);
-			api_error('Unable to build form definition (' . $e->getMessage() . ')', 'ActionError', 500);
+			self::recordException($e);
+			api_error(self::userSafeMessage($e, 'Unable to build the form definition.'), 'ActionError', 500);
 		}
 
 		if ($user_id) {

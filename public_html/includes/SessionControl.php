@@ -41,6 +41,14 @@ class DisplayMessage {
 	 */
 	public $shown = FALSE;
 
+	/**
+	 * The err_general_errors row behind an error message, when there is one.
+	 * An error message's "Report a problem" link carries it, so the report
+	 * names the exact error; without it the report page captures the page
+	 * and the message instead.
+	 */
+	public $error_ref = NULL;
+
 	function __construct($message, $message_title, $page_regex=NULL, $display_type=DisplayMessage::MESSAGE_ANNOUNCEMENT, $display_location=DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, $identifier=NULL, $clearable=TRUE) {
 		$this->message = $message;
 		$this->message_title = $message_title;
@@ -87,9 +95,23 @@ class DisplayMessage {
 			return 'error';
 		}
 	}
+
+	/**
+	 * The "Report a problem" link that follows an error message, or '' for
+	 * any other kind of message and for a guest (who cannot send a report).
+	 */
+	function report_link_html() {
+		if ($this->display_type != DisplayMessage::MESSAGE_ERROR) {
+			return '';
+		}
+		$text = trim(strip_tags(html_entity_decode((string)$this->message, ENT_QUOTES, 'UTF-8')));
+		return ErrorReference::reportLinkHtml($this->error_ref ? intval($this->error_ref) : NULL, $text);
+	}
 }
 
 /**
+ * @version 1.7 - DisplayMessage carries an optional error reference and renders the
+ *                "Report a problem" link that follows an error message (specs/bug_reports.md)
  * @version 1.6 - the vault re-enrollment gate's message says what the factor is for: signing
  *                in to an account that holds a vault, never opening the vault
  * @version 1.5 - the vault re-enrollment gate's message states the rule (a vault needs a

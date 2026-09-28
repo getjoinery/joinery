@@ -703,7 +703,13 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
         if(el.type==='checkbox') return el.checked?'1':'';
         return el.value;
     }
-    function showError(msg){ errEl.textContent=msg; errEl.style.display='block'; }
+    // err: the rejected call; a recorded server error adds a "Report a problem" link.
+    function showError(msg, err){
+        errEl.textContent=msg;
+        var link=joineryApi.reportLink(err);
+        if(link){ errEl.appendChild(document.createTextNode(' ')); errEl.appendChild(link); }
+        errEl.style.display='block';
+    }
     function clearError(){ errEl.textContent=''; errEl.style.display='none'; }
 
     function setLine(id, text){
@@ -814,7 +820,7 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
         })
         .catch(function(err){
             if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='Save';}
-            showError(err.message||'Save failed. Please try again.');
+            showError(err.message||'Save failed. Please try again.', err);
         });
     });
 
@@ -826,7 +832,7 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
         var it = viewed;
         if(!it || !it.entry_id) return;
         var done = function(){ closePopup(); window.dispatchEvent(new Event('calendarentrychanged')); };
-        var fail = function(err){ showError(err.message||'Delete failed.'); };
+        var fail = function(err){ showError(err.message||'Delete failed.', err); };
         if (it.occurrence_date) {
             var content = scopeChoice('Delete…', it.occurrence_date, true);
             JoineryModal.open(content, {

@@ -255,7 +255,7 @@ class FileSystemException extends BaseException {
 // ================================
 
 class SystemException extends BaseException {
-    protected string $userMessage = 'A system error occurred. Our team has been notified.';
+    protected string $userMessage = 'A system error occurred.';
     protected string $component = '';
     
     public function __construct(
@@ -349,7 +349,7 @@ class WebErrorHandler implements ErrorHandlerInterface {
         }
 
         if ($this->isProduction()) {
-            return 'We apologize for the inconvenience. Our team has been notified.';
+            return 'We apologize for the inconvenience.';
         }
 
         return $exception->getMessage();
@@ -408,20 +408,28 @@ class WebErrorHandler implements ErrorHandlerInterface {
             $html .= '<button onclick="history.back()" class="btn btn-secondary">Go Back</button>';
             $html .= '<a href="/" class="btn btn-primary">Home</a>';
         }
-        
-        // Add contact info if available
-        try {
-            $settings = Globalvars::get_instance();
-            $email = $settings->get_setting('webmaster_email');
-            if ($email) {
-                $html .= '<p class="contact-info">Need help? Contact <a href="mailto:' . htmlspecialchars($email) . '">' . htmlspecialchars($email) . '</a></p>';
-            }
-        } catch (\Throwable $e) {
-            // Ignore if we can't get contact info
-        }
-        
+
+        $html .= $this->renderReportAction($context);
         $html .= '</div>';
-        
+
+        return $html;
+    }
+
+    /**
+     * The "Report this problem" button, for a signed-in member only: guests
+     * cannot send a report. It links to the report page with this error's
+     * reference, so the report names the exact row.
+     */
+    protected function renderReportAction(ErrorContext $context): string {
+        if (!$context->getUserId()) {
+            return '';
+        }
+        $url = ErrorReference::reportUrl($context->getErrorId(), $context->getRequestUri());
+        $html = '<p class="contact-info">You can report this to the people who maintain this software.</p>';
+        $html .= '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" class="btn btn-secondary">Report this problem</a>';
+        if ($context->getErrorId()) {
+            $html .= '<p class="contact-info">Error reference: ' . intval($context->getErrorId()) . '</p>';
+        }
         return $html;
     }
     
@@ -647,10 +655,8 @@ class AdminErrorHandler extends WebErrorHandler {
             $html .= '<button onclick="history.back()" class="btn btn-secondary">Go Back</button>';
             $html .= '<a href="/adm" class="btn btn-primary">Admin Dashboard</a>';
         }
-        
-        // Admin-specific help
-        $html .= '<p class="contact-info mt-3">Admin Error - Check system logs or contact development team</p>';
-        
+
+        $html .= $this->renderReportAction($context);
         $html .= '</div>';
         
         return $html;
@@ -664,6 +670,10 @@ class AjaxErrorHandler implements ErrorHandlerInterface {
             'success' => false,
             'error' => $this->formatError($exception, $context)
         ];
+        $ref = ErrorReference::forEnvelope();
+        if ($ref !== null) {
+            $responseData['error_ref'] = $ref;
+        }
         
         if ($this->shouldIncludeDebugInfo($exception)) {
             $responseData['debug'] = [
@@ -764,12 +774,17 @@ class AjaxErrorHandler implements ErrorHandlerInterface {
 class ApiErrorHandler implements ErrorHandlerInterface {
 
 	public function handle(\Throwable $exception, ErrorContext $context): ErrorResponse {
-		return new JsonResponse([
+		$envelope = [
 			'api_version' => '1.0',
 			'errortype' => $this->errorType($exception),
 			'error' => $this->userMessage($exception),
 			'data' => new \stdClass(),
-		], $this->statusCode($exception));
+		];
+		$ref = ErrorReference::forEnvelope();
+		if ($ref !== null) {
+			$envelope['error_ref'] = $ref;
+		}
+		return new JsonResponse($envelope, $this->statusCode($exception));
 	}
 
 	public function supports(ErrorContext $context): bool {

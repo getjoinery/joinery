@@ -26,6 +26,8 @@
  *   'allowed_ports' => ['allow' => [443], 'min' => 1024]
  *   'allowed_ports' => null                      // any port (rarely correct)
  *
+ * @version 1.1 - head(): a HEAD request that reads headers only (CURLOPT_NOBODY),
+ *   for a caller that needs a response header and none of the body
  * @version 1.0
  */
 
@@ -100,6 +102,11 @@ class SafeHttpClient {
 
 	public function get(string $url, array $headers = array()): SafeHttpResponse {
 		return $this->request('GET', $url, null, $headers);
+	}
+
+	/** Headers only: the body is never requested, so no body cap is spent. */
+	public function head(string $url, array $headers = array()): SafeHttpResponse {
+		return $this->request('HEAD', $url, null, $headers);
 	}
 
 	public function post(string $url, string $body, array $headers = array()): SafeHttpResponse {
@@ -207,6 +214,10 @@ class SafeHttpClient {
 
 		if ($body !== null) {
 			curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+		}
+		if ($method === 'HEAD') {
+			// Without NOBODY curl would wait for the body the headers announce.
+			curl_setopt($ch, CURLOPT_NOBODY, true);
 		}
 		if (!empty($pin['ips'])) {
 			curl_setopt($ch, CURLOPT_RESOLVE, array(

@@ -16,7 +16,7 @@
  *   URL:  /api/v1/management/stats
  *   File: includes/management_api/stats_handler.php
  *   Funcs:
- *     stats_handler($request)       — does the work, returns array|null
+ *     stats_handler($request)       — does the work, returns an array
  *     stats_handler_api()           — returns ['method' => ..., 'description' => ...]
  *
  * Nested endpoints:
@@ -27,7 +27,9 @@
  * Discovery:
  *   GET /api/v1/management  →  lists every available endpoint + metadata.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - every handler returns an array for the standard envelope; the
+ *   streaming path (a handler returning null after writing its own response) is gone
  * @changelog 1.2 - authorization unified through ApiAuth: the machine-key +
  *   superadmin default is enforced up front (unchanged behavior); a handler's
  *   ['auth'] block can tighten it further after resolution
@@ -138,17 +140,11 @@ class ManagementApiRouter {
 			'headers' => getallheaders(),
 		];
 
-		// Invoke handler. Handler returns an array (wrapped by api_success),
-		// or null when it has streamed its own response.
+		// Invoke handler. Handler returns an array, wrapped by api_success.
 		try {
 			$result = call_user_func($function_base, $request);
 		} catch (Exception $e) {
 			api_error($e->getMessage(), 'TransactionError', 500);
-		}
-
-		// Streaming handlers return null — they've already sent their response
-		if ($result === null) {
-			exit;
 		}
 
 		api_success($result, '', 200);
