@@ -16,6 +16,7 @@
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql.gz (default)
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql (with --no-compress)
  *
+ * @version 1.3 - every failure exits 1 (die() with a message exits 0)
  * @version 1.2 - the database name comes from the dbname bootstrap key
  * @version 1.1
  */
@@ -23,6 +24,15 @@
 if (php_sapi_name() !== 'cli') {
 	http_response_code(403);
 	die('This script can only be run from the command line.');
+}
+
+/**
+ * Print what went wrong and stop with a failing exit status. die() with a
+ * message exits 0, which a caller (publish_upgrade.php) reads as success.
+ */
+function fail($message) {
+	echo $message;
+	exit(1);
 }
 
 // ============================================================================
@@ -48,14 +58,14 @@ if (isset($argc) && isset($argv)) {
 }
 
 if (!$version) {
-    die("ERROR: Version argument required\n" .
+    fail("ERROR: Version argument required\n" .
         "Usage: php utils/create_install_sql.php VERSION [--no-compress]\n" .
         "Example: php utils/create_install_sql.php 0.67\n");
 }
 
 // Validate version format (X.XX or X.XX.X)
 if (!preg_match('/^\d+\.\d+(\.\d+)?$/', $version)) {
-    die("ERROR: Invalid version format '$version'. Expected format: X.XX or X.XX.X (e.g., 0.8 or 0.8.1)\n");
+    fail("ERROR: Invalid version format '$version'. Expected format: X.XX or X.XX.X (e.g., 0.8 or 0.8.1)\n");
 }
 
 echo "Creating install SQL file (version $version)...\n";
@@ -71,7 +81,7 @@ if (!$compress) {
 // This is the proper way to load it for maintenance scripts
 $includes_path = dirname(__DIR__) . '/includes/PathHelper.php';
 if (!file_exists($includes_path)) {
-    die("ERROR: Cannot find PathHelper at: $includes_path\n");
+    fail("ERROR: Cannot find PathHelper at: $includes_path\n");
 }
 require_once($includes_path);
 
@@ -101,7 +111,7 @@ try {
     $result = $q->fetch(PDO::FETCH_OBJ);
 
     if (!$result) {
-        die("ERROR: Could not connect to database or retrieve version\n");
+        fail("ERROR: Could not connect to database or retrieve version\n");
     }
 
     // dbname is the bootstrap key every site's Globalvars_site.php carries.
@@ -109,7 +119,7 @@ try {
     echo "   Connected to database '$db_name'\n";
 
 } catch (Exception $e) {
-    die("ERROR: Database connection failed: " . $e->getMessage() . "\n");
+    fail("ERROR: Database connection failed: " . $e->getMessage() . "\n");
 }
 
 // ============================================================================
@@ -125,13 +135,13 @@ $uploads_dir = $site_root . '/uploads';
 // Create uploads directory if it doesn't exist
 if (!is_dir($uploads_dir)) {
     if (!mkdir($uploads_dir, 0755, true)) {
-        die("ERROR: Could not create uploads directory at $uploads_dir\n");
+        fail("ERROR: Could not create uploads directory at $uploads_dir\n");
     }
 }
 
 // Verify directory is writable
 if (!is_writable($uploads_dir)) {
-    die("ERROR: Uploads directory is not writable: $uploads_dir\n");
+    fail("ERROR: Uploads directory is not writable: $uploads_dir\n");
 }
 
 // Determine output filename based on compression flag
@@ -152,7 +162,7 @@ echo "[4/10] Creating temporary working directory...\n";
 
 $temp_dir = '/tmp/joinery-install-' . uniqid();
 if (!mkdir($temp_dir, 0700, true)) {
-    die("ERROR: Could not create temporary directory at $temp_dir\n");
+    fail("ERROR: Could not create temporary directory at $temp_dir\n");
 }
 
 echo "   Working directory: $temp_dir\n";
@@ -213,7 +223,7 @@ function pg_dump_or_die(array $args, ?string $password, string $what) {
     $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
     $proc = proc_open($cmd, $descriptors, $pipes, NULL, $env);
     if (!is_resource($proc)) {
-        die("ERROR: could not run pg_dump for {$what}\n");
+        fail("ERROR: could not run pg_dump for {$what}\n");
     }
 
     fclose($pipes[0]);
@@ -224,7 +234,7 @@ function pg_dump_or_die(array $args, ?string $password, string $what) {
     $exit_code = proc_close($proc);
 
     if ($exit_code !== 0) {
-        die("ERROR: pg_dump failed for {$what} (exit {$exit_code}):\n"
+        fail("ERROR: pg_dump failed for {$what} (exit {$exit_code}):\n"
             . trim($stderr) . "\n");
     }
 
@@ -239,14 +249,14 @@ $schema_output = pg_dump_or_die([
 ], $db_password, 'schema export');
 
 if (trim($schema_output) === '') {
-    die("ERROR: Schema export produced empty output\n");
+    fail("ERROR: Schema export produced empty output\n");
 }
 
 // A schema dump with no CREATE TABLE in it is not a schema, whatever pg_dump
 // exited with. This is the assertion that would have stopped a corrupt install
 // file from being published.
 if (strpos($schema_output, 'CREATE TABLE') === false) {
-    die("ERROR: Schema export contains no CREATE TABLE statements\n");
+    fail("ERROR: Schema export contains no CREATE TABLE statements\n");
 }
 
 file_put_contents($schema_file, $schema_output);
@@ -414,7 +424,7 @@ echo "[8/10] Assembling final SQL file...\n";
 $temp_output = $temp_dir . '/complete.sql';
 $output_handle = fopen($temp_output, 'w');
 if (!$output_handle) {
-    die("ERROR: Could not open temporary output file for writing\n");
+    fail("ERROR: Could not open temporary output file for writing\n");
 }
 
 // Write header with metadata
@@ -667,17 +677,17 @@ fwrite($output_handle, "-- =====================================================
 
 $settings_json_path = PathHelper::getIncludePath('settings.json');
 if (!file_exists($settings_json_path)) {
-    die("ERROR: settings.json not found at $settings_json_path\n");
+    fail("ERROR: settings.json not found at $settings_json_path\n");
 }
 $settings_json = json_decode(file_get_contents($settings_json_path), true);
 if (!is_array($settings_json) || !isset($settings_json['settings']) || !is_array($settings_json['settings'])) {
-    die("ERROR: settings.json is missing the 'settings' array or is not valid JSON\n");
+    fail("ERROR: settings.json is missing the 'settings' array or is not valid JSON\n");
 }
 
 $setting_id = 1;
 foreach ($settings_json['settings'] as $idx => $setting) {
     if (empty($setting['name'])) {
-        die("ERROR: settings.json entry at index $idx is missing 'name'\n");
+        fail("ERROR: settings.json entry at index $idx is missing 'name'\n");
     }
     $name = $setting['name'];
     $value = $setting['default'] ?? '';
@@ -710,11 +720,11 @@ fwrite($output_handle, "-- =====================================================
 
 $menus_json_path = PathHelper::getIncludePath('admin_menus.json');
 if (!file_exists($menus_json_path)) {
-    die("ERROR: admin_menus.json not found at $menus_json_path\n");
+    fail("ERROR: admin_menus.json not found at $menus_json_path\n");
 }
 $menus_data = json_decode(file_get_contents($menus_json_path), true);
 if (!is_array($menus_data)) {
-    die("ERROR: admin_menus.json is not valid JSON\n");
+    fail("ERROR: admin_menus.json is not valid JSON\n");
 }
 
 $pg_escape = function($v) {
@@ -729,7 +739,7 @@ $pg_escape = function($v) {
 $write_menu_insert = function($handle, $entry, $location, $visibility) use ($pg_escape) {
     foreach (['slug', 'title', 'order', 'permission'] as $f) {
         if (!isset($entry[$f]) && $f !== 'permission') {
-            die("ERROR: admin_menus.json entry missing required field '$f' (slug=" . ($entry['slug'] ?? '?') . ")\n");
+            fail("ERROR: admin_menus.json entry missing required field '$f' (slug=" . ($entry['slug'] ?? '?') . ")\n");
         }
     }
     $slug = $entry['slug'];
@@ -816,7 +826,7 @@ if ($compress) {
     exec($gzip_cmd, $output, $exit_code);
 
     if ($exit_code !== 0) {
-        die("ERROR: Failed to compress output file (exit code $exit_code)\n");
+        fail("ERROR: Failed to compress output file (exit code $exit_code)\n");
     }
 
     $file_size = filesize($final_output_path);
@@ -824,7 +834,7 @@ if ($compress) {
 } else {
     // Just copy the uncompressed file
     if (!copy($temp_output, $final_output_path)) {
-        die("ERROR: Failed to copy output file to final location\n");
+        fail("ERROR: Failed to copy output file to final location\n");
     }
     $file_size = filesize($final_output_path);
 }
@@ -836,11 +846,11 @@ if ($compress) {
 echo "[10/10] Verifying output file...\n";
 
 if (!file_exists($final_output_path)) {
-    die("ERROR: Output file was not created\n");
+    fail("ERROR: Output file was not created\n");
 }
 
 if ($file_size === 0) {
-    die("ERROR: Output file is empty\n");
+    fail("ERROR: Output file is empty\n");
 }
 
 echo "   File created successfully (" . number_format($file_size) . " bytes)\n";
