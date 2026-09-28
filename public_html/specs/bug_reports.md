@@ -1,6 +1,6 @@
 # Problem Reports: a node reports a bug to its upgrade source
 
-**Status:** WP1–WP5 built 2026-09-27, uncommitted; WP6 (live gate) not run. D1–D4 and D6 decided 2026-09-25; D5, D7 and D8 decided 2026-09-27. B5 fixed 2026-09-27 (endpoint removed). Open: the owner steps under **Build status**.
+**Status:** WP1–WP5 built and committed (b77cb344, 2026-09-28) except `views/report_problem.php`, which the commit missed (B8). WP6 rehearsed on dev 2026-09-28; the cross-site run needs a release. D1–D4 and D6 decided 2026-09-25; D5, D7 and D8 decided 2026-09-27. Open: the owner steps under **Build status**.
 **Date:** 2026-09-25.
 **Related:** `specs/implemented/agent_on_node_architecture.md` §3.5 (what may leave a
 node), `specs/agent_recipes_and_vocabulary.md` rule 8 (what private means),
@@ -359,7 +359,21 @@ The existing suites the change touches pass too (`error_handling`, `core_api_mec
    `ProblemReportSend` active.
 2. ~~Install and activate the `bug_reports` plugin on dev.~~ Done 2026-09-27;
    `models_crud`, `multi_models_crud` and `bug_reports_intake` pass.
-3. Commit, release, and run WP6.
+3. ~~Commit.~~ Done b77cb344, except the report page (B8).
+4. Commit `views/report_problem.php` with the B9 fix, release, and run WP6.
+
+**WP6 rehearsal on dev (2026-09-28).** A real operator bundle with a PNG, posted over
+HTTPS from dev to dev's own `report_submit`, answered 200 with a report id. The row
+stored `verified` (dev reaching itself passes the allowlist), the image attached, and
+the plugin's list grouped it and its detail page showed every section. A member's
+`/report_problem` page, opened from a real error page's button, showed the four member
+sections and none of the operator ones. Two faults found and fixed:
+
+- **B8:** b77cb344 left out `views/report_problem.php`. Every report link on a site
+  running that commit leads to a 404 until it is committed.
+- **B9:** the bundle's schema version was always blank: it read a `schema_version`
+  setting that does not exist. It is now the highest applied migration
+  (`mig_migrations`), and `problem_report_bundle` checks it.
 
 ## Open questions
 

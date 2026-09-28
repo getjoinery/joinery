@@ -87,6 +87,9 @@ foreach (array_keys(ProblemReportBundle::SECTIONS) as $key) {
 	check(array_key_exists($key, $op_bundle), 'section present: ' . $key);
 }
 check($op_bundle['scope'] === 'operator', 'marked as an operator report');
+$applied = (string)DbConnector::get_instance()->get_db_link()->query('SELECT MAX(mig_version) FROM mig_migrations')->fetchColumn();
+check($op_bundle['site']['version'] !== '' && $op_bundle['site']['schema_version'] === $applied,
+	'the site names its version and the highest migration applied', $op_bundle['site']['schema_version']);
 check($op_bundle['error']['id'] === (int)$own_error->key, 'the error row is attached');
 check($op_bundle['error']['hash'] === ErrorReference::hashForRow($own_error), 'the error carries its grouping hash');
 check($op_bundle['request']['path'] === '/profile/thing?id=42&q=…',

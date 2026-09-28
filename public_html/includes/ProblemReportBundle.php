@@ -23,7 +23,7 @@
  * sealed. Building a bundle opens no sealed content: settings are compared as
  * stored, never decrypted.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 class ProblemReportBundle {
 
@@ -138,21 +138,27 @@ class ProblemReportBundle {
 	// ---------------------------------------------------------------- sections
 
 	public static function site(): array {
-		$settings = Globalvars::get_instance();
+		$dblink = DbConnector::get_instance()->get_db_link();
 		$install_days = null;
 		try {
-			$first = DbConnector::get_instance()->get_db_link()
-				->query('SELECT MIN(usr_signup_date) FROM usr_users')->fetchColumn();
+			$first = $dblink->query('SELECT MIN(usr_signup_date) FROM usr_users')->fetchColumn();
 			if ($first) {
 				$install_days = (int)floor((time() - strtotime($first . ' UTC')) / 86400);
 			}
 		} catch (\Throwable $e) {
 			// No users table: the age stays unknown.
 		}
+		// The schema version is the highest migration applied.
+		$schema = '';
+		try {
+			$schema = (string)$dblink->query('SELECT MAX(mig_version) FROM mig_migrations')->fetchColumn();
+		} catch (\Throwable $e) {
+			// No migrations table: the version stays unknown.
+		}
 		return array(
 			'host'             => self::clean(ServicesClient::host()),
 			'version'          => self::clean(LibraryFunctions::get_joinery_version()),
-			'schema_version'   => self::clean((string)$settings->get_setting('schema_version', true, true)),
+			'schema_version'   => self::clean($schema),
 			'theme'            => self::clean((string)ThemeHelper::getActive()),
 			'install_age_days' => $install_days,
 		);
