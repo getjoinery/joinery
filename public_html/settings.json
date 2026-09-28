@@ -955,6 +955,14 @@
       "helptext": "Members and administrators can report an error from any error page or error message. A report carries versions, the error, and the reporter's comment and image, and from an administrator also masked log lines and a list of changed setting names. It never carries member data, addresses or setting values, and the reporter sees all of it before sending. Off keeps reports on this site only."
     },
     {
+      "name": "problem_reports_auto_send",
+      "default": "0",
+      "group": "problem_reports",
+      "label": "Send a report automatically when something breaks",
+      "type": "checkbox",
+      "helptext": "When an unexpected error happens, this site sends a report on its own, with no one reviewing it first. It carries versions, the error and its place in the code, and the page's address masked to its shape; never who was affected, log lines, member data or setting values. The same error is sent once per version, then as a count of how often it recurs. Needs sending switched on above."
+    },
+    {
       "name": "problem_reports_retention_days",
       "default": "90",
       "group": "problem_reports",

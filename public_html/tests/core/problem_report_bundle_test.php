@@ -16,6 +16,9 @@
  * sender: a report saves, a 2xx marks it sent with the remote id, a refusal
  * marks it failed with the reason, retries stop at the limit, the operator's
  * switch keeps reports local, and the retention rule removes old ones.
+ * Automatic reports (Part 2): the same-fault key, which errors count, what an
+ * automatic report carries, and one report per fault with its count sent as
+ * updates.
  *
  * The sender talks to a stand-in HTTP client; nothing leaves this box.
  *
@@ -216,6 +219,119 @@ harness_register_row('prr_problem_reports', 'prr_problem_report_id', $kept->key)
 check($kept->get('prr_status') === ProblemReport::STATUS_KEPT && count($client->calls) === $calls_before,
 	'with sending switched off, a report is kept here and nothing is sent');
 harness_set_setting_mem('problem_reports_send', '1');
+
+// ------------------------------------------------------- automatic reports
+
+section('The same-fault key');
+
+$base_error = array('kind' => 'Exception', 'file' => 'includes/Thing.php', 'line' => '40', 'message' => 'Row 17 not found',
+	'trace' => array('#0 includes/Thing.php(12): Thing->load()', '#1 views/page.php(88): Thing->show()'));
+$fp = ProblemReportBundle::fingerprint($base_error);
+check(is_string($fp) && strlen($fp) === 32, 'an error with frames has a key');
+$moved = $base_error;
+$moved['line'] = '52';
+$moved['message'] = 'Row 99 not found';
+$moved['trace'] = array('#0 includes/Thing.php(19): Thing->load()', '#1 views/page.php(101): Thing->show()');
+check(ProblemReportBundle::fingerprint($moved) === $fp, 'line numbers and the message do not split a fault that has frames');
+$other_path = $base_error;
+$other_path['trace'][1] = '#1 views/other.php(88): Thing->show()';
+check(ProblemReportBundle::fingerprint($other_path) !== $fp, 'a different caller is a different fault');
+$other_kind = $base_error;
+$other_kind['kind'] = 'Database Error';
+check(ProblemReportBundle::fingerprint($other_kind) !== $fp, 'a different kind is a different fault');
+
+$bare = array('kind' => 'Exception', 'file' => 'includes/Thing.php', 'message' => "User 'bob' has 3 items (ref 9f8e7d6c5b4a)");
+$bare2 = array('kind' => 'Exception', 'file' => 'includes/Thing.php', 'message' => "User 'alice' has 12 items (ref 0a1b2c3d4e5f)");
+check(ProblemReportBundle::fingerprint($bare) === ProblemReportBundle::fingerprint($bare2),
+	'with no frames, numbers, quoted text and hex runs do not split a fault');
+check(ProblemReportBundle::fingerprint($bare) !== ProblemReportBundle::fingerprint(array('kind' => 'Exception', 'file' => 'includes/Thing.php', 'message' => 'Disk full')),
+	'with no frames, a different message is a different fault');
+check(ProblemReportBundle::fingerprint(array('message' => '')) === null, 'an error naming neither a place nor a message has no key');
+
+section('Which errors are sent automatically');
+
+check(ProblemReport::isUnexpected(new RuntimeException('boom')), 'an ordinary exception is unexpected');
+check(!ProblemReport::isUnexpected(new SystemDisplayableError('Enter a date.')), 'a message marked safe to show is not');
+check(!ProblemReport::isUnexpected(new SystemAuthenticationError('No permission.')), 'a permission refusal is not');
+
+section('What an automatic report carries');
+
+check(ProblemReportBundle::pathShape('/profile/jane-doe/posts/42?id=7&q=Jane') === '/profile/…/posts/42?id=7&q=Jane',
+	'a path is masked to its shape (request() masks the query)', ProblemReportBundle::pathShape('/profile/jane-doe/posts/42?id=7&q=Jane'));
+$auto = ProblemReportBundle::automatic($own_error, 'RuntimeException', '/profile/Jane.Doe/edit?id=5&q=secret');
+check($auto['scope'] === 'automatic', 'marked automatic');
+check(!isset($auto['who']) && !isset($auto['recent_errors']), 'no reporter and no log lines');
+check(isset($auto['runtime'], $auto['plugins'], $auto['settings'], $auto['health']), 'the site-wide sections are there');
+check($auto['request']['path'] === '/profile/…/edit?id=5&q=…', 'the path is its shape', $auto['request']['path']);
+check(!isset($auto['request']['timezone']), 'no time zone');
+check($auto['error']['class'] === 'RuntimeException', 'the exception class is carried');
+check(ProblemReportBundle::maskQuoted("User 'bob' said \"hi\"") === "User '…' said \"…\"", 'quoted text in a message is masked');
+
+section('An unexpected error starts one automatic report, and recurrences count');
+
+$db = DbConnector::get_instance()->get_db_link();
+harness_set_setting_mem('problem_reports_send', '1');
+harness_set_setting_mem('problem_reports_auto_send', '0');
+$off_id = ErrorReference::log(new RuntimeException('prb automatic off'));
+harness_register_row('err_general_errors', 'err_general_error_id', $off_id);
+$auto_count = function () use ($db) {
+	return (int)$db->query("SELECT COUNT(*) FROM prr_problem_reports WHERE prr_automatic")->fetchColumn();
+};
+$before = $auto_count();
+ErrorReference::log(new RuntimeException('prb automatic off, again'));
+check($auto_count() === $before, 'with the switch off, nothing is noted');
+
+harness_set_setting_mem('problem_reports_auto_send', '1');
+/** Thrown from one place, so every call is the same fault. */
+function prb_auto_fault($n) {
+	return new RuntimeException('prb automatic fault number ' . $n);
+}
+$first_id = ErrorReference::log(prb_auto_fault(1));
+harness_register_row('err_general_errors', 'err_general_error_id', $first_id);
+check($auto_count() === $before + 1, 'an unexpected error starts an automatic report');
+$auto_id = (int)$db->query("SELECT MAX(prr_problem_report_id) FROM prr_problem_reports WHERE prr_automatic")->fetchColumn();
+harness_register_row('prr_problem_reports', 'prr_problem_report_id', $auto_id);
+$auto_row = new ProblemReport($auto_id, TRUE);
+check($auto_row->get('prr_status') === ProblemReport::STATUS_QUEUED && $auto_row->get('prr_usr_user_id') === null,
+	'it waits for the task, with no reporter', $auto_row->get('prr_status'));
+check((int)$auto_row->get('prr_occurrences') === 1 && $auto_row->bundle()['scope'] === 'automatic', 'counted once, with an automatic bundle');
+
+$second_id = ErrorReference::log(prb_auto_fault(2));
+harness_register_row('err_general_errors', 'err_general_error_id', $second_id);
+$auto_row = new ProblemReport($auto_id, TRUE);
+check($auto_count() === $before + 1 && (int)$auto_row->get('prr_occurrences') === 2,
+	'the same fault again adds to the count and starts nothing new', 'occurrences ' . $auto_row->get('prr_occurrences'));
+
+$wall_id = ErrorReference::log(new SystemDisplayableError('prb a wall, not a bug'));
+harness_register_row('err_general_errors', 'err_general_error_id', $wall_id);
+check($auto_count() === $before + 1, 'an error with a message safe to show is not noted');
+
+section('Sending an automatic report, then its count');
+
+$client->status = 200;
+$client->body = '{"api_version":"1.0","data":{"report_id":888}}';
+$calls_before = count($client->calls);
+check($auto_row->is_sendable() && $auto_row->send(), 'the task sends it');
+$sent_body = $client->calls[$calls_before]['body'] ?? '';
+check(strpos($sent_body, '"occurrences":2') !== false && strpos($sent_body, '"scope":"automatic"') !== false,
+	'it carries both occurrences and the automatic scope');
+$auto_row = new ProblemReport($auto_id, TRUE);
+check((int)$auto_row->get('prr_occurrences_sent') === 2 && !$auto_row->is_sendable(), 'what was sent is recorded; nothing is due');
+
+$third_id = ErrorReference::log(prb_auto_fault(3));
+harness_register_row('err_general_errors', 'err_general_error_id', $third_id);
+$auto_row = new ProblemReport($auto_id, TRUE);
+check($auto_row->is_sendable() && $auto_row->unsentOccurrences() === 1, 'a recurrence after sending makes it due again');
+$due = new MultiProblemReport(array('sendable' => true));
+$ids = array();
+foreach ($due as $d) { $ids[] = (int)$d->key; }
+check(in_array($auto_id, $ids, true), 'the task\'s list includes it');
+$auto_row->send();
+$update_body = $client->calls[count($client->calls) - 1]['body'];
+check(strpos($update_body, '"occurrences":1') !== false, 'the update carries only the new count');
+$auto_row = new ProblemReport($auto_id, TRUE);
+check((int)$auto_row->get('prr_occurrences') === 3 && (int)$auto_row->get('prr_occurrences_sent') === 3, 'all three are now heard');
+harness_set_setting_mem('problem_reports_auto_send', '0');
 
 section('Retention');
 

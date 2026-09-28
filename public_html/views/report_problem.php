@@ -13,7 +13,7 @@
  *
  * See specs/bug_reports.md.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getIncludePath('logic/report_problem_logic.php'));
@@ -51,6 +51,7 @@ $inputs = $page_vars['inputs'];
 
 			<div class="jy-panel" id="report-problem-form-panel">
 				<h2>What went wrong?</h2>
+				<p class="jy-muted">Say what you were trying to do and the steps that led to the problem, what you expected to happen, and what happened instead. Name the page you were on, and say whether it happens every time or only sometimes.</p>
 				<?php
 				$formwriter = $page->getFormWriter('report_problem_form', [
 					'action'  => '/report_problem',
@@ -62,9 +63,9 @@ $inputs = $page_vars['inputs'];
 				}
 				$formwriter->hiddeninput('from', '', ['value' => $inputs['from']]);
 				$formwriter->hiddeninput('msg', '', ['value' => $inputs['msg']]);
-				$formwriter->textarea('comment', 'Describe what you were doing and what happened', [
-					'rows'        => 6,
-					'placeholder' => 'For example: I pressed Save on my profile and got an error page.',
+				$formwriter->textarea('comment', 'Describe the problem', [
+					'rows'        => 8,
+					'placeholder' => 'For example: On my profile I changed my time zone and pressed Save. I expected it to save, but I got an error page instead. It happens every time.',
 					'helptext'    => 'Up to ' . number_format($page_vars['comment_max']) . ' characters. This is sent as you write it.',
 				]);
 				$formwriter->fileinput('image', 'Screenshot (optional)', [

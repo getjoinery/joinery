@@ -3,9 +3,15 @@
  * ReceivedBugReport — one problem report another site sent to this one.
  *
  * Sites that upgrade from this one send a report when a member reports an
- * error (core ProblemReport::send()). The intake action files it here with the
- * verdict of a call back to the claimed site, and the admin pages group the
- * same error across sites by its hash.
+ * error, and, when their operator allows it, on their own when an unexpected
+ * error happens (core ProblemReport::send()). The intake action files it here
+ * with the verdict of a call back to the claimed site, and the admin pages
+ * group the same fault across sites by its fingerprint
+ * (ProblemReportBundle::fingerprint()), or its hash for reports filed before
+ * fingerprints.
+ *
+ * An automatic report of a fault already stored for the same site and version
+ * is not stored again: its count is added to rbr_occurrences.
  *
  * Everything in a report is untrusted input from another machine: it is
  * stored as text, escaped on display, and never executed, resolved, or used
@@ -18,6 +24,7 @@
  *                     (refused, timed out, private address, or no header —
  *                     a site behind an IP allowlist lands here too)
  *
+ * @version 1.1.0 - fingerprint grouping; automatic reports and their counts
  * @version 1.0.0
  */
 
@@ -58,6 +65,13 @@ class ReceivedBugReport extends SystemBase {
 		'rbr_status'                 => array('type' => 'varchar(16)', 'is_nullable' => false, 'default' => 'new'),
 		'rbr_closed_usr_user_id'     => array('type' => 'int4', 'is_nullable' => true),
 		'rbr_closed_time'            => array('type' => 'timestamp(6)', 'is_nullable' => true),
+		// The same-fault key, computed here from the bundle's error section.
+		'rbr_fingerprint'            => array('type' => 'varchar(32)', 'is_nullable' => true, 'index' => true),
+		// Sent by the site on its own, and how many times the fault happened
+		// there on that version (the report itself and every count update).
+		'rbr_automatic'              => array('type' => 'bool', 'is_nullable' => false, 'default' => 'false'),
+		'rbr_occurrences'            => array('type' => 'int4', 'is_nullable' => false, 'default' => 1),
+		'rbr_last_seen_time'         => array('type' => 'timestamp(6)', 'is_nullable' => true),
 	);
 
 	public static $index_specifications = array(
@@ -151,27 +165,36 @@ class ReceivedBugReport extends SystemBase {
 		);
 	}
 
+	/** The group key: the fingerprint, else the Part 1 hash, else '' (no recorded error). */
+	const GROUP_KEY = "COALESCE(rbr_fingerprint, rbr_error_hash, '')";
+
+	/** This report's group key. */
+	public function group_key(): string {
+		return (string)($this->get('rbr_fingerprint') ?: ($this->get('rbr_error_hash') ?: ''));
+	}
+
 	/**
-	 * The same error grouped across reports: one row per hash, with how many
-	 * sites and reports, the newest version seen, the first and last time,
-	 * and how many are still open.
+	 * The same fault grouped across reports: one row per group key, with how
+	 * many sites and reports, how many times it happened, the newest version
+	 * seen, the first and last time, and how many are still open.
 	 */
 	public static function groups(int $limit = 100): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
-			"SELECT COALESCE(rbr_error_hash, '') AS hash,
+			"SELECT " . self::GROUP_KEY . " AS hash,
 			        MAX(rbr_error_kind) AS kind,
 			        MAX(rbr_error_location) AS location,
 			        MAX(rbr_error_message) AS message,
 			        COUNT(DISTINCT rbr_claimed_host) AS sites,
 			        COUNT(*) AS reports,
+			        SUM(rbr_occurrences) AS occurrences,
 			        SUM(CASE WHEN rbr_status <> 'closed' THEN 1 ELSE 0 END) AS open,
 			        MAX(rbr_claimed_version) AS newest_version,
 			        MIN(rbr_received_time) AS first_time,
-			        MAX(rbr_received_time) AS last_time
+			        MAX(COALESCE(rbr_last_seen_time, rbr_received_time)) AS last_time
 			   FROM rbr_received_bug_reports
-			  GROUP BY COALESCE(rbr_error_hash, '')
-			  ORDER BY SUM(CASE WHEN rbr_status <> 'closed' THEN 1 ELSE 0 END) > 0 DESC, MAX(rbr_received_time) DESC
+			  GROUP BY " . self::GROUP_KEY . "
+			  ORDER BY SUM(CASE WHEN rbr_status <> 'closed' THEN 1 ELSE 0 END) > 0 DESC, MAX(COALESCE(rbr_last_seen_time, rbr_received_time)) DESC
 			  LIMIT :limit");
 		$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 		$stmt->execute();
@@ -216,11 +239,15 @@ class MultiReceivedBugReport extends SystemMultiBase {
 		if (!empty($this->options['open'])) {
 			$filters['rbr_status'] = "<> 'closed'";
 		}
-		if (isset($this->options['hash'])) {
-			if ($this->options['hash'] === '') {
-				$filters['rbr_error_hash'] = 'IS NULL';
+		if (isset($this->options['group'])) {
+			// A group key is an md5, or '' for reports with no recorded error.
+			$group = (string)$this->options['group'];
+			if ($group === '') {
+				$filters['(rbr_fingerprint'] = 'IS NULL AND rbr_error_hash IS NULL)';
+			} elseif (preg_match('/^[0-9a-f]{32}$/', $group)) {
+				$filters['(rbr_fingerprint'] = "= '" . $group . "' OR (rbr_fingerprint IS NULL AND rbr_error_hash = '" . $group . "'))";
 			} else {
-				$filters['rbr_error_hash'] = array($this->options['hash'], PDO::PARAM_STR);
+				$filters['rbr_received_bug_report_id'] = '< 0';
 			}
 		}
 		if (isset($this->options['host'])) {

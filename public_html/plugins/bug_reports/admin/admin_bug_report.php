@@ -5,6 +5,7 @@
  * Mark closed and Reopen are POST buttons. Everything shown came from another
  * machine and is escaped.
  *
+ * @version 1.1.0 - automatic reports: sender, count, last seen; group link by fingerprint
  * @version 1.0.0
  */
 $session = SessionControl::get_instance();
@@ -64,6 +65,11 @@ $rows = array(
 	'Check'    => htmlspecialchars($verdicts[$report->get('rbr_verdict')] ?? (string)$report->get('rbr_verdict'))
 		. ': ' . htmlspecialchars((string)$report->get('rbr_verdict_reason')),
 	'Sent from' => htmlspecialchars((string)$report->get('rbr_sender_ip')),
+	'Sent by'   => (bool)$report->get('rbr_automatic') ? 'The site, automatically, when the error happened' : 'A member',
+	'Times seen' => (int)$report->get('rbr_occurrences')
+		. ($report->get('rbr_last_seen_time')
+			? ', last ' . htmlspecialchars(LibraryFunctions::convert_time($report->get('rbr_last_seen_time'), 'UTC', $tz, 'M j, Y g:i A'))
+			: ''),
 );
 foreach ($rows as $label => $value) {
 	echo '<tr><th scope="row" style="width: 25%">' . $label . '</th><td>' . $value . '</td></tr>';
@@ -77,14 +83,14 @@ if ($report->get('rbr_status') === ReceivedBugReport::STATUS_CLOSED) {
 } else {
 	echo AdminPage::action_button('Mark closed', $base, array('hidden' => $hidden + array('action' => 'close')));
 }
-if ($report->get('rbr_error_hash')) {
-	echo ' <a href="/plugins/bug_reports/admin/admin_bug_reports?view=all&hash=' . urlencode((string)$report->get('rbr_error_hash')) . '">Other reports with this error</a>';
+if ($report->group_key() !== '') {
+	echo ' <a href="/plugins/bug_reports/admin/admin_bug_reports?view=all&group=' . urlencode($report->group_key()) . '">Other reports with this error</a>';
 }
 echo '</p>';
 $page->end_box();
 
-$page->begin_box(array('title' => 'What the member wrote'));
-echo '<p style="white-space: pre-wrap">' . htmlspecialchars((string)$report->get('rbr_comment')) . '</p>';
+$page->begin_box(array('title' => (bool)$report->get('rbr_automatic') ? 'Description' : 'What the member wrote'));
+echo '<p style="white-space: pre-wrap">' . htmlspecialchars((string)$report->get('rbr_comment') !== '' ? (string)$report->get('rbr_comment') : '(none: sent automatically)') . '</p>';
 $file_id = (int)$report->get('rbr_fil_file_id');
 if ($file_id > 0 && File::check_if_exists($file_id)) {
 	$url = (new File($file_id, TRUE))->get_url('original');

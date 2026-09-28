@@ -1,6 +1,7 @@
 <?php
 /**
- * ProblemReport — one problem a member reported from this site.
+ * ProblemReport — one problem reported from this site, by a member or by the
+ * site itself.
  *
  * A member presses "Report this problem" on an error page or an error
  * message, reads what will be sent, adds a comment and optionally an image,
@@ -17,6 +18,13 @@
  * request goes through SafeHttpClient: no redirects, a short timeout, and a
  * small response cap, since the answer is only a report id.
  *
+ * Automatic reports (specs/bug_reports.md, Part 2): with the operator's
+ * problem_reports_auto_send switch on, noteError() keeps one row per fault
+ * (ProblemReportBundle::fingerprint()) and version for every unexpected error
+ * recorded, counting each recurrence. It never sends from the failing request;
+ * the hourly task sends a new fault as a report and later recurrences as a
+ * count, which the receiver adds to the report it already holds.
+ *
  * Statuses:
  *   queued  saved, not yet sent
  *   sent    the upgrade source accepted it (prr_remote_report_id holds its id)
@@ -27,6 +35,7 @@
  *
  * See specs/bug_reports.md.
  *
+ * @version 1.1.0 - automatic reports: noteError(), counts, and the count update on send
  * @version 1.0.0
  */
 
@@ -52,6 +61,12 @@ class ProblemReport extends SystemBase {
 	/** Reports one member may send in an hour. */
 	const HOURLY_LIMIT = 10;
 
+	/** New faults the site may start automatic reports for in a day; recurrences are always counted. */
+	const AUTO_DAILY_LIMIT = 20;
+
+	/** @var bool Set while noteError() runs, so an error inside it is not noted in turn. */
+	private static $noting = false;
+
 	/** Largest image accepted, in bytes. */
 	const IMAGE_MAX_BYTES = 5242880;
 
@@ -70,7 +85,8 @@ class ProblemReport extends SystemBase {
 
 	public static $field_specifications = array(
 		'prr_problem_report_id'    => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
-		'prr_usr_user_id'          => array('type' => 'int4', 'is_nullable' => false, 'index' => true),
+		// The reporter; NULL on an automatic report, which nobody made.
+		'prr_usr_user_id'          => array('type' => 'int4', 'is_nullable' => true, 'index' => true),
 		// The err_general_errors row reported, when there was one. A plain
 		// number: the error log is pruned on its own window, and the bundle
 		// already holds everything the report needs from the row.
@@ -88,11 +104,20 @@ class ProblemReport extends SystemBase {
 		'prr_destination'          => array('type' => 'varchar(255)', 'is_nullable' => true),
 		'prr_remote_report_id'     => array('type' => 'varchar(64)', 'is_nullable' => true),
 		'prr_create_time'          => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
+		// Automatic reports: one row per fault and version, and how often the
+		// fault happened. occurrences_sent is how many the receiver has heard.
+		'prr_automatic'            => array('type' => 'bool', 'is_nullable' => false, 'default' => 'false'),
+		'prr_fingerprint'          => array('type' => 'varchar(32)', 'is_nullable' => true),
+		'prr_version'              => array('type' => 'varchar(64)', 'is_nullable' => true),
+		'prr_occurrences'          => array('type' => 'int4', 'is_nullable' => false, 'default' => 1),
+		'prr_occurrences_sent'     => array('type' => 'int4', 'is_nullable' => false, 'default' => 0),
+		'prr_last_seen_time'       => array('type' => 'timestamp(6)', 'is_nullable' => true),
 	);
 
 	public static $index_specifications = array(
 		array('columns' => array('prr_status')),
 		array('columns' => array('prr_create_time')),
+		array('columns' => array('prr_fingerprint', 'prr_version')),
 	);
 
 	protected static $foreign_key_actions = array(
@@ -139,7 +164,8 @@ class ProblemReport extends SystemBase {
 	public function is_sendable(): bool {
 		$status = $this->get('prr_status');
 		return $status === self::STATUS_QUEUED
-			|| ($status === self::STATUS_FAILED && (int)$this->get('prr_attempts') < self::MAX_ATTEMPTS);
+			|| ($status === self::STATUS_FAILED && (int)$this->get('prr_attempts') < self::MAX_ATTEMPTS)
+			|| ($status === self::STATUS_SENT && (bool)$this->get('prr_automatic') && $this->unsentOccurrences() > 0);
 	}
 
 	/** A short human description of the status, for the admin list. */
@@ -290,6 +316,111 @@ class ProblemReport extends SystemBase {
 		));
 	}
 
+	// ------------------------------------------------------------- automatic
+
+	/** Whether this site sends a report on its own when something breaks. Off unless the operator turns it on. */
+	public static function autoSendEnabled(): bool {
+		return (bool)(int)Globalvars::get_instance()->get_setting('problem_reports_auto_send', true, true);
+	}
+
+	/**
+	 * Whether an error is a bug rather than a person meeting a wall (D14): not
+	 * a permission refusal, a sign-in requirement, a validation failure, or an
+	 * error whose message is marked safe to show.
+	 */
+	public static function isUnexpected(\Throwable $e): bool {
+		if ($e instanceof \DisplayableErrorMessage
+				|| $e instanceof \DisplayableErrorMessageNoLog
+				|| $e instanceof \DisplayablePermanentErrorMessage
+				|| $e instanceof \DisplayablePermanentErrorMessageNoLog
+				|| $e instanceof \SystemAuthenticationError
+				|| $e instanceof \AuthenticationException
+				|| $e instanceof \AuthorizationException
+				|| $e instanceof \ValidationException) {
+			return false;
+		}
+		return !($e instanceof \BaseException && $e->shouldDisplay());
+	}
+
+	/**
+	 * An error was recorded as row $error_id: count it toward its automatic
+	 * report, or start one. Runs on the failing request, so it sends nothing
+	 * (the hourly task does), throws nothing, and does nothing unless both of
+	 * the operator's switches are on and the error is unexpected. While the
+	 * process holds sealed content only the count moves: a new report's text
+	 * is a long write the sealed-content guard would refuse.
+	 */
+	public static function noteError(\Throwable $e, ?int $error_id): void {
+		if (self::$noting || !$error_id) {
+			return;
+		}
+		self::$noting = true;
+		try {
+			if (!self::autoSendEnabled() || !self::sendingEnabled() || !self::isUnexpected($e)) {
+				return;
+			}
+			$row = new GeneralError($error_id, TRUE);
+			if (!$row->key) {
+				return;
+			}
+			$fingerprint = ProblemReportBundle::fingerprint(ProblemReportBundle::errorFromRow($row));
+			if ($fingerprint === null) {
+				return;
+			}
+			$version = (string)LibraryFunctions::get_joinery_version();
+			if (self::countRecurrence($fingerprint, $version)) {
+				return;
+			}
+			if (SealedEgressGuard::isHot() || self::automaticToday() >= self::AUTO_DAILY_LIMIT) {
+				return;
+			}
+			$bundle = ProblemReportBundle::automatic($row, get_class($e), (string)($_SERVER['REQUEST_URI'] ?? ''));
+			SystemBase::server_initiated_write(function () use ($bundle, $fingerprint, $version, $row) {
+				$report = new ProblemReport(NULL);
+				$report->set('prr_automatic', true);
+				$report->set('prr_fingerprint', $fingerprint);
+				$report->set('prr_version', mb_substr($version, 0, 64));
+				$report->set('prr_occurrences', 1);
+				$report->set('prr_last_seen_time', gmdate('Y-m-d H:i:s'));
+				$report->set('prr_err_general_error_id', (int)$row->key);
+				$report->set('prr_error_hash', $bundle['error']['hash'] ?? null);
+				$report->set('prr_comment', '');
+				$report->set('prr_bundle', json_encode($bundle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+				$report->set('prr_status', self::STATUS_QUEUED);
+				$report->set('prr_destination', self::destinationHost());
+				$report->save();
+			});
+		} catch (\Throwable $t) {
+			error_log('Problem reports: an automatic report was not noted: ' . $t->getMessage());
+		} finally {
+			self::$noting = false;
+		}
+	}
+
+	/** Add one to the automatic report for this fault and version. Whether there was one. */
+	private static function countRecurrence(string $fingerprint, string $version): bool {
+		return (bool)SystemBase::server_initiated_write(function () use ($fingerprint, $version) {
+			$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+				"UPDATE prr_problem_reports
+				    SET prr_occurrences = prr_occurrences + 1, prr_last_seen_time = now()
+				  WHERE prr_automatic AND prr_fingerprint = ? AND prr_version = ?");
+			$stmt->execute(array($fingerprint, $version));
+			return $stmt->rowCount() > 0;
+		});
+	}
+
+	/** Automatic reports started in the last day. */
+	private static function automaticToday(): int {
+		return (int)DbConnector::get_instance()->get_db_link()->query(
+			"SELECT COUNT(*) FROM prr_problem_reports
+			  WHERE prr_automatic AND prr_create_time > now() - INTERVAL '1 day'")->fetchColumn();
+	}
+
+	/** Recurrences the receiver has not heard about yet. */
+	public function unsentOccurrences(): int {
+		return max(0, (int)$this->get('prr_occurrences') - (int)$this->get('prr_occurrences_sent'));
+	}
+
 	// --------------------------------------------------------------- sending
 
 	/** Use $client instead of a real SafeHttpClient (NULL restores it). For tests. */
@@ -318,8 +449,11 @@ class ProblemReport extends SystemBase {
 		$this->set('prr_last_attempt_time', gmdate('Y-m-d H:i:s'));
 		$this->set('prr_destination', (string)parse_url($url, PHP_URL_HOST));
 
+		// An automatic report carries the recurrences the receiver has not
+		// heard yet; on success they are marked heard.
+		$occurrences = (bool)$this->get('prr_automatic') ? $this->unsentOccurrences() : 0;
 		try {
-			list($body, $content_type) = $this->multipart_body();
+			list($body, $content_type) = $this->multipart_body($occurrences);
 			$client = self::$client ?: new SafeHttpClient(array(
 				'timeout'            => self::SEND_TIMEOUT,
 				'max_response_bytes' => self::SEND_RESPONSE_CAP,
@@ -336,6 +470,9 @@ class ProblemReport extends SystemBase {
 			$this->set('prr_status', self::STATUS_SENT);
 			$this->set('prr_remote_report_id', $remote !== null ? mb_substr((string)$remote, 0, 64) : null);
 			$this->set('prr_last_reason', null);
+			$this->set('prr_attempts', 0);
+			// Recurrences counted while this send was in flight stay unsent.
+			$this->set('prr_occurrences_sent', (int)$this->get('prr_occurrences_sent') + $occurrences);
 			$this->save();
 			return true;
 		}
@@ -372,8 +509,16 @@ class ProblemReport extends SystemBase {
 	 *
 	 * @return array{0: string, 1: string} body and Content-Type header
 	 */
-	private function multipart_body(): array {
+	private function multipart_body(int $occurrences = 0): array {
 		$boundary = '----joinery-report-' . bin2hex(random_bytes(12));
+		$bundle_json = (string)$this->get('prr_bundle');
+		if ($occurrences > 0) {
+			$bundle = json_decode($bundle_json, true);
+			if (is_array($bundle)) {
+				$bundle['occurrences'] = $occurrences;
+				$bundle_json = json_encode($bundle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+			}
+		}
 		$parts = array();
 		$field = function ($name, $value) use ($boundary) {
 			return '--' . $boundary . "\r\n"
@@ -381,7 +526,7 @@ class ProblemReport extends SystemBase {
 				. "Content-Type: text/plain; charset=utf-8\r\n\r\n"
 				. $value . "\r\n";
 		};
-		$parts[] = $field('bundle', (string)$this->get('prr_bundle'));
+		$parts[] = $field('bundle', $bundle_json);
 		$parts[] = $field('comment', (string)$this->get('prr_comment'));
 
 		$file_id = (int)$this->get('prr_fil_file_id');
@@ -398,6 +543,25 @@ class ProblemReport extends SystemBase {
 			}
 		}
 		return array(implode('', $parts) . '--' . $boundary . "--\r\n", 'multipart/form-data; boundary=' . $boundary);
+	}
+
+	/**
+	 * Save, first reloading an automatic report's count: save() writes every
+	 * column, and noteError() counts recurrences with its own UPDATE from other
+	 * requests, so a row loaded before a recurrence would write its count back
+	 * over it.
+	 */
+	function save($debug = false) {
+		if ($this->key && (bool)$this->get('prr_automatic')) {
+			$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+				'SELECT prr_occurrences FROM prr_problem_reports WHERE prr_problem_report_id = ?');
+			$stmt->execute(array((int)$this->key));
+			$current = $stmt->fetchColumn();
+			if ($current !== false) {
+				$this->set('prr_occurrences', (int)$current);
+			}
+		}
+		return parent::save($debug);
 	}
 
 	// -------------------------------------------------------------- deleting
@@ -463,8 +627,14 @@ class MultiProblemReport extends SystemMultiBase {
 			$filters['prr_create_time'] = "> '" . gmdate('Y-m-d H:i:s', $after === false ? 0 : $after) . "'";
 		}
 		if (!empty($this->options['sendable'])) {
+			// Due: never sent, a failed try with tries left, or an automatic
+			// report that has counted recurrences since it was last sent.
 			$filters['(prr_status'] = "= 'queued' OR (prr_status = 'failed' AND prr_attempts < "
-				. (int)ProblemReport::MAX_ATTEMPTS . "))";
+				. (int)ProblemReport::MAX_ATTEMPTS . ")"
+				. " OR (prr_status = 'sent' AND prr_automatic AND prr_occurrences > prr_occurrences_sent))";
+		}
+		if (isset($this->options['automatic'])) {
+			$filters['prr_automatic'] = $this->options['automatic'] ? '= true' : '= false';
 		}
 
 		return $this->_get_resultsv2('prr_problem_reports', $filters, $this->order_by, $only_count, $debug);

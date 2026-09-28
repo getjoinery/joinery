@@ -1,6 +1,6 @@
 # Problem Reports: a node reports a bug to its upgrade source
 
-**Status:** WP1–WP5 built and committed (b77cb344, 2026-09-28) except `views/report_problem.php`, which the commit missed (B8). WP6 rehearsed on dev 2026-09-28; the cross-site run needs a release. D1–D4 and D6 decided 2026-09-25; D5, D7 and D8 decided 2026-09-27. Open: the owner steps under **Build status**.
+**Status:** Part 1 (member reports) implemented 2026-09-28: committed (b77cb344, ddd52a62), released in 0.8.436, WP6 passed live dev → getjoinery.com (`verified`). Part 2 (automatic reports and duplicates, D10–D14, WP7–WP9) built 2026-09-28, uncommitted; schema applied on dev; needs a release and the live check under Part 2's build status. D1–D4 and D6 decided 2026-09-25; D5, D7 and D8 2026-09-27; D9–D14 2026-09-28.
 **Date:** 2026-09-25.
 **Related:** `specs/implemented/agent_on_node_architecture.md` §3.5 (what may leave a
 node), `specs/agent_recipes_and_vocabulary.md` rule 8 (what private means),
@@ -38,6 +38,7 @@ team has been notified", which is not true: nobody is.
 | D6 | The Request section keeps the full URL path. A member's name in a path segment is not a shape the redactor catches; the reporter is that member and sees it in the preview. | 2026-09-25 |
 | D7 | The admin menu's **Report a problem** sits beside **Admin Help** (top level, just after it), since it is for people, not operators. | 2026-09-27 |
 | D8 | B5: remove the management API's `backups/fetch` endpoint rather than restrict it to sealed files. Nothing calls it, and a future download button belongs on backup storage, where every copy is sealed. | 2026-09-27 |
+| D9 | Manual reports keep one description box, with two sentences above it saying what to include (what they were doing and the steps, what they expected, what happened instead, the page, how often). No separate title, steps, expected/actual, frequency or area fields: the reports are read by AI, which does not need them split out. | 2026-09-28 |
 | D5 | Settings and secrets go in as **counts and names**, never values. There is no "everything except `secret:true`" dump; that flag is an incomplete blocklist (`clone_export_key`, `mailjet_api_key`, `cloud_storage_access_key` and others are unflagged). A hand-picked list of settings safe to send by value may be added later if debugging keeps needing values. | 2026-09-27 |
 
 ## Today (checked 2026-09-25)
@@ -286,7 +287,7 @@ past it, images cascading.
 | WP3 | `ProblemReportBundle` collectors, `prr_problem_reports`, `File::SOURCE_PROBLEM_REPORT`, report page + logic + `report_problem_submit` action, sending on the `ProblemReport` model, `ProblemReportSend` task, settings, menus, `admin_problem_reports` | |
 | WP4 | Plugin `bug_reports`: data class, intake action with bucket + callback, admin list/detail, notice, email, prune task, plugin.json, docs/overview.md | |
 | WP5 | Docs: `docs/error_handling.md` (or the consolidation doc's home) gains the reference and the report link; `docs/api.md` gains `error_ref`; `docs/photo_system.md` two source rows; `docs/settings.md` if the group needs a mention. Current-state wording only. | |
-| WP6 | Live gate: getjoinery.com (`upgrade_source` = dev) sends a report to dev running the plugin; dev's IP allowlist makes the callback file it `unverified`, which is the expected verdict and is checked | |
+| WP6 | Live gate: a real report crosses sites to a receiver running the plugin, and its verdict is checked. Run dev → getjoinery.com, the direction every node uses (see Build status) | |
 
 ## Tests
 
@@ -350,30 +351,167 @@ The existing suites the change touches pass too (`error_handling`, `core_api_mec
   Reports** is under System at permission 9, matching the error log.
 - **Flash links also go into the six plugin pages that render messages by hand**
   (server_manager ×5, store checkout).
+- **Page order.** Top to bottom the page is: where the report goes, the form, then what
+  will be sent. The description is what the reporter came to write; the preview below it
+  is still the whole of what leaves.
+- **Guidance above the description (D9).** Two sentences name what to include, and the
+  example in the box is a full report. A manual report (from the menu, with no error
+  attached) uses the same page.
 - **FormWriter's upload `showToast` is not swept.** It posts to a legacy admin endpoint,
   never through `joineryApi`, so no error reference can reach it.
 
-**Owner steps before this is live:**
+**Owner steps:**
 
 1. ~~Run `update_database` on dev.~~ Done 2026-09-27: menu entries seeded,
    `ProblemReportSend` active.
 2. ~~Install and activate the `bug_reports` plugin on dev.~~ Done 2026-09-27;
    `models_crud`, `multi_models_crud` and `bug_reports_intake` pass.
 3. ~~Commit.~~ Done b77cb344, except the report page (B8).
-4. Commit `views/report_problem.php` with the B9 fix, release, and run WP6.
+4. ~~Commit `views/report_problem.php` with the B9 fix, release.~~ Done ddd52a62, 0.8.436
+   deployed to every node 2026-09-28.
+5. ~~Install and activate `bug_reports` on getjoinery.com.~~ Done 2026-09-28.
+6. Add `docs/error_handling.md` to the CLAUDE.md docs index (`/admin/admin_agent_files`).
+
+**WP6 live gate: passed (2026-09-28).** The design named getjoinery.com → dev; it ran the
+other way, dev → getjoinery.com, because every node's `upgrade_source` is getjoinery.com
+(dev's too), so that is the path real reports take. Dev made an operator report through
+`ProblemReport::submit()`, attached to a real error row, and sent it. getjoinery.com filed
+it as report 1 and dev's row reads `sent` with that remote id. The owner read report 1 on
+getjoinery.com: verdict **verified**.
+
+- The design expected `unverified`, on the reasoning that dev's IP allowlist would block
+  the callback. It does not: the allowlist (`usr_allowed_ips`) is per user and applies at
+  password sign-in only, so dev's front page answers anyone and carries
+  `X-Joinery-Version`. `unverified` is still what a site whose front page is blocked gets.
+- The first two tries answered 404 `Unknown action`: the plugin was installed but not yet
+  active, and an inactive plugin's actions do not exist. Once activated, the retry was
+  accepted. Dev's hourly task would have retried on its own (3 of 5 tries used).
+- The release itself hit two faults on dev, both from dev's own Postgres login rules, not
+  from this feature. A peer map set 2026-09-27 locked root and www-data out of the local
+  socket: `sudo publish_upgrade.php` failed generating the install SQL, and the 2026-09-28
+  site backup failed its dump. Dev's rules are back to the fleet's (password login). The
+  publish failure also showed that `utils/create_install_sql.php` exited 0 on every error,
+  so the publisher reported a missing file instead of the reason; fixed (1.3, every failure
+  exits 1, and the publisher prints the generator's output).
 
 **WP6 rehearsal on dev (2026-09-28).** A real operator bundle with a PNG, posted over
 HTTPS from dev to dev's own `report_submit`, answered 200 with a report id. The row
-stored `verified` (dev reaching itself passes the allowlist), the image attached, and
+stored `verified`, the image attached, and
 the plugin's list grouped it and its detail page showed every section. A member's
 `/report_problem` page, opened from a real error page's button, showed the four member
 sections and none of the operator ones. Two faults found and fixed:
 
-- **B8:** b77cb344 left out `views/report_problem.php`. Every report link on a site
-  running that commit leads to a 404 until it is committed.
+- **B8:** b77cb344 left out `views/report_problem.php`, so every report link led to a
+  404. Committed in ddd52a62.
 - **B9:** the bundle's schema version was always blank: it read a `schema_version`
   setting that does not exist. It is now the highest applied migration
   (`mig_migrations`), and `problem_report_bundle` checks it.
+
+## Part 2: automatic reports and duplicates (2026-09-28)
+
+**What it does for the owner.** A site can send a report on its own whenever something
+breaks, without a member pressing anything. The same bug firing a thousand times is one
+report with a count of 1,000, not a thousand reports.
+
+### Decisions
+
+| # | Decision | Decided |
+|---|---|---|
+| D10 | A checkbox setting, `problem_reports_auto_send`, default **off**, sends a report automatically when an unexpected error is recorded. Turning it on is the operator agreeing to send without a preview. | 2026-09-28 |
+| D11 | **Same fault** = the error's kind, the file it was thrown in, and the files and function names of its first five stack frames, with every line number dropped (so small edits do not split a group). With no stack frames, the message with numbers, quoted text and long hex runs blanked stands in for the frames. The receiver computes it from the bundle, so the rule can change on the receiver alone. | 2026-09-28 |
+| D12 | **Not saved** = an automatic report of the same fault, from the same site, on the same version, as one already stored. The stored one's count grows and its last-seen time moves. A newer version, a different site, or anything a person wrote is saved. A closed one that recurs reopens. | 2026-09-28 |
+| D13 | **Counts are kept on both ends.** The site keeps one automatic report per fault and version, counts every recurrence, and sends only what the receiver has not heard yet: the first time as a new report, later as a count update on the hourly task. The receiver adds each update to the stored report. | 2026-09-28 |
+| D14 | **Unexpected errors only**: not permission refusals, sign-in requirements, validation failures, or any error whose message is marked safe to show (the `Displayable*` family, a displayable `BaseException`). Those are people meeting a wall, not bugs. | 2026-09-28 |
+
+### What an automatic report carries
+
+Nobody reads an automatic report before it goes, so it carries less than an operator's:
+
+| Section | In an automatic report |
+|---|---|
+| Site, Runtime, Plugins, Settings, Health | As in an operator's report |
+| Request | Surface, browser, OS, app. The path is masked to its shape: a segment that is not a number or a lowercase word (letters, digits, underscores) becomes `…`, and every query value except a plain number too. No time zone. |
+| Error | As from the recorded row, plus the exception's class, with quoted text in the message masked (`'…'`) |
+| Who is reporting | Not sent. `scope` is `automatic` |
+| Recent errors | Not sent: other requests' log lines, which nobody reviews |
+| `occurrences` | How many times the fault happened since the site last told the receiver |
+
+It is built from the saved `err_general_errors` row, never the live exception, so an error
+recorded while sealed content was open (`SealedEgressGuard`) carries only the row's
+withheld reference.
+
+### The sending site (core)
+
+- `ErrorReference::recorded()` runs after an error row is saved on both paths (the
+  uncaught-exception handler and `ErrorReference::log()`), and calls
+  `ProblemReport::noteError()`. That does nothing unless both switches are on, the error
+  is unexpected (D14), and the row was saved. It never sends from the failing request:
+  it saves or updates a row, and the hourly `ProblemReportSend` task sends. It cannot
+  throw, and it does not run inside itself (an error while noting an error is dropped).
+- `prr_problem_reports` gains `prr_automatic`, `prr_fingerprint`, `prr_version`,
+  `prr_occurrences`, `prr_occurrences_sent` and `prr_last_seen_time`;
+  `prr_usr_user_id` becomes nullable (an automatic report has no reporter).
+- One automatic row per fingerprint and version. A recurrence adds 1 and moves
+  last-seen. A new fault beyond `AUTO_DAILY_LIMIT` (20) new automatic rows in a day is
+  dropped; recurrences of existing rows are always counted.
+- `send()` puts `occurrences` = `prr_occurrences - prr_occurrences_sent` into the bundle
+  it posts, and on success records what it sent and resets the tries. The task treats an
+  automatic row that has been sent but has counted more since as due again.
+- The site's **Problem Reports** list shows automatic rows as "Automatic" with their count.
+
+### The receiving site (`bug_reports`)
+
+- `rbr_received_bug_reports` gains `rbr_fingerprint` (indexed), `rbr_automatic`,
+  `rbr_occurrences` (default 1) and `rbr_last_seen_time`.
+- Intake: a report with `scope: automatic` may have no description. After the callback
+  and the unverified cap, an automatic report whose fingerprint, host and version match a
+  stored automatic report adds its `occurrences` (1 to 1,000,000, 1 when missing) to that
+  report, moves last-seen, reopens it if closed, and answers with that report's id. It is
+  not saved as a new row and sends no email.
+- Every report gets a fingerprint when it has an error; the grouped view groups by it,
+  falling back to the Part 1 hash for older rows, and shows **Times seen** (the sum of the
+  counts). The detail page shows the count, last seen, and whether a member or the site
+  sent it.
+
+### Work packages
+
+| WP | What |
+|---|---|
+| WP7 | Core: setting, `ProblemReportBundle::fingerprint()` and the automatic bundle, `ProblemReport::noteError()` and the count-update send, the hook in `ErrorReference`, the admin list |
+| WP8 | Plugin: columns, intake merge, grouped view and detail page |
+| WP9 | Tests (fingerprint cases, D14 filter, the merge and count), docs (`docs/error_handling.md`, the plugin overview) |
+
+
+### Build status, Part 2 (2026-09-28)
+
+WP7–WP9 built. `update_database --upgrade` applied the columns on dev (the reporter column
+became nullable only in the `--upgrade` pass, which every deploy runs). Suites:
+`problem_report_bundle` 73/73 (31 new: the fault key, which errors count, the automatic
+bundle, one row per fault with its count, the count update on send), `bug_reports_intake`
+38/38 (the merge, reopen on recurrence, a newer version and a member's report stored
+separately, an unreadable count counts as one, the grouped view's times seen).
+The receiver pages were checked in the browser on dev.
+
+**Where the build differs from the design above:**
+
+- **The site's count survives a send in flight.** The model's `save()` writes every column,
+  so `ProblemReport::save()` reloads an automatic report's count first; `noteError()`
+  counts with its own UPDATE from other requests.
+- **The receiver's comment rule moved into the intake.** The action's `comment` input is
+  no longer required at the API layer; `BugReportIntake::receive()` still refuses a
+  member's report without one.
+- **Old rows group by their hash.** The grouped view and its filter key on the fingerprint,
+  else the Part 1 hash, so reports filed before fingerprints stay grouped.
+
+**To finish:**
+
+1. Commit, release, and let getjoinery.com take the plugin's 1.1.0 (its sync adds the columns).
+   An automatic report sent to a receiver still on 1.0.0 is refused for having no
+   description; the sender retries, so order does not lose anything, but release the
+   receiver first.
+2. Live check: turn `problem_reports_auto_send` on for dev, trigger one unexpected error
+   twice, run the send task, and confirm getjoinery.com shows one automatic report with
+   times seen 2; trigger it again, run the task, and confirm 3 on the same report.
 
 ## Open questions
 

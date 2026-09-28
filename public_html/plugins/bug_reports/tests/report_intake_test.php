@@ -195,5 +195,76 @@ check(strpos(ReceivedBugReport::admin_notice(), 'new problem report') !== false,
 $session->clear_api_user();
 check(ReceivedBugReport::admin_notice() === '', 'no one below permission 9 is told');
 
+section('Automatic reports: one per fault, site and version, with a count');
+
+$client->fail = false;
+$client->version = '0.8.435';
+$auto_host = 'auto-' . substr(md5(uniqid('', true)), 0, 8) . '.example.org';
+$auto_error = array('kind' => 'Exception', 'file' => 'includes/Auto.php', 'line' => '9', 'message' => 'Automatic fault',
+	'trace' => array('#0 includes/Auto.php(3): Auto->run()', '#1 serve.php(12): include()'));
+$auto_bundle = function ($occurrences, $version = '0.8.435', $line = '9') use ($auto_host, $auto_error) {
+	$error = $auto_error;
+	$error['line'] = $line;
+	return json_encode(array('format' => 1, 'scope' => 'automatic', 'occurrences' => $occurrences,
+		'site' => array('host' => $auto_host, 'version' => $version), 'error' => $error));
+};
+$auto_receive = function ($bundle_json) {
+	$r = BugReportIntake::receive($bundle_json, '', null, '198.51.100.40');
+	harness_register_row('rbr_received_bug_reports', 'rbr_received_bug_report_id', $r->key);
+	return $r;
+};
+
+$first = $auto_receive($auto_bundle(5));
+check((bool)$first->get('rbr_automatic') && (int)$first->get('rbr_occurrences') === 5,
+	'an automatic report needs no description, and is stored with its count', 'occurrences ' . $first->get('rbr_occurrences'));
+check($first->get('rbr_fingerprint') === ProblemReportBundle::fingerprint($auto_error), 'its fingerprint is computed here');
+
+$again = $auto_receive($auto_bundle(3, '0.8.435', '11'));
+$first = new ReceivedBugReport($first->key, TRUE);
+check((int)$again->key === (int)$first->key && (int)$first->get('rbr_occurrences') === 8,
+	'the same fault from the same site and version adds to the stored report instead of a new one', 'occurrences ' . $first->get('rbr_occurrences'));
+$rows_for_host = count(new MultiReceivedBugReport(array('host' => $auto_host)));
+check($rows_for_host === 1, 'still one row for the site', $rows_for_host . ' rows');
+
+$first->close(1);
+$auto_receive($auto_bundle(1));
+$first = new ReceivedBugReport($first->key, TRUE);
+check($first->get('rbr_status') === ReceivedBugReport::STATUS_NEW && $first->get('rbr_closed_time') === null
+		&& (int)$first->get('rbr_occurrences') === 9,
+	'a closed report that recurs reopens', $first->get('rbr_status'));
+
+$bogus = $auto_receive(str_replace('"occurrences":1', '"occurrences":"lots"', $auto_bundle(1)));
+$first = new ReceivedBugReport($first->key, TRUE);
+check((int)$first->get('rbr_occurrences') === 10, 'a count that is not a number counts as one');
+
+$client->version = '0.8.436';
+$newer = $auto_receive($auto_bundle(2, '0.8.436'));
+check((int)$newer->key !== (int)$first->key && (int)$newer->get('rbr_occurrences') === 2, 'a newer version is a new report');
+$client->version = '0.8.435';
+
+$by_member = BugReportIntake::receive(json_encode(array('format' => 1, 'site' => array('host' => $auto_host, 'version' => '0.8.435'),
+	'error' => $auto_error)), 'It broke for me too.', null, '198.51.100.40');
+harness_register_row('rbr_received_bug_reports', 'rbr_received_bug_report_id', $by_member->key);
+check((int)$by_member->key !== (int)$first->key && !(bool)$by_member->get('rbr_automatic')
+		&& $by_member->get('rbr_fingerprint') === $first->get('rbr_fingerprint'),
+	'a member\'s report of the same fault is always stored, in the same group');
+
+try {
+	BugReportIntake::receive(json_encode(array('format' => 1, 'site' => array('host' => $auto_host, 'version' => '0.8.435'), 'error' => $auto_error)),
+		'', null, '198.51.100.40');
+	check(false, 'a member\'s report still needs a description');
+} catch (BugReportRefusal $e) {
+	check(true, 'a member\'s report still needs a description');
+}
+
+$group = null;
+foreach (ReceivedBugReport::groups(500) as $g) {
+	if ($g['hash'] === $first->get('rbr_fingerprint')) { $group = $g; }
+}
+check($group !== null && (int)$group['reports'] === 3 && (int)$group['occurrences'] === 13,
+	'the grouped view counts reports and times seen across versions', json_encode($group));
+check(count(new MultiReceivedBugReport(array('group' => (string)$first->get('rbr_fingerprint')))) === 3,
+	'the group filter finds every report in the group');
+
 BugReportIntake::useClient(null);
 harness_finish();

@@ -1,6 +1,6 @@
 {
     "name": "Bug Reports",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Receives problem reports from the sites that upgrade from this one: files each report, groups the same error across sites, checks that the sender is a Joinery site, and shows the reports to administrators. Install it on an upgrade source only.",
     "author": "System Developer",
     "license": "PolyForm-Noncommercial-1.0.0",

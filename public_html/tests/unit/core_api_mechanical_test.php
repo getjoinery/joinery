@@ -245,6 +245,7 @@ $permitted = array(
 	'data/api_keys_class.php'                                 => 'API key last-used tracking, on read requests',
 	'data/backup_targets_class.php'                            => 'a Backblaze credential completed with the region and endpoint Backblaze itself reports, written back once on the read that found them missing',
 	'data/general_errors_class.php'                           => 'error rows, recorded on whatever request failed',
+	'data/problem_reports_class.php'                          => 'an automatic problem report started or counted, on whatever request recorded an unexpected error',
 	'data/logins_class.php'                                   => 'the login row and usr_lastlogin_time stamp, written when a remembered cookie resumes a session on a read request',
 	'includes/PageProbe.php'                                  => 'a page_probe grant consumed and its render report written, by the probe request itself from this machine',
 	'includes/RequestLogger.php'                              => 'request log rows, including for reads',

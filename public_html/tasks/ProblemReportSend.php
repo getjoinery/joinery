@@ -12,6 +12,11 @@ require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
  * admin Problem Reports page shows. Nothing is sent while the operator's
  * problem_reports_send switch is off.
  *
+ * It is also how automatic reports leave (specs/bug_reports.md, Part 2): a new
+ * fault goes as a report, and recurrences counted since the last send go as a
+ * count the receiver adds to the report it holds.
+ *
+ * @version 1.1.0 - sends automatic reports and their counts
  * @version 1.0.0
  */
 class ProblemReportSend implements ScheduledTaskInterface {

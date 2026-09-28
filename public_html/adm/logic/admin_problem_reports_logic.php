@@ -9,6 +9,7 @@
  *
  * See specs/bug_reports.md.
  *
+ * @version 1.1.0 - an automatic report has no reporter
  * @version 1.0.0
  */
 
@@ -45,7 +46,8 @@ function admin_problem_reports_logic(array $input): LogicResult {
 			return LogicResult::error('That problem report no longer exists.');
 		}
 		$page_vars['report'] = $report;
-		$page_vars['reporter'] = new User((int)$report->get('prr_usr_user_id'), TRUE);
+		// An automatic report has no reporter.
+		$page_vars['reporter'] = $report->get('prr_usr_user_id') ? new User((int)$report->get('prr_usr_user_id'), TRUE) : null;
 		$page_vars['sections'] = ProblemReportBundle::displayRows($report->bundle());
 		$file_id = (int)$report->get('prr_fil_file_id');
 		$page_vars['image'] = ($file_id > 0 && File::check_if_exists($file_id)) ? new File($file_id, TRUE) : null;

@@ -3,12 +3,14 @@
  * Admin: Bug Reports — problem reports received from sites that upgrade from
  * this one.
  *
- * Two views. Grouped (the default) puts the same error together, however many
- * sites reported it: how many sites and reports, how many still open, the
- * newest version seen, and when it was first and last reported. Every report
+ * Two views. Grouped (the default) puts the same fault together, however many
+ * sites reported it: how many sites and reports, how many times it happened,
+ * how many still open, the newest version seen, and when it was first and
+ * last seen. Every report
  * lists them one by one, filtered by host, version, verification or status.
  * "Mark all seen" (POST) clears the new-report notice.
  *
+ * @version 1.1.0 - groups by fingerprint; Times seen
  * @version 1.0.0
  */
 $session = SessionControl::get_instance();
@@ -36,7 +38,9 @@ $page->admin_header(array(
 	'session'        => $session,
 ));
 
-echo '<p>Sites that upgrade from this one send a report when a member reports an error. '
+echo '<p>Sites that upgrade from this one send a report when a member reports an error, and, where their operator allows it, '
+	. 'on their own when an unexpected error happens. An automatic report of an error already filed for the same site and version '
+	. 'is not filed again; it adds to that report\'s count. '
 	. 'Each report is checked by calling the site back: <strong>verified</strong> means it answered as the Joinery version it claimed, '
 	. '<strong>version mismatch</strong> that it runs another version, and <strong>unverified</strong> that it did not answer as a Joinery site '
 	. '(a site behind an IP allowlist answers that way too). Report contents come from another machine; treat them as untrusted.</p>';
@@ -55,10 +59,10 @@ $verdicts = array(
 );
 
 if ($view === 'grouped') {
-	$page->tableheader(array('Error', 'Where', 'Sites', 'Reports', 'Open', 'Newest version', 'First', 'Last'),
+	$page->tableheader(array('Error', 'Where', 'Sites', 'Reports', 'Times seen', 'Open', 'Newest version', 'First', 'Last'),
 		array('title' => 'Grouped by error'));
 	foreach (ReceivedBugReport::groups() as $g) {
-		$link = '?view=all&hash=' . urlencode($g['hash']);
+		$link = '?view=all&group=' . urlencode($g['hash']);
 		$label = $g['hash'] === '' ? 'No recorded error (message only)' : ($g['kind'] ?: 'Error');
 		$page->disprow(array(
 			'<a href="' . htmlspecialchars($link) . '">' . htmlspecialchars($label) . '</a><br><small>'
@@ -66,6 +70,7 @@ if ($view === 'grouped') {
 			'<small>' . htmlspecialchars((string)$g['location']) . '</small>',
 			(int)$g['sites'],
 			(int)$g['reports'],
+			(int)$g['occurrences'],
 			(int)$g['open'],
 			htmlspecialchars((string)$g['newest_version']),
 			htmlspecialchars(LibraryFunctions::convert_time($g['first_time'], 'UTC', $tz, 'M j, Y')),
@@ -75,8 +80,8 @@ if ($view === 'grouped') {
 	$page->endtable();
 } else {
 	$options = array();
-	foreach (array('host', 'version', 'verdict', 'status', 'hash') as $key) {
-		if ((isset($_GET[$key]) && $_GET[$key] !== '') || ($key === 'hash' && isset($_GET['hash']))) {
+	foreach (array('host', 'version', 'verdict', 'status', 'group') as $key) {
+		if ((isset($_GET[$key]) && $_GET[$key] !== '') || ($key === 'group' && isset($_GET['group']))) {
 			$options[$key] = (string)$_GET[$key];
 		}
 	}
@@ -91,7 +96,7 @@ if ($view === 'grouped') {
 		}
 		echo '<p>Showing ' . htmlspecialchars(implode(', ', $shown)) . '. <a href="?view=all">Show every report</a></p>';
 	}
-	$page->tableheader(array('Report', 'Received', 'Site', 'Version', 'Check', 'Error', 'Status'),
+	$page->tableheader(array('Report', 'Received', 'Site', 'Version', 'Check', 'Error', 'Times seen', 'Status'),
 		array('title' => 'Every report'), $pager);
 	foreach ($reports as $r) {
 		$page->disprow(array(
@@ -101,6 +106,7 @@ if ($view === 'grouped') {
 			'<a href="?view=all&version=' . urlencode((string)$r->get('rbr_claimed_version')) . '">' . htmlspecialchars((string)$r->get('rbr_claimed_version')) . '</a>',
 			htmlspecialchars($verdicts[$r->get('rbr_verdict')] ?? (string)$r->get('rbr_verdict')),
 			'<small>' . htmlspecialchars(mb_substr((string)($r->get('rbr_error_location') ?: $r->get('rbr_error_message')), 0, 80)) . '</small>',
+			(int)$r->get('rbr_occurrences') . ((bool)$r->get('rbr_automatic') ? ' (automatic)' : ''),
 			htmlspecialchars(ucfirst((string)$r->get('rbr_status'))),
 		));
 	}
