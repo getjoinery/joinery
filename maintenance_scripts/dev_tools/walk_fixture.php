@@ -11,6 +11,10 @@
  *   php walk_fixture.php retire <purpose>
  *   php walk_fixture.php status <purpose>
  *
+ * Use the session's own name as the purpose (`create public-html-d7`): each
+ * session has its own browser (the MCP runs --isolated) and its own fixture,
+ * so no session retires another's.
+ *
  * A fixture is the user claude-walk-<purpose>@example.com (permission 5 unless
  * --permission says otherwise), the domain claude-walk-<purpose>.example they
  * own, at Standard, and its store mailbox box@ granted to them alone. `create`
@@ -20,11 +24,15 @@
  * walk_vault.js reads (never printed; delete it once the browser step ran).
  * Every run deletes a handoff older than five minutes. `create` also copies
  * walk_vault.js to WALK_SCRIPT: the MCP browser loads script files only from
- * /tmp/playwright-mcp or the web root.
+ * /tmp/playwright-mcp or the web root. It also retires every claude-walk
+ * fixture older than PRUNE_DAYS: sessions come and go (a reboot starts all
+ * new ones), so nothing else would.
  *
  * Refuses without the `debug` setting: it makes an admin account, so it never
  * runs on production.
  *
+ * @version 1.1 - the handoff carries the email (walk_vault.js signs in at /login);
+ *   create prunes fixtures older than PRUNE_DAYS
  * @version 1.0
  */
 
@@ -39,6 +47,7 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 const WALK_HANDOFF = '/tmp/playwright-mcp/walk-handoff.json';
 const WALK_HANDOFF_MAX_AGE = 300;
 const WALK_SCRIPT = '/tmp/playwright-mcp/walk_vault.js';
+const PRUNE_DAYS = 7;
 
 function walk_fail(string $message): void {
 	fwrite(STDERR, 'walk_fixture: ' . $message . "\n");
@@ -116,6 +125,22 @@ function walk_retire(array $names): void {
 	}
 }
 
+/** Retire every claude-walk fixture made more than PRUNE_DAYS ago (its user's birth stamp). */
+function walk_prune(): void {
+	$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT usr_email FROM usr_users
+		WHERE usr_email LIKE 'claude-walk-%@example.com' AND usr_terms_accepted_time < ?");
+	$q->execute(array(gmdate('Y-m-d H:i:s', time() - PRUNE_DAYS * 86400)));
+	foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $email) {
+		if (preg_match('/^claude-walk-([a-z0-9-]+)@example\.com$/', $email, $m)) {
+			try {
+				walk_retire(walk_names($m[1]));
+			} catch (\Throwable $e) {
+				fwrite(STDERR, 'walk_fixture: could not prune ' . $email . ': ' . $e->getMessage() . "\n");
+			}
+		}
+	}
+}
+
 function walk_expire_handoff(): void {
 	if (is_file(WALK_HANDOFF) && filemtime(WALK_HANDOFF) < time() - WALK_HANDOFF_MAX_AGE) {
 		@unlink(WALK_HANDOFF);
@@ -130,7 +155,8 @@ function walk_write_handoff(User $user): void {
 		@mkdir(dirname(WALK_HANDOFF), 0700, true);
 	}
 	$old = umask(077);
-	file_put_contents(WALK_HANDOFF, json_encode(array('user_id' => intval($user->key), 'password' => $password)));
+	file_put_contents(WALK_HANDOFF, json_encode(array('user_id' => intval($user->key),
+		'email' => (string)$user->get('usr_email'), 'password' => $password)));
 	umask($old);
 	chmod(WALK_HANDOFF, 0600);
 }
@@ -158,6 +184,7 @@ $address = 'box@' . $names['domain'];
 
 switch ($command) {
 	case 'create':
+		walk_prune();
 		walk_retire($names);
 		$user = new User(NULL);
 		$user->set('usr_first_name', 'Claude');
