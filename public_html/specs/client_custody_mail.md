@@ -986,7 +986,9 @@ mailbox page):
 `VaultUnlock::clientReseal('mail', ['InboundEmailMessage',
 'MailboxSearchKey'], ['plugins/mailbox/assets/mailbox-reseal.js'])`. The
 rotation walk covers every row under the scope, pending rows included (they
-carry a `v1.edgeseal.mail.` key), and the search key (R5). The hook re-MACs relay pins (R10). The device
+carry a `v1.edgeseal.mail.` key), and the search key (R5). A mail vault opens
+through the root, so its rotation needs only the root open: the new key takes
+one `root` wrapping (WP6 Q1). The hook re-MACs relay pins (R10). The device
 handoff offers `mail` automatically; the recovery-readiness ledger and the
 security page card appear per vault row. A rotation re-pushes the relay map
 at begin and commit.
@@ -1512,6 +1514,100 @@ first), and lift the refusal in WP7.
   three Fortress messages; they open after. Link a device
   (`/profile/devices_link`) and see "Mail vault" in its held scopes.
   Screenshot.
+- **Built 2026-09-28 (server half):** `VaultUnlock::onClientRotation()` /
+  `clientRotationChanged()` (listeners run after begin and commit are stored;
+  one that throws is logged and changes nothing); `VaultClientRotation` 1.4
+  calls it; the mailbox bootstrap 1.21 pushes the relay map from it.
+  `plugins/mailbox/tests/fortress_rotation_test.php` (20 checks): the walk
+  lists the three messages (a pending-parse and a deleted one included) and
+  the search key, not a mid-rotation arrival or another owner's row; commit
+  refuses with one left; every DEK is unchanged and opens under the new key.
+  `mailbox-reseal.js` is left to WP8: with no pins it has nothing to do, so
+  WP8 adds the script and its registration together.
+- **Q1 (owner, 2026-09-28: build it in WP6).** No mail vault could be
+  rotated: every one made since the one-vault change opens through the root
+  (`specs/implemented/one_vault_experience.md` § As built left "rotating a
+  content vault that opens through the root" unbuilt and its card hidden),
+  `begin()` demanded a passkey or passphrase wrapping plus recovery codes, and
+  `persistWrappings()` refuses both for such a vault. Built:
+  - `VaultClientCustody` 1.3: `opensThroughRoot($vault)` (a live `root`
+    wrapping on the key in use) and `throughRootVaults($user_id)`.
+  - `VaultClientRotation::begin()`: a vault that opens through the root takes
+    exactly one `root` wrapping and nothing else; any other set is refused.
+  - `vault-keyring.js` 1.6: `rotationPlan(scope, st, secret, rootSession)`
+    shows a short cost screen for such a vault (no codes, no taps; linked
+    computers re-link) and wraps the new secret under `rootSession.scopeKek(scope)`;
+    `pendingStatus()` exported.
+  - `joinery-sealed.js` 1.10: `resealScope()` opens the root first for such a
+    vault, shows no recovery codes, and finishes a stopped rotation by opening
+    the pending key through the root (`openThroughRoot(root, scope, pendingStatus(st))`).
+  - Security page: a **Vault Keys** panel lists each vault that opens through
+    the root with "Rotate this key" / "Finish rotating this key", using the
+    existing `data-vault-rotate` handler (`security_logic` supplies
+    `through_root_vaults`).
+  - `fortress_rotation_test.php` (34 checks): the root-vault case refuses its
+    own unlockers, a root wrapping beside a recovery code, two root wrappings
+    and an empty set, stores nothing on refusal, lists the pending root
+    wrapping apart for the resume, and after commit opens by the new root
+    wrapping alone.
+  - `docs/sealed_vault.md` § Rotating a client-custody key describes both
+    kinds and the `onClientRotation` listener.
+- **B30 (found on the walk, fixed):** the admin menu's Mailbox page
+  (`admin_mailbox_reader.php`) never passed `fortress` to the reader mount, so
+  a Fortress owner reading there saw every message as a sealed placeholder with
+  no way to unlock. It now mounts the Fortress module like the member page
+  (1.6).
+- **Review (public-html-a5, 2026-09-28):** the five questions traced sound
+  (the two through-root predicates cannot disagree; the current/pending
+  wrapping lists are strictly apart, the only guard since both generations'
+  root wrappings share KEK and AD; retiring a legacy vault's own unlockers is
+  the consistent end state; no leak on the admin reader). Findings, all
+  closed:
+  - **B31 (fixed):** the old key was retired with no proof the one stored
+    `root` wrapping opens the new key. `rotationPlan` now unwraps its blob and
+    compares it with the new secret before posting, and `resealScope` runs
+    `proveThroughRoot()` after begin and before the walk: it re-reads the
+    status, opens the pending wrapping through the root as the next page would,
+    and round-trips a random value sealed to the new public key. The walk and
+    the commit run only after it passes. That second check can fail only if
+    the stored copy differs from the posted one. It would then leave the
+    rotation pending with nothing moved, and the page says to report it.
+  - **B32 (fixed):** on the admin reader, another person's Fortress rows said
+    "Unlock your vault" or "could not be opened on this device". The service
+    marks them `sealed.foreign` (`MailboxService` 1.48); `mailbox_fortress.js`
+    1.9.2 shows "Only the mailbox owner's devices can open it" and raises no
+    unlock banner for them. `fortress_reader_api_test` 1.3 checks the flag.
+  - **B33 (WP7):** see WP7.
+  - **S1 (done):** the Vault Keys panel and the rotate handler no longer
+    depend on a recovery card being on the page. **S2 (done):** the cost
+    screen of a vault that still has passkeys or codes of its own says those
+    stop opening it. **S3 (done):** `persistWrappings` asks `opensThroughRoot()`.
+    **S4 (not done):** putting the generation into a root wrapping's AD. The
+    strict list split already guards this, and a second AD scheme would be
+    one more thing to keep in step.
+- **B34 (found on the re-walk, fixed):** after a rotation the mailbox showed
+  the mail vault locked (one click reopened it through the root, no tap):
+  `resealScope` locked both keys at the end. A committed rotation now adopts
+  the new key's session in the old one's place, resume halves and all.
+- **Re-walk after the fixes (fixture 147789, domain 38098):** two rotations
+  (generations 2 and 3). The recorded calls show `vault_client_status` (the
+  proof) between begin and the walk, and the mailbox read all three messages
+  on the next page with no click. The foreign-row notes were checked in the
+  browser with `MailboxFortress.openList`/`openThread`; `selfCheck` passes.
+- **Walk, 2026-09-28 (dev, fixture user 147432, domain 37983):** raised the
+  domain to Fortress from the editor; the mail vault was made through the root
+  (one `root` wrapping). Delivered three messages. Security page → Vault Keys →
+  Mail vault → Rotate this key: the dialog asked for nothing, and the status
+  read "Done. The vault is on its new key (generation 2)". In the database: the
+  mail vault on generation 2 with one live `root:2` wrapping, all three messages
+  on generation 2. The mailbox listed and opened all three (body and PDF). A
+  device linked at `/profile/devices_link` with "Let this device open my mail
+  vault" showed **Mail vault** in its held vaults on the Security page (then
+  unlinked). Screenshots: `/tmp/playwright-mcp/wp6-rotate-dialog.png`,
+  `wp6-list-after-rotation.png`, `wp6-message-after-rotation.png`,
+  `wp6-device-row.png`. Not walked: finishing a rotation that stopped part way
+  (the server half is in the test; the browser half is the three-line branch
+  above). `db --changed` 490/490.
 
 ### WP7. The relay path
 
@@ -1525,6 +1621,12 @@ first), and lift the refusal in WP7.
   `iem_search_written_time` with the search text and commits per message:
   R5's overlap bound), the pending banner and
   drain in `mailbox_fortress.js`, `mailbox_mime.js` with its gate.
+- **B33 (from the WP6 review):** once the map names the `mail` key, a commit
+  must not retire the old key while the relay still seals to it; mail sealed
+  to the retired key would be unreadable for ever. The rotation's commit
+  refuses while a relay is active and the last map it accepted is not the
+  current one: `RelayMapSync` records the pushed hash, and commit compares it
+  and does not push. The begin listener stays logged-only.
 - **Tests:** `plugins/mailbox/tests/fortress_relay_pull_test.php`
   (`test-db`): a spool entry with `key_kind: client` (made in PHP with the
   test keypair, the same bytes the Go test emits) stores the pending row

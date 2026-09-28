@@ -23,6 +23,8 @@
  * the root's secret — and nothing else. A passphrase wrapping is accepted only
  * on the root, and only for an account whose passkeys cannot hold a key (R8).
  *
+ * @version 1.3 - opensThroughRoot(), throughRootVaults(): a content vault that opens
+ *   through the root rotates under the root (specs/client_custody_mail.md WP6)
  * @version 1.2 - root and content scopes; `root` wrappings; code set id/index on
  *   recovery wrappings; passphrase gated (R8); forgetDevices()
  * @version 1.1 - wrappings carry a key generation; the status lists the one in use and,
@@ -58,6 +60,38 @@ class VaultClientCustody {
 	/** The one client-custody vault row for (user, scope), or null. */
 	public static function loadVault(int $user_id, string $scope): ?UserEncryptionVault {
 		return UserEncryptionVault::loadForUser($user_id, self::assertClientScope($scope));
+	}
+
+	/**
+	 * Whether $vault is a content vault that opens through the root: it holds a
+	 * live `root` wrapping for the key in use. It has no unlocker of its own, so
+	 * the new key of its rotation takes one `root` wrapping and nothing else.
+	 */
+	public static function opensThroughRoot(UserEncryptionVault $vault): bool {
+		return (new MultiUserEncryptionWrapping(array('vault_id' => (int)$vault->key,
+			'unlocker_type' => UserEncryptionWrapping::TYPE_ROOT,
+			'key_generation' => (int)$vault->get('uev_key_generation'))))->count() > 0;
+	}
+
+	/**
+	 * The user's content vaults that open through the root, for the Security
+	 * page's rotate controls (they have no recovery card of their own).
+	 *
+	 * @return array<int,array{scope:string,label:string,pending:bool}>
+	 */
+	public static function throughRootVaults(int $user_id): array {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		$out = array();
+		foreach (new MultiUserEncryptionVault(array('user_id' => $user_id)) as $vault) {
+			$scope = (string)$vault->get('uev_scope');
+			if ((string)$vault->get('uev_custody') !== 'client' || $scope === VaultScopes::ROOT_SCOPE
+					|| !VaultScopes::isRegistered($scope) || !self::opensThroughRoot($vault)) {
+				continue;
+			}
+			$out[] = array('scope' => $scope, 'label' => VaultScopes::labelFor($scope),
+				'pending' => $vault->get('uev_pending_key_generation') !== null);
+		}
+		return $out;
 	}
 
 	/**
@@ -105,8 +139,7 @@ class VaultClientCustody {
 					$through_root = true;
 				}
 			}
-			$through_root = $through_root || (new MultiUserEncryptionWrapping([
-				'vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_ROOT]))->count() > 0;
+			$through_root = $through_root || self::opensThroughRoot($vault);
 		}
 		foreach ($wrappings as $w) {
 			$type = isset($w['unlocker_type']) ? (string)$w['unlocker_type'] : '';

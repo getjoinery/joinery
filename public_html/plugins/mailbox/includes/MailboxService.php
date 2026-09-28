@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.48 - a Fortress row sealed to someone else carries `sealed.foreign` (an all-access viewer)
  * @version 1.47 - `device_search`: a search over end-to-end mail alone carries only the ids
  *   the browser found, no term (review of 2026-09-27, B4)
  * @version 1.46 - search takes `device_hits`: the message ids a Fortress owner's browser
@@ -1494,6 +1495,9 @@ class MailboxService {
 					if ($pending) {
 						$entry['sealed']['pending'] = true;
 					}
+					if ($this->sealedForSomeoneElse($row)) {
+						$entry['sealed']['foreign'] = true;
+					}
 				}
 				$out[$mid] = $entry;
 				continue;
@@ -1763,6 +1767,15 @@ class MailboxService {
 	 * by id, MIME part, size and inline flag only: the names are in the sealed
 	 * manifest. `fortress` marks it for clients that cannot open it.
 	 */
+	/**
+	 * A Fortress row sealed to another person's key: an all-access viewer
+	 * reading someone else's mailbox. No unlock of theirs opens it, so the
+	 * reader says whose devices can, rather than asking them to unlock.
+	 */
+	private function sealedForSomeoneElse(array $row): bool {
+		return intval($row['iem_sealed_owner_user_id'] ?? 0) !== intval($this->viewer->getUserId());
+	}
+
 	private function fortressThreadMessage(array $r): array {
 		$mid = intval($r['iem_inbound_email_message_id']);
 		$direction = $r['iem_direction'] ?: 'inbound';
@@ -1774,6 +1787,9 @@ class MailboxService {
 			'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers'));
 		if ($pending) {
 			$sealed['pending'] = true;
+		}
+		if ($this->sealedForSomeoneElse($r)) {
+			$sealed['foreign'] = true;
 		}
 		return array(
 			'id'                => $mid,

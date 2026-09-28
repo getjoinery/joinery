@@ -4,9 +4,12 @@
  * (docs/sealed_vault.md § Rotating a client-custody key).
  *
  * Only the browser holds a client-custody scope's secret, so only the browser
- * can rotate it, and it pays for it honestly: new recovery codes (it never held
- * the old ones), the passphrase again if there is one, and one passkey tap per
- * enrolled passkey. This class is the server's half, which is bookkeeping:
+ * can rotate it. A vault with unlockers of its own pays for it honestly: new
+ * recovery codes (it never held the old ones), the passphrase again if there is
+ * one, and one passkey tap per enrolled passkey. A vault that opens through the
+ * root costs nothing more than the root being open: the new key is wrapped
+ * under the root, whose unlockers and codes are unchanged. This class is the
+ * server's half, which is bookkeeping:
  *
  *   1. begin — the browser posts the NEW public key and the new key's
  *      wrappings. They are stored as generation N+1, PENDING: the key in use
@@ -22,6 +25,9 @@
  *      and every linked device that held the scope loses it (it holds the old
  *      secret and must re-link).
  *
+ * Consumers registered with VaultUnlock::onClientRotation() hear begin and
+ * commit once each is stored.
+ *
  * A pending rotation is only ever finished, never discarded. Keys a consumer's
  * hook moved (Drive's file grants, the password store key) carry no generation
  * the server could count, so there is no telling "nothing moved" from "the hooks
@@ -31,6 +37,8 @@
  * refuses while one is pending, and the way out is to finish it — the new key
  * opens with the unlockers it was given.
  *
+ * @version 1.4 - begin and commit tell VaultUnlock::onClientRotation() listeners; a vault
+ *   that opens through the root rotates with one `root` wrapping
  * @version 1.3 - a re-sealed key must name a client-custody scope (VaultCrypto::clientCustodyScope)
  * @version 1.2 - the root vault's key is refused (rotating it would orphan every content vault)
  * @version 1.1 - no abandon (it could not see what the hooks moved); assertCanBegin()
@@ -106,8 +114,10 @@ class VaultClientRotation {
 
 	/**
 	 * Start a rotation: store the new public key and its wrappings as the
-	 * pending generation. Needs a new unlocker to open it (a passkey or a
-	 * passphrase) and new recovery codes, as setup does.
+	 * pending generation. A vault with unlockers of its own needs a new one to
+	 * open the new key (a passkey or a passphrase) and new recovery codes, as
+	 * setup does; a vault that opens through the root takes one `root`
+	 * wrapping, made with the root open (VaultClientCustody::opensThroughRoot()).
 	 */
 	public static function begin(int $user_id, string $scope, string $public_key, array $wrappings): array {
 		$vault = self::assertCanBegin($user_id, $scope);
@@ -119,18 +129,26 @@ class VaultClientRotation {
 		if ($public_key === (string)$vault->get('uev_public_key')) {
 			throw new VaultClientCustodyException('The new key is the key already in use.');
 		}
-		$primary = 0;
-		$recovery = 0;
-		foreach ($wrappings as $w) {
-			$t = (string)($w['unlocker_type'] ?? '');
-			if ($t === UserEncryptionWrapping::TYPE_PASSKEY || $t === UserEncryptionWrapping::TYPE_PASSPHRASE) $primary++;
-			if ($t === UserEncryptionWrapping::TYPE_RECOVERY) $recovery++;
-		}
-		if ($primary < 1) {
-			throw new VaultClientCustodyException('The new key needs a passkey or a passphrase to unlock it.');
-		}
-		if ($recovery < 1) {
-			throw new VaultClientCustodyException('The new key needs at least one recovery code.');
+		if (VaultClientCustody::opensThroughRoot($vault)) {
+			// The root opens it, and the root's own passkeys, phrase and codes
+			// are the way back in: the new key takes its `root` wrapping alone.
+			if (count($wrappings) !== 1 || (string)($wrappings[0]['unlocker_type'] ?? '') !== UserEncryptionWrapping::TYPE_ROOT) {
+				throw new VaultClientCustodyException('This vault opens through your vault: its new key takes one wrapping under your vault and nothing else.');
+			}
+		} else {
+			$primary = 0;
+			$recovery = 0;
+			foreach ($wrappings as $w) {
+				$t = (string)($w['unlocker_type'] ?? '');
+				if ($t === UserEncryptionWrapping::TYPE_PASSKEY || $t === UserEncryptionWrapping::TYPE_PASSPHRASE) $primary++;
+				if ($t === UserEncryptionWrapping::TYPE_RECOVERY) $recovery++;
+			}
+			if ($primary < 1) {
+				throw new VaultClientCustodyException('The new key needs a passkey or a passphrase to unlock it.');
+			}
+			if ($recovery < 1) {
+				throw new VaultClientCustodyException('The new key needs at least one recovery code.');
+			}
 		}
 
 		$next = (int)$vault->get('uev_key_generation') + 1;
@@ -148,6 +166,7 @@ class VaultClientRotation {
 			if ($db->inTransaction()) $db->rollBack();
 			throw $e;
 		}
+		VaultUnlock::clientRotationChanged($user_id, $scope, 'begin');
 		return array('pending_key_generation' => $next);
 	}
 
@@ -249,6 +268,7 @@ class VaultClientRotation {
 			if ($db->inTransaction()) $db->rollBack();
 			throw $e;
 		}
+		VaultUnlock::clientRotationChanged($user_id, $scope, 'commit');
 		return array('key_generation' => $new);
 	}
 

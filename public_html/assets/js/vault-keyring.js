@@ -23,6 +23,8 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.6 - rotationPlan() for a vault that opens through the root: one `root` wrapping,
+ *   no codes, no taps; pendingStatus() exported for finishing its rotation
  * @version 1.5 - openRootWith(): a code, the phrase or another passkey opens the root for a passkey
  *   that is catching up, with nothing posted (the code stays unused, no window is ended)
  * @version 1.4 - the one vault: the root, one touch, one set of codes, content vaults through the root
@@ -404,10 +406,12 @@ window.VaultKeyring = (function () {
 	 * The person's side of rotating a client-custody vault's key: say what it
 	 * costs, then collect what the new key is wrapped under — one tap for each
 	 * enrolled passkey and the passphrase again if there is one — and mint new
-	 * recovery codes. Nothing is sent: resolves { wrappings, recoveryCodes } for
-	 * the new secret, or rejects 'Rotation cancelled.'.
+	 * recovery codes. A vault that opens through the root (st.root_wrapped)
+	 * costs nothing more: its new key is wrapped under rootSession alone and
+	 * recoveryCodes is null. Nothing is sent: resolves { wrappings,
+	 * recoveryCodes } for the new secret, or rejects 'Rotation cancelled.'.
 	 */
-	function rotationPlan(scope, st, secretKeyBytes) {
+	function rotationPlan(scope, st, secretKeyBytes, rootSession) {
 		var label = st.label || 'vault';
 		var enrolled = {};
 		(st.wrappings || []).forEach(function (w) {
@@ -432,6 +436,41 @@ window.VaultKeyring = (function () {
 				err.hidden = true;
 				err.setAttribute('role', 'alert');
 				return function (msg) { err.textContent = msg || ''; err.hidden = !msg; if (!err.parentNode) root.appendChild(err); };
+			}
+
+			function renderRootCost() {
+				var showError = frame('Rotate the key of your ' + label);
+				// A vault made before the root keeps unlockers of its own beside its
+				// root wrapping; they open only the old key and retire with it.
+				var own = (st.wrappings || []).some(function (w) { return w.unlocker_type !== 'root'; });
+				root.appendChild(el('p', null, 'This makes a new key for your ' + label + ' and moves everything in it onto the new key, in this browser. '
+					+ (own
+						? 'Your vault opens the new key as it opens this one. The passkeys and recovery codes set up for this ' + label + ' alone stop opening it; your vault\'s own keep working.'
+						: 'Your vault opens the new key as it opens this one: your passkeys, passphrase and recovery codes do not change.')));
+				var ul = el('ul');
+				ul.appendChild(el('li', null, 'Keep this page open until it says it is done.'));
+				ul.appendChild(el('li', null, 'Every computer linked to this vault must be linked again.'));
+				root.appendChild(ul);
+				var row = el('div', 'jy-vault-ceremony-actions');
+				row.appendChild(button('Rotate the key', 'primary', async function () {
+					showError('');
+					try {
+						var kek = await rootSession.scopeKek(scope);
+						var blob = await VaultCrypto.wrapSecretKey(secretKeyBytes, kek, adFor(scope, 'root'));
+						// The only way into the new key is this blob: prove it opens to
+						// the new secret before anything is stored.
+						var back = await VaultCrypto.unwrapSecretKey(blob, await rootSession.scopeKek(scope), adFor(scope, 'root'));
+						var same = back.length === secretKeyBytes.length && back.every(function (b, i) { return b === secretKeyBytes[i]; });
+						back.fill(0);
+						if (!same) throw new Error('The new key could not be prepared. Nothing was changed.');
+						settled = true;
+						dialog.close();
+						resolve({ wrappings: [{ unlocker_type: 'root', wrapped_secret_key: blob }], recoveryCodes: null });
+					} catch (e) {
+						showError((e && e.message) || 'Could not prepare the new key.');
+					}
+				}));
+				root.appendChild(row);
 			}
 
 			function renderCost() {
@@ -523,7 +562,12 @@ window.VaultKeyring = (function () {
 				}
 			}
 
-			renderCost();
+			if (st.root_wrapped) {
+				if (!rootSession) { settled = true; dialog.close(); reject(new Error('Unlock your vault to rotate this key.')); return; }
+				renderRootCost();
+			} else {
+				renderCost();
+			}
 		});
 	}
 
@@ -1112,6 +1156,7 @@ window.VaultKeyring = (function () {
 		DEFAULT_RECOVERY_COUNT: DEFAULT_RECOVERY_COUNT,
 		ensureUnlocked: ensureUnlocked,
 		rotationPlan: rotationPlan,
+		pendingStatus: pendingStatus,
 		showRecoveryCodes: showRecoveryCodes,
 		sessionFrom: function (scope, secretKeyBytes, publicKeyB64) { return makeSession(scope, secretKeyBytes, publicKeyB64); },
 		adFor: adFor,

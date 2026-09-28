@@ -16,6 +16,7 @@
  * also used by the member page at /profile/mailbox/mailbox — this page
  * supplies the admin chrome and the admin endpoint URLs.
  *
+ * @version 1.6 - Fortress mailboxes open here too (the `fortress` mount option)
  * @version 1.5
  */
 
@@ -28,6 +29,12 @@ $page_vars = process_logic(admin_mailbox_reader_logic(array_merge($_GET, $_POST,
 extract($page_vars);
 
 $page = new AdminPage();
+// End-to-end mail opens in this browser, as on the member page: without the
+// Fortress module a Fortress mailbox here would only ever list sealed rows.
+$fortress_visible = !empty($initial_mailboxes) && mailbox_reader_fortress_visible($initial_mailboxes);
+if ($fortress_visible) {
+	$page->needs_vault_client();
+}
 $page->admin_header(
 	array(
 		'menu-id' => 'incoming',
@@ -54,6 +61,7 @@ mailbox_render_mailbox_reader($page, array(
 	// An empty inbox is where "is this even wired up?" gets asked, so the answer
 	// is one click away from the mailbox rather than two tabs over.
 	'setup_url_base'      => '/plugins/mailbox/admin/admin_mailbox_setup?alias_id=',
+	'fortress'            => $fortress_visible,
 ));
 
 $page->admin_footer();

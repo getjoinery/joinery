@@ -1179,13 +1179,15 @@
             $settings = $page_vars['settings'];
             $user = $page_vars['user'];
             $session = SessionControl::get_instance();
-            if (!empty($recovery_items)): ?>
+            $through_root_vaults = $page_vars['through_root_vaults'] ?? [];
+            $rr_client_configs = [];
+            if (!empty($recovery_items) || $through_root_vaults): ?>
+            <?php if (!empty($recovery_items)): ?>
             <div class="jy-panel jy-mt-4">
                 <h2>Recovery Codes</h2>
                 <p class="jy-text-muted">These codes are the way back into your encrypted content if you lose your
                     other sign-in methods. Check one from your saved set now and then — checking never uses a code up.</p>
                 <?php
-                $rr_client_configs = [];
                 foreach ($recovery_items as $rr_i => $rr_item):
                     $rr_is_client = ($rr_item['custody'] ?? '') === 'client';
                     if ($rr_is_client) {
@@ -1250,6 +1252,29 @@
                 </div>
                 <?php endforeach; ?>
             </div>
+            <?php endif; ?>
+            <?php
+            // A content vault that opens through the root has no card above (the
+            // root's codes are its way back in). Rotating its key needs only the
+            // root open; the rotate handler below serves both panels.
+            if ($through_root_vaults): ?>
+            <div class="jy-panel jy-mt-4">
+                <h2>Vault Keys</h2>
+                <p class="jy-text-muted">Each part of your vault has its own key. Rotating one makes a new key and moves everything
+                    under it onto the new key, in this browser. Your vault opens the new key as before: your passkeys, passphrase and
+                    recovery codes do not change. Computers linked to it must be linked again.</p>
+                <?php foreach ($through_root_vaults as $tr_vault): ?>
+                <div class="jy-mt-3" data-vault-rotate="<?php echo htmlspecialchars($tr_vault['scope'], ENT_QUOTES); ?>">
+                    <h3><?php echo htmlspecialchars($tr_vault['label']); ?></h3>
+                    <?php if ($tr_vault['pending']): ?>
+                        <div class="jy-alert jy-alert-warning">A rotation of this key stopped part way. What it already moved to the new key will not open until the rotation is finished, so finish it now.</div>
+                    <?php endif; ?>
+                    <button type="button" class="btn btn-secondary" data-vault-rotate-btn><?php echo $tr_vault['pending'] ? 'Finish rotating this key' : 'Rotate this key'; ?></button>
+                    <div class="jy-mt-1" data-vault-rotate-status role="status"></div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
             <script defer src="/assets/js/recovery-readiness.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1'; ?>"></script>
             <script>
             window.rrClientConfigs = <?php echo json_encode($rr_client_configs); ?>;
