@@ -9,6 +9,11 @@
 # it to the recipient's public key at acceptance, and spools ciphertext; the
 # deployment's plane pulls its sealed blobs over HTTPS from the relay's own API.
 #
+# Version: 3.1 - the sealer seals a Fortress mailbox's mail in the browser's
+#                format to its browser-held key (key_kind=client,
+#                specs/client_custody_mail.md WP7). The deployment names that
+#                key only to a relay reporting 3.1 or later (RelayVersion::
+#                sealsForBrowsers); an older relay keeps the transport key.
 # Version: 3.0 - THE RELAY SERVES ITSELF (specs/relay_without_a_shell.md WP1).
 #                A relay is a machine with two listeners, Postfix on 25 and one
 #                Go binary on 443, and no other way in. Gone: WireGuard, sshd's
@@ -46,7 +51,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.0"
+RELAY_VERSION="3.1"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"

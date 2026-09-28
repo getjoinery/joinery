@@ -8,6 +8,7 @@
  * Usage:
  *   php walk_fixture.php create <purpose> [--messages=N] [--permission=P]
  *   php walk_fixture.php deliver <purpose> <N> <tag>
+ *   php walk_fixture.php deliver-relay <purpose> <N> <tag> [--parts=P]
  *   php walk_fixture.php retire <purpose>
  *   php walk_fixture.php status <purpose>
  *
@@ -28,9 +29,19 @@
  * fixture older than PRUNE_DAYS: sessions come and go (a reboot starts all
  * new ones), so nothing else would.
  *
+ * `deliver-relay` sends the messages the way a relay that fronts the mailbox
+ * would (specs/client_custody_mail.md WP7): the relay program is built from the
+ * tree and run on each message with a routing map holding the recipient entry
+ * RelayMapExporter would push to a current relay, and the spool entry it writes
+ * is stored by RelaySpoolConsumer's own ingest step. At Fortress that is the
+ * browser's format, stored pending for the owner's browser to parse. It turns
+ * the fixture domain's Seal at the relay add-on on (the relay seals Fortress
+ * mail only under it). --parts=P adds P more PDF attachments to each message.
+ *
  * Refuses without the `debug` setting: it makes an admin account, so it never
  * runs on production.
  *
+ * @version 1.2 - deliver-relay: through the relay program and the pull's ingest step
  * @version 1.1 - the handoff carries the email (walk_vault.js signs in at /login);
  *   create prunes fixtures older than PRUNE_DAYS
  * @version 1.0
@@ -73,8 +84,11 @@ function walk_domain(string $name): ?InboundEmailDomain {
 	return $domain ? $domain : null;
 }
 
-/** A message with a plain and an HTML body, an inline image and a PDF named after $word. */
-function walk_raw(string $address, string $subject, string $word): array {
+/**
+ * A message with a plain and an HTML body, an inline image and a PDF named
+ * after $word, plus $extra more PDFs (a message with many parts).
+ */
+function walk_raw(string $address, string $subject, string $word, int $extra = 0): array {
 	$mid = '<walk-' . bin2hex(random_bytes(6)) . '@elsewhere.example>';
 	$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==');
 	$line = 'The ' . $word . ' figures for the quarter are attached. ';
@@ -92,8 +106,18 @@ function walk_raw(string $address, string $subject, string $word): array {
 		chunk_split(base64_encode($png)), '--REL--',
 		'--OUT', 'Content-Type: application/pdf; name="' . $word . '-report.pdf"',
 		'Content-Disposition: attachment; filename="' . $word . '-report.pdf"', 'Content-Transfer-Encoding: base64', '',
-		chunk_split(base64_encode('%PDF-1.4 ' . $word . ' report')), '--OUT--', '',
+		chunk_split(base64_encode('%PDF-1.4 ' . $word . ' report')), walk_extra_parts($word, $extra) . '--OUT--', '',
 	)));
+}
+
+function walk_extra_parts(string $word, int $extra): string {
+	$out = '';
+	for ($i = 1; $i <= $extra; $i++) {
+		$out .= implode("\r\n", array('--OUT', 'Content-Type: application/pdf; name="' . $word . '-extra-' . $i . '.pdf"',
+			'Content-Disposition: attachment; filename="' . $word . '-extra-' . $i . '.pdf"', 'Content-Transfer-Encoding: base64', '',
+			chunk_split(base64_encode('%PDF-1.4 ' . $word . ' extra ' . $i)))) . "\r\n";
+	}
+	return $out;
 }
 
 function walk_deliver(string $address, int $n, string $tag): void {
@@ -107,6 +131,89 @@ function walk_deliver(string $address, int $n, string $tag): void {
 		$q->execute(array($mid));
 		$id = intval($q->fetchColumn());
 		echo $id > 0 ? "delivered message $id ($word)\n" : "NOT delivered: $word\n";
+	}
+}
+
+/**
+ * Deliver through the relay program: seal with the binary built from the tree,
+ * store with the pull's ingest step. The recipient entry is the exporter's
+ * answer for a relay reporting the version that seals for browsers.
+ */
+function walk_deliver_relay(InboundEmailDomain $domain, string $address, int $n, string $tag, int $extra = 0): void {
+	// A relay-fronted Fortress mailbox seals at the relay only under the add-on.
+	if (!$domain->relay_seals_to_owner()) {
+		$domain->set('ied_relay_seals_to_owner', true);
+		$domain->save();
+		$domain = new InboundEmailDomain(intval($domain->key), TRUE);
+		echo "Seal at the relay switched on for {$domain->get('ied_domain')}\n";
+	}
+	$alias = null;
+	foreach (new MultiInboundEmailAlias(array('iea_ied_inbound_email_domain_id' => intval($domain->key), 'deleted' => false)) as $a) {
+		$alias = $a;
+	}
+	if ($alias === null) {
+		walk_fail('the fixture has no mailbox');
+	}
+	$relay = new MailboxRelay(NULL);
+	$relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => RelayVersion::SEALS_FOR_BROWSERS)));
+	$exporter = (new ReflectionClass('RelayMapExporter'))->newInstanceWithoutConstructor();
+	(new ReflectionProperty('RelayMapExporter', 'relay'))->setValue($exporter, $relay);
+	$target = (new ReflectionMethod('RelayMapExporter', 'clientSealTarget'))->invoke($exporter, $alias, $domain);
+	if ($target === null) {
+		walk_fail('the mailbox takes no browser-held key: move the domain to Fortress with Seal at the relay on, '
+			. 'and set up the mail vault first');
+	}
+
+	$work = sys_get_temp_dir() . '/walk-relay-' . bin2hex(random_bytes(4));
+	mkdir($work . '/spool', 0700, true);
+	$bin = $work . '/relay-sealer';
+	$src = PathHelper::getIncludePath('plugins/mailbox/provisioning/relay-sealer');
+	exec('cd ' . escapeshellarg($src) . ' && CGO_ENABLED=0 go build -o ' . escapeshellarg($bin) . ' . 2>&1', $out, $rc);
+	if ($rc !== 0) {
+		walk_fail('go build failed: ' . implode(' ', $out));
+	}
+	file_put_contents($work . '/routing.json', json_encode(array(
+		'version' => 1, 'tenants' => array('walk' => (object)array()),
+		'recipients' => array(strtolower($address) => array('public_key' => $target[0], 'key_kind' => 'client',
+			'key_scope' => InboundEmailMessage::SEAL_SCOPE_FORTRESS, 'key_generation' => $target[1],
+			'mode' => 'store', 'tenant' => 'walk')),
+		'domains' => (object)array(),
+	)));
+
+	$consumer = new RelaySpoolConsumer(new MailboxRelay(NULL));
+	$ingest = new ReflectionMethod(RelaySpoolConsumer::class, 'ingestOne');
+	$words = array('zebracorn', 'quokkafig', 'lemonade', 'pangolin', 'marmalade', 'axolotl');
+	$db = DbConnector::get_instance()->get_db_link();
+	try {
+		for ($i = 0; $i < $n; $i++) {
+			$word = $words[$i % count($words)] . $tag;
+			list($mid, $raw) = walk_raw($address, 'Relay message ' . ($i + 1) . ': ' . $word, $word, $extra);
+			$proc = proc_open(array($bin, $address, 'sender@elsewhere.example'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')),
+				$pipes, null, array('JOINERY_RELAY_ROUTING' => $work . '/routing.json', 'JOINERY_RELAY_SPOOL' => $work . '/spool'));
+			fwrite($pipes[0], $raw);
+			fclose($pipes[0]);
+			$err = stream_get_contents($pipes[2]);
+			fclose($pipes[1]);
+			fclose($pipes[2]);
+			if (proc_close($proc) !== 0) {
+				walk_fail('the relay program refused the message: ' . trim($err));
+			}
+			foreach ((array)glob($work . '/spool/*.meta') as $meta) {
+				$spool_id = basename($meta, '.meta');
+				$outcome = (string)$ingest->invoke($consumer, $work . '/spool/' . $spool_id . '.seal', $meta, $spool_id);
+				@unlink($meta);
+				@unlink($work . '/spool/' . $spool_id . '.seal');
+				$q = $db->prepare('SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages WHERE iem_relay_spool_id = ?');
+				$q->execute(array($spool_id));
+				echo "relay-sealed message " . intval($q->fetchColumn()) . " ($word): $outcome\n";
+			}
+		}
+	} finally {
+		foreach (array_merge((array)glob($work . '/spool/*'), array($bin, $work . '/routing.json')) as $f) {
+			@unlink($f);
+		}
+		@rmdir($work . '/spool');
+		@rmdir($work);
 	}
 }
 
@@ -177,7 +284,7 @@ foreach (array_slice($argv, 1) as $a) {
 }
 $command = $args[0] ?? '';
 if ($command === '' || !isset($args[1])) {
-	walk_fail('usage: create|deliver|retire|status <purpose> ... (see the file header)');
+	walk_fail('usage: create|deliver|deliver-relay|retire|status <purpose> ... (see the file header)');
 }
 $names = walk_names($args[1]);
 $address = 'box@' . $names['domain'];
@@ -231,6 +338,15 @@ switch ($command) {
 			walk_fail('no fixture for ' . $args[1] . '; create it first');
 		}
 		walk_deliver($address, max(1, intval($args[2] ?? 1)), preg_replace('/[^a-z0-9]/', '', strtolower((string)($args[3] ?? 'more'))) ?: 'more');
+		break;
+
+	case 'deliver-relay':
+		$domain = walk_domain($names['domain']);
+		if (!$domain) {
+			walk_fail('no fixture for ' . $args[1] . '; create it first');
+		}
+		walk_deliver_relay($domain, $address, max(1, intval($args[2] ?? 1)), preg_replace('/[^a-z0-9]/', '', strtolower((string)($args[3] ?? 'relay'))) ?: 'relay',
+			max(0, min(200, intval($opts['parts'] ?? 0))));
 		break;
 
 	case 'retire':

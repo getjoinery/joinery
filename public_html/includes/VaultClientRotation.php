@@ -37,6 +37,7 @@
  * refuses while one is pending, and the way out is to finish it — the new key
  * opens with the unlockers it was given.
  *
+ * @version 1.5 - commit asks the scope's commit guards first (VaultUnlock::onClientRotationCommit)
  * @version 1.4 - begin and commit tell VaultUnlock::onClientRotation() listeners; a vault
  *   that opens through the root rotates with one `root` wrapping
  * @version 1.3 - a re-sealed key must name a client-custody scope (VaultCrypto::clientCustodyScope)
@@ -250,6 +251,10 @@ class VaultClientRotation {
 		if ($left > 0) {
 			throw new VaultClientCustodyException($left . ' sealed item' . ($left === 1 ? ' is' : 's are')
 				. ' still on the old key. Finish re-sealing before the old key retires.');
+		}
+		$refusal = VaultUnlock::clientRotationCommitRefusal($user_id, $scope);
+		if ($refusal !== null) {
+			throw new VaultClientCustodyException($refusal);
 		}
 
 		$db = DbConnector::get_instance()->get_db_link();

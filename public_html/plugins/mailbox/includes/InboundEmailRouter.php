@@ -90,6 +90,8 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.45 - storeRelayPending() takes a Fortress arrival the relay sealed to the
+ *                browser-held key: the row keeps the relay's DEK as its own key
  * @version 1.44 - Fortress rows at ingest (storeMessage, storeDirectMessage): attachments
  *   seal in the browser format with nothing about the file in the clear, the
  *   search text / snippet / manifest are sealed beside the content, and a failed
@@ -1017,8 +1019,17 @@ class InboundEmailRouter {
 	 * backstop, the message-id unique constraint. $owner_id is the alias's single
 	 * grantee (recorded so deferred ingest knows whose vault to unseal with).
 	 * $authserv_id is the relay's mail hostname — see authFromRelayMeta().
+	 *
+	 * $client is set for a Fortress arrival the relay sealed in the browser's
+	 * format (specs/client_custody_mail.md § R9): ['sealed_dek' => the
+	 * `v1.edgeseal.mail.` key, 'vault' => the owner's mail vault, 'generation'
+	 * => the generation that key belongs to]. The row takes that key as its own
+	 * in the same transaction as the insert, so a row never exists under a key
+	 * that does not open its body; the owner's browser parses it, not
+	 * DeferredIngest.
 	 */
-	public function storeRelayPending(array $meta, string $sealed_raw, $domain, $alias, int $owner_id, ?string $authserv_id = null): array {
+	public function storeRelayPending(array $meta, string $sealed_raw, $domain, $alias, int $owner_id, ?string $authserv_id = null,
+			?array $client = null): array {
 		$recipient = strtolower(trim((string)($meta['recipient'] ?? '')));
 		$message_id_header = trim((string)($meta['message_id'] ?? ''));
 		$message_id_header = ($message_id_header !== '') ? substr($message_id_header, 0, 255) : null;
@@ -1053,10 +1064,25 @@ class InboundEmailRouter {
 			'iem_sealed_owner_user_id' => $owner_id > 0 ? $owner_id : null,
 		);
 
+		$db = DbConnector::get_instance()->get_db_link();
+		$owns_transaction = ($client !== null && !$db->inTransaction());
 		try {
+			if ($owns_transaction) {
+				$db->beginTransaction();
+			}
 			$saved = InboundEmailMessage::CreateEntry($row);
+			if ($client !== null) {
+				InboundEmailMessage::adoptRelayClientKey(intval($saved->key), (string)$client['sealed_dek'],
+					$client['vault'], intval($client['generation']));
+			}
+			if ($owns_transaction) {
+				$db->commit();
+			}
 			return array('message' => $saved, 'dedup' => false);
 		} catch (\Throwable $e) {
+			if ($owns_transaction && $db->inTransaction()) {
+				$db->rollBack();
+			}
 			if ($this->isUniqueViolation($e) || $this->duplicateMessageExists($message_id_header, $row['iem_recipient'])) {
 				return array('message' => null, 'dedup' => true);
 			}
@@ -3100,6 +3126,33 @@ class InboundEmailRouter {
 	 * @param string $content_signal  'spam' | 'ham' | 'none' (from resolveContentSpam).
 	 * @return string|null InboundEmailMessage::SPAM_VERDICT_*, or null when disabled.
 	 */
+	/**
+	 * The spam disposition of a Fortress row its owner's browser parsed
+	 * (mailbox/fortress_parse_store): the X-Spam* header values the browser
+	 * read out of the relay-sealed message, read by readSpamHeader() exactly
+	 * as they would be off the raw, and the auth verdicts the pull stored.
+	 * The relay's verdict is the verdict: there is no raw here to scan, and no
+	 * sender to look up in the address book, so neither the local scan nor
+	 * the contact elevation runs.
+	 *
+	 * @param array $spam_headers x_spam, x_spam_flag, x_spam_score, x_spam_status
+	 * @param array{dkim:string,spf:string,dmarc:string,source:string} $auth
+	 * @return array{verdict:?string, score:?float}
+	 */
+	public function spamFromBrowserHeaders(array $spam_headers, array $auth): array {
+		$names = array('x_spam' => self::SPAM_FLAG_HEADER, 'x_spam_flag' => self::SPAM_FLAG_HEADER . '-Flag',
+			'x_spam_score' => self::SPAM_SCORE_HEADER, 'x_spam_status' => self::SPAM_STATUS_HEADER);
+		$block = '';
+		foreach ($names as $key => $name) {
+			$value = trim(str_replace(array("\r", "\n"), ' ', (string)($spam_headers[$key] ?? '')));
+			if ($value !== '') {
+				$block .= $name . ': ' . substr($value, 0, 500) . "\r\n";
+			}
+		}
+		$content = ($block === '') ? array('signal' => 'none', 'score' => null) : $this->readSpamHeader($block . "\r\n");
+		return array('verdict' => $this->classifySpam($auth, $content['signal']), 'score' => $content['score']);
+	}
+
 	private function classifySpam(array $auth, string $content_signal = 'none'): ?string {
 		if (!$this->settings->get_setting('mailbox_spam_filtering_enabled')) {
 			return null;

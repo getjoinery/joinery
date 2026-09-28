@@ -203,6 +203,14 @@ func (h *directHandler) handlePreflight(w http.ResponseWriter, r *http.Request) 
 	entry, matched := m.resolve(env.Recipient)
 	key, generation, isDecoy := "", 0, false
 	switch {
+	case matched && entry.KeyKind == keyKindClient:
+		// A key only the owner's browsers hold. A Direct sender seals with
+		// crypto_box_seal, which a browser cannot open, so the preflight names
+		// the tenant's transport key: the box opens the parts at pull and seals
+		// them to the browser's key, the path a Fortress row takes without a
+		// relay (specs/client_custody_mail.md B36).
+		key = tc.TransportPublicKey
+		generation = 1
 	case matched && entry.KeyKind == keyKindUser && entry.PublicKey != "":
 		key = entry.PublicKey
 		generation = orInt(entry.KeyGeneration, 1)

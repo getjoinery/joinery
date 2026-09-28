@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.49 - a relay-sealed row no vault here can open is marked sealed.unopenable
  * @version 1.48 - a Fortress row sealed to someone else carries `sealed.foreign` (an all-access viewer)
  * @version 1.47 - `device_search`: a search over end-to-end mail alone carries only the ids
  *   the browser found, no term (review of 2026-09-27, B4)
@@ -1465,7 +1466,7 @@ class MailboxService {
 		$in_full = count($full) ? implode(',', array_keys($full)) : '0';
 		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id, iem_direction,
 					iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id, iem_pending_parse,
-					iem_sender,
+					iem_key_generation, iem_sender,
 					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_subject END AS iem_subject,
 					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_body_plain END AS iem_body_plain,
 					CASE WHEN iem_inbound_email_message_id IN ($in_full) THEN iem_body_html END AS iem_body_html,
@@ -1494,6 +1495,9 @@ class MailboxService {
 						array('iem_sender', 'iem_subject', 'iem_snippet', 'iem_ai_summary'));
 					if ($pending) {
 						$entry['sealed']['pending'] = true;
+						if ($this->sealedToNoHeldKey($row)) {
+							$entry['sealed']['unopenable'] = true;
+						}
 					}
 					if ($this->sealedForSomeoneElse($row)) {
 						$entry['sealed']['foreign'] = true;
@@ -1645,7 +1649,7 @@ class MailboxService {
 					iem_mir_mail_import_run_id, iem_iia_inbound_imap_account_id,
 					iem_size_bytes, iem_message_id_header, iem_direction,
 					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
-					iem_sealed_owner_user_id, iem_pending_parse, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
+					iem_sealed_owner_user_id, iem_pending_parse, iem_key_generation, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
 					iem_ai_summary, iem_transport, iem_direct_verified,
 					iem_raw_storage_driver, iem_raw_storage_key, iem_source_gone_time,
 					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw,
@@ -1772,6 +1776,16 @@ class MailboxService {
 	 * reading someone else's mailbox. No unlock of theirs opens it, so the
 	 * reader says whose devices can, rather than asking them to unlock.
 	 */
+	/**
+	 * A relay-sealed row stored though no vault holding its mailbox has the key
+	 * it was sealed to (InboundEmailMessage::RELAY_UNOPENABLE_GENERATION): no
+	 * device can open it, and the reader says so instead of "waiting".
+	 */
+	private function sealedToNoHeldKey(array $row): bool {
+		return array_key_exists('iem_key_generation', $row)
+			&& intval($row['iem_key_generation']) === InboundEmailMessage::RELAY_UNOPENABLE_GENERATION;
+	}
+
 	private function sealedForSomeoneElse(array $row): bool {
 		return intval($row['iem_sealed_owner_user_id'] ?? 0) !== intval($this->viewer->getUserId());
 	}
@@ -1787,6 +1801,9 @@ class MailboxService {
 			'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers'));
 		if ($pending) {
 			$sealed['pending'] = true;
+			if ($this->sealedToNoHeldKey($r)) {
+				$sealed['unopenable'] = true;
+			}
 		}
 		if ($this->sealedForSomeoneElse($r)) {
 			$sealed['foreign'] = true;

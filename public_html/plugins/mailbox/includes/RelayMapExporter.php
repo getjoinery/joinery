@@ -18,8 +18,13 @@
  * public key (key_kind=user); everyone else seals
  * to the relay's ambient transport key (key_kind=transport), which Joinery opens
  * at pull. Catch-all recipients have no single owner, so they are always
- * transport-sealed.
+ * transport-sealed. A Fortress mailbox under the add-on seals to its owner's
+ * browser-held mail key (key_kind=client, key_scope=mail) when the relay can
+ * write the browser's format; otherwise it takes the transport key.
  *
+ * @version 2.4 - a Fortress mailbox under the Seal at the relay add-on seals to the owner's
+ *                mail key (key_kind=client) on a relay that reports it can (RelayVersion::sealsForBrowsers,
+ *                specs/client_custody_mail.md WP7, B35)
  * @version 2.3 - a Fortress mailbox takes the transport key until the relay seals to the mail key
  * @version 2.2 - the owner-key seal target follows the Seal at the relay add-on
  *                (ied_relay_seals_to_owner), not a level
@@ -154,7 +159,14 @@ class RelayMapExporter {
 				}
 				$address = $local . '@' . $domain_name;
 
-				list($public_key, $key_kind) = $this->sealTargetForAlias($alias, $domain);
+				$client = $this->clientSealTarget($alias, $domain);
+				if ($client !== null) {
+					list($public_key, $generation) = $client;
+					$key_kind = 'client';
+				} else {
+					list($public_key, $key_kind) = $this->sealTargetForAlias($alias, $domain);
+					$generation = $this->keyGenerationFor($alias, $domain, $key_kind);
+				}
 
 				$fragment['recipients'][$address] = array(
 					'public_key'        => $public_key,
@@ -162,12 +174,15 @@ class RelayMapExporter {
 					// The generation the relay reports in a Direct accept, so a
 					// sealed part can be tagged with the key it was sealed to and
 					// an unopenable message told apart from a corrupt one.
-					'key_generation'    => $this->keyGenerationFor($alias, $domain, $key_kind),
+					'key_generation'    => $generation,
 					'mode'              => (string)$alias->get('iea_delivery_mode'),
 					'destinations'      => array_values($alias->get_destinations_array()),
 					'forwarding_domain' => $forwarding_domain,
 					'forward_from'      => $forward_from,
 				);
+				if ($key_kind === 'client') {
+					$fragment['recipients'][$address]['key_scope'] = InboundEmailMessage::SEAL_SCOPE_FORTRESS;
+				}
 			}
 		}
 
@@ -218,6 +233,42 @@ class RelayMapExporter {
 	}
 
 	/**
+	 * A Fortress mailbox's browser-held seal target: [public key, generation],
+	 * or null when it takes the transport key instead.
+	 *
+	 * Only under the Seal at the relay add-on (specs/client_custody_mail.md
+	 * § R9): with it off, a Fortress message is sealed on arrival here, so
+	 * mail rules still run on it; with it on, this server never sees it.
+	 *
+	 * The key is the owner's mail vault's SEALING key — the pending one while a
+	 * rotation is under way, so mail arriving mid-rotation lands on the new
+	 * generation the walk is moving rows to. Null when the relay runs a program
+	 * that cannot write the browser's format (an older one would seal in the
+	 * server format and label it client: mail nobody opens, B35), or when the
+	 * mailbox has no single owner holding a mail vault; the transport key then
+	 * carries the message and the pull seals it to the mail key.
+	 */
+	private function clientSealTarget($alias, $domain): ?array {
+		if (!$alias->is_fortress() || !$domain->relay_seals_to_owner() || !RelayVersion::sealsForBrowsers($this->relay)) {
+			return null;
+		}
+		$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
+		if ($owner_id === null) {
+			return null;
+		}
+		try {
+			$vault = UserEncryptionVault::loadForUser($owner_id, InboundEmailMessage::SEAL_SCOPE_FORTRESS);
+		} catch (\Throwable $e) {
+			return null;
+		}
+		if ($vault === null || !$vault->key) {
+			return null;
+		}
+		$public_key = $vault->sealingPublicKey();
+		return ($public_key === '') ? null : array($public_key, max(1, $vault->sealingKeyGeneration()));
+	}
+
+	/**
 	 * The (public_key, key_kind) an alias's mail is sealed to. Only a Private
 	 * domain with the Seal at the relay add-on seals to the owner's vault key
 	 * (key_kind=user → sealed-to-owner, pending-parse at unlock); every other
@@ -230,9 +281,9 @@ class RelayMapExporter {
 	private function sealTargetForAlias($alias, $domain): array {
 		// A Fortress mailbox never takes the owner's SERVER key: a relay blob
 		// sealed to it would be parsed in the server window and stored as a
-		// Private row. Until the relay seals to the browser-held mail key
-		// (specs/client_custody_mail.md WP7) it takes the transport key, and the
-		// pull seals the message to the mail key like any Fortress arrival.
+		// Private row. When clientSealTarget() has no browser-held key for it,
+		// it takes the transport key, and the pull seals the message to the
+		// mail key like any Fortress arrival.
 		if ($alias->is_fortress()) {
 			return array($this->transport_public_key, 'transport');
 		}

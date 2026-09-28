@@ -103,6 +103,9 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.38 - adoptRelayClientKey(): a relay-sealed Fortress arrival keeps the relay's DEK
+ *                (generation RELAY_UNOPENABLE_GENERATION marks one no vault holding the mailbox
+ *                can open); acceptRelayParse() stores the browser's parse of it under that key
  * @version 1.37 - index on sealed live rows by (owner, mailbox, domain), for the reader's
  *   per-load unseal question
  * @version 1.36 - isBrowserSealed() and unwrapDekInWindow() go by the key's custody, so a
@@ -794,7 +797,9 @@ class InboundEmailMessage extends SystemBase {
 	 * (InboundEmailAlias::effectiveLevelSql(), the hook's own rule), reading only
 	 * the columns the walk needs. The generic walk reads every row the scope
 	 * holds, bodies and all, to ask the hook; a large Fortress mailbox beside a
-	 * small lowered one would make that the cost of every page.
+	 * small lowered one would make that the cost of every page. A relay-sealed
+	 * row still waiting to be parsed is left for the parse first: its body is
+	 * under the key the lowering would re-wrap (B45).
 	 */
 	public static function browserCustodyPage(int $user_id, string $scope, int $after_id, int $limit): array {
 		if ($scope !== self::SEAL_SCOPE_FORTRESS) {
@@ -808,6 +813,7 @@ class InboundEmailMessage extends SystemBase {
 			JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = m.iem_ied_inbound_email_domain_id
 			WHERE m.iem_sealed_owner_user_id = ? AND ' . self::mailKeySql('m.iem_sealed_key') . '
 			  AND ' . InboundEmailAlias::effectiveLevelSql('a', 'd') . ' <> \'' . InboundEmailDomain::LEVEL_FORTRESS . '\'
+			  AND m.iem_pending_parse = false
 			  AND m.iem_inbound_email_message_id > ?
 			ORDER BY m.iem_inbound_email_message_id LIMIT ' . $limit);
 		$stmt->execute(array($user_id, $after_id));
@@ -839,6 +845,85 @@ class InboundEmailMessage extends SystemBase {
 
 	/** How a message key sealed to the mail key begins. */
 	const MAIL_KEY_PREFIX = VaultCrypto::EDGE_SEAL_PREFIX . self::SEAL_SCOPE_FORTRESS . '.';
+
+	/**
+	 * The generation a relay-sealed row records when no vault holding its
+	 * mailbox has the key it was sealed to (RelaySpoolConsumer::ingestClient).
+	 * No real generation is 0, so the row is on no rotation's walk and no
+	 * device is handed it to parse; the reader says what it is.
+	 */
+	const RELAY_UNOPENABLE_GENERATION = 0;
+
+	/**
+	 * Give a just-inserted pending row the key a relay sealed its body under
+	 * (specs/client_custody_mail.md § R9). The relay made the DEK, sealed the
+	 * raw message under it and sealed it to the owner's browser-held mail key;
+	 * the server never holds it. The row records that key, the generation it
+	 * belongs to and its owner, and is marked sealed, so every field the
+	 * browser later posts lands under the key that opens the body.
+	 *
+	 * Only a pending row whose content is still empty takes one: anything
+	 * already sealed under another key would stay under a key nothing records.
+	 */
+	public static function adoptRelayClientKey(int $id, string $sealed_dek, UserEncryptionVault $vault, int $generation): void {
+		if (VaultCrypto::parseEdgeScope($sealed_dek) !== self::SEAL_SCOPE_FORTRESS) {
+			throw new RuntimeException('InboundEmailMessage: a relay client key must be sealed to the mail vault.');
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute(array($id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row || !in_array($row['iem_pending_parse'], array(true, 't', 1, '1'), true)) {
+			throw new RuntimeException('InboundEmailMessage: only a pending row takes a relay client key.');
+		}
+		foreach (static::$sealed_fields as $col) {
+			if ((string)($row[$col] ?? '') !== '' && $col !== 'iem_recipient') {
+				throw new RuntimeException('InboundEmailMessage: row ' . $id . ' already holds ' . $col . '.');
+			}
+		}
+		$wrap = static::sealKeyAssignments($sealed_dek, $vault, $generation);
+		$sets = array_merge($wrap['sets'], array('iem_content_sealed = true'));
+		$params = array_merge($wrap['params'], array($id));
+		$db->prepare('UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
+			. ' WHERE ' . static::$pkey_column . ' = ?')->execute($params);
+	}
+
+	/**
+	 * Store what the owner's browser parsed out of a relay-sealed row, under the
+	 * key the row already has (MailboxFortressParse). The fields are `v1.edge.`
+	 * values sealed under that key, or ''.
+	 *
+	 * Unlike acceptBrowserSealed() this does not ask which vault the row's
+	 * mailbox seals to now. The key is what the relay sealed the body under,
+	 * and a mailbox moved off Fortress since still needs its waiting mail
+	 * opened before the lowering walk can move it (specs/client_custody_mail.md
+	 * B45). The caller holds the row locked and has checked its owner and key.
+	 */
+	public static function acceptRelayParse(int $id, array $fields): void {
+		$sets = array();
+		$params = array();
+		$written = array();
+		foreach ($fields as $col => $value) {
+			if (!in_array($col, static::$sealed_fields, true) || self::isComposeOnlyField($col)) {
+				throw new RuntimeException('InboundEmailMessage: a parsed message does not carry ' . $col . '.');
+			}
+			if ($value !== '' && (!is_string($value) || !VaultCrypto::isEdgeField($value))) {
+				throw new RuntimeException('InboundEmailMessage: ' . $col . ' is not v1.edge. ciphertext.');
+			}
+			$sets[] = $col . ' = ?';
+			$params[] = $value;
+			if ($value !== '') {
+				$written[] = $col;
+			}
+		}
+		if (!$sets) {
+			return;
+		}
+		$sets = array_merge($sets, $written ? static::sealedWriteMarks($written) : array());
+		$params[] = $id;
+		DbConnector::get_instance()->get_db_link()->prepare('UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
+			. ' WHERE ' . static::$pkey_column . ' = ?')->execute($params);
+	}
 
 	/** The columns only a Fortress row carries (see $sealed_fields). */
 	const FORTRESS_DERIVED = array('iem_search_text', 'iem_snippet', 'iem_attachment_manifest');

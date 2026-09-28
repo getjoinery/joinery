@@ -21,6 +21,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_scope
  *
+ * @version 1.4 - Seal at the relay with Fortress is not refused (WP7, B38)
  * @version 1.3 - Seal at the relay is refused with Fortress (WP5, until WP7)
  * @version 1.2 - the Setup page's mail-vault step
  * @version 1.1 - feed refusal on a Fortress mailbox; the relay exporter never gives it the server key
@@ -231,7 +232,9 @@ try {
 	check($refusal($ok_domain, $owner_id) === null,
 		'the single owner of every mailbox, holding a mail vault, is not refused');
 	$r = admin_mailbox_domains_fortress_refusal(new InboundEmailDomain(intval($ok_domain->key), TRUE), $owner_id, true);
-	check($r !== null && stripos($r, 'relay') !== false, 'with Seal at the relay on it is refused until WP7', (string)$r);
+	// Refused only in front of a relay too old to seal for browsers (B38; that
+	// case is fortress_relay_pull's). With no relay the add-on waits for one.
+	check(MailboxRelay::active() !== null || $r === null, 'with Seal at the relay on it is not refused', (string)$r);
 
 	$other = make_user('FscOther');
 	$other_id = intval($other->key);

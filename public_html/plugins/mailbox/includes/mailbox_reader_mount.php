@@ -37,6 +37,8 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.26.0 - relay-sealed Fortress mail: mailbox_mime.js, the pending banner, and the
+ *                  Fortress client loaded while any waits to be parsed (B46)
  * @version 1.25.0 - the unseal convergence probe is mailbox_protection_owner_has_unseal_work()
  * @version 1.24.0 - Fortress search: mailbox_search.js, and the worker and index-code URLs in the config
  * @version 1.23.0 - Fortress mail (specs/client_custody_mail.md § R4): `fortress` loads
@@ -99,8 +101,11 @@ function mailbox_reader_fortress_visible(array $initial_mailboxes): bool {
 		}
 	}
 	// A mailbox moved off Fortress whose messages are not all back on the
-	// server's key: the browser still opens those, and moves them (R8).
-	return MailboxFortressLevel::loweringBacklogCount((int)SessionControl::get_instance()->get_user_id()) > 0;
+	// server's key: the browser still opens those, and moves them (R8). That
+	// includes relay-sealed mail still waiting to be parsed, which only this
+	// client opens, and which joins the lowering once it has (B46).
+	$user_id = (int)SessionControl::get_instance()->get_user_id();
+	return MailboxFortressLevel::loweringBacklogCount($user_id) > 0 || MailboxFortressParse::pendingCount($user_id) > 0;
 }
 
 /**
@@ -145,6 +150,31 @@ function mailbox_reader_emit_fortress_banner(callable $asset_ver, bool $vault_cl
 			. ' still being moved to your device key. Until then they read as before.</span></div>';
 	}
 	echo '<script src="' . htmlspecialchars($asset_ver('mailbox_fortress_level.js')) . '"></script>';
+}
+
+/**
+ * The banner over the reader while end-to-end mail a relay sealed to the
+ * viewer's key waits to be parsed in their browser (specs/client_custody_mail.md
+ * § R9). MailboxFortress.drainPending() keeps its count and hides it at none;
+ * it runs when the mail vault opens, so a locked vault leaves it standing.
+ */
+function mailbox_reader_emit_relay_pending_banner(bool $vault_client): void {
+	$user_id = (int)SessionControl::get_instance()->get_user_id();
+	if (!$user_id || !$vault_client) {
+		return;
+	}
+	try {
+		$n = MailboxFortressParse::pendingCount($user_id);
+	} catch (\Throwable $e) {
+		return; // a probe failure must never break the reader
+	}
+	if ($n === 0) {
+		return;
+	}
+	echo '<div class="mbx-catchup-banner" data-fortress-pending>'
+		. '<span class="mbx-catchup-text" data-fortress-pending-text>'
+		. htmlspecialchars($n . ' new end-to-end message' . ($n === 1 ? '' : 's'))
+		. ' waiting to be opened on this device. Unlock your vault to read ' . ($n === 1 ? 'it' : 'them') . '.</span></div>';
 }
 
 function mailbox_render_mailbox_reader($page, array $opts): void {
@@ -410,12 +440,14 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
      below runs. Same include convention as views/login.php and profile/security.php. -->
 <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
 <?php if (!empty($opts['fortress'])): ?>
+<script src="<?php echo htmlspecialchars($asset_ver('mailbox_mime.js')); ?>"></script>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_fortress.js')); ?>"></script>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_search.js')); ?>"></script>
 <?php endif; ?>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_reader.js')); ?>"></script>
 	<?php
 	mailbox_reader_emit_fortress_banner($asset_ver, !empty($opts['fortress']));
+	mailbox_reader_emit_relay_pending_banner(!empty($opts['fortress']));
 	mailbox_reader_emit_unseal_convergence();
 	mailbox_reader_emit_ai_catchup();
 }

@@ -27,7 +27,10 @@
  * is the only durable trace a window leaves — see docs/sealed_vault.md
  * § The audit log.
  *
- * @version 1.14
+ * @version 1.15
+ * @changelog 1.15 - onClientRotationCommit()/clientRotationCommitRefusal(): a
+ *   consumer can refuse a client-custody rotation's commit while retiring the
+ *   old key would lose something it still receives.
  * @changelog 1.14 - onClientRotation()/clientRotationChanged(): a consumer hears a
  *   client-custody rotation begin and commit.
  * @changelog 1.13 - clientReseal()/clientResealsFor(): what a client-custody
@@ -759,6 +762,39 @@ class VaultUnlock {
 				error_log('Client vault rotation listener (' . $scope . ', ' . $phase . ') failed: ' . $e->getMessage());
 			}
 		}
+	}
+
+	/** @var array<string,callable[]> client-custody rotation commit guards by scope */
+	private static $client_rotation_guards = array();
+
+	/**
+	 * Be asked before a rotation of client-custody $scope commits:
+	 * $guard(int $user_id) returns null to allow it, or a sentence saying why
+	 * the old key cannot retire yet. For a consumer that has handed the old
+	 * public key to something that may still seal to it (mail's relay).
+	 */
+	public static function onClientRotationCommit(string $scope, callable $guard): void {
+		self::$client_rotation_guards[$scope][] = $guard;
+	}
+
+	/**
+	 * Why $scope's rotation may not commit now, or null. A guard that fails
+	 * refuses: retiring a key something still seals to loses what arrives.
+	 */
+	public static function clientRotationCommitRefusal(int $user_id, string $scope): ?string {
+		self::loadConsumerBootstraps();
+		foreach (self::$client_rotation_guards[$scope] ?? array() as $guard) {
+			try {
+				$why = $guard($user_id);
+			} catch (\Throwable $e) {
+				error_log('Client vault rotation guard (' . $scope . ') failed: ' . $e->getMessage());
+				$why = 'The old key could not be checked as safe to retire. Try again in a minute.';
+			}
+			if (is_string($why) && $why !== '') {
+				return $why;
+			}
+		}
+		return null;
 	}
 
 	/** @return callable[] */

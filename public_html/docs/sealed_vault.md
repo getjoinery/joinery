@@ -1672,6 +1672,14 @@ $phase))`, called with `'begin'` and `'commit'` once each is stored; a listener
 that throws is logged and changes nothing. The mailbox uses it to push the
 relay routing map for `mail`.
 
+A consumer whose published key something may still be sealing to can hold the
+commit back: `VaultUnlock::onClientRotationCommit($scope, fn(int $user_id):
+?string)` returns null to allow it, or the sentence the person sees; a guard
+that throws refuses. The commit asks every guard before it retires anything.
+The mailbox's guard waits until the relay has accepted the map that names the
+new key and a pull has since read the relay's whole listing, so no mail sealed
+to the old key is still on the relay when that key retires.
+
 **While a rotation is pending, new material seals to the pending key**
 (`UserEncryptionVault::sealingPublicKey()`): the server sealer, the keys
 `drive_public_keys` hands out, and `JoinerySealed.seal()` all use it, and a

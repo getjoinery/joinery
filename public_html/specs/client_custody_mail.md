@@ -1627,6 +1627,23 @@ first), and lift the refusal in WP7.
   refuses while a relay is active and the last map it accepted is not the
   current one: `RelayMapSync` records the pushed hash, and commit compares it
   and does not push. The begin listener stays logged-only.
+- **B35 (found at WP7 start):** a relay running an older program reads a
+  `client` entry as any other key: it seals the whole message in the old
+  `v1.seal.` form and stamps `key_kind: client`, which nobody can open. So
+  the exporter names the mail key only to a relay whose reported
+  `relay_version` is at least the version that ships `sealEdge`
+  (`RELAY_VERSION` bumps with this package); any other relay keeps the
+  transport key, as today. The pull holds (never stores, never acks) a
+  `client` entry that is not `v1.edge.` + a `v1.edgeseal.mail.` DEK.
+- **B36 (found at WP7 start):** the relay's Joinery Direct preflight hands a
+  sender the entry's public key, and a Direct sender seals with
+  `crypto_box_seal`, which the browser cannot open. A `client` entry answers
+  the tenant's transport key instead: Direct at Fortress stays on the path
+  it takes today (the box opens and seals to the mail key at pull).
+- **Q1 (owner, 2026-09-28): the acceptance runs on dev with the relay
+  program run locally** (the `relay-serve` listener and the sealer fed a
+  message by pipe), not a relay box. The first real relay check is the
+  jeremytunnell relay after release.
 - **Tests:** `plugins/mailbox/tests/fortress_relay_pull_test.php`
   (`test-db`): a spool entry with `key_kind: client` (made in PHP with the
   test keypair, the same bytes the Go test emits) stores the pending row
@@ -1637,9 +1654,136 @@ first), and lift the refusal in WP7.
   nested multipart with an inline image and a base64 attachment,
   quoted-printable ISO-8859-1, RFC 2047 subject, RFC 2231 filename.
   `relay_map_pending`, `relay_client`, `relay_sealer_publish` stay green.
-- **Acceptance:** owner deploys the binary to the dev relay; a message to a
+- **Acceptance (Q1):** the relay program run locally on dev; a message to a
   relay-fronted Fortress alias appears as pending, opens on unlock, and the
   parsed row reads on a second browser without re-parsing. Screenshots.
+- **Built 2026-09-28.**
+  - **Go:**
+    - `seal.go` has `sealEdge` (plus `edgeSealWith` and `edgeFieldWith`,
+      which take their randomness from the caller so the vector can fix it),
+      and a public key is read in either base64 alphabet.
+    - `routing.go` adds `keyKindClient` and `key_scope`; a domain entry also
+      carries `key_scope` and `key_generation`.
+    - `meta.go` adds `sealed_dek`, `key_scope` and `key_generation` (client
+      entries only). `main.go` seals client entries with `sealEdge`.
+    - B36 is in `direct_handler.go`.
+    - New `edge_seal_test.go`: the shared vector byte for byte, the round
+      trip, the spool-id AD, the sidecar, a client catch-all, and B36.
+    - `roundtrip_test.sh` gains the PHP `openEdge` case.
+    - `provision_relay.sh` `RELAY_VERSION` 3.1.
+  - **PHP:**
+    - `RelayVersion::sealsForBrowsers()` (B35).
+    - `RelayMapExporter` 2.4: `clientSealTarget()` gives the mail vault's
+      sealing key and generation. A catch-all stays on the transport key,
+      since it has no single owner.
+    - `RelaySpoolConsumer` 1.14 `ingestClient()`:
+      - holds (never acks) an entry that is not in the browser's format;
+      - holds one sealed to a key no mail vault has, current or pending;
+      - finds the owner from the key when the grants changed.
+    - `InboundEmailRouter` 1.45:
+      - `storeRelayPending(..., $client)` inserts the row and gives it the
+        relay's key in one transaction;
+      - `spamFromBrowserHeaders()`.
+    - `InboundEmailMessage::adoptRelayClientKey()`.
+    - `DeferredIngest` 1.3 skips rows under a mail key.
+    - New `MailboxFortressParse`:
+      - `next()`: newest first, with `skip`;
+      - `pendingCount()`;
+      - `store()` / `storeParts()`: locks the row, refuses any DEK but the
+        row's own, owner only, parts bounded by the message's size, the
+        fields stored under the row's key (`acceptRelayParse`, B45), a second
+        post is a no-op.
+    - New actions `mailbox/fortress_pending` and
+      `mailbox/fortress_parse_store`.
+  - **B33:**
+    - `VaultUnlock::onClientRotationCommit()` and
+      `clientRotationCommitRefusal()`; `VaultClientRotation` 1.5 asks them
+      before commit.
+    - `RelayMapSync::rotationRefusal()` refuses until the relay's recorded
+      hash matches the map as it stands now **and** a pull has finished since
+      that push (so what it sealed to the old key is stored and on the walk).
+    - Registered in the mailbox bootstrap 1.22.
+  - **Browser:**
+    - New `mailbox_mime.js` with `mime_parser_gate.sh` (81 checks over 8
+      fixtures plus never-throws cases).
+    - `mailbox_fortress.js` 1.10 `drainPending()` runs whenever the mail vault
+      opens. A manifest can name its parts by number, and the reader matches
+      on it.
+    - A pending banner on the reader mount.
+  - **Tests:** `fortress_relay_pull_test.php` (39 checks).
+  - **Mail rules and contact elevation do not run on this path**: the server
+    has no sender to look up. This is the R9 card sentence, plus contact
+    elevation.
+  - **Review (a5, 2026-09-28): NOT YET VALID, 3 must-fix and 5 should-fix,
+    all taken.**
+    - **B37:** PHP drops uploads past `max_file_uploads` (20). All the parts
+      now go as ONE `bundle` upload, with each part at an offset. Walked with
+      a 27-part message: 26 parts stored and the last one opened.
+    - **B38:** the add-on is the switch, as R9 says:
+      - `clientSealTarget()` checks `relay_seals_to_owner()`;
+      - the domain refusal is lifted, except on a relay older than 3.1;
+      - the Fortress card note follows the add-on. The pinning sentence
+        waits for WP8.
+    - **B39:** the parts' Files are made and committed before the row's
+      transaction, so a refused store can delete them.
+    - **B40:** an entry sealed to a key no vault holding the mailbox has is
+      stored and acked, not held:
+      - it is stored under the owner at generation 0
+        (`RELAY_UNOPENABLE_GENERATION`);
+      - it is never handed to a device and is on no rotation walk;
+      - the reader says "arrived sealed to a key your vault does not hold …
+        You can delete it".
+      - Only a non-browser-format entry (B35, unreachable) and a mailbox with
+        no vault holder still hold.
+    - **B41:** the pull stamps `mrl_last_pull_drained_time` (new column;
+      `update_database` run on dev with the owner's OK) only when the listing
+      was read to its end with nothing torn, failed or left over.
+      `rotationRefusal` needs drained > pushed.
+    - **B42:** the key's own vault is used only if its owner still holds a
+      grant on the mailbox; otherwise the entry is stored unopenable (B40).
+    - **B43:** a device that skipped every remaining message makes the banner
+      say they could not be opened here. Every refusal is logged with its row.
+    - **B44:** a DEK that no longer matches the row answers `stale`
+      (nothing written), and the drain fetches it once more.
+    - **B45 (found while fixing B40):** the lowering walk and its count skip
+      rows still waiting to be parsed. The parse is stored under the row's
+      own key through `InboundEmailMessage::acceptRelayParse()`, not
+      `acceptBrowserSealed()`, which would re-derive the scope from the
+      mailbox's current level and refuse the parse forever after a lowering.
+    - `fortress_relay_pull_test` 1.1 has 51 checks.
+  - **Re-trace (a5, 2026-09-28): B37–B45 VALID; B46 from B45, fixed.**
+    - **B46:** with the waiting rows left out of the lowering count, a
+      lowered mailbox whose only mail-key rows were still waiting loaded no
+      Fortress client. So nothing parsed them, and the receipt read done.
+      The fix:
+      - `mailbox_reader_fortress_visible()` also counts
+        `MailboxFortressParse::pendingCount()`;
+      - the lowering receipt has its own "waiting to be opened on your
+        device" row, and does not read "every message is back" while any
+        wait;
+      - the server unseal waits for them too.
+      The walk's page still leaves them out. Test 1.2 has 53 checks.
+  - **a5 verdict 2026-09-28: VALID.** Two notes for the release:
+    - `mrl_last_pull_drained_time` is a new column, so every node needs
+      `update_database` before a mail rotation commit is tried there.
+    - A Fortress domain takes the add-on only once its relay reports 3.1;
+      until then the transport path is the fallback (B35). The first real
+      relay check (jeremytunnell after the release, Q1) should include one
+      mail rotation commit with the relay live.
+  - **Walked on dev 2026-09-28** (fixture 148539, domain 38333, via the new
+    `walk_fixture.php deliver-relay`, which runs the built Go sealer on the
+    message and stores the result with `ingestOne`):
+    - two messages stored pending, showing only `v1.edge.` and a
+      `v1.edgeseal.mail.` key in psql;
+    - the mailbox page drained them on load (pending, store, pending, store,
+      pending), each with its inline image (part 1.2) and PDF (part 2)
+      sealed;
+    - the list and thread read, and the PDF download is the original bytes;
+    - device search found one by a word in its body;
+    - a reload parsed nothing again;
+    - a third message with the vault locked showed the banner and "Waiting
+      to be opened on this device"; a passkey unlock drained it, and the
+      banner went.
 
 ### WP8. The relay pin (R10)
 

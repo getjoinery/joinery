@@ -1,0 +1,41 @@
+From: alice@example.com
+To: bob@example.org
+Subject: Nested
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=outer
+
+--outer
+Content-Type: multipart/related; boundary="rel"; type="multipart/alternative"
+
+--rel
+Content-Type: multipart/alternative;
+  boundary="alt"
+
+--alt
+Content-Type: text/plain; charset=utf-8
+
+See the logo.
+--alt
+Content-Type: text/html; charset=utf-8
+
+<p>See <img src="cid:logo@example.com"></p>
+--alt--
+
+--rel
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-ID: <logo@example.com>
+
+iVBORw0KGgoA
+AAANSUhEUg==
+--rel--
+
+--outer
+Content-Type: application/pdf; name="report.pdf"
+Content-Disposition: attachment; filename="report.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+AAEC/v+ADQol
+JUVPRg==
+--outer--

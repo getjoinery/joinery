@@ -231,13 +231,20 @@ func sealAndSpool(raw []byte, recipient, sender string, entry routingEntry, m *r
 		return exitTempFail
 	}
 
-	sealed, err := sealToPublicKey(raw, entry.PublicKey)
+	spoolID := newSpoolID()
+	var sealed, sealedDEK string
+	var err error
+	if entry.KeyKind == keyKindClient {
+		// A browser-held key: the browser's format, bound to this spool id.
+		sealed, sealedDEK, err = sealEdge(raw, entry.PublicKey, entry.KeyScope, spoolID)
+	} else {
+		sealed, err = sealToPublicKey(raw, entry.PublicKey)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "relay-sealer: seal failed: %v\n", err)
 		return exitTempFail
 	}
 
-	spoolID := newSpoolID()
 	headers, authResults := extractMeta(raw)
 	meta := spoolMeta{
 		SpoolID:               spoolID,
@@ -253,6 +260,11 @@ func sealAndSpool(raw []byte, recipient, sender string, entry routingEntry, m *r
 		PublicKey:             entry.PublicKey,
 		MapVersion:            m.Version,
 		ReceivedUTC:           time.Now().UTC().Format(time.RFC3339),
+	}
+	if entry.KeyKind == keyKindClient {
+		meta.SealedDEK = sealedDEK
+		meta.KeyScope = entry.KeyScope
+		meta.KeyGeneration = orInt(entry.KeyGeneration, 1)
 	}
 	metaBytes, err := meta.marshal()
 	if err != nil {

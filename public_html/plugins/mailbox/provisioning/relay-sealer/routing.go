@@ -17,12 +17,15 @@ const (
 )
 
 // keyKind tells the pull consumer whether the blob was sealed to a single
-// user's vault key (Seal at the relay — open only in-session, store pending-parse) or to
-// the ambient transport key Joinery holds (Standard/Private — open at pull and
-// run today's ingest). The sealer copies it verbatim into the .meta sidecar.
+// user's vault key (Seal at the relay — open only in-session, store pending-parse),
+// to the ambient transport key Joinery holds (Standard/Private — open at pull and
+// run today's ingest), or to a key only the owner's browsers hold (Fortress —
+// sealed in the browser's format, see sealEdge; key_scope names the vault).
+// The sealer copies it verbatim into the .meta sidecar.
 const (
 	keyKindUser      = "user"
 	keyKindTransport = "transport"
+	keyKindClient    = "client"
 )
 
 // legacyTenantSlug names the synthesized tenant block when the map predates the
@@ -48,6 +51,10 @@ type routingEntry struct {
 	// sealed part can be tagged with the generation it was sealed to and an
 	// unopenable message told apart from a corrupt one.
 	KeyGeneration int `json:"key_generation"`
+	// For key_kind=client, the vault scope the key belongs to (e.g. "mail"):
+	// it frames the sealed DEK, which is how the browser knows which of its
+	// keys opens it.
+	KeyScope string `json:"key_scope"`
 }
 
 // domainEntry captures the domain-level catch-all posture, used when no exact
@@ -58,6 +65,8 @@ type domainEntry struct {
 	RejectUnmatched  bool   `json:"reject_unmatched"`
 	PublicKey        string `json:"public_key"`
 	KeyKind          string `json:"key_kind"`
+	KeyScope         string `json:"key_scope"`
+	KeyGeneration    int    `json:"key_generation"`
 	ForwardingDomain string `json:"forwarding_domain"`
 	ForwardFrom      string `json:"forward_from"`
 	Tenant           string `json:"tenant"`
@@ -267,6 +276,8 @@ func (m *routingMap) resolve(recipient string) (routingEntry, bool) {
 		return routingEntry{
 			PublicKey:        de.PublicKey,
 			KeyKind:          de.KeyKind,
+			KeyScope:         de.KeyScope,
+			KeyGeneration:    de.KeyGeneration,
 			Mode:             modeStore,
 			ForwardingDomain: fallbackDomain(de.ForwardingDomain, dom),
 			Tenant:           de.Tenant,
