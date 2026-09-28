@@ -47,8 +47,43 @@
     when the chain's config carries no usable key: T's own key stays, and the database is not loaded.
   - `restore_statement.go` is not shared: with no approval, there is no statement to show.
   - `_site_state.sh` 1.2: clearing removes `vouched` with `copy_of`.
-  - Open: the dev-chain-into-a-scratch-project test (the canary and every sealed secret open,
-    T's password kept, census equal) needs the census, so it runs with WP3.
+  - The end-to-end proof ran with WP3 (`tests/backups/copy_restore_gate.sh`, below).
+- **WP3 built (2026-09-28); gate-tested on dev and on throwaway projects, not yet on a real copy:**
+  `SiteCensus` (core, 1.0), `maintenance_scripts/sysadmin_tools/site_census.php` 1.0,
+  `SecretReconciler` 1.2 (`census()`, the read-only pass), `SecretBox` 1.3 (`canaryState()` takes
+  the box to open with), agent 1.48.0 (`site_census`, observe), and on M `build_site_census`,
+  `JobResultProcessor::process_site_census` and `census_of()`. Choices made while building:
+  - **One class on both sides.** The node counts with `SiteCensus::take()`, M compares with
+    `SiteCensus::compare($source, $copy, $exact)`; the script prints one `CENSUS=` line of JSON.
+  - **The exclusion list is the files engine's.** Beyond the list in step 5: the site's own
+    `backup_exclude` names (tar patterns, matched as tar matches them), `public_html_*`,
+    `uploads/upgrades`, and the local copies of offloaded files. `site_census_test` holds the census's
+    names equal to `backup_files.sh`'s `NAMED_EXCLUDES`.
+  - **Files carry a digest.** Per top-level directory: files, directories, bytes, and a sha256 over
+    every path with its size, so a rename or two size changes that cancel still show. Nothing is read
+    but directory entries.
+  - **Tables are counted in one read-only snapshot**, so a live source's counts are of one moment.
+  - **The offloaded-files sample is part of the census:** the count, and 20 drawn at random asked
+    for by a metadata request each (never a download). Run as root, as the agent runs it, so a quiet
+    site's firewall does not stop it.
+  - **The census's egress.** Its offloaded-files sample is a request from root to the bucket, which
+    the quiet state's firewall allows by design: on a quiet copy it is the one outgoing request the
+    census makes (`docs/deploy_and_upgrade.md` says so).
+  - **Review (public-html-a5, 2026-09-28):** B1 fixed (a `backup_exclude` pattern matches any tail
+    of the path that starts at a name, with `*` crossing `/`, as tar's unanchored exclude does; the
+    test checks the census against tar itself). A1, N1 (the census is never redacted: a masked
+    digest compares equal to any other) and the spec and doc notes applied. L1-L5 answered with
+    nothing to fix: a restore's extraction deletes everything T has that S's archive lacks, at any
+    depth; nothing on a quiet T rewrites a counted file.
+  - **What blocks while S is live:** only what S changing cannot explain: T's canary not opening
+    while S's does, more dead secrets on T, or an offloaded file T cannot reach. Row, file, byte and
+    stored-secret counts block only in the exact comparison (step 8).
+  - The WP2 end-to-end proof, `tests/backups/copy_restore_gate.sh` (db tier): S is a throwaway
+    project whose database is the test database's schema and settings, every sealed setting sealed
+    again under S's own fixture key with a canary added (dev's key is never read). Restored with
+    `--adopt-secret-key` onto T with another key and password: the canary and every sealed value
+    open with T's config, T keeps its password, and the census is exactly equal. A second apply after
+    an edit, a new file and a new row on T removes all three.
 - Decided:
   - D1: a faithful copy, with switching over and deleting kept separate; the old Clone is retired.
   - D2: the backup chain carries the copy.
@@ -58,7 +93,7 @@
   - D5: the certificate and the DKIM keys travel.
 - **Goal set by the owner (Q1):** copy between any two servers — across Linode accounts and regions,
   and to another provider. Linode to Hetzner is the design target.
-- Open: none.
+- Open: none. Q6 and Q7 answered 2026-09-28 (WP4's side on T).
 - **Q3 answered (2026-09-28):** the test domain is `jeremytunnell.info`.
 - **Q5 answered (2026-09-28):** L0 creates its own source each run.
 - **Q4 answered (2026-09-28):** jeremytunnell switches by changing its Cloudflare origin (WP7a).
@@ -556,13 +591,14 @@ container target, which is out of scope. A container source is never dormant.
      It reports rows per table, file count and bytes per top-level directory, whether the canary
      opens, and how many registered sealed secrets are dead.
    - The script owns one exclusion list: each machine's own `Globalvars_site.php`, `backup_site_key`
-     and ledger, `logs/`, and the rows a backup run writes on S after its dump.
+     and ledger, the names the files engine never archives (`logs/` among them), and the rows a
+     backup run writes on S after its dump (`bkh_backup_history`).
    - It runs on T after every apply. At copy time S is live, so the comparison with S is approximate
      and informational. The exact comparison is at the final copy (step 8), with S frozen.
    - Nothing else re-proves the load: `restore_chain.sh` checks every artifact's size and hash
      against the manifest first, the database loads under `ON_ERROR_STOP`, and tar fails on a partial
      extract.
-   - T also checks, as root from the agent, that a sample of offloaded files answers from the bucket.
+   - The census also asks the bucket, as root from the agent, for a sample of the offloaded files.
    - **Also useful beyond copies:** the census verifies any disaster restore the same way.
 6. **Look (optional, owner).**
    - M shows the owner a link that sets the copy's secret cookie. The owner reaches T by its IP with a
@@ -596,6 +632,15 @@ The copy can stay dormant as long as the owner likes.
      newest increment is G4, a separate piece for later if the minutes matter.
    - M runs the census on S and on T and requires an exact match: S is frozen, so nothing drifts.
      On a mismatch, M stops and offers the way back (unfreeze S); nothing has moved yet.
+     - The census follows the final apply directly, with no look in between: a look runs the site's
+       PHP on T, and only the next full apply removes the rows it writes. The switch-over offers no
+       look after the final apply.
+     - No table is left out beyond `bkh_backup_history`. A row in `err_general_errors` on S between
+       its dump and the census means something failed during the freeze, and is reported as the
+       difference it is.
+     - The census itself is frozen time: a row count of every table and a stat of every file on S
+       and on T (about a second on dev; more with jeremytunnell's 16.7 GiB of uploads). L1 measures
+       it with the rest of the downtime.
 9. **Move the address, with T still dormant.**
    - **IP swap (WP12; the fleet's usual switch):**
      1. Power S off.
@@ -827,8 +872,8 @@ WP7 unchanged; only the ceremony (WP10) is its own, and it produces the same inp
 
 In build order. Each is built and tested on its own (design rule).
 
-**New agent words (five):** `copy_export` (S), `copy_restore` (T), `site_census` (any, read-only),
-`site_quiet on|off` (S; T's `off` at step 10), and the node-id word (T).
+**New agent words (six):** `copy_export` (S), `copy_import` (T, Q6), `copy_restore` (T), `site_census`
+(any, read-only), `site_quiet on|off` (S; T's `off` at step 10), and the node-id word (T).
 
 - **WP1 — The documents tell the truth (B22).** Correct the five documents and the
   `reconcile_site.sh` message to what is true today, and again when the copy lands. Small; first.
@@ -872,7 +917,14 @@ In build order. Each is built and tested on its own (design rule).
     builders serve the copy.
   - The agent's `SignBlob` with a domain prefix, and a libsodium-compatible seal
     (`golang.org/x/crypto/nacl/box`).
-  - **T's side of the export (carried from WP2).** `copy_restore` reads what this step leaves:
+  - **`copy_import` on T (Q6)**, trusting only the S key the dormant install recorded (Q7):
+    `install.sh --copy-of` takes S's agent public key with its node id. Pinned from the WP3 review:
+    - it runs only under `quiet copy`, as `copy_restore` does: a live site never takes a bundle;
+    - refusing a replayed bundle needs a high-water mark (the bundle's sequence or time) in root's
+      state directory, raised only after a bundle checks out;
+    - `_site_state.sh` clearing removes the recorded S key with `copy_of` and `vouched`, so a
+      promoted T stops trusting S's key.
+  - **T's side of the export (carried from WP2).** `copy_restore` reads what `copy_import` leaves:
     - each chain in the usual workspace, `restore_<chain id>` under the backup base, with
       `manifest.json` and the chain data key opened from the bundle as `chain.key`;
     - the vouch record `/etc/joinery/sites/{site}/vouched`, written whole each time with one
@@ -930,12 +982,13 @@ In build order. Each is built and tested on its own (design rule).
 
 **In the gate (db tier unless marked).** Each group tests one piece alone.
 - **Restore onto a copy (WP2):**
-  - Setup: a chain made on dev, restored with `--adopt-secret-key` into a scratch project whose config
-    has a different `secret_box_key` and database password.
+  - Setup: a chain of a throwaway project with dev's schema and settings (sealed under its own
+    fixture key), restored with `--adopt-secret-key` into a scratch project whose config has a
+    different `secret_box_key` and database password.
   - Pass:
     - The canary opens, and every registered sealed secret opens.
     - The scratch project keeps its own database password.
-    - The census on dev equals the census on the scratch project.
+    - The census of the source equals the census of the scratch project, exactly.
   - A second full apply, after an edit and a new file on the scratch project, removes both.
 - **`copy_export` (WP4):** seal, sign, verify and open.
   - Each of these refuses: a tampered byte, a wrong target key, a wrong source key, an expired
@@ -1020,3 +1073,16 @@ In build order. Each is built and tested on its own (design rule).
   - The IP swap is still built, right after, and proven by L0b (D3's revised order).
 - **Q5 — Answered 2026-09-28: L0 creates a fresh source each run** and deletes both servers after.
   `test1` (97.107.131.245) stays with the database-incrementals memory work.
+- **Q6 — Answered 2026-09-28: a sixth word, `copy_import`, on T.** After each `copy_export` it checks
+  S's signature, opens the seal, writes what `copy_restore` reads (each chain's `chain.key` and the
+  `vouched` record), and installs the host bundle (certificate lineage, ACME account, DNS-01
+  credentials, DKIM keys). Each piece stays on its own and is tested alone; a refresh can re-import
+  without a restore.
+- **Q7 — Answered 2026-09-28: the dormant install records S's signing key.** `--copy-of` takes S's
+  node id and S's agent public key (M prints both in the command the owner runs), stored beside
+  `copy_of` in root's state directory. `copy_import` trusts that key and no other. The owner already
+  trusts M's printed command to install T, and M already dispatches every operate word to T, so
+  this adds no new trust. (The census does not guard against a compromised M: M runs both census
+  jobs and the compare.)
+  - Hardening: S's own admin page already shows S's agent fingerprint, served by S and not by M.
+    The printed command shows the fingerprint it carries and tells the owner to compare the two.

@@ -84,6 +84,12 @@ back to its registry row (`ssr_last_state`, `ssr_dead_count`).
 `SecretReconciler::attention_verdict()` reads that — no live decrypt walk — so the
 setup pill and the management-node stats blob share one cheap computation.
 
+**The read-only count.** `SecretReconciler::census()` walks the same registry and
+returns the canary's state with the number of stored and dead secrets, by
+locator, and writes nothing: no heal, no cached verdict, no signal. The site
+census (`SiteCensus`, see [Backups](backups.md)) uses it to check a restored copy
+of a site against its source.
+
 ## Telling the operator
 
 - **Push, not a page to patrol.** A dead secret a human must act on raises the
