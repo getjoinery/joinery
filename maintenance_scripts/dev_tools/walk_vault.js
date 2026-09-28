@@ -4,15 +4,18 @@
  * (walk_fixture.php create copies it there), right after
  * `php walk_fixture.php create <purpose>`.
  *
- * From the admin's remembered session in the MCP browser, it signs in as the
- * handoff's user (admin_user_login_as), adds a CDP virtual authenticator (one
- * per browser: an existing one is reused), adds a passkey with the handoff
- * password, and sets up the vault. The recovery codes are shown by the page
+ * It signs the browser in as the handoff's user at /login with the handoff
+ * password (the MCP browser runs --isolated, so it starts signed out; a
+ * browser that is already signed in, from a shared profile, switches with the
+ * admin's login-as instead), adds a CDP virtual authenticator (one per
+ * browser: an existing one is reused), adds a passkey with the same password,
+ * and sets up the vault. The recovery codes are shown by the page
  * and never read back. Returns the user id and the vault's status line.
  *
  * Delete the handoff file afterwards (walk_fixture.php also drops one older
  * than five minutes).
  *
+ * @version 1.1 - signs in at /login with the fixture's own password
  * @version 1.0
  */
 async (page) => {
@@ -28,12 +31,25 @@ async (page) => {
 	}
 	await tab.close();
 
-	// Sign in as the fixture user from the admin's remembered session.
+	// Sign in as the fixture user: its own password at /login, or (a browser
+	// already signed in by a remembered admin) the admin's login-as.
 	await page.context().clearCookies({ name: 'PHPSESSID' });
-	await page.goto(base + '/admin/admin_user_login_as?usr_user_id=' + encodeURIComponent(handoff.user_id));
+	await page.goto(base + '/login');
 	await page.waitForTimeout(1500);
+	const email = page.locator('input[name="email"]');
+	let signin = 'login';
+	if (await email.count()) {
+		await email.fill(handoff.email);
+		await page.locator('input[name="password"]').fill(handoff.password);
+		await email.locator('xpath=ancestor::form').locator('[type=submit]').first().click();
+		await page.waitForTimeout(3000);
+	} else {
+		signin = 'login_as';
+		await page.goto(base + '/admin/admin_user_login_as?usr_user_id=' + encodeURIComponent(handoff.user_id));
+		await page.waitForTimeout(1500);
+	}
 	if (/\/login|verify-totp/.test(page.url())) {
-		return { ok: false, step: 'login_as', error: 'the browser has no admin session; sign the admin in first', url: page.url() };
+		return { ok: false, step: signin, error: 'sign-in did not complete', url: page.url() };
 	}
 
 	// One internal virtual authenticator per browser.
@@ -82,5 +98,5 @@ async (page) => {
 		const m = document.body.innerText.replace(/\s+/g, ' ').match(/Encrypted Vault.{0,60}?Status: (\w+)/);
 		return m ? m[1] : null;
 	});
-	return { ok: status === 'Unlocked', user_id: handoff.user_id, authenticator, vault: status };
+	return { ok: status === 'Unlocked', user_id: handoff.user_id, signin, authenticator, vault: status };
 }

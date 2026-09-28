@@ -2,8 +2,8 @@
 
 **Status:** drafted and approved for building 2026-09-28 (owner: "draft it, then implement").
 Built and used the same day for the WP5 re-walk (client_custody_mail.md): one `create`, one
-browser call, a ready walk user with an unlocked vault. D3 (browser isolation) is open, for the
-owner.
+browser call, a ready walk user with an unlocked vault. D3 (a browser per session) built the same
+day.
 
 ## The problem
 
@@ -43,18 +43,25 @@ up. It refuses to run without the `debug` setting, the same gate as the dev-only
 never runs on production. The `claude-walk-` prefix keeps it clear of the harness's stale-fixture
 reclaim (`harnesstest…`, deleted after an hour).
 
-**D3. Browser isolation (open, for the owner).** A reset still ends a walk mid-way; D1 makes
-that cheap, not impossible. Two ways to stop sessions ending each other's browser:
-- *A browser per session* (the Playwright MCP's `--isolated` flag, in the Claude Code MCP
-  config). Pro: no session can end another's walk. Con: each browser starts with no cookies, so
-  the admin sign-in (today carried by remember-me cookies in the shared profile) needs its own
-  answer, such as a `--storage-state` file, which is the sign-in cookie on disk in a second
-  place; and one Chrome per busy session on the dev box.
-- *A short "in use" marker* that sessions respect for the length of a walk. Pro: no config
-  change. Con: it bends the owner's "nobody holds it" rule, and a crashed session leaves a
-  stale marker (an age limit handles that).
-
-Neither is built. The recommendation is to see whether D1 alone is enough first.
+**D3. A browser per session: `--isolated`.** (Owner, 2026-09-28: only if it adds no
+maintenance; built.) Every Claude session already starts its own Playwright MCP server; they
+only collided because each launched Chrome on one shared profile folder, which one Chrome at a
+time can hold. The browser MCP's config (`~/.claude.json`, project `/var/www/html/joinerytest`,
+server `browser`) now passes `--isolated`: a session's first browser call starts its own Chrome
+with an in-memory profile, and it goes when that session's MCP server does. Nothing to count,
+register or clean: any number of sessions, all new after a reboot. A walk user's passkey lives
+as long as its session, and no other session can end it.
+- *Sign-in:* an isolated browser starts signed out, so `walk_vault.js` signs in at `/login`
+  with the fixture's own handoff password (falling back to the admin's login-as only when a
+  browser is already signed in). A session that needs superadmin pages makes its fixture with
+  `--permission=10`. The admin's remember-me cookie is not copied between browsers: it can
+  rotate on use, and browsers sharing it would sign each other out.
+- *Names:* a session uses its own name as the fixture purpose (`create public-html-d7`), so no
+  session retires another's; `create` retires every fixture older than seven days, since
+  sessions that ended leave theirs behind.
+- *Memory:* one headless Chrome is a few hundred MB, held while its session runs; a walk ends
+  with `browser_close`.
+- Sessions started before the change keep the shared profile until they restart.
 
 **D4. Auto mode.** Adding a virtual authenticator over CDP is the kind of call the auto-mode
 classifier refused on 2026-09-28 ("Credential Exploration"). Walks run `walk_vault.js` through
@@ -65,7 +72,8 @@ permission rule for that one script.
 
 **`maintenance_scripts/dev_tools/walk_fixture.php`** (CLI, dev only):
 
-- `create <purpose> [--messages=N] [--permission=P]`: retires the purpose's previous fixture,
+- `create <purpose> [--messages=N] [--permission=P]` (the purpose is the session's name):
+  retires every fixture older than seven days and the purpose's previous one,
   then makes the user (permission 5 by default, since the mail domain editor is an admin page),
   the domain at Standard owned by them, the `box@` store mailbox granted to them alone, and N
   messages (default 2), each with a PDF and an inline image. It sets a fresh random password and
@@ -81,12 +89,12 @@ permission rule for that one script.
   loads script files only from `/tmp/playwright-mcp` or the web root.
 
 **`maintenance_scripts/dev_tools/walk_vault.js`** (a Playwright function for
-`browser_run_code_unsafe` with `filename`): from the admin's remembered session, signs the
-browser in as the handoff's user (`admin_user_login_as`), adds a virtual authenticator (reusing
-this browser's if it has one), adds a passkey with the handoff password, sets up the vault, and
+`browser_run_code_unsafe` with `filename`): signs the browser in as the handoff's user at
+`/login` (D3), adds a virtual authenticator (reusing this browser's if it has one), adds a passkey with the handoff password, sets up the vault, and
 deletes nothing it did not make. It returns the user and the vault's state; recovery codes are
 never read back.
 
-**The walk recipe:** `php walk_fixture.php create <purpose>` → `browser_run_code_unsafe`
-with `filename` `/tmp/playwright-mcp/walk_vault.js` → `rm` the handoff file → walk. After a browser reset: run the same two
+**The walk recipe:** `php walk_fixture.php create <session name>` → `browser_run_code_unsafe`
+with `filename` `/tmp/playwright-mcp/walk_vault.js` → `rm` the handoff file → walk →
+`browser_close`. After a browser reset: run the same two
 steps again.
