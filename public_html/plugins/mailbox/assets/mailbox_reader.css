@@ -1,7 +1,8 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.50 — .mbx-device-search-btn (Rebuild / Remove on the device-search note)
+ * Vanilla CSS, no framework. @version 2.51 — .mbx-context-waiting (a slot held below a still-loading docked panel)
+ * @version 2.50 — .mbx-device-search-btn (Rebuild / Remove on the device-search note)
  * @version 2.49 — .mbx-dai-link (Change / Test again in the one-line ready state)
  * @version 2.48 — .mbx-dai-ondemand (Summarize, Scan now)
  * @version 2.47 — .mbx-danger-banner-model, .mbx-dai-info
@@ -1584,6 +1585,9 @@ button.mbx-setup-banner-btn:disabled { opacity: 0.6; cursor: default; }
 	padding-top: .75rem;
 	border-top: 1px solid #e4e7eb;
 }
+/* Below a docked panel that is still loading its first content: out of the
+   layout until it settles (syncContextColumn), so its growth moves nothing. */
+.mbx-context-slot.mbx-context-waiting { display: none; }
 .mbx-context.mbx-context-collapsed .mbx-context-slot + .mbx-context-slot {
 	margin-top: .5rem;
 	padding-top: .5rem;
