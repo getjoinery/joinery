@@ -1,6 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.85 — the header icons, compose autocomplete and the contacts panel share one
+ * No framework. @version 2.86 — a context-column slot below a docked panel still loading its
+ *   first content (data-loading) waits out of the layout, so the panel's growth shifts nothing.
+ * @version 2.85 — the header icons, compose autocomplete and the contacts panel share one
  *   contacts request per mailbox (held 60 s, forgotten on a change here); opening a message asked twice.
  * @version 2.84 — end-to-end (Fortress) compose: drafts are sealed in this browser
  *   (MailboxFortress.saveDraft), a reopened one is opened here, and a send carries the saved parts,
@@ -3443,7 +3445,8 @@
 	// is collapsed — so one open panel keeps the column its full width.
 	//
 	// A docked panel's whole contract: mark its root data-collapsed="true" while
-	// collapsed, and fire a bubbling 'joinerypanelcontent' event whenever what it
+	// collapsed and data-loading="true" while its first content is on the way,
+	// and fire a bubbling 'joinerypanelcontent' event whenever either or what it
 	// holds changes.
 	function peopleSlot() { return $('#mbx-context-people'); }
 
@@ -3463,6 +3466,15 @@
 			if (!collapsed) allCollapsed = false;
 		});
 		aside.hidden = !filled;
+		// A docked panel still loading its first content (data-loading) is about
+		// to grow; every slot below it stays out of the layout until it settles,
+		// so the growth pushes nothing down the column. A collapsed panel does not
+		// grow, so it holds nothing back.
+		var holding = false;
+		Array.prototype.forEach.call(slots, function (slot) {
+			slot.classList.toggle('mbx-context-waiting', holding);
+			if (!slot.hidden && slot.querySelector('[data-loading="true"]:not([data-collapsed="true"])')) holding = true;
+		});
 		var spine = filled && allCollapsed;
 		aside.classList.toggle('mbx-context-collapsed', spine);
 		// The other half of the contract: a docked panel is told when the column

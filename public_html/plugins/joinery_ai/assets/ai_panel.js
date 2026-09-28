@@ -22,9 +22,11 @@
  * Given a container, the panel LIVES there — a docked panel in the host's own
  * sidebar, beside whatever else the host keeps there, and the AI button hides
  * itself: the panel is already on the page, with its own header and its own
- * counts. It marks its root data-collapsed while collapsed and fires a bubbling
- * 'joinerypanelcontent' event whenever what it holds changes, which is all a
- * host column needs to decide its own width and visibility. A host that hides
+ * counts. It marks its root data-collapsed while collapsed, data-loading while
+ * its first content is on the way, and fires a bubbling 'joinerypanelcontent'
+ * event whenever either or what it holds changes, which is all a host column
+ * needs to decide its own width and visibility, and to keep what sits below a
+ * still-growing panel from being pushed down. A host that hides
  * that container at narrow widths costs nothing: the same panel moves into a
  * slide-over, and the button comes back as the way in, so the surface is never
  * unreachable.
@@ -51,7 +53,9 @@
  * the person as the blue circle — one is progress, the other is a request, and
  * they must not read as the same kind of number.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 2.9.0 - hostSection
+ * Vanilla JS, jy-ui styling, no framework. @version 2.10.0 - data-loading on the first load,
+ * and a refresh keeps the cards (dimmed) until the new ones arrive: no layout shift
+ * @version 2.9.0 - hostSection
  */
 (function () {
 	'use strict';
@@ -289,29 +293,57 @@
 			return payload;
 		}
 
+		// The first load grows the panel from a line to its whole list. Until it
+		// settles the root carries data-loading, so a host column can keep what
+		// sits below it out of the layout: the growth then moves nothing else on
+		// the page (a layout shift the person sees as the column jumping).
+		var settled = false;
 		function refresh() {
-			refreshStatus();
-			refreshCards();
+			var first = !settled;
+			if (first) {
+				panel.setAttribute('data-loading', 'true');
+				announce();
+			}
+			var both = Promise.all([refreshStatus(), refreshCards()].map(function (p) {
+				return Promise.resolve(p).catch(function () {});
+			}));
+			if (first) {
+				both.then(function () {
+					settled = true;
+					panel.removeAttribute('data-loading');
+					announce();
+				});
+			}
 		}
 
 		function refreshCards() {
-			recipesBox.innerHTML = '';
-			recipesBox.appendChild(el('p', 'aip-quiet', 'Loading\u2026'));
 			var ctx = getContext() || {};
 			if (area === 'mailbox' && !ctx.mailbox) {
+				recipesBox.classList.remove('aip-stale');
 				recipesBox.innerHTML = '';
 				recipesBox.appendChild(el('p', 'aip-quiet', 'Select a mailbox to manage AI for it.'));
-				return;
+				return Promise.resolve();
 			}
-			joineryApi.post('joinery_ai/ai_panel_state', contextBody())
+			// A refresh (another mailbox chosen) keeps the cards on screen, dimmed
+			// and not clickable, until the new ones replace them: blanking them to
+			// a loading line would shrink the panel and grow it back. Only an empty
+			// panel says it is loading.
+			if (recipesBox.childElementCount) {
+				recipesBox.classList.add('aip-stale');
+			} else {
+				recipesBox.appendChild(el('p', 'aip-quiet', 'Loading\u2026'));
+			}
+			return joineryApi.post('joinery_ai/ai_panel_state', contextBody())
 				.then(function (data) { renderCards(data && data.cards ? data.cards : []); })
 				.catch(function (err) {
+					recipesBox.classList.remove('aip-stale');
 					recipesBox.innerHTML = '';
 					recipesBox.appendChild(el('p', 'aip-quiet', err && err.message ? err.message : 'Could not load.'));
 				});
 		}
 
 		function renderCards(cards) {
+			recipesBox.classList.remove('aip-stale');
 			recipesBox.innerHTML = '';
 			if (!cards.length) {
 				recipesBox.appendChild(el('p', 'aip-quiet', 'No AI features for this page yet.'));

@@ -1,7 +1,8 @@
 /**
  * Area AI panel (ai_panel.js) — the same panel docked in a host's sidebar or
  * carried by the slide-over, so both are styled from one place. jy-ui
- * vocabulary, vanilla CSS, no framework. @version 2.5.0 - the slide-over scrolls
+ * vocabulary, vanilla CSS, no framework. @version 2.6.0 - .aip-stale: the previous context's cards, dimmed, while the next load
+ * @version 2.5.0 - the slide-over scrolls
  *   its body: the panel inside the drawer is the flex column
  */
 
@@ -97,6 +98,13 @@
 .aip-quiet {
 	color: var(--jy-color-text-muted, #667085);
 	font-size: 0.9rem;
+}
+
+/* Another context's cards, kept in place while this one's load: the panel
+   keeps its height instead of shrinking to a loading line and growing back. */
+.aip-recipes.aip-stale {
+	opacity: 0.5;
+	pointer-events: none;
 }
 
 .aip-card {
