@@ -37,6 +37,7 @@
  * the provider access token and the per-run root SSH private key, both
  * SecretBox-sealed and erased at terminal state.
  *
+ * @version 1.6 - rcl_instance_ipv6: the provider-reported IPv6 a birth report may arrive from
  * @version 1.5 - prefix rcl, table rcl_relay_cloud_provisions, locators rcl_relay_cloud_provisions.rcl_sealed_*:
  *                rcp is Recipe's alone (specs/implemented/shared_prefix_relay_cloud_provision.md)
  * @version 1.4 - the run's bundle copy lives under cache/relay_runs, never in the site root
@@ -72,6 +73,10 @@ class RelayCloudProvision extends SystemBase {
 		'rcl_mrl_mailbox_relay_id' => array('type'=>'int8'),
 		'rcl_instance_id'     => array('type'=>'varchar(50)'),
 		'rcl_instance_ip'     => array('type'=>'varchar(64)'),
+		// The instance's public IPv6, as the provider reports it. A dual-stack
+		// relay reaches this server over IPv6, so its birth report can arrive
+		// from this address rather than the IPv4 above (RelayBirthEndpoint).
+		'rcl_instance_ipv6'   => array('type'=>'varchar(64)'),
 		'rcl_sealed_token'    => array('type'=>'text'),
 		// A relay born from user-data (specs/relay_without_a_shell.md): the
 		// one-time run token the first-boot script presents to fetch the bundle

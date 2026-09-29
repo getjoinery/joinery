@@ -135,6 +135,25 @@ check($r['status'] === 403, 'a bad signature is refused', json_encode($r));
 $swapped = $signed; $swapped['report']['identity_fingerprint'] = base64_encode(str_repeat("\x22", 32));
 $r = RelayBirthEndpoint::processBorn(json_encode($swapped), $token, '127.0.0.1');
 check($r['status'] === 403, 'a fingerprint that is not the key\'s fingerprint is refused', json_encode($r));
+// IPv4 and IPv6 (owner rule 2026-09-29): a dual-stack relay's report arrives
+// over IPv6. The address step passes for the instance's recorded IPv6 in any
+// spelling — here it then stops at the forged signature, which proves it got
+// past the address — and refuses an IPv6 the run did not record.
+check(RelayBirthEndpoint::sameAddress('2001:DB8:0:0::5/128', '2001:db8::5')
+	&& RelayBirthEndpoint::sameAddress('::ffff:127.0.0.1', '127.0.0.1')
+	&& !RelayBirthEndpoint::sameAddress('2001:db8::5', '2001:db8::6')
+	&& !RelayBirthEndpoint::sameAddress('', '') && !RelayBirthEndpoint::sameAddress('not-an-ip', 'not-an-ip'),
+	'addresses compare as addresses: IPv6 spellings, IPv4-mapped, and nothing matches a non-address');
+$r = RelayBirthEndpoint::processBorn(json_encode($forged), $token, '2001:db8::5');
+check($r['status'] === 403 && strpos((string)$r['error'], 'did not come from') !== false,
+	'an IPv6 arrival the run never recorded is refused at the address', json_encode($r));
+$run->set('rcl_instance_ipv6', '2001:DB8::5');
+$run->save();
+$r = RelayBirthEndpoint::processBorn(json_encode($forged), $token, '2001:db8:0::5');
+check(strpos((string)($r['error'] ?? ''), 'did not come from') === false,
+	'a report from the instance\'s recorded IPv6 gets past the address (stopping here at the forged signature)', json_encode($r));
+$run->set('rcl_instance_ipv6', null);
+$run->save();
 $r = RelayBirthEndpoint::processBorn('{"report":', $token, '127.0.0.1');
 check($r['status'] === 400, 'garbage is a 400', json_encode($r));
 $check_run = new RelayCloudProvision(intval($run_id), TRUE);

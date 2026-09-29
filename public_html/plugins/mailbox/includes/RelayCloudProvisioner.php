@@ -23,6 +23,7 @@
  *
  * Test seam: $driver_factory.
  *
+ * @version 2.4 - the run records the instance's IPv6 beside its IPv4 (create, rebuild, boot poll)
  * @version 2.3 - an update run asks the provider for the server's region before the rebuild, so it takes
  *                the Metadata service instead of a StackScript fallback its token cannot use
  * @version 2.2 - a fleet shard is born the same way, skeleton only (rcl_mfs_mailbox_fleet_shard_id): the
@@ -196,6 +197,7 @@ class RelayCloudProvisioner {
 
 		$run->set('rcl_instance_id', (string)$instance['id']);
 		$run->set('rcl_instance_ip', (string)$instance['ip']);
+		$run->set('rcl_instance_ipv6', (string)($instance['ipv6'] ?? ''));
 		$run->set('rcl_status', 'booting');
 		$run->set('rcl_error', null);
 		$run->save();
@@ -407,11 +409,15 @@ class RelayCloudProvisioner {
 		// the token step does not ask for). Ask the provider where the server is.
 		if (trim((string)$run->get('rcl_region')) === '') {
 			try {
-				$region = (string)($driver->getInstance($instance_id)['region'] ?? '');
+				$found = $driver->getInstance($instance_id);
+				$region = (string)($found['region'] ?? '');
 				if ($region !== '') {
 					$run->set('rcl_region', substr($region, 0, 50));
-					$run->save();
 				}
+				if (!empty($found['ipv6'])) {
+					$run->set('rcl_instance_ipv6', (string)$found['ipv6']);
+				}
+				$run->save();
 			} catch (CloudComputeException $e) {
 				return $this->handleComputeFailure($run, $e, 'rebuild');
 			}
@@ -426,6 +432,9 @@ class RelayCloudProvisioner {
 
 		if (!empty($instance['ip'])) {
 			$run->set('rcl_instance_ip', (string)$instance['ip']);
+		}
+		if (!empty($instance['ipv6'])) {
+			$run->set('rcl_instance_ipv6', (string)$instance['ipv6']);
 		}
 		$run->set('rcl_status', 'booting');
 		$run->set('rcl_error', null);
@@ -454,6 +463,9 @@ class RelayCloudProvisioner {
 		}
 
 		$run->set('rcl_instance_ip', (string)$instance['ip']);
+		if (!empty($instance['ipv6'])) {
+			$run->set('rcl_instance_ipv6', (string)$instance['ipv6']);
+		}
 		$run->set('rcl_status', 'provisioning');
 		$run->save();
 		return 'boot complete - waiting for the relay to build itself and report in';
