@@ -1,9 +1,10 @@
 # Every file has an owner
 
-**Status: DRAFT (public-html-b3, 2026-09-26). Design proposal, not built.
-Measured with a census in scratch on the 420-seed sweep at `d9ad1769`.
-Approach NEEDED and VALID (public-html-a5, 2026-09-26), after its
-objections O1-O8 were written in (design 1a-1d, 2, 3, 4). Build started.**
+**Status: BUILDING in scratch (public-html-b3), steps 1, 2, 2b and 3; step 4
+and design 3 not started. Approach NEEDED and VALID (public-html-a5,
+2026-09-26, after O1-O8); design 2b and the step-2 fixes VALID 2026-09-27
+with conditions, written in. Census and sweeps on the 420 seeds at
+`d9ad1769` plus B11 and B12.**
 
 This is the reset's cause 3 (`drive_sync_reset.md`, "Why a reset"). It takes
 B6 and the reserved-name detour below as routes into one cause, the same way
@@ -159,16 +160,26 @@ due at its path shares that path with the download's record (1b).
      earlier in the same pass, so this only waits when the folder itself
      could not be. The census saw no file waiting on this across a pass.
 2. **One way to move a file aside: with its owner, record first.** Every
-   executor site that renames a file aside does it through one step that
-   writes the owner's new placement before the rename.
+   executor site that renames a file aside keeps the file owned: by its
+   record's identity always, and by a placement written before the rename
+   wherever the engine may decide that placement itself.
    - An established owner (it has an agreement) follows as `make_room` does
      today: agreement moved, server move owed (`agree_and_owe_move`).
    - A never-sent owner follows by rewriting its `remote` placement, with no
-     server move owed: there is no server file to move. Today
-     `the_owner_follows_its_file` returns without doing anything for a record
-     with no agreement, so under 1b alone `make_room` would still orphan the
-     aside. A never-sent owner held outside its vault stays held where it
-     lands (Q2 in `drive_file_identity.md`).
+     server move owed: there is no server file to move. Only within the
+     folder its record names (`Beside::InPlace`): a file carried into another
+     folder in the pass keeps its record by identity, and its placement is
+     stale until the next scan follows it, because whether it goes up sealed
+     and whether it is held there are the scan's decisions, made from the
+     whole disk. Followed across mid-pass, a file saved in a vault and
+     carried out was sent in the clear by the upload already queued for it
+     (hostile2 74427). On a disk without births the stale placement is the
+     only thing that would own it, so this depends on 2b. A never-sent owner
+     held outside its vault stays held where it lands (Q2 in
+     `drive_file_identity.md`).
+   - An upload planned for a never-sent record before its file was set aside
+     stands down (its planned placement is no longer the record's), and the
+     next pass decides from where the file stands.
    - `preserve_local_as` mints its copy's record after the rename; it moves
      to record first.
    - The blocker at a local move's destination (`execute.rs`) follows only a
@@ -179,9 +190,42 @@ due at its path shares that path with the download's record (1b).
      when the blocker's owner is nobody, or a never-sent record forgotten in
      the same step; otherwise the blocker goes aside with its owner.
    - The rescue out of a trashed folder follows a never-sent owner as well as
-     a held one, record first. An established live record there is one the
-     server spared: no server move is owed for it, and the next scan finds its
-     file by identity.
+     a held one, record first, across folders (`Beside::Anywhere`: the engine
+     chose the folder). An established live record there is one the server
+     spared: no server move is owed for it, and the next scan finds its file
+     by identity. A never-sent SEALED file never reaches this: the rescue
+     leaves sealed files to go to the trash with their folder
+     (`sealed_not_rescued`) rather than publish them, so no plain folder ever
+     receives one this way (traced, 2026-09-27).
+2b. **On a disk without births, a record never sent follows its own file by
+    its id.** It has no agreed inode and no agreed bytes, and there an id is
+    not an identity, so the path rules could not follow it: a file carried by
+    a swap read as a new file where it landed (hostile2 74415, births hidden:
+    a vault file minted again in a plain folder and sent in the clear) or as
+    the edit of the record whose path it landed on (plain2 75217). Three
+    rules:
+    - the last rule of the path-first scan, over files no other rule claimed:
+      a never-sent record that would read as deleted follows the unclaimed
+      file bearing its own id. A settled record's moved file can never be
+      taken this way, since every other rule runs first; a backup made by
+      renaming stays a save, because rule 1 gives the record the file at its
+      path first;
+    - rule 1's trade check counts a never-sent record's own id, both as the
+      owner of the file standing at a settled record's path and as the
+      record's own file standing elsewhere. A never-sent record is never at
+      home by that check (it has no agreed bytes). Wrong about a reused id
+      inside one pass, it costs the settled record's version history, which
+      ends at the backup name while the save goes up new; no bytes are lost;
+    - an upload that cannot find a never-sent record's file keeps the record
+      if it knows its own file at all, trusted or not, and the next scan
+      decides; before, without births, it forgot the record on the spot.
+    An id buys this because of what a record never sent is: no server file
+    and no version history, so a wrong match puts a stranger under it,
+    decided afresh where it stands, as a new file would have been; a hold it
+    had holds the stranger. Nothing is sent on the id's word. It narrows the
+    weak-volume vault leak and does not close it: a file whose id changes on
+    the way (FAT, exFAT) is still minted where it lands, and the vault
+    guarantee on weak volumes stays with `drive_file_identity.md` Q1.
 3. **A download's record takes its file's identity before the file is
    placed.** The spool keeps its identity through the rename into place, so
    the record writes `own_file` first and then the file lands. It writes
@@ -231,7 +275,12 @@ holds can reach it. Not retired: the `.jd-swap-` litter rule (1d).
     keeps one record and never uploads the escape (1b);
   - a sealed file set aside by `make_room` while never sent keeps its record
     and its encryption (2).
-- Sweep against `d9ad1769`, births hidden as the control: every G->R traced.
+- The landing bar (`drive_sync_reset.md` R10), for every commit in the
+  build order: pins red without their rule; suites green; the 420-seed
+  sweep against the commit before it, births shown and hidden, with NO seed
+  green to red and every journal change traced; the reviewer's NEEDED and
+  VALID on the final diff. A red on the sweep is fixed before the commit,
+  whether the commit caused it or only exposed it.
 
 ## Build order
 
@@ -240,8 +289,11 @@ hidden as the control:
 
 1. The oracle (design 4), counting, not failing: the census as a harness
    check with its excuses, so every later commit shows the count it moves.
+   With it, the sealed-name check counts only names the user chose (found by
+   the sweep, below).
 2. The executor (design 2): every move-aside takes its owner, record first,
    never-sent owners included; the blocker's trash asks whose it is.
+2b. Never-sent records on a disk without births (design 2b).
 3. The scan and the download (1b, 1c): the waiting state, no merge into a
    pending download, the download settling its slot by identity. The
    reserved-slot set goes.
@@ -263,7 +315,8 @@ The oracle turns from counting to failing once the count reads zero.
   own folder (a rescue, whose folder the engine chose, may cross), and an
   upload planned before its file was set aside stands down. Both needed;
   each pinned. Re-swept: births shown, no seed green to red; hidden, one
-  (plain2 75208), not yet traced.
+  (plain2 75208), to trace on the sweep with 2b in (a5: probably the weak
+  cross-folder aside 2b closes).
 - **Step 3 exposes a gap on volumes without births: a never-sent record
   cannot follow its own file.** It has no agreed content to be found by, and
   its file id alone is not trusted there. So a file carried by a swap reads
@@ -272,18 +325,77 @@ The oracle turns from counting to failing once the count reads zero.
   path it landed on (plain2 75204, 75217, 75278, 75279: one record holds
   both bodies of a swap). The reserved slot hid this by never minting such
   files at all: in the base run of 74415 the vault file had no record for
-  the whole run and was never synced. Proposed close, not built: on such a
-  volume a never-sent record follows its own file by file id, and scan rule
-  1 counts a never-sent record's own file id when it asks whether a file at
-  a path arrived by a trade. An id there is evidence enough to keep a file
-  under its record, never to send it: a wrong match (a reused id) holds a
-  stranger or mints it where it stands, and loses and leaks nothing.
+  the whole run and was never synced. Closed by design 2b (approach VALID,
+  public-html-a5, 2026-09-27, with its conditions: last rule, backup kept a
+  save, the misread's cost written, a narrowing not a close). Building it
+  found one more route: an upload that could not find a never-sent record's
+  file forgot the record when its identity was not trusted, which without
+  births is always; the record is now kept and the next scan decides.
 - **A harness false alarm** (plat3 75429, births shown): the sealed-name
   check counts the name of a vault file the user only edited. Here the
   engine had named it (a conflict copy), and the same generated name came
   up independently for a plain file at the top. The check should count only
   names the user chose, by creating or renaming. The reset's flaw 3 family
-  (the harness judges by name, not by where the name came from).
+  (the harness judges by name, not by where the name came from). Fixed in
+  step 1 (agreed, public-html-a5): a user write records whether it made the
+  file, and only a made name or a rename's destination counts as sealed.
+  Pinned by hand, since the seed is green before step 3 whatever the check
+  does.
+
+## Found by tracing the weak-disk seeds, 2026-09-28 (built in scratch wf5, not landed)
+
+Tracing the 13 births-hidden seeds for `drive_weak_volume_identity.md` found
+three routes by which a record is dropped while its file still stands. Each
+leaves a file with no record, which is this spec's flaw. On a weak disk a swap
+then carries the file onto a synced record's path, where it reads as that
+record's edit.
+
+- **E1a: moving a plain file into a vault, with the key here** (kill2 75112,
+  75116, 75119). The Convert arm (`pass.rs`, crossing a vault edge) queues
+  `trash_remote` and forgets the record, relying on the next scan to find the
+  file as new. The keyless arm of the same code mints a claimant with the file
+  handed over. The keyed arm should too: an encrypted claimant, pending upload,
+  `replaces` the source.
+- **E1b: a folder the server deleted, with a child that had already left it**
+  (hostile2 74414). `trash_local` then `forget_folder_the_server_confirms`
+  forgets the child, whose file had moved out mid-pass. It should read as
+  "deleted there, moved here": the file is kept and sent as new.
+- **E1c: a new file renamed off a held name mid-pass** (plat3 75425).
+  `clear_of_a_held_name` renames the disk file and the new record is minted at
+  the new name. Then the round loop's gone check tests that path against the
+  scan's `observed`, taken before the rename, and forgets the record.
+
+**Built (scratch wf5, 2026-09-28):**
+- **E1a:** the crossing arm mints the claimant with or without the key. It
+  waits `PendingKey` only without one, and the source's trash follows the
+  claimant's upload as it already did for the keyless case. Naming now skips
+  a source whose file a claimant has taken, until the source is trashed.
+  Judged there, its old name competed with the sealed file traded out into
+  that slot, which lost a case clash and was taken off the disk
+  (`a_swap_across_a_vault_edge_converts_in_and_holds_out`). One pin changed
+  for the better: a held file's plain folder dragged into a vault now carries
+  the sealed file into the vault as the same server file, not a second
+  sealed copy (`a_held_files_plain_folder_dragged_into_a_vault_takes_it_into_the_vault`).
+  Two follow-ups the pinned seed plat3 75400 found, which stalled (B7, found
+  by a5 and by b3):
+  - A record never sent is left to the provisional follow, which already made
+    it the vault's where its file stands, clear of any held name. Given a
+    claimant too, two records competed for one name in the vault, each
+    vetoing the other's upload.
+  - The round's gone check for a provisional counts its path as gone when
+    the file standing there is not its own and another record owns it. Its
+    source does not count as that other owner. A claimant whose file had gone
+    back to its source, with another record's file moved into its path
+    after, otherwise stood at that name for ever.
+- **E1b:** `forget_folder_the_server_confirms` gives a child whose own file
+  stands outside the folder a new record where the file stands, before its
+  old record goes. The file is found by id, or by bytes on a volume with no
+  ids. By bytes only when they are that child's alone: two children of the
+  deleted folder with the same bytes, both moved out, get no new record and
+  are minted new by the next scan (the behaviour before E1b; the safe
+  direction).
+- **E1c:** the gone check asks the disk when the scan's list does not have
+  the path.
 
 ## Open
 

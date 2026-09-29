@@ -343,7 +343,13 @@ WP3's bar, each with its shape report (R8), never in the same change.
   reach every volume: O2's ordering, the own-file reads (by file id alone
   where the identity is weak), and the held-name set built from the scan's
   moves. On the 420-seed sweep with births hidden that moves 14 verdicts, 7
-  each way, every one attributed by knockout to one of those three.
+  each way, every one attributed by knockout to one of those three. One
+  rule narrows this, from `drive_file_ownership.md` (2026-09-27): a record
+  never sent follows the file it was minted for by that file's id, and the
+  path rule's trade check counts that id. It narrows the weak-volume vault
+  leak and does not close it: a file whose id changes on the way (FAT and
+  exFAT keep the id in the directory entry) is still minted where it lands.
+  The vault guarantee on weak volumes stays with Q1.
 - **Folders.** WP2 gave folders directory identity. The same birth pair would
   retire C5's recycled-directory rule; that is a follow-up. C9 part 2, the
   folder make_room rule, folder T1, the D1 park gap and C13 are separate.
@@ -546,9 +552,10 @@ is frozen (R5).
   judge it for a name (it is never uploaded under one; judged, it outranked
   the other file, which was parked as a duplicate for good). The other file
   lands, the held one is moved aside, and the next scan finds it by its own
-  identity. On a weak volume the drag-out itself still sends it plain: the
-  path rule forgets the provisional and mints the file where it lands (weak
-  volumes keep today's reading; Q1). Pin, RED on commit 1 (which sends it
+  identity. On a weak volume the provisional follows its file by the id it
+  was minted for (`drive_file_ownership.md`, 2026-09-27) and is held where it
+  lands while that id holds; a file whose id changed on the way is still
+  minted where it lands and sent plain (Q1). Pin, RED on commit 1 (which sends it
   plain at the drag-out) and RED on commit 2 with either rule out:
   `a_never_sent_file_moved_aside_by_a_download_stays_held`.
 - **A record's server name is a name it holds, and the name merge never folds

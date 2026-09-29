@@ -1710,6 +1710,27 @@ not.
 **R9. Every designed behaviour a belt touches gets a pin, run RED with the
 belt in, before the belt lands.** B1 is what happens without this.
 
+**R10. The landing bar (owner, 2026-09-27): nothing is committed without all
+four of these.** Three months in, there is no room for another regression.
+1. *A theory, tested.* The cause is traced on a real run (a trace, a
+   census, a reproduction), not read from the code or taken on instinct.
+2. *A fix, verified.* Every rule it adds has a pin RED without that rule and
+   GREEN with it. The suites pass on the builder's own target directory.
+3. *No regression.* The 420-seed sweep against the named base commit, births
+   shown and hidden, turns no seed from green to red, and every journal
+   change is traced to the fix. A red the builder calls the harness's false
+   alarm counts only once the harness is fixed, in the same commit or
+   before it, and the seed is green again. "Pre-existing, only exposed" is
+   not an exemption: an exposed gap is closed before the commit lands.
+4. *A second agent agrees.* The reviewer rules NEEDED and VALID on the final
+   diff, by hash, having rerun the suites and the pins' knockouts itself.
+If any one is missing, the work stays unstaged, whatever else it has.
+
+**R11. Design first (owner, 2026-09-26).** A bug is reported as the symptom of
+a named design flaw, and the fix is the design that makes the flaw's whole
+class impossible, not a guard for the one route found. A new bug that fits
+no named flaw is a reason to name one.
+
 ## Tests
 
 - B1: `a_sealed_file_dragged_into_a_brand_new_folder_still_converts` -- RED on
@@ -1753,6 +1774,21 @@ belt in, before the belt lands.** B1 is what happens without this.
   B6, a file at a reserved download slot gets a record so the hold reaches
   it; then C9 part 2 with B4 and B5, the D1 park gap and C13. B3 waits for its
   prototype's three neighbour reds to be traced.
+- **File ownership, the reset's cause 3 (2026-09-26):
+  `drive_file_ownership.md`.** Every rule is a property of a record, and a
+  file on the disk could be owned by no record: the scan skipped a file at a
+  pending download's slot and every `.jd-` name, and the executor moved such
+  files aside with no owner. After a completed pass, 382 of the 420 seeds
+  held such a file. It takes B6 and the reserved-name detour as routes into
+  one cause. Approach NEEDED and VALID (public-html-a5, 2026-09-26); being
+  built. It supersedes the order line above from B6 on.
+- **B14, fixed in the harness 2026-09-27 (found by the file-ownership sweep,
+  plat3 75429): the sealed-name check counted the name of a vault file the
+  user only edited.** The engine had named it (a conflict copy), the same
+  generated name came up independently for a plain file, and the check read
+  a sealed name reaching the server. A write now records whether it made the
+  file; only a made name or a rename's destination counts. A symptom of the
+  harness judging by name rather than by where a name came from.
 - **B1, open (public-html-e9, 2026-09-25, read): a sync root on a different
   volume from the state directory cannot download.** `OsSpoolFile::commit`
   places a file with a bare `fs::rename` (`jd-vfs` `real.rs`), which fails
@@ -1804,7 +1840,8 @@ belt in, before the belt lands.** B1 is what happens without this.
   there). Two narrowings of `remote_wants` cleared it and broke two
   neighbours each (a livelock, a leak). Belongs with C9 part 2 (folder
   identity).
-- **B6, open (2026-09-25, traced in kill2 75129): a file saved at a vault
+- **B6, taken into file ownership (2026-09-26; `drive_file_ownership.md`,
+  design 1b) (2026-09-25, traced in kill2 75129): a file saved at a vault
   slot reserved for a download it has not received yet is nobody's, and
   carried out of the vault it goes up plain.** The scan gives no record to a
   file standing where a pending download will land (`pass.rs`, the

@@ -93,7 +93,8 @@
   - D5: the certificate and the DKIM keys travel.
 - **Goal set by the owner (Q1):** copy between any two servers — across Linode accounts and regions,
   and to another provider. Linode to Hetzner is the design target.
-- Open: none. Q6 and Q7 answered 2026-09-28 (WP4's side on T).
+- Open: Q8 and Q9 (2026-09-28, before WP4 is built), and G1 for the owner's nod. Q6 and Q7 answered
+  2026-09-28 (WP4's side on T).
 - **Q3 answered (2026-09-28):** the test domain is `jeremytunnell.info`.
 - **Q5 answered (2026-09-28):** L0 creates its own source each run.
 - **Q4 answered (2026-09-28):** jeremytunnell switches by changing its Cloudflare origin (WP7a).
@@ -924,6 +925,14 @@ In build order. Each is built and tested on its own (design rule).
       state directory, raised only after a bundle checks out;
     - `_site_state.sh` clearing removes the recorded S key with `copy_of` and `vouched`, so a
       promoted T stops trusting S's key.
+  - **G1 (found 2026-09-28 at the start of WP4; proposed, awaiting the owner's nod): T needs its own
+    staging word, `copy_stage`.** The ordinary `stage_chain` accepts only artifacts in T's own upload
+    ledger and opens the chain with T's own site key, so it refuses S's chain on both counts.
+    `copy_stage` (operate, only under `quiet copy`) downloads the chain M links under S's prefix,
+    accepts the manifest only when its hash is in `vouched`, and checks every artifact against the
+    manifest's sizes and hashes. It writes no key: `copy_import` already wrote `chain.key`.
+    `stage_chain` never learns that copies exist. One refresh is then: `copy_export` (S),
+    `copy_import`, `copy_stage`, `copy_restore` (T), `site_census` (both). That makes seven words.
   - **T's side of the export (carried from WP2).** `copy_restore` reads what `copy_import` leaves:
     - each chain in the usual workspace, `restore_<chain id>` under the backup base, with
       `manifest.json` and the chain data key opened from the bundle as `chain.key`;
@@ -1086,3 +1095,23 @@ In build order. Each is built and tested on its own (design rule).
   jobs and the compare.)
   - Hardening: S's own admin page already shows S's agent fingerprint, served by S and not by M.
     The printed command shows the fingerprint it carries and tells the owner to compare the two.
+- **Q8 — Open (2026-09-28): which key the export is sealed to.** The seal must go to a key S can
+  prove is T's, or a compromised M substitutes its own key and reads every secret in the bundle.
+  - **(a) T's agent key.** The key the owner approved T's join by, and the fingerprint the export
+    approval names, so S seals to exactly the key the owner saw. No extra step. Catch: one key both
+    signs and decrypts (Ed25519 converted to X25519; studied and accepted, as `age` does with ssh
+    keys). The spec's "sealed to T's `backup_site_key`" changes.
+  - **(b) T's `backup_site_key`, as written.** Keeps the signing key only signing. Catch: S cannot
+    tell T's backup key from one M made up, so T must publish it signed by its agent key: one more
+    word and one more job before every export.
+  - Recommendation: (a).
+- **Q9 — Open (2026-09-28): how often the owner approves on S.** S exports at the first copy, at
+  each refresh and at the final copy, inside the downtime.
+  - **(a) Every export.** The restore approval's mechanism as it is. Catch: each refresh needs the
+    recovery key, and the final copy waits on the owner inside the downtime (about a minute when
+    ready; the job holds up to an hour).
+  - **(b) Once per T.** The first approval records T's fingerprint in S's state directory; later
+    exports to that T run unasked. Only T can open them either way. Catch: a record to keep and to
+    withdraw, and a compromised M can push fresher data to T unasked (still readable only by T).
+  - Recommendation: (a) for v1; L0 measures the cost, and (b) can be added later without changing
+    the bundle.
