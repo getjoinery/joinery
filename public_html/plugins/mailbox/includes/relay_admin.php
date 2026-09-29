@@ -13,6 +13,9 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.7 - delete refuses a relay that is still enabled
+ * @version 2.6 - a run still waiting for its permission gives way to a new update or create;
+ *                relay messages show inside the Relay section (mailbox_relay_notice_html)
  * @version 2.5 - the Linode permission comes with the update or the create (grant=token|oauth,
  *                admin_mailbox_relay_take_grant); enable/disable set the receive mode; every
  *                relay action returns to #relay-section
@@ -40,11 +43,33 @@ function admin_mailbox_relay_linode_oauth_configured(): bool {
 }
 
 /** The shared flash shape every relay surface uses. */
+/**
+ * Leave a message for the Relay section, where every relay action lands
+ * (#relay-section): shown inside the section by mailbox_relay_notice_html(),
+ * then forgotten. The page's own message area sits at the top, above where the
+ * person has been taken, which read as "nothing happened".
+ */
 function admin_mailbox_relay_flash($session, string $msg, string $title = 'Done'): void {
-	$session->save_message(new DisplayMessage(
-		$msg, $title, '~/plugins/mailbox/admin/~',
-		DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-	));
+	$_SESSION['mailbox_relay_notice'] = array('title' => $title, 'message' => $msg);
+}
+
+/**
+ * Clear the way for a new relay act: a run still waiting for its Linode
+ * permission has done nothing, so a new update or create replaces it. True
+ * when nothing is under way now; false when a run has actually started.
+ */
+function admin_mailbox_relay_nothing_under_way(): bool {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
+	$live = RelayCloudProvision::live();
+	if ($live === null) {
+		return true;
+	}
+	if ((string)$live->get('rcl_status') === 'awaiting_grant') {
+		$live->eraseCredentials();
+		$live->soft_delete();
+		return true;
+	}
+	return false;
 }
 
 /**
@@ -87,12 +112,18 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 
 	if ($action === 'delete' && $relay_id) {
 		$relay = new MailboxRelay(intval($relay_id), TRUE);
+		// Only a disabled relay is removed: one still carrying mail is disabled
+		// first, which says what happens to the mail on the way.
+		if ((bool)$relay->get('mrl_is_enabled')) {
+			admin_mailbox_relay_flash($session, 'Disable the relay first, then delete it.', 'Relay still in use');
+			return LogicResult::redirect($back);
+		}
 		$relay->soft_delete();
 		admin_mailbox_relay_flash($session, 'Relay removed.');
 		return LogicResult::redirect($back);
 	}
 
-	// Check Relay Health: ask the relay for a fresh health answer (reachable, and
+	// Test Relay Health: ask the relay for a fresh health answer (reachable, and
 	// whether its spam scanner runs and its verdicts reach this server — the
 	// cron pass asks once per reconcile, but an operator mid-incident needs a
 	// fresh one, specs/mailbox_relay_scanner_health.md D1), then send the
@@ -146,9 +177,9 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 				'This relay is not one this site can update for you.', 'Cannot update');
 			return LogicResult::redirect($back);
 		}
-		if (RelayCloudProvision::live() !== null) {
+		if (!admin_mailbox_relay_nothing_under_way()) {
 			admin_mailbox_relay_flash($session,
-				'A relay cloud act is already in flight — one at a time.', 'Cannot upgrade');
+				'A relay update or creation is already under way — one at a time.', 'Cannot upgrade');
 			return LogicResult::redirect($back);
 		}
 
@@ -213,8 +244,8 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 			admin_mailbox_relay_flash($session, 'Pick a region.', 'Cannot provision');
 			return LogicResult::redirect($back);
 		}
-		if (RelayCloudProvision::live() !== null) {
-			admin_mailbox_relay_flash($session, 'A relay cloud act is already in flight — one at a time.', 'Cannot provision');
+		if (!admin_mailbox_relay_nothing_under_way()) {
+			admin_mailbox_relay_flash($session, 'A relay update or creation is already under way — one at a time.', 'Cannot provision');
 			return LogicResult::redirect($back);
 		}
 
@@ -261,9 +292,13 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		if ($run === null || (string)$run->get('rcl_status') !== 'awaiting_grant') {
 			return LogicResult::redirect($back);
 		}
-		// A run already waiting: a missing or rejected token leaves it waiting.
-		return admin_mailbox_relay_take_grant($run, array('grant' => 'token', 'cloud_token' => $input['cloud_token'] ?? '',
-			'keep_run' => 1), $session, $back) ?? LogicResult::redirect($back);
+		// A run already waiting (the section's Continue): Approve at Linode or a
+		// token, and a missing or rejected token leaves it waiting.
+		return admin_mailbox_relay_take_grant($run, array(
+			'grant'       => (($input['grant'] ?? '') === 'oauth') ? 'oauth' : 'token',
+			'cloud_token' => $input['cloud_token'] ?? '',
+			'keep_run'    => 1,
+		), $session, $back) ?? LogicResult::redirect($back);
 	}
 
 	// Dismiss a finished (or abandoned-at-consent) run from the section.
@@ -722,7 +757,7 @@ function admin_mailbox_relay_provision_shard(array $input, $session): array {
 		return array('title' => 'Cannot provision shard', 'message' => 'Pick a region.');
 	}
 	if (RelayCloudProvision::live() !== null) {
-		return array('title' => 'Cannot provision shard', 'message' => 'A relay cloud act is already in flight — one at a time.');
+		return array('title' => 'Cannot provision shard', 'message' => 'A relay update or creation is already under way — one at a time.');
 	}
 
 	$shard = new MailboxFleetShard(NULL);
