@@ -80,6 +80,30 @@ $v = InboundEmailHealth::hiddenOriginSendAllowed();
 check($v['allowed'] === false && ($v['probe']['state'] ?? '') === 'failed' && strpos($v['reason'], 'exposed') !== false,
 	'a probe that exposed this server refuses SMTP and says what leaked', json_encode($v));
 
+// A probe whose raw message is not kept (offloaded, or never stored) is found
+// by its header block, which is what the scan reads anyway.
+sleep(1);
+$h = new InboundEmailMessage(NULL);
+$h->set('iem_ied_inbound_email_domain_id', intval($domain->key));
+$h->set('iem_recipient', 'probe-target@relay-send-gate.example');
+$h->set('iem_sender', 'probe-target@relay-send-gate.example');
+$h->set('iem_subject', 'origin probe');
+$h->set('iem_raw_message', '');
+$h->set('iem_raw_headers', "Received: from relay.example (relay.example [198.51.100.9])\r\n"
+	. InboundEmailHealth::ORIGIN_PROBE_HEADER . ": gate-test\r\nSubject: origin probe\r\n");
+$h->set('iem_received_time', gmdate('Y-m-d H:i:s'));
+$h->save();
+harness_register_model('InboundEmailMessage', $h->key);
+$v = InboundEmailHealth::originProbeVerdict();
+check(($v['state'] ?? '') === 'passed', 'a probe kept only as its header block is found and passes', json_encode($v));
+
+// A host that calls itself localhost leaks nothing by the word: the relay's
+// scanner signs its own header with it.
+check(InboundEmailHealth::scanHeadersForOrigin("X-Rspamd-Server: localhost\r\nReceived: from relay.example\r\n", '203.0.113.7', 'localhost') === array(),
+	'a loopback hostname is not searched for (X-Rspamd-Server: localhost is the relay naming itself)');
+check(InboundEmailHealth::scanHeadersForOrigin("Received: from box7.internal (box7.internal [10.0.0.2])\r\n", '203.0.113.7', 'box7.internal') !== array(),
+	'a real hostname still is');
+
 // An API provider is unaffected by a failed probe: it passes by construction.
 harness_set_setting_mem('email_service', 'mailgun');
 $v = InboundEmailHealth::hiddenOriginSendAllowed();
