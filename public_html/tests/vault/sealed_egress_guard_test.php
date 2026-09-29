@@ -29,10 +29,14 @@
  *    someone can drift;
  *  - mail is refused outright unless the call site names why it is allowed;
  *  - a unit-of-work boundary scopes the rule without laundering it — an outer
- *    hot state survives, so nesting cannot be used to go cold.
+ *    hot state survives, so nesting cannot be used to go cold;
+ *  - an owner-approved action writes exactly what was approved, and only for
+ *    that owner; a declared content-free site writes metadata; both have a
+ *    fixed, enumerated set of callers.
  *
  * Run: php tests/run.php db --filter=sealed_egress_guard
  *
+ * @version 1.2 - consentToValues() and contentFree()
  * @version 1.1 - integer id lists pass at any length
  * @version 1.0
  */
@@ -321,6 +325,101 @@ try {
 		$row->save();
 	});
 	check($still_refused !== null, 'the very next write outside the unit is refused again');
+
+	// =====================================================================
+	section('an owner-approved action may write the values they approved');
+
+	// The approve step of the AI action queue: the owner saw these literal
+	// arguments and said yes, so the action may write them in the clear —
+	// and nothing else long.
+	SealedEgressGuard::reset();
+	SealedEgressGuard::noteScopeOpened($owner_id);
+	SealedEgressGuard::markHot('aqa:1:aqa_arguments');
+	$approved_notes = '  ' . seg_long('n') . '  ';
+	SealedEgressGuard::consentToValues(['title' => 'short', 'notes' => $approved_notes,
+		'nested' => ['deep' => seg_long('d')]], $owner_id, 'aqa:1');
+	$write = function (string $message) {
+		return seg_refusal(function () use ($message) {
+			$row = new GeneralError(NULL);
+			$row->set('err_level', 'Test');
+			$row->set('err_message', $message);
+			$row->save();
+			harness_register_row('err_general_errors', 'err_general_error_id', (int)$row->key);
+		});
+	};
+	check($write($approved_notes) === null, 'the exact approved value is written');
+	check($write(trim($approved_notes)) === null,
+		'as is a piece of it — the destination trims and caps what it stores');
+	check($write(seg_long('d')) === null, 'nested argument values are covered too');
+	check($write('Result: ' . trim($approved_notes)) !== null,
+		'a value that merely contains an approved one is still refused');
+	check($write(seg_long('q')) !== null, 'and so is anything the owner never saw');
+
+	SealedEgressGuard::noteScopeOpened($owner_id + 1);
+	check($write(trim($approved_notes)) !== null,
+		'once a second person\'s content is open, one owner\'s consent covers nothing');
+
+	SealedEgressGuard::reset();
+	SealedEgressGuard::noteScopeOpened($owner_id + 1);
+	SealedEgressGuard::markHot('aqa:2:aqa_arguments');
+	SealedEgressGuard::consentToValues(['notes' => seg_long('m')], $owner_id, 'aqa:2');
+	check($write(seg_long('m')) !== null,
+		'consent from one owner never covers a process hot on someone else');
+
+	// =====================================================================
+	section('a content-free write is a named claim, not a switch');
+
+	SealedEgressGuard::reset();
+	SealedEgressGuard::noteScopeOpened($owner_id);
+	SealedEgressGuard::markHot('mail:9:body');
+	check(seg_refusal(function () {
+		SealedEgressGuard::contentFree('vault_audit', function () {
+			$row = new GeneralError(NULL);
+			$row->set('err_level', 'Test');
+			$row->set('err_message', 'scope=user reason=explicit_lock session=0123456789ab open_seconds=42');
+			$row->save();
+			harness_register_row('err_general_errors', 'err_general_error_id', (int)$row->key);
+		});
+	}) === null, 'a declared site writes its metadata while hot');
+	check($write(seg_long('after')) !== null, 'and the rule is back the moment it returns');
+	$undeclared = null;
+	try {
+		SealedEgressGuard::contentFree('anything_else', function () {});
+	} catch (InvalidArgumentException $e) {
+		$undeclared = $e;
+	}
+	check($undeclared !== null, 'a site that is not declared is refused outright');
+
+	VaultAudit::closed($owner_id, 'user', VaultAudit::REASON_EXPLICIT_LOCK, 'seg-session', 42);
+	$audit = $db->prepare("SELECT evl_event_log_id FROM evl_event_logs
+		WHERE evl_usr_user_id = ? AND evl_event = ? ORDER BY evl_event_log_id DESC LIMIT 1");
+	$audit->execute([$owner_id, VaultAudit::EVENT_CLOSED]);
+	$audit_id = (int)$audit->fetchColumn();
+	if ($audit_id > 0) harness_register_row('evl_event_logs', 'evl_event_log_id', $audit_id);
+	check($audit_id > 0, 'a vault window closing on a hot request is still audited');
+
+	// The callers of both, enumerated: a new one is a claim worth reviewing.
+	$callers = array('consentToValues(' => array(), 'contentFree(' => array());
+	foreach (array('includes', 'data', 'logic', 'adm', 'ajax', 'api', 'views', 'plugins', 'utils', 'tasks') as $dir) {
+		$root = PathHelper::getBasePath() . $dir;
+		if (!is_dir($root)) continue;
+		$scan = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+		foreach ($scan as $file) {
+			if ($file->getExtension() !== 'php') continue;
+			$rel = ltrim(str_replace(PathHelper::getBasePath(), '', $file->getPathname()), '/');
+			if (strpos($rel, '/tests/') !== false || $rel === 'includes/SealedEgressGuard.php') continue;
+			$src = file_get_contents($file->getPathname());
+			foreach (array_keys($callers) as $call) {
+				if (strpos($src, 'SealedEgressGuard::' . $call) !== false) $callers[$call][] = $rel;
+			}
+		}
+	}
+	check($callers['consentToValues('] === array('plugins/joinery_ai/includes/ActionQueue.php'),
+		'consent is given only by the action queue\'s approve step',
+		implode(', ', $callers['consentToValues(']));
+	check($callers['contentFree('] === array('includes/VaultAudit.php'),
+		'and only the vault audit declares a content-free write',
+		implode(', ', $callers['contentFree(']));
 
 	// =====================================================================
 	section('more than one owner means no owner');

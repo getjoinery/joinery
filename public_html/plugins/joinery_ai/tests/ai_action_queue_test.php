@@ -24,6 +24,7 @@
  *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_action_queue_test.php
  *
+ * @version 1.1 - a sealed recipe proposal approved in-window lands; the card states a failure plainly
  * @version 1.0
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -42,6 +43,7 @@ require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 
 $db = DbConnector::get_instance()->get_db_link();
 
@@ -316,6 +318,73 @@ if ($aq_window_capable) {
 	$resolved = ActionQueue::resolve((int)$sealed->key, $owner_id, 'decline');
 	check((string)$resolved->get('aqa_status') === AiQueuedAction::STATUS_DECLINED,
 		'and resolving works in-window');
+
+	// Approving a sealed proposal opens its arguments, which makes the
+	// request hot — and the approved act must still land. This is the email
+	// schedule recipe's shape: a calendar entry read from protected mail,
+	// with notes well past the guard's 64-character floor.
+	$recipe = new Recipe(NULL);
+	$recipe->set('rcp_name', 'queue test sealed approval ' . gmdate('His'));
+	$recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
+	$recipe->set('rcp_pipeline_job', 'email_schedule');
+	$recipe->set('rcp_owner_user_id', $owner_id);
+	$recipe->set('rcp_max_iterations', 5);
+	$recipe->set('rcp_max_tokens', 5000);
+	$recipe->prepare();
+	$recipe->save();
+	harness_register_row('rcp_recipes', 'rcp_recipe_id', (int)$recipe->key);
+
+	$cal_day = gmdate('Y-m-d', time() + 3 * 86400);
+	$cal_title = 'Sealed approval lands ' . gmdate('His') . '-' . mt_rand(1000, 9999);
+	$cal_notes = 'Confirmation 55120; bring the printed ticket and arrive fifteen minutes early for check-in.';
+	$propose_sealed = function (array $args) use ($owner_id, $recipe) {
+		SealedEgressGuard::noteScopeOpened($owner_id);
+		SealedEgressGuard::markHot('ai_action_queue_test');
+		$row = ActionQueue::propose($owner_id, (int)$recipe->key, 'mailbox',
+			'create_calendar_entry', $args, 'source_ref');
+		aq_register($row);
+		SealedEgressGuard::reset();   // the approving request is a fresh, cold process
+		return $row;
+	};
+	$cal = $propose_sealed([
+		'title'       => $cal_title,
+		'start_local' => $cal_day . ' 19:00:00',
+		'end_local'   => $cal_day . ' 21:00:00',
+		'timezone'    => 'America/New_York',
+		'notes'       => $cal_notes,
+		'source_ref'  => 'aq-test-' . mt_rand(100000, 999999),
+	]);
+	check(!empty($cal->get('aqa_content_sealed')), 'the recipe\'s proposal is sealed');
+	$resolved = ActionQueue::resolve((int)$cal->key, $owner_id, 'approve');
+	$cal_rows = $db->prepare("SELECT cal_entry_id, cal_notes FROM cal_entries
+		WHERE cal_subject_id = ? AND cal_title = ? AND cal_delete_time IS NULL");
+	$cal_rows->execute([$owner_id, $cal_title]);
+	$cal_row = $cal_rows->fetch(PDO::FETCH_ASSOC);
+	if ($cal_row) harness_register_row('cal_entries', 'cal_entry_id', intval($cal_row['cal_entry_id']));
+	check((string)$resolved->get('aqa_status') === AiQueuedAction::STATUS_APPROVED,
+		'approving a sealed calendar proposal in-window executes it',
+		(string)$resolved->get('aqa_status') . ' — ' . json_encode(ActionQueue::card($resolved)['result'] ?? null));
+	check($cal_row !== false && (string)$cal_row['cal_notes'] === $cal_notes,
+		'and the entry is on the owner\'s calendar with its notes');
+
+	// A refusal on the card reads as a sentence, not a tool's internals.
+	$bad = $propose_sealed([
+		'title'       => 'Backwards ' . gmdate('His'),
+		'start_local' => $cal_day . ' 21:00:00',
+		'end_local'   => $cal_day . ' 19:00:00',
+		'timezone'    => 'America/New_York',
+		'source_ref'  => 'aq-test-' . mt_rand(100000, 999999),
+	]);
+	$resolved = ActionQueue::resolve((int)$bad->key, $owner_id, 'approve');
+	$card = ActionQueue::card($resolved);
+	check($resolved->get('aqa_status') === AiQueuedAction::STATUS_FAILED
+			&& $card['result'] === 'end_local must be after start_local.',
+		'a tool\'s own refusal shows without its tool-name prefix', json_encode($card['result']));
+	$failure_line = new ReflectionMethod('ActionQueue', 'failureLine');
+	$failure_line->setAccessible(true);
+	check($failure_line->invoke(null, 'SealedContentEgressException: Refusing to write sealed-derived content into cal_entries.')
+			=== 'It hit an internal error before it could finish.',
+		'an unexpected exception shows as a plain internal error, not its class and message');
 	VaultUnlock::lockAll($owner_id);
 } else {
 	harness_skip('in-window sealed card checks', 'APCu unavailable in this process');

@@ -848,13 +848,18 @@ check per statement. Hot, an INSERT or UPDATE carrying a string longer than
   `SealedEgressGuard::isIntegerList()`) — ids are references to content, never
   content, so a queue of message ids passes at any length;
 - the statement updates a single row already sealed to the owner whose scope
-  this process opened.
+  this process opened;
+- every long value is one the owner approved, or a piece of one (see
+  **Approved values** below);
+- the write runs inside a declared content-free site (see **Content-free
+  writes** below).
 
 Anything else throws `SealedContentEgressException` naming the destination table
 and what was read. The exception is the fix instruction, in preference order:
 store a reference instead of a copy, give the destination the Layer 0 sealing
 columns and seal the value, or do not write the content. There is deliberately
-no way to declare a table exempt.
+no way to declare a table exempt; the two allowances below are claims about
+values at named call sites.
 
 **A new row from a hot process** follows the Layer 0 order all the way through:
 insert it with its content empty and its long plain metadata left out, seal it,
@@ -917,6 +922,25 @@ the conversation. A protected conversation gates from its first turn; a standard
 conversation gates only after it actually touches sealed content, and never
 before. Arming restriction does not arm the write-guard, so an ordinary standard
 conversation keeps writing its plaintext transcript normally.
+
+**Approved values.** Approving a sealed AI proposal (`ActionQueue::resolve()`)
+opens its arguments, which makes the approving request hot — yet writing those
+arguments is the whole point: a calendar entry read from protected mail goes on
+the owner's calendar, which is not sealed. The owner was shown the literal
+arguments on the card and said yes, so the approve step calls
+`SealedEgressGuard::consentToValues()` with them. From then on, in that request,
+a long value that is one of those strings, or a piece of one (the destination
+trims and caps), passes. A value that contains an approved string plus anything
+else is still refused, and the consent counts only while the process is hot on
+that owner alone.
+
+**Content-free writes.** `SealedEgressGuard::contentFree($site, $write)` runs a
+write whose call site claims it carries metadata only — closed vocabularies,
+numbers, digests — the database twin of the mail boundary's `CONTENT_FREE`
+assertion. `$site` must be listed in `SealedEgressGuard::CONTENT_FREE_WRITE_SITES`;
+the one site is `vault_audit`, so a vault window that closes on a hot request is
+still recorded. `tests/vault/sealed_egress_guard_test.php` enumerates the callers
+of both this and `consentToValues()`.
 
 **Units of work.** `SealedEgressGuard::isolate()` runs one independent unit with
 its own hot state and restores the caller's afterwards, so a process that does

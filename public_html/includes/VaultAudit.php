@@ -24,6 +24,8 @@
  * is enough to tie an open to its close and useless to anyone reading the log.
  * No secret key, no wrapping, and no sealed content passes through here.
  *
+ * @version 1.1 - rows are written as a declared content-free site, so a window
+ *               closing on a request that opened sealed content is still recorded
  * @version 1.0.1 - comment wording: the hardened idle cap
  */
 
@@ -122,13 +124,18 @@ class VaultAudit {
 	 */
 	private static function write(string $event, int $user_id, string $note): void {
 		try {
-			SystemBase::server_initiated_write(function () use ($event, $user_id, $note) {
-				$log = new EventLog(NULL);
-				$log->set('evl_event',       $event);
-				$log->set('evl_usr_user_id', $user_id);
-				$log->set('evl_was_success', true);
-				$log->set('evl_note',        $note);
-				$log->save();
+			// The note is metadata only (see the class comment), so it is
+			// declared content-free: a window can close on a request that has
+			// already opened sealed content, and the audit row must still land.
+			SealedEgressGuard::contentFree('vault_audit', function () use ($event, $user_id, $note) {
+				SystemBase::server_initiated_write(function () use ($event, $user_id, $note) {
+					$log = new EventLog(NULL);
+					$log->set('evl_event',       $event);
+					$log->set('evl_usr_user_id', $user_id);
+					$log->set('evl_was_success', true);
+					$log->set('evl_note',        $note);
+					$log->save();
+				});
 			});
 		} catch (\Throwable $e) {
 			error_log($event . ': could not write the vault audit row for user '
