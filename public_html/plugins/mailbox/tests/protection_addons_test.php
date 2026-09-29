@@ -32,6 +32,7 @@
  *
  * Run: php tests/run.php db --filter=protection_addons
  *
+ * @version 1.5 - follows the mail cards' wording
  * @version 1.4 - the editor offers the Fortress card, its copy from the catalog (WP5)
  * @version 1.3 - Fortress is a settable level (specs/client_custody_mail.md); a
  *   legacy value is told apart by ied_level_set_time
@@ -297,7 +298,7 @@ check(strpos($view, "checkboxinput('ied_send_lock_requested'") === false
 check(strpos($view, 'Cost: new mail waits') === false && strpos($view, "Seal at the relay</strong>") === false,
 	'no add-on sentence is restated in the editor');
 check(strpos($view, "'levels'  => InboundEmailDomain::SETTABLE_LEVELS") !== false
-		&& strpos(ProtectionLevelPicker::copy(InboundEmailDomain::LEVEL_FORTRESS, ProtectionLevelPicker::SERVICE_MAIL)[0], 'Only your devices') === 0,
+		&& strpos(ProtectionLevelPicker::copy(InboundEmailDomain::LEVEL_FORTRESS, ProtectionLevelPicker::SERVICE_MAIL)[0], 'Full end-to-end encryption') === 0,
 	'the picker offers Fortress, with the mail card copy (specs/client_custody_mail.md § R12)');
 
 // Render it the way the editor does and read what a member sees.
@@ -338,7 +339,7 @@ check(strpos($html, 'role="switch" name="ied_security_level_relay_seals_to_owner
 check(preg_match('/name="ied_security_level_relay_seals_to_owner"[^>]*disabled/', $html) === 1
 		&& strpos($html, 'href="/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section"') !== false,
 	'with no relay, Seal at the relay is a disabled switch with a link to set one up');
-check(strpos($html, 'Only you can read your stored mail.') !== false, 'the Private card carries the mail copy');
+check(strpos($html, 'Your emails are encrypted in the database.') !== false, 'the Private card carries the mail copy');
 check(strpos($html, '"standard":{"hide":["ied_security_level_addons","ied_ai_processing_enabled"]') !== false
 		&& strpos($html, '"private":{"show":["ied_security_level_addons","ied_ai_processing_enabled"]') !== false,
 	'choosing Standard hides the add-ons and the AI read switch; Private shows them');

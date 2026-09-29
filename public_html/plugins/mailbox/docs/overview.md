@@ -1233,9 +1233,12 @@ row is recoverable).
 
 For **hosted mail** that identity is the domain: MX, SPF, DMARC and DKIM are
 domain-level facts, so the level lives on the domain (`ied_security_level`) and every
-mailbox under it inherits. It is chosen on the domain editor as a required two-card
-picker, **Standard** or **Private** (outcome language only, default **Standard**), with
-an **Extra protection** block of add-ons under Private (below).
+mailbox under it inherits. It is chosen on the domain editor as a required three-card
+picker, **Standard**, **Private** or **Fortress** (outcome language only, default
+**Standard**), with an **Extra protection** block of add-ons under Private and Fortress
+(below). The mailbox editor shows the same cards open, the one in force marked, each
+other card a link to the domain editor with that level chosen
+(`ProtectionLevelPicker::renderLinked()`), so the level is decided in one place.
 
 For **pulled-in mail** — a mailbox collected over IMAP — that identity is the mailbox.
 `gmail.com` is not an identity this deployment holds; it is somebody else's domain that
@@ -1261,12 +1264,14 @@ lowering a pulled-in mailbox runs the checklist, the server-side re-verification
 receipt card and the backlog sealing that a domain does, scoped to that one mailbox.
 There is no second ceremony.
 
-| | **Standard** | **Private** |
-|---|---|---|
-| Meaning | The server manages this mailbox for you | Only you can read stored mail |
-| Stored bodies/subjects/attachments/search index | plaintext | sealed at rest |
-| Search | SQL | in-window FTS |
-| Best for | club signups, newsletters | mail worth keeping private, automation still runs |
+| | **Standard** | **Private** | **Fortress** |
+|---|---|---|---|
+| Meaning | No encryption | Your emails are encrypted in the database | Full end-to-end encryption |
+| Stored bodies/subjects/attachments/search index | plaintext | sealed at rest | sealed to a key only the owner's devices hold |
+| Search | SQL | in-window FTS | a sealed word index in each browser |
+| Best for | mailboxes without sensitive data (customer service, clubs, newsletters) | most users | mail that must stay private even from a hacked server |
+| Team features (shared mailboxes) | yes | no | no |
+| Phone apps | yes | yes | no |
 
 **Extra protection — the add-ons on a Private domain**
 (specs/protection_levels_platform.md § Add-ons). The domain editor renders the level
@@ -1291,8 +1296,8 @@ a domain they own, or the domain of a live mailbox they hold a grant on): the un
 window is capped at 2 hours idle / 24 hours absolute
 (`VaultUnlock::HARDENED_*_CAP_SECONDS`, registered by the plugin bootstrap's window-cap
 provider). Neither add-on asks for a second factor. Plain Private keeps the 7-day
-absolute cap. Wherever the level is shown — the reader's level chip, the Accounts and
-mailbox badges (`InboundEmailDomain::addon_labels()`, `protection_addons` on
+absolute cap. Wherever the level is shown — the reader's level chip, the Accounts
+badges, the mailbox editor's cards (`InboundEmailDomain::addon_labels()`, `protection_addons` on
 `mailbox/mailboxes`) — the add-ons in force show with it, by their catalog names, with
 " (unfinished)" on a sending lock asked for but not finished. An enforcing sending lock
 is labelled at any level, so the labels and `is_hardened()` always agree.
@@ -1306,7 +1311,7 @@ domain; lifting it works at any level. The signing-stage DNS records (the sealed
 DKIM record and the forwarding subdomain) are prescribed only while the lock is asked
 for or on — a cancelled request's stored key publishes nothing.
 
-`LEVEL_FORTRESS` is end-to-end mail (specs/client_custody_mail.md): the domain's mail
+`LEVEL_FORTRESS` is end-to-end mail (§ Fortress: end-to-end mail, below): the domain's mail
 seals to the owner's browser-held `mail` vault, and the server never holds its key.
 `set_security_level()` accepts it and stamps `ied_level_set_time`. A row holding the
 value with no stamp is a legacy row from before mailbox migration
@@ -1329,10 +1334,11 @@ own when `iea_security_level` says so.
   `MailboxSender::sealTargetFor()` — used by the send and by the draft autosave, so
   a draft and the message it becomes can never disagree about being sealed.
 - **Relay seal target** — `RelayMapExporter::sealTargetForAlias()` seals to the owner's
-  vault key (`key_kind=user`, producing pending-parse rows) **only** for a domain with
-  the Seal at the relay add-on in force (`relay_seals_to_owner()`); every other domain
-  seals to the ambient transport key, which Joinery opens at pull and re-seals per the
-  domain's own level.
+  vault key **only** for a domain with the Seal at the relay add-on in force
+  (`relay_seals_to_owner()`): the server key (`key_kind=user`, producing pending-parse
+  rows) at Private, the mail vault's key (`key_kind=client`, `key_scope=mail`) at
+  Fortress. Every other domain seals to the ambient transport key, which Joinery opens
+  at pull and re-seals per the domain's own level.
 - **Setup/health DNS shape** — `InboundEmailSetupCheck` expects the inverted protected
   shape (SPF without the box, `p=reject; aspf=s; adkim=s`, DKIM matching the sealed
   key) for a domain whose `ied_is_protected_identity` flag is set, and for that
@@ -1444,6 +1450,152 @@ rows stay sealed and readable in-window.
 **Group-collaboration mailboxes are Standard-only** (the one-operator/one-key model every
 protected level rests on doesn't cover multi-reader sealing); the domain editor refuses
 to raise a domain whose alias has more than one live grant.
+
+### Fortress: end-to-end mail
+
+A Fortress mailbox is sealed to the owner's **`mail` vault**, a client-custody scope
+(docs/sealed_vault.md § Client-custody scopes): the key is opened only in the owner's
+browser, and the server stores and serves ciphertext it cannot open. Routing,
+threading, spam verdicts and the operational metadata stay server-readable
+(recipient, Message-ID, thread key, auth verdicts, spam score, size, times,
+direction, labels, flags); `iel_from_address` on a sealing mailbox is the envelope
+sender address only.
+
+**Which key a row takes.** `InboundEmailMessage::sealScopeForWrite()` answers `mail`
+when the row's mailbox resolves to Fortress and `user` otherwise, so every store path
+(push, Joinery Direct, the Sent copy, the raise) seals with the same code and only the
+vault differs. A Fortress mailbox whose owner has no `mail` vault is a missing seal
+target and its mail is held, as at Private. `InboundEmailMessage::isBrowserSealed()`
+(the key's scope is client custody, `VaultCrypto::clientCustodyScope()`) is the one
+predicate every server reader checks; `mailKeySql()` is its SQL spelling.
+
+**The row.** Every sealed field is `v1.edge.` under the row's DEK (AD
+`mail:{id}:{field}`), the DEK `v1.edgeseal.mail.…`. Three more sealed fields are
+written with it: `iem_search_text` (the folded search text, at most 32,768
+characters, `gz:`-compressed when that saves a third), `iem_snippet` (the list
+preview) and `iem_attachment_manifest` (`[{id, filename, content_type, content_id,
+mime_part, inline, size}]`). The `ima_` name, type and content-id columns are empty;
+each part's bytes are one AES-GCM box under the message DEK (AD
+`mail:{mid}:att:{mime_part}`), stored as an `application/octet-stream` File. No raw
+message is kept: when extraction fails the message is deferred, never stored with a
+raw. `iem_search_written_time` records when the search text was written, in the same
+UPDATE, so browsers catch up by it.
+
+**Arrival.** Without the relay add-on the pipeline is the Private one: the server
+parses, runs mail rules on the in-memory plaintext, scores spam, and seals to the mail
+key, writing no plaintext. A server compromised while mail arrives can read what
+arrives then; the Fortress card says so. With **Seal at the relay** the relay seals
+each message for the browser before this server sees it (below).
+
+**The reader** (`mailbox_fortress.js`, `window.MailboxFortress`, loaded where
+`mailbox_reader_fortress_visible()` says a Fortress mailbox, a lowering backlog or a
+waiting relay row is in view). `thread_list` and `thread` return a Fortress message in
+the sealed-for-browser shape with `fortress: true` and empty clear fields; the browser
+opens it with `JoinerySealed.open`, names attachment chips from the manifest, fetches
+part bytes as ciphertext and opens them with the row's DEK, and rewrites `cid:` images
+to blob URLs before the sandboxed iframe renders the HTML. Another person's Fortress
+rows on an admin view carry `sealed.foreign` and read "Only the mailbox owner's devices
+can open it". A lock blanks every body, revokes the blob URLs, ends the search worker
+and returns the list to placeholders. A vault a tab opened reopens after a reload of
+that tab (docs/sealed_vault.md § Sessions and the lock).
+
+**Search** runs in the browser. Each browser builds a sealed word index of the
+owner's Fortress mail once, in IndexedDB (`jy_mailsearch_{user_id}`), and afterwards
+adds only new mail. It keeps the Private index's rules (whole words, no text, no
+positions) with dense per-browser numbering, a list or a bitmap per word, no word over
+40 characters, and 256 gzip+AES shards; about 52 MB per 100,000 messages. Its key is
+one random key per user, sealed to the `mail` scope (`MailboxSearchKey`,
+`msk_mailbox_search_keys`, create-only); a rotation re-seals it and no browser
+rebuilds. `mailbox/search_entries` pages the rows' search text (`order: 'new'` after a
+cursor with ten minutes of overlap, `order: 'old'` for the first build, newest first);
+`thread_list` takes the hits as `device_hits` and unions them with the server's own
+search. The first search in a new browser downloads each message's search text once
+(a few hundred MB for 10 GB of mail) and indexes in the background for a few minutes;
+results show as it goes. "Rebuild" and "Remove from this browser" sit on the line above
+a Fortress search's results. **What the server learns:** when every mailbox in view is
+Fortress the reader sends `device_only` and no search term, so the server sees only the
+ids. In a view mixing Fortress and server-searchable mailboxes the term goes with the
+ids, since the server searches its half, so the server learns which Fortress messages
+in view hold that word; it never sees their content.
+
+**Compose.** A send is plaintext to the server, which signs it and hands it to the
+next hop as at any level. The Sent copy is sealed to the mail key with its search
+text, snippet and manifest, and no plaintext copy is written. Drafts are sealed in the
+browser: `draft_save` takes the plain columns first and the sealed fields second
+under one DEK for the draft's life, draft uploads are sealed before upload, and the
+server never opens a draft; on send the browser re-posts the parts it holds.
+
+**What the server does not do** on Fortress mail: AI recipes (AI over Fortress mail is
+the person's browser and their own model, below), the server search index
+(`MailboxIndex` skips the rows), mail rules after arrival, the header view in the
+message timeline, the deliverability-report intercept, and the server-custody repair
+tools. `fortress_server_readers_test.php` pins every one.
+
+**Changing level.** A domain goes to Fortress only when the acting admin owns every
+mailbox on it and none has an IMAP feed (the server would hold a password that reads
+the whole source mailbox) or more than one holder. Choosing Fortress on the domain
+editor opens the owner's mail vault first (made on first use), then saves.
+
+- **Raise.** The level flips at once, so new mail seals to the mail key; earlier
+  mail moves in the owner's unlock window as deferred work `mailbox_fortress_raise`
+  (100 rows or 64 MiB of parts a pass, `MailboxFortressLevel::convertRow()`: same
+  DEK, fields re-framed, parts re-stored nameless, search text and manifest written,
+  the raw dropped). A row that fails is stamped `iem_fortress_move_attempt_time` and
+  passed by for an hour. The Fortress receipt and the mailbox banner count what is
+  left (`mailbox/fortress_backlog`). Standard → Fortress seals straight to the mail
+  key in one pass.
+- **Lower.** The level flips first, then the owner's browser moves each row's DEK to
+  the server key (`JoinerySealed.changeCustody('mail')`, the core custody-change
+  batch); the receipt runs it, and a closed tab resumes from the mailbox banner.
+  Deferred work `mailbox_fortress_lowered` puts the manifest's names back on the
+  parts and clears the Fortress-only columns. Fortress → Standard is that, then the
+  unseal pass.
+
+**Rotation.** The mail vault opens through the root vault, so rotating it needs only
+the root open and takes one `root` wrapping (Security page → Vault Keys). The walk
+re-seals every message DEK, waiting relay rows and the search key; `mailbox-reseal.js`
+re-MACs the relay pins. With the relay add-on on, commit is refused until the relay
+holds the current map and a pull has drained since it was pushed
+(`RelayMapSync::rotationRefusal()`, `mrl_last_pull_drained_time`), so nothing sealed
+to the old key is left behind.
+
+**Seal at the relay, at Fortress.** Offered once the relay reports version 3.2
+(`RelayVersion::SEALS_FOR_BROWSERS`); an older relay keeps the transport key.
+
+- The map names the mail vault's key (`key_kind: client`, `key_scope: mail`, its
+  generation). The relay seals the whole message for the browser (`sealEdge`: a
+  fresh DEK, the body `v1.edge.` with AD `mail:relay:{spool_id}`, the DEK
+  `v1.edgeseal.mail.`). Joinery Direct into such a mailbox stays on the transport
+  key and is sealed to the mail key at pull.
+- The pull stores it as a waiting row (`iem_pending_parse`,
+  `iem_relay_sealed_raw`, the DEK in the key column). An entry sealed to a key no
+  vault on the mailbox holds is stored unopenable at generation 0 and the reader
+  says so; an entry not in the browser's format is held.
+- When the mail vault opens, the reader drains waiting rows newest first
+  (`mailbox/fortress_pending`): it opens the body, parses it (`mailbox_mime.js`,
+  pinned by `mime_parser_gate.sh`), seals the fields and parts under the same DEK,
+  and posts them as one bundle to `mailbox/fortress_parse_store`, which classifies
+  spam from the relay's own headers. The first device to open a row parses it; a
+  second post is a no-op.
+- Mail rules and contact elevation do not run on relay-sealed mail, and spam
+  learning is off; the relay's verdict is the verdict.
+- **The relay pin.** The browser checks which key the relay seals to. The relay
+  signs a statement per mailbox (`GET /relay/seal-target`, Ed25519 under its
+  identity key, prefix `joinery-relay:seal-target:v1`); `mailbox/relay_seal_target`
+  passes it through byte for byte. The browser verifies it against the relay
+  identity pinned for the mailbox (`iea_relay_identity_pin`: the identity and a MAC
+  under a key derived from the vault secret, so the server cannot make a pin the
+  browser accepts) and checks the key named is one it derived itself from the
+  secret it holds (a pending key counts only once opened through the root). The
+  first check pins (trust on first use; each device also keeps its own record, so
+  a pin deleted on the server is noticed). A bad signature, another key, or a
+  different relay stops with a dialog showing both fingerprints; "Trust the new
+  relay" re-pins, after a step-up on an account with a second factor.
+
+**Phone apps.** The iOS and Android apps do not open Fortress mail. The server
+answers `fortress: true` with the sealed shape; reading it on a phone needs the key
+handed to the phone through device linking and the decryption built into the apps,
+which they do not have. The Fortress card says mobile apps are not available.
 
 ### A sealing mailbox always has someone to seal to
 
