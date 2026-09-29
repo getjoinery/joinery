@@ -1,6 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
+// @version 1.5 - the relay-or-direct choice card is gone (Enable/Disable relay decide it), so no gate to handle
 // @version 1.4 - the Fortress receipt counts relay-sealed mail still waiting to be opened (B46)
 // @version 1.3 - Seal at the relay works with Fortress on a relay that reports it can
 //               seal for browsers (specs/client_custody_mail.md B38)
@@ -129,12 +130,6 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
-
-	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-	$gate_redirect = mailbox_receive_gate_handle($input);
-	if ($gate_redirect !== null) {
-		return $gate_redirect;
-	}
 
 	// Level ordering: raising crosses into sealing; lowering leaves it.
 	$level_rank = array(

@@ -25,6 +25,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
+ * @version 2.19 - the relay-or-direct choice card is gone (Enable/Disable relay decide it), so no gate to handle
  * @version 2.18 - the Sending identity box and guided steps follow the add-ons
  *   (focus_relay_on, focus_send_requested)
  * @version 2.17 - wizard_provision is gone: the setup wizard's Email step
@@ -57,11 +58,6 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-	$gate_redirect = mailbox_receive_gate_handle($input);
-	if ($gate_redirect !== null) {
-		return $gate_redirect;
-	}
-
 	$base = '/plugins/mailbox/admin/admin_mailbox_setup';
 	$advanced = !empty($input['advanced']);
 

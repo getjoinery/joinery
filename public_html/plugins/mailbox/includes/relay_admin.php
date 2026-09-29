@@ -13,6 +13,9 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.5 - the Linode permission comes with the update or the create (grant=token|oauth,
+ *                admin_mailbox_relay_take_grant); enable/disable set the receive mode; every
+ *                relay action returns to #relay-section
  * @version 2.4 - one relay_health_check action (the fresh health answer plus the origin-leak
  *                probe) replaces scanner_probe and origin_probe
  * @version 2.3 - a new fleet product is named Relay Hosting (tier Relay, link relay-hosting)
@@ -58,6 +61,8 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		return null;
 	}
 	$relay_id = $input['mrl_mailbox_relay_id'] ?? null;
+	// Every relay action returns to the Relay section, not the top of the page.
+	$back = $self_url . '#relay-section';
 	$server_manager_active = PluginHelper::isPluginActive('server_manager');
 
 	// Local mail listener decommission/restore (listener_admin.php).
@@ -71,16 +76,20 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		$relay = new MailboxRelay(intval($relay_id), TRUE);
 		$relay->set('mrl_is_enabled', $action === 'enable');
 		$relay->save();
-		admin_mailbox_relay_flash($session,
-			$action === 'enable' ? 'Relay enabled — it now fronts every hosted domain.' : 'Relay disabled.');
-		return LogicResult::redirect($self_url);
+		// Enabling or disabling the relay is also how this server's receive mode
+		// is chosen: the domain DNS checks prescribe from it (receive_mode.php).
+		Setting::put('mailbox_receive_mode', $action === 'enable' ? 'relay' : 'direct');
+		admin_mailbox_relay_flash($session, $action === 'enable'
+			? 'Relay enabled — it now fronts every hosted domain.'
+			: 'Relay disabled — this server receives mail directly. Point your domains\' MX records here; the checks show what to change.');
+		return LogicResult::redirect($back);
 	}
 
 	if ($action === 'delete' && $relay_id) {
 		$relay = new MailboxRelay(intval($relay_id), TRUE);
 		$relay->soft_delete();
 		admin_mailbox_relay_flash($session, 'Relay removed.');
-		return LogicResult::redirect($self_url);
+		return LogicResult::redirect($back);
 	}
 
 	// Check Relay Health: ask the relay for a fresh health answer (reachable, and
@@ -93,7 +102,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		$relay = MailboxRelay::active();
 		if ($relay === null) {
 			admin_mailbox_relay_flash($session, 'No relay is enabled to check.', 'Nothing to check');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 		$health = $relay->pollHealth();
 		$ok = ($health['state'] === MailboxRelay::HEALTH_OK);
@@ -107,7 +116,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 			? 'a test message is on its way out and back; its result shows under the relay in a minute or two.'
 			: $probe['message']);
 		admin_mailbox_relay_flash($session, implode(' ', $lines), $ok ? 'Relay checked' : 'Relay needs attention');
-		return LogicResult::redirect($self_url);
+		return LogicResult::redirect($back);
 	}
 
 	// Upgrade a cloud relay: open an upgrade run against its existing instance.
@@ -127,7 +136,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		}
 		if ($relay === null || !$relay->key) {
 			admin_mailbox_relay_flash($session, 'That relay no longer exists.', 'Cannot upgrade');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 		$vars = admin_mailbox_relay_upgrade_vars($relay);
 		if ($vars['route'] !== 'cloud') {
@@ -135,12 +144,12 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 			// page or a hand-posted form. Refuse rather than guess a route.
 			admin_mailbox_relay_flash($session,
 				'This relay is not one this site can update for you.', 'Cannot update');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 		if (RelayCloudProvision::live() !== null) {
 			admin_mailbox_relay_flash($session,
 				'A relay cloud act is already in flight — one at a time.', 'Cannot upgrade');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 
 		// The wipe guard, first pass. The provisioner re-asks the relay live before
@@ -151,7 +160,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 			admin_mailbox_relay_flash($session,
 				'This relay serves other deployments as well as this one. Re-imaging it would destroy '
 				. 'their mail and their configuration.', 'Cannot update a shared relay');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 		if ($sole === null && empty($input['shared_ack'])) {
 			// A relay too old to answer. The platform cannot prove it is safe, so
@@ -159,7 +168,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 			admin_mailbox_relay_flash($session,
 				'This relay is too old to say whether other deployments share it. Confirm you know it '
 				. 'serves only this site before updating it.', 'Confirmation needed');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 
 		$run = new RelayCloudProvision(NULL);
@@ -174,11 +183,15 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		$run->set('rcl_mail_hostname', (string)$relay->get('mrl_mx_hostname')
 			?: (string)$relay->get('mrl_name'));
 		$run->save();
+		$granted = admin_mailbox_relay_take_grant($run, $input, $session, $back);
+		if ($granted !== null) {
+			return $granted;
+		}
 		admin_mailbox_relay_flash($session,
 			'Approve access to your cloud account to continue. The relay is drained first, then the same '
 			. 'server is re-imaged and born again from the current release — it stops accepting mail for '
 			. 'several minutes, and senders retry.');
-		return LogicResult::redirect($self_url);
+		return LogicResult::redirect($back);
 	}
 
 	// Cloud path (specs/mailbox_relay_cloud_provisioning.md): create the run;
@@ -194,15 +207,15 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		$type = 'g6-nanode-1';
 		if ($mail_hostname === '' || strpos($mail_hostname, '.') === false) {
 			admin_mailbox_relay_flash($session, 'A mail hostname (FQDN, e.g. mx.example.com) is required.', 'Cannot provision');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 		if ($region === '') {
 			admin_mailbox_relay_flash($session, 'Pick a region.', 'Cannot provision');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 		if (RelayCloudProvision::live() !== null) {
 			admin_mailbox_relay_flash($session, 'A relay cloud act is already in flight — one at a time.', 'Cannot provision');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 
 		$run = new RelayCloudProvision(NULL);
@@ -212,7 +225,8 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		$run->set('rcl_region', substr($region, 0, 50));
 		$run->set('rcl_instance_type', substr($type, 0, 50));
 		$run->save();
-		return LogicResult::redirect($self_url);
+		$granted = admin_mailbox_relay_take_grant($run, $input, $session, $back);
+		return $granted ?? LogicResult::redirect($back);
 	}
 
 	// The one-click credential branch: when a Linode OAuth client is
@@ -223,15 +237,15 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 		$run = RelayCloudProvision::live();
 		if ($run === null || (string)$run->get('rcl_status') !== 'awaiting_grant') {
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 		try {
 			$consent_url = (new OAuth2Client())->beginConsent(
 				'linode', array('linodes:read_write'), 'relay_cloud',
-				array('run_id' => intval($run->key)), $self_url);
+				array('run_id' => intval($run->key)), $back);
 		} catch (\Throwable $e) {
 			admin_mailbox_relay_flash($session, $e->getMessage(), 'Could not start the Linode approval');
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
 		return LogicResult::redirect($consent_url);
 	}
@@ -245,35 +259,11 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 
 		$run = RelayCloudProvision::live();
 		if ($run === null || (string)$run->get('rcl_status') !== 'awaiting_grant') {
-			return LogicResult::redirect($self_url);
+			return LogicResult::redirect($back);
 		}
-		$token = trim((string)($input['cloud_token'] ?? ''));
-		if ($token === '') {
-			admin_mailbox_relay_flash($session, 'Paste the token to continue.', 'Token required');
-			return LogicResult::redirect($self_url);
-		}
-		// Fail fast on a bad token (a cheap read call); transient provider
-		// trouble is not the customer's fault, so only a rejection blocks.
-		try {
-			(new LinodeComputeDriver($token))->regions();
-		} catch (CloudComputeException $e) {
-			if ((int)$e->getCode() === 401) {
-				admin_mailbox_relay_flash($session,
-					'Linode rejected that token. Create a fresh one (scope: Linodes read/write) and paste it again.',
-					'Token rejected');
-				return LogicResult::redirect($self_url);
-			}
-		} catch (\Throwable $e) {
-			// Network hiccup — proceed; the run's own error handling covers it.
-		}
-		$run->sealToken($token);
-		$run->set('rcl_status', 'ready');
-		$run->set('rcl_error', null);
-		$run->save();
-		admin_mailbox_relay_flash($session,
-			'Provisioning started — the server is created in your account and builds itself from its first boot, '
-			. 'then reports in here. This page shows progress; the whole run takes several minutes.');
-		return LogicResult::redirect($self_url);
+		// A run already waiting: a missing or rejected token leaves it waiting.
+		return admin_mailbox_relay_take_grant($run, array('grant' => 'token', 'cloud_token' => $input['cloud_token'] ?? '',
+			'keep_run' => 1), $session, $back) ?? LogicResult::redirect($back);
 	}
 
 	// Dismiss a finished (or abandoned-at-consent) run from the section.
@@ -285,7 +275,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 			$run->eraseCredentials();
 			$run->soft_delete();
 		}
-		return LogicResult::redirect($self_url);
+		return LogicResult::redirect($back);
 	}
 
 	// Hosted slot lifecycle (the service connection itself is saved on Settings).
@@ -314,10 +304,78 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		} catch (\Throwable $e) {
 			admin_mailbox_relay_flash($session, $e->getMessage(), 'Relay service error');
 		}
-		return LogicResult::redirect($self_url);
+		return LogicResult::redirect($back);
 	}
 
 	return null;
+}
+
+
+/**
+ * The Linode permission, taken in the same post that opened the run (the Relay
+ * section's modal asks for it with the update or the create): grant=token with
+ * cloud_token, verified live, sealed onto the run, the run started; or
+ * grant=oauth, the consent begun at Linode. Null when the post carried no
+ * grant, and the run waits in awaiting_grant for the section's own step.
+ *
+ * A token Linode rejects removes the run it came with, so a refused modal
+ * leaves nothing half-started behind.
+ */
+function admin_mailbox_relay_take_grant(RelayCloudProvision $run, array $input, $session, string $back): ?LogicResult {
+	$grant = (string)($input['grant'] ?? '');
+	if ($grant === 'oauth') {
+		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
+		try {
+			$consent_url = (new OAuth2Client())->beginConsent(
+				'linode', array('linodes:read_write'), 'relay_cloud',
+				array('run_id' => intval($run->key)), $back);
+		} catch (\Throwable $e) {
+			admin_mailbox_relay_flash($session, $e->getMessage(), 'Could not start the Linode approval');
+			return LogicResult::redirect($back);
+		}
+		return LogicResult::redirect($consent_url);
+	}
+	if ($grant !== 'token') {
+		return null;
+	}
+	require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
+	$token = trim((string)($input['cloud_token'] ?? ''));
+	$drop = function () use ($run, $input) {
+		if (empty($input['keep_run'])) {
+			$run->eraseCredentials();
+			$run->soft_delete();
+		}
+	};
+	if ($token === '') {
+		$drop();
+		admin_mailbox_relay_flash($session, 'Paste the token to continue.', 'Token required');
+		return LogicResult::redirect($back);
+	}
+	// Fail fast on a bad token (a cheap read call); transient provider
+	// trouble is not the customer's fault, so only a rejection blocks.
+	try {
+		(new LinodeComputeDriver($token))->regions();
+	} catch (CloudComputeException $e) {
+		if ((int)$e->getCode() === 401) {
+			$drop();
+			admin_mailbox_relay_flash($session,
+				'Linode rejected that token, so nothing started. Create a fresh one (scope: Linodes read/write) and try again.',
+				'Token rejected');
+			return LogicResult::redirect($back);
+		}
+	} catch (\Throwable $e) {
+		// Network hiccup — proceed; the run's own error handling covers it.
+	}
+	$run->sealToken($token);
+	$run->set('rcl_status', 'ready');
+	$run->set('rcl_error', null);
+	$run->save();
+	admin_mailbox_relay_flash($session, ((string)$run->get('rcl_kind') === 'upgrade')
+		? 'Update started — the relay is drained first, then the same server is re-imaged from the current release '
+			. 'and reports in here. It stops accepting mail for several minutes; senders retry.'
+		: 'Provisioning started — the server is created in your account and builds itself from its first boot, '
+			. 'then reports in here. This page shows progress; the whole run takes several minutes.');
+	return LogicResult::redirect($back);
 }
 
 /**
