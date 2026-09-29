@@ -64,7 +64,7 @@ class RcpFakeDriver implements CloudComputeProvider {
 	public function getInstance(string $id): array {
 		$status = $this->boot_sequence[min($this->polls, count($this->boot_sequence) - 1)];
 		$this->polls++;
-		return array('id' => $id, 'status' => $status, 'ip' => $status === 'running' ? '198.51.100.99' : '', 'label' => 'r');
+		return array('id' => $id, 'status' => $status, 'ip' => $status === 'running' ? '198.51.100.99' : '', 'label' => 'r', 'region' => 'us-test');
 	}
 	public function rebuildInstance(string $id, array $opts): array {
 		$this->rebuilds[] = array($id, $opts);
@@ -240,6 +240,8 @@ class RelayCloudProvisionTest {
 				'rcl_kind' => 'upgrade', 'rcl_mrl_mailbox_relay_id' => intval($relay->key),
 				'rcl_instance_id' => 'fake-existing', 'rcl_instance_ip' => '127.0.0.1',
 				'rcl_mail_hostname' => 'mx.rcp-update.example',
+				// An update run starts from the relay row, which records no region.
+				'rcl_region' => '',
 			));
 			$p = new RelayCloudProvisioner();
 
@@ -257,6 +259,11 @@ class RelayCloudProvisionTest {
 			check(strpos((string)$opts['user_data'], 'RUN_ID="${RUN_ID:-' . $run->key . '}"') !== false, 'the user-data names the update run');
 			check($run->runTokenMatches($this->tokenIn((string)$opts['user_data'])), 'a fresh run token rides in it');
 			check(count($this->driver->deleted) === 0, 'an update never destroys the customer\'s instance');
+			check((string)$run->get('rcl_region') === 'us-test',
+				'the update learned the server\'s region from the provider before the rebuild (so it takes the Metadata service, not a StackScript)');
+			$refused = false;
+			try { (new LinodeComputeDriver('not-a-token'))->regionSupportsMetadata(''); } catch (CloudComputeException $e) { $refused = true; }
+			check($refused, 'the Linode driver refuses a blank region instead of reading the list of all regions as "no Metadata"');
 
 			// The update's birth writes the new pin on the SAME row.
 			$this->driver->boot_sequence = array('running');

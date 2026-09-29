@@ -11,6 +11,7 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.9 - a failed update or creation shows its reason, with Dismiss, while a relay exists
  * @version 2.8 - "Details"; Delete relay only once the relay is disabled, in the Disable button's place
  * @version 2.7 - the last relay action's message shows at the top of the section
  * @version 2.6 - a run waiting for its permission is one line (Continue opens the modal,
@@ -489,6 +490,15 @@ function mailbox_relay_section_render($page, array $v): void {
 	// disappear. The block still renders while a cloud act (provision retry,
 	// destroy) is in flight — its credential/progress step lives here.
 	$cloud_run_live = !empty($v['cloud_run']) && $v['cloud_run']->isLive();
+	// A failed update of an existing relay: say so, with the reason, until it is
+	// dismissed. Without this, a failed run left the section showing only
+	// "running version 3.0", as if nothing had been tried.
+	if (!empty($v['relays']) && !empty($v['cloud_run']) && (string)$v['cloud_run']->get('rcl_status') === 'failed') {
+		$failed_kind = ((string)$v['cloud_run']->get('rcl_kind') === 'upgrade') ? 'The last relay update' : 'The last relay creation';
+		echo '<div class="alert alert-danger" role="alert" style="margin-top:1rem;"><strong>' . $failed_kind
+			. ' did not finish.</strong> ' . htmlspecialchars((string)$v['cloud_run']->get('rcl_error'))
+			. ' ' . mailbox_relay_action_button(0, 'relay_cloud_dismiss', 'Dismiss', 'btn-secondary') . '</div>';
+	}
 	if (empty($v['relays']) || $cloud_run_live) {
 	$live_is_upgrade = $cloud_run_live && (string)$v['cloud_run']->get('rcl_kind') === 'upgrade';
 	echo '<h5 class="mt-3">' . ($live_is_upgrade ? 'Relay update' : ($cloud_run_live ? 'New relay' : 'Run your own relay')) . '</h5>';
