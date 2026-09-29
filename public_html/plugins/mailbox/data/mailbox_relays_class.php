@@ -35,6 +35,7 @@
  * coordinates the fleet service returned at enrollment. Either way this row
  * remains the deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.9 - mrl_last_test_time: when Test Relay Health last ran
  * @version 1.8 - mrl_last_pull_drained_time: the last pull that emptied the relay's listing
  * @version 1.7.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.7 - mrl_pickup_alarm_time and pickupTransition(): the reconcile pass announces
@@ -143,6 +144,9 @@ class MailboxRelay extends SystemBase {
 		// last-seen answer is worth most. The stored shape is readHealth()'s output.
 		'mrl_last_health_json'   => array('type'=>'text'),
 		'mrl_last_health_time'   => array('type'=>'timestamp(6)'),
+		// When someone last pressed Test Relay Health: the Relay section reads the
+		// leak test's result against it (waiting, passed, failed, never came back).
+		'mrl_last_test_time'     => array('type'=>'timestamp(6)'),
 		'mrl_mgn_managed_node_id'=> array('type'=>'int8'),
 		// Cloud-provisioned relays (specs/mailbox_relay_cloud_provisioning.md):
 		// the customer-account instance a destroy/rebuild targets.

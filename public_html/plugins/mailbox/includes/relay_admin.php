@@ -13,6 +13,7 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.8 - Test Relay Health records when it ran (mrl_last_test_time)
  * @version 2.7 - delete refuses a relay that is still enabled
  * @version 2.6 - a run still waiting for its permission gives way to a new update or create;
  *                relay messages show inside the Relay section (mailbox_relay_notice_html)
@@ -137,12 +138,19 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		}
 		$health = $relay->pollHealth();
 		$ok = ($health['state'] === MailboxRelay::HEALTH_OK);
+
 		$lines = array();
 		$lines[] = Globalvars::get_instance()->get_setting('mailbox_spam_filtering_enabled')
 			? 'Relay: ' . (string)$health['detail']
 			: ($ok ? 'Relay: it answered.' : 'Relay: ' . (string)$health['detail']);
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
 		$probe = InboundEmailHealth::sendOriginProbe();
+		if ($probe['ok']) {
+			// The Relay section's "Last tested" line reads the leak test's result
+			// against this time (mailbox_relay_last_test_html). Recorded only when
+			// the test message went out, so "has not come back" means just that.
+			MailboxRelay::updateColumns(intval($relay->key), array('mrl_last_test_time' => gmdate('Y-m-d H:i:s')));
+		}
 		$lines[] = 'Leak check: ' . ($probe['ok']
 			? 'a test message is on its way out and back; its result shows under the relay in a minute or two.'
 			: $probe['message']);
