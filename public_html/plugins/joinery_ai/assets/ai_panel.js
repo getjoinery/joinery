@@ -53,7 +53,10 @@
  * the person as the blue circle — one is progress, the other is a request, and
  * they must not read as the same kind of number.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 2.10.0 - data-loading on the first load,
+ * Vanilla JS, jy-ui styling, no framework. @version 2.11.0 - Waiting for you has a
+ * Current / Past switch (a declined action approved later, a failed one retried);
+ * cards show a tool's labelled fields, a link on one line, a note clamped with 'more'
+ * @version 2.10.0 - data-loading on the first load,
  * and a refresh keeps the cards (dimmed) until the new ones arrive: no layout shift
  * @version 2.9.0 - hostSection
  */
@@ -362,13 +365,19 @@
 		// can never disagree. Facts are server-rendered from each action's
 		// literal arguments; approve/decline go the same ai_action_resolve path
 		// the chat's inline cards use.
-		function refreshStatus() {
+		function refreshStatus(keepList) {
 			return joineryApi.post('joinery_ai/ai_status', {})
 				.then(function (data) {
 					data = data || {};
 					setCounts(data.job_count || 0, data.pending_count || 0);
 					renderWorking(data.jobs || []);
-					renderWaiting(data.actions || []);
+					if (keepList) {
+						lastActions = data.actions || [];
+						lastHasPast = !!data.has_past;
+						modeSwitch.hidden = false;
+					} else {
+						renderWaiting(data.actions || [], !!data.has_past);
+					}
 				})
 				.catch(function () {
 					workingBox.hidden = true;
@@ -398,38 +407,130 @@
 			announce();
 		}
 
-		function renderWaiting(actions) {
-			waitingBox.innerHTML = '';
-			if (!actions.length) { waitingBox.hidden = true; announce(); return; }
-			waitingBox.appendChild(el('h3', 'aip-section-title aip-waiting-title', 'Waiting for you'));
-			actions.forEach(function (a) {
-				var card = el('section', 'aip-card aip-action-card');
-				if (a.locked) {
-					card.appendChild(el('p', 'aip-card-status',
-						'Sealed to your vault — unlock to view and resolve.'));
-					waitingBox.appendChild(card);
-					return;
-				}
+		// Waiting for you, with a Current / Past switch once anything has been
+		// resolved: Past is where a decline the person regrets can still be
+		// approved, and a failure retried, until the action expires. The
+		// heartbeat redraws only the Current list; Past is fetched when chosen.
+		var waitingMode = 'current';
+		var lastActions = [], lastHasPast = false;
+		var waitingHead = el('div', 'aip-waiting-head');
+		waitingHead.appendChild(el('h3', 'aip-section-title aip-waiting-title', 'Waiting for you'));
+		var modeSwitch = el('div', 'aip-switch');
+		modeSwitch.setAttribute('role', 'group');
+		modeSwitch.setAttribute('aria-label', 'Show');
+		var modeBtns = {};
+		[['current', 'Current'], ['past', 'Past']].forEach(function (m) {
+			var b = el('button', 'aip-switch-btn', m[1]);
+			b.type = 'button';
+			b.addEventListener('click', function () { setWaitingMode(m[0]); });
+			modeBtns[m[0]] = b;
+			modeSwitch.appendChild(b);
+		});
+		modeBtns.current.classList.add('is-on');
+		modeBtns.current.setAttribute('aria-pressed', 'true');
+		modeBtns.past.setAttribute('aria-pressed', 'false');
+		waitingHead.appendChild(modeSwitch);
+		var waitingList = el('div', 'aip-waiting-list');
+		waitingBox.appendChild(waitingHead);
+		waitingBox.appendChild(waitingList);
+
+		function setWaitingMode(mode) {
+			waitingMode = mode;
+			Object.keys(modeBtns).forEach(function (k) {
+				modeBtns[k].classList.toggle('is-on', k === mode);
+				modeBtns[k].setAttribute('aria-pressed', k === mode ? 'true' : 'false');
+			});
+			if (mode === 'past') loadPast(); else renderWaiting(lastActions, lastHasPast);
+		}
+
+		function renderWaiting(actions, hasPast) {
+			lastActions = actions;
+			lastHasPast = !!hasPast;
+			modeSwitch.hidden = !lastHasPast && waitingMode === 'current';
+			if (!actions.length && !lastHasPast && waitingMode === 'current') {
+				waitingBox.hidden = true;
+				announce();
+				return;
+			}
+			waitingBox.hidden = false;
+			if (waitingMode === 'current') {
+				fillList(actions, 'Nothing is waiting for you.');
+			}
+			announce();
+		}
+
+		function loadPast() {
+			waitingList.innerHTML = '';
+			waitingList.appendChild(el('p', 'aip-quiet', 'Loading…'));
+			joineryApi.post('joinery_ai/ai_actions_list', { status: 'past' })
+				.then(function (data) {
+					if (waitingMode === 'past') fillList((data && data.actions) || [], 'Nothing resolved yet.');
+				})
+				.catch(function (err) {
+					waitingList.innerHTML = '';
+					waitingList.appendChild(el('p', 'aip-quiet', err && err.message ? err.message : 'Could not load.'));
+				});
+		}
+
+		function fillList(actions, emptyText) {
+			waitingList.innerHTML = '';
+			if (!actions.length) {
+				waitingList.appendChild(el('p', 'aip-quiet', emptyText));
+			}
+			actions.forEach(function (a) { waitingList.appendChild(actionCard(a)); });
+			fitClamps(waitingList);
+			announce();
+		}
+
+		var OUTCOME = { approved: 'Approved', declined: 'Declined', failed: 'Failed', expired: 'Expired' };
+
+		// One queued action. Facts are server-rendered: labelled fields when the
+		// tool states them, its plain lines otherwise.
+		function actionCard(a) {
+			var past = a.status !== 'pending';
+			var card = el('section', 'aip-card aip-action-card' + (past ? ' is-past' : ''));
+			if (past) {
+				var when = resolvedLabel(a.resolved_time);
+				card.appendChild(el('p', 'aip-card-outcome aip-outcome-' + a.status,
+					(OUTCOME[a.status] || a.status) + (when ? ' · ' + when : '')));
+			}
+			if (a.locked) {
+				card.appendChild(el('p', 'aip-card-status',
+					'Sealed to your vault — unlock to view' + (past ? '.' : ' and resolve.')));
+				return card;
+			}
+			if (a.fields) {
+				if (a.kicker) card.appendChild(el('p', 'aip-card-kicker', a.kicker));
+				card.appendChild(el('p', 'aip-card-name', a.headline || ''));
+				var dl = el('dl', 'aip-fields');
+				a.fields.forEach(function (f) { dl.appendChild(fieldRow(f)); });
+				card.appendChild(dl);
+			} else {
 				(a.facts || []).forEach(function (line, i) {
 					card.appendChild(el('p', i === 0 ? 'aip-card-name' : 'aip-card-fact', line));
 				});
-				// Which automation asked — one muted tag, so the owner knows
-				// what to adjust if these keep coming.
-				if (a.source_type === 'recipe' && a.recipe_name) {
-					card.appendChild(el('p', 'aip-card-status aip-card-origin', 'via ' + a.recipe_name));
-				}
-				if (a.model_note) {
-					var det = document.createElement('details');
-					det.className = 'aip-action-note';
-					var sum = document.createElement('summary');
-					sum.textContent = 'The assistant’s stated reason';
-					det.appendChild(sum);
-					var q = document.createElement('blockquote');
-					q.textContent = a.model_note;
-					det.appendChild(q);
-					card.appendChild(det);
-				}
-				var row = el('div', 'aip-action-buttons');
+			}
+			// Which automation asked — one muted tag, so the owner knows
+			// what to adjust if these keep coming.
+			if (a.source_type === 'recipe' && a.recipe_name) {
+				card.appendChild(el('p', 'aip-card-status aip-card-origin', 'via ' + a.recipe_name));
+			}
+			if (a.model_note) {
+				var det = document.createElement('details');
+				det.className = 'aip-action-note';
+				var sum = document.createElement('summary');
+				sum.textContent = 'The assistant’s stated reason';
+				det.appendChild(sum);
+				var q = document.createElement('blockquote');
+				q.textContent = a.model_note;
+				det.appendChild(q);
+				card.appendChild(det);
+			}
+			if (past && a.result && (a.status === 'approved' || a.status === 'failed')) {
+				card.appendChild(el('p', 'aip-card-result', a.result));
+			}
+			var row = el('div', 'aip-action-buttons');
+			if (!past) {
 				var approve = el('button', 'btn btn-primary', 'Approve');
 				approve.type = 'button';
 				var decline = el('button', 'btn btn-secondary', 'Decline');
@@ -438,11 +539,74 @@
 				decline.addEventListener('click', function () { resolveAction(a.action_id, 'decline', card); });
 				row.appendChild(approve);
 				row.appendChild(decline);
-				card.appendChild(row);
-				waitingBox.appendChild(card);
+			} else if (a.can_approve) {
+				var again = el('button', 'btn btn-secondary', a.status === 'failed' ? 'Try again' : 'Approve now');
+				again.type = 'button';
+				again.addEventListener('click', function () { resolveAction(a.action_id, 'approve', card); });
+				row.appendChild(again);
+			}
+			if (row.childElementCount) card.appendChild(row);
+			return card;
+		}
+
+		// A label beside its value. A 'line' value (a link) stays on one line
+		// until clicked — the whole of it is still there to read; a 'clamp'
+		// value (a note) shows its first lines and a 'more'.
+		function fieldRow(f) {
+			var wrap = el('div', 'aip-field');
+			wrap.appendChild(el('dt', 'aip-field-label', f.label));
+			var dd = el('dd', 'aip-field-value');
+			if (f.display === 'line') {
+				var line = el('button', 'aip-field-line', f.value);
+				line.type = 'button';
+				line.title = f.value;
+				line.setAttribute('aria-expanded', 'false');
+				line.addEventListener('click', function () {
+					var open = line.classList.toggle('is-open');
+					line.setAttribute('aria-expanded', open ? 'true' : 'false');
+				});
+				dd.appendChild(line);
+			} else if (f.display === 'clamp') {
+				var text = el('div', 'aip-field-clamp', f.value);
+				var more = el('button', 'aip-link aip-field-more', 'more');
+				more.type = 'button';
+				more.hidden = true;
+				more.addEventListener('click', function () {
+					var open = text.classList.toggle('is-open');
+					more.textContent = open ? 'less' : 'more';
+				});
+				dd.appendChild(text);
+				dd.appendChild(more);
+			} else {
+				dd.textContent = f.value;
+			}
+			wrap.appendChild(dd);
+			return wrap;
+		}
+
+		// Offer 'more' only on a note that is actually cut. Measured once the
+		// card is laid out; a panel not on screen yet (the closed slide-over)
+		// has nothing to measure, so there a long note is assumed to be cut.
+		function fitClamps(root) {
+			window.requestAnimationFrame(function () {
+				root.querySelectorAll('.aip-field-clamp').forEach(function (text) {
+					var more = text.nextSibling;
+					if (!more || text.classList.contains('is-open')) return;
+					more.hidden = text.clientHeight > 0
+						? text.scrollHeight <= text.clientHeight + 1
+						: !(text.textContent.length > 150 || text.textContent.split('\n').length > 3);
+				});
 			});
-			waitingBox.hidden = false;
-			announce();
+		}
+
+		// '3:04 PM' today, 'Sep 28' before that — the browser's own zone.
+		function resolvedLabel(utc) {
+			if (!utc) return '';
+			var d = new Date(String(utc).substring(0, 19).replace(' ', 'T') + 'Z');
+			if (isNaN(d.getTime())) return '';
+			return d.toDateString() === new Date().toDateString()
+				? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+				: d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 		}
 
 		function resolveAction(actionId, resolution, card) {
@@ -457,18 +621,21 @@
 					} else if (c && c.status === 'failed') {
 						text = 'Approved, but it failed: ' + ((c && c.result) || 'unknown error');
 					} else {
-						text = 'Declined — nothing was run.';
+						text = 'Declined — nothing was run. It stays under Past if you change your mind.';
 					}
 					card.innerHTML = '';
+					card.classList.add('is-resolved');
 					card.appendChild(el('p', 'aip-card-status', text));
 					// Both counts come from the status read rather than the
 					// resolve's own pending_count: approving may have started a
 					// job, and the header must not show one number from before
-					// the change beside one from after it.
-					refreshStatus();
+					// the change beside one from after it. The list is left as
+					// it is, so the outcome stays readable where it was clicked.
+					refreshStatus(true);
 				})
 				.catch(function (err) {
 					window.alert(err && err.message ? err.message : 'Could not resolve the action.');
+					if (waitingMode === 'past') loadPast();
 					refreshStatus();
 				});
 		}

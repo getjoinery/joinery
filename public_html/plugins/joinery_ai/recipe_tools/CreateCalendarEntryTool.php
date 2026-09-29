@@ -21,6 +21,8 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
  * The subject is always the acting user. Nothing in the input can aim the
  * entry at anyone else's calendar.
  *
+ * @version 1.4 - proposalFields(): the card as labelled fields; the whole
+ *   note behind a 'more', the link on one line the owner can expand
  * @version 1.3 - a Fortress source email is named, never read
  * @version 1.2
  * @changelog 1.2 - location, link (shown in full), notes on the card and
@@ -29,7 +31,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
  *   email's own clock alongside, and names the source email (subject, sender,
  *   mailbox) instead of its row id
  */
-class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInterface {
+class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInterface, ProposalFieldsInterface {
 
     /**
      * The card, from the literal arguments, for the owner who will read it:
@@ -62,9 +64,33 @@ class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInter
         }
         $notes = trim((string)($input['notes'] ?? ''));
         if ($notes !== '') $lines[] = 'Notes: ' . ProposedActionFacts::scalar($notes);
-        $source = self::sourceLine($input, $owner_id);
-        if ($source !== null) $lines[] = $source;
+        $source = self::source($input, $owner_id);
+        if ($source !== null) $lines[] = $source['line'];
         return $lines;
+    }
+
+    /** The same facts as labelled fields (ProposalFieldsInterface). */
+    public function proposalFields(array $input, ?int $owner_id = null): array {
+        $fields = [ProposedActionFacts::field('When', preg_replace('/^When: /', '', self::whenLine($input, $owner_id)))];
+        $location = trim((string)($input['location'] ?? ''));
+        if ($location !== '') $fields[] = ProposedActionFacts::field('Where', ProposedActionFacts::scalar($location));
+        $link = trim((string)($input['link'] ?? ''));
+        if ($link !== '') {
+            $fields[] = ProposedActionFacts::field('Link', ProposedActionFacts::revealed($link),
+                ProposedActionFacts::DISPLAY_LINE);
+        }
+        $notes = trim((string)($input['notes'] ?? ''));
+        if ($notes !== '') {
+            $fields[] = ProposedActionFacts::field('Notes', ProposedActionFacts::text($notes),
+                ProposedActionFacts::DISPLAY_CLAMP);
+        }
+        $source = self::source($input, $owner_id);
+        if ($source !== null) $fields[] = ProposedActionFacts::field('Source', $source['value']);
+        return [
+            'kicker'   => 'Add to your calendar',
+            'headline' => ProposedActionFacts::scalar($input['title'] ?? ''),
+            'fields'   => $fields,
+        ];
     }
 
     /**
@@ -146,16 +172,22 @@ class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInter
 
     /**
      * Which email this came from, as the owner would recognise it: subject,
-     * sender, and the mailbox it arrived in. Null when there is no source
-     * (a chat proposal with no source_ref).
+     * sender, and the mailbox it arrived in — as the card's line ('line') and
+     * as its Source field ('value'). Null when there is no source (a chat
+     * proposal with no source_ref).
      */
-    private static function sourceLine(array $input, ?int $owner_id): ?string {
+    private static function source(array $input, ?int $owner_id): ?array {
         $ref = trim((string)($input['source_ref'] ?? ''));
         if ($ref === '') return null;
+        $said = function (string $line, string $value): array {
+            return ['line' => $line, 'value' => $value];
+        };
         if (!ctype_digit($ref) || !class_exists('InboundEmailMessage')) {
-            return 'From: ' . ProposedActionFacts::scalar($ref);
+            $v = ProposedActionFacts::scalar($ref);
+            return $said('From: ' . $v, $v);
         }
-        $unreadable = 'From an email you cannot open (#' . $ref . ')';
+        $unreadable = $said('From an email you cannot open (#' . $ref . ')',
+            'An email you cannot open (#' . $ref . ')');
         if ($owner_id === null || $owner_id <= 0) return $unreadable;
 
         // A collection lookup, so a model-named id that matches nothing is
@@ -181,7 +213,8 @@ class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInter
 
         // Fortress mail opens only on its owner's devices; the server names it, never reads it.
         if (InboundEmailMessage::isBrowserSealed($msg)) {
-            return 'From an end-to-end encrypted email' . $in_mailbox;
+            return $said('From an end-to-end encrypted email' . $in_mailbox,
+                'An end-to-end encrypted email' . $in_mailbox);
         }
         try {
             $subject = ProposedActionFacts::scalar($msg->get('iem_subject'));
@@ -189,9 +222,11 @@ class CreateCalendarEntryTool implements RecipeToolInterface, QueueableToolInter
         } catch (VaultLockedException $e) {
             // The row's own facts are open but this message is sealed and the
             // window has closed between the two reads.
-            return 'From a sealed email' . $in_mailbox . ' (unlock your vault to see which)';
+            return $said('From a sealed email' . $in_mailbox . ' (unlock your vault to see which)',
+                'A sealed email' . $in_mailbox . ' (unlock your vault to see which)');
         }
-        return 'From the email “' . $subject . '” sent by ' . $sender . $in_mailbox;
+        return $said('From the email “' . $subject . '” sent by ' . $sender . $in_mailbox,
+            'The email “' . $subject . '” from ' . $sender . $in_mailbox);
     }
 
     public static function name(): string {

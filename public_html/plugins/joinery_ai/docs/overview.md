@@ -558,7 +558,8 @@ the authorization, there is no permission gate):
   call: the caller's recipe runs in flight (`AiPanelService::jobs()`, each line
   saying whether it is running, queued for a worker, or waiting for the owner's
   own unlocked session, which is the one wait a worker can never end) and their
-  pending queued actions as the same cards `ai_actions_list` renders. Each run
+  pending queued actions as the same cards `ai_actions_list` renders, and
+  `has_past` — whether any action has been resolved. Each run
   also carries how far through its queue it is — *4 done, 11 to go* — the left
   half from this run's rows in the item log and the right from the job's own
   `countWork()`, the same cheap indexed count the schedulers ask. Both are per
@@ -588,7 +589,11 @@ admins manage recipes on the dashboard.
 **The order on the panel** is the order the work reaches the person: **Working
 now** (the runs in flight), then **Waiting for you** — the pending queued
 actions ([Proposed actions](#proposed-actions)) with approve/decline on each —
-then the recipes, then the composer slot. Progress first, then what is stopped
+then the recipes, then the composer slot. Once anything has been resolved,
+Waiting for you carries a **Current / Past** switch: Past lists resolved
+actions, most recent first, each with its outcome and when, and offers
+*Approve now* on a declined one and *Try again* on a failed one while it has
+not expired. Progress first, then what is stopped
 until they answer, then the settings behind both.
 
 The recipes are a flat, unlabelled list, one row each: name and **On**/**Off**
@@ -681,7 +686,14 @@ as its substance, injected instructions would simply move into the prose. A
 tool can be queued only if it implements `QueueableToolInterface`
 (`renderProposedAction(array $input): array` — literal fact lines); a
 mutating tool without a renderer is refused outright, so an unrenderable
-action is impossible, not just unlikely. Every state-writing tool
+action is impossible, not just unlikely. A tool may also implement
+`ProposalFieldsInterface` (`proposalFields()`): the same facts as a kicker,
+a headline and labelled fields, each laid out as text, as one line the owner
+can expand (a link — the whole value is still on the card), or clamped to
+three lines with a *more* (a note, carried whole up to
+`ProposedActionFacts::TEXT_MAX`). The card then carries `kicker`, `headline`
+and `fields` beside its `facts`; the lines remain what the conversation is
+told on resolution. `create_calendar_entry` states its card this way. Every state-writing tool
 (`create_model`, `update_model`, `delete_model`, `invoke_action`, and the
 memory, note and workspace writers `remember`, `forget`, `save_note`,
 `set_workspace`; `RiskHeuristic::STATE_WRITE_TOOLS`) implements it via
@@ -706,7 +718,12 @@ opt-ins, `authenticate_write`, the logic gauntlet); a validation miss or
 execution error resolves the row `failed` with the reason on the card — an
 approved action never silently half-happens. **Decline** resolves the row and
 runs nothing. A pending action past `aqa_expires_time` resolves `expired` and
-can never execute. Either way the resolution is appended to the source
+can never execute. A **declined** or **failed** action can still be approved
+until it expires (`ActionQueue::REAPPROVABLE`) — a decline the owner regrets,
+or a failure whose cause has since been fixed — and runs exactly as a pending
+one would; the card's `can_approve` says whether it may. Nothing else
+reopens: an approved or expired action is final, and only a pending one can
+be declined. Either way the resolution is appended to the source
 conversation as an `event` message row, so the model knows on its next turn.
 There is deliberately **no approve-all** — rubber-stamping is the queue's
 failure mode; a category of action that lands constantly is the signal it
@@ -730,9 +747,11 @@ ownership is the authorization):
 
 - **`joinery_ai/ai_actions_list`** `{status?, area?, conversation_id?}` →
   `{actions: [card], pending_count}`; sweeps overdue pending rows to
-  `expired` first.
+  `expired` first. `status: 'past'` lists every resolved action, most
+  recently resolved first.
 - **`joinery_ai/ai_action_resolve`** `{action_id, resolution: approve|decline}`
-  → `{card, pending_count}`; refuses a non-pending action (idempotent-safe).
+  → `{card, pending_count}`; refuses a decline of anything not pending, and an
+  approve of anything not pending, declined or failed (idempotent-safe).
 
 **UI vocabulary.** User-facing text speaks of **standing approvals** and
 **pending actions**, never "taint": `TaintGate::explain()` is written in that

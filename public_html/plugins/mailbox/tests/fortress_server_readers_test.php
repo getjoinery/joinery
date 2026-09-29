@@ -20,7 +20,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_server_readers
  *
- * @version 1.0
+ * @version 1.1 - the calendar tool's source() states a line and a field value
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -89,8 +89,9 @@ try {
 	}
 	if (is_file(PathHelper::getIncludePath('plugins/joinery_ai/recipe_tools/CreateCalendarEntryTool.php'))) {
 		require_once(PathHelper::getIncludePath('plugins/joinery_ai/recipe_tools/CreateCalendarEntryTool.php'));
-		$line = new ReflectionMethod('CreateCalendarEntryTool', 'sourceLine');
-		$said = (string)$line->invoke(null, array('source_ref' => (string)$mid), $owner_id);
+		$source = new ReflectionMethod('CreateCalendarEntryTool', 'source');
+		$named = (array)$source->invoke(null, array('source_ref' => (string)$mid), $owner_id);
+		$said = (string)($named['line'] ?? '') . ' | ' . (string)($named['value'] ?? '');
 		check(strpos($said, 'end-to-end encrypted') !== false && stripos($said, 'Fortress quarterly') === false,
 			'the calendar tool names the source email without reading it', $said);
 	}

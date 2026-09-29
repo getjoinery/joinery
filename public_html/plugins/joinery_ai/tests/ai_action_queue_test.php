@@ -15,6 +15,9 @@
  *    resolves the row failed with the reason); decline runs nothing; resolving
  *    twice refused; someone else's action refused.
  *  - Expiry: a past-due pending action resolves expired and can never run.
+ *  - Past: a declined or failed action can still be approved until it
+ *    expires; nothing else reopens; the 'resolved' list and hasResolved().
+ *  - A tool's labelled card fields (the calendar entry's When / Link / Notes).
  *  - The resolution lands in the source conversation as an EVENT row.
  *  - Sealing: an enqueue from a hot process seals the arguments to the owner
  *    (ciphertext at rest, card locked without the window) and is REFUSED when
@@ -24,6 +27,7 @@
  *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_action_queue_test.php
  *
+ * @version 1.2 - Past: approve after a decline or a failure; labelled calendar card fields
  * @version 1.1 - a sealed recipe proposal approved in-window lands; the card states a failure plainly
  * @version 1.0
  */
@@ -252,6 +256,70 @@ check((string)$swept->get('aqa_status') === AiQueuedAction::STATUS_EXPIRED,
 check(ActionQueue::pendingCount($owner_id) === 0, 'nothing pending remains for the badge');
 
 // -----------------------------------------------------------------------------
+section('Past: a declined or failed action can still be approved until it expires');
+
+$regret = ActionQueue::enqueue($owner_id, 'create_model',
+	['model' => 'RecipeNote', 'fields' => ['rcn_owner_user_id' => $owner_id,
+		'rcn_title' => 'Second thoughts note', 'rcn_content' => 'Approved after a decline.']],
+	intval($conversation->key));
+aq_register($regret);
+$resolved = ActionQueue::resolve((int)$regret->key, $owner_id, 'decline');
+check(ActionQueue::card($resolved)['can_approve'] === true,
+	'a declined action that has not expired offers approval');
+check(ActionQueue::hasResolved($owner_id), 'the owner has a Past list');
+$past_ids = [];
+foreach (new MultiAiQueuedAction(['owner_user_id' => $owner_id, 'resolved' => true]) as $r) {
+	$past_ids[] = (int)$r->key;
+	check((string)$r->get('aqa_status') !== AiQueuedAction::STATUS_PENDING,
+		'the resolved list holds no pending row', (string)$r->key);
+}
+check(in_array((int)$regret->key, $past_ids, true), 'and it holds the declined one');
+$refused = '';
+try {
+	ActionQueue::resolve((int)$regret->key, $owner_id, 'decline');
+} catch (ActionQueueException $e) {
+	$refused = $e->getMessage();
+}
+check(stripos($refused, 'already declined') !== false, 'declining twice is still refused', $refused);
+$resolved = ActionQueue::resolve((int)$regret->key, $owner_id, 'approve');
+check((string)$resolved->get('aqa_status') === AiQueuedAction::STATUS_APPROVED,
+	'approving after a decline runs it', (string)$resolved->get('aqa_result'));
+$regret_note = (int)$db->query(
+	"SELECT rcn_note_id FROM rcn_notes WHERE rcn_title = 'Second thoughts note'
+	  ORDER BY rcn_note_id DESC LIMIT 1")->fetchColumn();
+if ($regret_note > 0) harness_register_row('rcn_notes', 'rcn_note_id', $regret_note);
+check($regret_note > 0, 'and the write lands');
+check(ActionQueue::card($resolved)['can_approve'] === false, 'an approved action offers nothing more');
+
+$resolved = ActionQueue::resolve((int)$stale->key, $owner_id, 'approve');
+check((string)$resolved->get('aqa_status') === AiQueuedAction::STATUS_FAILED,
+	'a failed action can be tried again, and fails again while its cause stands');
+
+$lapsed = ActionQueue::enqueue($owner_id, 'create_model',
+	['model' => 'RecipeNote', 'fields' => ['rcn_title' => 'Declined, then too late']],
+	intval($conversation->key));
+aq_register($lapsed);
+ActionQueue::resolve((int)$lapsed->key, $owner_id, 'decline');
+AiQueuedAction::updateColumns((int)$lapsed->key,
+	['aqa_expires_time' => gmdate('Y-m-d H:i:s', time() - 60)]);
+$lapsed->load();
+check(ActionQueue::card($lapsed)['can_approve'] === false, 'an expired decline offers no approval');
+$refused = '';
+try {
+	ActionQueue::resolve((int)$lapsed->key, $owner_id, 'approve');
+} catch (ActionQueueException $e) {
+	$refused = $e->getMessage();
+}
+$lapsed->load();
+check(stripos($refused, 'expired') !== false
+		&& (string)$lapsed->get('aqa_status') === AiQueuedAction::STATUS_DECLINED,
+	'and approving it is refused, the row still declined', $refused);
+
+check(ProposedActionFacts::text("Door code 4417\r\n\n\n\nBring   the ticket  ")
+		=== "Door code 4417\n\nBring the ticket",
+	'a note keeps its line breaks and closes up runs of space and blank lines');
+
+// -----------------------------------------------------------------------------
 section('Sealing: a hot enqueue seals to the owner, or refuses');
 
 // No vault yet: a hot process cannot protect the proposal — refused.
@@ -352,9 +420,23 @@ if ($aq_window_capable) {
 		'end_local'   => $cal_day . ' 21:00:00',
 		'timezone'    => 'America/New_York',
 		'notes'       => $cal_notes,
+		'link'        => 'https://tickets.example.com/order/55120?ref=aq',
 		'source_ref'  => 'aq-test-' . mt_rand(100000, 999999),
 	]);
 	check(!empty($cal->get('aqa_content_sealed')), 'the recipe\'s proposal is sealed');
+
+	// The card as labelled fields: the note whole behind its clamp, the link on one line.
+	$card = ActionQueue::card($cal);
+	$by_label = [];
+	foreach ((array)$card['fields'] as $f) $by_label[$f['label']] = $f;
+	check($card['kicker'] === 'Add to your calendar' && $card['headline'] === $cal_title,
+		'the calendar card states what and to what', json_encode([$card['kicker'], $card['headline']]));
+	check(isset($by_label['When']) && ($by_label['Notes']['value'] ?? '') === $cal_notes
+			&& ($by_label['Notes']['display'] ?? '') === 'clamp',
+		'its note is carried whole, to be clamped', json_encode($card['fields']));
+	check(($by_label['Link']['value'] ?? '') === 'https://tickets.example.com/order/55120?ref=aq'
+			&& ($by_label['Link']['display'] ?? '') === 'line',
+		'its link is carried whole, on one line');
 	$resolved = ActionQueue::resolve((int)$cal->key, $owner_id, 'approve');
 	$cal_rows = $db->prepare("SELECT cal_entry_id, cal_notes FROM cal_entries
 		WHERE cal_subject_id = ? AND cal_title = ? AND cal_delete_time IS NULL");
@@ -380,6 +462,7 @@ if ($aq_window_capable) {
 	check($resolved->get('aqa_status') === AiQueuedAction::STATUS_FAILED
 			&& $card['result'] === 'end_local must be after start_local.',
 		'a tool\'s own refusal shows without its tool-name prefix', json_encode($card['result']));
+	check($card['can_approve'] === true, 'a failed sealed action can be tried again');
 	$failure_line = new ReflectionMethod('ActionQueue', 'failureLine');
 	$failure_line->setAccessible(true);
 	check($failure_line->invoke(null, 'SealedContentEgressException: Refusing to write sealed-derived content into cal_entries.')
