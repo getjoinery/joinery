@@ -245,16 +245,35 @@ select.joai-chat-control { cursor: pointer; }
    facts are the card's substance; the model's note renders as collapsed
    quotation, visibly its voice. */
 .joai-chat-queued { padding: 0 1rem 0.5rem; }
-.joai-queued-card { margin-top: 0.6rem; padding: 0.6rem 0.7rem; border: 1px solid #f0c36d;
-                    background: #fff8e6; border-radius: 8px; }
+.joai-queued-card { margin-top: 0.6rem; padding: 0.7rem 0.85rem 0.8rem; border: 1px solid #dfe3e8;
+                    border-left: 3px solid #1d63d1; background: #fff; border-radius: 8px;
+                    min-width: 0; overflow-wrap: anywhere; }
 .joai-queued-head { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
-                    letter-spacing: 0.05em; color: #8a6d1a; margin-bottom: 0.35rem; }
-.joai-queued-fact { font-size: 0.9rem; margin: 0 0 0.25rem; color: #5c4a12; }
+                    letter-spacing: 0.05em; color: #1d63d1; margin-bottom: 0.35rem; }
+.joai-queued-fact { font-size: 0.9rem; margin: 0 0 0.25rem; color: #1f2933; }
 .joai-queued-headline { font-weight: 600; }
-.joai-queued-note { margin: 0.35rem 0; font-size: 0.82rem; color: #6d5a20; }
-.joai-queued-note blockquote { margin: 0.3rem 0 0 0.5rem; padding-left: 0.6rem;
-                               border-left: 3px solid #e2cf8f; font-style: italic; }
-.joai-queued-actions { display: flex; gap: 0.5rem; margin-top: 0.45rem; }
+.joai-queued-kicker { font-size: 0.75rem; font-weight: 600; margin: 0 0 0.1rem; color: #667085; }
+/* Labelled fields: a muted label column beside the values. A link stays on
+   one line until clicked; a note shows three lines, then 'more'. */
+.joai-queued-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr);
+                      column-gap: 0.75rem; row-gap: 0.3rem; margin: 0.4rem 0 0; }
+.joai-queued-field { display: contents; }
+.joai-queued-label { margin: 0; padding-top: 0.1rem; font-size: 0.75rem; font-weight: 600; color: #667085; }
+.joai-queued-value { margin: 0; min-width: 0; font-size: 0.9rem; line-height: 1.4; color: #1f2933; }
+.joai-queued-line { display: block; width: 100%; padding: 0; border: 0; background: none; font: inherit;
+                    text-align: left; color: inherit; cursor: pointer; white-space: nowrap;
+                    overflow: hidden; text-overflow: ellipsis; }
+.joai-queued-line.is-open { white-space: normal; overflow-wrap: anywhere; }
+.joai-queued-clamp { white-space: pre-line; display: -webkit-box; -webkit-box-orient: vertical;
+                     -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.joai-queued-clamp.is-open { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
+.joai-queued-more { padding: 0; border: 0; background: none; font: inherit; font-size: 0.8rem;
+                    color: #2563eb; cursor: pointer; }
+.joai-queued-more[hidden] { display: none; }
+.joai-queued-note { margin: 0.4rem 0 0; font-size: 0.82rem; color: #667085; }
+.joai-queued-note blockquote { margin: 0.3rem 0 0 0.25rem; padding-left: 0.6rem;
+                               border-left: 3px solid #dfe3e8; font-style: italic; }
+.joai-queued-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.7rem; }
 /* Event chips: platform-written transcript facts (a queued action's
    resolution) — neutral, centered, neither voice. */
 .joai-chat-event { margin: 0.75rem auto; max-width: 85%; text-align: center;

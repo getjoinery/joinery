@@ -4,13 +4,14 @@
  * actions as server-rendered cards (specs/implemented/ai_action_queue.md § API surface).
  *
  * POST /api/v1/action/joinery_ai/ai_actions_list (browser session). Params:
- * status (default 'pending'), area, conversation_id — all optional filters.
+ * status (default 'pending'; 'past' is every action no longer pending, most
+ * recently resolved first), area, conversation_id — all optional filters.
  * Card facts are rendered by the platform from each action's stored literal
  * arguments; the client never interprets them. A card sealed to a locked
  * vault carries locked=true and no facts. Ownership scoping is the
  * authorization: everyone lists exactly their own actions.
  *
- * @version 1.0
+ * @version 1.1 - status 'past'
  */
 
 function ai_actions_list_logic(array $input): LogicResult {
@@ -26,8 +27,14 @@ function ai_actions_list_logic(array $input): LogicResult {
 	ActionQueue::expireOverdueFor($uid);
 
 	$options = ['owner_user_id' => $uid];
+	$order = ['aqa_ai_queued_action_id' => 'DESC'];
 	$status = trim((string)($input['status'] ?? 'pending'));
-	if ($status !== '' && $status !== 'all') $options['status'] = $status;
+	if ($status === 'past') {
+		$options['resolved'] = true;
+		$order = ['aqa_resolved_time' => 'DESC', 'aqa_ai_queued_action_id' => 'DESC'];
+	} elseif ($status !== '' && $status !== 'all') {
+		$options['status'] = $status;
+	}
 	if (!empty($input['conversation_id'])) {
 		$options['conversation_id'] = (int)$input['conversation_id'];
 	}
@@ -35,7 +42,7 @@ function ai_actions_list_logic(array $input): LogicResult {
 		$options['area'] = trim((string)$input['area']);
 	}
 
-	$rows = new MultiAiQueuedAction($options, ['aqa_ai_queued_action_id' => 'DESC'], 50);
+	$rows = new MultiAiQueuedAction($options, $order, 50);
 	$rows->load();
 	$cards = [];
 	foreach ($rows as $row) {
@@ -58,8 +65,8 @@ function ai_actions_list_logic_descriptor(): array {
 		],
 		'input'       => [
 			'status' => ['type' => 'string', 'required' => false,
-				'enum' => ['pending', 'approved', 'declined', 'expired', 'failed', 'all'],
-				'label' => "Status filter (default 'pending')"],
+				'enum' => ['pending', 'past', 'approved', 'declined', 'expired', 'failed', 'all'],
+				'label' => "Status filter (default 'pending'; 'past' = everything resolved)"],
 			'area'   => ['type' => 'string', 'required' => false, 'label' => 'Area filter'],
 			'conversation_id' => ['type' => 'int', 'required' => false,
 				'label' => 'Only actions proposed in this conversation'],

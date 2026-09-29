@@ -26,7 +26,10 @@ class ActionQueueException extends Exception {}
  * the conversation through the resolution event row, where the next turn can
  * reason over it.
  *
- * @version 1.6
+ * @version 1.7
+ * @changelog 1.7 - a declined or failed action can still be approved while it
+ *   has not expired (the AI panel's Past list); the card carries labelled
+ *   fields from a ProposalFieldsInterface tool, and can_approve
  * @changelog 1.6 - approving a sealed proposal consents to its literal values
  *   (SealedEgressGuard::consentToValues), so the action can write them; the
  *   card states a failure in plain words
@@ -39,6 +42,9 @@ class ActionQueueException extends Exception {}
  *   names the proposing recipe
  */
 class ActionQueue {
+
+    /** Resolved states an owner may still approve, until the action expires. */
+    const REAPPROVABLE = [AiQueuedAction::STATUS_DECLINED, AiQueuedAction::STATUS_FAILED];
 
     /** Longest rendered fact line — literal values, but bounded for the card. */
     const FACT_LINE_MAX = 200;
@@ -184,8 +190,10 @@ class ActionQueue {
      */
     public static function factsFor(AiQueuedAction $row): ?array {
         $arguments = self::openArguments($row);
-        if ($arguments === null) return null;
+        return $arguments === null ? null : self::factsFrom($row, $arguments);
+    }
 
+    private static function factsFrom(AiQueuedAction $row, array $arguments): array {
         $tool = RecipeToolRegistry::get((string)$row->get('aqa_tool'));
         if ($tool === null || !($tool instanceof QueueableToolInterface)) {
             // The tool vanished since the proposal (plugin removed) — the card
@@ -205,7 +213,33 @@ class ActionQueue {
     }
 
     /**
-     * Resolve one pending action as its owner. 'approve' executes the call in
+     * The card as labelled fields, for a tool that can state them
+     * (ProposalFieldsInterface); null for every other tool, whose card is its
+     * lines.
+     */
+    private static function fieldsFrom(AiQueuedAction $row, array $arguments): ?array {
+        $tool = RecipeToolRegistry::get((string)$row->get('aqa_tool'));
+        if (!($tool instanceof ProposalFieldsInterface)) return null;
+        $card = $tool->proposalFields($arguments, (int)$row->get('aqa_owner_user_id'));
+        $fields = [];
+        foreach ((array)($card['fields'] ?? []) as $f) {
+            if (!is_array($f) || trim((string)($f['label'] ?? '')) === '') continue;
+            $fields[] = [
+                'label'   => (string)$f['label'],
+                'value'   => (string)($f['value'] ?? ''),
+                'display' => in_array($f['display'] ?? '', [ProposedActionFacts::DISPLAY_LINE,
+                    ProposedActionFacts::DISPLAY_CLAMP], true) ? $f['display'] : ProposedActionFacts::DISPLAY_TEXT,
+            ];
+        }
+        return [
+            'kicker'   => (string)($card['kicker'] ?? ''),
+            'headline' => (string)($card['headline'] ?? ''),
+            'fields'   => $fields,
+        ];
+    }
+
+    /**
+     * Resolve one action as its owner. 'approve' executes the call in
      * THIS request, re-validating against live state exactly as the tool
      * always does (allowlists, opt-ins, authenticate_write, the logic file's
      * own gauntlet); a validation miss or execution error resolves the row
@@ -213,6 +247,10 @@ class ActionQueue {
      * half-happens. 'decline' resolves the row and runs nothing. Either way
      * the resolution is appended to the source conversation as an event, so
      * the model knows on its next turn.
+     *
+     * A declined or failed action may still be approved until it expires —
+     * a decline the owner regrets, or a failure whose cause has since been
+     * fixed. It runs exactly as a pending one would; nothing else reopens.
      *
      * @return AiQueuedAction the resolved row (fresh)
      * @throws ActionQueueException on every refusal (not the owner's, not
@@ -228,11 +266,15 @@ class ActionQueue {
                 || (int)$row->get('aqa_owner_user_id') !== $user_id) {
             throw new ActionQueueException('No such pending action of yours.');
         }
-        if ((string)$row->get('aqa_status') !== AiQueuedAction::STATUS_PENDING) {
-            throw new ActionQueueException(
-                'This action is already ' . (string)$row->get('aqa_status') . '.');
+        $status = (string)$row->get('aqa_status');
+        if ($status !== AiQueuedAction::STATUS_PENDING
+                && !($resolution === 'approve' && in_array($status, self::REAPPROVABLE, true))) {
+            throw new ActionQueueException('This action is already ' . $status . '.');
         }
         if (self::isOverdue($row)) {
+            if ($status !== AiQueuedAction::STATUS_PENDING) {
+                throw new ActionQueueException('This proposal has expired, so it can no longer run.');
+            }
             self::markResolved($row, AiQueuedAction::STATUS_EXPIRED, null);
             throw new ActionQueueException('This proposal expired before it was resolved, so it can no longer run.');
         }
@@ -342,9 +384,22 @@ class ActionQueue {
         return (int)$q->fetchColumn();
     }
 
+    /** Whether the owner has any action no longer pending — the Past list has something to show. */
+    public static function hasResolved(int $user_id): bool {
+        $db = DbConnector::get_instance()->get_db_link();
+        $q = $db->prepare(
+            "SELECT 1 FROM aqa_ai_queued_actions
+              WHERE aqa_owner_user_id = ? AND aqa_status <> ? AND aqa_delete_time IS NULL
+              LIMIT 1");
+        $q->execute([$user_id, AiQueuedAction::STATUS_PENDING]);
+        return $q->fetchColumn() !== false;
+    }
+
     /** One action as the card shape every surface renders. */
     public static function card(AiQueuedAction $row): array {
-        $facts = self::factsFor($row);
+        $arguments = self::openArguments($row);
+        $facts = $arguments === null ? null : self::factsFrom($row, $arguments);
+        $fields = $arguments === null ? null : self::fieldsFrom($row, $arguments);
         $result = null;
         if ($facts !== null) {
             $raw = (string)$row->get('aqa_result');
@@ -355,13 +410,20 @@ class ActionQueue {
                 if (mb_strlen($result) > 500) $result = mb_substr($result, 0, 499) . '…';
             }
         }
+        $status = (string)$row->get('aqa_status');
         return [
             'action_id'       => (int)$row->key,
             'tool'            => (string)$row->get('aqa_tool'),
             'area'            => (string)$row->get('aqa_area'),
-            'status'          => (string)$row->get('aqa_status'),
+            'status'          => $status,
             'locked'          => $facts === null,
             'facts'           => $facts,
+            // Labelled fields when the tool states them; the lines otherwise.
+            'kicker'          => $fields['kicker'] ?? null,
+            'headline'        => $fields['headline'] ?? null,
+            'fields'          => $fields['fields'] ?? null,
+            'can_approve'     => $facts !== null && !self::isOverdue($row)
+                && ($status === AiQueuedAction::STATUS_PENDING || in_array($status, self::REAPPROVABLE, true)),
             'model_note'      => $facts === null ? null : (string)$row->get('aqa_model_note'),
             'result'          => $result,
             'source_type'     => (string)$row->get('aqa_source_type'),

@@ -1,7 +1,9 @@
 /**
  * Area AI panel (ai_panel.js) — the same panel docked in a host's sidebar or
  * carried by the slide-over, so both are styled from one place. jy-ui
- * vocabulary, vanilla CSS, no framework. @version 2.6.0 - .aip-stale: the previous context's cards, dimmed, while the next load
+ * vocabulary, vanilla CSS, no framework. @version 2.7.0 - action cards: neutral with a
+ *   blue edge, padded when docked, labelled fields, the Current / Past switch
+ * @version 2.6.0 - .aip-stale: the previous context's cards, dimmed, while the next load
  * @version 2.5.0 - the slide-over scrolls
  *   its body: the panel inside the drawer is the flex column
  */
@@ -149,23 +151,157 @@
 	text-align: center;
 }
 
-/* Waiting for you: pending queued actions. */
-.aip-panel .aip-waiting-title {
+/* Waiting for you: queued actions, with the Current / Past switch beside the
+   title. */
+.aip-waiting-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
 	margin: 1rem 0 0.5rem;
-	font-size: 0.8rem;
+}
+.aip-panel .aip-waiting-head .aip-waiting-title {
+	margin: 0;
+}
+.aip-switch {
+	display: inline-flex;
+	flex: 0 0 auto;
+	border: 1px solid var(--jy-color-border, #dfe3e8);
+	border-radius: 999px;
+	padding: 2px;
+	background: var(--jy-color-surface, #f7f8fa);
+}
+.aip-switch[hidden] { display: none; }
+.aip-switch-btn {
+	border: 0;
+	background: none;
+	border-radius: 999px;
+	padding: 0.1rem 0.6rem;
+	font: inherit;
+	font-size: 0.72rem;
+	line-height: 1.5;
+	color: var(--jy-color-text-muted, #667085);
+	cursor: pointer;
+}
+.aip-switch-btn.is-on {
+	background: var(--jy-color-bg, #fff);
+	color: var(--jy-color-text, #1f2933);
+	font-weight: 600;
+	box-shadow: 0 1px 2px rgba(15, 18, 24, 0.12);
+}
+
+/* A queued action. Neutral, with the blue edge the waiting count uses: a
+   request for a decision. Resolved ones (Past) drop the edge. Long values —
+   a URL, an address with no spaces — wrap inside the card, never past it. */
+.aip-card.aip-action-card {
+	background: var(--jy-color-bg, #fff);
+	border: 1px solid var(--jy-color-border, #dfe3e8);
+	border-left: 3px solid #1d63d1;
+	border-radius: 8px;
+	padding: 0.7rem 0.85rem 0.8rem;
+	margin-bottom: 0.6rem;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.aip-card.aip-action-card.is-past,
+.aip-card.aip-action-card.is-resolved {
+	border-left-color: var(--jy-color-border, #dfe3e8);
+}
+
+.aip-panel .aip-card-kicker {
+	margin: 0 0 0.1rem;
+	font-size: 0.72rem;
+	font-weight: 600;
+	color: var(--jy-color-text-muted, #667085);
+}
+.aip-panel .aip-action-card .aip-card-name {
+	margin: 0 0 0.45rem;
+	line-height: 1.3;
+}
+
+.aip-panel .aip-card-outcome {
+	margin: 0 0 0.35rem;
+	font-size: 0.72rem;
 	font-weight: 700;
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: 0.04em;
+	color: var(--jy-color-text-muted, #667085);
+}
+.aip-panel .aip-card-outcome.aip-outcome-approved { color: #067647; }
+.aip-panel .aip-card-outcome.aip-outcome-failed { color: #b42318; }
+
+.aip-panel .aip-card-result {
+	margin: 0.4rem 0 0;
+	font-size: 0.8rem;
 	color: var(--jy-color-text-muted, #667085);
 }
 
-.aip-action-card {
-	border-color: #e8d49a;
-	background: #fffaec;
+/* Label beside value: a narrow muted column of labels, the values in body
+   colour — the facts the owner is deciding on. */
+.aip-panel .aip-fields {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	column-gap: 0.7rem;
+	row-gap: 0.3rem;
+	margin: 0;
+}
+.aip-panel .aip-field {
+	display: contents;
+}
+.aip-panel .aip-field-label {
+	margin: 0;
+	padding-top: 0.08rem;
+	font-size: 0.72rem;
+	font-weight: 600;
+	color: var(--jy-color-text-muted, #667085);
+}
+.aip-panel .aip-field-value {
+	margin: 0;
+	min-width: 0;
+	font-size: 0.85rem;
+	line-height: 1.4;
+	color: var(--jy-color-text, #1f2933);
 }
 
-/* A proposal's facts: what it would do, in body colour — these are the
-   lines the owner is deciding on, not status chatter. */
+/* A link: one line, cut with an ellipsis; a click shows all of it. */
+.aip-panel .aip-field-line {
+	display: block;
+	width: 100%;
+	padding: 0;
+	border: 0;
+	background: none;
+	font: inherit;
+	text-align: left;
+	color: inherit;
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.aip-panel .aip-field-line.is-open {
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+/* A note: its first three lines, then 'more'. Line breaks are kept. */
+.aip-panel .aip-field-clamp {
+	white-space: pre-line;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	line-clamp: 3;
+	overflow: hidden;
+}
+.aip-panel .aip-field-clamp.is-open {
+	display: block;
+	-webkit-line-clamp: unset;
+	line-clamp: none;
+	overflow: visible;
+}
+.aip-panel .aip-field-more[hidden] { display: none; }
+
+/* A proposal's facts from a tool without labelled fields: what it would do,
+   in body colour. */
 .aip-panel .aip-card-fact {
 	margin: 0 0 0.2rem;
 	font-size: 0.85rem;
@@ -174,27 +310,28 @@
 }
 
 .aip-panel .aip-card-origin {
-	margin-top: 0.35rem;
+	margin-top: 0.5rem;
 	font-size: 0.75rem;
 }
 
 .aip-action-note {
-	margin: 0.35rem 0;
+	margin: 0.4rem 0 0;
 	font-size: 0.8rem;
 	color: var(--jy-color-text-muted, #667085);
 }
 
 .aip-action-note blockquote {
-	margin: 0.3rem 0 0 0.5rem;
+	margin: 0.3rem 0 0 0.25rem;
 	padding-left: 0.6rem;
-	border-left: 3px solid #e2cf8f;
+	border-left: 3px solid var(--jy-color-border, #dfe3e8);
 	font-style: italic;
 }
 
 .aip-action-buttons {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 0.5rem;
-	margin-top: 0.5rem;
+	margin-top: 0.7rem;
 }
 
 /* The standing-approval confirm dialog. */
@@ -250,6 +387,10 @@
 }
 .aip-panel-docked .aip-card {
 	padding: 0.5rem 0;
+}
+/* An action card is a bordered box wherever it is, so it keeps its inset. */
+.aip-panel-docked .aip-card.aip-action-card {
+	padding: 0.7rem 0.85rem 0.8rem;
 }
 /* Collapsed to its header: the column may then be down to a spine, and the
    host turns the title on its side. */

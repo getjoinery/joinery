@@ -13,11 +13,13 @@
  *   actions / pending_count  queued actions awaiting an approve or a decline,
  *                          as the same server-rendered cards ai_actions_list
  *                          returns (ActionQueue::card)
+ *   has_past               whether any action has been resolved, so the panel
+ *                          can offer its Past list even with nothing waiting
  *
  * Ownership scoping is the authorization: everyone sees exactly their own
  * runs and their own queued actions, so there is no permission gate.
  *
- * @version 1.0
+ * @version 1.1 - has_past
  */
 
 function ai_status_logic(array $input): LogicResult {
@@ -51,6 +53,7 @@ function ai_status_logic(array $input): LogicResult {
 		'job_count'     => $jobs['count'],
 		'actions'       => $actions,
 		'pending_count' => ActionQueue::pendingCount($uid),
+		'has_past'      => ActionQueue::hasResolved($uid),
 	]);
 }
 

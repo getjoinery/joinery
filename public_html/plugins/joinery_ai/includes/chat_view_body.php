@@ -1456,12 +1456,16 @@ if (!function_exists('joai_pin_svg')) {
                 lockedLine.textContent = 'Sealed to your vault — unlock to view and resolve.';
                 card.appendChild(lockedLine);
             } else {
-                (a.facts || []).forEach(function (line, i) {
-                    var p = document.createElement('p');
-                    p.className = 'joai-queued-fact' + (i === 0 ? ' joai-queued-headline' : '');
-                    p.textContent = line;
-                    card.appendChild(p);
-                });
+                if (a.fields) {
+                    queuedFields(card, a);
+                } else {
+                    (a.facts || []).forEach(function (line, i) {
+                        var p = document.createElement('p');
+                        p.className = 'joai-queued-fact' + (i === 0 ? ' joai-queued-headline' : '');
+                        p.textContent = line;
+                        card.appendChild(p);
+                    });
+                }
                 if (a.model_note) {
                     var det = document.createElement('details');
                     det.className = 'joai-queued-note';
@@ -1493,6 +1497,53 @@ if (!function_exists('joai_pin_svg')) {
         });
         queuedBox.hidden = false;
         scrollToBottom();
+    }
+
+    // A tool's labelled fields (the same server-stated facts, label beside
+    // value): a link on one line until clicked, a note's first three lines
+    // and a 'more' when it is cut.
+    function queuedFields(card, a) {
+        function node(tag, cls, text) {
+            var n = document.createElement(tag);
+            n.className = cls;
+            if (text != null) n.textContent = text;
+            return n;
+        }
+        if (a.kicker) card.appendChild(node('p', 'joai-queued-kicker', a.kicker));
+        card.appendChild(node('p', 'joai-queued-fact joai-queued-headline', a.headline || ''));
+        var dl = node('dl', 'joai-queued-fields');
+        a.fields.forEach(function (f) {
+            var row = node('div', 'joai-queued-field');
+            row.appendChild(node('dt', 'joai-queued-label', f.label));
+            var dd = node('dd', 'joai-queued-value');
+            if (f.display === 'line') {
+                var line = node('button', 'joai-queued-line', f.value);
+                line.type = 'button';
+                line.title = f.value;
+                line.addEventListener('click', function () { line.classList.toggle('is-open'); });
+                dd.appendChild(line);
+            } else if (f.display === 'clamp') {
+                var text = node('div', 'joai-queued-clamp', f.value);
+                var more = node('button', 'joai-queued-more', 'more');
+                more.type = 'button';
+                more.hidden = true;
+                more.addEventListener('click', function () {
+                    more.textContent = text.classList.toggle('is-open') ? 'less' : 'more';
+                });
+                dd.appendChild(text);
+                dd.appendChild(more);
+                requestAnimationFrame(function () {
+                    more.hidden = text.clientHeight > 0
+                        ? text.scrollHeight <= text.clientHeight + 1
+                        : !(f.value.length > 150 || f.value.split('\n').length > 3);
+                });
+            } else {
+                dd.textContent = f.value;
+            }
+            row.appendChild(dd);
+            dl.appendChild(row);
+        });
+        card.appendChild(dl);
     }
 
     function resolveQueued(actionId, resolution, card) {
