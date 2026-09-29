@@ -30,6 +30,8 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.6 - the checklist's fixes are buttons for one form outside it (mailbox_protection_fix_form());
+ *   a form inside the editor's form ended it early and left Save doing nothing
  * @version 2.5 - the Fortress receipt has a row for relay-sealed mail waiting to be opened (B46)
  * @version 2.4 - mailbox_protection_owner_has_unseal_work(): the reader's per-load question, asked
  *   of the distinct (mailbox, domain) pairs of the owner's sealed rows rather than the rows
@@ -764,6 +766,40 @@ function mailbox_fortress_receipt_render(InboundEmailDomain $domain, array $stat
 	return $html;
 }
 
+/** The id of the one form every checklist fix posts through. */
+const MAILBOX_PROTECTION_FIX_FORM = 'protection-fix-form';
+
+/**
+ * A checklist fix: a submit button for the form mailbox_protection_fix_form()
+ * emits, carrying its own target and fields in formaction. The checklist sits
+ * inside the editor's own form, and a form written inside a form ends the
+ * outer one where the inner one closes, leaving the editor's Save button in no
+ * form at all. So the checklist itself never contains a form.
+ */
+function mailbox_protection_fix_button(string $label, string $editor_url, array $fields,
+		string $style, string $confirm = ''): string {
+	$target = $editor_url . (strpos($editor_url, '?') === false ? '?' : '&') . http_build_query($fields);
+	$onclick = ($confirm !== '')
+		? ' onclick="' . htmlspecialchars('return confirm(' . json_encode($confirm, JSON_HEX_TAG | JSON_HEX_AMP
+			| JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) . ');', ENT_QUOTES) . '"'
+		: '';
+	return ' <button type="submit" form="' . MAILBOX_PROTECTION_FIX_FORM . '" formaction="'
+		. htmlspecialchars($target) . '" class="btn btn-sm ' . $style . '" style="margin-left:.5rem;"'
+		. $onclick . '>' . htmlspecialchars($label) . '</button>';
+}
+
+/**
+ * The form the checklist's fix buttons submit. Emit it once on any page that
+ * renders mailbox_protection_render(), after that page's own form closes,
+ * passing that form's token ($formwriter->getCSRFToken()).
+ */
+function mailbox_protection_fix_form(?string $csrf_token): string {
+	return '<form id="' . MAILBOX_PROTECTION_FIX_FORM . '" method="post" class="d-none">'
+		. ($csrf_token !== null && $csrf_token !== ''
+			? '<input type="hidden" name="_csrf_token" value="' . htmlspecialchars($csrf_token) . '">' : '')
+		. '</form>';
+}
+
 /**
  * Render the ceremony checklist for the domain editor. $urls carries the
  * editor's own URL (for the remove-grant forms and vault/passkey returns):
@@ -810,16 +846,12 @@ function mailbox_protection_render(array $rows, InboundEmailDomain $domain, arra
 			. htmlspecialchars($row['summary']);
 		foreach ($row['actions'] as $action) {
 			if ($action['type'] === 'remove_grant') {
-				$html .= '<form method="post" action="' . htmlspecialchars($urls['editor_url'])
-					. '" style="display:inline;margin-left:.5rem;">'
-					. '<input type="hidden" name="action" value="ceremony_remove_grant">'
-					. '<input type="hidden" name="ied_inbound_email_domain_id" value="' . intval($domain->key) . '">'
-					. '<input type="hidden" name="alias_id" value="' . intval($action['alias_id']) . '">'
-					. '<input type="hidden" name="user_id" value="' . intval($action['user_id']) . '">'
-					. '<button type="submit" class="btn btn-sm btn-outline-danger" '
-					. 'onclick="return confirm(\'Remove ' . htmlspecialchars(addslashes($action['name']))
-					. '\\\'s access to this mailbox?\');">Remove ' . htmlspecialchars($action['name']) . '</button>'
-					. '</form>';
+				$html .= mailbox_protection_fix_button('Remove ' . $action['name'], $urls['editor_url'], array(
+					'action' => 'ceremony_remove_grant',
+					'ied_inbound_email_domain_id' => intval($domain->key),
+					'alias_id' => intval($action['alias_id']),
+					'user_id' => intval($action['user_id']),
+				), 'btn-outline-danger', 'Remove ' . $action['name'] . '\'s access to this mailbox?');
 			} elseif ($action['type'] === 'add_reader') {
 				$html .= ' <a class="btn btn-sm btn-outline-primary" style="margin-left:.5rem;" href="'
 					. htmlspecialchars($urls['alias_url'] . '?iea_inbound_email_alias_id=' . intval($action['alias_id']))
@@ -828,11 +860,10 @@ function mailbox_protection_render(array $rows, InboundEmailDomain $domain, arra
 				// No owner picker exists, and the sending-lock ceremony
 				// already establishes "the person doing this becomes the owner".
 				// Make that explicit and deliberate rather than a side effect.
-				$html .= '<form method="post" style="display:inline;margin-left:.5rem;">'
-					. '<input type="hidden" name="action" value="ceremony_set_domain_owner">'
-					. '<input type="hidden" name="ied_inbound_email_domain_id" value="' . intval($domain->key) . '">'
-					. '<button type="submit" class="btn btn-sm btn-outline-primary">Make me the owner</button>'
-					. '</form>';
+				$html .= mailbox_protection_fix_button('Make me the owner', $urls['editor_url'], array(
+					'action' => 'ceremony_set_domain_owner',
+					'ied_inbound_email_domain_id' => intval($domain->key),
+				), 'btn-outline-primary');
 			} elseif ($action['type'] === 'vault_self') {
 				$html .= ' <a class="btn btn-sm btn-primary" style="margin-left:.5rem;" href="'
 					. htmlspecialchars($security_url) . '#vault-panel">Set up your vault</a>';

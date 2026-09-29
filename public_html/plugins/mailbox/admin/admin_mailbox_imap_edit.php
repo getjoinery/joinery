@@ -10,6 +10,7 @@
  * When no mailboxes (store-mode aliases) exist yet, the editor shows a callout
  * linking to the alias editor so the bound-mailbox requirement isn't a dead-end.
  *
+ * @version 1.6.2 - the checklist's fix buttons post through a form outside the account form
  * @version 1.6.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.6
  * @changelog 1.6 - a stored password is a locked field with Reset
@@ -294,6 +295,10 @@ if ($ceremony !== null && $mailbox_level === InboundEmailDomain::LEVEL_STANDARD)
 $formwriter->submitbutton('btn_submit', $combined ? 'Save Mailbox' : 'Save Account');
 
 echo $formwriter->end_form();
+// The checklist's fixes post through their own form, outside this one.
+if ($ceremony !== null && $mailbox_level === InboundEmailDomain::LEVEL_STANDARD) {
+	echo mailbox_protection_fix_form($formwriter->getCSRFToken());
+}
 
 $page->end_box();
 
