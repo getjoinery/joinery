@@ -11,6 +11,7 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.10 - while an update re-images the relay, the health line says so instead of failing
  * @version 2.9 - a failed update or creation shows its reason, with Dismiss, while a relay exists
  * @version 2.8 - "Details"; Delete relay only once the relay is disabled, in the Disable button's place
  * @version 2.7 - the last relay action's message shows at the top of the section
@@ -352,7 +353,15 @@ function mailbox_relay_section_render($page, array $v): void {
 
 			// Health only for the active relay: the battery resolves the active
 			// relay internally, so it would say nothing true about another row.
-			if (is_array($row['health'])) {
+			// While an update re-images the relay, it answers with a new identity
+			// (or not at all) until its birth report lands: that is the update
+			// under way, not a fault, so the health line says so.
+			$rebuilding = !empty($v['cloud_run']) && $v['cloud_run']->isLive()
+				&& (string)$v['cloud_run']->get('rcl_kind') === 'upgrade'
+				&& in_array((string)$v['cloud_run']->get('rcl_status'), array('rebuilding', 'booting', 'provisioning'), true);
+			if ($rebuilding) {
+				echo '<p class="mb-2">The relay is being updated. Its health shows here again once it reports in.</p>';
+			} elseif (is_array($row['health'])) {
 				echo mailbox_relay_health_html($row['health'], $relay);
 			}
 

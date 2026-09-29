@@ -27,6 +27,7 @@
  * by anything on the box during the boot window, so nothing here may teach a
  * holder of the token which check it failed beyond what its own request shows.
  *
+ * @version 1.1 - a birth report may arrive from the instance's IPv6 as well as its IPv4 (sameAddress)
  * @version 1.0
  */
 
@@ -132,6 +133,28 @@ class RelayBirthEndpoint {
 	}
 
 	/**
+	 * Are these the same IP address? IPv4 or IPv6, compared as addresses, not
+	 * text: an IPv6 address has many spellings (case, zero runs, a /128), and
+	 * an IPv4 can arrive IPv4-mapped (::ffff:a.b.c.d).
+	 */
+	public static function sameAddress(string $a, string $b): bool {
+		$norm = function (string $ip): ?string {
+			$ip = trim(explode('/', trim($ip), 2)[0]);
+			$bin = @inet_pton($ip);
+			if ($bin === false || $bin === null) {
+				return null;
+			}
+			if (strlen($bin) === 16 && substr($bin, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {
+				$bin = substr($bin, 12);   // IPv4-mapped IPv6
+			}
+			return $bin;
+		};
+		$x = $norm($a);
+		$y = $norm($b);
+		return $x !== null && $y !== null && hash_equals($x, $y);
+	}
+
+	/**
 	 * The birth report, as a pure decision, so a test can drive it without an
 	 * HTTP request. $remote is the address the report arrived from.
 	 * @return array{status:int, error?:string, data?:array}
@@ -150,11 +173,16 @@ class RelayBirthEndpoint {
 
 		// 1. The address. The report must NAME the address the provider gave
 		//    and must ARRIVE from it: the token alone is not enough to be believed.
+		//    It arrives from either of the instance's addresses: a dual-stack
+		//    relay reaches a dual-stack server over IPv6.
 		$expected_ip = trim((string)$run->get('rcl_instance_ip'));
+		$expected_ipv6 = trim((string)$run->get('rcl_instance_ipv6'));
 		$claimed_ip = trim((string)($report['public_ip'] ?? ''));
-		if ($expected_ip === '' || $claimed_ip !== $expected_ip || trim($remote) !== $expected_ip) {
+		$from = self::sameAddress($remote, $expected_ip) || ($expected_ipv6 !== '' && self::sameAddress($remote, $expected_ipv6));
+		if ($expected_ip === '' || $claimed_ip !== $expected_ip || !$from) {
 			error_log('RelayBirthEndpoint: run ' . $run->key . ' birth report refused - address mismatch (provider '
-				. $expected_ip . ', report ' . $claimed_ip . ', from ' . $remote . ')');
+				. $expected_ip . ($expected_ipv6 !== '' ? ' / ' . $expected_ipv6 : '') . ', report ' . $claimed_ip
+				. ', from ' . $remote . ')');
 			return array('status' => 403, 'error' => 'The report did not come from the relay this run created.');
 		}
 
