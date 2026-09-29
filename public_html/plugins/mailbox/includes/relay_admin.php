@@ -13,6 +13,8 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.4 - one relay_health_check action (the fresh health answer plus the origin-leak
+ *                probe) replaces scanner_probe and origin_probe
  * @version 2.3 - a new fleet product is named Relay Hosting (tier Relay, link relay-hosting)
  * @version 2.1 - the health battery carries a pending grade
  *                (ProvisioningCheckPending): a converging alias map renders as
@@ -81,33 +83,32 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		return LogicResult::redirect($self_url);
 	}
 
-	// Out-and-back origin-leak probe (provider mode): send a marked message
-	// from a hosted alias to itself; it returns via the relay MX and the
-	// origin-leak check scans the delivered headers.
-	if ($action === 'origin_probe') {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
-		$res = InboundEmailHealth::sendOriginProbe();
-		admin_mailbox_relay_flash($session, $res['message'], $res['ok'] ? 'Probe sent' : 'Probe not sent');
-		return LogicResult::redirect($self_url);
-	}
-
-	// Ask the relay about its spam scanner right now. The cron pass already asks
-	// once per reconcile, and the Setup tab reads that cached answer — but an
-	// operator mid-incident needs a fresh one, not a cached answer of unknown age
-	// (specs/mailbox_relay_scanner_health.md, D1).
-	if ($action === 'scanner_probe') {
+	// Check Relay Health: ask the relay for a fresh health answer (reachable, and
+	// whether its spam scanner runs and its verdicts reach this server — the
+	// cron pass asks once per reconcile, but an operator mid-incident needs a
+	// fresh one, specs/mailbox_relay_scanner_health.md D1), then send the
+	// out-and-back origin-leak probe, whose delivered headers the "No leaks in
+	// sent mail" check scans when it comes back.
+	if ($action === 'relay_health_check') {
 		$relay = MailboxRelay::active();
 		if ($relay === null) {
-			admin_mailbox_relay_flash($session, 'No relay is enabled to ask.', 'Nothing to check');
+			admin_mailbox_relay_flash($session, 'No relay is enabled to check.', 'Nothing to check');
 			return LogicResult::redirect($self_url);
 		}
 		$health = $relay->pollHealth();
 		$ok = ($health['state'] === MailboxRelay::HEALTH_OK);
-		admin_mailbox_relay_flash($session, (string)$health['detail'],
-			$ok ? 'Scanner is working' : 'Checked');
+		$lines = array();
+		$lines[] = Globalvars::get_instance()->get_setting('mailbox_spam_filtering_enabled')
+			? 'Relay: ' . (string)$health['detail']
+			: ($ok ? 'Relay: it answered.' : 'Relay: ' . (string)$health['detail']);
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
+		$probe = InboundEmailHealth::sendOriginProbe();
+		$lines[] = 'Leak check: ' . ($probe['ok']
+			? 'a test message is on its way out and back; its result shows under the relay in a minute or two.'
+			: $probe['message']);
+		admin_mailbox_relay_flash($session, implode(' ', $lines), $ok ? 'Relay checked' : 'Relay needs attention');
 		return LogicResult::redirect($self_url);
 	}
-
 
 	// Upgrade a cloud relay: open an upgrade run against its existing instance.
 	// The relay cannot be logged in to — no root credential exists for it — so the

@@ -11,6 +11,10 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.3 - the section says what the relay is in one sentence, its health in one line
+ *                (or the list of what is not healthy), shows its update in plain sight, has one
+ *                Check Relay Health button, and carries the relay-or-direct choice that the
+ *                "How mail reaches this server" box used to
  * @version 2.2 - a pending health dot renders amber: unmet but converging is
  *                a wait, not a fault
  * @version 2.1 - relay version line and the upgrade affordance, which differs by
@@ -111,14 +115,63 @@ function mailbox_relay_upgrade_control(int $relay_id, array $up): string {
 		. 'change.' . $warn . '</span></div>';
 }
 
+/**
+ * What a relay row means, in one sentence: mail arrives there and this server
+ * collects it, so this server's address stays out of public DNS.
+ */
+function mailbox_relay_summary(bool $enabled): string {
+	return $enabled
+		? 'Mail for your domains arrives at this relay first, and this server collects it from there, so this '
+			. 'server\'s address never appears in public DNS.'
+		: 'This relay is switched off: it does not receive mail for your domains until you enable it.';
+}
+
+/**
+ * The relay's health in one line: healthy, or the list of what is not. The
+ * battery's checks, plus the relay's own last answer about its spam scanner
+ * when spam filtering is on. Amber is a wait (converging on the next tick),
+ * red a fault.
+ */
+function mailbox_relay_health_html(array $battery, $relay): string {
+	$dot = function (string $color): string {
+		return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' . $color
+			. ';margin-right:6px;vertical-align:middle;"></span>';
+	};
+	$issues = array();
+	foreach ($battery as $h) {
+		if ($h['ok'] && empty($h['pending'])) {
+			continue;
+		}
+		$issues[] = array(!empty($h['pending']) ? $dot('#ffc107') : $dot('#dc3545'), (string)$h['label'], (string)$h['message']);
+	}
+	if (Globalvars::get_instance()->get_setting('mailbox_spam_filtering_enabled')) {
+		$scanner = $relay->lastHealth();
+		if ($scanner !== null && ($scanner['state'] ?? '') !== MailboxRelay::HEALTH_OK) {
+			$issues[] = array($dot('#dc3545'), 'Spam scanning', (string)($scanner['detail'] ?? ''));
+		}
+	}
+	if (!$issues) {
+		return '<p class="mb-2">' . $dot('#28a745') . 'The relay is healthy.</p>';
+	}
+	$h = '<p class="mb-1">' . (count($issues) === 1 ? 'One thing needs attention:' : count($issues) . ' things need attention:') . '</p>'
+		. '<ul class="mb-2" style="list-style:none;padding-left:.25rem;">';
+	foreach ($issues as $i) {
+		$h .= '<li>' . $i[0] . '<strong>' . htmlspecialchars($i[1]) . '</strong>'
+			. ($i[2] !== '' ? ' — ' . htmlspecialchars($i[2]) : '') . '</li>';
+	}
+	return $h . '</ul>';
+}
+
 /** Echo the Relay section (one box, anchored #relay-section). */
 function mailbox_relay_section_render($page, array $v): void {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
 	echo '<div id="relay-section">';
 	$page->begin_box(array('title' => 'Relay'));
 
 	// --- relay rows -----------------------------------------------------------
-	// One plain line per relay — name (ip), status, health. The technical
-	// facts and the lifecycle actions live behind its details disclosure.
+	// One relay per deployment: its name, address and state; one sentence on
+	// what that means; its health in a line; its update when it is behind. The
+	// technical facts and the rarer actions live behind a disclosure.
 	if (empty($v['relays'])) {
 		if (!empty($v['mx_points_at_gone_relay'])) {
 			// The world still sends mail to a relay this deployment no longer
@@ -130,42 +183,43 @@ function mailbox_relay_section_render($page, array $v): void {
 				. 'repoint every hosted domain\'s MX at this server and turn its mail listener back on in the '
 				. 'Local mail listener box.</p>';
 		}
-		echo mailbox_hosted_relay_offered()
-			? '<p>No relay yet. Get one below — a hosted relay slot, or one you run yourself.</p>'
-			: '<p>No relay yet. Set one up below on a server you control.</p>';
+		echo '<p>' . htmlspecialchars(mailbox_receive_mode() === 'relay'
+			? 'This server is set up to receive through a relay, but none is set up yet. Until one is, mail cannot reach it.'
+			: 'No relay: mail comes straight to this server. A relay would take mail in first and keep this server\'s '
+				. 'address out of public DNS.') . '</p>';
 	} else {
 		foreach ($v['relays'] as $row) {
 			$relay = $row['model'];
 			$enabled = (bool)$relay->get('mrl_is_enabled');
 			$rid = (int)$relay->key;
 			$name = (string)$relay->get('mrl_name') ?: (string)$relay->get('mrl_mx_hostname');
+			$up = is_array($row['upgrade'] ?? null) ? $row['upgrade'] : array();
 
-			// Health dots only for the active relay — the battery resolves the
-			// active relay internally, so it would be misleading on any other row.
-			$health_html = '';
-			if (is_array($row['health'])) {
-				foreach ($row['health'] as $h) {
-					// Amber = pending: unmet but converging on the next
-					// reconcile tick, which is a wait rather than a fault.
-					$dot = !empty($h['pending']) ? '🟡' : ($h['ok'] ? '🟢' : '🔴');
-					$health_html .= '<span style="margin-right:.75rem;white-space:nowrap;" title="'
-						. htmlspecialchars($h['message'] !== '' ? $h['message'] : $h['label'], ENT_QUOTES) . '">'
-						. $dot . ' ' . htmlspecialchars($h['label']) . '</span>';
-				}
-			}
-
-			echo '<div style="margin-bottom:.75rem;">';
+			echo '<div style="margin-bottom:1rem;">';
 			echo '<div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">';
 			echo '<strong>' . htmlspecialchars($name) . '</strong>'
 				. '<span class="text-muted">(' . htmlspecialchars((string)$relay->get('mrl_public_ip')) . ')</span>'
 				. ($enabled ? '<span class="badge badge-success">Enabled</span>'
 					: '<span class="badge badge-secondary">Disabled</span>');
 			echo '</div>';
-			if ($health_html !== '') {
-				echo '<div style="margin-top:.4rem;">' . $health_html . '</div>';
+			echo '<p class="mt-2 mb-2">' . htmlspecialchars(mailbox_relay_summary($enabled)) . '</p>';
+
+			// Health only for the active relay: the battery resolves the active
+			// relay internally, so it would say nothing true about another row.
+			if (is_array($row['health'])) {
+				echo mailbox_relay_health_html($row['health'], $relay);
 			}
 
-			echo '<details style="margin-top:.4rem;"><summary>Details &amp; actions</summary>';
+			// The update, where it can be seen: a relay behind this site's
+			// release says so and offers the way to move it.
+			if (!empty($up['offers']) || ($up['route'] ?? '') === 'hosted') {
+				if (!empty($up['offers'])) {
+					echo '<p class="mb-1">' . htmlspecialchars((string)$up['describe']) . '</p>';
+				}
+				echo mailbox_relay_upgrade_control($rid, $up);
+			}
+
+			echo '<details style="margin-top:.75rem;"><summary class="small">Details &amp; actions</summary>';
 			echo '<div style="margin-top:.5rem;">';
 			echo '<table class="table" style="max-width:560px;"><tbody>';
 			if ($relay->usesRelayApi()) {
@@ -190,7 +244,6 @@ function mailbox_relay_section_render($page, array $v): void {
 					: htmlspecialchars((string)$scanner['detail'])
 						. ' <span class="text-muted">(' . htmlspecialchars((string)$scanner['checked_time']) . ' UTC)</span>')
 				. '</td></tr>';
-			$up = is_array($row['upgrade'] ?? null) ? $row['upgrade'] : array();
 			if ($up !== array()) {
 				echo '<tr><th>Relay version</th><td>' . htmlspecialchars((string)$up['describe']) . '</td></tr>';
 			}
@@ -204,12 +257,6 @@ function mailbox_relay_section_render($page, array $v): void {
 					. '</pre></details>';
 			}
 			echo mailbox_relay_action_button($rid, $enabled ? 'disable' : 'enable', $enabled ? 'Disable' : 'Enable');
-			// The hosted notice shows regardless of standing: a tenant is owed the
-			// plain statement that this relay is somebody else's to upgrade, not
-			// just silence until it happens to fall behind.
-			if (!empty($up['offers']) || ($up['route'] ?? '') === 'hosted') {
-				echo mailbox_relay_upgrade_control($rid, $up);
-			}
 			$machine = (string)$relay->get('mrl_public_ip') ?: $name;
 			$delete_confirm = ((string)$relay->get('mrl_cloud_instance_id') !== '')
 				? 'Remove the relay at ' . $machine . ' from your mail setup? The server itself keeps running, and billing, '
@@ -223,25 +270,24 @@ function mailbox_relay_section_render($page, array $v): void {
 		}
 	}
 
-	// A relay that scans and finds nothing looks exactly like a relay whose scanner
-	// is dead, so the only way to tell is to ask it.
+	// One check, on demand: a fresh answer from the relay (its spam scanner
+	// included) and the out-and-back leak probe. A relay that scans and finds
+	// nothing looks exactly like one whose scanner is dead, so the only way to
+	// tell is to ask it.
 	if (!empty($v['has_active_relay'])) {
 		echo '<form method="post" style="display:inline">';
-		echo '<input type="hidden" name="action" value="scanner_probe">';
-		echo '<button type="submit" class="btn btn-sm btn-outline-secondary">Check spam scanning now</button>';
+		echo '<input type="hidden" name="action" value="relay_health_check">';
+		echo '<button type="submit" class="btn btn-sm btn-outline-secondary">Check Relay Health</button>';
 		echo '</form>';
-		echo ' <span class="text-muted small">Asks the relay whether its spam scanner is running and whether '
-			. 'its verdicts still reach this server.</span><br>';
 	}
 
-	// Provider mode: an out-and-back probe proves sent mail carries no origin leak.
-	if (!empty($v['has_active_relay'])) {
-		echo '<form method="post" style="display:inline">';
-		echo '<input type="hidden" name="action" value="origin_probe">';
-		echo '<button type="submit" class="btn btn-sm btn-outline-secondary">Run origin-leak probe</button>';
-		echo '</form>';
-		echo ' <span class="text-muted small">Sends a marked message out through your provider and back via the '
-			. 'relay MX; the origin-leak check then scans the delivered headers.</span>';
+	// The relay-or-direct comparison: the question itself while undecided, a
+	// quiet disclosure once decided (receive_mode.php).
+	if (mailbox_receive_mode() === '') {
+		echo mailbox_receive_mode_comparison();
+	} else {
+		echo '<details style="margin-top:.75rem;"><summary class="small text-muted">Change how mail reaches this server</summary>'
+			. '<div class="mt-2">' . mailbox_receive_mode_comparison() . '</div></details>';
 	}
 
 	// --- hosted relay slot (gated off until the fleet launches) ---------------

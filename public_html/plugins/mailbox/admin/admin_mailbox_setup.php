@@ -26,6 +26,8 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.16 - Advanced: one Relay section (the "How mail reaches this server" box folds into
+ *                it); this server's mail identity shows its values with an Edit link
  * @version 3.15 - protection is Private plus add-ons: the relay step follows Seal at
  *                the relay, the finishing step follows a requested sending lock
  * @version 3.14 - SRV fields are their own columns (Priority/Weight/Port), matching provider forms
@@ -800,18 +802,11 @@ if (!$advanced) {
 		$render_sending_identity();
 	}
 
-	// --- How mail reaches this server ---
-	// A deployment-wide fact with a sensible default, so it is a setting rather
-	// than a question in the way. It used to gate every mailbox surface until it
-	// was answered, which asked the operator to decide about relay
-	// infrastructure before they had a domain that needed any.
-	$page->begin_box(array('title' => 'How mail reaches this server'));
-	echo mailbox_receive_gate_render();
-	$page->end_box();
-
 	// --- Relay ---
-	// Server-wide, and mostly provisioning: the cards above report its state,
-	// this is where one is set up, rebuilt, enabled or removed.
+	// Server-wide: whether a relay takes this server's mail in, its health, its
+	// update, and where one is set up, enabled or removed. The relay-or-direct
+	// choice lives in it too (receive_mode.php), a sensible default rather than
+	// a question in the way.
 	if (!empty($relay_section)) {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_section.php'));
 		mailbox_relay_section_render($page, $relay_section);
@@ -825,7 +820,23 @@ if (!$advanced) {
 	// without the control that produces it.
 
 	// --- Server mail identity ---
+	// Two values that are set once: shown as values, with an Edit link to the
+	// form. The form opens by itself when auto-detection found a private
+	// address, which is the one case that needs a value typed in.
+	$identity_edit = !empty($_GET['edit_identity']) || $public_ip_private || $mail_hostname === '';
+	echo '<div id="mail-identity">';
 	$page->begin_box(array('title' => "This server's mail identity"));
+	if (!$identity_edit) {
+		$edit_url = $self_url . (strpos($self_url, '?') === false ? '?' : '&') . 'edit_identity=1#mail-identity';
+		echo '<table class="table" style="max-width:640px;"><tbody>'
+			. '<tr><th style="width:40%;">Mail server hostname</th><td>' . htmlspecialchars($mail_hostname) . '</td></tr>'
+			. '<tr><th>Public IP</th><td>' . htmlspecialchars($configured_public_ip !== '' ? $configured_public_ip
+				: ($public_ip !== '' ? $public_ip . ' (detected)' : 'detected automatically')) . '</td></tr>'
+			. '</tbody></table>'
+			. '<a href="' . htmlspecialchars($edit_url) . '">Edit</a>';
+		$page->end_box();
+		echo '</div>';
+	} else {
 	$formwriter = $page->getFormWriter('setup_form', array('action' => $self_url));
 	echo $formwriter->begin_form();
 	$formwriter->textinput('mail_hostname', 'Mail server hostname', array(
@@ -845,6 +856,8 @@ if (!$advanced) {
 	$formwriter->submitbutton('btn_save', 'Save & Run Checks');
 	echo $formwriter->end_form();
 	$page->end_box();
+	echo '</div>';
+	}
 
 	// --- DNS publish box, once there is nothing left to fix ---
 	// Above the copy-paste table, which is the manual version of the same thing.
