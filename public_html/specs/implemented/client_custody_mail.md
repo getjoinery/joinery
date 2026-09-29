@@ -1,6 +1,6 @@
 # Client-custody mail — Fortress, end-to-end encrypted mailboxes
 
-**Status: ACTIVE 2026-09-24, prepared for an executor.** Supersedes
+**Status: IMPLEMENTED 2026-09-29.** Supersedes
 `specs/DEFERRED_client_custody_mail.md` (removed 2026-09-24; its design record is folded in at the
 end). Builds on `specs/implemented/client_custody_declared_consumer.md`
 (commit 243ff863: per-row custody, the browser-format sealer, the ceremony and
@@ -11,9 +11,10 @@ end-to-end, nothing less). The four decisions this spec needed were taken with
 the owner on 2026-09-24 and are the last section. **Search (R5, WP3) was
 redesigned with the owner on 2026-09-27** for 10 GB mailboxes: a sealed word
 index kept in each browser, not a per-search download (§ Decisions
-2026-09-27). WP0–WP2b are built (fb0a830c); WP3 is built and walked on dev
-(8e008eeb); WP4 is built, reviewed and walked on dev (75b9501a). WP5 is
-built, tested and walked on dev (2026-09-28, uncommitted; § WP5 As built).
+2026-09-27). Commits: WP0–WP2b fb0a830c, WP3 8e008eeb, WP4 75b9501a, WP5
+46ef1efb, WP6 49989986, WP7 7ad0fc0e, WP8 e371e85c; WP9 and the card wording
+with this spec's move. **Follow-ups outside this spec** are listed under
+§ WP9 (the live relay check on jeremytunnell, the phone apps).
 
 ## For the executor — read this first
 
@@ -998,12 +999,13 @@ at begin and commit.
 `ProtectionLevelPicker::catalog()` gains a `SERVICE_MAIL` Fortress entry:
 
 - Title: **Fortress**
-- Protects: "Only your devices can read stored mail. A stolen database or a
-  hacked server gets nothing it can open."
-- Costs: "No server-side AI or server search on this domain; search runs on
-  your device, and the first search in each browser takes a few minutes to
-  prepare. Mail rules run only as mail arrives. Phone apps open this
-  mailbox in the browser."
+- Card (owner's wording, 2026-09-29): "Full end-to-end encryption." / "Even
+  a hacked Joinery does not reveal your emails." / "Team features and mobile
+  apps are not available." Standard and Private were reworded the same day:
+  "No encryption." / "Best for mailboxes that do not contain sensitive data
+  (customer service, clubs, newsletters)." / "Team features are available."
+  and "Your emails are encrypted in the database." / "Solid privacy for most
+  users." / "Team features are not available."
 - Note (relay add-on off): "New mail is encrypted the moment it arrives; a
   server hacked while mail is arriving could read what arrives then."
 - Note (relay add-on on): "This server never sees your mail, not even as it
@@ -1921,6 +1923,48 @@ first), and lift the refusal in WP7.
   lists vault scopes. `specs/protection_levels_platform.md` matrix row
   "Fortress" → built. Current state only. Update the `DEFERRED` pointers in
   `inbound_email_domains_class.php` comments. **Stop point 4.**
+
+- **Built 2026-09-29.**
+  - `plugins/mailbox/docs/overview.md`: a **Fortress: end-to-end mail** section
+    (the row, which key a row takes, arrival on both paths, the reader, search
+    and what the server learns from it, compose, what the server does not do,
+    level changes, rotation, Seal at the relay at Fortress, the relay pin, the
+    phone apps); the level table gains a Fortress column and the team-features
+    and phone-app rows; the level intro names three cards and the mailbox
+    editor's cards; the relay seal target names the `client` key at Fortress.
+  - `docs/sealed_vault.md` § Client-custody scopes already carried reopening
+    after a reload, the custody-change batch and the rotation listeners (each
+    written with its WP). `docs/account_security.md` lists no vault scopes, so
+    nothing changed there. No `DEFERRED` pointer was left in the mailbox data
+    classes.
+  - `specs/protection_levels_platform.md`: the mail Fortress row reads built.
+- **Card wording (owner, 2026-09-29).** All three mail cards reworded (R12),
+  `ProtectionLevelPicker` 1.5.0. The mailbox editor shows the cards open with
+  the level in force marked, each other card a link to the domain editor with
+  that level chosen (`ProtectionLevelPicker::renderLinked()`,
+  `admin_mailbox_alias.php` 1.11; its example address now names the mailbox's
+  own domain).
+- **A1 (settled by the owner's card wording, 2026-09-29):** the phone apps do
+  not open Fortress mail, and the card says "mobile apps are not available".
+  Checked in the tree: the iOS and Android apps have no Fortress code. It is
+  not blocked: the per-domain passkey limit (`specs/native_vault_unlock.md`
+  § The WebAuthn wall) stops passkeys in the apps, not Fortress, since the key
+  can reach a phone through device linking (built; "Let this device open my
+  mail vault", WP6 walk). The owner has another agent investigating app
+  support. **B58 (open, for that work):** the apps ignore `fortress: true`, so
+  a Fortress mailbox in an app shows empty messages instead of saying they
+  open elsewhere.
+- **A2 stands as built:** a domain goes to Fortress only when the acting
+  admin owns every mailbox on it. A "waiting for each owner's vault" state
+  for shared ownership is recorded, not built.
+- **Follow-ups outside this spec.**
+  - The live relay check on jeremytunnell (the relay reached 3.2 on
+    2026-09-29): one mailbox at Fortress with Seal at the relay, a message
+    arriving waiting and parsing on unlock, the first pin, the born relay's
+    reported identity equal to its signing key, and one mail rotation commit
+    that waits for a drained pull.
+  - Not walked in the browser: finishing a mail rotation that stopped part
+    way (WP6; the server half is in `fortress_rotation_test`).
 
 ## Tests
 

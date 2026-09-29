@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.16.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.17.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -1082,6 +1082,31 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
   font-weight: 400;
   font-size: var(--jy-text-xs);
   color: var(--jy-color-text-muted);
+}
+/* The level cards shown rather than asked (ProtectionLevelPicker::renderLinked):
+   the card in force is marked like a checked radio, and each other card is a
+   link to the page where that level is chosen. */
+.jy-ui .jy-radio-card .jy-radio-dot {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.2rem;
+  border: 1px solid var(--jy-color-border);
+  border-radius: 50%;
+}
+.jy-ui .form-check.jy-radio-card.is-current {
+  border-color: var(--jy-color-primary);
+  background: var(--jy-color-info-bg);
+}
+.jy-ui .jy-radio-card.is-current .jy-radio-dot {
+  border: 5px solid var(--jy-color-primary);
+}
+.jy-ui a.form-check.jy-radio-card {
+  color: inherit;
+  text-decoration: none;
+}
+.jy-ui a.form-check.jy-radio-card:hover {
+  border-color: var(--jy-color-primary);
 }
 
 /* Protection add-ons — the "Extra protection" switches ProtectionLevelPicker

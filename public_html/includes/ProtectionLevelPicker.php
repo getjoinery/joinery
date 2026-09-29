@@ -49,6 +49,8 @@
  * The picker echoes its markup, so it belongs in a direct-output form (not one
  * built with FormWriter's deferred_output).
  *
+ * @version 1.5.0 - mail cards in the owner's words: encryption, who it suits, team features and apps;
+ *   renderLinked(): the cards shown on a page where the level is decided elsewhere
  * @version 1.4.0 - mail's Fortress card (specs/client_custody_mail.md § R12); `notes`: a
  *   consumer's extra line under a card, for what only it knows
  * @version 1.3.0 - chips read "Private+" when an add-on is on; summaryTitle() names them on hover
@@ -108,21 +110,19 @@ class ProtectionLevelPicker {
 			),
 			self::SERVICE_MAIL => array(
 				ProtectionLevel::STANDARD => array(
-					'The server manages this mailbox for you.',
-					'Best for club signups, newsletters, and low-stakes addresses.',
-					'Nothing extra to set up. Stored mail is not protected at rest.',
+					'No encryption.',
+					'Best for mailboxes that do not contain sensitive data (customer service, clubs, newsletters).',
+					'Team features are available.',
 				),
 				ProtectionLevel::PRIVATE_ => array(
-					'Only you can read your stored mail.',
-					'Best for mail worth keeping private, where automation must keep working.',
-					'You unlock to read. Lose every unlocker and the mail is gone for good.',
+					'Your emails are encrypted in the database.',
+					'Solid privacy for most users.',
+					'Team features are not available.',
 				),
 				ProtectionLevel::FORTRESS => array(
-					'Only your devices can read stored mail. A stolen database or a hacked server gets nothing it can open.',
-					'Best for mail that must stay yours even if this server does not.',
-					'No server-side AI or server search on this domain; search runs on your device, and the first '
-						. 'search in each browser takes a few minutes to prepare. Mail rules run only as mail arrives. '
-						. 'Phone apps open this mailbox in the browser.',
+					'Full end-to-end encryption.',
+					'Even a hacked Joinery does not reveal your emails.',
+					'Team features and mobile apps are not available.',
 				),
 			),
 			self::SERVICE_MESSAGING => array(
@@ -285,11 +285,8 @@ class ProtectionLevelPicker {
 		$descriptions = array();
 		foreach ($levels as $level) {
 			$choices[$level] = ProtectionLevel::label($level);
-			$descriptions[$level] = array_merge(self::copy($level, $service), array_values((array)($options['notes'][$level] ?? array())));
-			// The selected card says which add-ons are on (Add-ons rule 4).
-			if ($active && $level === $value && self::levelTakesAddons($level)) {
-				$descriptions[$level][] = self::ADDONS_HEADING . ' on: ' . implode(', ', $active) . '.';
-			}
+			$descriptions[$level] = self::cardLines($level, $service, $options['notes'][$level] ?? array(),
+				$level === $value ? $active : array());
 		}
 
 		$field_options = array(
@@ -358,6 +355,65 @@ class ProtectionLevelPicker {
 			}
 		}
 		echo '</div>';
+	}
+
+	/**
+	 * The cards shown rather than asked, for a page where the level is decided
+	 * somewhere else (a hosted mailbox takes its domain's level): every rung in
+	 * the picker's words, the one in force marked, and each other card a link to
+	 * the page where that choice is made. Returns the markup.
+	 *
+	 * @param string $value   the level in force
+	 * @param array  $options service, levels, notes (as render()), addons_on
+	 *                        (labels of the add-ons in force), url (callable:
+	 *                        level => href for that card), label, helptext
+	 */
+	public static function renderLinked(string $value, array $options = array()): string {
+		$service = $options['service'] ?? self::SERVICE_DEFAULT;
+		$value   = ProtectionLevel::normalize($value);
+		$url     = $options['url'] ?? null;
+
+		$html = '<div class="form-group jy-level-linked">';
+		if (!empty($options['label'])) {
+			$html .= '<div class="form-label">' . htmlspecialchars((string)$options['label']) . '</div>';
+		}
+		$html .= '<div class="jy-radio-cards">';
+		foreach (self::levels($options['levels'] ?? null) as $level) {
+			$current = ($level === $value);
+			$href = (!$current && is_callable($url)) ? (string)$url($level) : '';
+			$tag = ($href !== '') ? 'a' : 'div';
+			$html .= '<' . $tag . ' class="form-check jy-radio-card' . ($current ? ' is-current' : '') . '"'
+				. ($href !== '' ? ' href="' . htmlspecialchars($href) . '"' : '')
+				. ($current ? ' aria-current="true"' : '') . '>';
+			$html .= '<span class="jy-radio-dot" aria-hidden="true"></span>';
+			$html .= '<span class="form-check-label">' . htmlspecialchars(ProtectionLevel::label($level));
+			$html .= '<span class="jy-radio-card-desc">';
+			$lines = self::cardLines($level, $service, $options['notes'][$level] ?? array(),
+				$current ? (array)($options['addons_on'] ?? array()) : array());
+			foreach ($lines as $line) {
+				$html .= '<span>' . htmlspecialchars($line) . '</span>';
+			}
+			$html .= '</span></span>';
+			$html .= '</' . $tag . '>';
+		}
+		$html .= '</div>';
+		if (!empty($options['helptext'])) {
+			$html .= '<small class="form-help">' . htmlspecialchars((string)$options['helptext']) . '</small>';
+		}
+		$html .= '</div>';
+		return $html;
+	}
+
+	/**
+	 * One card's lines: the catalog's three, a consumer's notes, and on the
+	 * card in force the add-ons that are on (Add-ons rule 4).
+	 */
+	protected static function cardLines(string $level, string $service, $notes, array $active): array {
+		$lines = array_merge(self::copy($level, $service), array_values((array)$notes));
+		if ($active && self::levelTakesAddons($level)) {
+			$lines[] = self::ADDONS_HEADING . ' on: ' . implode(', ', $active) . '.';
+		}
+		return $lines;
 	}
 
 	/** The submitted name of one add-on's switch. */

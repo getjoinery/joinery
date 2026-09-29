@@ -2,6 +2,8 @@
 /**
  * Inbound Email - Create/Edit Alias
  *
+ * @version 1.11 - the protection level shows as its cards, open; another card links to where it is chosen;
+ *   the help text's example address uses the mailbox's own domain
  * @version 1.10 - the protection badge carries the domain's add-ons in force
  * @version 1.9
  * @changelog 1.9 - the protection badge states the MAILBOX's level and links to
@@ -51,7 +53,10 @@ $domains->load();
 foreach ($domains as $d) {
 	$domain_options[$d->key] = $d->get('ied_domain');
 }
-$example_domain = !empty($domain_options) ? reset($domain_options) : 'example.com';
+// The example address names the mailbox's own domain; a new mailbox, the first listed.
+$alias_domain_choice = intval($alias->get('iea_ied_inbound_email_domain_id'));
+$example_domain = $domain_options[$alias_domain_choice]
+	?? (!empty($domain_options) ? reset($domain_options) : 'example.com');
 
 $formwriter = $page->getFormWriter('form1', [
 	'model' => $alias,
@@ -69,7 +74,7 @@ $formwriter->dropinput('iea_ied_inbound_email_domain_id', 'Domain', [
 // SPF, DMARC and DKIM are — surface the level here with a path to where it is
 // decided, so this page is never a dead end for someone looking to change it. A
 // pulled-in mailbox decides for itself, in the mailbox editor
-// (specs/mailbox_connect_flow.md § D), so its badge points there instead.
+// (specs/mailbox_connect_flow.md § D), so its cards point there instead.
 if ($is_edit && $alias->get('iea_ied_inbound_email_domain_id')) {
 	$alias_domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
@@ -81,16 +86,27 @@ if ($is_edit && $alias->get('iea_ied_inbound_email_domain_id')) {
 			? ('/plugins/mailbox/admin/admin_mailbox_imap_edit?domain_id=' . $alias_domain_id
 				. '&alias_id=' . intval($alias->key))
 			: ('/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . $alias_domain_id);
-		// "Private+" when the domain has an add-on on; hover names them (a
-		// pulled-in mailbox has none: they belong to a domain this deployment hosts).
+		// The level's cards, shown open: the one in force marked, each other
+		// card a link to the editor that decides it, with that level chosen,
+		// so the ceremony runs where it always does. The domain's add-ons in
+		// force are named on the current card (a pulled-in mailbox has none:
+		// they belong to a domain this deployment hosts).
 		$alias_addons = (!$level_is_own && $alias->seals_content()) ? $alias_domain->addon_labels() : array();
-		$alias_addon_title = ProtectionLevelPicker::chipTitle($alias_addons);
-		echo '<p class="jy-security-note" style="margin-top:-0.5rem;">Mail protection: '
-			. '<a class="iea-badge iea-badge-level iea-badge-level-' . htmlspecialchars($alias_level)
-			. '" href="' . htmlspecialchars($level_url) . '" title="' . htmlspecialchars('Mail protection level — set on '
-			. ($level_is_own ? 'this mailbox' : 'the domain') . ($alias_addon_title !== '' ? '. ' . $alias_addon_title : '')) . '">'
-			. htmlspecialchars(ucfirst($alias_level) . ($alias_addons ? '+' : '')) . '</a>';
-		echo '</p>';
+		echo ProtectionLevelPicker::renderLinked($alias_level, array(
+			'service'   => ProtectionLevelPicker::SERVICE_MAIL,
+			'levels'    => $level_is_own
+				? array(InboundEmailDomain::LEVEL_STANDARD, InboundEmailDomain::LEVEL_PRIVATE)
+				: InboundEmailDomain::SETTABLE_LEVELS,
+			'label'     => 'Mail protection',
+			'addons_on' => $alias_addons,
+			'url'       => function ($level) use ($level_url) {
+				return $level_url . '&target_level=' . rawurlencode($level);
+			},
+			'helptext'  => $level_is_own
+				? 'Set on this mailbox. Choose another level to change it.'
+				: 'Set on the domain, for every mailbox on ' . $alias_domain->get('ied_domain')
+					. '. Choose another level to change it there.',
+		));
 	}
 }
 
