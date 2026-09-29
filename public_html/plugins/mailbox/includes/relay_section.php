@@ -11,6 +11,10 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.5 - the Linode step (Approve at Linode, or a pasted token) is in the system modal
+ *                with the update or the create, so neither starts without it
+ * @version 2.4 - no relay-or-direct table: Disable relay / Enable relay, in plain view, decide
+ *                it; every confirm here (update, disable, enable, delete) is the system modal
  * @version 2.3 - the section says what the relay is in one sentence, its health in one line
  *                (or the list of what is not healthy), shows its update in plain sight, has one
  *                Check Relay Health button, and carries the relay-or-direct choice that the
@@ -28,14 +32,116 @@
  * @version 2.0 - relay scanner health: last answer + Check spam scanning now
  */
 
-/** A single-button action form (hidden inputs + submit only). */
-function mailbox_relay_action_button(int $relay_id, string $action, string $label, string $cls = 'btn-secondary', string $confirm = ''): string {
-	$onsubmit = $confirm !== '' ? ' onsubmit="return confirm(' . htmlspecialchars(json_encode($confirm), ENT_QUOTES) . ')"' : '';
-	return '<form method="post" style="display:inline"' . $onsubmit . '>'
-		. '<input type="hidden" name="mrl_mailbox_relay_id" value="' . $relay_id . '">'
-		. '<input type="hidden" name="action" value="' . htmlspecialchars($action, ENT_QUOTES) . '">'
-		. '<button type="submit" class="btn btn-sm ' . htmlspecialchars($cls, ENT_QUOTES) . '">' . htmlspecialchars($label) . '</button>'
-		. '</form> ';
+/**
+ * A single-button action form (hidden inputs + submit only). A confirm is
+ * asked in the system modal (JoineryModal, through PublicPageBase::action_button),
+ * with $confirm_label on its confirm button.
+ */
+function mailbox_relay_action_button(int $relay_id, string $action, string $label, string $cls = 'btn-secondary',
+		string $confirm = '', string $confirm_label = '', array $extra_hidden = array()): string {
+	$options = array(
+		'hidden' => array_merge(array('mrl_mailbox_relay_id' => $relay_id, 'action' => $action), $extra_hidden),
+		'class'  => 'btn btn-sm ' . $cls,
+	);
+	if ($confirm !== '') {
+		$options['confirm'] = $confirm;
+		$options['confirm_label'] = $confirm_label !== '' ? $confirm_label : $label;
+		$options['confirm_style'] = ($cls === 'btn-danger') ? 'danger' : 'primary';
+	}
+	return PublicPageBase::action_button($label, '', $options) . ' ';
+}
+
+/** How to make a one-time Linode token: the numbered steps, the same everywhere they are asked for. */
+function mailbox_relay_token_steps(): string {
+	return '<ol style="margin:0 0 1rem 1.5rem;padding:0;list-style:decimal;">'
+		. '<li style="margin-bottom:.5rem;">Open <a href="https://cloud.linode.com/profile/tokens" target="_blank" rel="noopener">'
+		. 'cloud.linode.com/profile/tokens</a> (sign in to your Linode account if asked).</li>'
+		. '<li style="margin-bottom:.5rem;">Click <strong>Create a Personal Access Token</strong>.</li>'
+		. '<li style="margin-bottom:.5rem;"><strong>Label:</strong> anything — for example, joinery relay.</li>'
+		. '<li style="margin-bottom:.5rem;"><strong>Expiry:</strong> the shortest option in the list.</li>'
+		. '<li style="margin-bottom:.5rem;"><strong>Access:</strong> set every row to <strong>No Access</strong>, except '
+		. '<strong>Linodes</strong> — set that one to <strong>Read/Write</strong>.</li>'
+		. '<li style="margin-bottom:.5rem;">Click <strong>Create Token</strong>, then copy the token it shows '
+		. '(Linode shows it only once).</li>'
+		. '<li style="margin-bottom:0;">Paste it below and press Start.</li>'
+		. '</ol>';
+}
+
+/**
+ * The Linode step in the system modal, for a relay update or a relay create:
+ * what is about to happen ($intro_html), then the one-time permission — Approve
+ * at Linode when a Linode OAuth client is configured, a pasted token otherwise
+ * (or as the other method) — posted with the act itself (grant=oauth|token,
+ * admin_mailbox_relay_take_grant), so nothing starts until the permission comes
+ * with it. Rendered hidden; a [data-relay-grant] button moves it into
+ * JoineryModal (mailbox_relay_grant_script). $copy names fields the modal copies
+ * from another form on the page when it opens (the create path's hostname and
+ * region).
+ */
+function mailbox_relay_grant_modal($page, string $id, string $intro_html, array $hidden, bool $oauth,
+		string $start_label, array $copy = array()): string {
+	$form = $page->getFormWriter($id . '_form');
+	ob_start();
+	echo $form->begin_form();
+	foreach ($hidden as $name => $value) {
+		$form->hiddeninput($name, '', array('value' => (string)$value));
+	}
+	foreach ($copy as $name) {
+		echo '<input type="hidden" name="' . htmlspecialchars($name, ENT_QUOTES) . '" data-copy="'
+			. htmlspecialchars($name, ENT_QUOTES) . '">';
+	}
+	if ($oauth) {
+		echo '<p>' . 'Approve the connection at Linode. The approval is used for this one job and never kept.' . '</p>';
+		echo '<button type="submit" name="grant" value="oauth" class="btn btn-primary">Approve at Linode</button>';
+		echo '<details style="margin-top:.75rem;"><summary>Use another method (paste an API token)</summary><div style="margin-top:.75rem;">';
+	} else {
+		echo '<p><strong>One approval needed:</strong> a one-time key from Linode.</p>';
+	}
+	echo mailbox_relay_token_steps();
+	$form->passwordinput('cloud_token', 'Linode API token', array());
+	echo '<button type="submit" name="grant" value="token" class="btn btn-primary" style="margin-top:.5rem;">'
+		. htmlspecialchars($start_label) . '</button>';
+	echo '<p class="text-muted small" style="margin-top:.75rem;">The key is used for this one job and never kept. '
+		. 'You can also delete it at Linode afterward.</p>';
+	if ($oauth) {
+		echo '</div></details>';
+	}
+	echo $form->end_form();
+	$form_html = ob_get_clean();
+	return '<div hidden id="' . htmlspecialchars($id, ENT_QUOTES) . '"><div style="max-width:640px;">'
+		. $intro_html . $form_html . '</div></div>' . mailbox_relay_grant_script();
+}
+
+/** The one script behind every [data-relay-grant] button: open its hidden step in the system modal. */
+function mailbox_relay_grant_script(): string {
+	static $done = false;
+	if ($done) {
+		return '';
+	}
+	$done = true;
+	return <<<'JS'
+<script>
+document.addEventListener('click', function (e) {
+	var b = e.target.closest ? e.target.closest('[data-relay-grant]') : null;
+	if (!b || !window.JoineryModal) return;
+	e.preventDefault();
+	var holder = document.getElementById(b.getAttribute('data-relay-grant'));
+	if (!holder || !holder.firstElementChild) return;
+	var node = holder.firstElementChild;
+	var from = b.getAttribute('data-copy-from');
+	var src = from ? document.getElementById(from) : null;
+	if (src) {
+		node.querySelectorAll('input[data-copy]').forEach(function (i) {
+			var f = src.querySelector('[name="' + i.getAttribute('data-copy') + '"]');
+			if (f) i.value = f.value;
+		});
+	}
+	var m = JoineryModal.open(node, { buttons: [{ label: 'Cancel', style: 'secondary' }] });
+	// Back into its holder when the modal closes, so it opens again.
+	m.dialog.addEventListener('close', function () { holder.appendChild(node); }, { once: true });
+});
+</script>
+JS;
 }
 
 /**
@@ -47,7 +153,7 @@ function mailbox_relay_action_button(int $relay_id, string $action, string $labe
  * (so nothing is lost), "your mail server will be offline for several minutes"
  * is a fact somebody may want to act on at 2pm on a Tuesday.
  */
-function mailbox_relay_upgrade_control(int $relay_id, array $up): string {
+function mailbox_relay_upgrade_control($page, int $relay_id, array $up, bool $oauth = false): string {
 	$route = (string)($up['route'] ?? '');
 
 	if ($route === 'hosted') {
@@ -90,26 +196,27 @@ function mailbox_relay_upgrade_control(int $relay_id, array $up): string {
 	$confirm = 'Update this relay now? It is drained of stored mail first, then the same server is re-imaged '
 		. 'from this site\'s current release and is born again. It stops accepting mail for several minutes — '
 		. 'senders retry, so nothing bounces. Its address does not change.';
-	$ack = '';
+	$ack = false;
 	if ($sole === null) {
 		// Too old to answer. The platform will not decide this on the customer's
 		// behalf, and will not proceed silently either.
 		$confirm = 'This relay is too old to report whether other deployments share it. If it does, '
 			. 'rebuilding destroys their mail and their configuration. Continue only if this relay '
 			. 'serves this site alone. ' . $confirm;
-		$ack = '<input type="hidden" name="shared_ack" value="1">';
+		$ack = true;
 		$warn .= ' <span class="text-danger">This relay cannot report whether others share it — '
 			. 'confirm it serves only this site.</span>';
 	}
 
-	$onsubmit = ' onsubmit="return confirm(' . htmlspecialchars(json_encode($confirm), ENT_QUOTES) . ')"';
+	$hidden = array('mrl_mailbox_relay_id' => $relay_id, 'action' => 'relay_upgrade');
+	if ($ack) {
+		$hidden['shared_ack'] = '1';
+	}
+	$modal_id = 'relay-upgrade-' . $relay_id;
 	return '<div style="margin-top:.5rem;">'
-		. '<form method="post" style="display:inline"' . $onsubmit . '>'
-		. '<input type="hidden" name="mrl_mailbox_relay_id" value="' . $relay_id . '">'
-		. '<input type="hidden" name="action" value="relay_upgrade">'
-		. $ack
-		. '<button type="submit" class="btn btn-sm btn-warning">Update relay</button>'
-		. '</form> '
+		. '<button type="button" class="btn btn-sm btn-warning" data-relay-grant="' . $modal_id . '">Update relay</button> '
+		. mailbox_relay_grant_modal($page, $modal_id, '<h5>Update this relay</h5><p>' . htmlspecialchars($confirm) . '</p>'
+			. ($warn !== '' ? '<p>' . $warn . '</p>' : ''), $hidden, $oauth, 'Start the update')
 		. '<span class="text-muted small">Drains the relay, then re-images the same server from this site\'s '
 		. 'current release. It stops accepting mail for several minutes; senders retry and its address does not '
 		. 'change.' . $warn . '</span></div>';
@@ -160,6 +267,16 @@ function mailbox_relay_health_html(array $battery, $relay): string {
 			. ($i[2] !== '' ? ' — ' . htmlspecialchars($i[2]) : '') . '</li>';
 	}
 	return $h . '</ul>';
+}
+
+/** What disabling the relay does, said before it happens. */
+function mailbox_relay_disable_message($relay): string {
+	$name = (string)$relay->get('mrl_name') ?: (string)$relay->get('mrl_mx_hostname');
+	return 'Stop using the relay ' . $name . '? This server stops collecting mail from it and receives mail '
+		. 'directly instead. Your domains\' MX records still point at the relay, so until you point them at this '
+		. 'server (the DNS checks will show what to change) and turn this server\'s mail listener back on, new mail '
+		. 'waits on the relay. The relay keeps running, and billing, at your cloud provider; you can enable it '
+		. 'again at any time.';
 }
 
 /** Echo the Relay section (one box, anchored #relay-section). */
@@ -216,7 +333,7 @@ function mailbox_relay_section_render($page, array $v): void {
 				if (!empty($up['offers'])) {
 					echo '<p class="mb-1">' . htmlspecialchars((string)$up['describe']) . '</p>';
 				}
-				echo mailbox_relay_upgrade_control($rid, $up);
+				echo mailbox_relay_upgrade_control($page, $rid, $up, !empty($v['cloud_oauth_configured']));
 			}
 
 			echo '<details style="margin-top:.75rem;"><summary class="small">Details &amp; actions</summary>';
@@ -256,7 +373,6 @@ function mailbox_relay_section_render($page, array $v): void {
 					. htmlspecialchars(json_encode($scanner['ping'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES))
 					. '</pre></details>';
 			}
-			echo mailbox_relay_action_button($rid, $enabled ? 'disable' : 'enable', $enabled ? 'Disable' : 'Enable');
 			$machine = (string)$relay->get('mrl_public_ip') ?: $name;
 			$delete_confirm = ((string)$relay->get('mrl_cloud_instance_id') !== '')
 				? 'Remove the relay at ' . $machine . ' from your mail setup? The server itself keeps running, and billing, '
@@ -273,21 +389,27 @@ function mailbox_relay_section_render($page, array $v): void {
 	// One check, on demand: a fresh answer from the relay (its spam scanner
 	// included) and the out-and-back leak probe. A relay that scans and finds
 	// nothing looks exactly like one whose scanner is dead, so the only way to
-	// tell is to ask it.
-	if (!empty($v['has_active_relay'])) {
-		echo '<form method="post" style="display:inline">';
-		echo '<input type="hidden" name="action" value="relay_health_check">';
-		echo '<button type="submit" class="btn btn-sm btn-outline-secondary">Check Relay Health</button>';
-		echo '</form>';
-	}
-
-	// The relay-or-direct comparison: the question itself while undecided, a
-	// quiet disclosure once decided (receive_mode.php).
-	if (mailbox_receive_mode() === '') {
-		echo mailbox_receive_mode_comparison();
-	} else {
-		echo '<details style="margin-top:.75rem;"><summary class="small text-muted">Change how mail reaches this server</summary>'
-			. '<div class="mt-2">' . mailbox_receive_mode_comparison() . '</div></details>';
+	// tell is to ask it. Beside it, the one switch: stop using the relay, or
+	// use it again, which is also how this server's receive mode is chosen
+	// (relay_admin.php).
+	if (!empty($v['relays'])) {
+		echo '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">';
+		if (!empty($v['has_active_relay'])) {
+			echo PublicPageBase::action_button('Check Relay Health', '', array(
+				'hidden' => array('action' => 'relay_health_check'), 'class' => 'btn btn-sm btn-outline-secondary'));
+		}
+		foreach ($v['relays'] as $row) {
+			$relay = $row['model'];
+			if ((bool)$relay->get('mrl_is_enabled')) {
+				echo mailbox_relay_action_button((int)$relay->key, 'disable', 'Disable relay', 'btn-outline-danger',
+					mailbox_relay_disable_message($relay), 'Disable relay');
+			} else {
+				echo mailbox_relay_action_button((int)$relay->key, 'enable', 'Enable relay', 'btn-primary',
+					'Use this relay again? This server starts collecting your domains\' mail from it and sends it the '
+					. 'address list, and your domains\' DNS checks expect their MX records to point at the relay.', 'Enable relay');
+			}
+		}
+		echo '</div>';
 	}
 
 	// --- hosted relay slot (gated off until the fleet launches) ---------------
@@ -382,18 +504,7 @@ function mailbox_relay_section_render($page, array $v): void {
 					echo $referral;
 					echo '<p style="margin-bottom:.5rem;">How to get the key:</p>';
 				}
-				echo '<ol style="margin:0 0 1rem 1.5rem;padding:0;list-style:decimal;">'
-					. '<li style="margin-bottom:.5rem;">Open <a href="https://cloud.linode.com/profile/tokens" target="_blank" rel="noopener">'
-					. 'cloud.linode.com/profile/tokens</a> (sign in to your Linode account if asked).</li>'
-					. '<li style="margin-bottom:.5rem;">Click <strong>Create a Personal Access Token</strong>.</li>'
-					. '<li style="margin-bottom:.5rem;"><strong>Label:</strong> anything — for example, joinery relay.</li>'
-					. '<li style="margin-bottom:.5rem;"><strong>Expiry:</strong> the shortest option in the list.</li>'
-					. '<li style="margin-bottom:.5rem;"><strong>Access:</strong> set every row to <strong>No Access</strong>, except '
-					. '<strong>Linodes</strong> — set that one to <strong>Read/Write</strong>.</li>'
-					. '<li style="margin-bottom:.5rem;">Click <strong>Create Token</strong>, then copy the token it shows '
-					. '(Linode shows it only once).</li>'
-					. '<li style="margin-bottom:0;">Paste it below and press Start.</li>'
-					. '</ol>';
+				echo mailbox_relay_token_steps();
 				$tform = $page->getFormWriter('relay_cloud_token');
 				echo $tform->begin_form();
 				$tform->passwordinput('cloud_token', 'Linode API token', array());
@@ -424,6 +535,7 @@ function mailbox_relay_section_render($page, array $v): void {
 			}
 
 			$cform = $page->getFormWriter('relay_cloud');
+			echo '<div id="relay-create-fields">';
 			echo $cform->begin_form();
 			$cform->hiddeninput('action', '', array('value' => 'relay_cloud_begin'));
 			$cform->textinput('cloud_mail_hostname', 'Mail hostname', array(
@@ -451,9 +563,17 @@ function mailbox_relay_section_render($page, array $v): void {
 				),
 			));
 			// Instance type is fixed to the 1 GB Nanode for now — a relay idles,
-			// and Linode's own interface can resize it later if ever needed.
-			$cform->submitbutton('btn_relay_cloud', 'Provision into my Linode account');
+			// and Linode's own interface can resize it later if ever needed. The
+			// button opens the Linode step with the hostname and region in it.
+			echo '<button type="button" class="btn btn-primary" data-relay-grant="relay-create" data-copy-from="relay-create-fields">'
+				. 'Provision into my Linode account</button>';
 			echo $cform->end_form();
+			echo '</div>';
+			echo mailbox_relay_grant_modal($page, 'relay-create',
+				'<h5>Create a relay</h5><p>This creates one small server (1 GB Nanode) in your Linode account, billed to you, '
+				. 'and builds the relay on it automatically. It takes several minutes and reports in here when it is done.</p>',
+				array('action' => 'relay_cloud_begin'), !empty($v['cloud_oauth_configured']), 'Start',
+				array('cloud_mail_hostname', 'cloud_region'));
 			echo '<p class="text-muted small">Creates one small instance (1 GB Nanode) in your Linode account, '
 				. 'billed to you, and builds the relay on it automatically. It can be resized later at Linode if ever needed.</p>';
 		}

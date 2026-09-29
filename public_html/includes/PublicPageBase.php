@@ -1404,11 +1404,24 @@ abstract class PublicPageBase {
 			. '</span>';
 	}
 
+	/**
+	 * A single-button POST form. Options: hidden (name => value), class,
+	 * confirm (a message the system modal, JoineryModal, asks before posting),
+	 * confirm_typed (a phrase the modal makes the person type first),
+	 * confirm_label and confirm_style (the modal's confirm button: its words,
+	 * and its style, e.g. 'danger' or 'primary').
+	 *
+	 * @return string HTML
+	 */
 	static function action_button($label, $url, $options = []) {
 		$hidden_fields = isset($options['hidden']) ? $options['hidden'] : [];
 		$confirm_msg   = isset($options['confirm']) ? $options['confirm'] : '';
 		$typed_phrase  = isset($options['confirm_typed']) ? $options['confirm_typed'] : '';
 		$extra_class   = isset($options['class'])   ? ' ' . $options['class'] : '';
+		$modal_opts    = array();
+		if (!empty($options['confirm_label'])) { $modal_opts['confirmLabel'] = (string)$options['confirm_label']; }
+		if (!empty($options['confirm_style'])) { $modal_opts['confirmStyle'] = (string)$options['confirm_style']; }
+		$modal_arg     = $modal_opts ? ', ' . json_encode($modal_opts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) : '';
 
 		// The confirm text becomes a JavaScript string literal inside an HTML
 		// attribute, so it is encoded in that order: json_encode makes it a
@@ -1422,11 +1435,11 @@ abstract class PublicPageBase {
 			// before the confirm button enables.
 			$js = 'var f=this.closest(\'form\'); JoineryModal.confirmTyped('
 				. self::js_literal($confirm_msg) . ', ' . self::js_literal($typed_phrase)
-				. ', function(){ f.submit(); });';
+				. ', function(){ f.submit(); }' . $modal_arg . ');';
 			$btn_onclick = ' onclick="' . htmlspecialchars($js, ENT_QUOTES) . '"';
 		} else if ($confirm_msg) {
 			$js = 'var f=this.closest(\'form\'); JoineryModal.confirm('
-				. self::js_literal($confirm_msg) . ', function(){ f.submit(); });';
+				. self::js_literal($confirm_msg) . ', function(){ f.submit(); }' . $modal_arg . ');';
 			$btn_onclick = ' onclick="' . htmlspecialchars($js, ENT_QUOTES) . '"';
 		}
 

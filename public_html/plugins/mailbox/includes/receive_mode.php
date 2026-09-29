@@ -7,8 +7,9 @@
  * server's address stays hidden? This helper resolves that fact.
  *
  * IT IS A SETTING, NOT A GATE (specs/mailbox_relay_surface_simplification.md).
- * An undecided deployment receives directly and works; the choice lives in the
- * Setup tab's Relay section (Advanced) and can be changed at any time. A relay is only
+ * An undecided deployment receives directly and works; the choice is made by
+ * the relay itself — enabling it sets relay, disabling it sets direct — on the
+ * Setup tab's Relay section, and can be changed at any time. A relay is only
  * load-bearing under the Seal at the relay add-on, so demanding the answer
  * before any domain has asked for it asked the operator to decide about infrastructure they
  * may never need, in front of every mailbox page.
@@ -20,8 +21,9 @@
  *      actually doing (relay row => 'relay', else 'direct').
  *   3. Otherwise '' — undecided, which every consumer treats as direct.
  *
- * @version 1.7 - the settled-state sentence moves into the Relay section (relay_section.php);
- *                no tunnel in the comparison
+ * @version 1.8 - no choice card: the receive mode follows the relay's Enable / Disable
+ *                (relay_admin.php); the comparison and its handler are gone
+ * @version 1.7 - the settled-state sentence moves into the Relay section (relay_section.php)
  * @version 1.6 - the relay row names the Seal at the relay add-on
  * @version 1.5 - IMAP-source domains do not decide the receive topology
  * @version 1.4 - a settled deployment reads its state in a sentence; the
@@ -83,110 +85,5 @@ function mailbox_receive_mode(): string {
 	$setting = (string)Globalvars::get_instance()->get_setting('mailbox_receive_mode');
 
 	return mailbox_receive_mode_resolve(mailbox_receive_relay_exists(), $setting, $has_receiving_domain);
-}
-
-/**
- * Handle the choice card's POST. Call first in every gated page's logic;
- * returns a redirect when the action was the choice, null otherwise.
- */
-function mailbox_receive_gate_handle(array $input): ?LogicResult {
-	if (($input['action'] ?? '') !== 'choose_receive_mode') {
-		return null;
-	}
-	$mode = (string)($input['receive_mode'] ?? '');
-	if ($mode !== 'direct' && $mode !== 'relay') {
-		return null;
-	}
-
-	require_once(PathHelper::getIncludePath('data/settings_class.php'));
-	$existing = new MultiSetting(array('setting_name' => 'mailbox_receive_mode'));
-	$existing->load();
-	if (count($existing)) {
-		$setting = $existing->get(0);
-	} else {
-		$setting = new Setting(NULL);
-		$setting->set('stg_name', 'mailbox_receive_mode');
-	}
-	$setting->set('stg_value', $mode);
-	$setting->save();
-
-	$session = SessionControl::get_instance();
-	$flash = function (string $msg) use ($session) {
-		$session->save_message(new DisplayMessage(
-			$msg, 'Done', '~/plugins/mailbox/admin/~',
-			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-		));
-	};
-
-	if ($mode === 'relay') {
-		$flash(mailbox_receive_relay_exists()
-			? 'A relay fronts this server. Finish its setup in the Relay section below.'
-			: 'A relay will front this server. Set one up in the Relay section below.');
-		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_setup');
-	}
-	$flash('Mail comes straight to this server. Add a domain to start receiving.'
-		. (mailbox_receive_relay_exists()
-			? ' A relay is still reserved for this server — remove it in the Setup tab\'s Relay section.' : ''));
-	return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');
-}
-
-/**
- * The pros-and-cons comparison, with one choose button per column. Both forms
- * post back to the page showing it.
- */
-function mailbox_receive_mode_comparison(): string {
-	$active_relay = false;
-	if (mailbox_receive_relay_exists()) {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
-		$active_relay = (MailboxRelay::active() !== null);
-	}
-	$relay_ready = mailbox_receive_relay_exists();
-
-	$choose = function (string $mode, string $label): string {
-		return '<form method="post">'
-			. '<input type="hidden" name="action" value="choose_receive_mode">'
-			. '<input type="hidden" name="receive_mode" value="' . htmlspecialchars($mode, ENT_QUOTES) . '">'
-			. '<button type="submit" class="btn btn-primary">' . htmlspecialchars($label) . '</button>'
-			. '</form>';
-	};
-
-	$rows = array(
-		array('Setup',
-			'Nothing extra — your domains\' DNS points at this server.',
-			// A relay that is live is not "a spot reserved, choosing this continues
-			// its setup" — that told an operator whose relay was already carrying
-			// mail that they had work left to do.
-			$active_relay
-				? 'Already running — this server has a relay in front of it now.'
-				: ($relay_ready
-					? 'A relay is set up but not enabled; choosing this continues where it left off.'
-					: (mailbox_hosted_relay_offered()
-						? 'A relay to set up — a hosted slot, or one you run yourself.'
-						: 'A relay to set up on a server you control.'))),
-		array('Your server\'s address',
-			'Public. DNS names this server and the internet connects to it directly.',
-			'Hidden. DNS names the relay; this server collects its mail from there.'),
-		array('Seal at the relay',
-			'Not available.',
-			'Available — a Private domain can have arriving mail sealed at the relay, so a hacked '
-				. 'server can\'t read mail that arrives while you\'re away.'),
-	);
-
-	$h = '<div class="iem-receive-gate" style="max-width:900px;">'
-		. '<div style="overflow-x:auto;"><table class="table" style="margin-top:1rem;">'
-		. '<thead><tr><th style="width:22%;"></th>'
-		. '<th>Straight to this server</th><th>Through a relay</th></tr></thead><tbody>';
-	foreach ($rows as $row) {
-		$h .= '<tr><th>' . htmlspecialchars($row[0]) . '</th>'
-			. '<td>' . htmlspecialchars($row[1]) . '</td>'
-			. '<td>' . htmlspecialchars($row[2]) . '</td></tr>';
-	}
-	$h .= '<tr><th></th>'
-		. '<td>' . $choose('direct', 'Receive directly') . '</td>'
-		. '<td>' . $choose('relay', 'Use a relay') . '</td></tr>'
-		. '</tbody></table></div>'
-		. '<p class="text-muted small">One choice for the whole server. It can be changed later.</p>'
-		. '</div>';
-	return $h;
 }
 ?>

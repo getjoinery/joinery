@@ -2522,11 +2522,15 @@ mail pickup, nothing held, address list current, origin hidden, the sending
 route, no leaks in sent mail, and spam scanning when spam filtering is on); and
 an **Update relay** control whenever the relay runs an older release than this
 site ships. **Check Relay Health** asks the relay for a fresh health answer and
-sends the out-and-back origin-leak probe. The technical facts (identity pin,
-last ping, address-list version, everything the relay reported), Enable or
-Disable, and Delete sit behind a Details disclosure, and so does the choice
-between receiving through a relay and receiving directly. The section also
-holds the create path when there is no relay.
+sends the out-and-back origin-leak probe. **Disable relay** (or **Enable
+relay**) is beside it, and is also how the server's receive mode is chosen:
+disabling sets it to direct, enabling to relay, and the domain DNS checks
+prescribe from that. The technical facts (identity pin, last ping,
+address-list version, everything the relay reported) and Delete sit behind a
+Details disclosure. The section also holds the create path when there is no
+relay. Every confirmation here is the system modal, and the Linode permission
+an update or a create needs (Approve at Linode, or a pasted one-time token) is
+asked in the same modal, so neither starts without it.
 
 #### Is the relay still scanning?
 

@@ -11,6 +11,7 @@
  * through the existing per-object editors (domain, alias, IMAP) which highlight
  * the Accounts tab.
  *
+ * @version 1.6 - the relay-or-direct choice card is gone (Enable/Disable relay decide it), so no gate to handle
  * @version 1.5
  * @changelog 1.5 - Reports which OAuth providers have app credentials, so the
  *   page can offer the setup step rather than a Connect button that cannot work.
@@ -29,12 +30,6 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
-
-	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-	$gate_redirect = mailbox_receive_gate_handle($input);
-	if ($gate_redirect !== null) {
-		return $gate_redirect;
-	}
 
 	// IMAP feeds carry full-mailbox credentials — superadmin-only, like the
 	// retired standalone IMAP Accounts page.
