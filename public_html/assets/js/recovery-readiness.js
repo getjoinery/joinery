@@ -428,13 +428,7 @@ window.recoveryReadiness = (function () {
 				if (!cfg.needed || form.dataset.rrStepped === '1') return;
 				ev.preventDefault();
 
-				joineryApi.post('passkey_stepup_options', {}).then(function (opt) {
-					if (!opt || !opt.options) throw new Error('Could not start confirmation.');
-					return JoineryPasskeys.authenticate(opt.options);
-				}).then(function (credential) {
-					return joineryApi.post('passkey_stepup_verify', { credential: credential });
-				}).then(function (res) {
-					if (res && res.success === false) throw new Error(res.message || 'Confirmation failed.');
+				JoineryPasskeys.stepUp().then(function () {
 					cfg.needed = false; // marker is stamped server-side for the whole session
 					form.dataset.rrStepped = '1';
 					if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }

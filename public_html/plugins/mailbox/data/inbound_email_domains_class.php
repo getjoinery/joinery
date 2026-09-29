@@ -81,15 +81,16 @@ class InboundEmailDomain extends SystemBase {
 	// Protection levels (specs/mailbox_security_levels.md). The single source of
 	// truth for a domain's protection level; every mailbox/alias inherits.
 	// Standard = server-managed plaintext; Private = sealed at rest.
-	const LEVEL_STANDARD = 'standard';
-	const LEVEL_PRIVATE  = 'private';
+	// The platform's rungs (ProtectionLevel); mail offers all three.
+	const LEVEL_STANDARD = ProtectionLevel::STANDARD;
+	const LEVEL_PRIVATE  = ProtectionLevel::PRIVATE_;
 	// End-to-end mail (specs/client_custody_mail.md): stored content seals to
 	// the owner's `mail` vault, whose secret only their devices hold, so the
 	// server keeps nothing it can open.
-	const LEVEL_FORTRESS = 'fortress';
+	const LEVEL_FORTRESS = ProtectionLevel::FORTRESS;
 
-	/** The levels a mail domain or mailbox can be set to. */
-	const SETTABLE_LEVELS = array(self::LEVEL_STANDARD, self::LEVEL_PRIVATE, self::LEVEL_FORTRESS);
+	/** The levels a mail domain or mailbox can be set to, weakest first. */
+	const SETTABLE_LEVELS = ProtectionLevel::ORDER;
 
 	// How far this domain's decrypted mail may travel to be read by an AI
 	// model, as the most permissive endpoint trust class it may reach. Same

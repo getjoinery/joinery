@@ -61,8 +61,7 @@ switch ($action) {
                 'message' => 'Unlock your vault to rename this protected chat.']);
             break;
         }
-        AiConversation::updateColumns((int)$conversation->key,
-            ChatSeal::resealConversationColumn($conversation, 'aic_title', $title));
+        ChatSeal::setConversationContent($conversation, 'aic_title', $title);
         echo json_encode(['success' => true, 'title' => $title]);
         break;
 

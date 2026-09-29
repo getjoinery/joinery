@@ -87,8 +87,10 @@ question instead of the outstanding-debt question refuses such an account
 straight back, and no amount of confirming will satisfy it. Ask
 `step_up_outstanding()`, never `hasRecentStepUp()` alone. The line the gate draws:
 **the vault gates plaintext redirection; the second factor gates
-administration.** Domain security-level changes are gated this way today; the
-same helper is how the remaining sensitive-administration actions adopt the gate.
+administration.** Every protection-level change is gated this way — Drive
+folders, mail domains and mailboxes, chats — through `ProtectionLevelChange`
+([Protection Levels](protection_levels.md)); the same helper is how the
+remaining sensitive-administration actions adopt the gate.
 
 ## Navigation gates
 

@@ -31,8 +31,6 @@
  * @changelog 1.3.0 - sent param: the Sent pseudo-folder view
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function thread_list_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));

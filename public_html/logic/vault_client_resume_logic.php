@@ -4,7 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 /**
  * vault_client_resume — the server's half of reopening a browser-held vault
  * after a reload of the same tab (specs/client_custody_mail.md § R4a;
- * includes/VaultClientResume.php).
+ * VaultClientResume in includes/VaultClientCustody.php).
  *
  *   op=put   {scope, tab, share}  keep this tab's half for the scope
  *   op=get   {scope, tab}         answer it, with the vault's public keys;

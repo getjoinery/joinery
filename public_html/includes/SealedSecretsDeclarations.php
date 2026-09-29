@@ -104,15 +104,6 @@ class SealedSecretsDeclarations {
 		return isset(self::all()[$locator]);
 	}
 
-	/** All declarations of one kind. */
-	public static function ofKind(string $kind): array {
-		$out = array();
-		foreach (self::all() as $locator => $d) {
-			if ($d['kind'] === $kind) $out[$locator] = $d;
-		}
-		return $out;
-	}
-
 	/**
 	 * Check every declaration for internal consistency. Returns a list of
 	 * human-readable problems; empty means the manifests are well-formed. Called

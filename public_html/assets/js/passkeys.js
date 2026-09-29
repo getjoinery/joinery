@@ -5,6 +5,8 @@
  * pass them to register()/authenticate()/derive(), then POST the returned
  * object back to the matching verify action.
  *
+ * @version 1.7 - stepUp() and withStepUp(): the one browser path for an API
+ *   action that answers requires_stepup
  * @version 1.6 - derive() hands back a second PRF output apart and strips it from the response
  * @version 1.5
  * @changelog 1.5 - runFlow() reads the error message out of whatever envelope
@@ -289,8 +291,47 @@ window.JoineryPasskeys = (function () {
 		return (verJson && verJson.data) || {};
 	}
 
+	/**
+	 * Confirm it is you with a passkey (the step-up): the server stamps a
+	 * short-lived confirmation on this session. Resolves when it has.
+	 */
+	async function stepUp() {
+		if (!isSupported() || !window.joineryApi) throw new Error('No passkey is available here.');
+		var opt = await window.joineryApi.post('passkey_stepup_options', {});
+		if (!opt || !opt.options) throw new Error('Could not start the confirmation.');
+		var credential = await authenticate(opt.options);
+		var res = await window.joineryApi.post('passkey_stepup_verify', { credential: credential });
+		if (res && res.success === false) throw new Error(res.message || 'The confirmation did not finish.');
+		return res;
+	}
+
+	/**
+	 * Run call() (a promise-returning API call). When it is refused with
+	 * requires_stepup, confirm with a passkey and run it once more. Without a
+	 * usable passkey, or when the ceremony is dismissed, send the person to
+	 * /verify-stepup — which also takes an authenticator code — and bring them
+	 * back to returnUrl; with no returnUrl the refusal is rethrown.
+	 */
+	async function withStepUp(call, returnUrl) {
+		try {
+			return await call();
+		} catch (e) {
+			if (!(e && e.data && e.data.requires_stepup)) throw e;
+			try {
+				await stepUp();
+			} catch (ceremonyError) {
+				if (!returnUrl) throw e;
+				window.location = '/verify-stepup?return=' + encodeURIComponent(returnUrl);
+				return new Promise(function () {});
+			}
+			return call();
+		}
+	}
+
 	return {
 		isSupported: isSupported,
+		stepUp: stepUp,
+		withStepUp: withStepUp,
 		isPrfLikely: isPrfLikely,
 		register: register,
 		authenticate: authenticate,

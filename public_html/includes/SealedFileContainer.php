@@ -37,7 +37,12 @@
  * offset of chunk i is therefore header + i * (chunk + 32), computed rather than
  * scanned: a Range request for the tail of a 2 GB video reads two chunks, not
  * two gigabytes. The length prefix at that offset is still validated, so a
- * truncated or corrupt container raises instead of decrypting garbage.
+ * container cut inside a chunk, or corrupt, raises instead of decrypting
+ * garbage. One cut it cannot see: a container ending exactly on a chunk
+ * boundary opens as a SHORTER plaintext, because the size is derived from the
+ * length and no final marker exists. A reader whose content has its own
+ * integrity (the search index's SQLite page count) catches that; one that
+ * needs the exact length records it beside the container.
  *
  * The key: a 32-byte per-file key (VaultCrypto::newItemDek()), wrapped to the
  * owner's vault public key by the caller. This class never sees a vault, a
@@ -283,7 +288,8 @@ class SealedFileContainer {
 	/** Decrypt to an open stream handle. */
 	public static function openStream($path, $fk, $dest_handle) {
 		return self::openRange($path, $fk, function ($bytes) use ($dest_handle) {
-			if (fwrite($dest_handle, $bytes) === false) {
+			// A short write (a full disk) is a failure too, never a shorter file.
+			if (fwrite($dest_handle, $bytes) !== strlen($bytes)) {
 				throw new SealedFileContainerException('openStream: short write to the destination.');
 			}
 		});

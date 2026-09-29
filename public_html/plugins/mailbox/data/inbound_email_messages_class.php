@@ -103,6 +103,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.39 - iem_unseal_attempt_time / iem_seal_attempt_time: a level change passes a row that
+ *   failed to convert by for a while; unsealAndPersistContent() reports its outcome
  * @version 1.38 - adoptRelayClientKey(): a relay-sealed Fortress arrival keeps the relay's DEK
  *                (generation RELAY_UNOPENABLE_GENERATION marks one no vault holding the mailbox
  *                can open); acceptRelayParse() stores the browser's parse of it under that key
@@ -491,6 +493,12 @@ class InboundEmailMessage extends SystemBase {
 		// (MailboxFortressLevel): the raise passes it by for a while, so one
 		// message that cannot move never holds up the ones behind it.
 		'iem_fortress_move_attempt_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		// When unsealing this row last failed (MailboxUnsealConvergence): the
+		// lowering's passes take the rows behind it for a while, so a row that
+		// cannot open never stalls the ones that can. It stays counted.
+		'iem_unseal_attempt_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		// The same for sealing a row during a raise (MailboxSealConvergence).
+		'iem_seal_attempt_time'   => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
 		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed
@@ -1070,6 +1078,25 @@ class InboundEmailMessage extends SystemBase {
 	}
 
 	/**
+	 * Store one browser-sealed Fortress part as a private File owned by
+	 * $owner_id, under its neutral name. $u carries the part's 'bytes' (the
+	 * browser's ciphertext) and 'mime_part'. The one writer behind the relay
+	 * parse and the Fortress draft.
+	 */
+	public static function storeFortressPartFile(int $message_id, int $owner_id, array $u): File {
+		require_once(PathHelper::getIncludePath('data/files_class.php'));
+		$file = File::createFromBytes($u['bytes'], self::fortressAttachmentName($message_id, $u['mime_part']),
+			self::FORTRESS_FILE_TYPE, $owner_id, array(
+				'fil_private' => true,
+				'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
+			));
+		// Magic-byte detection on save() saw ciphertext: keep the stored type.
+		$file->set('fil_type', self::FORTRESS_FILE_TYPE);
+		$file->save();
+		return $file;
+	}
+
+	/**
 	 * Throw MailboxBrowserSealedException for a Fortress row — the refusal a
 	 * server-custody tool gives instead of trying to open it.
 	 *
@@ -1599,7 +1626,8 @@ class InboundEmailMessage extends SystemBase {
 	 * only inside the sealed OWNER's unlock window: unsealing needs the
 	 * per-message DEK, which unwraps only with their in-window secret key.
 	 * Returns false — row untouched — when the window is closed, no owner
-	 * resolves, or any decrypt fails (logged).
+	 * resolves, or any decrypt or write fails (logged). $outcome says which:
+	 * 'unsealed', 'locked' (the window), 'failed', or 'skipped' (nothing to do).
 	 *
 	 * Recovery-safe ordering: every ciphertext decrypts into memory FIRST (any
 	 * failure aborts before a byte is written), attachment and raw bytes write
@@ -1609,7 +1637,8 @@ class InboundEmailMessage extends SystemBase {
 	 * still-sealed row whose next pass converges — never a stranded ciphertext
 	 * whose key was already discarded.
 	 */
-	public static function unsealAndPersistContent(InboundEmailMessage $msg): bool {
+	public static function unsealAndPersistContent(InboundEmailMessage $msg, ?string &$outcome = null): bool {
+		$outcome = 'skipped';
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
@@ -1642,12 +1671,14 @@ class InboundEmailMessage extends SystemBase {
 		if ((string)($row['iem_attachment_manifest'] ?? '') !== '') {
 			$window = VaultUnlock::secretKey($owner_id);
 			if ($window === null) {
+				$outcome = 'locked';
 				return false;
 			}
 			try {
 				MailboxFortressLevel::settleLowered($message_id, $window);
 			} catch (\Throwable $e) {
 				error_log('unsealAndPersistContent: settling message ' . $message_id . ' failed: ' . $e->getMessage());
+				$outcome = 'failed';
 				return false;
 			}
 			$stmt->execute(array($message_id));
@@ -1655,6 +1686,7 @@ class InboundEmailMessage extends SystemBase {
 		}
 		$dek = self::unwrapDekInWindow($owner_id, (string)$row['iem_sealed_key']);
 		if ($dek === null) {
+			$outcome = 'locked';
 			return false; // window closed — locked, not an error
 		}
 		$crypto = new VaultCrypto();
@@ -1726,6 +1758,7 @@ class InboundEmailMessage extends SystemBase {
 			}
 		} catch (\Throwable $e) {
 			error_log('unsealAndPersistContent: decrypt failed for message ' . $message_id . ': ' . $e->getMessage());
+			$outcome = 'failed';
 			return false;
 		}
 
@@ -1759,11 +1792,14 @@ class InboundEmailMessage extends SystemBase {
 			$columns['iem_sealed_key'] = null;
 			$columns['iem_sealed_owner_user_id'] = null;
 			$columns['iem_key_generation'] = 0;
+			$columns['iem_unseal_attempt_time'] = null;
 			self::updateColumns($message_id, $columns);
 		} catch (\Throwable $e) {
 			error_log('unsealAndPersistContent: write-back failed for message ' . $message_id . ': ' . $e->getMessage());
+			$outcome = 'failed';
 			return false;
 		}
+		$outcome = 'unsealed';
 		return true;
 	}
 

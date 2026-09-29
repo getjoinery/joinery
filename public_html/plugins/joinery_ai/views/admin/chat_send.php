@@ -78,7 +78,10 @@ if ($conversation_id > 0) {
 // continuing/starting one requires an open vault window. Locked → tell the page
 // to prompt unlock and resubmit, before anything is persisted.
 $protected = $conversation->isProtected();
-if (ChatSend::lockedForWrite($uid, $protected)) {
+// A chat lowered to Standard whose history has not all converged back still
+// holds sealed turns: reading them needs the window just the same.
+$needs_window = $protected || (!$is_new && ChatSeal::holdsSealedContent($conversation));
+if (ChatSend::lockedForWrite($uid, $needs_window)) {
     echo json_encode([
         'success'         => true,
         'locked'          => true,
@@ -107,7 +110,7 @@ try {
 }
 
 // Persist the user's message (complete on insert; content may be empty when the
-// turn is attachments-only). Protected chats seal the content afterward.
+// turn is attachments-only). Protected chats seal it as it is saved.
 $user_msg = ChatSend::persistUserMessage($conversation, $protected, $message);
 
 // Store + link the validated attachments to this message (private File rows,
@@ -117,11 +120,11 @@ $user_msg = ChatSend::persistUserMessage($conversation, $protected, $message);
 $attach_failures = ChatAttachmentIngest::commit($prepared_attachments, $user_msg, $conversation, $uid);
 
 // Create the assistant placeholder the page will poll. It is RUNNING until the
-// turn (below) finalizes it.
+// turn (below) finalizes it. It carries no content, so a protected chat's
+// placeholder takes no DEK here: the finalize (or failure) seals its first one.
 $assistant_msg = new AiConversationMessage(NULL);
 $assistant_msg->set('aim_aic_conversation_id', (int)$conversation->key);
 $assistant_msg->set('aim_role', AiConversationMessage::ROLE_ASSISTANT);
-$assistant_msg->set('aim_content', '');
 $assistant_msg->set('aim_status', AiConversationMessage::STATUS_RUNNING);
 $assistant_msg->prepare();
 $assistant_msg->save();

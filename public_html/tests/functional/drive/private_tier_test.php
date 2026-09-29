@@ -44,13 +44,8 @@ $friend = make_user('drvpriv_friend');
  * with a keypair this test holds, so it can open a window and read back exactly
  * what the product would read.
  */
-$kp = (new SealedBox())->generateKeypair();
-$ins = $dblink->prepare(
-	"INSERT INTO uev_user_encryption_vaults (uev_usr_user_id, uev_scope, uev_custody, uev_public_key, uev_salt, uev_key_generation)
-	 VALUES (?, 'user', 'server', ?, ?, 1) RETURNING uev_user_encryption_vault_id");
-$ins->execute(array((int)$owner->key, $kp['public'], base64_encode(random_bytes(16))));
-$vault_id = (int)$ins->fetchColumn();
-harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', $vault_id);
+$kp = vault_fixture_server_vault((int)$owner->key);
+$vault_id = $kp['id'];
 
 $window_ok = vault_apcu_usable() && vault_ensure_session();
 

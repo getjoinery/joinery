@@ -97,6 +97,9 @@
  * a working copy or restored blob of another format fails to open and is
  * rebuilt — the disposable-cache contract, so a shape change never needs a
  * migration, just one rebuild per owner on their next unlocked visit.
+ * @version 1.13 - FORMAT 3: the persisted index is a SealedFileContainer (the
+ *   platform's one chunked format); every older blob is rebuilt once, in its
+ *   owner's unlock window
  * @version 1.12 - a Fortress message is never folded into the server index
  * @version 1.11 - the persisted index is one file per user at a fixed path
  *   under cache/, not a File per persist: a second copy has no name to take
@@ -140,8 +143,9 @@ class MailboxIndex {
 	/** The working copy's schema. See SHAPE in the class comment. */
 	const FTS_DDL = "CREATE VIRTUAL TABLE mailfts USING fts5(content, content='', detail=none, contentless_delete=1)";
 
-	/** Stamped in PRAGMA user_version; a copy carrying another value is rebuilt. */
-	const FORMAT = 2;
+	/** Stamped in PRAGMA user_version and imi_format; a copy carrying another
+	 *  value is rebuilt. 3: the persisted blob is a SealedFileContainer. */
+	const FORMAT = 3;
 
 	/** Messages per checkpoint: the high-water mark advances after each fully
 	 *  successful batch, so an interrupted fold resumes instead of restarting. */
@@ -394,10 +398,18 @@ class MailboxIndex {
 	 * under the worker's umask (0644 in a world-writable tmpfs). `x` refuses
 	 * an existing file: rebuild() unlinks first, and fs.protected_regular
 	 * already stops a squatter's file from being adopted — a path that exists
-	 * here is someone else's, so it is an error, not a chmod.
+	 * here is someone else's, so it is an error, not a chmod. It is created
+	 * 0600 (umask 0077), never wider for a moment: an fd opened on a readable
+	 * file keeps reading the inode after a later chmod, and SQLite writes
+	 * plaintext into this one.
 	 */
 	private static function createPrivateFile(string $path): void {
-		$fh = @fopen($path, 'x');
+		$previous = umask(0077);
+		try {
+			$fh = @fopen($path, 'x');
+		} finally {
+			umask($previous);
+		}
 		if ($fh === false) {
 			throw new MailboxIndexException('MailboxIndex: could not create the working copy at ' . $path . '.');
 		}
@@ -435,8 +447,8 @@ class MailboxIndex {
 	 *
 	 * Streams from the fixed path straight to the /dev/shm working path, so
 	 * restore memory is bounded by a chunk, never by the index. Anything that
-	 * is not this build's format — a missing file, a file that is not in the
-	 * stream format, a stamp from another shape — is refused here, which is
+	 * is not this build's format — a missing file, a file that is not a sealed
+	 * container, a stamp from another shape — is refused here, which is
 	 * just the disposable-cache contract: the caller rebuilds from the sealed
 	 * message rows and the next persist writes the current format.
 	 */
@@ -454,7 +466,7 @@ class MailboxIndex {
 			return false;
 		}
 		$src = $this->blobPath($user_id);
-		if (!is_file($src) || !SealedBox::isStreamFile($src)) {
+		if (!is_file($src) || !SealedFileContainer::looksSealed($src)) {
 			return false;
 		}
 		try {

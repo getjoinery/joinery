@@ -1375,7 +1375,12 @@ enforcement):
   $target, $acting, $addons)` folds them into the level's list for the save-time
   gate. Switching the sending lock on records the request, seals the key when the
   owner is unambiguous, and routes into the verify-gated protect ceremony on the
-  Setup tab. Any change of level or add-on asks for a recent second factor.
+  Setup tab. Any change of level or add-on asks for a recent second factor. A
+  level change runs the platform's one sequence
+  ([Protection Levels](../../../docs/protection_levels.md)) with the domain
+  (`MailboxDomainLevel`) or a pulled-in mailbox (`MailboxAliasLevel`) as the
+  scope; the checklist rows are that scope's prerequisites, and the seal and
+  unseal batches below are its converge passes.
 
 **A raise lands on the receipt card** (specs/mailbox_raise_receipt.md,
 `mailbox_protection_receipt_render()`), the same surface that guided the raise
@@ -1826,10 +1831,11 @@ megabyte blob. The blob records the mark it covers (`imi_blob_high_water`) and a
 restore resets the live mark to it, so a blob that lags the mark can never open a
 silent coverage gap. A fold that changed nothing persists nothing, so repeated
 searches over unchanged mail never rewrite the blob. Sealing and
-restoring stream path-to-path in the chunked `v1.stream.` secretstream format
-(`VaultCrypto::sealFieldFile`/`openFieldFile` over `SealedBox::sealStreamFile`/
-`openStreamFile`), so memory stays proportional to a chunk — never to the mailbox — at
-any index size. Missing, stale, corrupt, or in any other sealed shape → `rebuild()`
+restoring stream path-to-path as a `SealedFileContainer` bound to the index's AD
+(`VaultCrypto::sealFieldFile`/`openFieldFile`), so memory stays proportional to a
+chunk — never to the mailbox — at any index size. A container cut short exactly at a
+chunk boundary opens shorter rather than failing; the SQLite copy then fails to open
+and is rebuilt. Missing, stale, corrupt, or in any other sealed shape → `rebuild()`
 from the sealed message rows; the cache is never the source of truth. `InboundMailboxSearchIndex::sweepWorkingCopies()` is the
 passive-close safety net for a working copy the wipe callback missed (an idle APCu
 expiry, a worker recycle); it is declared as that class's `$retention_policy` and runs
@@ -1899,19 +1905,6 @@ its candidate pool outright: it runs unattended with no unlock window, so a seal
 message is simply never a scan candidate, not a retried failure. `LearnSpamFeedback`
 already only trains from a message's raw RFC822, which a sealed message never
 retains — nothing further was needed there.
-
-**Pre-launch backfill.** `logic/backfill_seal_logic.php` (an in-window,
-session-authenticated API action, `mailbox/backfill_seal`) converges a user's
-already-stored, not-yet-sealed mail to the sealed form once they set up a vault — one
-bounded batch per call, called repeatedly until `done: true`. It seals what the read
-path expects per direction: an outbound row's `iem_recipient` seals as content, an
-inbound row's stays plaintext routing metadata. A message still carrying
-its raw (a legacy fallback-stored row) re-splits its attachments into sealed Files and
-destroys the raw; an already-lean row (Files already extracted before the vault
-existed) has its content columns sealed while its existing attachment Files stay
-plaintext — safe, because every byte reader keys on the per-file `ima_is_sealed` flag,
-so those Files keep streaming as-is (the accepted pre-launch residual; there are no
-production users yet).
 
 **Per-page cost.** The reader reads `iem_inbound_email_messages` by mailbox on every
 page load — the Inbox list, the rail's unread badge, the per-mailbox totals — and the
@@ -2006,7 +1999,7 @@ keeps scheme, host and port only, and accepts plain http only for `localhost`
 and private or tailnet IP literals (`hostIsPrivate()`: 10/8, 172.16/12,
 192.168/16, 100.64/10, 127/8, ::1, fc00::/7); a hostname over plain http is
 refused. The Email settings page (`/profile/mailbox/settings#your-model`,
-`mailbox_device_ai_settings.js`) takes the address, the key and the model
+the settings half of `mailbox_device_ai.js`) takes the address, the key and the model
 name in one form, opened by *Enter a different model* (the site's own model,
 when offered, is the primary button): the address's origin goes to the
 server, the path, key and model stay in the browser. The mailbox page

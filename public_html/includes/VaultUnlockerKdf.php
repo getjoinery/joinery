@@ -11,6 +11,10 @@
  * browser sends, and so the constants have one home the JS mirrors
  * (assets/js/vault-crypto.js, the same names). A production caller is a bug;
  * tests/vault/one_vault_kdf_test.php pins that none exists.
+ * (This covers the one-vault derivations only. A legacy account vault made
+ * before the root still verifies a typed recovery code server-side through
+ * SealedBox::kekFromRecoveryCode() — RecoveryReadiness, verify-only, behind a
+ * fresh second factor — and retires with those vaults.)
  *
  *   code KEK, account half   HKDF-SHA256(ikm = normalized code, salt = the
  *                            root vault's salt, info RECOVERY_ACCOUNT_INFO)

@@ -30,6 +30,8 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.8 - the three receipts share mailbox_receipt_open/_row/_dot
+ * @version 2.7 - the seal and unseal batches are ProtectionLevelChange::convergeBatch() passes (MailboxProtectionLevel)
  * @version 2.6 - the checklist's fixes are buttons for one form outside it (mailbox_protection_fix_form());
  *   a form inside the editor's form ended it early and left Save doing nothing
  * @version 2.5 - the Fortress receipt has a row for relay-sealed mail waiting to be opened (B46)
@@ -525,75 +527,22 @@ function mailbox_protection_alias_scope_sql(int $alias_scope_id, string $tbl = '
 
 /**
  * Seal one bounded batch of a domain's unsealed rows to each mailbox's
- * holder vault — the same per-row work as the reader-driven backfill_seal
- * action, but driveable from any admin session: sealing uses only the
+ * holder vault — the same per-row work as delivery — driveable from any
+ * admin session: sealing uses only the
  * holder's vault PUBLIC key. A row belonging to no mailbox seals to the domain
  * owner instead (specs/mailbox_unmatched_sealing.md). Rows with nobody to seal
  * to are skipped
  * (counted in remaining; the Setup tab's backlog row keeps them loud), and
  * pending-parse rows are never selected — they carry no plaintext, so sealing
  * one would store empty content under a fresh key and mark it done.
+ * One ProtectionLevelChange::convergeBatch() pass over MailboxSealConvergence:
+ * at most $limit rows and the platform's byte budget.
  * Returns ['sealed' => n, 'remaining' => n].
  */
 function mailbox_protection_seal_batch(InboundEmailDomain $domain, int $limit = 200,
 		int $alias_scope_id = 0): array {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
-
-	$db = DbConnector::get_instance()->get_db_link();
-	$stmt = $db->prepare(
-		"SELECT m.iem_inbound_email_message_id, m.iem_iea_inbound_email_alias_id
-		 FROM iem_inbound_email_messages m
-		 " . mailbox_protection_posture_join() . "
-		 WHERE m.iem_ied_inbound_email_domain_id = ?
-		   AND m.iem_content_sealed = false AND m.iem_pending_parse = false
-		   AND m.iem_delete_time IS NULL
-		   -- Private only: Fortress mail moves in its owner's window (MailboxFortressLevel).
-		   AND " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " = '" . InboundEmailDomain::LEVEL_PRIVATE . "'"
-		. mailbox_protection_alias_scope_sql($alias_scope_id, 'm') . "
-		 ORDER BY m.iem_inbound_email_message_id ASC LIMIT " . intval($limit));
-	$stmt->execute(array(intval($domain->key)));
-	$targets = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-	$router = new InboundEmailRouter();
-	$vault_cache = array();
-	$sealed = 0;
-	foreach ($targets as $t) {
-		$alias_id = intval($t['iem_iea_inbound_email_alias_id']);
-		if (!isset($vault_cache[$alias_id])) {
-			// alias 0 means the row belongs to no mailbox — the catch-all stored
-			// it for an address nobody created. Those seal to the DOMAIN owner
-			// (specs/mailbox_unmatched_sealing.md); sealOwnerUserId() decides,
-			// so delivery and this backlog pass can never disagree about whose
-			// key a message belongs under.
-			$owner_id = InboundEmailMessage::sealOwnerUserId($alias_id ?: null, intval($domain->key));
-			$vault_cache[$alias_id] = ($owner_id !== null) ? UserEncryptionVault::loadForUser($owner_id) : null;
-		}
-		$vault = $vault_cache[$alias_id];
-		if ($vault === null) {
-			continue; // nobody with a vault to seal to — stays in the backlog count
-		}
-		$msg = new InboundEmailMessage(intval($t['iem_inbound_email_message_id']), TRUE);
-		if (!$msg->key) {
-			continue;
-		}
-		try {
-			// Same path as backfill_seal_logic: seal every content column this
-			// row holds, chosen by the predicate the read path uses.
-			$dek = InboundEmailMessage::sealExistingRow($msg, $vault);
-			$raw = $msg->getRawMessage();
-			if ($raw !== null && $raw !== '') {
-				$router->resealBackfillAttachments(intval($msg->key), $raw, $dek);
-				$router->destroyRawAfterBackfill(intval($msg->key));
-			}
-			$sealed++;
-		} catch (\Throwable $e) {
-			error_log('protection_ceremony seal_batch: failed for message '
-				. $t['iem_inbound_email_message_id'] . ': ' . $e->getMessage());
-		}
-	}
-
-	return array('sealed' => $sealed,
-		'remaining' => mailbox_protection_backlog_count(intval($domain->key), $alias_scope_id));
+	$pass = ProtectionLevelChange::convergeBatch(new MailboxSealConvergence($domain, $alias_scope_id, $limit));
+	return array('sealed' => $pass['converted'], 'remaining' => $pass['remaining']);
 }
 
 /**
@@ -611,7 +560,8 @@ function mailbox_protection_seal_batch(InboundEmailDomain $domain, int $limit = 
  *
  * Each pass first drains the caller's pending-parse rows (a lowered relay-sealed
  * domain's relay blobs — DeferredIngest parses and re-seals them, and a later
- * pass unseals the result), then unseals up to $limit rows. Batches are small
+ * pass unseals the result), then unseals up to $limit rows
+ * (MailboxUnsealConvergence through ProtectionLevelChange::convergeBatch()). Batches are small
  * ($limit 25, not sealing's 200) because unsealing rewrites attachment bytes.
  *
  * Returns:
@@ -625,72 +575,53 @@ function mailbox_protection_unseal_batch(?InboundEmailDomain $domain, int $calle
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeferredIngest.php'));
 
-	$db = DbConnector::get_instance()->get_db_link();
-
-	// The scope: rows whose effective posture no longer seals — inside one
-	// domain, or anywhere. A scope that still seals yields no rows, so refusal is
-	// by construction rather than by a guard somebody has to remember.
-	$scope_sql = 'NOT (' . mailbox_protection_seals_sql() . ')';
-	if ($domain !== null) {
-		if (!$domain->key) {
-			return array('unsealed' => 0, 'own_remaining' => 0, 'others_remaining' => 0);
-		}
-		$scope_sql .= ' AND m.iem_ied_inbound_email_domain_id = ' . intval($domain->key);
+	if ($domain !== null && !$domain->key) {
+		return array('unsealed' => 0, 'own_remaining' => 0, 'others_remaining' => 0);
 	}
-	$scope_sql .= mailbox_protection_alias_scope_sql($alias_scope_id, 'm');
-	$join_sql = mailbox_protection_posture_join();
-
-	$counts = function () use ($db, $scope_sql, $join_sql, $caller_user_id) {
-		$stmt = $db->prepare(
-			"SELECT
-				COUNT(*) FILTER (WHERE m.iem_sealed_owner_user_id = ?) AS own,
-				COUNT(*) FILTER (WHERE m.iem_sealed_owner_user_id IS DISTINCT FROM ?) AS others
-			 FROM iem_inbound_email_messages m
-			 $join_sql
-			 WHERE $scope_sql
-			   AND (m.iem_content_sealed = true OR m.iem_pending_parse = true)
-			   AND m.iem_delete_time IS NULL");
-		$stmt->execute(array($caller_user_id, $caller_user_id));
-		$row = $stmt->fetch(PDO::FETCH_ASSOC);
-		return array('own' => intval($row['own'] ?? 0), 'others' => intval($row['others'] ?? 0));
-	};
+	$convergence = new MailboxUnsealConvergence($domain, $caller_user_id, $alias_scope_id, $limit);
 
 	$key = VaultUnlock::secretKey($caller_user_id);
 	if ($key === null) {
-		$c = $counts();
+		$c = $convergence->counts();
 		return array('unsealed' => 0, 'own_remaining' => $c['own'], 'others_remaining' => $c['others'], 'locked' => true);
 	}
 
 	// Pending-parse rows first — DeferredIngest is caller-scoped already.
 	DeferredIngest::drainForUser($caller_user_id, $key);
 
-	$stmt = $db->prepare(
-		"SELECT m.iem_inbound_email_message_id FROM iem_inbound_email_messages m
-		 $join_sql
-		 WHERE $scope_sql
-		   AND m.iem_content_sealed = true AND m.iem_pending_parse = false
-		   AND m.iem_sealed_owner_user_id = ?
-		   AND m.iem_delete_time IS NULL
-		   -- A Fortress row reaches the server key through its owner's browser
-		   -- first (JoinerySealed.changeCustody); until then it stays counted.
-		   AND NOT " . InboundEmailMessage::mailKeySql('m.iem_sealed_key') . "
-		 ORDER BY m.iem_inbound_email_message_id ASC LIMIT " . intval($limit));
-	$stmt->execute(array($caller_user_id));
-	$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-	$unsealed = 0;
-	foreach ($ids as $id) {
-		$msg = new InboundEmailMessage(intval($id), TRUE);
-		if (!$msg->key) {
-			continue;
-		}
-		if (InboundEmailMessage::unsealAndPersistContent($msg)) {
-			$unsealed++;
-		}
+	$pass = ProtectionLevelChange::convergeBatch($convergence);
+	$c = $convergence->counts();
+	$result = array('unsealed' => $pass['converted'], 'own_remaining' => $c['own'], 'others_remaining' => $c['others']);
+	if ($pass['locked']) {
+		$result['locked'] = true;
 	}
+	return $result;
+}
 
-	$c = $counts();
-	return array('unsealed' => $unsealed, 'own_remaining' => $c['own'], 'others_remaining' => $c['others']);
+/**
+ * A receipt's status dot. $live marks the one dot the shared batch loop
+ * recolors as it works (data-ceremony-dot); the rest are static facts.
+ */
+function mailbox_receipt_dot(string $status, bool $live = false): string {
+	$color = array('pass' => '#28a745', 'fail' => '#dc3545', 'warn' => '#ffc107', 'info' => '#6c757d');
+	return '<span class="receipt-dot"' . ($live ? ' data-ceremony-dot' : '')
+		. ' style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
+		. ($color[$status] ?? '#6c757d') . ';margin-right:8px;flex:none;"></span>';
+}
+
+/**
+ * One fact on a receipt: a dot and its text. $li_attrs and $text_attrs are
+ * pre-escaped attribute strings (ids and data- hooks the page scripts use).
+ */
+function mailbox_receipt_row(string $status, string $text, string $li_attrs = '', string $text_attrs = '',
+		bool $live = false): string {
+	return '<li' . $li_attrs . ' style="display:flex;align-items:baseline;margin:.5rem 0;">'
+		. mailbox_receipt_dot($status, $live) . '<div' . $text_attrs . '>' . $text . '</div></li>';
+}
+
+/** The receipt card's frame; $attrs carries its id and data- hooks, pre-escaped. */
+function mailbox_receipt_open(string $attrs): string {
+	return '<div' . $attrs . ' style="border:1px solid #d8dee4;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem;">';
 }
 
 /**
@@ -712,21 +643,15 @@ function mailbox_fortress_receipt_render(InboundEmailDomain $domain, array $stat
 	$waiting = intval($state['waiting'] ?? 0);
 	$is_fortress = !empty($state['is_fortress']);
 	$window_open = !empty($state['window_open']);
-	$dot = function ($status) {
-		$color = array('pass' => '#28a745', 'fail' => '#dc3545', 'warn' => '#ffc107', 'info' => '#6c757d');
-		return '<span class="receipt-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
-			. ($color[$status] ?? '#6c757d') . ';margin-right:8px;flex:none;"></span>';
-	};
 	$plural = function (int $n, string $one) { return $n . ' ' . $one . ($n === 1 ? '' : 's'); };
-	$row = function (string $id, string $status, string $text) use ($dot) {
-		return '<li id="' . $id . '" style="display:flex;align-items:baseline;margin:.5rem 0;">' . $dot($status)
-			. '<div class="fortress-receipt-text">' . $text . '</div></li>';
+	$row = function (string $id, string $status, string $text) {
+		return mailbox_receipt_row($status, $text, ' id="' . $id . '"', ' class="fortress-receipt-text"');
 	};
 
-	$html = '<div id="fortress-receipt" style="border:1px solid #d8dee4;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem;"'
+	$html = mailbox_receipt_open(' id="fortress-receipt"'
 		. ' data-domain-id="' . intval($domain->key) . '"'
 		. ' data-direction="' . ($is_fortress ? 'raise' : 'lower') . '"'
-		. ' data-backlog="' . ($is_fortress ? $raise : $lower) . '">';
+		. ' data-backlog="' . ($is_fortress ? $raise : $lower) . '"');
 	$html .= '<h3 style="margin-top:0;">This domain is now ' . htmlspecialchars(ucfirst($domain->security_level())) . '</h3>';
 	$html .= '<ul style="list-style:none;padding:0;margin:0;">';
 	if ($is_fortress) {
@@ -914,15 +839,6 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 	// into the protect ceremony; one that never asked is finished here.
 	$handoff = ($alias_scope_id <= 0 && $domain->send_lock_outstanding());
 
-	// $live marks the one dot the shared batch loop recolors as it works
-	// (data-ceremony-dot); the rest are static facts.
-	$dot = function ($status, $live = false) {
-		$color = array('pass' => '#28a745', 'fail' => '#dc3545', 'warn' => '#ffc107', 'info' => '#6c757d');
-		return '<span class="receipt-dot"' . ($live ? ' data-ceremony-dot' : '')
-			. ' style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
-			. ($color[$status] ?? '#6c757d') . ';margin-right:8px;flex:none;"></span>';
-	};
-
 	// Titles: the event, stated once. A raise that asked for the sending lock
 	// says one step remains until send protection is on.
 	if ($handoff) {
@@ -994,24 +910,20 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 			'working' => 'Sealing earlier messages — {remaining} remaining…',
 			'done'    => '{total} earlier message{s:total} sealed',
 			'none'    => 'No earlier messages needed sealing',
-			'stuck'   => '{remaining} message{s:remaining} could not be sealed — see the Setup tab.',
+			'stuck'   => '{remaining} message{s:remaining} could not be sealed yet — tried again within the hour; see the Setup tab.',
 			'paused'  => 'Sealing paused — reload this page to resume.',
 		),
 	));
 
-	$html = '<div id="raise-receipt" style="border:1px solid #d8dee4;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem;"'
+	$html = mailbox_receipt_open(' id="raise-receipt"'
 		. ' data-domain-id="' . intval($domain->key) . '"'
 		. ' data-title-done="' . htmlspecialchars($title_done) . '"'
-		. ($backlog > 0 ? ' data-ceremony-batch="' . htmlspecialchars($ceremony_config, ENT_QUOTES) . '"' : '')
-		. '>';
+		. ($backlog > 0 ? ' data-ceremony-batch="' . htmlspecialchars($ceremony_config, ENT_QUOTES) . '"' : ''));
 	$html .= '<h3 id="receipt-title" style="margin-top:0;">' . htmlspecialchars($title) . '</h3>';
 	$html .= '<ul style="list-style:none;padding:0;margin:0;">';
-	$html .= '<li id="receipt-seal-row" style="display:flex;align-items:baseline;margin:.5rem 0;">'
-		. $dot($seal_dot, true) . '<div id="receipt-seal-text" data-ceremony-text>' . $seal_fact . '</div></li>';
-	$html .= '<li style="display:flex;align-items:baseline;margin:.5rem 0;">'
-		. $dot('pass') . '<div>New mail seals on arrival</div></li>';
-	$html .= '<li style="display:flex;align-items:baseline;margin:.5rem 0;">'
-		. $dot('pass') . '<div>' . htmlspecialchars($unlock_fact) . '</div></li>';
+	$html .= mailbox_receipt_row($seal_dot, $seal_fact, ' id="receipt-seal-row"', ' id="receipt-seal-text" data-ceremony-text', true);
+	$html .= mailbox_receipt_row('pass', 'New mail seals on arrival');
+	$html .= mailbox_receipt_row('pass', htmlspecialchars($unlock_fact));
 	$html .= '</ul>';
 	$html .= '<div style="margin-top:.75rem;"><a id="receipt-action" class="btn btn-primary'
 		. ($backlog > 0 ? ' d-none' : '') . '"' . ($backlog > 0 ? ' data-ceremony-when-done hidden' : '')
@@ -1078,15 +990,6 @@ function mailbox_lowering_receipt_render(InboundEmailDomain $domain, array $stat
 	$window_open = !empty($state['window_open']);
 	$alias_scope_id = intval($state['alias_scope_id'] ?? 0);
 
-	// $live marks the one dot the shared batch loop recolors as it works
-	// (data-ceremony-dot); the rest are static facts.
-	$dot = function ($status, $live = false) {
-		$color = array('pass' => '#28a745', 'fail' => '#dc3545', 'warn' => '#ffc107', 'info' => '#6c757d');
-		return '<span class="receipt-dot"' . ($live ? ' data-ceremony-dot' : '')
-			. ' style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
-			. ($color[$status] ?? '#6c757d') . ';margin-right:8px;flex:none;"></span>';
-	};
-
 	$title = ($alias_scope_id > 0)
 		? (((string)($state['scope_label'] ?? '') !== '' ? (string)$state['scope_label'] : 'This mailbox')
 			. ' is now ' . ucfirst((string)($state['scope_level'] ?? InboundEmailDomain::LEVEL_STANDARD)))
@@ -1104,21 +1007,18 @@ function mailbox_lowering_receipt_render(InboundEmailDomain $domain, array $stat
 		$unseal_fact = 'All earlier messages are readable';
 	}
 
-	$html = '<div id="lowering-receipt" style="border:1px solid #d8dee4;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem;"'
+	$html = mailbox_receipt_open(' id="lowering-receipt"'
 		. ' data-domain-id="' . intval($domain->key) . '"'
 		. ' data-alias-id="' . $alias_scope_id . '"'
 		. ' data-own-backlog="' . $own . '"'
-		. ' data-window-open="' . ($window_open ? '1' : '0') . '">';
+		. ' data-window-open="' . ($window_open ? '1' : '0') . '"');
 	$html .= '<h3 id="lowering-title" style="margin-top:0;">' . htmlspecialchars($title) . '</h3>';
 	$html .= '<ul style="list-style:none;padding:0;margin:0;">';
-	$html .= '<li id="lowering-unseal-row" style="display:flex;align-items:baseline;margin:.5rem 0;">'
-		. $dot($unseal_dot) . '<div id="lowering-unseal-text">' . $unseal_fact . '</div></li>';
-	$html .= '<li style="display:flex;align-items:baseline;margin:.5rem 0;">'
-		. $dot('pass') . '<div>New mail is stored ready to read — no unlock needed</div></li>';
+	$html .= mailbox_receipt_row($unseal_dot, $unseal_fact, ' id="lowering-unseal-row"', ' id="lowering-unseal-text"');
+	$html .= mailbox_receipt_row('pass', 'New mail is stored ready to read — no unlock needed');
 	if ($others > 0) {
-		$html .= '<li id="lowering-others-row" style="display:flex;align-items:baseline;margin:.5rem 0;">'
-			. $dot('info') . '<div id="lowering-others-text">' . $others . ' message' . ($others === 1 ? '' : 's')
-			. ' stay sealed until their readers next unlock</div></li>';
+		$html .= mailbox_receipt_row('info', $others . ' message' . ($others === 1 ? '' : 's')
+			. ' stay sealed until their readers next unlock', ' id="lowering-others-row"', ' id="lowering-others-text"');
 	}
 	$html .= '</ul>';
 	$html .= '<div style="margin-top:.75rem;"><a id="lowering-action" class="btn btn-primary'

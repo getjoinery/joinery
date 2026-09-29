@@ -1,5 +1,4 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 /**
@@ -11,6 +10,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * never updated or soft-deleted; a purge task trims rows past the retention
  * window.
  *
+ * @version 1.2.0 - KIND_LEVEL_CHANGED: a folder tree's protection level changed
  * @version 1.1.0
  */
 class FileChange extends SystemBase {
@@ -43,6 +43,10 @@ class FileChange extends SystemBase {
 	const KIND_RESTORED      = 'restored';
 	const KIND_DELETED       = 'deleted';
 	const KIND_GRANT_CHANGED = 'grant_changed';
+	// A folder tree's protection level changed (drive_level_change). The files
+	// inside convert afterwards without a row each: what a client downloads
+	// from them is unchanged.
+	const KIND_LEVEL_CHANGED = 'level_changed';
 
 	public static $field_specifications = array(
 		'fch_file_change_id'     => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),

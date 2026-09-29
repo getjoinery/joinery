@@ -47,8 +47,7 @@ function chat_thread_action_logic(array $input): LogicResult {
                 return LogicResult::render(['locked' => true, 'conversation_id' => (int)$conversation->key,
                     'message' => 'Unlock your vault to rename this protected chat.']);
             }
-            AiConversation::updateColumns((int)$conversation->key,
-                ChatSeal::resealConversationColumn($conversation, 'aic_title', $title));
+            ChatSeal::setConversationContent($conversation, 'aic_title', $title);
             return LogicResult::render(['title' => $title]);
 
         case 'delete':

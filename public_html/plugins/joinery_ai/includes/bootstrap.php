@@ -52,6 +52,19 @@ VaultDeferredWork::register(
     }
 );
 
+// A chat whose privacy level changed converges in bounded passes; the page drives
+// them while it is open, and this finishes whatever it did not, in the owner's
+// window (ChatConversationLevel).
+VaultDeferredWork::register(
+    'ai_chat_level',
+    function (int $user_id): bool {
+        return ChatConversationLevel::hasWork($user_id);
+    },
+    function (int $user_id, VaultKey $key, float $deadline): int {
+        return ChatConversationLevel::drain($user_id, $deadline);
+    }
+);
+
 // --- Sealed-File decrypt hook (docs/sealed_vault.md § The two generic consumer hooks) ---
 // A chat upload on a protected conversation stores ciphertext bytes on disk; the
 // bytes are sealed under the OWNING message's DEK. Resolve the attachment link
@@ -80,68 +93,8 @@ File::registerDecryptHook(File::SOURCE_AI_CHAT_UPLOAD, function (string $ciphert
 // sealed to the generation being drained, to the new keypair. Attachments seal
 // under the message DEK (the DEK bytes are unchanged — only their sealing to the
 // vault key moves), so re-sealing the message DEK covers them; no attachment row
-// is touched. Fail-loud per the onReseal() contract: attempt every item, then
-// throw if any failed so the ceremony refuses to retire the old wrappings while
-// content is still sealed to them.
-VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_generation, string $new_public_key, int $new_key_generation) {
-    $db = DbConnector::get_instance()->get_db_link();
-    $crypto = new VaultCrypto();
-    $failed = 0;
-    $attempted = 0;
-
-    // Conversation DEKs. Soft-deleted rows are re-sealed too (the resealRows()
-    // contract): a deleted conversation is restorable, and one left on a
-    // retired generation would come back permanently unreadable.
-    $cs = $db->prepare(
-        'SELECT aic_conversation_id, aic_sealed_key FROM aic_conversations
-         WHERE aic_owner_user_id = ? AND aic_content_sealed = true
-         AND aic_key_generation = ?');
-    $cs->execute(array($user_id, $old_key_generation));
-    foreach ($cs->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        if ((string)$row['aic_sealed_key'] === '') { continue; }
-        $attempted++;
-        try {
-            $dek = $crypto->openItemDek((string)$row['aic_sealed_key'], $old_key);
-            $resealed = $crypto->sealItemDek($dek, $new_public_key);
-            $u = $db->prepare(
-                'UPDATE aic_conversations SET aic_sealed_key = ?, aic_key_generation = ?
-                 WHERE aic_conversation_id = ?');
-            $u->execute(array($resealed, $new_key_generation, intval($row['aic_conversation_id'])));
-        } catch (Throwable $e) {
-            $failed++;
-            error_log('Chat vault reseal: failed for conversation ' . $row['aic_conversation_id'] . ': ' . $e->getMessage());
-        }
-    }
-
-    // Message DEKs — self-contained via aim_sealed_owner_user_id (the
-    // conversation owner). Soft-deleted messages re-seal too, same as above.
-    $ms = $db->prepare(
-        'SELECT aim_conversation_message_id, aim_sealed_key FROM aim_conversation_messages
-         WHERE aim_sealed_owner_user_id = ? AND aim_content_sealed = true
-         AND aim_key_generation = ?');
-    $ms->execute(array($user_id, $old_key_generation));
-    foreach ($ms->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        if ((string)$row['aim_sealed_key'] === '') { continue; }
-        $attempted++;
-        try {
-            $dek = $crypto->openItemDek((string)$row['aim_sealed_key'], $old_key);
-            $resealed = $crypto->sealItemDek($dek, $new_public_key);
-            $u = $db->prepare(
-                'UPDATE aim_conversation_messages SET aim_sealed_key = ?, aim_key_generation = ?
-                 WHERE aim_conversation_message_id = ?');
-            $u->execute(array($resealed, $new_key_generation, intval($row['aim_conversation_message_id'])));
-        } catch (Throwable $e) {
-            $failed++;
-            error_log('Chat vault reseal: failed for message ' . $row['aim_conversation_message_id'] . ': ' . $e->getMessage());
-        }
-    }
-
-    if ($failed > 0) {
-        throw new RuntimeException(
-            'Chat reseal: ' . $failed . ' of ' . $attempted . ' sealed chat DEKs could not be '
-            . 're-sealed; the old key generation must not be retired.');
-    }
-});
+// is touched.
+VaultUnlock::onReseal(VaultUnlock::modelReseal(array(AiConversation::class, AiConversationMessage::class)));
 
 // --- Window-wipe callback (docs/sealed_vault.md § consumer contract) ---
 // The only disposable in-window plaintext chat keeps is the streaming scratch for

@@ -372,13 +372,21 @@ file carrying a live link or grant is refused outright, naming what is in the
 way.
 
 **Changing a level** (`drive_level_change`) is Standard ↔ Private only — the two
-the server holds a key wrapping for. The folder changes at once, so everything
-uploaded from that moment lands at the new level; the files already inside are
-converted afterwards by repeated `drive_level_batch` calls, each bounded by a
-byte budget rather than a row count. Raising needs only the owner's vault public
-key and so runs locked; lowering decrypts and needs the window. Going Private
-ends any public links and member grants in the subtree — the first call reports
-them and does nothing until the caller confirms.
+the server holds a key wrapping for. It runs the platform's one level-change
+sequence ([Protection Levels](protection_levels.md)) with the tree as the scope
+(`DriveFolderLevel`): the owner confirms with a second factor when they have one
+(the action answers `requires_stepup` and the page confirms with a passkey and
+applies again), the folder changes at once, so everything uploaded from that
+moment lands at the new level, and the files already inside are converted
+afterwards by repeated `drive_level_batch` calls, each bounded by a byte budget
+rather than a row count; whatever the dialog does not finish, the vault's deferred
+work (`drive_level`) finishes in the owner's window, and applying the same level
+again resumes it. Raising needs only the owner's vault public key and so
+runs locked; lowering decrypts and needs the window. Going Private ends any
+public links and member grants in the subtree — the first call reports them and
+does nothing until the caller confirms, and a prerequisite that refuses the
+change anyway answers before that prompt. Each change records a
+`level_changed` row in the change feed.
 
 Private is described in full in [Drive Encryption](drive_encryption.md), which
 covers both custody models.
@@ -576,7 +584,9 @@ needed) so it never reappears inside an unreachable parent.
 
 Every mutation records one `FileChange` via `FileChange::record($kind,
 $entity_type, $entity_id, $owner_id, $actor_id)` — kinds `created`, `content`,
-`renamed`, `moved`, `trashed`, `restored`, `deleted`, `grant_changed`. The feed is
+`renamed`, `moved`, `trashed`, `restored`, `deleted`, `grant_changed`, `level_changed` (a
+folder tree's protection level; a member who lost a grant to it gets a `grant_changed`
+row addressed to them). The feed is
 append-only and the primary key is the cursor. `drive_changes` takes a `{cursor}`
 and returns the changes after it that the caller may see — their own entities plus
 entities shared to them — with `next_cursor`. A nonzero cursor that cannot be

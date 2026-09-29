@@ -23,6 +23,7 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetProvisionSeeding.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_admin.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_fleet_logic.php'));   // the fleet console's functions
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 

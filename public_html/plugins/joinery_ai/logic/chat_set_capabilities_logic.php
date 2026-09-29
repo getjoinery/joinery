@@ -40,11 +40,16 @@ function chat_set_capabilities_logic(array $input): LogicResult {
     }
 
     // Changing the encryption level is its own operation (it reseals/reveals stored
-    // content and enforces prerequisites) — not a plain column write.
+    // content and enforces prerequisites) — not a plain column write. A refusal
+    // carrying requires_stepup asks the page to confirm and retry; `remaining`
+    // is what chat_level_batch still has to converge.
     if ($field === 'security_level') {
         $result = ChatLevel::changeLevel($conversation, (string)$value, $uid);
-        if (!$result['ok']) return LogicResult::error($result['error']);
-        return LogicResult::render(['field' => $field, 'security_level' => $result['level']]);
+        if (!$result['ok']) {
+            return LogicResult::error($result['error'], !empty($result['requires_stepup']) ? ['requires_stepup' => true] : []);
+        }
+        return LogicResult::render(['field' => $field, 'security_level' => $result['level'],
+            'remaining' => (int)$result['remaining']]);
     }
     // The Local models only add-on — one-way, and turning it on pins the model.
     if ($field === 'local_models_only') {
@@ -67,19 +72,17 @@ function chat_set_capabilities_logic(array $input): LogicResult {
             . 'running on your own hardware. Choose a local model.');
     }
 
-    // aic_instructions is content (sealed on a protected chat); reseal it under the
-    // vault (in-window). Every other control is cleartext. Either way persist via a
-    // targeted UPDATE so a sealed title/instructions is never decrypt-rewritten.
-    if ($column === 'aic_instructions' && $conversation->isProtected()) {
+    // aic_instructions is content (sealed on a protected chat, which needs the
+    // window to reseal). Every other control is cleartext and a targeted UPDATE.
+    if ($column === 'aic_instructions') {
         if (ChatSeal::lockedForContentEdit($conversation)) {
             return LogicResult::render(['locked' => true, 'conversation_id' => (int)$conversation->key,
                 'message' => 'Unlock your vault to edit this protected chat’s instructions.']);
         }
-        $cols = ChatSeal::resealConversationColumn($conversation, 'aic_instructions', $stored);
+        ChatSeal::setConversationContent($conversation, 'aic_instructions', $stored);
     } else {
-        $cols = [$column => $stored];
+        AiConversation::updateColumns((int)$conversation->key, [$column => $stored]);
     }
-    AiConversation::updateColumns((int)$conversation->key, $cols);
 
     return LogicResult::render(['field' => $field]);
 }

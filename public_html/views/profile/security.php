@@ -485,12 +485,7 @@
                 }
 
                 async function stepUp() {
-                    var options = await apiFetch('/api/v1/action/passkey_stepup_options', { method: 'POST', body: '{}' });
-                    var credential = await JoineryPasskeys.authenticate(options.data.options);
-                    await apiFetch('/api/v1/action/passkey_stepup_verify', {
-                        method: 'POST',
-                        body: JSON.stringify({ credential: credential }),
-                    });
+                    await JoineryPasskeys.stepUp();
                 }
 
                 // Wrap the vault key under one named passkey (an unlock-capable

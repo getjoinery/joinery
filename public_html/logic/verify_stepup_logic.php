@@ -10,8 +10,6 @@
  *
  * @version 1.0
  */
-require_once(__DIR__ . '/../includes/PathHelper.php');
-
 function verify_stepup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
@@ -25,10 +23,7 @@ function verify_stepup_logic(array $input): LogicResult {
 	$user = new User($session->get_user_id(), TRUE);
 
 	// Same-site relative return only (never an open redirect).
-	$return = isset($input['return']) ? (string)$input['return'] : '/profile';
-	if ($return === '' || $return[0] !== '/' || (isset($return[1]) && $return[1] === '/')) {
-		$return = '/profile';
-	}
+	$return = SessionControl::same_site_return(isset($input['return']) ? (string)$input['return'] : '/profile');
 
 	// Nothing to confirm — no factor enrolled, or already confirmed recently.
 	if (!$session->user_has_second_factor($user) || $session->has_recent_second_factor()) {

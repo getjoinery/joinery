@@ -10,8 +10,7 @@
  * Caller-scoped by construction: unsealing needs the per-message DEK, which
  * unwraps only inside the sealed owner's unlock window — so this call
  * converges only the CALLER's rows, and answers {locked: true} when their
- * window is closed. No staff gate, mirroring mailbox/backfill_seal: the rows
- * are the caller's own, and the domain posture already says plaintext is the
+ * window is closed. No staff gate: the rows are the caller's own, and the domain posture already says plaintext is the
  * correct state. A domain that still seals is refused.
  *
  * Returns {unsealed, own_remaining, others_remaining} (+ locked when closed).
@@ -20,8 +19,6 @@
  * @changelog 1.1 - accepts an alias_id scope; the still-sealing refusal asks the
  *   MAILBOX, so a Private mailbox on a lowered domain keeps its mail sealed
  */
-
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function unseal_batch_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));

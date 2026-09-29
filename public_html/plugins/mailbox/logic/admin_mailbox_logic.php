@@ -1,6 +1,4 @@
 <?php
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function admin_mailbox_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));

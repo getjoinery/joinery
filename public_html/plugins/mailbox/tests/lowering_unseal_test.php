@@ -227,6 +227,38 @@ try {
 		'the editor counts match', json_encode($counts));
 
 	// -----------------------------------------------------------------------
+	section('a row that fails to unseal is stamped, passed by, and still counted');
+
+	$dom2 = new InboundEmailDomain(NULL);
+	$dom2->set('ied_domain', 'lu2-' . bin2hex(random_bytes(3)) . '.example');
+	$dom2->set('ied_is_enabled', true);
+	$dom2->set('ied_security_level', InboundEmailDomain::LEVEL_PRIVATE);
+	$dom2->save();
+	$dom2->load();
+	harness_register_row('ied_inbound_email_domains', 'ied_inbound_email_domain_id', intval($dom2->key));
+	$box2 = lu_alias(intval($dom2->key), 'mine2', $owner_id);
+	$bad = lu_message(intval($dom2->key), intval($box2->key), 'inbound', 'broken subject', 'broken body', 'mine2@' . $dom2->get('ied_domain'));
+	$fine = lu_message(intval($dom2->key), intval($box2->key), 'inbound', 'fine subject', 'fine body', 'mine2@' . $dom2->get('ied_domain'));
+	mailbox_protection_seal_batch($dom2, 200);
+	$good_cipher = (string)lu_row($bad)['iem_subject'];
+	InboundEmailMessage::updateColumns($bad, array('iem_subject' => substr($good_cipher, 0, -6) . 'AAAAAA'));
+	$dom2->set('ied_security_level', InboundEmailDomain::LEVEL_STANDARD);
+	$dom2->save();
+	$dom2 = new InboundEmailDomain(intval($dom2->key), TRUE);
+	$res = mailbox_protection_unseal_batch($dom2, $owner_id, 25);
+	check($res['unsealed'] === 1 && $res['own_remaining'] === 1 && !empty(lu_row($bad)['iem_content_sealed'])
+		&& !empty(lu_row($bad)['iem_unseal_attempt_time']) && empty(lu_row($fine)['iem_content_sealed']),
+		'the good row unseals; the broken one stays sealed, stamped and counted', json_encode($res));
+	$res = mailbox_protection_unseal_batch($dom2, $owner_id, 25);
+	check($res['unsealed'] === 0 && $res['own_remaining'] === 1, 'the next pass passes it by', json_encode($res));
+	InboundEmailMessage::updateColumns($bad, array('iem_subject' => $good_cipher));
+	DbConnector::get_instance()->get_db_link()->prepare("UPDATE iem_inbound_email_messages SET iem_unseal_attempt_time = NOW() AT TIME ZONE 'UTC' - INTERVAL '2 hours'
+		WHERE iem_inbound_email_message_id = ?")->execute(array($bad));
+	$res = mailbox_protection_unseal_batch($dom2, $owner_id, 25);
+	check($res['unsealed'] === 1 && $res['own_remaining'] === 0 && empty(lu_row($bad)['iem_unseal_attempt_time']),
+		'once due (and readable) it unseals and the stamp is cleared', json_encode($res));
+
+	// -----------------------------------------------------------------------
 	section('lowering receipt render');
 
 	$state = array('own_backlog' => 3, 'others_backlog' => 1, 'window_open' => true,

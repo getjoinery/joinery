@@ -232,9 +232,14 @@ try {
 	check($refusal($ok_domain, $owner_id) === null,
 		'the single owner of every mailbox, holding a mail vault, is not refused');
 	$r = admin_mailbox_domains_fortress_refusal(new InboundEmailDomain(intval($ok_domain->key), TRUE), $owner_id, true);
-	// Refused only in front of a relay too old to seal for browsers (B38; that
-	// case is fortress_relay_pull's). With no relay the add-on waits for one.
-	check(MailboxRelay::active() !== null || $r === null, 'with Seal at the relay on it is not refused', (string)$r);
+	// Refused only in front of a relay too old to seal for browsers (B38; both
+	// relay cases are fortress_relay_pull's). With no relay the add-on waits for
+	// one — the case pinned here, so a relay row this test did not make skips it.
+	if (MailboxRelay::active() !== null) {
+		harness_skip('Seal at the relay with no relay', 'a relay is active here; fortress_relay_pull pins the relay cases');
+	} else {
+		check($r === null, 'with Seal at the relay on and no relay yet, it is not refused', (string)$r);
+	}
 
 	$other = make_user('FscOther');
 	$other_id = intval($other->key);

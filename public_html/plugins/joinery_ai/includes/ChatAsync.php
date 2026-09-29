@@ -239,13 +239,12 @@ class ChatAsync {
         );
         if ($started > $cutoff) return false;   // still within its legitimate window
 
-        // Seal the error on a protected conversation (errorColumns resolves it and
-        // no-ops for Standard); persist via a targeted UPDATE (the row may be a
-        // sealed, finalized message being reaped). Clear any leftover scratch.
-        $cols = ChatSeal::errorColumns($msg, 'The turn did not finish (the worker process appears to have stopped).');
-        $cols['aim_status']   = AiConversationMessage::STATUS_FAILED;
-        $cols['aim_activity'] = null;
-        AiConversationMessage::updateColumns((int)$msg->key, $cols);
+        // Seals the error on a protected conversation (writeFailure resolves it and
+        // writes plain for Standard). Clear any leftover scratch.
+        ChatSeal::writeFailure($msg, 'The turn did not finish (the worker process appears to have stopped).', [
+            'aim_status'   => AiConversationMessage::STATUS_FAILED,
+            'aim_activity' => null,
+        ]);
         self::clearScratch((int)$msg->key);
         return true;
     }

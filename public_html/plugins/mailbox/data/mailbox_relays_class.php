@@ -211,11 +211,6 @@ class MailboxRelay extends SystemBase {
 		return $kp['public'];
 	}
 
-	/** The ambient transport public key (Standard/Private sealing target for the map). */
-	public function transportPublicKey(): string {
-		return (string)$this->get('mrl_transport_public_key');
-	}
-
 	/** This deployment's tenant identity on the relay ('main' when unset). */
 	public function tenantSlug(): string {
 		$slug = strtolower(trim((string)$this->get('mrl_tenant_slug')));

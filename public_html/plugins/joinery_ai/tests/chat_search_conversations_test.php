@@ -66,23 +66,19 @@ $make_sealed = function (int $owner, string $title, string $body): AiConversatio
     $c->set('aic_owner_user_id', $owner);
     $c->set('aic_security_level', AiConversation::LEVEL_PRIVATE);
     $c->set('aic_model', 'qwen3:4b-instruct');
+    $c->set('aic_title', $title);           // save() seals it (Private)
+    $c->set('aic_instructions', '');
     $c->save();
     $c->load();
     harness_register_row('aic_conversations', 'aic_conversation_id', (int)$c->key);
-    AiConversation::updateColumns((int)$c->key,
-        ChatSeal::sealConversationColumns((int)$c->key, $c, ['aic_title' => $title, 'aic_instructions' => '']));
     if ($body !== '') {
         $m = new AiConversationMessage(NULL);
         $m->set('aim_aic_conversation_id', (int)$c->key);
         $m->set('aim_role', AiConversationMessage::ROLE_USER);
-        $m->set('aim_content', '');
+        $m->set('aim_content', $body);      // save() seals it (Private)
         $m->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
         $m->save();
-        $m->load();
         harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$m->key);
-        $tcols = ChatSeal::turnColumns($c, (int)$m->key, $body, []);
-        $tcols['aim_status'] = AiConversationMessage::STATUS_COMPLETE;
-        AiConversationMessage::updateColumns((int)$m->key, $tcols);
     }
     $c->load();
     return $c;

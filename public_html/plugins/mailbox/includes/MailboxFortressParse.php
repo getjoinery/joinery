@@ -162,7 +162,7 @@ class MailboxFortressParse {
 		$stored = false;
 		try {
 			foreach ($checked as $u) {
-				$made[] = array('part' => $u, 'file' => self::persistFile($id, $user_id, $u));
+				$made[] = array('part' => $u, 'file' => InboundEmailMessage::storeFortressPartFile($id, $user_id, $u));
 			}
 			$db->beginTransaction();
 			// One parse per row: the lock makes a second device's post wait, then
@@ -312,20 +312,6 @@ class MailboxFortressParse {
 				'inline' => !empty($inline) && $inline !== 'false');
 		}
 		return $out;
-	}
-
-	/** One part's ciphertext as a File named by message and part; committed on its own. */
-	private static function persistFile(int $message_id, int $user_id, array $u): File {
-		$file = File::createFromBytes($u['bytes'],
-			InboundEmailMessage::fortressAttachmentName($message_id, $u['mime_part']),
-			InboundEmailMessage::FORTRESS_FILE_TYPE, $user_id, array(
-				'fil_private' => true,
-				'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
-			));
-		// Magic-byte detection on save() saw ciphertext: keep the stored type.
-		$file->set('fil_type', InboundEmailMessage::FORTRESS_FILE_TYPE);
-		$file->save();
-		return $file;
 	}
 
 	/** The part's attachment row, with nothing in the clear; inside the row's transaction. */

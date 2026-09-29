@@ -23,6 +23,9 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatLevel.p
 
 $tz = $session->get_timezone();
 $selected_id = $selected ? (int)$selected->key : 0;
+// Rows the selected chat still has to converge after a privacy change that
+// stopped part-way; the page resumes it on load.
+$level_remaining = $selected ? (new ChatConversationLevel($selected))->remaining() : 0;
 // Effective model for the selected thread, used to price token usage.
 $conv_model = $selected ? ChatRender::conversationModel($selected) : '';
 
@@ -326,7 +329,7 @@ if (!function_exists('joai_pin_svg')) {
 </div>
 
 <!-- WebAuthn/PRF helper for the vault unlock ceremony (must load before the inline script). -->
-<script src="/assets/js/passkeys.js"></script>
+<script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
 <script>
 (function () {
     // Endpoint + link base for this surface (admin vs profile). Every fetch and
@@ -358,9 +361,42 @@ if (!function_exists('joai_pin_svg')) {
         return joaiApiV1('joinery_ai/chat_set_capabilities', payload).then(function (d) {
             var data = (d && d.data) || {};
             return { success: !(d && d.error), locked: !!data.locked,
+                     requires_stepup: !!data.requires_stepup, remaining: data.remaining | 0,
                      message: (d && d.error) || data.message || '' };
         });
     }
+    // A privacy-level change asks the owner to confirm it is them. A passkey
+    // confirms in place (resolves true); without one — or when it is dismissed —
+    // the confirmation page, which also takes an authenticator code, brings them
+    // back here.
+    function joaiStepUp() {
+        var viaPage = function () {
+            window.location = '/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search);
+            return new Promise(function () {});
+        };
+        if (!window.JoineryPasskeys || !window.JoineryPasskeys.stepUp) return viaPage();
+        return window.JoineryPasskeys.stepUp().then(function () { return true; }, viaPage);
+    }
+    // The level flips at once; the stored turns catch up in bounded batches.
+    // Resolves when nothing remains (or a pass can make no progress).
+    // A pass that converts nothing while rows remain stops and says how many
+    // were left; they are retried by the next pass (and in the background).
+    // Resolves to what is left. `quiet` (the resume on page load) says nothing.
+    function joaiConvergeLevel(remaining, quiet) {
+        if (!remaining) return Promise.resolve(0);
+        return joaiApiV1('joinery_ai/chat_level_batch', { conversation_id: currentConversationId }).then(function (d) {
+            var data = (d && d.data) || {};
+            if (d && d.error) { if (!quiet) alert(d.error); return remaining; }
+            var left = data.remaining | 0;
+            if (left > 0 && (data.converted | 0) > 0) return joaiConvergeLevel(left, quiet);
+            if (left > 0 && !quiet) {
+                alert(left + ' turn' + (left === 1 ? '' : 's') + ' of this chat could not be converted yet. '
+                    + 'They are tried again the next time the chat opens with your vault unlocked.');
+            }
+            return left;
+        });
+    }
+    var joaiLevelRemaining = <?php echo (int)$level_remaining; ?>;
     // Runs the unlock ceremony. Resolves to true on success. The platform's
     // one unlock (the lock chip's) opens every vault from one touch
     // (specs/one_vault_experience.md § R3); the inline passkey ceremony is the
@@ -588,16 +624,20 @@ if (!function_exists('joai_pin_svg')) {
         el.addEventListener('change', function () {
             if (!currentConversationId) return; // new chat: seeded on first send
             var field = el.getAttribute('data-field');
-            function send(retried) {
+            function send(retried, confirmed) {
                 joaiSetControl({ field: field, value: el.value })
                     .then(function (data) {
+                        if (data.requires_stepup && !confirmed) {
+                            joaiStepUp().then(function () { send(retried, true); });
+                            return;
+                        }
                         // Locked vault (a protected chat's instructions are sealed
                         // content): one-tap unlock, then retry the same change.
                         // A refused/failed unlock reloads so the control shows the
                         // real stored value instead of an unsaved edit.
                         if (data.locked && !retried) {
                             unlockVault().then(function (ok) {
-                                if (ok) { send(true); return; }
+                                if (ok) { send(true, confirmed); return; }
                                 alert(data.message || 'Unlock your vault to edit this protected chat.');
                                 location.reload();
                             });
@@ -609,15 +649,26 @@ if (!function_exists('joai_pin_svg')) {
                             return;
                         }
                         // Changing the privacy level reseals/reveals stored content and
-                        // may re-pin the model — reload so the whole page reflects it.
-                        if (field === 'security_level') location.reload();
+                        // may re-pin the model — converge what is left, then reload so
+                        // the whole page reflects it.
+                        if (field === 'security_level') {
+                            joaiConvergeLevel(data.remaining).then(function () { location.reload(); });
+                        }
                     })
                     .catch(function () {});
             }
-            send(false);
+            send(false, false);
         });
     }
     controls.forEach(wireField);
+
+    // A privacy change that stopped part-way (the tab closed mid-way) carries on
+    // here; the page reloads once it has, so the thread reads as it now is.
+    if (currentConversationId && joaiLevelRemaining > 0) {
+        joaiConvergeLevel(joaiLevelRemaining, true).then(function (left) {
+            if (left === 0) location.reload();
+        }).catch(function () { /* the next visit, or the deferred work, carries on */ });
+    }
 
     // ----- Local models only -----
     // The add-on lives under Private: its switch shows only while Privacy =

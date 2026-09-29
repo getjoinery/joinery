@@ -66,13 +66,9 @@ class ChatTurn {
             return;
         }
 
-        // Content columns: json-encode the trace and seal every content column when
-        // protected (Standard stores plaintext). Persist via a targeted raw UPDATE
-        // — a sealed row must never be save()d (that would decrypt-and-rewrite,
-        // unsealing it or throwing when locked).
-        $cols = ChatSeal::turnColumns($conversation, (int)$assistant_msg->key,
-            ChatRunner::resolveAssistantText($result),
-            $ctx->toolCalls());
+        // Operational columns, written with the content by ChatSeal::finalizeTurn()
+        // (which seals the content on a protected chat, window open or not).
+        $cols = [];
         $cols['aim_input_tokens']  = (int)$result['input_tokens'];
         $cols['aim_output_tokens'] = (int)$result['output_tokens'];
         $cols['aim_context_used']  = (int)($result['context_tokens'] ?? 0);
@@ -91,7 +87,8 @@ class ChatTurn {
         // just after the turn settled never leaves a stale "please stop" on the row.
         $cols['aim_cancel_requested'] = false;
         try {
-            AiConversationMessage::updateColumns((int)$assistant_msg->key, $cols);
+            ChatSeal::finalizeTurn($conversation, (int)$assistant_msg->key,
+                ChatRunner::resolveAssistantText($result), $ctx->toolCalls(), $cols);
         } catch (Throwable $e) {
             // Defensive: a content write the egress write-guard refuses (a hot turn
             // that slipped past the backstop above) must not surface as a 500.
@@ -106,8 +103,8 @@ class ChatTurn {
     }
 
     /** Add a turn's tokens to the conversation totals and bump its update time.
-     *  Token/time columns are cleartext; a targeted UPDATE leaves the sealed
-     *  title/instructions untouched (a full save() would decrypt-and-rewrite them). */
+     *  A targeted UPDATE, so a rename landing mid-turn is never overwritten by
+     *  this instance's stale copy of the title. */
     private static function rollupUsage(AiConversation $conversation, int $in, int $out): void {
         AiConversation::updateColumns((int)$conversation->key, [
             'aic_total_input_tokens'  => (int)$conversation->get('aic_total_input_tokens') + $in,
@@ -139,13 +136,13 @@ class ChatTurn {
     }
 
     public static function markFailed(AiConversationMessage $msg, string $error): void {
-        // Seal the error on a protected conversation (it may echo provider detail);
-        // errorColumns resolves the conversation itself and no-ops for Standard.
-        $cols = ChatSeal::errorColumns($msg, $error);
-        $cols['aim_status']   = AiConversationMessage::STATUS_FAILED;
-        $cols['aim_activity'] = null;
-        $cols['aim_cancel_requested'] = false;   // no stale flag on a settled row (§5)
-        AiConversationMessage::updateColumns((int)$msg->key, $cols);
+        // Seals the error on a protected conversation (it may echo provider detail);
+        // writeFailure resolves the conversation itself and writes plain for Standard.
+        ChatSeal::writeFailure($msg, $error, [
+            'aim_status'           => AiConversationMessage::STATUS_FAILED,
+            'aim_activity'         => null,
+            'aim_cancel_requested' => false,   // no stale flag on a settled row (§5)
+        ]);
         ChatAsync::clearScratch((int)$msg->key);
     }
 

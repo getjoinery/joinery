@@ -1,6 +1,4 @@
 <?php
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 /**
  * Logic for the Inbound Email Setup tab.
  *

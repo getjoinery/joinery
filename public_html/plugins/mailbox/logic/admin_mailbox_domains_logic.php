@@ -1,6 +1,5 @@
 <?php
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
+// @version 1.6 - a level change runs through ProtectionLevelChange (MailboxDomainLevel); levels are ProtectionLevel's
 // @version 1.5 - the relay-or-direct choice card is gone (Enable/Disable relay decide it), so no gate to handle
 // @version 1.4 - the Fortress receipt counts relay-sealed mail still waiting to be opened (B46)
 // @version 1.3 - Seal at the relay works with Fortress on a relay that reports it can
@@ -130,13 +129,6 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
-
-	// Level ordering: raising crosses into sealing; lowering leaves it.
-	$level_rank = array(
-		InboundEmailDomain::LEVEL_STANDARD => 0,
-		InboundEmailDomain::LEVEL_PRIVATE  => 1,
-		InboundEmailDomain::LEVEL_FORTRESS => 2,
-	);
 
 	// True when any alias on the domain has more than one live grant — today's
 	// structural proxy for a group-collaboration mailbox, which cannot be raised
@@ -276,10 +268,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 
 		// --- Protection level (specs/mailbox_security_levels.md Phase 2) ---
 		$old_level = $domain->key ? $domain->security_level() : InboundEmailDomain::LEVEL_STANDARD;
-		$new_level = strtolower(trim((string)($input['ied_security_level'] ?? InboundEmailDomain::LEVEL_STANDARD)));
-		if (!isset($level_rank[$new_level])) {
-			$new_level = InboundEmailDomain::LEVEL_STANDARD;
-		}
+		$new_level = ProtectionLevel::normalize($input['ied_security_level'] ?? InboundEmailDomain::LEVEL_STANDARD);
 		// A provider domain — gmail.com — is not an identity this deployment
 		// holds, so it makes no protection claim at all (specs/mailbox_connect_flow.md
 		// § D): it is forced Standard, and each pulled-in mailbox under it carries
@@ -289,8 +278,9 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			$new_level = InboundEmailDomain::LEVEL_STANDARD;
 		}
 
-		$raising = ($level_rank[$new_level] > $level_rank[$old_level]);
-		$lowering = ($level_rank[$new_level] < $level_rank[$old_level]);
+		// Raising crosses into sealing; lowering leaves it (ProtectionLevel::ORDER).
+		$raising = (ProtectionLevel::rank($new_level) > ProtectionLevel::rank($old_level));
+		$lowering = (ProtectionLevel::rank($new_level) < ProtectionLevel::rank($old_level));
 		$new_seals = ($new_level !== InboundEmailDomain::LEVEL_STANDARD);
 		$old_seals = ($old_level !== InboundEmailDomain::LEVEL_STANDARD);
 
@@ -341,16 +331,30 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// administration action (specs/mailbox_security_levels.md § 5.5):
 		// re-confirm the account's second factor first. Only on an actual change
 		// to an existing domain — the initial choice at creation is a plain
-		// choice, not a change. The step-up redirects to the ceremony and returns
-		// to this domain's editor; the user re-submits, now recently confirmed.
-		if ($domain->key && ($new_level !== $old_level || $addons_changed)) {
-			// The choices ride the return URL so the editor preselects them after
-			// the ceremony — the lost form POST must not silently discard the
-			// operator's intent.
-			$return_url = '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . (int)$domain->key
-				. '&target_level=' . rawurlencode($new_level)
-				. '&target_relay=' . ($new_relay_flag ? '1' : '0')
-				. '&target_send=' . ($new_send_flag ? '1' : '0');
+		// choice, not a change. A level change is ProtectionLevelChange's gate;
+		// an add-on alone is this editor's own. Either way the step-up redirects
+		// to the ceremony and returns to this domain's editor; the user
+		// re-submits, now recently confirmed.
+		$acting_user_id = intval($session->get_user_id());
+		$gate_addons = array('relay_seal' => $newly_relay, 'send_lock' => $newly_send);
+		$level_changes = $domain->key && $new_level !== $old_level;
+		$level_scope = $level_changes ? new MailboxDomainLevel($domain, $acting_user_id, $gate_addons) : null;
+		// The choices ride the return URL so the editor preselects them after
+		// the ceremony — the lost form POST must not silently discard the
+		// operator's intent.
+		$return_url = '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . (int)$domain->key
+			. '&target_level=' . rawurlencode($new_level)
+			. '&target_relay=' . ($new_relay_flag ? '1' : '0')
+			. '&target_send=' . ($new_send_flag ? '1' : '0');
+		if ($level_scope !== null) {
+			$gate = ProtectionLevelChange::gate($level_scope, $new_level);
+			if ($gate['status'] === ProtectionLevelChange::STEPUP) {
+				return SessionControl::stepup_redirect($return_url);
+			}
+			if ($gate['status'] === ProtectionLevelChange::REFUSED) {
+				return $level_error($gate['error']);
+			}
+		} elseif ($domain->key && $addons_changed) {
 			$stepup = $session->require_recent_second_factor($return_url);
 			if ($stepup !== null) {
 				return $stepup;
@@ -360,44 +364,25 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// Group-collaboration constraint (firm): a domain hosting a shared mailbox
 		// cannot be raised above Standard — the one-operator/one-key model every
 		// protected level rests on does not cover multi-reader sealing.
-		if ($level_rank[$new_level] > 0 && $domain->key && $domain_has_group_mailbox($domain->key)) {
+		if ($new_seals && $domain->key && $domain_has_group_mailbox($domain->key)) {
 			return $level_error('This domain hosts a shared (group) mailbox, so it can only use the Standard level.');
 		}
 
 		// Ceremony verification (specs/mailbox_protection_ceremony.md): a raise
 		// into a sealing level is refused until every required prerequisite row
-		// passes — the reader-vault rows are evaluated per HOLDER (the sealing
-		// target, InboundEmailRouter::storeMessage keys off the holder's vault),
-		// never the admin running the save. The editor's checklist renders these
-		// same rows with in-place fixes; this re-verification is the enforcement,
-		// the button state is the convenience.
-		// An add-on switched on runs its own rows (a second factor for either, a
-		// relay in front for relay sealing) whether or not the level moves, and
-		// on a new domain too: those rows are about the person and the
-		// deployment, not about mail already stored.
-		$acting_user_id = intval($session->get_user_id());
-		$gate_addons = array('relay_seal' => $newly_relay, 'send_lock' => $newly_send);
-		$gate_rows = array();
-		if ($raising && $new_seals && $domain->key) {
-			$gate_rows = mailbox_protection_rows(mailbox_protection_facts($domain),
-				$new_level, $acting_user_id, $gate_addons);
-		} elseif ($newly_relay || $newly_send) {
-			$gate_rows = mailbox_protection_addon_rows(mailbox_protection_facts($domain),
-				$gate_addons);
-		}
-		if (!mailbox_protection_required_ok($gate_rows)) {
-			return $level_error(mailbox_protection_first_failure($gate_rows));
-		}
-		// Lowering to Standard needs the acting user's key open — an idle admin
-		// session must not quietly downgrade protection, and the unseal runs in
-		// that window. Fortress to Private needs no server window: the owner's
-		// browser moves the keys (specs/client_custody_mail.md § R8).
-		$acting_vault = ($acting_user_id > 0) ? UserEncryptionVault::loadForUser($acting_user_id) : null;
-		if ($lowering && $old_seals && !$new_seals && $acting_vault !== null && !VaultUnlock::isOpen($acting_user_id)) {
-			return $level_error('Unlock your vault before lowering protection on this domain.');
+		// passes, the reader-vault rows evaluated per HOLDER. That is the level
+		// scope's prerequisite (MailboxDomainLevel::blockers()), asked by
+		// ProtectionLevelChange::change() below. An add-on switched on without a
+		// raise runs its own rows here (a second factor for either, a relay in
+		// front for relay sealing), and on a new domain too: those rows are about
+		// the person and the deployment, not about mail already stored.
+		if (!($level_changes && $raising && $new_seals) && ($newly_relay || $newly_send)) {
+			$gate_rows = mailbox_protection_addon_rows(mailbox_protection_facts($domain), $gate_addons);
+			if (!mailbox_protection_required_ok($gate_rows)) {
+				return $level_error(mailbox_protection_first_failure($gate_rows));
+			}
 		}
 
-		$domain->set_security_level($new_level);
 		if (!$is_imap) {
 			$domain->set('ied_relay_seals_to_owner', $new_relay_flag);
 			$domain->set('ied_send_lock_requested', $new_send_flag);
@@ -477,8 +462,24 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		$domain->set('ied_ai_processing_consent', $new_consent);
 
 		try {
-			$domain->prepare();
-			$domain->save();
+			if ($level_scope !== null) {
+				// The prerequisites, the window rule (lowering to Standard needs the
+				// acting user's key open when they hold one — the unseal runs in that
+				// window; Fortress to Private needs none, the owner's browser moves
+				// the keys, specs/client_custody_mail.md § R8), then the flip, which
+				// saves the domain with everything set on it above.
+				$change = ProtectionLevelChange::change($level_scope, $new_level, $acting_user_id);
+				if ($change['status'] === ProtectionLevelChange::STEPUP) {
+					return SessionControl::stepup_redirect($return_url);
+				}
+				if ($change['status'] !== ProtectionLevelChange::OK) {
+					return $level_error($change['error']);
+				}
+			} else {
+				$domain->set_security_level($new_level);
+				$domain->prepare();
+				$domain->save();
+			}
 
 			// A fleet-fronted deployment files a new hosted domain's ownership
 			// challenge at registration, so the Setup tab's ownership row

@@ -83,18 +83,6 @@ class RelayVersion {
 	}
 
 	/**
-	 * Where a relay stands, from its own cached health answer.
-	 *
-	 * A relay that has never answered, or answered the legacy plain-text PONG,
-	 * reports no version at all — which is UNKNOWN, which offers the upgrade. That
-	 * is the intended reading: a PONG relay predates the version marker and is by
-	 * definition old.
-	 */
-	public static function forRelay(MailboxRelay $relay): string {
-		return self::compare($relay->provisionedVersion());
-	}
-
-	/**
 	 * The first relay version that seals a Fortress mailbox's mail for its
 	 * owner's browsers (key_kind=client) AND answers /relay/seal-target, the
 	 * signed statement the browser checks that key against. 3.1 sealed without

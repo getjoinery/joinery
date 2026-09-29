@@ -76,15 +76,7 @@
         errEl.textContent = '';
         btn.disabled = true;
         try {
-            var opt = await joineryApi.post('passkey_stepup_options', {});
-            if (!opt || !opt.options) {
-                throw new Error('Could not start confirmation.');
-            }
-            var credential = await JoineryPasskeys.authenticate(opt.options);
-            var res = await joineryApi.post('passkey_stepup_verify', { credential: credential });
-            if (res && res.success === false) {
-                throw new Error(res.message || 'Confirmation failed.');
-            }
+            await JoineryPasskeys.stepUp();
             // The passkey step-up stamped the shared marker server-side — return.
             window.location = RETURN;
         } catch (e) {

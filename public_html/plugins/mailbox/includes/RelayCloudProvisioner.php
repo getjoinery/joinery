@@ -23,6 +23,8 @@
  *
  * Test seam: $driver_factory.
  *
+ * @version 2.5 - RelayFirstBoot lives in this file; a relay and a shard attach their
+ *   ManagedNode through one attachNode()
  * @version 2.4 - the run records the instance's IPv6 beside its IPv4 (create, rebuild, boot poll)
  * @version 2.3 - an update run asks the provider for the server's region before the rebuild, so it takes
  *                the Metadata service instead of a StackScript fallback its token cannot use
@@ -211,7 +213,6 @@ class RelayCloudProvisioner {
 	 * so the caller can hand either form to the provider.
 	 */
 	private function prepareFirstBoot(RelayCloudProvision $run): array {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayFirstBoot.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identities_class.php'));
 		$plane = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
 		if ($plane === '' || stripos($plane, 'https://') !== 0) {
@@ -265,7 +266,6 @@ class RelayCloudProvisioner {
 		if (!($driver instanceof LinodeComputeDriver)) {
 			return array('user_data' => $first_boot['user_data']);
 		}
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayFirstBoot.php'));
 		$id = $driver->ensureStackScript(self::STACKSCRIPT_LABEL, RelayFirstBoot::stackScript(), array(self::INSTANCE_IMAGE));
 		$data = array();
 		foreach ($first_boot['fields'] as $name => $value) {
@@ -626,27 +626,45 @@ class RelayCloudProvisioner {
 	 * here is logged and the relay is complete without its dashboard card.
 	 */
 	public function attachManagedNode(MailboxRelay $relay): void {
+		$this->attachNode($relay, array(
+			'node_column' => 'mrl_mgn_managed_node_id',
+			'hostname'    => (string)$relay->get('mrl_mx_hostname') ?: (string)$relay->get('mrl_name'),
+			'host'        => (string)$relay->get('mrl_public_ip'),
+			'name'        => 'Relay ',
+			'slug'        => 'relay-',
+			'notes'       => 'Disposable relay (specs/relay_without_a_shell.md): no shell, no agent. '
+				. 'Its only acts are Update and Delete on the mailbox Setup tab.',
+		));
+	}
+
+	/**
+	 * A relay or a fleet shard as a ManagedNode in the disposable posture, when
+	 * server_manager is active. $d names the row's node column, the hostname and
+	 * address to show, the name and slug prefixes, and the notes. Reuses the node
+	 * the row names, else a fresh one; a failure is logged, never raised.
+	 */
+	private function attachNode(SystemBase $row, array $d): void {
 		if (!PluginHelper::isPluginActive('server_manager') || !class_exists('ManagedNode')) {
 			return;
 		}
 		try {
 			$node = null;
-			$node_id = intval($relay->get('mrl_mgn_managed_node_id'));
+			$node_id = intval($row->get($d['node_column']));
 			if ($node_id > 0) {
 				$node = new ManagedNode($node_id, TRUE);
 				if (!$node->key || (string)$node->get('mgn_delete_time') !== '') {
 					$node = null;
 				}
 			}
-			$hostname = (string)$relay->get('mrl_mx_hostname') ?: (string)$relay->get('mrl_name');
+			$hostname = $d['hostname'];
 			if ($node === null) {
 				$node = new ManagedNode(NULL);
-				$node->set('mgn_name', substr('Relay ' . $hostname, 0, 100));
+				$node->set('mgn_name', substr($d['name'] . $hostname, 0, 100));
 				$node->set('mgn_slug', class_exists('AgentChannelEndpoint')
-					? AgentChannelEndpoint::freeSlug('relay-' . $hostname)
-					: substr('relay-' . preg_replace('/[^a-z0-9-]+/', '-', strtolower($hostname)) . '-' . intval($relay->key), 0, 50));
+					? AgentChannelEndpoint::freeSlug($d['slug'] . $hostname)
+					: substr($d['slug'] . preg_replace('/[^a-z0-9-]+/', '-', strtolower($hostname)) . '-' . intval($row->key), 0, 50));
 			}
-			$node->set('mgn_host', substr((string)$relay->get('mrl_public_ip'), 0, 255));
+			$node->set('mgn_host', substr($d['host'], 0, 255));
 			$node->set('mgn_is_relay', true);
 			$node->set('mgn_skip_joinery_checks', true);
 			$node->set('mgn_enabled', true);
@@ -654,14 +672,13 @@ class RelayCloudProvisioner {
 			$node->set('mgn_uptime_enabled', true);
 			$node->set('mgn_uptime_check_type', 'tcp_port');
 			$node->set('mgn_uptime_tcp_port', 25);
-			$node->set('mgn_notes', 'Disposable relay (specs/relay_without_a_shell.md): no shell, no agent. '
-				. 'Its only acts are Update and Delete on the mailbox Setup tab.');
+			$node->set('mgn_notes', $d['notes']);
 			$node->save();
-			$relay->set('mrl_mgn_managed_node_id', intval($node->key));
-			$relay->save();
+			$row->set($d['node_column'], intval($node->key));
+			$row->save();
 		} catch (\Throwable $e) {
-			error_log('RelayCloudProvisioner: could not attach a ManagedNode to relay ' . intval($relay->key)
-				. ': ' . $e->getMessage());
+			error_log('RelayCloudProvisioner: could not attach a ManagedNode to ' . get_class($row) . ' '
+				. intval($row->key) . ': ' . $e->getMessage());
 		}
 	}
 
@@ -715,41 +732,14 @@ class RelayCloudProvisioner {
 
 	/** A shard as a ManagedNode in the disposable posture, when server_manager is active. */
 	private function attachShardNode(MailboxFleetShard $shard): void {
-		if (!PluginHelper::isPluginActive('server_manager') || !class_exists('ManagedNode')) {
-			return;
-		}
-		try {
-			$node = null;
-			$node_id = intval($shard->get('mfs_mgn_managed_node_id'));
-			if ($node_id > 0) {
-				$node = new ManagedNode($node_id, TRUE);
-				if (!$node->key || (string)$node->get('mgn_delete_time') !== '') {
-					$node = null;
-				}
-			}
-			$hostname = (string)$shard->get('mfs_hostname');
-			if ($node === null) {
-				$node = new ManagedNode(NULL);
-				$node->set('mgn_name', substr('Relay shard ' . $hostname, 0, 100));
-				$node->set('mgn_slug', class_exists('AgentChannelEndpoint')
-					? AgentChannelEndpoint::freeSlug('shard-' . $hostname)
-					: substr('shard-' . preg_replace('/[^a-z0-9-]+/', '-', strtolower($hostname)) . '-' . intval($shard->key), 0, 50));
-			}
-			$node->set('mgn_host', substr((string)$shard->get('mfs_public_ip'), 0, 255));
-			$node->set('mgn_is_relay', true);
-			$node->set('mgn_skip_joinery_checks', true);
-			$node->set('mgn_enabled', true);
-			$node->set('mgn_ssh_key_path', null);
-			$node->set('mgn_uptime_enabled', true);
-			$node->set('mgn_uptime_check_type', 'tcp_port');
-			$node->set('mgn_uptime_tcp_port', 25);
-			$node->set('mgn_notes', 'Disposable fleet shard (specs/relay_without_a_shell.md): no shell, no agent.');
-			$node->save();
-			$shard->set('mfs_mgn_managed_node_id', intval($node->key));
-			$shard->save();
-		} catch (\Throwable $e) {
-			error_log('RelayCloudProvisioner: could not attach a ManagedNode to shard ' . intval($shard->key) . ': ' . $e->getMessage());
-		}
+		$this->attachNode($shard, array(
+			'node_column' => 'mfs_mgn_managed_node_id',
+			'hostname'    => (string)$shard->get('mfs_hostname'),
+			'host'        => (string)$shard->get('mfs_public_ip'),
+			'name'        => 'Relay shard ',
+			'slug'        => 'shard-',
+			'notes'       => 'Disposable fleet shard (specs/relay_without_a_shell.md): no shell, no agent.',
+		));
 	}
 
 	/**
@@ -861,5 +851,128 @@ class RelayCloudProvisioner {
 		return new LinodeComputeDriver($token);
 	}
 
+}
+
+/**
+ * RelayFirstBoot - render the user-data a relay is born from.
+ *
+ * specs/relay_without_a_shell.md § Birth. The template is
+ * provisioning/relay_first_boot.sh; this class fills its placeholders from a
+ * provisioning run and hands back the script the provider runs at first boot.
+ * Two forms, one template:
+ *
+ *   render()       the values baked in - what the provider's Metadata service
+ *                  (cloud-init user-data) carries
+ *   stackScript()  the placeholders left in place under a UDF header - what a
+ *                  region without Metadata runs as a StackScript, the same
+ *                  fields arriving as environment variables
+ *
+ * The user-data carries only public keys, the bundle's hash, the plane's URL
+ * and the one-time run token. It is readable by root on the box and by the
+ * account holder through the provider; it holds no secret that outlives the
+ * boot.
+ *
+ * @version 1.0
+ */
+
+class RelayFirstBoot {
+
+	/** Every placeholder the template declares, in the order the header lists them. */
+	const FIELDS = array(
+		'PLANE', 'RUN_ID', 'RUN_TOKEN', 'BUNDLE_SHA256', 'MAIL_HOSTNAME', 'AUTHSERV_ID',
+		'CLIENT_PUBLIC_KEY', 'OPERATOR_PUBLIC_KEY', 'SKELETON_ONLY',
+	);
+
+	/** The fields a run must supply; the rest may be empty. */
+	const REQUIRED = array('PLANE', 'RUN_ID', 'RUN_TOKEN', 'BUNDLE_SHA256', 'MAIL_HOSTNAME');
+
+	/** The template's path. */
+	public static function templatePath(): string {
+		return PathHelper::getIncludePath('plugins/mailbox/provisioning/relay_first_boot.sh');
+	}
+
+	/**
+	 * The first-boot script with every placeholder filled.
+	 *
+	 * @param array $fields lowercase or uppercase keys matching FIELDS; an
+	 *                      unsupplied optional field renders empty
+	 */
+	public static function render(array $fields): string {
+		$values = self::normalise($fields);
+		foreach (self::REQUIRED as $name) {
+			if ($values[$name] === '') {
+				throw new InvalidArgumentException('RelayFirstBoot: ' . strtolower($name) . ' is required to render the user-data.');
+			}
+		}
+		$template = self::template();
+		foreach (self::FIELDS as $name) {
+			$template = str_replace('__' . $name . '__', self::shellSafe($values[$name]), $template);
+		}
+		return $template;
+	}
+
+	/**
+	 * The same script as a Linode StackScript: a UDF header declaring each field,
+	 * and the placeholders left in place so the `${NAME:-__NAME__}` defaults fall
+	 * through to the UDF environment. The run token is a UDF like the rest:
+	 * readable by the account holder, exactly as user-data is.
+	 */
+	public static function stackScript(): string {
+		$udf = "#!/usr/bin/env bash\n";
+		$labels = array(
+			'PLANE' => 'Plane URL', 'RUN_ID' => 'Provisioning run id', 'RUN_TOKEN' => 'One-time run token',
+			'BUNDLE_SHA256' => 'Bundle sha256', 'MAIL_HOSTNAME' => 'Mail hostname', 'AUTHSERV_ID' => 'Authserv-id',
+			'CLIENT_PUBLIC_KEY' => 'Tenant public key', 'OPERATOR_PUBLIC_KEY' => 'Operator public key',
+			'SKELETON_ONLY' => 'Skeleton only (0|1)',
+		);
+		foreach (self::FIELDS as $name) {
+			$default = in_array($name, self::REQUIRED, true) ? '' : ' default=""';
+			$udf .= '# <UDF name="' . $name . '" label="' . $labels[$name] . '"' . $default . " />\n";
+		}
+		// The template's own shebang gives way to the one above.
+		$body = preg_replace('/^#!.*\n/', '', self::template(), 1);
+		return $udf . $body;
+	}
+
+	/** The sha256 of the rendered user-data, for a run to record what it created. */
+	public static function digest(string $rendered): string {
+		return hash('sha256', $rendered);
+	}
+
+	private static function template(): string {
+		$raw = @file_get_contents(self::templatePath());
+		if ($raw === false || $raw === '') {
+			throw new RuntimeException('RelayFirstBoot: the first-boot template is missing at ' . self::templatePath());
+		}
+		return $raw;
+	}
+
+	private static function normalise(array $fields): array {
+		$values = array_fill_keys(self::FIELDS, '');
+		foreach ($fields as $key => $value) {
+			$name = strtoupper((string)$key);
+			if (array_key_exists($name, $values)) {
+				$values[$name] = trim((string)$value);
+			}
+		}
+		if ($values['AUTHSERV_ID'] === '') {
+			$values['AUTHSERV_ID'] = $values['MAIL_HOSTNAME'];
+		}
+		$values['SKELETON_ONLY'] = ($values['SKELETON_ONLY'] === '1' || $values['SKELETON_ONLY'] === 'true') ? '1' : '0';
+		return $values;
+	}
+
+	/**
+	 * A value lands inside double quotes in a shell script. Every field is a
+	 * URL, an id, a hash, a hostname or base64 - none may carry a quote, a
+	 * dollar, a backtick, a backslash or a newline, so one is refused rather
+	 * than escaped: a value that needs escaping is not one of these.
+	 */
+	private static function shellSafe(string $value): string {
+		if (preg_match('/["$`\\\\\r\n]/', $value)) {
+			throw new InvalidArgumentException('RelayFirstBoot: a user-data value carries a shell metacharacter.');
+		}
+		return $value;
+	}
 }
 ?>

@@ -33,16 +33,13 @@ class AiConversation extends SystemBase {
     // unconverted row keeps its seal and its local pin. aic_001 retires it.
     const LEGACY_LEVEL_LOCAL_ONLY = 'fortress';
 
-    // Sealed Vault generic read hook (docs/sealed_vault.md): decrypted
-    // transparently by SystemBase::get() for a loaded model. aic_title is derived
-    // from the first message (content in miniature) and aic_instructions is a
-    // user-authored system-prompt override — both content, sealed on a protected
-    // conversation. Every other aic column is operational metadata (cleartext).
+    // Sealed Vault generic hooks (docs/sealed_vault.md): SystemBase::get()
+    // decrypts these on a sealed row and save() seals them on a Private
+    // conversation (shouldSeal()). aic_title is derived from the first message
+    // (content in miniature) and aic_instructions is a user-authored
+    // system-prompt override — both content. Every other aic column is
+    // operational metadata (cleartext).
     public static $sealed_fields = array('aic_title', 'aic_instructions');
-
-    // Sealing runs through ChatSeal, which seals the conversation and its
-    // messages under one policy read from aic_security_level.
-    public static $seal_on_save = false;
 
     // aic_owner_user_id doesn't fit the {prefix}_{owner_prefix}_..._id
     // convention (the owning User's own prefix isn't in the column), so it
@@ -77,6 +74,11 @@ class AiConversation extends SystemBase {
         'aic_sealed_key'         => array('type'=>'text', 'is_nullable'=>true),
         'aic_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
         'aic_content_sealed'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+        // Whose vault the DEK was wrapped to at seal time (SystemBase writes it
+        // with the wrapping), so a rotation selects this owner's rows directly.
+        'aic_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
+        // When converting this chat's own row (title/instructions) last failed.
+        'aic_level_attempt_time'   => array('type'=>'timestamp(6)', 'is_nullable'=>true),
         // Durable egress posture. Set true the first time any turn in this
         // conversation opens sealed content — a tool reading protected mail/drive,
         // or (on a protected conversation) decrypting its own sealed history. Once
@@ -128,12 +130,6 @@ class AiConversation extends SystemBase {
         }
     }
 
-    // A sealed conversation must NEVER be save()d: SystemBase::save() rebuilds
-    // every column through get(), which decrypts aic_title/aic_instructions and
-    // would write plaintext back (unsealing them) or throw when locked. Every
-    // write to a protected conversation — token rollups, pin, rename, control
-    // edits, seal/reseal — goes through SystemBase::updateColumns() instead.
-
     /** A stored level read as a current one: the legacy value is Private. */
     public static function normalizeLevel($stored): string {
         $stored = (string)$stored;
@@ -167,11 +163,9 @@ class AiConversation extends SystemBase {
     }
 
     /**
-     * Soft-delete via a targeted UPDATE, not the base save() path: SystemBase::
-     * soft_delete() rebuilds every column through get(), which on a sealed
-     * conversation would decrypt aic_title/aic_instructions and write them back
-     * as plaintext (unsealing a merely-soft-deleted, still-recoverable row) or
-     * throw when the vault is locked.
+     * Soft-delete via a targeted UPDATE of the delete time alone, so a delete
+     * from an instance loaded earlier never writes its stale token totals or
+     * activity back over what a running turn has since recorded.
      */
     public function soft_delete() {
         self::updateColumns((int)$this->key, ['aic_delete_time' => gmdate('Y-m-d H:i:s')]);
@@ -180,43 +174,29 @@ class AiConversation extends SystemBase {
     }
 
     /**
-     * Sealed Vault read hook (docs/sealed_vault.md), the SystemBase::get() path.
-     * A value is decrypted only when the row is marked sealed AND the value
-     * carries the sealed-blob prefix — an empty or not-yet-sealed field on a
-     * protected row (or any Standard row) is returned untouched. Throws
-     * VaultLockedException when the owner's vault window is closed.
+     * AD: chat:conv:{aic_conversation_id}:title|instructions — the literal every
+     * conversation already sealed carries, so it cannot change. Any other column
+     * name passes through, which keeps the {prefix}{id}:{field} shape
+     * sealedAdPrefix() checks.
      */
-    protected function decryptSealedField($field, $ciphertext) {
-        if (!$this->get('aic_content_sealed') || !is_string($ciphertext)
-                || strpos($ciphertext, 'v1.aead.') !== 0) {
-            return $ciphertext;
-        }
-        $owner = (int)$this->get('aic_owner_user_id');
-        $sealed_key = (string)$this->get('aic_sealed_key');
-        if ($owner <= 0 || $sealed_key === '') {
-            require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-            throw new VaultLockedException();
-        }
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
-        return ChatSeal::openConversationField((int)$this->key, $owner, $sealed_key, $field, $ciphertext);
+    public static function sealAd(int $row_id, string $field): string {
+        $token = array('aic_title' => 'title', 'aic_instructions' => 'instructions')[$field] ?? $field;
+        return 'chat:conv:' . $row_id . ':' . $token;
     }
 
-    /** Same, for a raw associative row (no $this) — the sealed-field contract's
-     *  static half. Chat conversations are not $ai_readable, so this path is not
-     *  exercised by ModelQueryExecutor, but the contract requires it. */
-    public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
-        if (empty($row['aic_content_sealed']) || !is_string($ciphertext)
-                || strpos($ciphertext, 'v1.aead.') !== 0) {
-            return $ciphertext;
-        }
-        $owner = (int)($row['aic_owner_user_id'] ?? 0);
-        $sealed_key = (string)($row['aic_sealed_key'] ?? '');
-        if ($owner <= 0 || $sealed_key === '') {
-            require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-            throw new VaultLockedException();
-        }
+    /** A Private conversation seals; a Standard one stores plaintext. */
+    protected static function shouldSeal(array $row): bool {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
-        return ChatSeal::openConversationField((int)($row['aic_conversation_id'] ?? 0), $owner, $sealed_key, $field, $ciphertext);
+        return ChatSeal::sealsForOwner((string)($row['aic_security_level'] ?? ''),
+            (int)($row['aic_owner_user_id'] ?? 0));
+    }
+
+    /** The owner recorded at seal time, else the conversation's owner (a row sealed before the column). */
+    protected static function sealedOwnerUserIdFor(array $row): ?int {
+        $owner = parent::sealedOwnerUserIdFor($row);
+        if ($owner !== null) return $owner;
+        $owner = (int)($row['aic_owner_user_id'] ?? 0);
+        return $owner > 0 ? $owner : null;
     }
 
 }
@@ -270,7 +250,7 @@ class MultiAiConversation extends SystemMultiBase {
 
         // 1. Standard chats via SQL ILIKE (level pinned to 'standard' — a protected
         //    row's ciphertext columns must never be scanned this way).
-        $std_where = ['aic_delete_time ' . $del_sql, "aic_security_level = 'standard'"];
+        $std_where = ['aic_delete_time ' . $del_sql, self::plainSearchSql()];
         if ($owner_id) $std_where[] = 'aic_owner_user_id = :owner_id';
         $std_where[] = '(aic_title ILIKE :title_term OR EXISTS ('
                      . 'SELECT 1 FROM aim_conversation_messages '
@@ -290,8 +270,7 @@ class MultiAiConversation extends SystemMultiBase {
         if ($owner_id && ChatSeal::windowOpenFor($owner_id)) {
             $psql = 'SELECT aic_conversation_id FROM aic_conversations WHERE aic_delete_time ' . $del_sql
                   . ' AND aic_owner_user_id = :powner'
-                  // 'fortress' = rows not yet converted by migration aic_001, which retires it.
-                  . " AND aic_security_level IN ('private','fortress')";
+                  . ' AND ' . self::sealedSearchSql();
             $pq = DbConnector::GetPreparedStatement($psql);
             $pq->bindValue(':powner', $owner_id, PDO::PARAM_INT);
             $pq->execute();
@@ -355,15 +334,31 @@ class MultiAiConversation extends SystemMultiBase {
         return self::ownerHasProtected($owner_id);
     }
 
+    /**
+     * SQL over aic_conversations: a chat whose rows are all plaintext — Standard
+     * and holding no sealed row. Only these are searched by SQL; a chat lowered
+     * to Standard whose rows have not all converged back is not one of them.
+     */
+    public static function plainSearchSql(): string {
+        return "aic_security_level = '" . AiConversation::LEVEL_STANDARD . "' AND aic_content_sealed = false"
+            . ' AND NOT EXISTS (SELECT 1 FROM aim_conversation_messages s'
+            . ' WHERE s.aim_aic_conversation_id = aic_conversation_id AND s.aim_delete_time IS NULL AND s.aim_content_sealed = true)';
+    }
+
+    /** SQL over aic_conversations: the complement — any chat that is protected or still holds a sealed row. */
+    public static function sealedSearchSql(): string {
+        return '(NOT (' . self::plainSearchSql() . '))';
+    }
+
     /** Whether the owner has any non-deleted protected conversation at all —
      *  a cheap, query-independent existence check (no content, no ciphertext read).
-     *  This is the only probe the withheld path runs (§4.4). */
+     *  This is the only probe the withheld path runs (§4.4). A chat lowered to
+     *  Standard whose rows have not all converged back counts: it holds sealed rows. */
     public static function ownerHasProtected(int $owner_id): bool {
         if ($owner_id <= 0) return false;
         $q = DbConnector::get_instance()->get_db_link()->prepare(
             'SELECT 1 FROM aic_conversations WHERE aic_owner_user_id = ? AND aic_delete_time IS NULL '
-            // 'fortress' = rows not yet converted by migration aic_001, which retires it.
-            . "AND aic_security_level IN ('private','fortress') LIMIT 1");
+            . 'AND ' . self::sealedSearchSql() . ' LIMIT 1');
         $q->execute([$owner_id]);
         return (bool)$q->fetchColumn();
     }
@@ -421,7 +416,7 @@ class MultiAiConversation extends SystemMultiBase {
                        COALESCE(aic_update_time, aic_create_time) AS aic_when
                   FROM aic_conversations
                  WHERE aic_owner_user_id = :owner AND aic_delete_time IS NULL
-                   AND aic_security_level = 'standard'$excl
+                   AND " . self::plainSearchSql() . "$excl
                    AND (aic_title ILIKE :t OR EXISTS (
                         SELECT 1 FROM aim_conversation_messages
                          WHERE aim_aic_conversation_id = aic_conversation_id
@@ -454,11 +449,11 @@ class MultiAiConversation extends SystemMultiBase {
             // bounded by the candidate cap so an owner with many protected chats
             // can't turn one tool call into an unbounded decrypt loop. Collect every
             // match (not stopping at $limit) so the merge below can rank a recent
-            // protected chat above older standard ones. 'fortress' = rows not yet
-            // converted by migration aic_001, which retires it.
+            // protected chat above older standard ones. Any chat still holding a
+            // sealed row is scanned here, never by SQL (sealedSearchSql()).
             $psql = "SELECT aic_conversation_id FROM aic_conversations
                       WHERE aic_owner_user_id = :owner AND aic_delete_time IS NULL
-                        AND aic_security_level IN ('private','fortress')$excl
+                        AND " . self::sealedSearchSql() . "$excl
                       ORDER BY aic_pinned DESC, aic_update_time DESC
                       LIMIT :lim";
             $pq = $db->prepare($psql);

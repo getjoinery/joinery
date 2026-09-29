@@ -1861,9 +1861,9 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Pre-launch backfill (specs/implemented/inbound_email_encryption_at_rest.md
-	 * § 9), called from logic/mailbox_backfill_seal_logic.php: re-split a
-	 * still-raw message's attachments into SEALED Files under $dek. Deletes any
+	 * The raise's backlog seal (MailboxSealConvergence, after
+	 * InboundEmailMessage::sealExistingRow()): re-split a still-raw message's
+	 * attachments into SEALED Files under $dek. Deletes any
 	 * section-pointer manifest rows the original ingest wrote (the raw-fallback
 	 * shape) first, so re-extraction never duplicates the attachment list.
 	 */

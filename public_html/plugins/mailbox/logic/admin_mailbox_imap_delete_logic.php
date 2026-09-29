@@ -20,8 +20,6 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function admin_mailbox_imap_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
