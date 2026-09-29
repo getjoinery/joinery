@@ -13,6 +13,7 @@
  * already the source of truth. Parsing it here rather than duplicating it means a
  * version bump has exactly one place to happen.
  *
+ * @version 1.2 - SEALS_FOR_BROWSERS 3.2: the relay that also answers the seal-target statement
  * @version 1.1 - sealsForBrowsers(): the relay version that writes the browser's format
  * @version 1.0
  */
@@ -93,8 +94,13 @@ class RelayVersion {
 		return self::compare($relay->provisionedVersion());
 	}
 
-	/** The first relay version whose sealer writes the browser's format (key_kind=client). */
-	const SEALS_FOR_BROWSERS = '3.1';
+	/**
+	 * The first relay version that seals a Fortress mailbox's mail for its
+	 * owner's browsers (key_kind=client) AND answers /relay/seal-target, the
+	 * signed statement the browser checks that key against. 3.1 sealed without
+	 * the statement; no Fortress mailbox is handed to it.
+	 */
+	const SEALS_FOR_BROWSERS = '3.2';
 
 	/**
 	 * Can this relay seal a Fortress mailbox's mail to its browser-held key?

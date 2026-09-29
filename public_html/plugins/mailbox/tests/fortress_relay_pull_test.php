@@ -326,18 +326,18 @@ try {
 		$r->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => $version)));
 		return $r;
 	};
-	check(!RelayVersion::sealsForBrowsers($relay_at('3.0')) && RelayVersion::sealsForBrowsers($relay_at('3.1'))
+	check(!RelayVersion::sealsForBrowsers($relay_at('3.1')) && RelayVersion::sealsForBrowsers($relay_at('3.2'))
 		&& RelayVersion::sealsForBrowsers($relay_at('3.10')) && !RelayVersion::sealsForBrowsers($relay_at('')),
-		'3.1 and later can; 3.0 and a relay that has not said cannot');
+		'3.2 and later can; 3.1 and a relay that has not said cannot');
 	$exporter = (new ReflectionClass('RelayMapExporter'))->newInstanceWithoutConstructor();
 	$relay_prop = new ReflectionProperty('RelayMapExporter', 'relay');
 	$target = new ReflectionMethod('RelayMapExporter', 'clientSealTarget');
 	$alias = new InboundEmailAlias(intval($alias->key), TRUE);
+	$relay_prop->setValue($exporter, $relay_at('3.2'));
+	check($target->invoke($exporter, $alias, $domain) === array($pub, 1), 'a 3.2 relay is given the mail key and its generation');
 	$relay_prop->setValue($exporter, $relay_at('3.1'));
-	check($target->invoke($exporter, $alias, $domain) === array($pub, 1), 'a 3.1 relay is given the mail key and its generation');
-	$relay_prop->setValue($exporter, $relay_at('3.0'));
-	check($target->invoke($exporter, $alias, $domain) === null, 'a 3.0 relay is not');
-	$relay_prop->setValue($exporter, $relay_at('3.1'));
+	check($target->invoke($exporter, $alias, $domain) === null, 'a 3.1 relay is not');
+	$relay_prop->setValue($exporter, $relay_at('3.2'));
 	$off = new InboundEmailDomain(intval($domain->key), TRUE);
 	$off->set('ied_relay_seals_to_owner', false);
 	check($target->invoke($exporter, $alias, $off) === null,
@@ -348,7 +348,7 @@ try {
 	$relay = new MailboxRelay(NULL);
 	$relay->set('mrl_name', 'harnesstest relay');
 	$relay->set('mrl_is_enabled', true);
-	$relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => '3.1')));
+	$relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => '3.2')));
 	$relay->save();
 	harness_register_row('mrl_mailbox_relays', 'mrl_mailbox_relay_id', intval($relay->key));
 	$active = MailboxRelay::active();
@@ -359,7 +359,7 @@ try {
 		$relay_refusal = function () use ($domain, $owner_id) {
 			return (string)admin_mailbox_domains_fortress_refusal($domain, $owner_id, true);
 		};
-		check(strpos($relay_refusal(), 'older version') === false, 'the add-on with Fortress is allowed on a 3.1 relay');
+		check(strpos($relay_refusal(), 'older version') === false, 'the add-on with Fortress is allowed on a 3.2 relay');
 		check(VaultUnlock::clientRotationCommitRefusal($owner_id, 'mail') !== null, 'a relay that never took this map refuses the commit');
 		$hash = RelayMapSync::contentHash((new RelayMapExporter(new MailboxRelay(intval($relay->key), TRUE)))->build());
 		$relay = new MailboxRelay(intval($relay->key), TRUE);
@@ -373,10 +373,10 @@ try {
 		$relay->set('mrl_last_pull_drained_time', gmdate('Y-m-d H:i:s'));
 		$relay->save();
 		check(VaultUnlock::clientRotationCommitRefusal($owner_id, 'mail') === null, 'map taken and a drained pull since: the commit may go');
-		$relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => '3.0')));
+		$relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => '3.1')));
 		$relay->set('mrl_map_content_hash', 'stale');
 		$relay->save();
-		check(strpos($relay_refusal(), 'older version') !== false, 'on a 3.0 relay the add-on with Fortress is refused');
+		check(strpos($relay_refusal(), 'older version') !== false, 'on a 3.1 relay the add-on with Fortress is refused');
 		check(VaultUnlock::clientRotationCommitRefusal($owner_id, 'mail') === null,
 			'a relay that seals Fortress mail to the transport key never holds a commit up');
 	}

@@ -23,6 +23,7 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.7 - session.mac() and session.derivedPublicKey(): the relay pin
  * @version 1.6 - rotationPlan() for a vault that opens through the root: one `root` wrapping,
  *   no codes, no taps; pendingStatus() exported for finishing its rotation
  * @version 1.5 - openRootWith(): a code, the phrase or another passkey opens the root for a passkey
@@ -108,6 +109,20 @@ window.VaultKeyring = (function () {
 				if (scope !== ROOT) return Promise.reject(new Error('Only your vault derives the others\' keys.'));
 				if (secret === null) return Promise.reject(new Error('Vault is locked.'));
 				return VaultCrypto.scopeKek(secret, targetScope);
+			},
+			// A MAC only this vault can make or check: HMAC-SHA256 under a key
+			// derived from the secret (info 'sealed-vault:pin'). The mail vault
+			// MACs the relay identity it pinned for a mailbox with it, so a pin
+			// the server writes or alters fails (specs/client_custody_mail.md § R10).
+			mac: function (bytes) {
+				if (secret === null) return Promise.reject(new Error('Vault is locked.'));
+				return VaultCrypto.macFromSecret(secret, 'sealed-vault:pin', bytes);
+			},
+			// This session's public key worked out from its secret. `publicKey`
+			// above is what the server reported; this one nobody else can move.
+			derivedPublicKey: function () {
+				if (secret === null) return Promise.reject(new Error('Vault is locked.'));
+				return VaultCrypto.publicKeyFromSecret(secret);
 			},
 			lock: function () {
 				if (secret) { secret.fill(0); secret = null; }

@@ -9,6 +9,11 @@
 # it to the recipient's public key at acceptance, and spools ciphertext; the
 # deployment's plane pulls its sealed blobs over HTTPS from the relay's own API.
 #
+# Version: 3.2 - GET /relay/seal-target: the relay's signed word on which key it
+#                seals a recipient's mail to, which the owner's browser checks
+#                against the relay identity it pinned (specs/client_custody_mail.md
+#                WP8). Fortress sealing at the relay needs 3.2 (RelayVersion::
+#                SEALS_FOR_BROWSERS), so it never runs without that check.
 # Version: 3.1 - the sealer seals a Fortress mailbox's mail in the browser's
 #                format to its browser-held key (key_kind=client,
 #                specs/client_custody_mail.md WP7). The deployment names that
@@ -51,7 +56,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.1"
+RELAY_VERSION="3.2"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"

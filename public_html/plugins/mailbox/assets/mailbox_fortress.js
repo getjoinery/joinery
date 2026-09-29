@@ -24,7 +24,10 @@
  *   drainPending()    parses what a relay sealed to this key (§ R9): the
  *                     message is opened and parsed here (MailboxMime) and its
  *                     fields and parts go back sealed under the row's own DEK.
- *                     It runs whenever the mail vault opens.
+ *                     It runs whenever the mail vault opens;
+ *   checkRelayPins()  asks the relay, through the server, which key it seals
+ *                     each relay-fronted mailbox to, and checks the signed
+ *                     answer against the relay pinned for it (§ R10).
  *
  * None of these starts an unlock: a content action does, through unlock().
  * While the mail vault is shut, rows get placeholders and the response says
@@ -38,6 +41,11 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.11 - checkRelayPins(): the relay's signed seal-target statement checked against the
+ *                pinned relay and the keys this browser derives from its own secrets (B47);
+ *                a pin re-made mid-rotation passes (B48); a local record of each pin keeps a
+ *                deleted server pin from passing for a first use (B49); first use pins, a
+ *                mismatch raises the alarm (§ R10)
  * @version 1.10.1 - review of 2026-09-28: parts go as one bundle upload (B37); a stale key is
  *                fetched once more (B44); the banner says when this device could not open
  *                them (B43); a row sealed to a key the vault does not hold says so (B40)
@@ -814,6 +822,267 @@ window.MailboxFortress = (function () {
 		return (gz.length * 3 <= plain.length * 2) ? gz : text;
 	}
 
+	// ---- the relay pin (§ R10) ------------------------------------------------------
+	//
+	// Under Seal at the relay, the relay seals a Fortress mailbox's mail to the
+	// key the server's map names. This browser asks the relay which key that is
+	// (the relay signs the answer with its identity key, which the server never
+	// holds) and checks it against the relay it pinned for the mailbox. The pin
+	// is MACed with a key only this vault derives (session.mac), so the server
+	// cannot plant one. The first check pins what the server reports (trust on
+	// first use, which the Fortress card says).
+
+	var SEAL_TARGET_PREFIX = 'joinery-relay:seal-target:v1\n';
+	var PIN_PREFIX = 'joinery-relay-pin:v1\n';
+	var pinsChecked = false;
+
+	function pinMessage(aliasId, identity) {
+		return new TextEncoder().encode(PIN_PREFIX + aliasId + '\n' + identity);
+	}
+
+	function sameText(a, b) {
+		a = String(a || ''); b = String(b || '');
+		if (a.length !== b.length) return false;
+		var d = 0;
+		for (var i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+		return d === 0;
+	}
+
+	/**
+	 * Judge one mailbox's answer from mailbox/relay_seal_target. mac(bytes)
+	 * makes this vault's pin MAC, or is a list of them (the current key's and,
+	 * mid-rotation, the pending key's: a pin re-made under the new key before
+	 * the commit is still this vault's, B48); keys are the public keys this
+	 * browser worked out from secrets it holds (acceptedKeys), never the
+	 * server's report of them (B47). Resolves
+	 * {ok, firstUse, identity} or {ok: false, reason, expected, reported,
+	 * approvable}: reason 'pin' (a pin this vault did not make), 'identity'
+	 * (a relay other than the pinned one; approvable when its own statement is
+	 * signed and names this vault's key), 'signature', 'key' (the relay seals
+	 * to another key), 'unreadable'.
+	 */
+	async function judgeSealTarget(answer, box, mac, keys) {
+		var relay, st;
+		try { relay = JSON.parse(answer.relay_answer); st = JSON.parse(relay.statement); } catch (e) { relay = null; }
+		if (!relay || !st || typeof relay.signature !== 'string') return { ok: false, reason: 'unreadable' };
+
+		var pinned, firstUse = false;
+		if (answer.pin) {
+			var macs = Array.isArray(mac) ? mac : [mac], mine = false;
+			for (var m = 0; m < macs.length && !mine; m++) {
+				mine = sameText(VaultCrypto.b64encode(await macs[m](pinMessage(box.alias_id, answer.pin.relay_identity_public_key))), answer.pin.mac);
+			}
+			if (!mine) {
+				return { ok: false, reason: 'pin', expected: answer.pin.relay_identity_public_key, reported: st.relay_identity_public_key };
+			}
+			pinned = answer.pin.relay_identity_public_key;
+		} else {
+			pinned = answer.relay_identity_public_key;
+			firstUse = true;
+		}
+		var signed = new TextEncoder().encode(SEAL_TARGET_PREFIX + relay.statement);
+		var names = st.recipient === String(box.address).toLowerCase() && st.key_scope === SCOPE
+			&& st.key_kind === 'client' && keys.indexOf(st.public_key) !== -1;
+		if (!sameText(st.relay_identity_public_key, pinned)) {
+			var selfSigned = await VaultCrypto.verifyEd25519(st.relay_identity_public_key, signed, relay.signature);
+			return { ok: false, reason: 'identity', expected: pinned, reported: st.relay_identity_public_key,
+				approvable: selfSigned && names, identity: st.relay_identity_public_key };
+		}
+		if (!await VaultCrypto.verifyEd25519(pinned, signed, relay.signature)) {
+			return { ok: false, reason: 'signature', expected: pinned, reported: pinned };
+		}
+		if (!names) return { ok: false, reason: 'key', expected: keys[0], reported: st.public_key };
+		return { ok: true, firstUse: firstUse, identity: pinned };
+	}
+
+	/** A key's fingerprint for people: SHA-256, the first 16 bytes in groups of four hex digits. */
+	async function fingerprint(b64) {
+		try {
+			var d = new Uint8Array(await crypto.subtle.digest('SHA-256', VaultCrypto.b64decode(String(b64))));
+			var hex = Array.prototype.map.call(d.slice(0, 16), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+			return hex.match(/.{4}/g).join(' ');
+		} catch (e) { return '(unreadable)'; }
+	}
+
+	/**
+	 * The public keys this browser accepts a relay sealing to, each worked out
+	 * from a secret it holds (B47): the server reports a vault's public keys,
+	 * and a hacked one could report a key of its own, push it to the relay as
+	 * the pending key, and have the honest relay sign for it. The current key
+	 * comes from the open mail session. A pending key (mid-rotation) counts only
+	 * once opened through the root vault from its `root` wrapping, which only
+	 * this browser's root secret opens; with the root shut the check waits for
+	 * a later page (null), which is no worse than a server withholding it.
+	 * Resolves {keys, macs} or null.
+	 */
+	async function acceptedKeys(session) {
+		var keys = [await session.derivedPublicKey()];
+		var macs = [function (b) { return session.mac(b); }];
+		var st = await VaultKeyring.status(SCOPE);
+		if (st && st.pending_public_key) {
+			if (!st.root_wrapped || !JoinerySealed.isOpen('root')) return null;
+			var pending = await VaultKeyring.openThroughRoot(await JoinerySealed.session('root'), SCOPE, VaultKeyring.pendingStatus(st));
+			if (!pending) return null;
+			keys.push(await pending.derivedPublicKey());
+			macs.push(function (b) { return pending.mac(b); });
+			return { keys: keys, macs: macs, done: function () { pending.lock(); } };
+		}
+		return { keys: keys, macs: macs, done: function () {} };
+	}
+
+	// This browser's own record of the relay each mailbox was pinned to (B49):
+	// a pin the server deleted then cannot pass for a first use here.
+	var LOCAL_PIN = 'joinery-relay-pin:';
+	function localPin(aliasId) {
+		try { return window.localStorage.getItem(LOCAL_PIN + aliasId) || null; } catch (e) { return null; }
+	}
+	function rememberPin(aliasId, identity) {
+		try { window.localStorage.setItem(LOCAL_PIN + aliasId, identity); } catch (e) { /* no storage here */ }
+	}
+
+	/**
+	 * Check every mailbox the relay seals for this browser (MAILBOX_READER
+	 * .relayPinMailboxes), once per page, while the mail vault is open.
+	 */
+	async function checkRelayPins() {
+		var boxes = cfg().relayPinMailboxes || [];
+		if (pinsChecked || !boxes.length || !isOpen()) return;
+		pinsChecked = true;
+		if (!(await VaultCrypto.ed25519Supported())) {
+			if (window.console) console.warn('MailboxFortress: this browser cannot check the relay\'s signature (no Ed25519).');
+			return;
+		}
+		var session = await JoinerySealed.session(SCOPE);
+		var accepted = await acceptedKeys(session);
+		if (!accepted) {
+			pinsChecked = false;
+			if (window.console) console.warn('MailboxFortress: the relay check waits for your vault to be open on a page with the rotation\'s new key.');
+			return;
+		}
+		try {
+			for (var i = 0; i < boxes.length; i++) {
+				await checkOne(boxes[i], session, accepted);
+			}
+		} finally {
+			accepted.done();   // the pending key's secret leaves memory with the check
+		}
+	}
+
+	async function checkOne(box, session, accepted) {
+		var answer;
+		try {
+			answer = await window.joineryApi.post('mailbox/relay_seal_target', { alias_id: box.alias_id });
+		} catch (e) {
+			// The server can withhold the check; it cannot forge its answer.
+			if (window.console) console.warn('MailboxFortress: the relay could not be asked about ' + box.address + ': ' + (e && e.message));
+			return;
+		}
+		// A mailbox this browser pinned before whose pin the server no longer
+		// has: judged against what this browser pinned, not as a first use.
+		var local = localPin(box.alias_id);
+		if (!answer.pin && local) answer = Object.assign({}, answer, { relay_identity_public_key: local });
+		var verdict = await judgeSealTarget(answer, box, accepted.macs, accepted.keys);
+		if (verdict.ok) {
+			rememberPin(box.alias_id, verdict.identity);
+			if (verdict.firstUse) {
+				await savePin(session, box, verdict.identity).catch(function (e) {
+					if (window.console) console.warn('MailboxFortress: could not pin the relay for ' + box.address + ': ' + (e && e.message));
+				});
+			}
+		} else {
+			await relayAlarm(box, verdict, session);
+		}
+	}
+
+	function savePin(session, box, identity) {
+		return session.mac(pinMessage(box.alias_id, identity)).then(function (m) {
+			return window.joineryApi.post('mailbox/relay_pin_set', { alias_id: box.alias_id,
+				relay_identity_public_key: identity, mac: VaultCrypto.b64encode(m) });
+		});
+	}
+
+	function stepUp() {
+		if (!window.JoineryPasskeys || !window.PublicKeyCredential) return Promise.reject(new Error('no passkey here'));
+		return window.joineryApi.post('passkey_stepup_options', {}).then(function (opt) {
+			if (!opt || !opt.options) throw new Error('Could not start the confirmation.');
+			return window.JoineryPasskeys.authenticate(opt.options);
+		}).then(function (credential) {
+			return window.joineryApi.post('passkey_stepup_verify', { credential: credential });
+		});
+	}
+
+	var ALARM_REASONS = {
+		pin: 'The relay this mailbox trusts was changed without this device.',
+		identity: 'A different relay is answering for this mailbox than the one this device trusts.',
+		signature: 'The relay\'s answer is not signed by the relay this device trusts.',
+		key: 'The relay is sealing this mailbox\'s mail to a key that is not this device\'s.',
+		unreadable: 'The relay\'s answer could not be read.'
+	};
+
+	/** The alarm: what is wrong, both fingerprints, and Approve only for a new relay that seals to this key. */
+	async function relayAlarm(box, verdict, session) {
+		if (typeof document === 'undefined') return;
+		var dlg = document.createElement('dialog');
+		dlg.className = 'mbx-relay-alarm';
+		dlg.setAttribute('data-relay-alarm', verdict.reason);
+		dlg.style.maxWidth = '34rem';
+		var h = document.createElement('h3');
+		h.textContent = 'Mail arriving at your relay is not being sealed to this device\'s key';
+		dlg.appendChild(h);
+		var p = document.createElement('p');
+		p.textContent = box.address + ': ' + (ALARM_REASONS[verdict.reason] || ALARM_REASONS.unreadable)
+			+ ' Until this is settled, mail to this address may be readable by whoever runs this server.';
+		dlg.appendChild(p);
+		if (verdict.expected || verdict.reported) {
+			var dl = document.createElement('dl');
+			var row = function (label, value) {
+				var dt = document.createElement('dt'); dt.textContent = label;
+				var dd = document.createElement('dd'); dd.textContent = value; dd.style.fontFamily = 'monospace';
+				dl.appendChild(dt); dl.appendChild(dd);
+			};
+			row(verdict.reason === 'key' ? 'This device\'s key' : 'The relay this device trusts', await fingerprint(verdict.expected));
+			row(verdict.reason === 'key' ? 'The key the relay seals to' : 'The relay answering now', await fingerprint(verdict.reported));
+			dlg.appendChild(dl);
+		}
+		var msg = document.createElement('p');
+		msg.className = 'mbx-relay-alarm-status';
+		dlg.appendChild(msg);
+		var buttons = document.createElement('div');
+		buttons.style.display = 'flex';
+		buttons.style.gap = '.5rem';
+		if (verdict.approvable) {
+			var approve = document.createElement('button');
+			approve.type = 'button';
+			approve.className = 'btn btn-primary';
+			approve.textContent = 'Trust the new relay';
+			approve.addEventListener('click', function () {
+				approve.disabled = true;
+				msg.textContent = 'Confirm it is you to trust the new relay…';
+				savePin(session, box, verdict.identity).catch(function (e) {
+					if (!(e && e.data && e.data.requires_stepup)) throw e;
+					return stepUp().then(function () { return savePin(session, box, verdict.identity); });
+				}).then(function () {
+					rememberPin(box.alias_id, verdict.identity);
+					dlg.close();
+					dlg.remove();
+				}, function (e) {
+					approve.disabled = false;
+					msg.textContent = 'The new relay was not trusted: ' + ((e && e.message) || 'the confirmation did not finish') + '.';
+				});
+			});
+			buttons.appendChild(approve);
+		}
+		var close = document.createElement('button');
+		close.type = 'button';
+		close.className = 'btn btn-secondary';
+		close.textContent = 'Close';
+		close.addEventListener('click', function () { dlg.close(); dlg.remove(); });
+		buttons.appendChild(close);
+		dlg.appendChild(buttons);
+		document.body.appendChild(dlg);
+		if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+	}
+
 	// ---- search text (the sealed iem_search_text) ------------------------------
 
 	/** A search text as stored, 'gz:' + base64(gzip) or plain, to its text. */
@@ -851,9 +1120,16 @@ window.MailboxFortress = (function () {
 		if (JoinerySealed.want) JoinerySealed.want(SCOPE, 'Vault');
 		// Relay-sealed mail waits for an open vault; open is when it is parsed.
 		document.addEventListener('joinery:vault-scope-unlocked', function (e) {
-			if (e && e.detail && e.detail.scope === SCOPE) drainPending().catch(function () {});
+			if (e && e.detail && e.detail.scope === SCOPE) {
+				drainPending().catch(function () {});
+				checkRelayPins().catch(function () {});
+			}
 		});
-		ready().then(function () { if (isOpen()) drainPending().catch(function () {}); });
+		ready().then(function () {
+			if (!isOpen()) return;
+			drainPending().catch(function () {});
+			checkRelayPins().catch(function () {});
+		});
 		JoinerySealed.onLock(SCOPE, function () {
 			lockEpoch++;
 			wipe();
@@ -1044,11 +1320,66 @@ window.MailboxFortress = (function () {
 		if (window.EmailDigest && window.VerdictCheck) {
 			await selfCheckJudge(note);
 		}
+		await selfCheckPin(note);
 		// A page holds the vault client; the node gates that load this file do not.
 		if (window.JoinerySealed) {
 			note('subscribed to the mail vault\'s lock, whatever order the scripts loaded in', hooked);
 		}
 		return { ok: checks.every(function (c) { return c.ok; }), checks: checks };
+	}
+
+	/**
+	 * The relay pin against the shared vector
+	 * (plugins/mailbox/tests/fixtures/relay_pin_vector.json, made by PHP): the
+	 * MAC matches the server's formula, a signed statement passes, a changed
+	 * key or signature fails, a pin this vault did not make is refused.
+	 */
+	async function selfCheckPin(note) {
+		if (typeof VaultCrypto === 'undefined' || !VaultCrypto.macFromSecret || !(await VaultCrypto.ed25519Supported())) return;
+		var v = {
+			secretHex: '1a94f30594ae6bf54e06ea46c983aa626582a81dea924d01b69a67d0e0089cd4',
+			aliasId: 42,
+			identity: 'uzn2WYR3e1WyY2Kcl1yJATPGrSeOLN9pfAim/U/NObM=',
+			mac: 'nAEl3HxC2IUhttrjI5PeEApF4tKvZ4RP5iQotyB6Z0Q=',
+			statement: '{"recipient":"box@fortress.test","public_key":"YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY=",'
+				+ '"key_kind":"client","key_scope":"mail","key_generation":1,"map_version":7,'
+				+ '"relay_identity_public_key":"uzn2WYR3e1WyY2Kcl1yJATPGrSeOLN9pfAim/U/NObM=","signed_at":"2026-09-28T12:00:00Z"}',
+			signature: '8pmxylHrOIw/ZDVwm3ab5K+J1TtwprMXYv6074UCUT5uU79N20dOWiglY7B125GuW5DZ2EZOZ1IN87GxcxvvBw=='
+		};
+		try {
+			var secret = new Uint8Array(v.secretHex.match(/../g).map(function (h) { return parseInt(h, 16); }));
+			var mac = function (b) { return VaultCrypto.macFromSecret(secret, 'sealed-vault:pin', b); };
+			note('the pin MAC matches the server\'s vector',
+				VaultCrypto.b64encode(await mac(pinMessage(v.aliasId, v.identity))) === v.mac);
+			var box = { alias_id: v.aliasId, address: 'box@fortress.test' };
+			var keys = ['YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY='];
+			var answer = { relay_answer: JSON.stringify({ statement: v.statement, signature: v.signature }),
+				relay_identity_public_key: v.identity, pin: { relay_identity_public_key: v.identity, mac: v.mac } };
+			var ok = await judgeSealTarget(answer, box, mac, keys);
+			note('a signed statement under the pinned relay passes', ok.ok && !ok.firstUse);
+			var first = await judgeSealTarget(Object.assign({}, answer, { pin: null }), box, mac, keys);
+			note('with no pin, it passes as a first use', first.ok && first.firstUse);
+			var other = await judgeSealTarget(answer, box, mac, ['AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+			note('a statement naming another key fails', !other.ok && other.reason === 'key');
+			var bad = await judgeSealTarget(Object.assign({}, answer, { relay_answer: JSON.stringify({
+				statement: v.statement.replace('"map_version":7', '"map_version":8'), signature: v.signature }) }), box, mac, keys);
+			note('a changed statement fails the signature', !bad.ok && bad.reason === 'signature');
+			var forged = await judgeSealTarget(Object.assign({}, answer, { pin: { relay_identity_public_key: v.identity,
+				mac: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' } }), box, mac, keys);
+			note('a pin this vault did not make is refused', !forged.ok && forged.reason === 'pin');
+			var other = function () { return Promise.resolve(new Uint8Array(32)); };
+			var either = await judgeSealTarget(answer, box, [other, mac], keys);
+			note('a pin re-made under the rotation\'s new key still passes (B48)', either.ok);
+			var neither = await judgeSealTarget(answer, box, [other], keys);
+			note('and one neither key made does not', !neither.ok && neither.reason === 'pin');
+			var pair = await VaultCrypto.generateVaultKeypair();
+			note('a vault\'s public key is worked out from its own secret (B47)',
+				(await VaultCrypto.publicKeyFromSecret(pair.secretKeyBytes)) === pair.publicKeyB64);
+			pair.secretKeyBytes.fill(0);
+			secret.fill(0);
+		} catch (e) {
+			note('the relay pin checks run', false);
+		}
 	}
 
 	/**
@@ -1154,6 +1485,7 @@ window.MailboxFortress = (function () {
 		sourceFiles: sourceFiles,
 		onLock: onLock,
 		drainPending: drainPending,
+		checkRelayPins: checkRelayPins,
 		judgeEntry: judgeEntry,
 		epoch: epoch,
 		selfCheck: selfCheck

@@ -976,7 +976,7 @@ mailbox page):
   that fails the signature, names another key, or a relay identity that
   differs from the pin, stops with a modal: "Mail arriving at your relay is
   not being sealed to this device's key" with the two fingerprints, and an
-  Approve button that re-pins only after a step-up. The `mail` rotation
+  Approve button that re-pins only after a step-up (for an account with a second factor, B50). The `mail` rotation
   hook (`plugins/mailbox/assets/mailbox-reseal.js`, `onReseal('mail')`)
   re-MACs every pin the user holds with the new session.
 
@@ -1766,7 +1766,8 @@ first), and lift the refusal in WP7.
   - **a5 verdict 2026-09-28: VALID.** Two notes for the release:
     - `mrl_last_pull_drained_time` is a new column, so every node needs
       `update_database` before a mail rotation commit is tried there.
-    - A Fortress domain takes the add-on only once its relay reports 3.1;
+    - A Fortress domain takes the add-on only once its relay reports 3.2
+      (3.1 until WP8 moved it);
       until then the transport path is the fallback (B35). The first real
       relay check (jeremytunnell after the release, Q1) should include one
       mail rotation commit with the relay live.
@@ -1798,6 +1799,117 @@ first), and lift the refusal in WP7.
   statement, fails on a changed key, the MAC matches the PHP vector.
 - **Acceptance:** first open pins (card says so); change the pinned key in
   the fixture and see the modal. Screenshot.
+- **Built 2026-09-28.**
+  - **Go:**
+    - New `relay_seal_target.go`: `GET /relay/seal-target`; it answers only
+      a storing recipient of the asking tenant, and anything else gets the
+      same 404.
+    - New `relay_seal_target_test.go`: canonical bytes, verify, a changed
+      byte fails, the prefix binds, and it refuses another tenant, a
+      forward-only address and an unknown one.
+    - `RELAY_VERSION` 3.2, and `RelayVersion::SEALS_FOR_BROWSERS` moves to
+      3.2 with it. No relay took 3.1, so Fortress sealing at the relay
+      never runs on a relay that cannot answer the statement.
+  - **PHP:**
+    - `RelayClient` 1.1 `sealTarget()` returns the raw body.
+    - New `MailboxRelayPin`: `mailboxesToCheck`, `sealTarget` (the body
+      byte for byte, plus the TLS-pinned relay identity and the stored pin),
+      `setPin`, `changesIdentity`, `pins`.
+    - New actions `mailbox/relay_seal_target`, `mailbox/relay_pin_set` (a
+      recent step-up only when the identity changes; a first pin and a
+      rotation's new MAC need none) and `mailbox/relay_pins`.
+    - The reader config carries `relayPinMailboxes`.
+    - The Fortress card's add-on note gains "Your browser checks which key
+      the relay seals to, pinned on first use."
+    - The pin column `iea_relay_identity_pin` was already there (WP0), so
+      there was no schema change.
+  - **The pin MAC input:** `joinery-relay-pin:v1\n{alias_id}\n{relay
+    identity key}`, under HKDF-SHA256(the vault secret as the browser holds
+    it, empty salt, info `sealed-vault:pin`).
+  - **Browser:**
+    - `vault-crypto.js` 1.3: `macFromSecret`, `verifyEd25519`,
+      `ed25519Supported`.
+    - `vault-keyring.js` 1.7: `session.mac()`.
+    - `mailbox_fortress.js` 1.11:
+      - `checkRelayPins()` runs when the mail vault opens;
+      - `judgeSealTarget()` gives one of pin, identity (approvable only when
+        the new relay's own statement is signed and names this key),
+        signature, key or unreadable;
+      - the alarm dialog shows both fingerprints;
+      - Trust the new relay does the step-up, then re-pins;
+      - the selfCheck runs the shared vector.
+    - New `mailbox-reseal.js` re-MACs every pin on a mail rotation. It is
+      registered through `clientReseal('mail', …, scripts)`.
+  - **Shared vector:** new `plugins/mailbox/tests/fixtures/relay_pin_vector.json`,
+    made by PHP. The browser's MAC and Ed25519 checks reproduce it: the six
+    selfCheck checks pass under Node in `device_ai_drain`.
+  - **Tests:** new `fortress_relay_pin_test.php` (21 checks). The step-up
+    gate in `relay_pin_set_logic` is the same two lines as
+    `vault_client_rotate_begin` and has no test of its own.
+  - **Walked on dev 2026-09-28** (fixture 149192, domain 38556, alias 47173).
+    Dev has no relay, so the browser intercepted `relay_seal_target` and
+    answered with statements signed by two throwaway relay keys, A and B.
+    Everything else was real.
+    - The first check pinned A (`relay_pin_set` 200, the pin stored).
+    - A reload checked A against the stored pin silently.
+    - Relay B raised the alarm (identity, both fingerprints, Trust
+      offered). Trust re-pinned to B: the passkey check at unlock had just
+      happened, so no step-up was asked.
+    - A's statement with another key, and a pin carrying a MAC this vault
+      did not make, both raised the alarm with no Trust button.
+  - **Review (public-html-91, 2026-09-28): NOT YET VALID.**
+    - **B47 (traced, a bypass):** the accepted keys came from
+      `VaultKeyring.status()`, which is the server's word. A hacked server
+      could report a pending key of its own; the exporter would push it to
+      the relay, and the honest relay would sign for it without any alarm.
+      Fix:
+      - `VaultCrypto.publicKeyFromSecret()` and `session.derivedPublicKey()`
+        work the key out from the held secret;
+      - `acceptedKeys()` takes the current key from the open mail session;
+      - a pending key counts only once opened through the root from its
+        `root` wrapping. With the root shut, the check waits for a later page.
+    - **B48:** a pin re-made under the rotation's new key before the commit
+      raised the "pin" alarm on the user's other devices. The pin's MAC is
+      now accepted under the current or the proven pending session.
+    - **B49:** a deleted server pin let a fake relay answer be taken as a
+      first use. Each device now keeps a local record of the relay it
+      pinned: a missing server pin is judged against it, is restored
+      silently for the same relay, and raises the alarm for any other.
+      - Taken: the deleted-pin half. A different relay then raises the
+        alarm; Trust needs the click, and the step-up only where B51 says.
+      - Not taken: alarming when the server drops a mailbox from the list.
+        A mailbox leaves the list legitimately too (add-on off, level
+        lowered), so this residual stays: a hacked server can withhold the
+        check.
+      - A new device still pins on first use.
+    - **B50 (owner, 2026-09-29: accepted):** the step-up on Trust exists
+      only for accounts with a second factor, as with every vault step-up
+      (rotation begin, adding an unlocker). On an account without one, Trust
+      re-pins after the click alone; adding a passkey is what protects that
+      account, here and everywhere else. The dialog does not say so.
+    - **B51 (91, re-trace; wording):** Trust asks for the step-up only when
+      the server still holds the old pin (`changesIdentity`). On the
+      deleted-pin path it re-pins after the click alone, which is not
+      silent. Against a hacked server the step-up is presence, not
+      authority: the same server checks the assertion. What protects the
+      pin is the MAC and this device's own record, and the step-up guards
+      against a slip, not an attacker.
+    - **Re-trace (91): B47, B48, B49 (the deleted-pin half) VALID by trace**
+      (cases A–L: a server-reported key, pending or current, never counts;
+      an unopenable pending key holds the check; a pin under either the
+      current or the proven pending key passes). **WP8 VALID for commit.**
+    - 91 confirmed:
+      - the judge's ordering, and the first-use identity (the born relay's
+        report and the signing key are the same key; check this once on a
+        real relay);
+      - `ctx.newSession` is always present;
+      - no false alarm right after the add-on goes on (a synchronous push;
+        a failed push is a true alarm);
+      - the tenant check and the signed bytes.
+    - selfCheck 9 pin checks pass under Node.
+    - The re-walk passed three cases: the stored pin checked silently
+      against the derived key; a deleted pin with relay A raised the alarm;
+      a deleted pin with relay B was restored silently.
 
 ### WP9. Docs
 

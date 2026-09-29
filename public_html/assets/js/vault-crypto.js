@@ -37,6 +37,7 @@
  * aeadEncryptGcm produce these same bytes. selfCheck() proves that against the
  * shared vector in tests/vault/fixtures/edge_vector.json.
  *
+ * @version 1.3 - macFromSecret(), publicKeyFromSecret(), verifyEd25519(), ed25519Supported(): the relay pin (client_custody_mail.md § R10)
  * @version 1.2 - the one vault's derivations: codeKeks(), passphraseKeks(), scopeKek(), hkdf()
  * @version 1.1 - encrypt()/decrypt() take an optional AD; selfCheck() opens the
  *   shared edge-format vector; a passphrase KDF that never settles rejects
@@ -199,6 +200,48 @@ window.VaultCrypto = (function () {
 		var bits = await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: saltBytes || new Uint8Array(0),
 			info: utf8(info) }, base, 256);
 		return new Uint8Array(bits);
+	}
+
+	// HMAC-SHA256 of messageBytes under HKDF-SHA256(secretBytes, empty salt,
+	// info): a MAC only the holder of the secret can make or check. A vault
+	// session's pin MAC (info 'sealed-vault:pin', specs/client_custody_mail.md
+	// § R10) is this over its own secret.
+	async function macFromSecret(secretBytes, info, messageBytes) {
+		var raw = await hkdf(secretBytes, null, info);
+		try {
+			var key = await subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+			return new Uint8Array(await subtle.sign('HMAC', key, messageBytes));
+		} finally { raw.fill(0); }
+	}
+
+	// The X25519 public key (standard base64, as generateVaultKeypair gives it)
+	// of a vault secret held as PKCS8 bytes: worked out from the secret itself,
+	// so a caller can know its own public key without taking anyone's word.
+	async function publicKeyFromSecret(secretBytes) {
+		var key = await subtle.importKey('pkcs8', secretBytes, { name: 'X25519' }, true, ['deriveBits']);
+		var jwk = await subtle.exportKey('jwk', key);
+		return b64encode(b64urlDecode(jwk.x));
+	}
+
+	// Ed25519 verify: a detached signature (standard base64) over messageBytes
+	// by a raw public key (standard base64). False on a bad signature, a
+	// malformed key, or a browser without Ed25519 (see ed25519Supported).
+	async function verifyEd25519(publicKeyB64, messageBytes, signatureB64) {
+		try {
+			var key = await subtle.importKey('raw', b64decode(publicKeyB64), { name: 'Ed25519' }, false, ['verify']);
+			return await subtle.verify({ name: 'Ed25519' }, key, b64decode(signatureB64), messageBytes);
+		} catch (e) { return false; }
+	}
+
+	// Whether this browser's WebCrypto has Ed25519 at all, so a caller can
+	// tell "cannot check here" from "the check failed".
+	async function ed25519Supported() {
+		try {
+			await subtle.importKey('raw', new Uint8Array(32), { name: 'Ed25519' }, false, ['verify']);
+			return true;
+		} catch (e) {
+			return !(e && (e.name === 'NotSupportedError' || /not supported|unrecognized/i.test(String(e.message))));
+		}
 	}
 
 	// A recovery code's two halves: { account: raw bytes (posted, base64url),
@@ -428,6 +471,10 @@ window.VaultCrypto = (function () {
 		b64urlDecode: b64urlDecode,
 		normalizeCode: normalizeCode,
 		hkdf: hkdf,
+		macFromSecret: macFromSecret,
+		publicKeyFromSecret: publicKeyFromSecret,
+		verifyEd25519: verifyEd25519,
+		ed25519Supported: ed25519Supported,
 		codeKeks: codeKeks,
 		passphraseKeks: passphraseKeks,
 		scopeKek: scopeKek,

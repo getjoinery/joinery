@@ -21,6 +21,7 @@
  * that answered something this code cannot read. MailboxRelay::pollHealth
  * records the class so the Setup tab can say which.
  *
+ * @version 1.1 - sealTarget(): the signed seal-target statement, raw
  * @version 1.0
  */
 
@@ -115,6 +116,19 @@ class RelayClient {
 	/** GET /relay/ping: the whole health object. */
 	public function ping(): array {
 		return $this->json('GET', '/relay/ping');
+	}
+
+	/**
+	 * GET /relay/seal-target: the relay's signed statement of which key it
+	 * seals $recipient's mail to (specs/client_custody_mail.md § R10), as the
+	 * raw body, unread and unchanged: the owner's browser verifies it against
+	 * the relay identity it pinned, so nothing here may re-encode it. Null when
+	 * the relay has no storing recipient by that address for this tenant (404).
+	 */
+	public function sealTarget(string $recipient): ?string {
+		list($status, $answer) = $this->request('GET', '/relay/seal-target?recipient=' . rawurlencode($recipient), '',
+			self::REQUEST_TIMEOUT, null, array(404));
+		return ($status === 404) ? null : $answer;
 	}
 
 	/**

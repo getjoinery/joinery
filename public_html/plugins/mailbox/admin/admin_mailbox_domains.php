@@ -12,6 +12,7 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.6 - the Fortress card names the relay pin (trust on first use)
  * @version 4.5 - the Fortress receipt names relay-sealed mail still waiting to be opened (B46)
  * @version 4.4 - the Fortress card says, under Seal at the relay, that this server never sees the mail (B38)
  * @version 4.3 - Fortress (specs/client_custody_mail.md § R8, R12): its card and notes, the
@@ -238,7 +239,8 @@ if ($show_form) {
 	// and that an account which unlocks by passphrase is as safe as its
 	// passphrase.
 	$fortress_notes = [($relay_value && $relay_offered)
-		? 'This server never sees your mail, not even as it arrives. Mail rules do not run on mail the relay seals.'
+		? 'This server never sees your mail, not even as it arrives. Your browser checks which key the relay seals to, '
+			. 'pinned on first use. Mail rules do not run on mail the relay seals.'
 		: 'New mail is encrypted the moment it arrives; a server hacked while mail is arriving '
 			. 'could read what arrives then.'];
 	$root_vault = UserEncryptionVault::loadForUser((int)$session->get_user_id(), VaultScopes::ROOT_SCOPE);
