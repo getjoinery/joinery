@@ -173,12 +173,11 @@ $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signatur
 </section>
 </div>
 <script src="/plugins/mailbox/assets/mailbox_signature.js?v=<?php echo is_file($sig_asset) ? filemtime($sig_asset) : '1'; ?>"></script>
-<?php if (!empty($page_vars['has_fortress'])): $dai_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_device_ai_settings.js'); ?>
+<?php if (!empty($page_vars['has_fortress'])): ?>
 <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
 <script>window.MAILBOX_DEVICE_AI = <?php echo json_encode(array('origin' => ($page_vars['device_ai_origin'] ?? null) ?: null, 'user_id' => (int)$page_vars['session']->get_user_id(), 'site_model' => $page_vars['device_ai_site_model'] ?? null)); ?>;</script>
 <?php $dai_panel = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_device_ai.js'); ?>
 <script src="/plugins/mailbox/assets/mailbox_device_ai.js?v=<?php echo is_file($dai_panel) ? filemtime($dai_panel) : '1'; ?>"></script>
-<script src="/plugins/mailbox/assets/mailbox_device_ai_settings.js?v=<?php echo is_file($dai_asset) ? filemtime($dai_asset) : '1'; ?>"></script>
 <?php endif; ?>
 <?php
 $page->public_footer();

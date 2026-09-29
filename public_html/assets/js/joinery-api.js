@@ -38,6 +38,8 @@
  * Loaded unconditionally by PublicPageBase::public_header() on every page,
  * before any inline page script.
  *
+ * @version 1.4.0 - postForm(action, formData, opts): opts.keepalive lets an
+ *   unload-time save outlive the page
  * @version 1.3.0 - err.errorRef and reportLink()
  */
 (function () {
@@ -58,12 +60,16 @@
 		return send(url, body, false);
 	}
 
-	function postForm(action, formData) {
+	/**
+	 * A multipart POST (file uploads). opts.keepalive lets a save made as the
+	 * page unloads finish after it is gone (the browser caps such a body).
+	 */
+	function postForm(action, formData, opts) {
 		var url = action.charAt(0) === '/' ? action : '/api/v1/action/' + action;
-		return send(url, formData, false);
+		return send(url, formData, false, opts);
 	}
 
-	function send(url, body, isRetry) {
+	function send(url, body, isRetry, opts) {
 		var token = csrf();
 		// A FormData body sets its own multipart Content-Type (with boundary);
 		// naming one here would break it.
@@ -75,6 +81,7 @@
 			method: 'POST',
 			headers: headers,
 			credentials: 'same-origin',
+			keepalive: !!(opts && opts.keepalive),
 			body: isForm ? body : JSON.stringify(body || {})
 		}).then(function (r) {
 			return r.json().catch(function () { return {}; }).then(function (env) {
@@ -87,7 +94,7 @@
 							&& env && env.errortype === 'AuthenticationError') {
 						var fresh = csrf();
 						if (fresh && fresh !== token) {
-							return send(url, body, true);
+							return send(url, body, true, opts);
 						}
 					}
 					// Error envelope keys per api_error(): errortype + error.

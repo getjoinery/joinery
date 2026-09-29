@@ -31,6 +31,7 @@
  * Writers emit the format their custody dictates; readers here open whichever
  * prefix they find.
  *
+ * @version 1.8 - sealFieldFile()/openFieldFile() write SealedFileContainer, the platform's one chunked format
  * @version 1.7 - clientCustodyScope(): a `v1.edgeseal.` key is the browser's
  *   alone when its scope is client custody; one sealed in that format to a
  *   server-custody scope (a row moved back off end-to-end) opens in the window
@@ -242,22 +243,75 @@ class VaultCrypto {
 	 * Seal a whole FILE under a per-item DEK, path to path, in memory bounded
 	 * by a chunk — the streaming sibling of sealField() for content too large
 	 * to ever hold as a string (the sealed mailbox search index). Same DEK,
-	 * same AD discipline; only the shape of what the DEK encrypts changes
-	 * (SealedBox::sealStreamFile, the `v1.stream.` format).
+	 * same AD discipline: the AD is the container's content id, bound into
+	 * every chunk (SealedFileContainer, the platform's one chunked format).
+	 * Written to a temp name and renamed in only on success, so a failure
+	 * never leaves a partial sealed file behind.
 	 */
 	public function sealFieldFile(string $src_path, string $dst_path, string $dek, string $ad): void {
-		$this->box->sealStreamFile($src_path, $dst_path, $dek, $ad);
+		require_once(PathHelper::getIncludePath('includes/SealedFileContainer.php'));
+		$tmp = $dst_path . '.sealing.' . bin2hex(random_bytes(6));
+		try {
+			SealedFileContainer::sealStream($src_path, $tmp, $dek, $ad);
+			if (!@rename($tmp, $dst_path)) {
+				throw new RuntimeException('VaultCrypto: cannot move the sealed file into place.');
+			}
+		} finally {
+			if (is_file($tmp)) {
+				@unlink($tmp);
+			}
+		}
 	}
 
 	/**
-	 * Open a file sealed by sealFieldFile(). Throws on tamper, truncation, or
-	 * an AD mismatch. A streaming open of STORED sealed content is a sealed
-	 * read like any other, so it arms the hot-turn rule exactly as openField()
-	 * does — tests/vault/sealed_read_paths_test.php pins this method as the
-	 * one sanctioned caller of SealedBox::openStreamFile.
+	 * Open a file sealed by sealFieldFile() into $dst_path. Throws on tamper, a
+	 * wrong key, or a file sealed under another AD. The plaintext lands in a
+	 * temp file created private (0600, umask 0077) — the destination
+	 * may sit in a world-readable tmpfs — and is renamed in only on success, so
+	 * a failed open never leaves partial plaintext behind. A container cut
+	 * short exactly at a chunk boundary opens shorter rather than failing
+	 * (its plaintext size is derived from its length); the index this serves
+	 * then fails to open and is rebuilt.
+	 *
+	 * A streaming open of STORED sealed content is a sealed read like any
+	 * other, so it arms the hot-turn rule exactly as openField() does.
 	 */
 	public function openFieldFile(string $src_path, string $dst_path, string $dek, string $ad): void {
-		$this->box->openStreamFile($src_path, $dst_path, $dek, $ad);
+		require_once(PathHelper::getIncludePath('includes/SealedFileContainer.php'));
+		if (SealedFileContainer::readHeader($src_path)['content_id'] !== $ad) {
+			throw new RuntimeException('VaultCrypto: this sealed file belongs to another context.');
+		}
+		$tmp = $dst_path . '.opening.' . bin2hex(random_bytes(6));
+		// Created 0600, never wider for a moment: an fd another local account
+		// opened on a readable file would keep reading it after a later chmod.
+		$previous = umask(0077);
+		try {
+			$out = @fopen($tmp, 'xb');
+		} finally {
+			umask($previous);
+		}
+		if ($out === false) {
+			throw new RuntimeException('VaultCrypto: cannot open the destination for writing.');
+		}
+		if (!@chmod($tmp, 0600)) {
+			fclose($out);
+			@unlink($tmp);
+			throw new RuntimeException('VaultCrypto: cannot make the destination private.');
+		}
+		try {
+			SealedFileContainer::openStream($src_path, $dek, $out);
+			fclose($out);
+			$out = null;
+			if (!@rename($tmp, $dst_path)) {
+				throw new RuntimeException('VaultCrypto: cannot move the opened file into place.');
+			}
+		} catch (Throwable $e) {
+			if ($out) {
+				fclose($out);
+			}
+			@unlink($tmp);
+			throw $e;
+		}
 		SealedEgressGuard::markHot($ad);
 	}
 

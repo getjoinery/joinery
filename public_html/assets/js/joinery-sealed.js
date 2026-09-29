@@ -55,6 +55,7 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.11 - openDek(scope, sealedDek): one browser-sealed row key opened to raw bytes
  * @version 1.10 - resealScope() rotates a vault that opens through the root under the root,
  *   and proves the stored new wrapping opens before moving anything (proveThroughRoot); a
  *   committed rotation leaves the new key open in the old one's place
@@ -568,6 +569,19 @@ window.JoinerySealed = (function () {
 		(resealHooks[scope] = resealHooks[scope] || []).push(fn);
 	}
 
+	/**
+	 * Open one browser-sealed row key (`v1.edgeseal.{scope}.`) with `scope`'s
+	 * session and hand back its raw bytes: the caller imports them and zeroes
+	 * them. A key sealed to another scope is refused. `opts` goes to session()
+	 * (the ceremony's reason).
+	 */
+	async function openDek(scope, sealedDek, opts) {
+		var parsed = parseSealedDek(sealedDek);
+		if (!parsed || parsed.scope !== scope) throw new Error('This is not sealed to your vault.');
+		var s = await session(scope, opts);
+		return s.openSealed(parsed.blob);
+	}
+
 	function stripEdgeSeal(sealed) {
 		var parsed = parseSealedDek(sealed);
 		if (!parsed) throw new Error('A sealed key is not a browser-sealed key.');
@@ -760,6 +774,7 @@ window.JoinerySealed = (function () {
 		seal: seal,
 		save: save,
 		session: session,
+		openDek: openDek,
 		isOpen: isOpen,
 		isPending: function (scope) { return !!pending[scope]; },
 		openScopes: openScopes,

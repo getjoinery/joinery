@@ -31,6 +31,7 @@
  * vault client drives on every page while the window is open; the receipt and
  * the mailbox banner only count (mailbox/fortress_backlog).
  *
+ * @version 1.2 - both drains are ProtectionLevelChange::convergeBatch() passes; the byte budget is the platform's
  * @version 1.1 - the lowering count leaves out relay-sealed rows still waiting to be parsed (B45)
  * @version 1.0
  */
@@ -38,11 +39,8 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/attachment_ret
 
 class MailboxFortressLevel {
 
-	/** Rows a raise pass takes at most. */
+	/** Rows a raise pass takes at most (bytes: ProtectionLevelChange::BYTE_BUDGET). */
 	const RAISE_MAX_ROWS = 100;
-
-	/** Attachment bytes a raise pass reads at most (it stops after the row that crosses it). */
-	const RAISE_MAX_BYTES = 67108864;
 
 	/** Rows a settle pass takes at most. */
 	const SETTLE_MAX_ROWS = 200;
@@ -105,40 +103,28 @@ class MailboxFortressLevel {
 
 	/**
 	 * Move $user_id's waiting messages to their mail key until $deadline, at
-	 * most RAISE_MAX_ROWS rows or RAISE_MAX_BYTES of attachments. Each row
-	 * commits on its own, so a pass cut short loses nothing and the search
-	 * index's catch-up (iem_search_written_time) sees each row as it lands.
-	 * A row that fails is logged and stamped (iem_fortress_move_attempt_time),
-	 * so passes take the rows behind it until RAISE_RETRY_SECONDS have gone by.
+	 * most RAISE_MAX_ROWS rows or the platform's byte budget of attachments —
+	 * one ProtectionLevelChange::convergeBatch() pass (MailboxFortressRaise).
+	 * Each row commits on its own, so a pass cut short loses nothing and the
+	 * search index's catch-up (iem_search_written_time) sees each row as it
+	 * lands. A row that fails is logged and stamped
+	 * (iem_fortress_move_attempt_time), so passes take the rows behind it until
+	 * RAISE_RETRY_SECONDS have gone by.
 	 */
 	public static function drainRaise(int $user_id, VaultKey $key, float $deadline): int {
 		$vault = InboundEmailMessage::loadSealVault($user_id, InboundEmailMessage::SEAL_SCOPE_FORTRESS);
 		if ($vault === null) {
 			return 0;   // no mail key: nothing can move (the level change refuses to create this state)
 		}
+		return ProtectionLevelChange::convergeBatch(new MailboxFortressRaise($user_id, $key, $vault), null, $deadline)['converted'];
+	}
+
+	/** The raise's pending rows: those a pass can take now (backlogWhere(ready)). */
+	public static function raiseCandidates(int $user_id, int $limit): array {
 		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT m.iem_inbound_email_message_id '
-			. self::backlogWhere(0, true) . ' ORDER BY m.iem_inbound_email_message_id LIMIT ' . self::RAISE_MAX_ROWS);
+			. self::backlogWhere(0, true) . ' ORDER BY m.iem_inbound_email_message_id LIMIT ' . intval($limit));
 		$stmt->execute(array(':uid' => $user_id));
-		$moved = 0;
-		$bytes = 0;
-		foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
-			if (microtime(true) >= $deadline || $bytes >= self::RAISE_MAX_BYTES) {
-				break;
-			}
-			try {
-				$result = self::convertRow(intval($id), $key, $vault);
-				if ($result !== null) {
-					$moved++;
-					$bytes += $result;
-				}
-			} catch (VaultLockedException $e) {
-				break;   // the window closed under us: the next unlock carries on
-			} catch (\Throwable $e) {
-				error_log('MailboxFortressLevel: message ' . intval($id) . ' could not move to the device key: ' . $e->getMessage());
-				InboundEmailMessage::updateColumns(intval($id), array('iem_fortress_move_attempt_time' => gmdate('Y-m-d H:i:s')));
-			}
-		}
-		return $moved;
+		return $stmt->fetchAll(PDO::FETCH_COLUMN);
 	}
 
 	/**
@@ -354,25 +340,23 @@ class MailboxFortressLevel {
 		return (bool)$stmt->fetchColumn();
 	}
 
-	/** Settle $user_id's lowered messages until $deadline (settleLowered()). */
+	/** Settle $user_id's lowered messages until $deadline (settleLowered()), one converge pass. */
 	public static function drainSettle(int $user_id, VaultKey $key, float $deadline): int {
+		return ProtectionLevelChange::convergeBatch(new MailboxFortressSettle($user_id, $key), null, $deadline)['converted'];
+	}
+
+	/** The settle's pending rows, and how many there are. */
+	public static function settleCandidates(int $user_id, int $limit): array {
 		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT iem_inbound_email_message_id '
-			. self::loweredWhere() . ' ORDER BY iem_inbound_email_message_id LIMIT ' . self::SETTLE_MAX_ROWS);
+			. self::loweredWhere() . ' ORDER BY iem_inbound_email_message_id LIMIT ' . intval($limit));
 		$stmt->execute(array($user_id));
-		$done = 0;
-		foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
-			if (microtime(true) >= $deadline) {
-				break;
-			}
-			try {
-				if (self::settleLowered(intval($id), $key)) {
-					$done++;
-				}
-			} catch (\Throwable $e) {
-				error_log('MailboxFortressLevel: lowered message ' . intval($id) . ' was not settled: ' . $e->getMessage());
-			}
-		}
-		return $done;
+		return $stmt->fetchAll(PDO::FETCH_COLUMN);
+	}
+
+	public static function settleCount(int $user_id): int {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT COUNT(*) ' . self::loweredWhere());
+		$stmt->execute(array($user_id));
+		return intval($stmt->fetchColumn());
 	}
 
 	/**
@@ -450,6 +434,88 @@ class MailboxFortressLevel {
 			. ($domain_id > 0 ? ' AND m.iem_ied_inbound_email_domain_id = ' . intval($domain_id) : ''));
 		$stmt->execute(array($user_id));
 		return intval($stmt->fetchColumn());
+	}
+}
+/**
+ * A Fortress raise's converge: $user_id's messages moving to their device key,
+ * in their window (the vault's deferred work drives it).
+ */
+class MailboxFortressRaise implements ProtectionLevelConvergence {
+
+	private $user_id;
+	private $key;
+	private $vault;
+
+	public function __construct(int $user_id, VaultKey $key, UserEncryptionVault $mail_vault) {
+		$this->user_id = $user_id;
+		$this->key = $key;
+		$this->vault = $mail_vault;
+	}
+
+	public function pending(int $limit): array {
+		return MailboxFortressLevel::raiseCandidates($this->user_id, $limit);
+	}
+
+	/** Rows already on the mail key are not pending; convertRow() re-checks under the row. */
+	public function browserSealed($item): bool {
+		return false;
+	}
+
+	/** A failure is stamped so passes take the rows behind it for a while. */
+	public function convertOne($item): ?int {
+		try {
+			return MailboxFortressLevel::convertRow(intval($item), $this->key, $this->vault);
+		} catch (VaultLockedException $e) {
+			throw $e;
+		} catch (\Throwable $e) {
+			InboundEmailMessage::updateColumns(intval($item), array('iem_fortress_move_attempt_time' => gmdate('Y-m-d H:i:s')));
+			throw $e;
+		}
+	}
+
+	public function remaining(): int {
+		return MailboxFortressLevel::backlogCount($this->user_id, 0, true);
+	}
+
+	public function budget(): array {
+		return array('rows' => MailboxFortressLevel::RAISE_MAX_ROWS);
+	}
+}
+
+/**
+ * A Fortress lowering's server half: once the owner's browser has moved a
+ * message back to the server key, its attachment names return and it joins
+ * the server index (MailboxFortressLevel::settleLowered()).
+ */
+class MailboxFortressSettle implements ProtectionLevelConvergence {
+
+	private $user_id;
+	private $key;
+
+	public function __construct(int $user_id, VaultKey $key) {
+		$this->user_id = $user_id;
+		$this->key = $key;
+	}
+
+	public function pending(int $limit): array {
+		return MailboxFortressLevel::settleCandidates($this->user_id, $limit);
+	}
+
+	/** loweredWhere() takes only rows back on the server key; settleLowered() re-checks. */
+	public function browserSealed($item): bool {
+		return false;
+	}
+
+	public function convertOne($item): ?int {
+		return MailboxFortressLevel::settleLowered(intval($item), $this->key) ? 0 : null;
+	}
+
+	public function remaining(): int {
+		return MailboxFortressLevel::settleCount($this->user_id);
+	}
+
+	public function budget(): array {
+		return array('rows' => MailboxFortressLevel::SETTLE_MAX_ROWS);
 	}
 }
 ?>

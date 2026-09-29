@@ -7,7 +7,7 @@
  */
 /**
  * The server's half of reopening a browser-held vault after a reload
- * (specs/client_custody_mail.md § R4a; includes/VaultClientResume.php).
+ * (specs/client_custody_mail.md § R4a; VaultClientResume in includes/VaultClientCustody.php).
  *
  *  - put / get / drop round trip, per scope and per tab: two tabs of one
  *    session keep their own halves, and dropping one leaves the other;
@@ -126,8 +126,10 @@ try {
 	$d = vault_client_resume_logic_descriptor();
 	check(!empty($d['auth']['requires_browser_session']) && !empty($d['auth']['session_write']),
 		'it needs the browser session and keeps $_SESSION writable');
+	$resume = new ReflectionClass('VaultClientResume');
 	$src = file_get_contents(PathHelper::getIncludePath('logic/vault_client_resume_logic.php'))
-		. file_get_contents(PathHelper::getIncludePath('includes/VaultClientResume.php'));
+		. implode('', array_slice(file($resume->getFileName()), $resume->getStartLine() - 1,
+			$resume->getEndLine() - $resume->getStartLine() + 1));
 	check(!preg_match('/error_log|RequestLogger|EventLog/', $src), 'nothing in it writes a log');
 
 } catch (\Throwable $e) {

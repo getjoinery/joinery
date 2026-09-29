@@ -36,20 +36,24 @@ keylogger on your own machine) defeats any password manager and is out of scope.
 ## Crypto architecture
 
 The identity is the vault's **own `passwords` client-custody keypair**
-(`uev_scope='passwords'`, `uev_custody='client'`, X25519) — separate from Drive
-and from server-custody mail/chat, so unlocking one never opens another. The key
-hierarchy, performed entirely in the browser:
+(`uev_scope='passwords'`, `uev_custody='client'`, X25519) — separate from Drive's,
+Fortress mail's and the server-custody account vault's, so no other scope's key
+opens it. The key hierarchy, performed entirely in the browser:
 
 ```
-unlocker  --KEK-->  vault X25519 secret key  --seals-->  store DEK  --encrypts--> each entry
+unlocker --> root secret --scope KEK--> vault X25519 secret key --seals--> store DEK --encrypts--> each entry
 ```
 
-- **Unlockers** derive a KEK in the browser: a passkey's WebAuthn **PRF** output
-  (context `vault-passwords-kek`, never sent to the server), a **recovery key**
-  (≥128-bit, fast keyed hash), or an optional **passphrase** (Argon2id, 64 MiB /
-  t=3 / p=4). Each KEK wraps the vault secret key (AES-256-GCM) — one wrapping
-  row per unlocker. Adding or changing an unlocker only re-wraps the secret key;
-  the store DEK and entries are untouched.
+- **The vault key opens through the root vault**
+  ([One vault](../../../docs/sealed_vault.md#one-vault)). The `passwords` secret
+  key holds one `root` wrapping, under a key the browser derives from the root's
+  secret for this scope, and no unlockers of its own: the person's passkeys,
+  recovery codes and optional passphrase are the root's, so one touch opens the
+  root and this vault with it. Adding or changing an unlocker changes the root's
+  wrappings only; this vault's key, the store DEK and the entries are untouched.
+  A passwords vault with no `root` wrapping yet has unlockers of its own (a
+  passkey's PRF output under context `vault-passwords-kek`, a recovery key, a
+  passphrase); its first unlock by them gives it the `root` wrapping.
 - **Store DEK** — a random 256-bit AES-GCM key sealed once (ECIES over X25519)
   to the vault public key and held as one blob (`vlk_wrapped_dek`). On unlock the
   browser unwraps the secret key, opens the sealed DEK, and holds it as a
@@ -90,18 +94,19 @@ entry, soft-deleted for trash/restore).
 
 The page opens the vault through core: `JoinerySealed.session('passwords')` runs
 the [shared ceremony](../../../docs/sealed_vault.md#the-ceremony) in a modal on
-load — setup on a first visit, unlock after — and the page keeps no setup or
-unlock screen of its own. Setup offers a passkey (with a PRF capability check)
-or a passphrase, states that losing every unlocker loses the vault, and shows
-the recovery codes once, proven kept by re-typing the last one or downloading
-the file. A first visit then mints the store DEK and opens the editor for the
-first entry. Closing the modal leaves a small "Your password vault is closed"
-card with an **Open your vault** button.
+load and the page keeps no setup or unlock screen of its own. The vault key is
+made through the root on a first visit, so there is nothing of its own to set
+up: a person who has not set up their vault yet sets up the root (a passkey
+with a PRF capability check, or a passphrase, and the recovery codes shown once,
+proven kept by re-typing the last one or downloading the file). A first visit
+then mints the store DEK and opens the editor for the first entry. Closing the
+modal leaves a small "Your password vault is closed" card with an **Open your
+vault** button.
 
-One deliberate act opens the password vault — its own unlock, separate from
-Drive and from mail/chat (separate keypair). The unlock offers the passkey, the
-passphrase (if enrolled), and a recovery code (last). A consumed recovery code is
-one-time: the browser marks it used server-side.
+Unlocking is the one vault unlock: the touch that opens the root opens this
+vault with it, and the lock chip's unlock does the same from any page. Its
+keypair is still its own, so its key and its content never open through any
+other scope's.
 
 **Locking discards all plaintext**, including unsaved edits. Core locks the
 session — after `vault_client_autolock_minutes` of no keyboard or pointer
@@ -112,12 +117,14 @@ left, and when a back/forward-cache restore brings the page back — and the pag
 editor inputs, the list and the detail pane, and clears the clipboard if it still
 holds a value the page copied.
 
-**Rotating the vault key** runs from the security page (the Password vault
-card) and costs new recovery codes, the passphrase again, and a tap per passkey
+**Rotating the vault key** runs from the security page (under **Vault Keys**)
+and, for a vault that opens through the root, costs nothing more than the root
+being open; a vault that still has unlockers of its own costs new recovery
+codes, the passphrase again and a tap per passkey
 (`docs/sealed_vault.md` § Rotating a client-custody key). The entries are not
 touched — they are encrypted under the store DEK, which does not change — only
 the store DEK's sealed copy moves to the new key, through
-`assets/js/vault-reseal.js` and `vault/keyring_replace`. The plugin's bootstrap
+`plugins/vault/assets/js/vault-reseal.js` and `vault/keyring_replace`. The plugin's bootstrap
 registers that hook (`VaultUnlock::clientReseal()`) and `plugin.json` declares
 `"client_reseals": ["passwords"]`, so a rotation cannot run without it.
 

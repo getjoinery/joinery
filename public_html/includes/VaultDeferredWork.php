@@ -74,12 +74,6 @@ class VaultDeferredWork {
 		self::$consumers[$id] = array('has_work' => $has_work, 'drain' => $drain);
 	}
 
-	/** Registered consumer ids, in execution order. Mostly for tests and diagnostics. */
-	public static function consumerIds(): array {
-		self::loadConsumers();
-		return array_keys(self::$consumers);
-	}
-
 	/**
 	 * Does any consumer have outstanding work for this user? Answered without
 	 * touching the vault — this runs on every heartbeat, so a consumer whose
@@ -241,11 +235,6 @@ class VaultDeferredWork {
 			self::$in_background_work = $was;
 			VaultUnlock::setActivitySuppressed($was);
 		}
-	}
-
-	/** True while a drain slice is running in this request. */
-	public static function inBackgroundWork(): bool {
-		return self::$in_background_work;
 	}
 
 	/** Seconds per drain request, from settings with a code fallback. */

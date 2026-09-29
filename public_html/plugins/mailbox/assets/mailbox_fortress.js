@@ -41,6 +41,7 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.12 - postForm() goes through joineryApi.postForm (the rotated-token retry, B2)
  * @version 1.11 - checkRelayPins(): the relay's signed seal-target statement checked against the
  *                pinned relay and the keys this browser derives from its own secrets (B47);
  *                a pin re-made mid-rotation passes (B48); a local record of each pin keeps a
@@ -139,12 +140,7 @@ window.MailboxFortress = (function () {
 	// ---- row keys --------------------------------------------------------------
 
 	async function importRowKey(sealedDek) {
-		var prefix = EDGE_SEAL + SCOPE + '.';
-		if (typeof sealedDek !== 'string' || sealedDek.indexOf(prefix) !== 0) {
-			throw new Error('This message is not sealed to your vault.');
-		}
-		var session = await JoinerySealed.session(SCOPE);
-		var bytes = await session.openSealed(sealedDek.slice(prefix.length));
+		var bytes = await JoinerySealed.openDek(SCOPE, sealedDek);
 		try {
 			return await VaultCrypto.importDek(bytes);
 		} finally {
@@ -432,17 +428,10 @@ window.MailboxFortress = (function () {
 		return st.pending_public_key || st.public_key;
 	}
 
-	// POST a FormData to an API action and unwrap its envelope.
+	// POST a FormData to an API action through the shared transport (which
+	// retries once on a rotated CSRF token) and unwrap its envelope.
 	async function postForm(url, body) {
-		var res = await fetch(url, { method: 'POST', credentials: 'same-origin',
-			headers: { 'X-Joinery-Csrf': joineryApi.csrf() }, body: body });
-		var env = await res.json().catch(function () { return null; });
-		if (!env || env.errortype || !res.ok) {
-			var err = new Error((env && env.error) || 'The draft could not be saved.');
-			err.errorRef = (env && env.error_ref) || null;
-			throw err;
-		}
-		return env.data || {};
+		return (await window.joineryApi.postForm(url, body)) || {};
 	}
 
 	/**
@@ -545,11 +534,7 @@ window.MailboxFortress = (function () {
 			bcc: '', subject: '', body_html: '', attachments: [], inline: [] };
 		if (!data.sealed) return { d: d, fields: out };
 
-		var parsed = String(data.sealed.sealed_dek || '');
-		var prefix = EDGE_SEAL + SCOPE + '.';
-		if (parsed.indexOf(prefix) !== 0) throw new Error('This draft is not sealed to your vault.');
-		var session = await JoinerySealed.session(SCOPE, { reason: 'to open this draft' });
-		d.dekBytes = await session.openSealed(parsed.slice(prefix.length));
+		d.dekBytes = await JoinerySealed.openDek(SCOPE, String(data.sealed.sealed_dek || ''), { reason: 'to open this draft' });
 		d.dek = await VaultCrypto.importDek(d.dekBytes);
 		var open = async function (col) {
 			var v = data.sealed[col];
@@ -1002,13 +987,8 @@ window.MailboxFortress = (function () {
 	}
 
 	function stepUp() {
-		if (!window.JoineryPasskeys || !window.PublicKeyCredential) return Promise.reject(new Error('no passkey here'));
-		return window.joineryApi.post('passkey_stepup_options', {}).then(function (opt) {
-			if (!opt || !opt.options) throw new Error('Could not start the confirmation.');
-			return window.JoineryPasskeys.authenticate(opt.options);
-		}).then(function (credential) {
-			return window.joineryApi.post('passkey_stepup_verify', { credential: credential });
-		});
+		if (!window.JoineryPasskeys || !window.JoineryPasskeys.stepUp) return Promise.reject(new Error('no passkey here'));
+		return window.JoineryPasskeys.stepUp();
 	}
 
 	var ALARM_REASONS = {

@@ -510,7 +510,7 @@ if ($show_form) {
 					if (remaining > 0 && unsealed === 0) {
 						setDot('#dc3545');
 						text.textContent = remaining + ' message' + (remaining === 1 ? '' : 's')
-							+ ' could not be unsealed — see the error log.';
+							+ ' could not be unsealed yet; they are tried again within the hour (the error log says why).';
 						return;
 					}
 					if (remaining > 0) {

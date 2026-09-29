@@ -129,7 +129,7 @@ that distinguishes the two causes:
 
 `ChatTurn::runAndFinalize()` maps `empty_answer` to `aim_status = failed`
 with the user-facing message above (sealed rows via the existing
-`ChatSeal::errorColumns()` path). The front-end already renders failed turns
+`ChatSeal::writeFailure()` path). The front-end already renders failed turns
 (`renderFailedBubble`) — no JS change.
 
 To make cause (a) detectable, `OpenAiCompatibleProvider::mapStopReason()`

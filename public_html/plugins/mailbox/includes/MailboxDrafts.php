@@ -526,15 +526,7 @@ class MailboxDrafts {
 
 	/** Store one part as it came: a File named by message and part, and a blank ima_ row. */
 	private function persistFortressPart(int $message_id, array $u): array {
-		$file = File::createFromBytes($u['bytes'],
-			InboundEmailMessage::fortressAttachmentName($message_id, $u['mime_part']),
-			InboundEmailMessage::FORTRESS_FILE_TYPE, $this->viewer->getUserId(), array(
-				'fil_private' => true,
-				'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
-			));
-		// Magic-byte detection on save() saw ciphertext — keep the stored type.
-		$file->set('fil_type', InboundEmailMessage::FORTRESS_FILE_TYPE);
-		$file->save();
+		$file = InboundEmailMessage::storeFortressPartFile($message_id, (int)$this->viewer->getUserId(), $u);
 		$att = InboundMessageAttachment::CreateEntry(array(
 			'ima_iem_inbound_email_message_id' => $message_id,
 			'ima_filename'     => '',

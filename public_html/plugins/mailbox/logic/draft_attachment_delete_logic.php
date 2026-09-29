@@ -11,8 +11,6 @@
  * @version 1.0.1
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function draft_attachment_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));

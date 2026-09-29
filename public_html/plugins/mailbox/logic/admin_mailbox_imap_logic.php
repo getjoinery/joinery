@@ -22,8 +22,6 @@
  *   that supplies them instead of reporting a dead end.
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function admin_mailbox_imap_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));

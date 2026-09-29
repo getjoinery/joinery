@@ -70,8 +70,6 @@
  *   and skip every core onReseal hook).
  */
 
-require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
-
 class VaultConsumers {
 
 	/** Where a consumer with no opinion about ordering lands. */
@@ -226,18 +224,6 @@ class VaultConsumers {
 		self::$loading = null;
 	}
 
-	/** The consumer currently loading, or null outside a loading context. */
-	public static function loadingConsumer(): ?string {
-		return self::$loading;
-	}
-
-	/**
-	 * Record that the consumer currently loading registered a callback covering
-	 * $obligation. A registration made outside any loading context (a test
-	 * wiring a callback directly) attributes to nobody and satisfies nothing,
-	 * which is the honest answer rather than crediting it to whoever happened to
-	 * load last.
-	 */
 	/** Record that the consumer loading now registered a client-custody resealer for $scope. */
 	public static function noteClientReseal(string $scope): void {
 		self::noteRegistration('client_reseals:' . $scope);
@@ -270,6 +256,13 @@ class VaultConsumers {
 		return $unmet;
 	}
 
+	/**
+	 * Record that the consumer currently loading registered a callback covering
+	 * $obligation. A registration made outside any loading context (a test
+	 * wiring a callback directly) attributes to nobody and satisfies nothing,
+	 * which is the honest answer rather than crediting it to whoever happened to
+	 * load last.
+	 */
 	public static function noteRegistration(string $obligation): void {
 		if (self::$loading === null) {
 			return;

@@ -1,6 +1,9 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.86 — a context-column slot below a docked panel still loading its
+ * No framework. @version 2.87 — one fmtDate and one fmtBytes (B1); every multipart post
+ *   goes through joineryApi.postForm, keepalive for the unload save (B2); unlockVault()
+ *   is the lock chip's unlock only (no second ceremony of its own).
+ * @version 2.86 — a context-column slot below a docked panel still loading its
  *   first content (data-loading) waits out of the layout, so the panel's growth shifts nothing.
  * @version 2.85 — the header icons, compose autocomplete and the contacts panel share one
  *   contacts request per mailbox (held 60 s, forgotten on a change here); opening a message asked twice.
@@ -214,7 +217,7 @@
 	// day is the whole point and the hour is noise.
 	function fmtDate(iso) {
 		if (!iso) return '';
-		var d = new Date(iso.replace(' ', 'T') + 'Z');
+		var d = new Date(String(iso).replace(' ', 'T') + 'Z');
 		if (isNaN(d.getTime())) return iso;
 		var opts = { month: 'short', day: 'numeric' };
 		if (d.getFullYear() !== new Date().getFullYear()) { opts.year = 'numeric'; }
@@ -428,27 +431,14 @@
 	async function unlockVault() {
 		selfUnlocking = true;
 		try {
-			if (window.JoineryVaultLock) {
-				return await JoineryVaultLock.unlock();
-			}
-			if (!window.JoineryPasskeys) { alert('Unlocking is unavailable on this page.'); return false; }
-			try {
-				var opt = await apiV1('vault_unlock_options', {});
-				if (!opt || !opt.options) {
-					throw new Error('Could not start unlock.');
-				}
-				var credential = (await JoineryPasskeys.derive(opt.options)).response;
-				var res = await apiV1('vault_unlock_passkey', { credential: credential });
-				if (res && res.success === false) {
-					throw new Error(res.message || 'Unlock failed.');
-				}
-				startHeartbeat();
-				document.dispatchEvent(new CustomEvent('joinery:vault-unlocked'));
-				return true;
-			} catch (e) {
-				alert(e.message || 'Could not unlock your vault.');
+			// The lock chip's module is on every page of someone who holds a vault
+			// (PublicPageBase), so without it there is no vault of theirs to open —
+			// an admin with none, reading a locked mailbox in the admin reader.
+			if (!window.JoineryVaultLock) {
+				alert('This mail opens with its reader\'s vault, and you have no vault to unlock here.');
 				return false;
 			}
+			return await JoineryVaultLock.unlock();
 		} finally {
 			selfUnlocking = false;
 		}
@@ -2929,13 +2919,6 @@
 	// submitCompose() builds the FormData manually from this array.
 	var pendingFiles = [];
 
-	function fmtBytes2(n) {
-		n = Number(n) || 0;
-		if (n < 1024) return n + ' B';
-		if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
-		return (n / (1024 * 1024)).toFixed(1) + ' MB';
-	}
-
 	function renderAttachStrip() {
 		var strip = $('#mbx-attach-strip');
 		if (!strip) return;
@@ -2949,7 +2932,7 @@
 		existing.forEach(function (a) {
 			var chip = el('span', 'mbx-attach-chip mbx-attach-saved');
 			chip.appendChild(el('span', 'mbx-attach-chip-name', a.filename));
-			chip.appendChild(el('span', 'mbx-attach-chip-size', fmtBytes2(a.size_bytes)));
+			chip.appendChild(el('span', 'mbx-attach-chip-size', fmtBytes(a.size_bytes)));
 			chip.title = 'Saved on this draft';
 			var rm = el('button', 'mbx-attach-chip-remove', '×');
 			rm.type = 'button';
@@ -2961,7 +2944,7 @@
 		pendingFiles.forEach(function (file, idx) {
 			var chip = el('span', 'mbx-attach-chip');
 			chip.appendChild(el('span', 'mbx-attach-chip-name', file.name));
-			chip.appendChild(el('span', 'mbx-attach-chip-size', fmtBytes2(file.size)));
+			chip.appendChild(el('span', 'mbx-attach-chip-size', fmtBytes(file.size)));
 			var rm = el('button', 'mbx-attach-chip-remove', '×');
 			rm.type = 'button';
 			rm.setAttribute('aria-label', 'Remove ' + file.name);
@@ -3007,11 +2990,11 @@
 				break;
 			}
 			if (f.size > maxFileBytes) {
-				showComposeError('"' + f.name + '" exceeds the ' + fmtBytes2(maxFileBytes) + ' per-file limit.');
+				showComposeError('"' + f.name + '" exceeds the ' + fmtBytes(maxFileBytes) + ' per-file limit.');
 				continue;
 			}
 			if (total + f.size > maxTotalBytes) {
-				showComposeError('The attachments exceed the ' + fmtBytes2(maxTotalBytes) + ' total size limit.');
+				showComposeError('The attachments exceed the ' + fmtBytes(maxTotalBytes) + ' total size limit.');
 				break;
 			}
 			total += f.size;
@@ -3429,12 +3412,6 @@
 
 	// ---- contact panel (§ Phase 5) ----
 	var contextCache = {}; // message_id -> payload, per session
-
-	function fmtDate(iso) {
-		if (!iso) return '';
-		var d = new Date(String(iso).replace(' ', 'T') + 'Z');
-		return isNaN(d.getTime()) ? iso : d.toLocaleDateString();
-	}
 
 	// ---- the right column ----
 	//
@@ -4082,14 +4059,12 @@
 				var fd = new FormData();
 				fd.append('file', importInput.files[0], importInput.files[0].name);
 				fd.append('alias_id', String(aliasId));
-				fetch(CFG.contactsImportUrl, { method: 'POST', credentials: 'same-origin',
-					headers: { 'X-Joinery-Csrf': joineryApi.csrf() }, body: fd })
-					.then(function (r) { return r.json(); }).then(function (env) {
-						var d = (env && env.data) ? env.data : {};
-						alert('Imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0) + '.');
-						forgetContactList(aliasId);
-						renderContactsPanel();
-					}).catch(function () { alert('Import failed.'); });
+				window.joineryApi.postForm(CFG.contactsImportUrl, fd).then(function (d) {
+					d = d || {};
+					alert('Imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0) + '.');
+					forgetContactList(aliasId);
+					renderContactsPanel();
+				}, function (err) { alert('Import failed' + (err && err.message ? ': ' + err.message : '.')); });
 			});
 			importLabel.appendChild(importInput);
 			tools.appendChild(importLabel);
@@ -4424,13 +4399,10 @@
 		var body = built.body;
 		if (state.draftId) body.append('draft_id', String(state.draftId));
 		state.draftSaving = true;
-		var opts = { method: 'POST', credentials: 'same-origin',
-			headers: { 'X-Joinery-Csrf': joineryApi.csrf() }, body: body };
-		if (sync) opts.keepalive = true;
-		fetch(CFG.draftSaveUrl, opts).then(function (r) { return r.json(); }).then(function (env) {
+		window.joineryApi.postForm(CFG.draftSaveUrl, body, { keepalive: !!sync }).then(function (data) {
 			if (gen !== composeGen) { if (cb) cb(); return; }   // stale — see above
 			state.draftSaving = false;
-			var data = (env && env.data) ? env.data : {};
+			data = data || {};
 			if (data.draft_id) {
 				state.draftId = data.draft_id;
 				state.draftDirty = false;
@@ -4913,20 +4885,22 @@
 	}
 
 	function postSend(e, btn, body) {
-		// Multipart send (attachments) — joineryApi.post is JSON-only, so this
-		// keeps a direct fetch and borrows only the shared CSRF read.
-		fetch(CFG.sendUrl, {
-			method: 'POST',
-			credentials: 'same-origin',
-			headers: { 'X-Joinery-Csrf': joineryApi.csrf() },
-			body: body
-		}).then(function (r) { return r.json(); }).then(async function (env) {
+		// A sending-lock compose while locked: one-tap unlock, then resubmit the
+		// same draft without re-navigation (specs/mailbox_security_levels.md § 4.1).
+		async function unlockAndResend() {
+			showComposeError('Your vault is locked. Unlocking…');
+			if (await unlockVault()) { hideComposeError(); submitCompose(e); }
+			else { showComposeError('Unlock is needed to send from this address.'); }
+		}
+		// Multipart (attachments), through the shared transport and its
+		// rotated-token retry.
+		window.joineryApi.postForm(CFG.sendUrl, body).then(async function (data) {
 			if (btn) btn.disabled = false;
-			var data = (env && env.data) ? env.data : {};
+			data = data || {};
 			// sent: the carrier took it. A warning rides along when its Sent copy
 			// could not be stored — still a success, so the compose closes and
 			// nothing invites a second send.
-			if (!(env && env.errortype) && (data.sent || data.outbound_id)) {
+			if (data.sent || data.outbound_id) {
 				// The draft (if any) was morphed into the Sent row server-side — drop
 				// our handle without a save-and-close.
 				var wasDrafts = state.draftsView;
@@ -4947,18 +4921,19 @@
 				refreshMailboxes();
 				if (data.warning) alert(data.warning);
 			} else if (data.locked) {
-				// sending-lock compose while locked: one-tap unlock, then resubmit the
-				// same draft without re-navigation (specs/mailbox_security_levels.md § 4.1).
-				showComposeError('Your vault is locked. Unlocking…');
-				if (await unlockVault()) { hideComposeError(); submitCompose(e); }
-				else { showComposeError('Unlock is needed to send from this address.'); }
+				await unlockAndResend();
 			} else {
-				showComposeError((env && env.error) || 'The message could not be sent.',
-					{ errorRef: (env && env.error_ref) || null });
+				showComposeError('The message could not be sent.');
 			}
-		}).catch(function () {
+		}, async function (err) {
 			if (btn) btn.disabled = false;
-			showComposeError('A network error prevented sending.');
+			if (err && err.data && err.data.locked) {
+				await unlockAndResend();
+			} else if (err && err.status) {
+				showComposeError(err.message || 'The message could not be sent.', { errorRef: err.errorRef || null });
+			} else {
+				showComposeError('A network error prevented sending.');
+			}
 		});
 	}
 

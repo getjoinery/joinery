@@ -33,8 +33,6 @@
  * @version 1.2.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function direct_status_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));

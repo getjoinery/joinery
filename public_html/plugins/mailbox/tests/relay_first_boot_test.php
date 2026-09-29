@@ -24,7 +24,7 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayFirstBoot.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));   // RelayFirstBoot lives there
 require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 
 use GuzzleHttp\Client;

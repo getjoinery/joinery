@@ -154,7 +154,8 @@ than each re-deriving it.
 Every PRF consumer today is a [Sealed Vault](sealed_vault.md) scope, one context
 each: `vault-kek` (the server-custody account vault, whose KEK is sent to the
 server), and the client-custody contexts — `vault-root-kek` (the root vault) and
-one per content vault such as `vault-passwords-kek` and `vault-drive-kek` — whose
+one per content vault (`vault-mail-kek`, `vault-passwords-kek`, `vault-drive-kek`, …,
+derived from the scope name) — whose
 KEK is derived and used **only in the browser** and never transmitted. The
 distinct per-scope context is what guarantees one scope's KEK can never unwrap
 another's key.

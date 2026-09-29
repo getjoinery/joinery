@@ -16,8 +16,6 @@
  *   its own backlog without touching the rest of its domain
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function seal_batch_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));

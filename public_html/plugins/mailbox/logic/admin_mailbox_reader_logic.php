@@ -11,8 +11,6 @@
  * @version 1.1
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function admin_mailbox_reader_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));

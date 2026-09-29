@@ -33,8 +33,6 @@
  * @version 1.5.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function sender_context_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));

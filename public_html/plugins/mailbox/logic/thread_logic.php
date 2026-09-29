@@ -25,8 +25,6 @@
  * @version 1.2.1
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function thread_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));

@@ -77,7 +77,10 @@ function chat_send_logic(array $input): LogicResult {
     // (or starting) one requires an open vault window. Locked → prompt unlock
     // before anything is persisted; the client unlocks then resubmits.
     $protected = $conversation->isProtected();
-    if (ChatSend::lockedForWrite($uid, $protected)) {
+    // A chat lowered to Standard whose history has not all converged back still
+    // holds sealed turns: reading them needs the window just the same.
+    $needs_window = $protected || (!$is_new && ChatSeal::holdsSealedContent($conversation));
+    if (ChatSend::lockedForWrite($uid, $needs_window)) {
         return LogicResult::render([
             'locked'          => true,
             'conversation_id' => $conversation_id,
@@ -106,7 +109,7 @@ function chat_send_logic(array $input): LogicResult {
     }
 
     // Persist the user's message (complete on insert; content may be empty when
-    // the turn is attachments-only). Protected chats seal the content afterward.
+    // the turn is attachments-only). Protected chats seal it as it is saved.
     $user_msg = ChatSend::persistUserMessage($conversation, $protected, $message);
 
     // Store + link the validated attachments to this message. A file whose stored
@@ -117,10 +120,11 @@ function chat_send_logic(array $input): LogicResult {
     $model_label = ChatRender::conversationModel($conversation);
 
     // Create the assistant placeholder the client polls; RUNNING until finalized.
+    // It carries no content, so a protected chat's placeholder takes no DEK here:
+    // the worker's finalize (or failure) seals its first one from the public key.
     $assistant_msg = new AiConversationMessage(NULL);
     $assistant_msg->set('aim_aic_conversation_id', (int)$conversation->key);
     $assistant_msg->set('aim_role', AiConversationMessage::ROLE_ASSISTANT);
-    $assistant_msg->set('aim_content', '');
     $assistant_msg->set('aim_status', AiConversationMessage::STATUS_RUNNING);
     $assistant_msg->prepare();
     $assistant_msg->save();
@@ -142,7 +146,7 @@ function chat_send_logic(array $input): LogicResult {
     // A protected conversation must NOT go to the CLI worker: its unlock window
     // lives in this web request's APCu segment (a separate CLI process can't see
     // the secret key to decrypt history), so it runs in-process below.
-    if (!$protected && ChatWorkerSpawner::spawn((int)$assistant_msg->key)) {
+    if (!$needs_window && ChatWorkerSpawner::spawn((int)$assistant_msg->key)) {
         $payload['status'] = AiConversationMessage::STATUS_RUNNING;
         return LogicResult::render($payload);
     }

@@ -4,12 +4,15 @@ A per-user encryption identity shared by every feature that seals content the
 server should only read while the user has proven presence. One lock (a
 passkey, a recovery code, or — only where no passkey can hold a key — a
 passphrase), one touch that opens every vault the person holds (see
-[One vault](#one-vault)), one bounded unlock window, and any number of consumers behind it — mail, AI chat,
+[One vault](#one-vault)), one bounded unlock window, and any number of consumers behind it — Private mail, AI chat,
 [protected conversations](social_features.md#protection-levels) and
 [Drive's Private files](drive_encryption.md#private-files--server-custody) seal
-server-custody content; the [password manager](../plugins/vault/docs/overview.md)
-and [Drive's Fortress folders](drive_encryption.md) are client-custody consumers
-(their keys are unwrapped only in the browser). The vault owns the identity and
+server-custody content; the [password manager](../plugins/vault/docs/overview.md),
+[Drive's Fortress folders](drive_encryption.md) and
+[Fortress mail](../plugins/mailbox/docs/overview.md) are client-custody consumers
+(their keys are unwrapped only in the browser). Custody is chosen per row, so
+one consumer can hold both: a Private mailbox's rows seal to `user`, a Fortress
+mailbox's to `mail`. The vault owns the identity and
 the lock; each consumer owns what it seals and how it presents locked state.
 
 Consumers register their hooks from a bootstrap file the vault loads lazily.
@@ -23,8 +26,9 @@ for the developer-facing walkthrough.
 ## The shape of it
 
 Each user gets an X25519 keypair per **scope** (`uev_scope`). `user` is the
-server-custody scope, shared by mail, chat and every other consumer the server
-reads for while the member is present; every other scope is client custody. The
+server-custody scope, shared by Private mail, chat and every other consumer the
+server reads for while the member is present; every other scope — `mail` for
+Fortress mail, `drive`, `passwords`, … — is client custody. The
 **public** key is cleartext at rest — anything can seal to it, even while the
 user is offline. The **secret** key never touches disk unwrapped: it exists
 only as **wrappings**, one per enrolled unlocker (a passkey's WebAuthn PRF
@@ -195,12 +199,18 @@ $deks   = $crypto->openItemDeks($sealed_list, $key);     // a page of rows in ON
 $blob   = $crypto->sealField($plaintext, $dek, $ad);     // $ad is the CONSUMER's row-binding string
 $plain  = $crypto->openField($blob, $dek, $ad);          // e.g. 'mail:{message_id}:body_plain'
 $crypto->sealFieldFile($src, $dst, $dek, $ad);           // whole FILE, path-to-path, memory bounded
-$crypto->openFieldFile($src, $dst, $dek, $ad);           //   by a chunk (SealedBox v1.stream. format)
+$crypto->openFieldFile($src, $dst, $dek, $ad);           //   by a chunk (a SealedFileContainer, $ad its content id)
 ```
 
 The AD (additional data) is entirely the consumer's convention — a stable
 per-item identity string. Binding it means a ciphertext can never be spliced
 onto a different row and still decrypt.
+
+The file form checks the container's content id against `$ad` before it
+writes anything, and writes the plaintext to a 0600 temp that is renamed in
+only on success. A container cut exactly at a chunk boundary opens as a
+shorter file rather than failing (its size comes from its length); the search
+index this serves then fails SQLite's own integrity check and is rebuilt.
 
 **A vault key is used, never read.** `VaultUnlock::secretKey()` returns a
 `VaultKey` (`includes/VaultKey.php`): `unseal(array $sealed)` opens
@@ -220,7 +230,8 @@ request that presented an unlocker for it.
 - **`uev_user_encryption_vaults`** (`UserEncryptionVault`) — one row per
   (user, scope): `uev_public_key` (cleartext), `uev_salt` (the current
   generation's KDF salt for the recovery/passphrase unlockers), `uev_custody`
-  (`server` for mail/chat; `client` for the browser-only password/Drive scopes),
+  (`server` for the `user` scope — Private mail, chat; `client` for the browser-only
+`mail`/`drive`/`passwords` scopes),
   `uev_key_generation`.
 - **`uew_user_encryption_wrappings`** (`UserEncryptionWrapping`) — one row per
   enrolled unlocker: `uew_unlocker_type` (`passkey`/`recovery`/`passphrase`),
@@ -496,7 +507,7 @@ Two facts about the APCu window these checks guard:
 
 The mailbox search index's working copy in `/dev/shm` (a 1777 tmpfs every
 local account can list) is created 0600 before its first write, at both of
-its creation points, and `SealedBox::openStreamFile()` makes its plaintext
+its creation points, and `VaultCrypto::openFieldFile()` makes its plaintext
 temp file private before the first decrypted byte lands.
 
 ## The lock chip
@@ -1370,7 +1381,8 @@ window suite exercises APCu and skips under plain CLI — run it directly with
 - `vault_unlock_idle_minutes` (default `30`) — the server unlock window's idle
   timeout.
 - `vault_client_autolock_minutes` (default `15`) — how long a vault the browser
-  holds (the password vault, Fortress folders) stays unlocked without activity.
+  holds (the password vault, Fortress folders, Fortress mail) stays unlocked
+  without activity.
   A person can choose a shorter or longer time for their own browser (the
   password manager's select; stored in `localStorage` as
   `jy_vault_client_autolock`).
@@ -1399,7 +1411,10 @@ no ceremony and no session code:
   actions — opaque-blob storage: the keypair record, the keyring view,
   add/remove/replace unlocker wrappings, consume a one-time recovery key (which
   emails the account — the server can't verify code knowledge, so visibility is
-  the defense against a session-rider burning codes).
+  the defense against a session-rider burning codes). The same file holds the rest of
+  client custody's server side: `VaultClientRotation` (key rotation),
+  `VaultCustodyChange` (rows moving between custodies) and `VaultClientResume`
+  (reopening after a reload).
 
 Each client scope has its **own** keypair and its **own** PRF context, so
 unlocking one never opens another. The context is DERIVED from the scope name
@@ -1425,8 +1440,10 @@ no card, no unlock, and the rows are never deleted, so reactivating the plugin
 restores access.
 
 The built consumers are the [password manager](../plugins/vault/docs/overview.md)
-(scope `passwords`) and [Drive encryption](drive_encryption.md) (scope `drive`,
-adding per-file content encryption and multi-user key sharing on top).
+(scope `passwords`), [Drive encryption](drive_encryption.md) (scope `drive`,
+adding per-file content encryption and multi-user key sharing on top), and
+[Fortress mail](../plugins/mailbox/docs/overview.md) (scope `mail`, declared by
+the mailbox plugin; its PRF context derives to `vault-mail-kek`).
 
 ### One row shape for both custodies
 
@@ -1449,7 +1466,7 @@ with no extra column:
 
 | Blob | Server custody | Client custody |
 |---|---|---|
-| sealed DEK | `v1.seal.` + libsodium sealed box | `v1.edgeseal.{scope}.` + base64(ephPub ‖ IV ‖ ct), `vault-crypto.js` ECIES to the scope's public key |
+| sealed DEK | `v1.seal.` + libsodium sealed box | `v1.edgeseal.{scope}.` + base64(ephPub ‖ IV ‖ ct ‖ tag), `vault-crypto.js` ECIES to the scope's public key |
 | field | `v1.aead.` + XChaCha20-Poly1305 | `v1.edge.` + base64(IV ‖ ct ‖ tag), AES-256-GCM under the DEK, AD = the model's `sealAd($row_id, $field)` |
 
 The prefixes belong to the row layer (`SystemBase`, `joinery-sealed.js`); the
@@ -1611,7 +1628,7 @@ vault:{scope}:resume`) under `HKDF-SHA256(server half ‖ tab half, info
 'joinery-vault-resume:v1:{scope}')`, two random 32-byte halves. The tab keeps
 the wrapped secret and its half in `sessionStorage`; the server keeps the
 other half in the sign-in's PHP session (`vault_client_resume`,
-`includes/VaultClientResume.php`, keyed by scope and a random per-tab id).
+`VaultClientResume` in `includes/VaultClientCustody.php`, keyed by scope and a random per-tab id).
 Neither half opens anything alone, and shares are never logged. At load
 `JoinerySealed.ready` settles once every scope the tab had open has reopened
 (`joinery:vault-scope-unlocked` with `detail.resumed`) or been given up — a

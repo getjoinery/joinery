@@ -167,7 +167,6 @@ class RelayFleetTest {
 		check(!isset($coords['ssh_user']) && !isset($coords['tunnel_ip']) && !isset($coords['wg_public_key']),
 			'no tunnel or ssh coordinate survives');
 		check($shard->slotCount() === 1, 'slot count sees the live slot');
-		check($shard->hasCapacity(), 'shard under capacity');
 
 		$slot_b = new MailboxFleetSlot(NULL);
 		$slot_b->set('mft_mfs_mailbox_fleet_shard_id', intval($shard->key));

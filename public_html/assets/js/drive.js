@@ -638,13 +638,14 @@
 		if (!protectionTarget) return;
 		var picked = document.querySelector('input[name="drv_protection_level"]:checked');
 		var target = picked ? picked.value : 'standard';
-		if (target === (protectionTarget.protection_level || 'standard')) { $('drvProtectionDialog').close(); return; }
+		// The level it already has still goes to the server: a conversion that
+		// stopped part-way comes back as `remaining` and resumes here.
 
 		var body = { folder_id: protectionTarget.id, protection_level: target };
 		if (protectionConfirmed) body.confirm_revoke_sharing = true;
 
 		$('drvProtectionApply').disabled = true;
-		api.post('drive_level_change', body).then(function (d) {
+		withStepUp(function () { return api.post('drive_level_change', body); }).then(function (d) {
 			// The server reports what going Private will end before it ends it.
 			if (d && d.needs_confirmation) {
 				var warn = $('drvProtectionWarning');
@@ -655,12 +656,28 @@
 				protectionConfirmed = true;
 				return;
 			}
+			if (d && d.unchanged && !d.remaining) { $('drvProtectionDialog').close(); return; }
 			startProtectionBatch(protectionTarget.id, d && d.remaining ? d.remaining : 0, target);
 		}).catch(function (err) {
 			var warn = $('drvProtectionWarning');
 			warn.textContent = err.message || 'Could not change the protection level.';
 			warn.hidden = false;
 			$('drvProtectionApply').disabled = false;
+		});
+	}
+
+	// A level change asks the owner to confirm it is them (requires_stepup):
+	// confirm with a passkey and apply again, or, without one, go through the
+	// confirmation page and come back here.
+	function withStepUp(call) {
+		var back = location.pathname + location.search;
+		if (window.JoineryPasskeys && window.JoineryPasskeys.withStepUp) {
+			return window.JoineryPasskeys.withStepUp(call, back);
+		}
+		return call().catch(function (e) {
+			if (!(e && e.data && e.data.requires_stepup)) throw e;
+			window.location = '/verify-stepup?return=' + encodeURIComponent(back);
+			return new Promise(function () {});
 		});
 	}
 
@@ -678,7 +695,7 @@
 				done: '{total} file{s:total} converted',
 				none: 'No files needed converting',
 				stuck: '{remaining} file{s:remaining} could not be converted — they keep their old protection.',
-				paused: 'Paused — reopen this folder to resume.'
+				paused: 'Paused — it carries on while your vault is unlocked, or apply again here.'
 			}
 		}));
 		delete box.dataset.ceremonyStarted;

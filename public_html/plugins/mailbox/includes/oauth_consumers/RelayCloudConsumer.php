@@ -4,9 +4,10 @@
  * (specs/mailbox_relay_cloud_provisioning.md).
  *
  * The one-click branch of the just-in-time credential step: when a Linode
- * OAuth client is configured, the Setup tab's Relay section offers "Approve
- * at Linode" (action relay_cloud_connect -> OAuth2Client::beginConsent(...,
- * 'relay_cloud', ['run_id' => N], ...)) instead of the token-paste floor.
+ * OAuth client is configured, the Setup tab's grant step offers "Approve at
+ * Linode" (grant=oauth -> admin_mailbox_relay_take_grant() ->
+ * OAuth2Client::beginConsent(..., 'relay_cloud', ['run_id' => N], ...)) instead
+ * of the token-paste floor.
  * The shared /oauth_callback exchanges the code and dispatches here.
  *
  * Grant-per-act custody: no account link is created and no refresh token is

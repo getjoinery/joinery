@@ -13,8 +13,6 @@
  * @version 1.1.2 - a valid address that fails to save says so, instead of calling the address invalid
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function contacts_import_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));

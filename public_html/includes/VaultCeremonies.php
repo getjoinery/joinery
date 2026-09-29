@@ -605,20 +605,6 @@ class VaultCeremonies {
 	}
 
 	/**
-	 * Unlock with a one-time recovery code. Kill-switch semantics: a consumed
-	 * code first ends EVERY open window everywhere, then opens one only for
-	 * the current session. Each wrapping's KEK derives from its own recorded
-	 * salt, so codes from a not-yet-drained generation keep working.
-	 *
-	 * @return array{regenerate_recommended:bool}
-	 */
-	/**
-	 * Defense in depth: the (User, vault) pair must belong together. The logic
-	 * shells load the caller's own vault, but nothing here re-checked it — so a
-	 * bug that passed a mismatched pair would open user A's window with vault B's
-	 * secret. Assert ownership at the ceremony boundary too.
-	 */
-	/**
 	 * Give the root vault the twins of what the account vault just got: the
 	 * new code set's wrappings, and the phrase's when one was enrolled (or
 	 * none, removing the root's). Runs inside the caller's transaction.
@@ -639,6 +625,12 @@ class VaultCeremonies {
 		}
 	}
 
+	/**
+	 * Defense in depth: the (User, vault) pair must belong together. The logic
+	 * shells load the caller's own vault, but nothing here re-checked it — so a
+	 * bug that passed a mismatched pair would open user A's window with vault B's
+	 * secret. Assert ownership at the ceremony boundary too.
+	 */
 	private function assertVaultOwnership(User $user, UserEncryptionVault $vault): void {
 		if ((int)$vault->get('uev_usr_user_id') !== (int)$user->key) {
 			throw new VaultCeremonyException('Vault does not belong to this user.');
@@ -872,14 +864,6 @@ class VaultCeremonies {
 	}
 
 	/**
-	 * Consume a recovery code ATOMICALLY. A load-then-save races: two
-	 * concurrent requests presenting the same code both load it as
-	 * is_used=false, both open, and both mark it used — double-unlocking from
-	 * a single code. A conditional UPDATE guarded on is_used=false lets exactly
-	 * one request win; a rowCount of 0 means another request already consumed
-	 * it, which is an already-used code.
-	 */
-	/**
 	 * A code from a browser-made set also wraps the root vault
 	 * (specs/one_vault_experience.md § R6): its twin there carries the same
 	 * set id and index. Both are spent in ONE transaction, so no failure can
@@ -931,6 +915,14 @@ class VaultCeremonies {
 		}
 	}
 
+	/**
+	 * Consume a recovery code ATOMICALLY. A load-then-save races: two
+	 * concurrent requests presenting the same code both load it as
+	 * is_used=false, both open, and both mark it used — double-unlocking from
+	 * a single code. A conditional UPDATE guarded on is_used=false lets exactly
+	 * one request win; a rowCount of 0 means another request already consumed
+	 * it, which is an already-used code.
+	 */
 	private function consumeRecoveryCode(UserEncryptionWrapping $matched): void {
 		$db = DbConnector::get_instance()->get_db_link();
 		$consume = $db->prepare(

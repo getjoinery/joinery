@@ -15,6 +15,7 @@
  * Connection details for a known provider come from the preset catalog; the
  * app/basic password is a non-model field stored encrypted via setPassword().
  *
+ * @version 2.11 - a level change runs through ProtectionLevelChange (MailboxAliasLevel)
  * @version 2.10 - refuses to bind a feed to a Fortress mailbox
  * @version 2.9 - no unencrypted connection mode; a generic host inside this
  *   server's own network is refused at save
@@ -32,8 +33,6 @@
  *   folder cursors; switching to future-only keeps them, so un-polled mail at
  *   the source is not skipped.
  */
-
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -325,6 +324,12 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 			// here?" decides whether a protection choice is an initial choice or a
 			// change — and nothing can ask afterwards.
 			$alias_pre_existing = ($existing_alias > 0);
+			if (!$alias_pre_existing) {
+				// A new account can still resolve to a mailbox that is already here
+				// (by name) and may hold mail: that one is a change, not a first choice.
+				$by_name = new MultiInboundEmailAlias(array('domain_id' => $domain_id, 'alias' => trim($local), 'deleted' => false));
+				$alias_pre_existing = count($by_name) > 0;
+			}
 			$resolved_alias_id = _imap_edit_resolve_mailbox($domain_id, trim($local), $existing_alias);
 			$account->set('iia_iea_inbound_email_alias_id', $resolved_alias_id);
 		} else {
@@ -407,52 +412,62 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 				$new_level = _imap_edit_submitted_level($input, $domain, $old_level);
 				$old_seals = ($old_level === InboundEmailDomain::LEVEL_PRIVATE);
 				$new_seals = ($new_level === InboundEmailDomain::LEVEL_PRIVATE);
+				$acting_user_id = intval($session->get_user_id());
 
-				// Changing a mailbox's protection is the same sensitive action the
-				// domain editor gates — re-confirm the account's second factor first.
-				// Not on creation: an initial choice is not a change, and there is no
-				// mail under it yet.
-				if ($alias_pre_existing && $new_level !== $old_level) {
-					// target_level rides the return URL so the picker comes back on
-					// the choice they made: the step-up drops the POST, and silently
-					// discarding their intent is how an operator ends up thinking
-					// the save did nothing.
-					$stepup = $session->require_recent_second_factor(
-						$editor_base . '?domain_id=' . intval($domain->key)
-						. '&alias_id=' . $resolved_alias_id
-						. '&target_level=' . rawurlencode($new_level));
-					if ($stepup !== null) {
-						return $stepup;
+				// Changing a mailbox's protection runs the same sequence the domain
+				// editor does (ProtectionLevelChange). A mailbox being created asks
+				// no step-up — an initial choice is not a change, and there is no
+				// mail under it yet — but its prerequisites still hold.
+				$level_scope = ($new_level !== $old_level)
+					? new MailboxAliasLevel($domain, $alias_row, $acting_user_id) : null;
+				// target_level rides the return URL so the picker comes back on
+				// the choice they made: the step-up drops the POST, and silently
+				// discarding their intent is how an operator ends up thinking
+				// the save did nothing.
+				$stepup_return = $editor_base . '?domain_id=' . intval($domain->key)
+					. '&alias_id=' . $resolved_alias_id . '&target_level=' . rawurlencode($new_level);
+				$change_level = function () use ($level_scope, $new_level, $acting_user_id, $stepup_return, $alias_pre_existing) {
+					$change = ProtectionLevelChange::change($level_scope, $new_level, $acting_user_id, $alias_pre_existing);
+					if ($change['status'] === ProtectionLevelChange::STEPUP) {
+						return SessionControl::stepup_redirect($stepup_return);
+					}
+					if ($change['status'] !== ProtectionLevelChange::OK) {
+						throw new InboundEmailAliasException($change['error']);
+					}
+					return null;
+				};
+				// The confirmation comes before any write below, never after the
+				// grants have already synced.
+				if ($level_scope !== null) {
+					$gate = ProtectionLevelChange::gate($level_scope, $new_level, $alias_pre_existing);
+					if ($gate['status'] === ProtectionLevelChange::STEPUP) {
+						return SessionControl::stepup_redirect($stepup_return);
+					}
+					if ($gate['status'] === ProtectionLevelChange::REFUSED) {
+						throw new InboundEmailAliasException($gate['error']);
 					}
 				}
 
 				// Lowering first, raising last. A lowering relaxes the one-holder
 				// rule, so writing it before the grants sync means "share this
 				// mailbox and set it to Standard" is one submit rather than two; a
-				// raise has to see the final holder set before it is allowed at all.
-				if (!$new_seals && $old_seals) {
-					if (!_imap_edit_lowering_allowed($session)) {
-						throw new InboundEmailAliasException(
-							'Unlock your vault before lowering protection on this mailbox.');
+				// raise has to see the final holder set before it is allowed at all
+				// — its checklist rows are about holders, vaults and passkeys, so
+				// ProtectionLevelChange asks them after the grants are written.
+				if ($level_scope !== null && !$new_seals) {
+					$refused = $change_level();
+					if ($refused !== null) {
+						return $refused;
 					}
-					_imap_edit_write_level($alias_row, $new_level);
 				}
 
 				InboundEmailMailboxGrant::sync_for_alias($resolved_alias_id, $submitted);
 
-				if ($new_seals && $new_level !== $old_level) {
-					// The same checklist the domain editor renders, gathered for this
-					// one mailbox. The rows are about holders, vaults and passkeys —
-					// never the level — so evaluating them here, after the grants are
-					// written, judges exactly the state the raise would seal into.
-					$acting_user_id = intval($session->get_user_id());
-					$rows = mailbox_protection_rows(
-						mailbox_protection_facts($domain, $resolved_alias_id),
-						$new_level, $acting_user_id);
-					if (!mailbox_protection_required_ok($rows)) {
-						throw new InboundEmailAliasException(mailbox_protection_first_failure($rows));
+				if ($level_scope !== null && $new_seals) {
+					$refused = $change_level();
+					if ($refused !== null) {
+						return $refused;
 					}
-					_imap_edit_write_level($alias_row, $new_level);
 				}
 
 				if ($new_level !== $old_level) {
@@ -582,35 +597,6 @@ function _imap_edit_submitted_level(array $input, ?InboundEmailDomain $domain, s
 	$want = strtolower(trim((string)$input['iea_security_level']));
 	return in_array($want, array(InboundEmailDomain::LEVEL_STANDARD,
 		InboundEmailDomain::LEVEL_PRIVATE), true) ? $want : $current;
-}
-
-/**
- * Persist a mailbox's own level. Standard on an IMAP-source mailbox is stored
- * explicitly rather than as "inherit": the operator chose it for this mailbox,
- * and a later change to the domain must not silently reopen mail they decided
- * to leave in the clear — or seal mail they decided to leave readable.
- */
-function _imap_edit_write_level(InboundEmailAlias $alias, string $level): void {
-	$alias->set('iea_security_level', $level);
-	$alias->prepare();
-	$alias->save();
-	$alias->load();
-}
-
-/**
- * Lowering protection needs the acting admin's own key open — an idle session
- * must not quietly downgrade a mailbox. Someone with no vault at all is not
- * being asked for one they cannot have.
- */
-function _imap_edit_lowering_allowed($session): bool {
-	$acting_user_id = intval($session->get_user_id());
-	if ($acting_user_id <= 0) {
-		return false;
-	}
-	if (UserEncryptionVault::loadForUser($acting_user_id) === null) {
-		return true;
-	}
-	return VaultUnlock::isOpen($acting_user_id);
 }
 
 /**

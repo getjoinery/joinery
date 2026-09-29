@@ -36,8 +36,8 @@ Three creation points, all in `plugins/mailbox/includes/MailboxIndex.php`:
 
 1. `rebuild()` — `new SQLite3($path)` on a fresh path.
 2. `restoreFromBlob()` — `VaultCrypto::openFieldFile()` writes the restored
-   copy via `SealedBox::openStreamFile()`, which writes a sibling temp file
-   (`xb`) and renames it into place.
+   copy to a sibling temp file (`xb`) through `SealedFileContainer::openStream()`
+   and renames it into place.
 3. `tryOpenDb()` opens an existing file read-write and creates nothing.
 
 **Order matters.** SQLite gives its `-journal` and `-wal` files the mode of
@@ -46,7 +46,7 @@ the main database file, so the mode must be 0600 before the first write:
 - In `rebuild()`, pre-create the file (`fopen($path, 'x')`, close, `chmod
   0600`) and only then hand the path to `SQLite3`.
 - In `restoreFromBlob()` the plaintext is world-readable while it is being
-  written, not only after: `SealedBox::openStreamFile()` creates its temp
+  written, not only after: `VaultCrypto::openFieldFile()` creates its temp
   file under the umask and streams the decrypted index into it for as long
   as the decrypt takes. The temp file is made 0600 before the first byte
   (the rename carries the mode to the final path), and `restoreFromBlob()`

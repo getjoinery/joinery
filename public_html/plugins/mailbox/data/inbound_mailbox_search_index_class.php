@@ -24,6 +24,7 @@
  * column goes once every node reports zero
  * (specs/implemented/mailbox_search_index_blob_leak.md WP7).
  *
+ * @version 1.6 - the sweep takes SQLite's side files and a restore's orphaned `.opening.` temp too
  * @version 1.5 - sweepLegacyBlobs(): the File era's index bytes that no File
  *   row holds any more are counted and reclaimed by the same sweep
  * @version 1.4 - the persisted index is a path, not a File: permanent_delete()
@@ -315,6 +316,9 @@ class InboundMailboxSearchIndex extends SystemBase {
 		return $result;
 	}
 
+	/** How old a restore's `.opening.` temp must be to count as orphaned. */
+	const DEAD_RESTORE_SECONDS = 600;
+
 	/**
 	 * Passive-close safety net for the /dev/shm working copies of this index
 	 * (specs/implemented/inbound_email_encryption_at_rest.md § 6.4).
@@ -341,7 +345,10 @@ class InboundMailboxSearchIndex extends SystemBase {
 		$persisted = self::sweepPersistedIndexes();
 		$legacy = self::sweepLegacyBlobs();
 
-		$files = glob('/dev/shm/mailfts_*.sqlite');
+		// The working copy, SQLite's -journal/-wal/-shm beside it, and a restore's
+		// `.opening.` temp (VaultCrypto::openFieldFile) that a fatal error left
+		// behind: all plaintext, all this sweep's.
+		$files = glob('/dev/shm/mailfts_*.sqlite*');
 		if ($files === false || !count($files)) {
 			return array(
 				'removed' => $persisted['removed'] + $legacy['removed'],
@@ -351,10 +358,14 @@ class InboundMailboxSearchIndex extends SystemBase {
 
 		$swept = 0;
 		foreach ($files as $path) {
-			if (!preg_match('/mailfts_(\d+)\.sqlite$/', basename($path), $m)) {
+			if (!preg_match('/^mailfts_(\d+)\.sqlite(-journal|-wal|-shm|\.opening\.[0-9a-f]+)?$/', basename($path), $m)) {
 				continue; // not one of ours — leave it alone
 			}
-			if (VaultUnlock::hasAnyOpenWindow((int)$m[1], UserEncryptionVault::SCOPE_USER)) {
+			// A restore finishes in seconds; a temp this old is one a fatal error
+			// orphaned, whatever the owner's window says.
+			$dead_temp = isset($m[2]) && strpos($m[2], '.opening.') === 0
+				&& @filemtime($path) !== false && filemtime($path) < time() - self::DEAD_RESTORE_SECONDS;
+			if (!$dead_temp && VaultUnlock::hasAnyOpenWindow((int)$m[1], UserEncryptionVault::SCOPE_USER)) {
 				continue; // still in-window somewhere — not this sweep's to touch
 			}
 			if (@unlink($path)) {

@@ -23,6 +23,8 @@
  * the root's secret — and nothing else. A passphrase wrapping is accepted only
  * on the root, and only for an account whose passkeys cannot hold a key (R8).
  *
+ * @version 1.4 - holds VaultClientRotation, VaultCustodyChange and VaultClientResume too:
+ *   one file for client custody, four classes
  * @version 1.3 - opensThroughRoot(), throughRootVaults(): a content vault that opens
  *   through the root rotates under the root (specs/client_custody_mail.md WP6)
  * @version 1.2 - root and content scopes; `root` wrappings; code set id/index on
@@ -558,6 +560,617 @@ class VaultClientCustody {
 			return $params;
 		}
 		return json_encode($params);
+	}
+}
+
+// =====================================================================
+// Rotating a client-custody key (VaultClientRotation)
+// =====================================================================
+
+/**
+ * VaultClientRotation - rotating a client-custody vault's keypair
+ * (docs/sealed_vault.md § Rotating a client-custody key).
+ *
+ * Only the browser holds a client-custody scope's secret, so only the browser
+ * can rotate it. A vault with unlockers of its own pays for it honestly: new
+ * recovery codes (it never held the old ones), the passphrase again if there is
+ * one, and one passkey tap per enrolled passkey. A vault that opens through the
+ * root costs nothing more than the root being open: the new key is wrapped
+ * under the root, whose unlockers and codes are unchanged. This class is the
+ * server's half, which is bookkeeping:
+ *
+ *   1. begin — the browser posts the NEW public key and the new key's
+ *      wrappings. They are stored as generation N+1, PENDING: the key in use
+ *      and its unlockers are untouched, so a rotation that stops half way
+ *      leaves every existing unlocker working.
+ *   2. the batch — every sealed DEK under the scope is re-sealed to the new
+ *      key by the browser: rows of the models registered with
+ *      VaultUnlock::clientReseal() through resealPage()/resealRows(), and keys
+ *      kept elsewhere through each consumer's own browser hook. A moved row
+ *      carries generation N+1, so the walk resumes where it stopped.
+ *   3. commit — refused while any registered row still sits on generation N.
+ *      Then generation N's wrappings retire, the pending key becomes the key,
+ *      and every linked device that held the scope loses it (it holds the old
+ *      secret and must re-link).
+ *
+ * Consumers registered with VaultUnlock::onClientRotation() hear begin and
+ * commit once each is stored.
+ *
+ * A pending rotation is only ever finished, never discarded. Keys a consumer's
+ * hook moved (Drive's file grants, the password store key) carry no generation
+ * the server could count, so there is no telling "nothing moved" from "the hooks
+ * moved everything"; and material sealed while the rotation is pending goes to
+ * the pending key (UserEncryptionVault::sealingPublicKey()). Discarding the
+ * pending key could therefore strand content, so there is no abandon: begin
+ * refuses while one is pending, and the way out is to finish it — the new key
+ * opens with the unlockers it was given.
+ *
+ * @version 1.5 - commit asks the scope's commit guards first (VaultUnlock::onClientRotationCommit)
+ * @version 1.4 - begin and commit tell VaultUnlock::onClientRotation() listeners; a vault
+ *   that opens through the root rotates with one `root` wrapping
+ * @version 1.3 - a re-sealed key must name a client-custody scope (VaultCrypto::clientCustodyScope)
+ * @version 1.2 - the root vault's key is refused (rotating it would orphan every content vault)
+ * @version 1.1 - no abandon (it could not see what the hooks moved); assertCanBegin()
+ *   for the browser to ask before collecting taps; one vault load per scope
+ * @version 1.0
+ */
+require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+
+class VaultClientRotation {
+
+	/** Rows per page of the re-seal walk. */
+	const PAGE_MAX = 200;
+
+	/**
+	 * Refuse a rotation some consumer could not re-seal for: one that declares
+	 * `client_reseals` for this scope and registered nothing, or whose plugin is
+	 * switched off (its keys would be left on the retired key).
+	 */
+	public static function assertResealersPresent(string $scope): void {
+		VaultUnlock::loadConsumerBootstraps();
+		$unmet = VaultConsumers::unmetClientReseals($scope);
+		if (!$unmet) {
+			return;
+		}
+		error_log('Client vault rotation refused for scope ' . $scope . ': no resealer registered by '
+			. implode(', ', array_keys($unmet)));
+		$inactive = array_keys(array_filter($unmet));
+		if ($inactive) {
+			throw new VaultClientCustodyException('Rotating now would lock what a switched-off feature keeps in this vault ('
+				. implode(', ', $inactive) . '). Nothing was changed. Switch it back on and rotate again.');
+		}
+		throw new VaultClientCustodyException('Part of this site keeps keys in this vault and cannot re-secure them ('
+			. implode(', ', array_keys($unmet)) . '). Nothing was changed.');
+	}
+
+	/** The caller's vault for $scope with a rotation pending, or a refusal. */
+	private static function pendingVault(int $user_id, string $scope): UserEncryptionVault {
+		VaultClientCustody::assertClientScope($scope);
+		$vault = VaultClientCustody::loadVault($user_id, $scope);
+		if (!$vault) {
+			throw new VaultClientCustodyException('Your vault is not set up.');
+		}
+		if ($vault->get('uev_pending_key_generation') === null) {
+			throw new VaultClientCustodyException('No key rotation is under way for this vault.');
+		}
+		return $vault;
+	}
+
+	/**
+	 * Whether a rotation of $scope can begin: the vault exists, none is pending,
+	 * and every consumer that keeps keys under it can re-seal them. The browser
+	 * asks this before collecting passkey taps and the passphrase.
+	 */
+	public static function assertCanBegin(int $user_id, string $scope): UserEncryptionVault {
+		VaultClientCustody::assertClientScope($scope);
+		// The root vault's key is not rotated here: every content vault's `root`
+		// wrapping is under a key derived from the root's secret, not sealed to
+		// its public key, so no reseal would move them and a committed rotation
+		// would orphan them all (specs/one_vault_experience.md § As built).
+		if ($scope === VaultScopes::ROOT_SCOPE) {
+			throw new VaultClientCustodyException('Your vault\'s own key cannot be rotated here.');
+		}
+		$vault = VaultClientCustody::loadVault($user_id, $scope);
+		if (!$vault) {
+			throw new VaultClientCustodyException('Your vault is not set up.');
+		}
+		if ($vault->get('uev_pending_key_generation') !== null) {
+			throw new VaultClientCustodyException('A rotation of this vault\'s key is already under way. Finish it first.');
+		}
+		self::assertResealersPresent($scope);
+		return $vault;
+	}
+
+	/**
+	 * Start a rotation: store the new public key and its wrappings as the
+	 * pending generation. A vault with unlockers of its own needs a new one to
+	 * open the new key (a passkey or a passphrase) and new recovery codes, as
+	 * setup does; a vault that opens through the root takes one `root`
+	 * wrapping, made with the root open (VaultClientCustody::opensThroughRoot()).
+	 */
+	public static function begin(int $user_id, string $scope, string $public_key, array $wrappings): array {
+		$vault = self::assertCanBegin($user_id, $scope);
+
+		$raw = base64_decode($public_key, true);
+		if ($raw === false || strlen($raw) !== 32) {
+			throw new VaultClientCustodyException('The new public key is malformed.');
+		}
+		if ($public_key === (string)$vault->get('uev_public_key')) {
+			throw new VaultClientCustodyException('The new key is the key already in use.');
+		}
+		if (VaultClientCustody::opensThroughRoot($vault)) {
+			// The root opens it, and the root's own passkeys, phrase and codes
+			// are the way back in: the new key takes its `root` wrapping alone.
+			if (count($wrappings) !== 1 || (string)($wrappings[0]['unlocker_type'] ?? '') !== UserEncryptionWrapping::TYPE_ROOT) {
+				throw new VaultClientCustodyException('This vault opens through your vault: its new key takes one wrapping under your vault and nothing else.');
+			}
+		} else {
+			$primary = 0;
+			$recovery = 0;
+			foreach ($wrappings as $w) {
+				$t = (string)($w['unlocker_type'] ?? '');
+				if ($t === UserEncryptionWrapping::TYPE_PASSKEY || $t === UserEncryptionWrapping::TYPE_PASSPHRASE) $primary++;
+				if ($t === UserEncryptionWrapping::TYPE_RECOVERY) $recovery++;
+			}
+			if ($primary < 1) {
+				throw new VaultClientCustodyException('The new key needs a passkey or a passphrase to unlock it.');
+			}
+			if ($recovery < 1) {
+				throw new VaultClientCustodyException('The new key needs at least one recovery code.');
+			}
+		}
+
+		$next = (int)$vault->get('uev_key_generation') + 1;
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->beginTransaction();
+		try {
+			// Leftovers of an earlier attempt at this generation that never took go first.
+			$db->prepare('DELETE FROM uew_user_encryption_wrappings WHERE uew_uev_user_encryption_vault_id = ? AND uew_key_generation = ?')
+				->execute(array((int)$vault->key, $next));
+			VaultClientCustody::persistWrappings($user_id, $vault, $wrappings, $next);
+			$db->prepare('UPDATE uev_user_encryption_vaults SET uev_pending_public_key = ?, uev_pending_key_generation = ?, uev_update_time = now()
+				WHERE uev_user_encryption_vault_id = ?')->execute(array($public_key, $next, (int)$vault->key));
+			$db->commit();
+		} catch (Throwable $e) {
+			if ($db->inTransaction()) $db->rollBack();
+			throw $e;
+		}
+		VaultUnlock::clientRotationChanged($user_id, $scope, 'begin');
+		return array('pending_key_generation' => $next);
+	}
+
+	/**
+	 * One page of the rows to re-seal, across the models registered for the
+	 * scope, in registration order. $model/$after_id is the cursor the previous
+	 * page returned; an empty $model starts at the first model.
+	 *
+	 * @return array{rows:array, next:?array{model:string,after_id:int}, remaining:int}
+	 */
+	public static function resealPage(int $user_id, string $scope, string $model, int $after_id, int $limit): array {
+		$vault = self::pendingVault($user_id, $scope);
+		$generation = (int)$vault->get('uev_key_generation');
+		$classes = VaultUnlock::clientResealsFor($scope)['classes'];
+		$limit = max(1, min(self::PAGE_MAX, $limit));
+
+		$remaining = 0;
+		foreach ($classes as $class) {
+			$remaining += $class::browserSealedRowCount($user_id, $scope, $generation);
+		}
+
+		$start = ($model === '') ? 0 : array_search($model, $classes, true);
+		if ($start === false) {
+			throw new VaultClientCustodyException('Unknown model in the re-seal cursor.');
+		}
+		for ($i = $start; $i < count($classes); $i++) {
+			$class = $classes[$i];
+			$page = $class::browserResealPage($user_id, $scope, $generation, ($i === $start) ? $after_id : 0, $limit);
+			if ($page['rows']) {
+				$rows = array_map(function ($r) use ($class) {
+					return array('model' => $class, 'id' => $r['id'], 'sealed_dek' => $r['sealed_dek']);
+				}, $page['rows']);
+				return array('rows' => $rows, 'next' => array('model' => $class, 'after_id' => $page['last_id']),
+					'remaining' => $remaining);
+			}
+		}
+		return array('rows' => array(), 'next' => null, 'remaining' => $remaining);
+	}
+
+	/**
+	 * Store re-sealed DEKs, [{model, id, sealed_dek}]. Each model must be one
+	 * registered for the blob's scope; each row must be the caller's.
+	 */
+	public static function resealRows(int $user_id, array $rows): int {
+		$written = 0;
+		$vaults = array();   // scope => its vault, loaded once per request
+		foreach ($rows as $r) {
+			$sealed = (string)($r['sealed_dek'] ?? '');
+			$scope = VaultCrypto::clientCustodyScope($sealed);
+			if ($scope === null) {
+				throw new VaultClientCustodyException('A re-sealed key is not sealed to a client-custody vault.');
+			}
+			$vault = $vaults[$scope] ?? ($vaults[$scope] = self::pendingVault($user_id, $scope));
+			$model = (string)($r['model'] ?? '');
+			if (!in_array($model, VaultUnlock::clientResealsFor($scope)['classes'], true)) {
+				throw new VaultClientCustodyException('Nothing named ' . $model . ' is re-sealed for this vault.');
+			}
+			try {
+				$model::acceptBrowserReseal($user_id, (int)($r['id'] ?? 0), $sealed,
+					(int)$vault->get('uev_key_generation'), (int)$vault->get('uev_pending_key_generation'));
+			} catch (RuntimeException $e) {
+				throw new VaultClientCustodyException($e->getMessage());
+			}
+			$written++;
+		}
+		return $written;
+	}
+
+	/**
+	 * Make the pending key the key. Refused while any registered row still
+	 * sits on the old generation.
+	 */
+	public static function commit(int $user_id, string $scope): array {
+		$vault = self::pendingVault($user_id, $scope);
+		$old = (int)$vault->get('uev_key_generation');
+		$new = (int)$vault->get('uev_pending_key_generation');
+		$left = 0;
+		foreach (VaultUnlock::clientResealsFor($scope)['classes'] as $class) {
+			$left += $class::browserSealedRowCount($user_id, $scope, $old);
+		}
+		if ($left > 0) {
+			throw new VaultClientCustodyException($left . ' sealed item' . ($left === 1 ? ' is' : 's are')
+				. ' still on the old key. Finish re-sealing before the old key retires.');
+		}
+		$refusal = VaultUnlock::clientRotationCommitRefusal($user_id, $scope);
+		if ($refusal !== null) {
+			throw new VaultClientCustodyException($refusal);
+		}
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->beginTransaction();
+		try {
+			$db->prepare('UPDATE uew_user_encryption_wrappings SET uew_delete_time = now()
+				WHERE uew_uev_user_encryption_vault_id = ? AND uew_key_generation = ? AND uew_delete_time IS NULL')
+				->execute(array((int)$vault->key, $old));
+			$db->prepare('UPDATE uev_user_encryption_vaults SET uev_public_key = uev_pending_public_key,
+				uev_key_generation = uev_pending_key_generation, uev_pending_public_key = NULL,
+				uev_pending_key_generation = NULL, uev_update_time = now() WHERE uev_user_encryption_vault_id = ?')
+				->execute(array((int)$vault->key));
+			self::forgetScopeOnDevices($user_id, $scope);
+			$db->commit();
+		} catch (Throwable $e) {
+			if ($db->inTransaction()) $db->rollBack();
+			throw $e;
+		}
+		VaultUnlock::clientRotationChanged($user_id, $scope, 'commit');
+		return array('key_generation' => $new);
+	}
+
+	/**
+	 * A linked device held the retired secret: take the scope off every one of
+	 * the user's devices. One left holding no vault drops its device key too, so
+	 * it reads as holding none (SyncDevice::vault_scopes()).
+	 */
+	private static function forgetScopeOnDevices(int $user_id, string $scope): void {
+		$devices = new MultiSyncDevice(array('user_id' => $user_id, 'deleted' => false));
+		foreach ($devices as $device) {
+			$held = $device->vault_scopes();
+			if (!in_array($scope, $held, true)) {
+				continue;
+			}
+			$left = array_values(array_diff($held, array($scope)));
+			$device->set('sde_vault_scopes', $left ? implode(',', $left) : null);
+			if (!$left) {
+				$device->set('sde_device_pubkey', null);
+			}
+			$device->save();
+		}
+	}
+}
+
+// =====================================================================
+// Moving rows between custodies (VaultCustodyChange)
+// =====================================================================
+
+/**
+ * VaultCustodyChange - moving rows off a client-custody vault
+ * (specs/client_custody_mail.md § R8, the lowering).
+ *
+ * A row sealed to a client-custody scope (Fortress mail) has a DEK only its
+ * owner's browser opens, so only that browser can move it anywhere else. When
+ * a row's hook stops naming the scope (a mailbox lowered from Fortress to
+ * Private), the browser walks the rows the hook moved, opens each DEK with the
+ * scope's session and re-seals it to the vault the hook now names; the server
+ * checks and stores the result (SystemBase::acceptBrowserCustodyChange()).
+ * Content stays as it is: the DEK does not change, only whose key wraps it.
+ *
+ * Which models take part is what VaultUnlock::clientReseal() registered for
+ * the scope, the same list a rotation re-seals. The walk resumes wherever it
+ * stopped, since a moved row is no longer listed.
+ *
+ * The raise (server custody to client) is the server's work, done row by row
+ * in the owner's window: SystemBase::convertRowToClientCustody().
+ *
+ * @version 1.0
+ */
+class VaultCustodyChange {
+
+	/** Rows per page of the walk, and per accept request. */
+	const PAGE_MAX = 100;
+
+	/**
+	 * One page of the caller's rows to move off client-custody $scope, across
+	 * the registered models in order. $model/$after_id is the cursor the
+	 * previous page returned; an empty $model starts at the first model, and
+	 * that first page also carries `remaining` when every model can count
+	 * cheaply (backlog(); later pages carry null). A page may be empty with a
+	 * `next`: keep walking.
+	 * Each row names the vault it moves to and that vault's public key, in the
+	 * standard base64 the browser seals to.
+	 *
+	 * @return array{rows:array, next:?array{model:string,after_id:int}, remaining:?int}
+	 */
+	public static function page(int $user_id, string $scope, string $model, int $after_id, int $limit): array {
+		self::assertScopeVault($user_id, $scope);
+		$classes = VaultUnlock::clientResealsFor($scope)['classes'];
+		$limit = max(1, min(self::PAGE_MAX, $limit));
+		$remaining = null;
+		if ($model === '' && $after_id === 0) {
+			$remaining = self::backlog($user_id, $scope);
+		}
+
+		$start = ($model === '') ? 0 : array_search($model, $classes, true);
+		if ($start === false) {
+			throw new VaultClientCustodyException('Unknown model in the custody cursor.');
+		}
+		$keys = array();   // target scope => its public key, loaded once per request
+		for ($i = $start; $i < count($classes); $i++) {
+			$class = $classes[$i];
+			try {
+				$page = $class::browserCustodyPage($user_id, $scope, ($i === $start) ? $after_id : 0, $limit);
+			} catch (RuntimeException $e) {
+				throw new VaultClientCustodyException($e->getMessage());
+			}
+			if (!$page['rows'] && $page['done']) {
+				continue;
+			}
+			$rows = array();
+			foreach ($page['rows'] as $r) {
+				$target = $r['target_scope'];
+				if (!array_key_exists($target, $keys)) {
+					$keys[$target] = self::targetPublicKey($user_id, $target);
+				}
+				$rows[] = array('model' => $class, 'id' => $r['id'], 'sealed_dek' => $r['sealed_dek'],
+					'target_scope' => $target, 'target_public_key' => $keys[$target]);
+			}
+			$next = (!$page['done'] || $i + 1 < count($classes))
+				? ($page['done'] ? array('model' => $classes[$i + 1], 'after_id' => 0)
+					: array('model' => $class, 'after_id' => $page['last_id']))
+				: null;
+			return array('rows' => $rows, 'next' => $next, 'remaining' => $remaining);
+		}
+		return array('rows' => array(), 'next' => null, 'remaining' => $remaining);
+	}
+
+	/**
+	 * How many of the caller's rows under $scope are waiting to move, or null
+	 * when a model cannot say without reading every row
+	 * (SystemBase::browserCustodyBacklog()).
+	 */
+	public static function backlog(int $user_id, string $scope): ?int {
+		VaultClientCustody::assertClientScope($scope);
+		$count = 0;
+		foreach (VaultUnlock::clientResealsFor($scope)['classes'] as $class) {
+			$n = $class::browserCustodyBacklog($user_id, $scope);
+			if ($n === null) {
+				return null;
+			}
+			$count += $n;
+		}
+		return $count;
+	}
+
+	/**
+	 * Store re-sealed DEKs, [{model, id, sealed_dek}], for rows leaving
+	 * $scope. Each model must be registered for $scope; each row must be the
+	 * caller's and its hook must name the vault the key is sealed to.
+	 */
+	public static function accept(int $user_id, string $scope, array $rows): int {
+		VaultClientCustody::assertClientScope($scope);
+		if (count($rows) > self::PAGE_MAX) {
+			throw new VaultClientCustodyException('Too many rows in one request.');
+		}
+		$classes = VaultUnlock::clientResealsFor($scope)['classes'];
+		$written = 0;
+		foreach ($rows as $r) {
+			$model = (string)($r['model'] ?? '');
+			if (!in_array($model, $classes, true)) {
+				throw new VaultClientCustodyException('Nothing named ' . $model . ' is kept in this vault.');
+			}
+			try {
+				$model::acceptBrowserCustodyChange($user_id, (int)($r['id'] ?? 0), (string)($r['sealed_dek'] ?? ''));
+			} catch (RuntimeException $e) {
+				throw new VaultClientCustodyException($e->getMessage());
+			}
+			$written++;
+		}
+		return $written;
+	}
+
+	/** The caller must hold the scope's vault: its session opens the DEKs being moved. */
+	private static function assertScopeVault(int $user_id, string $scope): void {
+		if (!VaultClientCustody::loadVault($user_id, $scope)) {
+			throw new VaultClientCustodyException('Your vault is not set up.');
+		}
+	}
+
+	/**
+	 * The public key a row moving to $scope is sealed to, standard base64. A
+	 * client-custody vault's key is stored that way already (the pending one
+	 * during a rotation); a server vault's is base64url.
+	 */
+	private static function targetPublicKey(int $user_id, string $scope): string {
+		$vault = UserEncryptionVault::loadForUser($user_id, $scope);
+		if (!$vault) {
+			throw new VaultClientCustodyException('There is no "' . $scope . '" vault to move these to.');
+		}
+		if ((string)$vault->get('uev_custody') === 'client') {
+			return $vault->sealingPublicKey();
+		}
+		return base64_encode(SealedBox::b64url_decode((string)$vault->get('uev_public_key')));
+	}
+}
+
+// =====================================================================
+// Resuming a browser session after a reload (VaultClientResume)
+// =====================================================================
+
+/**
+ * VaultClientResume - the server's half of keeping a browser-held vault open
+ * across a reload of the same tab (specs/client_custody_mail.md § R4a).
+ *
+ * A client-custody vault's secret lives in the page's memory, so a reload used
+ * to drop it and ask for the passkey again. When a scope opens, the browser
+ * wraps its secret under a key derived from two random halves: one it keeps in
+ * the tab's sessionStorage beside the wrapped secret, one it hands here. A
+ * reload asks for this half back, rebuilds the key, and unwraps.
+ *
+ * Neither half opens anything alone. This half lives in the PHP session, so it
+ * is readable only with this session's cookie, and it dies when the session
+ * does: sign-out, expiry, or an explicit drop when the vault is locked in the
+ * browser. The tab's half dies when the tab closes. The server never sees the
+ * tab's half or the wrapped secret, so holding this one gives it nothing it
+ * can open.
+ *
+ * Each tab keeps its own half under a random id it makes (`tab`), so two tabs
+ * of one session never overwrite each other; a session holds at most
+ * MAX_PER_SCOPE halves per scope, oldest dropped first.
+ *
+ * Never log a share. The API logs no request bodies; keep it that way here.
+ *
+ * @version 1.1 - a half kept before the account's last recovery-code use is refused
+ * @version 1.0
+ */
+
+class VaultClientResumeException extends Exception {}
+
+class VaultClientResume {
+
+	/** Where the halves live in $_SESSION, keyed by scope. */
+	const SESSION_KEY = 'jy_vault_client_resume';
+
+	/** A share is 32 random bytes, sent as standard base64. */
+	const SHARE_BYTES = 32;
+
+	/** Halves kept per scope in one session (one per open tab, in practice). */
+	const MAX_PER_SCOPE = 8;
+
+	/** A tab id: 16 to 64 lowercase hex characters the browser makes. */
+	private static function assertTab(string $tab): void {
+		if (!preg_match('/^[0-9a-f]{16,64}$/', $tab)) {
+			throw new VaultClientResumeException('A resume needs the tab\'s id.');
+		}
+	}
+
+	/**
+	 * Keep $share_b64 for $scope in this session, replacing any earlier one.
+	 * The scope must be client custody and the user must hold its vault.
+	 *
+	 * @throws VaultClientResumeException
+	 */
+	public static function put(int $user_id, string $scope, string $tab, string $share_b64): void {
+		self::assertHeldScope($user_id, $scope);
+		self::assertTab($tab);
+		$raw = base64_decode($share_b64, true);
+		if ($raw === false || strlen($raw) !== self::SHARE_BYTES) {
+			throw new VaultClientResumeException('A resume share is 32 bytes.');
+		}
+		self::assertSession();
+		$kept = $_SESSION[self::SESSION_KEY][$scope] ?? array();
+		unset($kept[$tab]);
+		$kept[$tab] = array(
+			'user_id' => $user_id,
+			'share'   => base64_encode($raw),
+			'set'     => time(),
+		);
+		while (count($kept) > self::MAX_PER_SCOPE) {
+			array_shift($kept);   // insertion order: the oldest first
+		}
+		$_SESSION[self::SESSION_KEY][$scope] = $kept;
+	}
+
+	/**
+	 * This session's share for $scope, with the vault's public keys (current,
+	 * and pending during a rotation) so the browser can tell a wrapped secret
+	 * that a rotation has retired. Null when there is none, or it belongs to
+	 * another user (a session that changed hands through login-as).
+	 *
+	 * @return array{share:string, public_key:string, pending_public_key:?string}|null
+	 * @throws VaultClientResumeException
+	 */
+	public static function get(int $user_id, string $scope, string $tab): ?array {
+		$vault = self::assertHeldScope($user_id, $scope);
+		self::assertTab($tab);
+		$entry = $_SESSION[self::SESSION_KEY][$scope][$tab] ?? null;
+		if (!is_array($entry) || intval($entry['user_id'] ?? 0) !== $user_id || (string)($entry['share'] ?? '') === '') {
+			self::drop($scope, $tab);
+			return null;
+		}
+		// A recovery code used since this half was kept ends it, in every
+		// session: a used code is a possible theft (specs/one_vault_experience.md
+		// § R6, review B6). The stamp lives on the vault rows, so it reaches
+		// sessions this request cannot see.
+		$recovered = UserEncryptionVault::lastRecoveryTime($user_id);
+		if ($recovered !== null && intval($entry['set'] ?? 0) < strtotime($recovered . ' UTC')) {
+			self::drop($scope, $tab);
+			return null;
+		}
+		$pending = $vault->get('uev_pending_key_generation') !== null ? (string)$vault->get('uev_pending_public_key') : '';
+		return array(
+			'share'              => (string)$entry['share'],
+			'public_key'         => (string)$vault->get('uev_public_key'),
+			'pending_public_key' => $pending !== '' ? $pending : null,
+		);
+	}
+
+	/**
+	 * Forget a tab's share for $scope; every tab's for the scope with a null
+	 * tab; every scope's with a null scope.
+	 */
+	public static function drop(?string $scope = null, ?string $tab = null): void {
+		if (session_status() !== PHP_SESSION_ACTIVE || !isset($_SESSION[self::SESSION_KEY])) {
+			return;
+		}
+		if ($scope === null) {
+			unset($_SESSION[self::SESSION_KEY]);
+			return;
+		}
+		if ($tab === null) {
+			unset($_SESSION[self::SESSION_KEY][$scope]);
+			return;
+		}
+		unset($_SESSION[self::SESSION_KEY][$scope][$tab]);
+	}
+
+	/** The scope's vault row, refusing a scope that is not client custody or not held. */
+	private static function assertHeldScope(int $user_id, string $scope): UserEncryptionVault {
+		if ($user_id <= 0) {
+			throw new VaultClientResumeException('Sign in first.');
+		}
+		try {
+			$vault = VaultClientCustody::loadVault($user_id, $scope);
+		} catch (VaultClientCustodyException $e) {
+			throw new VaultClientResumeException($e->getMessage());
+		}
+		if ($vault === null) {
+			throw new VaultClientResumeException('You have no ' . strtolower(VaultScopes::labelFor($scope)) . '.');
+		}
+		return $vault;
+	}
+
+	private static function assertSession(): void {
+		if (session_status() !== PHP_SESSION_ACTIVE) {
+			throw new VaultClientResumeException('No session to keep the share in.');
+		}
 	}
 }
 ?>

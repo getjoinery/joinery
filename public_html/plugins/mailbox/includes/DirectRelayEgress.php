@@ -32,12 +32,6 @@ require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.
 
 class DirectRelayEgress {
 
-	const EGRESS_PATH = '/egress';
-
-	/** Headers the relay reads and answers with. */
-	const TARGET_HEADER = 'X-Joinery-Direct-Target';
-	const STATUS_HEADER = 'X-Joinery-Direct-Status';
-
 	/** @var MailboxRelay */
 	private $relay;
 	/** @var int */

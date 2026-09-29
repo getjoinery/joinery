@@ -32,8 +32,23 @@
  *  - a mail rotation does not commit while the relay has not taken the map,
  *    or no pull has drained its listing since it did (B33, B41).
  *
+ * And the relay pin (specs/client_custody_mail.md § R10, WP8):
+ *  - the shared vector (fixtures/relay_pin_vector.json): PHP's pin MAC formula
+ *    (MailboxRelayPin::pinMessage, HKDF 'sealed-vault:pin', HMAC-SHA256) gives
+ *    the vector's MAC, the statement verifies under the relay identity over the
+ *    prefixed bytes and fails when a byte changes, and mailbox_fortress.js
+ *    carries the same values for its selfCheck;
+ *  - relay_pin_set (setPin) refuses a mailbox that is not the caller's and
+ *    anything not shaped like a pin; a first pin and a new MAC over the same
+ *    identity change nothing trusted, another identity does (the step-up);
+ *  - the proxy (sealTarget) hands the relay's body back byte for byte, with the
+ *    stored pin and the relay identity; it answers only for the owner's
+ *    Fortress mailbox under Seal at the relay;
+ *  - the pins listing is what a rotation re-makes.
+ *
  * Run: php tests/run.php test-db --filter=fortress_relay_pull
  *
+ * @version 1.3 - carries the relay pin checks (fortress_relay_pin folded in)
  * @version 1.2 - B46: the waiting row is counted after a lowering
  * @version 1.1 - the review of 2026-09-28 (B38, B40-B42, B44, B45)
  * @version 1.0
@@ -47,6 +62,24 @@ require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 if (!extension_loaded('sodium')) {
 	harness_skip('sodium extension unavailable');
 	harness_finish();
+}
+
+/** A relay whose API is a stub answering one seal-target body. */
+class FortressPinStubRelay extends MailboxRelay {
+	public $answer;
+	public $asked = array();
+	public function withApi(callable $fn) {
+		$client = (new ReflectionClass('FortressPinStubClient'))->newInstanceWithoutConstructor();
+		$client->relay = $this;
+		return $fn($client);
+	}
+}
+class FortressPinStubClient extends RelayClient {
+	public $relay;
+	public function sealTarget(string $recipient): ?string {
+		$this->relay->asked[] = $recipient;
+		return $this->relay->answer;
+	}
 }
 
 $db = DbConnector::get_instance()->get_db_link();
@@ -320,6 +353,114 @@ try {
 	InboundEmailMessage::forgetSealScopes();
 
 	// ---------------------------------------------------------------- the map
+	// ------------------------------------------------------- the relay pin
+	// (formerly fortress_relay_pin) — its own mailbox and a relay that is never
+	// stored, ahead of the sections below that make relay rows.
+	section('The shared vector');
+	$pin_v = json_decode((string)file_get_contents(__DIR__ . '/fixtures/relay_pin_vector.json'), true);
+	$pin_key = hash_hkdf('sha256', hex2bin($pin_v['vault_secret_hex']), 32, 'sealed-vault:pin', '');
+	$pin_mac = base64_encode(hash_hmac('sha256', MailboxRelayPin::pinMessage(intval($pin_v['alias_id']), $pin_v['relay_identity_public_key']), $pin_key, true));
+	check($pin_mac === $pin_v['pin_mac'], 'the pin MAC formula gives the vector\'s MAC');
+	$pin_pub = base64_decode($pin_v['relay_identity_public_key']);
+	$pin_sig = base64_decode($pin_v['signature']);
+	check(sodium_crypto_sign_verify_detached($pin_sig, "joinery-relay:seal-target:v1\n" . $pin_v['statement'], $pin_pub),
+		'the statement verifies under the relay identity over the prefixed bytes');
+	check(!sodium_crypto_sign_verify_detached($pin_sig, "joinery-relay:seal-target:v1\n" . str_replace('"map_version":7', '"map_version":8', $pin_v['statement']), $pin_pub),
+		'and fails when a byte changes');
+	$pin_js = (string)file_get_contents(PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_fortress.js'));
+	check(strpos($pin_js, $pin_v['pin_mac']) !== false && strpos($pin_js, $pin_v['signature']) !== false && strpos($pin_js, $pin_v['vault_secret_hex']) !== false,
+		'mailbox_fortress.js selfCheck carries the same vector');
+
+	section('Fixtures');
+	$pin_box = new SealedBox();
+	$pin_pair = $pin_box->generateKeypair();
+	$pin_mail_pub = base64_encode(SealedBox::b64url_decode($pin_pair['public']));
+	$pin_owner = make_user('FrnOwner');
+	$pin_owner_id = intval($pin_owner->key);
+	vault_fixture_client_vault($pin_owner_id, $pin_mail_pub, InboundEmailMessage::SEAL_SCOPE_FORTRESS);
+	$pin_stranger = make_user('FrnStranger');
+
+	$pin_domain = new InboundEmailDomain(NULL);
+	$pin_domain->set('ied_domain', 'harnesstest-frn-' . bin2hex(random_bytes(4)) . '.example');
+	$pin_domain->set('ied_is_enabled', true);
+	$pin_domain->set('ied_owner_usr_user_id', $pin_owner_id);
+	$pin_domain->save();
+	harness_register_row('ied_inbound_email_domains', 'ied_inbound_email_domain_id', intval($pin_domain->key));
+	$pin_domain->set_security_level(InboundEmailDomain::LEVEL_FORTRESS);
+	$pin_domain->set('ied_relay_seals_to_owner', true);
+	$pin_domain->save();
+
+	$pin_alias = new InboundEmailAlias(NULL);
+	$pin_alias->set('iea_ied_inbound_email_domain_id', intval($pin_domain->key));
+	$pin_alias->set('iea_alias', 'harnesstest_pin');
+	$pin_alias->set('iea_delivery_mode', InboundEmailAlias::MODE_STORE);
+	$pin_alias->set('iea_destinations', '');
+	$pin_alias->set('iea_is_enabled', true);
+	$pin_alias->save();
+	$pin_alias_id = intval($pin_alias->key);
+	harness_register_row('iea_inbound_email_aliases', 'iea_inbound_email_alias_id', $pin_alias_id);
+	InboundEmailMailboxGrant::sync_for_alias($pin_alias_id, array($pin_owner_id));
+	harness_defer(function () use ($db, $pin_alias_id) {
+		$db->prepare('DELETE FROM ieg_inbound_email_mailbox_grants WHERE ieg_iea_inbound_email_alias_id = ?')->execute(array($pin_alias_id));
+	});
+	check(true, 'a Fortress mailbox under Seal at the relay, one owner with a mail vault');
+
+	$pin_relay = new FortressPinStubRelay(NULL);
+	$pin_relay->set('mrl_identity_public_key', $pin_v['relay_identity_public_key']);
+	$pin_relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => '3.2')));
+	$pin_relay->answer = '{"statement":"{\"a\":1}","signature":"c2ln"}' . "\n";
+
+	$pin_refused = function (callable $pin_fn): bool {
+		try { $pin_fn(); return false; } catch (MailboxRelayPinException $e) { return true; }
+	};
+
+	section('relay_pin_set');
+	$pin_identity = $pin_v['relay_identity_public_key'];
+	$pin_a_mac = base64_encode(random_bytes(32));
+	check($pin_refused(function () use ($pin_stranger, $pin_alias_id, $pin_identity, $pin_a_mac) {
+		MailboxRelayPin::setPin(intval($pin_stranger->key), $pin_alias_id, $pin_identity, $pin_a_mac);
+	}), 'a mailbox that is not the caller\'s is refused');
+	check($pin_refused(function () use ($pin_owner_id, $pin_alias_id, $pin_a_mac) {
+		MailboxRelayPin::setPin($pin_owner_id, $pin_alias_id, base64_encode('short'), $pin_a_mac);
+	}) && $pin_refused(function () use ($pin_owner_id, $pin_alias_id, $pin_identity) {
+		MailboxRelayPin::setPin($pin_owner_id, $pin_alias_id, $pin_identity, 'not base64 !');
+	}), 'something not shaped like a pin is refused');
+	check(!MailboxRelayPin::changesIdentity($pin_owner_id, $pin_alias_id, $pin_identity), 'a first pin trusts nothing new (first use)');
+	MailboxRelayPin::setPin($pin_owner_id, $pin_alias_id, $pin_identity, $pin_a_mac);
+	$pin_stored = json_decode((string)(new InboundEmailAlias($pin_alias_id, TRUE))->get('iea_relay_identity_pin'), true);
+	check($pin_stored === array('relay_identity_public_key' => $pin_identity, 'mac' => $pin_a_mac), 'the pin is stored as sent');
+	check(!MailboxRelayPin::changesIdentity($pin_owner_id, $pin_alias_id, $pin_identity), 'a new MAC over the same relay needs no step-up (a rotation)');
+	$pin_other_identity = base64_encode(random_bytes(32));
+	check(MailboxRelayPin::changesIdentity($pin_owner_id, $pin_alias_id, $pin_other_identity), 'another relay identity does');
+
+	section('relay_seal_target: the relay\'s body, unchanged');
+	$pin_answer = MailboxRelayPin::sealTarget($pin_owner_id, $pin_alias_id, $pin_relay);
+	check($pin_answer['relay_answer'] === $pin_relay->answer, 'the relay\'s body comes back byte for byte');
+	check($pin_relay->asked === array('harnesstest_pin@' . $pin_domain->get('ied_domain')), 'asked about this mailbox\'s address');
+	check($pin_answer['relay_identity_public_key'] === $pin_identity && $pin_answer['pin'] === $pin_stored, 'with the relay identity and the stored pin');
+	check($pin_refused(function () use ($pin_stranger, $pin_alias_id, $pin_relay) {
+		MailboxRelayPin::sealTarget(intval($pin_stranger->key), $pin_alias_id, $pin_relay);
+	}), 'not for someone else\'s mailbox');
+	$pin_relay->answer = null;
+	check($pin_refused(function () use ($pin_owner_id, $pin_alias_id, $pin_relay) {
+		MailboxRelayPin::sealTarget($pin_owner_id, $pin_alias_id, $pin_relay);
+	}), 'a relay that does not know the mailbox is an error, not an empty answer');
+	check(count(MailboxRelayPin::mailboxesToCheck($pin_owner_id, $pin_relay)) === 1, 'the owner\'s page checks this mailbox');
+
+	$pin_domain->set('ied_relay_seals_to_owner', false);
+	$pin_domain->save();
+	$pin_relay->answer = '{}';
+	check($pin_refused(function () use ($pin_owner_id, $pin_alias_id, $pin_relay) {
+		MailboxRelayPin::sealTarget($pin_owner_id, $pin_alias_id, $pin_relay);
+	}) && MailboxRelayPin::mailboxesToCheck($pin_owner_id, $pin_relay) === array(), 'with Seal at the relay off there is nothing to check');
+
+	section('The rotation re-makes every pin');
+	check(MailboxRelayPin::pins($pin_owner_id) === array(array('alias_id' => $pin_alias_id, 'relay_identity_public_key' => $pin_identity, 'mac' => $pin_a_mac)),
+		'relay_pins lists the owner\'s pin');
+	check(MailboxRelayPin::pins(intval($pin_stranger->key)) === array(), 'and nobody else\'s');
+	check(VaultUnlock::clientResealsFor('mail')['scripts'] === array('plugins/mailbox/assets/mailbox-reseal.js'),
+		'the mail rotation page loads mailbox-reseal.js');
+
 	section('B35: the map names the mail key only to a relay that can seal for a browser');
 	$relay_at = function (string $version): MailboxRelay {
 		$r = new MailboxRelay(NULL);

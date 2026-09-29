@@ -222,6 +222,27 @@ function vault_fixture_client_vault(int $user_id, string $public_key, string $sc
 }
 
 /**
+ * A bare SERVER-custody vault (scope `user`, generation 1, no wrappings) for
+ * $user_id, from a keypair minted here and returned so the test can open a
+ * window with it (vault_fixture_open_window($user_id, $kp['secret'])) or
+ * decrypt directly (vault_fixture_key($kp['secret'])). The server twin of
+ * vault_fixture_client_vault(); registered for teardown.
+ *
+ * @return array{id:int, public:string, secret:string}
+ */
+function vault_fixture_server_vault(int $user_id): array {
+	$kp = (new SealedBox())->generateKeypair();
+	$dblink = DbConnector::get_instance()->get_db_link();
+	$q = $dblink->prepare(
+		"INSERT INTO uev_user_encryption_vaults (uev_usr_user_id, uev_scope, uev_custody, uev_public_key, uev_salt, uev_key_generation)
+		 VALUES (?, 'user', 'server', ?, ?, 1) RETURNING uev_user_encryption_vault_id");
+	$q->execute(array($user_id, $kp['public'], (new SealedBox())->generateSalt()));
+	$id = (int)$q->fetchColumn();
+	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', $id);
+	return array('id' => $id, 'public' => $kp['public'], 'secret' => $kp['secret']);
+}
+
+/**
  * A VaultKey for a keypair the test minted itself (SealedBox::generateKeypair()):
  * the secret is wrapped under a throwaway KEK and opened exactly the way the
  * platform opens one — VaultUnlock::openKey() — so the test never needs a

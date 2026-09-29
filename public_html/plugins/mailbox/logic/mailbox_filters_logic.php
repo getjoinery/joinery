@@ -24,8 +24,6 @@
  * @version 2.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 const FILTER_UNIT_MULTIPLIERS = array('B' => 1, 'KB' => 1024, 'MB' => 1048576);
 
 /**

@@ -6,36 +6,29 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_c
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 
 /**
- * The Sealed Vault consumer crypto for AI chat (docs/sealed_vault.md,
- * specs/joinery_ai_chat_encryption.md). One place owns what chat seals, the AD
- * (additional-data) row-binding convention every sealer/opener must agree on
- * byte-for-byte, and the mint-vs-reuse DEK dance.
+ * The Sealed Vault consumer policy for AI chat (docs/sealed_vault.md,
+ * specs/joinery_ai_chat_encryption.md).
  *
  * The unit of protection is the CONVERSATION: its aic_security_level is 'private'
- * (protected) or 'standard' (plaintext, unchanged). A protected
- * conversation seals its title/instructions under a per-conversation DEK
- * (aic_sealed_key) and each message seals content/tool-trace/error under a
- * per-message DEK (aim_sealed_key); attachments seal under the OWNING message's
- * DEK (no per-attachment key). Every DEK is sealed to the owner's vault public
- * key — so sealing needs only the public key (works while locked); only reading
- * (openField) needs the in-window secret.
+ * (protected) or 'standard' (plaintext, unchanged). A protected conversation
+ * seals its title/instructions under a per-conversation DEK (aic_sealed_key) and
+ * each message seals content/tool-trace/error under a per-message DEK
+ * (aim_sealed_key). Both models ride SystemBase's generic sealing: save() seals
+ * what it writes (shouldSeal() reads the level), get() opens it in-window, and
+ * the models' sealAd() overrides keep the AD literals every stored row carries.
+ * Every DEK is sealed to the owner's vault public key, so a new row seals with
+ * the window closed; rewriting a sealed column under an existing DEK needs the
+ * window.
  *
- * IMPORTANT persistence rule: a sealed row must NEVER be written through model
- * save() — SystemBase::save() rebuilds every column via get(), which decrypts the
- * sealed fields and would write plaintext back (unsealing them) or throw when
- * locked. The seal methods here therefore RETURN a column => value map that the
- * caller persists with the model's updateColumns() (a targeted raw UPDATE). All
- * sealed fields on one row share that row's single DEK, so a partial update
- * reuses the existing DEK (reseal*), while an initial full seal mints (seal*).
+ * What stays here is what the generic path cannot express: the level
+ * predicates, the finalize and failure writes a worker makes after its owner
+ * may have locked, attachments sealed under the OWNING message's DEK (no key
+ * of their own), and the Standard<->Private backfill.
  */
 class ChatSeal {
 
     const LEVEL_STANDARD = 'standard';
     const LEVEL_PRIVATE  = 'private';
-
-    /** A sealed AEAD blob always carries this prefix (SealedBox::aeadEncrypt); the
-     *  decrypt paths key on it so an empty/not-yet-sealed field is returned as-is. */
-    const BLOB_PREFIX = 'v1.aead.';
 
     /** The placeholder title shown for a locked protected conversation. */
     const LOCKED_TITLE = 'Protected chat (locked)';
@@ -49,16 +42,29 @@ class ChatSeal {
         return [self::LEVEL_STANDARD, self::LEVEL_PRIVATE];
     }
 
+    /**
+     * Should content written at $level for $owner_id seal? The models'
+     * shouldSeal() hooks ask this. A Private chat whose owner has no vault is
+     * refused outright rather than stored in the clear.
+     */
+    public static function sealsForOwner(string $level, int $owner_id): bool {
+        if (!self::isProtectedLevel($level)) return false;
+        if (!self::ownerHasVault($owner_id)) {
+            throw new RuntimeException('ChatSeal: owner ' . $owner_id . ' has no vault; a protected chat cannot be sealed.');
+        }
+        return true;
+    }
+
     // ---------------------------------------------------------- AD conventions
 
     /** Message column AD: chat:{aim_conversation_message_id}:{column}. */
     public static function messageAd(int $message_id, string $column): string {
-        return 'chat:' . $message_id . ':' . $column;
+        return AiConversationMessage::sealAd($message_id, $column);
     }
 
     /** Conversation column AD: chat:conv:{aic_conversation_id}:title|instructions. */
     public static function conversationAd(int $conversation_id, string $token): string {
-        return 'chat:conv:' . $conversation_id . ':' . $token;
+        return AiConversation::sealAd($conversation_id, 'aic_' . $token);
     }
 
     /** Attachment bytes AD: chat:{aim_conversation_message_id}:att:{aia_message_attachment_id}. */
@@ -69,15 +75,6 @@ class ChatSeal {
     /** Attachment extracted-text AD: chat:{aim_conversation_message_id}:att_text:{aia_message_attachment_id}. */
     public static function attachmentTextAd(int $message_id, int $attachment_id): string {
         return 'chat:' . $message_id . ':att_text:' . $attachment_id;
-    }
-
-    private static function conversationToken(string $column): string {
-        return $column === 'aic_title' ? 'title' : 'instructions';
-    }
-
-    /** Whether a message column stores JSON (tool trace / pending action). */
-    public static function isJsonColumn(string $column): bool {
-        return $column === 'aim_tool_calls';
     }
 
     // ---------------------------------------------------------- vault resolution
@@ -91,6 +88,16 @@ class ChatSeal {
         return self::vaultForOwner($owner_id) !== null;
     }
 
+    /** The conversation owner's vault, for a direct seal; refuses when there is none. */
+    public static function requireVault(AiConversation $c): UserEncryptionVault {
+        $owner = (int)$c->get('aic_owner_user_id');
+        $vault = self::vaultForOwner($owner);
+        if ($vault === null) {
+            throw new RuntimeException('ChatSeal: owner ' . $owner . ' has no vault; a protected chat cannot be sealed.');
+        }
+        return $vault;
+    }
+
     /** Whether $owner_id currently holds an open vault window (secret in RAM).
      *  A pure probe — isOpen() has no side effects. secretKey() would extend the
      *  idle window and stamp a content-decrypt on every call, and this runs per
@@ -99,10 +106,39 @@ class ChatSeal {
         return VaultUnlock::isOpen($owner_id);
     }
 
-    /** Locked-state test: protected AND the owner's window is closed. */
+    /**
+     * Locked-state test: the owner's window is closed AND the chat is protected
+     * or still holds sealed rows (lowered, not yet converged).
+     */
     public static function isLocked(AiConversation $c): bool {
-        return self::isProtectedLevel($c->get('aic_security_level'))
-            && !self::windowOpenFor((int)$c->get('aic_owner_user_id'));
+        if (self::windowOpenFor((int)$c->get('aic_owner_user_id'))) return false;
+        return self::isProtectedLevel($c->get('aic_security_level')) || self::holdsSealedContent($c);
+    }
+
+    /**
+     * Does this chat still hold sealed rows? True on a protected chat, and on
+     * one lowered to Standard whose rows have not all converged back yet.
+     */
+    public static function holdsSealedContent(AiConversation $c): bool {
+        if ($c->rowIsSealed()) return true;
+        $owner = (int)$c->get('aic_owner_user_id');
+        // One probe per owner per request: an owner none of whose chats holds a
+        // sealed row (everyone without a vault) never pays the per-chat query,
+        // which the chat list would otherwise run for every row it renders.
+        static $owner_holds = array();
+        if (!array_key_exists($owner, $owner_holds)) {
+            $stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT EXISTS (SELECT 1 FROM aic_conversations
+                WHERE aic_owner_user_id = ? AND aic_content_sealed = true) OR EXISTS (SELECT 1 FROM aim_conversation_messages m
+                JOIN aic_conversations c ON c.aic_conversation_id = m.aim_aic_conversation_id
+                WHERE c.aic_owner_user_id = ? AND m.aim_delete_time IS NULL AND m.aim_content_sealed = true)');
+            $stmt->execute(array($owner, $owner));
+            $owner_holds[$owner] = in_array($stmt->fetchColumn(), array(true, 't', 1, '1'), true);
+        }
+        if (!$owner_holds[$owner]) return false;
+        $stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT EXISTS (SELECT 1 FROM aim_conversation_messages
+            WHERE aim_aic_conversation_id = ? AND aim_delete_time IS NULL AND aim_content_sealed = true)');
+        $stmt->execute(array((int)$c->key));
+        return in_array($stmt->fetchColumn(), array(true, 't', 1, '1'), true);
     }
 
     /**
@@ -112,176 +148,96 @@ class ChatSeal {
      * instructions surfaces so their locked-state gate can't diverge.
      */
     public static function lockedForContentEdit(AiConversation $c): bool {
-        return $c->isProtected() && !self::windowOpenFor((int)$c->get('aic_owner_user_id'));
+        if (self::windowOpenFor((int)$c->get('aic_owner_user_id'))) return false;
+        return $c->isProtected() || self::holdsSealedContent($c);
     }
 
-    // ---------------------------------------------------------- message sealing
+    // ------------------------------------------------------- worker-side writes
 
     /**
-     * Column map sealing message content fields under a FRESH per-message DEK
-     * (public key only — no window). $fields maps column => plaintext (null/''
-     * pass through unsealed). The returned map also carries aim_sealed_key /
-     * generation / owner / content_sealed and is persisted via
-     * AiConversationMessage::updateColumns($message_id, $map).
+     * Write a finalized turn: its content and trace plus the operational columns
+     * in $plain (status, tokens, activity).
+     *
+     * On a Private chat the content is a direct full-row seal under a FRESH DEK,
+     * never save(). The turn finalizes in a worker whose owner may have locked
+     * since it started; minting needs only the public key, where save() on a
+     * row sealed before (a resumed turn) would have to unwrap its existing DEK.
+     * Every sealed column is written, so nothing older is left under a key the
+     * row no longer records.
      */
-    public static function sealMessageColumns(int $message_id, AiConversation $conv, array $fields): array {
-        $owner = (int)$conv->get('aic_owner_user_id');
-        $vault = self::vaultForOwner($owner);
-        if ($vault === null) {
-            throw new RuntimeException('ChatSeal: owner ' . $owner . ' has no vault; a protected chat cannot be sealed.');
-        }
-        if ($message_id <= 0) {
-            throw new RuntimeException('ChatSeal: message must be persisted (id assigned) before sealing.');
-        }
-        $crypto = new VaultCrypto();
-        $dek = $crypto->newItemDek();
-        $sealed_key = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
-        $cols = array();
-        foreach ($fields as $col => $plain) {
-            $cols[$col] = ($plain === null || $plain === '') ? $plain
-                : $crypto->sealField((string)$plain, $dek, self::messageAd($message_id, $col));
-        }
-        $cols['aim_sealed_key'] = $sealed_key;
-        $cols['aim_key_generation'] = (int)$vault->get('uev_key_generation');
-        $cols['aim_sealed_owner_user_id'] = $owner;
-        $cols['aim_content_sealed'] = true;
-        return $cols;
-    }
-
-    /**
-     * The content columns for a finalized turn: json-encode the trace columns and
-     * seal every content column when protected (else plaintext). Returned map is
-     * merged with the caller's operational columns (status/tokens/activity) and
-     * persisted via updateColumns.
-     */
-    public static function turnColumns(AiConversation $conv, int $message_id, string $content, $tool_calls): array {
+    public static function finalizeTurn(AiConversation $conv, int $message_id, string $content,
+            $tool_calls, array $plain): void {
         $tc = self::encodeJsonColumn($tool_calls);
-        if (self::isProtectedLevel($conv->get('aic_security_level'))) {
-            return self::sealMessageColumns($message_id, $conv, [
-                'aim_content' => $content, 'aim_tool_calls' => $tc,
-            ]);
+        if (!self::isProtectedLevel($conv->get('aic_security_level'))) {
+            AiConversationMessage::updateColumns($message_id,
+                ['aim_content' => $content, 'aim_tool_calls' => $tc] + $plain);
+            return;
         }
-        return ['aim_content' => $content, 'aim_tool_calls' => $tc];
-    }
-
-    /** The content column(s) for a user message. */
-    public static function userColumns(AiConversation $conv, int $message_id, string $content): array {
-        if (self::isProtectedLevel($conv->get('aic_security_level'))) {
-            return self::sealMessageColumns($message_id, $conv, ['aim_content' => $content]);
+        $vault = self::requireVault($conv);
+        $db = DbConnector::get_instance()->get_db_link();
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            AiConversationMessage::sealColumns($message_id, $vault,
+                ['aim_content' => $content, 'aim_tool_calls' => $tc, 'aim_error' => null]);
+            AiConversationMessage::updateColumns($message_id, $plain);
+            if ($own) $db->commit();
+        } catch (Throwable $e) {
+            if ($own && $db->inTransaction()) $db->rollBack();
+            throw $e;
         }
-        return ['aim_content' => $content];
     }
 
     /**
-     * The aim_error column for markFailed/sweep. Reuses the row's existing DEK when
-     * it is already sealed (in-window); mints a fresh DEK for an unsealed
-     * placeholder (public key only). markFailed strings are generic operational
-     * text, so if sealing is impossible the error is stored plaintext rather than
-     * lost — never content ciphertext.
+     * Mark a turn failed with $error, plus the operational columns in $plain.
+     *
+     * On a Private chat the error is content (it can echo provider detail) and
+     * seals like any other column, through save() on a fresh instance. An
+     * unsealed placeholder takes its first DEK from the public key, so that works
+     * with the window closed. A row that is already sealed can only take a new
+     * sealed value under its existing DEK, which needs the window: with the
+     * window closed the error text is dropped and aim_status alone records the
+     * failure. Plaintext never goes into a sealed column.
      */
-    public static function errorColumns(AiConversationMessage $msg, string $error): array {
+    public static function writeFailure(AiConversationMessage $msg, string $error, array $plain): void {
         $conv = new AiConversation((int)$msg->get('aim_aic_conversation_id'), true);
         if (!$conv->key || !self::isProtectedLevel($conv->get('aic_security_level'))) {
-            return ['aim_error' => $error];
+            AiConversationMessage::updateColumns((int)$msg->key, ['aim_error' => $error] + $plain);
+            return;
         }
         try {
-            if ($msg->get('aim_content_sealed') && (string)$msg->get('aim_sealed_key') !== '') {
-                $owner  = (int)$conv->get('aic_owner_user_id');
-                $key = VaultUnlock::secretKey($owner);
-                if ($key === null) throw new VaultLockedException();
-                $crypto = new VaultCrypto();
-                $dek = $crypto->openItemDek((string)$msg->get('aim_sealed_key'), $key);
-                return ['aim_error' => $crypto->sealField($error, $dek, self::messageAd((int)$msg->key, 'aim_error'))];
+            $fresh = new AiConversationMessage((int)$msg->key, true);
+            foreach ($plain as $col => $value) $fresh->set($col, $value);
+            if (!$fresh->rowIsSealed() || self::windowOpenFor((int)$conv->get('aic_owner_user_id'))) {
+                $fresh->set('aim_error', $error);
             }
-            return self::sealMessageColumns((int)$msg->key, $conv, ['aim_error' => $error]);
+            $fresh->save();
         } catch (Throwable $e) {
-            return ['aim_error' => $error];
+            // The failure itself must still land (a turn left RUNNING would spin
+            // until the sweeper reaps it); only the error text is lost.
+            error_log('ChatSeal: could not seal the failure on message ' . (int)$msg->key . ': ' . $e->getMessage());
+            AiConversationMessage::updateColumns((int)$msg->key, $plain);
         }
     }
 
     /**
-     * Re-seal one message content column under the row's EXISTING DEK (in window) —
-     * for a single content rewrite in place (e.g. clearing a dangling pending
-     * action). Standard rows return the plain value. Returns a column => value map.
+     * Write a conversation's title or instructions through save() on a fresh
+     * instance: a Private chat reseals under its existing DEK (callers gate on
+     * lockedForContentEdit() first, since that needs the window) and a Standard
+     * one stores plaintext. Fresh, so the save carries nothing stale beside the
+     * one column.
      */
-    public static function resealMessageColumn(AiConversationMessage $msg, AiConversation $conv, string $column, $plain): array {
-        if (!self::isProtectedLevel($conv->get('aic_security_level'))) {
-            return [$column => self::isJsonColumn($column) ? self::encodeJsonColumn($plain) : $plain];
+    public static function setConversationContent(AiConversation $c, string $column, $value): void {
+        // A chat lowered to Standard whose own row is still sealed opens it back
+        // first; save() at Standard leaves a sealed column alone, and the edit
+        // would vanish.
+        $scope = new ChatConversationLevel($c);
+        if (!$c->isProtected() && in_array(ChatConversationLevel::CONVERSATION_ITEM, $scope->pending(1), true)) {
+            $scope->convertOne(ChatConversationLevel::CONVERSATION_ITEM);
         }
-        $stored = self::isJsonColumn($column) ? self::encodeJsonColumn($plain) : $plain;
-        if ($stored === null || $stored === '') return [$column => $stored];
-        if (!$msg->get('aim_content_sealed') || (string)$msg->get('aim_sealed_key') === '') {
-            return self::sealMessageColumns((int)$msg->key, $conv, [$column => $stored]);
-        }
-        $owner  = (int)$conv->get('aic_owner_user_id');
-        $key = VaultUnlock::secretKey($owner);
-        if ($key === null) throw new VaultLockedException();
-        $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek((string)$msg->get('aim_sealed_key'), $key);
-        return [$column => $crypto->sealField((string)$stored, $dek, self::messageAd((int)$msg->key, $column))];
-    }
-
-    /** Open one sealed message column — behind AiConversationMessage::decryptSealedField(). */
-    public static function openMessageField(int $message_id, int $owner_id, string $sealed_key,
-            string $column, string $ciphertext): string {
-        $key = VaultUnlock::secretKey($owner_id);
-        if ($key === null) throw new VaultLockedException();
-        $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek($sealed_key, $key);
-        return $crypto->openField($ciphertext, $dek, self::messageAd($message_id, $column));
-    }
-
-    // ------------------------------------------------------ conversation sealing
-
-    /** Column map sealing a conversation's title/instructions under a FRESH DEK. */
-    public static function sealConversationColumns(int $conversation_id, AiConversation $c, array $fields): array {
-        $owner = (int)$c->get('aic_owner_user_id');
-        $vault = self::vaultForOwner($owner);
-        if ($vault === null) {
-            throw new RuntimeException('ChatSeal: owner ' . $owner . ' has no vault; a protected chat cannot be sealed.');
-        }
-        if ($conversation_id <= 0) {
-            throw new RuntimeException('ChatSeal: conversation must be persisted before sealing.');
-        }
-        $crypto = new VaultCrypto();
-        $dek = $crypto->newItemDek();
-        $sealed_key = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
-        $cols = array();
-        foreach ($fields as $col => $plain) {
-            $cols[$col] = ($plain === null || $plain === '') ? $plain
-                : $crypto->sealField((string)$plain, $dek, self::conversationAd($conversation_id, self::conversationToken($col)));
-        }
-        $cols['aic_sealed_key'] = $sealed_key;
-        $cols['aic_key_generation'] = (int)$vault->get('uev_key_generation');
-        $cols['aic_content_sealed'] = true;
-        return $cols;
-    }
-
-    /** Re-seal ONE conversation column (title/instructions) under the existing DEK. */
-    public static function resealConversationColumn(AiConversation $c, string $column, $plain): array {
-        if (!self::isProtectedLevel($c->get('aic_security_level'))) {
-            return [$column => $plain];
-        }
-        if ($plain === null || $plain === '') return [$column => $plain];
-        if (!$c->get('aic_content_sealed') || (string)$c->get('aic_sealed_key') === '') {
-            return self::sealConversationColumns((int)$c->key, $c, [$column => $plain]);
-        }
-        $owner  = (int)$c->get('aic_owner_user_id');
-        $key = VaultUnlock::secretKey($owner);
-        if ($key === null) throw new VaultLockedException();
-        $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek((string)$c->get('aic_sealed_key'), $key);
-        return [$column => $crypto->sealField((string)$plain, $dek, self::conversationAd((int)$c->key, self::conversationToken($column)))];
-    }
-
-    /** Open a sealed conversation column — behind AiConversation::decryptSealedField(). */
-    public static function openConversationField(int $conversation_id, int $owner_id, string $sealed_key,
-            string $column, string $ciphertext): string {
-        $key = VaultUnlock::secretKey($owner_id);
-        if ($key === null) throw new VaultLockedException();
-        $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek($sealed_key, $key);
-        return $crypto->openField($ciphertext, $dek, self::conversationAd($conversation_id, self::conversationToken($column)));
+        $fresh = new AiConversation((int)$c->key, true);
+        $fresh->set($column, $value);
+        $fresh->save();
     }
 
     // -------------------------------------------------------- attachment sealing
@@ -314,20 +270,23 @@ class ChatSeal {
 
     /**
      * Seal an attachment's extracted text and/or raw bytes under the OWNING
-     * message's DEK (in window). Returns ['text'=>?string, 'bytes'=>?string] — a
+     * message's DEK: $dek when the caller just minted it, else unwrapped in
+     * window. Returns ['text'=>?string, 'bytes'=>?string] — a
      * null input stays null.
      */
     public static function sealAttachmentUnderMessage(AiConversationMessage $msg, int $attachment_id,
-            ?string $text, ?string $bytes): array {
-        $owner = (int)$msg->get('aim_sealed_owner_user_id');
-        $sealed_key = (string)$msg->get('aim_sealed_key');
-        if ($owner <= 0 || $sealed_key === '') {
-            throw new RuntimeException('ChatSeal: owning message is not sealed; cannot seal its attachment.');
-        }
-        $key = VaultUnlock::secretKey($owner);
-        if ($key === null) throw new VaultLockedException();
+            ?string $text, ?string $bytes, ?string $dek = null): array {
         $crypto = new VaultCrypto();
-        $dek = $crypto->openItemDek($sealed_key, $key);
+        if ($dek === null) {
+            $owner = (int)$msg->get('aim_sealed_owner_user_id');
+            $sealed_key = (string)$msg->get('aim_sealed_key');
+            if ($owner <= 0 || $sealed_key === '') {
+                throw new RuntimeException('ChatSeal: owning message is not sealed; cannot seal its attachment.');
+            }
+            $key = VaultUnlock::secretKey($owner);
+            if ($key === null) throw new VaultLockedException();
+            $dek = $crypto->openItemDek($sealed_key, $key);
+        }
         return [
             'text'  => ($text  === null || $text  === '') ? $text
                        : $crypto->sealField($text, $dek, self::attachmentTextAd((int)$msg->key, $attachment_id)),
@@ -341,23 +300,48 @@ class ChatSeal {
     /**
      * Converge one message to sealed form (Standard→protected backfill). Reads its
      * plaintext columns (Standard = plaintext at rest, no window needed), seals
-     * them under a fresh DEK via one raw UPDATE, then seals each attachment's text
-     * + bytes under that DEK. Idempotent — an already-sealed row is skipped.
+     * the whole row under a fresh DEK, then seals each attachment's text + bytes
+     * under that same DEK — all from the public key, so no window is needed.
+     * Idempotent: a row sealed on an earlier pass whose attachments did not all
+     * follow has those finished under its DEK (unwrapped in window).
      */
     public static function sealExistingMessage(AiConversationMessage $msg, AiConversation $conv): void {
-        if ($msg->get('aim_content_sealed')) return;
-        $content = (string)$msg->get('aim_content');
-        $tool    = (string)$msg->get('aim_tool_calls');       // plain JSON text
-        $error   = (string)$msg->get('aim_error');
-        $cols = self::sealMessageColumns((int)$msg->key, $conv, [
-            'aim_content'        => $content,
-            'aim_tool_calls'     => $tool !== '' ? $tool : null,
-            'aim_error'          => $error !== '' ? $error : null,
-        ]);
-        AiConversationMessage::updateColumns((int)$msg->key, $cols);
-        // Reload so the sealed DEK is in hand for the attachments.
+        // Several drivers can reach one message at once (the page's loop, the
+        // vault's deferred work, a second tab). The first seal holds the row and
+        // re-reads it, so a second driver waits and then finds it sealed: two
+        // first seals would each mint a DEK, and whatever was sealed under the
+        // first would be left under a key the row no longer records. Only the row
+        // write is inside the lock; attachment bytes (not transactional) follow
+        // under the DEK the row now records, so a failure there leaves nothing
+        // under a key the row does not know.
+        $dek = null;
+        $db = DbConnector::get_instance()->get_db_link();
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            $lock = $db->prepare('SELECT aim_content_sealed FROM aim_conversation_messages
+                WHERE aim_conversation_message_id = ? FOR UPDATE');
+            $lock->execute(array((int)$msg->key));
+            $msg->load();
+            if (!$msg->get('aim_content_sealed')) {
+                $content = (string)$msg->get('aim_content');
+                $tool    = (string)$msg->get('aim_tool_calls');       // plain JSON text
+                $error   = (string)$msg->get('aim_error');
+                $dek = AiConversationMessage::sealColumns((int)$msg->key, self::requireVault($conv), [
+                    'aim_content'        => $content,
+                    'aim_tool_calls'     => $tool !== '' ? $tool : null,
+                    'aim_error'          => $error !== '' ? $error : null,
+                ]);
+            }
+            if ($own) $db->commit();
+        } catch (Throwable $e) {
+            if ($own && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
         $msg->load();
-        self::sealExistingAttachments($msg);
+        // A row sealed by this call hands its DEK on; one sealed earlier (or by
+        // another driver just now) has it unwrapped in window.
+        self::sealExistingAttachments($msg, $dek);
     }
 
     /** Reverse: converge a sealed message back to plaintext (→Standard). */
@@ -378,7 +362,7 @@ class ChatSeal {
         ]);
     }
 
-    public static function sealExistingAttachments(AiConversationMessage $msg): void {
+    public static function sealExistingAttachments(AiConversationMessage $msg, ?string $dek = null): void {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachments_class.php'));
         require_once(PathHelper::getIncludePath('data/files_class.php'));
         $links = new MultiAiMessageAttachment(['message_id' => (int)$msg->key, 'deleted' => false], []);
@@ -387,16 +371,30 @@ class ChatSeal {
             if ($link->get('aia_sealed')) continue;
             $text = (string)$link->get('aia_extracted_text');
             $file = new File((int)$link->get('aia_fil_file_id'), true);
-            $bytes = $file->key ? $file->read_bytes('original') : null;
+            $bytes = null;
+            if ($file->key) {
+                $bytes = $file->read_bytes('original');
+                // A read that fails (a cloud error, a missing blob) is not "nothing
+                // to seal": the link stays unsealed and the message in the backlog.
+                if (!is_string($bytes)) {
+                    throw new RuntimeException('ChatSeal: attachment ' . (int)$link->key . ' could not be read to seal.');
+                }
+                // Bytes a pass already sealed (it stopped before the link) are not
+                // sealed a second time.
+                if (strpos($bytes, 'v1.aead.') === 0) {
+                    $bytes = null;
+                }
+            }
             $sealed = self::sealAttachmentUnderMessage($msg, (int)$link->key,
-                $text !== '' ? $text : null, ($bytes === false ? null : $bytes));
+                $text !== '' ? $text : null, $bytes, $dek);
             if ($file->key && $sealed['bytes'] !== null) {
                 // replace_bytes() splits a dedup-shared blob before rewriting, so a
                 // sibling file that deduped onto the same original is never sealed over.
-                if ($file->replace_bytes($sealed['bytes'])) {
-                    $file->set('fil_type', substr((string)$file->get('fil_type'), 0, 128));
-                    $file->save();
+                if (!$file->replace_bytes($sealed['bytes'])) {
+                    throw new RuntimeException('ChatSeal: attachment ' . (int)$link->key . ' could not be sealed.');
                 }
+                $file->set('fil_type', substr((string)$file->get('fil_type'), 0, 128));
+                $file->save();
             }
             AiMessageAttachment::updateColumns((int)$link->key, [
                 'aia_extracted_text' => $sealed['text'],
@@ -416,13 +414,21 @@ class ChatSeal {
             $file = new File((int)$link->get('aia_fil_file_id'), true);
             if ($file->key) {
                 $cipher = $file->read_bytes('original');
-                if ($cipher !== null && $cipher !== false && $cipher !== '') {
-                    try {
-                        $plain_bytes = self::openAttachmentBytes($msg, (int)$link->key, $cipher);
-                        // replace_bytes() writes through the blob (cloud-aware) and
-                        // splits a shared blob first, mirroring the seal path.
-                        $file->replace_bytes($plain_bytes);
-                    } catch (Throwable $e) { /* leave as-is on failure */ }
+                // Bytes still sealed are opened and written back plain; bytes already
+                // plain (a pass that wrote them and stopped before the link) are done.
+                // A read that fails, or any other failure, throws with the link still
+                // marked sealed: the message keeps its DEK and stays in the backlog,
+                // rather than claiming plaintext it does not hold.
+                if (!is_string($cipher)) {
+                    throw new RuntimeException('ChatSeal: attachment ' . (int)$link->key . ' could not be read to open.');
+                }
+                if (strpos($cipher, 'v1.aead.') === 0) {
+                    $plain_bytes = self::openAttachmentBytes($msg, (int)$link->key, $cipher);
+                    // replace_bytes() writes through the blob (cloud-aware) and
+                    // splits a shared blob first, mirroring the seal path.
+                    if (!$file->replace_bytes($plain_bytes)) {
+                        throw new RuntimeException('ChatSeal: attachment ' . (int)$link->key . ' could not be written back.');
+                    }
                 }
             }
             AiMessageAttachment::updateColumns((int)$link->key, [

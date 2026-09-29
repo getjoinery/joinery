@@ -87,10 +87,6 @@ class MailboxFleetShard extends SystemBase {
 		$stmt->execute(array($this->key));
 		return intval($stmt->fetchColumn());
 	}
-
-	public function hasCapacity(): bool {
-		return $this->slotCount() < intval($this->get('mfs_capacity'));
-	}
 }
 
 class MultiMailboxFleetShard extends SystemMultiBase {

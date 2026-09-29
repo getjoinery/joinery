@@ -54,24 +54,25 @@ $conv = new AiConversation(NULL);
 $conv->set('aic_owner_user_id', $uid);
 $conv->set('aic_security_level', AiConversation::LEVEL_PRIVATE);
 $conv->set('aic_model', 'qwen3:4b-instruct');
+$conv->set('aic_title', 'Merger due diligence');   // save() seals both (Private)
+$conv->set('aic_instructions', 'Be terse.');
 $conv->save();
 $conv->load();
 harness_register_row('aic_conversations', 'aic_conversation_id', (int)$conv->key);
-AiConversation::updateColumns((int)$conv->key,
-    ChatSeal::sealConversationColumns((int)$conv->key, $conv,
-        ['aic_title' => 'Merger due diligence', 'aic_instructions' => 'Be terse.']));
 
+// The assistant placeholder carries no content, so it takes no DEK; the
+// worker's finalize mints one. No window is open anywhere in this CLI run, so
+// this is also the "turn finalized with the window closed seals" case.
 $msg = new AiConversationMessage(NULL);
 $msg->set('aim_aic_conversation_id', (int)$conv->key);
 $msg->set('aim_role', AiConversationMessage::ROLE_ASSISTANT);
-$msg->set('aim_content', '');
+$msg->set('aim_status', AiConversationMessage::STATUS_RUNNING);
 $msg->save();
 $msg->load();
 harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$msg->key);
-$turn_cols = ChatSeal::turnColumns($conv, (int)$msg->key, 'The target is undervalued at 4x EBITDA.',
-    [['name' => 'query_model', 'is_error' => false]]);
-$turn_cols['aim_status'] = AiConversationMessage::STATUS_COMPLETE;
-AiConversationMessage::updateColumns((int)$msg->key, $turn_cols);
+$placeholder_unsealed = !$msg->rowIsSealed();
+ChatSeal::finalizeTurn($conv, (int)$msg->key, 'The target is undervalued at 4x EBITDA.',
+    [['name' => 'query_model', 'is_error' => false]], ['aim_status' => AiConversationMessage::STATUS_COMPLETE]);
 
 // ---- Seal at rest: raw SQL shows ciphertext ------------------------------
 section('Seal at rest');
@@ -91,6 +92,82 @@ check((string)$raw_msg['aim_sealed_key'] !== '', 'aim_sealed_key is populated');
 check((int)$raw_msg['aim_content_sealed'] === 1 || $raw_msg['aim_content_sealed'] === true || $raw_msg['aim_content_sealed'] === 't', 'aim_content_sealed marked');
 check((int)$raw_msg['aim_sealed_owner_user_id'] === $uid, 'aim_sealed_owner_user_id records the owner');
 check((int)$raw_msg['aim_key_generation'] === 1, 'aim_key_generation matches the vault generation');
+check($placeholder_unsealed, 'an assistant placeholder with no content takes no DEK');
+check(VaultUnlock::secretKey($uid) === null && $raw_msg['aim_status'] === AiConversationMessage::STATUS_COMPLETE,
+    'a turn finalized with the window closed seals, and its status lands with it');
+check(strpos((string)$raw_conv['aic_instructions'], 'v1.aead.') === 0, 'aic_instructions is ciphertext at rest');
+
+// ---- Seal on save: a new row with content seals once, no window ---------
+section('Seal on save');
+$um = new AiConversationMessage(NULL);
+$um->set('aim_aic_conversation_id', (int)$conv->key);
+$um->set('aim_role', AiConversationMessage::ROLE_USER);
+$um->set('aim_content', 'What is the downside case?');
+$um->save();
+harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$um->key);
+$raw_um = (function () use ($db, $um) {
+    $s = $db->prepare('SELECT * FROM aim_conversation_messages WHERE aim_conversation_message_id = ?');
+    $s->execute([(int)$um->key]); return $s->fetch(PDO::FETCH_ASSOC);
+})();
+check(strpos((string)$raw_um['aim_content'], 'v1.aead.') === 0 && (string)$raw_um['aim_sealed_key'] !== ''
+    && (int)$raw_um['aim_sealed_owner_user_id'] === $uid,
+    'a new message saved once with content on a Private chat seals at rest with no window');
+$um_dek = $crypto->openItemDek((string)$raw_um['aim_sealed_key'], vault_fixture_key($kp1['secret']));
+check($crypto->openField((string)$raw_um['aim_content'], $um_dek, 'chat:' . (int)$um->key . ':aim_content')
+    === 'What is the downside case?', 'it opens under the chat:{id}:{column} AD every stored row carries');
+$em = new AiConversationMessage(NULL);
+$em->set('aim_aic_conversation_id', (int)$conv->key);
+$em->set('aim_role', AiConversationMessage::ROLE_USER);
+$em->set('aim_content', '');
+$em->save();
+harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$em->key);
+$em_row = new AiConversationMessage((int)$em->key, TRUE);
+check($em_row->rowIsSealed() && (string)$em_row->get('aim_content') === '',
+    'an attachments-only (empty) user message on a Private chat still gets the DEK its attachments seal under');
+// A Private chat whose owner has no vault is refused, never stored in the clear.
+$novault_user = make_user('ChatEncNoVault');
+$nv_conv = new AiConversation(NULL);
+$nv_conv->set('aic_owner_user_id', (int)$novault_user->key);
+$nv_conv->set('aic_security_level', AiConversation::LEVEL_PRIVATE);
+$nv_conv->set('aic_title', 'must not land in the clear');
+$nv_refused = false;
+try { $nv_conv->save(); } catch (RuntimeException $e) { $nv_refused = true; }
+if ($nv_conv->key) harness_register_row('aic_conversations', 'aic_conversation_id', (int)$nv_conv->key);
+$nv_rows = (int)$db->query("SELECT COUNT(*) FROM aic_conversations WHERE aic_title = 'must not land in the clear'")->fetchColumn();
+check($nv_refused && $nv_rows === 0, 'a Private chat whose owner has no vault refuses to save its title in the clear');
+
+// ---- A failure on a locked sealed row never writes plaintext ------------
+section('Failure while locked');
+// Unsealed placeholder: the error takes the row's first DEK from the public key.
+$fp = new AiConversationMessage(NULL);
+$fp->set('aim_aic_conversation_id', (int)$conv->key);
+$fp->set('aim_role', AiConversationMessage::ROLE_ASSISTANT);
+$fp->set('aim_status', AiConversationMessage::STATUS_RUNNING);
+$fp->save();
+$fp->load();
+harness_register_row('aim_conversation_messages', 'aim_conversation_message_id', (int)$fp->key);
+ChatTurn::markFailed($fp, 'Provider said: quota exceeded for key sk-live-abc');
+$raw_fp = $db->query('SELECT * FROM aim_conversation_messages WHERE aim_conversation_message_id = ' . (int)$fp->key)->fetch(PDO::FETCH_ASSOC);
+check($raw_fp['aim_status'] === AiConversationMessage::STATUS_FAILED
+    && strpos((string)$raw_fp['aim_error'], 'v1.aead.') === 0,
+    'a placeholder failed with the window closed seals its error (first DEK from the public key)');
+// Already-sealed row (the finalized turn): its DEK needs the window, so the
+// error text is dropped and the status alone records the failure.
+AiConversationMessage::updateColumns((int)$msg->key, ['aim_status' => AiConversationMessage::STATUS_RUNNING]);
+$before_key = (string)$raw_msg['aim_sealed_key'];
+ChatTurn::markFailed(new AiConversationMessage((int)$msg->key, TRUE), 'Provider said: something private');
+$raw_locked = $db->query('SELECT * FROM aim_conversation_messages WHERE aim_conversation_message_id = ' . (int)$msg->key)->fetch(PDO::FETCH_ASSOC);
+check($raw_locked['aim_status'] === AiConversationMessage::STATUS_FAILED
+    && ($raw_locked['aim_error'] === null || $raw_locked['aim_error'] === ''),
+    'a sealed row failed with the window closed records the failure and writes no plaintext error');
+check((string)$raw_locked['aim_sealed_key'] === $before_key
+    && (string)$raw_locked['aim_content'] === (string)$raw_msg['aim_content'],
+    'and its DEK and sealed content are untouched');
+$locked_read = new AiConversationMessage((int)$msg->key, TRUE);
+$read_ok = false;
+try { $locked_read->get('aim_error'); $read_ok = true; } catch (Throwable $e) {}
+check($read_ok, 'the failed row still reads (no plaintext in a sealed column to trip the generic read)');
+AiConversationMessage::updateColumns((int)$msg->key, ['aim_status' => AiConversationMessage::STATUS_COMPLETE]);
 
 // ---- Crypto roundtrip (opens directly with the secret) -------------------
 section('Crypto roundtrip');
@@ -437,6 +514,25 @@ if (!vault_apcu_usable() || !$has_session || session_id() === '') {
     $shared = VaultUnlock::secretKey($uid, UserEncryptionVault::SCOPE_USER);
     check($shared instanceof VaultKey && $shared->id() === vault_fixture_key($kp2['secret'])->id(),
         'the one open window serves every server-custody consumer (mail + chat share it)');
+    // A rename reseals through save() under the conversation's existing DEK:
+    // the key wrapping stays, the other sealed column still opens.
+    $key_before = (string)$db->query('SELECT aic_sealed_key FROM aic_conversations WHERE aic_conversation_id = '
+        . (int)$conv->key)->fetchColumn();
+    ChatSeal::setConversationContent($c2, 'aic_title', 'Merger — phase two');
+    $c3 = new AiConversation((int)$conv->key, TRUE);
+    $raw_title = (string)$db->query('SELECT aic_title FROM aic_conversations WHERE aic_conversation_id = '
+        . (int)$conv->key)->fetchColumn();
+    check((string)$c3->get('aic_title') === 'Merger — phase two' && strpos($raw_title, 'v1.aead.') === 0
+        && (string)$c3->get('aic_instructions') === 'Be terse.'
+        && (string)$c3->get('aic_sealed_key') === $key_before,
+        'a rename in-window reseals the title under the existing DEK; instructions still open');
+    // A failure on a sealed row with the window open seals the error under the row's DEK.
+    AiConversationMessage::updateColumns((int)$msg->key, ['aim_status' => AiConversationMessage::STATUS_RUNNING]);
+    ChatTurn::markFailed(new AiConversationMessage((int)$msg->key, TRUE), 'Provider said: rate limited');
+    $m3 = new AiConversationMessage((int)$msg->key, TRUE);
+    check((string)$m3->get('aim_error') === 'Provider said: rate limited'
+        && (string)$m3->get('aim_content') === 'The target is undervalued at 4x EBITDA.',
+        'a sealed row failed with the window open seals its error beside the content it already had');
     VaultUnlock::close($uid, UserEncryptionVault::SCOPE_USER);
 }
 

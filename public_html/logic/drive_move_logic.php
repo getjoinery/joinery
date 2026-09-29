@@ -131,7 +131,7 @@ function drive_move_logic(array $input): LogicResult {
 					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id));
 			}
 			$plain_bytes = $entity->plain_size_bytes();
-			if ($plain_bytes > DriveSealed::TRANSITION_BYTE_BUDGET) {
+			if ($plain_bytes > ProtectionLevelChange::BYTE_BUDGET) {
 				return LogicResult::error('That file is too large to convert during a move. Move it with its folder, or change the folder\'s protection level.');
 			}
 			// Private carries no public link and no member grant. A folder-wide

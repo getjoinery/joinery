@@ -1389,12 +1389,34 @@ class SessionControl{
 		if ($this->has_recent_second_factor($ttl)) {
 			return null;
 		}
+		return self::stepup_redirect($return_url);
+	}
+
+	/**
+	 * The redirect to the step-up ceremony, for a caller that has already decided
+	 * a confirmation is needed (a ProtectionLevelChange STEPUP verdict): it does
+	 * not judge again, so the answer cannot change between two checks.
+	 *
+	 * @return LogicResult
+	 */
+	public static function stepup_redirect(string $return_url) {
 		require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-		// Only same-site relative returns (leading single slash) — never an open redirect.
-		if ($return_url === '' || $return_url[0] !== '/' || (isset($return_url[1]) && $return_url[1] === '/')) {
-			$return_url = '/profile';
+		return LogicResult::redirect('/verify-stepup?return=' . rawurlencode(self::same_site_return($return_url)));
+	}
+
+	/**
+	 * A return path that stays on this site: one leading slash, not followed by
+	 * a slash, and no backslash, control character or space anywhere. Browsers
+	 * read `/\host` as `//host` and drop tabs and newlines inside a URL, so
+	 * `/<tab>/host` is another site too. Anything else comes back as /profile.
+	 */
+	public static function same_site_return(string $return_url): string {
+		if ($return_url === '' || $return_url[0] !== '/'
+				|| (isset($return_url[1]) && $return_url[1] === '/')
+				|| preg_match('/[\x00-\x20\x7f\\\\]/', $return_url)) {
+			return '/profile';
 		}
-		return LogicResult::redirect('/verify-stepup?return=' . rawurlencode($return_url));
+		return $return_url;
 	}
 
 	function get_permission() {

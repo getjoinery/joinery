@@ -126,19 +126,16 @@ function mailbox_setup_scoped_rows(int $alias_id, string $relay_advanced_url = '
 		}
 	}
 
-	// The relay reads as two cards among the checks — one per side of the
-	// mail path — rather than a section of its own above everything. Grey
-	// and optional until a relay exists; its health once one does. The
-	// receiving card only applies to mail this deployment actually receives,
-	// so an IMAP-pull mailbox gets the sending card alone.
-	// ...and only where a relay is this mailbox's business at all.
-	if ($needs_relay) {
+	// The relay reads as one card among the Receiving checks rather than a
+	// section of its own above everything. Grey and optional until a relay
+	// exists; its health once one does. It applies only to mail this
+	// deployment actually receives (an IMAP-pull mailbox has none), and only
+	// where a relay is this mailbox's business at all. The relay is inbound
+	// only, so it has no Sending card.
+	if ($needs_relay && $arrival !== 'imap') {
 		$relay_cards = admin_mailbox_relay_check_rows($relay_advanced_url);
-		if ($arrival !== 'imap' && $relay_cards['receiving'] !== null) {
+		if ($relay_cards['receiving'] !== null) {
 			$receiving_rows[] = $relay_cards['receiving'];
-		}
-		if ($relay_cards['sending'] !== null) {
-			$forwarding_rows[] = $relay_cards['sending'];
 		}
 	}
 

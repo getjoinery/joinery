@@ -168,16 +168,16 @@ class ChatLevel {
     }
 
     /**
-     * Change an existing conversation's level, converging its stored content
-     * (specs/joinery_ai_chat_encryption.md § Phase 6 backfill). Raising to a
-     * protected level seals title/instructions + every message + attachment under
-     * fresh DEKs (idempotent — already-sealed rows are skipped); sealing needs
-     * only the public key. Lowering to Standard decrypts everything back to
-     * plaintext and so requires an open window. Raising to Private restores a
-     * Local models only add-on the chat already carries (the flag is one-way and
-     * stays stored while the chat is Standard), so that raise also requires a
-     * local model and re-pins the chat's model to one. Returns
-     * ['ok'=>bool, 'error'=>?string, 'level'=>string].
+     * Change an existing conversation's level (specs/joinery_ai_chat_encryption.md
+     * § Phase 6). The sequence and its security rules are ProtectionLevelChange's:
+     * a recent second factor for an owner who has one, the prerequisites
+     * (ChatConversationLevel::blockers()), lowering only with the owner's window
+     * open, and the level flipped FIRST. One bounded converge pass runs here so a
+     * short chat is done at once; a longer one reports `remaining`, and the page
+     * drives chat_level_batch until nothing is left.
+     *
+     * Returns ['ok'=>bool, 'error'=>?string, 'requires_stepup'=>?bool,
+     *          'level'=>string, 'remaining'=>int].
      */
     public static function changeLevel(AiConversation $c, string $target, int $uid): array {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
@@ -186,66 +186,48 @@ class ChatLevel {
         if (!in_array($target, ChatSeal::levels(), true)) {
             return ['ok' => false, 'error' => 'Invalid privacy level.'];
         }
-        $owner = (int)$c->get('aic_owner_user_id');
-        if ($owner !== $uid) return ['ok' => false, 'error' => 'Not your chat.'];
+        if ((int)$c->get('aic_owner_user_id') !== $uid) return ['ok' => false, 'error' => 'Not your chat.'];
 
-        $current = $c->level();
-        // An unconverted legacy row is rewritten in the current shape on any
-        // level write, so the flag it implied is never lost.
-        $legacy_cols = ((string)$c->get('aic_security_level') === AiConversation::LEGACY_LEVEL_LOCAL_ONLY)
-            ? ['aic_local_models_only' => true] : [];
-        $target_protected  = ChatSeal::isProtectedLevel($target);
-        $current_protected = ChatSeal::isProtectedLevel($current);
-
-        // Prerequisites.
-        if ($target_protected && !ChatSeal::ownerHasVault($owner)) {
-            return ['ok' => false, 'error' => 'Set up your encryption vault first (in your security settings) to make a chat private.'];
-        }
-        $pin_local = $target_protected && $c->localModelsOnlyFlag();
-        if ($pin_local && !self::localModelConfigured()) {
-            return ['ok' => false, 'error' => 'This chat is set to Local models only — configure a local model in Joinery AI settings to make it Private again.'];
-        }
-        // Reading sealed content to unseal (or to reseal a locked protected chat)
-        // needs the window.
-        if ($current_protected && !ChatSeal::windowOpenFor($owner)) {
-            return ['ok' => false, 'error' => 'Unlock your vault to change this protected chat’s privacy.'];
-        }
-        // A level change must not race an in-flight turn: the worker finalizes
-        // with the level it captured at turn start, so converging the rows under
-        // it would leave a plaintext turn on a sealed chat (or a sealed row on a
-        // Standard one). Reap a stale runner first so a dead worker can't block
-        // the change forever.
-        if ($current !== $target && self::hasRunningTurn($c)) {
-            return ['ok' => false, 'error' => 'Wait for the current reply to finish before changing this chat’s privacy.'];
-        }
-
-        if ($current === $target) {
-            // No content transition; a local-only no-op still ensures the model pin.
-            $cols = $legacy_cols ? $legacy_cols + ['aic_security_level' => $target] : [];
+        if ($c->level() === $target) {
+            // No content transition. An unconverted legacy row is rewritten in the
+            // current shape, and a local-only chat still gets its model pin.
+            $pin_local = ChatSeal::isProtectedLevel($target) && $c->localModelsOnlyFlag();
+            if ($pin_local && !self::localModelConfigured()) {
+                return ['ok' => false, 'error' => 'This chat is set to Local models only — configure a local model in Joinery AI settings to make it Private again.'];
+            }
+            $cols = ((string)$c->get('aic_security_level') === AiConversation::LEGACY_LEVEL_LOCAL_ONLY)
+                ? ['aic_security_level' => $target, 'aic_local_models_only' => true] : [];
             if ($pin_local && !self::isLocalModel((string)$c->get('aic_model'))) {
                 $cols['aic_model'] = self::localDefaultModel();
             }
             if ($cols) AiConversation::updateColumns((int)$c->key, $cols);
-            return ['ok' => true, 'level' => $target];
+            // A change that stopped part-way resumes here too.
+            $scope = new ChatConversationLevel($c);
+            $remaining = $scope->remaining();
+            if ($remaining > 0) {
+                $remaining = ProtectionLevelChange::convergeBatch($scope)['remaining'];
+            }
+            return ['ok' => true, 'level' => $target, 'remaining' => $remaining];
         }
 
-        try {
-            if (!$current_protected && $target_protected) {
-                self::sealConversationBackfill($c);
-            } elseif ($current_protected && !$target_protected) {
-                self::unsealConversationBackfill($c);
-            }
-
-            $final = ['aic_security_level' => $target] + $legacy_cols;
-            if ($pin_local && !self::isLocalModel((string)$c->get('aic_model'))) {
-                $final['aic_model'] = self::localDefaultModel();
-            }
-            AiConversation::updateColumns((int)$c->key, $final);
-        } catch (Throwable $e) {
-            error_log('[joinery_ai chat] level change failed for conversation ' . $c->key . ': ' . $e->getMessage());
-            return ['ok' => false, 'error' => 'Could not change this chat’s privacy — please try again.'];
+        // A level change must not race an in-flight turn: the worker finalizes
+        // with the level it captured at turn start, so a flip under it would leave
+        // a plaintext turn on a sealed chat (or a sealed row on a Standard one).
+        // Reap a stale runner first so a dead worker can't block the change forever.
+        if (self::hasRunningTurn($c)) {
+            return ['ok' => false, 'error' => 'Wait for the current reply to finish before changing this chat’s privacy.'];
         }
-        return ['ok' => true, 'level' => $target];
+
+        $scope = new ChatConversationLevel($c);
+        $change = ProtectionLevelChange::change($scope, $target, $uid);
+        if ($change['status'] === ProtectionLevelChange::STEPUP) {
+            return ['ok' => false, 'error' => $change['error'], 'requires_stepup' => true];
+        }
+        if ($change['status'] !== ProtectionLevelChange::OK) {
+            return ['ok' => false, 'error' => $change['error']];
+        }
+        $pass = ProtectionLevelChange::convergeBatch($scope);
+        return ['ok' => true, 'level' => $target, 'remaining' => $pass['remaining']];
     }
 
     /** Whether the conversation has a RUNNING assistant turn (a live worker that
@@ -262,43 +244,5 @@ class ChatLevel {
         }
         return false;
     }
-
-    /** Seal a Standard conversation's stored content (title/instructions + every
-     *  message + attachment). Idempotent per row. */
-    private static function sealConversationBackfill(AiConversation $c): void {
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
-        if (!$c->get('aic_content_sealed')) {
-            $title = (string)$c->get('aic_title');
-            $instr = (string)$c->get('aic_instructions');
-            AiConversation::updateColumns((int)$c->key,
-                ChatSeal::sealConversationColumns((int)$c->key, $c, ['aic_title' => $title, 'aic_instructions' => $instr]));
-            $c->load();
-        }
-        $rows = new MultiAiConversationMessage(
-            ['conversation_id' => (int)$c->key, 'deleted' => false], ['aim_conversation_message_id' => 'ASC']);
-        $rows->load();
-        foreach ($rows as $m) ChatSeal::sealExistingMessage($m, $c);
-    }
-
-    /** Reverse: decrypt a protected conversation's content back to plaintext. */
-    private static function unsealConversationBackfill(AiConversation $c): void {
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
-        $rows = new MultiAiConversationMessage(
-            ['conversation_id' => (int)$c->key, 'deleted' => false], ['aim_conversation_message_id' => 'ASC']);
-        $rows->load();
-        foreach ($rows as $m) ChatSeal::unsealExistingMessage($m);
-
-        if ($c->get('aic_content_sealed')) {
-            $title = (string)$c->get('aic_title');           // get() decrypts in-window
-            $instr = (string)$c->get('aic_instructions');
-            AiConversation::updateColumns((int)$c->key, [
-                'aic_title'          => $title,
-                'aic_instructions'   => $instr,
-                'aic_content_sealed' => false,
-                'aic_sealed_key'     => null,
-                'aic_key_generation' => 0,
-            ]);
-            $c->load();
-        }
-    }
 }
+

@@ -41,9 +41,6 @@ class DriveSealed {
 	/** fil_source tag whose files this consumer owns the decryption of. */
 	const SOURCE = 'drive';
 
-	/** Bytes re-encrypted per batch during a level change (see runTransitionBatch). */
-	const TRANSITION_BYTE_BUDGET = 67108864; // 64 MB
-
 	// ------------------------------------------------------------------
 	// Keys
 	// ------------------------------------------------------------------
@@ -433,7 +430,8 @@ class DriveSealed {
 	 * the truth about its bytes. Right after a level change those disagree for
 	 * everything already inside, and this is the count of the disagreement. New
 	 * uploads land at the folder's level immediately, so the backlog only
-	 * shrinks.
+	 * shrinks. A Fortress file is never the server's to convert, so it never
+	 * counts.
 	 */
 	public static function transitionBacklog($folder_id, $target_level) {
 		require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
@@ -443,78 +441,11 @@ class DriveSealed {
 			"SELECT COUNT(*), COALESCE(SUM(COALESCE(fil_plain_size_bytes, fbb_size_bytes)), 0)
 			 FROM fil_files LEFT JOIN fbb_file_blobs ON fbb_file_blob_id = fil_fbb_file_blob_id
 			 WHERE fil_fol_folder_id IN (" . DriveHelper::int_in_list($ids) . ")
-			   AND fil_protection_level <> ? AND fil_delete_time IS NULL");
+			   AND fil_protection_level <> ? AND fil_protection_level <> '" . ProtectionLevel::FORTRESS . "'
+			   AND fil_delete_time IS NULL");
 		$stmt->execute(array($target_level));
 		$row = $stmt->fetch(PDO::FETCH_NUM);
 		return array('files' => (int)$row[0], 'bytes' => (int)$row[1]);
-	}
-
-	/**
-	 * Convert one bounded batch of a subtree's files to $target_level.
-	 *
-	 * BYTE-budgeted, not row-counted. Mail's 200-row batches are safe because a
-	 * message is capped at 25 MB; a Drive batch of 200 rows could be a terabyte.
-	 * The budget is checked after each file so one oversized file still makes
-	 * progress rather than deadlocking the loop.
-	 *
-	 * Raising (-> private) needs only the owner's public key, so it runs from any
-	 * owner session. Lowering (-> standard) decrypts, so it needs the owner's
-	 * window; a closed vault raises VaultLockedException and the caller says so.
-	 *
-	 * A single file that fails is logged and left in the backlog rather than
-	 * failing the batch — otherwise one unreadable file would block the whole
-	 * folder forever. The caller detects "a pass converted nothing" and stops.
-	 *
-	 * @return array{converted:int, failed:int, bytes:int, remaining:int}
-	 */
-	public static function runTransitionBatch($folder_id, $target_level, $byte_budget = null) {
-		require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
-		$byte_budget = ($byte_budget === null) ? self::TRANSITION_BYTE_BUDGET : (int)$byte_budget;
-		$ids = self::subtreeFolderIds($folder_id);
-
-		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare(
-			"SELECT fil_file_id FROM fil_files
-			 WHERE fil_fol_folder_id IN (" . DriveHelper::int_in_list($ids) . ")
-			   AND fil_protection_level <> ? AND fil_delete_time IS NULL
-			 ORDER BY fil_file_id ASC LIMIT 500");
-		$stmt->execute(array($target_level));
-		$file_ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-		$converted = 0;
-		$failed = 0;
-		$bytes = 0;
-		foreach ($file_ids as $fid) {
-			$file = DriveHelper::load_file((int)$fid);
-			if (!$file) {
-				continue;
-			}
-			if ($file->is_encrypted()) {
-				continue; // Fortress never converts server-side (doctrine D2)
-			}
-			try {
-				$bytes += ($target_level === ProtectionLevel::PRIVATE_)
-					? self::sealExistingFile($file)
-					: self::unsealExistingFile($file);
-				$converted++;
-			} catch (VaultLockedException $e) {
-				throw $e; // the whole pass needs the window; say so once
-			} catch (Throwable $e) {
-				$failed++;
-				error_log('Drive level change: file ' . (int)$fid . ' could not be converted: ' . $e->getMessage());
-			}
-			if ($bytes >= $byte_budget) {
-				break;
-			}
-		}
-
-		$backlog = self::transitionBacklog($folder_id, $target_level);
-		return array(
-			'converted' => $converted,
-			'failed'    => $failed,
-			'bytes'     => $bytes,
-			'remaining' => $backlog['files'],
-		);
 	}
 
 	/** A folder and every folder beneath it. */
@@ -806,6 +737,20 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 // key — the client-custody scope — so rotating that key re-seals the grants in
 // the browser (assets/js/drive-reseal.js, through drive_key_grants_reseal).
 VaultUnlock::clientReseal('drive', array(), array('assets/js/drive-reseal.js'));
+
+// A folder whose level changed converges in bounded batches; the dialog drives
+// them while it is open, and this finishes whatever it did not, in the owner's
+// window (DriveFolderLevel).
+require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
+VaultDeferredWork::register(
+	'drive_level',
+	function (int $user_id): bool {
+		return DriveFolderLevel::hasWork($user_id);
+	},
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return DriveFolderLevel::drain($user_id, $deadline);
+	}
+);
 
 // No onWipe callback: a Private file keeps no in-window plaintext working copy —
 // every read streams from the container and nothing is cached. When content

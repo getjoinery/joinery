@@ -17,8 +17,6 @@
  *   page can offer the setup step rather than a Connect button that cannot work.
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 function admin_mailbox_accounts_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));

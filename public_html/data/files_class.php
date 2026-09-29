@@ -45,7 +45,9 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.13.0
+ * @version 1.14.0
+ * @changelog 1.14.0 - fil_level_attempt_time: a folder's level change passes a file that failed
+ *   to convert by for a while
  * @changelog 1.13.0 - SOURCE_PROBLEM_REPORT and SOURCE_BUG_REPORT_IMAGE: images
  *   attached to problem reports, sent and received (specs/implemented/bug_reports.md).
  * @changelog 1.12.0 - get_url() always mints a local /uploads/* URL: a public
@@ -283,6 +285,10 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    //             the real name, MIME type and thumbnail live in the
 	    //             FK-encrypted metadata blob below.
 	    'fil_protection_level' => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'standard'),
+	    // When converting this file to its folder's new level last failed
+	    // (DriveFolderLevel): passes take the files behind it for a while, and
+	    // the vault's deferred work does not wake for it until then.
+	    'fil_level_attempt_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	    // Layer 0 sealed-columns wrapping (docs/sealed_vault.md), used at the
 	    // private level only. $sealed_fields is deliberately empty: no DB column
 	    // here holds ciphertext — the per-file key exists to seal the BLOB and

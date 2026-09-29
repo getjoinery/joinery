@@ -81,8 +81,9 @@ never open another's key.
    documented, not solved).
 4. **Unlock.** The vault's client-custody unlock — a browser-derived KEK, the
    secret key held only in the tab's memory for the page lifetime (client-custody
-   has no server unlock window). Drive's unlock is its own: it does not open the
-   password vault and does not touch the server-custody mail/chat key.
+   has no server unlock window). Drive's key is its own: one touch opens it through
+   the root vault, but it opens neither the password vault's key nor the
+   server-custody account vault's (Private mail and chat).
 
 WebCrypto provides AES-GCM and X25519 natively; the only dependency is the
 Argon2id WASM module for the passphrase KDF, which is the **vault's shared

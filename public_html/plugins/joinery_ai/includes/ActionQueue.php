@@ -584,17 +584,15 @@ class ActionQueue {
                 $text = $open . '. Result: ' . self::boundResult($summary, false) . ']';
             }
 
+            // save() seals the text on a protected conversation (public key only,
+            // so this works with the owner's window closed).
             $msg = new AiConversationMessage(NULL);
             $msg->set('aim_aic_conversation_id', $conv_id);
             $msg->set('aim_role', AiConversationMessage::ROLE_EVENT);
             $msg->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
             $msg->set('aim_create_time', gmdate('Y-m-d H:i:s'));
+            $msg->set('aim_content', $text);
             $msg->save();
-            $msg->load();
-
-            require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
-            $cols = ChatSeal::userColumns($conversation, (int)$msg->key, $text);
-            AiConversationMessage::updateColumns((int)$msg->key, $cols);
             AiConversation::updateColumns($conv_id, [
                 'aic_update_time' => gmdate('Y-m-d H:i:s'),
             ]);

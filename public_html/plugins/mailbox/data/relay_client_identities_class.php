@@ -109,23 +109,6 @@ class RelayClientIdentity extends SystemBase {
 		}
 	}
 
-	/**
-	 * Rotate: retire the active identity and mint a fresh one. The relay's
-	 * registry still holds the old public key until an update re-images it
-	 * (self-hosted) or the operator re-registers the tenant (fleet), so this is
-	 * an act to pair with one of those, never a routine one.
-	 */
-	public static function rotate(string $kind): RelayClientIdentity {
-		$previous = self::forKind($kind);
-		$fresh = self::mint($kind);
-		if ($previous !== null) {
-			$previous->set('rci_is_active', false);
-			$previous->save();
-		}
-		unset(self::$cache[$kind]);
-		return $fresh;
-	}
-
 	private static function mint(string $kind): RelayClientIdentity {
 		self::assertKind($kind);
 		$pair   = sodium_crypto_sign_keypair();

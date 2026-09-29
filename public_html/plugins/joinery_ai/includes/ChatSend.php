@@ -84,45 +84,39 @@ class ChatSend {
     }
 
     /**
-     * Persist a freshly built conversation, then seal its title/instructions
-     * under a fresh DEK once the id (which the AD binds to) exists. A Standard
-     * chat's title was already set in memory by buildNewConversation().
+     * Persist a freshly built conversation. On a Private chat save() seals the
+     * title/instructions under a fresh DEK once the id (which the AD binds to)
+     * exists; a Standard chat's title was already set in memory by
+     * buildNewConversation().
      */
     public static function persistNewConversation(AiConversation $c, bool $protected,
             string $title, string $instructions): void {
+        if ($protected) {
+            $c->set('aic_title', $title);
+            $c->set('aic_instructions', $instructions);
+        }
         $c->prepare();
         $c->save();
-        $c->load();
-        if ($protected) {
-            AiConversation::updateColumns((int)$c->key,
-                ChatSeal::sealConversationColumns((int)$c->key, $c, [
-                    'aic_title'        => $title,
-                    'aic_instructions' => $instructions,
-                ]));
-            $c->load();   // refresh so get('aic_title') decrypts in-window
-        }
+        $c->load();   // refresh so get('aic_title') decrypts in-window
     }
 
     /**
      * Persist the user's message (complete on insert; content may be empty when
-     * the turn is attachments-only). On a protected chat the row is inserted
-     * empty and its content sealed under a per-message DEK afterward — the AD
-     * needs the row id, and no plaintext prompt ever lands at rest. Returns the
-     * loaded row (sealed columns decrypt in-window on read).
+     * the turn is attachments-only). On a protected chat save() inserts the row
+     * with its content column empty and seals the content under a fresh
+     * per-message DEK in the same transaction — the AD needs the row id, and no
+     * plaintext prompt ever lands at rest. The row gets its DEK even when the
+     * content is empty, since its attachments seal under it. Returns the loaded
+     * row (sealed columns decrypt in-window on read).
      */
     public static function persistUserMessage(AiConversation $c, bool $protected, string $message): AiConversationMessage {
         $m = new AiConversationMessage(NULL);
         $m->set('aim_aic_conversation_id', (int)$c->key);
         $m->set('aim_role', AiConversationMessage::ROLE_USER);
-        $m->set('aim_content', $protected ? '' : $message);
+        $m->set('aim_content', $message);
         $m->prepare();
         $m->save();
         $m->load();
-        if ($protected) {
-            AiConversationMessage::updateColumns((int)$m->key,
-                ChatSeal::userColumns($c, (int)$m->key, $message));
-            $m->load();   // refresh so the serializer/renderer reads sealed→decrypt
-        }
         return $m;
     }
 }

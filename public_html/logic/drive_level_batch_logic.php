@@ -15,11 +15,6 @@
 
 function drive_level_batch_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
-	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-	// DriveSealed is the drive_sealed consumer bootstrap — it loads only through
-	// the loader, so its registrations attribute to the consumer.
-	VaultUnlock::loadConsumerBootstraps();
 
 	$settings = Globalvars::get_instance();
 	$session  = SessionControl::get_instance();
@@ -44,17 +39,15 @@ function drive_level_batch_logic(array $input): LogicResult {
 	// The target is the folder's CURRENT level, never a parameter: the promise was
 	// already made by drive_level_change, and this action only catches the files
 	// up to it. A caller cannot use this to convert a tree somewhere else.
-	$target = DriveHelper::folder_level($folder);
-
-	try {
-		$result = DriveSealed::runTransitionBatch($folder_id, $target);
-	} catch (VaultLockedException $e) {
+	$scope = new DriveFolderLevel($folder, $user_id);
+	$result = ProtectionLevelChange::convergeBatch($scope);
+	if ($result['locked']) {
 		return LogicResult::error('Unlock your vault to keep converting these files.');
 	}
 
 	return LogicResult::render(array(
 		'ok'               => true,
-		'protection_level' => $target,
+		'protection_level' => $scope->currentLevel(),
 		'converted'        => $result['converted'],
 		'failed'           => $result['failed'],
 		'bytes'            => $result['bytes'],
