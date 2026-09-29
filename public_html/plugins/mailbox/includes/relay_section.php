@@ -11,6 +11,7 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.11 - a lasting "Last tested" line: the relay's answer and the leak test's result
  * @version 2.10 - while an update re-images the relay, the health line says so instead of failing
  * @version 2.9 - a failed update or creation shows its reason, with Dismiss, while a relay exists
  * @version 2.8 - "Details"; Delete relay only once the relay is disabled, in the Disable button's place
@@ -308,6 +309,52 @@ function mailbox_relay_notice_html(): string {
 		. htmlspecialchars((string)$notice['message']) . '</div>';
 }
 
+/** How long a leak test message may take to come back before the line says it did not. */
+const MAILBOX_RELAY_TEST_RETURN_MINUTES = 10;
+
+/**
+ * The result of the last Test Relay Health, lasting: when it ran, what the relay
+ * answered (reachable, and its spam scanner when spam filtering is on), and the
+ * leak test — the message it sent out and back — as waiting, passed, failed, or
+ * not back after MAILBOX_RELAY_TEST_RETURN_MINUTES. Empty when never run.
+ */
+function mailbox_relay_last_test_html($relay): string {
+	$tested = trim((string)$relay->get('mrl_last_test_time'));
+	if ($tested === '') {
+		return '';
+	}
+	$tested_ts = strtotime($tested . ' UTC');
+	$health = $relay->lastHealth();
+	$scanning = Globalvars::get_instance()->get_setting('mailbox_spam_filtering_enabled');
+	if ($health === null) {
+		$answer = 'the relay did not answer';
+	} elseif (($health['state'] ?? '') === MailboxRelay::HEALTH_OK) {
+		$answer = $scanning ? 'the relay answered and its spam scanning works' : 'the relay answered';
+	} else {
+		$answer = 'the relay: ' . rtrim((string)($health['detail'] ?? 'did not answer as expected'), '.');
+	}
+
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
+	$verdict = InboundEmailHealth::originProbeVerdict();
+	$back_ts = ((string)($verdict['checked_time'] ?? '') !== '') ? strtotime($verdict['checked_time'] . ' UTC') : false;
+	$ok = (($health['state'] ?? '') === MailboxRelay::HEALTH_OK);
+	if ($back_ts !== false && $back_ts >= $tested_ts - 60 && ($verdict['state'] ?? '') === 'passed') {
+		$leak = 'the leak test passed (the test message came back at ' . gmdate('H:i', $back_ts) . ' UTC with no trace of this server)';
+	} elseif ($back_ts !== false && $back_ts >= $tested_ts - 60 && ($verdict['state'] ?? '') === 'failed') {
+		$leak = 'the leak test FAILED: ' . (string)$verdict['message'];
+		$ok = false;
+	} elseif (time() - $tested_ts < MAILBOX_RELAY_TEST_RETURN_MINUTES * 60) {
+		$leak = 'the leak test is waiting for its test message to come back';
+	} else {
+		$leak = 'the leak test\'s message has not come back after ' . MAILBOX_RELAY_TEST_RETURN_MINUTES
+			. ' minutes, so sent mail may not be reaching the relay';
+		$ok = false;
+	}
+	return '<p class="mb-2 small' . ($ok ? ' text-muted' : ' text-danger') . '">Last tested '
+		. htmlspecialchars(gmdate('M j, H:i', $tested_ts)) . ' UTC: ' . htmlspecialchars($answer) . '; '
+		. htmlspecialchars($leak) . '.</p>';
+}
+
 /** Echo the Relay section (one box, anchored #relay-section). */
 function mailbox_relay_section_render($page, array $v): void {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
@@ -363,6 +410,7 @@ function mailbox_relay_section_render($page, array $v): void {
 				echo '<p class="mb-2">The relay is being updated. Its health shows here again once it reports in.</p>';
 			} elseif (is_array($row['health'])) {
 				echo mailbox_relay_health_html($row['health'], $relay);
+				echo mailbox_relay_last_test_html($relay);
 			}
 
 			// The update, where it can be seen: a relay behind this site's
@@ -403,6 +451,9 @@ function mailbox_relay_section_render($page, array $v): void {
 			if ($up !== array()) {
 				echo '<tr><th>Relay version</th><td>' . htmlspecialchars((string)$up['describe']) . '</td></tr>';
 			}
+			$last_test = mailbox_relay_last_test_html($relay);
+			echo '<tr><th>Last health test</th><td>' . ($last_test !== ''
+				? strip_tags($last_test, '') : '<span class="text-muted">Not run yet</span>') . '</td></tr>';
 			echo '</tbody></table>';
 			// Health is the only window into a relay without a shell: every group
 			// the relay reported, as it reported it, behind a disclosure.
