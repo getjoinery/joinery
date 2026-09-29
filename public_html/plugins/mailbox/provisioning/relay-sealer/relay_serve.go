@@ -332,6 +332,9 @@ func (s *relayServer) serveRelay(w http.ResponseWriter, r *http.Request) {
 	case rest == "fragment" && r.Method == http.MethodPut:
 		s.putFragment(w, tenant, body)
 
+	case rest == "seal-target" && r.Method == http.MethodGet:
+		s.sealTarget(w, r, tenant)
+
 	case strings.HasPrefix(rest, "tenants/"):
 		s.tenantRoute(w, r, tenant, strings.TrimPrefix(rest, "tenants/"), body)
 

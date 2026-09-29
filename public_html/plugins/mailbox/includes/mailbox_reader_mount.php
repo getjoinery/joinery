@@ -37,6 +37,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.27.0 - relayPinMailboxes in the config: the mailboxes whose relay pin the browser checks
  * @version 1.26.0 - relay-sealed Fortress mail: mailbox_mime.js, the pending banner, and the
  *                  Fortress client loaded while any waits to be parsed (B46)
  * @version 1.25.0 - the unseal convergence probe is mailbox_protection_owner_has_unseal_work()
@@ -234,6 +235,14 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		// code it loads.
 		$config['searchWorkerUrl'] = $asset_ver('mailbox_search_worker.js');
 		$config['searchCoreUrl'] = $asset_ver('mailbox_search_core.js');
+		// The mailboxes whose mail the relay seals for this browser: it asks the
+		// relay which key it seals each to and checks the answer against the
+		// relay it pinned (§ R10, MailboxFortress.checkRelayPins).
+		try {
+			$config['relayPinMailboxes'] = MailboxRelayPin::mailboxesToCheck((int)SessionControl::get_instance()->get_user_id());
+		} catch (\Throwable $e) {
+			$config['relayPinMailboxes'] = array();
+		}
 	}
 	echo '<script>window.MAILBOX_READER = ' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
 	?>

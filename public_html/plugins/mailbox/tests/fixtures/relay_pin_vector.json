@@ -1,0 +1,9 @@
+{
+    "_about": "Shared vector for the relay pin (specs/client_custody_mail.md R10): the pin MAC is HMAC-SHA256 under HKDF-SHA256(vault secret, empty salt, info sealed-vault:pin) over joinery-relay-pin:v1 LF alias_id LF relay identity key; the statement is signed by the relay identity over joinery-relay:seal-target:v1 LF statement. fortress_relay_pin_test.php reproduces it and MailboxFortress.selfCheck() checks the same values in the browser. Test keys only.",
+    "vault_secret_hex": "1a94f30594ae6bf54e06ea46c983aa626582a81dea924d01b69a67d0e0089cd4",
+    "alias_id": 42,
+    "relay_identity_public_key": "uzn2WYR3e1WyY2Kcl1yJATPGrSeOLN9pfAim/U/NObM=",
+    "pin_mac": "nAEl3HxC2IUhttrjI5PeEApF4tKvZ4RP5iQotyB6Z0Q=",
+    "statement": "{\"recipient\":\"box@fortress.test\",\"public_key\":\"YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY=\",\"key_kind\":\"client\",\"key_scope\":\"mail\",\"key_generation\":1,\"map_version\":7,\"relay_identity_public_key\":\"uzn2WYR3e1WyY2Kcl1yJATPGrSeOLN9pfAim/U/NObM=\",\"signed_at\":\"2026-09-28T12:00:00Z\"}",
+    "signature": "8pmxylHrOIw/ZDVwm3ab5K+J1TtwprMXYv6074UCUT5uU79N20dOWiglY7B125GuW5DZ2EZOZ1IN87GxcxvvBw=="
+}

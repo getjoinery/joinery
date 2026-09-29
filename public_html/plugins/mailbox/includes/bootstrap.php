@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.23 - the mail rotation re-makes the relay pins (mailbox-reseal.js)
  * @version 1.22 - a `mail` rotation does not commit while the relay may still seal to
  *                the old key (RelayMapSync::rotationRefusal, B33)
  * @version 1.21 - a `mail` rotation pushes the relay routing map at begin and commit
@@ -323,8 +324,11 @@ VaultUnlock::onReseal(VaultUnlock::modelReseal(array(MailboxContactIndexKey::cla
 // rows (vault_client_reseal_rows / vault_row_reseal). Pending relay rows carry
 // the same key and are walked with them, and so is the search key every browser's
 // Fortress search index is sealed under (MailboxSearchKey, § R5): only its wrapping
-// moves, so no browser rebuilds its index after a rotation.
-VaultUnlock::clientReseal('mail', array(InboundEmailMessage::class, MailboxSearchKey::class));
+// moves, so no browser rebuilds its index after a rotation. The relay pins
+// (§ R10) are MACed with a key the vault's secret derives, so mailbox-reseal.js
+// makes each again under the new key.
+VaultUnlock::clientReseal('mail', array(InboundEmailMessage::class, MailboxSearchKey::class),
+	array('plugins/mailbox/assets/mailbox-reseal.js'));
 
 // The relay routing map names the key each alias's mail is sealed to. On a relay
 // that seals Fortress mail to the `mail` key (RelayMapExporter::clientSealTarget)
