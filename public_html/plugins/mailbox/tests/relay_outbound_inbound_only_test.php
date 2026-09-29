@@ -28,6 +28,7 @@
  *
  * Run: php plugins/mailbox/tests/relay_outbound_inbound_only_test.php
  *
+ * @version 1.2 - the server's IPv6 is looked for too
  * @version 1.1
  */
 
@@ -164,6 +165,15 @@ check(empty($clean), 'clean message (mail hostname only) is not flagged', json_e
 
 $short = InboundEmailHealth::scanHeadersForOrigin("X: mx\n\nbody", '', 'mx');
 check(empty($short), 'a too-short hostname needle is ignored (no false positive)');
+
+// IPv4 and IPv6 (project rule, 2026-09-29): the server's IPv6 is looked for
+// too, as an address, in whatever spelling the header uses.
+$v6_raw = "From: a@example.test\nReceived: from box ([2600:3C03:0::2000:f3ff:fec0:3c5e]) by relay\n\nbody";
+$v6 = InboundEmailHealth::scanHeadersForOrigin($v6_raw, '203.0.113.7', 'box-internal.example', '2600:3c03::2000:f3ff:fec0:3c5e');
+check(count($v6) === 1 && strpos($v6[0], 'IPv6') !== false && strpos($v6[0], 'Received') !== false,
+	'the server\'s IPv6 in a Received header is flagged, whatever its spelling', json_encode($v6));
+check(empty(InboundEmailHealth::scanHeadersForOrigin($v6_raw, '203.0.113.7', 'box-internal.example', '2600:3c03::1')),
+	'another IPv6 is not');
 
 // Only the header block is scanned; a leak in the BODY is out of scope.
 $body_only = "From: a@example.test\n\nbody mentions 203.0.113.7 here";

@@ -27,6 +27,7 @@
  * by anything on the box during the boot window, so nothing here may teach a
  * holder of the token which check it failed beyond what its own request shows.
  *
+ * @version 1.2 - sameAddress() is IpAddress::same()
  * @version 1.1 - a birth report may arrive from the instance's IPv6 as well as its IPv4 (sameAddress)
  * @version 1.0
  */
@@ -132,26 +133,9 @@ class RelayBirthEndpoint {
 		return array('status' => 200, 'path' => $path);
 	}
 
-	/**
-	 * Are these the same IP address? IPv4 or IPv6, compared as addresses, not
-	 * text: an IPv6 address has many spellings (case, zero runs, a /128), and
-	 * an IPv4 can arrive IPv4-mapped (::ffff:a.b.c.d).
-	 */
+	/** Are these the same IP address, IPv4 or IPv6, in any spelling? (IpAddress::same) */
 	public static function sameAddress(string $a, string $b): bool {
-		$norm = function (string $ip): ?string {
-			$ip = trim(explode('/', trim($ip), 2)[0]);
-			$bin = @inet_pton($ip);
-			if ($bin === false || $bin === null) {
-				return null;
-			}
-			if (strlen($bin) === 16 && substr($bin, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {
-				$bin = substr($bin, 12);   // IPv4-mapped IPv6
-			}
-			return $bin;
-		};
-		$x = $norm($a);
-		$y = $norm($b);
-		return $x !== null && $y !== null && hash_equals($x, $y);
+		return IpAddress::same($a, $b);
 	}
 
 	/**

@@ -20,6 +20,12 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.24 - IPv4 and IPv6: the origin is this server's IPv4 and its public IPv6
+ *                (originAddresses); the leak scan, the MX check (AAAA) and SPF look for both,
+ *                compared as addresses (IpAddress)
+ * @version 1.23 - the origin-leak probe is found by its stored header block (iem_raw_headers), not
+ *                only the raw message, which most rows do not keep; the scan skips a loopback
+ *                hostname (localhost), which identifies no machine
  * @version 1.22 - checkSealingMailboxHolders() asks for the vault of the mailbox's seal
  *   scope, so a Fortress holder without a mail vault is named
  * @version 1.21 - the origin probe skips relay-sealed domains (the Seal at the
@@ -650,6 +656,24 @@ class InboundEmailHealth {
     }
 
     /**
+     * This server's own public addresses, the ones a hidden origin must not
+     * show: the configured IPv4 (mailbox_public_ip), and its public IPv6 as
+     * the machine would use it to reach the internet ('' when it has none).
+     *
+     * @return array{ipv4:string, ipv6:string}
+     */
+    public static function originAddresses(): array {
+        static $ipv6 = null;
+        if ($ipv6 === null) {
+            $ipv6 = IpAddress::detectPublicIpv6();
+        }
+        return array(
+            'ipv4' => trim((string)Globalvars::get_instance()->get_setting('mailbox_public_ip')),
+            'ipv6' => $ipv6,
+        );
+    }
+
+    /**
      * Deployment-wide origin-hiding check: once a relay exists, the main box's
      * public IP must not appear in ANY hosted domain's mail DNS (MX or the mail
      * hostname A record) — a single leak defeats the hidden origin. Not
@@ -666,10 +690,11 @@ class InboundEmailHealth {
         if ((string)Globalvars::get_instance()->get_setting('mailbox_relay_cutover_complete') !== '1') {
             return;
         }
-        $settings = Globalvars::get_instance();
-        $origin_ip = trim((string)$settings->get_setting('mailbox_public_ip'));
-        if ($origin_ip === '') {
-            return; // unknown origin IP — nothing to assert against
+        $origin = self::originAddresses();
+        $origin_ip = $origin['ipv4'];
+        $origin_ipv6 = $origin['ipv6'];
+        if ($origin_ip === '' && $origin_ipv6 === '') {
+            return; // unknown origin address — nothing to assert against
         }
 
         $domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false));
@@ -686,8 +711,11 @@ class InboundEmailHealth {
                     if ($target === '') {
                         continue;
                     }
-                    if (in_array($origin_ip, DnsResolver::getA($target), true)) {
+                    if ($origin_ip !== '' && IpAddress::in($origin_ip, DnsResolver::getA($target))) {
                         $leaks[] = $name . ' (MX ' . $target . ' → ' . $origin_ip . ')';
+                    }
+                    if ($origin_ipv6 !== '' && IpAddress::in($origin_ipv6, DnsResolver::getAaaa($target))) {
+                        $leaks[] = $name . ' (MX ' . $target . ' → ' . $origin_ipv6 . ')';
                     }
                 }
                 // SPF TXT can also expose the origin: a v=spf1 record still listing
@@ -697,8 +725,10 @@ class InboundEmailHealth {
                     if (stripos($txt, 'v=spf1') === false) {
                         continue;
                     }
-                    if (self::spfNamesIp($txt, $origin_ip)) {
-                        $leaks[] = $name . ' (SPF lists ' . $origin_ip . ')';
+                    foreach (array($origin_ip, $origin_ipv6) as $ip) {
+                        if ($ip !== '' && self::spfNamesIp($txt, $ip)) {
+                            $leaks[] = $name . ' (SPF lists ' . $ip . ')';
+                        }
                     }
                 }
             } catch (\Throwable $e) {
@@ -708,7 +738,7 @@ class InboundEmailHealth {
         }
         if (!empty($leaks)) {
             throw new ProvisioningCheckFailed(
-                'The main box IP (' . $origin_ip . ') is present in mail DNS for: ' . implode(', ', array_unique($leaks))
+                'The main box\'s address is present in mail DNS for: ' . implode(', ', array_unique($leaks))
                 . ' — point every hosted domain\'s MX at the relay and drop the origin from SPF to keep it hidden.'
             );
         }
@@ -719,8 +749,7 @@ class InboundEmailHealth {
         foreach (preg_split('/\s+/', trim($spf)) as $token) {
             $t = ltrim($token, '+-~?');
             if (stripos($t, 'ip4:') === 0 || stripos($t, 'ip6:') === 0) {
-                $addr = explode('/', substr($t, 4), 2)[0];
-                if (strcasecmp($addr, $ip) === 0) {
+                if (IpAddress::same(substr($t, 4), $ip)) {
                     return true;
                 }
             }
@@ -791,9 +820,8 @@ class InboundEmailHealth {
             return array('state' => 'none', 'message' => 'no origin-leak probe has been delivered in the last '
                 . self::ORIGIN_PROBE_FRESH_DAYS . ' days', 'checked_time' => '');
         }
-        $settings = Globalvars::get_instance();
-        $origin_ip = trim((string)$settings->get_setting('mailbox_public_ip'));
-        $leaks = self::scanHeadersForOrigin($found['raw'], $origin_ip, (string)gethostname());
+        $origin = self::originAddresses();
+        $leaks = self::scanHeadersForOrigin($found['raw'], $origin['ipv4'], (string)gethostname(), $origin['ipv6']);
         if (!empty($leaks)) {
             return array('state' => 'failed', 'message' => implode('; ', $leaks), 'checked_time' => $found['time']);
         }
@@ -855,19 +883,27 @@ class InboundEmailHealth {
             // The time window keeps the ILIKE scan bounded as the table grows -
             // and it IS the freshness window: a probe older than this is stale
             // evidence, not proof.
+            //
+            // The header block is all the scan reads, and it is kept in
+            // iem_raw_headers: the full raw message is offloaded or not kept at
+            // all on most rows, so a probe searched for only there was never
+            // found. The raw column stays as the fallback for a row that has no
+            // header block of its own.
+            $marker = '%' . self::ORIGIN_PROBE_HEADER . '%';
             $stmt = $db->prepare(
-                "SELECT iem_raw_message, iem_received_time FROM iem_inbound_email_messages
-                 WHERE iem_received_time >= ? AND iem_raw_message ILIKE ?
+                "SELECT COALESCE(NULLIF(iem_raw_headers, ''), iem_raw_message) AS headers, iem_received_time
+                   FROM iem_inbound_email_messages
+                 WHERE iem_received_time >= ? AND (iem_raw_headers ILIKE ? OR iem_raw_message ILIKE ?)
                  ORDER BY iem_received_time DESC LIMIT 1");
             $stmt->execute(array(
                 LibraryFunctions::time_shift(gmdate('Y-m-d H:i:s'), '-' . self::ORIGIN_PROBE_FRESH_DAYS . ' days', 'Y-m-d H:i:s'),
-                '%' . self::ORIGIN_PROBE_HEADER . '%',
+                $marker, $marker,
             ));
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            if (!$row || (string)$row['iem_raw_message'] === '') {
+            if (!$row || (string)$row['headers'] === '') {
                 return null;
             }
-            return array('raw' => (string)$row['iem_raw_message'], 'time' => (string)$row['iem_received_time']);
+            return array('raw' => (string)$row['headers'], 'time' => (string)$row['iem_received_time']);
         } catch (\Throwable $e) {
             return null;
         }
@@ -881,7 +917,7 @@ class InboundEmailHealth {
      * mail hostname is deliberately NOT a needle: on a relay-fronted deployment it
      * names the relay and is expected in the chain.
      */
-    public static function scanHeadersForOrigin(string $raw, string $origin_ip, string $internal_hostname): array {
+    public static function scanHeadersForOrigin(string $raw, string $origin_ip, string $internal_hostname, string $origin_ipv6 = ''): array {
         $normalized = str_replace("\r\n", "\n", $raw);
         $split = strpos($normalized, "\n\n");
         $block = ($split !== false) ? substr($normalized, 0, $split) : $normalized;
@@ -896,14 +932,34 @@ class InboundEmailHealth {
                 '/(?<![0-9.])' . preg_quote($origin_ip, '/') . '(?![0-9.])/';
         }
         // A very short hostname would false-positive against unrelated tokens; a
-        // real host FQDN is well over this floor.
+        // real host FQDN is well over this floor. A loopback name identifies no
+        // machine: every host calls itself localhost, and a relay's scanner
+        // signs its own header with it (X-Rspamd-Server: localhost), which read
+        // as this server leaking when it had not.
         $internal_hostname = trim($internal_hostname);
-        if (strlen($internal_hostname) >= 4) {
+        $generic = in_array(strtolower($internal_hostname),
+            array('localhost', 'localhost.localdomain', 'localhost6', 'localhost6.localdomain6', 'ip6-localhost', 'ip6-loopback'), true);
+        if (strlen($internal_hostname) >= 4 && !$generic) {
             $needles['this server\'s hostname (' . $internal_hostname . ')'] =
                 '/(?<![A-Za-z0-9._-])' . preg_quote($internal_hostname, '/') . '(?![A-Za-z0-9-])/i';
         }
 
         $leaks = array();
+        // The server's IPv6, matched as an address: an IPv6 is written many ways.
+        $origin_ipv6 = trim($origin_ipv6);
+        if ($origin_ipv6 !== '') {
+            foreach (explode("\n", $block) as $line) {
+                foreach (IpAddress::ipv6Tokens($line) as $token) {
+                    if (IpAddress::same($token, $origin_ipv6)) {
+                        $colon = strpos($line, ':');
+                        $hdr = ($colon !== false && ($line === '' || !($line[0] === ' ' || $line[0] === "\t")))
+                            ? trim(substr($line, 0, $colon)) : 'a folded header';
+                        $leaks[] = 'this server\'s IPv6 (' . $origin_ipv6 . ') in the ' . $hdr . ' header';
+                        break 2;
+                    }
+                }
+            }
+        }
         foreach ($needles as $desc => $needle) {
             foreach (explode("\n", $block) as $line) {
                 if (preg_match($needle, $line)) {
