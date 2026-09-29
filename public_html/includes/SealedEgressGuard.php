@@ -51,6 +51,22 @@
  * unencrypted channel, so a hot process may only send a message its call site
  * explicitly declares content-free.
  *
+ * Two narrow ways past the write-guard exist, and both are claims made at a
+ * named call site, not exemptions for a table:
+ *
+ *   consentToValues() — the owner approved an action whose literal arguments
+ *     they were shown. Those exact values (and any piece of one, such as a
+ *     trimmed or length-capped copy) may be written in the clear while the
+ *     process is hot on that owner alone. A value that merely CONTAINS one is
+ *     still refused. The one caller is ActionQueue's approve step.
+ *
+ *   contentFree() — a write built only from metadata (closed vocabularies,
+ *     numbers, digests), the database twin of the mail boundary's
+ *     'content-free' assertion. Callers name a site from
+ *     CONTENT_FREE_WRITE_SITES; any other name is refused.
+ *
+ * tests/vault/sealed_egress_guard_test.php enumerates the callers of both.
+ *
  * This is the confidentiality twin of joinery_ai's TaintGate, which tracks
  * injection provenance through the same predicate-at-a-choke-point shape.
  *
@@ -62,6 +78,8 @@
  * egressGated() (hot OR a caller-declared durable restriction), while the
  * write-guard keeps asking isHot() alone.
  *
+ * @version 1.4 - consentToValues() for an owner-approved action's literal arguments;
+ *                contentFree() for metadata-only writes at a declared site
  * @version 1.3 - the browser's format (v1.edge., v1.edgeseal.) is sealed too
  * @version 1.2 - a list of integers is a reference, not content, whatever its length
  * @version 1.1
@@ -107,6 +125,14 @@ class SealedEgressGuard {
 	 */
 	const SEND_ASSERTIONS = array('content-free', 'user-compose', 'acknowledged-forward');
 
+	/**
+	 * The call sites that may declare a database write content-free. Each is a
+	 * reviewed claim that everything the write carries is metadata:
+	 *   vault_audit — VaultAudit's window opened/closed rows (scope, reason,
+	 *                 session digest, durations).
+	 */
+	const CONTENT_FREE_WRITE_SITES = array('vault_audit');
+
 	/** @var bool has this process opened sealed content? */
 	private static $hot = false;
 
@@ -127,6 +153,12 @@ class SealedEgressGuard {
 
 	/** @var array<string,bool> descriptions of what was opened, for the error message */
 	private static $sources = array();
+
+	/** @var array<int,string[]> owner id => long values that owner approved for writing in the clear */
+	private static $consented = array();
+
+	/** @var int how many contentFree() writes are running */
+	private static $content_free_depth = 0;
 
 	/** @var bool master switch — off only while a test drives the rule directly */
 	private static $armed = true;
@@ -214,6 +246,49 @@ class SealedEgressGuard {
 	}
 
 	/**
+	 * The owner approved an action and was shown its literal arguments: every
+	 * string among them may be written in the clear for the rest of this
+	 * process, as may any piece of one (the destination trims and caps). It
+	 * counts only while the process is hot on that owner ALONE — consent from
+	 * one person never covers another's content — and a value that holds one
+	 * of these plus anything else is still refused.
+	 *
+	 * @param array  $values the approved arguments, nested arrays walked
+	 * @param string $source what was approved, for diagnostics
+	 */
+	public static function consentToValues(array $values, int $owner_id, string $source): void {
+		if ($owner_id <= 0) {
+			return;
+		}
+		array_walk_recursive($values, function ($value) use ($owner_id) {
+			if (is_string($value) && strlen($value) > self::THRESHOLD) {
+				self::$consented[$owner_id][] = $value;
+			}
+		});
+		if ($source !== '' && count(self::$sources) < 50) {
+			self::$sources['consent:' . $source] = true;
+		}
+	}
+
+	/**
+	 * Run a write the call site declares content-free — built only from
+	 * metadata, never from anything a person wrote or anything opened. $site
+	 * must be one of CONTENT_FREE_WRITE_SITES; any other name throws, so the
+	 * claim cannot be made in passing.
+	 */
+	public static function contentFree(string $site, callable $write) {
+		if (!in_array($site, self::CONTENT_FREE_WRITE_SITES, true)) {
+			throw new InvalidArgumentException("'$site' is not a declared content-free write site.");
+		}
+		self::$content_free_depth++;
+		try {
+			return $write();
+		} finally {
+			self::$content_free_depth--;
+		}
+	}
+
+	/**
 	 * Turn the rule off for the rest of the process. The ONLY supported caller
 	 * is a test that needs to write fixtures after driving the rule; there is
 	 * no production path to it and adding one would be the table-exemption
@@ -250,10 +325,12 @@ class SealedEgressGuard {
 		$was_owners = self::$scope_owners;
 		$was_sources = self::$sources;
 		$was_restricted = self::$egress_restricted;
+		$was_consented = self::$consented;
 		self::$hot = false;
 		self::$scope_owners = array();
 		self::$sources = array();
 		self::$egress_restricted = false;
+		self::$consented = array();
 		try {
 			return $unit();
 		} finally {
@@ -261,6 +338,7 @@ class SealedEgressGuard {
 			self::$scope_owners = $was_owners;
 			self::$sources = $was_sources;
 			self::$egress_restricted = $was_restricted;
+			self::$consented = $was_consented;
 		}
 	}
 
@@ -270,6 +348,8 @@ class SealedEgressGuard {
 		self::$scope_owners = array();
 		self::$sources = array();
 		self::$egress_restricted = false;
+		self::$consented = array();
+		self::$content_free_depth = 0;
 		self::$armed = true;
 	}
 
@@ -285,7 +365,7 @@ class SealedEgressGuard {
 	 *                      refers to them (':name', or 1-based positional index)
 	 */
 	public static function assertStatementAllowed(string $sql, array $bound): void {
-		if (!self::isHot()) {
+		if (!self::isHot() || self::$content_free_depth > 0) {
 			return;
 		}
 		$target = self::writeTarget($sql);
@@ -349,14 +429,29 @@ class SealedEgressGuard {
 		return strtolower($dot === false ? $name : substr($name, $dot + 1));
 	}
 
-	/** Any bound string long enough to carry content, and not already sealed. */
+	/** Any bound string long enough to carry content, not already sealed, and not consented. */
 	private static function hasLongPlaintext(array $values): bool {
 		foreach ($values as $value) {
 			if (!is_string($value)) continue;
 			if (strlen($value) <= self::THRESHOLD) continue;
 			if (self::isSealedBlob($value)) continue;
 			if (self::isIntegerList($value)) continue;
+			if (self::isConsented($value)) continue;
 			return true;
+		}
+		return false;
+	}
+
+	/** True when $value is, or is a piece of, a value the single hot owner approved. */
+	private static function isConsented(string $value): bool {
+		$owner_id = self::ownerUserId();
+		if ($owner_id === null || empty(self::$consented[$owner_id])) {
+			return false;
+		}
+		foreach (self::$consented[$owner_id] as $approved) {
+			if (strpos($approved, $value) !== false) {
+				return true;
+			}
 		}
 		return false;
 	}

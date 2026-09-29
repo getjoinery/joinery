@@ -26,7 +26,10 @@ class ActionQueueException extends Exception {}
  * the conversation through the resolution event row, where the next turn can
  * reason over it.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - approving a sealed proposal consents to its literal values
+ *   (SealedEgressGuard::consentToValues), so the action can write them; the
+ *   card states a failure in plain words
  * @changelog 1.5 - propose()/enqueue() take an optional expiry that wins when
  *   it comes before the default
  * @changelog 1.4 - factsFor() passes the owner's user id to the tool's renderer
@@ -278,6 +281,13 @@ class ActionQueue {
             return $row;
         }
 
+        // Opening sealed arguments made this request hot. The owner was shown
+        // these literal values and approved them, so the action may write them
+        // where it writes — a calendar entry, a record — in the clear.
+        if (!empty($row->get('aqa_content_sealed'))) {
+            SealedEgressGuard::consentToValues($arguments, $user_id, 'aqa:' . (int)$row->key);
+        }
+
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
         $tool_use = [
             'type'  => 'tool_use',
@@ -340,7 +350,8 @@ class ActionQueue {
             $raw = (string)$row->get('aqa_result');
             $decoded = $raw !== '' ? json_decode($raw, true) : null;
             if (is_array($decoded)) {
-                $result = self::resultLine($decoded);
+                $result = isset($decoded['error']) ? self::failureLine((string)$decoded['error'])
+                    : self::resultLine($decoded);
                 if (mb_strlen($result) > 500) $result = mb_substr($result, 0, 499) . '…';
             }
         }
@@ -360,6 +371,21 @@ class ActionQueue {
             'expires_time'    => (string)$row->get('aqa_expires_time'),
             'resolved_time'   => (string)$row->get('aqa_resolved_time'),
         ];
+    }
+
+    /**
+     * A failure as the owner reads it on the card. A tool's own refusal
+     * ("create_calendar_entry error: end_local must be after start_local.")
+     * loses its tool-name prefix; an exception the tool did not expect
+     * ("SomeException: …") is internal detail, so the card says only that
+     * it broke. The stored result keeps the full text for the conversation
+     * and the trace.
+     */
+    private static function failureLine(string $error): string {
+        if (preg_match('/^[A-Za-z_\\\\]*(?:Exception|Error): /', $error)) {
+            return 'It hit an internal error before it could finish.';
+        }
+        return preg_replace('/^[a-z_]+ error: /', '', $error);
     }
 
     /** The proposing recipe's name for the card, or null for a chat proposal. */
