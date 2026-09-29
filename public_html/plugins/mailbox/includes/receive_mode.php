@@ -8,7 +8,7 @@
  *
  * IT IS A SETTING, NOT A GATE (specs/mailbox_relay_surface_simplification.md).
  * An undecided deployment receives directly and works; the choice lives in the
- * Setup tab's Advanced section and can be changed at any time. A relay is only
+ * Setup tab's Relay section (Advanced) and can be changed at any time. A relay is only
  * load-bearing under the Seal at the relay add-on, so demanding the answer
  * before any domain has asked for it asked the operator to decide about infrastructure they
  * may never need, in front of every mailbox page.
@@ -20,6 +20,8 @@
  *      actually doing (relay row => 'relay', else 'direct').
  *   3. Otherwise '' — undecided, which every consumer treats as direct.
  *
+ * @version 1.7 - the settled-state sentence moves into the Relay section (relay_section.php);
+ *                no tunnel in the comparison
  * @version 1.6 - the relay row names the Seal at the relay add-on
  * @version 1.5 - IMAP-source domains do not decide the receive topology
  * @version 1.4 - a settled deployment reads its state in a sentence; the
@@ -129,50 +131,6 @@ function mailbox_receive_gate_handle(array $input): ?LogicResult {
 }
 
 /**
- * How mail reaches this server: what it is now, and how to change it.
- *
- * A DECIDED DEPLOYMENT IS NOT ASKED AGAIN. The pros-and-cons comparison is a
- * decision aid, and it reads as one — two columns and two big choose buttons is
- * a question. In front of a deployment that answered it long ago and has a relay
- * carrying live mail, it reads as though the choice were still open, or worse as
- * though something were unfinished. So a settled deployment gets one sentence
- * saying what is true, and the comparison waits behind a disclosure for the
- * operator who actually wants to change it.
- *
- * An undecided deployment gets the comparison straight away — there, it is the
- * question, and the whole point of the surface.
- */
-function mailbox_receive_gate_render(): string {
-	$mode = mailbox_receive_mode();
-	$table = mailbox_receive_mode_comparison();
-
-	if ($mode === '') {
-		return $table;
-	}
-
-	$relay = null;
-	if ($mode === 'relay') {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
-		$relay = mailbox_receive_relay_exists() ? MailboxRelay::active() : null;
-	}
-
-	if ($mode === 'relay') {
-		$now = $relay !== null
-			? 'A relay fronts this server. Mail arrives at the relay, is sealed there, and is passed here over '
-				. 'a private tunnel — this server\'s address stays out of DNS.'
-			: 'This server is set up to receive through a relay, but no relay is enabled yet. Until one is, '
-				. 'mail cannot reach it.';
-	} else {
-		$now = 'Mail comes straight to this server. Your domains\' DNS names it, and the internet connects to '
-			. 'it directly.';
-	}
-
-	return '<p class="mb-2">' . htmlspecialchars($now) . '</p>'
-		. '<details><summary class="fix-toggle small">Change how mail reaches this server</summary>'
-		. '<div class="mt-2">' . $table . '</div></details>';
-}
-
-/**
  * The pros-and-cons comparison, with one choose button per column. Both forms
  * post back to the page showing it.
  */
@@ -207,7 +165,7 @@ function mailbox_receive_mode_comparison(): string {
 						: 'A relay to set up on a server you control.'))),
 		array('Your server\'s address',
 			'Public. DNS names this server and the internet connects to it directly.',
-			'Hidden. DNS names the relay; mail is passed along over a private tunnel.'),
+			'Hidden. DNS names the relay; this server collects its mail from there.'),
 		array('Seal at the relay',
 			'Not available.',
 			'Available — a Private domain can have arriving mail sealed at the relay, so a hacked '

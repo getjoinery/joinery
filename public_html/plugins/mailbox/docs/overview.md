@@ -2514,12 +2514,19 @@ deployment): it installs two narrow root helpers with their sudoers rule —
 `joinery-dkim-remove`. Nothing about a relay lives on the main box's disk: the
 relay client identity and the relay's pin are rows in the database.
 
-The **Setup tab's Relay section** (rendered whenever the receive mode is relay
-or a relay row exists) is the dashboard: it lists each relay with its
-provisioning checks (reachable, spool draining, map fresh, origin hidden) plus
-the relay's last health answer with every group the relay reported behind a
-disclosure, and its guided controls create, update, enable/disable, delete,
-and **Check spam scanning now**.
+The **Setup tab's Relay section** (under Advanced, and wherever the receive
+mode is relay or a relay row exists) is the dashboard. It shows the relay's
+name, address and state; one sentence on what that means; its health in one
+line ("The relay is healthy", or a list of the checks that are not: reachable,
+mail pickup, nothing held, address list current, origin hidden, the sending
+route, no leaks in sent mail, and spam scanning when spam filtering is on); and
+an **Update relay** control whenever the relay runs an older release than this
+site ships. **Check Relay Health** asks the relay for a fresh health answer and
+sends the out-and-back origin-leak probe. The technical facts (identity pin,
+last ping, address-list version, everything the relay reported), Enable or
+Disable, and Delete sit behind a Details disclosure, and so does the choice
+between receiving through a relay and receiving directly. The section also
+holds the create path when there is no relay.
 
 #### Is the relay still scanning?
 
@@ -2576,7 +2583,7 @@ destroys the only information available during an outage.
 
 `MailboxRelayReconcile` polls once per pass, and
 `InboundEmailSetupCheck::checkRelayScannerHealth()` reads the cached answer,
-so no page render pays for a round trip. **Check spam scanning now** in the
+so no page render pays for a round trip. **Check Relay Health** in the
 Relay section forces a fresh one for an operator mid-incident. Severity depends
 on whether this server is covering:
 
