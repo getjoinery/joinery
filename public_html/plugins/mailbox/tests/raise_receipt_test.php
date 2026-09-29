@@ -10,6 +10,7 @@
  * into the completed facts after a level raise.
  *
  *  - Checklist heading names the destination level.
+ *  - Checklist fixes hold no form (a form inside the editor form left Save dead).
  *  - Receipt render: working state (live sealing row, hidden button, noscript
  *    batch form), completed state (sealed-count fact, visible button),
  *    zero-backlog wording, unlock fact naming (self vs other holder).
@@ -22,6 +23,7 @@
  *
  * Run: php tests/run.php db --filter=raise_receipt
  *
+ * @version 1.2 - checklist fixes are buttons for one form outside the editor form; Fortress heading
  * @version 1.1 - the handoff follows a requested sending lock, not a level
  */
 
@@ -68,6 +70,36 @@ try {
 	$html = mailbox_protection_render($rows, $dom, $urls);
 	check(strpos($html, 'Before this domain can be protected') !== false,
 		'no target falls back to the generic heading');
+
+	// -----------------------------------------------------------------------
+	section('checklist fixes never nest a form in the editor form');
+
+	// The checklist renders inside the editor's own form. A form written inside
+	// it ends the editor's form where the inner one closes, and Save is left in
+	// no form: clicking it does nothing at all.
+	$fix_rows = array(
+		array('id' => 'single_reader:1', 'severity' => 'required', 'status' => 'fail', 'label' => 'One reader',
+			'summary' => 'Two readers.', 'actions' => array(
+				array('type' => 'remove_grant', 'alias_id' => 5, 'user_id' => 9, 'name' => "Pat O'Brien"))),
+		array('id' => 'domain_owner', 'severity' => 'required', 'status' => 'fail', 'label' => 'Domain owner',
+			'summary' => 'No owner.', 'actions' => array(array('type' => 'set_domain_owner'))),
+	);
+	$html = mailbox_protection_render($fix_rows, $dom, $urls, InboundEmailDomain::LEVEL_FORTRESS);
+	check(stripos($html, '<form') === false && stripos($html, '</form') === false,
+		'the checklist holds no form of its own');
+	check(strpos($html, 'Before this domain can be Fortress') !== false, 'the Fortress checklist heading names Fortress');
+	check(substr_count($html, 'form="' . MAILBOX_PROTECTION_FIX_FORM . '"') === 2,
+		'each fix is a button for the one fix form');
+	check(strpos($html, htmlspecialchars('action=ceremony_set_domain_owner&ied_inbound_email_domain_id=' . intval($dom->key))) !== false,
+		'Make me the owner posts the owner claim for this domain');
+	check(strpos($html, htmlspecialchars('action=ceremony_remove_grant&ied_inbound_email_domain_id=' . intval($dom->key)
+		. '&alias_id=5&user_id=9')) !== false, 'Remove posts the grant it names');
+	check(strpos($html, 'return confirm(') !== false && strpos($html, "O'Brien") === false,
+		'the removal asks first, the name escaped inside its confirm');
+	$fix_form = mailbox_protection_fix_form('tok123');
+	check(strpos($fix_form, 'id="' . MAILBOX_PROTECTION_FIX_FORM . '"') !== false
+		&& strpos($fix_form, 'name="_csrf_token" value="tok123"') !== false,
+		'the fix form carries the page form\'s token');
 
 	// -----------------------------------------------------------------------
 	section('receipt render: working state');

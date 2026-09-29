@@ -12,6 +12,8 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.7 - Save works on a domain whose checklist offers a fix (no form inside the form); Fortress
+ *   shows its checklist; the step-up waits for the vault to open; a vault that fails to open says so
  * @version 4.6 - the Fortress card names the relay pin (trust on first use)
  * @version 4.5 - the Fortress receipt names relay-sealed mail still waiting to be opened (B46)
  * @version 4.4 - the Fortress card says, under Seal at the relay, that this server never sees the mail (B38)
@@ -371,8 +373,12 @@ if ($show_form) {
 			'editor_url' => $ceremony['editor_url'],
 			'alias_url'  => '/plugins/mailbox/admin/admin_mailbox_alias',
 		);
+		// Fortress asks everything Private does (the save re-verifies the same
+		// rows), so the one set of rows renders under each card with its heading.
 		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-private"',
 			mailbox_protection_render($ceremony['rows_private'], $edit_domain, $urls, InboundEmailDomain::LEVEL_PRIVATE));
+		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-fortress"',
+			mailbox_protection_render($ceremony['rows_private'], $edit_domain, $urls, InboundEmailDomain::LEVEL_FORTRESS));
 		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-relay"',
 			mailbox_protection_render($ceremony['rows_relay'], $edit_domain, $urls, '', '',
 				'Before Seal at the relay can be on'));
@@ -384,6 +390,9 @@ if ($show_form) {
 	$formwriter->submitbutton('btn_submit', $edit_domain ? 'Update Domain' : 'Add Domain');
 
 	echo $formwriter->end_form();
+	if ($ceremony !== null) {
+		echo mailbox_protection_fix_form($formwriter->getCSRFToken());
+	}
 
 	$page->end_box();
 
@@ -410,8 +419,13 @@ if ($show_form) {
 				JoinerySealed.session('mail', { reason: 'to make the key Fortress mail is sealed to' }).then(function () {
 					opened = true;
 					form.requestSubmit(submitter && submitter.form === form ? submitter : undefined);
-				}, function () {
-					// Cancelled or refused: nothing saved, the form stays as it was.
+				}, function (err) {
+					// Nothing saved, the form stays as it was. A cancel needs no
+					// word; anything else says why the save did not go.
+					var msg = (err && err.message) ? err.message : '';
+					if (msg === 'Unlock cancelled.') return;
+					msg = 'Your mail vault did not open, so the domain was not saved. ' + msg;
+					if (window.JoineryModal) { JoineryModal.alert(msg); } else { alert(msg); }
 				}).then(function () { opening = false; });
 			});
 		})();
@@ -521,6 +535,7 @@ if ($show_form) {
 		$current_rank = array(
 			InboundEmailDomain::LEVEL_STANDARD => 0,
 			InboundEmailDomain::LEVEL_PRIVATE  => 1,
+			InboundEmailDomain::LEVEL_FORTRESS => 2,
 		)[$edit_domain->security_level()] ?? 0;
 		?>
 		<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
@@ -531,7 +546,7 @@ if ($show_form) {
 			// Add-ons already in force: switching one on is what shows its rows.
 			var currentRelay = <?php echo $edit_domain->relay_seals_to_owner() ? 'true' : 'false'; ?>;
 			var currentSend = <?php echo $edit_domain->send_lock_requested() ? 'true' : 'false'; ?>;
-			var ranks = { standard: 0, private: 1 };
+			var ranks = { standard: 0, private: 1, fortress: 2 };
 			// The add-on switches, as ProtectionLevelPicker names them.
 			var relayName = <?php echo json_encode(ProtectionLevelPicker::addonFieldName('ied_security_level',
 				ProtectionLevelPicker::ADDON_RELAY_SEALS_TO_OWNER)); ?>;
@@ -562,9 +577,12 @@ if ($show_form) {
 				var isPrivate = (level === 'private');
 				var newRelay = isPrivate && ticked(relayName) && !currentRelay;
 				var newSend = isPrivate && ticked(sendName) && !currentSend;
+				var card = document.getElementById('ied_security_level_' + level + '_card');
 				var active = [
-					place(document.getElementById('protection-ceremony-private'),
-						document.getElementById('ied_security_level_' + level + '_card'), raising),
+					place(document.getElementById('protection-ceremony-private'), card,
+						raising && level === 'private'),
+					place(document.getElementById('protection-ceremony-fortress'), card,
+						raising && level === 'fortress'),
 					place(document.getElementById('protection-ceremony-relay'),
 						document.getElementById(relayName + '_container'), newRelay),
 					place(document.getElementById('protection-ceremony-send'),
@@ -593,7 +611,10 @@ if ($show_form) {
 			var stepupDone = false;
 			var stepupInFlight = false;
 			form.addEventListener('submit', function (e) {
-				if (stepupDone) return;
+				// Choosing Fortress opens the mail vault first: its listener holds
+				// this submission and asks for it again once the vault is open,
+				// and the step-up runs then, once.
+				if (stepupDone || e.defaultPrevented) return;
 				var chosen = form.querySelector('input[name="ied_security_level"]:checked');
 				var level = chosen ? chosen.value : currentLevel;
 				// An add-on change is as sensitive as a level change.
