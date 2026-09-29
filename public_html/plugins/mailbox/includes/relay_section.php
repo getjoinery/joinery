@@ -11,13 +11,17 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.8 - "Details"; Delete relay only once the relay is disabled, in the Disable button's place
+ * @version 2.7 - the last relay action's message shows at the top of the section
+ * @version 2.6 - a run waiting for its permission is one line (Continue opens the modal,
+ *                Cancel drops it); no Update relay while a run is in flight
  * @version 2.5 - the Linode step (Approve at Linode, or a pasted token) is in the system modal
  *                with the update or the create, so neither starts without it
  * @version 2.4 - no relay-or-direct table: Disable relay / Enable relay, in plain view, decide
  *                it; every confirm here (update, disable, enable, delete) is the system modal
  * @version 2.3 - the section says what the relay is in one sentence, its health in one line
  *                (or the list of what is not healthy), shows its update in plain sight, has one
- *                Check Relay Health button, and carries the relay-or-direct choice that the
+ *                Test Relay Health button, and carries the relay-or-direct choice that the
  *                "How mail reaches this server" box used to
  * @version 2.2 - a pending health dot renders amber: unmet but converging is
  *                a wait, not a fault
@@ -269,6 +273,17 @@ function mailbox_relay_health_html(array $battery, $relay): string {
 	return $h . '</ul>';
 }
 
+/** What deleting a (disabled) relay does, said before it happens. */
+function mailbox_relay_delete_message($relay): string {
+	$machine = (string)$relay->get('mrl_public_ip') ?: ((string)$relay->get('mrl_name') ?: (string)$relay->get('mrl_mx_hostname'));
+	return ((string)$relay->get('mrl_cloud_instance_id') !== '')
+		? 'Remove the relay at ' . $machine . ' from your mail setup? The server itself keeps running, and billing, '
+			. 'at your cloud provider until you delete it there. If your domains\' MX records still point at it, '
+			. 'repoint them at this server and turn its mail listener on, or create a new relay.'
+		: 'Remove the relay at ' . $machine . '? If your domains\' MX records still point at it, repoint them at this '
+			. 'server and turn its mail listener on, or create a new relay.';
+}
+
 /** What disabling the relay does, said before it happens. */
 function mailbox_relay_disable_message($relay): string {
 	$name = (string)$relay->get('mrl_name') ?: (string)$relay->get('mrl_mx_hostname');
@@ -279,11 +294,24 @@ function mailbox_relay_disable_message($relay): string {
 		. 'again at any time.';
 }
 
+/** The message the last relay action left (admin_mailbox_relay_flash), once, then forgotten. */
+function mailbox_relay_notice_html(): string {
+	$notice = $_SESSION['mailbox_relay_notice'] ?? null;
+	unset($_SESSION['mailbox_relay_notice']);
+	if (!is_array($notice) || (string)($notice['message'] ?? '') === '') {
+		return '';
+	}
+	return '<div class="alert alert-info" role="status" style="margin-bottom:1rem;">'
+		. ((string)($notice['title'] ?? '') !== '' ? '<strong>' . htmlspecialchars((string)$notice['title']) . ':</strong> ' : '')
+		. htmlspecialchars((string)$notice['message']) . '</div>';
+}
+
 /** Echo the Relay section (one box, anchored #relay-section). */
 function mailbox_relay_section_render($page, array $v): void {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
 	echo '<div id="relay-section">';
 	$page->begin_box(array('title' => 'Relay'));
+	echo mailbox_relay_notice_html();
 
 	// --- relay rows -----------------------------------------------------------
 	// One relay per deployment: its name, address and state; one sentence on
@@ -329,14 +357,15 @@ function mailbox_relay_section_render($page, array $v): void {
 
 			// The update, where it can be seen: a relay behind this site's
 			// release says so and offers the way to move it.
-			if (!empty($up['offers']) || ($up['route'] ?? '') === 'hosted') {
+			$run_in_flight = !empty($v['cloud_run']) && $v['cloud_run']->isLive();
+			if ((!empty($up['offers']) && !$run_in_flight) || ($up['route'] ?? '') === 'hosted') {
 				if (!empty($up['offers'])) {
 					echo '<p class="mb-1">' . htmlspecialchars((string)$up['describe']) . '</p>';
 				}
 				echo mailbox_relay_upgrade_control($page, $rid, $up, !empty($v['cloud_oauth_configured']));
 			}
 
-			echo '<details style="margin-top:.75rem;"><summary class="small">Details &amp; actions</summary>';
+			echo '<details style="margin-top:.75rem;"><summary class="small">Details</summary>';
 			echo '<div style="margin-top:.5rem;">';
 			echo '<table class="table" style="max-width:560px;"><tbody>';
 			if ($relay->usesRelayApi()) {
@@ -373,14 +402,6 @@ function mailbox_relay_section_render($page, array $v): void {
 					. htmlspecialchars(json_encode($scanner['ping'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES))
 					. '</pre></details>';
 			}
-			$machine = (string)$relay->get('mrl_public_ip') ?: $name;
-			$delete_confirm = ((string)$relay->get('mrl_cloud_instance_id') !== '')
-				? 'Remove the relay at ' . $machine . ' from your mail setup? The server itself keeps running, and billing, '
-					. 'at your cloud provider until you delete it there. Your domains\' MX records still point at it: '
-					. 'create a new relay, or repoint the MX at this server and turn its mail listener on.'
-				: 'Remove the relay at ' . $machine . '? Your domains\' MX records still point at it: create a new relay, '
-					. 'or repoint the MX at this server and turn its mail listener on.';
-			echo mailbox_relay_action_button($rid, 'delete', 'Delete', 'btn-danger', $delete_confirm);
 			echo '</div></details>';
 			echo '</div>';
 		}
@@ -395,7 +416,7 @@ function mailbox_relay_section_render($page, array $v): void {
 	if (!empty($v['relays'])) {
 		echo '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">';
 		if (!empty($v['has_active_relay'])) {
-			echo PublicPageBase::action_button('Check Relay Health', '', array(
+			echo PublicPageBase::action_button('Test Relay Health', '', array(
 				'hidden' => array('action' => 'relay_health_check'), 'class' => 'btn btn-sm btn-outline-secondary'));
 		}
 		foreach ($v['relays'] as $row) {
@@ -404,9 +425,13 @@ function mailbox_relay_section_render($page, array $v): void {
 				echo mailbox_relay_action_button((int)$relay->key, 'disable', 'Disable relay', 'btn-outline-danger',
 					mailbox_relay_disable_message($relay), 'Disable relay');
 			} else {
+				// Disabled: use it again, or remove it for good — Delete is
+				// offered only here, once the relay no longer carries mail.
 				echo mailbox_relay_action_button((int)$relay->key, 'enable', 'Enable relay', 'btn-primary',
 					'Use this relay again? This server starts collecting your domains\' mail from it and sends it the '
 					. 'address list, and your domains\' DNS checks expect their MX records to point at the relay.', 'Enable relay');
+				echo mailbox_relay_action_button((int)$relay->key, 'delete', 'Delete relay', 'btn-danger',
+					mailbox_relay_delete_message($relay), 'Delete relay');
 			}
 		}
 		echo '</div>';
@@ -465,7 +490,8 @@ function mailbox_relay_section_render($page, array $v): void {
 	// destroy) is in flight — its credential/progress step lives here.
 	$cloud_run_live = !empty($v['cloud_run']) && $v['cloud_run']->isLive();
 	if (empty($v['relays']) || $cloud_run_live) {
-	echo '<h5 class="mt-3">' . ($cloud_run_live && !empty($v['relays']) ? 'Relay cloud act' : 'Run your own relay') . '</h5>';
+	$live_is_upgrade = $cloud_run_live && (string)$v['cloud_run']->get('rcl_kind') === 'upgrade';
+	echo '<h5 class="mt-3">' . ($live_is_upgrade ? 'Relay update' : ($cloud_run_live ? 'New relay' : 'Run your own relay')) . '</h5>';
 	{
 		// The cloud path: this deployment creates the relay in the customer's
 		// own cloud account and the relay builds itself from first-boot
@@ -484,43 +510,24 @@ function mailbox_relay_section_render($page, array $v): void {
 
 		if ($run !== null && $run->isLive()) {
 			if ($run_status === 'awaiting_grant') {
-				// The just-in-time credential step — the only moment Linode
-				// comes up, and the credential dies with this one act.
-				$act_label = 'One approval needed to create the server';
-				$referral = '<p>No Linode account yet? '
-					. '<a href="https://www.linode.com/lp/refer/?r=f89d0c9308eeef26368cc67356eb8fa81365d488" '
-					. 'target="_blank" rel="noopener">Sign up with this link</a> to receive two months of hosting free.</p>';
-				echo '<div style="max-width:700px;">';
-				if (!empty($v['cloud_oauth_configured'])) {
-					// One-click branch: a registered Linode OAuth client exists.
-					echo '<p><strong>' . htmlspecialchars($act_label) . ':</strong> approve the connection at Linode. '
-						. 'The approval is used for this one job and never kept.</p>';
-					echo $referral;
-					echo mailbox_relay_action_button(0, 'relay_cloud_connect', 'Approve at Linode', 'btn-primary');
-					echo mailbox_relay_action_button(0, 'relay_cloud_dismiss', 'Cancel', 'btn-secondary');
-					echo '<details style="margin-top:.75rem;"><summary>Use another method (paste an API token)</summary><div style="margin-top:.75rem;">';
-				} else {
-					echo '<p><strong>' . htmlspecialchars($act_label) . ':</strong> a one-time key from Linode.</p>';
-					echo $referral;
-					echo '<p style="margin-bottom:.5rem;">How to get the key:</p>';
-				}
-				echo mailbox_relay_token_steps();
-				$tform = $page->getFormWriter('relay_cloud_token');
-				echo $tform->begin_form();
-				$tform->passwordinput('cloud_token', 'Linode API token', array());
-				// Two named submits in one form so Start and Cancel sit side by
-				// side (a dismiss needs no separate form).
-				echo '<div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;">'
-					. '<button type="submit" name="action" value="relay_cloud_token" class="btn btn-primary">Start</button>'
-					. '<button type="submit" name="action" value="relay_cloud_dismiss" formnovalidate class="btn btn-secondary">Cancel</button>'
+				// A run opened without its permission (an older page, or an
+				// Approve at Linode not finished): one line here, and the
+				// permission itself only ever in the modal.
+				$is_upgrade = ((string)$run->get('rcl_kind') === 'upgrade');
+				echo '<p>' . ($is_upgrade ? 'An update of this relay is waiting for your Linode approval.'
+					: 'A new relay is waiting for your Linode approval.') . ' Nothing has started yet.</p>';
+				echo '<div style="display:flex;gap:.5rem;flex-wrap:wrap;">'
+					. '<button type="button" class="btn btn-sm btn-primary" data-relay-grant="relay-resume">Continue</button> '
+					. mailbox_relay_action_button(0, 'relay_cloud_dismiss', 'Cancel', 'btn-secondary')
 					. '</div>';
-				echo $tform->end_form();
-				echo '<p class="text-muted" style="margin-top:.75rem;">The key is used for this one job and never kept. '
-					. 'You can also delete it at Linode afterward.</p>';
-				if (!empty($v['cloud_oauth_configured'])) {
-					echo '</div></details>';
-				}
-				echo '</div>';
+				echo mailbox_relay_grant_modal($page, 'relay-resume', $is_upgrade
+						? '<h5>Update this relay</h5><p>The relay is drained of stored mail first, then the same server is '
+							. 're-imaged from this site\'s current release. It stops accepting mail for several minutes; senders '
+							. 'retry, and its address does not change.</p>'
+						: '<h5>Create a relay</h5><p>This creates one small server (1 GB Nanode) in your Linode account, billed '
+							. 'to you, and builds the relay on it automatically.</p>',
+					array('action' => 'relay_cloud_token'), !empty($v['cloud_oauth_configured']),
+					$is_upgrade ? 'Start the update' : 'Start');
 			} else {
 				echo '<p>⏳ ' . htmlspecialchars($status_lines[$run_status] ?? $run_status)
 					. ' <a href="">Refresh</a></p>';
@@ -571,7 +578,9 @@ function mailbox_relay_section_render($page, array $v): void {
 			echo '</div>';
 			echo mailbox_relay_grant_modal($page, 'relay-create',
 				'<h5>Create a relay</h5><p>This creates one small server (1 GB Nanode) in your Linode account, billed to you, '
-				. 'and builds the relay on it automatically. It takes several minutes and reports in here when it is done.</p>',
+				. 'and builds the relay on it automatically. It takes several minutes and reports in here when it is done.</p>'
+				. '<p>No Linode account yet? <a href="https://www.linode.com/lp/refer/?r=f89d0c9308eeef26368cc67356eb8fa81365d488" '
+				. 'target="_blank" rel="noopener">Sign up with this link</a> to receive two months of hosting free.</p>',
 				array('action' => 'relay_cloud_begin'), !empty($v['cloud_oauth_configured']), 'Start',
 				array('cloud_mail_hostname', 'cloud_region'));
 			echo '<p class="text-muted small">Creates one small instance (1 GB Nanode) in your Linode account, '
