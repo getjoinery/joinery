@@ -6,6 +6,7 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.6 - the instance report carries its region; regionSupportsMetadata() refuses a blank region
  * @version 1.5 - the instance report carries ipv6 (Linode's addr/128, prefix stripped) beside the first public IPv4
  * @version 1.4 - shutdownInstance()/bootInstance() (POST …/shutdown, …/boot) and getTransfer()
  *                (GET account/transfer): the hosted tier's only automatic lever is power, and
@@ -111,6 +112,11 @@ class LinodeComputeDriver implements CloudComputeProvider {
 	 * user-data? Regions without it take the StackScript fallback.
 	 */
 	public function regionSupportsMetadata(string $region): bool {
+		// A blank region would ask GET regions/ — the list of every region, with
+		// no capabilities at its top — and read as "no Metadata here".
+		if (trim($region) === '') {
+			throw new CloudComputeException('regionSupportsMetadata needs a region');
+		}
 		$info = $this->request('GET', 'regions/' . rawurlencode($region));
 		$capabilities = isset($info['capabilities']) && is_array($info['capabilities']) ? $info['capabilities'] : array();
 		return in_array('Metadata', $capabilities, true);
@@ -239,6 +245,7 @@ class LinodeComputeDriver implements CloudComputeProvider {
 			'ip'     => $ip,
 			'ipv6'   => $ipv6,
 			'label'  => isset($instance['label']) ? (string)$instance['label'] : '',
+			'region' => isset($instance['region']) ? (string)$instance['region'] : '',
 		);
 	}
 

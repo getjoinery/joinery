@@ -23,6 +23,8 @@
  *
  * Test seam: $driver_factory.
  *
+ * @version 2.3 - an update run asks the provider for the server's region before the rebuild, so it takes
+ *                the Metadata service instead of a StackScript fallback its token cannot use
  * @version 2.2 - a fleet shard is born the same way, skeleton only (rcl_mfs_mailbox_fleet_shard_id): the
  *                operator identity's key rides in its user-data and its birth lands on the
  *                MailboxFleetShard row (specs/relay_without_a_shell.md WP4)
@@ -399,6 +401,21 @@ class RelayCloudProvisioner {
 		}
 
 		$driver = $this->driverFor($run);
+		// An update run starts from the relay row, which does not record the
+		// region; the region decides how the rebuilt server gets its first-boot
+		// setup (the Metadata service, or a StackScript, which needs a permission
+		// the token step does not ask for). Ask the provider where the server is.
+		if (trim((string)$run->get('rcl_region')) === '') {
+			try {
+				$region = (string)($driver->getInstance($instance_id)['region'] ?? '');
+				if ($region !== '') {
+					$run->set('rcl_region', substr($region, 0, 50));
+					$run->save();
+				}
+			} catch (CloudComputeException $e) {
+				return $this->handleComputeFailure($run, $e, 'rebuild');
+			}
+		}
 		try {
 			$instance = $driver->rebuildInstance($instance_id,
 				array('image' => self::INSTANCE_IMAGE)
