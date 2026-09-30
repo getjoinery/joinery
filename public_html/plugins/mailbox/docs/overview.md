@@ -4188,9 +4188,8 @@ storage keys, never on plaintext, so a sealed mailbox needs no unlock window.
 `$retention_policy` and runs in the platform's daily retention sweep, purging what was
 trashed longer than `mailbox_trash_retention_days` (default 30) ago. `0` means nothing
 purges. A per-run cap (500) keeps a large backlog draining over several runs rather than
-one enormous transaction, and says so in its result message. Each Trash row shows **when
-it purges**, computed for display from the same setting and the row's delete time — never
-stored, because an operator can change the window.
+one enormous transaction, and says so in its result message. The Trash view states the
+window once, at the top of the list; each row shows its received date like every other list.
 
 **Unmatched mail ages out on its own window.** Mail stored for an address no alias claims
 sits in no member's mailbox, so nobody ever trashes it and the window above never sees it.
@@ -4425,12 +4424,13 @@ delegated to `toLocaleTimeString`, which would render 24-hour under some locales
 and disagree with the rung below it; the month name stays locale-aware
 (specs/mailbox_timestamp_ladder.md).
 
-**Sent and Drafts are ordered by time alone.** Every other list is sectioned —
+**Sent, Drafts and Trash are ordered by time alone.** Every other list is sectioned —
 unread first, then starred, then the rest — which answers *what still needs me?*
-On mail the member sent or wrote there is no such question: an outbound row's
-unread flag is whatever the source's `\Seen` said when it was pulled, or the
-ingest default of false, and never something the member decided. So those two
-views drop the sectioning and read strictly newest-first, the way every mail
+Trash is discarded mail, where the member looks for something they just threw away,
+not for what needs them. On mail the member sent or wrote there is no such question
+either: an outbound row's unread flag is whatever the source's `\Seen` said when it
+was pulled, or the ingest default of false, and never something the member decided.
+So those three views drop the sectioning and read strictly newest-first, the way every mail
 client shows sent mail. The **mailbox unread badge** excludes outbound rows for
 the same reason, and because the Inbox it lands on has never listed them
 (specs/bugfix_sent_view_ordering.md).

@@ -1,7 +1,8 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.51 — .mbx-context-waiting (a slot held below a still-loading docked panel)
+ * Vanilla CSS, no framework. @version 2.52 — .mbx-thread-purge removed (Trash rows show the received date)
+ * @version 2.51 — .mbx-context-waiting (a slot held below a still-loading docked panel)
  * @version 2.50 — .mbx-device-search-btn (Rebuild / Remove on the device-search note)
  * @version 2.49 — .mbx-dai-link (Change / Test again in the one-line ready state)
  * @version 2.48 — .mbx-dai-ondemand (Summarize, Scan now)
@@ -432,10 +433,6 @@
    grey, a step darker still. A read row keeps the quiet grey either way. */
 .mbx-thread-item.unread .mbx-thread-ai { color: #111827; }
 .mbx-thread-time { flex: 0 0 auto; color: #9097a1; font-size: var(--mbx-text-xs); white-space: nowrap; }
-/* In Trash the right-hand date is when the conversation is permanently deleted,
-   not when it arrived — a deadline, so it does not read as quiet metadata. */
-.mbx-thread-purge { color: #b45309; }
-
 /* The Trash view's one line about itself: the retention window, plus the
    source-server caveat on a mailbox that pulls from one. A note, not a row —
    it must never scan as mail. */
