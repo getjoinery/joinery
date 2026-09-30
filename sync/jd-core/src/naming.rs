@@ -265,11 +265,61 @@ pub fn apply_naming(
         .filter(|i| i.kind == crate::pass::DIRECTORY_DISAGREES)
         .filter_map(|i| i.entity)
         .collect();
-    for entry in crate::pass::all_entries(env)? {
+    // Names a server file is due at and has not arrived: a real record with
+    // no agreement here. A file saved at one of them and never sent waits
+    // for that download (`specs/drive_file_ownership.md`, design 1b).
+    let all = crate::pass::all_entries(env)?;
+    let unarrived: std::collections::HashSet<(Option<i64>, String)> = all
+        .iter()
+        .filter(|e| {
+            e.id.entity_type == EntityType::File
+                && !e.id.is_provisional()
+                && !e.remote_deleted
+                && e.synced_placement.is_none()
+        })
+        .map(|e| (e.remote.parent, jd_vfs::comparison_key(&competing_placement(e).name, personality)))
+        .collect();
+    // A source whose file a claimant has taken into a vault holds no file on
+    // this disk: it waits on the server for the claimant's upload to replace
+    // it. Judged here, its old name competed with whatever the user put there
+    // since -- the sealed file traded out into that same slot lost a case
+    // clash and was taken off the disk (`specs/drive_file_ownership.md`, E1a).
+    // Until it is trashed: the claimant's upload landing ends the hold, and
+    // the source's trash follows a pass later.
+    let replaced: std::collections::HashSet<EntityId> = all
+        .iter()
+        .filter(|e| !e.remote_deleted && e.status != LocalStatus::OutOfScope)
+        .filter_map(|e| e.replaces)
+        .collect();
+    let parked = crate::pass::held_by_a_weak_volume_park(env)?;
+    let waiting: std::collections::HashSet<EntityId> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == crate::pass::NAME_HELD_BY_A_PARKED_VAULT)
+        .filter_map(|i| i.entity)
+        .collect();
+    for entry in all {
+        // A folder whose rename waits for a name a parked vault holds on the
+        // server keeps the name it wears here; the round asks after it.
+        if waiting.contains(&entry.id) {
+            continue;
+        }
         // Out of scope is a deliberate absence, and something the server has
         // already deleted is on its way out. Neither should hold a slot against
         // a sibling that wants to exist.
         if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
+            continue;
+        }
+        // Nor is anything under a vault parked on a weak volume judged: it
+        // waits with the park, as the round leaves it (D3). Judged, a sealed
+        // file of the server's and a file saved into the park under its name
+        // were given a park that could never land, retried for ever (FAT
+        // hostile2 74418).
+        if entry.local_placement().parent.is_some_and(|p| parked.contains(&p)) {
+            continue;
+        }
+        if replaced.contains(&entry.id) {
             continue;
         }
         // A folder the scan is HOLDING -- its directory known to stand at a
@@ -302,6 +352,21 @@ pub fn apply_naming(
         // for good. That file lands, the one here is moved aside (`make_room`),
         // and the next scan finds it there by its own identity.
         if crate::pass::held_and_never_sent(env, &entry)? {
+            continue;
+        }
+        // Nor does a file saved where a server file is due and never sent: it
+        // waits for that download, which settles the two by identity. Judged
+        // here, it outranked the file the server holds under that name, which
+        // was parked as a duplicate and never downloaded -- and the one here,
+        // refused that name, waited for it for ever.
+        if entry.id.entity_type == EntityType::File
+            && entry.id.is_provisional()
+            && entry.synced_placement.is_none()
+            && unarrived.contains(&(
+                entry.remote.parent,
+                jd_vfs::comparison_key(&competing_placement(&entry).name, personality),
+            ))
+        {
             continue;
         }
         by_parent
@@ -670,8 +735,12 @@ fn judge_destinations(
     let already: std::collections::HashSet<EntityId> =
         out.give_up_local_copy.iter().map(|(id, _)| *id).collect();
     let (trading, pending) = trading_names(env, personality, settled, leaving_this_pass, busy)?;
+    let parked = crate::pass::held_by_a_weak_volume_park(env)?;
     for entry in crate::pass::all_entries(env)? {
         if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
+            continue;
+        }
+        if entry.local_placement().parent.is_some_and(|p| parked.contains(&p)) {
             continue;
         }
         if !entry.holds_a_local_file() || already.contains(&entry.id) {
@@ -1013,6 +1082,7 @@ mod tests {
             replaces: None,
             stand_in: None,
             own_file: None,
+            last_seen_sha: None,
         }
     }
 

@@ -342,12 +342,41 @@ fn sweep_world_with(
     // The weak control (`specs/drive_file_identity.md`): every disk reports no
     // birth, so every file's identity is weak and the engine reads the disk
     // by its older rules.
-    if std::env::var("HIDEBIRTHS").is_ok() {
+    if std::env::var("HIDEBIRTHS").is_ok() || BIRTHS_HIDDEN_HERE.with(|b| b.get()) {
         for device in &world.devices {
             device.fs.hide_births(true);
         }
     }
+    // The FAT and exFAT controls (`specs/drive_weak_volume_identity.md`, F1):
+    // every disk numbers its files as a USB stick does on one system.
+    if let Some(model) = fat_disk() {
+        for device in &world.devices {
+            device.fs.file_ids(model);
+        }
+    }
     world
+}
+
+thread_local! {
+    /// A frozen seed pinned on a FAT disk model sets it here, for its own
+    /// thread only: `FATDISK` is process-wide and would re-world every test.
+    static FAT_DISK_HERE: std::cell::Cell<Option<jd_sim::FileIds>> = const { std::cell::Cell::new(None) };
+    /// The same for a frozen seed pinned with births hidden (`HIDEBIRTHS`).
+    static BIRTHS_HIDDEN_HERE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The FAT disk model a sweep runs on, from `FATDISK`: `win` (Windows FAT and
+/// exFAT), `mac` (macOS FAT32) or `linux` (Linux FAT and exFAT, macOS exFAT).
+fn fat_disk() -> Option<jd_sim::FileIds> {
+    if let Some(model) = FAT_DISK_HERE.with(|m| m.get()) {
+        return Some(model);
+    }
+    match std::env::var("FATDISK").ok()?.as_str() {
+        "win" => Some(jd_sim::FileIds::DirectorySlot),
+        "mac" => Some(jd_sim::FileIds::DataCluster),
+        "linux" => Some(jd_sim::FileIds::MountSession),
+        other => panic!("FATDISK={other}: expected win, mac or linux"),
+    }
 }
 
 /// Which name table the workload draws from.
@@ -455,6 +484,18 @@ fn record_folder_swap(world: &World, device: &jd_sim::engine::Device, x: &str, y
 /// Reports coverage, because an oracle that checked nothing would look
 /// identical to one that found nothing.
 fn assert_no_entity_holds_both_sides_of_a_swap(world: &World, seed: u64) {
+    let (held, _) = swap_mixes(world, seed);
+    assert!(
+        held.is_empty(),
+        "seed {seed}: {} swap-separated pair(s) held by one entity: {}",
+        held.len(),
+        held.join("; ")
+    );
+}
+
+/// The swap-separated pairs one entity's history holds, unannounced, and how
+/// many announced ones were excused (see below).
+fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
     let pairs = world.swap_pairs();
     let versions = world.server.all_versions();
     let mut bodies: std::collections::BTreeMap<i64, Vec<Vec<u8>>> = Default::default();
@@ -467,9 +508,52 @@ fn assert_no_entity_holds_both_sides_of_a_swap(world: &World, seed: u64) {
     // separated more than once, in either order, and that is one poisoning.
     let mut seen: std::collections::BTreeSet<(i64, Vec<u8>, Vec<u8>)> = Default::default();
     let mut held: Vec<String> = Vec::new();
+    // A mix the user was told of, on a drive that cannot track renames at all
+    // (Windows FAT and exFAT): owner decision 2026-09-29, such drives may work
+    // badly but fail loudly. Earned by the drive's kind and by the warning
+    // naming this file on the device that could not tell the two apart.
+    //
+    // Narrow as the fire (a5's C1-C5): the device's own kind is read here, not
+    // inferred from the warning (C2); only the per-event warning excuses, never
+    // the drive's standing notice (C3); the warning must stand, open, on the
+    // device whose scan read the two as crossed, which is the device that sent
+    // the mixed versions (C4); and it excuses this entity holding exactly the
+    // two bodies it recorded as crossed, nothing else (C1, C5). Excused mixes
+    // are counted on the report line, never folded into zero.
+    let mut reported: std::collections::BTreeSet<(i64, String, String)> = Default::default();
+    for d in &world.devices {
+        let p = jd_vfs::Vfs::personality(&d.fs);
+        if !(p.positional_file_ids && p.id_tie_break == jd_vfs::IdTieBreak::None) {
+            continue;
+        }
+        let told: std::collections::BTreeSet<i64> = d
+            .store
+            .open_issues()
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.kind == "names_may_have_swapped")
+            .filter_map(|i| i.entity.map(|e| e.server_id))
+            .collect();
+        for (id, a, b) in d.store.swap_reports().unwrap() {
+            if told.contains(&id) {
+                reported.insert((id, a, b));
+            }
+        }
+    }
+    let mut excused = 0usize;
     for p in &pairs {
         let (lo, hi) = if p.a <= p.b { (&p.a, &p.b) } else { (&p.b, &p.a) };
+        let (sha_lo, sha_hi) = {
+            let (x, y) = (jd_sim::sha256_hex(lo), jd_sim::sha256_hex(hi));
+            if x <= y { (x, y) } else { (y, x) }
+        };
         for (id, chain) in &bodies {
+            if chain.contains(lo) && chain.contains(hi) && reported.contains(&(*id, sha_lo.clone(), sha_hi.clone())) {
+                if seen.insert((*id, lo.clone(), hi.clone())) {
+                    excused += 1;
+                }
+                continue;
+            }
             if chain.contains(lo) && chain.contains(hi) && seen.insert((*id, lo.clone(), hi.clone())) {
                 held.push(format!(
                     "file {id} holds {:?} and {:?} (separated by {})",
@@ -483,7 +567,7 @@ fn assert_no_entity_holds_both_sides_of_a_swap(world: &World, seed: u64) {
     let by_source = |src: &str| pairs.iter().filter(|p| p.source == src).count();
     eprintln!(
         "CHAIN-ORACLE seed={seed} pairs={} chaos={} slots={} rotation={} folders={} \
-         pairs_sealed={} entities_with_versions={} versions={} held_by_one_entity={}",
+         pairs_sealed={} entities_with_versions={} versions={} held_by_one_entity={} excused_by_issue={excused}",
         pairs.len(),
         by_source("chaos"),
         by_source("slots"),
@@ -494,12 +578,7 @@ fn assert_no_entity_holds_both_sides_of_a_swap(world: &World, seed: u64) {
         versions.len(),
         held.len()
     );
-    assert!(
-        held.is_empty(),
-        "seed {seed}: {} swap-separated pair(s) held by one entity: {}",
-        held.len(),
-        held.join("; ")
-    );
+    (held, excused)
 }
 
 /// Where the user put each file: the custody oracle's record of intent.
@@ -1123,6 +1202,12 @@ fn workload_core_with(
             .sum();
         eprintln!("CONFLICT-NAMES seed={seed} server={server} disks={disks}");
     }
+    // Files a pass left owned by no record (`specs/drive_file_ownership.md`
+    // design 4): counted, not a verdict, until the count reads zero.
+    {
+        let o = world.ownership();
+        eprintln!("OWNERSHIP seed={seed} total={} counts={:?} samples={:?}", o.total(), o.counts, o.samples);
+    }
     // Which records' own files are not the file standing where they are
     // placed, or are claimed twice (`own_files_astray`). Off unless asked.
     if std::env::var("OWNFILE").is_ok() {
@@ -1363,12 +1448,40 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
     let mut sealed_names: std::collections::BTreeSet<String> = Default::default();
     let mut plain_names: std::collections::BTreeSet<String> = Default::default();
     let mut unattributed = 0usize;
+    // A body or name counts as sealed only once the engine on some device
+    // could have known it was: seen in a vault by a scan that completed, or
+    // held in a record that placed it in one. A file saved in a vault and
+    // moved out before either is a plain file to every engine, and uploading
+    // it plain is what the user's last act asked for (owner decision Q4,
+    // `specs/drive_weak_volume_identity.md`).
+    // Each body with the server change id as of which some engine could first
+    // have known it: a plaintext version the server made no later than that
+    // was sent before anything could know, which is Q4's plain file.
+    let mut known_bodies: std::collections::BTreeMap<String, i64> = Default::default();
+    let mut known_names: std::collections::BTreeSet<String> = Default::default();
+    for d in &world.devices {
+        let (bodies, names) = d.fs.sealed_known();
+        for (sha, at) in bodies {
+            let first = known_bodies.entry(sha).or_insert(at);
+            *first = (*first).min(at);
+        }
+        known_names.extend(names.iter().map(|n| leaf(n)));
+    }
+    let mut never_known = 0usize;
     for d in &world.devices {
         for w in d.fs.user_writes() {
             match side(&w.path, w.in_sealed_dir) {
+                Side::Sealed if !known_bodies.contains_key(&w.sha256) => never_known += 1,
                 Side::Sealed => {
                     sealed_bodies.entry(w.sha256).or_insert(w.path.clone());
-                    sealed_names.insert(leaf(&w.path));
+                    // Only a name the user chose: a save over a file already
+                    // there gives it no name, and an engine-made name (a
+                    // conflict copy) can come up again for a plain file
+                    // elsewhere without anything sealed reaching the server
+                    // (plat3 75429).
+                    if w.created && known_names.contains(&leaf(&w.path)) {
+                        sealed_names.insert(leaf(&w.path));
+                    }
                 }
                 Side::Plain | Side::Unattributed => {
                     if side(&w.path, w.in_sealed_dir) == Side::Unattributed {
@@ -1381,6 +1494,7 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
         }
         for (path, in_sealed_dir) in d.fs.user_renames() {
             match side(&path, in_sealed_dir) {
+                Side::Sealed if !known_names.contains(&leaf(&path)) => never_known += 1,
                 Side::Sealed => {
                     sealed_names.insert(leaf(&path));
                 }
@@ -1402,7 +1516,8 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
         .collect();
     eprintln!(
         "SEALED-ORACLE seed={seed} sealed_bodies={} exempted_as_copied_plain={} \
-         sealed_names={} unattributed_ring_writes={unattributed} exempted={exempted:?}",
+         sealed_names={} unattributed_ring_writes={unattributed} never_known_sealed={never_known} \
+         exempted={exempted:?}",
         sealed_bodies.len(),
         exempted.len(),
         sealed_names.len()
@@ -1463,8 +1578,16 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
         .collect();
     let mut roads: std::collections::BTreeMap<&str, usize> = Default::default();
     let mut leaked = Vec::new();
+    let mut excused_by_time = 0usize;
     for (hash, written_at) in &sealed_bodies {
         if plain_bodies.contains_key(hash) || world.server.blob(hash).is_none() {
+            continue;
+        }
+        // Every plaintext version of it made before any engine could know it
+        // was sealed: saved in a vault and moved out before a scan (Q4).
+        let known_at = known_bodies.get(hash).copied().unwrap_or(i64::MIN);
+        if versions.iter().filter(|v| &v.sha256 == hash).all(|v| v.change_id <= known_at) {
+            excused_by_time += 1;
             continue;
         }
         let standing_at: Vec<&String> = tree
@@ -1511,7 +1634,7 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
         ));
     }
     eprintln!(
-        "SEALED-LEAKS seed={seed} leaked={} carried_out_by_chaos={by_chaos} not_carried_out={by_engine} \
+        "SEALED-LEAKS seed={seed} leaked={} excused_by_time={excused_by_time} carried_out_by_chaos={by_chaos} not_carried_out={by_engine} \
          as_new_file={as_new_file} as_new_version={as_new_version} never_sealed={} as_an_edit={} \
          beside_a_live_sealed_copy={} sealed_copy_gone={}",
         leaked.len(),
@@ -2416,6 +2539,14 @@ fn drive(
             custody.note_swaps(world);
             custody.learn(di, device, false);
             trace(world, &format!("step {step} kill on {}", device.name));
+        }
+
+        // A USB stick unplugged and plugged in again between passes. On a
+        // fixed beat rather than a draw, so every seed keeps the run it has
+        // without FATDISK.
+        if fat_disk().is_some() && step % 12 == 11 {
+            device.fs.remount();
+            trace(world, &format!("step {step} remount on {}", device.name));
         }
 
         match rng.below(20) {
@@ -4786,4 +4917,859 @@ fn red_only_on(expected: &[&str], on_green: &str, run: impl FnOnce() + std::pani
         "a frozen seed fired something other than [{}]: {why}",
         expected.join(", ")
     );
+}
+
+/// The sealed-name check counts only names the user chose. Two devices save
+/// the same name at the top and in the vault, and the engine gives the loser
+/// the same conflict name in both places. The user then edits the copy in the
+/// vault: saving over a file names nothing, and the plain file at the top
+/// bearing the same engine-made name is not a sealed name reaching the server
+/// (plat3 75429; `specs/drive_file_ownership.md`, found by the sweep).
+#[test]
+fn the_sealed_name_check_counts_only_names_the_user_chose() {
+    let seed = 9_999;
+    let vault = jd_sim::SimVault::new(seed);
+    let mut world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    for (d, n) in [("laptop", 1), ("desktop", 2)] {
+        world.device(d).fs.user_write("c.txt", format!("top, from {d}").as_bytes());
+        world.device(d).fs.user_write("Private/c.txt", format!("sealed, from {d} {n}").as_bytes());
+    }
+    assert!(world.settle().is_some());
+    let laptop = world.device("laptop");
+    let copies: Vec<String> = jd_sim::scenario::disk_tree(laptop)
+        .into_keys()
+        .filter(|p| p.starts_with("Private/c (conflicted copy"))
+        .collect();
+    assert_eq!(copies.len(), 1, "construction: one conflict copy in the vault: {:?}", jd_sim::scenario::disk_tree(laptop));
+    let top = copies[0].trim_start_matches("Private/").to_string();
+    assert!(jd_sim::scenario::disk_tree(laptop).contains_key(&top), "construction: the same engine-made name at the top: {top}");
+    laptop.fs.user_write(&copies[0], b"an edit to the sealed conflict copy");
+    assert!(world.settle().is_some());
+    assert_sealed_content_never_reached_the_clear(&world, seed);
+}
+
+/// A file saved in a vault and moved out before the engine ever looked is a
+/// plain file to every engine: nothing on any device saw it sealed or held a
+/// record placing it in the vault. It goes up plain, as the user's last act
+/// asked, and the sealed oracle does not call that a leak (owner decision Q4,
+/// `specs/drive_weak_volume_identity.md`). Births shown and hidden.
+#[test]
+fn a_file_no_engine_saw_in_a_vault_is_not_counted_sealed() {
+    for births in [true, false] {
+        let seed = 9_997;
+        let vault = jd_sim::SimVault::new(seed);
+        let mut world = World::of(seed, &[("laptop", Platform::Linux)]);
+        world.give_vault("laptop", &vault);
+        world.server.set_vault_public_key(1, &vault.public_key_b64);
+        world.server.seed_encrypted_folder(None, "Private");
+        world.device("laptop").fs.hide_births(!births);
+        assert!(world.settle().is_some());
+        let laptop = world.device("laptop");
+        laptop.fs.user_write("Private/quick.txt", b"saved in the vault, dragged out at once");
+        laptop.fs.user_rename("Private/quick.txt", "quick.txt");
+        assert!(world.settle().is_some());
+        let sha = jd_sim::sha256_hex(b"saved in the vault, dragged out at once");
+        assert!(
+            world.server.all_versions().iter().any(|v| v.sha256 == sha),
+            "construction: the body went up plain (births shown: {births})"
+        );
+        assert_sealed_content_never_reached_the_clear(&world, seed);
+    }
+}
+
+/// The other half: once a scan that completed saw the file in the vault, or
+/// a record placed it there, it is sealed for good, and a later upload of it
+/// in the clear is a leak the oracle reports. Births shown and hidden.
+#[test]
+fn a_file_an_engine_saw_in_a_vault_stays_counted_sealed() {
+    for births in [true, false] {
+        let seed = 9_996;
+        let vault = jd_sim::SimVault::new(seed);
+        let mut world = World::of(seed, &[("laptop", Platform::Linux)]);
+        world.give_vault("laptop", &vault);
+        world.server.set_vault_public_key(1, &vault.public_key_b64);
+        world.server.seed_encrypted_folder(None, "Private");
+        world.device("laptop").fs.hide_births(!births);
+        assert!(world.settle().is_some());
+        let laptop = world.device("laptop");
+        laptop.fs.user_write("Private/seen.txt", b"saved in the vault and seen there");
+        world.pass(laptop);
+        let sha = jd_sim::sha256_hex(b"saved in the vault and seen there");
+        assert!(laptop.fs.sealed_known().0.contains_key(&sha), "a completed scan saw it sealed (births shown: {births})");
+        let (bodies, _) = laptop.fs.sealed_known();
+        assert!(!bodies.contains_key(&jd_sim::sha256_hex(b"never written")), "and nothing it never saw");
+    }
+}
+
+/// The same engine-made name at the top and in the vault, and a swap in the
+/// vault trades the conflict copy's name with another sealed file's. A swap
+/// gives no name -- both were given before -- so the plain file at the top
+/// bearing the engine's name is still not a sealed name reaching the server
+/// (kill2 75108, 75127; `specs/drive_file_ownership.md`, found by the sweep).
+#[test]
+fn the_sealed_name_check_counts_no_name_a_swap_traded() {
+    let seed = 9_998;
+    let vault = jd_sim::SimVault::new(seed);
+    let mut world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    for (d, n) in [("laptop", 1), ("desktop", 2)] {
+        world.device(d).fs.user_write("c.txt", format!("top, from {d}").as_bytes());
+        world.device(d).fs.user_write("Private/c.txt", format!("sealed, from {d} {n}").as_bytes());
+    }
+    assert!(world.settle().is_some());
+    let laptop = world.device("laptop");
+    let copies: Vec<String> = jd_sim::scenario::disk_tree(laptop)
+        .into_keys()
+        .filter(|p| p.starts_with("Private/c (conflicted copy"))
+        .collect();
+    assert_eq!(copies.len(), 1, "construction: one conflict copy in the vault: {:?}", jd_sim::scenario::disk_tree(laptop));
+    let top = copies[0].trim_start_matches("Private/").to_string();
+    assert!(jd_sim::scenario::disk_tree(laptop).contains_key(&top), "construction: the same engine-made name at the top: {top}");
+    world.swap_names_by_chaos("laptop", &copies[0], "Private/c.txt");
+    assert!(world.settle().is_some());
+    assert_sealed_content_never_reached_the_clear(&world, seed);
+}
+
+/// kill2 75127 with swaps on: a plain file carried into a vault is replaced
+/// by its claimant, and while its plain source waited to be trashed a file
+/// saved where a download was landing, under the source's old name, was
+/// folded into the source by the name merge and sent as its version. One
+/// file's history then held the other's bytes. Witness of that world; the
+/// invariant is all that is asserted (`specs/drive_file_ownership.md`, E1a).
+#[test]
+fn frozen_a_converting_source_takes_no_merged_file_seed() {
+    never_fires(&["no_entity_holds_both_sides_of_a_swap"], || {
+        workload_core_with(
+            75_127,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+}
+
+/// plain2 75268 on a macOS FAT32 stick: a file saved while a download was
+/// landing got a record of its own; a swap carried it onto another record's
+/// path, and the landed download at its old name let the name merge fold its
+/// record into that download's record, whose bytes stood there -- the saved
+/// file was left with no record and read as the other record's edit. The
+/// merge now needs the file at the name to be both records' (layer 1,
+/// `specs/drive_weak_volume_identity.md`). The invariant is all that is
+/// asserted.
+#[test]
+fn frozen_a_merge_needs_both_records_bytes_on_a_stick_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DataCluster)));
+    never_fires(&["no_entity_holds_both_sides_of_a_swap"], || {
+        workload_core_with(
+            75_268,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::None,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// hostile2 74424 with swaps on: two devices rotate the three rings in
+/// opposite directions under net faults. The vault lost a name contest while
+/// its directory stood at another ring's name, the park disowned it, and its
+/// directory was minted as a new plain folder with a sealed file inside
+/// (Defect AF's family); and the path map read the vault for a plain folder
+/// whose directory had only been renamed, converting a plain file into it.
+/// Witness of that world; the invariants are all that is asserted.
+#[test]
+fn frozen_rings_rotated_both_ways_seed() {
+    never_fires(&["sealed_never_in_the_clear", "every_file_in_a_folder_the_user_put_it_in"], || {
+        workload_core_with(
+            74_424,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+}
+
+/// kill2 75110 with the name swapper off: the plain ring folder and the vault
+/// both still named ring-1 in their records while the server's trade was in
+/// flight, the user swapped ring-1 and ring-3, and both records were evicted
+/// from ring-1. With no holder at ring-1 the ring walk never closed: the plain
+/// folder was read as deleted and trashed with its files inside, which the
+/// path map (reading each directory by its identity) had correctly left in
+/// it. Read as a chain by identity, each folder lands where its directory
+/// stands. The invariant is all that is asserted.
+#[test]
+fn frozen_a_swap_through_a_path_both_its_records_left_resolves_seed() {
+    never_fires(&["every_file_in_a_folder_the_user_put_it_in"], || {
+        workload_core_with(
+            75_110,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::Off,
+        );
+    });
+}
+
+/// kill2 75123 with the name swapper off: an open chain, not a ring. The
+/// server had moved one plain ring folder away, so its record still named the
+/// vault's path and was evicted from it; its directory stood at the second
+/// plain folder's path, and that folder's directory at a name no record held.
+/// The end of the chain waited for the member moving into its old path, the
+/// member could not be placed until the end left, and the folder was read as
+/// gone: the server's trade ended in a conflict-named copy. The chain is now
+/// read by identity, its end corroborated by its own files. The invariant is
+/// all that is asserted.
+#[test]
+fn frozen_an_open_chain_of_folder_moves_resolves_seed() {
+    never_fires(&["every_file_in_a_folder_the_user_put_it_in"], || {
+        workload_core_with(
+            75_123,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::Off,
+        );
+    });
+}
+
+/// kill2 75100: the vault and a plain ring folder traded names after the plain
+/// folder's files had moved out, so the vault's old path held a directory with
+/// nothing known in it -- displaced, not contested -- and the ring walk, over
+/// contested paths only, never closed. Both read as present, and the path
+/// map, reading each directory by its identity, filed the plain folder's new
+/// files into the vault's record and back until one went up in the clear. The
+/// walk now includes displaced paths. The invariants are all that is asserted.
+#[test]
+fn frozen_a_ring_closes_through_a_displaced_path_seed() {
+    never_fires(&["every_file_in_a_folder_the_user_put_it_in", "sealed_never_in_the_clear"], || {
+        workload_core_with(
+            75_100,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+}
+
+/// hostile2 74414: the vault was parked under a scratch local name because
+/// its directory stood elsewhere (WP2's row 4), and its directory then came
+/// back to its own agreed name. No move was left to report, the scratch name
+/// was never cleared, and the park was retried every pass for ever. Settling
+/// is all that is asserted.
+#[test]
+fn frozen_a_park_lifts_when_its_directory_comes_home_seed() {
+    never_fires(&[], || {
+        workload_core_with(
+            74_414,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+}
+
+/// hostile2 74403 on a Linux FAT stick: a sealed file held outside its vault
+/// was set aside for a download landing on its path, and nothing followed it
+/// to the aside -- the folder was asked for by a directory id the volume does
+/// not have, and the file was minted as a new plain file and sent in the
+/// clear. The invariant is all that is asserted.
+#[test]
+fn frozen_a_held_file_set_aside_on_a_stick_stays_held_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    never_fires(&["sealed_never_in_the_clear"], || {
+        workload_core_with(
+            74_403,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// hostile2 74418 with births hidden: the vault is parked on the weak disk,
+/// the user saves a file into it under the name a sealed file of the server's
+/// holds there, and moves that sealed file into the other parked vault. Left
+/// where it was, the moved file's record contested the name with the saved
+/// file -- a rename and a park that could never land, retried for ever -- and
+/// the moved file stood unclaimed in the other vault's folder. It now follows
+/// its file within the park. Settling, with every oracle quiet, is asserted.
+#[test]
+fn frozen_a_file_moved_between_parked_vaults_is_followed_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(
+            74_418,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// kill2 75129 with births hidden: a sealed file held outside its vault in a
+/// plain folder another device deleted. The folder's subtree, read by the
+/// server's parents, did not list the held record, which was left naming a
+/// forgotten folder -- out of every scan -- while a trade carried its file
+/// onto a plain record's path, and its sealed bytes went up as that record's
+/// version. The invariants are all that is asserted.
+#[test]
+fn frozen_a_held_file_outlives_the_plain_folder_it_was_held_in_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    never_fires(&["sealed_never_in_the_clear", "no_entity_holds_both_sides_of_a_swap"], || {
+        workload_core_with(
+            75_129,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+}
+
+/// hostile2 74400 on a Linux FAT stick: the user traded the vault's ring name
+/// with a plain ring's in the same breath as the disk was first read weak. The
+/// park came after that pass's folder reading, which read the rotation by
+/// name -- the plain folder's directory as the vault, the vault's sealed file
+/// as carried into a plain folder -- and a plain file later traded into the
+/// vault's directory put the vault file's name on the server. Parked before
+/// the folders are read, the vault is followed by its sealed file's bytes.
+#[test]
+fn frozen_a_vault_renamed_as_the_disk_turns_weak_is_followed_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    never_fires(&["sealed_never_in_the_clear"], || {
+        workload_core_with(
+            74_400,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// clean2 74001 with births hidden: the vault is parked on the weak disk and
+/// the user rotates the ring names, carrying the vault's directory to a plain
+/// ring's name. The park did not follow it: the directory and the sealed file
+/// in it stood on the disk with no record claiming them. The parked vault now
+/// follows its directory, the local placement only. Every oracle quiet is
+/// asserted.
+#[test]
+fn frozen_a_parked_vault_follows_its_directory_on_a_weak_disk_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(
+            74_001,
+            40,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            false,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// hostile2 74418 on a Linux FAT stick: a sealed file of the server's moved
+/// into the other parked vault, and a file saved into the first park under
+/// its name. Naming judged the two under the park -- a park of the sealed
+/// file that could never land, retried for ever. Nothing under a park is
+/// judged. Settling, with every oracle quiet, is asserted.
+#[test]
+fn frozen_nothing_under_a_parked_vault_is_judged_on_a_stick_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(
+            74_418,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// plain2 75298 on a Linux FAT stick: two files traded names, and each side's
+/// bytes also stood as another record's copy, so the bytes named neither and
+/// each read as the other's edit. Within a mount the stick's ids break the
+/// tie. The invariant is all that is asserted.
+#[test]
+fn frozen_a_copy_swap_on_a_linux_stick_is_told_apart_by_id_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    never_fires(&["no_entity_holds_both_sides_of_a_swap"], || {
+        workload_core_with(
+            75_298,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::None,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// The same world on a macOS FAT32 stick, whose ids (a file's first cluster)
+/// survive renames and remounts.
+#[test]
+fn frozen_a_copy_swap_on_a_mac_stick_is_told_apart_by_id_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DataCluster)));
+    never_fires(&["no_entity_holds_both_sides_of_a_swap"], || {
+        workload_core_with(
+            75_298,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::None,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// kill2 75105 on a macOS FAT32 stick: the parked vault's only sealed file was
+/// traded out and its directory then traded names with a plain ring, so its
+/// contents named no directory. Its directory's recorded id does -- and a
+/// power cycle between the two does not void a durable id. Read as plain, a
+/// file the trade put there under the vault file's name went up with it. The
+/// invariant is all that is asserted.
+#[test]
+fn frozen_a_parked_vault_is_followed_by_its_directory_id_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DataCluster)));
+    never_fires(&["sealed_never_in_the_clear"], || {
+        workload_core_with(
+            75_105,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// plat3 75412 with the swapper off, on a Linux FAT stick: the user traded the
+/// parked vault's name with a plain ring's. The vault follows locally and sends
+/// nothing; the plain folder's rename onto the name the server still gives the
+/// vault waits, told to the user, instead of being refused and leaving the
+/// folder with no directory and two records on the vault's.
+#[test]
+fn frozen_a_rename_onto_a_parked_vaults_name_waits_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    never_fires(&["converged", "one_record_per_directory"], || {
+        workload_core_with(
+            75_412,
+            40,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::Off,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// kill2 75105 on a Windows FAT stick: the user trades a plain ring file with
+/// the parked vault's sealed file, and swaps the vault's folder name with a
+/// plain ring's in the same breath. Nothing says which directory is the vault,
+/// the plain file reads as moved into a plain folder under the sealed file's
+/// real name, and that name went to the server. The move goes up keeping the
+/// server's name, the file wears the new one here, and the user is told.
+#[test]
+fn frozen_a_plain_file_moved_onto_a_sealed_name_keeps_its_server_name_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    never_fires(&["sealed_never_in_the_clear", "converged"], || {
+        workload_core_with(
+            75_105,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// kill2 75105 on a Linux FAT stick: the same trade, with the engine restarted
+/// before the pass that reads it. The restart voids the vault's directory id
+/// (O2), so the name hold, not the id, is what keeps the name off the server.
+#[test]
+fn frozen_a_sealed_name_is_held_after_a_restart_on_a_linux_stick_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    never_fires(&["sealed_never_in_the_clear", "converged"], || {
+        workload_core_with(
+            75_105,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// kill2 75112 on a macOS FAT32 stick: the trade and a three-ring rotation
+/// happen before the device's first pass on the weak disk, so no directory id
+/// was ever recorded, durable or not. The name hold keeps the name off.
+#[test]
+fn frozen_a_sealed_name_is_held_on_a_first_weak_pass_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DataCluster)));
+    never_fires(&["sealed_never_in_the_clear", "converged"], || {
+        workload_core_with(
+            75_112,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// plat3 75406 on a Windows FAT stick: the same shape, where a file never sent
+/// follows its own file onto the sealed file's name and was uploaded new under
+/// it. Not planned while the name is at risk, and said.
+#[test]
+fn frozen_a_new_file_is_not_sent_under_a_sealed_name_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    never_fires(&["sealed_never_in_the_clear", "converged"], || {
+        workload_core_with(
+            75_406,
+            40,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// plat3 75428 on a Windows FAT stick: a file saved in the parked vault and
+/// traded out before any walk on that device listed it, minted plain and sent
+/// -- Q4's plain file. Another device's weak disk later downloaded it into the
+/// vault's own directory, which made the bytes known sealed after the send.
+/// The credit is time-ordered (a5's Q1 ruling): a plaintext version older than
+/// the pass that first could know is not a leak.
+#[test]
+fn frozen_a_plain_send_before_anything_knew_is_not_a_leak_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    never_fires(&["sealed_never_in_the_clear"], || {
+        workload_core_with(
+            75_428,
+            40,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// kill2 75122 on a Linux FAT stick: an engine-made conflict copy of a sealed
+/// file, inside the parked vault, traded out into a plain folder. Its bytes
+/// were the sealed file's too, so they named neither, and it was minted plain
+/// and sent in the clear. Bytes of a sealed record whose own file has left its
+/// path are minted sealed, held and never sent.
+#[test]
+fn frozen_a_sealed_copy_carried_out_on_a_stick_is_held_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    never_fires(&["sealed_never_in_the_clear"], || {
+        workload_core_with(
+            75_122,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// hostile2 74401 with the swapper off, on a Windows FAT stick: the parked
+/// vault traded names with a plain ring. The vault was followed by its
+/// contents; the plain folder, found by nothing on a disk with no ids, read as
+/// deleted and was trashed, and a peer's move into it landed at the root. Its
+/// own files at the vault's old path now say where it went.
+#[test]
+fn frozen_a_plain_folder_that_traded_names_with_a_parked_vault_moves_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    never_fires(&["every_file_in_a_folder_the_user_put_it_in"], || {
+        workload_core_with(
+            74_401,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::Off,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// A Windows FAT stick (no id holds still through a rename): two files, each
+/// with an identical copy in another folder, trade names. Nothing can tell
+/// which file moved, so each record reads the other's bytes as its edit.
+fn a_copy_swap_on(model: jd_sim::FileIds, remount_first: bool) -> World {
+    let world = World::new(9_990, &["stick"]);
+    let stick = world.device("stick");
+    stick.fs.file_ids(model);
+    stick.fs.user_mkdir("A");
+    stick.fs.user_mkdir("B");
+    stick.fs.user_write("A/one.txt", b"the first body");
+    stick.fs.user_write("B/one-copy.txt", b"the first body");
+    stick.fs.user_write("A/two.txt", b"the second body");
+    stick.fs.user_write("B/two-copy.txt", b"the second body");
+    assert!(world.settle().is_some());
+    if remount_first {
+        stick.fs.remount();
+    }
+    world.record_swap_pair(b"the first body", b"the second body", "chaos", false);
+    stick.fs.user_trade_names("A/one.txt", "A/two.txt", "A/.swap.tmp");
+    assert!(world.settle().is_some());
+    world
+}
+
+fn swap_warnings(world: &World) -> Vec<String> {
+    world.devices[0]
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "names_may_have_swapped")
+        .map(|i| i.detail)
+        .collect()
+}
+
+/// Owner decision 2026-09-29: a Windows stick may mix two files' histories
+/// when files with copies elsewhere trade names, but never silently. The user
+/// is told which two files, and the sweep counts the mix as announced. RED
+/// without the warning.
+#[test]
+fn a_copy_swap_on_a_windows_stick_is_announced() {
+    let world = a_copy_swap_on(jd_sim::FileIds::DirectorySlot, false);
+    let warned = swap_warnings(&world);
+    assert_eq!(warned.len(), 2, "{warned:?}");
+    assert!(warned[0].contains("A/one.txt") && warned[0].contains("A/two.txt"), "{warned:?}");
+    let (held, excused) = swap_mixes(&world, 0);
+    assert!(held.is_empty(), "{held:?}");
+    assert_eq!(excused, 2, "both histories hold the pair, and both were announced");
+    assert!(
+        world.devices[0].store.open_issues().unwrap().iter().any(|i| i.kind == "renames_untracked_on_this_drive"),
+        "the drive's standing notice"
+    );
+}
+
+/// The drive's standing notice is never an excuse: with only the notice, the
+/// mix is a fire (a5's C3).
+#[test]
+fn a_copy_swap_on_a_windows_stick_is_not_excused_by_the_notice_alone() {
+    let world = a_copy_swap_on(jd_sim::FileIds::DirectorySlot, false);
+    world.devices[0].store.withdraw_issues("names_may_have_swapped").unwrap();
+    let (held, _) = swap_mixes(&world, 0);
+    assert_eq!(held.len(), 2, "{held:?}");
+}
+
+/// On a Linux stick the engine warns just the same when it had no id to tell
+/// the two apart (here, right after a remount), but the sweep does not excuse
+/// it: mixing there is a defect, not the owner's accepted cost (a5's C2).
+#[test]
+fn a_copy_swap_on_a_linux_stick_is_never_excused() {
+    let world = a_copy_swap_on(jd_sim::FileIds::MountSession, true);
+    let (held, excused) = swap_mixes(&world, 0);
+    assert_eq!(swap_warnings(&world).len(), 2, "construction: with no id since the remount, the engine warns");
+    assert_eq!(excused, 0);
+    assert_eq!(held.len(), 2, "a Linux stick's warning excused a mix: {held:?}");
+}
+
+/// plat3 75400 with births hidden and the swapper off: two plain rings traded
+/// names, one onto the name the server still gives the parked vault. That one
+/// waits; the other's rename onto the waiting folder's server name was refused
+/// and the folder read as deleted and trashed. A waiting folder's server name
+/// is held too.
+#[test]
+fn frozen_a_rotation_through_a_parked_vaults_name_waits_all_the_way_round_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        never_fires(&["every_file_in_a_folder_the_user_put_it_in"], || {
+            workload_core_with(75_400, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::Off);
+        });
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// plat3 75419 on a Linux FAT stick: a file saved over mid-pass and taken up as
+/// a new record's, then moved by the old record's planned move into another
+/// folder. With no ids the file at the path is the record's only as far as its
+/// bytes say.
+#[test]
+fn frozen_a_file_saved_over_mid_pass_is_not_moved_with_the_record_it_left_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    let run = std::panic::catch_unwind(|| {
+        never_fires(&["every_file_in_a_folder_the_user_put_it_in"], || {
+            workload_core_with(75_419, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+        });
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// kill2 75104 on a macOS FAT32 stick: a file's move was refused without a
+/// reason, and both conflict names tried were ones the server already held,
+/// retried for ever. Known names are skipped. Settling is asserted.
+#[test]
+fn frozen_a_refused_move_skips_conflict_names_already_taken_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DataCluster)));
+    let run = std::panic::catch_unwind(|| {
+        never_fires(&[], || {
+            workload_core_with(75_104, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+        });
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// clean2 74000 with births hidden and the swapper off: a plain ring renamed
+/// here onto the parked vault's server name while a peer renamed it on the
+/// server. The wait held the server's rename off for good; it waits only
+/// while the server has not moved the folder.
+#[test]
+fn frozen_a_rename_from_both_sides_is_not_held_by_the_wait_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        never_fires(&["converged"], || {
+            workload_core_with(74_000, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, Swaps::Off);
+        });
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// clean2 74001 on a Windows FAT stick with the swapper off: the waiting
+/// folder's names were traded back a pass later; the name it wore for the
+/// wait stayed on, two records on the vault's directory. Back at its agreed
+/// name, the wait is over.
+#[test]
+fn frozen_a_wait_ends_when_the_names_are_traded_back_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    let run = std::panic::catch_unwind(|| {
+        never_fires(&["converged", "one_record_per_directory"], || {
+            workload_core_with(74_001, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, Swaps::Off);
+        });
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// clean2 74029 with births hidden: two plain rings waited under the vault's
+/// and each other's names, and the user then rotated every directory back to
+/// its own name. By their directories' identity they were home, but the names
+/// they wore for the wait stayed on: two records on the vault's directory and
+/// the rings' files claimed by nobody. Back home by identity, the wait is over.
+#[test]
+fn frozen_a_wait_ends_when_its_directory_is_home_again_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        never_fires(&["converged", "one_record_per_directory"], || {
+            workload_core_with(74_029, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+        });
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
 }

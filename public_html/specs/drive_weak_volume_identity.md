@@ -1,11 +1,11 @@
 # Drive sync: knowing which file is which on disks that cannot say
 
-**Status: DESIGN SETTLED 2026-09-28, nothing built. Design reviewed by a5 on
-2026-09-28: needed, and valid once its blocking points B1, B1a and B2 and the
-layer 1 readers list are written in (they are, below). Owner accepted D1 to D3
-the same day. Seeds traced 2026-09-28: rules X and U added, reviewed by a5 the same day
-(valid with B3-B6, written in); Q4 decided (a). Facts F1, F2 and F4 traced on Linux, macOS and Windows (exFAT on Linux
-untested). Next: the simulator's disk models.** Owner decision 2026-09-28: close this
+**Status: BUILT, reviewed VALID by a5 on 2026-09-30 (tree d8bb8ca4, with file
+ownership): zero G->R on the 420-seed sweep in all five disk modes, vault seeds
+counted; every rule red under its own knockout. What stays open is the open-set
+list below. Design settled 2026-09-28; owner accepted D1 to D3 the same day; Q4
+decided (a); facts F1, F2 and F4 traced on Linux, macOS and Windows (exFAT on
+Linux untested).** Owner decision 2026-09-28: close this
 limit rather than exempt it ("if we can diagnose the problem, explain it, and
 there is a solution to it, we should do the work"). It blocks landing
 `drive_file_ownership.md` under the reset's R10 bar (`drive_sync_reset.md`).
@@ -65,7 +65,54 @@ wrong where ids move with renames and are reused first-fit.
 |---|---|---|
 | strong | APFS, HFS+, NTFS, ext4, btrfs, xfs v5 | identity (with birth) |
 | stable-id weak | xfs v4, some network/FUSE | order only; reused after delete |
-| positional | FAT, exFAT on every OS | nothing; do not read it |
+| positional | FAT, exFAT on every OS | never identity; see the tie-break below |
+
+**Positional, split by how far the id holds still (a5, 2026-09-29).** No
+FAT or exFAT id is ever read as identity: every reader in the inventory stays
+gated off, and a fingerprint's id is 0. But where the facts (F1) say an id
+holds still, it may break a tie between files the bytes cannot tell apart:
+
+| Volume | Tie-break | Why |
+|---|---|---|
+| macOS FAT32 | durable | the first data cluster: survives rename, move, remount; an in-place save moves only the saved file's |
+| macOS exFAT, Linux FAT and exFAT | mount session | stable within one mount, renumbered on the next |
+| Windows FAT and exFAT | none | the directory entry's position: moves on a rename |
+
+The id travels beside a file as its tie-break id, never in its fingerprint,
+and is stored per record in its own table (`tie_breaks`), never in `entries`,
+so nothing that reads identity can pick it up. It never reaches the hash
+cache (B7: the path-keyed cache stays). It is read in two places only: the
+weak scan's pairing, where bytes two records share are refined by the id to
+one record and one file (the copy-swap shape, which layer 1 alone cannot
+read), and the parked-vault follow, where a vault whose contents name no
+directory follows its directory's id.
+
+Every id is void when it may be stale. On a mount-session volume, an id read
+in another mount session is void unread (O2): the engine keeps its own session
+counter, moved whenever it may have lost track of the volume (start, a lost
+or overflowed watcher, a remount). On both kinds, an unedited file standing
+at its own path under a different id than the one recorded voids every id for
+that pass, which then runs by bytes and paths (O1). Any such file counts,
+its bytes shared or not: a file inside a set of identical copies cannot vouch
+for its own copies, so no anchor is trusted over a void. The rule is one pure
+function (`scan::tie_breaks_that_hold`), pinned at unit level for O1 and O2.
+
+A daemon restart voids the session too, with no remount behind it: the
+daemon cannot tell the two apart. The name hold (below) covers what that
+costs. On Linux, statx's `stx_mnt_id` (unique per mount instance per boot)
+could anchor a session across restarts; deferred until a fire remains after
+the hold, and it needs its F fact verified on a disk image first.
+
+**Windows sticks fail loudly (owner decision, 2026-09-29).** With no id to
+break the tie, two files with identical copies elsewhere that trade names are
+read as each other's edit, and their histories mix. The owner accepted that
+such drives may work badly, but not silently: the drive carries a standing
+notice (`renames_untracked_on_this_drive`), and each time the engine reads
+two records as crossed edits it names both files in an issue
+(`names_may_have_swapped`), recording the two contents it read as crossed.
+There is no version mark and no server change. The sweep excuses such a mix
+only on a Windows-kind device, only for the two contents the issue recorded,
+and counts every excused mix on its report line.
 
 **The probe cannot find Linux FAT (B1a).** The probe renames a file to a
 longer name and checks that id and birth survive. On Linux the FAT id survives
@@ -569,6 +616,17 @@ FAT-formatted VHD on the Windows VM.
   leak; the same file swapped out after a record or a completed scan still
   is.
 
+  The credit is time-ordered (a5, 2026-09-30). Every credit a pass earns --
+  its walk's listing, and the records it writes placing bytes in a vault --
+  is stamped with the server's change id as of that pass's start. A
+  plaintext version the server made no later than a body's earliest stamp
+  was sent before any engine could know, and is Q4's plain file; one made
+  later is a leak, including one the same pass sent after its own walk
+  listed the bytes. The oracle's line reports `excused_by_time`. Every seed
+  on a strong disk with a nonzero count must trace to Q4's shape (saved in a
+  vault and moved out before any scan); anything else means the stamp is
+  hiding a leak.
+
 ## D3 as built behaviour (proposed 2026-09-28; revised with a5's B5, 2026-09-29; built in scratch wf5 2026-09-29)
 
 The owner chose to refuse vaults on weak disks. What "refuse" does, case by
@@ -651,11 +709,70 @@ only: nothing is asked of the server, and it stays parked.
   moved out and are held. (iii) The vault's old path now holds something
   else: that is not the vault; a folder of the vault's name there is the
   stand-in rule.
+- A directory another live record's files stand in is ruled out before the
+  choice, on both readings: that is where the user carried the vault's
+  files, not the vault. Ruled out only after contents had chosen it, the id
+  never got its say: a vault emptied into a plain folder and renamed in one
+  breath went up as a new plain folder, with a file saved into it in the
+  clear.
 - The park is decided before the folders are read, so the first pass that
   finds the volume weak already follows by contents. Parked after the
   folder scan, that pass read a same-breath ring rotation by name (FAT
   hostile2 74400).
 - A file moved from one place under a park to another follows the same way.
+- The park never renames the vault on the server (a5's ruling: a follow
+  read wrongly and sent would rename the vault onto a plain folder's name on
+  every device). So a plain folder the user renames onto the name the server
+  still gives the vault cannot take it there. Its rename waits: the folder
+  keeps its directory, wears the new name locally, keeps its server name, and
+  the user is told (`name_held_by_a_parked_vault`). Every pass asks the
+  server's current state again; once the name is free the rename is sent. A
+  folder whose rename targets a waiting folder's server name waits too (a
+  rotation waits all the way round). The wait ends when the server deletes
+  the folder, and when the user trades the names back.
+
+**A plain file on a sealed file's name (the name hold, a5, 2026-09-30).** A
+sealed file traded out of its vault, and the vault's directory renamed in
+the same breath, leave nothing to say which directory is the vault: no
+contents to follow, and no id (Windows has none; a restart voids a
+mount-session id; a device whose first pass on the weak disk comes after the
+trade never recorded one). The plain file the user put in the vault's
+directory then reads as a plain folder's, under the sealed file's real name.
+Sent, that name reached the server (FAT kill2 75105, 75112; plat3 75406, on
+every positional kind).
+- The names at risk, on a disk with no file identities: every sealed file
+  the store knows the server keeps (not deleted there) whose last-seen bytes
+  do not stand at the path the server keeps it at. A record that never
+  carried bytes here counts as not home. Compared by name in any folder,
+  never by path: the plain file lands in another folder's name.
+- A file never sent, under a name at risk, is not planned: no upload, and an
+  issue (`name_of_a_sealed_file_held`).
+- A sent plain file moved or renamed onto a name at risk: the move goes up
+  keeping the server's name, and the file wears the new name here (its local
+  name), with the same issue. Held back whole, the move left its record on
+  the path it had left, and a new file there fought it for that name for good
+  (win plat3 75428).
+- A move into a vault is not held: there the name goes up sealed.
+- Every pass asks again. Once the name is not at risk (the sealed file home),
+  the worn name is sent as a rename and the issue withdrawn. The user
+  renaming the file again ends the wear with that rename.
+- The server moving the file while it wears a held name, or while it moves
+  onto one, is a rename from both sides: the ordinary race settles it, the
+  server's move wins, the user is told as for any race, and the file is
+  carried from the name it wears. A server delete deletes it from there.
+- The sweep excuses a held file only on a positional volume, with the issue
+  open on that device: a file never sent is still required to stand at its
+  path, and a sent one is expected under the name it wears.
+
+**Bytes listed in a vault stay sealed (a5's R3, 2026-09-30).** On a disk with
+no file identities, the walk writes down each file's bytes it lists under a
+vault's directory (as the records place it), the moment it lists them, in the
+store (`vault_listed_bytes`). They are forgotten only when a finished walk
+finds them nowhere on the disk. Bytes written down there that turn up
+outside every vault are carried out: the file is minted sealed and held,
+never sent, as a sealed record's bytes are. In the simulator every file a walk
+lists in a vault is recorded the same pass; the rule covers a crash between
+the walk and the record, with the file carried out while nothing ran.
 
 **As built (scratch wf5, 2026-09-29).**
 - `park_vaults_on_a_weak_volume` runs each pass beside the existing
@@ -722,11 +839,92 @@ Convert flow on the lift.
     if it stands outside the folder, and otherwise keeps the folder's record,
     as a kept sealed child does; the folder's subtree, read by the server's
     parents, never listed it (hidden kill2 75129).
+- On a disk with no ids:
+  - a new file whose bytes belong to a sealed record whose own file has left
+    its path is minted sealed, held and never sent (a conflict copy of a
+    sealed file traded out of its parked vault went up in the clear);
+  - a plain folder that traded names with a parked vault is read as moved to
+    the vault's old path when its own files stand there (it read as deleted);
+  - a move takes a file only while its bytes are the record's own (a file
+    saved over mid-pass and taken up as another record's went with the old
+    record into its new folder).
+- A refusal without a reason, on an upload or a move, skips conflict names
+  the device already knows the server holds; two such names were the whole
+  budget, retried for ever.
 - The harness: the sealed oracle credits what the walk itself listed in a
   vault, not a snapshot taken before the pass (a trade landing mid-pass was
   counted as seen); a record's path counts only where that path is in a
   vault (Q4's wording; a held file's path is not); a trade whose second side
   did not exist records the name it gave.
+
+**Known open shape (a5, 2026-09-29).** A copy swap across a remount on a
+mount-session volume: the remount voids the ids, the per-pair warning is
+raised, and the sweep still fires, since its excuse is Windows-only. No seed
+hits it. If one does, the excuse is extended only by a remount the harness
+itself witnessed between the pair and the settle, never by the engine's own
+flag.
+
+**The open set on b5282d0f (2026-09-30).** Every seed not green that was not
+a G->R (red on the committed tree too), with the oracle it fires and its
+class: leak (name or body), never settled, converged, custody (a file in a
+folder the user never put it in, or a history mixed). "Expected" is what the
+name hold, R3 and the time-ordered credit should do to it; the next table is
+read against this.
+
+| Mode | Seed | Oracle | Class | Expected |
+|---|---|---|---|---|
+| shown | off plat3 75415 | never settled | never settled | open |
+| shown | kill2 75111 | every_file_in_a_folder_the_user_put_it_in | custody | open |
+| shown | kill2 75112 | converged (a file no entry claims) | converged | open |
+| shown | kill2 75118 | sealed_never_in_the_clear (plaintext) | leak, body | open; any time excuse traced |
+| shown | plat3 75401 | sealed_never_in_the_clear (plaintext) | leak, body | open; any time excuse traced |
+| shown | plat3 75415 | never settled | never settled | open |
+| shown | plat3 75422 | no_entity_holds_both_sides_of_a_swap, sealed | custody + leak, body | open |
+| shown | plat3 75426 | sealed_never_in_the_clear (plaintext) | leak, body | open; any time excuse traced |
+| hidden | kill2 75109 | sealed_never_in_the_clear (plaintext) | leak, body | open; any time excuse traced |
+| hidden | kill2 75122 | converged (names held, not used) | converged | open |
+| hidden | kill2 75125 | sealed_never_in_the_clear (plaintext) | leak, body | open; any time excuse traced |
+| hidden | plat3 75419 | every_file_in_a_folder_the_user_put_it_in | custody | open |
+| win | hostile2 74407 | converged (only on the server) | converged | open |
+| win | hostile2 74409 | sealed_never_in_the_clear (plaintext) | leak, body | open |
+| win | hostile2 74424 | no_entity_holds_both_sides_of_a_swap | custody (history) | open |
+| win | kill2 75102 | never settled | never settled | open |
+| win | kill2 75105 | sealed name | leak, name | green (hold) |
+| win | kill2 75112 | sealed name | leak, name | green (hold) |
+| win | kill2 75123 | sealed plaintext | leak, body | open: sent in the pass whose user trade made it known |
+| win | kill2 75125 | sealed plaintext | leak, body | open |
+| win | plat3 75406 | sealed name | leak, name | green (hold) |
+| win | plat3 75410 | never settled | never settled | open |
+| win | plat3 75424 | sealed plaintext | leak, body | green (time-ordered credit): traced, sent plain from a plain folder before a record placed the bytes in a vault |
+| win | plat3 75428 | sealed plaintext | leak, body | green (time-ordered credit): sent before any walk listed it; known later on mac, whose weak disk downloaded the plain file into the vault's own directory (custody, the AG family on a weak disk) |
+| linux | kill2 75105 | sealed name | leak, name | green (hold) |
+| linux | kill2 75112 | sealed name | leak, name | green (hold) |
+| linux | kill2 75123 | sealed plaintext | leak, body | open, as on win |
+| linux | plat3 75410 | never settled | never settled | open |
+| linux | plat3 75424 | sealed plaintext | leak, body | green (time-ordered credit), as on win |
+| mac | kill2 75112 | sealed name | leak, name | green (hold) |
+| mac | kill2 75123 | sealed plaintext | leak, body | open, as on win |
+| mac | plat3 75410 | never settled | never settled | open |
+| mac | plat3 75424 | sealed plaintext | leak, body | green (time-ordered credit), as on win |
+
+**Read against it on 1b5b7a6e (2026-09-30).** Green of 420 against the
+committed tree, G->R zero in every mode: shown 382 -> 413, hidden 294 -> 417,
+win 207 -> 415, linux 337 -> 419, mac 379 -> 419. No seed green on b5282d0f is
+red. Every "green" expected above is green. Also green beyond the
+expectation: win hostile2 74424, and plat3 75410 on win, linux and mac.
+Excused by the time-ordered credit, and each traced:
+- shown plat3 75426: written in the vault on pc and traded out before pc's
+  next scan; its one plaintext version (change 13) was sent from a plain
+  path, and the bytes were first known at change 37, when another device's
+  record placed a copy in a vault. Q4's shape.
+- hidden kill2 75125: written in the vault and traded out before mac's next
+  scan, which first saw it outside every vault; sent plain at change 17,
+  first known at 21. Q4's shape.
+- win plat3 75424 and 75428, linux and mac plat3 75424: as in the rows above.
+
+Still open on 1b5b7a6e: shown off plat3 75415, kill2 75111, 75112, 75118,
+plat3 75401, 75415, 75422; hidden kill2 75109, 75122, plat3 75419; win
+hostile2 74407, 74409, kill2 75102, 75123, 75125; linux and mac kill2 75123.
 
 **A shortcut that does not work (tried 2026-09-29).** Running every pass on a
 weak disk as a device with no vault key covers the server side: nothing in

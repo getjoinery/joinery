@@ -101,6 +101,10 @@ pub struct Daemon {
     /// Kept alive for as long as the daemon runs: dropping it stops the
     /// operating system delivering events, and nothing would say so.
     _watcher: Option<watch::Watcher>,
+    /// Whether the path-keyed hash cache has been kept in step with the
+    /// watcher since this process started. False until the first pass
+    /// forgets it all: nothing watched the disk while the client was down.
+    path_hashes_trusted: bool,
     shared: Arc<Shared>,
     commands: Receiver<Command>,
     paused: bool,
@@ -149,6 +153,7 @@ impl Daemon {
             client,
             dirty,
             _watcher: watcher,
+            path_hashes_trusted: false,
             shared,
             commands,
             paused: false,
@@ -226,9 +231,46 @@ impl Daemon {
         // whole tree: anything the watcher noticed before it started is covered
         // by it, and carrying those paths forward would mean walking again for
         // no reason.
-        if let Ok(mut set) = self.dirty.lock() {
-            let _ = set.take_settled(now_ms());
-            set.clear_rescan();
+        //
+        // On a volume with no file ids the scan's hash cache is kept by path,
+        // and a path is only evidence while nothing has touched it: two files
+        // of one size and one two-second tick can trade names. So every path
+        // the watcher reports -- settled or not -- loses its cached hash
+        // first, and all of them do on the first pass, after lost events, or
+        // with no watcher at all (`specs/drive_weak_volume_identity.md`, B7).
+        let positional = self.vfs.personality().positional_file_ids;
+        let mut forget: Option<Vec<String>> = None;
+        let mut forget_all = positional && (!self.path_hashes_trusted || self._watcher.is_none());
+        match self.dirty.lock() {
+            Ok(mut set) => {
+                if positional {
+                    forget_all |= set.rescan_needed();
+                    let root = self.vfs.root();
+                    forget = Some(
+                        set.touched()
+                            .iter()
+                            .filter_map(|p| root.as_ref().and_then(|r| p.strip_prefix(r).ok()))
+                            .map(|p| p.to_string_lossy().replace('\\', "/"))
+                            .collect(),
+                    );
+                }
+                let _ = set.take_settled(now_ms());
+                set.clear_rescan();
+            }
+            Err(_) => forget_all = positional,
+        }
+        if positional {
+            let done = if forget_all {
+                // Whatever may have gone by unseen may include a remount: a
+                // tie-break id read before now names nothing this session
+                // (`specs/drive_weak_volume_identity.md`, the classes).
+                let _ = self.store.bump_mount_session();
+                self.store.forget_path_hashes(None)
+            } else {
+                self.store.forget_path_hashes(forget.as_deref())
+            };
+            // Unforgotten is untrusted: the next pass forgets everything.
+            self.path_hashes_trusted = done.is_ok();
         }
 
         let ctx = Context {

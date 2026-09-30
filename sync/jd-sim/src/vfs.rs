@@ -84,6 +84,29 @@ pub enum FailureKind {
     RootUnavailable,
 }
 
+/// What a disk's file id means: the question every FAT and exFAT volume
+/// answers differently, each traced on a real system
+/// (`specs/drive_weak_volume_identity.md`, F1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileIds {
+    /// One id for as long as the file exists: every strong disk.
+    Stable,
+    /// Windows FAT and exFAT: the position of the file's directory entry. It
+    /// moves when the entry has to (another folder, a longer name), a freed
+    /// slot is taken again first-fit by the next entry in that folder, and a
+    /// name taken again within 15 seconds is given the creation time of the
+    /// file that left it (tunnelling). Its probe reads it weak.
+    DirectorySlot,
+    /// macOS 15 FAT32: the file's first data cluster. A rename, a move and a
+    /// remount keep it; rewriting the content moves it, and an empty file has
+    /// a temporary id that a remount replaces. Its probe reads it strong.
+    DataCluster,
+    /// Linux FAT and exFAT, macOS exFAT: an id handed out per mount, kept
+    /// through renames, and every one new after a remount; births kept. Its
+    /// probe reads it strong.
+    MountSession,
+}
+
 #[derive(Debug)]
 struct MemFsState {
     /// Relative path (`/`-joined, `""` is the root) → node. A `BTreeMap` so
@@ -117,6 +140,23 @@ struct MemFsState {
     /// Ids released by deletes, handed out again when id reuse is enabled.
     freed_ids: Vec<u64>,
     reuse_file_ids: bool,
+    /// What an id means on this disk. See [`FileIds`].
+    file_id_model: FileIds,
+    /// Under `DirectorySlot`: the entry slots freed in each directory, by
+    /// the directory's key, taken again lowest first.
+    free_slots: BTreeMap<String, BTreeSet<u64>>,
+    /// Under `DirectorySlot`: each name a file left, with that file's birth
+    /// and when it left, for tunnelling.
+    vacated: BTreeMap<String, (u64, u64)>,
+    /// Under `DataCluster`: the next temporary id for an empty file, counted
+    /// down from the top as macOS does.
+    next_temp_id: u64,
+    /// Every path a change touched since the watcher was last asked, the way
+    /// a perfect watcher reports them, and whether it lost track (a remount,
+    /// or the engine not running). Read by the pass runner on FAT models to
+    /// keep the path-keyed hash cache honest (`MemFs::take_touched`).
+    touched: BTreeSet<String>,
+    watch_lost: bool,
     /// Where trashed things went. The engine's promise is that a delete it got
     /// wrong is recoverable, so the simulator keeps the evidence.
     trash: Vec<(String, Node)>,
@@ -156,6 +196,17 @@ struct MemFsState {
     /// under a sealed name carries no mark: it is not the folder the user
     /// sealed, whatever it is called.
     sealed_dirs: BTreeSet<String>,
+    /// Bodies (sha256) and leaf names the engine on this device could have
+    /// known were sealed: seen in a vault by a scan that completed, or held
+    /// in a record that places them in one. A harness fact; the sealed
+    /// oracle counts nothing else as sealed (owner decision Q4,
+    /// `specs/drive_weak_volume_identity.md`).
+    sealed_known: BTreeMap<String, i64>,
+    sealed_names_known: BTreeSet<String>,
+    /// Bodies and leaf names the engine's own directory listings have shown
+    /// it under a sealed directory since the harness last took them: what a
+    /// scan saw in a vault, at the moment it looked.
+    listed_in_a_vault: Vec<(String, String)>,
     /// Every directory answers 0 for its identity. See
     /// [`MemFs::directory_ids_unreadable`].
     directory_ids_unreadable: bool,
@@ -169,6 +220,10 @@ pub struct UserWrite {
     pub sha256: String,
     /// Under a directory marked sealed at the moment of the write.
     pub in_sealed_dir: bool,
+    /// The write made a new file at this path. Saving over a file that is
+    /// there already chooses no name: the name was given when that file was
+    /// made, by the user or by the engine.
+    pub created: bool,
 }
 
 /// The virtual disk. Cloning shares it — that is what makes "restart the
@@ -225,6 +280,12 @@ impl MemFs {
                 births_hidden: false,
                 freed_ids: Vec::new(),
                 reuse_file_ids: false,
+                file_id_model: FileIds::Stable,
+                free_slots: BTreeMap::new(),
+                vacated: BTreeMap::new(),
+                next_temp_id: u64::MAX,
+                touched: BTreeSet::new(),
+                watch_lost: false,
                 trash: Vec::new(),
                 root_available: true,
                 failures: Vec::new(),
@@ -233,6 +294,9 @@ impl MemFs {
                 user_writes: Vec::new(),
                 user_renames: Vec::new(),
                 sealed_dirs: BTreeSet::new(),
+                sealed_known: BTreeMap::new(),
+                sealed_names_known: BTreeSet::new(),
+                listed_in_a_vault: Vec::new(),
                 directory_ids_unreadable: false,
             })),
             personality,
@@ -316,6 +380,56 @@ impl MemFs {
         self.state.lock().unwrap().reuse_file_ids = on;
     }
 
+    /// The paths touched since the last call, or None when the watcher lost
+    /// track and everything must be read again. Clears both.
+    pub fn take_touched(&self) -> Option<Vec<String>> {
+        let mut st = self.state.lock().unwrap();
+        let touched = std::mem::take(&mut st.touched);
+        if std::mem::replace(&mut st.watch_lost, false) {
+            None
+        } else {
+            Some(touched.into_iter().collect())
+        }
+    }
+
+    /// The engine stopped: nothing watched the disk meanwhile.
+    pub fn lose_watch(&self) {
+        self.state.lock().unwrap().watch_lost = true;
+    }
+
+    /// Number files the way a FAT or exFAT volume does on one system. Set
+    /// before anything is written; `reuse_file_ids` no longer applies.
+    pub fn file_ids(&self, model: FileIds) {
+        self.state.lock().unwrap().file_id_model = model;
+    }
+
+    /// The volume unplugged and plugged in again, between passes. What that
+    /// does to ids depends on the volume: every id new (`MountSession`), the
+    /// temporary ids of empty files new (`DataCluster`), nothing (the rest).
+    /// Births are the disk's own and survive it.
+    pub fn remount(&self) {
+        let mut st = self.state.lock().unwrap();
+        // Nothing watched the stick while it was out.
+        st.watch_lost = true;
+        let keys: Vec<String> = st.file_ids.keys().filter(|k| !k.is_empty()).cloned().collect();
+        for k in keys {
+            let renew = match st.file_id_model {
+                FileIds::MountSession => true,
+                FileIds::DataCluster => matches!(st.nodes.get(&k), Some(Node::File { bytes, .. }) if bytes.is_empty()),
+                FileIds::Stable | FileIds::DirectorySlot => false,
+            };
+            if renew {
+                let id = if st.file_id_model == FileIds::DataCluster {
+                    Self::temp_id(&mut st)
+                } else {
+                    st.next_file_id += 1;
+                    st.next_file_id
+                };
+                st.file_ids.insert(k, id);
+            }
+        }
+    }
+
     /// Report no file's birth: the volume with no birth time, whose
     /// personality then says its file identity is weak, where the engine reads
     /// the disk by its older rules.
@@ -392,7 +506,7 @@ impl MemFs {
     pub fn user_write(&self, path: &str, bytes: &[u8]) {
         let key = self.store_path(path);
         let mut st = self.state.lock().unwrap();
-        let mtime = self.truncated_now();
+        let mtime = self.truncated_now(&st);
         Self::refuse_impossible(&st, &key, "write a file");
         assert!(
             !matches!(st.nodes.get(&key), Some(Node::Dir)),
@@ -403,18 +517,27 @@ impl MemFs {
              scenario, not this check.",
         );
         Self::ensure_parents(&mut st, &key);
-        if !st.file_ids.contains_key(&key) {
-            let id = Self::alloc_id(&mut st);
+        let created = !st.file_ids.contains_key(&key);
+        let now = self.clock.now_ns();
+        if created {
+            let id = Self::new_file_id(&mut st, &key, bytes.len());
             st.file_ids.insert(key.clone(), id);
             let birth = Self::new_file_birth(&mut st);
             st.file_births.insert(key.clone(), birth);
+            Self::tunnel(&mut st, &key, now);
+        } else if st.file_id_model == FileIds::DataCluster {
+            // Rewritten in place: the content goes to new clusters.
+            let id = Self::cluster_id(&mut st, bytes.len());
+            st.file_ids.insert(key.clone(), id);
         }
         Self::watch_loss(&st, &key, "the user saving over it");
+        st.touched.insert(key.clone());
         let in_sealed_dir = Self::under_a_sealed_dir(&st, &key);
         st.user_writes.push(UserWrite {
             path: key.clone(),
             sha256: crate::sha256_hex(bytes),
             in_sealed_dir,
+            created,
         });
         st.nodes.insert(
             key,
@@ -443,6 +566,51 @@ impl MemFs {
     }
 
     /// Does a directory marked sealed stand above this path right now?
+    /// Every file standing under a directory marked sealed, as (body sha256,
+    /// leaf name): what a scan starting now would see in a vault.
+    pub fn in_sealed_dirs(&self) -> Vec<(String, String)> {
+        let st = self.state.lock().unwrap();
+        st.nodes
+            .iter()
+            .filter(|(k, _)| Self::under_a_sealed_dir(&st, k))
+            .filter_map(|(k, n)| match n {
+                Node::File { bytes, .. } => {
+                    Some((crate::sha256_hex(bytes), k.rsplit('/').next().unwrap_or(k).to_string()))
+                }
+                Node::Dir => None,
+            })
+            .collect()
+    }
+
+    /// What the engine's own listings have shown it under a sealed directory
+    /// since this was last asked, and forget it. The harness credits it once
+    /// the pass that listed it completes (owner decision Q4): read before the
+    /// pass instead, a file carried out of the vault after that read and
+    /// before the walk was counted as seen there when no engine ever saw it
+    /// (FAT plat3 75428, a trade landing mid-pass).
+    pub fn take_listed_in_a_vault(&self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.state.lock().unwrap().listed_in_a_vault)
+    }
+
+    /// Record bodies and names the engine here could have known were sealed,
+    /// as of `as_of`: the server's change id when the pass that earned the
+    /// knowledge started. A body keeps the earliest.
+    pub fn know_sealed(&self, found: impl IntoIterator<Item = (String, String)>, as_of: i64) {
+        let mut st = self.state.lock().unwrap();
+        for (sha, name) in found {
+            let at = st.sealed_known.entry(sha).or_insert(as_of);
+            *at = (*at).min(as_of);
+            st.sealed_names_known.insert(name);
+        }
+    }
+
+    /// Bodies and leaf names this device's engine could have known were
+    /// sealed. See [`MemFs::know_sealed`].
+    pub fn sealed_known(&self) -> (BTreeMap<String, i64>, BTreeSet<String>) {
+        let st = self.state.lock().unwrap();
+        (st.sealed_known.clone(), st.sealed_names_known.clone())
+    }
+
     pub fn under_sealed_dir(&self, path: &str) -> bool {
         let key = self.store_path(path);
         Self::under_a_sealed_dir(&self.state.lock().unwrap(), &key)
@@ -481,14 +649,17 @@ impl MemFs {
             .filter(|k| **k == key || k.starts_with(&format!("{key}/")))
             .cloned()
             .collect();
+        let now = self.clock.now_ns();
         for v in victims {
             Self::watch_loss(&st, &v, "the user deleting it");
+            st.touched.insert(v.clone());
+            Self::vacate(&mut st, &v, now);
             st.nodes.remove(&v);
             st.sealed_dirs.remove(&v);
             st.births.remove(&v);
             st.file_births.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
-                st.freed_ids.push(id);
+                Self::release_id(&mut st, &v, id);
             }
         }
     }
@@ -500,7 +671,7 @@ impl MemFs {
         let mut st = self.state.lock().unwrap();
         Self::refuse_impossible(&st, &t, "move something");
         Self::ensure_parents(&mut st, &t);
-        Self::move_subtree(&mut st, &f, &t);
+        Self::move_subtree(&mut st, &f, &t, self.clock.now_ns());
         let placed: Vec<(String, bool)> = st
             .nodes
             .iter()
@@ -510,6 +681,33 @@ impl MemFs {
             .map(|(k, _)| (k.clone(), Self::under_a_sealed_dir(&st, k)))
             .collect();
         st.user_renames.extend(placed);
+    }
+
+    /// Two files trade names through a parked name, the way an application
+    /// swaps them on a filesystem with no atomic exchange. The user gives no
+    /// name here: both names were given before -- by the user, and recorded
+    /// then, or by the engine -- so none is recorded as the user's choice.
+    /// Recorded, an engine-made conflict name a swap carried into a vault read
+    /// as a sealed name the user chose, and the same engine name on an
+    /// unrelated plain file read as that sealed name leaking (kill2 75108).
+    ///
+    /// Unless `b` was not there: then nothing traded, and `a` was simply given
+    /// the name `b` in `b`'s folder -- a name the user chose there, recorded
+    /// as any rename is. Dropped, a plain file the user named `sealed.txt` in
+    /// a plain folder read as a sealed file's name leaking (FAT hostile2
+    /// 74400: the workload's trade aimed at a vault file whose folder had
+    /// since been renamed away).
+    pub fn user_trade_names(&self, a: &str, b: &str, parked: &str) {
+        let b_was_there = self.state.lock().unwrap().nodes.contains_key(&self.store_path(b));
+        let kept = self.state.lock().unwrap().user_renames.len();
+        self.user_rename(a, parked);
+        self.user_rename(b, a);
+        let named = self.state.lock().unwrap().user_renames.len();
+        self.user_rename(parked, b);
+        let mut st = self.state.lock().unwrap();
+        let given: Vec<(String, bool)> = if b_was_there { Vec::new() } else { st.user_renames[named..].to_vec() };
+        st.user_renames.truncate(kept);
+        st.user_renames.extend(given);
     }
 
     /// Every file path the user has renamed something onto, in order, with
@@ -593,6 +791,12 @@ impl MemFs {
 
     /// The birth of the directory at this path (see `MemFsState::births`).
     /// `None` for a file or for nothing.
+    /// The file's birth as the disk keeps it, whatever the engine is shown.
+    pub fn file_birth_of(&self, path: &str) -> Option<u64> {
+        let key = self.store_path(path);
+        self.state.lock().unwrap().file_births.get(&key).copied()
+    }
+
     pub fn birth_of(&self, path: &str) -> Option<u64> {
         let key = self.store_path(path);
         self.state.lock().unwrap().births.get(&key).copied()
@@ -701,8 +905,13 @@ impl MemFs {
             .join("/")
     }
 
-    fn truncated_now(&self) -> u64 {
-        let g = self.personality.mtime_granularity_ns.max(1);
+    /// FAT and exFAT keep modification times in two-second steps, whatever
+    /// the system mounting them.
+    const FAT_MTIME_NS: u64 = 2_000_000_000;
+
+    fn truncated_now(&self, st: &MemFsState) -> u64 {
+        let fat = st.file_id_model != FileIds::Stable;
+        let g = if fat { Self::FAT_MTIME_NS } else { self.personality.mtime_granularity_ns.max(1) };
         (self.clock.now_ns() / g) * g
     }
 
@@ -720,6 +929,80 @@ impl MemFs {
         }
         st.next_file_id += 1;
         st.next_file_id
+    }
+
+    fn parent_key(key: &str) -> &str {
+        key.rsplit_once('/').map(|(d, _)| d).unwrap_or("")
+    }
+
+    /// The id a new entry at `key` gets, holding `len` bytes.
+    fn new_file_id(st: &mut MemFsState, key: &str, len: usize) -> u64 {
+        match st.file_id_model {
+            FileIds::Stable => Self::alloc_id(st),
+            FileIds::DirectorySlot => Self::slot_id(st, key),
+            FileIds::DataCluster => Self::cluster_id(st, len),
+            FileIds::MountSession => {
+                st.next_file_id += 1;
+                st.next_file_id
+            }
+        }
+    }
+
+    /// A slot in `key`'s directory: the lowest one freed there, else a new one.
+    fn slot_id(st: &mut MemFsState, key: &str) -> u64 {
+        let dir = Self::parent_key(key).to_string();
+        if let Some(id) = st.free_slots.get_mut(&dir).and_then(|s| s.pop_first()) {
+            return id;
+        }
+        st.next_file_id += 1;
+        st.next_file_id
+    }
+
+    fn cluster_id(st: &mut MemFsState, len: usize) -> u64 {
+        if len == 0 {
+            return Self::temp_id(st);
+        }
+        st.next_file_id += 1;
+        st.next_file_id
+    }
+
+    fn temp_id(st: &mut MemFsState) -> u64 {
+        st.next_temp_id -= 1;
+        st.next_temp_id + 1
+    }
+
+    /// An id whose entry is gone.
+    fn release_id(st: &mut MemFsState, key: &str, id: u64) {
+        match st.file_id_model {
+            FileIds::Stable => st.freed_ids.push(id),
+            FileIds::DirectorySlot => {
+                st.free_slots.entry(Self::parent_key(key).to_string()).or_default().insert(id);
+            }
+            FileIds::DataCluster | FileIds::MountSession => {}
+        }
+    }
+
+    /// A file leaving the name `key` (`DirectorySlot` only: tunnelling).
+    fn vacate(st: &mut MemFsState, key: &str, now: u64) {
+        if st.file_id_model != FileIds::DirectorySlot {
+            return;
+        }
+        if let Some(birth) = st.file_births.get(key).copied() {
+            st.vacated.insert(key.to_string(), (birth, now));
+        }
+    }
+
+    /// A file arriving at the name `key`: within 15 seconds of another file
+    /// leaving it, Windows gives it that file's creation time.
+    fn tunnel(st: &mut MemFsState, key: &str, now: u64) {
+        if st.file_id_model != FileIds::DirectorySlot {
+            return;
+        }
+        if let Some((birth, left)) = st.vacated.remove(key) {
+            if now.saturating_sub(left) <= 15_000_000_000 && st.file_births.contains_key(key) {
+                st.file_births.insert(key.to_string(), birth);
+            }
+        }
     }
 
     /// Refuse, loudly, a scenario asking this tree for a shape a disk cannot
@@ -776,7 +1059,14 @@ impl MemFs {
             return;
         }
         st.nodes.insert(key.to_string(), Node::Dir);
-        let id = Self::alloc_id(st);
+        let id = match st.file_id_model {
+            FileIds::Stable => Self::alloc_id(st),
+            FileIds::DirectorySlot => Self::slot_id(st, key),
+            FileIds::DataCluster | FileIds::MountSession => {
+                st.next_file_id += 1;
+                st.next_file_id
+            }
+        };
         st.file_ids.insert(key.to_string(), id);
         st.next_birth += 1;
         st.births.insert(key.to_string(), st.next_birth);
@@ -814,8 +1104,11 @@ impl MemFs {
         );
     }
 
-    fn move_subtree(st: &mut MemFsState, from: &str, to: &str) {
+    fn move_subtree(st: &mut MemFsState, from: &str, to: &str, now: u64) {
         Self::watch_loss(st, to, "a rename landing on it");
+        Self::vacate(st, from, now);
+        st.touched.insert(from.to_string());
+        st.touched.insert(to.to_string());
         let moving: Vec<String> = st
             .nodes
             .keys()
@@ -841,6 +1134,18 @@ impl MemFs {
                 st.sealed_dirs.insert(new);
             }
         }
+        // Only the moved entry itself: what is under a moved directory stays
+        // in that directory's own entries.
+        if st.file_id_model == FileIds::DirectorySlot && st.file_ids.contains_key(to) {
+            let longer = to.rsplit('/').next().map(str::len) > from.rsplit('/').next().map(str::len);
+            if Self::parent_key(from) != Self::parent_key(to) || longer {
+                let old = st.file_ids[to];
+                let id = Self::slot_id(st, to);
+                Self::release_id(st, from, old);
+                st.file_ids.insert(to.to_string(), id);
+            }
+        }
+        Self::tunnel(st, to, now);
     }
 
     /// Consume a scheduled failure for this op/path, if one is due.
@@ -872,20 +1177,35 @@ impl MemFs {
     }
 
     /// A directory's identity, or 0 when this disk cannot read one.
+    /// The raw id the volume keeps for `key`, as the engine is shown it
+    /// beside a fingerprint: only on the FAT models whose ids hold still long
+    /// enough to break a tie (`Personality::id_tie_break`), 0 elsewhere.
+    fn tie_break_of(st: &MemFsState, key: &str) -> u64 {
+        match st.file_id_model {
+            FileIds::DataCluster | FileIds::MountSession => st.file_ids.get(key).copied().unwrap_or(0),
+            _ => 0,
+        }
+    }
+
     fn directory_id_of(st: &MemFsState, key: &str) -> u64 {
-        if st.directory_ids_unreadable {
+        if st.directory_ids_unreadable || st.file_id_model != FileIds::Stable {
             return 0;
         }
         st.file_ids.get(key).copied().unwrap_or(0)
     }
 
+    /// A file's fingerprint as the engine is shown it. On a FAT or exFAT
+    /// model the volume is named positional and reports no id and no birth,
+    /// as `OsVfs` does (`Personality::positional_file_ids`); the disk's own
+    /// numbers stay readable to the harness through `file_id_of`.
     fn fingerprint_of(st: &MemFsState, key: &str) -> Option<Fingerprint> {
+        let positional = st.file_id_model != FileIds::Stable;
         match st.nodes.get(key) {
             Some(Node::File { bytes, mtime_ns }) => Some(Fingerprint {
                 size: bytes.len() as u64,
                 mtime_ns: *mtime_ns,
-                file_id: st.file_ids.get(key).copied().unwrap_or(0),
-                birth_ns: if st.births_hidden {
+                file_id: if positional { 0 } else { st.file_ids.get(key).copied().unwrap_or(0) },
+                birth_ns: if st.births_hidden || positional {
                     0
                 } else {
                     st.file_births.get(key).copied().unwrap_or(0)
@@ -912,6 +1232,7 @@ impl MemFs {
             format!("{key}/")
         };
         let mut out = Vec::new();
+        let mut sealed_here: Vec<(String, String)> = Vec::new();
         for (k, node) in st.nodes.iter() {
             if k.is_empty() || !k.starts_with(&prefix) {
                 continue;
@@ -947,8 +1268,16 @@ impl MemFs {
                     Node::Dir => Some(Fingerprint::of_directory(Self::directory_id_of(&st, k))),
                     Node::File { .. } => Self::fingerprint_of(&st, k),
                 },
+                tie_break_id: Self::tie_break_of(&st, k),
             });
+            if let Node::File { bytes, .. } = node {
+                if Self::under_a_sealed_dir(&st, k) {
+                    sealed_here.push((crate::sha256_hex(bytes), rest.to_string()));
+                }
+            }
         }
+        drop(st);
+        self.state.lock().unwrap().listed_in_a_vault.extend(sealed_here);
         Ok(out)
     }
 }
@@ -958,8 +1287,21 @@ impl Vfs for MemFs {
         // A volume with no birth time is one whose file identity is weak, and
         // a real one says so through its probe.
         let mut p = self.personality;
-        if self.state.lock().unwrap().births_hidden {
+        let st = self.state.lock().unwrap();
+        if st.births_hidden {
             p.stable_file_identity = false;
+        }
+        // Every FAT and exFAT model is named by its filesystem type, whatever
+        // the rename probe would have said (F1).
+        if st.file_id_model != FileIds::Stable {
+            p.stable_file_identity = false;
+            p.positional_file_ids = true;
+            p.id_tie_break = match st.file_id_model {
+                FileIds::DataCluster => jd_vfs::IdTieBreak::Durable,
+                FileIds::MountSession => jd_vfs::IdTieBreak::MountSession,
+                _ => jd_vfs::IdTieBreak::None,
+            };
+            p.mtime_granularity_ns = p.mtime_granularity_ns.max(Self::FAT_MTIME_NS);
         }
         p
     }
@@ -995,6 +1337,12 @@ impl Vfs for MemFs {
             Some(Node::Dir) => Some(Self::directory_id_of(&st, &key)),
             _ => None,
         })
+    }
+
+    fn tie_break_id(&self, path: &Path) -> VfsResult<u64> {
+        let key = self.key_for(path)?;
+        let st = self.state.lock().unwrap();
+        Ok(if st.nodes.contains_key(&key) { Self::tie_break_of(&st, &key) } else { 0 })
     }
 
     fn hash(&self, path: &Path) -> VfsResult<String> {
@@ -1109,7 +1457,7 @@ impl Vfs for MemFs {
             return Err(VfsError::AlreadyExists(Self::path_of(&blocker)));
         }
         Self::ensure_parents(&mut st, &t);
-        Self::move_subtree(&mut st, &f, &t);
+        Self::move_subtree(&mut st, &f, &t, self.clock.now_ns());
         Ok(())
     }
 
@@ -1129,7 +1477,10 @@ impl Vfs for MemFs {
         if victims.is_empty() {
             return Ok(());
         }
+        let now = self.clock.now_ns();
         for v in victims {
+            Self::vacate(&mut st, &v, now);
+            st.touched.insert(v.clone());
             if let Some(node) = st.nodes.remove(&v) {
                 st.trash.push((v.clone(), node));
             }
@@ -1137,7 +1488,7 @@ impl Vfs for MemFs {
             st.births.remove(&v);
             st.file_births.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
-                st.freed_ids.push(id);
+                Self::release_id(&mut st, &v, id);
             }
         }
         Ok(())
@@ -1286,7 +1637,7 @@ impl SpoolFile for MemSpool {
             self.fs.state.lock().unwrap().spools.remove(&self.name);
             return Err(e);
         }
-        let mtime = self.fs.truncated_now();
+        let mtime = { let st = self.fs.state.lock().unwrap(); self.fs.truncated_now(&st) };
         let mut st = self.fs.state.lock().unwrap();
         st.spools.remove(&self.name);
 
@@ -1302,7 +1653,14 @@ impl SpoolFile for MemSpool {
         // it simulates reports bugs that do not exist while hiding ones that do.
         let current = MemFs::fingerprint_of(&st, &key);
         if let (Some(want), Some(now)) = (expect, current) {
-            if !now.unchanged_from(&want, &self.fs.personality) {
+            // Without ids, size and time, as `OsVfs` guards it.
+            let unchanged = if st.file_id_model != FileIds::Stable {
+                now.size == want.size
+                    && now.mtime_ns.abs_diff(want.mtime_ns) < self.fs.personality.mtime_granularity_ns.max(1)
+            } else {
+                now.unchanged_from(&want, &self.fs.personality)
+            };
+            if !unchanged {
                 return Err(VfsError::AlreadyExists(target.to_path_buf()));
             }
         }
@@ -1331,14 +1689,25 @@ impl SpoolFile for MemSpool {
         }
 
         MemFs::watch_loss(&st, &key, "a download committing on top of it");
+        st.touched.insert(key.clone());
         MemFs::ensure_parents(&mut st, &key);
         // Replacing a file keeps its id — the rename lands on top of it, which
         // is what a real filesystem does and what makes "same inode, new
         // content" a case the engine has to handle.
-        let id = match st.file_ids.get(&key) {
-            Some(id) => *id,
-            None => {
-                let id = MemFs::alloc_id(&mut st);
+        let len = self.buf.len();
+        let id = match (st.file_ids.get(&key).copied(), st.file_id_model) {
+            (Some(id), FileIds::Stable) => id,
+            // A FAT volume has no "same inode, new content": the spool is a
+            // new entry renamed over the old one, and the id is the new
+            // entry's (a new slot, new clusters, a new number this mount).
+            (Some(old), _) => {
+                let id = MemFs::new_file_id(&mut st, &key, len);
+                MemFs::release_id(&mut st, &key, old);
+                st.file_ids.insert(key.clone(), id);
+                id
+            }
+            (None, _) => {
+                let id = MemFs::new_file_id(&mut st, &key, len);
                 st.file_ids.insert(key.clone(), id);
                 id
             }
@@ -1348,8 +1717,12 @@ impl SpoolFile for MemSpool {
         if !st.file_births.contains_key(&key) {
             let birth = MemFs::new_file_birth(&mut st);
             st.file_births.insert(key.clone(), birth);
+            let now = self.fs.clock.now_ns();
+            MemFs::tunnel(&mut st, &key, now);
         }
-        let birth_ns = if st.births_hidden { 0 } else { st.file_births[&key] };
+        let positional = st.file_id_model != FileIds::Stable;
+        let birth_ns = if st.births_hidden || positional { 0 } else { st.file_births[&key] };
+        let id = if positional { 0 } else { id };
         let size = self.buf.len() as u64;
         st.nodes.insert(
             key,
@@ -1382,6 +1755,101 @@ mod tests {
 
     fn fs() -> MemFs {
         MemFs::linux(SimClock::new())
+    }
+
+    fn fat(model: FileIds) -> (MemFs, SimClock) {
+        let clock = SimClock::new();
+        let f = MemFs::linux(clock.clone());
+        f.file_ids(model);
+        (f, clock)
+    }
+
+    fn birth(f: &MemFs, path: &str) -> u64 {
+        f.file_birth_of(path).unwrap()
+    }
+
+    /// Every FAT model is named by its filesystem type: positional, and the
+    /// engine is shown no id and no birth (`Personality::positional_file_ids`).
+    fn named_positional(f: &MemFs, path: &str) {
+        let pers = f.personality();
+        assert!(pers.positional_file_ids && !pers.stable_file_identity);
+        let fp = f.fingerprint(&p(path)).unwrap().unwrap();
+        assert_eq!((fp.file_id, fp.birth_ns), (0, 0), "the engine is shown no identity");
+    }
+
+    // The FAT models, each as traced on a real system on 2026-09-28
+    // (`specs/drive_weak_volume_identity.md`, F1 and F4).
+
+    #[test]
+    fn on_windows_fat_an_id_is_the_entry_slot() {
+        let (f, clock) = fat(FileIds::DirectorySlot);
+        f.user_write("a.txt", b"a");
+        f.user_write("b.txt", b"b");
+        let a = f.file_id_of("a.txt").unwrap();
+        f.user_rename("a.txt", "c.txt");
+        assert_eq!(f.file_id_of("c.txt"), Some(a), "a rename to a name no longer keeps the slot");
+        f.user_rename("c.txt", "a-much-longer-name.txt");
+        let moved = f.file_id_of("a-much-longer-name.txt").unwrap();
+        assert_ne!(moved, a, "a longer name moves the entry");
+        f.user_mkdir("sub");
+        assert_eq!(f.file_id_of("sub"), Some(a), "a freed slot is taken again first-fit");
+        let b = f.file_id_of("b.txt").unwrap();
+        f.user_rename("b.txt", "sub/b.txt");
+        assert_ne!(f.file_id_of("sub/b.txt"), Some(b), "another folder is another slot");
+        f.user_write("new.txt", b"n");
+        assert_eq!(f.file_id_of("new.txt"), Some(b), "so a new file at the top takes the slot b left");
+        named_positional(&f, "new.txt");
+        let _ = clock;
+    }
+
+    #[test]
+    fn on_windows_fat_a_name_taken_again_within_15_seconds_keeps_the_old_creation_time() {
+        let (f, clock) = fat(FileIds::DirectorySlot);
+        f.user_write("a.txt", b"a");
+        clock.advance_secs(1);
+        f.user_write("b.txt", b"b");
+        let (ba, bb) = (birth(&f, "a.txt"), birth(&f, "b.txt"));
+        assert_ne!(ba, bb);
+        f.user_trade_names("a.txt", "b.txt", "tmp.txt");
+        assert_eq!((birth(&f, "a.txt"), birth(&f, "b.txt")), (ba, bb), "the creation times stay with the names");
+        clock.advance_secs(60);
+        f.user_rename("a.txt", "x.txt");
+        clock.advance_secs(20);
+        f.user_write("a.txt", b"late");
+        assert_ne!(birth(&f, "a.txt"), ba, "after 15 seconds nothing tunnels");
+    }
+
+    #[test]
+    fn on_macos_fat32_an_id_is_the_first_cluster() {
+        let (f, _) = fat(FileIds::DataCluster);
+        f.user_write("a.txt", b"a");
+        let a = f.file_id_of("a.txt").unwrap();
+        f.user_mkdir("sub");
+        f.user_rename("a.txt", "sub/a-much-longer-name.txt");
+        f.remount();
+        assert_eq!(f.file_id_of("sub/a-much-longer-name.txt"), Some(a), "a rename, a move and a remount keep it");
+        f.user_write("sub/a-much-longer-name.txt", b"saved");
+        assert_ne!(f.file_id_of("sub/a-much-longer-name.txt"), Some(a), "a save rewrites the clusters");
+        f.user_write("empty.txt", b"");
+        let e = f.file_id_of("empty.txt").unwrap();
+        f.remount();
+        assert_ne!(f.file_id_of("empty.txt"), Some(e), "an empty file's id is temporary");
+        named_positional(&f, "empty.txt");
+    }
+
+    #[test]
+    fn on_linux_fat_ids_last_one_mount() {
+        let (f, _) = fat(FileIds::MountSession);
+        f.user_write("a.txt", b"a");
+        f.user_write("b.txt", b"b");
+        let (a, b) = (f.file_id_of("a.txt").unwrap(), f.file_id_of("b.txt").unwrap());
+        let ba = birth(&f, "a.txt");
+        f.user_trade_names("a.txt", "b.txt", "tmp.txt");
+        assert_eq!((f.file_id_of("b.txt"), f.file_id_of("a.txt")), (Some(a), Some(b)), "ids travel with the files while mounted");
+        f.remount();
+        assert!(f.file_id_of("b.txt") != Some(a) && f.file_id_of("a.txt") != Some(b), "a remount renumbers every file");
+        assert_eq!(birth(&f, "b.txt"), ba, "births survive a remount");
+        named_positional(&f, "a.txt");
     }
 
     #[test]

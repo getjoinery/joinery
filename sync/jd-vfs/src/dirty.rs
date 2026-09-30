@@ -173,6 +173,11 @@ impl DirtySet {
 
     /// Everything pending, settled or not. Used when the engine is stopping and
     /// wants to persist what it knows rather than lose it.
+    /// Every path marked and not yet taken, settled or not.
+    pub fn touched(&self) -> Vec<PathBuf> {
+        self.paths.keys().cloned().collect()
+    }
+
     pub fn drain_all(&mut self) -> Vec<DirtyPath> {
         let mut out: Vec<DirtyPath> = self.paths.drain().map(|(_, d)| d).collect();
         out.sort_by(|a, b| a.path.cmp(&b.path));

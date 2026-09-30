@@ -103,6 +103,17 @@ impl OsVfs {
     }
 }
 
+/// A fingerprint as the engine is shown it: on a volume whose ids are only
+/// positions, with no id and no birth, so nothing reads one
+/// (`Personality::positional_file_ids`).
+fn as_seen(fp: Fingerprint, personality: &Personality) -> Fingerprint {
+    if personality.positional_file_ids {
+        Fingerprint { file_id: 0, birth_ns: 0, ..fp }
+    } else {
+        fp
+    }
+}
+
 fn list_dir(
 path: &Path,
 personality: &Personality,
@@ -150,14 +161,28 @@ include_internal: bool,
         } else {
             EntryKind::Other
         };
+        // Beside the fingerprint, never in it: the raw id, only where this
+        // volume's ids may break a tie (`Personality::id_tie_break`).
+        let tie_break_id = if personality.id_tie_break == crate::personality::IdTieBreak::None {
+            0
+        } else {
+            match kind {
+                EntryKind::File => fingerprint_of(&entry.path(), &md).file_id,
+                EntryKind::Directory => directory_id_of(&entry.path(), &md),
+                _ => 0,
+            }
+        };
         out.push(DirEntry {
             name,
             kind,
+            tie_break_id,
             fingerprint: match kind {
-                EntryKind::File => Some(fingerprint_of(&entry.path(), &md)),
-                EntryKind::Directory => {
-                    Some(Fingerprint::of_directory(directory_id_of(&entry.path(), &md)))
-                }
+                EntryKind::File => Some(as_seen(fingerprint_of(&entry.path(), &md), personality)),
+                EntryKind::Directory => Some(Fingerprint::of_directory(if personality.positional_file_ids {
+                    0
+                } else {
+                    directory_id_of(&entry.path(), &md)
+                })),
                 _ => None,
             },
         });
@@ -247,6 +272,105 @@ pub(crate) fn identity_at(path: &Path) -> Option<crate::FileIdentity> {
 /// index `file_index` reads is not guaranteed to tell two of them apart.
 #[cfg(windows)]
 pub(crate) fn ids_not_unique_on_this_volume(dir: &Path) -> bool {
+    // Unanswered is not an answer that trusts the ids.
+    volume_filesystem_name(dir).is_none_or(|n| n.eq_ignore_ascii_case("ReFS"))
+}
+
+/// Is this a FAT or exFAT volume, whose file ids say where a file sits rather
+/// than which file it is? Named by the filesystem type, because on Linux and
+/// macOS the rename probe cannot see it (`specs/drive_weak_volume_identity.md`,
+/// F1: Windows moves the id with the directory entry, macOS FAT32 with the
+/// first data cluster, Linux and macOS exFAT with the mount).
+#[cfg(windows)]
+pub(crate) fn ids_are_positions_on_this_volume(dir: &Path) -> bool {
+    volume_filesystem_name(dir).is_some_and(|n| {
+        ["FAT", "FAT32", "exFAT"].iter().any(|fat| n.eq_ignore_ascii_case(fat))
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn ids_are_positions_on_this_volume(dir: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    const MSDOS_SUPER_MAGIC: i64 = 0x4d44;
+    const EXFAT_SUPER_MAGIC: i64 = 0x2011_bab0;
+    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: a NUL-terminated path and a zeroed struct of the right type.
+    if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
+        return false;
+    }
+    matches!(st.f_type as i64, MSDOS_SUPER_MAGIC | EXFAT_SUPER_MAGIC)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn ids_are_positions_on_this_volume(dir: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: a NUL-terminated path and a zeroed struct of the right type.
+    if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
+        return false;
+    }
+    // SAFETY: the kernel NUL-terminates the type name inside the array.
+    let name = unsafe { std::ffi::CStr::from_ptr(st.f_fstypename.as_ptr()) };
+    matches!(name.to_bytes(), b"msdos" | b"exfat")
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+pub(crate) fn ids_are_positions_on_this_volume(_dir: &Path) -> bool {
+    false
+}
+
+/// How far this FAT or exFAT volume's ids hold still (F1): Windows ids are a
+/// directory entry's position and move on a rename; Linux FAT and exFAT ids
+/// hold for one mount; macOS FAT32 ids are a file's first data cluster and
+/// survive renames and remounts, while macOS exFAT ids hold for one mount.
+#[cfg(windows)]
+pub(crate) fn id_tie_break_on_this_volume(_dir: &Path) -> crate::personality::IdTieBreak {
+    crate::personality::IdTieBreak::None
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn id_tie_break_on_this_volume(dir: &Path) -> crate::personality::IdTieBreak {
+    if ids_are_positions_on_this_volume(dir) {
+        crate::personality::IdTieBreak::MountSession
+    } else {
+        crate::personality::IdTieBreak::None
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn id_tie_break_on_this_volume(dir: &Path) -> crate::personality::IdTieBreak {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
+        return crate::personality::IdTieBreak::None;
+    };
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: a NUL-terminated path and a zeroed struct of the right type.
+    if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
+        return crate::personality::IdTieBreak::None;
+    }
+    // SAFETY: the kernel NUL-terminates the type name inside the array.
+    let name = unsafe { std::ffi::CStr::from_ptr(st.f_fstypename.as_ptr()) };
+    match name.to_bytes() {
+        b"msdos" => crate::personality::IdTieBreak::Durable,
+        b"exfat" => crate::personality::IdTieBreak::MountSession,
+        _ => crate::personality::IdTieBreak::None,
+    }
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+pub(crate) fn id_tie_break_on_this_volume(_dir: &Path) -> crate::personality::IdTieBreak {
+    crate::personality::IdTieBreak::None
+}
+
+/// The filesystem's name for the volume holding `dir`, or None unanswered.
+#[cfg(windows)]
+fn volume_filesystem_name(dir: &Path) -> Option<String> {
     use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
@@ -259,8 +383,7 @@ pub(crate) fn ids_not_unique_on_this_volume(dir: &Path) -> bool {
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .open(dir)
     else {
-        // Unanswered is not an answer that trusts the ids.
-        return true;
+        return None;
     };
     let mut name = [0u16; 64];
     // SAFETY: the handle is live for the call and the buffer's length is the
@@ -278,10 +401,10 @@ pub(crate) fn ids_not_unique_on_this_volume(dir: &Path) -> bool {
         )
     };
     if ok == 0 {
-        return true;
+        return None;
     }
     let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
-    String::from_utf16_lossy(&name[..end]).eq_ignore_ascii_case("ReFS")
+    Some(String::from_utf16_lossy(&name[..end]))
 }
 
 /// Unix volumes number files with an inode, unique on the volume.
@@ -478,7 +601,7 @@ impl Vfs for OsVfs {
 
     fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>> {
         match path.symlink_metadata() {
-            Ok(md) if md.is_file() => Ok(Some(fingerprint_of(path, &md))),
+            Ok(md) if md.is_file() => Ok(Some(as_seen(fingerprint_of(path, &md), &self.personality))),
             Ok(_) => Ok(None),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err(path, e)),
@@ -490,10 +613,24 @@ impl Vfs for OsVfs {
             // symlink_metadata, so a symlink to a directory is not a directory
             // here, exactly as it is not one in a listing.
             Ok(md) if md.is_dir() && !md.file_type().is_symlink() => {
-                Ok(Some(directory_id_of(path, &md)))
+                Ok(Some(if self.personality.positional_file_ids { 0 } else { directory_id_of(path, &md) }))
             }
             Ok(_) => Ok(None),
             Err(e) if not_there(&e) => Ok(None),
+            Err(e) => Err(io_err(path, e)),
+        }
+    }
+
+    fn tie_break_id(&self, path: &Path) -> VfsResult<u64> {
+        if self.personality.id_tie_break == crate::personality::IdTieBreak::None {
+            return Ok(0);
+        }
+        match path.symlink_metadata() {
+            Ok(md) if md.file_type().is_symlink() => Ok(0),
+            Ok(md) if md.is_dir() => Ok(directory_id_of(path, &md)),
+            Ok(md) if md.is_file() => Ok(fingerprint_of(path, &md).file_id),
+            Ok(_) => Ok(0),
+            Err(e) if not_there(&e) => Ok(0),
             Err(e) => Err(io_err(path, e)),
         }
     }
@@ -550,6 +687,7 @@ impl Vfs for OsVfs {
         Ok(Box::new(OsSpoolFile {
             file: Some(file),
             path,
+            personality: self.personality,
             target: target.to_path_buf(),
         }))
     }
@@ -581,7 +719,7 @@ impl Vfs for OsVfs {
         if !md.is_file() {
             return Ok(None);
         }
-        let fingerprint = fingerprint_of_handle(&file, &md);
+        let fingerprint = as_seen(fingerprint_of_handle(&file, &md), &self.personality);
         Ok(Some((Box::new(BufReader::new(file)), fingerprint)))
     }
 
@@ -680,6 +818,7 @@ impl Drop for OsScratchReader {
 struct OsSpoolFile {
     file: Option<File>,
     path: PathBuf,
+    personality: Personality,
     #[allow(dead_code)]
     target: PathBuf,
 }
@@ -715,7 +854,18 @@ impl OsSpoolFile {
                 Ok(md) => {
                     if md.is_file() {
                         let actual = fingerprint_of(target, &md);
-                        if !actual.unchanged_from(&expected, &Personality::native()) {
+                        // Without ids the guard is size and time: the caller
+                        // hashed the standing file a moment before, and that
+                        // gate is the one about content (execute.rs,
+                        // `download`).
+                        let unchanged = if self.personality.positional_file_ids {
+                            actual.size == expected.size
+                                && actual.mtime_ns.abs_diff(expected.mtime_ns)
+                                    < self.personality.mtime_granularity_ns.max(1)
+                        } else {
+                            actual.unchanged_from(&expected, &Personality::native())
+                        };
+                        if !unchanged {
                             return Err(VfsError::AlreadyExists(target.to_path_buf()));
                         }
                     }
@@ -762,7 +912,7 @@ impl OsSpoolFile {
         fs::rename(&self.path, target).map_err(|e| io_err(&self.path, e))?;
 
         let md = target.symlink_metadata().map_err(|e| io_err(target, e))?;
-        Ok(fingerprint_of(target, &md))
+        Ok(as_seen(fingerprint_of(target, &md), &self.personality))
     }
 }
 

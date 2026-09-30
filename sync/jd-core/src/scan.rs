@@ -42,6 +42,10 @@ pub struct ObservedFile {
     pub path: String,
     pub fingerprint: jd_vfs::Fingerprint,
     pub sha256: String,
+    /// The volume's own id for the file, only where its ids may break a tie
+    /// (`jd_vfs::Personality::id_tie_break`), and 0 everywhere else. Never
+    /// identity: read only by the tie-break in [`pair_files`].
+    pub tie_break_id: u64,
 }
 
 /// What the engine last recorded about a file it is tracking.
@@ -74,12 +78,21 @@ pub struct KnownLocal {
     /// name the server gives this record is a name it holds (step 2).
     pub server_path: Option<String>,
     /// The file on this disk that is this record's own
-    /// (`Entry::own_file`). `pair_files` pairs by it; `pair_with` does not.
+    /// (`Entry::own_file`). `pair_files` pairs by it; `pair_with` reads it
+    /// only for a record never sent (`never_sent_own_id`).
     pub own_file: Option<jd_vfs::FileIdentity>,
     /// For a claimant -- a record waiting for a vault key to send the file its
     /// source had -- the source. A claimant stands for the bytes at its path
     /// in the vault: its file standing anywhere else is its source's again.
     pub claimant_for: Option<EntityId>,
+    /// The hash of this record's file when the last scan saw it
+    /// (`Entry::last_seen_sha`): on a weak volume, the identity `pair_files`
+    /// reads the record by (layer 1).
+    pub last_seen_sha: Option<String>,
+    /// The volume's own id for the record's file as last read in this mount
+    /// session, where its ids may break a tie, and 0 where there is none
+    /// (`jd_vfs::Personality::id_tie_break`). Never identity.
+    pub tie_break: u64,
 }
 
 /// What the scan concluded about one tracked file.
@@ -139,6 +152,23 @@ pub fn pair_with(
     observed: &[ObservedFile],
     awaiting_bytes: &HashSet<String>,
 ) -> ScanOutcome {
+    pair_with_given(known, observed, awaiting_bytes, &vec![false; known.len()], &vec![false; observed.len()], &vec![false; observed.len()])
+}
+
+/// `pair_with`, after something already read some of the records (`given`)
+/// and took some of the files (`taken`): those records get no change here and
+/// those files are nobody else's, and all of them still count as evidence --
+/// who holds which inode, which bytes, which path. Read without them, a
+/// record whose own file another record had already taken found nothing of
+/// its own elsewhere, and read the stranger at its path as its edit.
+fn pair_with_given(
+    known: &[KnownLocal],
+    observed: &[ObservedFile],
+    awaiting_bytes: &HashSet<String>,
+    given: &[bool],
+    taken: &[bool],
+    taken_at_home: &[bool],
+) -> ScanOutcome {
     let mut out = ScanOutcome::default();
 
     let by_path: HashMap<&str, &ObservedFile> =
@@ -146,7 +176,7 @@ pub fn pair_with(
 
     // Which observed files have been accounted for. Anything left at the end is
     // genuinely new.
-    let mut claimed: Vec<bool> = vec![false; observed.len()];
+    let mut claimed: Vec<bool> = taken.to_vec();
     let index_of: HashMap<&str, usize> = observed
         .iter()
         .enumerate()
@@ -181,13 +211,28 @@ pub fn pair_with(
     //    deletion that would take the file off the server.
     // What rule 1 asks when the bytes at a record's path are not its own:
     // who holds which inode, which agreed content, and which path.
-    let live = |k: &KnownLocal| !k.server_deleted;
+    // The server's deleted records included: a record owns its file until it
+    // is forgotten, as `pair_files` holds where births are shown. Left out,
+    // a file swapped off the path of a file the server had deleted read as
+    // the edit of the record whose path it landed on, and the deleted
+    // record's trash took the other (kill2 75129; `specs/drive_file_ownership.md`).
     let nonzero = |id: u64| id != 0;
     let mut inode_owners: HashMap<u64, Vec<usize>> = HashMap::new();
     let mut sha_owners: HashMap<&str, Vec<usize>> = HashMap::new();
     let mut record_at: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (n, k) in known.iter().enumerate().filter(|(_, k)| live(k)) {
+    for (n, k) in known.iter().enumerate() {
         if let Some(id) = k.fingerprint.map(|f| f.file_id).filter(|id| nonzero(*id)) {
+            inode_owners.entry(id).or_default().push(n);
+        } else if let Some(id) = never_sent_own_id(k) {
+            // A record never sent has no agreed inode or bytes; the file it
+            // was minted for is all it has. Read only, as the question "is
+            // the file here another record's that arrived by a trade?" -- so
+            // a file a swap carried onto a settled record's path is not read
+            // as that record's edit. It is never at home here (it has no
+            // agreed bytes), so it always counts as not at home. Wrong about a
+            // reused id only inside one pass, it costs the settled record's
+            // history, which then ends at the backup name while the save goes
+            // up new; no bytes are lost (`specs/drive_file_ownership.md`).
             inode_owners.entry(id).or_default().push(n);
         }
         if let Some(sha) = k.sha256.as_deref() {
@@ -260,7 +305,6 @@ pub fn pair_with(
     // new one under the other name (the reset's T1, plain2 75292). A backup
     // made by renaming still reads as an edit: its backup lands on a path no
     // record holds.
-    const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     let arrived_by_a_trade = |n: usize, k: &KnownLocal, obs: &ObservedFile| -> bool {
         if k.sha256.as_deref() == Some(obs.sha256.as_str()) {
             return false;
@@ -268,11 +312,16 @@ pub fn pair_with(
         let standing = match k.fingerprint {
             Some(f) if nonzero(f.file_id) => observed_by_inode.get(&f.file_id),
             Some(_) => None,
-            None => k
-                .sha256
-                .as_deref()
-                .filter(|mine| *mine != EMPTY_SHA256)
-                .and_then(|mine| observed_by_sha.get(mine)),
+            // A record never sent knows its file only by the id it was
+            // minted for.
+            None => match never_sent_own_id(k) {
+                Some(id) => observed_by_inode.get(&id),
+                None => k
+                    .sha256
+                    .as_deref()
+                    .filter(|mine| *mine != EMPTY_SHA256)
+                    .and_then(|mine| observed_by_sha.get(mine)),
+            },
         };
         let mine_elsewhere: Vec<&ObservedFile> = standing
             .map(|os| os.iter().copied().filter(|o| o.path != k.path).collect())
@@ -281,6 +330,28 @@ pub fn pair_with(
             return false;
         }
         let another_not_at_home = |r: usize| r != n && !at_home(&known[r]);
+        // A record never sent knows its file by the id it was minted for, and
+        // reads by it as a record reads by its identity where births are
+        // shown (`pair_files` step 2): its own file standing elsewhere is a
+        // move, whatever now stands at its path -- unless it stands beside
+        // it, at a path no record holds, and the file here is nobody's: a
+        // backup made by renaming, and the file here is the save. Read by
+        // the other evidence alone, a sealed file never sent, carried into a
+        // plain folder by a swap, read the file left at its path as its edit
+        // and was minted again where it went, plain (plat3 75429;
+        // `specs/drive_file_ownership.md`, 2b).
+        if never_sent_own_id(k).is_some() {
+            let nobodys_here = !inode_owners
+                .get(&obs.fingerprint.file_id)
+                .is_some_and(|rs| rs.iter().any(|r| *r != n));
+            let a_backup = nobodys_here
+                && mine_elsewhere.iter().any(|o| {
+                    folder_of(&o.path) == folder_of(&k.path)
+                        && !record_at.contains_key(o.path.as_str())
+                        && !awaiting_bytes.contains(o.path.as_str())
+                });
+            return !a_backup;
+        }
         let by_inode = nonzero(obs.fingerprint.file_id)
             && inode_owners
                 .get(&obs.fingerprint.file_id)
@@ -318,8 +389,12 @@ pub fn pair_with(
         by_inode || by_content || mine_on_anothers_path || home_again
     };
 
-    let mut settled: Vec<bool> = vec![false; known.len()];
+    let mut settled: Vec<bool> = given.to_vec();
+    let mut gone_never_sent: Vec<(usize, usize)> = Vec::new();
     for (n, k) in known.iter().enumerate() {
+        if settled[n] {
+            continue;
+        }
         let Some(obs) = by_path.get(k.path.as_str()) else {
             continue;
         };
@@ -332,13 +407,20 @@ pub fn pair_with(
         // no fingerprint -- its upload finished while the user was already
         // moving it -- has nothing to match and pairs by path with nobody;
         // the bytes brought back are still found by hash in the round below.
-        if k.held && k.fingerprint.is_none_or(|fp| fp.file_id != obs.fingerprint.file_id) {
+        if k.held && k.fingerprint.is_none_or(|fp| fp.file_id == 0 || fp.file_id != obs.fingerprint.file_id) {
             continue;
         }
         if arrived_by_a_trade(n, k, obs) {
             continue;
         }
         let i = index_of[obs.path.as_str()];
+        // A file a follower took from elsewhere is not this record's, and the
+        // record is not left to naming for it: it is read on by rules 2 to 5
+        // (the strong reading's steps 3, 5 and 6 refuse it the same way; only
+        // a file another record is AT HOME with leaves it unchanged).
+        if taken[i] && !taken_at_home[i] {
+            continue;
+        }
         settled[n] = true;
         if claimed[i] {
             out.changes.push((
@@ -439,8 +521,38 @@ pub fn pair_with(
                 ));
             }
             // 5. Nowhere to be found. It is gone.
-            (None, None) => out.changes.push((k.id, LocalChange::Deleted)),
+            (None, None) => {
+                if never_sent_own_id(k).is_some() {
+                    gone_never_sent.push((n, out.changes.len()));
+                }
+                out.changes.push((k.id, LocalChange::Deleted))
+            }
         }
+    }
+
+    // 6. Last, over what nobody else claimed: a record never sent follows the
+    //    file it was minted for, by its file id. With no birth, an id is not
+    //    an identity (rule 4), and it buys this only because of what a record
+    //    never sent is: it has no file on the server and no version history,
+    //    so a wrong match -- a reused id -- only puts a stranger under it,
+    //    decided afresh where it stands, as a new file would have been; the
+    //    record's hold, if it had one, holds the stranger instead. Nothing is
+    //    sent on the id's word. Without it, a file saved in a vault and carried
+    //    out by a swap before it was sent was minted again where it landed,
+    //    and sent in the clear (hostile2 74415; `specs/drive_file_ownership.md`).
+    for (n, at) in gone_never_sent {
+        let Some(id) = never_sent_own_id(&known[n]) else { continue };
+        let Some(i) = (0..observed.len()).find(|i| !claimed[*i] && observed[*i].fingerprint.file_id == id) else {
+            continue;
+        };
+        claimed[i] = true;
+        out.changes[at] = (
+            known[n].id,
+            LocalChange::Moved {
+                to_path: observed[i].path.clone(),
+                fingerprint: observed[i].fingerprint,
+            },
+        );
     }
 
     for (i, obs) in observed.iter().enumerate() {
@@ -451,6 +563,19 @@ pub fn pair_with(
 
     out
 }
+
+/// The file id a record never sent was minted for: it has no agreed inode and
+/// no agreed bytes, only its own file. `None` for any other record, and for a
+/// zero id (no identity).
+fn never_sent_own_id(k: &KnownLocal) -> Option<u64> {
+    if k.fingerprint.is_some() || k.sha256.is_some() || !k.id.is_provisional() {
+        return None;
+    }
+    k.own_file.map(|o| o.file_id).filter(|id| *id != 0)
+}
+
+/// The sha256 of no bytes: every empty file's, so it names no file.
+pub(crate) const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 /// The folder a relative path stands in; "" is the sync root.
 fn folder_of(path: &str) -> &str {
@@ -509,14 +634,104 @@ pub fn pair_files(
     awaiting_bytes: &HashSet<String>,
     strong_volume: bool,
 ) -> ScanOutcome {
-    use jd_vfs::FileIdentity;
-    let own = |k: &KnownLocal| k.own_file.filter(|o| strong_volume && o.is_strong());
-    if !known.iter().any(|k| own(k).is_some()) {
-        return pair_with(known, observed, awaiting_bytes);
+    if strong_volume {
+        let own = |k: &KnownLocal| k.own_file.filter(|o| o.is_strong());
+        if !known.iter().any(|k| own(k).is_some()) {
+            return pair_with(known, observed, awaiting_bytes);
+        }
+        let identity = |o: &ObservedFile| Some(o.fingerprint.identity()).filter(|i| i.is_strong());
+        return pair_by(known, observed, awaiting_bytes, own, identity, identity, Steps::All);
     }
-    let identity = |o: &ObservedFile| {
-        Some(o.fingerprint.identity()).filter(|i| strong_volume && i.is_strong())
+    // A weak volume cannot say which file is which, and its bytes can: a
+    // file whose bytes are still the ones a record last saw is that record's
+    // file, unedited, wherever it now stands (layer 1 and rule X,
+    // `specs/drive_weak_volume_identity.md`). Following it adds nothing to
+    // the record's history that is not there already, so a wrong follow
+    // mixes nothing (D1). Only bytes that name one record count: two records
+    // with the same bytes (a copy, a template, an empty file) name neither.
+    // And only bytes that stand somewhere: a record whose bytes are gone was
+    // edited, and is read by `pair_with` as before -- the safe-save stays an
+    // edit. Held records and claimants keep today's reading too; a vault on
+    // a weak volume is refused (D3).
+    // The bytes last seen, unless the agreed bytes stand at the record's own
+    // path: then it is at home with them, whatever an older look saw (a
+    // download that landed since, say), and an old copy elsewhere is not it.
+    let at_path: HashMap<&str, &str> = observed.iter().map(|o| (o.path.as_str(), o.sha256.as_str())).collect();
+    let key = |k: &KnownLocal| -> Option<String> {
+        if k.held || k.server_home.is_some() || k.claimant_for.is_some() {
+            return None;
+        }
+        let agreed_here = k.sha256.as_deref().filter(|a| at_path.get(k.path.as_str()) == Some(a));
+        agreed_here
+            .map(str::to_string)
+            .or_else(|| k.last_seen_sha.clone())
+            .or_else(|| k.sha256.clone())
+            .filter(|sha| !sha.is_empty() && sha != EMPTY_SHA256)
     };
+    let mut claims: HashMap<String, usize> = HashMap::new();
+    for k in known {
+        if let Some(sha) = key(k) {
+            *claims.entry(sha).or_default() += 1;
+        }
+    }
+    // Bytes two records claim (a copy, a conflict copy) name neither -- unless
+    // the volume's ids may break the tie (`Personality::id_tie_break`): then a
+    // record whose recorded id is the id of one file with those bytes names
+    // that file, and only that file. Never identity: a record with no id, or
+    // an id no such file carries, stays unnamed and is read as before.
+    let shared: HashSet<&String> = claims.iter().filter(|(_, n)| **n > 1).map(|(sha, _)| sha).collect();
+    let refined = |sha: String, tie_break: u64| -> String {
+        if tie_break != 0 && shared.contains(&sha) {
+            format!("{sha}#{tie_break}")
+        } else {
+            sha
+        }
+    };
+    let mut claims: HashMap<String, usize> = HashMap::new();
+    for k in known {
+        if let Some(sha) = key(k) {
+            *claims.entry(refined(sha, k.tie_break)).or_default() += 1;
+        }
+    }
+    let mut standing: HashMap<String, usize> = HashMap::new();
+    for o in observed {
+        *standing.entry(refined(o.sha256.clone(), o.tie_break_id)).or_default() += 1;
+    }
+    let named: HashSet<String> = claims
+        .into_iter()
+        .filter(|(key, n)| *n == 1 && standing.get(key).is_some_and(|m| *m == 1 || !key.contains('#')))
+        .map(|(key, _)| key)
+        .collect();
+    let own = |k: &KnownLocal| key(k).map(|sha| refined(sha, k.tie_break)).filter(|key| named.contains(key));
+    let identity = |o: &ObservedFile| Some(refined(o.sha256.clone(), o.tie_break_id)).filter(|key| named.contains(key));
+    pair_by(known, observed, awaiting_bytes, own, identity, |_: &ObservedFile| None, Steps::AtHomeAndFollowed)
+}
+
+/// How much of `pair_by` a reading uses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Steps {
+    /// Every step, with records that have no identity read by `pair_with`
+    /// over the files no identity is owned by: the strong reading.
+    All,
+    /// At home and followed only; every record left, and every file left, is
+    /// read by `pair_with`: the weak reading, whose identity (the bytes) is
+    /// only ever evidence that a file is unedited.
+    AtHomeAndFollowed,
+}
+
+/// The steps of [`pair_files`], over whatever identity a reading has: a
+/// file's id and birth on a strong volume, its bytes on a weak one. `own` is
+/// a record's identity, `identity` a file's, and `bind` what a pairing
+/// records as the record's own file from now on (`ScanOutcome::bound`).
+fn pair_by<K: Clone + Eq + std::hash::Hash>(
+    known: &[KnownLocal],
+    observed: &[ObservedFile],
+    awaiting_bytes: &HashSet<String>,
+    own: impl Fn(&KnownLocal) -> Option<K>,
+    identity: impl Fn(&ObservedFile) -> Option<K>,
+    bind: impl Fn(&ObservedFile) -> Option<jd_vfs::FileIdentity>,
+    steps: Steps,
+) -> ScanOutcome {
     let held = |k: &KnownLocal| k.held || k.server_home.is_some();
     let moved = |k: &KnownLocal, o: &ObservedFile| {
         if k.sha256.as_deref() == Some(o.sha256.as_str()) {
@@ -548,7 +763,7 @@ pub fn pair_files(
     let mut settled = vec![false; known.len()];
     let at_path: HashMap<&str, usize> =
         observed.iter().enumerate().map(|(i, o)| (o.path.as_str(), i)).collect();
-    let mut by_identity: HashMap<FileIdentity, Vec<usize>> = HashMap::new();
+    let mut by_identity: HashMap<K, Vec<usize>> = HashMap::new();
     for (i, o) in observed.iter().enumerate() {
         if let Some(id) = identity(o) {
             by_identity.entry(id).or_default().push(i);
@@ -556,7 +771,7 @@ pub fn pair_files(
     }
     // Every strong record owns its file, the server's deleted ones included:
     // a record owns its file until it is forgotten.
-    let owned_ids: HashSet<FileIdentity> = known.iter().filter_map(own).collect();
+    let owned_ids: HashSet<K> = known.iter().filter_map(&own).collect();
     let owned = |i: usize| identity(&observed[i]).is_some_and(|id| owned_ids.contains(&id));
     let held_paths: HashSet<&str> = known
         .iter()
@@ -588,7 +803,7 @@ pub fn pair_files(
             }
         }
     }
-    let mut at_home_ids: HashSet<FileIdentity> = HashSet::new();
+    let mut at_home_ids: HashSet<K> = HashSet::new();
     let mut home_taken: HashSet<usize> = HashSet::new();
     for (i, mut contenders) in home {
         let bytes_here = |n: &usize| known[*n].sha256.as_deref() != Some(observed[i].sha256.as_str());
@@ -600,7 +815,7 @@ pub fn pair_files(
             settled[n] = true;
             let k = &known[n];
             let change = if place == 0 {
-                out.bound.extend(identity(&observed[i]).map(|id| (k.id, id)));
+                out.bound.extend(bind(&observed[i]).map(|id| (k.id, id)));
                 unchanged_or_edited(k, &observed[i])
             } else if k.server_deleted {
                 LocalChange::Deleted
@@ -633,7 +848,7 @@ pub fn pair_files(
             claimed[c] = true;
             settled[s] = true;
             let obs = &observed[c];
-            out.bound.extend(identity(obs).map(|id| (known[s].id, id)));
+            out.bound.extend(bind(obs).map(|id| (known[s].id, id)));
             out.changes.push((known[s].id, moved(&known[s], obs)));
             continue;
         }
@@ -645,15 +860,41 @@ pub fn pair_files(
             if let Some(&o) = at_path.get(k.path.as_str()).filter(|o| !claimed[**o] && !owned(**o)) {
                 claimed[o] = true;
                 settled[n] = true;
-                out.bound.extend(identity(&observed[o]).map(|id| (k.id, id)));
+                out.bound.extend(bind(&observed[o]).map(|id| (k.id, id)));
                 out.changes.push((k.id, unchanged_or_edited(k, &observed[o])));
                 continue;
             }
         }
         claimed[c] = true;
         settled[n] = true;
-        out.bound.push((k.id, id));
+        out.bound.extend(bind(&observed[c]).map(|id| (k.id, id)));
         out.changes.push((k.id, moved(k, &observed[c])));
+    }
+
+    if steps == Steps::AtHomeAndFollowed {
+        // Everything not read by its bytes is read as before, with every
+        // record and file still in view as evidence.
+        let mut at_home_files = vec![false; observed.len()];
+        for i in &home_taken {
+            at_home_files[*i] = true;
+        }
+        let weak_out = pair_with_given(known, observed, awaiting_bytes, &settled, &claimed, &at_home_files);
+        let left: HashSet<&str> = weak_out.created.iter().map(|o| o.path.as_str()).collect();
+        for i in 0..observed.len() {
+            if !left.contains(observed[i].path.as_str()) {
+                claimed[i] = true;
+            }
+        }
+        out.changes.extend(weak_out.changes);
+        let position: HashMap<EntityId, usize> =
+            known.iter().enumerate().map(|(n, k)| (k.id, n)).collect();
+        out.changes.sort_by_key(|(id, _)| position.get(id).copied().unwrap_or(usize::MAX));
+        for (i, o) in observed.iter().enumerate() {
+            if !claimed[i] {
+                out.created.push(o.clone());
+            }
+        }
+        return out;
     }
 
     // 3. Replaced.
@@ -672,12 +913,21 @@ pub fn pair_files(
         }
         claimed[o] = true;
         settled[n] = true;
-        out.bound.extend(identity(&observed[o]).map(|id| (k.id, id)));
+        out.bound.extend(bind(&observed[o]).map(|id| (k.id, id)));
         out.changes.push((k.id, unchanged_or_edited(k, &observed[o])));
     }
 
     // 4. Weak records, by today's rules, over what no strong record owns.
-    let weak: Vec<KnownLocal> = known.iter().filter(|k| own(k).is_none()).cloned().collect();
+    // Not a record an earlier step settled: a claimant's source, which has no
+    // identity of its own once it handed its file over, is settled by step 2
+    // when its claimant's file stands elsewhere -- read again here it was
+    // also Deleted, two changes for one record in one scan.
+    let weak: Vec<KnownLocal> = known
+        .iter()
+        .enumerate()
+        .filter(|(n, k)| own(k).is_none() && !settled[*n])
+        .map(|(_, k)| k.clone())
+        .collect();
     let rest: Vec<usize> = (0..observed.len()).filter(|i| !claimed[*i] && !owned(*i)).collect();
     let rest_files: Vec<ObservedFile> = rest.iter().map(|i| observed[*i].clone()).collect();
     let weak_out = pair_with(&weak, &rest_files, awaiting_bytes);
@@ -708,7 +958,7 @@ pub fn pair_files(
         let Some(i) = nearest(k, &mut hits) else { continue };
         claimed[i] = true;
         settled[n] = true;
-        out.bound.extend(identity(&observed[i]).map(|id| (k.id, id)));
+        out.bound.extend(bind(&observed[i]).map(|id| (k.id, id)));
         out.changes.push((
             k.id,
             LocalChange::Moved {
@@ -741,6 +991,46 @@ pub fn pair_files(
     out
 }
 
+/// The tie-break ids a pass may read (`jd_vfs::Personality::id_tie_break`,
+/// `specs/drive_weak_volume_identity.md`): of those `recorded` (the id and
+/// the mount session it was read in), the ones that still hold.
+///
+/// A mount-session volume renumbers on every mount, so an id read in another
+/// session is void unread (O2): after a remount the numbers are handed out
+/// again, and an old one can equal a different file's new one by chance. A
+/// durable volume keeps its ids through a remount, and only the disk says one
+/// has gone stale (O1): a record whose file stands unedited at its own path
+/// under another id than the one recorded means the volume renumbered behind
+/// the engine's back -- a stick whose clusters another machine reused -- and
+/// then no recorded id names anything this pass. The same check runs on both.
+/// Any such record counts, its bytes shared or not: a swap inside a set of
+/// identical copies voids every id for the pass too, and the pass reads that
+/// set as a disk with no ids does.
+/// Where every id is void the pass reads by bytes and paths alone.
+pub(crate) fn tie_breaks_that_hold(
+    class: jd_vfs::IdTieBreak,
+    session_now: i64,
+    recorded: &HashMap<EntityId, (u64, i64)>,
+    unedited_at_home: &HashMap<EntityId, u64>,
+) -> HashMap<EntityId, u64> {
+    let in_force: HashMap<EntityId, u64> = match class {
+        jd_vfs::IdTieBreak::None => return HashMap::new(),
+        jd_vfs::IdTieBreak::MountSession => recorded
+            .iter()
+            .filter(|(_, (_, session))| *session == session_now)
+            .map(|(e, (id, _))| (*e, *id))
+            .collect(),
+        jd_vfs::IdTieBreak::Durable => recorded.iter().map(|(e, (id, _))| (*e, *id)).collect(),
+    };
+    let stale = in_force
+        .iter()
+        .any(|(e, id)| unedited_at_home.get(e).is_some_and(|now| now != id));
+    if stale {
+        return HashMap::new();
+    }
+    in_force
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -759,6 +1049,7 @@ mod tests {
             path: path.into(),
             fingerprint: fp(file_id, 10, 100),
             sha256: sha.into(),
+            tie_break_id: 0,
         }
     }
 
@@ -768,7 +1059,7 @@ mod tests {
             path: path.into(),
             fingerprint: Some(fp(file_id, 10, 100)),
             sha256: Some(sha.into()),
-            server_deleted: false, held: false, server_home: None, server_path: None, own_file: None, claimant_for: None,
+            server_deleted: false, held: false, server_home: None, server_path: None, own_file: None, claimant_for: None, last_seen_sha: None, tie_break: 0,
         }
     }
 
@@ -1048,6 +1339,7 @@ mod tests {
             server_home: None,
             server_path: None,
             own_file: None,
+            last_seen_sha: None, tie_break: 0,
             claimant_for: None,
         };
         let out = pair(
@@ -1153,7 +1445,7 @@ mod tests {
                 path: "a.txt".into(),
                 fingerprint: None,
                 sha256: None,
-                server_deleted: false, held: false, server_home: None, server_path: None, own_file: None, claimant_for: None,
+                server_deleted: false, held: false, server_home: None, server_path: None, own_file: None, claimant_for: None, last_seen_sha: None, tie_break: 0,
             }],
             &[observed("elsewhere.txt", 900, "sha-x")],
         );
@@ -1265,12 +1557,13 @@ mod tests {
         KnownLocal {
             fingerprint: Some(sfp(file_id, birth)),
             own_file: Some(jd_vfs::FileIdentity { file_id, birth_ns: birth }),
+            last_seen_sha: None,
             ..known(id, path, file_id, sha)
         }
     }
 
     fn seen(path: &str, file_id: u64, birth: u64, sha: &str) -> ObservedFile {
-        ObservedFile { path: path.into(), fingerprint: sfp(file_id, birth), sha256: sha.into() }
+        ObservedFile { path: path.into(), fingerprint: sfp(file_id, birth), sha256: sha.into(), tie_break_id: 0 }
     }
 
     fn by_identity(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
@@ -1402,6 +1695,67 @@ mod tests {
         assert_eq!(created(&out), vec!["a.txt"]);
     }
 
+    /// Without births (`specs/drive_file_ownership.md`): a record never sent
+    /// knows its file by the id it was minted for.
+    fn never_sent(id: i64, path: &str, file_id: u64) -> KnownLocal {
+        KnownLocal { id: EntityId::file(id), sha256: None, fingerprint: None, ..mine(id, path, file_id, 0, "") }
+    }
+
+    #[test]
+    fn without_births_a_provisional_traded_with_a_synced_file_is_two_moves() {
+        // A swap: each file stands at the other's path. The settled record
+        // does not read the never-sent file as its edit, nor the other way.
+        let out = pair_files(
+            &[never_sent(-1, "new.txt", 500), known(2, "old.txt", 600, "sha-old")],
+            &[observed("new.txt", 600, "sha-old"), observed("old.txt", 500, "sha-draft")],
+            &HashSet::new(),
+            false,
+        );
+        assert_eq!(moved_to(&out, -1).as_deref(), Some("old.txt"));
+        assert_eq!(moved_to(&out, 2).as_deref(), Some("new.txt"));
+        assert!(out.created.is_empty(), "{:?}", out.created);
+    }
+
+    #[test]
+    fn without_births_a_never_sent_file_carried_elsewhere_is_followed_by_its_id() {
+        let out = pair_files(
+            &[never_sent(-1, "Private/new.txt", 500)],
+            &[observed("Plain/new.txt", 500, "sha-draft")],
+            &HashSet::new(),
+            false,
+        );
+        assert_eq!(moved_to(&out, -1).as_deref(), Some("Plain/new.txt"));
+        assert!(out.created.is_empty(), "minted again where it landed: {:?}", out.created);
+    }
+
+    #[test]
+    fn without_births_a_never_sent_file_carried_into_another_folder_is_followed_not_edited() {
+        // A swap with a file nothing tracks yet: the file left at the record's
+        // path is new, and the record follows its own file by its id.
+        let out = pair_files(
+            &[never_sent(-1, "Private/new.txt", 500)],
+            &[observed("Private/new.txt", 600, "sha-other"), observed("Plain/other.txt", 500, "sha-draft")],
+            &HashSet::new(),
+            false,
+        );
+        assert_eq!(moved_to(&out, -1).as_deref(), Some("Plain/other.txt"));
+        assert_eq!(created(&out), vec!["Private/new.txt"]);
+    }
+
+    #[test]
+    fn without_births_a_never_sent_files_backup_by_rename_is_still_a_save() {
+        // The editor renames the original to notes.txt~ and writes a new
+        // notes.txt: the new file is the save, the backup is new.
+        let out = pair_files(
+            &[never_sent(-1, "notes.txt", 500)],
+            &[observed("notes.txt~", 500, "sha-old"), observed("notes.txt", 700, "sha-new")],
+            &HashSet::new(),
+            false,
+        );
+        assert!(matches!(out.change_for(EntityId::file(-1)), Some(LocalChange::Edited { .. })), "{:?}", out.changes);
+        assert_eq!(out.created.iter().map(|o| o.path.as_str()).collect::<Vec<_>>(), vec!["notes.txt~"]);
+    }
+
     #[test]
     fn by_identity_a_provisional_traded_with_a_synced_file_is_two_moves() {
         // T1-C: a record never uploaded has its own file from its mint.
@@ -1488,9 +1842,308 @@ mod tests {
         );
     }
 
+    // Layer 1 and rule X (`specs/drive_weak_volume_identity.md`): on a weak
+    // volume a record is read by the bytes it last saw, where they stand.
+
+    /// A record on a weak volume that last saw `sha` at `path`, with no id.
+    fn saw(id: i64, path: &str, sha: &str) -> KnownLocal {
+        KnownLocal { last_seen_sha: Some(sha.into()), ..known(id, path, 0, sha) }
+    }
+
+    fn weak(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
+        pair_files(known, observed, &HashSet::new(), false)
+    }
+
+    #[test]
+    fn on_a_weak_volume_an_unedited_file_carried_to_another_folder_is_followed() {
+        // plat3 75408: a new file nobody has seen was swapped onto a synced
+        // record's path, and the record's file stands unedited in another
+        // folder. Read by the path, the stranger was the record's edit.
+        let known = [saw(1, "ring-2/r.txt", "sha-r")];
+        let observed = [observed("ring-2/r.txt", 0, "sha-stranger"), observed("Sub/doc.txt", 0, "sha-r")];
+        assert!(edited(&pair_with(&known, &observed, &HashSet::new()), 1), "the old reading");
+        let out = weak(&known, &observed);
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("Sub/doc.txt"));
+        assert_eq!(out.created.iter().map(|o| o.path.as_str()).collect::<Vec<_>>(), vec!["ring-2/r.txt"]);
+    }
+
+    #[test]
+    fn on_a_weak_volume_a_backup_beside_is_still_a_save() {
+        let known = [saw(1, "notes.txt", "sha-n")];
+        let observed = [observed("notes.txt~", 0, "sha-n"), observed("notes.txt", 0, "sha-n2")];
+        let out = weak(&known, &observed);
+        assert!(edited(&out, 1), "{:?}", out.changes);
+        assert_eq!(out.created.iter().map(|o| o.path.as_str()).collect::<Vec<_>>(), vec!["notes.txt~"]);
+    }
+
+    #[test]
+    fn on_a_weak_volume_a_safe_save_is_an_edit() {
+        let out = weak(&[saw(1, "a.txt", "sha-a")], &[observed("a.txt", 0, "sha-a2")]);
+        assert!(edited(&out, 1));
+        assert!(out.created.is_empty());
+    }
+
+    #[test]
+    fn on_a_weak_volume_bytes_two_records_share_name_neither() {
+        // A copy: both records last saw the same bytes, so the bytes cannot say
+        // which file is whose, and the reading is the path rule's.
+        let known = [saw(1, "x/a.txt", "sha-t"), saw(2, "y/b.txt", "sha-t")];
+        let observed = [observed("x/a.txt", 0, "sha-q"), observed("z/c.txt", 0, "sha-t"), observed("y/b.txt", 0, "sha-t")];
+        assert_eq!(weak(&known, &observed), pair_with(&known, &observed, &HashSet::new()));
+    }
+
+    /// What a reading decided, without the fingerprints the two disk kinds
+    /// report differently.
+    fn decided(out: &ScanOutcome) -> Vec<String> {
+        let mut v: Vec<String> = out
+            .changes
+            .iter()
+            .map(|(id, c)| match c {
+                LocalChange::Unchanged => format!("{} unchanged", id.server_id),
+                LocalChange::Edited { sha256, .. } => format!("{} edited {sha256}", id.server_id),
+                LocalChange::Moved { to_path, .. } => format!("{} moved {to_path}", id.server_id),
+                LocalChange::MovedAndEdited { to_path, sha256, .. } => format!("{} moved {to_path} edited {sha256}", id.server_id),
+                LocalChange::Deleted => format!("{} deleted", id.server_id),
+            })
+            .chain(out.created.iter().map(|o| format!("new {}", o.path)))
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn the_strong_and_weak_readings_agree_on_unedited_files() {
+        // One disk, read once by identity and once by bytes (a5's B3: the two
+        // step-2 readings drifted apart once, so one fixture holds them
+        // together). Each shape an unedited file can take: at home, carried
+        // to another folder with a stranger left behind, a backup made
+        // beside with the save at the name, a trade inside one folder, a
+        // safe-save, and a file gone with another's moved onto its path.
+        let (strong_known, strong_seen) = (
+            [
+                mine(1, "home.txt", 101, 1, "sha-home"),
+                mine(2, "ring/r.txt", 102, 2, "sha-r"),
+                mine(3, "doc/notes.txt", 103, 3, "sha-n"),
+                mine(4, "t/a.txt", 104, 4, "sha-a"),
+                mine(5, "t/b.txt", 105, 5, "sha-b"),
+                mine(6, "saved.txt", 106, 6, "sha-s"),
+                mine(7, "g/r.txt", 107, 7, "sha-gr"),
+                mine(8, "g/f.txt", 108, 8, "sha-gf"),
+            ],
+            [
+                seen("home.txt", 101, 1, "sha-home"),
+                seen("ring/r.txt", 201, 21, "sha-stranger"),
+                seen("Sub/doc.txt", 102, 2, "sha-r"),
+                seen("doc/notes.txt~", 103, 3, "sha-n"),
+                seen("doc/notes.txt", 202, 22, "sha-n2"),
+                seen("t/a.txt", 105, 5, "sha-b"),
+                seen("t/b.txt", 104, 4, "sha-a"),
+                seen("saved.txt", 203, 23, "sha-s2"),
+                seen("g/r.txt", 108, 8, "sha-gf"),
+            ],
+        );
+        let weak_known: Vec<KnownLocal> = strong_known
+            .iter()
+            .map(|k| KnownLocal {
+                fingerprint: Some(fp(0, 10, 100)),
+                own_file: None,
+                last_seen_sha: k.sha256.clone(),
+                ..k.clone()
+            })
+            .collect();
+        let weak_seen: Vec<ObservedFile> =
+            strong_seen.iter().map(|o| ObservedFile { fingerprint: fp(0, 10, 100), ..o.clone() }).collect();
+        let by_id = by_identity(&strong_known, &strong_seen);
+        let by_bytes = weak(&weak_known, &weak_seen);
+        assert_eq!(decided(&by_bytes), decided(&by_id));
+        assert_eq!(moved_to(&by_bytes, 2).as_deref(), Some("Sub/doc.txt"), "{:?}", decided(&by_bytes));
+    }
+
+    #[test]
+    fn a_followers_file_at_a_gone_records_path_reads_the_same_on_both_disks() {
+        // R's file is gone from the disk; F's unedited file was moved onto R's
+        // path. Strong: R deleted, F moved. Weak must agree.
+        let strong_known = [mine(1, "d/r.txt", 101, 1, "sha-r"), mine(2, "d/f.txt", 102, 2, "sha-f")];
+        let strong_seen = [seen("d/r.txt", 102, 2, "sha-f")];
+        let weak_known: Vec<KnownLocal> = strong_known
+            .iter()
+            .map(|k| KnownLocal { fingerprint: Some(fp(0, 10, 100)), own_file: None, last_seen_sha: k.sha256.clone(), ..k.clone() })
+            .collect();
+        let weak_seen: Vec<ObservedFile> =
+            strong_seen.iter().map(|o| ObservedFile { fingerprint: fp(0, 10, 100), ..o.clone() }).collect();
+        let by_id = by_identity(&strong_known, &strong_seen);
+        let by_bytes = weak(&weak_known, &weak_seen);
+        assert_eq!(decided(&by_id), vec!["1 deleted", "2 moved d/r.txt"]);
+        assert_eq!(decided(&by_bytes), decided(&by_id));
+    }
+
+    #[test]
+    fn a_claimant_held_source_does_not_take_a_stranger_at_its_old_path_on_a_positional_disk() {
+        // A source whose file a claimant holds (`held`): its path proves
+        // nothing, and with no ids nothing can bring the file back to it by
+        // identity. A file at its old name is new, never its edit -- read as
+        // one, the source was alive again, the claimant's hold lapsed, and
+        // the stranger went up as the source's version (a5, retracting B4).
+        let source = KnownLocal { held: true, last_seen_sha: Some("sha-a".into()), ..known(1, "plain/a.txt", 0, "sha-a") };
+        let observed = [observed("plain/a.txt", 0, "sha-stranger")];
+        let out = weak(&[source], &observed);
+        assert!(!edited(&out, 1), "{:?}", decided(&out));
+        assert_eq!(out.created.iter().map(|o| o.path.as_str()).collect::<Vec<_>>(), vec!["plain/a.txt"]);
+    }
+
+    #[test]
+    fn a_file_held_outside_its_vault_edited_in_place_on_a_positional_disk_is_its_edit() {
+        // A sealed file held outside its vault (D1, `server_home`): with no ids
+        // the path is all it has, and the file at it is its own, edited.
+        let held = KnownLocal {
+            server_home: Some("Private/a.txt".into()),
+            last_seen_sha: Some("sha-a".into()),
+            ..known(1, "plain/a.txt", 0, "sha-a")
+        };
+        let observed = [observed("plain/a.txt", 0, "sha-a2")];
+        let out = weak(&[held], &observed);
+        assert!(edited(&out, 1), "{:?}", decided(&out));
+        assert!(out.created.is_empty(), "{:?}", decided(&out));
+    }
+
+    #[test]
+    fn a_stale_last_seen_after_a_download_does_not_follow_a_copy() {
+        // The record agreed on B (a download landed it); last_seen still says
+        // A from before. The user's own copy of the old bytes stands in another
+        // folder. R is at home with B; the copy is new.
+        let r = KnownLocal { last_seen_sha: Some("sha-a".into()), ..known(1, "d/r.txt", 0, "sha-b") };
+        let observed = [observed("d/r.txt", 0, "sha-b"), observed("old/r-copy.txt", 0, "sha-a")];
+        let out = weak(&[r], &observed);
+        assert_eq!(out.change_for(EntityId::file(1)), Some(&LocalChange::Unchanged), "{:?}", decided(&out));
+        assert_eq!(out.created.iter().map(|o| o.path.as_str()).collect::<Vec<_>>(), vec!["old/r-copy.txt"]);
+    }
+
+    #[test]
+    fn a_claimants_source_following_its_file_gets_one_change() {
+        // The source handed its file to a claimant and has no identity of its
+        // own; the claimant's file stands somewhere else, so the source follows
+        // it. That is the source's one change: read again by the weak rules it
+        // was also Deleted (hostile2 74424).
+        let source = KnownLocal { own_file: None, ..known(1, "Plain/s.txt", 100, "sha-s") };
+        let claimant = KnownLocal {
+            claimant_for: Some(EntityId::file(1)),
+            sha256: None,
+            fingerprint: None,
+            ..mine(-1, "Private/s.txt", 100, 1, "")
+        };
+        let out = by_identity(&[source, claimant], &[seen("Plain/moved.txt", 100, 1, "sha-s")]);
+        let for_source: Vec<_> = out.changes.iter().filter(|(id, _)| *id == EntityId::file(1)).collect();
+        assert_eq!(for_source.len(), 1, "{:?}", out.changes);
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("Plain/moved.txt"));
+    }
+
     #[test]
     fn an_empty_tree_against_no_entries_produces_nothing() {
         let out = pair(&[], &[]);
         assert!(out.changes.is_empty() && out.created.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tie_break_tests {
+    use super::*;
+
+    fn fp0() -> jd_vfs::Fingerprint {
+        jd_vfs::Fingerprint { size: 10, mtime_ns: 100, file_id: 0, birth_ns: 0 }
+    }
+
+    fn rec(id: i64, path: &str, seen: &str, tie_break: u64) -> KnownLocal {
+        KnownLocal {
+            id: EntityId::file(id),
+            path: path.into(),
+            fingerprint: Some(fp0()),
+            sha256: Some(seen.into()),
+            server_deleted: false,
+            held: false,
+            server_home: None,
+            server_path: None,
+            own_file: None,
+            claimant_for: None,
+            last_seen_sha: Some(seen.into()),
+            tie_break,
+        }
+    }
+
+    fn file(path: &str, sha: &str, tie_break_id: u64) -> ObservedFile {
+        ObservedFile { path: path.into(), fingerprint: fp0(), sha256: sha.into(), tie_break_id }
+    }
+
+    /// Two files whose bytes each also stand as another record's copy, and
+    /// each file now standing at the other's path with the other's id. With
+    /// the ids in force the two are told apart and each follows its file;
+    /// with none, each is read by its path as the other's edit.
+    fn a_copy_swap(tie_breaks: &HashMap<EntityId, u64>) -> ScanOutcome {
+        let tb = |id: i64| tie_breaks.get(&EntityId::file(id)).copied().unwrap_or(0);
+        let known = [
+            rec(1, "A/one.txt", "sha-x", tb(1)),
+            rec(2, "A/two.txt", "sha-y", tb(2)),
+            rec(3, "B/one-copy.txt", "sha-x", 0),
+            rec(4, "B/two-copy.txt", "sha-y", 0),
+        ];
+        let seen = [
+            file("A/one.txt", "sha-y", 9),
+            file("A/two.txt", "sha-x", 7),
+            file("B/one-copy.txt", "sha-x", 0),
+            file("B/two-copy.txt", "sha-y", 0),
+        ];
+        pair_files(&known, &seen, &HashSet::new(), false)
+    }
+
+    fn crossed(out: &ScanOutcome) -> bool {
+        matches!(out.change_for(EntityId::file(1)), Some(LocalChange::Moved { to_path, .. }) if to_path == "A/two.txt")
+    }
+
+    fn read_by_path(out: &ScanOutcome) -> bool {
+        matches!(out.change_for(EntityId::file(1)), Some(LocalChange::Edited { .. }))
+            && matches!(out.change_for(EntityId::file(2)), Some(LocalChange::Edited { .. }))
+    }
+
+    fn recorded(session: i64) -> HashMap<EntityId, (u64, i64)> {
+        [(EntityId::file(1), (7, session)), (EntityId::file(2), (9, session))].into_iter().collect()
+    }
+
+    #[test]
+    fn a_copy_swap_is_told_apart_by_ids_read_in_this_mount_session() {
+        let holds = tie_breaks_that_hold(jd_vfs::IdTieBreak::MountSession, 4, &recorded(4), &HashMap::new());
+        assert_eq!(holds.len(), 2);
+        assert!(crossed(&a_copy_swap(&holds)), "{:?}", a_copy_swap(&holds).changes);
+    }
+
+    /// O2, with no file to notice: ids read before a remount are void on a
+    /// mount-session volume, whatever they are. Numbers handed out again after
+    /// a remount would otherwise tell the two apart the wrong way round. RED
+    /// with the session comparison forced equal.
+    #[test]
+    fn ids_read_in_another_mount_session_break_no_tie() {
+        let holds = tie_breaks_that_hold(jd_vfs::IdTieBreak::MountSession, 5, &recorded(4), &HashMap::new());
+        assert!(holds.is_empty(), "{holds:?}");
+        let out = a_copy_swap(&holds);
+        assert!(!crossed(&out) && read_by_path(&out), "{:?}", out.changes);
+    }
+
+    /// A durable volume keeps its ids through a remount...
+    #[test]
+    fn a_durable_id_holds_across_mount_sessions() {
+        let holds = tie_breaks_that_hold(jd_vfs::IdTieBreak::Durable, 5, &recorded(4), &HashMap::new());
+        assert_eq!(holds.len(), 2);
+    }
+
+    /// ...until the disk says it has gone stale (O1): a file standing unedited
+    /// at its own path under another id -- clusters another machine reused --
+    /// voids every id, and the pass reads by path. RED without that check.
+    #[test]
+    fn a_durable_id_the_disk_has_moved_breaks_no_tie() {
+        let moved: HashMap<EntityId, u64> = [(EntityId::file(3), 11)].into_iter().collect();
+        let mut recorded = recorded(4);
+        recorded.insert(EntityId::file(3), (5, 4));
+        let holds = tie_breaks_that_hold(jd_vfs::IdTieBreak::Durable, 5, &recorded, &moved);
+        assert!(holds.is_empty(), "{holds:?}");
+        let out = a_copy_swap(&holds);
+        assert!(!crossed(&out) && read_by_path(&out), "{:?}", out.changes);
     }
 }

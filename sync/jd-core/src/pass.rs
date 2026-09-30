@@ -85,6 +85,7 @@ pub fn run_pass(
         return Ok(out);
     }
 
+
     // ---- anything a kill left half-done -------------------------------------
     //
     // Asked again on every pass that finds something outstanding, rather than
@@ -309,17 +310,22 @@ pub fn run_pass(
 
     // ---- what this computer did --------------------------------------------
     let observed = observe(env)?;
-    let known = known_local(env)?;
+    let tie_breaks = tie_breaks_for_this_pass(env, &observed)?;
+    let known = known_local(env, &tie_breaks)?;
     let strong_volume = env.vfs.personality().stable_file_identity;
-    let scan = pair_files(&known, &observed, &awaiting_bytes(env)?, strong_volume);
+    let awaiting = awaiting_bytes(env)?;
+    let scan = pair_files(&known, &observed, &awaiting, strong_volume);
     adopt_own_files(env, &known, &observed)?;
     bind_own_files(env, &scan, strong_volume)?;
+    note_what_each_record_saw(env, &known, &observed, &scan)?;
+    note_the_tie_breaks_each_record_saw(env, &known, &observed, &scan)?;
+    say_where_two_files_may_have_swapped(env, &known, &scan)?;
 
     // Anything on disk that nothing is tracking gets an identity now, so that
     // the loop below can treat it like any other entry. Folders first: a new
     // file inside a new folder cannot say where it lives until the folder has
     // one.
-    let (dirs_on_disk, dir_identity) = observed_dirs(env)?;
+    let (dirs_on_disk, dir_identity, dir_tie_breaks) = observed_dirs_and_tie_breaks(env)?;
     let mut folder_ids = folder_paths(env)?;
     // What each folder record says its own path is, before this pass moves
     // anything: the only pairings a record may learn its directory from.
@@ -330,7 +336,28 @@ pub fn run_pass(
     // behind on the server, everything inside is re-parented one file at a
     // time, and the folder's sharing and history stay with a shell nobody can
     // see any more.
-    let folders = detect_folder_moves(env, &observed, &dirs_on_disk, &dir_identity, &mut folder_ids)?;
+    // Before the folders are read: on the first pass that finds the volume
+    // weak, a vault whose directory the user moved in the same breath is
+    // found by its contents, not read by its name. Parked after the folder
+    // scan, that pass read a ring rotation by name -- the plain folder's
+    // directory as the vault and the vault's sealed file as carried into a
+    // plain folder -- and every pass after built on it (FAT hostile2 74400).
+    park_vaults_on_a_weak_volume(env)?;
+    say_whether_renames_can_be_tracked(env)?;
+    let (followed, traded_with_a_vault) =
+        follow_parked_vaults_by_their_contents(env, &observed, &dirs_on_disk, &dir_tie_breaks, &tie_breaks, &mut folder_ids)?;
+    let folders = detect_folder_moves(
+        env,
+        &observed,
+        &dirs_on_disk,
+        &dir_identity,
+        &mut folder_ids,
+        &followed,
+        &traded_with_a_vault,
+    )?;
+    point_paths_at_the_folders_whose_directories_they_are(env, &dir_identity, &mut folder_ids)?;
+    note_the_tie_breaks_of_the_folders(env, &folder_ids, &dir_tie_breaks, &tie_breaks)?;
+    lift_parks_whose_directories_came_home(env, &folders, &dir_identity, &folder_ids)?;
 
     // The recorded paths of the folders not yet on this disk in their own
     // right, keyed the way the disk keys names. A directory is matched to
@@ -446,39 +473,6 @@ pub fn run_pass(
     let mut folders = folders;
     folders.place_deferred(env, &folder_ids)?;
     record_directory_identities(env, &agreed_paths, &dir_identity)?;
-    // Slots already spoken for by an entry whose bytes have not arrived yet.
-    //
-    // `known_local` deliberately leaves those entries out -- there is no local
-    // file to have moved away from, and counting one would read it as deleted.
-    // The cost is that the scan cannot see the reservation, so anything
-    // standing at that path looks like a brand new file and is given an
-    // identity of its own.
-    //
-    // That is how an escape reaches the server as a real name. A file the
-    // engine wrote under an escaped name is adopted under that name, uploaded
-    // as that name, and from then on the server genuinely holds `memo-47%20`
-    // beside `memo-47 ` -- two names that are one name on the disk that had to
-    // escape, so they collide there for ever. `holds_a_local_file` already
-    // states the rule this restores: a `PendingDownload` entry holds its slot,
-    // because those bytes are on their way to that path.
-    //
-    // Nothing is lost by leaving the file alone. The download that is coming
-    // treats whatever stands at its destination as an occupant and moves it
-    // aside as a conflict copy, which keeps the user's bytes under a name that
-    // says where they came from -- the designed path, and the one that does not
-    // invent a second identity for a file that already has an owner.
-    let mut reserved: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for entry in all_entries(env)? {
-        if entry.synced_placement.is_some() || entry.id.is_provisional() {
-            continue; // already accounted for by `known_local`
-        }
-        if !entry.holds_a_local_file() {
-            continue; // parked: it is not going to materialize here at all
-        }
-        if let Some(path) = relative_path(env, &entry)? {
-            reserved.insert(path);
-        }
-    }
     // Sealed files this scan finds outside every vault while the server keeps
     // them in one: held from this pass on, and their names in the vault are
     // theirs from the start of the pass. The hold is written when the round
@@ -507,10 +501,12 @@ pub fn run_pass(
             }
         }
     }
+    // Every file nothing owns gets a record, including one standing where a
+    // pending download will land: a file with no record is outside every
+    // rule a record carries (`specs/drive_file_ownership.md`). One at a
+    // download's slot waits for that download (`waits_for_a_download`), which
+    // settles the two by identity when it lands.
     for file in &scan.created {
-        if reserved.contains(&file.path) {
-            continue;
-        }
         let Some(placement) = placement_of(&file.path, &folder_ids) else {
             // Its folder is not tracked yet. Nothing is lost: the folder gets an
             // identity above on this pass or the next, and the file follows.
@@ -524,7 +520,7 @@ pub fn run_pass(
         // disk identity is the held record's own, and that buys a WAIT, never
         // a name: nothing is decided for it here, and it is not sent while the
         // hold stands (below).
-        let coming_home = match held_owner_of(env, file.fingerprint.identity())? {
+        let coming_home = match held_owner_of(env, file)? {
             Some(held) => !held_file_stands(env, &held, &observed)?,
             None => false,
         };
@@ -539,6 +535,7 @@ pub fn run_pass(
         // before any upload: a record with nothing to know its file by is
         // one any file at its path can pass for.
         entry.own_file = Some(file.fingerprint.identity());
+        entry.last_seen_sha = Some(file.sha256.clone());
         // Encryption is a property of where a thing lives, not of the thing:
         // the server decides an upload is encrypted by looking at the
         // destination folder. Working that out HERE, when the file first gets
@@ -547,6 +544,17 @@ pub fn run_pass(
         // a folder the user believes is private, and the server would store it
         // exactly as sent.
         entry.is_encrypted = parent_is_encrypted(env, placement.parent)?;
+        // On a volume with no file identities, bytes a sealed record last saw
+        // or agreed on, while its own file no longer stands at its path with
+        // them, are that sealed file carried out as far as anything here can
+        // tell (a5, 2026-09-29: nothing whose bytes pair to a sealed record is
+        // ever minted plain). Minted sealed, it is held and never sent. Minted
+        // plain, a conflict copy of a sealed file traded out of its parked
+        // vault went up in the clear (FAT kill2 75122). A copy the user made,
+        // its original still standing, is not this.
+        if !entry.is_encrypted && sealed_bytes_carried_out(env, &file.sha256, &observed)? {
+            entry.is_encrypted = true;
+        }
         // ...and if it belongs in a vault this device cannot open, say so and
         // stop, exactly as the download side does. A device linked without
         // encrypted folders does not materialize the vault, but nothing stops
@@ -637,6 +645,14 @@ pub fn run_pass(
     // After the walk, so that what is held under it is what is on the disk
     // now, and before the round, which skips what this parks.
     park_stand_ins_of_trashed_vaults(env, &observed)?;
+    let parked_on_a_weak_volume: std::collections::HashSet<EntityId> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == VAULT_ON_A_WEAK_DRIVE)
+        .filter_map(|i| i.entity)
+        .collect();
+    let held_by_park = held_by_a_weak_volume_park(env)?;
     // Everything under a folder parked out of scope is parked with it. A
     // claimant released by a key that arrives while its folder is still in
     // the trash would otherwise be planned as an upload into a trashed
@@ -690,10 +706,9 @@ pub fn run_pass(
         set
     };
 
+    let sealed_names_at_risk = sealed_names_this_disk_cannot_vouch_for(env, &observed)?;
+    let mut names_held: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
     for mut entry in all_entries(env)? {
-        if busy.contains(&entry.id) {
-            continue;
-        }
         // A file never uploaded follows its own file: where the scan found it
         // is where it is (the reset's T1-C). Its placement is where it stands
         // now, and whether it goes up sealed is decided again from there. The
@@ -732,6 +747,15 @@ pub fn run_pass(
                 }
             }
         }
+        // Written above even for a record whose upload is still queued: its
+        // record says where its file is, and the queued upload, planned for
+        // the place it left, stands down when it runs. Skipped, the record
+        // kept naming the folder the file left, and that folder's trash
+        // forgot it by that belief while the file lived on, owned by nobody
+        // (plain2 75223; `specs/drive_file_ownership.md`).
+        if busy.contains(&entry.id) {
+            continue;
+        }
         // An arrival naming left unjudged because the name it wants is held
         // by a busy entry waits the same pass its verdict waits: planned now,
         // its move would land on the holder's directory before the holder's
@@ -764,7 +788,34 @@ pub fn run_pass(
                 // with no way back to the root; belt and braces.
                 None => true,
                 Some(path) => match entry.id.entity_type {
-                    EntityType::File => !observed.iter().any(|o| o.path == path),
+                    // The scan's list first, then the disk: this pass may have
+                    // put the file where it now stands itself -- renamed off a
+                    // held name as its record was minted -- after the scan
+                    // looked. Read from the list alone, the record was
+                    // forgotten and its file left with none (plat3 75425;
+                    // `specs/drive_file_ownership.md`, E1c).
+                    //
+                    // And a file standing there that another record owns is
+                    // that record's, not this one's: a claimant whose file went
+                    // back to its source, with another record's file moved in
+                    // after, stood on at that name and vetoed the other's
+                    // upload for ever, as it vetoed its (plat3 75400).
+                    EntityType::File => match env.vfs.root() {
+                        Some(root) => match env.vfs.fingerprint(&root.join(&path))? {
+                            None => !observed.iter().any(|o| o.path == path),
+                            // Only when the file is not this record's own too:
+                            // a held file and the record waiting for it own one
+                            // file on purpose. Nor is its source another owner:
+                            // it handed this record the file, and its agreement
+                            // still names it.
+                            Some(fp) => {
+                                let owners = crate::execute::owners_here(env, &root.join(&path), fp, true)?;
+                                !owners.iter().any(|o| o.id == entry.id)
+                                    && owners.iter().any(|o| Some(o.id) != entry.replaces)
+                            }
+                        },
+                        None => true,
+                    },
                     EntityType::Folder => !dirs_on_disk.contains(&path),
                 },
             };
@@ -777,12 +828,80 @@ pub fn run_pass(
                 continue;
             }
         }
-        if entry.status == LocalStatus::OutOfScope
+        // A file saved where a download is due waits for it: not sent while
+        // the download is pending, so the two never race, and a download
+        // placed at an escaped name and killed before it was recorded is never
+        // sent up under the escape. The download settles it when it lands:
+        // the same bytes are its own, handed over by identity; other bytes go
+        // aside with their record and are sent from there
+        // (`specs/drive_file_ownership.md`, design 1b). Asked fresh each pass,
+        // so nothing is left to go stale when the download is withdrawn or the
+        // file moves.
+        if entry.id.is_provisional()
+            && entry.id.entity_type == EntityType::File
+            && relative_path(env, &entry)?.is_some_and(|p| awaiting.contains(&p))
+        {
+            continue;
+        }
+        // A vault parked on a weak volume follows its own directory when the
+        // user renames or moves it (a5's D3 ruling, 2026-09-29): the local
+        // placement only -- nothing is asked of the server, and it stays
+        // parked. Left where it was, the directory and every file in it stood
+        // on the disk with no record claiming them, and nothing would ever
+        // scan, send, move or remove them (hidden hostile2 and clean2, the
+        // ring rotation carrying the vault's name to a plain folder).
+        if entry.id.entity_type == EntityType::Folder
+            && entry.status == LocalStatus::OutOfScope
+            && parked_on_a_weak_volume.contains(&entry.id)
+        {
+            if let Some(to) = folders.moves.get(&entry.id) {
+                let mut moved = entry.clone();
+                moved.synced_placement = Some(to.clone());
+                moved.local_name = None;
+                env.store.put_entry(&moved)?;
+            }
+            continue;
+        }
+        // The same for a file moved from one place under a parked vault to
+        // another: its record follows it there, the local placement only.
+        // Left behind, the file stood unclaimed in the other vault's folder
+        // (hidden hostile2 74418). One moved OUT of the park is the
+        // exception below.
+        if entry.id.entity_type == EntityType::File
+            && !entry.id.is_provisional()
+            && entry.local_placement().parent.is_some_and(|p| held_by_park.contains(&p))
+        {
+            if let Some(LocalChange::Moved { to_path, .. } | LocalChange::MovedAndEdited { to_path, .. }) =
+                scan.change_for(entry.id)
+            {
+                if let Some(to) = placement_of(to_path, &folder_ids).filter(|to| to.parent.is_some_and(|p| held_by_park.contains(&p))) {
+                    let mut moved = entry.clone();
+                    moved.synced_placement = Some(to);
+                    moved.local_name = None;
+                    env.store.put_entry(&moved)?;
+                    continue;
+                }
+            }
+        }
+        // A sealed file the user carries out of a parked vault is let through
+        // to be held there (D1): skipped with its vault, its move was never
+        // read, and the file standing outside minted as a new plain one and
+        // went up in the clear (D3 on a weak volume, case (b)).
+        let leaving_a_parked_vault = entry.id.entity_type == EntityType::File
+            && entry.is_encrypted
+            && match scan.change_for(entry.id) {
+                Some(LocalChange::Moved { to_path, .. } | LocalChange::MovedAndEdited { to_path, .. }) => {
+                    placement_of(to_path, &folder_ids).is_some_and(|to| !to.parent.is_some_and(|p| shadowed.contains(&p)))
+                }
+                _ => false,
+            };
+        if !leaving_a_parked_vault
+            && (entry.status == LocalStatus::OutOfScope
             || entry.local_placement().parent.is_some_and(|p| shadowed.contains(&p))
             || entry
                 .local_placement()
                 .parent
-                .is_some_and(|p| parked_without_a_directory.contains(&p))
+                .is_some_and(|p| parked_without_a_directory.contains(&p)))
         {
             continue;
         }
@@ -1045,7 +1164,7 @@ pub fn run_pass(
             // held record is going (its delete in flight); in a plain folder it
             // is a copy out of the vault and waits like any other.
             if let Some(o) = observed.iter().find(|o| o.path == path) {
-                if let Some(held) = held_owner_of(env, o.fingerprint.identity())? {
+                if let Some(held) = held_owner_of(env, o)? {
                     let in_a_vault = parent_is_encrypted(env, entry.remote.parent)?;
                     let going = !held_file_stands(env, &held, &observed)?
                         || env.store.entities_with_open_ops()?.contains(&held.id);
@@ -1053,6 +1172,13 @@ pub fn run_pass(
                         continue;
                     }
                 }
+            }
+            // Never sent under a sealed file's name this disk cannot vouch for
+            // (the name hold, below).
+            if !entry.is_encrypted && sealed_names_at_risk.contains(&jd_vfs::comparison_key(&entry.remote.name, &env.vfs.personality())) {
+                say_a_sealed_name_is_held(env, &entry, &entry.remote.name)?;
+                names_held.insert(entry.id);
+                continue;
             }
             let content = observed.iter().find(|o| o.path == path).map(|o| ContentId {
                 sha256: o.sha256.clone(),
@@ -1075,6 +1201,116 @@ pub fn run_pass(
             // locally is worked out separately.
             None => folder_delta(&entry, &folders),
         };
+        // A plain folder renamed here onto a name the server still gives to a
+        // vault parked on this weak disk (a5's ruling on the D3 follow,
+        // 2026-09-29): the park sends nothing, so that rename would be refused
+        // for good and the folder left with no directory. It waits: the
+        // folder keeps its directory under the new name here, its server name
+        // stays, and the user is told. Asked again every pass of the server's
+        // current state: the name freed -- a peer renamed the vault -- and
+        // the rename is sent that pass.
+        if entry.id.entity_type == EntityType::Folder && entry.status != LocalStatus::OutOfScope {
+            let waiting = env
+                .store
+                .open_issues()?
+                .into_iter()
+                .filter(|i| i.kind == NAME_HELD_BY_A_PARKED_VAULT && i.entity == Some(entry.id))
+                .collect::<Vec<_>>();
+            let agreed_parent = entry.synced_placement.as_ref().map(|p| p.parent);
+            // Only while the server has not moved it either: a rename from
+            // both sides at once is the ordinary reconciliation's to settle,
+            // and a wait in front of it held the server's move off for good.
+            let server_still_agrees = entry.synced_placement.as_ref() == Some(&entry.remote);
+            // Deleted on the server, it waits for nothing: the delete goes
+            // through as for any folder, and the wait's word is withdrawn.
+            if entry.remote_deleted {
+                for issue in &waiting {
+                    env.store.dismiss_issue(issue.issue_id)?;
+                }
+            }
+            match &local {
+                Delta::Moved { to } if agreed_parent == Some(to.parent) && server_still_agrees => {
+                    if let Some(vault) = parked_vault_holding(env, to)? {
+                        let mut held = entry.clone();
+                        held.local_name = Some(to.name.clone());
+                        env.store.put_entry(&held)?;
+                        if waiting.is_empty() {
+                            env.store.raise_issue(
+                                Some(entry.id),
+                                NAME_HELD_BY_A_PARKED_VAULT,
+                                &if vault.is_encrypted {
+                                    format!(
+                                        "{} cannot be renamed {} on the server: that is the name of your vault {}, \
+                                         which this drive cannot sync. Rename the folder, or move the vault to a \
+                                         drive that can keep track of its files.",
+                                        entry.remote.name, to.name, vault.remote.name
+                                    )
+                                } else {
+                                    format!(
+                                        "{} cannot be renamed {} on the server yet: the folder {} still has that \
+                                         name there, and cannot give it up while a vault this drive cannot sync \
+                                         holds the name it wants. Rename the folders, or move the vault to a drive \
+                                         that can keep track of its files.",
+                                        entry.remote.name, to.name, vault.remote.name
+                                    )
+                                },
+                                (env.now_ms)() as i64,
+                            )?;
+                        }
+                        continue;
+                    }
+                }
+                // Its own directory back at its agreed name, by the directory's
+                // identity -- the user traded the names back: the wait is over,
+                // and so is the name it wore for it (hidden clean2 74029).
+                Delta::None
+                    if !waiting.is_empty()
+                        && entry.synced_fingerprint.map(|f| f.file_id).filter(|id| *id != 0).is_some_and(|mine| {
+                            let mut home = entry.clone();
+                            home.local_name = None;
+                            relative_path(env, &home)
+                                .ok()
+                                .flatten()
+                                .is_some_and(|p| dir_identity.get(&p) == Some(&mine))
+                        }) =>
+                {
+                    for issue in waiting {
+                        env.store.dismiss_issue(issue.issue_id)?;
+                    }
+                    let mut home = entry.clone();
+                    home.local_name = None;
+                    env.store.put_entry(&home)?;
+                    continue;
+                }
+                Delta::None if !waiting.is_empty() => {
+                    let target = entry
+                        .local_name
+                        .clone()
+                        .zip(agreed_parent)
+                        .map(|(name, parent)| Placement { parent, name });
+                    match target {
+                        Some(to) if server_still_agrees && parked_vault_holding(env, &to)?.is_some() => continue,
+                        Some(to) => {
+                            for issue in waiting {
+                                env.store.dismiss_issue(issue.issue_id)?;
+                            }
+                            // The name it wore while it waited comes off here, so
+                            // the move reads as the rename it is and not as the
+                            // disk keeping a spelling; the move's landing writes
+                            // the new agreement (`a_waiting_rename_lands_once_the_vaults_name_is_free`).
+                            entry.local_name = None;
+                            local = Delta::Moved { to };
+                        }
+                        None => {
+                            for issue in waiting {
+                                env.store.dismiss_issue(issue.issue_id)?;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         // A file moved INTO a vault slot a held file still holds on the
         // server goes there under a conflict name (`clear_of_a_held_name`).
         if entry.id.entity_type == EntityType::File {
@@ -1085,6 +1321,56 @@ pub fn run_pass(
             };
             if let (Some(to_path), Delta::Moved { to } | Delta::MovedAndEdited { to, .. }) = (to_path, &mut local) {
                 *to = clear_of_a_held_name(env, &to_path, to, Some(entry.id), &leaving_a_vault)?;
+            }
+        }
+        // A plain file on a disk with no file identities is not sent under the
+        // name of a sealed file this disk cannot vouch for (a5's name hold,
+        // 2026-09-30). A sealed file traded out of its vault and the vault's
+        // directory renamed in the same breath leave nothing -- no contents,
+        // no id -- to say which directory is the vault, and the plain file
+        // the user put in it reads as a plain folder's under the sealed
+        // file's real name (FAT kill2 75105, 75112; plat3 75406). The move
+        // goes up, the name does not: the server keeps the name it had, the
+        // file wears the new one here, and the user is told. Held back, the
+        // move left its record on the path it had left, and a new file there
+        // fought it for the name for good (win plat3 75428). Naming works the
+        // local name out afresh every pass, so the scan reads the rename again
+        // each pass and this decides it again: the sealed file home, the name
+        // goes up as the ordinary rename it is. A file never sent is held
+        // where its creation is planned, above.
+        let mut racing_a_peer = false;
+        if entry.id.entity_type == EntityType::File && !entry.is_encrypted {
+            let personality = env.vfs.personality();
+            let at_risk = |n: &str| sealed_names_at_risk.contains(&jd_vfs::comparison_key(n, &personality));
+            let same = |a: &str, b: &str| jd_vfs::comparison_key(a, &personality) == jd_vfs::comparison_key(b, &personality);
+            if let Delta::Moved { to } | Delta::MovedAndEdited { to, .. } = &mut local {
+                // Into a vault it goes up sealed, name and all: nothing to hold.
+                if !same(&to.name, &entry.remote.name) && at_risk(&to.name) && !parent_is_encrypted(env, to.parent)? {
+                    entry.local_name = Some(to.name.clone());
+                    // Moved on the server meanwhile: a rename from both sides,
+                    // the ordinary race's to settle (a5's R2) -- the server's
+                    // move wins, the user is told as for any race, and the file
+                    // is carried from the name it wears. Nothing of this name
+                    // is sent: the race only decides.
+                    let server_moved = entry.synced_placement.as_ref() != Some(&entry.remote);
+                    if server_moved {
+                        racing_a_peer = true;
+                    } else {
+                        say_a_sealed_name_is_held(env, &entry, &to.name)?;
+                        names_held.insert(entry.id);
+                        to.name = entry.remote.name.clone();
+                    }
+                    env.store.put_entry(&entry)?;
+                    // A rename alone leaves nothing to send: the file stays in
+                    // its slot, wearing the name here. Read as a respelling it
+                    // would lose that name to the server's spelling.
+                    if !server_moved && entry.synced_placement.as_ref() == Some(&*to) {
+                        local = match std::mem::replace(&mut local, Delta::None) {
+                            Delta::MovedAndEdited { content, .. } => Delta::Edited { content },
+                            _ => Delta::None,
+                        };
+                    }
+                }
             }
         }
         // A move that arrives at the slot the agreement already puts it in is
@@ -1127,7 +1413,10 @@ pub fn run_pass(
         // A respell onto a FREE name is none of these. It is an ordinary rename
         // and still goes up: the user renaming `report.txt` to `Report.txt` on
         // a case-folding volume means it, and the server can grant it.
+        // (A rename held off a sealed name racing a peer's is a rename, not
+        // a respelling: it goes to the race.)
         let local = match local {
+            Delta::Moved { .. } | Delta::MovedAndEdited { .. } if racing_a_peer => local,
             Delta::Moved { ref to } | Delta::MovedAndEdited { ref to, .. } => {
                 match same_slot_spelling(env, &entry, to, &busy)? {
                     Some(spelling) => {
@@ -1263,10 +1552,31 @@ pub fn run_pass(
                 env.store.raise_issue(Some(entry.id), "withdrawn", &detail, (env.now_ms)() as i64)?;
                 continue;
             }
-            if env.vault.is_none() {
-                // No key here, so this device cannot do the re-upload either --
-                // and it must not trash the server's copy on the strength of a
-                // conversion it cannot perform.
+            // A record never sent has no server copy for a claimant to hold
+            // and replace, and it has already crossed: the follow above made
+            // it the vault's where its file stands, clear of any held name.
+            // Given a claimant too, or its placement written again from the
+            // raw move, two records competed for one name inside the vault,
+            // each vetoing the other's upload for ever (plat3 75400).
+            if entry.id.is_provisional() && entry.id.entity_type == EntityType::File {
+                continue;
+            }
+            {
+                // The conversion is a claimant: a record in the vault that owns
+                // the file from this moment and holds the source's server copy
+                // until its own upload lands, when the source is trashed. With
+                // the key here it uploads at once; without it, it waits.
+                //
+                // With the key this used to trash the source and forget it,
+                // and let the next scan find the bytes at their new path as a
+                // creation. Until that scan the file had no record, and a swap
+                // in the gap carried it onto another record's path, where it
+                // read as that record's edit (kill2 75112, 75116, 75119;
+                // `specs/drive_file_ownership.md`, E1a).
+                //
+                // Without the key, this device cannot do the re-upload
+                // either -- and it must not trash the server's copy on the
+                // strength of a conversion it cannot perform.
                 //
                 // Saying so on the SOURCE does not work, and the shape of the
                 // failure is worth keeping: a status meaning "the file went
@@ -1300,7 +1610,7 @@ pub fn run_pass(
                 // -- so it is asserted rather than assumed.
                 debug_assert!(
                     !entry.is_encrypted,
-                    "an encrypted entry reached the keyless crossing mint; the \
+                    "an encrypted entry reached the crossing mint; the \
                      PendingKey skip above is meant to have taken it"
                 );
                 if !held_for_replacement.contains(&entry.id) {
@@ -1318,7 +1628,9 @@ pub fn run_pass(
                     };
                     let mut waiting = blank(claimant, to);
                     waiting.is_encrypted = true;
-                    waiting.status = LocalStatus::PendingKey;
+                    if env.vault.is_none() {
+                        waiting.status = LocalStatus::PendingKey;
+                    }
                     waiting.replaces = Some(entry.id);
                     // The file standing at `to` is the source's own file,
                     // moved there. The claimant is the record that will send
@@ -1337,13 +1649,6 @@ pub fn run_pass(
                 follow_the_server(env, &entry)?;
                 continue;
             }
-            // Trash the source and forget it. `trash_remote` never touches the
-            // local file, so the next scan finds the bytes at their new path as
-            // a local creation and uploads them with the destination's
-            // protection -- which is the conversion, done by the one part of
-            // the engine that already knows how to do it.
-            env.store.queue_op("trash_remote", entry.id, "{}", &key_for())?;
-            continue;
         }
         // Measured from the agreement, using the freshest remote state we hold.
         // For an entity the feed did not mention this pass that is what we
@@ -1463,6 +1768,12 @@ pub fn run_pass(
             remote,
             depth,
         });
+    }
+
+    for issue in env.store.open_issues()? {
+        if issue.kind == NAME_OF_A_SEALED_FILE_HELD && !issue.entity.is_some_and(|e| names_held.contains(&e)) {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
     }
 
     // ---- decide, journal, do -------------------------------------------------
@@ -2042,7 +2353,7 @@ fn observed_remote(entry: &Entry) -> RemoteState {
 /// The hash cache means a file whose fingerprint has not moved is not read
 /// again — but a fingerprint is only ever allowed to skip the read. It is never
 /// allowed to stand in for the answer.
-fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
+pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
     let Some(root) = env.vfs.root() else {
         return Ok(Vec::new());
     };
@@ -2084,6 +2395,8 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
     let mut guard = 0;
     let now_ns = (env.now_ms)().saturating_mul(1_000_000);
     let granularity = env.vfs.personality().mtime_granularity_ns.max(1);
+    let positional = env.vfs.personality().positional_file_ids;
+    let vaults = if positional { vault_directories(env)? } else { Vec::new() };
     while let Some((dir, rel)) = queue.pop() {
         guard += 1;
         if guard > 100_000 {
@@ -2151,18 +2464,40 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                     let Some(fingerprint) = env.vfs.fingerprint(&full)? else {
                         continue;
                     };
-                    let sha = match env.store.cached_hash(fingerprint, granularity)? {
+                    // Without file ids the cache is kept by path, and is only
+                    // as good as the watcher that forgets it
+                    // (`Store::forget_path_hashes`).
+                    let cached = if positional {
+                        env.store.cached_hash_at(&path, fingerprint, granularity)?
+                    } else {
+                        env.store.cached_hash(fingerprint, granularity)?
+                    };
+                    let sha = match cached {
                         Some(s) => s,
                         None => {
                             let s = env.vfs.hash(&full)?;
-                            env.store.cache_hash(fingerprint, &s, None, now_ns)?;
+                            if positional {
+                                env.store.cache_hash_at(&path, fingerprint, &s, now_ns)?;
+                            } else {
+                                env.store.cache_hash(fingerprint, &s, None, now_ns)?;
+                            }
                             s
                         }
                     };
+                    // Listed inside a vault on a disk with no file identities:
+                    // these bytes are sealed from now on (owner decision Q4),
+                    // written down as they are listed, before anything else
+                    // this pass can be stopped by (a5's R3). Nothing sealed
+                    // here otherwise remembers them, and carried out of the
+                    // vault they read as a stranger's plain file.
+                    if let Some(vault) = vault_holding(&vaults, &path) {
+                        env.store.note_vault_listed_bytes(vault, &sha)?;
+                    }
                     out.push(ObservedFile {
                         path,
                         fingerprint,
                         sha256: sha,
+                        tie_break_id: child.tie_break_id,
                     });
                 }
                 // Symlinks are flagged and never followed: following one walks
@@ -2170,6 +2505,13 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                 _ => {}
             }
         }
+    }
+
+    // The walk finished: bytes listed in a vault that now stand nowhere on the
+    // disk are forgotten. Never mid-walk, where bytes not reached yet would
+    // read as gone.
+    if positional {
+        env.store.keep_vault_listed_bytes(&out.iter().map(|o| o.sha256.as_str()).collect())?;
     }
 
     // A state, not an event: re-derived from the disk every pass and withdrawn
@@ -2213,12 +2555,23 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
 /// under a `.jd-` name), which the listing leaves out: whether an id stands
 /// on this disk is a fact about the disk, and a parked folder's directory
 /// stands as surely as any other.
-fn observed_dirs(env: &ExecEnv) -> Result<(Vec<String>, HashMap<String, u64>), ExecError> {
+pub(crate) fn observed_dirs(env: &ExecEnv) -> Result<(Vec<String>, HashMap<String, u64>), ExecError> {
+    let (out, identity, _) = observed_dirs_and_tie_breaks(env)?;
+    Ok((out, identity))
+}
+
+/// The same, with each directory's tie-break id (`DirEntry::tie_break_id`)
+/// where the volume's ids may break a tie.
+#[allow(clippy::type_complexity)]
+pub(crate) fn observed_dirs_and_tie_breaks(
+    env: &ExecEnv,
+) -> Result<(Vec<String>, HashMap<String, u64>, HashMap<String, u64>), ExecError> {
     let Some(root) = env.vfs.root() else {
-        return Ok((Vec::new(), HashMap::new()));
+        return Ok((Vec::new(), HashMap::new(), HashMap::new()));
     };
     let mut out = Vec::new();
     let mut identity = HashMap::new();
+    let mut tie_breaks = HashMap::new();
     let mut queue = vec![(root, String::new())];
     let mut guard = 0;
     while let Some((dir, rel)) = queue.pop() {
@@ -2236,6 +2589,9 @@ fn observed_dirs(env: &ExecEnv) -> Result<(Vec<String>, HashMap<String, u64>), E
                 format!("{rel}/{}", child.name)
             };
             identity.insert(path.clone(), child.fingerprint.map(|fp| fp.file_id).unwrap_or(0));
+            if child.tie_break_id != 0 {
+                tie_breaks.insert(path.clone(), child.tie_break_id);
+            }
             if jd_vfs::is_internal(&child.name) {
                 // Known to stand, never listed, and not walked into: what a
                 // park holds is the finisher's business.
@@ -2248,7 +2604,7 @@ fn observed_dirs(env: &ExecEnv) -> Result<(Vec<String>, HashMap<String, u64>), E
     // Shallowest first, so a parent always has an identity before its children
     // need one.
     out.sort_by_key(|p| (depth_of(p), p.clone()));
-    Ok((out, identity))
+    Ok((out, identity, tie_breaks))
 }
 
 /// A folder record learns which directory is its own.
@@ -2380,6 +2736,181 @@ fn follow_the_server(env: &ExecEnv, entry: &Entry) -> Result<(), ExecError> {
 /// the holder's restore then met a plain sibling of the same name. Restored
 /// from the trash, a parked folder goes back to waiting for a key the same
 /// way.
+/// The issue a vault parked by D3 carries, which is also what marks the park
+/// as D3's to lift.
+const VAULT_ON_A_WEAK_DRIVE: &str = "vault_on_a_weak_drive";
+
+/// A vault is not synced on a volume that cannot say which file is which
+/// (owner decision D3, `specs/drive_weak_volume_identity.md`): there a file
+/// edited and carried across the vault's edge is the same disk as a save, and
+/// its sealed bytes would go up in the clear. Each vault's top folder is
+/// parked out of scope, and everything under it waits with it: nothing is
+/// downloaded or created there, nothing in it is read as deleted or moved,
+/// and a file saved into it gets a record and is never sent. A sealed file
+/// held outside its vault is not under it, and keeps its hold -- which is why
+/// this is a park and not a device with no key: a device that turns weak
+/// already holds sealed plaintext, and a no-key reading let a held file go up
+/// plain. The volume read strong again lifts the park.
+fn park_vaults_on_a_weak_volume(env: &ExecEnv) -> Result<(), ExecError> {
+    let weak = !env.vfs.personality().stable_file_identity;
+    let parked_by_us: std::collections::HashSet<EntityId> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == VAULT_ON_A_WEAK_DRIVE)
+        .filter_map(|i| i.entity)
+        .collect();
+    for mut entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder || !entry.is_encrypted || entry.remote_deleted {
+            continue;
+        }
+        // The vault's top folder: its children follow it by the shadow.
+        if parent_is_encrypted(env, entry.local_placement().parent)? {
+            continue;
+        }
+        let ours = parked_by_us.contains(&entry.id);
+        if weak && !ours && !matches!(entry.status, LocalStatus::OutOfScope | LocalStatus::Unsyncable(_)) {
+            entry.status = LocalStatus::OutOfScope;
+            env.store.put_entry(&entry)?;
+            env.store.raise_issue(
+                Some(entry.id),
+                VAULT_ON_A_WEAK_DRIVE,
+                &format!(
+                    "{} is a vault. This drive cannot keep track of which file is which (FAT, exFAT, \
+                     or another kind that does not keep file identities), so it cannot keep a \
+                     vault's files safe, and vaults are not synced on it. They stay on the server \
+                     and on your other devices. Files you save into it here are not uploaded; \
+                     files you move out of it are synced as ordinary files, except sealed files, \
+                     which stay held.",
+                    entry.remote.name
+                ),
+                (env.now_ms)() as i64,
+            )?;
+        } else if !weak && ours {
+            if entry.status == LocalStatus::OutOfScope {
+                entry.status = if entry.synced_placement.is_some() {
+                    LocalStatus::Synced
+                } else {
+                    LocalStatus::PendingDownload
+                };
+                env.store.put_entry(&entry)?;
+            }
+            for issue in env.store.open_issues()? {
+                if issue.kind == VAULT_ON_A_WEAK_DRIVE && issue.entity == Some(entry.id) {
+                    env.store.dismiss_issue(issue.issue_id)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The folders a D3 park holds on this disk: every vault parked on a weak
+/// volume, and everything under it by the local tree.
+pub(crate) fn held_by_a_weak_volume_park(env: &ExecEnv) -> Result<std::collections::HashSet<i64>, ExecError> {
+    let mut set: std::collections::HashSet<i64> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == VAULT_ON_A_WEAK_DRIVE)
+        .filter_map(|i| i.entity)
+        .filter(|id| id.entity_type == EntityType::Folder)
+        .map(|id| id.server_id)
+        .collect();
+    if set.is_empty() {
+        return Ok(set);
+    }
+    let folders: Vec<Entry> = all_entries(env)?.into_iter().filter(|e| e.id.entity_type == EntityType::Folder).collect();
+    loop {
+        let before = set.len();
+        for f in &folders {
+            if f.local_placement().parent.is_some_and(|p| set.contains(&p)) {
+                set.insert(f.id.server_id);
+            }
+        }
+        if set.len() == before {
+            return Ok(set);
+        }
+    }
+}
+
+/// The standing notice on a drive whose ids cannot even break a tie
+/// (Windows FAT and exFAT): renames there are read from contents and paths
+/// alone, and the one thing that cannot be read -- two files with identical
+/// contents elsewhere trading names -- is reported, not hidden (owner
+/// decision 2026-09-29: such drives may work badly, but they fail loudly).
+pub(crate) const RENAMES_UNTRACKED: &str = "renames_untracked_on_this_drive";
+
+/// Raised per pair when it happens (`say_where_two_files_may_have_swapped`).
+pub(crate) const NAMES_MAY_HAVE_SWAPPED: &str = "names_may_have_swapped";
+
+fn say_whether_renames_can_be_tracked(env: &ExecEnv) -> Result<(), ExecError> {
+    let personality = env.vfs.personality();
+    let untracked = personality.positional_file_ids && personality.id_tie_break == jd_vfs::IdTieBreak::None;
+    let open: Vec<_> = env.store.open_issues()?.into_iter().filter(|i| i.kind == RENAMES_UNTRACKED).collect();
+    if untracked && open.is_empty() {
+        env.store.raise_issue(
+            None,
+            RENAMES_UNTRACKED,
+            "This drive (FAT or exFAT on Windows) cannot keep track of files when they are renamed. \
+             Syncing still works, but if files with identical contents swap names, their version \
+             histories may get mixed up. Each time that may have happened you will be told which files.",
+            (env.now_ms)() as i64,
+        )?;
+    } else if !untracked {
+        for issue in open {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    Ok(())
+}
+
+/// Two records each read as the other's edit: each one's new bytes are the
+/// bytes the other last saw, and nothing (no tie-break id) told the files
+/// apart. The likeliest story is that the two files traded names, and each
+/// record is about to take the other's version into its history. The sync
+/// goes ahead, and the user is told which two files, once per pair.
+fn say_where_two_files_may_have_swapped(env: &ExecEnv, known: &[KnownLocal], scan: &ScanOutcome) -> Result<(), ExecError> {
+    if !env.vfs.personality().positional_file_ids {
+        return Ok(());
+    }
+    let record: HashMap<EntityId, &KnownLocal> = known.iter().map(|k| (k.id, k)).collect();
+    let edits: Vec<(&KnownLocal, &str)> = scan
+        .changes
+        .iter()
+        .filter_map(|(id, change)| match change {
+            LocalChange::Edited { sha256, .. } => record.get(id).map(|k| (*k, sha256.as_str())),
+            _ => None,
+        })
+        .filter(|(k, _)| k.tie_break == 0)
+        .collect();
+    let told: Vec<_> = env.store.open_issues()?.into_iter().filter(|i| i.kind == NAMES_MAY_HAVE_SWAPPED).collect();
+    for (i, (a, a_now)) in edits.iter().enumerate() {
+        for (b, b_now) in edits.iter().skip(i + 1) {
+            let crossed = a.last_seen_sha.as_deref() == Some(*b_now) && b.last_seen_sha.as_deref() == Some(*a_now);
+            if !crossed || a.last_seen_sha == b.last_seen_sha {
+                continue;
+            }
+            let (Some(ea), Some(eb)) = (env.store.get_entry(a.id)?, env.store.get_entry(b.id)?) else {
+                continue;
+            };
+            let detail = format!(
+                "{} and {} may have swapped names in a way this drive gave no way to follow. \
+                 Their version histories may now be mixed; check them before restoring an older version.",
+                a.path, b.path
+            );
+            if told.iter().any(|t| t.entity == Some(ea.id) && t.detail == detail) {
+                continue;
+            }
+            for id in [ea.id, eb.id] {
+                env.store.raise_issue(Some(id), NAMES_MAY_HAVE_SWAPPED, &detail, (env.now_ms)() as i64)?;
+                env.store.record_swap_report(id, a_now, b_now)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn park_stand_ins_of_trashed_vaults(
     env: &ExecEnv,
     observed: &[ObservedFile],
@@ -2822,12 +3353,381 @@ fn waiting_for_a_held_file(env: &ExecEnv) -> Result<Vec<(EntityId, String)>, Exe
     Ok(out)
 }
 
+/// The path map is seeded from the records' placements, and a placement is a
+/// name: while folders trade names faster than the server can take the
+/// trades, a path can be held by one record while another folder's directory
+/// stands there. Every reader then saw the wrong folder -- a plain file whose
+/// folder was only renamed read as carried into the vault that had held the
+/// name, and was converted (hostile2 74424). So a path whose directory is,
+/// by its identity, another live folder's recorded directory is that
+/// folder's (the reset's WP2: the directory a file stands in is read against
+/// the folder whose directory it is). A directory with no identity, or one
+/// claimed by more than one record, keeps the name's reading: no evidence is
+/// never a change.
+fn point_paths_at_the_folders_whose_directories_they_are(
+    env: &ExecEnv,
+    dir_identity: &HashMap<String, u64>,
+    folder_ids: &mut HashMap<String, i64>,
+) -> Result<(), ExecError> {
+    let entries = all_entries(env)?;
+    // A record some entry replaces never wins the map: its claimant stands at
+    // its directory by design (a folder dragged into a vault, held for the
+    // replacement) -- the same set naming and the merge keep out.
+    let replaced: std::collections::HashSet<EntityId> = entries
+        .iter()
+        .filter(|e| !e.remote_deleted && e.status != LocalStatus::OutOfScope)
+        .filter_map(|e| e.replaces)
+        .collect();
+    let stands_at: HashMap<u64, &String> = dir_identity.iter().map(|(p, d)| (*d, p)).collect();
+    let mut owners: HashMap<u64, Vec<i64>> = HashMap::new();
+    for e in &entries {
+        if e.id.entity_type != EntityType::Folder || e.remote_deleted || replaced.contains(&e.id) {
+            continue;
+        }
+        let Some(dir) = e.synced_fingerprint.map(|f| f.file_id).filter(|d| *d != 0) else { continue };
+        // Not an id recycled onto a directory under the record's own path: that
+        // is some other directory, as `detect_folder_moves` reads it (C5,
+        // frozen 1073449).
+        let under_itself = relative_path(env, e)?
+            .is_some_and(|mine| stands_at.get(&dir).is_some_and(|at| at.starts_with(&format!("{mine}/"))));
+        if under_itself {
+            continue;
+        }
+        owners.entry(dir).or_default().push(e.id.server_id);
+    }
+    for (path, id) in folder_ids.iter_mut() {
+        let Some(dir) = dir_identity.get(path).copied().filter(|d| *d != 0) else { continue };
+        if let Some([owner]) = owners.get(&dir).map(Vec::as_slice) {
+            if owner != id {
+                *id = *owner;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A folder parked under a scratch local name because its directory stood
+/// elsewhere (the executor's unmaterialize park, WP2's row 4) is found again
+/// by that directory. When the directory stands at the folder's own agreed
+/// placement, there is no move to report -- the folder never left its
+/// agreement -- and the scratch name, which only a move cleared, was worn for
+/// ever: the scan read the folder at a path that does not exist, and its park
+/// was retried every pass (hostile2 74414, never settled). The name goes when
+/// the directory is home and nothing is in flight for the folder.
+fn lift_parks_whose_directories_came_home(
+    env: &ExecEnv,
+    folders: &FolderScan,
+    dir_identity: &HashMap<String, u64>,
+    folder_ids: &HashMap<String, i64>,
+) -> Result<(), ExecError> {
+    let busy = env.store.entities_with_open_ops()?;
+    for mut entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder
+            || entry.remote_deleted
+            || busy.contains(&entry.id)
+            || folders.moves.contains_key(&entry.id)
+            || !entry.local_name.as_deref().is_some_and(jd_vfs::is_internal)
+        {
+            continue;
+        }
+        let (Some(agreed), Some(mine)) = (
+            entry.synced_placement.clone(),
+            entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0),
+        ) else {
+            continue;
+        };
+        let mut at = dir_identity.iter().filter(|(_, id)| **id == mine).map(|(p, _)| p);
+        let (Some(home), None) = (at.next(), at.next()) else { continue };
+        if placement_of(home, folder_ids).as_ref() == Some(&agreed) {
+            entry.local_name = None;
+            env.store.put_entry(&entry)?;
+        }
+    }
+    Ok(())
+}
+
+/// A vault parked on a volume with no file identities follows its directory
+/// by its sealed files' bytes (a5's D3 ruling, 2026-09-29). The directory the
+/// user renamed or moved it to cannot be told by any id, and read by name it
+/// was whichever plain folder held the new name: a file the user saved into
+/// the renamed vault went up plain, and a plain file swapped into it put the
+/// vault file's real name on the server (FAT hostile2 74400). A directory
+/// holding the vault's sealed files at their own relative paths, by the bytes
+/// each record last saw, IS the vault: the park follows it, the local
+/// placement only -- nothing is asked of the server, and it stays parked.
+///
+/// Only one such directory, and none at the vault's own path: a copy of the
+/// vault is two directories and follows nothing, and its sealed files are
+/// held as moved out of it. Not a directory another live record's files stand
+/// in by their own bytes: that is that folder, whatever it holds besides. A
+/// vault whose sealed files pair nowhere (emptied, or never brought down)
+/// has nothing to follow, and nothing sealed stands where it went.
+fn follow_parked_vaults_by_their_contents(
+    env: &ExecEnv,
+    observed: &[ObservedFile],
+    dirs_on_disk: &[String],
+    dir_tie_breaks: &HashMap<String, u64>,
+    tie_breaks: &HashMap<EntityId, u64>,
+    folder_ids: &mut HashMap<String, i64>,
+) -> Result<(std::collections::HashSet<EntityId>, Vec<(EntityId, String)>), ExecError> {
+    let mut followed = std::collections::HashSet::new();
+    let mut traded = Vec::new();
+    if !env.vfs.personality().positional_file_ids {
+        return Ok((followed, traded));
+    }
+    let parked: std::collections::HashSet<EntityId> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == VAULT_ON_A_WEAK_DRIVE)
+        .filter_map(|i| i.entity)
+        .collect();
+    if parked.is_empty() {
+        return Ok((followed, traded));
+    }
+    let entries = all_entries(env)?;
+    let mut file_paths: Vec<(&Entry, String)> = Vec::new();
+    for e in &entries {
+        if e.id.entity_type == EntityType::File && !e.remote_deleted && e.last_seen_sha.is_some() {
+            if let Some(path) = relative_path(env, e)? {
+                file_paths.push((e, path));
+            }
+        }
+    }
+    let bytes_at: HashMap<&str, &str> = observed.iter().map(|o| (o.path.as_str(), o.sha256.as_str())).collect();
+    let stands = |e: &Entry, path: &str| bytes_at.get(path).copied() == e.last_seen_sha.as_deref();
+    for vault in &entries {
+        if vault.id.entity_type != EntityType::Folder
+            || !parked.contains(&vault.id)
+            || vault.status != LocalStatus::OutOfScope
+            || !vault.is_encrypted
+            || vault.remote_deleted
+        {
+            continue;
+        }
+        let Some(home) = relative_path(env, vault)? else { continue };
+        let inside = format!("{home}/");
+        let sealed: Vec<(&Entry, &str)> = file_paths
+            .iter()
+            .filter(|(e, _)| e.is_encrypted)
+            .filter_map(|(e, p)| p.strip_prefix(&inside).map(|rel| (*e, rel)))
+            .collect();
+        let found_in = |dir: &str| sealed.iter().filter(|(e, rel)| stands(e, &format!("{dir}/{rel}"))).count();
+        // Where the volume's ids may break a tie, the id its directory was
+        // last read under says where it went when the contents cannot: its
+        // only sealed file carried out in the same breath, or none brought
+        // down. Contents first, the id second (a5, 2026-09-29).
+        let recorded = tie_breaks.get(&vault.id).copied().filter(|id| *id != 0);
+        let at_home_by_id = recorded.is_some() && dir_tie_breaks.get(&home).copied() == recorded;
+        if dirs_on_disk.contains(&home) && (found_in(&home) > 0 || at_home_by_id) {
+            continue;
+        }
+        let elsewhere = |d: &&String| **d != home && !d.starts_with(&inside) && !home.starts_with(&format!("{d}/"));
+        // Not a directory another live record's files stand in by their
+        // bytes: that is where the user carried the vault's files, not the
+        // vault. Ruled out before choosing, so the id still gets its say: the
+        // vault emptied into a plain folder and renamed in one breath read
+        // the plain folder by contents, stopped there, and the renamed vault
+        // went up as a new plain folder with what was saved into it.
+        let anothers_in = |d: &str| {
+            let there = format!("{d}/");
+            file_paths.iter().any(|(e, p)| !p.starts_with(&inside) && p.starts_with(&there) && stands(e, p))
+        };
+        let by_contents: Vec<&String> = dirs_on_disk
+            .iter()
+            .filter(elsewhere)
+            .filter(|d| found_in(d) > 0 && !anothers_in(d))
+            .collect();
+        let by_id: Vec<&String> = match recorded {
+            Some(id) => dirs_on_disk
+                .iter()
+                .filter(elsewhere)
+                .filter(|d| dir_tie_breaks.get(*d) == Some(&id) && !anothers_in(d))
+                .collect(),
+            None => Vec::new(),
+        };
+        let dest = match (by_contents.as_slice(), by_id.as_slice()) {
+            ([one], _) => *one,
+            ([], [one]) => *one,
+            _ => continue,
+        };
+        let there = format!("{dest}/");
+        let Some(placement) = placement_of(dest, folder_ids) else { continue };
+        // The plain folder that held `dest` by name, when its own files
+        // stand, by their bytes, at the vault's old path: the two traded
+        // names. It is read as moved there. Left to the folder scan, which
+        // on this volume has no id to find a directory by, it read as
+        // deleted and was trashed, and a peer's move into it landed at the
+        // top of the drive (FAT hostile2 74401, the ring rotated with the
+        // swapper off).
+        if let Some(holder) = folder_ids
+            .get(dest.as_str())
+            .copied()
+            .filter(|h| *h != vault.id.server_id)
+            .and_then(|h| entries.iter().find(|e| e.id == EntityId::folder(h)))
+            .filter(|h| !h.is_encrypted && !h.remote_deleted && dirs_on_disk.contains(&home))
+        {
+            let theirs: Vec<(&Entry, &str)> = file_paths
+                .iter()
+                .filter_map(|(e, p)| p.strip_prefix(&there).map(|rel| (*e, rel)))
+                .collect();
+            if theirs.iter().any(|(e, rel)| stands(e, &format!("{home}/{rel}")))
+                && !theirs.iter().any(|(e, rel)| stands(e, &format!("{dest}/{rel}")))
+            {
+                traded.push((holder.id, home.clone()));
+            }
+        }
+        let mut moved = vault.clone();
+        moved.synced_placement = Some(placement);
+        moved.local_name = None;
+        env.store.put_entry(&moved)?;
+        if folder_ids.get(&home) == Some(&vault.id.server_id) {
+            folder_ids.remove(&home);
+        }
+        folder_ids.insert((*dest).clone(), vault.id.server_id);
+        followed.insert(vault.id);
+    }
+    Ok((followed, traded))
+}
+
+/// Record each folder's directory tie-break id, where the volume's ids may
+/// break a tie, as the folder scan placed it: the id the parked-vault follow
+/// reads when a vault's contents cannot say where it went.
+fn note_the_tie_breaks_of_the_folders(
+    env: &ExecEnv,
+    folder_ids: &HashMap<String, i64>,
+    dir_tie_breaks: &HashMap<String, u64>,
+    tie_breaks: &HashMap<EntityId, u64>,
+) -> Result<(), ExecError> {
+    if env.vfs.personality().id_tie_break == jd_vfs::IdTieBreak::None {
+        return Ok(());
+    }
+    let session = env.store.mount_session()?;
+    for (path, id) in folder_ids {
+        let folder = EntityId::folder(*id);
+        let now = dir_tie_breaks.get(path).copied().unwrap_or(0);
+        if tie_breaks.get(&folder).copied() != Some(now) {
+            env.store.set_tie_break(folder, now, session)?;
+        }
+    }
+    Ok(())
+}
+
+/// The issue a plain folder carries while its rename waits for a name the
+/// server still gives to a vault parked on this weak disk.
+pub(crate) const NAME_HELD_BY_A_PARKED_VAULT: &str = "name_held_by_a_parked_vault";
+
+/// The issue a plain file carries while it is not sent under a sealed file's
+/// name.
+pub(crate) const NAME_OF_A_SEALED_FILE_HELD: &str = "name_of_a_sealed_file_held";
+
+/// On a volume with no file identities, the names (comparison keys) of the
+/// sealed files the server keeps, as this store knows them, that do not stand
+/// at home: their last-seen bytes not at the path the server keeps them at. A
+/// record that never carried bytes here counts as not home (a5's R1): leaving
+/// it out, a sealed file forgotten here while the server keeps it released
+/// its name one forget later. A plain file sent under one of those names, in
+/// any folder, may be the sealed file's own directory read as a plain
+/// folder's, and nothing here can say otherwise.
+fn sealed_names_this_disk_cannot_vouch_for(
+    env: &ExecEnv,
+    observed: &[ObservedFile],
+) -> Result<std::collections::HashSet<String>, ExecError> {
+    let personality = env.vfs.personality();
+    let mut out = std::collections::HashSet::new();
+    if !personality.positional_file_ids {
+        return Ok(out);
+    }
+    let at: HashMap<&str, &str> = observed.iter().map(|o| (o.path.as_str(), o.sha256.as_str())).collect();
+    for e in all_entries(env)? {
+        if e.id.entity_type != EntityType::File || !e.is_encrypted || e.remote_deleted {
+            continue;
+        }
+        let mut home = e.clone();
+        home.synced_placement = Some(e.remote.clone());
+        home.stand_in = None;
+        home.local_name = None;
+        let stands = match e.last_seen_sha.as_deref() {
+            Some(seen) => relative_path(env, &home)?.is_some_and(|p| at.get(p.as_str()) == Some(&seen)),
+            None => false,
+        };
+        if !stands {
+            out.insert(jd_vfs::comparison_key(&e.remote.name, &personality));
+        }
+    }
+    Ok(out)
+}
+
+fn say_a_sealed_name_is_held(env: &ExecEnv, entry: &Entry, name: &str) -> Result<(), ExecError> {
+    let detail = format!(
+        "{name} is not synced: a file in one of your vaults has that name, and this drive cannot \
+         keep track of which folder is the vault (FAT, exFAT, or another kind that does not keep \
+         file identities), so sending it could show the vault file's name on the server. Rename \
+         it, or put the vault's file back where it was."
+    );
+    for issue in env.store.open_issues()? {
+        if issue.kind == NAME_OF_A_SEALED_FILE_HELD && issue.entity == Some(entry.id) && issue.detail != detail {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    env.store.raise_issue(Some(entry.id), NAME_OF_A_SEALED_FILE_HELD, &detail, (env.now_ms)() as i64)?;
+    Ok(())
+}
+
+/// The vault parked on this weak disk (D3) that the server, as this device
+/// last heard, still gives this name to in this folder.
+fn parked_vault_holding(env: &ExecEnv, to: &Placement) -> Result<Option<Entry>, ExecError> {
+    let parked: std::collections::HashSet<EntityId> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == VAULT_ON_A_WEAK_DRIVE)
+        .filter_map(|i| i.entity)
+        .collect();
+    if parked.is_empty() {
+        return Ok(None);
+    }
+    let personality = env.vfs.personality();
+    let wanted = jd_vfs::comparison_key(&to.name, &personality);
+    // A folder whose own rename waits keeps its server name for as long as
+    // it waits, so that name is held just the same: a rotation through the
+    // vault's name waits all the way round. Left to the server, the next
+    // folder's rename onto it was refused, and the folder read as deleted and
+    // was trashed (hidden plat3 75400).
+    let waiting: std::collections::HashSet<EntityId> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == NAME_HELD_BY_A_PARKED_VAULT)
+        .filter_map(|i| i.entity)
+        .collect();
+    let mut chained = None;
+    for e in all_entries(env)? {
+        if e.id.entity_type != EntityType::Folder
+            || e.remote_deleted
+            || e.remote.parent != to.parent
+            || jd_vfs::comparison_key(&e.remote.name, &personality) != wanted
+        {
+            continue;
+        }
+        if parked.contains(&e.id) && e.status == LocalStatus::OutOfScope {
+            return Ok(Some(e));
+        }
+        if waiting.contains(&e.id) {
+            chained = Some(e);
+        }
+    }
+    Ok(chained)
+}
+
 fn detect_folder_moves(
     env: &ExecEnv,
     observed: &[ObservedFile],
     dirs_on_disk: &[String],
     dir_identity: &HashMap<String, u64>,
     folder_ids: &mut HashMap<String, i64>,
+    followed: &std::collections::HashSet<EntityId>,
+    traded_with_a_vault: &[(EntityId, String)],
 ) -> Result<FolderScan, ExecError> {
     let mut scan = FolderScan::default();
     // Where each tracked folder believes it is, and which of those are gone.
@@ -2978,6 +3878,11 @@ fn detect_folder_moves(
                         evicted.push((path.clone(), holder));
                         evicted.push((path.clone(), entry.id));
                         tracked.remove(&path);
+                    } else if followed.contains(&holder) {
+                        // A parked vault this pass found by its own sealed
+                        // files keeps the path it was found at; the record
+                        // that only names it goes to the pool.
+                        evicted.push((path, entry.id));
                     } else {
                         // Identity cannot say (neither knows its directory, or
                         // both claim it): today's reading, the later record
@@ -3377,6 +4282,40 @@ fn detect_folder_moves(
     candidates.sort_by_key(|d| (depth_of(d), d.to_string()));
     let mut taken: std::collections::HashSet<&String> = std::collections::HashSet::new();
 
+    // A plain folder that traded names with a parked vault the pass followed
+    // by its contents (`follow_parked_vaults_by_their_contents`): it stands
+    // at the vault's old path, as its own files say.
+    for (id, path) in traded_with_a_vault {
+        let Some(path) = dirs_on_disk.iter().find(|d| *d == path) else { continue };
+        if claimed.contains(id) || taken.contains(path) || scan.held.contains(path.as_str()) {
+            continue;
+        }
+        claimed.push(*id);
+        taken.insert(path);
+        scan.present.insert(*id);
+        folder_ids.insert(path.clone(), id.server_id);
+        match placement_of(path, folder_ids) {
+            Some(placement) => {
+                let Some(mut entry) = env.store.get_entry(*id)? else { continue };
+                if entry.synced_placement.as_ref() != Some(&placement) {
+                    scan.moves.insert(*id, placement);
+                } else if entry.local_name.is_some() {
+                    // Back at its agreed name -- the user traded the names
+                    // back -- while it was waiting under the vault's: the
+                    // wait is over, and so is the name it wore for it.
+                    entry.local_name = None;
+                    env.store.put_entry(&entry)?;
+                    for issue in env.store.open_issues()? {
+                        if issue.kind == NAME_HELD_BY_A_PARKED_VAULT && issue.entity == Some(*id) {
+                            env.store.dismiss_issue(issue.issue_id)?;
+                        }
+                    }
+                }
+            }
+            None => scan.deferred.push((*id, path.clone())),
+        }
+    }
+
     // Folders that traded names with each other.
     //
     // A swap leaves nothing missing and nothing displaced: every path still
@@ -3412,8 +4351,16 @@ fn detect_folder_moves(
     // when more than one live record carries the id -- two records can carry
     // one id for a pass after a trade, and picking one by map order would be
     // picking by hash order; that is ambiguous, and contents decide.
+    // Over displaced paths as well as contested ones: a path whose directory
+    // holds nothing known reads as a rebuilt shell, but a shell carrying
+    // another tracked folder's own id is that folder, arrived. Left out, a
+    // vault and a plain folder that traded names after the plain one's files
+    // had moved out never closed as a ring: both read as present, and the path
+    // map, reading each directory by its identity, filed the plain folder's
+    // new files into the vault's record and back (kill2 75100).
+    let ring_paths: Vec<(String, EntityId)> = contested.iter().chain(displaced.iter()).cloned().collect();
     let mut arrived_at: HashMap<&String, EntityId> = HashMap::new();
-    for (path, _) in contested.iter() {
+    for (path, _) in ring_paths.iter() {
         let by_identity = if scan.held.contains(path.as_str()) {
             None
         } else {
@@ -3461,7 +4408,7 @@ fn detect_folder_moves(
         arrived_at.iter().map(|(p, id)| (*id, *p)).collect();
     let mut ring_members: Vec<(&String, EntityId)> = Vec::new();
     let mut in_a_ring: std::collections::HashSet<&String> = std::collections::HashSet::new();
-    for (start_path, _) in contested.iter() {
+    for (start_path, _) in ring_paths.iter() {
         if in_a_ring.contains(start_path) {
             continue;
         }
@@ -3477,7 +4424,7 @@ fn detect_folder_moves(
             if *next == start_path {
                 break true;
             }
-            if ring.len() > contested.len() {
+            if ring.len() > ring_paths.len() {
                 break false;
             }
             at = *next;
@@ -3543,6 +4490,108 @@ fn detect_folder_moves(
         };
         if let Some(path) = path {
             remote_wants.insert(path, *fid);
+        }
+    }
+
+    // Chains, by identity: the open cousin of a ring. A contested folder's own
+    // directory stands at another tracked folder's path, that folder's own
+    // directory stands at a third path, and so on until a path no record
+    // holds. Every member but the last lands on a path its live, tracked
+    // owner has left, so, as in a ring, this is folders agreeing on where
+    // each other went, not a plain folder claiming a stranger. The last
+    // lands on an untracked directory, where a plain folder's id alone
+    // proves nothing: its files must say so too, wholesale, as they would
+    // for any contested folder. Not onto a held path or one the server is
+    // giving another folder, and not for a held record or an id two records
+    // carry. Before this a chain never resolved: its end waited for the
+    // member moving into its old path, which could not be placed until the
+    // end left, and the member was read as gone (kill2 75123, with the path
+    // map reading its files as in it: the server's trade of the plain ring
+    // folder ended in a conflict-named copy).
+    let carrier_of = |rid: u64| -> Option<EntityId> {
+        let mut carriers = record_identity.iter().filter(|(_, r)| **r == rid).map(|(id, _)| *id);
+        match (carriers.next(), carriers.next()) {
+            (Some(one), None) => Some(one),
+            _ => None,
+        }
+    };
+    let pool: Vec<(String, EntityId)> = ring_paths.clone();
+    let old_path_of = |id: EntityId| pool.iter().find(|(_, e)| *e == id).map(|(p, _)| p.clone());
+    let mut chains: Vec<Vec<(&String, EntityId)>> = Vec::new();
+    for (_, head) in pool.iter() {
+        let mut links: Vec<(&String, EntityId)> = Vec::new();
+        let mut cur = *head;
+        let complete = loop {
+            if claimed.contains(&cur) || held_ids.contains(&cur) || chains.iter().flatten().any(|(_, e)| *e == cur) {
+                break false;
+            }
+            let Some(old) = old_path_of(cur) else { break false };
+            let Some(rid) = record_identity.get(&cur).copied() else { break false };
+            if carrier_of(rid) != Some(cur) {
+                break false;
+            }
+            let Some(at) = where_id_stands.get(&rid).copied() else { break false };
+            if *at == old
+                || taken.contains(at)
+                || scan.held.contains(at.as_str())
+                || links.iter().any(|(p, _)| *p == at)
+                // The server naming the path's own holder there is the name
+                // the holder is leaving in this chain, not another folder
+                // arriving.
+                || remote_wants.get(at).is_some_and(|w| *w != cur && tracked.get(at) != Some(w))
+            {
+                break false;
+            }
+            links.push((at, cur));
+            match tracked.get(at).copied() {
+                // The end: a path no record holds. Its files must agree.
+                None => {
+                    break encrypted.contains(&cur)
+                        || (children.get(&old).is_some_and(|kids| {
+                            kids.iter().any(|(name, file_id)| {
+                                by_path
+                                    .get(format!("{at}/{name}").as_str())
+                                    .is_some_and(|o| o.fingerprint.file_id == *file_id)
+                            })
+                        }) && moved_wholesale(&old, at));
+                }
+                // Its holder was already placed elsewhere this pass.
+                Some(holder) if claimed.contains(&holder) => break true,
+                Some(holder) if holder == cur => break false,
+                Some(holder) => cur = holder,
+            }
+        };
+        if complete && links.len() > 1 {
+            chains.push(links);
+        }
+    }
+    let chain_members: Vec<(&String, EntityId)> = chains.into_iter().flatten().collect();
+    for (path, id) in &chain_members {
+        claimed.push(*id);
+        taken.insert(path);
+        scan.present.insert(*id);
+        if let Some(old) = old_path_of(*id) {
+            if folder_ids.get(&old) == Some(&id.server_id) {
+                folder_ids.remove(&old);
+            }
+        }
+    }
+    for (path, id) in &chain_members {
+        folder_ids.insert((*path).clone(), id.server_id);
+    }
+    for (path, id) in &chain_members {
+        match placement_of(path, folder_ids) {
+            Some(placement) => {
+                let unchanged = env
+                    .store
+                    .get_entry(*id)?
+                    .and_then(|e| e.synced_placement.clone())
+                    .is_some_and(|p| p == placement);
+                if !unchanged {
+                    scan.moves.insert(*id, placement);
+                }
+            }
+            None => scan.deferred.push((*id, (*path).clone())),
         }
     }
 
@@ -4078,9 +5127,121 @@ fn adopt_own_files(
 /// wherever it still stands -- the backup the editor left, the copy the move
 /// came from. A record paired by its own file (`scan.bound`) takes the file
 /// it was paired with; a weak one, the file its edit or move names.
+/// Record, on every record the scan read its file for, the bytes it saw
+/// there (`Entry::last_seen_sha`, layer 1 of
+/// `specs/drive_weak_volume_identity.md`). A record read unchanged is only
+/// credited with the file at its path when those bytes are its own -- agreed
+/// or last seen -- so a record left unchanged for naming, beside another's
+/// file, learns nothing from it.
+fn note_what_each_record_saw(
+    env: &ExecEnv,
+    known: &[KnownLocal],
+    observed: &[ObservedFile],
+    scan: &ScanOutcome,
+) -> Result<(), ExecError> {
+    let at: HashMap<&str, &ObservedFile> = observed.iter().map(|o| (o.path.as_str(), o)).collect();
+    let record: HashMap<EntityId, &KnownLocal> = known.iter().map(|k| (k.id, k)).collect();
+    for (id, change) in &scan.changes {
+        let seen = match change {
+            LocalChange::Unchanged => record.get(id).and_then(|k| {
+                at.get(k.path.as_str())
+                    .map(|o| o.sha256.clone())
+                    .filter(|sha| k.sha256.as_ref() == Some(sha) || k.last_seen_sha.as_ref() == Some(sha))
+            }),
+            LocalChange::Edited { sha256, .. } | LocalChange::MovedAndEdited { sha256, .. } => Some(sha256.clone()),
+            LocalChange::Moved { to_path, .. } => at.get(to_path.as_str()).map(|o| o.sha256.clone()),
+            LocalChange::Deleted => None,
+        };
+        let Some(seen) = seen else { continue };
+        if record.get(id).is_some_and(|k| k.last_seen_sha.as_ref() == Some(&seen)) {
+            continue;
+        }
+        let Some(mut entry) = env.store.get_entry(*id)? else {
+            continue;
+        };
+        if entry.id.entity_type == EntityType::File && entry.last_seen_sha.as_ref() != Some(&seen) {
+            entry.last_seen_sha = Some(seen);
+            env.store.put_entry(&entry)?;
+        }
+    }
+    Ok(())
+}
+
+/// The tie-break ids this pass may read: those recorded in this mount
+/// session, on a volume whose ids may break a tie at all
+/// (`jd_vfs::Personality::id_tie_break`; `specs/drive_weak_volume_identity.md`).
+///
+/// And none at all when the disk says they have gone stale: a record whose
+/// file stands unedited at its own path -- its last-seen bytes, right there
+/// -- under another id than the one recorded means the volume renumbered
+/// behind the engine's back (a stick remounted elsewhere, clusters reused by
+/// another machine), and then no recorded id names anything this pass. The
+/// pass runs by bytes and paths, as on a volume with no ids, and records them
+/// again.
+fn tie_breaks_for_this_pass(env: &ExecEnv, observed: &[ObservedFile]) -> Result<HashMap<EntityId, u64>, ExecError> {
+    let class = env.vfs.personality().id_tie_break;
+    if class == jd_vfs::IdTieBreak::None {
+        return Ok(HashMap::new());
+    }
+    let recorded = env.store.tie_breaks()?;
+    let at: HashMap<&str, &ObservedFile> = observed.iter().map(|o| (o.path.as_str(), o)).collect();
+    // Each record whose file stands unedited at its own path -- its last-seen
+    // bytes, right there -- and the id it stands under now.
+    let mut unedited_at_home: HashMap<EntityId, u64> = HashMap::new();
+    for e in all_entries(env)? {
+        if e.id.entity_type != EntityType::File || !recorded.contains_key(&e.id) {
+            continue;
+        }
+        let Some(path) = relative_path(env, &e)? else { continue };
+        let Some(o) = at.get(path.as_str()) else { continue };
+        if e.last_seen_sha.as_deref() == Some(o.sha256.as_str()) {
+            unedited_at_home.insert(e.id, o.tie_break_id);
+        }
+    }
+    Ok(crate::scan::tie_breaks_that_hold(class, env.store.mount_session()?, &recorded, &unedited_at_home))
+}
+
+/// Record, on a volume whose ids may break a tie, the id of the file each
+/// record's scan found as its own, in this mount session.
+fn note_the_tie_breaks_each_record_saw(
+    env: &ExecEnv,
+    known: &[KnownLocal],
+    observed: &[ObservedFile],
+    scan: &ScanOutcome,
+) -> Result<(), ExecError> {
+    if env.vfs.personality().id_tie_break == jd_vfs::IdTieBreak::None {
+        return Ok(());
+    }
+    let session = env.store.mount_session()?;
+    let at: HashMap<&str, &ObservedFile> = observed.iter().map(|o| (o.path.as_str(), o)).collect();
+    let record: HashMap<EntityId, &KnownLocal> = known.iter().map(|k| (k.id, k)).collect();
+    for (id, change) in &scan.changes {
+        let found = match change {
+            LocalChange::Unchanged => record.get(id).and_then(|k| {
+                at.get(k.path.as_str()).filter(|o| {
+                    k.sha256.as_deref() == Some(o.sha256.as_str()) || k.last_seen_sha.as_deref() == Some(o.sha256.as_str())
+                })
+            }),
+            LocalChange::Edited { .. } => record.get(id).and_then(|k| at.get(k.path.as_str())),
+            LocalChange::Moved { to_path, .. } | LocalChange::MovedAndEdited { to_path, .. } => at.get(to_path.as_str()),
+            LocalChange::Deleted => None,
+        };
+        let id_now = found.map(|o| o.tie_break_id).unwrap_or(0);
+        if record.get(id).is_some_and(|k| k.tie_break == id_now && id_now != 0) {
+            continue;
+        }
+        env.store.set_tie_break(*id, id_now, session)?;
+    }
+    Ok(())
+}
+
 fn bind_own_files(env: &ExecEnv, scan: &ScanOutcome, strong_volume: bool) -> Result<(), ExecError> {
     if !strong_volume {
-        return Ok(());
+        // With no ids at all there is nothing to bind: the bytes do it (layer 1).
+        if env.vfs.personality().positional_file_ids {
+            return Ok(());
+        }
+        return bind_never_sent_own_ids(env, scan);
     }
     let by_identity: std::collections::HashSet<EntityId> = scan.bound.iter().map(|(id, _)| *id).collect();
     let weak = scan.changes.iter().filter(|(id, _)| !by_identity.contains(id)).filter_map(|(id, change)| {
@@ -4107,7 +5268,40 @@ fn bind_own_files(env: &ExecEnv, scan: &ScanOutcome, strong_volume: bool) -> Res
     Ok(())
 }
 
-fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
+/// Without births, a record never sent knows its file by the id it was
+/// minted for, and the scan and the upload both ask it by that id
+/// (`specs/drive_file_ownership.md`, 2b). The file the scan pairs it with --
+/// a save that replaced the file at its path, or the file followed to where
+/// it went -- is its file from now on, or the upload would refuse that file
+/// for ever.
+fn bind_never_sent_own_ids(env: &ExecEnv, scan: &ScanOutcome) -> Result<(), ExecError> {
+    for (id, change) in &scan.changes {
+        if !id.is_provisional() || id.entity_type != EntityType::File {
+            continue;
+        }
+        let fingerprint = match change {
+            LocalChange::Edited { fingerprint, .. }
+            | LocalChange::Moved { fingerprint, .. }
+            | LocalChange::MovedAndEdited { fingerprint, .. } => fingerprint,
+            LocalChange::Unchanged | LocalChange::Deleted => continue,
+        };
+        if fingerprint.file_id == 0 {
+            continue;
+        }
+        let Some(mut entry) = env.store.get_entry(*id)? else {
+            continue;
+        };
+        if entry.synced_fingerprint.is_some() || entry.own_file.map(|o| o.file_id) == Some(fingerprint.file_id) {
+            continue;
+        }
+        entry.own_file = Some(fingerprint.identity());
+        env.store.put_entry(&entry)?;
+    }
+    Ok(())
+}
+
+fn known_local(env: &ExecEnv, tie_breaks: &HashMap<EntityId, u64>) -> Result<Vec<KnownLocal>, ExecError> {
+    let positional = env.vfs.personality().positional_file_ids;
     let mut out = Vec::new();
     let mut deleted = Vec::new();
     let all = all_entries(env)?;
@@ -4156,14 +5350,19 @@ fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
         let known = KnownLocal {
             id: entry.id,
             path,
-            fingerprint: entry.synced_fingerprint,
+            // On a volume whose ids are only positions, an id recorded
+            // before it was read that way names nothing: the record keeps
+            // no id, as every file there has none.
+            fingerprint: entry.synced_fingerprint.map(|f| if positional { jd_vfs::Fingerprint { file_id: 0, birth_ns: 0, ..f } } else { f }),
             sha256: entry.synced_content.as_ref().map(|c| c.sha256.clone()),
             server_deleted: entry.remote_deleted,
             held: held.contains(&entry.id),
             server_home,
             server_path: on_the_server,
-            own_file: entry.own_file,
+            own_file: entry.own_file.filter(|_| !positional),
             claimant_for: entry.replaces.filter(|_| entry.id.is_provisional()),
+            last_seen_sha: entry.last_seen_sha.clone(),
+            tie_break: tie_breaks.get(&entry.id).copied().unwrap_or(0),
         };
         if entry.remote_deleted {
             deleted.push(known);
@@ -4491,13 +5690,90 @@ pub(crate) fn held_and_never_sent(env: &ExecEnv, entry: &Entry) -> Result<bool, 
 }
 
 /// The held record whose own file this is, if any.
-fn held_owner_of(env: &ExecEnv, here: jd_vfs::FileIdentity) -> Result<Option<Entry>, ExecError> {
+///
+/// On a volume with no file identities, by its bytes: the held record's last
+/// seen bytes. Asked of the id alone, nothing was ever a held file there, and
+/// the held file set aside or renamed while another file took its path was
+/// minted a new PLAIN file and sent in the clear (FAT hostile2 74403). The
+/// bytes can also be a copy the user made; a copy out of a vault waits in a
+/// plain folder all the same, so the reading costs nothing where it is wrong.
+fn held_owner_of(env: &ExecEnv, file: &ObservedFile) -> Result<Option<Entry>, ExecError> {
+    let here = file.fingerprint.identity();
+    if here.file_id == 0 {
+        if !env.vfs.personality().positional_file_ids {
+            return Ok(None);
+        }
+        for e in all_entries(env)? {
+            if e.id.entity_type == EntityType::File
+                && !e.remote_deleted
+                && e.last_seen_sha.as_deref() == Some(file.sha256.as_str())
+                && held_outside_its_vault(env, &e)?
+            {
+                return Ok(Some(e));
+            }
+        }
+        return Ok(None);
+    }
     for e in env.store.owners_of_file(here, false)? {
         if held_outside_its_vault(env, &e)? {
             return Ok(Some(e));
         }
     }
     Ok(None)
+}
+
+/// Do these bytes belong to a sealed record whose own file no longer stands at
+/// its path with them? Only on a volume with no file identities, where bytes
+/// are all a file is known by.
+fn sealed_bytes_carried_out(env: &ExecEnv, sha: &str, observed: &[ObservedFile]) -> Result<bool, ExecError> {
+    if !env.vfs.personality().positional_file_ids || sha == crate::scan::EMPTY_SHA256 {
+        return Ok(false);
+    }
+    // Bytes the walk listed in a vault, standing in none now: carried out, as
+    // surely as a record's (a5's R3; win plat3 75428, a file saved in a parked
+    // vault and traded out before anything recorded it).
+    if env.store.vault_listed(sha)? {
+        let vaults = vault_directories(env)?;
+        if !observed.iter().any(|o| o.sha256 == sha && vault_holding(&vaults, &o.path).is_some()) {
+            return Ok(true);
+        }
+    }
+    for e in all_entries(env)? {
+        if e.id.entity_type != EntityType::File
+            || e.remote_deleted
+            || !e.is_encrypted
+            || !(e.last_seen_sha.as_deref() == Some(sha) || e.synced_content.as_ref().is_some_and(|c| c.sha256 == sha))
+        {
+            continue;
+        }
+        let at_home = relative_path(env, &e)?
+            .is_some_and(|home| observed.iter().any(|o| o.path == home && o.sha256 == sha));
+        if !at_home {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Every vault folder's directory as the records place it on this disk.
+fn vault_directories(env: &ExecEnv) -> Result<Vec<(String, i64)>, ExecError> {
+    let mut out = Vec::new();
+    for e in all_entries(env)? {
+        if e.id.entity_type == EntityType::Folder && e.is_encrypted && !e.remote_deleted {
+            if let Some(path) = relative_path(env, &e)? {
+                out.push((path, e.id.server_id));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The vault folder whose directory `path` stands in, if any.
+fn vault_holding(vaults: &[(String, i64)], path: &str) -> Option<i64> {
+    vaults
+        .iter()
+        .find(|(dir, _)| path.strip_prefix(dir.as_str()).is_some_and(|rest| rest.starts_with('/')))
+        .map(|(_, id)| *id)
 }
 
 /// Does the held record's own file still stand where it agrees it does? Then a
@@ -4582,7 +5858,7 @@ fn in_a_deleted_vault(env: &ExecEnv, mut parent: Option<i64>) -> Result<bool, Ex
     Ok(false)
 }
 
-fn parent_is_encrypted(env: &ExecEnv, parent: Option<i64>) -> Result<bool, ExecError> {
+pub(crate) fn parent_is_encrypted(env: &ExecEnv, parent: Option<i64>) -> Result<bool, ExecError> {
     let Some(id) = parent else {
         return Ok(false);
     };
@@ -4593,7 +5869,7 @@ fn parent_is_encrypted(env: &ExecEnv, parent: Option<i64>) -> Result<bool, ExecE
         .unwrap_or(false))
 }
 
-fn blank(id: EntityId, placement: &Placement) -> Entry {
+pub(crate) fn blank(id: EntityId, placement: &Placement) -> Entry {
     Entry {
         id,
         remote: placement.clone(),
@@ -4613,6 +5889,7 @@ fn blank(id: EntityId, placement: &Placement) -> Entry {
         replaces: None,
         stand_in: None,
         own_file: None,
+        last_seen_sha: None,
     }
 }
 
@@ -4800,6 +6077,11 @@ fn merge_duplicate_folders(env: &ExecEnv) -> Result<usize, ExecError> {
 /// finds all of them.
 fn merge_duplicate_files(env: &ExecEnv) -> Result<usize, ExecError> {
     let entries = all_entries(env)?;
+    let replaced: std::collections::HashSet<EntityId> = entries
+        .iter()
+        .filter(|e| !e.remote_deleted && e.status != LocalStatus::OutOfScope)
+        .filter_map(|e| e.replaces)
+        .collect();
     let mut real: HashMap<(Option<i64>, String), i64> = HashMap::new();
     for e in &entries {
         if e.id.entity_type == EntityType::File && !e.id.is_provisional() && !e.remote_deleted {
@@ -4824,6 +6106,23 @@ fn merge_duplicate_files(env: &ExecEnv) -> Result<usize, ExecError> {
             if !may_take_a_merged_file(env, &r)? {
                 continue;
             }
+            // A source a claimant has taken its file from, until the source is
+            // trashed: its file is the claimant's, and a file at its old name
+            // is somebody else's. Folded in, it took a never-sent file saved
+            // there as its own and sent it as its version (kill2 75127;
+            // `specs/drive_file_ownership.md`, E1a).
+            if replaced.contains(&r.id) {
+                continue;
+            }
+            // Nor a record whose bytes have not arrived here: matched by name
+            // alone, a stranger saved at a download's slot was folded into the
+            // download and its file left nobody's. The provisional waits for
+            // the download instead, which settles the two by identity -- its
+            // own lost upload included, found by its bytes when they land
+            // (`specs/drive_file_ownership.md`, design 1c).
+            if r.synced_placement.is_none() {
+                continue;
+            }
             // Nor is a provisional held outside its vault: it was never sent,
             // so no server file is its upload. Folded into whatever another
             // device put at its name, its file was owned by nobody and minted
@@ -4843,6 +6142,53 @@ fn merge_duplicate_files(env: &ExecEnv) -> Result<usize, ExecError> {
             };
             if strong_volume && two_files(r.own_file, e.own_file) {
                 continue;
+            }
+            // Without births the disk answers it, by the id the provisional
+            // was minted for (`specs/drive_file_ownership.md`, 2b): the two
+            // are one file only if that file stands at the name they share.
+            // Folded while a swap had carried it off, it was owned by nobody,
+            // and the scan read it as the edit of the record whose path it
+            // stood at (plain2 75227). The real record is read as the scan
+            // reads it without births, by its path: its own id is not asked,
+            // since nothing updates it when its file is saved by replacement,
+            // and a provisional minted for the new file read as a second file
+            // kept the two on one path for ever (plat3 75401).
+            if !strong_volume {
+                if let (Some(own), Some(root)) = (crate::execute::never_sent_own_id(e), env.vfs.root()) {
+                    let here = match relative_path(env, e)? {
+                        Some(p) => env.vfs.fingerprint(&root.join(p))?.map(|fp| fp.file_id),
+                        None => None,
+                    };
+                    if here != Some(own) {
+                        continue;
+                    }
+                }
+                // And by the bytes, which every weak volume has: the file at
+                // the shared name must be the real record's, unedited -- its
+                // bytes the ones it last saw there or last agreed. Otherwise
+                // its file is elsewhere and this is another file: folded in,
+                // the real record read it as its own edit (plain2 75298,
+                // 75237, 75201; `specs/drive_weak_volume_identity.md`, class
+                // M). The provisional stays, and its upload lands beside.
+                if let Some(root) = env.vfs.root() {
+                    let here = match relative_path(env, e)? {
+                        Some(p) if env.vfs.fingerprint(&root.join(&p))?.is_some() => Some(env.vfs.hash(&root.join(p))?),
+                        _ => None,
+                    };
+                    let its_own = |h: &String| {
+                        r.last_seen_sha.as_ref() == Some(h) || r.synced_content.as_ref().is_some_and(|c| &c.sha256 == h)
+                    };
+                    // And the provisional's too: a merge says the two name one
+                    // file. A provisional whose file a swap carried away, with
+                    // the real record's download landing at the name after,
+                    // was folded in while its own file stood elsewhere with no
+                    // record, and was read as another record's edit (plain2
+                    // 75268, on a USB stick).
+                    let provisionals_too = |h: &String| e.last_seen_sha.as_ref().is_none_or(|seen| seen == h);
+                    if !here.as_ref().is_some_and(|h| its_own(h) && provisionals_too(h)) {
+                        continue;
+                    }
+                }
             }
             // By name alone, and before the disk is read: the real entry takes
             // the provisional's file only if it has no file of its own here.

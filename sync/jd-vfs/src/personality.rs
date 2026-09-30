@@ -69,6 +69,35 @@ pub struct Personality {
     /// is false every file's identity is weak, and the engine reads the disk
     /// by its older rules (`specs/drive_file_identity.md`).
     pub stable_file_identity: bool,
+    /// Is a file's id no identity at all, only where the file happens to sit?
+    /// True on FAT and exFAT, named by the volume's filesystem type: their ids
+    /// move with a directory entry (Windows), with the file's first data
+    /// cluster (macOS FAT32), or with the mount (Linux; macOS exFAT), and the
+    /// rename probe cannot catch the last two. Where it is true the volume
+    /// reports every id and every birth as 0, so nothing in the engine reads
+    /// one (`specs/drive_weak_volume_identity.md`, B1 and B1a). Implies
+    /// `stable_file_identity` is false.
+    pub positional_file_ids: bool,
+    /// On a volume whose ids are no identity (`positional_file_ids`), may an
+    /// id still break a tie between files the bytes cannot tell apart? Never
+    /// identity, and never read by anything that reads identity: only a
+    /// tie-break, carried beside a file as its tie-break id, never in its
+    /// fingerprint (`specs/drive_weak_volume_identity.md`, the classes).
+    pub id_tie_break: IdTieBreak,
+}
+
+/// How far a FAT or exFAT volume's ids hold still, from the traced facts (F1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdTieBreak {
+    /// Not at all for the purpose: every rename can move one (Windows FAT and
+    /// exFAT, a directory entry's position), and any volume not named FAT.
+    None,
+    /// Through renames, moves and remounts; an in-place save moves only the
+    /// saved file's (macOS FAT32, the first data cluster).
+    Durable,
+    /// For one mount; renumbered on the next (Linux FAT and exFAT, macOS
+    /// exFAT).
+    MountSession,
 }
 
 const WINDOWS_ILLEGAL: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
@@ -93,6 +122,8 @@ impl Personality {
             max_path_bytes: 4096,
             mtime_granularity_ns: 1,
             stable_file_identity: true,
+            positional_file_ids: false,
+            id_tie_break: IdTieBreak::None,
         }
     }
 
@@ -124,6 +155,8 @@ impl Personality {
             max_path_bytes: 1024,
             mtime_granularity_ns: 1,
             stable_file_identity: true,
+            positional_file_ids: false,
+            id_tie_break: IdTieBreak::None,
         }
     }
 
@@ -160,6 +193,8 @@ impl Personality {
             max_path_bytes: 32_000,
             mtime_granularity_ns: 100,
             stable_file_identity: true,
+            positional_file_ids: false,
+            id_tie_break: IdTieBreak::None,
         }
     }
 
@@ -169,6 +204,7 @@ impl Personality {
         Personality {
             mtime_granularity_ns: 2_000_000_000,
             stable_file_identity: false,
+            positional_file_ids: true,
             ..Personality::windows()
         }
     }
@@ -207,6 +243,8 @@ impl Personality {
             // The platform's names are its safe guess; for identity the safe
             // guess is none, which costs only the older rules.
             p.stable_file_identity = false;
+            p.positional_file_ids = crate::real::ids_are_positions_on_this_volume(dir);
+            p.id_tie_break = crate::real::id_tie_break_on_this_volume(dir);
             return p;
         }
 
@@ -270,6 +308,14 @@ impl Personality {
             }
             Err(_) => false,
         };
+        // Named, not only asked: on Linux a FAT id survives a rename and the
+        // volume reports the creation time, so the probe above reads it
+        // strong, and every id changes at the next mount (F1).
+        if crate::real::ids_are_positions_on_this_volume(dir) {
+            p.positional_file_ids = true;
+            p.stable_file_identity = false;
+            p.id_tie_break = crate::real::id_tie_break_on_this_volume(dir);
+        }
 
         let _ = std::fs::remove_file(&path);
         p

@@ -36,7 +36,7 @@ pub use names::{
     resolve_siblings, to_local_name, EscapeReason, LocalName, Resolved, UnsyncableReason,
 };
 pub use paths::{canonical_root, is_inside, is_verbatim, strip_verbatim};
-pub use personality::Personality;
+pub use personality::{IdTieBreak, Personality};
 pub use real::OsVfs;
 pub use watch::{watch_root, Watcher};
 
@@ -128,8 +128,12 @@ impl Fingerprint {
     /// still have to match, and any doubt sends us to the hash — this only
     /// decides whether a rescan bothers to read the bytes. The birth is not
     /// compared: this is a question about content, not identity.
+    ///
+    /// Without an id on either side it answers no, so the caller reads the
+    /// bytes: size and a two-second time alone cannot tell two files apart,
+    /// and on a FAT or exFAT volume every id is 0 (`positional_file_ids`).
     pub fn unchanged_from(&self, other: &Fingerprint, p: &Personality) -> bool {
-        if self.size != other.size || self.file_id != other.file_id {
+        if self.size != other.size || self.file_id != other.file_id || self.file_id == 0 {
             return false;
         }
         let delta = self.mtime_ns.abs_diff(other.mtime_ns);
@@ -160,6 +164,10 @@ pub struct DirEntry {
     /// moves whenever a child is made, and nothing here may read it. A
     /// symlink or anything else carries `None`.
     pub fingerprint: Option<Fingerprint>,
+    /// The volume's own id for the entry, where its ids may break a tie
+    /// (`Personality::id_tie_break`), and 0 everywhere else. Never identity:
+    /// nothing that reads a fingerprint's id reads this.
+    pub tie_break_id: u64,
 }
 
 impl Fingerprint {
@@ -275,6 +283,12 @@ pub trait Vfs: Send + Sync {
     /// that would not open), which every reader treats as "unknown", never as
     /// a match.
     fn directory_id(&self, path: &Path) -> VfsResult<Option<u64>>;
+    /// The tie-break id of the file or directory at `path`
+    /// (`DirEntry::tie_break_id`): 0 where the volume's ids may not break a
+    /// tie, or nothing stands there.
+    fn tie_break_id(&self, _path: &Path) -> VfsResult<u64> {
+        Ok(0)
+    }
     fn hash(&self, path: &Path) -> VfsResult<String>;
 
     fn create_dir(&self, path: &Path) -> VfsResult<()>;
@@ -361,5 +375,9 @@ mod tests {
     fn a_backwards_clock_still_reads_as_drift() {
         let p = Personality::linux();
         assert!(!fp(10, 500, 7).unchanged_from(&fp(10, 1000, 7), &p));
+        assert!(
+            !fp(10, 1000, 0).unchanged_from(&fp(10, 1000, 0), &p),
+            "no id on either side is no answer: read the bytes"
+        );
     }
 }

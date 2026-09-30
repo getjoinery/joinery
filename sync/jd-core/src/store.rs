@@ -24,7 +24,7 @@
 //! it describes would mean syncing it, which means two devices overwriting each
 //! other's idea of the truth.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -196,6 +196,8 @@ impl Store {
                 -- the file on this disk that is this record's (FileIdentity)
                 own_file_id            INTEGER,
                 own_file_birth_ns      INTEGER,
+                -- the hash of the file as the last scan saw it
+                last_seen_sha256       TEXT,
                 PRIMARY KEY (entity_type, server_id)
             );
             CREATE INDEX IF NOT EXISTS entries_parent ON entries (parent_folder_id);
@@ -231,6 +233,52 @@ impl Store {
                 -- `cached_hash`.
                 cached_at_ns INTEGER,
                 PRIMARY KEY (file_id, size, mtime_ns)
+            );
+
+            -- The hash cache on a volume with no file ids (FAT, exFAT), keyed
+            -- by where the file stands. A path proves nothing on its own --
+            -- two files of one size and one two-second tick can trade names
+            -- -- so a row is only as good as the watcher: whoever runs passes
+            -- forgets the rows of every path it reports touched, and all of
+            -- them when it may have missed one (`forget_path_hashes`).
+            -- The volume's own id for a record's file or directory, kept only
+            -- where a FAT or exFAT volume's ids may break a tie between files
+            -- the bytes cannot tell apart (`Personality::id_tie_break`), with
+            -- the mount session it was read in. Never identity: nothing that
+            -- reads `entries` reads this, and nothing here ever reaches the
+            -- hash cache (`specs/drive_weak_volume_identity.md`).
+            -- Each time two records were read as each other's edit on a drive
+            -- that cannot track renames, and the user was told: the two bytes
+            -- read as crossed. Kept beside the issue so what was reported can
+            -- be matched exactly (`pass::say_where_two_files_may_have_swapped`).
+            CREATE TABLE IF NOT EXISTS swap_reports (
+                entity_type TEXT NOT NULL,
+                server_id   INTEGER NOT NULL,
+                sha_a       TEXT NOT NULL,
+                sha_b       TEXT NOT NULL,
+                PRIMARY KEY (entity_type, server_id, sha_a, sha_b)
+            );
+
+            CREATE TABLE IF NOT EXISTS vault_listed_bytes (
+                vault INTEGER NOT NULL,
+                sha   TEXT NOT NULL,
+                PRIMARY KEY (vault, sha)
+            );
+
+            CREATE TABLE IF NOT EXISTS tie_breaks (
+                entity_type TEXT NOT NULL,
+                server_id   INTEGER NOT NULL,
+                id          INTEGER NOT NULL,
+                session     INTEGER NOT NULL,
+                PRIMARY KEY (entity_type, server_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS path_hashes (
+                path         TEXT PRIMARY KEY,
+                size         INTEGER NOT NULL,
+                mtime_ns     INTEGER NOT NULL,
+                sha256       TEXT NOT NULL,
+                cached_at_ns INTEGER NOT NULL
             );
 
             -- Server bytes this device has already proven it cannot turn into
@@ -290,6 +338,7 @@ impl Store {
             ("synced_fp_birth_ns", "INTEGER"),
             ("own_file_id", "INTEGER"),
             ("own_file_birth_ns", "INTEGER"),
+            ("last_seen_sha256", "TEXT"),
         ] {
             store.add_column_if_missing("entries", column, ddl)?;
         }
@@ -418,8 +467,8 @@ impl Store {
                 local_status, unsyncable_reason, wrapped_file_key,
                 content_id, synced_remote_sha256, synced_remote_size,
                 replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                synced_fp_birth_ns, own_file_id, own_file_birth_ns
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)
+                synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)
              ON CONFLICT(entity_type, server_id) DO UPDATE SET
                 parent_folder_id = excluded.parent_folder_id,
                 remote_name = excluded.remote_name,
@@ -449,7 +498,8 @@ impl Store {
                 stand_in_name = excluded.stand_in_name,
                 synced_fp_birth_ns = excluded.synced_fp_birth_ns,
                 own_file_id = excluded.own_file_id,
-                own_file_birth_ns = excluded.own_file_birth_ns",
+                own_file_birth_ns = excluded.own_file_birth_ns,
+                last_seen_sha256 = excluded.last_seen_sha256",
             params![
                 e.id.entity_type.to_string(),
                 e.id.server_id,
@@ -482,6 +532,7 @@ impl Store {
                 e.synced_fingerprint.map(|f| f.birth_ns as i64),
                 e.own_file.map(|o| o.file_id as i64),
                 e.own_file.map(|o| o.birth_ns as i64),
+                e.last_seen_sha,
             ],
         )?;
         Ok(())
@@ -498,7 +549,7 @@ impl Store {
                         local_status, unsyncable_reason, wrapped_file_key,
                         content_id, synced_remote_sha256, synced_remote_size,
                         replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
                    FROM entries WHERE entity_type = ?1 AND server_id = ?2",
                 params![id.entity_type.to_string(), id.server_id],
                 row_to_entry,
@@ -772,6 +823,36 @@ impl Store {
         }
     }
 
+    /// Write a record and forget others, as one step: a file handed from a
+    /// never-sent record to the record that takes it is owned by exactly one
+    /// of them at every moment (`specs/drive_file_ownership.md`, design 1b).
+    pub fn put_and_forget(&self, entry: &Entry, forget: &[EntityId]) -> StoreResult<()> {
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        let result = (|| -> StoreResult<()> {
+            for id in forget {
+                let t = id.entity_type.to_string();
+                for table in ["ops", "local_index", "unreadable", "entries"] {
+                    self.conn.execute(
+                        &format!("DELETE FROM {table} WHERE entity_type = ?1 AND server_id = ?2"),
+                        params![t, id.server_id],
+                    )?;
+                }
+            }
+            self.put_entry(entry)?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute("COMMIT", [])?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
+    }
+
     /// Forget ONE entity and every trace of it, leaving its children alone.
     ///
     /// `delete_subtree` decides for itself what goes, from the parent pointers
@@ -831,7 +912,7 @@ impl Store {
                           local_status, unsyncable_reason, wrapped_file_key,
                           content_id, synced_remote_sha256, synced_remote_size,
                           replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
                      FROM entries
                     ORDER BY entity_type, server_id";
         let mut stmt = self.conn.prepare(sql)?;
@@ -852,7 +933,7 @@ impl Store {
                           local_status, unsyncable_reason, wrapped_file_key,
                           content_id, synced_remote_sha256, synced_remote_size,
                           replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
                      FROM entries
                     WHERE parent_folder_id IS ?1
                     ORDER BY entity_type, server_id";
@@ -1233,6 +1314,10 @@ impl Store {
         entity: Option<EntityId>,
         now_ns: u64,
     ) -> StoreResult<()> {
+        // 0 is no identity, and a row keyed by it would be every file's.
+        if fp.file_id == 0 {
+            return Ok(());
+        }
         self.conn.execute(
             "INSERT INTO local_index
                 (file_id, size, mtime_ns, sha256, entity_type, server_id, cached_at_ns)
@@ -1281,6 +1366,9 @@ impl Store {
         fp: jd_vfs::Fingerprint,
         granularity_ns: u64,
     ) -> StoreResult<Option<String>> {
+        if fp.file_id == 0 {
+            return Ok(None);
+        }
         Ok(self
             .conn
             .query_row(
@@ -1299,9 +1387,168 @@ impl Store {
             .optional()?)
     }
 
+    /// The hash of the file standing at `path` (relative to the root) with this
+    /// size and mtime, cached on a volume with no file ids, if nothing has
+    /// said the path was touched since. See the `path_hashes` table.
+    pub fn cached_hash_at(
+        &self,
+        path: &str,
+        fp: jd_vfs::Fingerprint,
+        granularity_ns: u64,
+    ) -> StoreResult<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT sha256 FROM path_hashes
+                  WHERE path = ?1 AND size = ?2 AND mtime_ns = ?3
+                    AND cached_at_ns - mtime_ns >= ?4",
+                params![path_key(path), fp.size as i64, fp.mtime_ns as i64, granularity_ns.max(1) as i64],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn cache_hash_at(&self, path: &str, fp: jd_vfs::Fingerprint, sha256: &str, now_ns: u64) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO path_hashes (path, size, mtime_ns, sha256, cached_at_ns)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(path) DO UPDATE SET
+                size = excluded.size, mtime_ns = excluded.mtime_ns,
+                sha256 = excluded.sha256, cached_at_ns = excluded.cached_at_ns",
+            params![path_key(path), fp.size as i64, fp.mtime_ns as i64, sha256, now_ns as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Record that `entity` was told it may have swapped names, reading these
+    /// two bytes as crossed. The pair is stored in order.
+    pub fn record_swap_report(&self, entity: EntityId, a: &str, b: &str) -> StoreResult<()> {
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        self.conn.execute(
+            "INSERT OR IGNORE INTO swap_reports (entity_type, server_id, sha_a, sha_b) VALUES (?1, ?2, ?3, ?4)",
+            params![entity.entity_type.to_string(), entity.server_id, lo, hi],
+        )?;
+        Ok(())
+    }
+
+    /// Every swap reported: (file server id, lower sha, higher sha).
+    pub fn swap_reports(&self) -> StoreResult<Vec<(i64, String, String)>> {
+        let mut stmt = self.conn.prepare("SELECT server_id, sha_a, sha_b FROM swap_reports WHERE entity_type = 'file'")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The mount session this engine is in: moved on every occasion it may
+    /// have lost track of the volume (start, a watcher lost or overflowed),
+    /// so a tie-break id read in another session is no evidence at all.
+    pub fn mount_session(&self) -> StoreResult<i64> {
+        Ok(self.get_meta("mount_session")?.and_then(|v| v.parse().ok()).unwrap_or(0))
+    }
+
+    pub fn bump_mount_session(&self) -> StoreResult<i64> {
+        let next = self.mount_session()? + 1;
+        self.set_meta("mount_session", &next.to_string())?;
+        Ok(next)
+    }
+
+    /// Record the tie-break id of a record's file or directory, read in this
+    /// mount session. 0 forgets it.
+    pub fn set_tie_break(&self, entity: EntityId, id: u64, session: i64) -> StoreResult<()> {
+        if id == 0 {
+            self.conn.execute(
+                "DELETE FROM tie_breaks WHERE entity_type = ?1 AND server_id = ?2",
+                params![entity.entity_type.to_string(), entity.server_id],
+            )?;
+        } else {
+            self.conn.execute(
+                "INSERT INTO tie_breaks (entity_type, server_id, id, session) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(entity_type, server_id) DO UPDATE SET id = excluded.id, session = excluded.session",
+                params![entity.entity_type.to_string(), entity.server_id, id as i64, session],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Bytes the walk listed inside a vault's directory on a disk with no file
+    /// identities, the moment it listed them.
+    pub fn note_vault_listed_bytes(&self, vault: i64, sha: &str) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO vault_listed_bytes (vault, sha) VALUES (?1, ?2)",
+            params![vault, sha],
+        )?;
+        Ok(())
+    }
+
+    /// Were these bytes ever listed inside a vault here?
+    pub fn vault_listed(&self, sha: &str) -> StoreResult<bool> {
+        Ok(self
+            .conn
+            .query_row("SELECT 1 FROM vault_listed_bytes WHERE sha = ?1 LIMIT 1", params![sha], |_| Ok(()))
+            .optional()?
+            .is_some())
+    }
+
+    /// Forget listed bytes that stand nowhere on the disk now: `present`, from
+    /// a walk that finished.
+    pub fn keep_vault_listed_bytes(&self, present: &HashSet<&str>) -> StoreResult<()> {
+        let mut stmt = self.conn.prepare("SELECT DISTINCT sha FROM vault_listed_bytes")?;
+        let gone: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|sha| !present.contains(sha.as_str()))
+            .collect();
+        for sha in gone {
+            self.conn.execute("DELETE FROM vault_listed_bytes WHERE sha = ?1", params![sha])?;
+        }
+        Ok(())
+    }
+
+    /// Every record's tie-break id, with the mount session it was read in.
+    pub fn tie_breaks(&self) -> StoreResult<HashMap<EntityId, (u64, i64)>> {
+        let mut stmt = self.conn.prepare("SELECT entity_type, server_id, id, session FROM tie_breaks")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?))
+        })?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (t, id, tb, session) = row?;
+            let entity_type = match t.as_str() {
+                "folder" => EntityType::Folder,
+                _ => EntityType::File,
+            };
+            out.insert(EntityId { entity_type, server_id: id }, (tb as u64, session));
+        }
+        Ok(out)
+    }
+
+    /// Forget the path-keyed hashes of these paths and everything under them
+    /// (a folder renamed carries its files), or of every path when `None`:
+    /// the watcher may have missed something, or was not running.
+    pub fn forget_path_hashes(&self, paths: Option<&[String]>) -> StoreResult<()> {
+        match paths {
+            None => {
+                self.conn.execute("DELETE FROM path_hashes", [])?;
+            }
+            Some(paths) => {
+                for p in paths {
+                    self.conn.execute(
+                        "DELETE FROM path_hashes WHERE path = ?1 OR substr(path, 1, length(?1) + 1) = ?1 || '/'",
+                        params![path_key(p)],
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Which entry, if any, a local file id was last known to belong to. This
     /// is how a moved file keeps its identity instead of arriving as a stranger.
     pub fn entity_for_file_id(&self, file_id: u64) -> StoreResult<Option<EntityId>> {
+        // 0 is no identity: every file on a FAT or exFAT volume has it.
+        if file_id == 0 {
+            return Ok(None);
+        }
         let found: Option<(Option<String>, Option<i64>)> = self
             .conn
             .query_row(
@@ -1342,7 +1589,7 @@ impl Store {
                     local_status, unsyncable_reason, wrapped_file_key,
                     content_id, synced_remote_sha256, synced_remote_size,
                     replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
                FROM entries
               WHERE entity_type = ?1 AND synced_fp_file_id = ?2",
         )?;
@@ -1366,7 +1613,7 @@ impl Store {
                     local_status, unsyncable_reason, wrapped_file_key,
                     content_id, synced_remote_sha256, synced_remote_size,
                     replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
                FROM entries
               WHERE entity_type = 'file'
                 AND (own_file_id = ?1 OR (own_file_id IS NULL AND synced_fp_file_id = ?1))",
@@ -1391,7 +1638,7 @@ impl Store {
                     local_status, unsyncable_reason, wrapped_file_key,
                     content_id, synced_remote_sha256, synced_remote_size,
                     replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
                FROM entries
               WHERE entity_type = ?1 AND synced_fp_file_id = ?2 AND remote_deleted = 0",
         )?;
@@ -1413,6 +1660,29 @@ impl Store {
                 &serde_json::json!({ "parent": to.parent, "name": to.name }).to_string(),
                 key,
             )?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute("COMMIT", [])?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
+    }
+
+    /// Write several records as one step: a file handed from one record to
+    /// another is never owned by neither, and never by both once this lands
+    /// (`specs/drive_file_ownership.md`, design 2).
+    pub fn put_entries(&self, entries: &[&Entry]) -> StoreResult<()> {
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        let result = (|| -> StoreResult<()> {
+            for e in entries {
+                self.put_entry(e)?;
+            }
             Ok(())
         })();
         match result {
@@ -1733,6 +2003,7 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
     let fp_birth: Option<i64> = r.get(28)?;
     let own_file_id: Option<i64> = r.get(29)?;
     let own_file_birth: Option<i64> = r.get(30)?;
+    let last_seen_sha: Option<String> = r.get(31)?;
 
     Ok(Entry {
         id: EntityId {
@@ -1814,7 +2085,16 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
             }),
             _ => None,
         },
+        last_seen_sha,
     })
+}
+
+/// One spelling per slot for the path-keyed hash cache, so a watcher that
+/// reports a name in another normal form or case still reaches the row the
+/// scan wrote: FAT and exFAT fold case, and macOS may hand either form of an
+/// accent.
+fn path_key(path: &str) -> String {
+    jd_vfs::nfc(path).to_lowercase()
 }
 
 #[cfg(test)]
@@ -1919,6 +2199,7 @@ mod tests {
             replaces: None,
             stand_in: None,
             own_file: Some(jd_vfs::FileIdentity { file_id: 99, birth_ns: 5678 }),
+            last_seen_sha: None,
         }
     }
 
@@ -1976,6 +2257,7 @@ mod tests {
         let provisional = Entry {
             id: EntityId::file(-3),
             own_file: Some(mine),
+            last_seen_sha: None,
             ..entry(-3, "Report.txt")
         };
         // The real entry agrees on this path: the file the provisional was
@@ -1990,6 +2272,7 @@ mod tests {
         // download; it is nobody's until it is found again as new.
         s.put_entry(&Entry {
             own_file: None,
+            last_seen_sha: None,
             synced_placement: None,
             status: LocalStatus::PendingDownload,
             ..entry(8, "Other.txt")
