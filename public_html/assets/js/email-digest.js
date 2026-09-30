@@ -19,7 +19,11 @@
  *   attachments(manifest) the ATTACHMENTS section, metadata only ('' for none)
  *   wrapBlock(text, nonce), neutralize(text)   the untrusted-input envelope
  *
- * Vanilla JS, no framework. @version 1.1 - the marker rewrite covers invisible characters (B3)
+ * Vanilla JS, no framework. @version 1.3.1 - a Q word's trailing lone '=' is dropped; bare UTF-16 honours a BE mark
+ * @version 1.3 - every encoded word decodes as iconv_mime_decode does: lenient base64,
+ *   a bad Q escape or unconvertible bytes keep the word (losing its '=' at the end of the value)
+ * @version 1.2 - encoded words in ISO-8859-1 and US-ASCII decode as iconv decodes them
+ * @version 1.1 - the marker rewrite covers invisible characters (B3)
  */
 (function () {
 	'use strict';
@@ -323,7 +327,15 @@
 		return parts.join(', ');
 	}
 
-	/** RFC 2047 encoded words, as iconv_mime_decode(CONTINUE_ON_ERROR) reads them. */
+	/**
+	 * RFC 2047 encoded words, as iconv_mime_decode(CONTINUE_ON_ERROR) reads them
+	 * (PHP 8.3 on glibc), quirks included, so a device's digest is the server's:
+	 * B is decoded leniently (php_base64_decode non-strict: '=' and characters
+	 * outside the alphabet are skipped, padding is optional); a Q word with a bad
+	 * escape is kept as written; a word whose bytes the charset cannot take
+	 * (invalid UTF-8, US-ASCII past 0x7F, windows-1252's undefined bytes) is kept
+	 * as written too, and when it ends the value it loses its final '='.
+	 */
 	function decodeHeaderValue(value) {
 		value = String(value || '');
 		if (value === '') return '';
@@ -337,39 +349,100 @@
 			var between = value.slice(last, m.index);
 			if (!(prevWasWord && /^[ \t\r\n]*$/.test(between))) out += between;
 			var decoded = decodeWord(m[1], m[2], m[3]);
-			out += decoded === null ? m[0] : decoded;
-			prevWasWord = decoded !== null;
+			if (typeof decoded === 'string') {
+				out += decoded;
+			} else {
+				var endsValue = word.lastIndex === value.length;
+				out += (decoded === UNCONVERTIBLE && endsValue) ? m[0].slice(0, -1) : m[0];
+			}
+			prevWasWord = typeof decoded === 'string';
 			last = word.lastIndex;
 		}
 		return out + value.slice(last);
 	}
 
+	var UNDECODABLE = {};   // a bad Q escape, an unknown charset: the word stays as written
+	var UNCONVERTIBLE = {}; // bytes the charset cannot take: kept, and at the end it loses its '='
+
+	/** php_base64_decode(), non-strict. */
+	function phpBase64(text) {
+		var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+		var out = [], i = 0, cur = 0;
+		for (var k = 0; k < text.length; k++) {
+			var ch = text.charAt(k);
+			if (ch === '=') continue;
+			var v = alphabet.indexOf(ch);
+			if (v < 0) continue;
+			switch (i % 4) {
+				case 0: cur = (v << 2) & 0xFF; break;
+				case 1: out.push(cur | (v >> 4)); cur = ((v & 0x0F) << 4) & 0xFF; break;
+				case 2: out.push(cur | (v >> 2)); cur = ((v & 0x03) << 6) & 0xFF; break;
+				case 3: out.push(cur | v); break;
+			}
+			i++;
+		}
+		return new Uint8Array(out);
+	}
+
 	function decodeWord(charset, enc, text) {
 		var bytes;
-		try {
-			if (enc === 'B' || enc === 'b') {
-				var bin = atob(text);
-				bytes = new Uint8Array(bin.length);
-				for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-			} else {
-				var q = text.replace(/_/g, ' ');
-				var arr = [];
-				for (var j = 0; j < q.length; j++) {
-					var ch = q.charAt(j);
-					if (ch === '=' && /^[0-9A-Fa-f]{2}$/.test(q.substr(j + 1, 2))) {
-						arr.push(parseInt(q.substr(j + 1, 2), 16));
-						j += 2;
-					} else {
-						arr.push(q.charCodeAt(j) & 0xFF);
-					}
+		if (enc === 'B' || enc === 'b') {
+			bytes = phpBase64(text);
+		} else {
+			var q = text.replace(/_/g, ' ');
+			var arr = [];
+			for (var j = 0; j < q.length; j++) {
+				var ch = q.charAt(j);
+				if (ch === '=') {
+					// A lone '=' ending the text is a soft break: iconv drops it.
+					if (j === q.length - 1) break;
+					if (!/^[0-9A-Fa-f]{2}$/.test(q.substr(j + 1, 2))) return UNDECODABLE;
+					arr.push(parseInt(q.substr(j + 1, 2), 16));
+					j += 2;
+				} else {
+					arr.push(q.charCodeAt(j) & 0xFF);
 				}
-				bytes = new Uint8Array(arr);
 			}
-			return new TextDecoder(charset.split('*')[0], { fatal: true }).decode(bytes);
+			bytes = new Uint8Array(arr);
+		}
+		var label = charset.split('*')[0].trim().toLowerCase();
+		// iconv reads ISO-8859-1 byte for byte, 0x80-0x9F included, where a
+		// browser's decoder treats the label as windows-1252; it refuses a
+		// US-ASCII byte past 0x7F and windows-1252's five undefined bytes.
+		if (LATIN1_LABELS.indexOf(label) !== -1) {
+			var s = '';
+			for (var k = 0; k < bytes.length; k++) s += String.fromCharCode(bytes[k]);
+			return s;
+		}
+		if (ASCII_LABELS.indexOf(label) !== -1) {
+			for (var n = 0; n < bytes.length; n++) if (bytes[n] > 0x7F) return UNCONVERTIBLE;
+		}
+		if (CP1252_LABELS.indexOf(label) !== -1) {
+			for (var u = 0; u < bytes.length; u++) if (CP1252_UNDEFINED.indexOf(bytes[u]) !== -1) return UNCONVERTIBLE;
+		}
+		// Bare UTF-16: iconv honours a byte-order mark either way round and
+		// reads little-endian without one; a browser's utf-16 is always LE.
+		if (label === 'utf-16' && bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+			label = 'utf-16be';
+			bytes = bytes.subarray(2);
+		}
+		var decoder;
+		try {
+			decoder = new TextDecoder(label, { fatal: true });
 		} catch (e) {
-			return null;
+			return UNDECODABLE;
+		}
+		try {
+			return decoder.decode(bytes);
+		} catch (e) {
+			return UNCONVERTIBLE;
 		}
 	}
+
+	var CP1252_LABELS = ['windows-1252', 'cp1252', 'x-cp1252'];
+	var CP1252_UNDEFINED = [0x81, 0x8D, 0x8F, 0x90, 0x9D];
+	var LATIN1_LABELS = ['iso-8859-1', 'iso8859-1', 'iso_8859-1', 'latin1', 'l1', 'cp819', 'ibm819', 'iso-ir-100', 'csisolatin1'];
+	var ASCII_LABELS = ['us-ascii', 'ascii', 'ansi_x3.4-1968', 'iso646-us', 'us'];
 
 	/** The first occurrence of a header's unfolded value, or null (EmailSecurityDigest::extractHeader). */
 	function extractHeader(raw, name) {

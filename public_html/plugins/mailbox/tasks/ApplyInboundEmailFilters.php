@@ -14,6 +14,7 @@
  * flag clears and the cursor resets.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.1 - the batch's end writes only the walk's two columns, never the whole rule
  * @version 1.0
  */
 
@@ -102,16 +103,16 @@ class ApplyInboundEmailFilters implements ScheduledTaskInterface {
 			$total_scanned += $scanned;
 			$total_matched += $matched;
 
-			if (count($ids) < $batch) {
-				// Mailbox exhausted: clear the flag and reset the cursor.
-				$filter->set('ief_apply_existing_pending', false);
-				$filter->set('ief_apply_existing_cursor', 0);
+			// Write only this walk's two columns: the batch took time, and a
+			// whole-row save from the copy loaded before it would undo whatever
+			// else changed on the rule meanwhile (an edit, a new request).
+			$done = count($ids) < $batch;
+			$db->prepare('UPDATE ief_inbound_email_filters SET ief_apply_existing_pending = ?, ief_apply_existing_cursor = ?
+				WHERE ief_inbound_email_filter_id = ?')
+				->execute(array($done ? 'false' : 'true', $done ? 0 : $last_id, intval($filter->key)));
+			if ($done) {
 				$filters_done++;
-			} else {
-				// More to do next run: advance the cursor.
-				$filter->set('ief_apply_existing_cursor', $last_id);
 			}
-			$filter->save();
 		}
 
 		return array('status' => 'success', 'message' => sprintf(

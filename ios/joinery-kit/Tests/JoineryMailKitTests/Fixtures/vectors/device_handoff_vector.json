@@ -1,0 +1,58 @@
+{
+	"_about": "Device handoff and one Fortress row, built by assets/js/vault-crypto.js from seeded randomness (tests/vault/device_handoff_vector.mjs). Standard base64 with padding throughout. A phone: (1) opens handoff.blob with device.secret (X25519, HKDF-SHA256 salt empty info \"sealed-vault:dek\" ‖ ephPub ‖ devicePub, AES-256-GCM, no AAD) and gets vault.pkcs8_hex, whose last 32 bytes are the mail secret; (2) opens row.sealed_dek (strip \"v1.edgeseal.mail.\", same seal) with that secret to get row.dek_hex; (3) opens each v1.edge. value (base64 IV[12] ‖ ct ‖ tag[16]) under the DEK with its AD. A search text whose plaintext starts \"gz:\" is base64 gzip. A part is the stored text itself, same box, AD mail:{id}:att:{mime_part}.",
+	"kdf_info_prefix": "sealed-vault:dek",
+	"device": {
+		"secret_hex": "bbb22bd116243a71e64c1f2570b5b20f2ee0b3bab1f5ce24db17b980dd822950",
+		"public_b64": "b1RITbXXEw6fqmvu9oeyblKMXQNWJOTBq0vEHk5LBXA="
+	},
+	"vault": {
+		"secret_hex": "dc6ae0be226b86bfadfdb755eb0a05f15a32d64e1e143c44d9f192abbf4da93c",
+		"public_b64": "2ODTvMEiKu4PNBHM/gR30JmMZ4/lMwR4iZ96kbbyliM=",
+		"pkcs8_hex": "302e020100300506032b656e04220420dc6ae0be226b86bfadfdb755eb0a05f15a32d64e1e143c44d9f192abbf4da93c"
+	},
+	"handoff": {
+		"eph_secret_hex": "944c11a5f953336474553b0a857e829db25b9cd158675276d9532b65940cd8b6",
+		"iv_hex": "99e29fe9ea4520f910fe8fbb",
+		"blob": "+e46pez/P9Wq4A98iTxf0D0l6n0ZiBVjj49AzA3A3BGZ4p/p6kUg+RD+j7vos/QEIEuH6ZDDYEmSSghG0SHGGxCliVV8ZHHYzSaxOaNZipe2VBDXo387lFsc0PVZL7CXo0khndH3XoHSo8Dm"
+	},
+	"row": {
+		"id": 4242,
+		"ad_prefix": "mail:",
+		"dek_hex": "465eff7d93539dfcdfbd9f44e5852d0cfc1f17bfd44b46f1a52cd31157e6ff26",
+		"sealed_dek": "v1.edgeseal.mail.sJijA/VtbLwpqQjtIEdH5jytWg9GJmlgZQVFsgYt7jpjme4c95GOoGw3TdrE2YXDnDWkAeYA2aw3B4GrYfLpxjP0eEPkcEvYrGdj5Sbotj+UrMNj/92wtEzntTA=",
+		"dek_eph_secret_hex": "bb3074011a79fe3d990f71041eee3db501ba92dd3ab53c6fa98cebbb8f9bd6ca",
+		"dek_iv_hex": "6399ee1cf7918ea06c374dda",
+		"fields": [
+			{
+				"column": "iem_subject",
+				"ad": "mail:4242:iem_subject",
+				"plaintext": "Quarterly numbers — draft ✓",
+				"iv_hex": "cff5b967c0c8b85cff4e82ea",
+				"value": "v1.edge.z/W5Z8DIuFz/ToLqogiJEZYPpI9j1DlK9c7KF/vp4i7YKpOK+8s+dYhmhqu5VQd5a6lgd7nofm7Ap1o="
+			},
+			{
+				"column": "iem_sender",
+				"ad": "mail:4242:iem_sender",
+				"plaintext": "Zoë Adams <zoe@example.test>",
+				"iv_hex": "3c4ea25ba1704e9d101c3da1",
+				"value": "v1.edge.PE6iW6FwTp0QHD2hweot3uTlsbe68+/dsMg/GrbA6XPxCHq6jsRI0gB2lMTFdVK29l4ygCs4B/+C"
+			}
+		],
+		"search_text": {
+			"column": "iem_search_text",
+			"ad": "mail:4242:iem_search_text",
+			"packed": "gz:H4sIAAAAAAAAA+3Lyw2CQBQF0FZuAYQapAS37h7ORUiYj3feELEly7AxC7ACEvbn3PL3gyFYrHhnXviyWFb2zuq4NpNT647U4khVBNnkEEuW9yVM8Jl4/jETYe52nxk6iBtTI1rBksCN2iE+lpzOfvbD9R+lqHSdMgMAAA==",
+			"text": "Zoë Adams zoe@example.test Quarterly numbers draft report.pdf the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region the quarterly numbers are attached, revenue up in every region",
+			"iv_hex": "97eeb1abb389e8012c44c04a",
+			"value": "v1.edge.l+6xq7OJ6AEsRMBKGn0zUFTKh7V+WTOTUZWNXe8e+5CVEGbKOYnKd8naVXG7jXLUxffZ/YD6GKVAgCPB/Nb4kuWp9xCt5T9PSUD3LmtLtgrAPyTVh/obg53JjJQttuS0O8lgHD3lnT0VaHOHT8cz/X8Roc9v9KgFkJLCDdZ9aQTXn/hbD0bgYt/TIsLJrekK3d/AFTJtWnYObTAIN9F6fkIrAoGdQAFNACizqe9ORFuLMS9RkxD030L575xZjzrPkCvW30ggRw=="
+		},
+		"part": {
+			"mime_part": "2",
+			"ad": "mail:4242:att:2",
+			"bytes_b64": "CzBVep/E6Q4zWH2ix+wRNluApcrvFDleg6jN8hc8YYar0PUaP2SJrtP4HUJnjLHW+yBFao+02f4jSG2St9wBJktwlbrfBClOc5i94gcsUXabwOUKL1R5nsPoDTJXfKHG6xA1Wn+kye4TOF2Cp8zxFjtgharP9Bk+Y4it0vccQWaLsNX6H0RpjrPY/SJHbJG22wAlSm+Uud4DKE1yl7zhBitQdZq/5AkuU3idwucMMVZ7oMXqDzRZfqPI7RI3XIGmy/AVOl+Eqc7zGD1ih6zR9htAZYqv1PkeQ2iNstf8IUZrkLXa/yRJbpO43QInTHGWu+AFKk90mb7jCC1Sd5zB5gswVXqfxOkOM1h9osfsETZbgKXK7xQ5XoOozfIXPGGGq9D1Gj9kia7T+B1C",
+			"sha256_hex": "9b854f0a59eabeac0b0ecaee1f5cd7ab3bfbc93e9b33e2a89ac338b237f300f2",
+			"iv_hex": "ce80a7296744ebc32c3c5177",
+			"stored": "v1.edge.zoCnKWdE68MsPFF3zKkkgXWcyG+43qxuPRNo4v7Of816ERXvScgBV3u70ICGIW8nct6i3EtSjI3fN3iF6eEc+PCLlwCDokgZYshJJuNgaAX53GRq7m7vFkSDeXKZUKXbX/6/XQjT18uAJgKedSCI63kydUAGREl2ZG2mr9JwKKQiDcUF8QvyCmY+vmeKxrolcLh+eve1Ht9tTVM1GqfB9h76t9dg5DBobRQDnxb2JL+C/GHwFK9QnBPKtHE+n4yzr4xyaUIdSmzRyqD+dRiLXdX6FtjsTe/knzExPJ5ySvkhqGgBBmmrNfXUn0zteIQ3IEu0B27JDa+kg6h/J0THIcV+R2aX6vYIzDq9zpo0kctIhhubI+JA228K3gBRJFG2GLLdLBL2wbSLtexbKbPTqdztjuLIqhDqyjbMjeGcpt//gvfvFNgQWQ=="
+		}
+	}
+}

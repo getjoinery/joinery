@@ -41,6 +41,11 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.13.2 - a failed device_rules fetch is not cached for the drain (review F6); the rule
+ *   backlog walk moves past a row it cannot open (F7)
+ * @version 1.13.1 - the pin self-check derives from the PKCS#8 secret, as session.mac() does
+ * @version 1.13 - mail rules run here on relay-sealed mail (rule_matches, forward_raw) and on
+ *   existing end-to-end mail (drainRuleBacklog), with MailboxFilterMatch (specs/fortress_mobile_apps.md § R14)
  * @version 1.12 - postForm() goes through joineryApi.postForm (the rotated-token retry, B2)
  * @version 1.11 - checkRelayPins(): the relay's signed seal-target statement checked against the
  *                pinned relay and the keys this browser derives from its own secrets (B47);
@@ -651,12 +656,14 @@ window.MailboxFortress = (function () {
 
 	var FORTRESS_FIELD_MAX = { iem_subject: 4000, iem_sender: 500 };
 	var draining = null;
+	var ruleCache = {};   // alias id => the mailbox's rules (device_rules), for one drain
 
 	/** Parse and store every relay-sealed message waiting for this vault. Resolves the count stored. */
 	function drainPending() {
 		if (draining) return draining;
 		draining = (async function () {
 			var epoch0 = lockEpoch, stored = 0, skip = [], refetched = {};
+			ruleCache = {};
 			try {
 				while (isOpen() && lockEpoch === epoch0) {
 					var d = await window.joineryApi.post('mailbox/fortress_pending', { skip: skip.join(',') });
@@ -724,13 +731,47 @@ window.MailboxFortress = (function () {
 		// The parser hands back views into these bytes for parts that need no
 		// decoding, so they are wiped only once everything is sealed.
 		try {
-			return await sealAndStore(item, key, MailboxMime.parse(raw), epoch0);
+			return await sealAndStore(item, key, MailboxMime.parse(raw), epoch0, raw);
 		} finally {
 			raw.fill(0);
 		}
 	}
 
-	async function sealAndStore(item, key, p, epoch0) {
+	/**
+	 * The mailbox's mail rules as a device evaluates them, fetched once per
+	 * drain. A mailbox with none, or a page without the matcher, runs none.
+	 */
+	async function rulesFor(aliasId) {
+		if (!aliasId || !window.MailboxFilterMatch) return [];
+		if (!ruleCache[aliasId]) {
+			// A failed fetch is not kept: the next message asks again, so one
+			// passing error costs one message a retry on a later visit, not
+			// every message of the mailbox in this drain.
+			ruleCache[aliasId] = window.joineryApi.post('mailbox/device_rules', { alias_id: aliasId })
+				.then(function (d) { return (d && d.rules) || []; },
+					function (e) { delete ruleCache[aliasId]; throw e; });
+		}
+		return ruleCache[aliasId];
+	}
+
+	/**
+	 * Which of the mailbox's rules the parsed message matches, and whether any
+	 * of them forwards (the server then needs the opened message to relay).
+	 * The server applies the rules' own actions; this only names them.
+	 */
+	async function ruleMatches(item, p, rawLength) {
+		var rules = await rulesFor(item.alias_id);
+		if (!rules.length) return { ids: [], forwards: false };
+		var ids = MailboxFilterMatch.matchingIds(rules, {
+			sender: p.from, recipient: item.recipient || '', subject: p.subject,
+			body_plain: p.textPlain, body_html: p.textHtml,
+			size_bytes: item.size_bytes || rawLength, has_attachment: p.attachments.length > 0
+		});
+		var forwards = rules.some(function (r) { return r.forwards && ids.indexOf(r.id) !== -1; });
+		return { ids: ids, forwards: forwards };
+	}
+
+	async function sealAndStore(item, key, p, epoch0, raw) {
 		var readable = readableText(p.textHtml);
 		var names = p.attachments.map(function (a) { return a.filename; }).filter(function (n) { return n; });
 		var values = {
@@ -780,9 +821,60 @@ window.MailboxFortress = (function () {
 			x_spam_score: MailboxMime.headerValue(p, 'X-Spam-Score'),
 			x_spam_status: MailboxMime.headerValue(p, 'X-Spam-Status')
 		}));
+		var rules = await ruleMatches(item, p, raw ? raw.length : 0);
+		if (rules.ids.length) body.append('rule_matches', JSON.stringify(rules.ids));
+		// A forward is the one rule action the server cannot take from ciphertext:
+		// it relays the message this device opened, and keeps nothing.
+		if (rules.forwards && raw) body.append('forward_raw', new Blob([raw], { type: 'message/rfc822' }), 'message.eml');
 		if (lockEpoch !== epoch0 || !isOpen()) return 'dropped';
 		var answer = await postForm('/api/v1/action/mailbox/fortress_parse_store', body);
 		return answer.stored ? 'stored' : (answer.stale ? 'stale' : 'already');
+	}
+
+	// ---- mail rules on existing mail (§ R14 of fortress_mobile_apps) ------------------
+	//
+	// "Also apply to existing mail" on end-to-end rows: the server hands this
+	// device one rule and a page of the owner's rows it cannot read; this
+	// device opens each, names the ones the rule matches, and the server applies
+	// the rule's own actions (never a forward) and moves on.
+
+	var backlogging = null;
+
+	/** Walk every rule's existing-mail backlog. Resolves how many rows a rule applied to. */
+	function drainRuleBacklog() {
+		if (backlogging) return backlogging;
+		backlogging = (async function () {
+			var epoch0 = lockEpoch, applied = 0;
+			try {
+				while (window.MailboxFilterMatch && isOpen() && lockEpoch === epoch0) {
+					var page = await window.joineryApi.post('mailbox/rule_backlog', {});
+					if (!page || !page.rule) break;
+					var matched = [];
+					for (var i = 0; i < page.rows.length; i++) {
+						var row = page.rows[i];
+						var o;
+						// A row this device cannot open cannot match here; the walk
+						// moves past it rather than asking for the same page forever.
+						try { o = await JoinerySealed.open(row.sealed); } catch (e) { continue; }
+						if (MailboxFilterMatch.matches(page.rule, {
+							sender: o.iem_sender || '', recipient: row.recipient || o.iem_recipient || '',
+							subject: o.iem_subject || '', body_plain: o.iem_body_plain || '', body_html: o.iem_body_html || '',
+							size_bytes: row.size_bytes, has_attachment: !!row.has_attachment
+						})) matched.push(row.id);
+					}
+					if (lockEpoch !== epoch0 || !isOpen()) break;
+					var done = await window.joineryApi.post('mailbox/rule_outcomes', {
+						rule_id: page.rule.id, through_id: page.through_id, matched_ids: JSON.stringify(matched)
+					});
+					applied += (done && done.applied) || 0;
+				}
+			} finally {
+				backlogging = null;
+				if (applied && window.MailboxReader && MailboxReader.refreshList) MailboxReader.refreshList();
+			}
+			return applied;
+		})();
+		return backlogging;
 	}
 
 	/** An HTML body's readable text, for search and the preview. Parsing runs no script. */
@@ -1101,13 +1193,13 @@ window.MailboxFortress = (function () {
 		// Relay-sealed mail waits for an open vault; open is when it is parsed.
 		document.addEventListener('joinery:vault-scope-unlocked', function (e) {
 			if (e && e.detail && e.detail.scope === SCOPE) {
-				drainPending().catch(function () {});
+				drainPending().catch(function () {}).then(function () { return drainRuleBacklog(); }).catch(function () {});
 				checkRelayPins().catch(function () {});
 			}
 		});
 		ready().then(function () {
 			if (!isOpen()) return;
-			drainPending().catch(function () {});
+			drainPending().catch(function () {}).then(function () { return drainRuleBacklog(); }).catch(function () {});
 			checkRelayPins().catch(function () {});
 		});
 		JoinerySealed.onLock(SCOPE, function () {
@@ -1301,11 +1393,42 @@ window.MailboxFortress = (function () {
 			await selfCheckJudge(note);
 		}
 		await selfCheckPin(note);
+		if (window.MailboxFilterMatch) {
+			await selfCheckRules(note);
+		}
 		// A page holds the vault client; the node gates that load this file do not.
 		if (window.JoinerySealed) {
 			note('subscribed to the mail vault\'s lock, whatever order the scripts loaded in', hooked);
 		}
 		return { ok: checks.every(function (c) { return c.ok; }), checks: checks };
+	}
+
+	/**
+	 * The parse's rule glue: the parsed message reaches the matcher with the
+	 * row's recipient and size, the matching ids come back in the rules' order,
+	 * and a matched forwarding rule asks for the raw.
+	 */
+	async function selfCheckRules(note) {
+		var saved = ruleCache;
+		try {
+			ruleCache = { 99: Promise.resolve([
+				{ id: 5, match: { subject: 'invoice' }, forwards: false },
+				{ id: 6, match: { to: 'box@', size_op: 'gt', size_bytes: 100 }, forwards: true },
+				{ id: 7, match: { from: 'nobody@' }, forwards: true }
+			]) };
+			var p = { from: 'Billing <billing@example.com>', subject: 'Your Invoice', textPlain: 'Pay.', textHtml: '',
+				attachments: [] };
+			var m = await ruleMatches({ alias_id: 99, recipient: 'box@example.com', size_bytes: 500 }, p, 0);
+			note('the parse names the rules it matched, in order, and asks for the raw for a forward',
+				m.ids.join(',') === '5,6' && m.forwards === true);
+			var none = await ruleMatches({ alias_id: 99, recipient: 'box@example.com', size_bytes: 50 },
+				{ from: 'x@y', subject: 'hello', textPlain: '', textHtml: '', attachments: [] }, 0);
+			note('and nothing when nothing matched', none.ids.length === 0 && none.forwards === false);
+		} catch (e) {
+			note('the parse names the rules it matched, in order, and asks for the raw for a forward', false);
+		} finally {
+			ruleCache = saved;
+		}
 	}
 
 	/**
@@ -1320,14 +1443,15 @@ window.MailboxFortress = (function () {
 			secretHex: '1a94f30594ae6bf54e06ea46c983aa626582a81dea924d01b69a67d0e0089cd4',
 			aliasId: 42,
 			identity: 'uzn2WYR3e1WyY2Kcl1yJATPGrSeOLN9pfAim/U/NObM=',
-			mac: 'nAEl3HxC2IUhttrjI5PeEApF4tKvZ4RP5iQotyB6Z0Q=',
+			mac: 'gPKbTONVl2T3ZmbEUFf+kh1c5OlSjTiWXw9SbDEaiaE=',
 			statement: '{"recipient":"box@fortress.test","public_key":"YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY=",'
 				+ '"key_kind":"client","key_scope":"mail","key_generation":1,"map_version":7,'
 				+ '"relay_identity_public_key":"uzn2WYR3e1WyY2Kcl1yJATPGrSeOLN9pfAim/U/NObM=","signed_at":"2026-09-28T12:00:00Z"}',
 			signature: '8pmxylHrOIw/ZDVwm3ab5K+J1TtwprMXYv6074UCUT5uU79N20dOWiglY7B125GuW5DZ2EZOZ1IN87GxcxvvBw=='
 		};
 		try {
-			var secret = new Uint8Array(v.secretHex.match(/../g).map(function (h) { return parseInt(h, 16); }));
+			// The secret as the keyring holds it (PKCS#8), which is what session.mac() derives from.
+			var secret = new Uint8Array(('302e020100300506032b656e04220420' + v.secretHex).match(/../g).map(function (h) { return parseInt(h, 16); }));
 			var mac = function (b) { return VaultCrypto.macFromSecret(secret, 'sealed-vault:pin', b); };
 			note('the pin MAC matches the server\'s vector',
 				VaultCrypto.b64encode(await mac(pinMessage(v.aliasId, v.identity))) === v.mac);
@@ -1465,6 +1589,7 @@ window.MailboxFortress = (function () {
 		sourceFiles: sourceFiles,
 		onLock: onLock,
 		drainPending: drainPending,
+		drainRuleBacklog: drainRuleBacklog,
 		checkRelayPins: checkRelayPins,
 		judgeEntry: judgeEntry,
 		epoch: epoch,

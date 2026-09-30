@@ -5,7 +5,7 @@
  * caller's browser to open and add to its own search index
  * (specs/client_custody_mail.md § R5).
  *
- * POST /api/v1/action/mailbox/search_entries (browser session). Params:
+ * POST /api/v1/action/mailbox/search_entries (browser session or app session key). Params:
  * order ('old': backwards from a point in time, newest first — a browser's
  * first build; 'new': forwards from where it got to — catching up); time and
  * id (the cursor; time '' starts from now for 'old', from the beginning for
@@ -14,6 +14,8 @@
  * total?}. No content is opened here; the server holds no key that could.
  * MailboxDeviceSearch holds the rules.
  *
+ * @version 1.1 - reachable with an app session key too (requires_person_credential,
+ * specs/fortress_mobile_apps.md § R8)
  * @version 1.0
  */
 
@@ -31,7 +33,7 @@ function search_entries_logic(array $input): LogicResult {
 function search_entries_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('requires_person_credential' => true),
 		'mutates' => false,
 		'description' => 'Page the caller\'s end-to-end encrypted messages with their sealed search text, for their browser\'s own search index',
 		'input' => [

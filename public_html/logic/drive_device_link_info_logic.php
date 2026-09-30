@@ -10,6 +10,8 @@
  *
  * This is the one place a link code can be probed from, so a run of wrong codes
  * from one address shuts that address out for a while.
+ *
+ * @version 1.1 - bound ceremonies: only their own user sees or acts on them; open to anyone holding a content vault
  */
 
 function drive_device_link_info_logic(array $input): LogicResult {
@@ -18,6 +20,10 @@ function drive_device_link_info_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
+	$user_id = (int)$session->get_user_id();
+	if (!DeviceLink::linking_available($user_id)) {
+		return LogicResult::error('There is nothing to hand a device: turn on Drive or set up an end-to-end vault first.');
+	}
 
 	$code = (string)($input['code'] ?? '');
 	if (trim($code) === '') {
@@ -29,7 +35,7 @@ function drive_device_link_info_logic(array $input): LogicResult {
 	}
 
 	$link = DeviceLink::load_open_by_code($code);
-	if (!$link) {
+	if (!$link || !$link->actionable_by($user_id)) {
 		DeviceLink::record_failed_guess();
 		return LogicResult::error('That code is not valid, or it has expired. Codes last ten minutes — start again on the device for a fresh one.');
 	}
@@ -38,6 +44,10 @@ function drive_device_link_info_logic(array $input): LogicResult {
 		'ok'           => true,
 		'device_name'  => $link->get('dlk_device_name'),
 		'platform'     => $link->get('dlk_platform'),
+		'platform_label' => SyncDevice::platform_label((string)$link->get('dlk_platform')),
+		// Opened by an app already signed in to this account: it keeps its own
+		// credential and asks only for vault keys.
+		'bound'        => $link->is_bound(),
 		'request_ip'   => $link->get('dlk_request_ip'),
 		'expires_time' => $link->get('dlk_expires_time'),
 		// Whether this device can receive the encrypted-folder key at all. No
@@ -52,7 +62,6 @@ function drive_device_link_info_logic_descriptor(): array {
 	return array(
 		'description'      => 'Details of a pending device-link ceremony, looked up by its code, so the approval page can show the user what is asking for access.',
 		'requires_session' => true,
-		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('requires_browser_session' => true),
 		'input'            => array(

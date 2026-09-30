@@ -173,6 +173,23 @@ public static function GenerateKey($key) {
 	}
 
 	/**
+	 * A revoked key takes its device with it. A linked computer or phone is the
+	 * identity that owns a session key (SyncDevice); once the key is gone the
+	 * device can reach nothing, and leaving its row live would list a signed-out
+	 * phone as still holding the user's keys.
+	 */
+	function soft_delete() {
+		$result = parent::soft_delete();
+		if ($result && $this->key) {
+			$device = SyncDevice::for_api_key((int)$this->key);
+			if ($device) {
+				$device->soft_delete();
+			}
+		}
+		return $result;
+	}
+
+	/**
 	 * Soft-delete every active session key owned by a user. Called from
 	 * User::save() when the password hash changes — machine keys survive.
 	 */

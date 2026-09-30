@@ -48,6 +48,17 @@ for ($i = 1; $i <= 26; $i++) {
 	$many_links .= '<a href="https://t' . ($i % 17) . '.tracker.example/c/' . $i . '?u=https%3A%2F%2Fshop.example%2F' . $i . '">Item ' . $i . '</a> ';
 }
 $fixtures = array(
+	// Encoded words with a byte in 0x80-0x9F: iconv reads ISO-8859-1 byte for
+	// byte and refuses it in US-ASCII, where a browser's decoder reads both as
+	// windows-1252.
+	'c1-bytes' => array(
+		'raw' => "From: =?ISO-8859-1?Q?Caf=E9_=96_Latin?= <a@latin.example>\r\n"
+			. "Reply-To: =?us-ascii?Q?Ascii_=96_word?= <b@ascii.example>\r\n"
+			. "To: you@example.test\r\n"
+			. "Subject: =?windows-1252?Q?Dash_=96_here?=\r\n",
+		'body_plain' => 'Plain body.',
+		'body_html' => '',
+	),
 	'phish-html' => array(
 		'raw' => "Return-Path: <bounce@mail.evil-pay.example>\r\n"
 			. "Authentication-Results: $ours; spf=pass smtp.mailfrom=mail.evil-pay.example; dkim=pass header.d=Evil-Pay.example.; dmarc=fail\r\n"
@@ -139,12 +150,66 @@ $urls = array('https://a.example/x', 'HTTP://UPPER.Example:443/p', 'https://user
 	'/relative/path', '#frag', 'https://h.example?q=1', 'https://h.example#f', 'https://a@b@c.example/', 'ftp://files.example/f',
 	'https://h.example:/p', 'http:/nohost', 'https://', 'tel:+123', 'https://xn--n3h.example/', "https://\u{00E9}.example/");
 
-$input = array('fixtures' => $fixtures, 'manifests' => $manifests, 'envelopes' => $envelopes, 'randoms' => $randoms, 'urls' => $urls);
+// Encoded words, well-formed and not: the device's reading must be iconv's,
+// quirks included (lenient base64, a kept word losing its '=' at the end).
+$words = array(
+	"=?UTF-8?Q?a=?=",
+	"=?UTF-8?Q?=?=",
+	"=?UTF-8?Q?a=?= tail",
+	"=?UTF-8?Q?a=4?=",
+	"=?UTF-16?B?/v8AYQBi?=",
+	"=?UTF-16?B?//5hAGIA?=",
+	"=?UTF-16?B?YQBiAA==?=",
+	"=?ISO-8859-1?Q?caf=E9?=",
+	"=?ISO-8859-1?Q?=80=9F=A0?=",
+	"=?US-ASCII?Q?=E9?=",
+	"=?US-ASCII?Q?abc?=",
+	"=?UTF-8?B?inv@lid!!?=",
+	"=?UTF-8?B?4pyT?=",
+	"=?X-UNKNOWN?Q?abc?=",
+	"=?UTF-8?Q?a_b?=",
+	"=?UTF-8?Q?ab?= =?UTF-8?Q?cd?=",
+	"=?UTF-8?Q?ab?=\t\r\n =?UTF-8?Q?cd?=",
+	"=?UTF-8?Q?ab?= x =?UTF-8?Q?cd?=",
+	"=?UTF-8?Q?a?==?UTF-8?Q?b?=",
+	"=?windows-1252?Q?=80?=",
+	"=?windows-1252?Q?=81?=",
+	"=?windows-1252?Q?=8D=8F=90=9D?=",
+	"=?UTF-8?Q?=C3?=",
+	"=?UTF-8?Q?=e9?=",
+	"=?UTF-8?Q?a=zz?=",
+	"=?UTF-8?Q?a?b?=",
+	"=?UTF-8?Q??=",
+	"=?utf-8*en?q?hi?=",
+	"pre =?UTF-8?Q?x?= post",
+	"=?ISO-8859-2?Q?=B1?=",
+	"=?koi8-r?Q?=C1?=",
+	"=?GB2312?B?xOO6ww==?=",
+	"=?UTF-8?Q?=F0=9F=98=80?=",
+	"=?UTF-8?B?w4?= =?UTF-8?B?ng==?=",
+	"=?ISO-8859-1?B?/w==?=",
+	"=?ISO-8859-1?Q?=00?=",
+	"=?UTF-16?B?AGEAYg==?=",
+	"=?UTF-8?Q?a=20b?=",
+	"=?ascii?Q?=7F?=",
+	"=?UTF-8?Q?a?=  =?UTF-8?Q?b?=  tail",
+	"x =?UTF-8?Q??= y",
+	"=?UTF-8?B?YQ==?= =?ISO-8859-1?Q?=E9?=",
+	"=?UTF-8?B?YQ=?=",
+	"=?UTF-8?B?Y?=",
+	"=?UTF-8?B?YWI=Yw==?=",
+	"=?iso-8859-1?q?a=E9?=",
+	"=?UTF-8?Q?a=E9?="
+);
+
+$input = array('fixtures' => $fixtures, 'manifests' => $manifests, 'envelopes' => $envelopes, 'randoms' => $randoms, 'urls' => $urls, 'words' => $words);
 $in_file = tempnam(sys_get_temp_dir(), 'daiin');
 file_put_contents($in_file, json_encode($input, JSON_UNESCAPED_UNICODE));
 $root = PathHelper::getRootDir();
 $runner = tempnam(sys_get_temp_dir(), 'dai') . '.js';
 file_put_contents($runner, "globalThis.window = globalThis;\n"
+	// A browser's windows-1252, which Node's decoder lacks (lib/whatwg_text_decoder.js).
+	. "require(" . json_encode($root . '/plugins/mailbox/tests/lib/whatwg_text_decoder.js') . ");\n"
 	. "require(" . json_encode($root . '/assets/js/html-entities.js') . ");\n"
 	. "require(" . json_encode($root . '/assets/js/email-digest.js') . ");\n"
 	. "const D = window.EmailDigest;\n"
@@ -155,6 +220,7 @@ file_put_contents($runner, "globalThis.window = globalThis;\n"
 	. "for (const k in input.envelopes) out.envelopes[k] = D.wrapBlock(input.envelopes[k], 'abcd');\n"
 	. "for (const s of input.randoms) { out.strip.push(D._php.stripTags(s)); out.decode.push(D._php.decodeEntities(s)); }\n"
 	. "for (const u of input.urls) out.hosts.push(D._php.urlHost(u));\n"
+	. "out.words = input.words.map(w => D._php.decodeHeaderValue(w));\n"
 	. "process.stdout.write(JSON.stringify(out));\n");
 $raw_out = (string)shell_exec(escapeshellarg($node) . ' ' . escapeshellarg($runner) . ' 2>&1');
 @unlink($runner);
@@ -183,6 +249,13 @@ $phish = EmailSecurityDigest::buildFromColumns($fixtures['phish-html']);
 check(strpos($phish, 'dkim=pass (d=evil-pay.example) dmarc=fail') !== false, 'the DKIM domain comes from our own stamp, not the foreign one');
 check(strpos($phish, 'SUBJECT (decoded):') !== false && strpos($phish, "limited \u{2014} act now") !== false, 'the folded encoded-word subject decodes');
 check(strpos($phish, 'invisible/whitespace characters') !== false, 'the padding is annotated');
+
+section('Encoded words decode as iconv_mime_decode does');
+foreach ($words as $i => $w) {
+	$d = @iconv_mime_decode($w, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+	$php = $d !== false ? $d : $w;
+	check($php === ($js['words'][$i] ?? null), 'word: ' . $w, json_encode(array('php' => $php, 'js' => $js['words'][$i] ?? null), JSON_UNESCAPED_UNICODE));
+}
 
 section('The ATTACHMENTS section is byte-equal');
 foreach ($manifests as $name => $m) {

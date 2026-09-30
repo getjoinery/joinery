@@ -28,6 +28,7 @@
  * for the browser to open. saveDraft refuses such a mailbox, so a plaintext draft
  * cannot land there.
  *
+ * @version 1.4 - a Fortress draft's parts carry signed URLs to their ciphertext (specs/fortress_mobile_apps.md § R12)
  * @version 1.3.2 - a new part may not repeat a part name (review by public-html-91, B15)
  * @version 1.3.1 - review of 2026-09-27: only a browser-sealed or truly hollow draft is a Fortress
  *   draft (B2, B9); the part limits count the parts a save keeps (B7)
@@ -568,18 +569,28 @@ class MailboxDrafts {
 	/** A Fortress draft's parts, as the browser needs them to fetch and open each. */
 	private function fortressParts(int $message_id): array {
 		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare('SELECT ima_inbound_message_attachment_id, ima_mime_part, ima_size_bytes, ima_is_inline
+		$stmt = $db->prepare('SELECT ima_inbound_message_attachment_id, ima_mime_part, ima_size_bytes, ima_is_inline, ima_fil_file_id
 			FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = ?
 			ORDER BY ima_inbound_message_attachment_id ASC');
 		$stmt->execute(array($message_id));
 		$out = array();
 		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
 			$inline = $r['ima_is_inline'];
+			// A signed URL to the part's stored ciphertext, for a phone app that
+			// reopens a draft (the browser fetches through its session page).
+			$url = null;
+			if ($r['ima_fil_file_id'] !== null) {
+				$file = new File(intval($r['ima_fil_file_id']), TRUE);
+				if ($file->key && !$file->get('fil_delete_time')) {
+					$url = $file->mintSignedUrl('original', 900, 'full');
+				}
+			}
 			$out[] = array(
 				'id'         => intval($r['ima_inbound_message_attachment_id']),
 				'mime_part'  => (string)$r['ima_mime_part'],
 				'size_bytes' => intval($r['ima_size_bytes']),
 				'inline'     => ($inline === true || $inline === 't' || $inline === 1 || $inline === '1'),
+				'url'        => $url,
 			);
 		}
 		return $out;

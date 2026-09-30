@@ -90,6 +90,7 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.46 - forwardStoredMessage() takes the raw an end-to-end message's device opened
  * @version 1.45 - storeRelayPending() takes a Fortress arrival the relay sealed to the
  *                browser-held key: the row keeps the relay's DEK as its own key
  * @version 1.44 - Fortress rows at ingest (storeMessage, storeDirectMessage): attachments
@@ -2486,17 +2487,21 @@ class InboundEmailRouter {
 	 * stored recipient/domain, not an alias row. Best-effort: returns the
 	 * per-destination relay result and never throws.
 	 *
+	 * An end-to-end message has no raw the server can read; the owner's device
+	 * that opened it hands the raw in as $raw (a device-run rule's forward).
+	 *
 	 * @param InboundEmailMessage $msg          a persisted message (raw resolvable)
 	 * @param array               $destinations target addresses
+	 * @param string|null         $raw          the message as its owner's device opened it
 	 * @return array ['destination' => bool]
 	 */
-	public function forwardStoredMessage(InboundEmailMessage $msg, array $destinations): array {
+	public function forwardStoredMessage(InboundEmailMessage $msg, array $destinations, ?string $raw = null): array {
 		$destinations = array_values(array_filter(array_map('trim', $destinations), 'strlen'));
 		if (!count($destinations)) {
 			return array();
 		}
 		try {
-			$raw = $msg->getRawMessage();
+			$raw = ($raw !== null && $raw !== '') ? $raw : $msg->getRawMessage();
 			// The loop guard reads the headers the message ARRIVED with. A lean
 			// record keeps no raw but keeps its header block, and the synthesized
 			// forward below carries none of the arrival headers — so the guard

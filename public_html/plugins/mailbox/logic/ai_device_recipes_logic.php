@@ -4,7 +4,7 @@
  * judge their end-to-end encrypted mail on one mailbox against their own model
  * (specs/fortress_mail_device_ai.md § R5).
  *
- * POST /api/v1/action/mailbox/ai_device_recipes (browser session). Params:
+ * POST /api/v1/action/mailbox/ai_device_recipes (browser session or app session key). Params:
  * mailbox (address). Returns {alias_id, recipes, authserv_id, model_reference,
  * consent_refusal}: each recipe is {recipe_id, job_id, label, system, nonce,
  * verdict_descriptor, max_tokens, min_tier, attachments}, `system` being the
@@ -13,6 +13,8 @@
  * reason the mailbox's domain refuses the registered model, or null.
  * MailboxDeviceAi holds the rules.
  *
+ * @version 1.1 - reachable with an app session key too (requires_person_credential,
+ * specs/fortress_mobile_apps.md § R8)
  * @version 1.0
  */
 
@@ -28,7 +30,7 @@ function ai_device_recipes_logic(array $input): LogicResult {
 function ai_device_recipes_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('requires_person_credential' => true),
 		'description' => 'The caller\'s device-capable AI recipes on one mailbox, with the full system prompt, nonce and verdict shape their browser judges with',
 		'input' => [
 			'mailbox' => ['type' => 'string', 'required' => true, 'label' => 'Mailbox address'],

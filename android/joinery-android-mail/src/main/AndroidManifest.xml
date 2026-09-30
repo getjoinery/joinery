@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The new-mail check (specs/fortress_mobile_apps.md § R15), asked for
+         the first time a mailbox's notifications are turned on. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application>
         <!-- Hands downloaded attachments to the system viewer/share sheet.
              Authority is per-app via the applicationId placeholder, so two

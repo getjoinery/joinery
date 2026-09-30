@@ -59,6 +59,7 @@ public final class APIClient: @unchecked Sendable {
         var components = URLComponents(url: config.baseURL, resolvingAgainstBaseURL: false)!
         components.path = path
         if !query.isEmpty { components.queryItems = query }
+        try Self.requireHTTPS(components.url!)
         var request = URLRequest(url: components.url!)
         request.httpMethod = method
         request.timeoutInterval = 30
@@ -114,6 +115,55 @@ public final class APIClient: @unchecked Sendable {
         return json
     }
 
+    /// A byte download from a signed URL (an attachment's stored bytes). The
+    /// URL is its own credential, so the request carries no key headers and no
+    /// cookie: an ephemeral session with no cookie store, so nothing a signed
+    /// URL returns can set or read the bridged web session.
+    public func fetchBytes(_ urlString: String) async throws -> Data {
+        guard let url = URL(string: urlString, relativeTo: config.baseURL)?.absoluteURL else {
+            throw JoineryAPIError.malformedResponse
+        }
+        try Self.requireHTTPS(url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 120
+        request.setValue(config.clientApp, forHTTPHeaderField: "client-app")
+        request.setValue(config.clientVersion, forHTTPHeaderField: "client-version")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await Self.bytesSession.data(for: request)
+        } catch {
+            throw JoineryAPIError.network(underlying: error)
+        }
+        guard let http = response as? HTTPURLResponse else { throw JoineryAPIError.malformedResponse }
+        let type = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+        // The attachment page renders HTML for its own refusals.
+        guard http.statusCode == 200, !type.lowercased().contains("text/html") else {
+            throw JoineryAPIError.server(errortype: "DownloadError",
+                                         message: "This attachment could not be fetched.", status: http.statusCode)
+        }
+        return data
+    }
+
+    static let bytesSession: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.httpCookieStorage = nil
+        c.httpShouldSetCookies = false
+        c.urlCache = nil
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: c)
+    }()
+
+    /// Every request to the site is https: the session key and the signed
+    /// URLs never cross a plain connection, whatever the app's transport
+    /// settings allow elsewhere (a local AI model may be plain http).
+    static func requireHTTPS(_ url: URL) throws {
+        guard url.scheme?.lowercased() == "https" else {
+            throw JoineryAPIError.server(errortype: "SecurityError",
+                                         message: "This app talks to its site only over https.", status: 0)
+        }
+    }
+
     /// GET a form definition: `/api/v1/form/{action}`.
     /// Sessionless forms (password resets, register) pass `authenticated: false`.
     public func formDefinition(
@@ -161,6 +211,7 @@ public final class APIClient: @unchecked Sendable {
     ) async throws -> JSONValue {
         var components = URLComponents(url: config.baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/api/v1/action/\(action)"
+        try Self.requireHTTPS(components.url!)
         var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
         // Uploads can be several MB — allow more headroom than a JSON call.

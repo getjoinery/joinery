@@ -8,36 +8,192 @@ import JoineryKit
 public enum JoineryMail {
     public static func registerScreens() {
         NativeScreenRegistry.register("mailbox") { context in
-            AnyView(MailboxScreen(client: context.session.client))
+            AnyView(MailboxScreen(session: context.session, user: context.user))
         }
     }
 }
 
-/// The native mailbox: a Gmail-style thread list over the granted mailboxes,
-/// with view switching (Inbox / Starred / All Mail / Spam), server-side
-/// search, swipe triage, paging, and pull-to-refresh.
-public struct MailboxScreen: View {
-    @StateObject private var store: MailboxStore
-    @State private var newCompose: ComposeRequest?
+/// Everything one signed-in mailbox screen holds: the list, the end-to-end
+/// half, the device-side work, the phone's search, and the AI settings.
+@MainActor
+final class MailScreenModel: ObservableObject {
+    let store: MailboxStore
+    let fortress: FortressSession
+    let work: FortressWork
+    let ai: DeviceAISettings
 
-    public init(client: APIClient) {
-        _store = StateObject(wrappedValue: MailboxStore(api: MailAPI(client: client)))
+    init(session: SessionController, user: UserSummary) {
+        let api = MailAPI(client: session.client)
+        let fortress = FortressSession(session: session)
+        fortress.vault.companions = [DeviceAISettings.keyName]
+        let search = DeviceSearch(api: api, fortress: fortress, userID: user.userId)
+        ai = DeviceAISettings(deviceKeys: session.deviceKeys, userID: user.userId)
+        store = MailboxStore(api: api, fortress: fortress, deviceSearch: search)
+        work = FortressWork(fortress: fortress, api: api, ai: ai)
+        self.fortress = fortress
+        session.addSignOutHook {
+            OpenedFiles.removeAll()
+            MailPolling.reset()
+            UserDefaults.standard.removeObject(forKey: FortressWork.skipKey)
+            UserDefaults.standard.removeObject(forKey: FortressWork.parsingKey)
+            // The sealed index stays; its key goes with the mail key and it
+            // reopens after the next enrollment (§ R9).
+        }
+        MailPolling.schedule()
+    }
+
+    private var lastRefreshCheck = Date.distantPast
+
+    /// A list refresh (pull, return, a reload): notice a retired key and new
+    /// relay mail at most once per 10 s — the probe, then the device work.
+    func refreshed() async {
+        guard Date().timeIntervalSince(lastRefreshCheck) >= 10 else { return }
+        lastRefreshCheck = Date()
+        let before = fortress.vault.status
+        await fortress.vault.checkStillHeld()
+        if before != fortress.vault.status { await store.reload(refreshMailboxes: true) }
+        startWork()
+    }
+
+    /// With the key held and the mailbox on screen: the device's share of the
+    /// work (parse, rules, pin check, AI) and the search index's first build.
+    func startWork() {
+        guard fortress.isOpen, let boxes = store.home?.mailboxes, boxes.contains(where: \.isFortress) else { return }
+        store.deviceSearch?.warm()
+        work.run(mailboxes: boxes) { [weak self] in await self?.store.reload(refreshMailboxes: true) }
+    }
+}
+
+/// The native mailbox: a Gmail-style thread list over the granted mailboxes,
+/// with view switching (Inbox / Starred / All Mail / Spam / Drafts), search
+/// (server-side, and on the phone's own index for end-to-end mail), swipe
+/// triage, paging, and pull-to-refresh. End-to-end mailboxes open here with
+/// the mail key this phone holds (specs/fortress_mobile_apps.md).
+public struct MailboxScreen: View {
+    @StateObject private var model: MailScreenModel
+    @State private var newCompose: ComposeRequest?
+    @State private var showEnroll = false
+    @State private var showSettings = false
+    @State private var unlockError: String?
+    @Environment(\.scenePhase) private var scenePhase
+
+    private var store: MailboxStore { model.store }
+
+    public init(session: SessionController, user: UserSummary) {
+        _model = StateObject(wrappedValue: MailScreenModel(session: session, user: user))
     }
 
     public var body: some View {
+        MailboxScreenBody(model: model, store: model.store, vault: model.fortress.vault, work: model.work,
+                          newCompose: $newCompose, showEnroll: $showEnroll, showSettings: $showSettings,
+                          unlockError: $unlockError)
+            .task {
+                OpenedFiles.removeAll()
+                if case .loading = model.store.phase { await model.store.initialLoad() }
+                await model.fortress.vault.checkStillHeld()
+                model.startWork()
+            }
+            .onChange(of: scenePhase) { phase in
+                guard phase == .active else { return }
+                // B6: a key retired while away is noticed here, and wiped.
+                Task { await model.refreshed() }
+            }
+            .onReceive(model.fortress.$lockEpoch.dropFirst()) { _ in
+                Task { await model.store.reopenRows() }
+            }
+            .sheet(item: $newCompose) { request in
+                ComposeSheet(api: model.store.api, request: request,
+                             mailboxes: model.store.home?.mailboxes ?? [], preselectedAlias: model.store.selectedAlias,
+                             fortress: model.fortress) {
+                    Task { await model.store.reload(refreshMailboxes: true) }
+                }
+            }
+            .sheet(isPresented: $showEnroll) {
+                EnrollSheet(vault: model.fortress.vault) {
+                    Task {
+                        await model.store.reopenRows()
+                        model.startWork()
+                    }
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                MailSettingsView(model: model)
+            }
+    }
+}
+
+/// The screen's body, observing the list, the vault and the device work.
+struct MailboxScreenBody: View {
+    let model: MailScreenModel
+    @ObservedObject var store: MailboxStore
+    @ObservedObject var vault: DeviceVault
+    @ObservedObject var work: FortressWork
+    @Binding var newCompose: ComposeRequest?
+    @Binding var showEnroll: Bool
+    @Binding var showSettings: Bool
+    @Binding var unlockError: String?
+
+    var body: some View {
         content
             .navigationTitle(store.title)
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarContent }
-            .task {
-                if case .loading = store.phase { await store.initialLoad() }
+            .alert(item: Binding(get: { work.relayAlarm }, set: { _ in })) { alarm in
+                Alert(title: Text("Mail arriving at your relay is not being sealed to this phone's key"),
+                      message: Text("\(alarm.address): \(alarm.reason)\n\nTrusted relay: \(alarm.expected)\nAnswering now: \(alarm.reported)"),
+                      dismissButton: .default(Text("Close")))
             }
-            .sheet(item: $newCompose) { request in
-                ComposeSheet(api: store.api, request: request,
-                             mailboxes: store.home?.mailboxes ?? [], preselectedAlias: store.selectedAlias) {
-                    Task { await store.reload(refreshMailboxes: true) }
+    }
+
+    private var hasFortress: Bool { store.home?.mailboxes.contains(where: \.isFortress) ?? false }
+
+    /// R10: one banner for the end-to-end state, one button.
+    @ViewBuilder
+    private var fortressBanner: some View {
+        if hasFortress {
+            switch vault.status {
+            case .notEnrolled:
+                banner(vault.retired
+                       ? "Your mail key changed. Open your mail on a computer once to hand this phone the new key."
+                       : "This mailbox is end-to-end encrypted. Hand this phone the key from a computer where your mail is open.",
+                       button: "Enroll", id: "mail_fortress_enroll") { showEnroll = true }
+            case .locked:
+                banner(unlockError ?? "End-to-end encrypted mail is locked on this phone.",
+                       button: "Unlock", id: "mail_fortress_unlock") {
+                    Task {
+                        do {
+                            try await model.fortress.unlock()
+                            unlockError = nil
+                            await store.reopenRows()
+                            model.startWork()
+                        } catch DeviceKeyStore.Failure.cancelled {
+                        } catch {
+                            unlockError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        }
+                    }
+                }
+            case .open:
+                ForEach([work.pendingLine, work.aiLine, store.searchNote, store.deviceSearch?.status.line]
+                    .compactMap { $0 }, id: \.self) { line in
+                    Text(line).font(.footnote).foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
+                        .accessibilityIdentifier("mail_fortress_status")
                 }
             }
+        }
+    }
+
+    private func banner(_ text: String, button: String, id: String, action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(text, systemImage: "lock.shield")
+                .font(.subheadline)
+                .accessibilityIdentifier("mail_fortress_banner")
+            Button(button, action: action)
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier(id)
+        }
+        .padding(.vertical, 6)
+        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder
@@ -67,6 +223,7 @@ public struct MailboxScreen: View {
 
     private var threadList: some View {
         List {
+            fortressBanner
             if store.threads.isEmpty {
                 emptyState
             }
@@ -74,19 +231,37 @@ public struct MailboxScreen: View {
                 ZStack {
                     // Row content owns the layout; a background NavigationLink
                     // keeps the disclosure chevron out of the Gmail-style row.
-                    NavigationLink {
-                        ThreadDetailView(store: store, summary: thread)
-                    } label: { EmptyView() }
-                    .opacity(0)
+                    if store.view == .drafts {
+                        Button { newCompose = .draft(thread.latestID, aliasID: store.selectedAlias) } label: { EmptyView() }
+                            .opacity(0)
+                    } else {
+                        NavigationLink {
+                            ThreadDetailView(store: store, summary: thread)
+                        } label: { EmptyView() }
+                        .opacity(0)
+                    }
                     ThreadRowView(thread: thread) {
                         Task {
                             await store.perform(thread.isStarred ? "unstar" : "star", on: thread)
                         }
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if store.view == .drafts { newCompose = .draft(thread.latestID, aliasID: store.selectedAlias) }
+                    }
+                    .allowsHitTesting(store.view == .drafts)
                 }
                 .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 12))
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    if store.view != .spam {
+                    if store.view == .drafts {
+                        Button(role: .destructive) {
+                            Task {
+                                _ = try? await store.api.action("mailbox/draft_delete",
+                                                                [(key: "draft_id", value: .number(Double(thread.latestID)))])
+                                store.remove(thread.threadKey)
+                            }
+                        } label: { Label("Discard", systemImage: "trash") }
+                    } else if store.view != .spam {
                         Button {
                             Task { await store.perform(thread.isArchived ? "unarchive" : "archive", on: thread) }
                         } label: {
@@ -121,6 +296,7 @@ public struct MailboxScreen: View {
         .accessibilityIdentifier("mail_list")
         .refreshable {
             await store.reload(refreshMailboxes: true)
+            await model.refreshed()
         }
         .searchable(text: $store.searchText, placement: .navigationBarDrawer(displayMode: .automatic),
                     prompt: "Search mail")
@@ -154,6 +330,7 @@ public struct MailboxScreen: View {
         case .starred: return "No starred conversations."
         case .all: return "No mail yet."
         case .spam: return "No spam. Nice."
+        case .drafts: return "No drafts."
         }
     }
 
@@ -173,6 +350,11 @@ public struct MailboxScreen: View {
                             Text(box.address).tag(Int?.some(box.aliasID))
                         }
                     }
+                }
+                Button {
+                    showSettings = true
+                } label: {
+                    Label("Mail settings", systemImage: "gearshape")
                 }
             } label: {
                 Image(systemName: "line.3.horizontal.decrease.circle")
@@ -239,11 +421,14 @@ struct ThreadRowView: View {
                 }
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(thread.subject.isEmpty ? "(no subject)" : thread.subject)
+                        // An end-to-end row this phone cannot open says so (B1),
+                        // never "(no subject)".
+                        Text(thread.placeholder != nil ? "End-to-end encrypted"
+                             : (thread.subject.isEmpty ? "(no subject)" : thread.subject))
                             .font(.subheadline.weight(thread.hasUnread ? .semibold : .regular))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                        Text(thread.snippet)
+                        Text(thread.aiSummary.isEmpty ? thread.snippet : thread.aiSummary)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

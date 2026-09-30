@@ -293,6 +293,10 @@ change is immediately visible in both:
   matching the web and Android pickers exactly (there is no empty-state
   affordance to create the first one from the button itself).
 
+Fortress mail, drafts, on-phone search, mail rules on relay-sealed mail, AI on
+the person's own model and new-mail notifications: § Fortress mail, drafts,
+search and notifications in the native mail modules.
+
 Not in the module (the web reader remains for them): filter management, spam
 settings.
 
@@ -737,8 +741,120 @@ Compose `testTag` values (`mail_*`) are the stable UI-test addressing:
 `mail_attachment_{id}`, and `mail_compose_*` (`from`, `to`, `cc`, `subject`,
 `body`, `attach`, `attachment_remove`, `send`, `cancel`, `error`).
 
+Fortress mail and the rest of the key-holding work are described once for
+both platforms: § Fortress mail, drafts, search and notifications in the
+native mail modules.
+
 Not in the module (the web reader remains for them): filter management and
 Gmail filter import, spam settings, admin oversight surfaces.
+
+## Fortress mail, drafts, search and notifications in the native mail modules
+
+Both mail modules (JoineryMailKit and joinery-android-mail) read and write
+**Fortress** mail — the end-to-end level whose key the server never holds
+(`plugins/mailbox/docs/overview.md` § Fortress: end-to-end mail) — and carry
+drafts, on-phone search and new-mail notifications for every mailbox. The two
+platforms mirror each other; the shared test vectors under
+`plugins/mailbox/tests/fixtures/` and `tests/vault/fixtures/` pin every port
+to the browser's own code.
+
+**The key on the phone.** The phone holds the mail vault's secret and opens
+rows itself; there is no server window and no passkey. At first enrollment the
+app makes an X25519 device keypair and keeps it across sign-outs. Enrollment is
+bound to the session key the app already has (`device_key_enroll`,
+`docs/sealed_vault.md` § Handing a vault to a device): the app shows a code and
+the page to open, the owner approves it on a computer (`/profile/devices/link`,
+where the browser seals the mail secret to the device key), and the app's poll
+collects the sealed key, opens it with the device secret, and stores the mail
+secret. Neither the Secure Enclave nor StrongBox holds X25519 keys, so both
+secrets live **behind** the chip's biometric gate: on iOS as Keychain items
+(`WhenPasscodeSetThisDeviceOnly`, `.biometryCurrentSet`); on Android wrapped
+under a Keystore AES-GCM key that needs strong biometrics, is invalidated by a
+new enrollment, and is StrongBox-backed where the phone has one
+(`BiometricPrompt`; Tink does the X25519, HKDF and AES-GCM). A stolen phone
+yields nothing without the owner's face or finger; a new fingerprint or face
+invalidates the stored key.
+
+**When it is open.** Opening a Fortress mailbox prompts once; the secret then
+lives in memory and is zeroed after five minutes in the background, on
+sign-out, on a 401, and when `vault_client_probe` (called at launch and on
+foreground) says this device no longer holds the scope or the vault's key is
+not the one the secret derives. That last case is a rotation or a
+recovery-code use: the app wipes the secret and shows the enroll banner again.
+Sign-out keeps the device key, so re-enrollment approves the same one.
+
+**Reading.** List rows and messages arrive with empty clear fields and a
+`sealed` shape; the app opens the row key (`v1.edgeseal.mail.`) with the mail
+secret and each field (`v1.edge.`, AD `mail:{id}:{field}`) with the row key,
+names parts from the sealed manifest, and fetches each part through its
+signed URL (the stored ciphertext; no credential) and opens it with the row key
+and AD `mail:{id}:att:{mime_part}`. `cid:` images become `data:` URLs, so no
+opened byte reaches disk for display. HTML bodies render in a view that carries
+no web-session cookie (a non-persistent data store on iOS, a cookie-less
+WebView on Android); a Fortress body loads nothing remote. Opened files for
+the share sheet or viewer are written file-protected to the app's private
+storage and deleted when the viewer returns and at sign-out. Without the key,
+rows say "Encrypted on your other devices", one banner offers **Enroll**, and
+Reply is hidden; a relay-sealed row still waiting to be parsed says so.
+
+**Compose.** A reply or forward of a Fortress message posts `source_open`
+(what the phone opened, for the quote) and, for a forward, the opened parts as
+uploads. A send answered `{locked: true}` (the sending lock) keeps the sheet
+open and says to send from a computer.
+
+**Drafts, every level.** A Drafts view (`thread_list` with `drafts`),
+autosave three seconds after the last edit and on leaving the sheet, restore
+from `draft_get`, swipe to delete. Standard and Private drafts save plain; a
+Fortress draft takes the browser's two-step sealed save (one DEK for the
+draft's life, the fields sealed under it, each new part sealed and posted in
+its own request, `keep` authoritative), and its saved parts come back through
+their signed URLs. The background lock saves an open Fortress draft first,
+then closes the sheet.
+
+**Search on the phone.** Fortress mail is searched on the device: a port of
+the browser's shard index (`mailbox_search_core.js`), built from
+`search_entries` in the background with a progress line, sealed at rest under
+a record key derived from the mail secret
+(`HKDF-SHA256(secret, '', 'joinery-mailsearch:record:v1')`), and queried into
+`thread_list`'s `device_hits` / `device_only`. **Rebuild** and **Remove from
+this phone** sit in the mailbox menu.
+
+**Relay-sealed mail and mail rules.** Under Seal at the relay, the phone
+drains `fortress_pending` like the browser: it opens the raw message, parses it
+(a port of `mailbox_mime.js`), matches the mailbox's rules on it
+(`mailbox/device_rules`), seals every field and part under the row's key and
+posts them as one bundle with the matched rule ids (and the opened raw when a
+matched rule forwards). It verifies the relay's signed seal-target statement
+against the pin and raises an alarm on a mismatch; trusting a new relay is a
+step-up on a computer. The rules' "apply to existing mail" walk
+(`rule_backlog` / `rule_outcomes`) runs from the same place.
+
+**AI on the person's own model.** With a model origin registered on a computer
+(`ai_device_recipes` returns it as `device_ai_origin`), the AI settings screen
+takes the endpoint path, key and model — stored behind the biometric gate — with
+a Test button and a **Wi-Fi only** switch (on by default). While the mailbox
+is open, the app drains `device_ai_entries` for each device-capable recipe,
+builds the digest (a port of `email-digest.js`), calls the endpoint,
+validates the verdict (a port of `verdict-check.js`), seals it under the row
+key and posts `device_ai_verdict`. Never in the background.
+
+**New-mail notifications (polling).** A scheduled background check (iOS
+`BGAppRefreshTask`, id `com.getjoinery.mail.poll`; Android `WorkManager`
+periodic work, network required) calls `mailboxes` and compares each
+turned-on mailbox's `newest_unread_id` with the highest id it last notified.
+Higher means new mail: one notification, "New message in {address}", with the
+sender and subject for a Standard mailbox only (Private and Fortress name the
+mailbox alone). Per-mailbox switches live in the app's settings; the first
+check after sign-in only records marks; sign-out and a 401 cancel the
+schedule. The OS decides how often the check runs.
+
+**What the phone never does.** Set up or unlock the vault against the server,
+rotate a key, approve another device, change a protection level, trust a new
+relay, or register where its AI model lives. Each of those is a browser
+ceremony; an app that meets one (`requires_stepup`) points to a computer.
+
+The API actions a phone calls for this work admit the app session key through
+`requires_person_credential` (`docs/api.md` § Authentication).
 
 ## joinery-android-calendar (native calendar module)
 
@@ -1101,6 +1217,24 @@ Stable `testTag` values: `billing_list`, `billing_current_tier`,
   tasks. The member module's fixtures
   (`src/test/resources/fixtures/*.json`) are the verbatim JoineryMemberKit
   fixtures, parity by construction.
+- `tests/functional/api/fortress_phone_flow_test.php` — the phone's Fortress
+  calls end to end over HTTP against dev: sign in, the sealed list, enrollment
+  bound to the session key, the poll's sealed key opened with the device
+  secret, the row and a part fetched by signed URL with no credential and
+  opened. With `FORTRESS_CAPTURE_DIR` set it writes the envelopes both apps'
+  parsing tests read (`plugins/mailbox/tests/fixtures/fortress_api/`).
+- `tests/functional/ios/fortress_gate.sh` and
+  `tests/functional/android/fortress_gate.sh` — the Fortress gates (live tier,
+  on the mini). Fixtures come from `maintenance_scripts/dev_tools/walk_fixture.php`:
+  `create <purpose> --fortress` (a mail vault from a keypair the script keeps in
+  `/tmp/joinery-app-fortress-<purpose>.json`, so no browser is needed),
+  `approve-device` (the link page's handover for the code the app shows),
+  `deliver` / `deliver-relay`, `add-rule`, `retire-key` and `ai-on`. Legs:
+  enroll, read and open a part, reply and forward with parts, a relay-sealed
+  arrival parsed on the phone with a mail rule applied and a forward posted,
+  on-phone search, a sealed draft saved, reopened and sent, lock and unlock,
+  a retired key wiped and re-enrolled, the AI drain against a stand-in model
+  (`tests/functional/android/ai_standin.py`), and a polled notification.
 - `tests/functional/android/member_gate.sh` — the Android instrumented gate:
   drives the `joinery-member-android` Compose test suites on the emulator
   (`joinery_test` AVD) against dev, mirroring `phase3_gate.sh` leg for leg

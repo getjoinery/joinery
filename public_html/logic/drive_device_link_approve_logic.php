@@ -21,6 +21,13 @@
  * rides in `sealed_vault_keys` ({scope: blob}), each sealed to the same device
  * key in its own unlock. The device records which scopes it was handed.
  *
+ * A ceremony a signed-in app opened (device_key_enroll) is bound to that app's
+ * key already: approving it mints nothing. The vaults handed over are recorded
+ * on the SyncDevice row for that key — created here on the first handover,
+ * reused after — and only the bound user may approve it.
+ *
+ * @version 1.2 - bound ceremonies (a signed-in app): mint nothing, record the handover on its key's device;
+ *   open to anyone holding a content vault, not only with Drive on
  * @version 1.1 - sealed_vault_keys for scopes beyond Drive; sde_vault_scopes recorded
  */
 
@@ -52,8 +59,12 @@ function drive_device_link_approve_logic(array $input): LogicResult {
 		return LogicResult::error('Too many incorrect codes. Wait a few minutes and try again.');
 	}
 
+	if (!DeviceLink::linking_available($user_id)) {
+		return LogicResult::error('There is nothing to hand a device: turn on Drive or set up an end-to-end vault first.');
+	}
+
 	$link = DeviceLink::load_open_by_code($code);
-	if (!$link) {
+	if (!$link || !$link->actionable_by($user_id)) {
 		DeviceLink::record_failed_guess();
 		return LogicResult::error('That code is not valid, or it has expired. Codes last ten minutes — start again on the device for a fresh one.');
 	}
@@ -106,6 +117,11 @@ function drive_device_link_approve_logic(array $input): LogicResult {
 
 	$device_name = (string)$link->get('dlk_device_name');
 
+	if ($link->is_bound()) {
+		return _device_link_approve_bound($link, $user_id, $device_pubkey, $handed_scopes,
+			$enable_vault ? $sealed_vault_key : '', $sealed_vault_keys);
+	}
+
 	// Mint the credential, then the identity that owns it. The key is labelled
 	// with the device name so it is recognizable on the API Keys page too.
 	$minted = ApiKey::CreateSessionKey($user_id, $device_name);
@@ -145,11 +161,65 @@ function drive_device_link_approve_logic(array $input): LogicResult {
 	));
 }
 
+/**
+ * Approve a ceremony a signed-in app opened: the app keeps the credential it
+ * has, and what it gains is the sealed keys and a device row saying it holds
+ * them. A bound ceremony exists to hand over keys, so one with none is refused.
+ */
+function _device_link_approve_bound(DeviceLink $link, int $user_id, string $device_pubkey,
+		array $handed_scopes, string $sealed_drive_key, array $sealed_vault_keys): LogicResult {
+	if (!$handed_scopes) {
+		return LogicResult::error('Choose at least one vault to hand this device.');
+	}
+	$api_key = new ApiKey((int)$link->get('dlk_apk_api_key_id'), TRUE);
+	if (!$api_key->key || $api_key->get('apk_delete_time')
+		|| (int)$api_key->get('apk_usr_user_id') !== $user_id) {
+		return LogicResult::error('That device has been signed out. Sign in on it again and start over.');
+	}
+
+	$device = SyncDevice::for_api_key((int)$api_key->key);
+	$scopes = $handed_scopes;
+	if ($device) {
+		// Same device key: what it already holds stays held. A new device key
+		// (the app was reinstalled) cannot open anything sealed to the old one.
+		if ((string)$device->get('sde_device_pubkey') === $device_pubkey) {
+			$scopes = array_values(array_unique(array_merge($device->vault_scopes(), $handed_scopes)));
+		}
+	} else {
+		$device = new SyncDevice(NULL);
+		$device->set('sde_usr_user_id', $user_id);
+		$device->set('sde_apk_api_key_id', (int)$api_key->key);
+		$device->set('sde_platform', (string)$link->get('dlk_platform'));
+	}
+	$device->set('sde_device_name', substr((string)$link->get('dlk_device_name'), 0, 64));
+	$device->set('sde_device_pubkey', $device_pubkey);
+	$device->set('sde_vault_scopes', implode(',', $scopes));
+	$device->save();
+
+	$link->set('dlk_sde_sync_device_id', (int)$device->key);
+	$link->set('dlk_status', DeviceLink::STATUS_APPROVED);
+	if ($sealed_drive_key !== '') {
+		$link->set('dlk_sealed_vault_key', $sealed_drive_key);
+	}
+	if ($sealed_vault_keys) {
+		$link->set('dlk_sealed_vault_keys', json_encode($sealed_vault_keys));
+	}
+	$link->save();
+
+	return LogicResult::render(array(
+		'ok'           => true,
+		'approved'     => true,
+		'device_id'    => (int)$device->key,
+		'device_name'  => (string)$link->get('dlk_device_name'),
+		'vault_shared' => $sealed_drive_key !== '',
+		'vault_scopes' => $handed_scopes,
+	));
+}
+
 function drive_device_link_approve_logic_descriptor(): array {
 	return array(
-		'description'      => 'Approve a pending device-link ceremony: mints the device\'s session credential, creates its SyncDevice identity, and (optionally) stores browser-sealed vault keys for the device to collect: the drive key in `sealed_vault_key`, any other client-custody vault in `sealed_vault_keys` ({scope: blob}). Requires a signed-in browser session and a recent step-up. Every sealed key is opaque ciphertext produced in the browser — the server cannot open it.',
+		'description'      => 'Approve a pending device-link ceremony: mints the device\'s session credential (none for a ceremony a signed-in app opened, which keeps its own), creates or updates its SyncDevice identity, and (optionally) stores browser-sealed vault keys for the device to collect: the drive key in `sealed_vault_key`, any other client-custody vault in `sealed_vault_keys` ({scope: blob}). Requires a signed-in browser session and a recent step-up. Every sealed key is opaque ciphertext produced in the browser — the server cannot open it.',
 		'requires_session' => true,
-		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'auth'             => array('requires_browser_session' => true),
 		'input'            => array(

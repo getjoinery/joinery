@@ -37,6 +37,9 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.6 - device-run rules: deviceRule(), applyDeviceMatches() (a rule of the message's own scope switched
+ *   off mid-drain is skipped, not refused), requestApplyExisting(), ief_device_backlog_requested_time (each owner's
+ *   place in InboundEmailFilterDeviceProgress)
  * @version 1.5 - matches() never matches a stored Fortress message (no plaintext to read)
  * @version 1.4 - prefix ief, table ief_inbound_email_filters: fil is File's alone
  *                (specs/implemented/shared_prefix_inbound_email_filter.md)
@@ -119,6 +122,12 @@ class InboundEmailFilter extends SystemBase {
 		// backfill bookkeeping ("Also apply to existing")
 		'ief_apply_existing_pending' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'ief_apply_existing_cursor'  => array('type'=>'int8', 'default'=>'0', 'is_nullable'=>false),
+		// The same walk over end-to-end rows, which only each row's owner's
+		// device can read (MailboxDeviceRules): when it was last asked for, NULL
+		// when never. Each owner's place is kept apart, in
+		// ifp_inbound_email_filter_device_progress (a domain-wide rule reaches
+		// several owners, and a whole-row save of the rule must not move them).
+		'ief_device_backlog_requested_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 
 		'ief_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'ief_update_time' => array('type'=>'timestamp(6)'),
@@ -401,6 +410,130 @@ class InboundEmailFilter extends SystemBase {
 			 WHERE ima_iem_inbound_email_message_id = ? LIMIT 1');
 		$stmt->execute(array($messageId));
 		return (bool)$stmt->fetchColumn();
+	}
+
+	/**
+	 * "Also apply to existing mail": the server's backfill walks the rows it
+	 * can read, and the owner's device walks the end-to-end rows it cannot
+	 * (MailboxDeviceRules::backlog()).
+	 */
+	function requestApplyExisting(): void {
+		$this->set('ief_apply_existing_pending', true);
+		$this->set('ief_apply_existing_cursor', 0);
+		// Microseconds, so two requests in one second are two requests: an
+		// owner's finished walk of the first must not count for the second.
+		list($usec, $sec) = explode(' ', microtime());
+		$this->set('ief_device_backlog_requested_time', gmdate('Y-m-d H:i:s', (int)$sec) . '.' . substr($usec, 2, 6));
+	}
+
+	/** The criteria a device evaluates, in the shape its matcher reads (MailboxDeviceRules). */
+	function deviceRule(): array {
+		$op = (string)$this->get('ief_match_size_op');
+		return array(
+			'id'       => intval($this->key),
+			'match'    => array(
+				'from'           => (string)$this->get('ief_match_from'),
+				'to'             => (string)$this->get('ief_match_to'),
+				'subject'        => (string)$this->get('ief_match_subject'),
+				'has_words'      => (string)$this->get('ief_match_has_words'),
+				'excludes'       => (string)$this->get('ief_match_excludes'),
+				'size_op'        => in_array($op, array(self::SIZE_OP_GT, self::SIZE_OP_LT), true) ? $op : '',
+				'size_bytes'     => intval($this->get('ief_match_size_bytes')),
+				'has_attachment' => (bool)$this->get('ief_match_has_attachment'),
+			),
+			// Whether a match needs the opened message posted with it: a forward
+			// is the one action the server cannot take from ciphertext.
+			'forwards' => $this->buildActionSet()['forward_to'] ? true : false,
+		);
+	}
+
+	/**
+	 * Apply the rules a device found matching an end-to-end message it opened
+	 * (specs/fortress_mobile_apps.md § R14). The device is the only reader, so
+	 * its evaluation is the evaluation; what the server checks is authorization:
+	 * every id must be an enabled rule in this message's scope. The actions are
+	 * the server's own (each rule's buildActionSet(), merged as runForMessage()
+	 * merges them), so a device can name rules but never invent an action.
+	 *
+	 * A forward is relayed from $forward_raw, the opened RFC 822 the device
+	 * posted; without it no forward is sent. Returns what was applied.
+	 *
+	 * @param int[] $ids
+	 * @return array{matched:int[],actions:string[],forward_to:string[]}
+	 * @throws InvalidArgumentException naming a rule not in scope
+	 */
+	static function applyDeviceMatches(InboundEmailMessage $msg, array $ids, ?string $forward_raw = null, bool $allow_forward = true): array {
+		$ids = array_values(array_unique(array_map('intval', $ids)));
+		if (!$ids) {
+			return array('matched' => array(), 'actions' => array(), 'forward_to' => array());
+		}
+		$aliasId  = $msg->get('iem_iea_inbound_email_alias_id') !== null
+			? intval($msg->get('iem_iea_inbound_email_alias_id')) : null;
+		$domainId = intval($msg->get('iem_ied_inbound_email_domain_id'));
+		$in_scope = array();
+		foreach (self::inScopeFor($aliasId, $domainId) as $f) {
+			$in_scope[intval($f->key)] = $f;
+		}
+		$accum = array('never_spam'=>false, 'mark_spam'=>false, 'label_ids'=>array(),
+			'star'=>false, 'mark_read'=>false, 'archive'=>false, 'forward_to'=>array(), 'delete'=>false);
+		$applied_ids = array();
+		foreach ($ids as $id) {
+			if (!isset($in_scope[$id])) {
+				// A rule of this message's own scope that was switched off or
+				// deleted after the device fetched the rules is simply not
+				// applied; one that never reached this message is refused.
+				if (self::wasInScope($id, $aliasId, $domainId)) {
+					continue;
+				}
+				throw new InvalidArgumentException('Rule ' . $id . ' does not apply to this message.');
+			}
+			$applied_ids[] = $id;
+			$set = $in_scope[$id]->buildActionSet();
+			foreach (array('never_spam', 'mark_spam', 'star', 'mark_read', 'archive', 'delete') as $k) {
+				$accum[$k] = $accum[$k] || $set[$k];
+			}
+			$accum['label_ids']  = array_values(array_unique(array_merge($accum['label_ids'], $set['label_ids'])));
+			$accum['forward_to'] = array_values(array_unique(array_merge($accum['forward_to'], $set['forward_to'])));
+		}
+		$forward_to = $accum['forward_to'];
+		// The flag writes now; the forward is relayed from the posted raw by the
+		// caller once its transaction commits (relayDeviceForward()).
+		$accum['forward_to'] = array();
+		if (!$applied_ids) {
+			return array('matched' => array(), 'actions' => array(), 'forward_to' => array());
+		}
+		$actions = self::applyActionSet($msg, $accum, false);
+		self::logMatch($msg, $applied_ids, $actions);
+		return array('matched' => $applied_ids, 'actions' => $actions,
+			'forward_to' => ($allow_forward && $forward_raw !== null && $forward_raw !== '') ? $forward_to : array());
+	}
+
+	/** Is rule $id one of this scope's (the alias's own or its domain's), enabled or not, deleted or not? */
+	private static function wasInScope(int $id, ?int $aliasId, int $domainId): bool {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT ief_iea_inbound_email_alias_id, ief_ied_inbound_email_domain_id
+			FROM ief_inbound_email_filters WHERE ief_inbound_email_filter_id = ?');
+		$stmt->execute(array($id));
+		$r = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$r) {
+			return false;
+		}
+		if ($r['ief_iea_inbound_email_alias_id'] !== null) {
+			return $aliasId !== null && intval($r['ief_iea_inbound_email_alias_id']) === $aliasId;
+		}
+		return intval($r['ief_ied_inbound_email_domain_id']) === $domainId;
+	}
+
+	/** Relay the device-opened raw to the forward destinations applyDeviceMatches() named. */
+	static function relayDeviceForward(InboundEmailMessage $msg, array $destinations, string $raw): void {
+		if (!$destinations || $raw === '') {
+			return;
+		}
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
+			(new InboundEmailRouter())->forwardStoredMessage($msg, $destinations, $raw);
+		} catch (\Throwable $e) {
+			error_log('InboundEmailFilter: device-opened forward failed for message ' . intval($msg->key) . ': ' . $e->getMessage());
+		}
 	}
 
 	// ------------------------------------------------------------ actions

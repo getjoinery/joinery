@@ -1,7 +1,6 @@
 # Fortress mail in the phone apps
 
-**Status: INVESTIGATED 2026-09-29, awaiting owner decisions D1–D4. No build
-scheduled.** Follows `specs/implemented/client_custody_mail.md` (Fortress:
+**Status: IMPLEMENTED 2026-09-30.** Every WP built and tested (§ As built). Follows `specs/implemented/client_custody_mail.md` (Fortress:
 the mail key lives in the owner's browser, the server stores ciphertext;
 its A1 and B58 are this spec's starting point) and takes option C of
 `specs/native_vault_unlock.md` (the device holds the key and reads locally)
@@ -9,16 +8,16 @@ for mail only. Apps: `ios/joinery-kit` (JoineryMailKit) and
 `android/joinery-android-mail`. **Scope (owner, 2026-09-29): the full
 build.** Beyond reading, search and compose, the apps get drafts (R12), AI
 on the person's own model (R13), mail rules on relay-sealed mail (R14, which
-also gives the browser the same) and new-mail notifications (R15, a
-platform feature every mailbox gets).
+also gives the browser the same) and new-mail notifications by polling
+(R15, every mailbox). Pushed notifications through a Joinery-run relay are
+`specs/push_notification_relay.md`, after this one.
 
 ## The problem in plain terms
 
 A Fortress mailbox is one the server cannot read. Today the two phone apps
 ask the server for mail and show what comes back, and for a Fortress mailbox
 what comes back is ciphertext they ignore: every row reads "(no subject)"
-from "(unknown)" with a blank body (B1, the spec's B58). The Fortress card
-says "mobile apps are not available", which is true.
+from "(unknown)" with a blank body (B1, the spec's B58).
 
 For a phone to read Fortress mail it needs two things: the mail key, and
 the code to open messages with it. Neither exists in the apps. Both are
@@ -280,7 +279,7 @@ device key to the identity it has. **D1** below is that choice.
   lives in memory. It is dropped when the app has been in the background
   for `N` minutes (default 5, the browser idle lock's spirit), on sign-out,
   on a 401 (`SessionController.signOutLocally` / `sessionInvalidatedHandler`
-  gain a "wipe held keys" hook), on unlink, and when `device_vault_status`
+  gain a "wipe held keys" hook), on unlink, and when `vault_client_probe`
   says the key is retired. Dropped means zeroed.
 - **Wiping the mail secret does not wipe the device key**, so the next
   enrollment approves the same public key.
@@ -337,8 +336,11 @@ query) to Swift and Kotlin and keep its on-disk shape (256 gzip+AES-GCM
 shards, `ids`, `meta`, `tail`), because the node gate
 `plugins/mailbox/tests/search_index_gate.sh` is then the oracle for all
 three implementations and the size numbers (≈52 MB per 100,000 messages)
-carry over. The record key is one random 32-byte key per phone, stored
-beside the mail secret; a phone never needs `MailboxSearchKey`. First build
+carry over. The record key is derived from the mail secret
+(`HKDF-SHA256(mail secret, salt '', info 'joinery-mailsearch:record:v1')`,
+32 bytes), so nothing more is stored and an index sealed before a sign-out
+reopens after the next enrollment; a rotation gives a new key and a
+rebuild. A phone never needs `MailboxSearchKey`. First build
 runs in the background with the browser's progress line ("Indexing mail on
 this phone: 42,000 of 105,000"); "Rebuild" and "Remove from this phone" sit
 in the mailbox menu.
@@ -358,8 +360,7 @@ things change in the apps:
   message; the sending lock is a browser ceremony, so the sheet says to send
   from a computer.
 
-No drafts: the apps have none, so the browser's sealed two-step draft save
-is not needed. If drafts ever come to the apps they follow WP4's shape.
+Drafts, at every level, are R12.
 
 ### R7. The relay path
 
@@ -377,7 +378,7 @@ refreshes; a computer's next visit parses it and the phone reads the result.
 device makes: verify the relay's signed statement (Ed25519) and the pin's
 MAC (`HKDF(secret, 'sealed-vault:pin')`). The phone can verify and alarm;
 **Trust** needs a passkey step-up, so the phone's alarm says to approve the
-new relay from a computer. Ships with D3's package.
+new relay from a computer. Ships with WP7.
 
 ### R8. Server changes
 
@@ -388,12 +389,13 @@ new relay from a computer. Ships with D3's package.
   `mailbox/fortress_pending`, `fortress_parse_store`, `search_entries`,
   `relay_seal_target`, `relay_pins`; for R13 `ai_device_recipes`,
   `device_ai_entries`, `device_ai_verdict`, `ai_device_record`,
-  `device_ai_test_prompt`; for R14 `mailbox_filters` (read). Everything
+  `device_ai_test_prompt`. New with it: `device_key_enroll` (R2) and, for
+  R14, `mailbox/device_rules`, `rule_backlog`, `rule_outcomes`. Everything
   else keeps `requires_browser_session`, in particular `vault_client_status`
   (the unlock material), `device_ai_host` (a step-up) and every unlock,
-  setup, rotation, custody-change, resume and pin-set action. A test
-  asserts the moved list is exactly these eleven and that a machine key is
-  refused at each.
+  setup, rotation, custody-change, resume and pin-set action.
+  `tests/functional/api/person_credential_test.php` asserts the declared
+  list is exactly these fourteen and that a machine key is refused at each.
 - `device_key_enroll` and the two `vault_client_probe` fields (R2);
   `drive_device_link_approve` and the poll handling a pre-bound link;
   platforms; the vault-based gate.
@@ -407,17 +409,17 @@ new relay from a computer. Ships with D3's package.
   device) ends its API access; the app's 401 path wipes the mail secret.
   One row, one gesture, as `native_vault_unlock.md` promised.
 - A mail-key rotation forgets the scope on every device; the phone learns
-  it from `device_vault_status`, wipes, and asks to be enrolled again. A
+  it from `vault_client_probe`, wipes, and asks to be enrolled again. A
   recovery-code use does the same. Both leave the phone's device key in
   place so the re-enrollment approves the same public key.
-- Signing out of the app wipes the mail secret and the search index's key
-  (the sealed index stays and reopens after the next enrollment, as the
-  browser's does after a lock).
+- Signing out of the app wipes the mail secret, and with it the search
+  index's key, which is derived from it (R5): the sealed index stays and
+  reopens after the next enrollment, as the browser's does after a lock.
 
 ### R10. Cards and copy
 
-- Fortress card, third line: "Team features are not available." (the phone
-  clause goes when WP5 ships on both apps). The card's app note: "Your
+- Fortress card, third line: "Team features are not available." The
+  card's app note: "Your
   phone reads this mail once you hand it the key from a computer; the key
   stays behind your phone's face or fingerprint lock."
 - In the app, a Fortress mailbox without the key shows one banner: "This
@@ -539,112 +541,86 @@ the sentence comes off the card.
 
 - **Where it runs.** The device that parses a pending row
   (`fortress_pending` → parse → `fortress_parse_store`) evaluates the
-  mailbox's rules on the parsed plaintext first. Rules come from
-  `mailbox_filters` for the alias and its domain, enabled only, in
-  `ief_order`; the match logic is a port of
-  `InboundEmailFilter::matches()` (:290): sender, subject, bodies from the
-  parse, recipient and size from the row's clear columns, has-attachment
-  from the parsed parts. Both ports (JS and the two phones) run the same
-  fixture cases as `plugins/mailbox/tests/` gives the PHP matcher.
-- **Posting the outcome.** `fortress_parse_store` gains `rule_outcomes`:
-  the accumulator `runForMessage()` produces today (`{never_spam,
-  mark_spam, label_ids, star, mark_read, archive, delete, forward_to,
-  matched_filter_ids}`). The server applies the flag and label outcomes to
-  the row in the same transaction as the parse, checking authorization,
-  not truth: every id in `matched_filter_ids` is an enabled rule of that
-  mailbox or its domain, every label id is the caller's, `forward_to`
-  addresses are those rules' acknowledged destinations
-  (`ief_forward_ack_*`). The device is the only reader of the message, so
-  its evaluation is the evaluation; the server's job is to refuse an
-  outcome no rule of that mailbox could have produced.
+  mailbox's rules on the parsed plaintext first. Rules come from the new
+  action `mailbox/device_rules {alias_id}` (person credential): each enabled
+  rule of the alias and its domain in evaluation order, as `{id, match:
+  {from, to, subject, has_words, excludes, size_op, size_bytes,
+  has_attachment}, forwards}` — criteria only, never the actions.
+  `fortress_pending` adds `alias_id`, `recipient` and `size_bytes` to its
+  item. The match logic is a port of `InboundEmailFilter::matches()` (:290);
+  the JS port (`mailbox_filter_match.js`) and the two phone ports replay
+  `filter_match_cases.json`, whose expected ids the PHP matcher produces.
+- **Posting the matches** (as built: ids, not an outcome). The device posts
+  the matching rule ids as `rule_matches`. The server checks each is an
+  enabled rule in the row's scope (a stray id refuses the parse) and takes
+  the actions from the rules themselves (`InboundEmailFilter::
+  applyDeviceMatches()`, merged as `runForMessage()` merges them), in the
+  parse's transaction after the spam verdict. A device can pick among the
+  owner's rules; it can never name an action, a label or a destination.
 - **Forwarding.** A forward rule needs the message to leave; the server
-  cannot build it from ciphertext. The device posts the opened RFC 822
-  bytes with the outcome (`forward_raw`, bounded by the message size), and
-  the server hands it to `MailboxSender`'s forward path and keeps nothing,
-  as any send. A device that cannot post the raw (a phone on the Wi-Fi-only
-  switch) leaves the forward out and the row is marked
-  `iem_rule_forward_pending`, which the next device to open the thread with
-  a network settles. Mail rules never run twice on a row: the parse is
-  idempotent (B11 of the mail spec) and so are its outcomes.
-- **Apply to existing** (`ief_apply_existing_pending`) on Fortress rows:
-  `ApplyInboundEmailFilters` skips browser-sealed rows today and keeps
-  doing so. New action `mailbox/rule_backlog {filter_id, after_id}` pages
-  the caller's Fortress rows the rule has not been applied to (the
-  `device_ai_entries` shape: sealed sender, subject, bodies, manifest), the
-  device evaluates and posts `mailbox/rule_outcomes {rows: [{id,
-  outcomes}]}`; the cursor `ief_apply_existing_cursor` advances as it does
-  for the server walk. Runs from the same drain as R13, after it.
+  cannot build it from ciphertext. When a matched rule `forwards`, the
+  device posts the opened RFC 822 as a second upload, `forward_raw`
+  (bounded by the row's size), and the server relays it after commit
+  through `forwardStoredMessage()` and keeps nothing. The parsing device
+  always holds the raw it just opened, so there is no pending-forward
+  state. Mail rules never run twice on a row: the parse is idempotent.
+- **Apply to existing** on Fortress rows: `ApplyInboundEmailFilters` skips
+  browser-sealed rows and keeps doing so. `requestApplyExisting()` also sets
+  `ief_device_backlog_requested_time`, each owner's place in
+  `ifp_inbound_email_filter_device_progress`; `mailbox/rule_backlog {}` hands the device
+  the first of its rules with device work and a page of the caller's parsed
+  Fortress rows in scope past the cursor (sealed sender, subject, bodies,
+  recipient; clear size and has-attachment), and `mailbox/rule_outcomes
+  {rule_id, through_id, matched_ids}` applies that rule's actions (never a
+  forward) and moves the cursor; an empty page closes the walk. The
+  browser runs it after the pending drain whenever the mail vault opens;
+  the phones run it from the same place.
 - **Card and docs.** The relay add-on's cost line at Fortress becomes "New
   mail is opened on your device, and your mail rules run there when it is
   opened." Contact elevation on this path stays out (the server has no
   sender to look up; recorded, not built).
 
-### R15. New-mail notifications, content-free
+### R15. New-mail notifications, by polling
 
-Neither app has push notifications for anything, and the platform has no
-push infrastructure (`docs/notifications.md` covers the in-app bell and
-email; `specs/implemented/ios_app_platform.md` and the Android one list
-push as deferred). This is a platform feature: every mailbox gets it, and
-Fortress mail rides along with nothing in the notification but the fact of
-arrival.
+Neither app has notifications for anything, and the platform has no push
+infrastructure (`docs/notifications.md` covers the in-app bell and email).
+A push needs the app publisher's APNs key and Firebase project, which a
+self-hosted deployment does not hold; pushes through a Joinery-run relay
+are `specs/push_notification_relay.md` (D4). This build gives every
+mailbox notifications by polling, which that spec keeps as its fallback.
 
-**The constraint that shapes it.** A push to an iPhone is sent with the app
-publisher's APNs key; a push to an Android phone with the app's Firebase
-project. Both belong to whoever ships the binary, which is Joinery, not the
-self-hosted deployment. A deployment cannot send pushes for the Joinery app
-on its own, and shipping the APNs key to every deployment would let any one
-of them push to every user of the app. This is the passkey domain problem
-in another coat, and the industry answer is the same one Bitwarden ships
-for self-hosted installs: **a push relay run by the app publisher**, which
-deployments hand a token and an opaque payload. **D4** is whether to run
-one.
+- **What the server adds.** `mailbox/mailboxes` gives each mailbox
+  `newest_unread_id`: the highest message id among the rows its `unread`
+  count counts that were never read (the same Inbox filter, the same index
+  range; `null` when none — a message marked unread again is not new). New mail raises it; reading elsewhere lowers or
+  clears it. Nothing else changes on the server.
+- **What the phone does.** A scheduled background check (iOS
+  `BGAppRefreshTask`, opportunistic, at the OS's discretion; Android
+  `WorkManager` periodic work, 15 minutes at best, network required) calls
+  `mailboxes` with the stored session key and, for each mailbox the person
+  turned on, compares `newest_unread_id` with the high-water mark it last
+  notified for that mailbox. Higher means new mail: one notification per
+  mailbox, "New message in {address}", and the mark moves up. The first
+  check after sign-in only records marks.
+- **What the notification says.** For a **Standard** mailbox, the check
+  fetches the newest row (`thread_list {alias_id, perpage: 1}`) and shows
+  its sender and subject. **Private** and **Fortress** show the mailbox
+  only: the session key opens no server window, and the Fortress key is
+  behind the biometric gate and never held in the background (R3).
+  Tapping opens that mailbox. The app icon badge is the sum of `unread`
+  over the mailboxes turned on.
+- **Preferences.** Per mailbox, in the app's settings (default: every
+  mailbox the person is a member of, `own`), plus the OS's own
+  notification permission, asked the first time the person turns one on.
+  Quiet hours are the phone's Focus and Do Not Disturb. The settings line
+  says what polling means: "New mail shows when your phone next checks,
+  which it decides."
+- **Sign-out and 401** cancel the schedule and clear the marks.
 
-- **What the server knows.** Mail arrives in `storeMessage`,
-  `storeDirectMessage` and, on the relay path, `storeRelayPending`. Each
-  emits one signal, `mailbox.message_arrived {alias_id, message_id,
-  level}`, after commit (the signal bus, `docs/signals.md`). A push
-  subscriber turns it into one nudge per registered device of the
-  mailbox's holders that opted in to that mailbox.
-- **Device tokens.** New core model `PushDeviceToken`
-  (`pdt_push_device_tokens`: user, `apk_api_key_id`, platform, token,
-  `client_app`, mailboxes opted in, create and last-seen times, failure
-  count). `push_register` (session key only) upserts by key; sign-out and
-  revocation delete the key's tokens (a revoked key's tokens go with it,
-  the `SyncDevice` cascade pattern). A machine key can never register.
-- **The nudge carries nothing readable.** Payload `{site: <deployment
-  id>, ref: <opaque per-token alias handle>}`: no address, no user, no
-  sender, no subject, at any level. The relay learns that a deployment
-  nudged a token at a time and nothing else. The phone maps `ref` to a
-  mailbox from its own cached `mailboxes` list.
-- **What the phone shows.** iOS: a visible push with `mutable-content`; a
-  Notification Service Extension rewrites it to "New message in
-  {address}" and, for a **Standard** mailbox, fetches the newest row and
-  shows sender and subject. Private and Fortress show the mailbox only:
-  the phone's session key opens no server window, and the Fortress key is
-  behind the biometric gate and not held in the background. Android: an
-  FCM data message; the app's messaging service builds the same
-  notification. Tapping opens that mailbox. Badge = unread from
-  `mailboxes`.
-- **Fallback when there is no relay** (setting `push_relay_url` blank, or
-  the relay unreachable): the apps poll. iOS `BGAppRefreshTask`
-  (opportunistic, minutes to hours apart, at the OS's discretion), Android
-  `WorkManager` periodic work (15 minutes at best). The app compares
-  `mailboxes` unread counts and posts the same local notification. Honest
-  wording in settings: "Without the relay, new mail shows when your phone
-  next checks, which it decides."
-- **Preferences.** Per mailbox, on the phone (which mailboxes notify) and
-  stored with the token so the server nudges only for those. Quiet hours
-  are the phone's own Focus and Do Not Disturb.
-- **The relay path.** A relay-fronted message becomes a pending row at the
-  next pull, so the nudge fires at pull time; the pull interval bounds the
-  delay, as it does for arrival itself.
-- **Not built:** notifications for anything but mail arrival (calendar,
-  messenger) ride the same signal-to-push subscriber later; the subscriber
-  is generic, the signal is mail's.
+## Decisions
 
-## Decisions for the owner
-
-**D1. How the phone becomes a key-holding device.**
+**D1. How the phone becomes a key-holding device.** Decided 2026-09-30:
+bind to the app's existing session key.
 
 - **Bind to the app's existing session key (recommended).** `device_key_enroll`
   attaches a device key to the credential the phone already has; approval
@@ -656,7 +632,8 @@ one.
   the login one. Catch: two identities for one phone, and the swap is a
   place to lose a signed-in user.
 
-**D2. The search index on the phone.**
+**D2. The search index on the phone.** Decided 2026-09-30: port the
+browser's shard core.
 
 - **Port the browser's shard core (recommended).** Same tokenizer, codecs
   and on-disk shape on web, iOS and Android; the existing node gate is the
@@ -668,34 +645,15 @@ one.
   unless SQLCipher is added; a second tokenizer whose results can differ
   from the browser's.
 
-**D3. The relay path in the first build.**
+**D3. The relay path in the first build.** Decided 2026-09-30: reading,
+search and compose first (WP0–WP6), the MIME parser port and the pin check
+next (WP7), all in this build. R14's rules run in the parse, so WP10
+follows WP7 on the phones.
 
-- **Ship reading and compose first; the MIME parser port and the pin check
-  follow as WP7.** A Fortress mailbox with Seal at the relay shows arriving
-  mail as "Waiting to be opened on a computer" until then. Catch: a
-  phone-only user of a relay-fronted mailbox sees nothing new until they
-  open a computer.
-- **Include WP7 in the first build.** Nothing waits. Catch: the two MIME
-  parser ports (~700 lines each) and their fixtures land before any user
-  can read a message on a phone.
-
-**D4. How a self-hosted deployment reaches a phone (R15).**
-
-- **A Joinery-run push relay, with polling as the fallback (recommended).**
-  Deployments post `{token, payload}` to `push.getjoinery.com`, signed
-  with their Joinery Direct identity; the relay holds the APNs key and the
-  Firebase credentials and forwards. Payloads are content-free by design,
-  so the relay learns only that a deployment nudged a token. This is the
-  shape Bitwarden ships for self-hosted installs. Catches: one more service
-  Joinery runs and must keep up (the mail relay pattern applies:
-  disposable, provisioned by script, never agented); a deployment that
-  turns it off gets polling; a de-Googled Android phone has no FCM and
-  gets polling.
-- **Polling only.** No relay, nothing new to run. Catch: "new mail" arrives
-  when the phone next wakes the app, minutes to hours later on iOS, at
-  least 15 minutes on Android; for a mail app that is not a notification.
-- **Per-deployment app builds** are not viable for the reason passkeys are
-  not: every self-hoster would need Apple and Google developer accounts.
+**D4. How a self-hosted deployment reaches a phone (R15).** Decided
+2026-09-30: this build polls; pushes through a Joinery-run relay, opt-in
+per deployment, are `specs/push_notification_relay.md`, built after this
+spec.
 
 ## Work packages
 
@@ -704,8 +662,8 @@ Each is testable alone. The browser is untouched throughout.
 
 ### WP0. Server: credential admission and enrollment
 
-- `requires_person_credential` in `ApiAuth::authorize`; the six actions
-  moved (R8).
+- `requires_person_credential` in `ApiAuth::authorize`; every action of R8
+  on it (built together, the AI and rules ones included).
 - `logic/device_key_enroll_logic.php`; `vault_client_probe` 1.1 with
   `pending_public_key` and `held_by_this_device`; `DeviceLink` rows bound
   at begin; `drive_device_link_approve` and the poll honouring a bound
@@ -808,47 +766,39 @@ Each is testable alone. The browser is untouched throughout.
 
 ### WP10. Mail rules on relay-sealed mail (R14)
 
-- Server: `rule_outcomes` and `forward_raw` on `fortress_parse_store`, the
-  authorization checks, `iem_rule_forward_pending`; `mailbox/rule_backlog`
-  and `mailbox/rule_outcomes`; `mailbox_filters` readable to a key
-  principal; the card line.
+- Server: `rule_matches` and `forward_raw` on `fortress_parse_store`, the
+  scope check; `mailbox/device_rules`, `mailbox/rule_backlog` and
+  `mailbox/rule_outcomes`; `ief_device_backlog_requested_time` and the
+  per-owner progress table; the card line.
 - Browser: `mailbox_fortress.js` evaluates rules in `drainPending()`
   before the store (a port of `matches()` to JS with the PHP fixtures as
-  its gate), and runs the backlog walk from the AI drain's place.
+  its gate), and runs the backlog walk after the pending drain.
 - Both apps: the same port and the same two calls.
-- **Tests:** `fortress_relay_pull_test.php` gains: outcomes applied in the
-  parse transaction, an outcome naming another mailbox's rule refused, a
-  label not the caller's refused, a forward to an unacknowledged address
-  refused, a forward raw sent and nothing kept; the JS and phone matchers
+- **Tests:** `fortress_relay_pull_test.php` gains: matched rules' own
+  actions applied in the parse transaction, another mailbox's rule and a
+  disabled rule refusing the parse, a forward named only with the raw, the
+  backlog walk applying, refusing a row out of reach and closing; the JS and phone matchers
   replay the PHP matcher's fixtures; a gate leg delivers a relay-sealed
   message matching a label rule and sees the label on the row after the
   phone parses it.
 
-### WP11. Notifications (R15, D4)
+### WP11. Notifications by polling (R15)
 
-- **Platform:** the `mailbox.message_arrived` signal from the three store
-  paths; `PushDeviceToken` and `push_register`; the push subscriber and the
-  relay client (Direct-identity-signed POST, `push_relay_url` setting,
-  failure backoff, token retirement after repeated rejections); token
-  deletion on sign-out and revocation.
-- **Relay service** (`push.getjoinery.com`): a small Go program in the
-  mail relay's mould (`provisioning/`, a `build.sh`, provisioned by
-  script): verifies the deployment signature, forwards to APNs (token
-  auth, HTTP/2) and FCM (HTTP v1), records nothing but counters. Its
-  credentials are the App Store team's APNs key and the Firebase project
-  the Android release spec creates.
-- **iOS:** `aps-environment` entitlement, registration, the Notification
-  Service Extension, `BGAppRefreshTask` fallback, per-mailbox settings.
-- **Android:** Firebase Messaging, the messaging service, `WorkManager`
-  fallback, per-mailbox settings.
-- **Tests:** `tests/functional/api/push_register_test.php` (upsert by key,
-  machine key refused, tokens gone after revocation); a subscriber test
-  that one arrival nudges each opted-in token once with a content-free
-  payload; the relay's Go tests (signature, a changed byte refused, APNs
-  and FCM request shapes against recorded fixtures); a gate leg per
-  platform on the Mac mini: the simulator or emulator registers, a seeded
-  message produces the notification with the mailbox address and, for
-  Standard, the sender and subject.
+- **Server:** `newest_unread_id` on `mailbox/mailboxes`.
+- **iOS:** `BGAppRefreshTask` registration and handler, notification
+  permission, per-mailbox settings, the Standard fetch, the badge, the
+  schedule cancelled on sign-out and 401.
+- **Android:** `WorkManager` periodic worker, `POST_NOTIFICATIONS`
+  permission (API 33+) and a notification channel, per-mailbox settings,
+  the Standard fetch, cancelled on sign-out and 401.
+- **Tests:** `newest_unread_id` rises on arrival, falls on read, is `null`
+  on an all-read mailbox (added to the mailbox reader-API test); the
+  high-water-mark logic unit-tested on both platforms (first check records
+  only, a higher id notifies once, a lower one is silent); a gate leg per
+  platform on the Mac mini: trigger the background task
+  (`_simulateLaunchForTaskWithIdentifier` / `WorkManager` test driver),
+  a seeded message produces the notification with the mailbox address
+  and, for Standard, the sender and subject.
 
 ## Corrections to the earlier answer
 
@@ -877,11 +827,46 @@ not need), `mailbox_mime.js` 698, `email-digest.js` and `verdict-check.js`
 (R13), and `InboundEmailFilter::matches()` (~70 lines of PHP, R14). The
 mail kits today: iOS 1,888, Android ~2,080 lines. Server work for WP0–WP10
 is small: three actions, one flag, one branch in approve and poll, signed
-URLs for one attachment shape, `rule_outcomes` on the parse store. WP11 is
-the one large server item: a signal, a token model, a subscriber, a relay
-client, and a Go relay service with its own provisioning.
+URLs for one attachment shape, `rule_matches` on the parse store and three rules actions,
+`newest_unread_id` on `mailboxes`.
 
 Order, if built as listed: WP0–WP6 give a phone that reads, searches and
 replies; WP7 the relay path; WP8 drafts; WP9 AI; WP10 rules; WP11
-notifications. WP8, WP9 and WP11 are independent of one another once WP0
+notifications by polling. WP8, WP9 and WP11 are independent of one another once WP0
 and the key custody of WP2/WP4 exist, so they can run in parallel.
+
+## As built (2026-09-30)
+
+- **Server:** as R2, R4, R8, R14 and R15 describe; `person_credential_test`,
+  `fortress_phone_flow_test` (the phone's calls end to end over HTTP),
+  `fortress_relay_pull_test`, `fortress_ingest_test`, `fortress_compose_test`,
+  `mailbox_reader_test`, `fortress_device_ai_test`. Fortress draft parts also
+  carry signed URLs (`draft_get`, `draft_save`); `ai_device_recipes` returns
+  `device_ai_origin`.
+- **Review:** public-html-91, four rounds (2 high, 13 medium, 34 low in all),
+  every finding fixed; notable: iOS key custody on lockout and re-enrollment,
+  per-owner rule backlog progress in `ifp_inbound_email_filter_device_progress`,
+  Android biometric-only key on every API level, relay drain memory guard,
+  digest encoded words matching iconv exactly.
+- **Apps:** iOS 164 unit tests, Android 200; both live gates
+  (`tests/functional/{ios,android}/fortress_gate.sh`) green against dev with
+  `walk_fixture.php --fortress` fixtures: enroll, read, parts, reply, forward
+  with parts, relay parse with a rule and a forward, search, sealed draft
+  reopened and sent, lock, key retirement and re-enrollment, AI drain on a
+  stand-in model, polling.
+- **Not exercised:** real Face ID / fingerprint hardware (the simulator gate
+  runs with a debug keystore; the emulator uses an enrolled test fingerprint).
+- **Bugs found and fixed in the build:** Node's windows-1252 decoding in the
+  shared MIME vectors (WHATWG shim); `email-digest.js` encoded words in
+  ISO-8859-1 / US-ASCII decoded unlike iconv; the relay pin vector derived
+  from the raw scalar instead of the keyring's PKCS#8; `mailbox_filter_match.js`
+  exported nowhere under Node; Swift lowercasing lacks Final_Sigma; Android
+  tests skipping silently on a missing resource; Android mail WebView sharing
+  the cookie jar; cleartext for a local model (iOS `NSAllowsLocalNetworking`,
+  Android base config with https enforced in the API client and web view);
+  banner offering Unlock after a wiped key; retired key and relay mail noticed
+  only on key open; one unopenable row stopping the AI pass; iOS AI judge off
+  the main actor.
+- **Open:** the Android gate failed once each on two different legs (4, then 1)
+  and passed on re-run; cause not found (screen dump and exception line now
+  captured).

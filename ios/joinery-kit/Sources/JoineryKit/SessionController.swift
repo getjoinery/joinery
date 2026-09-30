@@ -23,18 +23,36 @@ public final class SessionController: ObservableObject {
 
     public let client: APIClient
     private let keychain: KeychainStore
+    /// The device's own keys and the client-custody secrets handed to it
+    /// (specs/fortress_mobile_apps.md § R3), and the ones held in memory now.
+    public let deviceKeys: DeviceKeyStore
+    public let heldKeys: HeldKeys
+    private var signOutHooks: [() -> Void] = []
 
     public init(config: JoineryConfig, keychainService: String) {
         self.client = APIClient(config: config)
         self.keychain = KeychainStore(service: keychainService)
+        self.deviceKeys = DeviceKeyStore(service: keychainService)
+        self.heldKeys = HeldKeys()
         wireClient()
     }
 
     /// Test seam: inject a prepared client/keychain.
-    public init(client: APIClient, keychain: KeychainStore) {
+    public init(client: APIClient, keychain: KeychainStore,
+                deviceKeys: DeviceKeyStore = DeviceKeyStore(service: "test", protection: .plain),
+                heldKeys: HeldKeys? = nil) {
         self.client = client
         self.keychain = keychain
+        self.deviceKeys = deviceKeys
+        self.heldKeys = heldKeys ?? HeldKeys(observeApp: false)
         wireClient()
+    }
+
+    /// Runs on every sign-out path — user action or a 401 — after the held
+    /// keys are dropped. Modules register what they keep per account (a mail
+    /// secret, a search key, a polling schedule) so it goes with the account.
+    public func addSignOutHook(_ hook: @escaping () -> Void) {
+        signOutHooks.append(hook)
     }
 
     private func wireClient() {
@@ -45,7 +63,9 @@ public final class SessionController: ObservableObject {
         }
         client.sessionInvalidatedHandler = { [weak self] in
             Task { @MainActor in
-                self?.signOutLocally()
+                // A 401 mid-session: the key was revoked on the Security page,
+                // which is how a phone is unlinked (D1).
+                self?.signOutLocally(revoked: true)
             }
         }
     }
@@ -65,27 +85,30 @@ public final class SessionController: ObservableObject {
             if let user = UserSummary(json: envelope["data"]) {
                 state = .loggedIn(user)
             } else {
-                signOutLocally()
-            }
-        } catch let error as JoineryAPIError {
-            switch error {
-            case .authentication:
-                // Key revoked while we were gone.
-                signOutLocally()
-            case .upgradeRequired(let message):
-                state = .upgradeRequired(message: message)
-            case .network:
-                // Offline at launch with a stored key: enter the app with a
-                // placeholder; data loads surface their own errors and the
-                // next successful call refreshes the summary.
+                // Not the site's answer (a portal's JSON): keep the session.
                 state = .loggedIn(UserSummary.offlinePlaceholder)
                 Task { await self.refreshUser() }
-            default:
-                signOutLocally()
             }
         } catch {
-            signOutLocally()
+            if case .upgradeRequired(let message) = error as? JoineryAPIError {
+                state = .upgradeRequired(message: message)
+            } else if Self.signsOut(on: error) {
+                // Key revoked while we were gone.
+                signOutLocally(revoked: true)
+            } else {
+                // Offline, a captive portal's page (not a Joinery envelope), a
+                // server error: none of them says the key is bad. The session
+                // stays; enter with a placeholder and retry (R9).
+                state = .loggedIn(UserSummary.offlinePlaceholder)
+                Task { await self.refreshUser() }
+            }
         }
+    }
+
+    /// Only the site's own authentication error signs a stored session out.
+    nonisolated static func signsOut(on error: Error) -> Bool {
+        if case .authentication = error as? JoineryAPIError { return true }
+        return false
     }
 
     /// `auth/login`: mints a session key, stores it, enters the app.
@@ -128,9 +151,16 @@ public final class SessionController: ObservableObject {
         }
     }
 
-    private func signOutLocally() {
+    private func signOutLocally(revoked: Bool = false) {
         client.setCredentials(nil)
         keychain.deleteCredentials()
+        // Signing out wipes the held secrets and the stored ones; the device
+        // key stays, so the next enrollment approves the same public key —
+        // unless the session was revoked, which unlinks the phone: then the
+        // device key goes too.
+        heldKeys.dropAll()
+        if revoked { deviceKeys.forgetDeviceKey() }
+        signOutHooks.forEach { $0() }
         onSignOut?()
         state = .loggedOut
     }

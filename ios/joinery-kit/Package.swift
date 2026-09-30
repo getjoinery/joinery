@@ -16,7 +16,7 @@
 // JoineryBillingKit — the native in-app purchase surface (StoreKit 2 purchase,
 // plan change, restore, server-authoritative status), registered as the
 // `billing` screen; same layering as mail.
-// Version: 0.7.1 (sender labels match the web reader: organization over local part)
+// Version: 0.8.0 (end-to-end Fortress mail on the phone: specs/fortress_mobile_apps.md)
 import PackageDescription
 
 let package = Package(
@@ -41,7 +41,10 @@ let package = Package(
         .target(
             name: "JoineryMailKit",
             dependencies: ["JoineryKit"],
-            path: "Sources/JoineryMailKit"
+            path: "Sources/JoineryMailKit",
+            resources: [
+                .copy("Resources/html_entities.json"),
+            ]
         ),
         .target(
             name: "JoineryCalendarKit",

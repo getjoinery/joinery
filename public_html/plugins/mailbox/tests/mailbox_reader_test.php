@@ -293,6 +293,10 @@ class MailboxReaderTest {
 		}
 		$this->ok($beth_box && $beth_box['unread'] === 2 && $beth_box['total'] === 2, 'beth@ unread/total = 2/2');
 		$this->ok($legal_box && $legal_box['unread'] === 1, 'legal@ unread = 1');
+		// The polling high-water mark (specs/fortress_mobile_apps.md § R15): the
+		// newest message the unread count counts.
+		$this->ok($beth_box && $beth_box['newest_unread_id'] === max($this->msg_ids['t1a'], $this->msg_ids['t1b']),
+			'beth@ newest_unread_id is T1\'s newer message', json_encode($beth_box['newest_unread_id'] ?? null));
 
 		section('the Inbox is inbound: a sent-only thread waits in All Mail');
 
@@ -501,6 +505,20 @@ class MailboxReaderTest {
 		$beth->markRead($ids, true);
 		$this->ok($this->isRead($this->msg_ids['t1a']) && $this->isRead($this->msg_ids['t1b']), 'T1 marked read');
 		$this->ok($this->readTime($this->msg_ids['t1a']) !== null, 'read_time set on first read');
+		$beth_box = null;
+		foreach ($beth->listMailboxes()['mailboxes'] as $m) {
+			if ($m['alias_id'] === $this->beth_alias) $beth_box = $m;
+		}
+		$this->ok($beth_box && $beth_box['unread'] === 0 && $beth_box['newest_unread_id'] === null,
+			'with everything read, newest_unread_id is null');
+		$beth->markRead([$this->msg_ids['t1a']], false);
+		$beth_box = null;
+		foreach ($beth->listMailboxes()['mailboxes'] as $m) {
+			if ($m['alias_id'] === $this->beth_alias) $beth_box = $m;
+		}
+		$this->ok($beth_box && $beth_box['unread'] === 1 && $beth_box['newest_unread_id'] === null,
+			'a message marked unread again counts as unread but is not announced as new');
+		$beth->markRead([$this->msg_ids['t1a']], true);
 
 		// Shared state: beth marks legal@ T2 read; bob (also on legal@) sees it read.
 		$beth->markRead([$this->msg_ids['t2']], true);

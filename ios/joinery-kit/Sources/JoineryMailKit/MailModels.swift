@@ -27,6 +27,24 @@ public struct Mailbox: Identifiable, Equatable, Sendable {
     public let total: Int
     public let folders: [MailFolder]
     public let foldersExclusive: Bool
+    /// `standard`, `private` or `fortress` (the mailbox's own level).
+    public let securityLevel: String
+    /// Sealed at rest and the viewer's server window is shut (Private).
+    public let locked: Bool
+    /// The viewer is a member (not an all-access view): the mailboxes whose
+    /// new mail notifies by default.
+    public let own: Bool
+    /// The highest message id the `unread` count counts, nil when none is
+    /// unread — the polling high-water mark (specs/fortress_mobile_apps.md § R15).
+    public let newestUnreadID: Int?
+    public let signature: String
+    /// The add-ons in force (e.g. "Seal at the relay"), as the level chip names them.
+    public let protectionAddons: [String]
+    /// Saved drafts on this mailbox (the Drafts badge).
+    public let drafts: Int
+
+    /// End-to-end: the server cannot read it; this phone opens it with the mail key.
+    public var isFortress: Bool { securityLevel == "fortress" }
 
     public var id: Int { aliasID }
 
@@ -45,6 +63,14 @@ public struct Mailbox: Identifiable, Equatable, Sendable {
         self.total = json["total"]?.intValue ?? 0
         self.folders = (json["folders"]?.arrayValue ?? []).compactMap(MailFolder.init(json:))
         self.foldersExclusive = json["folders_exclusive"]?.boolValue ?? false
+        self.securityLevel = json["security_level"]?.stringValue ?? "standard"
+        self.locked = json["locked"]?.boolValue ?? false
+        self.own = json["own"]?.boolValue ?? true
+        let newest = json["newest_unread_id"]
+        self.newestUnreadID = (newest?.isNull ?? true) ? nil : newest?.intValue
+        self.signature = json["signature"]?.stringValue ?? ""
+        self.protectionAddons = (json["protection_addons"]?.arrayValue ?? []).compactMap(\.stringValue)
+        self.drafts = json["drafts"]?.intValue ?? 0
     }
 }
 
@@ -63,9 +89,17 @@ public struct MailboxHome: Equatable, Sendable {
 /// One row of `mailbox/thread_list`.
 public struct ThreadSummary: Identifiable, Equatable, Sendable {
     public let threadKey: String
-    public let subject: String
-    public let sender: String
-    public let snippet: String
+    public var subject: String
+    public var sender: String
+    public var snippet: String
+    /// A Fortress row: the server sent ciphertext for the phone to open.
+    public let sealed: SealedRow?
+    /// What stands in for the content when this phone cannot open it.
+    public var placeholder: FortressNote?
+    /// The summary the owner's own model wrote (sealed under the row on Fortress).
+    public var aiSummary: String = ""
+    /// The newest message's id (in the Drafts view, the draft's id).
+    public var latestID: Int = 0
     public let messageCount: Int
     public var unreadCount: Int
     public var isStarred: Bool
@@ -86,17 +120,24 @@ public struct ThreadSummary: Identifiable, Equatable, Sendable {
         isStarred = json["any_starred"]?.boolValue ?? false
         isArchived = json["any_archived"]?.boolValue ?? false
         latestTime = json["latest_time"]?.stringValue ?? ""
+        sealed = SealedRow(json: json["sealed"])
+        placeholder = nil
+        latestID = json["latest_id"]?.intValue ?? 0
+        aiSummary = json["ai_summary"]?.stringValue ?? ""
     }
 }
 
 /// The `mailbox/thread_list` payload.
 public struct ThreadPage: Equatable, Sendable {
-    public let threads: [ThreadSummary]
+    public var threads: [ThreadSummary]
     public let hasMore: Bool
     public let page: Int
+    /// The page carries end-to-end rows (`fortress: true`).
+    public let fortress: Bool
 
     public init?(data: JSONValue?) {
         guard let data else { return nil }
+        fortress = data["fortress"]?.boolValue ?? false
         threads = (data["threads"]?.arrayValue ?? []).compactMap(ThreadSummary.init(json:))
         hasMore = data["has_more"]?.boolValue ?? false
         page = data["page"]?.intValue ?? 1
@@ -107,10 +148,21 @@ public struct ThreadPage: Equatable, Sendable {
 /// download URL when the bytes are file-backed, nil otherwise.
 public struct MailAttachment: Identifiable, Equatable, Sendable {
     public let id: Int
-    public let filename: String
-    public let contentType: String
+    public var filename: String
+    public var contentType: String
     public let sizeBytes: Int
     public let url: String?
+    /// The IMAP part number; a Fortress part's AD is built from it.
+    public let mimePart: String
+    public let inline: Bool
+    public var contentID: String = ""
+    /// Stored as ciphertext: fetched from `url` and opened on this phone.
+    public var sealed = false
+    /// The message whose DEK opens it, and that row's AD prefix.
+    public var messageID: Int = 0
+    public var adPrefix: String = ""
+    /// The row's sealed DEK, so a part opens after a lock cleared the key cache.
+    public var sealedDek: String = ""
 
     init?(json: JSONValue) {
         guard let id = json["id"]?.intValue else { return nil }
@@ -118,8 +170,14 @@ public struct MailAttachment: Identifiable, Equatable, Sendable {
         filename = json["filename"]?.stringValue ?? "attachment"
         contentType = json["content_type"]?.stringValue ?? "application/octet-stream"
         sizeBytes = json["size_bytes"]?.intValue ?? 0
-        url = json["url"]?.stringValue
+        let u = json["url"]
+        url = (u?.isNull ?? true) ? nil : u?.stringValue
+        mimePart = json["mime_part"]?.stringValue ?? ""
+        inline = json["inline"]?.boolValue ?? false
     }
+
+    /// A part's AD under its row's DEK.
+    public var ad: String { "\(adPrefix)\(messageID):att:\(mimePart)" }
 
     public var sizeLabel: String {
         let bytes = Double(sizeBytes)
@@ -155,16 +213,40 @@ public struct MailMessage: Identifiable, Equatable, Sendable {
     /// "Unmatched" view. Resolves which mailbox's folder rail the Move/Labels
     /// control uses (the first message in a thread that has one).
     public let aliasID: Int?
-    public let sender: String
-    public let recipient: String
-    public let subject: String
+    public var sender: String
+    public var recipient: String
+    public var subject: String
     public let receivedTime: String
     public var isRead: Bool
     public var isStarred: Bool
     public let direction: String
-    public let bodyPlain: String
-    public let bodyHTML: String
-    public let attachments: [MailAttachment]
+    public var bodyPlain: String
+    public var bodyHTML: String
+    public var attachments: [MailAttachment]
+    public var to: String
+    public var cc: String
+    /// A Fortress message's ciphertext as sent; kept after opening, since the
+    /// row key opens its parts for a download or a forward.
+    public let sealed: SealedRow?
+    public let fortress: Bool
+    /// What stands in for the content when this phone cannot open it.
+    public var placeholder: FortressNote?
+    /// The body HTML as the sender wrote it (cid: references intact), for a
+    /// reply's quote; `bodyHTML` has them resolved for display.
+    public var bodyHTMLSource: String = ""
+    /// Inline parts (cid: images) of an opened Fortress message.
+    public var inlineParts: [MailAttachment] = []
+    public var aiSummary: String = ""
+    public var aiScan: JSONValue?
+    public var rawHeaders: String = ""
+    public let aiDangerScore: Int?
+    public let receivedAuth: (spf: String, dkim: String, dmarc: String)
+
+    public static func == (a: MailMessage, b: MailMessage) -> Bool {
+        a.id == b.id && a.isRead == b.isRead && a.isStarred == b.isStarred && a.subject == b.subject
+            && a.bodyPlain == b.bodyPlain && a.bodyHTML == b.bodyHTML && a.attachments == b.attachments
+            && a.placeholder == b.placeholder
+    }
 
     public var isOutbound: Bool { direction == "outbound" }
 
@@ -182,13 +264,25 @@ public struct MailMessage: Identifiable, Equatable, Sendable {
         bodyPlain = json["body_plain"]?.stringValue ?? ""
         bodyHTML = json["body_html"]?.stringValue ?? ""
         attachments = (json["attachments"]?.arrayValue ?? []).compactMap(MailAttachment.init(json:))
+        to = json["to"]?.stringValue ?? ""
+        cc = json["cc"]?.stringValue ?? ""
+        sealed = SealedRow(json: json["sealed"])
+        fortress = json["fortress"]?.boolValue ?? false
+        let score = json["ai_danger_score"]
+        aiDangerScore = (score?.isNull ?? true) ? nil : score?.intValue
+        receivedAuth = (json["spf_result"]?.stringValue ?? "", json["dkim_result"]?.stringValue ?? "",
+                        json["dmarc_result"]?.stringValue ?? "")
+        bodyHTMLSource = bodyHTML
     }
+
+    /// Reply and forward are offered on an opened message, never on a placeholder.
+    public var canRespond: Bool { placeholder == nil }
 }
 
 /// The `mailbox/thread` payload: the in-scope messages plus the thread's
 /// current folder/label memberships (ids into the mailbox's `folders`).
 public struct MailThread: Equatable, Sendable {
-    public let messages: [MailMessage]
+    public var messages: [MailMessage]
     public let folderIDs: [Int]
 
     public init?(data: JSONValue?) {
@@ -373,4 +467,55 @@ public enum MailDisplay {
         }
         return Int(hash % UInt32(max(paletteSize, 1)))
     }
+}
+
+
+// MARK: - End-to-end (Fortress) rows
+
+/// A row's sealed columns as the server stores them
+/// (`InboundEmailMessage::sealedForBrowser`): `{key, sealed_scope, sealed_dek,
+/// sealed_ad_prefix, iem_*}` plus the flags the reader acts on. Every `iem_*`
+/// value is a `v1.edge.` field under the row's DEK, AD `{prefix}{key}:{column}`.
+public struct SealedRow: Equatable, Sendable {
+    public let key: Int
+    public let scope: String
+    public let sealedDek: String
+    public let adPrefix: String
+    public let fields: [String: String]
+    /// Relay-sealed and not parsed yet: the first device that opens it parses it.
+    public let pending: Bool
+    /// Sealed to a key the owner's vault does not hold.
+    public let unopenable: Bool
+    /// Another person's row (an all-access viewer): only the owner's devices open it.
+    public let foreign: Bool
+
+    public init?(json: JSONValue?) {
+        guard let json, case .object(let pairs) = json else { return nil }
+        key = json["key"]?.intValue ?? 0
+        scope = json["sealed_scope"]?.stringValue ?? "mail"
+        sealedDek = json["sealed_dek"]?.stringValue ?? ""
+        adPrefix = json["sealed_ad_prefix"]?.stringValue ?? "mail:"
+        var f: [String: String] = [:]
+        for (k, v) in pairs where k.hasPrefix("iem_") {
+            if let s = v.stringValue { f[k] = s }
+        }
+        fields = f
+        pending = json["pending"]?.boolValue ?? false
+        unopenable = json["unopenable"]?.boolValue ?? false
+        foreign = json["foreign"]?.boolValue ?? false
+    }
+
+    public func ad(_ column: String) -> String { "\(adPrefix)\(key):\(column)" }
+}
+
+/// Why a Fortress row shows a placeholder instead of its content — the
+/// browser's notes, word for word where they apply to a phone.
+public enum FortressNote: String, Equatable, Sendable {
+    case locked = "End-to-end encrypted. Unlock to read it."
+    case noKey = "Encrypted on your other devices."
+    case pending = "Waiting to be opened."
+    case pendingElsewhere = "Waiting to be opened on a computer."
+    case failed = "This message could not be opened on this device."
+    case foreign = "End-to-end encrypted. Only the mailbox owner's devices can open it."
+    case unopenable = "This message arrived sealed to a key your vault does not hold, so it cannot be opened. You can delete it."
 }

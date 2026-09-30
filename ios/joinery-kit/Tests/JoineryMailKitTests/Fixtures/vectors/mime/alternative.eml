@@ -1,0 +1,23 @@
+From: alice@example.com
+To: bob@example.org
+Cc: dave@example.org
+Subject: Alternative
+Message-ID: <alt-1@example.com>
+In-Reply-To: <parent@example.com>
+References: <root@example.com>
+	<parent@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="ALT-BOUNDARY"
+
+This is the preamble; it is ignored.
+--ALT-BOUNDARY
+Content-Type: text/plain; charset=us-ascii
+
+Plain version
+--ALT-BOUNDARY  
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<p>HTML version</p>
+--ALT-BOUNDARY--
+This is the epilogue; it is ignored.

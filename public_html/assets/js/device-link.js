@@ -15,6 +15,8 @@
  * (vault_scope_{scope}); each chosen one is unlocked and sealed the same way,
  * one unlock per vault, and travels in sealed_vault_keys.
  *
+ * @version 1.4 - the server names the device kind (phones included); a signed-in app's
+ *   handover says to return to the app
  * @version 1.3 - a checkbox, an unlock and a sealed key per vault beyond Drive
  * @version 1.2 - the unlock is the core ceremony; no dialog of its own
  * @version 1.1
@@ -50,8 +52,6 @@
 
 	// ---- showing what is asking ---------------------------------------------
 
-	var PLATFORM_LABELS = { macos: 'Mac', windows: 'Windows PC', linux: 'Linux computer' };
-
 	async function resolveCode() {
 		var field = codeField();
 		var code = field ? (field.value || '').trim() : '';
@@ -63,7 +63,7 @@
 			var info = await api.post('drive_device_link_info', { code: code });
 			resolved = info;
 			$('dlkName').textContent = info.device_name || '';
-			$('dlkPlatform').textContent = PLATFORM_LABELS[info.platform] || info.platform || '';
+			$('dlkPlatform').textContent = info.platform_label || info.platform || '';
 			$('dlkIp').textContent = info.request_ip || 'unknown address';
 			$('dlkDetails').hidden = false;
 			alertBox('');
@@ -138,7 +138,9 @@
 			}
 
 			var res = await api.post('drive_device_link_approve', body);
-			alertBox(res.device_name + ' is linked. It will start syncing in a few seconds — you can close this page.', 'success');
+			alertBox(resolved && resolved.bound
+				? res.device_name + ' has its keys. Go back to the app — it picks them up in a few seconds.'
+				: res.device_name + ' is linked. It will start syncing in a few seconds — you can close this page.', 'success');
 			document.querySelectorAll('#dlkAlert ~ form button, [name="code"], [name="enable_vault"], [name^="vault_scope_"]').forEach(function (el) {
 				el.disabled = true;
 			});

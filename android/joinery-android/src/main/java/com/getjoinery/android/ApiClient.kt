@@ -65,8 +65,9 @@ class ApiClient(
         body: JsonValue? = null,
         authenticated: Boolean = true,
         idempotencyKey: String? = null,
+        maxResponseBytes: Long? = null,
     ): JsonValue {
-        val urlBuilder = config.baseUrl.toHttpUrl().newBuilder().encodedPath(path)
+        val urlBuilder = requireHttps(config.baseUrl).newBuilder().encodedPath(path)
         query.forEach { urlBuilder.addQueryParameter(it.first, it.second) }
 
         val builder = Request.Builder()
@@ -88,7 +89,7 @@ class ApiClient(
         val requestBody = body?.encodedBytes()?.toRequestBody(jsonMediaType)
         builder.method(method, requestBody ?: emptyBodyIfNeeded(method))
 
-        return execute(builder.build(), authenticated, http)
+        return execute(builder.build(), authenticated, http, maxResponseBytes)
     }
 
     /**
@@ -107,7 +108,7 @@ class ApiClient(
         authenticated: Boolean = true,
         idempotencyKey: String? = null,
     ): JsonValue {
-        val url = config.baseUrl.toHttpUrl().newBuilder()
+        val url = requireHttps(config.baseUrl).newBuilder()
             .encodedPath("/api/v1/action/$action").build()
 
         val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
@@ -140,13 +141,15 @@ class ApiClient(
         return execute(builder.build(), authenticated, uploadHttp)
     }
 
-    private suspend fun execute(request: Request, authenticated: Boolean, client: OkHttpClient): JsonValue {
+    private suspend fun execute(request: Request, authenticated: Boolean, client: OkHttpClient, maxBytes: Long? = null): JsonValue {
         val (status, text) = try {
             withContext(Dispatchers.IO) {
                 client.newCall(request).execute().use { response ->
-                    response.code to (response.body?.string() ?: "")
+                    response.code to readBody(response, maxBytes)
                 }
             }
+        } catch (e: JoineryApiError.TooLarge) {
+            throw e
         } catch (e: Exception) {
             throw JoineryApiError.Network(e)
         }
@@ -159,6 +162,81 @@ class ApiClient(
 
         if (status >= 400) throw mapError(status, json, authenticated)
         return json
+    }
+
+    /**
+     * GET a URL's raw bytes — a signed download link, which authorizes itself,
+     * so no key headers and no cookies ride along. A relative URL resolves
+     * against the deployment. The server's own refusal pages are HTML, so an
+     * HTML answer is a failure, never bytes.
+     */
+    suspend fun fetchBytes(url: String): ByteArray {
+        val absolute = if (url.startsWith("http://") || url.startsWith("https://")) url
+        else config.baseUrl.trimEnd('/') + "/" + url.trimStart('/')
+        val request = Request.Builder().url(requireHttps(absolute))
+            .header("client-app", config.clientApp)
+            .header("client-version", config.clientVersion)
+            .get().build()
+        return try {
+            withContext(Dispatchers.IO) {
+                uploadHttp.newCall(request).execute().use { response ->
+                    val type = response.header("Content-Type") ?: ""
+                    if (!response.isSuccessful || type.contains("text/html", ignoreCase = true)) {
+                        throw JoineryApiError.Server("NotFound", "This file could not be fetched.", response.code)
+                    }
+                    response.body?.bytes() ?: ByteArray(0)
+                }
+            }
+        } catch (e: JoineryApiError) {
+            throw e
+        } catch (e: Exception) {
+            throw JoineryApiError.Network(e)
+        }
+    }
+
+    /**
+     * POST raw JSON to the person's own AI endpoint. No Joinery header or key
+     * rides along. The URL must be on [registeredOrigin] (the account's
+     * `device_ai_origin`): the one place plain http is allowed, because the
+     * server registers an http origin only on a private network.
+     * Returns (status, body).
+     */
+    suspend fun postExternal(
+        url: String,
+        registeredOrigin: String,
+        body: ByteArray,
+        headers: Map<String, String>,
+        timeoutSeconds: Long = 120,
+    ): Pair<Int, String> {
+        val target = requireRegisteredOrigin(url, registeredOrigin)
+        val builder = Request.Builder().url(target).post(body.toRequestBody(jsonMediaType))
+        headers.forEach { (k, v) -> builder.header(k, v) }
+        // One hop only: a redirect is an answer (the caller treats 3xx as an
+        // error), never a second request — it would carry the opened message to
+        // a host nobody registered, possibly over plain http.
+        val client = http.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
+            .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
+            .build()
+        return try {
+            withContext(Dispatchers.IO) {
+                client.newCall(builder.build()).execute().use { it.code to (it.body?.string() ?: "") }
+            }
+        } catch (e: Exception) {
+            throw JoineryApiError.Network(e)
+        }
+    }
+
+    /** The body as text, refusing to hold more than [maxBytes] of it. */
+    private fun readBody(response: okhttp3.Response, maxBytes: Long?): String {
+        val body = response.body ?: return ""
+        if (maxBytes == null) return body.string()
+        if (body.contentLength() > maxBytes) throw JoineryApiError.TooLarge(maxBytes)
+        val source = body.source()
+        if (source.request(maxBytes + 1)) throw JoineryApiError.TooLarge(maxBytes)
+        return source.buffer.readUtf8()
     }
 
     private val uploadHttp: OkHttpClient by lazy {
@@ -191,11 +269,13 @@ class ApiClient(
         body: JsonValue,
         authenticated: Boolean = true,
         idempotencyKey: String? = null,
+        maxResponseBytes: Long? = null,
     ): JsonValue = request(
         "POST", "/api/v1/action/$action",
         body = body,
         authenticated = authenticated,
         idempotencyKey = idempotencyKey ?: java.util.UUID.randomUUID().toString(),
+        maxResponseBytes = maxResponseBytes,
     )
 
     // MARK: Error mapping
@@ -236,6 +316,28 @@ class ApiClient(
         else null
 
     companion object {
+        /**
+         * Every request carrying a Joinery credential or mail bytes goes over
+         * https, whatever the platform allows (the app permits cleartext only
+         * for the AI endpoint on the person's network): the deployment, signed
+         * part and draft links alike. Anything else is refused before a byte leaves.
+         */
+        fun requireHttps(url: String): okhttp3.HttpUrl {
+            val parsed = try { url.toHttpUrl() } catch (e: Exception) { throw JoineryApiError.InsecureUrl(url) }
+            if (!parsed.isHttps) throw JoineryApiError.InsecureUrl(url)
+            return parsed
+        }
+
+        /** [url] must share [registeredOrigin]'s scheme, host and port exactly. */
+        fun requireRegisteredOrigin(url: String, registeredOrigin: String): okhttp3.HttpUrl {
+            val parsed = try { url.toHttpUrl() } catch (e: Exception) { throw JoineryApiError.InsecureUrl(url) }
+            val origin = try { registeredOrigin.trimEnd('/').toHttpUrl() } catch (e: Exception) { throw JoineryApiError.InsecureUrl(url) }
+            if (parsed.scheme != origin.scheme || parsed.host != origin.host || parsed.port != origin.port) {
+                throw JoineryApiError.InsecureUrl(url)
+            }
+            return parsed
+        }
+
         fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

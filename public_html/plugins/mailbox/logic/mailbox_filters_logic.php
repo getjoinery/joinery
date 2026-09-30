@@ -630,8 +630,7 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
 
 	// "Also apply to existing": flag for the backfill task and reset its cursor.
 	if ($v['apply_existing']) {
-		$filter->set('ief_apply_existing_pending', true);
-		$filter->set('ief_apply_existing_cursor', 0);
+		$filter->requestApplyExisting();
 	}
 
 	$filter->prepare();

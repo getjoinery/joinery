@@ -40,6 +40,17 @@ android {
             returnDefaultValues = true
         }
     }
+
+    // Shared vectors read in place from the web tree (search core, MIME,
+    // rule matcher, device AI, vault handoff) — one oracle for every port.
+    sourceSets {
+        test {
+            resources.srcDirs += [
+                rootProject.file("../public_html/tests/vault/fixtures"),
+                rootProject.file("../public_html/plugins/mailbox/tests/fixtures"),
+            ]
+        }
+    }
 }
 
 dependencies {

@@ -1271,7 +1271,7 @@ There is no second ceremony.
 | Search | SQL | in-window FTS | a sealed word index in each browser |
 | Best for | mailboxes without sensitive data (customer service, clubs, newsletters) | most users | mail that must stay private even from a hacked server |
 | Team features (shared mailboxes) | yes | no | no |
-| Phone apps | yes | yes | no |
+| Phone apps | yes | yes | yes, once a computer hands the phone the key |
 
 **Extra protection — the add-ons on a Private domain**
 (specs/protection_levels_platform.md § Add-ons). The domain editor renders the level
@@ -1582,8 +1582,35 @@ to the old key is left behind.
   and posts them as one bundle to `mailbox/fortress_parse_store`, which classifies
   spam from the relay's own headers. The first device to open a row parses it; a
   second post is a no-op.
-- Mail rules and contact elevation do not run on relay-sealed mail, and spam
-  learning is off; the relay's verdict is the verdict.
+- **Mail rules run on the device that parses.** Before the post, the device
+  fetches the mailbox's enabled rules (`mailbox/device_rules {alias_id}`: each
+  rule's criteria and whether it forwards, never its actions), matches them on
+  the parsed plaintext (`mailbox_filter_match.js` in the browser, the same port
+  in each phone app; `filter_match_cases.json` pins all of them to
+  `InboundEmailFilter::matches()`), and posts the matching ids as
+  `rule_matches`. The server checks each is an enabled rule in the row's scope
+  (a stray id refuses the whole parse) and applies the rules' own actions in the
+  parse's transaction, after the spam verdict (`InboundEmailFilter::
+  applyDeviceMatches()`). A device picks among the owner's rules; it never
+  names an action. A matched forward needs the message itself: the device posts
+  the opened RFC 822 as `forward_raw`, and the server relays it after commit and
+  keeps nothing.
+- **"Also apply to existing mail"** walks end-to-end rows on each owner's device
+  too: `requestApplyExisting()` stamps `ief_device_backlog_requested_time`, and each
+  owner's place in that request is a row of `ifp_inbound_email_filter_device_progress`
+  (rule, owner, request time, cursor, done — a domain-wide rule reaches several
+  owners' mailboxes, and keeping the places off the rule row means a whole-row save
+  of the rule cannot move them). `mailbox/rule_backlog` hands the device one
+  rule and a page of the caller's own parsed rows past their cursor (sealed fields
+  only), and `mailbox/rule_outcomes {rule_id, through_id, matched_ids}` applies the
+  rule's actions to the rows the device matched (never a forward) and moves that
+  owner's cursor; a `through_id` past the rows in reach is refused, and an empty
+  page closes that owner's walk. Each place is written with one upsert. A matched id naming a
+  rule of the row's own scope that was switched off after the device fetched the
+  rules is skipped; one outside the scope refuses the parse. The browser runs it after the pending drain, whenever the mail
+  vault opens (`MailboxFortress.drainRuleBacklog()`).
+- Contact elevation does not run on relay-sealed mail, and spam learning is off;
+  the relay's verdict is the verdict.
 - **The relay pin.** The browser checks which key the relay seals to. The relay
   signs a statement per mailbox (`GET /relay/seal-target`, Ed25519 under its
   identity key, prefix `joinery-relay:seal-target:v1`); `mailbox/relay_seal_target`
@@ -1597,10 +1624,13 @@ to the old key is left behind.
   different relay stops with a dialog showing both fingerprints; "Trust the new
   relay" re-pins, after a step-up on an account with a second factor.
 
-**Phone apps.** The iOS and Android apps do not open Fortress mail. The server
-answers `fortress: true` with the sealed shape; reading it on a phone needs the key
-handed to the phone through device linking and the decryption built into the apps,
-which they do not have. The Fortress card says mobile apps are not available.
+**Phone apps.** The iOS and Android apps read, search, draft and reply to
+Fortress mail. The phone is handed the mail key once from a computer — enrollment
+bound to the app's own session key (`device_key_enroll`) — and keeps it behind its
+biometric lock; it opens rows, parts and drafts itself (parts through signed URLs to
+their ciphertext), parses relay-sealed mail and runs the mailbox's rules on it, and
+judges mail on the person's own model. See `docs/mobile_apps.md` § Fortress mail,
+drafts, search and notifications in the native mail modules.
 
 ### A sealing mailbox always has someone to seal to
 
@@ -1669,13 +1699,16 @@ domain a locked row is **excluded** from AI results (never a placeholder) and st
 pending for post-unlock catch-up; `query_model` reports the excluded count so the model
 knows the result set is partial. The LLM provider is a disclosure, not a level gate.
 
-### Notifications & offline cache (native contract)
+### Notifications (native contract)
 
-Push content is set by when plaintext legally exists: Standard = full (sender/subject/
-snippet); Private = sender + subject (generated at the ingest moment, pre-seal), with an
-optional per-mailbox generic-notifications toggle; Seal at the relay = generic by
-construction ("New mail to `user@domain`"). Native offline cache defaults on for
-Standard/Private and off under Seal at the relay. (These ride the native app + push packages.)
+The phone apps learn of new mail by polling: a background check the OS schedules
+(iOS `BGAppRefreshTask`, Android `WorkManager`) compares each mailbox's
+`newest_unread_id` from `mailboxes` with the highest id it last notified. A
+notification names the mailbox; a Standard mailbox's also carries the newest row's
+sender and subject, fetched with the session key. Private and Fortress name the mailbox
+only: the session key opens no server window, and the Fortress key is not held in the
+background. See `docs/mobile_apps.md` § Fortress mail, drafts, search and notifications
+in the native mail modules.
 
 ## Encryption at rest
 
@@ -3827,7 +3860,19 @@ message's inline file-backed parts. Minting happens only after the
 viewer-scope check that gated the thread fetch; the serving path validates
 signature + expiry with no session at all. Attachments whose bytes are not a
 private File (IMAP on-demand / raw-section parts) carry `url: null` and
-stream only through the sessioned member endpoint.
+stream only through the sessioned member endpoint. A Fortress message's parts,
+inline ones included, and a Fortress draft's parts (`draft_get`, `draft_save`)
+carry a signed URL to their stored ciphertext
+(`withFortressPartUrls()`): the mail decrypt hook serves a browser-sealed row's
+part unchanged, no serve grant is minted, and the app that holds the key opens
+the bytes under the row's DEK and the part's AD and resolves the body's `cid:`
+references itself.
+
+**New-mail polling.** Each `mailboxes` row carries `newest_unread_id`, the
+highest id among the rows its `unread` count counts that were never read
+(`null` when none; a message marked unread again is not new). New mail raises
+it and reading lowers or clears it, so an app polling in the
+background compares it with the highest id it last notified for that mailbox.
 
 **The app route flip.** The plugin's `profileMenu` entry declares
 `"nativeScreen": "mailbox"`, so the app navigation endpoint serves the Email
@@ -4439,7 +4484,10 @@ the same reason, and because the Inbox it lands on has never listed them
 sets a pending flag drained by the `ApplyInboundEmailFilters` scheduled task, which
 pages through that mailbox's locally-received, non-deleted history in bounded
 batches and applies the same matcher and actions (forwarding is never re-applied to
-historical mail), resuming across runs via a per-filter cursor.
+historical mail), resuming across runs via a per-filter cursor. End-to-end rows,
+which the task cannot read, are walked by the owner's device instead
+(§ Fortress: end-to-end mail, `ifp_inbound_email_filter_device_progress`). The
+task writes only its own two columns when a batch ends, never the whole rule.
 
 **Logging.** Each ingest that matches at least one filter writes a `filtered` line to
 the inbound transaction log (the **Logs** tab) recording the matched filter ids and

@@ -6,9 +6,13 @@
  * (and with it the account's virtual passkey) is reset.
  *
  * Usage:
- *   php walk_fixture.php create <purpose> [--messages=N] [--permission=P]
+ *   php walk_fixture.php create <purpose> [--messages=N] [--permission=P] [--fortress]
  *   php walk_fixture.php deliver <purpose> <N> <tag>
  *   php walk_fixture.php deliver-relay <purpose> <N> <tag> [--parts=P]
+ *   php walk_fixture.php approve-device <purpose> <link code>
+ *   php walk_fixture.php add-rule <purpose> <subject word> [--forward=ADDRESS]
+ *   php walk_fixture.php retire-key <purpose>
+ *   php walk_fixture.php ai-on <purpose> <model origin>
  *   php walk_fixture.php retire <purpose>
  *   php walk_fixture.php status <purpose>
  *
@@ -38,9 +42,25 @@
  * the fixture domain's Seal at the relay add-on on (the relay seals Fortress
  * mail only under it). --parts=P adds P more PDF attachments to each message.
  *
+ * `--fortress` makes the fixture a phone-app one (specs/fortress_mobile_apps.md):
+ * the user's `mail` vault is made from a keypair this script mints, the domain
+ * is at Fortress, and the vault's secret stays in a 0600 file, APP_KEYFILE
+ * (with the account's password, for the app to sign in with), so no browser
+ * is needed: `approve-device` does what the link page does for a signed-in
+ * app's enrollment — seals the mail secret to the device key and approves
+ * the bound link as the fixture user. `create` without --fortress removes a
+ * purpose's key file. For the gates' other legs: `add-rule` makes a mail rule
+ * on the mailbox (subject contains the word: star it, or forward it with the
+ * forwarding acknowledged); `retire-key` does what a mail key rotation does to
+ * devices (a new mail keypair in the key file, the scope taken off every
+ * device); `ai-on` turns AI on for the domain, registers the model origin and
+ * makes the triage and security-scan recipes for the mailbox.
+ *
  * Refuses without the `debug` setting: it makes an admin account, so it never
  * runs on production.
  *
+ * @version 1.4 - add-rule, retire-key, ai-on: the phone gates' rule, rotation and AI legs
+ * @version 1.3 - --fortress (a known-key mail vault, no browser) and approve-device, for the phone apps' gates
  * @version 1.2 - deliver-relay: through the relay program and the pull's ingest step
  * @version 1.1 - the handoff carries the email (walk_vault.js signs in at /login);
  *   create prunes fixtures older than PRUNE_DAYS
@@ -59,6 +79,7 @@ const WALK_HANDOFF = '/tmp/playwright-mcp/walk-handoff.json';
 const WALK_HANDOFF_MAX_AGE = 300;
 const WALK_SCRIPT = '/tmp/playwright-mcp/walk_vault.js';
 const PRUNE_DAYS = 7;
+const APP_KEYFILE = '/tmp/joinery-app-fortress-%s.json';
 
 function walk_fail(string $message): void {
 	fwrite(STDERR, 'walk_fixture: ' . $message . "\n");
@@ -217,6 +238,148 @@ function walk_deliver_relay(InboundEmailDomain $domain, string $address, int $n,
 	}
 }
 
+/**
+ * A Fortress fixture without a browser: a `mail` vault from a keypair minted
+ * here, the domain at Fortress, and the secret and a fresh password in the
+ * purpose's 0600 key file.
+ */
+function walk_make_fortress(User $user, InboundEmailDomain $domain, string $purpose): void {
+	$box = new SealedBox();
+	$pair = $box->generateKeypair();
+	$pub = base64_encode(SealedBox::b64url_decode($pair['public']));
+	$db = DbConnector::get_instance()->get_db_link();
+	$db->prepare("INSERT INTO uev_user_encryption_vaults (uev_usr_user_id, uev_scope, uev_custody, uev_public_key, uev_salt, uev_key_generation)
+		VALUES (?, ?, 'client', ?, ?, 1)")->execute(array(intval($user->key), InboundEmailMessage::SEAL_SCOPE_FORTRESS, $pub,
+		base64_encode(random_bytes(16))));
+	InboundEmailMessage::forgetSealScopes();
+	$domain->set_security_level(InboundEmailDomain::LEVEL_FORTRESS);
+	$domain->save();
+	$password = bin2hex(random_bytes(16));
+	$user->set('usr_password', User::GeneratePassword($password));
+	$user->save();
+	$file = sprintf(APP_KEYFILE, $purpose);
+	$old = umask(077);
+	file_put_contents($file, json_encode(array('user_id' => intval($user->key), 'email' => (string)$user->get('usr_email'),
+		'password' => $password, 'mail_secret' => $pair['secret'], 'mail_public' => $pub)));
+	umask($old);
+	chmod($file, 0600);
+	echo "mail vault made, domain at Fortress; key file $file\n";
+}
+
+/**
+ * Approve a signed-in app's enrollment the way the link page does: the mail
+ * secret (PKCS#8, as the browser's keyring hands it over) sealed to the
+ * device key, then the approval as the fixture user.
+ */
+function walk_approve_device(array $names, string $purpose, string $code): void {
+	$file = sprintf(APP_KEYFILE, $purpose);
+	$keys = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
+	if (!is_array($keys)) {
+		walk_fail('no key file for ' . $purpose . ': create it with --fortress');
+	}
+	$link = DeviceLink::load_open_by_code($code);
+	if (!$link || !$link->is_bound() || intval($link->get('dlk_usr_user_id')) !== intval($keys['user_id'])) {
+		walk_fail('no open enrollment of this fixture\'s app under that code');
+	}
+	$secret = SealedBox::b64url_decode($keys['mail_secret']);
+	$pkcs8 = hex2bin('302e020100300506032b656e04220420') . $secret;
+	$blob = (new SealedBox())->sealEdge($pkcs8, (string)$link->get('dlk_device_pubkey'));
+	require_once(PathHelper::getIncludePath('logic/drive_device_link_approve_logic.php'));
+	$session = SessionControl::get_instance();
+	$session->set_api_user(intval($keys['user_id']));
+	try {
+		$result = drive_device_link_approve_logic(array('code' => $code,
+			'sealed_vault_keys' => array(InboundEmailMessage::SEAL_SCOPE_FORTRESS => $blob)));
+	} finally {
+		$session->clear_api_user();
+	}
+	if ($result->error) {
+		walk_fail('approval refused: ' . $result->error);
+	}
+	echo 'approved device ' . intval($result->data['device_id']) . ' (' . $result->data['device_name'] . ")\n";
+}
+
+/** The fixture's mailbox, or a refusal. */
+function walk_alias(array $names): InboundEmailAlias {
+	$domain = walk_domain($names['domain']);
+	if ($domain) {
+		foreach (new MultiInboundEmailAlias(array('iea_ied_inbound_email_domain_id' => intval($domain->key), 'deleted' => false)) as $a) {
+			return new InboundEmailAlias(intval($a->key), TRUE);
+		}
+	}
+	walk_fail('no fixture mailbox; create it first');
+}
+
+function walk_add_rule(array $names, string $word, string $forward): void {
+	$alias = walk_alias($names);
+	$user = walk_user($names['email']);
+	$f = new InboundEmailFilter(NULL);
+	$f->set('ief_iea_inbound_email_alias_id', intval($alias->key));
+	$f->set('ief_ied_inbound_email_domain_id', intval($alias->get('iea_ied_inbound_email_domain_id')));
+	$f->set('ief_name', 'walk rule ' . $word);
+	$f->set('ief_is_enabled', true);
+	$f->set('ief_match_subject', $word);
+	if ($forward !== '') {
+		$f->set('ief_action_forward_to', $forward);
+	} else {
+		$f->set('ief_action_star', true);
+	}
+	$f->prepare();
+	$f->save();
+	if ($forward !== '') {
+		$f = new InboundEmailFilter(intval($f->key), TRUE);
+		$f->recordForwardAcknowledgment(intval($user->key));
+		$f->save();
+	}
+	echo 'rule ' . intval($f->key) . ': subject contains "' . $word . '" → ' . ($forward !== '' ? 'forward to ' . $forward : 'star') . "\n";
+}
+
+function walk_retire_key(array $names, string $purpose): void {
+	$file = sprintf(APP_KEYFILE, $purpose);
+	$keys = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
+	if (!is_array($keys)) {
+		walk_fail('no key file for ' . $purpose . ': create it with --fortress');
+	}
+	$pair = (new SealedBox())->generateKeypair();
+	$pub = base64_encode(SealedBox::b64url_decode($pair['public']));
+	DbConnector::get_instance()->get_db_link()->prepare("UPDATE uev_user_encryption_vaults
+		SET uev_public_key = ?, uev_key_generation = uev_key_generation + 1
+		WHERE uev_usr_user_id = ? AND uev_scope = ?")
+		->execute(array($pub, intval($keys['user_id']), InboundEmailMessage::SEAL_SCOPE_FORTRESS));
+	(new ReflectionMethod('VaultClientRotation', 'forgetScopeOnDevices'))->invoke(null, intval($keys['user_id']),
+		InboundEmailMessage::SEAL_SCOPE_FORTRESS);
+	InboundEmailMessage::forgetSealScopes();
+	$keys['mail_secret'] = $pair['secret'];
+	$keys['mail_public'] = $pub;
+	$old = umask(077);
+	file_put_contents($file, json_encode($keys));
+	umask($old);
+	echo "mail key retired: a new one is in $file; every device was told it no longer holds mail\n";
+}
+
+function walk_ai_on(array $names, string $origin): void {
+	$alias = walk_alias($names);
+	$domain = walk_domain($names['domain']);
+	$user = walk_user($names['email']);
+	$domain->set('ied_ai_processing_enabled', true);
+	$domain->save();
+	MailboxAliasConfig::clearPostureCache();
+	MailboxDeviceAiHost::setForUser(intval($user->key), MailboxDeviceAiHost::normalizeOrigin($origin));
+	$address = 'box@' . $names['domain'];
+	foreach (array('email_triage', 'email_security_scan') as $job) {
+		$recipe = new Recipe(NULL);
+		$recipe->set('rcp_name', 'walk ' . $job);
+		$recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
+		$recipe->set('rcp_pipeline_job', $job);
+		$recipe->set('rcp_source_config', json_encode(array('mailbox_aliases' => array($address))));
+		$recipe->set('rcp_owner_user_id', intval($user->key));
+		$recipe->set('rcp_enabled', true);
+		$recipe->save();
+		echo "recipe " . intval($recipe->key) . " ($job) on $address\n";
+	}
+	echo "AI on for {$names['domain']}, model origin " . MailboxDeviceAiHost::originForUser(intval($user->key)) . "\n";
+}
+
 /** Remove the purpose's fixture: the domain (its mailbox, grants and messages with it), then the user. */
 function walk_retire(array $names): void {
 	$domain = walk_domain($names['domain']);
@@ -227,6 +390,10 @@ function walk_retire(array $names): void {
 	$user = walk_user($names['email']);
 	if ($user) {
 		$id = intval($user->key);
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->prepare('DELETE FROM aip_recipe_item_log WHERE aip_rcp_recipe_id IN (SELECT rcp_recipe_id FROM rcp_recipes WHERE rcp_owner_user_id = ?)')
+			->execute(array($id));
+		$db->prepare('DELETE FROM rcp_recipes WHERE rcp_owner_user_id = ?')->execute(array($id));
 		$user->permanent_delete();
 		echo "retired user $id\n";
 	}
@@ -280,11 +447,13 @@ $opts = array();
 foreach (array_slice($argv, 1) as $a) {
 	if (preg_match('/^--([a-z]+)=(.*)$/', $a, $m)) {
 		$opts[$m[1]] = $m[2];
+	} elseif (preg_match('/^--([a-z]+)$/', $a, $m)) {
+		$opts[$m[1]] = true;
 	}
 }
 $command = $args[0] ?? '';
 if ($command === '' || !isset($args[1])) {
-	walk_fail('usage: create|deliver|deliver-relay|retire|status <purpose> ... (see the file header)');
+	walk_fail('usage: create|deliver|deliver-relay|approve-device|add-rule|retire-key|ai-on|retire|status <purpose> ... (see the file header)');
 }
 $names = walk_names($args[1]);
 $address = 'box@' . $names['domain'];
@@ -326,6 +495,12 @@ switch ($command) {
 
 		echo "user $uid ({$names['email']}), domain " . intval($domain->key) . " ({$names['domain']}), mailbox "
 			. intval($alias->key) . " ($address)\n";
+		if (array_key_exists('fortress', $opts)) {
+			walk_make_fortress(new User($uid, TRUE), $domain, $args[1]);
+			walk_deliver($address, max(0, intval($opts['messages'] ?? 2)), 'fortress');
+			break;
+		}
+		@unlink(sprintf(APP_KEYFILE, $args[1]));
 		walk_deliver($address, max(0, intval($opts['messages'] ?? 2)), 'standard');
 		walk_write_handoff(new User($uid, TRUE));
 		copy(__DIR__ . '/walk_vault.js', WALK_SCRIPT);
@@ -349,8 +524,25 @@ switch ($command) {
 			max(0, min(200, intval($opts['parts'] ?? 0))));
 		break;
 
+	case 'add-rule':
+		walk_add_rule($names, (string)($args[2] ?? 'invoice'), (string)($opts['forward'] ?? ''));
+		break;
+
+	case 'retire-key':
+		walk_retire_key($names, $args[1]);
+		break;
+
+	case 'ai-on':
+		walk_ai_on($names, (string)($args[2] ?? ''));
+		break;
+
+	case 'approve-device':
+		walk_approve_device($names, $args[1], (string)($args[2] ?? ''));
+		break;
+
 	case 'retire':
 		walk_retire($names);
+		@unlink(sprintf(APP_KEYFILE, $args[1]));
 		break;
 
 	case 'status':

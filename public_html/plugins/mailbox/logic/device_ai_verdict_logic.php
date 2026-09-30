@@ -4,7 +4,7 @@
  * sealed under a Fortress message's own key (specs/fortress_mail_device_ai.md
  * § R4).
  *
- * POST /api/v1/action/mailbox/device_ai_verdict (browser session). Params: id
+ * POST /api/v1/action/mailbox/device_ai_verdict (browser session or app session key). Params: id
  * (the message), recipe_id, fields ({iem_ai_summary} for the triage,
  * {iem_ai_scan} for the security scan, each `v1.edge.` ciphertext), and
  * danger_score (0–10, the scan only; kept in the clear as a Private row keeps
@@ -13,6 +13,8 @@
  * had already judged the message (a second tab got there first), in which
  * case nothing was written.
  *
+ * @version 1.1 - reachable with an app session key too (requires_person_credential,
+ * specs/fortress_mobile_apps.md § R8)
  * @version 1.0
  */
 
@@ -33,7 +35,7 @@ function device_ai_verdict_logic(array $input): LogicResult {
 function device_ai_verdict_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('requires_person_credential' => true),
 		'description' => 'Store a device-computed AI verdict, sealed by the browser under a Fortress message\'s own key, with the recipe\'s done mark, atomically',
 		'input' => [
 			'id'           => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],

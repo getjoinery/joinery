@@ -54,17 +54,38 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.getjoinery.android.JoineryApiError
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.getjoinery.android.JsonValue
+import com.getjoinery.android.vault.BiometricGate
+import com.getjoinery.mail.drafts.ComposeContent
+import com.getjoinery.mail.drafts.MailDrafts
+import com.getjoinery.mail.drafts.SavedPart
+import com.getjoinery.mail.fortress.FortressMail
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Reply / reply-all / forward / new-message compose. Deliberately lean: the
- * server is the authority on quoting, subject normalization (Re:/Fwd:),
- * threading headers, and the sending identity (for a new message, the picked
- * mailbox) — this sheet collects recipients and the new text. A forward
- * re-attaches the original server-side; new uploads (any mode) attach here
- * via the system picker, mirroring ComposeSheet.swift.
+ * Reply / reply-all / forward / new-message compose, and a draft reopened
+ * from Drafts. The server is the authority on quoting, subject normalization
+ * (Re:/Fwd:), threading headers and the sending identity — except for
+ * end-to-end mail, which it cannot read: a reply or forward of an opened
+ * Fortress message carries the quote this phone opened (`source_open`) and a
+ * forward its parts, opened here (specs/fortress_mobile_apps.md § R6).
+ *
+ * Drafts (§ R12): the sheet autosaves three seconds after the last edit and
+ * when the app leaves the foreground or the sheet closes; a send turns the
+ * draft into the Sent row; Discard deletes it. A Fortress draft is sealed on
+ * the phone under its own key; when the mail key locks, the sheet (already
+ * saved) closes and drops that key.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,10 +96,12 @@ internal fun ComposeSheet(
     preselectedAlias: Int?,
     onDismiss: () -> Unit,
     onSent: () -> Unit,
+    fortress: FortressMail? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val source = request.source
+    val drafts = remember { MailDrafts(api.client, fortress?.opener) }
 
     var to by remember {
         mutableStateOf(
@@ -101,24 +124,140 @@ internal fun ComposeSheet(
             },
         )
     }
+    var mode by remember { mutableStateOf(request.mode) }
+    var sourceId by remember { mutableStateOf(source?.id) }
     var fromAlias by remember {
         mutableStateOf(
             if (request.mode == ComposeMode.NEW) {
                 preselectedAlias ?: mailboxes.firstOrNull()?.aliasId
-            } else null,
+            } else source?.aliasId,
         )
     }
     var bodyText by remember { mutableStateOf("") }
     val attachments = remember { mutableStateListOf<MailOutgoingAttachment>() }
+    val savedParts = remember { mutableStateListOf<SavedPart>() }
     var isSending by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    var loadingDraft by remember { mutableStateOf(request.draftId != null) }
+    var dirty by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf<Job?>(null) }
+    var autosaveJob by remember { mutableStateOf<Job?>(null) }
+
+    val composeMailbox = mailboxes.firstOrNull { it.aliasId == fromAlias }
+    val isFortress = composeMailbox?.isFortress == true
+    val session = remember(isFortress) { MailDrafts.Session(fortress = isFortress) }
+
+    fun content() = ComposeContent(
+        aliasId = fromAlias, mode = mode, sourceId = sourceId,
+        sender = composeMailbox?.address ?: "", to = to, cc = cc, subject = subject, body = bodyText,
+    )
+
+    /** Save now (one save at a time); returns when it settled. */
+    suspend fun saveNow() {
+        saving?.join()
+        if (!dirty || !(content().hasContent || attachments.isNotEmpty())) return
+        if (session.fortress && fortress?.isOpen != true && session.dek == null) return
+        val job = scope.launch {
+            try {
+                val pending = attachments.toList()
+                val persisted = drafts.save(session, content(), pending, savedParts.map { it.mimePart }.toSet())
+                attachments.removeAll { a -> persisted.any { it.id == a.id } }
+                savedParts.clear()
+                savedParts.addAll(session.parts.filter { !it.inline || session.fortress })
+                dirty = false
+                notice = "Draft saved"
+            } catch (e: Exception) {
+                failure = "This draft could not be saved: " +
+                    ((e as? JoineryApiError)?.displayMessage ?: (e.message ?: "unknown error"))
+            }
+        }
+        saving = job
+        job.join()
+        saving = null
+    }
+
+    fun markDirty() {
+        dirty = true
+        notice = null
+        autosaveJob?.cancel()
+        autosaveJob = scope.launch {
+            delay(3_000)
+            saveNow()
+        }
+    }
+
+    fun closeSavingFirst() {
+        autosaveJob?.cancel()
+        scope.launch {
+            saveNow()
+            session.wipe()
+            onDismiss()
+        }
+    }
+
+    // A draft reopened from Drafts.
+    LaunchedEffect(request.draftId) {
+        val id = request.draftId ?: return@LaunchedEffect
+        try {
+            // A Fortress draft opens with the mail key: ask for it first.
+            if (fortress != null && fortress.holdsKey && !fortress.isOpen) {
+                BiometricGate.activity(context)?.let { fortress.unlock(it) }
+            }
+            val (opened, s) = drafts.open(id)
+            session.draftId = s.draftId
+            session.adPrefix = s.adPrefix
+            session.dek = s.dek
+            session.parts.clear(); session.parts.addAll(s.parts)
+            val c = opened.content
+            fromAlias = c.aliasId ?: fromAlias
+            mode = c.mode
+            sourceId = c.sourceId
+            to = c.to; cc = c.cc; subject = c.subject; bodyText = c.body
+            savedParts.clear(); savedParts.addAll(opened.parts)
+            loadingDraft = false
+        } catch (e: Exception) {
+            loadingDraft = false
+            failure = (e as? JoineryApiError)?.displayMessage ?: (e.message ?: "This draft could not be opened.")
+        }
+    }
+
+    // Leaving the app saves the compose; a lock of the mail key closes a
+    // Fortress compose (already saved) and drops its key (§ R12 Lock).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, isFortress) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                autosaveJob?.cancel()
+                scope.launch { saveNow() }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        val onLock: () -> Unit = {
+            if (session.fortress) {
+                scope.launch {
+                    saving?.join()
+                    session.wipe()
+                    onDismiss()
+                }
+            }
+        }
+        fortress?.keys?.held?.onLock(onLock)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            fortress?.keys?.held?.removeOnLock(onLock)
+        }
+    }
 
     fun addPicked(uris: List<Uri>) {
         scope.launch {
             for (uri in uris) {
                 val picked = withContext(Dispatchers.IO) { readAttachment(context, uri) } ?: continue
                 failure = preflight(attachments, picked)
-                if (failure == null) attachments.add(picked)
+                if (failure == null) {
+                    attachments.add(picked)
+                    markDirty()
+                }
             }
         }
     }
@@ -127,37 +266,91 @@ internal fun ComposeSheet(
         ActivityResultContracts.GetMultipleContents(),
     ) { uris -> addPicked(uris) }
 
-    val title = when (request.mode) {
-        ComposeMode.REPLY -> "Reply"
-        ComposeMode.REPLY_ALL -> "Reply all"
-        ComposeMode.FORWARD -> "Forward"
-        ComposeMode.NEW -> "New message"
+    val title = when {
+        request.draftId != null -> "Draft"
+        else -> when (mode) {
+            ComposeMode.REPLY -> "Reply"
+            ComposeMode.REPLY_ALL -> "Reply all"
+            ComposeMode.FORWARD -> "Forward"
+            ComposeMode.NEW -> "New message"
+        }
     }
-    val footerText = when (request.mode) {
+    val footerText = when (mode) {
         ComposeMode.FORWARD -> "The forwarded message and its attachments are included below your text."
         ComposeMode.NEW -> null
         else -> "The original message is quoted below your text."
     }
-    val canSend = !isSending && to.trim().isNotEmpty() &&
-        !(request.mode == ComposeMode.NEW && fromAlias == null)
+    val canSend = !isSending && !loadingDraft && to.trim().isNotEmpty() &&
+        !(mode == ComposeMode.NEW && fromAlias == null)
 
     fun send() {
         isSending = true
         failure = null
+        autosaveJob?.cancel()
         scope.launch {
             try {
-                api.send(
-                    mode = request.mode,
-                    sourceId = source?.id,
-                    aliasId = if (request.mode == ComposeMode.NEW) fromAlias else null,
+                saving?.join()
+                val outgoing = ArrayList<MailOutgoingAttachment>(attachments)
+                val inline = LinkedHashMap<String, String>()
+                var sourceOpen: JsonValue? = null
+                // An end-to-end source: the quote and, on a forward, the parts
+                // this phone opened — the server cannot read them.
+                if (source != null && source.sealed != null && mode != ComposeMode.NEW) {
+                    if (!source.isOpenedFortress) {
+                        throw IllegalStateException("Unlock and open the message again, then send.")
+                    }
+                    sourceOpen = JsonValue.obj(
+                        "sender" to JsonValue.Str(source.sender),
+                        "subject" to JsonValue.Str(source.subject),
+                        "recipient" to JsonValue.Str(source.recipient),
+                        "body_html" to JsonValue.Str(source.bodyHtmlSource ?: source.bodyHtml),
+                        "body_plain" to JsonValue.Str(source.bodyPlain),
+                    )
+                    if (mode == ComposeMode.FORWARD && fortress != null) {
+                        for (a in source.attachments) {
+                            if (!a.fortress) continue
+                            outgoing.add(MailOutgoingAttachment(filename = a.filename, mimeType = a.contentType, data = fortress.opener.partBytes(a)))
+                        }
+                        source.inlineParts.forEachIndexed { j, p ->
+                            val cid = p.contentId.trim('<', '>')
+                            if (cid.isEmpty()) return@forEachIndexed
+                            val name = "fwdinl$j-" + p.filename.ifEmpty { "image" }.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                            outgoing.add(MailOutgoingAttachment(filename = name, mimeType = p.contentType, data = fortress.opener.partBytes(p)))
+                            inline[cid] = name
+                        }
+                    }
+                }
+                // A Fortress draft's saved parts: opened here and posted with the rest.
+                if (session.fortress && session.draftId != null) {
+                    outgoing.addAll(drafts.openedParts(session, savedParts.map { it.mimePart }.toSet()))
+                }
+                val result = api.send(
+                    mode = mode,
+                    sourceId = if (mode != ComposeMode.NEW) sourceId else null,
+                    aliasId = if (mode == ComposeMode.NEW) fromAlias else null,
                     to = to,
                     cc = cc,
                     subject = subject,
                     body = bodyText,
-                    attachments = attachments.toList(),
+                    attachments = outgoing,
+                    sourceOpen = sourceOpen,
+                    inlineManifest = inline,
+                    draftId = session.draftId,
                 )
                 isSending = false
-                onSent()
+                when (result) {
+                    is MailApi.SendResult.Locked -> {
+                        // B2: nothing was sent. Keep the sheet and the words.
+                        dirty = true
+                        saveNow()
+                        failure = result.message + " The sending lock opens in a browser: send this from a computer." +
+                            if (session.draftId != null) " Your draft is saved." else ""
+                    }
+                    is MailApi.SendResult.Sent -> {
+                        session.wipe()
+                        onSent()
+                    }
+                }
             } catch (e: Exception) {
                 isSending = false
                 failure = (e as? JoineryApiError)?.displayMessage ?: (e.message ?: "Send failed.")
@@ -165,8 +358,18 @@ internal fun ComposeSheet(
         }
     }
 
+    fun discard() {
+        autosaveJob?.cancel()
+        scope.launch {
+            saving?.join()
+            session.draftId?.let { id -> try { drafts.delete(id) } catch (_: Exception) {} }
+            session.wipe()
+            onDismiss()
+        }
+    }
+
     Dialog(
-        onDismissRequest = { if (!isSending) onDismiss() },
+        onDismissRequest = { if (!isSending) closeSavingFirst() },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = true),
     ) {
         Surface(Modifier.fillMaxSize()) {
@@ -175,16 +378,23 @@ internal fun ComposeSheet(
                     title = { Text(title, maxLines = 1) },
                     navigationIcon = {
                         IconButton(
-                            onClick = onDismiss,
+                            onClick = { closeSavingFirst() },
                             enabled = !isSending,
                             modifier = Modifier.testTag("mail_compose_cancel"),
                         ) {
-                            Icon(Icons.Outlined.Close, contentDescription = "Cancel")
+                            Icon(Icons.Outlined.Close, contentDescription = "Close and keep draft")
                         }
                     },
                     actions = {
+                        IconButton(
+                            onClick = { discard() },
+                            enabled = !isSending,
+                            modifier = Modifier.testTag("mail_compose_discard"),
+                        ) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Discard draft")
+                        }
                         AttachMenuButton(
-                            enabled = !isSending && attachments.size < MAX_ATTACHMENTS,
+                            enabled = !isSending && attachments.size + savedParts.size < MAX_ATTACHMENTS,
                             onPickPhotos = { filePicker.launch("image/*") },
                             onPickFiles = { filePicker.launch("*/*") },
                         )
@@ -210,12 +420,26 @@ internal fun ComposeSheet(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (request.mode == ComposeMode.NEW) {
-                        FromPicker(mailboxes, fromAlias) { fromAlias = it }
+                    if (loadingDraft) {
+                        CircularProgressIndicator(Modifier.size(24.dp).testTag("mail_compose_loading"))
+                    }
+                    if (isFortress) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Lock, contentDescription = null, modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "Drafts from this mailbox are sealed on this phone. The message itself goes to its recipients as ordinary email.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (mode == ComposeMode.NEW) {
+                        FromPicker(mailboxes, fromAlias) { fromAlias = it; markDirty() }
                     }
                     OutlinedTextField(
                         value = to,
-                        onValueChange = { to = it },
+                        onValueChange = { to = it; markDirty() },
                         label = { Text("To") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
@@ -225,10 +449,10 @@ internal fun ComposeSheet(
                         ),
                         modifier = Modifier.fillMaxWidth().testTag("mail_compose_to"),
                     )
-                    if (request.mode != ComposeMode.FORWARD) {
+                    if (mode != ComposeMode.FORWARD) {
                         OutlinedTextField(
                             value = cc,
-                            onValueChange = { cc = it },
+                            onValueChange = { cc = it; markDirty() },
                             label = { Text("Cc") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(
@@ -241,14 +465,14 @@ internal fun ComposeSheet(
                     }
                     OutlinedTextField(
                         value = subject,
-                        onValueChange = { subject = it },
+                        onValueChange = { subject = it; markDirty() },
                         label = { Text("Subject") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("mail_compose_subject"),
                     )
                     OutlinedTextField(
                         value = bodyText,
-                        onValueChange = { bodyText = it },
+                        onValueChange = { bodyText = it; markDirty() },
                         label = { Text("Message") },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -262,31 +486,25 @@ internal fun ComposeSheet(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    attachments.forEach { att ->
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                if (att.mimeType.startsWith("image/")) Icons.Outlined.Image
-                                else Icons.Outlined.Description,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                att.filename,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            IconButton(
-                                onClick = { attachments.removeAll { it.id == att.id } },
-                                modifier = Modifier.testTag("mail_compose_attachment_remove"),
-                            ) {
-                                Icon(Icons.Outlined.Close, contentDescription = "Remove attachment")
+                    savedParts.forEach { part ->
+                        AttachmentRow(part.filename, part.contentType, "mail_compose_saved_attachment") {
+                            savedParts.removeAll { it.mimePart == part.mimePart && it.id == part.id }
+                            val draftId = session.draftId
+                            if (!session.fortress && draftId != null && part.id != null) {
+                                scope.launch { try { drafts.deleteAttachment(draftId, part.id) } catch (_: Exception) {} }
                             }
+                            markDirty()
                         }
+                    }
+                    attachments.forEach { att ->
+                        AttachmentRow(att.filename, att.mimeType, "mail_compose_attachment") {
+                            attachments.removeAll { it.id == att.id }
+                            markDirty()
+                        }
+                    }
+                    notice?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("mail_compose_notice"))
                     }
                     failure?.let {
                         Text(
@@ -297,6 +515,25 @@ internal fun ComposeSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AttachmentRow(filename: String, mimeType: String, tag: String, onRemove: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().testTag(tag),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (mimeType.startsWith("image/")) Icons.Outlined.Image else Icons.Outlined.Description,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(filename, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        IconButton(onClick = onRemove, modifier = Modifier.testTag("mail_compose_attachment_remove")) {
+            Icon(Icons.Outlined.Close, contentDescription = "Remove attachment")
         }
     }
 }

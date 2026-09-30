@@ -385,9 +385,14 @@ function security_logic(array $input): LogicResult{
 					$device_key->soft_delete();
 				}
 			}
-			$device->soft_delete();
+			// The key's revocation unlinks its device (ApiKey::soft_delete);
+			// reload rather than save the copy read before it.
+			$device = new SyncDevice((int)$device->key, TRUE);
+			if ($device->key && !$device->get('sde_delete_time')) {
+				$device->soft_delete();
+			}
 			$message = new DisplayMessage(
-				htmlspecialchars($device->get('sde_device_name')) . ' can no longer reach your files. Anything it already downloaded stays on that computer.',
+				htmlspecialchars($device->get('sde_device_name')) . ' is signed out and can no longer reach your account. Anything it already downloaded stays on it.',
 				'Device unlinked',
 				'/\/profile\/security.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT,
 				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);

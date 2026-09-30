@@ -4,13 +4,15 @@
  * it seals one of the caller's Fortress mailboxes to (specs/client_custody_mail.md
  * § R10), for the caller's browser to check against the relay it pinned.
  *
- * POST /api/v1/action/mailbox/relay_seal_target (browser session). Input:
+ * POST /api/v1/action/mailbox/relay_seal_target (browser session or app session key). Input:
  * alias_id, a Fortress mailbox of the caller's under Seal at the relay.
  * Returns {address, relay_answer, relay_identity_public_key, pin}: the relay's
  * body byte for byte (JSON {statement, signature}), the relay identity this
  * server pins the relay's TLS to (what a first use pins), and the stored pin
  * ({relay_identity_public_key, mac}) or null.
  *
+ * @version 1.1 - reachable with an app session key too (requires_person_credential,
+ * specs/fortress_mobile_apps.md § R8)
  * @version 1.0
  */
 
@@ -29,7 +31,7 @@ function relay_seal_target_logic(array $input): LogicResult {
 function relay_seal_target_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('requires_person_credential' => true),
 		'mutates' => false,
 		'description' => 'The relay\'s signed statement of which key it seals one of the caller\'s end-to-end mailboxes to, unchanged, with the stored pin',
 		'input' => [

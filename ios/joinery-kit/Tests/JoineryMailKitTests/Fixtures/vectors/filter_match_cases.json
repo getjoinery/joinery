@@ -1,0 +1,1594 @@
+{
+    "_about": "Mail-rule cases (specs/fortress_mobile_apps.md § R14). Each case: rules as mailbox/device_rules lists them ({id, match: {from, to, subject, has_words, excludes, size_op: \"\" | \"gt\" | \"lt\", size_bytes, has_attachment}}, in the order the server evaluates them), a message {sender, recipient, subject, body_plain, body_html, size_bytes, has_attachment}, and expected_ids: the ids InboundEmailFilter::matches() accepts, in the order given (written by plugins/mailbox/tests/port_vectors_test.php from the PHP code, PORT_VECTORS_WRITE=1). has_attachment is true when the parse found any part at all. Case folding is PHP mb_strtolower (full Unicode lower-case mapping, no locale).",
+    "cases": [
+        {
+            "name": "from: one term, any case",
+            "rules": [
+                {
+                    "id": 100,
+                    "match": {
+                        "from": "alice@example.com",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                100
+            ]
+        },
+        {
+            "name": "from: comma list is OR, spaces and empty terms ignored",
+            "rules": [
+                {
+                    "id": 101,
+                    "match": {
+                        "from": " bob@x.example , , EXAMPLE.com ",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                101
+            ]
+        },
+        {
+            "name": "from: no term matches",
+            "rules": [
+                {
+                    "id": 102,
+                    "match": {
+                        "from": "bob@x.example, carol",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "from: only commas matches nothing",
+            "rules": [
+                {
+                    "id": 103,
+                    "match": {
+                        "from": " , ,",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "from: tab and newline around terms",
+            "rules": [
+                {
+                    "id": 104,
+                    "match": {
+                        "from": "\tzed,\n alice \n",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                104
+            ]
+        },
+        {
+            "name": "to: matches the recipient, not the sender",
+            "rules": [
+                {
+                    "id": 105,
+                    "match": {
+                        "from": "",
+                        "to": "alice",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "to: comma list",
+            "rules": [
+                {
+                    "id": 106,
+                    "match": {
+                        "from": "",
+                        "to": "nobody@x, TEAM@",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                106
+            ]
+        },
+        {
+            "name": "subject: substring, any case",
+            "rules": [
+                {
+                    "id": 107,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "report READY",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                107
+            ]
+        },
+        {
+            "name": "subject: surrounding whitespace trimmed",
+            "rules": [
+                {
+                    "id": 108,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "  quarterly \t",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                108
+            ]
+        },
+        {
+            "name": "subject: inner whitespace kept",
+            "rules": [
+                {
+                    "id": 109,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "quarterly  report",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "subject: no match",
+            "rules": [
+                {
+                    "id": 110,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "annual",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "case folding: accented capitals",
+            "rules": [
+                {
+                    "id": 111,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "ÉTÉ ÜBER",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Rapport été über alles",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                111
+            ]
+        },
+        {
+            "name": "case folding: accented rule, plain subject",
+            "rules": [
+                {
+                    "id": 112,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "été",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "ETE",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "case folding: Greek capital sigma",
+            "rules": [
+                {
+                    "id": 113,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "οδυσσεας",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "ΟΔΥΣΣΕΑΣ ΝΕΑ",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                113
+            ]
+        },
+        {
+            "name": "case folding: Greek final sigma in rule",
+            "rules": [
+                {
+                    "id": 114,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "οδυσσεας",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "οδυσσεας νεα",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                114
+            ]
+        },
+        {
+            "name": "final sigma: a word-final capital sigma lowers to ς",
+            "rules": [
+                {
+                    "id": 150,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "ας",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                },
+                {
+                    "id": 151,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "ασ",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "ΑΣ",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                150
+            ]
+        },
+        {
+            "name": "final sigma: a lone capital sigma lowers to σ",
+            "rules": [
+                {
+                    "id": 152,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "σ",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                },
+                {
+                    "id": 153,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "ς",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "x Σ y",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                152
+            ]
+        },
+        {
+            "name": "final sigma: mid-word stays σ",
+            "rules": [
+                {
+                    "id": 154,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "ασα",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                },
+                {
+                    "id": 155,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "αςα",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "ΑΣΑ",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                154
+            ]
+        },
+        {
+            "name": "final sigma: case-ignorable characters are skipped",
+            "rules": [
+                {
+                    "id": 156,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "α.ς",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                },
+                {
+                    "id": 157,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "ας́",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Α.Σ ΑΣ́",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                156,
+                157
+            ]
+        },
+        {
+            "name": "final sigma: the rule is lowered too",
+            "rules": [
+                {
+                    "id": 158,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "ΑΣ",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "ας",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                158
+            ]
+        },
+        {
+            "name": "case folding: Turkish dotted capital I",
+            "rules": [
+                {
+                    "id": 115,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "istanbul",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "İSTANBUL trip",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "case folding: Turkish dotted I in the rule",
+            "rules": [
+                {
+                    "id": 116,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "İstanbul",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "İSTANBUL trip",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                116
+            ]
+        },
+        {
+            "name": "case folding: dotless i",
+            "rules": [
+                {
+                    "id": 117,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "ı",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "I",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "case folding: sharp s is not ss",
+            "rules": [
+                {
+                    "id": 118,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "strasse",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Hauptstraße 5",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "case folding: capital sharp s",
+            "rules": [
+                {
+                    "id": 119,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "straße",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "HAUPTSTRAẞE",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                119
+            ]
+        },
+        {
+            "name": "has words: every token, across sender, subject and bodies",
+            "rules": [
+                {
+                    "id": 120,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "alice quarterly invoice HREF",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                120
+            ]
+        },
+        {
+            "name": "has words: one token missing",
+            "rules": [
+                {
+                    "id": 121,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "alice budget",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "has words: tabs and newlines split tokens",
+            "rules": [
+                {
+                    "id": 122,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "numbers\tinvoice\r\nteam",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                122
+            ]
+        },
+        {
+            "name": "has words: unicode whitespace splits tokens",
+            "rules": [
+                {
+                    "id": 123,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "numbers invoice　team alice",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                123
+            ]
+        },
+        {
+            "name": "has words: a zero-width space does not split",
+            "rules": [
+                {
+                    "id": 124,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "numbers​invoice",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "has words: a token that spans two fields",
+            "rules": [
+                {
+                    "id": 125,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "ready hi",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "x ready",
+                "body_plain": "hi",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                125
+            ]
+        },
+        {
+            "name": "has words: the joined haystack",
+            "rules": [
+                {
+                    "id": 126,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "ready hi",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "already",
+                "body_plain": "high",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                126
+            ]
+        },
+        {
+            "name": "excludes: a token present",
+            "rules": [
+                {
+                    "id": 127,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "unsubscribe invoice",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "excludes: none present",
+            "rules": [
+                {
+                    "id": 128,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "unsubscribe newsletter",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                128
+            ]
+        },
+        {
+            "name": "size gt: equal is not greater",
+            "rules": [
+                {
+                    "id": 129,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "gt",
+                        "size_bytes": 5000,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "size gt: one less",
+            "rules": [
+                {
+                    "id": 130,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "gt",
+                        "size_bytes": 4999,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                130
+            ]
+        },
+        {
+            "name": "size lt: equal is not less",
+            "rules": [
+                {
+                    "id": 131,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "lt",
+                        "size_bytes": 5000,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "size lt: one more",
+            "rules": [
+                {
+                    "id": 132,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "lt",
+                        "size_bytes": 5001,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                132
+            ]
+        },
+        {
+            "name": "size: no operator ignores the size",
+            "rules": [
+                {
+                    "id": 133,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 1,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                133
+            ]
+        },
+        {
+            "name": "size: zero bytes ignores the operator",
+            "rules": [
+                {
+                    "id": 134,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "gt",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                134
+            ]
+        },
+        {
+            "name": "size: a message size of 0",
+            "rules": [
+                {
+                    "id": 135,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "lt",
+                        "size_bytes": 10,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 0,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                135
+            ]
+        },
+        {
+            "name": "has attachment: wanted, present",
+            "rules": [
+                {
+                    "id": 136,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": true
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": true
+            },
+            "expected_ids": [
+                136
+            ]
+        },
+        {
+            "name": "has attachment: wanted, absent",
+            "rules": [
+                {
+                    "id": 137,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": true
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "has attachment: not wanted, present",
+            "rules": [
+                {
+                    "id": 138,
+                    "match": {
+                        "from": "alice",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": true
+            },
+            "expected_ids": [
+                138
+            ]
+        },
+        {
+            "name": "all criteria together (AND)",
+            "rules": [
+                {
+                    "id": 139,
+                    "match": {
+                        "from": "example.com",
+                        "to": "team",
+                        "subject": "report",
+                        "has_words": "numbers",
+                        "excludes": "spam",
+                        "size_op": "gt",
+                        "size_bytes": 10,
+                        "has_attachment": true
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": true
+            },
+            "expected_ids": [
+                139
+            ]
+        },
+        {
+            "name": "all criteria, one fails",
+            "rules": [
+                {
+                    "id": 140,
+                    "match": {
+                        "from": "example.com",
+                        "to": "team",
+                        "subject": "report",
+                        "has_words": "",
+                        "excludes": "numbers",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        },
+        {
+            "name": "a rule with no criterion matches every message",
+            "rules": [
+                {
+                    "id": 141,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                141
+            ]
+        },
+        {
+            "name": "a rule of only whitespace matches every message",
+            "rules": [
+                {
+                    "id": 142,
+                    "match": {
+                        "from": "  ",
+                        "to": "",
+                        "subject": "\t",
+                        "has_words": "\n",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                142
+            ]
+        },
+        {
+            "name": "empty message fields",
+            "rules": [
+                {
+                    "id": 143,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "x",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                },
+                {
+                    "id": 144,
+                    "match": {
+                        "from": "a",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "",
+                "recipient": "",
+                "subject": "",
+                "body_plain": "",
+                "body_html": "",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                143
+            ]
+        },
+        {
+            "name": "several rules: the matching ids, in the order given",
+            "rules": [
+                {
+                    "id": 9,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "report",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                },
+                {
+                    "id": 3,
+                    "match": {
+                        "from": "zed",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                },
+                {
+                    "id": 7,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "invoice",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                },
+                {
+                    "id": 1,
+                    "match": {
+                        "from": "",
+                        "to": "",
+                        "subject": "",
+                        "has_words": "",
+                        "excludes": "",
+                        "size_op": "",
+                        "size_bytes": 0,
+                        "has_attachment": false
+                    }
+                }
+            ],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": [
+                9,
+                7,
+                1
+            ]
+        },
+        {
+            "name": "no rules",
+            "rules": [],
+            "message": {
+                "sender": "Alice Example <Alice@Example.COM>",
+                "recipient": "team@corp.example",
+                "subject": "Quarterly Report ready",
+                "body_plain": "Hi team, the numbers are in. Invoice #42 attached.",
+                "body_html": "<p>Hi team, <a href=\"https://x.example/r\">report</a></p>",
+                "size_bytes": 5000,
+                "has_attachment": false
+            },
+            "expected_ids": []
+        }
+    ]
+}

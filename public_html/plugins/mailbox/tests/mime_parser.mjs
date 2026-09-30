@@ -24,14 +24,21 @@
  * plus built-in cases: input that is not a message, nesting past the depth
  * cap, and a message with no Content-Type at all. The parser must never throw.
  *
+ * Runs with lib/whatwg_text_decoder.js installed: Node decodes windows-1252
+ * bytes 0x80-0x9F as C1 controls, a browser as the WHATWG index says.
+ *
+ * @version 1.1 - a browser's windows-1252
  * @version 1.0
  */
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const here = dirname(fileURLToPath(import.meta.url));
+// Decode windows-1252 as a browser does, not as Node does (lib/whatwg_text_decoder.js).
+createRequire(import.meta.url)(join(here, 'lib', 'whatwg_text_decoder.js'));
 new Function(readFileSync(join(here, '..', 'assets', 'mailbox_mime.js'), 'utf8'))();
 const Mime = globalThis.MailboxMime;
 
@@ -213,6 +220,13 @@ console.log('== never throws ==');
 		try { p = Mime.parse(input); } catch (e) { p = null; }
 		ok(label + ' returns the full shape', p && shape.every((k) => k in p) && Array.isArray(p.attachments));
 	}
+	// windows-1252 as a browser decodes it: 0x80-0x9F are real characters, for
+	// every label WHATWG maps there, and for the not-UTF-8 fallback.
+	const w1252 = (hdr) => Mime.parse(new Uint8Array([...text(hdr + '\r\n\r\nA'), 0x96, 0x80, 0x85, 0x93, 0x94])).textPlain;
+	eq('windows-1252 0x80-0x9F are WHATWG characters', w1252('Content-Type: text/plain; charset=windows-1252'), 'A\u2013\u20AC\u2026\u201C\u201D');
+	eq('so is iso-8859-1 (WHATWG reads it as windows-1252)', w1252('Content-Type: text/plain; charset=iso-8859-1'), 'A\u2013\u20AC\u2026\u201C\u201D');
+	eq('and a body that is not UTF-8 with no charset', w1252('Content-Type: text/plain'), 'A\u2013\u20AC\u2026\u201C\u201D');
+	eq('and an encoded word in cp1252', Mime.parse(text('Subject: =?cp1252?Q?a=96b?=\r\n\r\nx')).subject, 'a\u2013b');
 	eq('unknown charset falls back to utf-8', Mime.parse(text('Content-Type: text/plain; charset=x-klingon\r\n\r\nqapla')).textPlain, 'qapla');
 	eq('no Content-Type is text/plain', Mime.parse(text('Subject: s\r\n\r\nbody')).textPlain, 'body');
 	eq('headerValue of nonsense', Mime.headerValue(null, 'subject'), '');

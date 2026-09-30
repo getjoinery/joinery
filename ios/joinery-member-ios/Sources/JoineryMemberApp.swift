@@ -22,11 +22,21 @@ struct JoineryMemberApp: App {
         JoineryCalendar.registerScreens()
         JoineryAIChat.registerScreens()
         JoineryMember.registerScreens()
+        // New-mail notifications by polling: the task must be registered
+        // before launch finishes (specs/fortress_mobile_apps.md § R15).
+        MailPolling.registerBackgroundTask(config: Self.config, keychainService: Self.keychainService)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--poll-on-foreground") {
+            MailPolling.enableForegroundChecksForTesting()
+        }
+        #endif
 
         // Deterministic UI-test startup: wipe stored credentials so every
         // test run begins signed out.
         if ProcessInfo.processInfo.arguments.contains("--reset-auth") {
             KeychainStore(service: Self.keychainService).deleteCredentials()
+            // And any mail key a previous run's account left on the phone.
+            DeviceKeyStore(service: Self.keychainService, protection: .plain).forgetVaultSecret(scope: "mail")
         }
     }
 

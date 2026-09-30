@@ -46,7 +46,13 @@ function drive_device_revoke_logic(array $input): LogicResult {
 		}
 	}
 
-	$device->soft_delete();
+	// Revoking the key unlinks its device (ApiKey::soft_delete); reload rather
+	// than save the copy read before that, and unlink it here only if a key
+	// that was not the user's left it standing.
+	$device = new SyncDevice($device_id, true);
+	if ($device->key && $device->get('sde_delete_time') === null) {
+		$device->soft_delete();
+	}
 
 	return LogicResult::render(array('ok' => true, 'revoked' => true, 'device_id' => $device_id));
 }

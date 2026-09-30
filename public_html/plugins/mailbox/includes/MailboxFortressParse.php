@@ -19,13 +19,19 @@
  * A post under a key the row no longer has (a rotation re-wrapped it after
  * the fetch) is answered `stale`, and the browser fetches it again. The spam
  * disposition is the relay's (the X-Spam* values the browser read out of the
- * message, InboundEmailRouter::spamFromBrowserHeaders()); mail rules do not
- * run on this path.
+ * message, InboundEmailRouter::spamFromBrowserHeaders()). Mail rules run on
+ * the device that parses: it evaluates the mailbox's rules
+ * (MailboxDeviceRules::rulesFor()) and posts the ids that matched
+ * (`rule_matches`); they apply in the parse's transaction, after the spam
+ * verdict, as at any arrival. A matched forward is relayed after commit from
+ * the opened message the device posted (`forward_raw`).
  *
  * The parts arrive as ONE upload, `bundle`, each part's ciphertext at an
  * offset: PHP drops every upload past max_file_uploads (20 on this stack), and
  * a newsletter with more inline images than that is ordinary (B37).
  *
+ * @version 1.4 - next() takes max_bytes; with no item to hand out it still counts what waits (and too_large)
+ * @version 1.3 - rule_matches applied in the parse; forward_raw relays a matched forward
  * @version 1.2 - pendingCount() by domain, for the lowering receipt (B46)
  * @version 1.1 - one bundle upload for every part (B37); Files are made before the row's
  *                transaction, so a refused store can delete them (B39); a stale key is
@@ -77,10 +83,13 @@ class MailboxFortressParse {
 	 * $skip names rows this device already failed to parse, so one message it
 	 * cannot read does not stand in front of the rest.
 	 *
+	 * $max_bytes > 0 leaves out messages larger than the asking device can
+	 * hold (a phone); they stay for a device that can.
+	 *
 	 * @param int[] $skip
 	 * @return array{remaining:int, item:?array}
 	 */
-	public static function next(int $user_id, array $skip = array()): array {
+	public static function next(int $user_id, array $skip = array(), int $max_bytes = 0): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$where = self::PENDING_WHERE . ' AND ' . InboundEmailMessage::mailKeySql();
 		$remaining = self::pendingCount($user_id);
@@ -89,13 +98,27 @@ class MailboxFortressParse {
 		}
 		$skip = array_values(array_slice(array_unique(array_filter(array_map('intval', $skip))), 0, 100));
 		$not = $skip ? ' AND iem_inbound_email_message_id NOT IN (' . implode(',', array_fill(0, count($skip), '?')) . ')' : '';
-		$stmt = $db->prepare('SELECT iem_inbound_email_message_id, iem_sealed_key, iem_relay_sealed_raw, iem_relay_spool_id
+		if ($max_bytes > 0) {
+			$not .= ' AND iem_size_bytes <= ' . intval($max_bytes);
+		}
+		$stmt = $db->prepare('SELECT iem_inbound_email_message_id, iem_sealed_key, iem_relay_sealed_raw, iem_relay_spool_id,
+				iem_iea_inbound_email_alias_id, iem_recipient, iem_size_bytes
 			FROM iem_inbound_email_messages WHERE ' . $where . $not . '
 			ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC LIMIT 1');
 		$stmt->execute(array_merge(array($user_id), $skip));
 		$r = $stmt->fetch(PDO::FETCH_ASSOC);
 		if (!$r) {
-			return array('remaining' => 0, 'item' => null);
+			// Nothing this device can take: the rest are ones it skipped or,
+			// for a device that named a limit, larger than it can hold. They
+			// still wait, and the count says so.
+			$out = array('remaining' => $remaining, 'item' => null);
+			if ($max_bytes > 0) {
+				$big = $db->prepare('SELECT count(*) FROM iem_inbound_email_messages WHERE ' . $where
+					. ' AND iem_size_bytes > ' . intval($max_bytes));
+				$big->execute(array($user_id));
+				$out['too_large'] = intval($big->fetchColumn());
+			}
+			return $out;
 		}
 		return array('remaining' => $remaining, 'item' => array(
 			'id'               => intval($r['iem_inbound_email_message_id']),
@@ -103,6 +126,11 @@ class MailboxFortressParse {
 			'sealed_raw'       => (string)$r['iem_relay_sealed_raw'],
 			'raw_ad'           => 'mail:relay:' . (string)$r['iem_relay_spool_id'],
 			'sealed_ad_prefix' => InboundEmailMessage::sealedAdPrefix(),
+			// What the parsing device's mail rules match on beside the content
+			// (device_rules): the mailbox, the routing recipient and the size.
+			'alias_id'         => $r['iem_iea_inbound_email_alias_id'] !== null ? intval($r['iem_iea_inbound_email_alias_id']) : null,
+			'recipient'        => strncmp((string)$r['iem_recipient'], 'v1.edge.', 8) === 0 ? '' : (string)$r['iem_recipient'],
+			'size_bytes'       => intval($r['iem_size_bytes']),
 		));
 	}
 
@@ -117,7 +145,11 @@ class MailboxFortressParse {
 	 * @return array{id:int, stored:bool, stale?:bool}
 	 * @throws MailboxFortressParseException
 	 */
-	public static function store(int $user_id, array $params, ?array $bundle = null): array {
+	public static function store(int $user_id, array $params, ?array $bundle = null, ?array $forward_raw = null): array {
+		if ($forward_raw !== null && ($forward_raw['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+			$raw = @file_get_contents((string)($forward_raw['tmp_name'] ?? ''));
+			$params['forward_raw'] = is_string($raw) ? $raw : '';
+		}
 		return self::storeParts($user_id, $params, self::uploads($params['parts'] ?? array(), $bundle));
 	}
 
@@ -158,6 +190,11 @@ class MailboxFortressParse {
 		$stmt->execute(array($id));
 		$checked = self::checkParts($parts, intval(($stmt->fetch(PDO::FETCH_ASSOC) ?: array())['iem_size_bytes'] ?? 0), $id);
 
+		$rule_matches = array_values(array_filter(array_map('intval',
+			is_array($params['rule_matches'] ?? null) ? $params['rule_matches'] : array())));
+		$forward_raw = is_string($params['forward_raw'] ?? null) ? $params['forward_raw'] : '';
+		$forward = array();
+
 		$made = array();
 		$stored = false;
 		try {
@@ -194,6 +231,19 @@ class MailboxFortressParse {
 				'iem_spam_verdict'     => $spam['verdict'],
 				'iem_spam_score'       => $spam['score'],
 			));
+			if ($rule_matches) {
+				// A raw far larger than the message the relay measured is not it.
+				if (strlen($forward_raw) > intval($row['iem_size_bytes']) + 65536) {
+					throw self::refuse($id, self::REFUSAL, 'forward_raw larger than the message');
+				}
+				try {
+					$applied = InboundEmailFilter::applyDeviceMatches(new InboundEmailMessage($id, TRUE),
+						$rule_matches, $forward_raw);
+				} catch (InvalidArgumentException $e) {
+					throw self::refuse($id, self::REFUSAL, $e->getMessage());
+				}
+				$forward = $applied['forward_to'];
+			}
 			$db->commit();
 			$stored = true;
 		} catch (Throwable $e) {
@@ -212,6 +262,9 @@ class MailboxFortressParse {
 					}
 				}
 			}
+		}
+		if ($forward) {
+			InboundEmailFilter::relayDeviceForward(new InboundEmailMessage($id, TRUE), $forward, $forward_raw);
 		}
 		return array('id' => $id, 'stored' => true);
 	}

@@ -58,6 +58,11 @@ dependencies {
 
     androidTestImplementation "androidx.test.ext:junit:1.2.1"
     androidTestImplementation "androidx.test.espresso:espresso-core:3.6.1"
+    // The Fortress gate picks a file in the system picker (DocumentsUI).
+    androidTestImplementation "androidx.test.uiautomator:uiautomator:2.3.0"
+    // The Fortress gate runs the real new-mail worker: WorkManager skips a
+    // forced run of periodic work that is not due yet.
+    androidTestImplementation "androidx.work:work-testing:2.9.0"
     androidTestImplementation "androidx.compose.ui:ui-test-junit4"
     debugImplementation "androidx.compose.ui:ui-test-manifest"
 }

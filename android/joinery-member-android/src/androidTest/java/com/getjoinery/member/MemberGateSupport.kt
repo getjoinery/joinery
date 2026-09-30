@@ -59,11 +59,13 @@ object MemberGate {
 
     /** Launch MainActivity signed out (credentials wiped). [disableMember] skips
      *  the member module registration to exercise the web fallback. */
-    fun launch(disableMember: Boolean = false): ActivityScenario<MainActivity> {
+    fun launch(disableMember: Boolean = false, keepAuth: Boolean = false): ActivityScenario<MainActivity> {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val intent = Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra("reset_auth", true)
+            // keepAuth: stay signed in from an earlier leg (the Fortress gate's
+            // key is bound to the session key it enrolled with).
+            putExtra("reset_auth", !keepAuth)
             putExtra("base_url", baseUrl)
             putExtra("client_version", clientVersion)
             if (disableMember) putExtra("disable_member_module", true)

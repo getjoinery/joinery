@@ -47,7 +47,9 @@
  * that never reach authorize(). An action whose auth block declares
  * requires_scoped_key admits only a key scoped to it.
  *
- * @version 1.3.0
+ * @version 1.4.0
+ * @changelog 1.4.0 - requires_person_credential: browser session or app session
+ *   key, never a machine key (specs/fortress_mobile_apps.md § R8).
  * @changelog 1.3.0 - Scoped machine keys: authorize() takes the endpoint's
  *   name, refuses a scoped key outside its scope, and enforces
  *   requires_scoped_key; refuseScopedKeyOutsideActions() for apiv1.php.
@@ -395,6 +397,13 @@ class ApiAuth {
 		// bridge, so they satisfy this too.
 		if (!empty($auth['requires_browser_session']) && $api_entry !== null) {
 			api_error($message_prefix . ' is available only to a signed-in browser session', 'AuthenticationError', 403);
+		}
+
+		// Person-credential gate: the browser session (no key row) or an app's
+		// session key. A machine key is the one credential refused.
+		if (!empty($auth['requires_person_credential']) && $api_entry !== null
+			&& $api_entry->get('apk_type') !== ApiKey::TYPE_SESSION) {
+			api_error($message_prefix . ' is available only to a signed-in person (browser or app)', 'AuthenticationError', 403);
 		}
 
 		// Capability gate (apk_permission). Null = this surface does not gate on it.

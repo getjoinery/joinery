@@ -3,7 +3,7 @@
  * API action: mailbox/device_ai_test_prompt — what the AI panel's Test button
  * sends to the person's own model (specs/fortress_mail_device_ai.md § R7).
  *
- * POST /api/v1/action/mailbox/device_ai_test_prompt (browser session). Params:
+ * POST /api/v1/action/mailbox/device_ai_test_prompt (browser session or app session key). Params:
  * mailbox (address, optional). Returns {system, user, max_tokens, source}:
  * the security scan's system prompt as a server run renders it
  * (PipelineRunner::systemText) and a sample digest wrapped as untrusted input
@@ -15,6 +15,8 @@
  * The sample is made up here, a shop's order notice with a full-length body
  * and a list of tracked links. No real mail is ever in it.
  *
+ * @version 1.2 - reachable with an app session key too (requires_person_credential,
+ * specs/fortress_mobile_apps.md § R8)
  * @version 1.1 - reasoning_effort 'none': Test checks reachability, the key, the model and the
  *   context, and its 1024-token budget cannot hold a model's reasoning as well
  * @version 1.0
@@ -104,7 +106,7 @@ function device_ai_test_prompt_sample_digest(): string {
 function device_ai_test_prompt_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('requires_person_credential' => true),
 		'description' => 'The system prompt and a made-up sample digest the AI panel\'s Test button sends to the caller\'s own model',
 		'input' => [
 			'mailbox' => ['type' => 'string', 'required' => false, 'label' => 'Mailbox address whose scan recipe to use'],

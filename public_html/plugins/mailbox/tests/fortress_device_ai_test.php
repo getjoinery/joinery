@@ -196,6 +196,8 @@ try {
 	check($scan_rec['min_tier'] === 'capable' && $scan_rec['attachments'] === false && isset($scan_rec['verdict_descriptor']['input']['score']),
 		'and its tier floor, digest shape and verdict descriptor');
 	check($rec['consent_refusal'] === null && !empty($rec['model_reference']['models']), 'with the consent verdict and the model reference');
+	check(($rec['device_ai_origin'] ?? null) === MailboxDeviceAiHost::originForUser($A) && $rec['device_ai_origin'] !== null,
+		'and the registered model origin, which a phone reads here', json_encode($rec['device_ai_origin'] ?? null));
 	check(fdai_refusal(function () use ($A, $b) { MailboxDeviceAi::recipesFor($A, $b['address']); }) !== null, 'another member\'s mailbox: refused');
 
 	// -------------------------------------------------------------------------
