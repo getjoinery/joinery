@@ -103,6 +103,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.40 - iem_spam_corrected_time: when a member marked the row spam / not spam, which is
+ *   what the spam-learning pass teaches (a scanner's own verdict is never a correction)
  * @version 1.39 - iem_unseal_attempt_time / iem_seal_attempt_time: a level change passes a row that
  *   failed to convert by for a while; unsealAndPersistContent() reports its outcome
  * @version 1.38 - adoptRelayClientKey(): a relay-sealed Fortress arrival keeps the relay's DEK
@@ -439,10 +441,15 @@ class InboundEmailMessage extends SystemBase {
 		// Content spam (specs/inbound_email_content_spam_filtering.md). Recorded score
 		// from the scanner/provider (display/tuning only, NEVER read for disposition);
 		// NULL = none reported. iem_learned_verdict is the last verdict actually taught
-		// to rspamd's Bayes classifier — the LearnSpamFeedback reconcile teaches a row
+		// to rspamd's Bayes classifier — SpamLearning teaches a corrected row
 		// whenever it diverges from iem_spam_verdict; NULL = never taught.
 		'iem_spam_score'          => array('type'=>'numeric'),
 		'iem_learned_verdict'     => array('type'=>'varchar(10)'),
+		// When a member last marked this row spam / not spam (UTC); NULL = never
+		// corrected. Only a correction is taught to the Bayes corpus — the verdict
+		// ingest wrote is the scanner's own answer, and teaching it back would
+		// only confirm the scanner to itself (SpamLearning).
+		'iem_spam_corrected_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		// AI security scan (specs/joinery_ai_email_security_scan.md). A danger
 		// score (0-10) plus the model's verdict/red-flags/summary for mail that
 		// passes the auth/spam filters above but is malicious in content — what
@@ -579,6 +586,10 @@ class InboundEmailMessage extends SystemBase {
 		array('columns' => array('iem_sealed_owner_user_id', 'iem_iea_inbound_email_alias_id',
 			'iem_ied_inbound_email_domain_id'),
 			'where' => '(iem_content_sealed = true OR iem_pending_parse = true) AND iem_delete_time IS NULL'),
+		// Spam corrections waiting to be taught (SpamLearning): a handful of rows
+		// in a whole mailbox, looked up by owner on every vault heartbeat.
+		array('columns' => array('iem_sealed_owner_user_id'),
+			'where' => 'iem_spam_corrected_time IS NOT NULL'),
 		// The no-Message-ID dedup lookup (F6) — per feed, only rows that have a key.
 		array('columns' => array('iem_iia_inbound_imap_account_id', 'iem_source_message_key'),
 			'where' => 'iem_source_message_key IS NOT NULL'),

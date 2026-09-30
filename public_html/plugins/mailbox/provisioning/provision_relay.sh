@@ -9,6 +9,9 @@
 # it to the recipient's public key at acceptance, and spools ciphertext; the
 # deployment's plane pulls its sealed blobs over HTTPS from the relay's own API.
 #
+# Version: 3.3 - rspamd rbl.conf: DNS lists that cannot answer off (NiX Spam timed out
+#                every lookup and held each scanned message 5-8s; SURBL/URIBL refuse
+#                shared resolvers).
 # Version: 3.2 - GET /relay/seal-target: the relay's signed word on which key it
 #                seals a recipient's mail to, which the owner's browser checks
 #                against the relay identity it pinned (specs/client_custody_mail.md
@@ -56,7 +59,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.2"
+RELAY_VERSION="3.3"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -686,6 +689,32 @@ if write_if_changed /etc/rspamd/local.d/classifier-bayes.conf 644 <<'RSPAMDBAYES
 enabled = false;
 autolearn = false;
 RSPAMDBAYES
+then
+    mark_changed rspamd
+fi
+if write_if_changed /etc/rspamd/local.d/rbl.conf 644 <<'RSPAMDRBL'
+# joinery-managed - DNS lists that cannot answer this box.
+# NiX Spam (ix.dnsbl.manitu.net) was shut down; its zone has no nameservers, so
+# every query waits out the DNS retransmits (timeout 1s x 5 = ~5s) and stalls
+# the scan, up to the 8s task timeout.
+# SURBL and URIBL refuse queries that arrive through a shared public resolver
+# (the provider's DNS this box uses): every answer is a "blocked" code, never
+# a verdict. Asking them only spends lookups.
+rbls {
+  nixspam {
+    enabled = false;
+  }
+  "SURBL_MULTI" {
+    enabled = false;
+  }
+  "SURBL_HASHBL" {
+    enabled = false;
+  }
+  "URIBL_MULTI" {
+    enabled = false;
+  }
+}
+RSPAMDRBL
 then
     mark_changed rspamd
 fi

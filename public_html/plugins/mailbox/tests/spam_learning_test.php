@@ -29,6 +29,7 @@
  *
  * Run: php tests/run.php db --filter=spam_learning
  *
+ * @version 1.1 - the fixture is a correction (iem_spam_corrected_time): only corrections are taught
  * @version 1.0
  */
 
@@ -51,7 +52,7 @@ class SpamLearningTest {
 		$this->db = DbConnector::get_instance()->get_db_link();
 	}
 
-	/** A stored message whose verdict diverges from what was last taught. */
+	/** A member's correction, not yet taught. */
 	private function makeDivergedWebhookMessage(): void {
 		$domain = new InboundEmailDomain(NULL);
 		$domain->set('ied_domain', 'spam-learn-test.example');
@@ -66,8 +67,9 @@ class SpamLearningTest {
 		$q = $this->db->prepare(
 			"INSERT INTO iem_inbound_email_messages
 			 (iem_ied_inbound_email_domain_id, iem_sender, iem_recipient, iem_subject,
-			  iem_raw_message, iem_auth_source, iem_spam_verdict, iem_learned_verdict)
-			 VALUES (?, ?, ?, ?, ?, 'mailgun', ?, NULL)
+			  iem_raw_message, iem_auth_source, iem_spam_verdict, iem_learned_verdict,
+			  iem_spam_corrected_time)
+			 VALUES (?, ?, ?, ?, ?, 'mailgun', ?, NULL, now())
 			 RETURNING iem_inbound_email_message_id");
 		$q->execute(array($domain_id, 'sender@spam-learn-test.example',
 			'user@spam-learn-test.example', 'diverged fixture',

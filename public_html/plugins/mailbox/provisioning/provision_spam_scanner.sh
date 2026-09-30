@@ -3,6 +3,8 @@
 # provision_spam_scanner.sh - install, remove or inspect this box's own spam
 # scanner (specs/mailbox_spam_filtering_simplification.md D6).
 #
+# Version: 1.1 - rbl.conf: DNS lists that cannot answer this box off (NiX Spam timed
+#                out every lookup and stalled a scan 5-8s; SURBL/URIBL refuse shared resolvers).
 # Version: 1.0 - Extracted from install_email.sh section 5b as a standalone,
 #                verb-driven provisioner.
 #
@@ -21,7 +23,8 @@
 #   - Installs rspamd + redis-server.
 #   - Writes the joinery-managed /etc/rspamd/local.d config: the X-Spam header
 #     contract InboundEmailRouter::readSpamHeader() parses, add_header-only
-#     actions (NEVER reject - the reviewable-verdict model), the Bayes
+#     actions (NEVER reject - the reviewable-verdict model), dead DNS lists
+#     off, the Bayes
 #     classifier on redis with autolearn, the loopback controller on 11334
 #     (trusted by origin, no password), and the milter worker on 11332.
 #   - Wires the milter into Postfix ONLY when Postfix is present. On a
@@ -77,6 +80,7 @@ MANAGED_CONFIGS=(
     "redis.conf"
     "worker-controller.inc"
     "worker-proxy.inc"
+    "rbl.conf"
 )
 
 # --- helpers -----------------------------------------------------------------
@@ -195,6 +199,32 @@ upstream "local" {
 }
 bind_socket = "*:11332";
 RSPAMDPROXY
+
+    # rbl: a DNS list that cannot answer costs every scan lookups (a dead one ~5s)
+    # (the ingest scan is on the path that turns relay-sealed mail readable).
+    cat > "${RSPAMD_LOCAL_D}/rbl.conf" <<'RSPAMDRBL'
+# joinery-managed - DNS lists that cannot answer this box.
+# NiX Spam (ix.dnsbl.manitu.net) was shut down; its zone has no nameservers, so
+# every query waits out the DNS retransmits (timeout 1s x 5 = ~5s) and stalls
+# the scan, up to the 8s task timeout.
+# SURBL and URIBL refuse queries that arrive through a shared public resolver
+# (the provider's DNS this box uses): every answer is a "blocked" code, never
+# a verdict. Asking them only spends lookups.
+rbls {
+  nixspam {
+    enabled = false;
+  }
+  "SURBL_MULTI" {
+    enabled = false;
+  }
+  "SURBL_HASHBL" {
+    enabled = false;
+  }
+  "URIBL_MULTI" {
+    enabled = false;
+  }
+}
+RSPAMDRBL
 
     echo "spam-scanner: wrote ${#MANAGED_CONFIGS[@]} joinery-managed config file(s) to ${RSPAMD_LOCAL_D}"
 

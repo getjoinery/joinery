@@ -1315,6 +1315,14 @@ keeps a long backlog from spending that budget and locking the person out of
 their own mail. A drain the server refuses (a 429, or any failure) backs off
 for a minute before the next attempt.
 
+A page whose own content is waiting on a consumer skips the wait:
+`JoineryVaultPresence.drainNow()` starts a drain at once, past the quiet period
+and the chain gap. Every drain that answers dispatches `joinery:vault-work-done`
+on `document` with the server's `{done, more}` (`done` maps consumer id to items
+completed), so the page re-reads what the drain made readable. The mail reader
+does both for relay-sealed mail: its list answers `parsing` instead of parsing,
+it calls `drainNow()`, and it refreshes on `done.mailbox_parse`.
+
 The work never runs inside the beat. A batch can involve a language model whose
 timeout is measured in minutes; a beat blocked that long would stack up behind
 itself while the window it exists to protect lapsed.

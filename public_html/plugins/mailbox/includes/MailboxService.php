@@ -25,7 +25,7 @@
  * Spam (specs/inbound_email_spam_filtering.md): the default list/switcher hide
  * judged-spam rows (iem_spam_verdict='spam'); the Spam view shows only them.
  * setSpamVerdict() is the manual "Mark as spam"/"Not spam" correction — which, with
- * content filtering on, also drives the LearnSpamFeedback reconcile
+ * learning on, is what SpamLearning teaches the local scanner
  * (specs/inbound_email_content_spam_filtering.md). getThread() returns the recorded
  * content-spam score (iem_spam_score) for display only.
  *
@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.52 - setSpamVerdict stamps iem_spam_corrected_time (what spam learning teaches)
+ * @version 1.51 - the list never parses relay-sealed mail (it says `parsing`); opening a thread parses its pending rows
  * @version 1.49 - a relay-sealed row no vault here can open is marked sealed.unopenable
  * @version 1.48 - a Fortress row sealed to someone else carries `sealed.foreign` (an all-access viewer)
  * @version 1.47 - `device_search`: a search over end-to-end mail alone carries only the ids
@@ -1007,12 +1009,6 @@ class MailboxService {
 		$perpage = max(1, min(200, $perpage));
 		$offset = ($page - 1) * $perpage;
 
-		// Deferred ingest (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 5):
-		// if this scope's owner holds an unlocked vault, parse any relay-sealed
-		// relay-sealed backlog before listing, so the mailbox view reflects fully-parsed
-		// mail. No-op on colocated deployments (no pending rows ever exist).
-		$this->drainRelayBacklog($aliasId);
-
 		// Drafts view (specs/mailbox_compose_maturity.md § Phase 2): the viewer's saved
 		// drafts, each a singleton (grouped by its own id, not a shared thread key).
 		// Every other view excludes drafts via readScopeSql.
@@ -1414,6 +1410,14 @@ class MailboxService {
 			// read as missing mail.
 			$result['search_indexing'] = $this->search_indexing;
 		}
+		if ($this->parseKey() !== null) {
+			// Relay-sealed mail is waiting for the viewer's open window to parse
+			// it (DeferredIngest). The list never parses — one message can wait
+			// seconds on the spam scanner — so it lists those rows sealed and
+			// says so; the reader starts the background drain at once and
+			// refreshes as it lands.
+			$result['parsing'] = true;
+		}
 		if ($searching && !$trash && !$sent && !empty($filters['inbox'])) {
 			// The Inbox tab was open but the search covered All Mail (see the
 			// scope block above) — the reader shows a one-line note so results
@@ -1586,59 +1590,55 @@ class MailboxService {
 	}
 
 	/**
+	 * The viewer's open-window key when relay-sealed mail of theirs is waiting
+	 * to be parsed (DeferredIngest), else null. Only the viewer's own backlog:
+	 * the window that parses a row is its owner's, keyed to their browser
+	 * session. Cheap when there is nothing waiting (one indexed LIMIT 1, no
+	 * vault read); never throws into the caller.
+	 */
+	private function parseKey(): ?VaultKey {
+		$viewer_id = intval($this->viewer->getUserId());
+		if ($viewer_id <= 0) {
+			return null;
+		}
+		try {
+			if (!DeferredIngest::hasWork($viewer_id)) {
+				return null;
+			}
+			return VaultUnlock::secretKey($viewer_id);
+		} catch (\Throwable $e) {
+			error_log('MailboxService: relay backlog check failed for user ' . $viewer_id . ': ' . $e->getMessage());
+			return null;
+		}
+	}
+
+	/**
 	 * All in-scope messages in a thread, chronological, each with read/star
 	 * flags AND its plain/HTML body (rendered client-side in a sandboxed iframe).
 	 * Empty if the thread is outside scope.
 	 *
 	 * @return array[]  message rows
 	 */
-	/**
-	 * Parse the relay-sealed pending-parse backlog for this scope's owner, once
-	 * per request per owner, when their vault is unlocked. Cheap and skipped
-	 * entirely on colocated deployments (the pending query hits an owner index and
-	 * returns nothing). Never throws into the caller — a drain failure must not
-	 * break the mailbox view.
-	 */
-	private function drainRelayBacklog(?int $aliasId): void {
-		static $drained = array();
-
-		// Resolve whose pending-parse backlog to drain. A single-alias scope drains
-		// that alias's single owner; the combined "all mailboxes" view ($aliasId
-		// null) is the primary reader surface (thread_list_logic + native apps), so
-		// it must drain too — the session user, whose own relay-sealed mail is what the
-		// relay pulled (specs/mailbox_relay_fix_pack.md § Fix 9). Without this, the
-		// owner of relay-sealed mail sees a default inbox with blank sender/subject/body forever.
-		if ($aliasId !== null && $aliasId > 0) {
-			$owner_id = InboundEmailMessage::singleOwnerUserId($aliasId);
-		} else {
-			$owner_id = $this->viewer->getUserId();
-		}
-		if ($owner_id === null || $owner_id <= 0 || isset($drained[$owner_id])) {
-			return;
-		}
-		$drained[$owner_id] = true;
-
-		try {
-			$vault = UserEncryptionVault::loadForUser($owner_id);
-			if ($vault === null) {
-				return;
-			}
-			$key = VaultUnlock::secretKey($owner_id);
-			if ($key === null) {
-				return; // locked — nothing to parse until the next unlocked view
-			}
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeferredIngest.php'));
-			DeferredIngest::drainForUser($owner_id, $key);
-		} catch (\Throwable $e) {
-			error_log('MailboxService: relay backlog drain failed for owner ' . $owner_id . ': ' . $e->getMessage());
-		}
-	}
-
 	public function getThread(?int $aliasId, string $thread_key, bool $trashed = false): array {
 		$this->content_locked = false;
 		$ids = $this->messageIdsInThread($aliasId, $thread_key, $trashed);
 		if (!count($ids)) {
 			return array();
+		}
+		// A relay-sealed message the viewer's open window has not parsed yet is
+		// parsed now, only this thread's: the list shows such a row sealed while
+		// the background drain works, and opening it must show the mail, not a
+		// placeholder. Never throws into the read.
+		$key = $this->parseKey();
+		if ($key !== null) {
+			try {
+				$pending = DeferredIngest::pendingAmong(intval($this->viewer->getUserId()), $ids);
+				if ($pending) {
+					DeferredIngest::parseMessages(intval($this->viewer->getUserId()), $key, $pending);
+				}
+			} catch (\Throwable $e) {
+				error_log('MailboxService: parse on open failed for thread ' . $thread_key . ': ' . $e->getMessage());
+			}
 		}
 		$in = implode(',', array_map('intval', $ids));
 		$db = $this->db();
@@ -2481,8 +2481,11 @@ class MailboxService {
 			return 0;
 		}
 		$in = implode(',', $ids);
+		// The correction time is what makes the row something to teach the spam
+		// filter (SpamLearning); a verdict ingest wrote never is.
 		$sql = "UPDATE iem_inbound_email_messages
-				SET iem_spam_verdict = " . $this->db()->quote($verdict) . "
+				SET iem_spam_verdict = " . $this->db()->quote($verdict) . ",
+					iem_spam_corrected_time = " . $this->db()->quote(gmdate('Y-m-d H:i:s')) . "
 				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql();
 		$stmt = $this->db()->prepare($sql);
 		$stmt->execute();
