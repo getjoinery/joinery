@@ -41,7 +41,14 @@
  * by background work. A drain the server refuses (429, or any failure) backs
  * off for BACKOFF_MS instead of being retried on the next beat.
  *
- * @version 1.5
+ * A page whose own work is waiting on a drain skips the wait: drainNow()
+ * starts one at once, past the quiet period and the chain gap (the mail
+ * reader, when its list says relay-sealed mail is waiting to be parsed). Every
+ * drain that answers dispatches 'joinery:vault-work-done' with the server's
+ * {done, more}, so a page can refresh what a drain just made readable.
+ *
+ * @version 1.6
+ * @changelog 1.6 - drainNow(); 'joinery:vault-work-done' after each drain
  * @changelog 1.5 - chained drains paced (DRAIN_GAP_MS); a refused drain backs
  *   off (BACKOFF_MS). A long backlog drained the per-address API budget and
  *   429'd the reader (jeremytunnell, 2026-09-15).
@@ -85,6 +92,10 @@
 		draining = true;
 		joineryApi.post('vault_deferred_work', {}).then(function (res) {
 			draining = false;
+			if (res) {
+				document.dispatchEvent(new CustomEvent('joinery:vault-work-done',
+					{ detail: { done: res.done || {}, more: !!res.more } }));
+			}
 			// More waiting and the window still open - keep going rather than
 			// idling until the next beat, but paced: the next slice starts
 			// DRAIN_GAP_MS after this one ended.
@@ -98,6 +109,15 @@
 			// address's budget is spent; asking again sooner only spends more.
 			quietUntil = Date.now() + BACKOFF_MS;
 		});
+	}
+
+	// Drain now, not after the quiet period or the chain gap. One in flight
+	// already is left to finish: a second would only wait on its locks.
+	function drainNow() {
+		if (!timer) { start(); }
+		quietUntil = 0;
+		if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
+		drain();
 	}
 
 	function start() {
@@ -124,7 +144,7 @@
 	document.addEventListener('joinery:vault-unlocked', start);
 	document.addEventListener('joinery:vault-locked', stop);
 
-	window.JoineryVaultPresence = { start: start, stop: stop };
+	window.JoineryVaultPresence = { start: start, stop: stop, drainNow: drainNow };
 
 	if (document.querySelector('meta[name="joinery-vault-window"][content="open"]')) {
 		if (document.readyState === 'loading') {

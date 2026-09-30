@@ -1902,9 +1902,9 @@ subject or body — every write passes an empty subject, sender/recipient addres
 logged as routing metadata only. Content-derived AI processing
 (`plugins/joinery_ai/pipeline_jobs/EmailSecurityScanJob.php`) excludes sealed rows from
 its candidate pool outright: it runs unattended with no unlock window, so a sealed
-message is simply never a scan candidate, not a retried failure. `LearnSpamFeedback`
-already only trains from a message's raw RFC822, which a sealed message never
-retains — nothing further was needed there.
+message is simply never a scan candidate, not a retried failure. Spam learning teaches
+a sealed row's correction only inside its owner's window (`SpamLearning`, below), and
+what it hands the scanner is the same loopback hand-off the ingest scan makes.
 
 **Per-page cost.** The reader reads `iem_inbound_email_messages` by mailbox on every
 page load — the Inbox list, the rail's unread badge, the per-mailbox totals — and the
@@ -2158,6 +2158,19 @@ so the backlog drains wherever the owner is on the site with their vault open �
 not only when they open the mailbox. It parses newest first, so the most recent
 mail becomes readable first, and because the AI jobs skip unparsed mail and also
 take the newest first, the two never work against each other.
+
+The mailbox list never parses. One parse includes the spam scan, which can wait
+seconds on the scanner's network lookups, so a list that parsed first would hold
+the whole mailbox back behind the night's mail. The list shows a pending row with
+the sealed placeholder and answers `parsing: true` while the viewer's open window
+has mail waiting; the reader then starts a drain at once
+(`JoineryVaultPresence.drainNow()`, past the beacon's quiet period) and re-reads
+the list each time a drain reports `mailbox_parse` done
+(`joinery:vault-work-done`). Opening a thread parses that thread's pending rows
+first (`DeferredIngest::parseMessages`), so the mail someone clicks is readable
+when it shows. Each parse holds a per-message advisory lock and re-reads the row
+under it, so the drain, a thread open and a second tab never parse one message
+twice.
 
 ## Outbound send protection
 
@@ -2546,8 +2559,8 @@ land as **pending-parse** rows: operational metadata + the sealed blob, so
 threading and unread counts work while subject/sender/body/attachments do not
 exist yet. At the next unlock, `DeferredIngest` unseals each blob, runs the
 full pipeline (parse, filters, attachment split, seal fields under a fresh
-per-message DEK), and clears the pending state. For a single reader this is
-invisible — the rules have always run by the time any mailbox view renders.
+per-message DEK), and clears the pending state — as background work, with the
+list showing the row sealed until it lands (see [Parsing the backlog](#parsing-the-backlog)).
 
 The reader's Refresh button runs the same pull on demand (`mailbox/check_mail`
 API action) before re-reading the list, so a user waiting on a message waits on
@@ -3731,7 +3744,7 @@ What a line can be, and where it comes from:
 | Left the sender's server / Passed through / Received by | the `Received:` chain in the message's stored headers (`MailboxMessageTimeline::parseReceived()`); readable only in-window on a sealing mailbox |
 | Arrived at *alias* / Arrived over Joinery Direct / Collected from *provider* | `iem_received_time`, `iem_transport`, the source account and its folder, `iem_create_time` |
 | Authentication | `InboundEmailMessage::authReadout()` over the stored SPF/DKIM/DMARC verdicts and their source |
-| Spam check / You marked this… / Safety scan | `iem_spam_verdict`, `iem_spam_score`, `iem_learned_verdict`, `iem_ai_danger_score` |
+| Spam check / You marked this… / Safety scan | `iem_spam_verdict`, `iem_spam_score`, `iem_spam_corrected_time`, `iem_learned_verdict`, `iem_ai_danger_score` |
 | Routed to … — stored / Forwarded on / Held as spam / Filters applied / … | the `iel_inbound_email_logs` rows whose `iel_iem_inbound_email_message_id` names the message (`InboundEmailRouter::logTransaction()` writes the link) |
 | Sealed / Opened / Labelled / Starred / Archived / Moved to trash | the row's own state columns; the labels are the current `ilm_` members |
 | Sent as … / Forwarded / Send attempt failed / Forward failed | `mst_mailbox_send_attempts` rows that produced the message or answered it (`about_message_id`) |
@@ -4047,22 +4060,45 @@ data lost." A redis volume mount is an optional deploy-layer optimization, never
 correctness requirement.
 
 **Spam/ham feedback (Bayes training).** A reader correction (**Report spam** / **Not
-spam**) is the whole trigger — there is no separate "report" control. Flipping
-`iem_spam_verdict` leaves the row *diverged* from `iem_learned_verdict` (the marker of
-what was last taught). The **`LearnSpamFeedback`** scheduled task (every cron pass, gated
-on `MailboxSpamPolicy::learningEnabled()`) reconciles the divergence out-of-band: for each
-diverged row it POSTs the raw RFC822 to the controller's `/learnspam` | `/learnham` over
-loopback and, on success, stamps `iem_learned_verdict = iem_spam_verdict` so the row stops
-re-selecting. Flip-backs and idempotency fall out for free. Every correction that still
-has a raw message teaches the corpus, whatever path the message arrived by —
-webhook- and IMAP-sourced rows included, since the corpus is a deployment-wide asset
-and the local scanner is what scores that mail. Rows whose raw is gone (pruned, IMAP
-reference-backed, or sealed out of reach of this keyless cron pass) are marked handled as
-permanent no-ops. A controller that is unreachable — not yet installed, or down — returns
-`skipped` and leaves rows diverged to retry on the next pass, so the loop self-heals
-through an outage and rebuilds the corpus after a wipe rather than stranding corrections.
-(rspamd's classifier needs roughly 200 messages of each class before it contributes, so
-early corrections have little visible effect.)
+spam**) is the whole trigger — there is no separate "report" control.
+`MailboxService::setSpamVerdict()` flips `iem_spam_verdict` and stamps
+`iem_spam_corrected_time`; a row with a correction time whose verdict differs from
+`iem_learned_verdict` (the marker of what was last taught) is waiting to be taught. Only
+a correction is ever taught: the verdict ingest wrote is the scanner's own answer, and
+teaching it back would only confirm the scanner to itself. Flip-backs fall out for
+free — the row diverges again and is taught the other way.
+
+`SpamLearning` (`includes/SpamLearning.php`) does the teaching, gated on
+`MailboxSpamPolicy::learningEnabled()`, in one of two passes chosen by what opening the
+row needs, so neither re-selects rows it can never finish:
+
+- **Keyless** — the `LearnSpamFeedback` scheduled task (every cron pass, activated on
+  install; a no-op while learning is off): rows stored in the clear, and end-to-end
+  (Fortress) rows, which no server can open and are marked handled.
+- **In the window** — the `mailbox_spam_learn` deferred-work consumer: rows sealed to a
+  member's vault, taught while that member's vault is open.
+
+rspamd learns from an RFC822 message. A row that kept its whole raw sends it. A lean
+record keeps no raw, so `SpamLearning::learnText()` rebuilds one: the stored header block
+with its MIME structure headers (`MIME-Version`, `Content-Type`,
+`Content-Transfer-Encoding`, `Content-Disposition`) replaced by a single `text/plain`
+part holding the plain body, or the readable text of the HTML body. Bayes reads headers
+and text, so nothing it uses is lost; the original's multipart headers would describe
+parts the rebuilt body does not have.
+
+The learn call POSTs to the controller's `/learnspam` | `/learnham` over loopback. A 2xx
+(or "already learned") stamps `iem_learned_verdict`. A 4xx is rspamd refusing the message
+itself (too few tokens, unparseable), which no retry changes, so it is stamped too. No
+answer or a 5xx leaves the row diverged to retry, so the loop self-heals through an
+outage and rebuilds the corpus after a wipe rather than stranding corrections. A
+controller that is unreachable skips the pass entirely. The corpus is a deployment-wide
+asset: every correction teaches it, whatever path the message arrived by — webhook-,
+relay- and IMAP-sourced rows included, since the local scanner is what scores that
+mail. (rspamd's classifier needs roughly 200 messages of each class before it
+contributes, so early corrections have little visible effect.)
+
+The message timeline shows "You marked this as spam / not spam" at the correction time,
+with whether the filter has learned from it yet.
 
 ## Deliverability reports
 

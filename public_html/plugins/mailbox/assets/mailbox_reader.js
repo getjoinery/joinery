@@ -1,6 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.87 — one fmtDate and one fmtBytes (B1); every multipart post
+ * No framework. @version 2.88 — relay-sealed mail waiting to be parsed starts the drain at
+ * once (`parsing`) and refreshes the list as it lands; the list read no longer parses.
+ * @version 2.87 — one fmtDate and one fmtBytes (B1); every multipart post
  *   goes through joineryApi.postForm, keepalive for the unload save (B2); unlockVault()
  *   is the lock chip's unlock only (no second ceremony of its own).
  * @version 2.86 — a context-column slot below a docked panel still loading its
@@ -1395,6 +1397,12 @@
 			state.hasMore = !!data.has_more;
 			$('#mbx-more').hidden = !state.hasMore;
 			syncSelectionUI();
+			// Relay-sealed mail is waiting for this open vault to parse it. The list
+			// showed those rows sealed rather than wait on the parse; start it now,
+			// not after the beacon's quiet period — the rows fill in as it lands.
+			if (data.parsing && window.JoineryVaultPresence && JoineryVaultPresence.drainNow) {
+				JoineryVaultPresence.drainNow();
+			}
 		}).catch(function (err) {
 			if (seq !== listSeq) { return; }
 			// The read failed. Say that — an unanswered request must never render
@@ -5070,8 +5078,8 @@
 			refreshBtn.classList.add('mbx-refreshing');
 			// Refresh means "go get my mail": first activate the delivery chain's
 			// pull lanes (relay spool pull + IMAP feed fetch), THEN re-read. On a
-			// relay-fronted deployment the re-read also parses any pulled
-			// relay-sealed rows (drainRelayBacklog), so new mail lands in this paint.
+			// relay-fronted deployment pulled relay-sealed rows list sealed and the
+			// re-read's `parsing` starts their parse, which refreshes the list.
 			// A failed or cooled-down check still re-reads — refresh never breaks.
 			var checkMail = CFG.checkMailUrl
 				? joineryApi.post(CFG.checkMailUrl, {}).catch(function () {})
@@ -5157,6 +5165,15 @@
 		// action instead (selfUnlocking).
 		document.addEventListener('joinery:vault-unlocked', function () {
 			if (selfUnlocking) { return; }
+			refreshMailboxes();
+			refreshThreads();
+		});
+
+		// A background drain parsed relay-sealed mail: those rows were listed
+		// sealed, so re-read them (counts too — a mail rule may have filed one).
+		document.addEventListener('joinery:vault-work-done', function (e) {
+			var done = (e && e.detail && e.detail.done) || {};
+			if (!(done.mailbox_parse > 0)) { return; }
 			refreshMailboxes();
 			refreshThreads();
 		});

@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.24 - registers the mailbox_spam_learn deferred-work consumer (SpamLearning)
  * @version 1.23 - the mail rotation re-makes the relay pins (mailbox-reseal.js)
  * @version 1.22 - a `mail` rotation does not commit while the relay may still seal to
  *                the old key (RelayMapSync::rotationRefusal, B33)
@@ -394,6 +395,20 @@ VaultDeferredWork::register(
 	},
 	function (int $user_id, VaultKey $key, float $deadline): int {
 		return PromotedRowRepair::drainForUser($user_id, $key, PromotedRowRepair::DEFAULT_MAX, $deadline);
+	}
+);
+
+// Spam corrections on mail sealed to the owner's vault are taught to the local
+// scanner's Bayes corpus in their window (SpamLearning); the LearnSpamFeedback
+// cron pass teaches everything else. After parsing and row repair (a pending
+// row is never taught), and cheap: corrections are a handful of rows.
+VaultDeferredWork::register(
+	'mailbox_spam_learn',
+	function (int $user_id): bool {
+		return SpamLearning::hasWindowWork($user_id);
+	},
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return SpamLearning::drainForUser($user_id, $deadline);
 	}
 );
 

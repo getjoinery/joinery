@@ -21,6 +21,7 @@
  * recipients (sealed with the mailbox), and a closed window drops exactly
  * those lines and sets locked:true beside the rest.
  *
+ * @version 1.2 - "You marked this" comes from the correction time, and says whether the filter learned it
  * @version 1.1 - a Fortress message shows routing events only (no header block)
  * @version 1.0
  */
@@ -125,9 +126,19 @@ class MailboxMessageTimeline {
 			$this->add($received, 'spam', $verdict === InboundEmailMessage::SPAM_VERDICT_SPAM ? 'Spam check: judged spam' : 'Spam check: not spam',
 				($score !== null && $score !== '') ? 'score ' . rtrim(rtrim(number_format((float)$score, 2, '.', ''), '0'), '.') : null);
 		}
+		// A member's correction, and whether the spam filter has learned it yet.
+		$corrected = (string)$m->get('iem_spam_corrected_time');
 		$learned = (string)$m->get('iem_learned_verdict');
-		if ($learned !== '') {
-			$this->add(null, 'spam', $learned === InboundEmailMessage::SPAM_VERDICT_SPAM ? 'You marked this as spam' : 'You marked this as not spam', null);
+		if ($corrected !== '' && $verdict !== '') {
+			$detail = null;
+			if ($learned === $verdict) {
+				$detail = 'The spam filter has learned from it';
+			} elseif (MailboxSpamPolicy::learningEnabled() && !InboundEmailMessage::isBrowserSealed($m)) {
+				$detail = 'The spam filter will learn from it';
+			}
+			$this->add($corrected, 'spam',
+				$verdict === InboundEmailMessage::SPAM_VERDICT_SPAM ? 'You marked this as spam' : 'You marked this as not spam',
+				$detail);
 		}
 
 		// AI safety scan.
