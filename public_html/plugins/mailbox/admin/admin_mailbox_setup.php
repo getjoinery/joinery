@@ -26,6 +26,8 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.17 - the full health run groups Domain DNS by domain; a domain with nothing to
+ *                act on folds to one line
  * @version 3.16 - Advanced: one Relay section (the "How mail reaches this server" box folds into
  *                it); this server's mail identity shows its values with an Edit link
  * @version 3.15 - protection is Private plus add-ons: the relay step follows Seal at
@@ -896,6 +898,33 @@ if (!$advanced) {
 	// The subtraction is against what was actually rendered, not a fixed list, so
 	// a focus that shows nothing above (a domain with no mailbox, no selection at
 	// all) still gets the complete run here.
+	// One heading per domain. Unfocused, the run covers every hosted domain,
+	// and the same eight or so checks listed flat for six domains read as one
+	// list full of duplicates. A domain with nothing to act on folds to one
+	// line; one with a failure or warning stays open.
+	$render_domain_groups = function ($rows) use ($render_check) {
+		$groups = array();
+		foreach ($rows as $r) { $groups[$r['for_domain'] ?? $r['scope'] ?? ''][] = $r; }
+		foreach ($groups as $group_domain => $group_rows) {
+			$counts = array();
+			foreach ($group_rows as $r) { $counts[$r['status']] = ($counts[$r['status']] ?? 0) + 1; }
+			$needs_action = count($group_rows) > (($counts[InboundEmailSetupCheck::PASS] ?? 0)
+				+ ($counts[InboundEmailSetupCheck::INFO] ?? 0) + ($counts[InboundEmailSetupCheck::OPTIONAL] ?? 0));
+			$tally = array();
+			foreach (array(InboundEmailSetupCheck::FAIL => 'failing', InboundEmailSetupCheck::WARN => 'warning',
+					InboundEmailSetupCheck::UNKNOWN => 'could not be checked', InboundEmailSetupCheck::PASS => 'passing',
+					InboundEmailSetupCheck::INFO => 'info', InboundEmailSetupCheck::OPTIONAL => 'optional') as $status => $word) {
+				if (!empty($counts[$status])) { $tally[] = $counts[$status] . ' ' . $word; }
+			}
+			echo '<details class="mb-2"' . ($needs_action ? ' open' : '') . '><summary>'
+				. '<strong>' . htmlspecialchars($group_domain) . '</strong>'
+				. ' <span class="text-muted small">&mdash; ' . htmlspecialchars(implode(', ', $tally)) . '</span>'
+				. '</summary><div class="mt-2">';
+			foreach ($group_rows as $r) { $render_check($r); }
+			echo '</div></details>';
+		}
+	};
+
 	$remaining = array();
 	foreach ($results as $r) {
 		if (empty($rendered_checks[($r['id'] ?? '') . '|' . ($r['scope'] ?? '')])) {
@@ -928,6 +957,7 @@ if (!$advanced) {
 		foreach ($layer_titles as $layer => $title) {
 			if (empty($by_layer[$layer])) { continue; }
 			echo '<h6 class="text-muted mt-3">' . htmlspecialchars($title) . '</h6>';
+			if ($layer === 'domain') { $render_domain_groups($by_layer[$layer]); continue; }
 			foreach ($by_layer[$layer] as $r) { $render_check($r); }
 		}
 		// Any layers not in the title map (defensive).

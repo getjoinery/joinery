@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.53 - run() tags every per-domain row with the domain it ran for (for_domain)
  * @version 1.52 - a Fortress mailbox with a device AI recipe shows an INFO row (address.device_ai)
  * @version 1.51 - a Fortress mailbox shows its mail-vault step (address.mail_vault); the
  *   sealed-backlog row asks for the vault of the mailbox's seal scope
@@ -294,9 +295,17 @@ class InboundEmailSetupCheck {
 		// that used to live here; MailgunProvider returns its own catalogue.
 		$provider = InboundProviderRegistry::active();
 
+		// Every per-domain row is tagged with the domain it was run for, so a
+		// reader listing several domains can group them. The row's own scope is
+		// not enough: the machine-sender rows are scoped to mail.<domain>.
 		$domain = $domain ? strtolower(trim($domain)) : null;
 		if ($domain) {
-			foreach ($provider::getSetupChecks($domain) as $r) { $results[] = $r; }
+			foreach ($provider::getSetupChecks($domain) as $r) {
+				if ($r['layer'] !== 'host' && $r['layer'] !== 'mailhost') {
+					$r['for_domain'] = $domain;
+				}
+				$results[] = $r;
+			}
 		} else {
 			// Provider-wide checks (host/mailhost) — pass once with null domain.
 			foreach ($provider::getSetupChecks(null) as $r) { $results[] = $r; }
@@ -308,6 +317,7 @@ class InboundEmailSetupCheck {
 					if ($r['layer'] === 'host' || $r['layer'] === 'mailhost') {
 						continue;
 					}
+					$r['for_domain'] = strtolower($d->get('ied_domain'));
 					$results[] = $r;
 				}
 			}
