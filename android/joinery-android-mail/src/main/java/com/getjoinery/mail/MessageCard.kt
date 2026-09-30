@@ -42,11 +42,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.FileProvider
+import android.webkit.WebResourceResponse
+import com.getjoinery.android.JsonValue
+import com.getjoinery.mail.fortress.FortressOpener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -59,6 +60,7 @@ import java.net.URL
 @Composable
 internal fun MessageCard(
     message: MailMessage,
+    opener: FortressOpener? = null,
     isExpanded: Boolean,
     onToggle: () -> Unit,
 ) {
@@ -114,15 +116,25 @@ internal fun MessageCard(
         }
         if (isExpanded) {
             Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
-                if (message.bodyHtml.isNotEmpty()) {
-                    MailHtmlBody(message.bodyHtml)
+                DangerBanner(message)
+                if (message.fortressNote != null) {
+                    Text(
+                        message.fortressNote,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("mail_message_fortress_note"),
+                    )
+                } else if (message.bodyHtml.isNotEmpty()) {
+                    MailHtmlBody(message.bodyHtml, endToEnd = message.sealed != null)
                 } else {
                     SelectionContainer {
-                        Text(message.bodyPlain, style = MaterialTheme.typography.bodyLarge)
+                        Text(message.bodyPlain, style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.testTag("mail_message_body_plain"))
                     }
                 }
                 if (message.attachments.isNotEmpty()) {
-                    AttachmentChips(message.attachments)
+                    AttachmentChips(message.attachments, opener)
                 }
             }
         }
@@ -131,6 +143,7 @@ internal fun MessageCard(
 }
 
 private fun previewLine(message: MailMessage): String {
+    message.fortressNote?.let { return it }
     val plain = message.bodyPlain.trim()
     if (plain.isNotEmpty()) return plain.replace("\n", " ")
     return if (message.attachments.isEmpty()) "" else "📎 ${message.attachments.size} attachment(s)"
@@ -146,7 +159,7 @@ private fun previewLine(message: MailMessage): String {
  * once after remote images have had a moment to lay out).
  */
 @Composable
-private fun MailHtmlBody(html: String) {
+private fun MailHtmlBody(html: String, endToEnd: Boolean) {
     var heightDp by remember(html) { mutableStateOf(60) }
     val dark = isSystemInDarkTheme()
 
@@ -159,10 +172,29 @@ private fun MailHtmlBody(html: String) {
                 settings.setSupportZoom(false)
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
+                // B3: the body view never carries the bridged web session. An
+                // end-to-end body loads nothing remote at all (its inline images
+                // are already data: URLs, opened on this phone); a Standard
+                // body's remote images are fetched below with no cookies.
+                android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+                settings.blockNetworkLoads = endToEnd
+                settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
                 isVerticalScrollBarEnabled = false
                 isHorizontalScrollBarEnabled = false
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 webViewClient = object : WebViewClient() {
+                    override fun shouldInterceptRequest(
+                        view: WebView,
+                        request: WebResourceRequest,
+                    ): WebResourceResponse? {
+                        val scheme = request.url.scheme?.lowercase() ?: return null
+                        if (scheme != "http" && scheme != "https") return null
+                        // No plain-http loads (a web page's mixed-content rule),
+                        // and nothing remote at all in an end-to-end body.
+                        if (endToEnd || scheme == "http" || request.method != "GET") return blockedResponse()
+                        return cookieLessFetch(request.url.toString())
+                    }
+
                     override fun shouldOverrideUrlLoading(
                         view: WebView,
                         request: WebResourceRequest,
@@ -188,6 +220,59 @@ private fun MailHtmlBody(html: String) {
             }
         },
     )
+}
+
+private fun blockedResponse() = WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+
+/** A remote resource of a mail body, fetched with no cookies and no
+ *  credentials of any kind: the WebView's cookie jar (which holds the bridged
+ *  web session) never sees the request (B3). */
+private fun cookieLessFetch(url: String): WebResourceResponse {
+    return try {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.instanceFollowRedirects = true
+        connection.connectTimeout = 15_000
+        connection.readTimeout = 20_000
+        connection.setRequestProperty("Cookie", "")
+        val code = connection.responseCode
+        if (code !in 200..299) return blockedResponse()
+        val type = (connection.contentType ?: "application/octet-stream").substringBefore(';').trim()
+        val bytes = connection.inputStream.use { it.readBytes() }
+        connection.disconnect()
+        WebResourceResponse(type, null, java.io.ByteArrayInputStream(bytes))
+    } catch (e: Exception) {
+        blockedResponse()
+    }
+}
+
+/** The AI security scan's banner: the score decides the tier; the scan (the
+ *  owner's own model's, on a Fortress message) says what it found. */
+@Composable
+private fun DangerBanner(message: MailMessage) {
+    val score = message.aiDangerScore ?: return
+    if (message.aiScan.isEmpty() || message.fortressNote != null) return
+    val scan = try { JsonValue.parse(message.aiScan) } catch (e: Exception) { return }
+    val tier = if (score >= 7) 2 else if (score >= 5) 1 else 0
+    val head = when (tier) { 2 -> "Danger"; 1 -> "Caution"; else -> "Security scan" }
+    val color = when (tier) {
+        2 -> MaterialTheme.colorScheme.errorContainer
+        1 -> androidx.compose.ui.graphics.Color(0xFFFFF3CD)
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    Surface(color = color, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).testTag("mail_danger_banner")) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("$head: $score/10", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            scan["summary"]?.stringValue?.takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            scan["model"]?.stringValue?.takeIf { it.isNotEmpty() }?.let {
+                Text("Judged by $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (tier > 0) {
+                scan["red_flags"]?.arrayValue?.forEach { flag ->
+                    flag["finding"]?.stringValue?.takeIf { it.isNotEmpty() }?.let { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+        }
+    }
 }
 
 private fun openExternally(context: Context, url: Uri) {
@@ -219,7 +304,7 @@ internal fun wrapMailHtml(body: String, dark: Boolean): String {
 // MARK: - Attachments
 
 @Composable
-private fun AttachmentChips(attachments: List<MailAttachment>) {
+private fun AttachmentChips(attachments: List<MailAttachment>, opener: FortressOpener?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var downloadingId by remember { mutableStateOf<Int?>(null) }
@@ -241,7 +326,7 @@ private fun AttachmentChips(attachments: List<MailAttachment>) {
                         downloadingId = attachment.id
                         scope.launch {
                             try {
-                                openAttachment(context, attachment)
+                                openAttachment(context, attachment, opener)
                             } catch (e: Exception) {
                                 // Transient failure — the chip stays tappable to retry.
                             } finally {
@@ -284,43 +369,33 @@ private fun AttachmentChips(attachments: List<MailAttachment>) {
     }
 }
 
-/** Fetch the signed URL to a cache file and hand it to the system viewer via
- *  a chooser (the same hand-off the webview downloads use). */
-private suspend fun openAttachment(context: Context, attachment: MailAttachment) {
-    val urlString = attachment.url ?: return
-    val file = withContext(Dispatchers.IO) {
-        val dir = File(context.cacheDir, "mail_attachments")
-        dir.mkdirs()
-        // Path-safe name; the display name is preserved for the receiving app.
-        val safe = attachment.filename.replace(Regex("[/\\\\ ]"), "_")
-        val target = File(dir, safe)
-        val connection = URL(urlString).openConnection() as HttpURLConnection
-        try {
-            if (connection.responseCode != 200) {
-                throw IllegalStateException("download failed: ${connection.responseCode}")
+/** Fetch the part — for an end-to-end message, its ciphertext opened on this
+ *  phone — stage it in the private cache (deleted when the person comes back,
+ *  B4) and hand it to the system viewer. */
+private suspend fun openAttachment(context: Context, attachment: MailAttachment, opener: FortressOpener?) {
+    val bytes = if (attachment.fortress) {
+        opener?.partBytes(attachment) ?: return
+    } else {
+        val urlString = attachment.url ?: return
+        // Mail bytes travel over https only (the app allows cleartext for the
+        // AI endpoint alone).
+        val secure = com.getjoinery.android.ApiClient.requireHttps(urlString).toString()
+        withContext(Dispatchers.IO) {
+            val connection = URL(secure).openConnection() as HttpURLConnection
+            try {
+                if (connection.responseCode != 200) {
+                    throw IllegalStateException("download failed: ${connection.responseCode}")
+                }
+                connection.inputStream.use { it.readBytes() }
+            } finally {
+                connection.disconnect()
             }
-            connection.inputStream.use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
-            }
-        } finally {
-            connection.disconnect()
         }
-        target
     }
-    val uri = FileProvider.getUriForFile(
-        context, "${context.packageName}.joinerymail.files", file,
-    )
-    val view = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(uri, attachment.contentType.ifEmpty { "application/octet-stream" })
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    try {
-        context.startActivity(Intent.createChooser(view, attachment.filename))
-    } catch (e: ActivityNotFoundException) {
-        // Nothing can open it — fall back to a share intent.
-        val send = Intent(Intent.ACTION_SEND)
-            .setType(attachment.contentType.ifEmpty { "application/octet-stream" })
-            .putExtra(Intent.EXTRA_STREAM, uri)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        context.startActivity(Intent.createChooser(send, attachment.filename))
+    val file = try {
+        MailFiles.stage(context, attachment.filename, bytes)
+    } finally {
+        if (attachment.fortress) bytes.fill(0)
     }
+    MailFiles.open(context, file, attachment.filename, attachment.contentType)
 }

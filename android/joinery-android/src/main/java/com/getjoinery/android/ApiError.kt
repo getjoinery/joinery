@@ -30,6 +30,13 @@ sealed class JoineryApiError(message: String) : Exception(message) {
     /** Transport failure — offline, DNS, TLS, timeout. */
     data class Network(val underlying: Throwable) : JoineryApiError("Could not reach the server. Check your connection and try again.")
 
+    /** A request that would leave over plain http, or to an address it may not
+     *  go to. Refused before anything is sent. */
+    data class InsecureUrl(val url: String) : JoineryApiError("This address is not allowed: it is not a secure (https) address this app may use.")
+
+    /** The answer was larger than the caller will hold; nothing of it was kept. */
+    data class TooLarge(val limit: Long) : JoineryApiError("The answer was too large to handle on this phone.")
+
     /** Response was not a valid API envelope. */
     object Malformed : JoineryApiError("The server returned an unexpected response.")
 
@@ -42,6 +49,8 @@ sealed class JoineryApiError(message: String) : Exception(message) {
             is Validation -> text
             is Server -> text
             is Network -> "Could not reach the server. Check your connection and try again."
+            is TooLarge -> "The answer was too large to handle on this phone."
+            is InsecureUrl -> "This address is not allowed: it is not a secure (https) address this app may use."
             is Malformed -> "The server returned an unexpected response."
         }
 

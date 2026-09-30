@@ -238,7 +238,8 @@ class RelayMapExporter {
 	 *
 	 * Only under the Seal at the relay add-on (specs/client_custody_mail.md
 	 * § R9): with it off, a Fortress message is sealed on arrival here, so
-	 * mail rules still run on it; with it on, this server never sees it.
+	 * the server runs mail rules on it; with it on, this server never sees it
+	 * and the device that opens it runs them (MailboxDeviceRules).
 	 *
 	 * The key is the owner's mail vault's SEALING key — the pending one while a
 	 * rotation is under way, so mail arriving mid-rotation lands on the new

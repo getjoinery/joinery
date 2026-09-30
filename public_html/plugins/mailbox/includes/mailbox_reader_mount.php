@@ -37,6 +37,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.28.0 - mailbox_filter_match.js: mail rules run on end-to-end mail in the browser
  * @version 1.27.0 - relayPinMailboxes in the config: the mailboxes whose relay pin the browser checks
  * @version 1.26.0 - relay-sealed Fortress mail: mailbox_mime.js, the pending banner, and the
  *                  Fortress client loaded while any waits to be parsed (B46)
@@ -450,6 +451,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
 <?php if (!empty($opts['fortress'])): ?>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_mime.js')); ?>"></script>
+<script src="<?php echo htmlspecialchars($asset_ver('mailbox_filter_match.js')); ?>"></script>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_fortress.js')); ?>"></script>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_search.js')); ?>"></script>
 <?php endif; ?>

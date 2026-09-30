@@ -189,6 +189,14 @@ try {
 		&& strpos((string)$file->get('fil_name'), 'part') !== false, 'a part is stored nameless, its File named by message and part');
 	check(fortress_open_field($fx, (string)$file->read_bytes('original'), $dek, InboundEmailMessage::attachmentAd($id, $part_a))
 		=== 'bytes of ' . $part_a, 'and its bytes open under the draft DEK');
+	check(is_string($by_part[$part_a]['url'] ?? null) && strpos($by_part[$part_a]['url'], 'sig=') !== false,
+		'each part carries a signed URL, for a phone reopening the draft');
+	VaultUnlock::loadConsumerBootstraps();
+	$resolve = new ReflectionMethod('File', 'resolve_decrypt_hook');
+	$resolve->setAccessible(true);
+	$hook = $resolve->invoke(null, $file->get('fil_source'));
+	check($hook && call_user_func($hook, (string)$file->read_bytes('original'), $file) === (string)$file->read_bytes('original'),
+		'which serves the stored ciphertext unchanged');
 
 	$drafts->saveFortressDraft(array('alias_id' => $alias_id, 'draft_id' => $id, 'mode' => 'reply', 'source_id' => $src,
 		'sealed_dek' => $sealed_dek, 'public_key' => $fx['pub'], 'fields' => $seal($id, $values), 'parts' => array(),

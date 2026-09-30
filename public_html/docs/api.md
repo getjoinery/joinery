@@ -357,7 +357,7 @@ API authorization decisions involve two distinct axes — keep them separate whe
 | **Key capability** | `apk_permission` | What a *key* may do on the CRUD axis (read / write / delete, non-monotonic — see above). |
 | **User role** | `usr_permission` | The owning *user's* role floor (e.g. `5` = staff, `10` = superadmin). This is the value passed to per-record `authenticate_read/write` as `current_user_permission`, and the floor the management plane gates on. |
 
-Both axes live in one class, `ApiAuth` (`includes/ApiAuth.php`), which owns the whole security boundary: `ApiAuth::authenticate()` resolves the principal from request headers, and `ApiAuth::authorize()` enforces every endpoint's authorization against a small contract — a key's scope, a `capability`, an optional `requires_machine_key` or its inverse `requires_browser_session`, an optional `requires_scoped_key`, and a `min_user_permission` floor.
+Both axes live in one class, `ApiAuth` (`includes/ApiAuth.php`), which owns the whole security boundary: `ApiAuth::authenticate()` resolves the principal from request headers, and `ApiAuth::authorize()` enforces every endpoint's authorization against a small contract — a key's scope, a `capability`, an optional `requires_machine_key` or its inverse `requires_browser_session`, an optional `requires_person_credential`, an optional `requires_scoped_key`, and a `min_user_permission` floor.
 
 ### Declaring endpoint authorization
 
@@ -372,6 +372,7 @@ function catalog_logic_descriptor(): array {
             'requires_session'         => true,    // run under session simulation as the key's user
             'requires_machine_key'     => false,   // require apk_type = machine
             'requires_browser_session' => false,   // inverse of machine_key: refuse ALL API keys, browser-session credential only
+            'requires_person_credential' => false, // browser session or an app session key; refuse machine keys
             'allow_guest'              => false,   // accept the anonymous browser principal (valid CSRF, no signed-in user)
             'session_write'            => false,   // re-open the session so the action's $_SESSION writes persist (browser credential only)
             'min_user_permission'      => 0,       // usr_permission floor
@@ -391,6 +392,8 @@ Resolution order for each field: explicit `auth` value → router default → `A
 | Management (`/api/v1/management/*`) | `requires_machine_key: true, min_user_permission: 10` (no `apk_permission` check) |
 
 `requires_machine_key` and `requires_browser_session` are mutually exclusive opposites: the first admits only machine keys, the second refuses every API key so the action is reachable only through the browser-session credential (session cookie + CSRF; native apps ride the same bridge). Session-bound operations whose state is keyed to the session id — Sealed Vault and passkey management — set `requires_browser_session` so the boundary is declared, not left to incidental session-plumbing behavior.
+
+`requires_person_credential` sits between them: it admits the two credentials a person holds in their own hands — the browser session and an app's session key (`apk_type = 'session'`, minted by `auth/login`) — and refuses a machine key. Key-holding device work uses it: a phone that holds a Fortress mail key opens rows, pages the sealed search text, parses relay-sealed mail and runs AI and mail rules on its own, and none of that needs a PHP session. Anything that unlocks, sets up, rotates or changes custody stays `requires_browser_session`.
 
 `allow_guest` admits the anonymous browser principal (see [Browser sessions](#browser-sessions-page-javascript)); without it, `ApiAuth::authorize()` denies anonymous callers 401 before any other check, so contracts that never think about guests stay guest-free. Guest-reachable actions whose state lives in the web session (the cart) pair it with `requires_browser_session` — an API key has no session to act on — and with `session_write` when they mutate that state, since the browser credential otherwise releases the session lock after reading identity and later `$_SESSION` writes would not persist.
 

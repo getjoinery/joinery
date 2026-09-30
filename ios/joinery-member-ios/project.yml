@@ -22,6 +22,21 @@ targets:
     platform: iOS
     deploymentTarget: "16.0"
     sources: [Sources]
+    # Keys GENERATE_INFOPLIST_FILE cannot express (arrays), merged with the
+    # generated ones: the mail poll's background task and Face ID's reason
+    # (specs/fortress_mobile_apps.md § R3, R15).
+    info:
+      path: Sources/Info.plist
+      properties:
+        NSFaceIDUsageDescription: Your end-to-end encrypted mail key stays on this phone behind Face ID.
+        BGTaskSchedulerPermittedIdentifiers: [com.getjoinery.mail.poll]
+        UIBackgroundModes: [fetch]
+        # The person's own AI model may answer over plain http on their own
+        # network (an Ollama at 192.168.x.x or a tailnet IP). Local networking
+        # only; the site itself is https-only in APIClient.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Your own AI model on your network judges your end-to-end encrypted mail.
     dependencies:
       - package: JoineryKit
         product: JoineryKit

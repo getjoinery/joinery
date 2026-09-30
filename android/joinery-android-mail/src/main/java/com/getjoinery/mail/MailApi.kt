@@ -53,11 +53,18 @@ class MailApi(val client: ApiClient) {
         folderId: Int?,
         query: String,
         page: Int,
+        drafts: Boolean = false,
+        deviceHits: List<Int>? = null,
+        deviceOnly: Boolean = false,
+        perpage: Int? = null,
     ): ThreadPage {
         val body = ArrayList<Pair<String, JsonValue>>()
         body.add("page" to JsonValue.Num(page.toDouble()))
+        if (perpage != null) body.add("perpage" to JsonValue.Num(perpage.toDouble()))
         if (aliasId != null) body.add("alias_id" to JsonValue.Num(aliasId.toDouble()))
-        if (folderId != null) {
+        if (drafts) {
+            body.add("drafts" to JsonValue.Bool(true))
+        } else if (folderId != null) {
             // A folder is its own view: membership-filtered, no inbox/spam flag.
             body.add("folder_id" to JsonValue.Num(folderId.toDouble()))
         } else when (view) {
@@ -67,6 +74,11 @@ class MailApi(val client: ApiClient) {
             MailView.SPAM -> body.add("spam" to JsonValue.Bool(true))
         }
         if (query.isNotEmpty()) body.add("q" to JsonValue.Str(query))
+        if (deviceHits != null) {
+            // What this phone's own index found in end-to-end mail (§ R5).
+            body.add("device_hits" to JsonValue.Str(DeviceHits.pack(deviceHits.map { it.toLong() })))
+            if (deviceOnly) body.add("device_only" to JsonValue.Bool(true))
+        }
         val envelope = client.submitAction("mailbox/thread_list", JsonValue.Obj(body))
         return ThreadPage.from(envelope["data"]) ?: throw JoineryApiError.Malformed
     }
@@ -110,15 +122,28 @@ class MailApi(val client: ApiClient) {
         return envelope["data"]?.get("folder")?.let { MailFolder.from(it) }
     }
 
+    /** What `mailbox/send` answered. */
+    sealed class SendResult {
+        data class Sent(val warning: String?) : SendResult()
+        /** The sending lock is shut (HTTP 200 `{locked: true}`, B2): nothing
+         *  was sent. The lock is a browser ceremony, so the phone says to send
+         *  from a computer and keeps the sheet open. */
+        data class Locked(val message: String) : SendResult()
+    }
+
     /**
      * Send as the mailbox. For reply/reply-all/forward the server quotes the
      * original, normalizes the subject, and applies threading headers; for a
      * new message ([sourceId] null, [aliasId] set) it sends exactly as entered
      * and starts a fresh conversation. Either way the outbound copy is stored
      * (with an attachment manifest, so the sent copy shows what was attached).
-     * When [attachments] is non-empty the call goes out as multipart so the
-     * files reach the server's `$_FILES['attachments']`; otherwise it's a
-     * plain JSON action.
+     *
+     * End-to-end mail (specs/fortress_mobile_apps.md § R6): the server cannot
+     * read a Fortress source, so a reply or forward carries [sourceOpen] (what
+     * this phone opened, for the quote) and a forward its parts, opened here,
+     * with the inline ones named in [inlineManifest] (Content-ID → filename).
+     * [draftId] turns a saved draft into the Sent row. `upload_count` lets the
+     * server refuse a send PHP cut short.
      */
     suspend fun send(
         mode: ComposeMode,
@@ -129,30 +154,42 @@ class MailApi(val client: ApiClient) {
         subject: String,
         body: String,
         attachments: List<MailOutgoingAttachment> = emptyList(),
-    ) {
-        if (attachments.isEmpty()) {
-            val fields = ArrayList<Pair<String, JsonValue>>()
-            fields.add("mode" to JsonValue.Str(mode.wire))
-            if (sourceId != null) fields.add("source_id" to JsonValue.Num(sourceId.toDouble()))
-            if (aliasId != null) fields.add("alias_id" to JsonValue.Num(aliasId.toDouble()))
-            fields.add("to" to JsonValue.Str(to))
-            fields.add("cc" to JsonValue.Str(cc))
-            fields.add("subject" to JsonValue.Str(subject))
-            fields.add("body" to JsonValue.Str(body))
-            client.submitAction("mailbox/send", JsonValue.Obj(fields))
+        bcc: String = "",
+        sourceOpen: JsonValue? = null,
+        inlineManifest: Map<String, String> = emptyMap(),
+        draftId: Int? = null,
+    ): SendResult {
+        val fields = ArrayList<Pair<String, String>>()
+        fields.add("mode" to mode.wire)
+        if (sourceId != null) fields.add("source_id" to sourceId.toString())
+        if (aliasId != null) fields.add("alias_id" to aliasId.toString())
+        fields.add("to" to to)
+        fields.add("cc" to cc)
+        if (bcc.isNotEmpty()) fields.add("bcc" to bcc)
+        fields.add("subject" to subject)
+        fields.add("body" to body)
+        if (sourceOpen != null) fields.add("source_open" to sourceOpen.encoded())
+        if (inlineManifest.isNotEmpty()) {
+            fields.add("inline_manifest" to JsonValue.Obj(inlineManifest.map { it.key to JsonValue.Str(it.value) }).encoded())
+        }
+        if (draftId != null) fields.add("draft_id" to draftId.toString())
+        fields.add("upload_count" to attachments.size.toString())
+
+        val envelope = if (attachments.isEmpty()) {
+            client.submitAction("mailbox/send", JsonValue.Obj(fields.map { it.first to JsonValue.Str(it.second) }))
         } else {
-            val textFields = ArrayList<Pair<String, String>>()
-            textFields.add("mode" to mode.wire)
-            if (sourceId != null) textFields.add("source_id" to sourceId.toString())
-            if (aliasId != null) textFields.add("alias_id" to aliasId.toString())
-            textFields.add("to" to to)
-            textFields.add("cc" to cc)
-            textFields.add("subject" to subject)
-            textFields.add("body" to body)
             val files = attachments.map {
                 MultipartFile("attachments[]", it.filename, it.mimeType, it.data)
             }
-            client.submitMultipart("mailbox/send", textFields, files)
+            client.submitMultipart("mailbox/send", fields, files)
         }
+        val data = envelope["data"]
+        if (data?.get("locked")?.boolValue == true) {
+            return SendResult.Locked(
+                data["message"]?.stringValue?.takeIf { it.isNotEmpty() }
+                    ?: "Sending from this address needs your vault unlocked.",
+            )
+        }
+        return SendResult.Sent(data?.get("warning")?.stringValue?.takeIf { it.isNotEmpty() })
     }
 }

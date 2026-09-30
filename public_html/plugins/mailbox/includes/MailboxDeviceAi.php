@@ -22,6 +22,7 @@
  * on a mailbox the recipe covers. Without the owner check one member could
  * mark another's message judged and hide it from that member's own scan.
  *
+ * @version 1.7 - recipesFor() carries device_ai_origin, for a phone to read (specs/fortress_mobile_apps.md § R13)
  * @version 1.6 - originTrust(): an https tailnet name (.ts.net) is the person's own network
  * @version 1.5 - pendingCount(), deviceQueues(), lastJudgedOnDevice(): what the AI panel says
  *   about a device recipe in place of a server run's last-ran line and queue notice
@@ -413,6 +414,9 @@ class MailboxDeviceAi {
 			'authserv_id'     => (string)Globalvars::get_instance()->get_setting('mailbox_mail_hostname'),
 			'model_reference' => $reference,
 			'consent_refusal' => self::consentRefusal($user_id, $alias_id),
+			// Where the person registered their model (a step-up on a computer):
+			// a phone reads it here, as the reader page reads it from its own vars.
+			'device_ai_origin' => MailboxDeviceAiHost::originForUser($user_id),
 		);
 	}
 

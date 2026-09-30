@@ -1760,7 +1760,38 @@ browser-held vault the user has set up: Drive's (`enable_vault`, its key in
 scope (its key in `sealed_vault_keys`, `{scope: blob}`). Each chosen vault is
 unlocked and its secret sealed to the device's public key in the browser
 (`session.sealSecretKeyTo()`), one unlock per vault. The device collects both
-fields once on its claim, and `sde_vault_scopes` records what it holds. A
-native client learns a scope's public key and key generation — and so notices a
-rotation — from `vault_client_probe` (any registered client scope, session-key
-reachable, no unlock material).
+fields once on its claim, and `sde_vault_scopes` records what it holds.
+
+The page is open to a user when there is something to hand a device: Drive is
+on, or they hold a client-custody content vault (`DeviceLink::
+linking_available()`).
+
+**A device that is already signed in** (a phone app, holding the session key
+`auth/login` gave it) does not run the credential half of the ceremony. It
+calls `device_key_enroll` with `{device_pubkey, platform, device_name}`, which
+opens a link **bound** to the caller (`dlk_bound`, `dlk_usr_user_id` and
+`dlk_apk_api_key_id` set at begin) and answers the same `{link_code,
+verify_url, poll_token, expires_time}` as `auth/device_link`. On the page, a
+bound link is visible to, and approvable and deniable by, its own user only.
+Approval mints nothing: it creates or updates the `SyncDevice` row for the
+calling key (platform `ios` or `android`) with the device key and the handed
+scopes — keeping the scopes it already held when the device key is the same —
+and requires at least one vault. The poll returns `{status: 'approved',
+device_id, sealed_vault_keys}` once and no credential; a second poll is 409.
+Re-enrolling after a rotation or a recovery-code use re-uses the row.
+
+A native client learns a scope's public key and key generation — and so
+notices a rotation — from `vault_client_probe` (any registered client scope,
+session-key reachable, no unlock material). The probe also answers
+`pending_public_key` (a rotation in progress) and `held_by_this_device`
+(whether the calling key's device row still lists the scope), and
+`device_linked` (whether the calling key has a device row at all — false before
+the first handover and after an unlink). A rotation or a
+recovery-code use takes the scope off every device
+(`VaultClientRotation::forgetScopeOnDevices`, `VaultClientCustody::
+forgetDevices`), so a device learns from the probe that the secret it holds is
+retired, wipes it, and enrolls again. A call from a device stamps it seen.
+
+Revoking a session key (sign-out, the Security page, a password change)
+soft-deletes the device row that owns it: a device is the identity of its key,
+and a revoked one can reach nothing.

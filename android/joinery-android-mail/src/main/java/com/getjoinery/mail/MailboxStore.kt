@@ -4,8 +4,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.getjoinery.android.JoineryApiError
+import com.getjoinery.mail.fortress.FortressMail
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 
 /**
  * State for the mailbox screen: the granted mailboxes plus the thread list
@@ -13,7 +16,7 @@ import kotlinx.coroutines.coroutineScope
  * mutations go through [MailApi] and re-read or locally patch the list — the
  * server is the single source of truth shared with the web reader.
  */
-class MailboxStore(val api: MailApi) {
+class MailboxStore(val api: MailApi, val fortress: FortressMail? = null) {
     sealed class Phase {
         object Loading : Phase()
         object Loaded : Phase()
@@ -25,6 +28,13 @@ class MailboxStore(val api: MailApi) {
     var home by mutableStateOf<MailboxHome?>(null)
         private set
     var threads by mutableStateOf<List<ThreadSummary>>(emptyList())
+        private set
+    /** The rows as the server sent them; [threads] is these with every
+     *  end-to-end row opened on this phone (or its placeholder). A lock
+     *  re-renders from these, so no opened text survives it. */
+    private var serverThreads: List<ThreadSummary> = emptyList()
+    /** The Drafts view (each draft its own row). */
+    var draftsView by mutableStateOf(false)
         private set
     var hasMore by mutableStateOf(false)
         private set
@@ -55,8 +65,31 @@ class MailboxStore(val api: MailApi) {
     val effectiveMailbox: Mailbox?
         get() = selectedMailbox ?: home?.mailboxes?.singleOrNull()
 
+    /** Some mailbox in view is end-to-end encrypted. */
+    val showsFortress: Boolean
+        get() {
+            val boxes = home?.mailboxes ?: return false
+            val inView = selectedAlias?.let { a -> boxes.filter { it.aliasId == a } } ?: boxes
+            return inView.any { it.isFortress }
+        }
+
+    /** Every mailbox in view is end-to-end encrypted (search runs on the phone only). */
+    val onlyFortressInView: Boolean
+        get() {
+            val boxes = home?.mailboxes ?: return false
+            val inView = selectedAlias?.let { a -> boxes.filter { it.aliasId == a } } ?: boxes
+            return inView.isNotEmpty() && inView.all { it.isFortress }
+        }
+
+    /** Runs after every successful reload (the screen's end-to-end upkeep). */
+    var afterReload: (() -> Unit)? = null
+
+    /** Hits from the phone's own index for the current search, or null. */
+    var deviceSearch: (suspend (String) -> List<Int>?)? = null
+
     val title: String
         get() = when {
+            draftsView -> "Drafts"
             activeQuery.isNotEmpty() -> "Search"
             selectedFolder != null -> selectedFolder!!.name
             else -> view.title
@@ -68,13 +101,12 @@ class MailboxStore(val api: MailApi) {
         try {
             coroutineScope {
                 val homeTask = async { api.mailboxes() }
-                val pageTask = async {
-                    api.threadList(selectedAlias, view, selectedFolder?.id, activeQuery, 1)
-                }
+                val pageTask = async { fetchPage(1) }
                 home = homeTask.await()
                 apply(pageTask.await(), reset = true)
             }
             phase = Phase.Loaded
+            afterReload?.invoke()
         } catch (e: Exception) {
             phase = Phase.Failed(displayMessage(e))
         }
@@ -90,10 +122,11 @@ class MailboxStore(val api: MailApi) {
             if (refreshMailboxes) {
                 home = api.mailboxes()
             }
-            val firstPage = api.threadList(selectedAlias, view, selectedFolder?.id, activeQuery, 1)
+            val firstPage = fetchPage(1)
             if (generation != loadGeneration) return
             apply(firstPage, reset = true)
             phase = Phase.Loaded
+            afterReload?.invoke()
         } catch (e: Exception) {
             if (generation != loadGeneration) return
             if (phase is Phase.Loaded) return
@@ -106,7 +139,7 @@ class MailboxStore(val api: MailApi) {
         isLoadingMore = true
         val generation = loadGeneration
         try {
-            val next = api.threadList(selectedAlias, view, selectedFolder?.id, activeQuery, page + 1)
+            val next = fetchPage(page + 1)
             if (generation == loadGeneration) apply(next, reset = false)
         } catch (e: Exception) {
             // Paging failures are silent; the next scroll retries.
@@ -115,23 +148,58 @@ class MailboxStore(val api: MailApi) {
         }
     }
 
-    private fun apply(pageData: ThreadPage, reset: Boolean) {
-        threads = if (reset) {
+    private suspend fun fetchPage(n: Int): ThreadPage {
+        if (draftsView) return api.threadList(selectedAlias, view, null, "", n, drafts = true)
+        // End-to-end mail is searched on this phone: its index's hits ride
+        // along, and when every mailbox in view is end-to-end, only they count.
+        var hits: List<Int>? = null
+        if (activeQuery.isNotEmpty() && showsFortress) hits = deviceSearch?.invoke(activeQuery)
+        return api.threadList(
+            selectedAlias, view, selectedFolder?.id, activeQuery, n,
+            deviceHits = hits, deviceOnly = hits != null && onlyFortressInView,
+        )
+    }
+
+    private suspend fun apply(pageData: ThreadPage, reset: Boolean) {
+        serverThreads = if (reset) {
             pageData.threads
         } else {
-            val known = threads.map { it.threadKey }.toHashSet()
-            threads + pageData.threads.filter { !known.contains(it.threadKey) }
+            val known = serverThreads.map { it.threadKey }.toHashSet()
+            serverThreads + pageData.threads.filter { !known.contains(it.threadKey) }
         }
+        threads = openAll(serverThreads)
         page = pageData.page
         hasMore = pageData.hasMore
+    }
+
+    private suspend fun openAll(rows: List<ThreadSummary>): List<ThreadSummary> {
+        val opener = fortress?.opener ?: return rows
+        if (rows.none { it.sealed != null }) return rows
+        return withContext(Dispatchers.Default) { rows.map { if (it.sealed != null) opener.openSummary(it) else it } }
+    }
+
+    /** Re-open the list after the mail key opened or locked. */
+    suspend fun reopen() {
+        threads = openAll(serverThreads)
     }
 
     // MARK: Slice changes
 
     suspend fun select(newView: MailView) {
-        if (newView == view && selectedFolder == null) return
+        if (newView == view && selectedFolder == null && !draftsView) return
         view = newView
         selectedFolder = null
+        draftsView = false
+        reload()
+    }
+
+    /** The Drafts view: `thread_list` with `drafts`, each draft its own row. */
+    suspend fun selectDrafts() {
+        if (draftsView) return
+        draftsView = true
+        selectedFolder = null
+        activeQuery = ""
+        searchText = ""
         reload()
     }
 
@@ -147,6 +215,7 @@ class MailboxStore(val api: MailApi) {
         if (selectedFolder?.id == folder.id && selectedAlias == ofAlias) return
         selectedAlias = ofAlias
         selectedFolder = folder
+        draftsView = false
         reload()
     }
 
@@ -190,13 +259,27 @@ class MailboxStore(val api: MailApi) {
         }
     }
 
+    /** Swipe a draft away in the Drafts view. */
+    suspend fun deleteDraft(t: ThreadSummary) {
+        val id = t.latestId ?: return
+        try {
+            com.getjoinery.mail.drafts.MailDrafts(api.client, null).delete(id)
+            remove(t.threadKey)
+            home = api.mailboxes()
+        } catch (e: Exception) {
+            reload()
+        }
+    }
+
     /** Local patch used by the detail screen when it changes thread state. */
     fun patch(threadKey: String, mutate: (ThreadSummary) -> ThreadSummary) {
         threads = threads.map { if (it.threadKey == threadKey) mutate(it) else it }
+        serverThreads = serverThreads.map { if (it.threadKey == threadKey) mutate(it) else it }
     }
 
     fun remove(threadKey: String) {
         threads = threads.filter { it.threadKey != threadKey }
+        serverThreads = serverThreads.filter { it.threadKey != threadKey }
     }
 
     private fun displayMessage(e: Exception): String =

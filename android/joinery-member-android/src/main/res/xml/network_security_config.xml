@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain http is allowed for one reason: AI on the person's own model
+     (specs/fortress_mobile_apps.md § R13). An Ollama on a home computer
+     answers on http://192.168.x.x:11434, and Android cannot scope cleartext
+     to private addresses in this file, so the app scopes it in code instead:
+     the deployment this app is built for is https, mail bodies load no http
+     resource (MessageCard), and the AI settings accept http only for the
+     origin the account registered, which the server allows as http only on a
+     private network (MailboxDeviceAiHost::normalizeOrigin). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

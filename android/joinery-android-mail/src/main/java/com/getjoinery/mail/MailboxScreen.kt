@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Clear
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Drafts
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FilterList
@@ -67,8 +68,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalContext
 import com.getjoinery.android.ApiClient
 import com.getjoinery.android.NativeScreenRegistry
+import com.getjoinery.android.SessionEvents
+import com.getjoinery.mail.fortress.FortressBanner
+import com.getjoinery.mail.fortress.FortressMail
 import kotlinx.coroutines.launch
 
 /**
@@ -80,7 +85,30 @@ import kotlinx.coroutines.launch
 object JoineryMail {
     fun registerScreens() {
         NativeScreenRegistry.register("mailbox") { context ->
-            MailboxScreen(client = context.session.client)
+            MailboxScreen(client = context.session.client, userId = context.user.userId)
+        }
+        registerSessionHooks()
+    }
+
+    private var hooked = false
+
+    /** Sign-out removes opened attachments left on disk and the new-mail
+     *  check; sign-in starts the check (specs/fortress_mobile_apps.md § R15). */
+    private fun registerSessionHooks() {
+        if (hooked) return
+        hooked = true
+        SessionEvents.onSignOut { context ->
+            context ?: return@onSignOut
+            MailFiles.sweep(context)
+            com.getjoinery.mail.notify.MailPoller.cancel(context)
+            com.getjoinery.mail.search.MailSearchIndex.onSignOut(context)
+            com.getjoinery.mail.fortress.FortressWork.reset()
+            FortressMail.reset()
+        }
+        SessionEvents.onSignedIn { context, client, storeFile ->
+            context ?: return@onSignedIn
+            MailFiles.sweep(context)
+            com.getjoinery.mail.notify.MailPoller.schedule(context, client, storeFile)
         }
     }
 }
@@ -88,7 +116,7 @@ object JoineryMail {
 /** A compose invocation: what mode, and (for reply/reply-all/forward) which
  *  message it responds to. New-message compose has no source to quote — the
  *  sending identity comes from a From picker over the granted mailboxes. */
-data class ComposeRequest(val mode: ComposeMode, val source: MailMessage?) {
+data class ComposeRequest(val mode: ComposeMode, val source: MailMessage?, val draftId: Int? = null) {
     companion object {
         val new = ComposeRequest(ComposeMode.NEW, null)
     }
@@ -101,15 +129,41 @@ data class ComposeRequest(val mode: ComposeMode, val source: MailMessage?) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MailboxScreen(client: ApiClient) {
-    val store = remember { MailboxStore(MailApi(client)) }
+fun MailboxScreen(client: ApiClient, userId: Int = 0) {
+    val context = LocalContext.current
+    val fortress = remember { FortressMail.get(context, client) }
+    val store = remember { MailboxStore(MailApi(client), fortress) }
+    val search = remember { com.getjoinery.mail.search.MailSearchIndex.get(context, client, fortress, userId) }
+    val work = remember { com.getjoinery.mail.fortress.FortressWork.get(context, client, fortress) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var openThread by remember { mutableStateOf<ThreadSummary?>(null) }
     var composeRequest by remember { mutableStateOf<ComposeRequest?>(null) }
+    store.deviceSearch = { q -> search.query(q) }
 
     LaunchedEffect(Unit) {
         if (store.phase is MailboxStore.Phase.Loading) store.initialLoad()
+    }
+
+    // Re-open (or re-placeholder) the list whenever the mail key opens or
+    // locks, and after every refresh: ask whether the key this phone holds is
+    // still current (B6), then — with the key open — parse relay-sealed
+    // arrivals, keep the search index current, and run the owner's AI and
+    // rules. Foreground only; FortressWork throttles itself.
+    fun upkeep(force: Boolean) {
+        scope.launch {
+            if (store.home?.mailboxes?.any { it.isFortress } == true) fortress.checkHeld()
+            if (fortress.isOpen && store.showsFortress) {
+                work.runForeground(store, force) { scope.launch { store.reload(refreshMailboxes = true) } }
+                search.ensureBuilding()
+            }
+        }
+    }
+    store.afterReload = { upkeep(force = false) }
+    val keyVersion = fortress.keyVersion
+    LaunchedEffect(keyVersion) {
+        store.reopen()
+        upkeep(force = true)
     }
 
     // Foreground refresh: mail may have arrived while the app was away. Skips
@@ -118,6 +172,8 @@ fun MailboxScreen(client: ApiClient) {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME && store.phase !is MailboxStore.Phase.Loading) {
+                // Opened attachments are gone once the viewer hands back (B4).
+                MailFiles.sweep(context)
                 scope.launch { store.reload(refreshMailboxes = true) }
             }
         }
@@ -132,8 +188,24 @@ fun MailboxScreen(client: ApiClient) {
         MailboxListScaffold(
             store = store,
             listState = listState,
-            onOpenThread = { openThread = it },
+            onOpenThread = { t ->
+                // A draft opens its compose, not a conversation.
+                if (store.draftsView) {
+                    t.latestId?.let { composeRequest = ComposeRequest(ComposeMode.NEW, null, draftId = it) }
+                } else {
+                    openThread = t
+                }
+            },
             onNewMessage = { composeRequest = ComposeRequest.new },
+            banner = {
+                if (store.showsFortress) {
+                    FortressBanner(fortress) { scope.launch { store.reopen() } }
+                    com.getjoinery.mail.fortress.FortressProgress(work, search)
+                }
+            },
+            extraMenu = { close ->
+                com.getjoinery.mail.fortress.FortressMenuItems(store, fortress, search, close)
+            },
         )
     }
 
@@ -143,11 +215,15 @@ fun MailboxScreen(client: ApiClient) {
             request = request,
             mailboxes = store.home?.mailboxes ?: emptyList(),
             preselectedAlias = store.selectedAlias,
-            onDismiss = { composeRequest = null },
+            onDismiss = {
+                composeRequest = null
+                scope.launch { store.reload(refreshMailboxes = true) }
+            },
             onSent = {
                 composeRequest = null
                 scope.launch { store.reload(refreshMailboxes = true) }
             },
+            fortress = fortress,
         )
     }
 }
@@ -159,6 +235,8 @@ private fun MailboxListScaffold(
     listState: androidx.compose.foundation.lazy.LazyListState,
     onOpenThread: (ThreadSummary) -> Unit,
     onNewMessage: () -> Unit,
+    banner: @Composable () -> Unit = {},
+    extraMenu: @Composable (close: () -> Unit) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
 
@@ -166,7 +244,7 @@ private fun MailboxListScaffold(
         TopAppBar(
             title = { Text(store.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             actions = {
-                FilterMenuButton(store)
+                FilterMenuButton(store, extraMenu)
                 IconButton(
                     onClick = onNewMessage,
                     enabled = store.home?.canCompose == true,
@@ -178,7 +256,8 @@ private fun MailboxListScaffold(
         )
     }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            SearchRow(store)
+            banner()
+            if (!store.draftsView) SearchRow(store)
             when (val phase = store.phase) {
                 is MailboxStore.Phase.Loading ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -236,7 +315,8 @@ private fun ThreadListContent(
                 val thread = store.threads[index]
                 SwipeableThreadRow(
                     thread = thread,
-                    allowArchive = store.view != MailView.SPAM,
+                    allowArchive = store.view != MailView.SPAM || store.draftsView,
+                    isDraft = store.draftsView,
                     onOpen = { onOpenThread(thread) },
                     onToggleRead = { t ->
                         scope.launch {
@@ -245,7 +325,8 @@ private fun ThreadListContent(
                     },
                     onToggleArchive = { t ->
                         scope.launch {
-                            store.perform(if (t.isArchived) "unarchive" else "archive", t)
+                            if (store.draftsView) store.deleteDraft(t)
+                            else store.perform(if (t.isArchived) "unarchive" else "archive", t)
                         }
                     },
                     onToggleStar = { t ->
@@ -338,7 +419,7 @@ private fun SearchRow(store: MailboxStore) {
 /** The view / mailbox / folder switcher — one menu, mirroring the iOS toolbar
  *  menu plus the web reader's folder rail. */
 @Composable
-private fun FilterMenuButton(store: MailboxStore) {
+private fun FilterMenuButton(store: MailboxStore, extraMenu: @Composable (close: () -> Unit) -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
 
@@ -351,7 +432,7 @@ private fun FilterMenuButton(store: MailboxStore) {
                 text = { Text(view.title) },
                 leadingIcon = { Icon(view.icon, contentDescription = null) },
                 trailingIcon = {
-                    if (store.view == view && store.selectedFolder == null) CheckMark()
+                    if (store.view == view && store.selectedFolder == null && !store.draftsView) CheckMark()
                 },
                 onClick = {
                     open = false
@@ -359,6 +440,19 @@ private fun FilterMenuButton(store: MailboxStore) {
                 },
             )
         }
+        DropdownMenuItem(
+            text = {
+                val count = store.home?.mailboxes?.sumOf { it.drafts } ?: 0
+                Text(if (count > 0) "Drafts ($count)" else "Drafts")
+            },
+            leadingIcon = { Icon(Icons.Outlined.Drafts, contentDescription = null) },
+            trailingIcon = { if (store.draftsView) CheckMark() },
+            onClick = {
+                open = false
+                scope.launch { store.selectDrafts() }
+            },
+            modifier = Modifier.testTag("mail_view_drafts"),
+        )
         val mailboxes = store.home?.mailboxes ?: emptyList()
         if (mailboxes.size > 1) {
             HorizontalDivider()
@@ -396,6 +490,7 @@ private fun FilterMenuButton(store: MailboxStore) {
                 )
             }
         }
+        extraMenu { open = false }
     }
 }
 
@@ -415,6 +510,7 @@ private fun CheckMark() {
 private fun SwipeableThreadRow(
     thread: ThreadSummary,
     allowArchive: Boolean,
+    isDraft: Boolean = false,
     onOpen: () -> Unit,
     onToggleRead: (ThreadSummary) -> Unit,
     onToggleArchive: (ThreadSummary) -> Unit,
@@ -438,7 +534,7 @@ private fun SwipeableThreadRow(
 
     SwipeToDismissBox(
         state = dismissState,
-        enableDismissFromStartToEnd = true,
+        enableDismissFromStartToEnd = !isDraft,
         enableDismissFromEndToStart = allowArchive,
         backgroundContent = {
             val target = dismissState.dismissDirection
@@ -449,8 +545,8 @@ private fun SwipeableThreadRow(
                     Alignment.CenterStart,
                 )
                 SwipeToDismissBoxValue.EndToStart -> Triple(
-                    Color(0xFF43A047),
-                    if (thread.isArchived) Icons.Outlined.Unarchive else Icons.Outlined.Archive,
+                    if (isDraft) Color(0xFFE53935) else Color(0xFF43A047),
+                    if (isDraft) Icons.Outlined.Delete else if (thread.isArchived) Icons.Outlined.Unarchive else Icons.Outlined.Archive,
                     Alignment.CenterEnd,
                 )
                 else -> return@SwipeToDismissBox
@@ -519,11 +615,14 @@ private fun ThreadRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        thread.snippet,
+                        // The owner's own model's summary, when one was written.
+                        thread.aiSummary.ifEmpty { thread.snippet },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        fontStyle = if (thread.isFortressPlaceholder) androidx.compose.ui.text.font.FontStyle.Italic else null,
+                        modifier = if (thread.isFortressPlaceholder) Modifier.testTag("mail_row_fortress_note") else Modifier,
                     )
                 }
                 IconButton(

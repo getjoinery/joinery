@@ -4,6 +4,8 @@
  * (specs/client_custody_mail.md § R10), for a mail key rotation to make again
  * under the new key (mailbox-reseal.js). [{alias_id, relay_identity_public_key, mac}].
  *
+ * @version 1.1 - reachable with an app session key too (requires_person_credential,
+ * specs/fortress_mobile_apps.md § R8)
  * @version 1.0
  */
 
@@ -18,7 +20,7 @@ function relay_pins_logic(array $input): LogicResult {
 function relay_pins_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('requires_person_credential' => true),
 		'mutates' => false,
 		'description' => 'The relay pins the caller\'s browser made, for a mail key rotation to make again: {pins}',
 		'input' => [],

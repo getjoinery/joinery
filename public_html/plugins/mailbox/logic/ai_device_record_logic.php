@@ -5,12 +5,14 @@
  * retry, so the recipe does not offer the message again
  * (specs/fortress_mail_device_ai.md § R3).
  *
- * POST /api/v1/action/mailbox/ai_device_record (browser session). Params:
+ * POST /api/v1/action/mailbox/ai_device_record (browser session or app session key). Params:
  * recipe_id, item_key (the message id). Records `error` and nothing else: a
  * verdict records its own `done` with the verdict (mailbox/device_ai_verdict),
  * and a call that never reached the model records nothing, so the message
  * comes back next time. Returns {recorded}.
  *
+ * @version 1.1 - reachable with an app session key too (requires_person_credential,
+ * specs/fortress_mobile_apps.md § R8)
  * @version 1.0
  */
 
@@ -28,7 +30,7 @@ function ai_device_record_logic(array $input): LogicResult {
 function ai_device_record_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('requires_person_credential' => true),
 		'description' => 'Record that the caller\'s own model gave an invalid verdict for one of their Fortress messages, so the recipe skips it',
 		'input' => [
 			'recipe_id' => ['type' => 'int', 'required' => true, 'label' => 'Recipe ID (the caller\'s own)'],

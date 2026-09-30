@@ -49,6 +49,7 @@
  * The picker echoes its markup, so it belongs in a direct-output form (not one
  * built with FormWriter's deferred_output).
  *
+ * @version 1.5.1 - mail's Fortress card no longer says mobile apps are unavailable
  * @version 1.5.0 - mail cards in the owner's words: encryption, who it suits, team features and apps;
  *   renderLinked(): the cards shown on a page where the level is decided elsewhere
  * @version 1.4.0 - mail's Fortress card (specs/client_custody_mail.md § R12); `notes`: a
@@ -122,7 +123,7 @@ class ProtectionLevelPicker {
 				ProtectionLevel::FORTRESS => array(
 					'Full end-to-end encryption.',
 					'Even a hacked Joinery does not reveal your emails.',
-					'Team features and mobile apps are not available.',
+					'Team features are not available.',
 				),
 			),
 			self::SERVICE_MESSAGING => array(

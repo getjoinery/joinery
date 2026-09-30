@@ -402,13 +402,29 @@ try {
 	check(count($m['attachments']) === 3, 'three parts listed, the inline image included');
 	$inline = array_values(array_filter($m['attachments'], function ($a) { return !empty($a['inline']); }));
 	check(count($inline) === 1, 'one of them inline');
-	$unnamed = true; $unsigned = true;
+	$unnamed = true; $signed = true;
 	foreach ($m['attachments'] as $a) {
 		if (array_key_exists('filename', $a) || array_key_exists('content_type', $a)) { $unnamed = false; }
-		if ($a['url'] !== null) { $unsigned = false; }
+		if (!is_string($a['url']) || strpos($a['url'], 'sig=') === false) { $signed = false; }
 	}
 	check($unnamed, 'no part carries a name or a type');
-	check($unsigned, 'and none gets a signed URL: a sessionless client has no key to open it');
+	check($signed, 'every part, the inline one included, gets a signed URL for a key-holding app to fetch');
+
+	// What a signed fetch serves: the decrypt hook hands a Fortress part's
+	// stored bytes back unchanged, and they open under the row's key.
+	$part0 = new InboundMessageAttachment(intval($m['attachments'][0]['id']), TRUE);
+	$file0 = new File(intval($part0->get('ima_fil_file_id')), TRUE);
+	VaultUnlock::loadConsumerBootstraps();
+	$resolve = new ReflectionMethod('File', 'resolve_decrypt_hook');
+	$resolve->setAccessible(true);
+	$hook = $resolve->invoke(null, $file0->get('fil_source'));
+	$stored = (string)$file0->read_bytes('original');
+	$served = $hook ? call_user_func($hook, $stored, $file0) : null;
+	check($served === $stored && strncmp($stored, 'v1.edge.', 8) === 0,
+		'a signed fetch serves the stored ciphertext unchanged');
+	$opened = fortress_open_field($afx, $served, $dek, 'mail:' . $mid . ':att:' . $part0->get('ima_mime_part'));
+	check($opened !== '' && strlen($opened) === intval($part0->get('ima_size_bytes')),
+		'and the owner\'s key opens it with the part\'s AD', strlen($opened) . ' bytes');
 	check($m['original_source'] === 'none', 'no original is offered');
 
 	// ---------------------------------------------------------------- attachments

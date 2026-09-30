@@ -25,12 +25,69 @@ public final class MailboxStore: ObservableObject {
     @Published public private(set) var selectedAlias: Int?
 
     public let api: MailAPI
+    /// End-to-end mail on this phone (specs/fortress_mobile_apps.md): opens
+    /// Fortress rows, holds the mail key, runs the device-side work.
+    public let fortress: FortressSession?
+    /// This phone's own index over Fortress mail (§ R5).
+    public let deviceSearch: DeviceSearch?
+    /// What the phone's search said about itself on the last search.
+    @Published public private(set) var searchNote: String?
     private var page = 1
     /// Ignores stale in-flight loads after the view/mailbox/search changes.
     private var loadGeneration = 0
+    /// device_hits for the active query, computed once per search.
+    private var hitsForQuery: (query: String, packed: String?, deviceOnly: Bool)?
 
-    public init(api: MailAPI) {
+    public init(api: MailAPI, fortress: FortressSession? = nil, deviceSearch: DeviceSearch? = nil) {
         self.api = api
+        self.fortress = fortress
+        self.deviceSearch = deviceSearch
+    }
+
+    /// Some mailbox in view is end-to-end.
+    public var fortressInView: Bool {
+        if let box = selectedMailbox { return box.isFortress }
+        return home?.mailboxes.contains { $0.isFortress } ?? false
+    }
+
+    /// Every mailbox in view is end-to-end: a search sends no term to the server.
+    public var fortressOnlyInView: Bool {
+        if let box = selectedMailbox { return box.isFortress }
+        guard let boxes = home?.mailboxes, !boxes.isEmpty else { return false }
+        return boxes.allSatisfy(\.isFortress)
+    }
+
+    /// Fill Fortress rows from the key this phone holds; placeholders otherwise.
+    private func opened(_ page: ThreadPage) -> ThreadPage {
+        guard let fortress, page.threads.contains(where: { $0.sealed != nil }) else { return page }
+        return fortress.openList(page)
+    }
+
+    /// Re-open the loaded rows in place (after an unlock or a lock).
+    public func reopenRows() async {
+        await reload(refreshMailboxes: true)
+    }
+
+    /// The page for the current slice, a search over end-to-end mail adding
+    /// this phone's hits (device_hits), or sending no term at all (device_only).
+    private func fetch(page number: Int) async throws -> ThreadPage {
+        guard !activeQuery.isEmpty, view != .drafts, fortressInView, let deviceSearch, let fortress else {
+            return opened(try await api.threadList(aliasID: selectedAlias, view: view, query: activeQuery, page: number))
+        }
+        if hitsForQuery?.query != activeQuery {
+            var packed: String? = nil
+            if fortress.isOpen {
+                let r = await deviceSearch.hits(activeQuery)
+                packed = r.packed
+                searchNote = r.note
+            } else {
+                searchNote = "Unlock your mail to search end-to-end encrypted messages."
+            }
+            hitsForQuery = (activeQuery, packed, fortressOnlyInView)
+        }
+        let h = hitsForQuery!
+        return opened(try await api.threadList(aliasID: selectedAlias, view: view, query: activeQuery, page: number,
+                                               deviceHits: h.packed, deviceOnly: h.deviceOnly))
     }
 
     /// The mailbox the list is scoped to, when a specific one is selected.
@@ -48,11 +105,8 @@ public final class MailboxStore: ObservableObject {
     public func initialLoad() async {
         phase = .loading
         do {
-            async let homeTask = api.mailboxes()
-            async let pageTask = api.threadList(aliasID: selectedAlias, view: view, query: activeQuery, page: 1)
-            let (loadedHome, firstPage) = try await (homeTask, pageTask)
-            home = loadedHome
-            apply(firstPage, reset: true)
+            home = try await api.mailboxes()
+            apply(try await fetch(page: 1), reset: true)
             phase = .loaded
         } catch {
             phase = .failed((error as? JoineryAPIError)?.displayMessage ?? error.localizedDescription)
@@ -69,7 +123,7 @@ public final class MailboxStore: ObservableObject {
             if refreshMailboxes {
                 home = try await api.mailboxes()
             }
-            let firstPage = try await api.threadList(aliasID: selectedAlias, view: view, query: activeQuery, page: 1)
+            let firstPage = try await fetch(page: 1)
             guard generation == loadGeneration else { return }
             apply(firstPage, reset: true)
             phase = .loaded
@@ -86,7 +140,7 @@ public final class MailboxStore: ObservableObject {
         defer { isLoadingMore = false }
         let generation = loadGeneration
         do {
-            let next = try await api.threadList(aliasID: selectedAlias, view: view, query: activeQuery, page: page + 1)
+            let next = try await fetch(page: page + 1)
             guard generation == loadGeneration else { return }
             apply(next, reset: false)
         } catch {
@@ -121,6 +175,7 @@ public final class MailboxStore: ObservableObject {
 
     public func submitSearch() async {
         activeQuery = searchText.trimmingCharacters(in: .whitespaces)
+        hitsForQuery = nil
         await reload()
     }
 
@@ -128,6 +183,8 @@ public final class MailboxStore: ObservableObject {
         guard !activeQuery.isEmpty else { return }
         searchText = ""
         activeQuery = ""
+        hitsForQuery = nil
+        searchNote = nil
         await reload()
     }
 

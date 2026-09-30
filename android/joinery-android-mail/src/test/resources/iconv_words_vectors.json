@@ -1,0 +1,193 @@
+{
+    "_about": "Encoded words as PHP iconv_mime_decode(CONTINUE_ON_ERROR, UTF-8) decodes them: the $words list of plugins/mailbox/tests/device_ai_digest_parity_test.php, run through PHP 8.3.35 by the Android port (email-digest.js pins the same). Regenerate when that list changes.",
+    "cases": [
+        {
+            "word": "=?UTF-8?Q?a=?=",
+            "php": "a"
+        },
+        {
+            "word": "=?UTF-8?Q?=?=",
+            "php": ""
+        },
+        {
+            "word": "=?UTF-8?Q?a=?= tail",
+            "php": "a tail"
+        },
+        {
+            "word": "=?UTF-8?Q?a=4?=",
+            "php": "=?UTF-8?Q?a=4?="
+        },
+        {
+            "word": "=?UTF-16?B?/v8AYQBi?=",
+            "php": "ab"
+        },
+        {
+            "word": "=?UTF-16?B?//5hAGIA?=",
+            "php": "ab"
+        },
+        {
+            "word": "=?UTF-16?B?YQBiAA==?=",
+            "php": "ab"
+        },
+        {
+            "word": "=?ISO-8859-1?Q?caf=E9?=",
+            "php": "café"
+        },
+        {
+            "word": "=?ISO-8859-1?Q?=80=9F=A0?=",
+            "php": " "
+        },
+        {
+            "word": "=?US-ASCII?Q?=E9?=",
+            "php": "=?US-ASCII?Q?=E9?"
+        },
+        {
+            "word": "=?US-ASCII?Q?abc?=",
+            "php": "abc"
+        },
+        {
+            "word": "=?UTF-8?B?inv@lid!!?=",
+            "php": "=?UTF-8?B?inv@lid!!?"
+        },
+        {
+            "word": "=?UTF-8?B?4pyT?=",
+            "php": "✓"
+        },
+        {
+            "word": "=?X-UNKNOWN?Q?abc?=",
+            "php": "=?X-UNKNOWN?Q?abc?="
+        },
+        {
+            "word": "=?UTF-8?Q?a_b?=",
+            "php": "a b"
+        },
+        {
+            "word": "=?UTF-8?Q?ab?= =?UTF-8?Q?cd?=",
+            "php": "abcd"
+        },
+        {
+            "word": "=?UTF-8?Q?ab?=\t\r\n =?UTF-8?Q?cd?=",
+            "php": "abcd"
+        },
+        {
+            "word": "=?UTF-8?Q?ab?= x =?UTF-8?Q?cd?=",
+            "php": "ab x cd"
+        },
+        {
+            "word": "=?UTF-8?Q?a?==?UTF-8?Q?b?=",
+            "php": "ab"
+        },
+        {
+            "word": "=?windows-1252?Q?=80?=",
+            "php": "€"
+        },
+        {
+            "word": "=?windows-1252?Q?=81?=",
+            "php": "=?windows-1252?Q?=81?"
+        },
+        {
+            "word": "=?windows-1252?Q?=8D=8F=90=9D?=",
+            "php": "=?windows-1252?Q?=8D=8F=90=9D?"
+        },
+        {
+            "word": "=?UTF-8?Q?=C3?=",
+            "php": "=?UTF-8?Q?=C3?"
+        },
+        {
+            "word": "=?UTF-8?Q?=e9?=",
+            "php": "=?UTF-8?Q?=e9?"
+        },
+        {
+            "word": "=?UTF-8?Q?a=zz?=",
+            "php": "=?UTF-8?Q?a=zz?="
+        },
+        {
+            "word": "=?UTF-8?Q?a?b?=",
+            "php": "=?UTF-8?Q?a?b?="
+        },
+        {
+            "word": "=?UTF-8?Q??=",
+            "php": ""
+        },
+        {
+            "word": "=?utf-8*en?q?hi?=",
+            "php": "hi"
+        },
+        {
+            "word": "pre =?UTF-8?Q?x?= post",
+            "php": "pre x post"
+        },
+        {
+            "word": "=?ISO-8859-2?Q?=B1?=",
+            "php": "ą"
+        },
+        {
+            "word": "=?koi8-r?Q?=C1?=",
+            "php": "а"
+        },
+        {
+            "word": "=?GB2312?B?xOO6ww==?=",
+            "php": "你好"
+        },
+        {
+            "word": "=?UTF-8?Q?=F0=9F=98=80?=",
+            "php": "😀"
+        },
+        {
+            "word": "=?UTF-8?B?w4?= =?UTF-8?B?ng==?=",
+            "php": "=?UTF-8?B?w4?= =?UTF-8?B?ng==?"
+        },
+        {
+            "word": "=?ISO-8859-1?B?/w==?=",
+            "php": "ÿ"
+        },
+        {
+            "word": "=?ISO-8859-1?Q?=00?=",
+            "php": "\u0000"
+        },
+        {
+            "word": "=?UTF-16?B?AGEAYg==?=",
+            "php": "愀戀"
+        },
+        {
+            "word": "=?UTF-8?Q?a=20b?=",
+            "php": "a b"
+        },
+        {
+            "word": "=?ascii?Q?=7F?=",
+            "php": ""
+        },
+        {
+            "word": "=?UTF-8?Q?a?=  =?UTF-8?Q?b?=  tail",
+            "php": "ab  tail"
+        },
+        {
+            "word": "x =?UTF-8?Q??= y",
+            "php": "x  y"
+        },
+        {
+            "word": "=?UTF-8?B?YQ==?= =?ISO-8859-1?Q?=E9?=",
+            "php": "aé"
+        },
+        {
+            "word": "=?UTF-8?B?YQ=?=",
+            "php": "a"
+        },
+        {
+            "word": "=?UTF-8?B?Y?=",
+            "php": ""
+        },
+        {
+            "word": "=?UTF-8?B?YWI=Yw==?=",
+            "php": "ab\u0018"
+        },
+        {
+            "word": "=?iso-8859-1?q?a=E9?=",
+            "php": "aé"
+        },
+        {
+            "word": "=?UTF-8?Q?a=E9?=",
+            "php": "=?UTF-8?Q?a=E9?"
+        }
+    ]
+}

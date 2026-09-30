@@ -1066,15 +1066,15 @@
             ?>
             <?php if ($has_sync_devices): ?>
             <div class="jy-panel jy-mt-4">
-                <h2>Sync Devices</h2>
-                <p>Computers syncing your Drive. Unlinking one cuts off its access immediately.</p>
+                <h2>Linked Devices</h2>
+                <p>Computers syncing your Drive and phones holding your end-to-end keys. Unlinking one signs it out straight away.</p>
 
                 <table class="jy-table jy-w-full">
                     <thead>
                         <tr>
                             <th>Device</th>
                             <th>Linked</th>
-                            <th>Last synced</th>
+                            <th>Last seen</th>
                             <th>Vaults</th>
                             <th></th>
                         </tr>
@@ -1093,7 +1093,7 @@
                                            aria-label="Device name">
                                     <button type="submit" class="btn btn-secondary">Rename</button>
                                 </form>
-                                <span class="jy-text-muted"><?php echo htmlspecialchars($sync_device->get('sde_platform')); ?></span>
+                                <span class="jy-text-muted"><?php echo htmlspecialchars(SyncDevice::platform_label((string)$sync_device->get('sde_platform'))); ?></span>
                             </td>
                             <td><?php echo htmlspecialchars(LibraryFunctions::convert_time($sync_device->get('sde_create_time'), 'UTC', $tz, 'M j, Y')); ?></td>
                             <td><?php echo $seen
@@ -1107,7 +1107,7 @@
                             ?></td>
                             <td class="text-end">
                                 <form action="/profile/security" method="POST" class="jy-inline"
-                                      data-jy-confirm="Unlink this device? It will stop syncing straight away.">
+                                      data-jy-confirm="Unlink this device? It is signed out straight away.">
                                     <input type="hidden" name="action" value="revoke_sync_device">
                                     <input type="hidden" name="sde_sync_device_id" value="<?php echo (int)$sync_device->key; ?>">
                                     <button type="submit" class="btn btn-danger">Unlink</button>

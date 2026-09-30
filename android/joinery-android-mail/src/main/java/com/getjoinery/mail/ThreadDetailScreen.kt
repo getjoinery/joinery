@@ -87,10 +87,21 @@ fun ThreadDetailScreen(
 
     BackHandler(onBack = onClose)
 
+    val fortress = store.fortress
+    // The server copies; [messages] is these with every end-to-end message
+    // opened on this phone, so a lock re-renders placeholders from them.
+    var serverMessages by remember { mutableStateOf<List<MailMessage>>(emptyList()) }
+
+    suspend fun openAll(list: List<MailMessage>): List<MailMessage> {
+        val opener = fortress?.opener ?: return list
+        return list.map { if (it.sealed != null) opener.openMessage(it) else it }
+    }
+
     suspend fun load(markRead: Boolean = true) {
         try {
             val thread = store.api.thread(summary.threadKey, store.selectedAlias)
-            messages = thread.messages
+            serverMessages = thread.messages
+            messages = openAll(thread.messages)
             folderIds = thread.folderIds.toSet()
             // Latest message expanded, everything read collapsed; unread
             // messages always start expanded.
@@ -115,6 +126,16 @@ fun ThreadDetailScreen(
     }
 
     LaunchedEffect(summary.threadKey) { load() }
+
+    // The mail key opened or locked: re-open from the server copies. The
+    // signed part links are short-lived, so an unlock fetches afresh.
+    val keyVersion = fortress?.keyVersion ?: 0
+    var seenKeyVersion by remember { mutableStateOf(keyVersion) }
+    LaunchedEffect(keyVersion) {
+        if (keyVersion == seenKeyVersion) return@LaunchedEffect
+        seenKeyVersion = keyVersion
+        if (fortress?.isOpen == true) load(markRead = false) else messages = openAll(serverMessages)
+    }
 
     fun act(action: String, thenClose: Boolean) {
         scope.launch {
@@ -199,7 +220,9 @@ fun ThreadDetailScreen(
         },
         bottomBar = {
             val source = messages.lastOrNull()
-            if (source != null && store.home?.canCompose == true) {
+            // Reply and Forward need the message opened: a placeholder has
+            // nothing to quote (§ R6).
+            if (source != null && store.home?.canCompose == true && source.fortressNote == null) {
                 Surface(tonalElevation = 3.dp) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -243,7 +266,8 @@ fun ThreadDetailScreen(
                         verticalAlignment = Alignment.Top,
                     ) {
                         Text(
-                            summary.subject.ifEmpty { "(no subject)" },
+                            (messages.lastOrNull { it.fortressNote == null && it.sealed != null }?.subject ?: summary.subject)
+                                .ifEmpty { if (summary.isFortressPlaceholder) "End-to-end encrypted" else "(no subject)" },
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f).testTag("mail_thread_subject"),
@@ -261,9 +285,13 @@ fun ThreadDetailScreen(
                             )
                         }
                     }
+                    if (fortress != null && messages.any { it.sealed != null } && !fortress.isOpen) {
+                        com.getjoinery.mail.fortress.FortressBanner(fortress) { }
+                    }
                     messages.forEach { message ->
                         MessageCard(
                             message = message,
+                            opener = fortress?.opener,
                             isExpanded = expanded.contains(message.id),
                             onToggle = {
                                 expanded = if (expanded.contains(message.id)) {
@@ -289,6 +317,7 @@ fun ThreadDetailScreen(
                 composeRequest = null
                 scope.launch { load(markRead = false) }
             },
+            fortress = fortress,
         )
     }
 

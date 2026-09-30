@@ -10,6 +10,8 @@
  * no" and "the network is flaky".
  *
  * No step-up: refusing access can only ever reduce it.
+ *
+ * @version 1.1 - bound ceremonies: only their own user sees or acts on them; open to anyone holding a content vault
  */
 
 function drive_device_link_deny_logic(array $input): LogicResult {
@@ -18,6 +20,10 @@ function drive_device_link_deny_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
+	$user_id = (int)$session->get_user_id();
+	if (!DeviceLink::linking_available($user_id)) {
+		return LogicResult::error('There is nothing to hand a device: turn on Drive or set up an end-to-end vault first.');
+	}
 
 	$code = (string)($input['code'] ?? '');
 	if (trim($code) === '') {
@@ -29,7 +35,7 @@ function drive_device_link_deny_logic(array $input): LogicResult {
 	}
 
 	$link = DeviceLink::load_open_by_code($code);
-	if (!$link) {
+	if (!$link || !$link->actionable_by($user_id)) {
 		DeviceLink::record_failed_guess();
 		return LogicResult::error('That code is not valid, or it has expired.');
 	}
@@ -44,7 +50,6 @@ function drive_device_link_deny_logic_descriptor(): array {
 	return array(
 		'description'      => 'Refuse a pending device-link ceremony so the waiting client is told no immediately instead of timing out.',
 		'requires_session' => true,
-		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'auth'             => array('requires_browser_session' => true),
 		'input'            => array(

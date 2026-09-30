@@ -4,7 +4,7 @@
  * encrypted (Fortress) messages a recipe has not judged yet, for their browser
  * to judge against their own model (specs/fortress_mail_device_ai.md § R3).
  *
- * POST /api/v1/action/mailbox/device_ai_entries (browser session). Params:
+ * POST /api/v1/action/mailbox/device_ai_entries (browser session or app session key). Params:
  * recipe_id; alias_id (0 or absent: every mailbox the recipe covers);
  * before_id (the cursor; 0 or absent: from the newest). Returns {entries,
  * next_before_id}: each entry is {id, received_time, dkim_result, spf_result,
@@ -13,6 +13,8 @@
  * columns one judgement needs). No content is opened here; the server holds
  * no key that could. MailboxDeviceAi holds the rules.
  *
+ * @version 1.1 - reachable with an app session key too (requires_person_credential,
+ * specs/fortress_mobile_apps.md § R8)
  * @version 1.0
  */
 
@@ -29,7 +31,7 @@ function device_ai_entries_logic(array $input): LogicResult {
 function device_ai_entries_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('requires_person_credential' => true),
 		'description' => 'Page the caller\'s end-to-end encrypted messages a device-capable recipe has not judged, newest first, with their sealed columns for the browser to open',
 		'input' => [
 			'recipe_id' => ['type' => 'int', 'required' => true, 'label' => 'Recipe ID (the caller\'s own)'],

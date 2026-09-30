@@ -3,7 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 /**
- * SyncDevice — a computer the user has linked to their Drive (sde_sync_devices).
+ * SyncDevice — a computer or phone the user has linked (sde_sync_devices).
  *
  * A session ApiKey on its own says "some client holds a credential"; it has a
  * label and nothing else. That is not enough to run a sync fleet: the user
@@ -16,9 +16,14 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * folders syncable: the browser seals the vault secret key to it at approval
  * time, and only that device can open the result.
  *
+ * A phone gets its row when it is first handed a vault key: the app is already
+ * signed in with a session key, and enrollment (device_key_enroll) binds the
+ * device key to that credential rather than minting another.
+ *
  * Soft delete means unlinked. Revoking a device also revokes its key — see
  * drive_device_revoke.
  *
+ * @version 1.2.0 - phone platforms (ios, android); platform_label()
  * @version 1.1.0 - sde_vault_scopes: which vault secrets this device was handed
  * @version 1.0.0
  */
@@ -37,6 +42,8 @@ class SyncDevice extends SystemBase {
 	const PLATFORM_MACOS   = 'macos';
 	const PLATFORM_WINDOWS = 'windows';
 	const PLATFORM_LINUX   = 'linux';
+	const PLATFORM_IOS     = 'ios';
+	const PLATFORM_ANDROID = 'android';
 
 	public static $field_specifications = array(
 		'sde_sync_device_id'  => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
@@ -62,7 +69,25 @@ class SyncDevice extends SystemBase {
 
 	/** The platforms a client may register as. */
 	public static function platforms() {
-		return array(self::PLATFORM_MACOS, self::PLATFORM_WINDOWS, self::PLATFORM_LINUX);
+		return array(self::PLATFORM_MACOS, self::PLATFORM_WINDOWS, self::PLATFORM_LINUX,
+			self::PLATFORM_IOS, self::PLATFORM_ANDROID);
+	}
+
+	/** Is this platform a phone (an app enrolled against its own sign-in)? */
+	public static function is_phone_platform(string $platform): bool {
+		return in_array($platform, array(self::PLATFORM_IOS, self::PLATFORM_ANDROID), true);
+	}
+
+	/** The platform as a person would name the device kind. */
+	public static function platform_label(string $platform): string {
+		$labels = array(
+			self::PLATFORM_MACOS   => 'Mac',
+			self::PLATFORM_WINDOWS => 'Windows',
+			self::PLATFORM_LINUX   => 'Linux',
+			self::PLATFORM_IOS     => 'iPhone',
+			self::PLATFORM_ANDROID => 'Android phone',
+		);
+		return $labels[$platform] ?? $platform;
 	}
 
 	/** The live device that authenticates with this api key, or null. */

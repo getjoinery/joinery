@@ -22,7 +22,9 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
- * @version 1.4.0
+ * @version 1.5.0
+ * @changelog 1.5.0 - a bound device link (opened by a signed-in app, device_key_enroll)
+ *   claims its sealed keys alone: no credential was minted, none is handed over
  * @changelog 1.4.0 - a device-link claim carries sealed_vault_keys ({scope: blob}) beside sealed_vault_key
  * @changelog 1.3.1 - device-link 429s say the count, the limit and when to retry (api_rate_limited)
  * @changelog 1.3.0 - auth/web_session: mints an AppBridgeToken for session keys
@@ -281,6 +283,32 @@ class ApiAuthEndpoint {
 
 		if ($status === DeviceLink::STATUS_DENIED) {
 			api_success(array('status' => DeviceLink::STATUS_DENIED));
+		}
+
+		// Approved. A ceremony a signed-in app opened minted nothing: the app
+		// keeps its own credential and collects the sealed keys alone, once.
+		if ($link->is_bound()) {
+			$sealed_many = json_decode((string)$link->get('dlk_sealed_vault_keys'), true);
+			$sealed_drive = (string)$link->get('dlk_sealed_vault_key');
+			if ((!is_array($sealed_many) || !$sealed_many) && $sealed_drive === '') {
+				api_error('This device link has already been claimed', 'AuthenticationError', 409);
+			}
+			$payload = array(
+				'status'    => DeviceLink::STATUS_APPROVED,
+				'device_id' => (int)$link->get('dlk_sde_sync_device_id'),
+			);
+			if ($sealed_drive !== '') {
+				$payload['sealed_vault_key'] = $sealed_drive;
+			}
+			if (is_array($sealed_many) && $sealed_many) {
+				$payload['sealed_vault_keys'] = $sealed_many;
+			}
+			$link->scrub_secrets();
+			RequestLogger::log('api_auth', 'auth/device_link/claim', true, [
+				'user_id' => (int)$link->get('dlk_usr_user_id'),
+				'status_code' => 200,
+			]);
+			api_success($payload, 'Device keys handed over');
 		}
 
 		// Approved. The secret is present only until the first collector takes it.

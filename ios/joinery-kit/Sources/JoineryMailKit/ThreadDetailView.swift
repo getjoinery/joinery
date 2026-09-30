@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import JoineryKit
 
 /// One conversation, Gmail-style: subject header, message cards (older ones
@@ -62,7 +63,8 @@ struct ThreadDetailView: View {
         .safeAreaInset(edge: .bottom) { replyBar }
         .sheet(item: $compose) { request in
             ComposeSheet(api: store.api, request: request,
-                         mailboxes: store.home?.mailboxes ?? [], preselectedAlias: store.selectedAlias) {
+                         mailboxes: store.home?.mailboxes ?? [], preselectedAlias: store.selectedAlias,
+                         fortress: store.fortress) {
                 Task { await load(markRead: false) }
             }
         }
@@ -118,6 +120,11 @@ struct ThreadDetailView: View {
             }
         }
         .task { await load() }
+        .onReceive(store.fortress?.$lockEpoch.dropFirst().eraseToAnyPublisher()
+                   ?? Empty<Int, Never>().eraseToAnyPublisher()) { _ in
+            // A lock drops what was opened: the thread shows placeholders again.
+            Task { await load(markRead: false) }
+        }
     }
 
     private var messageScroll: some View {
@@ -140,11 +147,32 @@ struct ThreadDetailView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 4)
 
+                if messages.contains(where: { $0.placeholder == .locked }), let fortress = store.fortress {
+                    // R4: after a lock, one Unlock right here, as in the list.
+                    Button {
+                        Task {
+                            do {
+                                try await fortress.unlock()
+                                await load(markRead: false)
+                            } catch {
+                                loadFailure = nil
+                            }
+                        }
+                    } label: {
+                        Label("Unlock to read", systemImage: "lock.open")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+                    .accessibilityIdentifier("mail_thread_unlock")
+                }
                 ForEach(messages) { message in
                     MessageCardView(
                         message: message,
                         isExpanded: expanded.contains(message.id),
-                        onToggle: { toggle(message.id) }
+                        onToggle: { toggle(message.id) },
+                        client: store.api.client,
+                        fortress: store.fortress
                     )
                 }
             }
@@ -206,7 +234,8 @@ struct ThreadDetailView: View {
     /// server resolves the sending mailbox from it and quotes it.
     @ViewBuilder
     private var replyBar: some View {
-        if let source = messages.last, store.home?.canCompose == true {
+        // Reply and Forward only on a message this phone opened (never on a placeholder).
+        if let source = messages.last, store.home?.canCompose == true, source.canRespond {
             HStack(spacing: 12) {
                 replyButton("Reply", icon: "arrowshape.turn.up.left", id: "mail_reply") {
                     compose = ComposeRequest(mode: .reply, source: source)
@@ -239,7 +268,10 @@ struct ThreadDetailView: View {
 
     private func load(markRead: Bool = true) async {
         do {
-            let thread = try await store.api.thread(key: summary.threadKey, aliasID: store.selectedAlias)
+            var thread = try await store.api.thread(key: summary.threadKey, aliasID: store.selectedAlias)
+            if let fortress = store.fortress, thread.messages.contains(where: { $0.sealed != nil }) {
+                thread = await fortress.openThread(thread)
+            }
             messages = thread.messages
             folderIDs = Set(thread.folderIDs)
             // Latest message expanded, everything read collapsed; unread
@@ -282,7 +314,14 @@ struct ThreadDetailView: View {
 struct ComposeRequest: Identifiable {
     let mode: MailAPI.ComposeMode
     let source: MailMessage?
-    var id: String { source.map { "\(mode.rawValue)-\($0.id)" } ?? mode.rawValue }
+    /// Reopening a saved draft: its id, and the mailbox and source it names.
+    var draftID: Int? = nil
+    var draftAlias: Int? = nil
+    var draftSourceID: Int? = nil
+    var id: String {
+        if let draftID { return "draft-\(draftID)" }
+        return source.map { "\(mode.rawValue)-\($0.id)" } ?? mode.rawValue
+    }
 
     init(mode: MailAPI.ComposeMode, source: MailMessage) {
         self.mode = mode
@@ -291,6 +330,14 @@ struct ComposeRequest: Identifiable {
 
     /// New-message compose: no source to reply to or quote.
     static let new = ComposeRequest(mode: .new)
+
+    /// A saved draft, reopened (it restores its own mode and recipients).
+    static func draft(_ id: Int, aliasID: Int?) -> ComposeRequest {
+        var r = ComposeRequest(mode: .new)
+        r.draftID = id
+        r.draftAlias = aliasID
+        return r
+    }
 
     private init(mode: MailAPI.ComposeMode) {
         self.mode = mode

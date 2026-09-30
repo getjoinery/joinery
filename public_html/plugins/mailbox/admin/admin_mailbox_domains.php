@@ -12,6 +12,7 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.8 - the Fortress card: mail rules run on the device under Seal at the relay; the phone note
  * @version 4.7 - Save works on a domain whose checklist offers a fix (no form inside the form); Fortress
  *   shows its checklist; the step-up waits for the vault to open; a vault that fails to open says so
  * @version 4.6 - the Fortress card names the relay pin (trust on first use)
@@ -237,14 +238,16 @@ if ($show_form) {
 	}
 	// What only this page knows about Fortress, under its card (R12): whether
 	// mail is seen as it arrives (it is, unless the relay seals it for your
-	// devices under Seal at the relay, and then mail rules do not run on it),
-	// and that an account which unlocks by passphrase is as safe as its
-	// passphrase.
+	// devices under Seal at the relay, and then your mail rules run on the
+	// device that opens it), how a phone reads it, and that an account which
+	// unlocks by passphrase is as safe as its passphrase.
 	$fortress_notes = [($relay_value && $relay_offered)
 		? 'This server never sees your mail, not even as it arrives. Your browser checks which key the relay seals to, '
-			. 'pinned on first use. Mail rules do not run on mail the relay seals.'
+			. 'pinned on first use. New mail is opened on your device, and your mail rules run there when it is opened.'
 		: 'New mail is encrypted the moment it arrives; a server hacked while mail is arriving '
-			. 'could read what arrives then.'];
+			. 'could read what arrives then.',
+		'Your phone reads this mail once you hand it the key from a computer; the key stays behind your '
+			. 'phone\'s face or fingerprint lock.'];
 	$root_vault = UserEncryptionVault::loadForUser((int)$session->get_user_id(), VaultScopes::ROOT_SCOPE);
 	if ($root_vault !== null && (new MultiUserEncryptionWrapping(['vault_id' => (int)$root_vault->key,
 			'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE, 'deleted' => false]))->count() > 0) {

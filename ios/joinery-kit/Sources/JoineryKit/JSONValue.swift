@@ -128,6 +128,8 @@ public enum JSONValue: Equatable, Sendable {
             case "\n": out += "\\n"
             case "\r": out += "\\r"
             case "\t": out += "\\t"
+            case "\u{08}": out += "\\b"
+            case "\u{0C}": out += "\\f"
             default:
                 if scalar.value < 0x20 {
                     out += String(format: "\\u%04x", scalar.value)

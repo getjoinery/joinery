@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- FileProvider scope for opened mail attachments (cache only — attachments
-     are transient downloads, never durable app data). -->
+<!-- FileProvider scope for opened mail attachments: the private cache
+     directory MailFiles stages each open in and deletes afterwards. -->
 <paths>
-    <cache-path name="mail_attachments" path="mail_attachments/" />
+    <cache-path name="mail_open" path="mail_open/" />
 </paths>

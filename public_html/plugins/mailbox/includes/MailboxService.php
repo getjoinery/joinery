@@ -52,6 +52,7 @@
  * @version 1.53 - Trash lists newest-first with no unread/starred sections; rows carry no purge_time
  * @version 1.52 - setSpamVerdict stamps iem_spam_corrected_time (what spam learning teaches)
  * @version 1.51 - the list never parses relay-sealed mail (it says `parsing`); opening a thread parses its pending rows
+ * @version 1.50 - Fortress parts carry signed URLs to their ciphertext (withFortressPartUrls); mailboxes carry newest_unread_id
  * @version 1.49 - a relay-sealed row no vault here can open is marked sealed.unopenable
  * @version 1.48 - a Fortress row sealed to someone else carries `sealed.foreign` (an all-access viewer)
  * @version 1.47 - `device_search`: a search over end-to-end mail alone carries only the ids
@@ -543,9 +544,16 @@ class MailboxService {
 					AND iem_iea_inbound_email_alias_id IN ($in)
 					GROUP BY iem_iea_inbound_email_alias_id";
 			foreach ($db->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
-				$agg[intval($r['alias_id'])] = array('total' => intval($r['total']), 'unread' => 0);
+				$agg[intval($r['alias_id'])] = array('total' => intval($r['total']), 'unread' => 0, 'newest_unread_id' => null);
 			}
-			$sql = "SELECT iem_iea_inbound_email_alias_id AS alias_id, COUNT(*) AS unread
+			// newest_unread_id rides the same range: an app polling for new mail
+			// compares it with the highest id it last told the person about
+			// (specs/fortress_mobile_apps.md § R15). New mail raises it; reading
+			// lowers or clears it. Only mail never read counts, so marking an old
+			// message unread again is not announced as new (iem_read_time stays
+			// set once a message has been read).
+			$sql = "SELECT iem_iea_inbound_email_alias_id AS alias_id, COUNT(*) AS unread,
+						MAX(iem_inbound_email_message_id) FILTER (WHERE iem_read_time IS NULL) AS newest_unread_id
 					FROM iem_inbound_email_messages
 					WHERE iem_delete_time IS NULL
 					AND iem_is_archived = false AND iem_is_read = false
@@ -557,6 +565,7 @@ class MailboxService {
 				$aid = intval($r['alias_id']);
 				if (isset($agg[$aid])) {
 					$agg[$aid]['unread'] = intval($r['unread']);
+					$agg[$aid]['newest_unread_id'] = $r['newest_unread_id'] !== null ? intval($r['newest_unread_id']) : null;
 				}
 			}
 		}
@@ -605,6 +614,7 @@ class MailboxService {
 					'protection_addons' => $seals ? ($domain_addons[$domain_id] ?? array()) : array(),
 					'locked'         => ($seals && !$viewer_unlocked),
 					'unread'         => $row ? intval($row['unread']) : 0,
+					'newest_unread_id' => $row ? $row['newest_unread_id'] : null,
 					'total'          => $row ? intval($row['total']) : 0,
 					// The viewer's own compose signature for this mailbox (§ Phase 3),
 					// inserted client-side on compose open. Personal per grant. `own`
@@ -2154,17 +2164,23 @@ class MailboxService {
 		$messages = self::resolveInlineImages($messages, $ttl_seconds);
 
 		$ids = array();
+		$fortress_ids = array();
 		foreach ($messages as $m) {
-			// A Fortress message's parts get no URL: a sessionless client holds no
-			// key to open them (fortressThreadMessage()).
 			if (empty($m['fortress'])) {
 				$ids[] = intval($m['id']);
+			} else {
+				$fortress_ids[] = intval($m['id']);
 			}
 		}
+		require_once(PathHelper::getIncludePath('data/files_class.php'));
+		// A Fortress message's parts, inline ones included, get a plain signed
+		// URL to their stored ciphertext: the app that holds the key opens the
+		// bytes and resolves the body's cid: references itself. No serve grant —
+		// the server has nothing to open (specs/fortress_mobile_apps.md § R4).
+		$messages = $this->withFortressPartUrls($messages, $fortress_ids, $ttl_seconds);
 		if (!count($ids)) {
 			return $messages;
 		}
-		require_once(PathHelper::getIncludePath('data/files_class.php'));
 
 		// getThread()'s manifest lists non-inline parts only; inline parts ride
 		// inside the body, rewritten by resolveInlineImages() above.
@@ -2197,6 +2213,35 @@ class MailboxService {
 			}
 			foreach ($m['attachments'] as &$att) {
 				$att['url'] = $signed_by_att[intval($att['id'])] ?? null;
+			}
+			unset($att);
+		}
+		unset($m);
+		return $messages;
+	}
+
+	/** Signed URLs for Fortress messages' parts (withSignedTransport()). */
+	private function withFortressPartUrls(array $messages, array $message_ids, int $ttl_seconds): array {
+		if (!count($message_ids)) {
+			return $messages;
+		}
+		$in = implode(',', array_map('intval', $message_ids));
+		$rows = $this->db()->query("SELECT ima_inbound_message_attachment_id, ima_fil_file_id
+			FROM ima_inbound_message_attachments
+			WHERE ima_iem_inbound_email_message_id IN ($in) AND ima_fil_file_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
+		$signed = array();
+		foreach ($rows as $r) {
+			$file = new File(intval($r['ima_fil_file_id']), TRUE);
+			if ($file->key && !$file->get('fil_delete_time')) {
+				$signed[intval($r['ima_inbound_message_attachment_id'])] = $file->mintSignedUrl('original', $ttl_seconds, 'full');
+			}
+		}
+		foreach ($messages as &$m) {
+			if (empty($m['fortress'])) {
+				continue;
+			}
+			foreach ($m['attachments'] as &$att) {
+				$att['url'] = $signed[intval($att['id'])] ?? null;
 			}
 			unset($att);
 		}
@@ -2599,8 +2644,7 @@ class MailboxService {
 			$filter->set('ief_is_enabled', true);
 			$filter->set('ief_action_never_spam', true);
 			$filter->set('ief_action_mark_spam', false);
-			$filter->set('ief_apply_existing_pending', true);
-			$filter->set('ief_apply_existing_cursor', 0);
+			$filter->requestApplyExisting();
 			$filter->prepare();
 			$filter->save();
 			return true;

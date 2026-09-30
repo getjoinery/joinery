@@ -256,7 +256,10 @@ private class WebController(
         webView?.goBack()
     }
 
+    /** Same origin means https on the deployment's host: the bridged session
+     *  never follows a plain-http link, even to its own host. */
     private fun isSameOrigin(uri: Uri): Boolean {
+        if (uri.scheme?.lowercase() != "https") return false
         val host = uri.host ?: return false
         val base = web.baseHost ?: return false
         return host == base
@@ -274,6 +277,17 @@ private class WebController(
     // MARK: Delegates
 
     fun webViewClient(): WebViewClient = object : WebViewClient() {
+        // The app allows cleartext for one purpose (the AI endpoint on the
+        // person's network); nothing in the session's webview loads over http,
+        // subframes and page resources included.
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
+            if (request.url.scheme?.lowercase() == "http") {
+                return android.webkit.WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(),
+                    java.io.ByteArrayInputStream(ByteArray(0)))
+            }
+            return null
+        }
+
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url
             // Subframes (embedded payment fields, media) are the page's business.

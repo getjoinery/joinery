@@ -1,0 +1,1382 @@
+{
+	"_about": "MailboxSearchCore (plugins/mailbox/assets/mailbox_search_core.js) under Node, the oracle for the Swift and Kotlin ports (specs/fortress_mobile_apps.md WP5, D2). All byte strings are lowercase hex. tokenizer: words() is the distinct indexable words in first-seen order, query_words() keeps long words. postings: posting(docs) (kind_bit 0 list = first doc then gaps as LEB128; 1 bitmap = bit d&7 of byte d>>3). extend: extend(posting(docs), more). ids: encodeIds (count, then zigzag LEB128 differences). pack_ids: packIds, base64 LEB128 gaps (thread_list device_hits). build: messages added in order to an empty Index then merged; shards keyed by shard number. schedule: the same messages added in batches, merged after every batch but the last; before_final_merge is that state (the last batch in the tail, tail_hex = mapToShard(tail)); queries run against it. records: the browser's storage layout (mailbox_search_worker.js); a phone keeps the same names, AD and gzip-then-seal.",
+	"format": 1,
+	"max_word": 40,
+	"shards_count": 256,
+	"tokenizer": [
+		{
+			"text": "Hello, World!",
+			"words": [
+				"hello",
+				"world"
+			],
+			"query_words": [
+				"hello",
+				"world"
+			]
+		},
+		{
+			"text": "Café Crème brûlée",
+			"words": [
+				"cafe",
+				"creme",
+				"brulee"
+			],
+			"query_words": [
+				"cafe",
+				"creme",
+				"brulee"
+			]
+		},
+		{
+			"text": "naïve façade – Ångström",
+			"words": [
+				"naive",
+				"facade",
+				"angstrom"
+			],
+			"query_words": [
+				"naive",
+				"facade",
+				"angstrom"
+			]
+		},
+		{
+			"text": "ﬁle ligature ①②③ ｆｕｌｌｗｉｄｔｈ",
+			"words": [
+				"file",
+				"ligature",
+				"123",
+				"fullwidth"
+			],
+			"query_words": [
+				"file",
+				"ligature",
+				"123",
+				"fullwidth"
+			]
+		},
+		{
+			"text": "user.name+tag@example.co.uk wrote: re: RE: Fwd:",
+			"words": [
+				"user",
+				"name",
+				"tag",
+				"example",
+				"co",
+				"uk",
+				"wrote",
+				"re",
+				"fwd"
+			],
+			"query_words": [
+				"user",
+				"name",
+				"tag",
+				"example",
+				"co",
+				"uk",
+				"wrote",
+				"re",
+				"fwd"
+			]
+		},
+		{
+			"text": "Straße STRASSE ß",
+			"words": [
+				"straße",
+				"strasse",
+				"ß"
+			],
+			"query_words": [
+				"straße",
+				"strasse",
+				"ß"
+			]
+		},
+		{
+			"text": "ΑΒΓ δέλτα Ωμέγα",
+			"words": [
+				"αβγ",
+				"δελτα",
+				"ωμεγα"
+			],
+			"query_words": [
+				"αβγ",
+				"δελτα",
+				"ωμεγα"
+			]
+		},
+		{
+			"text": "日本語のテキスト 한국어",
+			"words": [
+				"日本語のテキスト",
+				"한국어"
+			],
+			"query_words": [
+				"日本語のテキスト",
+				"한국어"
+			]
+		},
+		{
+			"text": "emoji 😀 test👍🏽ok",
+			"words": [
+				"emoji",
+				"test",
+				"ok"
+			],
+			"query_words": [
+				"emoji",
+				"test",
+				"ok"
+			]
+		},
+		{
+			"text": "İstanbul DİKKAT ı",
+			"words": [
+				"istanbul",
+				"dikkat",
+				"ı"
+			],
+			"query_words": [
+				"istanbul",
+				"dikkat",
+				"ı"
+			]
+		},
+		{
+			"text": "Zürich 3.14 v2-beta_x 1,000,000",
+			"words": [
+				"zurich",
+				"3",
+				"14",
+				"v2",
+				"beta",
+				"x",
+				"1",
+				"000"
+			],
+			"query_words": [
+				"zurich",
+				"3",
+				"14",
+				"v2",
+				"beta",
+				"x",
+				"1",
+				"000"
+			]
+		},
+		{
+			"text": "",
+			"words": [],
+			"query_words": []
+		},
+		{
+			"text": "   \t\n ",
+			"words": [],
+			"query_words": []
+		},
+		{
+			"text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb éééééééééééééééééééééééééééééééééééééééé",
+			"words": [
+				"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+			],
+			"query_words": [
+				"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+			]
+		},
+		{
+			"text": "dup dup DUP Dup",
+			"words": [
+				"dup"
+			],
+			"query_words": [
+				"dup"
+			]
+		},
+		{
+			"text": "x​y zero width",
+			"words": [
+				"x",
+				"y",
+				"zero",
+				"width"
+			],
+			"query_words": [
+				"x",
+				"y",
+				"zero",
+				"width"
+			]
+		},
+		{
+			"text": "Ǆemal ǅ",
+			"words": [
+				"dzemal",
+				"dz"
+			],
+			"query_words": [
+				"dzemal",
+				"dz"
+			]
+		}
+	],
+	"fnv1a": [
+		{
+			"word": "a",
+			"utf8_hex": "61",
+			"fnv1a": 3826002220,
+			"shard": 44
+		},
+		{
+			"word": "hello",
+			"utf8_hex": "68656c6c6f",
+			"fnv1a": 1335831723,
+			"shard": 171
+		},
+		{
+			"word": "café",
+			"utf8_hex": "636166c3a9",
+			"fnv1a": 2821410889,
+			"shard": 73
+		},
+		{
+			"word": "straße",
+			"utf8_hex": "73747261c39f65",
+			"fnv1a": 640088088,
+			"shard": 24
+		},
+		{
+			"word": "日本語のテキスト",
+			"utf8_hex": "e697a5e69cace8aa9ee381aee38386e382ade382b9e38388",
+			"fnv1a": 3917013005,
+			"shard": 13
+		},
+		{
+			"word": "😀",
+			"utf8_hex": "f09f9880",
+			"fnv1a": 866293256,
+			"shard": 8
+		},
+		{
+			"word": "0",
+			"utf8_hex": "30",
+			"fnv1a": 890022063,
+			"shard": 175
+		},
+		{
+			"word": "zzzzzzzz",
+			"utf8_hex": "7a7a7a7a7a7a7a7a",
+			"fnv1a": 4276226693,
+			"shard": 133
+		}
+	],
+	"postings": [
+		{
+			"docs": [
+				0
+			],
+			"kind": "list",
+			"kind_bit": 0,
+			"bytes_hex": "00",
+			"count": 1,
+			"last": 0
+		},
+		{
+			"docs": [
+				5
+			],
+			"kind": "list",
+			"kind_bit": 0,
+			"bytes_hex": "05",
+			"count": 1,
+			"last": 5
+		},
+		{
+			"docs": [
+				0,
+				1,
+				2,
+				3
+			],
+			"kind": "bitmap",
+			"kind_bit": 1,
+			"bytes_hex": "0f",
+			"count": 4,
+			"last": 3
+		},
+		{
+			"docs": [
+				0,
+				127,
+				128,
+				16384
+			],
+			"kind": "list",
+			"kind_bit": 0,
+			"bytes_hex": "007f01807f",
+			"count": 4,
+			"last": 16384
+		},
+		{
+			"docs": [
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20
+			],
+			"kind": "bitmap",
+			"kind_bit": 1,
+			"bytes_hex": "ffff1f",
+			"count": 21,
+			"last": 20
+		},
+		{
+			"docs": [
+				0,
+				8,
+				16,
+				24,
+				32,
+				40,
+				48,
+				56,
+				64,
+				72,
+				80,
+				88
+			],
+			"kind": "list",
+			"kind_bit": 0,
+			"bytes_hex": "000808080808080808080808",
+			"count": 12,
+			"last": 88
+		},
+		{
+			"docs": [
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10
+			],
+			"kind": "bitmap",
+			"kind_bit": 1,
+			"bytes_hex": "f807",
+			"count": 8,
+			"last": 10
+		},
+		{
+			"docs": [
+				1000000
+			],
+			"kind": "list",
+			"kind_bit": 0,
+			"bytes_hex": "c0843d",
+			"count": 1,
+			"last": 1000000
+		},
+		{
+			"docs": [
+				7,
+				300,
+				301,
+				302,
+				65535
+			],
+			"kind": "list",
+			"kind_bit": 0,
+			"bytes_hex": "07a5020101d1fd03",
+			"count": 5,
+			"last": 65535
+		}
+	],
+	"extend": [
+		{
+			"docs": [
+				0,
+				1
+			],
+			"more": [
+				2,
+				3,
+				4,
+				5,
+				6,
+				7
+			],
+			"kind_bit": 1,
+			"bytes_hex": "ff",
+			"docs_after": [
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7
+			]
+		},
+		{
+			"docs": [
+				0,
+				50
+			],
+			"more": [
+				51,
+				52
+			],
+			"kind_bit": 0,
+			"bytes_hex": "00320101",
+			"docs_after": [
+				0,
+				50,
+				51,
+				52
+			]
+		},
+		{
+			"docs": [
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15
+			],
+			"more": [
+				16,
+				400
+			],
+			"kind_bit": 0,
+			"bytes_hex": "00010101010101010101010101010101018003",
+			"docs_after": [
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				400
+			]
+		},
+		{
+			"docs": [
+				9
+			],
+			"more": [
+				10
+			],
+			"kind_bit": 0,
+			"bytes_hex": "0901",
+			"docs_after": [
+				9,
+				10
+			]
+		}
+	],
+	"ids": [
+		{
+			"ids": [],
+			"encoded_hex": "00"
+		},
+		{
+			"ids": [
+				1
+			],
+			"encoded_hex": "0102"
+		},
+		{
+			"ids": [
+				5,
+				3,
+				1000,
+				2,
+				1073741824
+			],
+			"encoded_hex": "050a03ca0fcb0ffcffffff07"
+		},
+		{
+			"ids": [
+				100,
+				99,
+				98,
+				97
+			],
+			"encoded_hex": "04c801010101"
+		},
+		{
+			"ids": [
+				9007199254740,
+				1,
+				9007199254740
+			],
+			"encoded_hex": "03a8e3cbeea48c04a5e3cbeea48c04a6e3cbeea48c04"
+		}
+	],
+	"pack_ids": {
+		"ids": [
+			1,
+			2,
+			3,
+			127,
+			128,
+			129,
+			16383,
+			16384,
+			300000,
+			300001,
+			2147483647,
+			2147483648,
+			9007199254740
+		],
+		"packed": "AQEBfAEB/n4B4KcRAZ7Y7f8HAdTxpbeKhgI="
+	},
+	"build": {
+		"messages": [
+			{
+				"id": 1000,
+				"text": "common hello receipt order report world receipt café budget Seventh x@y.example"
+			},
+			{
+				"id": 1112,
+				"text": "common rare shipping hello q3 café gamma shipping alpha report CAFÉ"
+			},
+			{
+				"id": 1042,
+				"text": "common rare receipt 日本 日本 naïve zoë CAFÉ"
+			},
+			{
+				"id": 1154,
+				"text": "common alpha straße zoë gamma naïve receipt naïve world x@y.example"
+			},
+			{
+				"id": 1084,
+				"text": "common rare budget world beta alpha CAFÉ"
+			},
+			{
+				"id": 1016,
+				"text": "common straße report shipping hello receipt zoë 日本 CAFÉ"
+			},
+			{
+				"id": 1126,
+				"text": "common q3 order budget x@y.example"
+			},
+			{
+				"id": 1058,
+				"text": "common receipt shipping q3 Seventh CAFÉ"
+			},
+			{
+				"id": 1168,
+				"text": "common 日本 hello world straße budget CAFÉ"
+			},
+			{
+				"id": 1100,
+				"text": "common 日本 rare budget x@y.example"
+			},
+			{
+				"id": 1030,
+				"text": "common café meeting world budget beta 日本 rare CAFÉ"
+			},
+			{
+				"id": 1142,
+				"text": "common hello straße rare gamma alpha beta zoë CAFÉ"
+			},
+			{
+				"id": 1072,
+				"text": "common naïve 日本 receipt beta invoice gamma q3 delta q3 world x@y.example"
+			},
+			{
+				"id": 1004,
+				"text": "common gamma beta invoice CAFÉ"
+			},
+			{
+				"id": 1114,
+				"text": "common report alpha straße zoë naïve shipping Seventh CAFÉ"
+			},
+			{
+				"id": 1046,
+				"text": "common straße invoice rare naïve report beta hello q3 receipt café x@y.example"
+			},
+			{
+				"id": 1156,
+				"text": "common café gamma beta gamma café receipt world report q3 q3 CAFÉ"
+			},
+			{
+				"id": 1088,
+				"text": "common meeting delta budget hello CAFÉ"
+			},
+			{
+				"id": 1018,
+				"text": "common hello receipt gamma café naïve delta café x@y.example"
+			},
+			{
+				"id": 1130,
+				"text": "common order delta order world delta 日本 q3 receipt receipt naïve CAFÉ"
+			},
+			{
+				"id": 1060,
+				"text": "common shipping 日本 gamma report naïve zoë CAFÉ"
+			},
+			{
+				"id": 1172,
+				"text": "common café 日本 gamma shipping budget order 日本 world Seventh x@y.example"
+			},
+			{
+				"id": 1102,
+				"text": "common hello rare order CAFÉ"
+			},
+			{
+				"id": 1034,
+				"text": "common meeting alpha rare CAFÉ"
+			},
+			{
+				"id": 1144,
+				"text": "common zoë naïve straße x@y.example"
+			},
+			{
+				"id": 1076,
+				"text": "common order budget alpha café shipping delta 日本 delta order CAFÉ"
+			},
+			{
+				"id": 1006,
+				"text": "common beta beta world straße 日本 order order delta café q3 CAFÉ"
+			},
+			{
+				"id": 1118,
+				"text": "common hello zoë 日本 naïve shipping x@y.example"
+			},
+			{
+				"id": 1048,
+				"text": "common rare rare naïve meeting alpha alpha order meeting report Seventh CAFÉ"
+			},
+			{
+				"id": 1160,
+				"text": "common order hello receipt café alpha zoë CAFÉ"
+			},
+			{
+				"id": 1090,
+				"text": "common report hello alpha straße straße shipping shipping hello rare report x@y.example"
+			},
+			{
+				"id": 1022,
+				"text": "common delta order meeting café delta CAFÉ"
+			},
+			{
+				"id": 1132,
+				"text": "common zoë beta order world q3 meeting meeting order report zoë CAFÉ"
+			},
+			{
+				"id": 1064,
+				"text": "common q3 world world receipt world 日本 report x@y.example"
+			},
+			{
+				"id": 1174,
+				"text": "common gamma delta 日本 naïve rare world café receipt report q3 CAFÉ"
+			},
+			{
+				"id": 1106,
+				"text": "common beta café straße café 日本 naïve shipping zoë rare straße Seventh CAFÉ"
+			},
+			{
+				"id": 1036,
+				"text": "common naïve café invoice shipping x@y.example"
+			},
+			{
+				"id": 1148,
+				"text": "common q3 delta report straße naïve world CAFÉ"
+			},
+			{
+				"id": 1078,
+				"text": "common shipping beta café straße delta order rare café delta CAFÉ"
+			},
+			{
+				"id": 1010,
+				"text": "common gamma café meeting meeting world order café gamma meeting x@y.example"
+			},
+			{
+				"id": 1120,
+				"text": "common report rare hello zoë CAFÉ"
+			},
+			{
+				"id": 1052,
+				"text": "common zoë café alpha naïve rare naïve CAFÉ"
+			},
+			{
+				"id": 1162,
+				"text": "common invoice report delta alpha report report report budget Seventh x@y.example"
+			},
+			{
+				"id": 1094,
+				"text": "common shipping order alpha invoice CAFÉ"
+			},
+			{
+				"id": 1024,
+				"text": "common 日本 zoë q3 alpha alpha q3 hello q3 CAFÉ"
+			},
+			{
+				"id": 1136,
+				"text": "common report rare q3 straße 日本 naïve world hello hello x@y.example"
+			},
+			{
+				"id": 1066,
+				"text": "common hello rare delta naïve CAFÉ"
+			},
+			{
+				"id": 1178,
+				"text": "common invoice invoice invoice receipt order alpha order world CAFÉ"
+			},
+			{
+				"id": 1108,
+				"text": "common delta shipping naïve meeting invoice alpha beta x@y.example"
+			},
+			{
+				"id": 1040,
+				"text": "common naïve q3 invoice world rare order report straße Seventh CAFÉ"
+			},
+			{
+				"id": 1150,
+				"text": "common receipt café delta world alpha CAFÉ"
+			},
+			{
+				"id": 1082,
+				"text": "common q3 q3 gamma report delta x@y.example"
+			},
+			{
+				"id": 1012,
+				"text": "common gamma report budget CAFÉ"
+			},
+			{
+				"id": 1124,
+				"text": "common budget 日本 naïve shipping café CAFÉ"
+			},
+			{
+				"id": 1054,
+				"text": "common meeting café budget café x@y.example"
+			},
+			{
+				"id": 1166,
+				"text": "common budget café shipping zoë world delta CAFÉ"
+			},
+			{
+				"id": 1096,
+				"text": "common rare naïve hello zoë naïve alpha Seventh CAFÉ"
+			},
+			{
+				"id": 1028,
+				"text": "common gamma shipping hello rare x@y.example"
+			},
+			{
+				"id": 1138,
+				"text": "common gamma delta zoë CAFÉ"
+			},
+			{
+				"id": 1070,
+				"text": "common rare naïve order budget 日本 world café meeting CAFÉ"
+			}
+		],
+		"doc_ids": [
+			1000,
+			1112,
+			1042,
+			1154,
+			1084,
+			1016,
+			1126,
+			1058,
+			1168,
+			1100,
+			1030,
+			1142,
+			1072,
+			1004,
+			1114,
+			1046,
+			1156,
+			1088,
+			1018,
+			1130,
+			1060,
+			1172,
+			1102,
+			1034,
+			1144,
+			1076,
+			1006,
+			1118,
+			1048,
+			1160,
+			1090,
+			1022,
+			1132,
+			1064,
+			1174,
+			1106,
+			1036,
+			1148,
+			1078,
+			1010,
+			1120,
+			1052,
+			1162,
+			1094,
+			1024,
+			1136,
+			1066,
+			1178,
+			1108,
+			1040,
+			1150,
+			1082,
+			1012,
+			1124,
+			1054,
+			1166,
+			1096,
+			1028,
+			1138,
+			1070
+		],
+		"ids_hex": "3cd00fe0018b01e0018b018701dc018701dc0187018b01e0018b018701dc018701dc0187018b01e0018b01e0018b018701dc0187018b01e0018b01e0018b018701dc018701dc0187018b01e0018b018701dc018701dc0187018b01e0018b01e0018b018701dc0187018b01e0018b01e0018b018701dc018701",
+		"merged_shard_keys": [
+			10,
+			16,
+			24,
+			33,
+			58,
+			67,
+			72,
+			81,
+			98,
+			116,
+			135,
+			136,
+			147,
+			151,
+			161,
+			171,
+			182,
+			185,
+			189,
+			195,
+			199,
+			221,
+			235,
+			244
+		],
+		"shards": {
+			"10": "01000567616d6d61110a38350084001806",
+			"16": "010007696e766f6963650f00b00000108c03",
+			"24": "01000773747261c39f650f28c90045682002",
+			"33": "01000564656c74611100100e8664448d04",
+			"58": "0100076d656574696e67110004829081004108",
+			"67": "010007726563656970740fad900d20068004",
+			"72": "0100046361666511b7edffb6fddbf60d",
+			"81": "010006e697a5e69cac112417380e0e302008",
+			"98": "010007736576656e7468118140201008040201",
+			"116": "010006636f6d6d6f6e11ffffffffffffff0f",
+			"135": "01000178114992244992244902",
+			"136": "01000662756467657411510722020004f008",
+			"147": "010005776f726c641119152904a7a08608",
+			"151": "0100056f7264657211410068b6c1880208",
+			"161": "0100076578616d706c65114992244992244902",
+			"171": "020005616c706861111a488072009e0501000568656c6c6f112389466800710003",
+			"182": "0100056e61697665110cd01c193c622309",
+			"185": "0100037a6f65112c48102909138005",
+			"189": "01000271330fc290090427300a",
+			"195": "0100087368697070696e6711a240304a5808a102",
+			"199": "010004626574610f10bc0104490001",
+			"221": "0100047261726511168ec0504c63020b",
+			"235": "0100067265706f72740f23c0115027251a",
+			"244": "01000179114992244992244902"
+		}
+	},
+	"schedule": {
+		"batches": [
+			25,
+			20,
+			15
+		],
+		"before_final_merge": {
+			"shards": {
+				"10": "01000567616d6d610b0a38350084",
+				"16": "010007696e766f6963650c0c0102150601",
+				"24": "01000773747261c39f650b28c9004568",
+				"33": "01000564656c74610d00100e866404",
+				"58": "0100076d656574696e670b0004829081",
+				"67": "010007726563656970740bad900d2006",
+				"72": "010004636166650db7edffb6fd1b",
+				"81": "010006e697a5e69cac0d2417380e0e10",
+				"98": "010007736576656e74680d814020100804",
+				"116": "010006636f6d6d6f6e0dffffffffff1f",
+				"135": "010001780d499224499204",
+				"136": "0100066275646765740d510722020004",
+				"147": "010005776f726c640b19152904a7",
+				"151": "0100056f726465720d410068b6c108",
+				"161": "0100076578616d706c650d499224499204",
+				"171": "020005616c7068610d1a488072001e000568656c6c6f0d238946680011",
+				"182": "0100056e616976650d0cd01c193c02",
+				"185": "0100037a6f650d2c4810290913",
+				"189": "01000271330dc29009042710",
+				"195": "0100087368697070696e670da240304a5808",
+				"199": "010004626574610b10bc010449",
+				"221": "010004726172650d168ec0504c03",
+				"235": "0100067265706f72740d23c011502705",
+				"244": "010001790d499224499204"
+			},
+			"tail_hex": "190005616c706861082f0102060004626574610230010575646765740a3401010104000463616665110000000000c0f60d01056f6d6d6f6e110000000000e0ff0f000564656c74610c2e020201040300076578616d706c650a2d03030303000567616d6d610833010501000568656c6c6f082d010a010007696e766f696365062f010100076d656574696e670630060500056e616976650e2d01020104030300056f72646572062f020a00027133062d04020004726172650c2d01030701020106656365697074042f030204706f7274082d0402010007736576656e7468043107010768697070696e6708300502020106747261c39f65042d040005776f726c640c2d02020105040001780a2d030303030001790a2d0303030300037a6f65063701020006e697a5e69cac062d0806",
+			"tail_docs": 15,
+			"ids_hex": "3cd00fe0018b01e0018b018701dc018701dc0187018b01e0018b018701dc018701dc0187018b01e0018b01e0018b018701dc0187018b01e0018b01e0018b018701dc018701dc0187018b01e0018b018701dc018701dc0187018b01e0018b01e0018b018701dc0187018b01e0018b01e0018b018701dc018701"
+		}
+	},
+	"queries": [
+		{
+			"q": "common",
+			"ids": [
+				1000,
+				1004,
+				1006,
+				1010,
+				1012,
+				1016,
+				1018,
+				1022,
+				1024,
+				1028,
+				1030,
+				1034,
+				1036,
+				1040,
+				1042,
+				1046,
+				1048,
+				1052,
+				1054,
+				1058,
+				1060,
+				1064,
+				1066,
+				1070,
+				1072,
+				1076,
+				1078,
+				1082,
+				1084,
+				1088,
+				1090,
+				1094,
+				1096,
+				1100,
+				1102,
+				1106,
+				1108,
+				1112,
+				1114,
+				1118,
+				1120,
+				1124,
+				1126,
+				1130,
+				1132,
+				1136,
+				1138,
+				1142,
+				1144,
+				1148,
+				1150,
+				1154,
+				1156,
+				1160,
+				1162,
+				1166,
+				1168,
+				1172,
+				1174,
+				1178
+			],
+			"packed": "6AcEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBA=="
+		},
+		{
+			"q": "invoice",
+			"ids": [
+				1004,
+				1036,
+				1040,
+				1046,
+				1072,
+				1094,
+				1108,
+				1162,
+				1178
+			],
+			"packed": "7AcgBAYaFg42EA=="
+		},
+		{
+			"q": "invoice meeting",
+			"ids": [
+				1108
+			],
+			"packed": "1Ag="
+		},
+		{
+			"q": "CAFÉ report",
+			"ids": [
+				1000,
+				1012,
+				1016,
+				1040,
+				1046,
+				1048,
+				1060,
+				1112,
+				1114,
+				1120,
+				1132,
+				1148,
+				1156,
+				1174
+			],
+			"packed": "6AcMBBgGAgw0AgYMEAgS"
+		},
+		{
+			"q": "cafe",
+			"ids": [
+				1000,
+				1004,
+				1006,
+				1010,
+				1012,
+				1016,
+				1018,
+				1022,
+				1024,
+				1030,
+				1034,
+				1036,
+				1040,
+				1042,
+				1046,
+				1048,
+				1052,
+				1054,
+				1058,
+				1060,
+				1066,
+				1070,
+				1076,
+				1078,
+				1084,
+				1088,
+				1094,
+				1096,
+				1102,
+				1106,
+				1112,
+				1114,
+				1120,
+				1124,
+				1130,
+				1132,
+				1138,
+				1142,
+				1148,
+				1150,
+				1156,
+				1160,
+				1166,
+				1168,
+				1172,
+				1174,
+				1178
+			],
+			"packed": "6AcEAgQCBAIEAgYEAgQCBAIEAgQCBgQGAgYEBgIGBAYCBgQGAgYEBgIGBAYCBAIE"
+		},
+		{
+			"q": "zoe",
+			"ids": [
+				1016,
+				1024,
+				1042,
+				1052,
+				1060,
+				1096,
+				1106,
+				1114,
+				1118,
+				1120,
+				1132,
+				1138,
+				1142,
+				1144,
+				1154,
+				1160,
+				1166
+			],
+			"packed": "+AcIEgoIJAoIBAIMBgQCCgYG"
+		},
+		{
+			"q": "straße",
+			"ids": [
+				1006,
+				1016,
+				1040,
+				1046,
+				1078,
+				1090,
+				1106,
+				1114,
+				1136,
+				1142,
+				1144,
+				1148,
+				1154,
+				1168
+			],
+			"packed": "7gcKGAYgDBAIFgYCBAYO"
+		},
+		{
+			"q": "strasse",
+			"ids": [],
+			"packed": ""
+		},
+		{
+			"q": "日本",
+			"ids": [
+				1006,
+				1016,
+				1024,
+				1030,
+				1042,
+				1060,
+				1064,
+				1070,
+				1072,
+				1076,
+				1100,
+				1106,
+				1118,
+				1124,
+				1130,
+				1136,
+				1168,
+				1172,
+				1174
+			],
+			"packed": "7gcKCAYMEgQGAgQYBgwGBgYgBAI="
+		},
+		{
+			"q": "seventh",
+			"ids": [
+				1000,
+				1040,
+				1048,
+				1058,
+				1096,
+				1106,
+				1114,
+				1162,
+				1172
+			],
+			"packed": "6AcoCAomCggwCg=="
+		},
+		{
+			"q": "rare order receipt",
+			"ids": [],
+			"packed": ""
+		},
+		{
+			"q": "x y example",
+			"ids": [
+				1000,
+				1010,
+				1018,
+				1028,
+				1036,
+				1046,
+				1054,
+				1064,
+				1072,
+				1082,
+				1090,
+				1100,
+				1108,
+				1118,
+				1126,
+				1136,
+				1144,
+				1154,
+				1162,
+				1172
+			],
+			"packed": "6AcKCAoICggKCAoICggKCAoICggK"
+		},
+		{
+			"q": "nothing",
+			"ids": [],
+			"packed": ""
+		},
+		{
+			"q": "",
+			"ids": [],
+			"packed": ""
+		},
+		{
+			"q": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"ids": [],
+			"packed": ""
+		},
+		{
+			"q": "common common",
+			"ids": [
+				1000,
+				1004,
+				1006,
+				1010,
+				1012,
+				1016,
+				1018,
+				1022,
+				1024,
+				1028,
+				1030,
+				1034,
+				1036,
+				1040,
+				1042,
+				1046,
+				1048,
+				1052,
+				1054,
+				1058,
+				1060,
+				1064,
+				1066,
+				1070,
+				1072,
+				1076,
+				1078,
+				1082,
+				1084,
+				1088,
+				1090,
+				1094,
+				1096,
+				1100,
+				1102,
+				1106,
+				1108,
+				1112,
+				1114,
+				1118,
+				1120,
+				1124,
+				1126,
+				1130,
+				1132,
+				1136,
+				1138,
+				1142,
+				1144,
+				1148,
+				1150,
+				1154,
+				1156,
+				1160,
+				1162,
+				1166,
+				1168,
+				1172,
+				1174,
+				1178
+			],
+			"packed": "6AcEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBAIEAgQCBA=="
+		},
+		{
+			"q": "alpha beta gamma",
+			"ids": [
+				1142
+			],
+			"packed": "9gg="
+		}
+	],
+	"records": {
+		"names": [
+			"head",
+			"meta",
+			"ids",
+			"tail",
+			"shard:00 .. shard:ff (two lowercase hex digits)"
+		],
+		"shard_name_examples": {
+			"0": "shard:00",
+			"10": "shard:0a",
+			"255": "shard:ff"
+		},
+		"sealing": "gzip(record bytes), then AES-256-GCM under the record key with a fresh 12-byte IV; stored as {iv, ct}",
+		"ad": "mailsearch:{user_id}:{record name}:{format}",
+		"ad_example": {
+			"user_id": 7,
+			"record": "shard:0a",
+			"ad": "mailsearch:7:shard:0a:1"
+		},
+		"head": "{format, fp} in the clear; a different format or key fingerprint clears the index",
+		"meta_fields": [
+			"seq",
+			"doc_count",
+			"catchup",
+			"backfill",
+			"backfill_done",
+			"build_started",
+			"total"
+		],
+		"ids": "encodeIds(ids)",
+		"tail": "mapToShard(tail)",
+		"merge_at_tail_docs": 2000
+	}
+}

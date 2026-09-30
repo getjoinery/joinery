@@ -1,0 +1,193 @@
+{
+    "_about": "PHP iconv_mime_decode(CONTINUE_ON_ERROR, UTF-8) of the encoded-word cases in plugins/mailbox/tests/device_ai_digest_parity_test.php, written by ios/joinery-kit/Tests/sync_vectors.sh. Outputs as base64 (some are not valid UTF-8).",
+    "cases": [
+        {
+            "input": "=?UTF-8?Q?a=?=",
+            "expected_b64": "YQ=="
+        },
+        {
+            "input": "=?UTF-8?Q?=?=",
+            "expected_b64": ""
+        },
+        {
+            "input": "=?UTF-8?Q?a=?= tail",
+            "expected_b64": "YSB0YWls"
+        },
+        {
+            "input": "=?UTF-8?Q?a=4?=",
+            "expected_b64": "PT9VVEYtOD9RP2E9ND89"
+        },
+        {
+            "input": "=?UTF-16?B?/v8AYQBi?=",
+            "expected_b64": "YWI="
+        },
+        {
+            "input": "=?UTF-16?B?//5hAGIA?=",
+            "expected_b64": "YWI="
+        },
+        {
+            "input": "=?UTF-16?B?YQBiAA==?=",
+            "expected_b64": "YWI="
+        },
+        {
+            "input": "=?ISO-8859-1?Q?caf=E9?=",
+            "expected_b64": "Y2Fmw6k="
+        },
+        {
+            "input": "=?ISO-8859-1?Q?=80=9F=A0?=",
+            "expected_b64": "woDCn8Kg"
+        },
+        {
+            "input": "=?US-ASCII?Q?=E9?=",
+            "expected_b64": "PT9VUy1BU0NJST9RPz1FOT8="
+        },
+        {
+            "input": "=?US-ASCII?Q?abc?=",
+            "expected_b64": "YWJj"
+        },
+        {
+            "input": "=?UTF-8?B?inv@lid!!?=",
+            "expected_b64": "PT9VVEYtOD9CP2ludkBsaWQhIT8="
+        },
+        {
+            "input": "=?UTF-8?B?4pyT?=",
+            "expected_b64": "4pyT"
+        },
+        {
+            "input": "=?X-UNKNOWN?Q?abc?=",
+            "expected_b64": "PT9YLVVOS05PV04/UT9hYmM/PQ=="
+        },
+        {
+            "input": "=?UTF-8?Q?a_b?=",
+            "expected_b64": "YSBi"
+        },
+        {
+            "input": "=?UTF-8?Q?ab?= =?UTF-8?Q?cd?=",
+            "expected_b64": "YWJjZA=="
+        },
+        {
+            "input": "=?UTF-8?Q?ab?=\t\r\n =?UTF-8?Q?cd?=",
+            "expected_b64": "YWJjZA=="
+        },
+        {
+            "input": "=?UTF-8?Q?ab?= x =?UTF-8?Q?cd?=",
+            "expected_b64": "YWIgeCBjZA=="
+        },
+        {
+            "input": "=?UTF-8?Q?a?==?UTF-8?Q?b?=",
+            "expected_b64": "YWI="
+        },
+        {
+            "input": "=?windows-1252?Q?=80?=",
+            "expected_b64": "4oKs"
+        },
+        {
+            "input": "=?windows-1252?Q?=81?=",
+            "expected_b64": "PT93aW5kb3dzLTEyNTI/UT89ODE/"
+        },
+        {
+            "input": "=?windows-1252?Q?=8D=8F=90=9D?=",
+            "expected_b64": "PT93aW5kb3dzLTEyNTI/UT89OEQ9OEY9OTA9OUQ/"
+        },
+        {
+            "input": "=?UTF-8?Q?=C3?=",
+            "expected_b64": "PT9VVEYtOD9RPz1DMz8="
+        },
+        {
+            "input": "=?UTF-8?Q?=e9?=",
+            "expected_b64": "PT9VVEYtOD9RPz1lOT8="
+        },
+        {
+            "input": "=?UTF-8?Q?a=zz?=",
+            "expected_b64": "PT9VVEYtOD9RP2E9eno/PQ=="
+        },
+        {
+            "input": "=?UTF-8?Q?a?b?=",
+            "expected_b64": "PT9VVEYtOD9RP2E/Yj89"
+        },
+        {
+            "input": "=?UTF-8?Q??=",
+            "expected_b64": ""
+        },
+        {
+            "input": "=?utf-8*en?q?hi?=",
+            "expected_b64": "aGk="
+        },
+        {
+            "input": "pre =?UTF-8?Q?x?= post",
+            "expected_b64": "cHJlIHggcG9zdA=="
+        },
+        {
+            "input": "=?ISO-8859-2?Q?=B1?=",
+            "expected_b64": "xIU="
+        },
+        {
+            "input": "=?koi8-r?Q?=C1?=",
+            "expected_b64": "0LA="
+        },
+        {
+            "input": "=?GB2312?B?xOO6ww==?=",
+            "expected_b64": "5L2g5aW9"
+        },
+        {
+            "input": "=?UTF-8?Q?=F0=9F=98=80?=",
+            "expected_b64": "8J+YgA=="
+        },
+        {
+            "input": "=?UTF-8?B?w4?= =?UTF-8?B?ng==?=",
+            "expected_b64": "PT9VVEYtOD9CP3c0Pz0gPT9VVEYtOD9CP25nPT0/"
+        },
+        {
+            "input": "=?ISO-8859-1?B?/w==?=",
+            "expected_b64": "w78="
+        },
+        {
+            "input": "=?ISO-8859-1?Q?=00?=",
+            "expected_b64": "AA=="
+        },
+        {
+            "input": "=?UTF-16?B?AGEAYg==?=",
+            "expected_b64": "5oSA5oiA"
+        },
+        {
+            "input": "=?UTF-8?Q?a=20b?=",
+            "expected_b64": "YSBi"
+        },
+        {
+            "input": "=?ascii?Q?=7F?=",
+            "expected_b64": "fw=="
+        },
+        {
+            "input": "=?UTF-8?Q?a?=  =?UTF-8?Q?b?=  tail",
+            "expected_b64": "YWIgIHRhaWw="
+        },
+        {
+            "input": "x =?UTF-8?Q??= y",
+            "expected_b64": "eCAgeQ=="
+        },
+        {
+            "input": "=?UTF-8?B?YQ==?= =?ISO-8859-1?Q?=E9?=",
+            "expected_b64": "YcOp"
+        },
+        {
+            "input": "=?UTF-8?B?YQ=?=",
+            "expected_b64": "YQ=="
+        },
+        {
+            "input": "=?UTF-8?B?Y?=",
+            "expected_b64": ""
+        },
+        {
+            "input": "=?UTF-8?B?YWI=Yw==?=",
+            "expected_b64": "YWIY"
+        },
+        {
+            "input": "=?iso-8859-1?q?a=E9?=",
+            "expected_b64": "YcOp"
+        },
+        {
+            "input": "=?UTF-8?Q?a=E9?=",
+            "expected_b64": "PT9VVEYtOD9RP2E9RTk/"
+        }
+    ]
+}

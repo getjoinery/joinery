@@ -7,6 +7,29 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
+/**
+ * App-wide session events for layered modules that keep state of their own
+ * beyond the session key (the mail module's new-mail check and search index).
+ * Listeners register once at launch; the controller fires them.
+ */
+object SessionEvents {
+    private val signOut = ArrayList<(Context?) -> Unit>()
+    private val signedIn = ArrayList<(Context?, ApiClient, String?) -> Unit>()
+
+    fun onSignOut(listener: (Context?) -> Unit) = synchronized(this) { signOut.add(listener) }
+    /** [listener] gets the session key store's file name too, so background
+     *  work (the new-mail check) can read the key where the app keeps it. */
+    fun onSignedIn(listener: (Context?, ApiClient, String?) -> Unit) = synchronized(this) { signedIn.add(listener) }
+
+    internal fun fireSignOut(context: Context?) {
+        synchronized(this) { signOut.toList() }.forEach { try { it(context) } catch (_: Exception) {} }
+    }
+
+    internal fun fireSignedIn(context: Context?, client: ApiClient, storeFileName: String?) {
+        synchronized(this) { signedIn.toList() }.forEach { try { it(context, client, storeFileName) } catch (_: Exception) {} }
+    }
+}
+
 /** Session-key persistence. EncryptedCredentialStore is the production
  *  implementation; tests inject a fake. */
 interface CredentialStore {
@@ -24,6 +47,10 @@ class SessionController(
     val client: ApiClient,
     private val store: CredentialStore,
     private val scope: CoroutineScope,
+    /** Application context, for the sign-in and sign-out hooks (null in tests). */
+    private val appContext: Context? = null,
+    /** The encrypted store's file name, for background work that needs the key. */
+    private val storeFileName: String? = null,
 ) {
     sealed class State {
         /** Checking storage / refreshing on launch. */
@@ -34,8 +61,15 @@ class SessionController(
         data class UpgradeRequired(val message: String) : State()
     }
 
-    var state by mutableStateOf<State>(State.Launching)
-        private set
+    private var stateValue by mutableStateOf<State>(State.Launching)
+
+    var state: State
+        get() = stateValue
+        private set(value) {
+            val wasIn = stateValue is State.LoggedIn
+            stateValue = value
+            if (value is State.LoggedIn && !wasIn) SessionEvents.fireSignedIn(appContext, client, storeFileName)
+        }
 
     /** Runs on every sign-out path (user action or 401 invalidation) — the
      *  navigation shell hooks this to drop the bridged webview session (cookies)
@@ -122,6 +156,11 @@ class SessionController(
     private fun signOutLocally() {
         client.credentials = null
         store.deleteCredentials()
+        // Every vault secret this phone was handed goes with the session: a
+        // signed-out phone opens nothing (specs/fortress_mobile_apps.md § R9).
+        // The device key stays, so the next enrollment approves the same key.
+        appContext?.let { com.getjoinery.android.vault.DeviceKeys.shared(it).onSignOut() }
+        SessionEvents.fireSignOut(appContext)
         onSignOut?.invoke()
         state = State.LoggedOut
     }
@@ -137,6 +176,8 @@ class SessionController(
             client = ApiClient(config),
             store = EncryptedCredentialStore(context, storeFileName),
             scope = scope,
+            appContext = context.applicationContext,
+            storeFileName = storeFileName,
         )
     }
 }

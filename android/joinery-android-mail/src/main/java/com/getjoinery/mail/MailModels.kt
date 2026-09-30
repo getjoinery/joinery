@@ -1,6 +1,7 @@
 package com.getjoinery.mail
 
 import com.getjoinery.android.JsonValue
+import com.getjoinery.mail.fortress.SealedRow
 import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -38,7 +39,22 @@ data class Mailbox(
     val total: Int,
     val folders: List<MailFolder>,
     val foldersExclusive: Boolean,
+    /** `standard`, `private` or `fortress` (end-to-end: only the owner's
+     *  devices open it — specs/fortress_mobile_apps.md). */
+    val securityLevel: String = "standard",
+    /** Sealed content with no server window open for the viewer. */
+    val locked: Boolean = false,
+    /** The newest unread Inbox message's id, for the new-mail check (R15). */
+    val newestUnreadId: Int? = null,
+    /** The viewer is a member of this mailbox (not all-access). */
+    val own: Boolean = true,
+    /** Saved drafts on this mailbox, for the Drafts badge. */
+    val drafts: Int = 0,
+    /** The protection add-ons in force, e.g. "Seal at the relay". */
+    val protectionAddons: List<String> = emptyList(),
 ) {
+    val isFortress: Boolean get() = securityLevel == "fortress"
+
     /** The local part — what the switcher shows when every grant shares a domain. */
     val localPart: String
         get() = address.substringBefore('@')
@@ -56,6 +72,13 @@ data class Mailbox(
                 folders = (json["folders"]?.arrayValue ?: emptyList())
                     .mapNotNull { MailFolder.from(it) },
                 foldersExclusive = json["folders_exclusive"]?.boolValue ?: false,
+                securityLevel = json["security_level"]?.stringValue ?: "standard",
+                locked = json["locked"]?.boolValue ?: false,
+                newestUnreadId = json["newest_unread_id"]?.takeUnless { it.isNull }?.intValue,
+                own = json["own"]?.boolValue ?: true,
+                drafts = json["drafts"]?.intValue ?: 0,
+                protectionAddons = (json["protection_addons"]?.arrayValue ?: emptyList())
+                    .mapNotNull { it.stringValue ?: it["label"]?.stringValue },
             )
         }
     }
@@ -89,8 +112,17 @@ data class ThreadSummary(
     val isStarred: Boolean,
     val isArchived: Boolean,
     val latestTime: String,
+    /** The newest message's id (a draft row's draft id in the Drafts view). */
+    val latestId: Int? = null,
+    /** An end-to-end thread's newest message, sealed: opened on this phone. */
+    val sealed: SealedRow? = null,
+    /** What the row says instead of its content when it is not opened here. */
+    val fortressNote: String? = null,
+    /** The summary the owner's own model wrote (sealed on a Fortress row). */
+    val aiSummary: String = "",
 ) {
     val hasUnread: Boolean get() = unreadCount > 0
+    val isFortressPlaceholder: Boolean get() = fortressNote != null
 
     companion object {
         fun from(json: JsonValue): ThreadSummary? {
@@ -106,6 +138,9 @@ data class ThreadSummary(
                 isStarred = json["any_starred"]?.boolValue ?: false,
                 isArchived = json["any_archived"]?.boolValue ?: false,
                 latestTime = json["latest_time"]?.stringValue ?: "",
+                latestId = json["latest_id"]?.takeUnless { it.isNull }?.intValue,
+                sealed = json["sealed"]?.takeUnless { it.isNull }?.let { SealedRow.from(it) },
+                aiSummary = json["ai_summary"]?.stringValue ?: "",
             )
         }
     }
@@ -116,6 +151,8 @@ data class ThreadPage(
     val threads: List<ThreadSummary>,
     val hasMore: Boolean,
     val page: Int,
+    /** Some row is end-to-end encrypted. */
+    val fortress: Boolean = false,
 ) {
     companion object {
         fun from(data: JsonValue?): ThreadPage? {
@@ -125,6 +162,7 @@ data class ThreadPage(
                     .mapNotNull { ThreadSummary.from(it) },
                 hasMore = data["has_more"]?.boolValue ?: false,
                 page = data["page"]?.intValue ?: 1,
+                fortress = data["fortress"]?.boolValue ?: false,
             )
         }
     }
@@ -138,7 +176,18 @@ data class MailAttachment(
     val contentType: String,
     val sizeBytes: Int,
     val url: String?,
+    /** The MIME part id ("2", "1.2", "draft:…") — an end-to-end part's AD. */
+    val mimePart: String = "",
+    val inline: Boolean = false,
+    val contentId: String = "",
+    /** An end-to-end part: [url] serves ciphertext this phone opens. */
+    val fortress: Boolean = false,
+    val messageId: Int = 0,
+    val adPrefix: String = "",
 ) {
+    /** The AD an end-to-end part's bytes are bound to. */
+    val partAd: String get() = "$adPrefix$messageId:att:$mimePart"
+
     val sizeLabel: String
         get() {
             val bytes = sizeBytes.toDouble()
@@ -156,6 +205,8 @@ data class MailAttachment(
                 contentType = json["content_type"]?.stringValue ?: "application/octet-stream",
                 sizeBytes = json["size_bytes"]?.intValue ?: 0,
                 url = json["url"]?.takeUnless { it.isNull }?.stringValue,
+                mimePart = json["mime_part"]?.stringValue ?: "",
+                inline = json["inline"]?.boolValue ?: false,
             )
         }
     }
@@ -188,8 +239,27 @@ data class MailMessage(
     val bodyPlain: String,
     val bodyHtml: String,
     val attachments: List<MailAttachment>,
+    val to: String = "",
+    val cc: String = "",
+    val bcc: String = "",
+    /** End-to-end: the sealed columns, opened on this phone. */
+    val sealed: SealedRow? = null,
+    val fortress: Boolean = false,
+    /** Set when an end-to-end message is shown as a placeholder. */
+    val fortressNote: String? = null,
+    /** The HTML as the sender wrote it (cid: references intact), for a quote. */
+    val bodyHtmlSource: String? = null,
+    /** Opened inline parts (cid: images), for a forward. */
+    val inlineParts: List<MailAttachment> = emptyList(),
+    val aiSummary: String = "",
+    /** The security scan as JSON text (sealed on a Fortress row). */
+    val aiScan: String = "",
+    val aiDangerScore: Int? = null,
+    val rawHeaders: String = "",
 ) {
     val isOutbound: Boolean get() = direction == "outbound"
+    /** An end-to-end message this phone has opened. */
+    val isOpenedFortress: Boolean get() = sealed != null && fortressNote == null
 
     companion object {
         fun from(json: JsonValue): MailMessage? {
@@ -208,6 +278,14 @@ data class MailMessage(
                 bodyHtml = json["body_html"]?.stringValue ?: "",
                 attachments = (json["attachments"]?.arrayValue ?: emptyList())
                     .mapNotNull { MailAttachment.from(it) },
+                to = json["to"]?.stringValue ?: "",
+                cc = json["cc"]?.stringValue ?: "",
+                bcc = json["bcc"]?.stringValue ?: "",
+                sealed = json["sealed"]?.takeUnless { it.isNull }?.let { SealedRow.from(it) },
+                fortress = json["fortress"]?.boolValue ?: false,
+                aiSummary = json["ai_summary"]?.stringValue ?: "",
+                aiScan = json["ai_scan"]?.takeUnless { it.isNull }?.let { if (it is JsonValue.Str) it.value else it.encoded() } ?: "",
+                aiDangerScore = json["ai_danger_score"]?.takeUnless { it.isNull }?.intValue,
             )
         }
     }

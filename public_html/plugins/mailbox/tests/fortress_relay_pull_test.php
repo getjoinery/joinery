@@ -30,7 +30,14 @@
  *    reports 3.1 (B35, B38); the add-on with Fortress is refused only for an
  *    older relay;
  *  - a mail rotation does not commit while the relay has not taken the map,
- *    or no pull has drained its listing since it did (B33, B41).
+ *    or no pull has drained its listing since it did (B33, B41);
+ *  - mail rules on the device that parses (specs/fortress_mobile_apps.md
+ *    § R14): device_rules lists the mailbox's rules as a device reads them;
+ *    the matched ids posted with a parse apply in its transaction with the
+ *    rule's own actions; a rule of another mailbox refuses the whole parse; a
+ *    forward is named only when the opened raw came with it; the "apply to
+ *    existing" walk pages the owner's end-to-end rows, applies what the device
+ *    matched, refuses a row outside the rule, and closes when done.
  *
  * And the relay pin (specs/client_custody_mail.md § R10, WP8):
  *  - the shared vector (fixtures/relay_pin_vector.json): PHP's pin MAC formula
@@ -48,6 +55,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_relay_pull
  *
+ * @version 1.4 - mail rules run by the parsing device
  * @version 1.3 - carries the relay pin checks (fortress_relay_pin folded in)
  * @version 1.2 - B46: the waiting row is counted after a lowering
  * @version 1.1 - the review of 2026-09-28 (B38, B40-B42, B44, B45)
@@ -248,7 +256,14 @@ try {
 	$next = MailboxFortressParse::next($owner_id);
 	check($next['remaining'] === 1 && $next['item']['id'] === $id && $next['item']['raw_ad'] === 'mail:relay:' . $entry[2],
 		'next() hands out the row with its AD');
-	check(MailboxFortressParse::next($owner_id, array($id))['item'] === null, 'a row this device skipped is not handed out again');
+	$skipped_next = MailboxFortressParse::next($owner_id, array($id));
+	check($skipped_next['item'] === null && $skipped_next['remaining'] === 1,
+		'a row this device skipped is not handed out again, and still counts as waiting');
+	check(MailboxFortressParse::next($owner_id, array(), strlen($raw) - 1)['item'] === null
+		&& MailboxFortressParse::next($owner_id, array(), strlen($raw))['item']['id'] === $id,
+		'a device that can hold less than the message is not handed it; one that can is');
+	$small = MailboxFortressParse::next($owner_id, array(), strlen($raw) - 1);
+	check($small['remaining'] === 1 && ($small['too_large'] ?? null) === 1, 'and is told one waits that is too large for it');
 
 	// The browser's half, with the test's secret.
 	$dek = $box->openEdge(substr($next['item']['sealed_dek'], strlen('v1.edgeseal.mail.')), $pair['secret'], $pub);
@@ -352,13 +367,162 @@ try {
 	$domain = new InboundEmailDomain(intval($domain->key), TRUE);
 	InboundEmailMessage::forgetSealScopes();
 
+	// ------------------------------------------------ mail rules on the device
+	section('R14: mail rules run where the message is opened');
+	$make_rule = function (?int $alias_id, array $set) use ($domain) {
+		$f = new InboundEmailFilter(NULL);
+		$f->set('ief_iea_inbound_email_alias_id', $alias_id);
+		$f->set('ief_ied_inbound_email_domain_id', intval($domain->key));
+		$f->set('ief_name', 'harnesstest rule');
+		$f->set('ief_is_enabled', true);
+		foreach ($set as $k => $v) { $f->set($k, $v); }
+		$f->prepare();
+		$f->save();
+		harness_register_row('ief_inbound_email_filters', 'ief_inbound_email_filter_id', intval($f->key));
+		return new InboundEmailFilter(intval($f->key), TRUE);
+	};
+	$star_rule = $make_rule(intval($alias->key), array('ief_match_subject' => 'invoice', 'ief_action_star' => true));
+	$read_rule = $make_rule(null, array('ief_match_from' => 'billing@', 'ief_action_mark_read' => true));
+	$off_rule = $make_rule(intval($alias->key), array('ief_match_subject' => 'invoice', 'ief_action_archive' => true));
+	$off_rule->set('ief_is_enabled', false);
+	$off_rule->save();
+
+	$listed = MailboxDeviceRules::rulesFor($owner_id, intval($alias->key));
+	$listed_ids = array_map(function ($x) { return $x['id']; }, $listed['rules']);
+	check(in_array(intval($star_rule->key), $listed_ids, true) && in_array(intval($read_rule->key), $listed_ids, true)
+		&& !in_array(intval($off_rule->key), $listed_ids, true), 'device_rules lists the mailbox\'s and its domain\'s enabled rules');
+	$star_listed = null;
+	foreach ($listed['rules'] as $x) { if ($x['id'] === intval($star_rule->key)) { $star_listed = $x; } }
+	check($star_listed !== null && $star_listed['match']['subject'] === 'invoice' && $star_listed['forwards'] === false
+		&& !array_key_exists('ief_action_star', $star_listed), 'as criteria and a forward flag, never the actions');
+	check((function () use ($other, $alias) {
+		try { MailboxDeviceRules::rulesFor(intval($other->key), intval($alias->key)); return false; }
+		catch (MailboxDeviceRulesException $e) { return true; }
+	})(), 'another person cannot read the mailbox\'s rules');
+
+	$raw2 = "From: Billing <billing@example.com>\r\nTo: " . $address . "\r\nSubject: Your invoice\r\n\r\nPay up.\r\n";
+	$entry2 = $client_entry($address, $raw2);
+	check($pull($entry2) === 'pending', 'a second relay message waits');
+	$q->execute(array($entry2[2]));
+	$id2 = intval($q->fetchColumn());
+	$next2 = MailboxFortressParse::next($owner_id);
+	$dek2 = $box->openEdge(substr($next2['item']['sealed_dek'], strlen('v1.edgeseal.mail.')), $pair['secret'], $pub);
+	$prefix2 = $next2['item']['sealed_ad_prefix'] . $id2;
+	$params2 = array('id' => $id2, 'sealed_dek' => $next2['item']['sealed_dek'], 'fields' => array(
+		'iem_sender' => 'v1.edge.' . $box->aeadEncryptGcm('Billing <billing@example.com>', $dek2, $prefix2 . ':iem_sender'),
+		'iem_subject' => 'v1.edge.' . $box->aeadEncryptGcm('Your invoice', $dek2, $prefix2 . ':iem_subject'),
+	));
+
+	// A rule of the domain's other mailbox is not this message's to apply.
+	$side = new InboundEmailAlias(NULL);
+	$side->set('iea_ied_inbound_email_domain_id', intval($domain->key));
+	$side->set('iea_alias', 'harnesstest_side');
+	$side->set('iea_delivery_mode', InboundEmailAlias::MODE_STORE);
+	$side->set('iea_destinations', '');
+	$side->set('iea_is_enabled', true);
+	$side->save();
+	harness_register_row('iea_inbound_email_aliases', 'iea_inbound_email_alias_id', intval($side->key));
+	$foreign_rule = $make_rule(intval($side->key), array('ief_match_subject' => 'invoice', 'ief_action_star' => true));
+	check($refused(function () use ($owner_id, $params2, $foreign_rule) {
+		MailboxFortressParse::storeParts($owner_id, array_merge($params2, array('rule_matches' => array(intval($foreign_rule->key)))), array());
+	}), 'a rule outside the message\'s scope refuses the parse');
+	check($is_true($row_of($id2)['iem_pending_parse']), 'the row still waits after it');
+
+	// The mailbox's own rule switched off after the device fetched the rules
+	// (off_rule archives): skipped, not a refusal of the parse.
+	$stored2 = MailboxFortressParse::storeParts($owner_id, array_merge($params2,
+		array('rule_matches' => array(intval($star_rule->key), intval($off_rule->key), intval($read_rule->key)))), array());
+	check($stored2 === array('id' => $id2, 'stored' => true),
+		'the parse with its matched rules is stored, a rule switched off since the fetch skipped');
+	$r2 = $row_of($id2);
+	check($is_true($r2['iem_is_starred']) && $is_true($r2['iem_is_read']) && !$is_true($r2['iem_is_archived']),
+		'each live matched rule\'s own action applied, nothing else');
+
+	$fwd_rule = $make_rule(intval($alias->key), array('ief_match_subject' => 'invoice',
+		'ief_action_forward_to' => 'harnesstest-fwd@example.invalid'));
+	$fwd_rule->recordForwardAcknowledgment($owner_id);
+	$fwd_rule->save();
+	$fwd_rule = new InboundEmailFilter(intval($fwd_rule->key), TRUE);
+	check($fwd_rule->deviceRule()['forwards'] === true, 'a forwarding rule tells the device to post the raw');
+	$m2 = new InboundEmailMessage($id2, TRUE);
+	check(InboundEmailFilter::applyDeviceMatches($m2, array(intval($fwd_rule->key)), null)['forward_to'] === array(),
+		'without the opened raw, no forward is named');
+	check(InboundEmailFilter::applyDeviceMatches($m2, array(intval($fwd_rule->key)), $raw2)['forward_to']
+		=== array('harnesstest-fwd@example.invalid'), 'with it, the rule\'s acknowledged destination is');
+	$fwd_rule->set('ief_is_enabled', false);
+	$fwd_rule->save();
+
+	section('R14: apply to existing, on the owner\'s device');
+	$back_rule = $make_rule(intval($alias->key), array('ief_match_subject' => 'relay sealed', 'ief_action_archive' => true));
+	$back_rule->requestApplyExisting();
+	$back_rule->save();
+	$page = MailboxDeviceRules::backlog($owner_id);
+	$page_ids = array_map(function ($x) { return $x['id']; }, $page['rows']);
+	check(($page['rule']['id'] ?? 0) === intval($back_rule->key) && in_array($id, $page_ids, true) && in_array($id2, $page_ids, true),
+		'the walk hands the device the rule and the owner\'s parsed rows');
+	$row_for = null;
+	foreach ($page['rows'] as $x) { if ($x['id'] === $id) { $row_for = $x; } }
+	check($row_for !== null && strncmp($row_for['sealed']['iem_subject'] ?? '', 'v1.edge.', 8) === 0
+		&& !array_key_exists('subject', $row_for), 'each row as sealed fields only');
+	check((function () use ($owner_id, $back_rule, $page, $unopenable_id) {
+		try { MailboxDeviceRules::outcomes($owner_id, intval($back_rule->key), $page['through_id'], array($unopenable_id)); return false; }
+		catch (MailboxDeviceRulesException $e) { return true; }
+	})(), 'a row outside the rule\'s reach is refused');
+	check((function () use ($owner_id, $back_rule) {
+		try { MailboxDeviceRules::outcomes($owner_id, intval($back_rule->key), PHP_INT_MAX, array()); return false; }
+		catch (MailboxDeviceRulesException $e) { return true; }
+	})(), 'and so is a page that ends past every row in reach');
+	$done = MailboxDeviceRules::outcomes($owner_id, intval($back_rule->key), $page['through_id'], array($id));
+	check($done['applied'] === 1 && $is_true($row_of($id)['iem_is_archived']) && !$is_true($row_of($id2)['iem_is_archived']),
+		'the matched row gets the rule\'s action, the unmatched one does not');
+	$after = MailboxDeviceRules::backlog($owner_id);
+	check(($after['rule']['id'] ?? null) !== intval($back_rule->key), 'with nothing past the cursor the owner\'s walk closes');
+	$back_rule = new InboundEmailFilter(intval($back_rule->key), TRUE);
+	$place = InboundEmailFilterDeviceProgress::placeFor(intval($back_rule->key), $owner_id,
+		(string)$back_rule->get('ief_device_backlog_requested_time'));
+	check($place['done'] === true, 'recorded as done for that owner', json_encode($place));
+	// Asked again within the same second: a new request, with its walk to do.
+	$again = new InboundEmailFilter(intval($back_rule->key), TRUE);
+	$again->requestApplyExisting();
+	$t1 = (string)$again->get('ief_device_backlog_requested_time');
+	$again->requestApplyExisting();
+	check($t1 !== (string)$again->get('ief_device_backlog_requested_time') && strpos($t1, '.000000') === false,
+		'two requests in one second are told apart', $t1);
+	// A whole-row save of the rule from a copy read before the walk ended (an
+	// edit, the backfill task) leaves the owner's place where it is.
+	$back_rule->set('ief_name', 'renamed while the device walked');
+	$back_rule->save();
+	check((MailboxDeviceRules::backlog($owner_id)['rule']['id'] ?? null) !== intval($back_rule->key),
+		'and a later save of the rule does not reopen it');
+
+	// A domain-wide rule reaches every owner's mailbox on the domain: one owner
+	// finishing (or a member with no rows of their own) closes nothing for another.
+	$wide = $make_rule(null, array('ief_match_subject' => 'relay sealed', 'ief_action_star' => true));
+	$wide->requestApplyExisting();
+	$wide->save();
+	InboundEmailMailboxGrant::sync_for_alias(intval($side->key), array(intval($other->key)));
+	$empty = MailboxDeviceRules::backlog(intval($other->key));
+	check(($empty['rule'] ?? null) === null, 'another member with no end-to-end rows of their own has nothing to walk');
+	$wide = new InboundEmailFilter(intval($wide->key), TRUE);
+	$wide_time = (string)$wide->get('ief_device_backlog_requested_time');
+	check(InboundEmailFilterDeviceProgress::placeFor(intval($wide->key), intval($other->key), $wide_time)['done'] === true
+		&& InboundEmailFilterDeviceProgress::placeFor(intval($wide->key), $owner_id, $wide_time)['done'] === false,
+		'which closes their place only');
+	$owner_page = MailboxDeviceRules::backlog($owner_id);
+	check(($owner_page['rule']['id'] ?? 0) === intval($wide->key) && in_array($id, array_column($owner_page['rows'], 'id'), true),
+		'the owner\'s walk of the same rule still hands out their rows');
+	$db->prepare('DELETE FROM ieg_inbound_email_mailbox_grants WHERE ieg_iea_inbound_email_alias_id = ?')->execute(array(intval($side->key)));
+	$wide->set('ief_is_enabled', false);
+	$wide->save();
+
 	// ---------------------------------------------------------------- the map
 	// ------------------------------------------------------- the relay pin
 	// (formerly fortress_relay_pin) — its own mailbox and a relay that is never
 	// stored, ahead of the sections below that make relay rows.
 	section('The shared vector');
 	$pin_v = json_decode((string)file_get_contents(__DIR__ . '/fixtures/relay_pin_vector.json'), true);
-	$pin_key = hash_hkdf('sha256', hex2bin($pin_v['vault_secret_hex']), 32, 'sealed-vault:pin', '');
+	// The key is derived from the secret as the browser's keyring holds it: PKCS#8.
+	$pin_key = hash_hkdf('sha256', hex2bin('302e020100300506032b656e04220420' . $pin_v['vault_secret_hex']), 32, 'sealed-vault:pin', '');
 	$pin_mac = base64_encode(hash_hmac('sha256', MailboxRelayPin::pinMessage(intval($pin_v['alias_id']), $pin_v['relay_identity_public_key']), $pin_key, true));
 	check($pin_mac === $pin_v['pin_mac'], 'the pin MAC formula gives the vector\'s MAC');
 	$pin_pub = base64_decode($pin_v['relay_identity_public_key']);

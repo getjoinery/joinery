@@ -38,6 +38,17 @@ android {
             returnDefaultValues = true
         }
     }
+
+    // The shared vault vectors are read in place from the web tree, so the
+    // browser, PHP, Rust, iOS and Android all open the very same bytes.
+    sourceSets {
+        test {
+            resources.srcDirs += [
+                rootProject.file("../public_html/tests/vault/fixtures"),
+                rootProject.file("../public_html/plugins/mailbox/tests/fixtures"),
+            ]
+        }
+    }
 }
 
 dependencies {
@@ -61,9 +72,20 @@ dependencies {
 
     // Keystore-backed EncryptedSharedPreferences — secrets never touch plain prefs.
     implementation "androidx.security:security-crypto:1.1.0-alpha06"
-    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    api "com.squareup.okhttp3:okhttp:4.12.0"
+
+    // Fortress custody (specs/fortress_mobile_apps.md): X25519, HKDF and Ed25519
+    // before API 33 (Tink); the biometric gate on the Keystore key that wraps
+    // the device and mail secrets (BiometricPrompt needs a FragmentActivity);
+    // WorkManager for the new-mail check.
+    api "com.google.crypto.tink:tink-android:1.13.0"
+    api "androidx.biometric:biometric:1.1.0"
+    api "androidx.fragment:fragment-ktx:1.8.1"
+    api "androidx.work:work-runtime-ktx:2.9.0"
+    implementation "androidx.lifecycle:lifecycle-process:2.8.2"
 
     testImplementation "junit:junit:4.13.2"
+    testImplementation "com.squareup.okhttp3:mockwebserver:4.12.0"
     testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1"
 
     androidTestImplementation "androidx.test.ext:junit:1.2.1"

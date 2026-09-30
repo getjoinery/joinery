@@ -16,6 +16,9 @@
  * was parsed already (by another of the caller's devices), or, with stale,
  * its key changed since it was fetched (fetch it again).
  *
+ * @version 1.3 - rule_matches and the forward_raw upload (specs/fortress_mobile_apps.md § R14)
+ * @version 1.2 - reachable with an app session key too (requires_person_credential,
+ * specs/fortress_mobile_apps.md § R8)
  * @version 1.1 - one bundle upload; the stale answer
  * @version 1.0
  */
@@ -40,7 +43,9 @@ function fortress_parse_store_logic(array $input): LogicResult {
 			'fields'       => $decode($input['fields'] ?? ''),
 			'parts'        => $decode($input['parts'] ?? ''),
 			'spam_headers' => $decode($input['spam_headers'] ?? ''),
-		), isset($_FILES['bundle']) && is_array($_FILES['bundle']) ? $_FILES['bundle'] : null);
+			'rule_matches' => $decode($input['rule_matches'] ?? ''),
+		), isset($_FILES['bundle']) && is_array($_FILES['bundle']) ? $_FILES['bundle'] : null,
+			isset($_FILES['forward_raw']) && is_array($_FILES['forward_raw']) ? $_FILES['forward_raw'] : null);
 	} catch (MailboxFortressParseException $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -50,7 +55,7 @@ function fortress_parse_store_logic(array $input): LogicResult {
 function fortress_parse_store_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('requires_person_credential' => true),
 		'description' => 'Store an end-to-end message the caller\'s browser parsed from its relay-sealed form: the fields and attachments as ciphertext under the row\'s own key',
 		'input' => [
 			'id' => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],
@@ -58,6 +63,7 @@ function fortress_parse_store_logic_descriptor() {
 			'fields' => ['type' => 'text', 'required' => true, 'label' => 'JSON: sealed column => v1.edge. ciphertext'],
 			'parts' => ['type' => 'text', 'required' => false, 'max_length' => 100000, 'label' => 'JSON: [{mime_part, size, inline, offset, length}] placing each sealed part in the bundle upload'],
 			'spam_headers' => ['type' => 'text', 'required' => false, 'max_length' => 4000, 'label' => 'JSON: the X-Spam* header values read from the message'],
+			'rule_matches' => ['type' => 'text', 'required' => false, 'max_length' => 4000, 'label' => 'JSON: the ids of the mailbox\'s mail rules (device_rules) the parsed message matched'],
 		],
 	);
 }

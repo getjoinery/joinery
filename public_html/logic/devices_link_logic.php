@@ -14,9 +14,11 @@
  * folders, and any other client-custody vault they have set up), and what code
  * (if any) did they arrive with.
  *
- * The page answers to drive_active like every device-link action: a linked
- * computer is a Drive sync client, and its other vaults ride along with it.
+ * The page is open when there is something to hand a device: Drive is on (a
+ * linked computer is a Drive sync client), or the user holds a client-custody
+ * content vault (a phone reading Fortress mail).
  *
+ * @version 1.3 - open to anyone holding a content vault, not only with Drive on
  * @version 1.2 - content vaults only: the root vault is never handed to a device
  * @version 1.1 - lists every set-up client-custody vault beside Drive's
  */
@@ -29,9 +31,8 @@ function devices_link_logic(array $input): LogicResult {
 	$session->check_permission(0);
 	$user_id = (int)$session->get_user_id();
 
-	$settings = Globalvars::get_instance();
-	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+	if (!DeviceLink::linking_available($user_id)) {
+		return LogicResult::error('There is nothing to hand a device: turn on Drive or set up an end-to-end vault first.');
 	}
 
 	// Whether to offer the encrypted-folders checkbox at all. Offering it to
@@ -77,7 +78,7 @@ function devices_link_logic_form($formwriter, $page_vars = array(), $input = arr
 	$formwriter->textinput('code', 'Code from the device', array(
 		'required' => true,
 		'value'    => $page_vars['code'] ?? '',
-		'helptext' => 'Eight characters, shown on the computer you are linking.',
+		'helptext' => 'Eight characters, shown on the computer or phone you are linking.',
 	));
 
 	if (!empty($page_vars['has_vault'])) {

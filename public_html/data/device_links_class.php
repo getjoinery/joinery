@@ -19,6 +19,14 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * that address is shut out.
  * Nothing here survives the ceremony — the retention sweep removes the row (see $retention_policy).
  *
+ * A ceremony can also be opened by an app that is already signed in
+ * (`device_key_enroll`): the phone has its credential and needs only the vault
+ * keys. That row is **bound** at begin — `dlk_usr_user_id` and
+ * `dlk_apk_api_key_id` are the caller's, `dlk_bound` is true — so approval mints
+ * nothing, only the same user can approve or deny it, and the poll hands over
+ * the sealed keys alone.
+ *
+ * @version 1.2.0 - dlk_bound: a ceremony opened by a signed-in app, bound to its key
  * @version 1.1.0 - dlk_sealed_vault_keys: one sealed secret per client-custody scope
  * @version 1.0.0
  */
@@ -90,6 +98,9 @@ class DeviceLink extends SystemBase {
 		// moment the device collects it. It exists here only to bridge the gap
 		// between the browser that approved and the device that is polling.
 		'dlk_secret_once'        => array('type' => 'text', 'is_nullable' => true),
+		// Opened by a signed-in app (device_key_enroll) and bound to its key at
+		// begin: approval mints no credential, only the bound user may act on it.
+		'dlk_bound'              => array('type' => 'bool', 'is_nullable' => false, 'default' => 'false'),
 		'dlk_expires_time'       => array('type' => 'timestamp(6)', 'is_nullable' => false, 'required' => true),
 		'dlk_create_time'        => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
@@ -174,6 +185,43 @@ class DeviceLink extends SystemBase {
 			return null;
 		}
 		return $opened['value'];
+	}
+
+	/** Opened by a signed-in app and bound to its credential at begin. */
+	public function is_bound(): bool {
+		$v = $this->get('dlk_bound');
+		return $v === true || $v === 't' || $v === 1 || $v === '1';
+	}
+
+	/**
+	 * May this user act on (see, approve, deny) this ceremony? An unbound one is
+	 * anyone's who holds the code, as it always was; a bound one is its user's
+	 * alone — another account approving it would hand that account's vault keys
+	 * to someone else's phone.
+	 */
+	public function actionable_by(int $user_id): bool {
+		return !$this->is_bound() || (int)$this->get('dlk_usr_user_id') === $user_id;
+	}
+
+	/**
+	 * Is device linking open to this user? A linked computer is a Drive sync
+	 * client, so Drive being on is enough; otherwise a device is worth linking
+	 * only when the user holds a client-custody content vault to hand it.
+	 */
+	public static function linking_available(int $user_id): bool {
+		if (Globalvars::get_instance()->get_setting('drive_active')) {
+			return true;
+		}
+		foreach (VaultScopes::contentScopes() as $scope) {
+			try {
+				if (VaultClientCustody::loadVault($user_id, $scope)) {
+					return true;
+				}
+			} catch (Exception $e) {
+				// an unregistered scope holds nothing
+			}
+		}
+		return false;
 	}
 
 	/**

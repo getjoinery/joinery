@@ -1,0 +1,365 @@
+{
+	"_about": "The built-in cases of mime_parser.mjs as raw bytes (raw_b64) with MailboxMime.parse()'s result. The parser never throws.",
+	"cases": [
+		{
+			"label": "random bytes",
+			"raw_b64": "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",
+			"source": "random bytes",
+			"raw_sha256_hex": "a9991eb6d6c5d1d38e97ab6a0df82faa2b2232a9f3c5c8193ee9beb2ef7c96bb",
+			"parsed": {
+				"headers": "",
+				"from": "",
+				"to": "",
+				"cc": "",
+				"subject": "",
+				"date": "",
+				"message_id": "",
+				"in_reply_to": "",
+				"references": "",
+				"text_plain": "\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e",
+				"text_html": "",
+				"attachments": []
+			},
+			"header_values": {
+				"Subject": "",
+				"From": "",
+				"X-Spam": "",
+				"X-Spam-Flag": "",
+				"X-Spam-Score": "",
+				"X-Spam-Status": "",
+				"x-nonexistent": ""
+			},
+			"store": {
+				"fields": {
+					"iem_sender": "",
+					"iem_subject": "",
+					"iem_body_plain": "\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e\rüëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a\tøçÖÅ´£’p_N=,\u001b\nùè×Æµ¤“‚q`O>-\u001c\u000búéØÇ¶¥”ƒraP?.\u001d\fûêÙÈ·¦•„sbQ@/\u001e",
+					"iem_body_html": "",
+					"iem_raw_headers": "",
+					"iem_to": "",
+					"iem_cc": "",
+					"iem_attachment_manifest": ""
+				},
+				"parts": [],
+				"spam_headers": {
+					"x_spam": "",
+					"x_spam_flag": "",
+					"x_spam_score": "",
+					"x_spam_status": ""
+				},
+				"snippet_from_plain": "üëÚÉ¸§–…tcRA0\u001f\u000eýìÛÊ¹¨—†udSB1 \u000fþíÜËº©˜‡veTC2!\u0010ÿîÝÌ»ª™ˆwfUD3\"\u0011\u0000ïÞÍ¼«š‰xgVE4#\u0012\u0001ðßÎ½¬›ŠyhWF5$\u0013\u0002ñàÏ¾­œ‹ziXG6%\u0014\u0003òáÐ¿®Œ{jYH7&\u0015\u0004óâÑÀ¯ž|kZI8'\u0016\u0005ôãÒÁ°ŸŽ}l[J9(\u0017\u0006õäÓÂ± ~m\\K:)\u0018\u0007öåÔÃ²¡n]L;*\u0019\b÷æÕÄ³¢‘€o^M<+\u001a øçÖÅ´£’p_N=,\u001b ùè×Æµ¤“‚q`O>-\u001c úéØÇ¶¥”ƒraP?.\u001d"
+			}
+		},
+		{
+			"label": "headers only, no blank line",
+			"raw_b64": "U3ViamVjdDogeA0KRnJvbTogeQ==",
+			"source": "headers only, no blank line",
+			"raw_sha256_hex": "2b18b45eed7619b5d73eabeb35c3f79aee390e224117235f5eaf00c52deb7bd4",
+			"parsed": {
+				"headers": "Subject: x\r\nFrom: y",
+				"from": "y",
+				"to": "",
+				"cc": "",
+				"subject": "x",
+				"date": "",
+				"message_id": "",
+				"in_reply_to": "",
+				"references": "",
+				"text_plain": "",
+				"text_html": "",
+				"attachments": []
+			},
+			"header_values": {
+				"Subject": "x",
+				"From": "y",
+				"X-Spam": "",
+				"X-Spam-Flag": "",
+				"X-Spam-Score": "",
+				"X-Spam-Status": "",
+				"x-nonexistent": ""
+			},
+			"store": {
+				"fields": {
+					"iem_sender": "y",
+					"iem_subject": "x",
+					"iem_body_plain": "",
+					"iem_body_html": "",
+					"iem_raw_headers": "Subject: x\r\nFrom: y",
+					"iem_to": "",
+					"iem_cc": "",
+					"iem_attachment_manifest": ""
+				},
+				"parts": [],
+				"spam_headers": {
+					"x_spam": "",
+					"x_spam_flag": "",
+					"x_spam_score": "",
+					"x_spam_status": ""
+				},
+				"snippet_from_plain": ""
+			}
+		},
+		{
+			"label": "an unknown charset and encoding",
+			"raw_b64": "Q29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PXgta2xpbmdvbg0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogeC1yb3QxMw0KDQpxYXBsYQ==",
+			"source": "an unknown charset and encoding",
+			"raw_sha256_hex": "fbb4b482338d7f21d7183d5a4e7a9e468b049d8f4002cccab23cd1dea20d0246",
+			"parsed": {
+				"headers": "Content-Type: text/plain; charset=x-klingon\r\nContent-Transfer-Encoding: x-rot13\r\n",
+				"from": "",
+				"to": "",
+				"cc": "",
+				"subject": "",
+				"date": "",
+				"message_id": "",
+				"in_reply_to": "",
+				"references": "",
+				"text_plain": "qapla",
+				"text_html": "",
+				"attachments": []
+			},
+			"header_values": {
+				"Subject": "",
+				"From": "",
+				"X-Spam": "",
+				"X-Spam-Flag": "",
+				"X-Spam-Score": "",
+				"X-Spam-Status": "",
+				"x-nonexistent": ""
+			},
+			"store": {
+				"fields": {
+					"iem_sender": "",
+					"iem_subject": "",
+					"iem_body_plain": "qapla",
+					"iem_body_html": "",
+					"iem_raw_headers": "Content-Type: text/plain; charset=x-klingon\r\nContent-Transfer-Encoding: x-rot13\r\n",
+					"iem_to": "",
+					"iem_cc": "",
+					"iem_attachment_manifest": ""
+				},
+				"parts": [],
+				"spam_headers": {
+					"x_spam": "",
+					"x_spam_flag": "",
+					"x_spam_score": "",
+					"x_spam_status": ""
+				},
+				"snippet_from_plain": "qapla"
+			}
+		},
+		{
+			"label": "a boundary that never appears",
+			"raw_b64": "Q29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PXp6DQoNCm5vIHBhcnRz",
+			"source": "a boundary that never appears",
+			"raw_sha256_hex": "a73cb889017a8c5326941dd76108a5ed566cc8d6f4acdfcf831ede04638fc168",
+			"parsed": {
+				"headers": "Content-Type: multipart/mixed; boundary=zz\r\n",
+				"from": "",
+				"to": "",
+				"cc": "",
+				"subject": "",
+				"date": "",
+				"message_id": "",
+				"in_reply_to": "",
+				"references": "",
+				"text_plain": "no parts",
+				"text_html": "",
+				"attachments": []
+			},
+			"header_values": {
+				"Subject": "",
+				"From": "",
+				"X-Spam": "",
+				"X-Spam-Flag": "",
+				"X-Spam-Score": "",
+				"X-Spam-Status": "",
+				"x-nonexistent": ""
+			},
+			"store": {
+				"fields": {
+					"iem_sender": "",
+					"iem_subject": "",
+					"iem_body_plain": "no parts",
+					"iem_body_html": "",
+					"iem_raw_headers": "Content-Type: multipart/mixed; boundary=zz\r\n",
+					"iem_to": "",
+					"iem_cc": "",
+					"iem_attachment_manifest": ""
+				},
+				"parts": [],
+				"spam_headers": {
+					"x_spam": "",
+					"x_spam_flag": "",
+					"x_spam_score": "",
+					"x_spam_status": ""
+				},
+				"snippet_from_plain": "no parts"
+			}
+		},
+		{
+			"label": "no Content-Type",
+			"raw_b64": "U3ViamVjdDogcw0KDQpib2R5",
+			"source": "no Content-Type",
+			"raw_sha256_hex": "281a9016d4f01c58a142e8608208d77d21c1069c28d41ce7cdc39159222e3b98",
+			"parsed": {
+				"headers": "Subject: s\r\n",
+				"from": "",
+				"to": "",
+				"cc": "",
+				"subject": "s",
+				"date": "",
+				"message_id": "",
+				"in_reply_to": "",
+				"references": "",
+				"text_plain": "body",
+				"text_html": "",
+				"attachments": []
+			},
+			"header_values": {
+				"Subject": "s",
+				"From": "",
+				"X-Spam": "",
+				"X-Spam-Flag": "",
+				"X-Spam-Score": "",
+				"X-Spam-Status": "",
+				"x-nonexistent": ""
+			},
+			"store": {
+				"fields": {
+					"iem_sender": "",
+					"iem_subject": "s",
+					"iem_body_plain": "body",
+					"iem_body_html": "",
+					"iem_raw_headers": "Subject: s\r\n",
+					"iem_to": "",
+					"iem_cc": "",
+					"iem_attachment_manifest": ""
+				},
+				"parts": [],
+				"spam_headers": {
+					"x_spam": "",
+					"x_spam_flag": "",
+					"x_spam_score": "",
+					"x_spam_status": ""
+				},
+				"snippet_from_plain": "body"
+			}
+		},
+		{
+			"label": "nesting past the depth cap",
+			"raw_b64": "Q29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMzkiDQoNCi0tZDM5DQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQzOCINCg0KLS1kMzgNCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDM3Ig0KDQotLWQzNw0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMzYiDQoNCi0tZDM2DQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQzNSINCg0KLS1kMzUNCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDM0Ig0KDQotLWQzNA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMzMiDQoNCi0tZDMzDQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQzMiINCg0KLS1kMzINCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDMxIg0KDQotLWQzMQ0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMzAiDQoNCi0tZDMwDQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQyOSINCg0KLS1kMjkNCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDI4Ig0KDQotLWQyOA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMjciDQoNCi0tZDI3DQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQyNiINCg0KLS1kMjYNCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDI1Ig0KDQotLWQyNQ0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMjQiDQoNCi0tZDI0DQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQyMyINCg0KLS1kMjMNCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDIyIg0KDQotLWQyMg0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMjEiDQoNCi0tZDIxDQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQyMCINCg0KLS1kMjANCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDE5Ig0KDQotLWQxOQ0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMTgiDQoNCi0tZDE4DQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQxNyINCg0KLS1kMTcNCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDE2Ig0KDQotLWQxNg0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMTUiDQoNCi0tZDE1DQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQxNCINCg0KLS1kMTQNCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDEzIg0KDQotLWQxMw0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMTIiDQoNCi0tZDEyDQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImQxMSINCg0KLS1kMTENCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZDEwIg0KDQotLWQxMA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkOSINCg0KLS1kOQ0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkOCINCg0KLS1kOA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkNyINCg0KLS1kNw0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkNiINCg0KLS1kNg0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkNSINCg0KLS1kNQ0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkNCINCg0KLS1kNA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMyINCg0KLS1kMw0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMiINCg0KLS1kMg0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMSINCg0KLS1kMQ0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMCINCg0KLS1kMA0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluDQoNCmlubmVybW9zdA0KLS1kMC0tDQotLWQxLS0NCi0tZDItLQ0KLS1kMy0tDQotLWQ0LS0NCi0tZDUtLQ0KLS1kNi0tDQotLWQ3LS0NCi0tZDgtLQ0KLS1kOS0tDQotLWQxMC0tDQotLWQxMS0tDQotLWQxMi0tDQotLWQxMy0tDQotLWQxNC0tDQotLWQxNS0tDQotLWQxNi0tDQotLWQxNy0tDQotLWQxOC0tDQotLWQxOS0tDQotLWQyMC0tDQotLWQyMS0tDQotLWQyMi0tDQotLWQyMy0tDQotLWQyNC0tDQotLWQyNS0tDQotLWQyNi0tDQotLWQyNy0tDQotLWQyOC0tDQotLWQyOS0tDQotLWQzMC0tDQotLWQzMS0tDQotLWQzMi0tDQotLWQzMy0tDQotLWQzNC0tDQotLWQzNS0tDQotLWQzNi0tDQotLWQzNy0tDQotLWQzOC0tDQotLWQzOS0tDQo=",
+			"source": "nesting past the depth cap",
+			"raw_sha256_hex": "8199891411f0d666831f792b77b08902f74dd498637aee59a7fab95fedf8aa76",
+			"parsed": {
+				"headers": "Content-Type: multipart/mixed; boundary=\"d39\"\r\n",
+				"from": "",
+				"to": "",
+				"cc": "",
+				"subject": "",
+				"date": "",
+				"message_id": "",
+				"in_reply_to": "",
+				"references": "",
+				"text_plain": "",
+				"text_html": "",
+				"attachments": [
+					{
+						"mime_part": "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1",
+						"filename": "",
+						"content_type": "multipart/mixed",
+						"content_id": "",
+						"inline": false,
+						"size": 609,
+						"sha256_hex": "84f34040ac4bd6935bd1ff7dc1a76f09d1e8c1e27c4102d422f068f4e8b1ef4d",
+						"bytes_b64": "LS1kOQ0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkOCINCg0KLS1kOA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkNyINCg0KLS1kNw0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkNiINCg0KLS1kNg0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkNSINCg0KLS1kNQ0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkNCINCg0KLS1kNA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMyINCg0KLS1kMw0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMiINCg0KLS1kMg0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMSINCg0KLS1kMQ0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvbWl4ZWQ7IGJvdW5kYXJ5PSJkMCINCg0KLS1kMA0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluDQoNCmlubmVybW9zdA0KLS1kMC0tDQotLWQxLS0NCi0tZDItLQ0KLS1kMy0tDQotLWQ0LS0NCi0tZDUtLQ0KLS1kNi0tDQotLWQ3LS0NCi0tZDgtLQ0KLS1kOS0t"
+					}
+				]
+			},
+			"header_values": {
+				"Subject": "",
+				"From": "",
+				"X-Spam": "",
+				"X-Spam-Flag": "",
+				"X-Spam-Score": "",
+				"X-Spam-Status": "",
+				"x-nonexistent": ""
+			},
+			"store": {
+				"fields": {
+					"iem_sender": "",
+					"iem_subject": "",
+					"iem_body_plain": "",
+					"iem_body_html": "",
+					"iem_raw_headers": "Content-Type: multipart/mixed; boundary=\"d39\"\r\n",
+					"iem_to": "",
+					"iem_cc": "",
+					"iem_attachment_manifest": "[{\"mime_part\":\"1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1\",\"filename\":\"\",\"content_type\":\"multipart/mixed\",\"content_id\":\"\",\"inline\":false,\"size\":609}]"
+				},
+				"parts": [
+					{
+						"mime_part": "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1",
+						"size": 609,
+						"inline": false
+					}
+				],
+				"spam_headers": {
+					"x_spam": "",
+					"x_spam_flag": "",
+					"x_spam_score": "",
+					"x_spam_status": ""
+				},
+				"snippet_from_plain": ""
+			}
+		},
+		{
+			"label": "empty input",
+			"raw_b64": "",
+			"source": "empty input",
+			"raw_sha256_hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"parsed": {
+				"headers": "",
+				"from": "",
+				"to": "",
+				"cc": "",
+				"subject": "",
+				"date": "",
+				"message_id": "",
+				"in_reply_to": "",
+				"references": "",
+				"text_plain": "",
+				"text_html": "",
+				"attachments": []
+			},
+			"header_values": {
+				"Subject": "",
+				"From": "",
+				"X-Spam": "",
+				"X-Spam-Flag": "",
+				"X-Spam-Score": "",
+				"X-Spam-Status": "",
+				"x-nonexistent": ""
+			},
+			"store": {
+				"fields": {
+					"iem_sender": "",
+					"iem_subject": "",
+					"iem_body_plain": "",
+					"iem_body_html": "",
+					"iem_raw_headers": "",
+					"iem_to": "",
+					"iem_cc": "",
+					"iem_attachment_manifest": ""
+				},
+				"parts": [],
+				"spam_headers": {
+					"x_spam": "",
+					"x_spam_flag": "",
+					"x_spam_score": "",
+					"x_spam_status": ""
+				},
+				"snippet_from_plain": ""
+			}
+		}
+	]
+}

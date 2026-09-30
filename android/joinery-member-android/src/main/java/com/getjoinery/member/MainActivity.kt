@@ -1,9 +1,9 @@
 package com.getjoinery.member
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.graphics.Color
+import androidx.fragment.app.FragmentActivity
 import com.getjoinery.android.EncryptedCredentialStore
 import com.getjoinery.android.JoineryAppRoot
 import com.getjoinery.android.JoineryConfig
@@ -15,8 +15,10 @@ import com.getjoinery.memberkit.JoineryMember
 /**
  * The Joinery member app: pure brand shell. All behavior lives in
  * joinery-android; this activity supplies configuration and mounts the root.
+ * A FragmentActivity so the biometric prompt that opens end-to-end encrypted
+ * mail can attach to it.
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

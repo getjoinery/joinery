@@ -139,6 +139,12 @@ File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (string $ciphe
 	if (!$msg->key) {
 		throw new VaultLockedException(); // dangling manifest row - nothing to open
 	}
+	// A Fortress part is ciphertext only its owner's devices open: a signed
+	// fetch (the phone apps') gets the stored bytes as they are, which the row
+	// already exposed (specs/fortress_mobile_apps.md § R4).
+	if (InboundEmailMessage::isBrowserSealed($msg)) {
+		return $ciphertext;
+	}
 	// openSealedAttachment() dispatches on the sealed shape — a plaintext File (a
 	// pre-vault attachment on a since-backfilled message) streams as-is.
 	return InboundEmailMessage::openSealedAttachment($msg, $att, $ciphertext, $file);
