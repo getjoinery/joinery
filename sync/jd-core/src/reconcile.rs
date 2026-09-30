@@ -481,6 +481,7 @@ mod tests {
             replaces: None,
             stand_in: None,
             own_file: None,
+            last_seen_sha: None,
             synced_remote_content: None,
             synced_content: Some(content(sha, 10)),
             synced_placement: Some(placement(None, name)),

@@ -322,6 +322,14 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         }
     };
 
+    // A file this op placed, moved or sent: the id it stands under now, on a
+    // volume whose ids may break a tie, so a swap before the next scan is
+    // still told apart (a download's bytes are otherwise an id short until
+    // then). Bookkeeping only: a failure here fails nothing.
+    if matches!(outcome, OpOutcome::Done) && op.entity.entity_type == EntityType::File {
+        let _ = the_tie_break_of_its_file(env, op.entity);
+    }
+
     match &outcome {
         OpOutcome::Done => {
             env.store.set_op_state(op.op_id, OpState::Done)?;
@@ -753,6 +761,7 @@ fn path_for(env: &ExecEnv, p: &Placement) -> Result<Placed, ExecError> {
         replaces: None,
         stand_in: None,
         own_file: None,
+        last_seen_sha: None,
     };
     local_path(env, &probe)
 }
@@ -1105,7 +1114,8 @@ fn follow_the_server_name(
         // never be hash-equal to a file, so one always takes the move-aside arm
         // below. On doubt — unreadable, or any error — move aside rather than
         // dispose. A duplicate is an annoyance; a wrong removal is loss.
-        let identical = match env.vfs.fingerprint(&to)? {
+        let blocker = env.vfs.fingerprint(&to)?;
+        let identical = match blocker {
             Some(fp) => {
                 let existing = match env
                     .store
@@ -1118,10 +1128,28 @@ fn follow_the_server_name(
             }
             None => false,
         };
-        if identical {
+        // Whose it is decides whether it may go to the trash. A record that
+        // has an agreement would read its file's absence as the user deleting
+        // it, and trash the server copy with it; only a file nobody owns, or
+        // one a never-sent record owns (forgotten in the same step), is
+        // disposable here (`specs/drive_file_ownership.md`, design 2).
+        let owners = match blocker {
+            Some(fp) => owners_here(env, &to, fp, true)?,
+            None => Vec::new(),
+        };
+        let disposable = owners
+            .iter()
+            .all(|o| o.id != id && o.id.is_provisional() && o.synced_placement.is_none());
+        if identical && disposable {
+            for o in &owners {
+                env.store.delete_subtree(o.id)?;
+            }
             env.vfs.trash(&to)?;
         } else {
             let aside = free_conflict_path(env, &to, &wanted.name, &[])?;
+            if let Some(fp) = blocker {
+                the_owner_follows_its_file(env, &to, fp, &aside, &format!("{}-blocker", id.server_id), Beside::InPlace)?;
+            }
             env.vfs.rename(&to, &aside)?;
             the_owner_follows_its_directory(env, &aside)?;
             env.store.raise_issue(
@@ -1256,17 +1284,86 @@ fn the_owner_follows_its_directory(env: &ExecEnv, aside: &std::path::Path) -> Re
 /// stands in for it and its bytes are known to be elsewhere): two holders is
 /// a question this cannot answer, and a held record's hold is not the
 /// engine's to lift.
+/// Where the engine is moving a file to, for a never-sent owner.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Beside {
+    /// Aside in the folder it stands in, to make room there. The record
+    /// follows only if that is the folder it says: a file carried into
+    /// another folder in the pass is followed by the next scan, which decides
+    /// again whether it goes up sealed and whether it is held there. Followed
+    /// here, a file saved in a vault and carried out was sent in the clear
+    /// (hostile2 74427).
+    InPlace,
+    /// A folder the engine chose itself -- the rescue out of a trashed folder.
+    Anywhere,
+}
+
+/// The file records that own the file `fp` standing at `path`: by its
+/// identity where the volume gives one; on a volume with no ids (FAT, exFAT)
+/// by its bytes -- every record whose last-seen or agreed bytes they are.
+/// More than one is the bytes naming nobody for certain: a caller that needs
+/// the one owner gets none, and one asking whether anybody owns it gets all
+/// (`specs/drive_weak_volume_identity.md`, inventory 5).
+pub(crate) fn owners_here(
+    env: &ExecEnv,
+    path: &std::path::Path,
+    fp: jd_vfs::Fingerprint,
+    live_only: bool,
+) -> Result<Vec<Entry>, ExecError> {
+    if fp.file_id != 0 {
+        return Ok(env.store.owners_of_file(fp.identity(), live_only)?);
+    }
+    if !env.vfs.personality().positional_file_ids {
+        return Ok(Vec::new());
+    }
+    const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    let here = env.vfs.hash(path)?;
+    if here == EMPTY_SHA256 {
+        return Ok(Vec::new());
+    }
+    Ok(env
+        .store
+        .every_entry()?
+        .into_iter()
+        .filter(|e| e.id.entity_type == EntityType::File && !(live_only && e.remote_deleted))
+        .filter(|e| {
+            e.last_seen_sha.as_deref() == Some(here.as_str())
+                || e.synced_content.as_ref().is_some_and(|c| c.sha256 == here)
+        })
+        .collect())
+}
+
 fn the_owner_follows_its_file(
     env: &ExecEnv,
-    here: jd_vfs::FileIdentity,
+    from: &std::path::Path,
+    fp: jd_vfs::Fingerprint,
     aside: &std::path::Path,
     key: &str,
+    beside: Beside,
 ) -> Result<(), ExecError> {
-    let mut owners = env.store.owners_of_file(here, true)?;
+    let here = fp.identity();
+    let mut owners = owners_here(env, from, fp, true)?;
     if owners.len() != 1 {
         return Ok(());
     }
     let mut owner = owners.remove(0);
+    // Never sent: there is no server file to move and no agreement to
+    // change. Its placement is where its file stands, so the record says the
+    // aside before the rename, and the file is never nobody's
+    // (`specs/drive_file_ownership.md`, design 2). Held outside its vault, it
+    // stays held where it lands: the hold is read from where it stands.
+    if owner.id.is_provisional() && owner.synced_placement.is_none() {
+        let Some(to) = aside_placement(env, aside)? else {
+            return Ok(());
+        };
+        if beside == Beside::InPlace && to.parent != owner.remote.parent {
+            return Ok(());
+        }
+        owner.remote = to;
+        owner.local_name = None;
+        env.store.put_entry(&owner)?;
+        return Ok(());
+    }
     if owner.synced_placement.is_none() || env.store.is_held_by_a_provisional(owner.id)? {
         return Ok(());
     }
@@ -1284,31 +1381,23 @@ fn the_owner_follows_its_file(
     // 75100: a download of the record the user traded it with landed there).
     if !crate::pass::held_outside_its_vault(env, &owner)? {
         if let Placed::At(home) = local_path(env, &owner)? {
-            if env.vfs.fingerprint(&home)?.is_some_and(|fp| fp.identity() == here) {
+            // With no ids, the slot itself: its own path, in any spelling
+            // the volume folds together.
+            let same = if here.file_id == 0 {
+                home == from
+                    || jd_vfs::nfc(&home.to_string_lossy()).to_lowercase()
+                        == jd_vfs::nfc(&from.to_string_lossy()).to_lowercase()
+            } else {
+                env.vfs.fingerprint(&home)?.is_some_and(|fp| fp.identity() == here)
+            };
+            if same {
                 return Ok(());
             }
         }
     }
-    let (Some(root), Some(dir)) = (env.vfs.root(), aside.parent()) else {
+    let Some(to) = aside_placement(env, aside)? else {
         return Ok(());
     };
-    let parent = if dir == root.as_path() {
-        None
-    } else {
-        let Some(dir_id) = env.vfs.directory_id(dir)?.filter(|id| *id != 0) else {
-            return Ok(());
-        };
-        let folders = env.store.live_holders_of(EntityType::Folder, dir_id)?;
-        let [folder] = folders.as_slice() else {
-            return Ok(());
-        };
-        Some(folder.id.server_id)
-    };
-    let name = aside
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let to = Placement { parent, name };
     owner.synced_placement = Some(to.clone());
     owner.local_name = None;
     // A sealed file whose file now stands outside its vault is HELD there, not
@@ -1333,6 +1422,59 @@ fn the_owner_follows_its_file(
     );
     env.store.agree_and_owe_move(&owner, &to, &owed_key)?;
     Ok(())
+}
+
+/// Where a file moved aside now stands, as a placement: its folder read by
+/// the directory's identity. `None` when no single live folder record holds
+/// that directory, and then nothing follows.
+fn aside_placement(env: &ExecEnv, aside: &std::path::Path) -> Result<Option<Placement>, ExecError> {
+    let (Some(root), Some(dir)) = (env.vfs.root(), aside.parent()) else {
+        return Ok(None);
+    };
+    let parent = if dir == root.as_path() {
+        None
+    } else {
+        match env.vfs.directory_id(dir)?.filter(|id| *id != 0) {
+            Some(dir_id) => {
+                let folders = env.store.live_holders_of(EntityType::Folder, dir_id)?;
+                let [folder] = folders.as_slice() else {
+                    return Ok(None);
+                };
+                Some(folder.id.server_id)
+            }
+            // A volume with no directory identities: the records decide, as
+            // they do for a folder's own move. Asked of the id alone, nothing
+            // followed on a FAT disk, and a sealed file held outside its vault
+            // and set aside for a download was minted as a new PLAIN file and
+            // went up in the clear (FAT linux hostile2 74403).
+            None if env.vfs.personality().positional_file_ids => {
+                let mut holders = Vec::new();
+                for other in env.store.every_entry()? {
+                    if other.id.entity_type != EntityType::Folder
+                        || other.remote_deleted
+                        || (other.synced_placement.is_none() && other.stand_in.is_none())
+                    {
+                        continue;
+                    }
+                    if let Placed::At(theirs) = local_path(env, &other)? {
+                        if theirs == dir {
+                            holders.push(other.id.server_id);
+                        }
+                    }
+                }
+                let [folder] = holders.as_slice() else {
+                    return Ok(None);
+                };
+                Some(*folder)
+            }
+            None => return Ok(None),
+        }
+    };
+    let name = aside
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    Ok(Some(Placement { parent, name }))
 }
 
 pub(crate) fn make_room(
@@ -1390,7 +1532,7 @@ pub(crate) fn make_room(
     // very state this exists to prevent. (A directory's owner reads the
     // directory at the aside, so it follows after.)
     if let Some(fp) = env.vfs.fingerprint(path)? {
-        the_owner_follows_its_file(env, fp.identity(), &aside, key)?;
+        the_owner_follows_its_file(env, path, fp, &aside, key, Beside::InPlace)?;
     }
     env.vfs.rename(path, &aside)?;
     the_owner_follows_its_directory(env, &aside)?;
@@ -1648,6 +1790,9 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             // operation's to overwrite: the scan meets it as a conflict, which
             // keeps both copies. The same three-way answer the refusal arm
             // below gives, asked before the write rather than after it.
+            if let Some(fp) = env.vfs.fingerprint(&path)? {
+                record_a_file_found_landing(env, &entry, &path, fp)?;
+            }
             return Ok(OpOutcome::Overtaken(
                 "the file standing here is not the one this download was decided against".into(),
             ));
@@ -1745,7 +1890,18 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                     .unwrap_or(entry.head_change_id);
                 entry.synced_remote_content = entry.is_encrypted.then(|| arrived.cipher.clone());
                 agree(&mut entry, Some(arrived.plain), Some(fp));
-                env.store.put_entry(&entry)?;
+                // The file here may have a record of its own: saved at this
+                // slot and never sent, waiting for this download. The same
+                // bytes make it this download's own -- its own earlier
+                // placement, or its own upload whose answer was lost -- and it
+                // is handed over in the same step, never owned by both
+                // (`specs/drive_file_ownership.md`, design 1b).
+                let waiting: Vec<EntityId> = owners_here(env, &path, fp, true)?
+                    .into_iter()
+                    .filter(|o| o.id != entry.id && o.id.is_provisional() && o.synced_placement.is_none())
+                    .map(|o| o.id)
+                    .collect();
+                env.store.put_and_forget(&entry, &waiting)?;
                 env.store.cache_hash(
                     fp,
                     &here,
@@ -1773,7 +1929,8 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             }
 
             // Neither what arrived nor what was agreed: a real edit nobody has
-            // seen. Leave it for the scan, which meets it as a conflict.
+            // seen. Recorded now, and the scan meets it as a conflict.
+            record_a_file_found_landing(env, &entry, &path, fp)?;
             return Ok(OpOutcome::Overtaken(
                 "the file changed here while it was downloading".into(),
             ));
@@ -1830,6 +1987,16 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     if as_new.is_none() && entry.remote_deleted {
         return Ok(OpOutcome::Overtaken(
             "the server deleted it while this upload was in flight".into(),
+        ));
+    }
+    // A never-sent record whose file was set aside since this was planned:
+    // its record says the aside now, and this upload was decided for the
+    // place it left. It stands down and the next pass decides from where the
+    // file stands (`specs/drive_file_ownership.md`, design 2). Sent anyway,
+    // the bytes went up under the name planned for the place it left.
+    if entry.id.is_provisional() && as_new.as_ref().is_some_and(|p| *p != entry.remote) {
+        return Ok(OpOutcome::Overtaken(
+            "the file was set aside since this upload was planned; deciding again from where it stands".into(),
         ));
     }
     // Where the bytes are on this computer.
@@ -1916,6 +2083,20 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     // file is not this record's to send: a file swapped onto its path went up
     // as its next version, and the file itself stood elsewhere, minted new.
     let own = trusted_own_file(env, &entry);
+    // Without births, a record never sent knows its file by the id it was
+    // minted for, and the scan reads it so (`never_sent_own_id`). The upload
+    // asks the same: sent by its path, a file a swap carried there went up as
+    // this record, and the record whose file it was, seeing that copy at
+    // home, took the file here as its edit (plain2 75204;
+    // `specs/drive_file_ownership.md`, 2b).
+    // Not on a volume whose ids are only positions: every id is 0 there, and
+    // an id a record kept from before the volume was read that way names
+    // nothing (it refused every upload, for ever).
+    let own_id = own
+        .is_none()
+        .then(|| never_sent_own_id(&entry))
+        .flatten()
+        .filter(|_| !env.vfs.personality().positional_file_ids);
     let mut not_its_own = false;
     let mut vetoed = false;
     let mut found = None;
@@ -1937,7 +2118,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             // file's whatever the path holds by the time they are read.
             Placed::At(path) => {
                 if let Some((reader, fp)) = env.vfs.open_file(&path)? {
-                    if own.is_some_and(|own| fp.identity() != own) {
+                    if own.is_some_and(|own| fp.identity() != own) || own_id.is_some_and(|id| fp.file_id != id) {
                         not_its_own = true;
                         continue;
                     }
@@ -1998,9 +2179,10 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         // Unless it knows its own file: then the file may simply have moved,
         // and forgetting the record here is how a file saved in a vault and
         // carried out of it was minted again as a new plain one and sent in
-        // the clear. The next scan finds it by its identity wherever it is, or
-        // reads it gone and forgets the record then.
-        if op.entity.is_provisional() && own.is_some() {
+        // the clear. The next scan finds it by its identity wherever it is --
+        // on a disk without births, by the id it was minted for -- or reads it
+        // gone and forgets the record then (`specs/drive_file_ownership.md`).
+        if op.entity.is_provisional() && entry.own_file.is_some() {
             return Ok(OpOutcome::Overtaken(
                 "the file is not where this upload looked; deciding again from what is there now".into(),
             ));
@@ -2032,6 +2214,21 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             s
         }
     };
+
+    // On a volume that cannot say which file is which, what is sent must be
+    // the file the plan was made from: the bytes the scan that planned this
+    // saw (`last_seen_sha`). A swap between that scan and this upload put
+    // another file here, and its bytes went up as this record's version, or
+    // under its name (kill2 75100, 75122; rule U,
+    // `specs/drive_weak_volume_identity.md`). A file edited since is not
+    // sent either; the next scan reads it as it stands.
+    if !env.vfs.personality().stable_file_identity
+        && entry.last_seen_sha.as_deref().is_some_and(|planned| planned != sha)
+    {
+        return Ok(OpOutcome::Overtaken(
+            "the file here is not the one this upload was planned from; deciding again from what is there now".into(),
+        ));
+    }
 
     // Name and destination folder come from the same decision, because the name
     // was chosen for that folder and means nothing anywhere else. A rescue name
@@ -2304,10 +2501,24 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             // forever-loop, but it is a real cost and the cap of two is what
             // bounds it.
             Err(e) if e.refused_without_saying_why() && !entry.is_encrypted && attempt < 2 => {
+                // A conflict name this device already knows the server holds
+                // is no attempt at all: it earns the same refusal, and with a
+                // cap of two a folder already holding the first two such names
+                // was never left (hostile2 74400 on a stick). Skipped, the two
+                // attempts are spent on names that may be free.
+                let taken = names_the_server_has(env, placement.parent)?;
                 attempt += 1;
-                params.name = (env.conflict_name)(&placement.name, attempt);
+                let mut n = attempt;
+                loop {
+                    let candidate = (env.conflict_name)(&placement.name, n);
+                    if !taken.iter().any(|t| *t == candidate) || n > attempt + 1000 {
+                        params.name = candidate;
+                        break;
+                    }
+                    n += 1;
+                }
                 params.idempotency_key =
-                    Some(format!("{}-n{attempt}", op.idempotency_key));
+                    Some(format!("{}-n{attempt}-{}", op.idempotency_key, n));
             }
             Err(e) => return Err(e.into()),
         }
@@ -2354,6 +2565,15 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     // server are still a real version of it, so nothing is wrong — but calling
     // this the agreed state would mean the newer content never gets sent.
     let settled = env.vfs.fingerprint(&path)?.filter(|fp| *fp == fingerprint);
+    // Without ids a fingerprint is size and a two-second time, which a
+    // same-sized file swapped in while this went up matches: agreed only when
+    // the bytes here are still the ones sent.
+    let settled = match settled {
+        Some(_) if !env.vfs.personality().stable_file_identity => {
+            settled.filter(|_| env.vfs.hash(&path).is_ok_and(|now| now == sha))
+        }
+        other => other,
+    };
 
     let mut entry = entry;
     let target = EntityId {
@@ -2734,6 +2954,20 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
             "the file here is another file; deciding again from what is there now".into(),
         ));
     }
+    // Killed after the records below were written and before the rename: the
+    // copy's record already owns this file. The step is finished by renaming
+    // it to where that record says it is, never by minting a second record.
+    if let Some(copy) = owners_here(env, &from, here, true)?
+        .into_iter()
+        .find(|o| o.id != entry.id && o.id.is_provisional() && o.synced_placement.is_none())
+    {
+        if let Placed::At(to) = path_for(env, &copy.remote)? {
+            if nothing_at(env, &to)? {
+                env.vfs.rename(&from, &to)?;
+            }
+        }
+        return Ok(OpOutcome::Done);
+    }
     // The name came from the plan, which can see neither the disk nor the
     // server. Something already at this path is an earlier rescue of this same
     // file, and renaming over it would destroy the copy that rescue was for.
@@ -2746,9 +2980,8 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
     } else {
         to
     };
-    env.vfs.rename(&from, &to)?;
 
-    // Where it actually went, which is not always where the plan said. When the
+    // Where it is going, which is not always where the plan said. When the
     // planned path was occupied the search above picked another one, and an
     // entry recorded under the planned name would claim a name that is already
     // somebody else's — the earlier rescue's, which by now is a real file on the
@@ -2793,19 +3026,46 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         stand_in: None,
         // The file renamed aside is the one this copy stands for: its own
         // file, handed over, never copied -- two records owning one file is
-        // not a hard link, and nothing could tell them apart.
-        own_file: entry.own_file,
+        // not a hard link, and nothing could tell them apart. Read from the
+        // file itself, so a replay after a kill finds this record by it.
+        own_file: Some(here.identity()),
+        last_seen_sha: Some(env.vfs.hash(&from)?),
     };
-    env.store.put_entry(&rescued)?;
-
-    // The original entry now has no local file; the download of the winning
-    // content is a separate op in the same round.
+    // The original entry has no local file from here on; the download of the
+    // winning content is a separate op in the same round. Both records are
+    // written, as one step, BEFORE the rename: a kill in between leaves the
+    // file where it was, owned by the copy's record, and the replay above
+    // finishes the rename (`specs/drive_file_ownership.md`, design 2).
     let mut entry = entry;
     entry.synced_fingerprint = None;
     entry.own_file = None;
     entry.status = LocalStatus::PendingDownload;
-    env.store.put_entry(&entry)?;
+    env.store.put_entries(&[&rescued, &entry])?;
+    env.vfs.rename(&from, &to)?;
+    let _ = record_tie_break(env, rescued.id, &to);
     Ok(OpOutcome::Done)
+}
+
+/// Record the tie-break id of the file standing at `path` for `entity`, in
+/// this mount session, where the volume's ids may break a tie at all.
+fn record_tie_break(env: &ExecEnv, entity: EntityId, path: &std::path::Path) -> Result<(), ExecError> {
+    if env.vfs.personality().id_tie_break == jd_vfs::IdTieBreak::None {
+        return Ok(());
+    }
+    let id = env.vfs.tie_break_id(path)?;
+    env.store.set_tie_break(entity, id, env.store.mount_session()?)?;
+    Ok(())
+}
+
+fn the_tie_break_of_its_file(env: &ExecEnv, entity: EntityId) -> Result<(), ExecError> {
+    if env.vfs.personality().id_tie_break == jd_vfs::IdTieBreak::None {
+        return Ok(());
+    }
+    let Some(entry) = env.store.get_entry(entity)? else { return Ok(()) };
+    if let Placed::At(path) = local_path(env, &entry)? {
+        record_tie_break(env, entity, &path)?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -3447,6 +3707,25 @@ fn move_remote(
             "the folder it was going into has changed since this was planned".into(),
         ));
     }
+    // On a volume that cannot say which file is which, a move is only this
+    // record's if the file where it went is not identifiably another's: a
+    // swap back after the scan leaves another record's file at the
+    // destination, and moving the server's copy there names that file with
+    // this record (plain2 75201; rule U, `specs/drive_weak_volume_identity.md`).
+    // Its bytes decide, and only another record's: an edit made since the
+    // scan is still this file, moved, and the next scan reads the edit.
+    if op.entity.entity_type == EntityType::File && !env.vfs.personality().stable_file_identity {
+        if let Placed::At(dest) = path_for(env, &to)? {
+            if env.vfs.fingerprint(&dest)?.is_some() {
+                let here = env.vfs.hash(&dest)?;
+                if bytes_of_another_record(env, entry.id, &here)? {
+                    return Ok(OpOutcome::Overtaken(
+                        "the file where it was moved is another file; deciding again from what is there now".into(),
+                    ));
+                }
+            }
+        }
+    }
     let t = op.entity.entity_type.to_string();
 
     // Rename and reparent are separate calls, and a crash between them leaves
@@ -3695,8 +3974,19 @@ fn move_remote(
                         "the name is spoken for by something this device is renaming".into(),
                     ));
                 }
+                // As the upload does: a conflict name this device already
+                // knows the server holds earns the same refusal, and two such
+                // tries were the whole budget (kill2 75104 on a stick).
+                let taken = names_the_server_has(env, to.parent)?;
                 attempt += 1;
-                wanted = (env.conflict_name)(&to.name, attempt);
+                let mut n = attempt;
+                wanted = loop {
+                    let candidate = (env.conflict_name)(&to.name, n);
+                    if !taken.iter().any(|t| *t == candidate) || n > attempt + 1000 {
+                        break candidate;
+                    }
+                    n += 1;
+                };
             }
             Err(e) => return Err(e),
         }
@@ -3992,6 +4282,21 @@ fn move_local(
             return Ok(why.outcome());
         }
     };
+    // On a volume with no file ids the file standing at the path is this
+    // record's only as far as its bytes say. Saved over mid-pass and taken up
+    // as another record's file (a landing, a creation) before this move ran,
+    // it is that record's now, and moving it along with this one carried the
+    // other record's file into this one's new folder (FAT plat3 75419).
+    if op.entity.entity_type == EntityType::File && env.vfs.personality().positional_file_ids {
+        if let Some(fp) = env.vfs.fingerprint(&from)? {
+            let owners = owners_here(env, &from, fp, true)?;
+            if !owners.is_empty() && !owners.iter().any(|o| o.id == entry.id) {
+                return Ok(OpOutcome::Overtaken(
+                    "the file here is another record's now; deciding again from what is there".into(),
+                ));
+            }
+        }
+    }
     let dest = match path_for(env, &to)? {
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
@@ -4546,6 +4851,25 @@ fn unmaterialize_and_park(
                 }
             }
         };
+        // WP2's row 4, which this arm never asked: the directory at the agreed
+        // path is not this record's, but is this record's own directory
+        // standing somewhere else? Then the folder was moved, and the next
+        // pass re-derives that rename by directory identity (C12). It is
+        // parked, not disowned: a scratch local name takes it out of the
+        // contest, and its placement and directory identity stay. Disowned,
+        // its directory stood on with no record, was minted as a new plain
+        // folder, and a vault's sealed file inside went up in the clear
+        // (hostile2 74424; Defect AF's family).
+        if disown {
+            if let Some(mine) = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0) {
+                let (_, dir_identity) = crate::pass::observed_dirs(env)?;
+                if dir_identity.values().any(|id| *id == mine) {
+                    entry.local_name = Some(crate::order::swap_name(&op.idempotency_key));
+                    env.store.put_entry(&entry)?;
+                    return Ok(OpOutcome::Done);
+                }
+            }
+        }
         if disown {
             entry.synced_placement = None;
             entry.synced_fingerprint = None;
@@ -4625,16 +4949,19 @@ fn unmaterialize_and_park(
         // What the records say the server already holds, for the copies that
         // are actually in here. Gathered before anything moves, because the
         // rescue below asks it about files whose folder is on its way out.
-        let mut agreed_here: std::collections::HashMap<u64, jd_vfs::Fingerprint> =
-            std::collections::HashMap::new();
+        let mut agreed_here = AgreedHere::default();
         for under in &inside {
             // Files only, said so: a folder record carries its directory's
             // id in the same slot, and this map is keyed by file inode.
-            if under.id.entity_type != EntityType::File || under.synced_content.is_none() {
+            if under.id.entity_type != EntityType::File {
                 continue;
             }
-            if let Some(fingerprint) = under.synced_fingerprint {
-                agreed_here.insert(fingerprint.file_id, fingerprint);
+            let Some(content) = under.synced_content.as_ref() else {
+                continue;
+            };
+            agreed_here.contents.insert(content.sha256.clone());
+            if let Some(fingerprint) = under.synced_fingerprint.filter(|f| f.file_id != 0) {
+                agreed_here.by_id.insert(fingerprint.file_id, fingerprint);
             }
         }
         if env.vfs.read_dir(&path).is_ok() {
@@ -4876,10 +5203,20 @@ fn summarise(names: &[String]) -> String {
 /// Anything this cannot vouch for is treated as not uploaded. Being wrong that
 /// way costs a spare copy beside the folder; being wrong the other way costs
 /// the file.
+/// What the records say the server already holds for the files of a folder
+/// on its way out: by disk id, and by agreed content for a volume that has no
+/// ids (`positional_file_ids`).
+#[derive(Default)]
+struct AgreedHere {
+    by_id: std::collections::HashMap<u64, jd_vfs::Fingerprint>,
+    contents: std::collections::HashSet<String>,
+}
+
 fn is_on_the_server(
     env: &ExecEnv,
+    path: &std::path::Path,
     child: &jd_vfs::DirEntry,
-    agreed_here: &std::collections::HashMap<u64, jd_vfs::Fingerprint>,
+    agreed_here: &AgreedHere,
 ) -> Result<bool, ExecError> {
     // Files only. A directory's listing entry carries a fingerprint too now
     // (its identity, with size and mtime zeroed), and comparing that against
@@ -4893,6 +5230,13 @@ fn is_on_the_server(
     let Some(fp) = child.fingerprint else {
         return Ok(false);
     };
+    // No id to know the file by, so it is known by its bytes: on the server
+    // when they are what a record in this folder agreed on. A folder's worth
+    // of hashing, once, on a FAT or exFAT volume only.
+    if fp.file_id == 0 {
+        let here = env.vfs.hash(path)?;
+        return Ok(agreed_here.contents.contains(&here));
+    }
     // A file held outside its vault is on the server only sealed, in the
     // vault -- never at this path. Trashed with this folder, the user's copy
     // would go and the scan would then read its absence as a delete of the
@@ -4913,7 +5257,7 @@ fn is_on_the_server(
     // Callers that already know the subtree pass what its entries say. The same
     // freshness test still has to pass, so an edit nobody has uploaded is still
     // work worth saving.
-    if let Some(recorded) = agreed_here.get(&fp.file_id) {
+    if let Some(recorded) = agreed_here.by_id.get(&fp.file_id) {
         if fp.unchanged_from(recorded, &env.vfs.personality()) {
             return Ok(true);
         }
@@ -4949,7 +5293,7 @@ fn rescue_unsynced(
     env: &ExecEnv,
     folder: &std::path::Path,
     into: &std::path::Path,
-    agreed_here: &std::collections::HashMap<u64, jd_vfs::Fingerprint>,
+    agreed_here: &AgreedHere,
     sealed: bool,
     sealed_dirs: &std::collections::HashSet<PathBuf>,
     refused: &mut Vec<String>,
@@ -4982,7 +5326,7 @@ fn rescue_unsynced(
                 )?);
             }
             jd_vfs::EntryKind::File => {
-                if is_on_the_server(env, &child, agreed_here)? {
+                if is_on_the_server(env, &path, &child, agreed_here)? {
                     continue;
                 }
                 // A rescue carries a file OUT of the folder it was in and lets
@@ -5017,39 +5361,50 @@ fn rescue_unsynced(
                 } else {
                     free_conflict_path(env, &plain, &child.name, &[])?
                 };
-                env.vfs.rename(&path, &to)?;
                 // A file held outside its vault keeps its record: the record
                 // follows it out and stays held where it lands. Left behind,
-                // the scan would mint these bytes as a new PLAIN file.
+                // the scan would mint these bytes as a new PLAIN file. A
+                // never-sent record follows too. Both are written before the
+                // rename, so the file is never nobody's
+                // (`specs/drive_file_ownership.md`, design 2). An established
+                // record here is one the server spared: its file is found by
+                // its identity at the next scan, and no server move is owed.
+                let mut held = None;
                 if let Some(fp) = child.fingerprint {
-                    let mut held = None;
-                    for h in env.store.owners_of_file(fp.identity(), true)? {
+                    let mut follows = false;
+                    for h in owners_here(env, &path, fp, true)? {
                         if crate::pass::held_outside_its_vault(env, &h)? {
                             held = Some(h.id);
+                            follows = true;
+                        } else if h.id.is_provisional() && h.synced_placement.is_none() {
+                            follows = true;
                         }
                     }
-                    if let Some(id) = held {
-                        the_owner_follows_its_file(env, fp.identity(), &to, "rescue")?;
-                        let name = to
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        let where_to = match env.vfs.root().and_then(|r| into.strip_prefix(&r).ok().map(PathBuf::from)) {
-                            Some(rel) if !rel.as_os_str().is_empty() => rel.display().to_string(),
-                            _ => "the top of your drive".to_string(),
-                        };
-                        env.store.raise_issue(
-                            Some(id),
-                            "rescued_from_trash",
-                            &format!(
-                                "The folder {name} was in was deleted on the server, so it was \
-                                 moved to {where_to}. It is still encrypted on the server and kept \
-                                 only on this device until you move it back into the vault."
-                            ),
-                            (env.now_ms)() as i64,
-                        )?;
-                        continue;
+                    if follows {
+                        the_owner_follows_its_file(env, &path, fp, &to, "rescue", Beside::Anywhere)?;
                     }
+                }
+                env.vfs.rename(&path, &to)?;
+                if let Some(id) = held {
+                    let name = to
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let where_to = match env.vfs.root().and_then(|r| into.strip_prefix(&r).ok().map(PathBuf::from)) {
+                        Some(rel) if !rel.as_os_str().is_empty() => rel.display().to_string(),
+                        _ => "the top of your drive".to_string(),
+                    };
+                    env.store.raise_issue(
+                        Some(id),
+                        "rescued_from_trash",
+                        &format!(
+                            "The folder {name} was in was deleted on the server, so it was \
+                             moved to {where_to}. It is still encrypted on the server and kept \
+                             only on this device until you move it back into the vault."
+                        ),
+                        (env.now_ms)() as i64,
+                    )?;
+                    continue;
                 }
                 rescued.push(child.name.clone());
             }
@@ -5126,12 +5481,9 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
         env.store.forget_entry(id)?;
     }
 
-    if real.is_empty() {
-        env.store.forget_entry(root)?;
-        return Ok(());
-    }
-
-    let answers = crate::pass::stat_all(env, &real)?;
+    // With nothing real under it there is nothing to ask the server, but a
+    // held file placed here on this disk is still asked after below.
+    let answers = if real.is_empty() { Default::default() } else { crate::pass::stat_all(env, &real)? };
     // A SEALED record whose file is still on this disk is not disownable,
     // whatever the server says about the entity. The believed path cannot
     // answer that -- a folder-name trade moves the file without the engine
@@ -5166,6 +5518,57 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
             .and_then(|e| e.own_file_id())
             .is_some_and(|id| still_here.contains(&id)))
     };
+    // A child the user moved out of the folder before the server's delete
+    // reached this device: its own file stands outside the folder. Its
+    // record goes with the folder, and the file gets a record of its own
+    // where it stands, sent as new -- it is never left without one.
+    // Forgotten with nothing in its place, a swap carried it onto another
+    // record's path, where it read as that record's edit (hostile2 74414;
+    // `specs/drive_file_ownership.md`, E1b). Known by its own id, or on a
+    // volume with no ids by its bytes, held by that record alone.
+    let on_disk = crate::pass::observe(env)?;
+    let positional = env.vfs.personality().positional_file_ids;
+    let under = |path: &str, dir: &str| path.starts_with(&format!("{dir}/"));
+    let folder_path = match env.store.get_entry(root)? {
+        Some(r) => crate::pass::relative_path(env, &r)?,
+        None => None,
+    };
+    let everyone = env.store.every_entry()?;
+    let moved_out = |id: &EntityId| -> Result<Option<crate::scan::ObservedFile>, ExecError> {
+        let (Some(e), Some(dir)) = (env.store.get_entry(*id)?, folder_path.as_deref()) else {
+            return Ok(None);
+        };
+        if e.id.entity_type != EntityType::File {
+            return Ok(None);
+        }
+        let by_id = e.own_file_id().filter(|id| *id != 0);
+        // By bytes only when they are this record's alone, as everywhere in
+        // layer 1: another record's file with the same bytes (a copy the
+        // user made) is that record's, and minting a second record for it
+        // would give one file two (a5's B3).
+        let by_bytes = e
+            .last_seen_sha
+            .clone()
+            .or(e.synced_content.as_ref().map(|c| c.sha256.clone()))
+            .filter(|sha| {
+                everyone.iter().filter(|r| {
+                    r.id.entity_type == EntityType::File
+                        && (r.last_seen_sha.as_deref() == Some(sha.as_str())
+                            || r.synced_content.as_ref().is_some_and(|c| &c.sha256 == sha))
+                }).count() == 1
+            });
+        let hits: Vec<&crate::scan::ObservedFile> = on_disk
+            .iter()
+            .filter(|o| match by_id {
+                Some(id) => o.fingerprint.file_id == id,
+                None => positional && by_bytes.as_deref() == Some(o.sha256.as_str()),
+            })
+            .collect();
+        Ok(match hits.as_slice() {
+            [o] if !under(&o.path, dir) => Some((*o).clone()),
+            _ => None,
+        })
+    };
     // The names of what was kept, for the user and for the reset's reading
     // of this belt (R8: a belt reports the shape it fired on). Raised once
     // below, on the folder.
@@ -5199,11 +5602,66 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
         .filter(|(_, state)| state.deleted)
         .map(|(id, _)| *id)
         .collect();
+    // A sealed file held outside its vault (D1) in this folder. Its server
+    // side is in its vault, so the folder's subtree does not list it, and
+    // forgotten under it the held record named a folder with no record: no
+    // path, out of every scan, while its file stood on. A trade had carried
+    // that file onto a plain record's path, it read as that record's edit,
+    // and its sealed bytes went up as that record's version (hidden kill2
+    // 75129). Moved out, it follows its file, still held, as a moved-out
+    // child gets a record where it stands; still inside, or found nowhere,
+    // it keeps the folder's record, as a kept sealed child does.
+    let doomed_folders: std::collections::HashSet<i64> = env
+        .store
+        .subtree_ids(root)?
+        .into_iter()
+        .filter(|id| id.entity_type == EntityType::Folder)
+        .map(|id| id.server_id)
+        .collect();
+    for held in &everyone {
+        if held.id.entity_type != EntityType::File
+            || held.remote_deleted
+            || !held.synced_placement.as_ref().is_some_and(|p| p.parent.is_some_and(|f| doomed_folders.contains(&f)))
+            || !crate::pass::held_outside_its_vault(env, held)?
+        {
+            continue;
+        }
+        if let (Some(file), Some(root_dir)) = (moved_out(&held.id)?, env.vfs.root()) {
+            if let Some(placement) = aside_placement(env, &root_dir.join(&file.path))?
+                .filter(|p| !p.parent.is_some_and(|f| doomed_folders.contains(&f)))
+            {
+                let mut follows = held.clone();
+                follows.synced_placement = Some(placement);
+                follows.local_name = None;
+                env.store.put_entry(&follows)?;
+                crate::pass::say_it_is_held(env, &follows)?;
+                continue;
+            }
+        }
+        kept_a_child = true;
+        kept.push(held.effective_local_name().to_string());
+    }
     for id in real {
         if gone.contains(&id) {
             if keep(&id)? {
                 kept_a_child = true;
                 continue;
+            }
+            if let (Some(file), Some(root_dir)) = (moved_out(&id)?, env.vfs.root()) {
+                if let Some(placement) = aside_placement(env, &root_dir.join(&file.path))? {
+                    let mut found = crate::pass::blank(EntityId::file(env.store.next_provisional_id()?), &placement);
+                    found.own_file = Some(file.fingerprint.identity()).filter(|i| i.file_id != 0);
+                    found.last_seen_sha = Some(file.sha256.clone());
+                    found.is_encrypted = crate::pass::parent_is_encrypted(env, placement.parent)?;
+                    if found.is_encrypted && env.vault.is_none() {
+                        found.status = LocalStatus::PendingKey;
+                    }
+                    if let Some(mut old) = env.store.get_entry(id)? {
+                        old.own_file = None;
+                        env.store.put_entry(&old)?;
+                    }
+                    env.store.put_entry(&found)?;
+                }
             }
             env.store.forget_entry(id)?;
         }
@@ -5295,6 +5753,14 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 path.display(),
             )));
         }
+    } else if op.entity.entity_type == EntityType::File && !its_agreed_file_is_here(env, &entry, &path)? {
+        // Where the disk cannot say which file is the record's own, the bytes
+        // say it, as the download's last gate reads them: on a disk without
+        // births the path's word trashed the file the swap had put there.
+        return Ok(OpOutcome::Overtaken(format!(
+            "{} is not the file the server deleted; deciding again from what is there now",
+            path.display(),
+        )));
     }
     if op.entity.entity_type == EntityType::Folder {
         // A file standing at the folder's path is not the folder. The folder
@@ -5378,11 +5844,27 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         if let Some(parent) = path.parent() {
             let sealed_dirs = sealed_folder_dirs(env)?;
             let mut refused: Vec<String> = Vec::new();
+            // No ids to go on (a FAT or exFAT volume): what the server held
+            // here is known by the bytes its records agreed on. The server
+            // took them with the folder, so deleted records count.
+            let mut agreed_here = AgreedHere::default();
+            if env.vfs.personality().positional_file_ids {
+                for e in env.store.every_entry()? {
+                    if e.id.entity_type == EntityType::File
+                        && !e.id.is_provisional()
+                        && local_chain_passes(env, &e, entry.id.server_id)?
+                    {
+                        if let Some(c) = e.synced_content.as_ref() {
+                            agreed_here.contents.insert(c.sha256.clone());
+                        }
+                    }
+                }
+            }
             let rescued = rescue_unsynced(
                 env,
                 &path,
                 parent,
-                &std::collections::HashMap::new(),
+                &agreed_here,
                 entry.is_encrypted,
                 &sealed_dirs,
                 &mut refused,
@@ -5744,6 +6226,7 @@ fn takes_the_uploaded_file(env: &ExecEnv, real: &Entry) -> Result<bool, ExecErro
 /// describes is a change the engine will never look for again.
 fn agree(entry: &mut Entry, content: Option<ContentId>, fingerprint: Option<jd_vfs::Fingerprint>) {
     entry.synced_placement = Some(entry.remote.clone());
+    let bytes_given = content.is_some();
     if content.is_some() {
         entry.synced_content = content;
     }
@@ -5754,7 +6237,15 @@ fn agree(entry: &mut Entry, content: Option<ContentId>, fingerprint: Option<jd_v
     // upload sent, or the one a download placed (read at the committed
     // target, never from the spool, which is somewhere else).
     if let Some(fp) = fingerprint.filter(|_| entry.id.entity_type == EntityType::File) {
-        entry.own_file = Some(fp.identity());
+        // An id of 0 is no identity (a volume with none): nothing to own by.
+        entry.own_file = Some(fp.identity()).filter(|i| i.file_id != 0);
+        // And its bytes are the agreed ones, standing here now: what the
+        // record has last seen of its file. Left as they were, a download's
+        // record still named the bytes it had before, and the scan could
+        // follow an old copy of them elsewhere (layer 1).
+        if let Some(c) = entry.synced_content.as_ref().filter(|_| bytes_given) {
+            entry.last_seen_sha = Some(c.sha256.clone());
+        }
     }
     entry.status = LocalStatus::Synced;
 }
@@ -5781,6 +6272,27 @@ fn apply_export(entry: &mut Entry, file: &Value) {
 
 /// The SHA-256 of what a handle reads, from its start, in the form
 /// `Vfs::hash` gives for a path. Left at the end; every reader after it seeks.
+/// Are these bytes one other live file record's own -- the bytes it last saw
+/// or last agreed, held by that record alone? Not `me`'s, and never empty.
+fn bytes_of_another_record(env: &ExecEnv, me: EntityId, sha: &str) -> Result<bool, ExecError> {
+    const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    if sha == EMPTY_SHA256 {
+        return Ok(false);
+    }
+    let mut owners = Vec::new();
+    for e in env.store.every_entry()? {
+        if e.id.entity_type != EntityType::File || e.remote_deleted {
+            continue;
+        }
+        let seen = e.last_seen_sha.as_deref() == Some(sha);
+        let agreed = e.synced_content.as_ref().is_some_and(|c| c.sha256 == sha);
+        if seen || agreed {
+            owners.push(e.id);
+        }
+    }
+    Ok(owners.len() == 1 && owners[0] != me)
+}
+
 fn hash_of(reader: &mut dyn jd_vfs::ReadSeek) -> Result<String, ExecError> {
     reader.seek(std::io::SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
@@ -5802,6 +6314,69 @@ fn hash_of(reader: &mut dyn jd_vfs::ReadSeek) -> Result<String, ExecError> {
 /// on its path, as it always has: on a weak volume nothing rebinds the own
 /// file, so an id kept from before a save with the same bytes would refuse
 /// that file for ever.
+/// A file this download found at a slot it has never held, that no record
+/// owns: recorded here, the moment the engine meets it, as the scan would
+/// record it (`specs/drive_file_ownership.md`, design 1b) -- placed where the
+/// download is due, so it waits for that download the same way. Left for the
+/// scan, it
+/// had no record for as long as passes failed before their scan, and a swap
+/// in that window carried it onto a synced file's path, where it read as that
+/// file's edit (plain2 75236, 75281).
+fn record_a_file_found_landing(
+    env: &ExecEnv,
+    download: &Entry,
+    path: &std::path::Path,
+    fp: jd_vfs::Fingerprint,
+) -> Result<(), ExecError> {
+    // Only at a slot this download has never held: where it has, a file at
+    // its path is its own record's edit, which the scan reads as one. With
+    // no id the file is known by its bytes, on a volume that has none.
+    let positional = env.vfs.personality().positional_file_ids;
+    if download.synced_placement.is_some()
+        || (fp.file_id == 0 && !positional)
+        || !owners_here(env, path, fp, false)?.is_empty()
+    {
+        return Ok(());
+    }
+    let placement = download.local_placement().clone();
+    let mut found = crate::pass::blank(EntityId::file(env.store.next_provisional_id()?), &placement);
+    found.local_name = download.local_name.clone();
+    found.own_file = Some(fp.identity()).filter(|_| fp.file_id != 0);
+    found.last_seen_sha = Some(env.vfs.hash(path)?);
+    found.is_encrypted = crate::pass::parent_is_encrypted(env, placement.parent)?;
+    if found.is_encrypted && env.vault.is_none() {
+        found.status = LocalStatus::PendingKey;
+    }
+    env.store.put_entry(&found)?;
+    Ok(())
+}
+
+/// Is the file at this path the one both sides agreed on: unchanged since, or
+/// holding exactly the agreed bytes? Nothing there is an answer too: there is
+/// nothing to act on.
+fn its_agreed_file_is_here(env: &ExecEnv, entry: &Entry, path: &std::path::Path) -> Result<bool, ExecError> {
+    let Some(here) = env.vfs.fingerprint(path)? else {
+        return Ok(true);
+    };
+    if entry.synced_fingerprint.is_some_and(|agreed| here.unchanged_from(&agreed, &env.vfs.personality())) {
+        return Ok(true);
+    }
+    let Some(agreed) = entry.synced_content.as_ref() else {
+        return Ok(false);
+    };
+    Ok(env.vfs.hash(path)? == agreed.sha256)
+}
+
+/// The file id a record never sent was minted for, which is all it knows its
+/// file by where births are not shown. `None` for a record ever sent, and for
+/// a zero id.
+pub(crate) fn never_sent_own_id(entry: &Entry) -> Option<u64> {
+    if entry.id.entity_type != EntityType::File || !entry.id.is_provisional() || entry.synced_fingerprint.is_some() {
+        return None;
+    }
+    entry.own_file.map(|o| o.file_id).filter(|id| *id != 0)
+}
+
 fn trusted_own_file(env: &ExecEnv, entry: &Entry) -> Option<jd_vfs::FileIdentity> {
     if entry.id.entity_type != EntityType::File {
         return None;

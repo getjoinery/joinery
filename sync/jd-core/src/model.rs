@@ -220,6 +220,12 @@ pub struct Entry {
     /// file up (a park, a disowning, a placement dropped). See
     /// `specs/drive_file_identity.md`.
     pub own_file: Option<jd_vfs::FileIdentity>,
+    /// The hash of this record's file as the last scan saw it, where it
+    /// stood. Not an agreement: the bytes the server has are
+    /// `synced_content`. On a volume that cannot say which file is which, a
+    /// file whose bytes are still these is this record's file unedited, found
+    /// wherever it now stands (`specs/drive_weak_volume_identity.md`, layer 1).
+    pub last_seen_sha: Option<String>,
 }
 
 impl Entry {

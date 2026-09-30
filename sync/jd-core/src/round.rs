@@ -322,6 +322,7 @@ mod tests {
             replaces: None,
             stand_in: None,
             own_file: None,
+            last_seen_sha: None,
         }
     }
 

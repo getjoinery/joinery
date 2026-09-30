@@ -111,6 +111,10 @@ pub struct World {
     /// The set above is cleared each pass, so a scenario cannot use it to ask
     /// the question that keeps it honest: did the window ever actually open?
     landing_seen: std::sync::Arc<std::sync::Mutex<usize>>,
+    /// Every file a pass left owned by no record, counted across the run
+    /// (`files_nobody_owns`, `specs/drive_file_ownership.md` design 4).
+    /// Counted, not asserted, until the count reads zero.
+    ownership: std::sync::Arc<std::sync::Mutex<Ownership>>,
     /// How many name swaps actually fired mid-upload. A hunt that finds
     /// nothing proves nothing unless the disk really did move under the
     /// engine, so the count is readable rather than merely hoped for.
@@ -204,9 +208,7 @@ fn swap_two_names(
             pairs.lock().unwrap().push(SwapPair { a: ba, b: bb, source: "chaos", sealed: sa || sb, crossed_out, stood_in });
         }
     }
-    disk.user_rename(a, parked);
-    disk.user_rename(b, a);
-    disk.user_rename(parked, b);
+    disk.user_trade_names(a, b, parked);
 }
 
 /// Which operating system's filesystem a device has.
@@ -269,6 +271,7 @@ impl World {
             swaps_seen: Default::default(),
             folder_renames_seen: Default::default(),
             power_cycles: Default::default(),
+            ownership: Default::default(),
             journal: Default::default(),
             swap_pairs: Default::default(),
         }
@@ -592,6 +595,11 @@ impl World {
 
     /// How many mid-upload name swaps `user_rearranges_names_during_uploads`
     /// actually performed.
+    /// What `files_nobody_owns` found after every pass of the run.
+    pub fn ownership(&self) -> Ownership {
+        self.ownership.lock().unwrap().clone()
+    }
+
     pub fn swaps_made_during_uploads(&self) -> usize {
         *self.swaps_seen.lock().unwrap()
     }
@@ -665,6 +673,12 @@ impl World {
         // Checked here for the same reason everything else is: inside a single
         // pass, the user wrote it and only the engine can have taken it away.
         let landed = self.landing_saves.lock().unwrap().clone();
+        // A pass that failed before its scan has seen nothing new; a file the
+        // rig saved at a new path after the pass's walk has not been seen yet.
+        if outcome.is_ok() {
+            let unowned = files_nobody_owns(device, &landed);
+            self.ownership.lock().unwrap().add(&device.name, unowned);
+        }
         for hash in &landed {
             // Still here, or the user themselves wrote over it -- the other
             // chaos knob picks paths at random and can land on this one, and
@@ -702,6 +716,26 @@ impl World {
         let now = device.now();
         let e: ExecEnv = env(device, &now);
         let mut keys = device.key_source();
+        // What the records already place in a vault, and (below) what this
+        // pass's walk lists in one (owner decision Q4).
+        // Everything this pass earns is stamped as of its start (a5's Q1
+        // ruling): a plaintext version the pass itself sends after its walk
+        // listed the bytes in a vault is later than the stamp, and fires.
+        let as_of = self.server.latest_change_id();
+        device.fs.take_listed_in_a_vault();
+        device.fs.know_sealed(recorded_in_a_vault(device), as_of);
+        // What the daemon does before a pass on a volume with no file ids:
+        // every path the watcher reported loses its cached hash, and all of
+        // them do when it lost track (`specs/drive_weak_volume_identity.md`,
+        // B7).
+        if jd_vfs::Vfs::personality(&device.fs).positional_file_ids {
+            let touched = device.fs.take_touched();
+            // And, as it does, a new mount session when it lost track.
+            if touched.is_none() {
+                device.store.bump_mount_session().unwrap();
+            }
+            device.store.forget_path_hashes(touched.as_deref()).unwrap();
+        }
         // The pass can be stopped dead part-way through, which is what a real
         // kill does and what nothing here could stage before. Only the death is
         // caught: an assertion that fires inside a pass is a finding, and
@@ -710,8 +744,14 @@ impl World {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             run_pass(&e, &ctx, DeletePolicy::Guard, &mut keys)
         }));
+        device.fs.know_sealed(recorded_in_a_vault(device), as_of);
         match outcome {
-            Ok(o) => o,
+            Ok(o) => {
+                // The scan ran to the end of a pass that completed: what its
+                // walk listed in a vault, as it listed it.
+                device.fs.know_sealed(device.fs.take_listed_in_a_vault(), as_of);
+                o
+            }
             Err(payload) => {
                 let died = payload
                     .downcast_ref::<String>()
@@ -725,6 +765,7 @@ impl World {
                 // op it was really running, which is exactly what a kill leaves
                 // and what the between-passes kill has to approximate.
                 *self.power_cycles.lock().unwrap() += 1;
+                device.fs.lose_watch();
                 let now = device.now();
                 let e = env(device, &now);
                 let _ = jd_core::execute::recover(&e);
@@ -765,6 +806,8 @@ impl World {
     /// a hook inside `run_pass`, and until there is one, a seed that survives
     /// this has been asked the easier of the two questions.
     pub fn power_cycle(&self, device: &Device) {
+        // Nothing watches the disk while the engine is down.
+        device.fs.lose_watch();
         for op in device.store.queued_ops().unwrap() {
             device
                 .store
@@ -1306,6 +1349,7 @@ pub fn assert_converged(world: &World) {
         let held_here: std::collections::HashSet<String> = {
             let mut paths: std::collections::HashSet<String> =
                 held_never_sent(device).into_iter().map(|(_, p)| p).collect();
+            paths.extend(held_under_a_sealed_name(device).into_iter().map(|(_, p)| p));
             paths.extend(held_waiting(device).into_iter().map(|(_, p)| p));
             for e in entries.iter().filter(|e| held.contains(&e.id)) {
                 paths.extend(held_path(e).filter(|p| !anothers_file_at(e, p)));
@@ -1461,6 +1505,45 @@ pub fn assert_converged(world: &World) {
                 (disk, server.clone())
             };
 
+        // A vault this device parked because its volume cannot keep a file's
+        // identity (owner decision D3, `drive_weak_volume_identity.md`) is not
+        // synced here, on purpose: what the user saves into it stays on this
+        // disk, and what other devices put in it stays on the server. Dropped
+        // from both sides, as for a device with no key. The excuse is earned:
+        // the volume must really be weak, and the park must be D3's by its
+        // issue. What leaves the vault is still judged, here and by the
+        // sealed and vault oracles.
+        let weak_parks: Vec<(Option<String>, Option<String>)> =
+            if jd_vfs::Vfs::personality(&device.fs).stable_file_identity {
+                Vec::new()
+            } else {
+                let d3: std::collections::HashSet<jd_core::EntityId> = device
+                    .store
+                    .open_issues()
+                    .unwrap()
+                    .into_iter()
+                    .filter(|i| i.kind == "vault_on_a_weak_drive")
+                    .filter_map(|i| i.entity)
+                    .collect();
+                entries
+                    .iter()
+                    .filter(|e| {
+                        d3.contains(&e.id)
+                            && e.id.entity_type == jd_core::EntityType::Folder
+                            && e.is_encrypted
+                            && e.status == jd_core::model::LocalStatus::OutOfScope
+                    })
+                    .map(|e| (local_path_of_folder(device, e.id.server_id), server_path_of(&entries, e)))
+                    .collect()
+            };
+        let under = |p: &String, top: &Option<String>| {
+            top.as_ref().is_some_and(|t| p == t || p.starts_with(&format!("{t}/")))
+        };
+        let disk: BTreeMap<String, Option<String>> =
+            disk.into_iter().filter(|(p, _)| !weak_parks.iter().any(|(local, _)| under(p, local))).collect();
+        let server: BTreeMap<String, Option<String>> =
+            server.into_iter().filter(|(p, _)| !weak_parks.iter().any(|(_, remote)| under(p, remote))).collect();
+
         // What this device SHOULD hold, which is not always what the server
         // calls it. A name the server is perfectly happy with can be one this
         // filesystem cannot write -- a reserved DOS stem, a forbidden
@@ -1492,13 +1575,50 @@ pub fn assert_converged(world: &World) {
         // Keyed by the entry's whole server path, not its bare name: a spelling
         // one file was granted must not be lent to another file that merely
         // shares its name in a different folder.
+        // And a plain folder whose rename waits because the server still gives
+        // the name to a vault parked on this weak disk (D3): it stands here
+        // under that name by design, told to the user by its issue. Earned as
+        // the park's own excuses are: the volume weak, and the issue open.
+        let waiting_for_a_parked_vault: std::collections::HashSet<jd_core::EntityId> =
+            if jd_vfs::Vfs::personality(&device.fs).stable_file_identity {
+                Default::default()
+            } else {
+                device
+                    .store
+                    .open_issues()
+                    .unwrap()
+                    .into_iter()
+                    .filter(|i| i.kind == "name_held_by_a_parked_vault")
+                    .filter_map(|i| i.entity)
+                    .collect()
+            };
+        // And a plain file that went up keeping its server name because the
+        // one it wears here is a sealed file's this disk cannot vouch for
+        // (the name hold): earned the same way, the volume positional and the
+        // issue open.
+        let wearing_a_sealed_name: std::collections::HashSet<jd_core::EntityId> =
+            if jd_vfs::Vfs::personality(&device.fs).positional_file_ids {
+                device
+                    .store
+                    .open_issues()
+                    .unwrap()
+                    .into_iter()
+                    .filter(|i| i.kind == "name_of_a_sealed_file_held")
+                    .filter_map(|i| i.entity)
+                    .filter(|id| !id.is_provisional())
+                    .collect()
+            } else {
+                Default::default()
+            };
         let respelled: std::collections::HashMap<String, String> = entries
             .iter()
             .filter(|e| !e.remote_deleted)
             .filter_map(|e| {
                 let local = e.local_name.as_deref()?;
-                (jd_vfs::comparison_key(local, &personality)
-                    == jd_vfs::comparison_key(&e.remote.name, &folding))
+                (waiting_for_a_parked_vault.contains(&e.id)
+                    || wearing_a_sealed_name.contains(&e.id)
+                    || jd_vfs::comparison_key(local, &personality)
+                        == jd_vfs::comparison_key(&e.remote.name, &folding))
                 .then(|| Some((server_path_of(&entries, e)?, local.to_string())))
                 .flatten()
             })
@@ -1595,6 +1715,16 @@ pub fn assert_converged(world: &World) {
             assert!(
                 disk.remove(&path).is_some(),
                 "{}: {id:?} is held here, never sent, at {path:?}, and nothing stands there",
+                device.name
+            );
+        }
+        // A plain file never sent because its name is a sealed file's this
+        // weak disk cannot vouch for (the name hold): here and nowhere else,
+        // declared per entity, and still required to BE at its path here.
+        for (id, path) in held_under_a_sealed_name(device) {
+            assert!(
+                disk.remove(&path).is_some(),
+                "{}: {id:?} is held under a sealed file's name at {path:?}, and nothing stands there",
                 device.name
             );
         }
@@ -1718,6 +1848,55 @@ pub fn held_never_sent(device: &Device) -> Vec<(jd_core::model::EntityId, String
         .collect()
 }
 
+/// Plain files never sent because their name is a sealed file's that a disk
+/// with no file identities cannot vouch for (`name_of_a_sealed_file_held`):
+/// a plain provisional FILE with that issue open, on a positional volume,
+/// whose name is a sealed file's on this device. The entity and the path its
+/// file stands at; it is on this disk only, and nowhere on the server, on
+/// purpose. Earned by all four: a plain file with the issue anywhere else is
+/// not excused.
+pub fn held_under_a_sealed_name(device: &Device) -> Vec<(jd_core::model::EntityId, String)> {
+    let personality = jd_vfs::Vfs::personality(&device.fs);
+    if !personality.positional_file_ids {
+        return Vec::new();
+    }
+    let open: std::collections::HashSet<jd_core::model::EntityId> = device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "name_of_a_sealed_file_held")
+        .filter_map(|i| i.entity)
+        .collect();
+    if open.is_empty() {
+        return Vec::new();
+    }
+    let entries = device.store.every_entry().unwrap();
+    let sealed_names: std::collections::HashSet<String> = entries
+        .iter()
+        .filter(|e| e.id.entity_type == jd_core::model::EntityType::File && e.is_encrypted)
+        .map(|e| jd_vfs::comparison_key(&e.remote.name, &personality))
+        .collect();
+    entries
+        .iter()
+        .filter(|e| {
+            e.id.is_provisional()
+                && e.id.entity_type == jd_core::model::EntityType::File
+                && !e.is_encrypted
+                && open.contains(&e.id)
+                && sealed_names.contains(&jd_vfs::comparison_key(&e.remote.name, &personality))
+        })
+        .filter_map(|e| {
+            let name = e.local_name.clone().unwrap_or_else(|| e.remote.name.clone());
+            let path = match e.remote.parent {
+                None => Some(name),
+                Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{name}")),
+            };
+            path.map(|p| (e.id, p))
+        })
+        .collect()
+}
+
 /// Held records whose file waits under another record: nothing stands at the
 /// held record's agreed path, and exactly one provisional record's file on this
 /// disk carries the held record's agreed disk identity -- the engine's W-state
@@ -1755,6 +1934,54 @@ pub fn held_waiting(device: &Device) -> Vec<(jd_core::model::EntityId, String)> 
             .collect();
         if carriers.len() == 1 {
             out.push((e.id, carriers[0].clone()));
+        }
+    }
+    out
+}
+
+/// Bodies and leaf names a record on this device places in a vault: an
+/// encrypted record's agreed body, the file standing at its path, and the
+/// file carrying its own id. Wider than the record alone can prove, which
+/// only ever makes the sealed oracle stricter.
+pub fn recorded_in_a_vault(device: &Device) -> Vec<(String, String)> {
+    if jd_vfs::Vfs::root(&device.fs).is_none() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let files: Vec<String> = device.fs.all_paths();
+    for e in device.store.every_entry().unwrap().iter().filter(|e| {
+        e.id.entity_type == jd_core::model::EntityType::File && e.is_encrypted
+    }) {
+        let placement = e.synced_placement.as_ref().unwrap_or(&e.remote);
+        let name = e.local_name.clone().unwrap_or_else(|| placement.name.clone());
+        if let Some(c) = e.synced_content.as_ref() {
+            out.push((c.sha256.clone(), name.clone()));
+        }
+        let path = match placement.parent {
+            None => Some(name.clone()),
+            Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{name}")),
+        };
+        // What stands at the record's path, only where that path is IN a
+        // vault (Q4: a record placing it in one). A sealed file held outside
+        // its vault is placed in a plain folder, and a file the user saves or
+        // trades onto that path after the held file moved on was never in a
+        // vault on any engine's reading (FAT plat3 75428).
+        let in_a_vault = placement.parent.is_some_and(|id| {
+            device
+                .store
+                .get_entry(jd_core::model::EntityId::folder(id))
+                .unwrap()
+                .is_some_and(|f| f.is_encrypted)
+        });
+        if let Some(bytes) = path.as_deref().filter(|_| in_a_vault).and_then(|p| device.fs.peek(p)) {
+            out.push((crate::sha256_hex(&bytes), name.clone()));
+        }
+        if let Some(own) = e.own_file.map(|o| o.file_id).filter(|i| *i != 0) {
+            for p in files.iter().filter(|p| device.fs.file_id_of(p) == Some(own)) {
+                if let Some(bytes) = device.fs.peek(p) {
+                    out.push((crate::sha256_hex(&bytes), p.rsplit('/').next().unwrap_or(p).to_string()));
+                }
+            }
         }
     }
     out
@@ -1805,12 +2032,66 @@ pub fn own_files_astray(device: &Device) -> Vec<String> {
     out
 }
 
+/// The folders a D3 park holds on this device: each vault parked on a weak
+/// volume by its issue, and every folder under one, locally or on the server.
+fn parked_on_a_weak_volume(device: &Device) -> std::collections::HashSet<i64> {
+    let entries = device.store.every_entry().unwrap();
+    let issued: std::collections::HashSet<jd_core::EntityId> = device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "vault_on_a_weak_drive")
+        .filter_map(|i| i.entity)
+        .collect();
+    let mut set: std::collections::HashSet<i64> = entries
+        .iter()
+        .filter(|e| {
+            issued.contains(&e.id)
+                && e.id.entity_type == jd_core::EntityType::Folder
+                && e.is_encrypted
+                && e.status == jd_core::model::LocalStatus::OutOfScope
+        })
+        .map(|e| e.id.server_id)
+        .collect();
+    loop {
+        let before = set.len();
+        for f in entries.iter().filter(|e| e.id.entity_type == jd_core::EntityType::Folder) {
+            if f.local_placement().parent.is_some_and(|p| set.contains(&p))
+                || f.remote.parent.is_some_and(|p| set.contains(&p))
+            {
+                set.insert(f.id.server_id);
+            }
+        }
+        if set.len() == before {
+            return set;
+        }
+    }
+}
+
 pub fn assert_records_agree_with_the_server(world: &World) {
     for device in &world.devices {
         let held = held_outside_the_vault(device);
+        // Under a vault parked on a weak volume (owner decision D3) a move the
+        // user makes is followed here and never sent, by design: the record
+        // stands where its file does and the server keeps the vault as it was.
+        // Earned as the tree comparison's excuse is -- the volume weak, the
+        // park D3's by its issue -- and only where BOTH placements are inside
+        // such a park; anything that crossed its edge is judged as ever.
+        let parked: std::collections::HashSet<i64> =
+            if jd_vfs::Vfs::personality(&device.fs).stable_file_identity {
+                Default::default()
+            } else {
+                parked_on_a_weak_volume(device)
+            };
         let mut stale = Vec::new();
         for e in device.store.every_entry().unwrap() {
             if held.contains(&e.id) {
+                continue;
+            }
+            if e.synced_placement.as_ref().is_some_and(|p| p.parent.is_some_and(|f| parked.contains(&f)))
+                && e.remote.parent.is_some_and(|f| parked.contains(&f))
+            {
                 continue;
             }
             if e.remote_deleted || e.id.is_provisional() {
@@ -2362,4 +2643,104 @@ pub fn assert_no_two_records_on_one_directory(world: &World) {
         }
 
     }
+}
+
+
+/// Files a pass left owned by no record, over a run: counts by kind, and the
+/// first few of each for a trace.
+#[derive(Debug, Clone, Default)]
+pub struct Ownership {
+    pub counts: BTreeMap<&'static str, usize>,
+    pub samples: Vec<String>,
+}
+
+impl Ownership {
+    fn add(&mut self, device: &str, found: Vec<(&'static str, String)>) {
+        for (kind, line) in found {
+            *self.counts.entry(kind).or_default() += 1;
+            if self.samples.len() < 12 {
+                self.samples.push(format!("{device} {kind} {line}"));
+            }
+        }
+    }
+    pub fn total(&self) -> usize {
+        self.counts.values().sum()
+    }
+}
+
+/// Every file on this disk that no record owns, as a pass leaves it
+/// (`specs/drive_file_ownership.md`, the rule). Empty is right.
+///
+/// On a trusted volume a file is owned by the one live record whose own file
+/// it is: `unowned` when no record's identity and no record's path is it,
+/// `slot` when only a record whose bytes have not arrived holds its path,
+/// `path_only` when a settled record holds its path and not its identity,
+/// `twice` when two live records own it. On a volume without trusted identity
+/// records own by path, and a file is `unheld` when no record holds its path.
+///
+/// `excused`: content hashes the rig wrote at a new path inside the pass,
+/// after its walk. The engine has not seen those yet. An overwrite keeps the
+/// file's identity and needs no excuse.
+pub fn files_nobody_owns(device: &Device, excused: &std::collections::BTreeSet<String>) -> Vec<(&'static str, String)> {
+    let Some(root) = jd_vfs::Vfs::root(&device.fs) else {
+        return Vec::new();
+    };
+    let trusted = jd_vfs::Vfs::personality(&device.fs).stable_file_identity;
+    let entries = device.store.every_entry().unwrap();
+    let files: Vec<&jd_core::model::Entry> =
+        entries.iter().filter(|e| e.id.entity_type == jd_core::EntityType::File).collect();
+    // Where each record says its file is on this disk, spelt as the disk
+    // compares names.
+    let path_of = |e: &jd_core::model::Entry| -> Option<String> {
+        let name = e.effective_local_name().to_string();
+        let path = match e.local_placement().parent {
+            None => Some(name),
+            Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{name}")),
+        }?;
+        Some(jd_vfs::nfc(&path))
+    };
+    let held_paths: Vec<(String, &jd_core::model::Entry)> =
+        files.iter().filter_map(|e| path_of(e).map(|p| (p, *e))).collect();
+    let mut out = Vec::new();
+    for p in device.fs.all_paths() {
+        let Some(bytes) = device.fs.peek(&p) else { continue };
+        // The engine's own scratch (a park under `.jd-swap-`) is its record's;
+        // that rule is the walk's and stays (design 1d).
+        if p.split('/').any(|c| c.starts_with(".jd-swap-")) {
+            continue;
+        }
+        if excused.contains(&crate::sha256_hex(&bytes)) {
+            continue;
+        }
+        let Some(f) = jd_vfs::Vfs::fingerprint(&device.fs, &root.join(&p)).ok().flatten() else {
+            continue;
+        };
+        let here = f.identity();
+        let key = jd_vfs::nfc(&p);
+        let at_path: Vec<&jd_core::model::Entry> =
+            held_paths.iter().filter(|(q, _)| *q == key).map(|(_, e)| *e).collect();
+        if !(trusted && here.is_strong()) {
+            if at_path.is_empty() {
+                out.push(("unheld", format!("{p:?}")));
+            }
+            continue;
+        }
+        let owners: Vec<&&jd_core::model::Entry> =
+            files.iter().filter(|e| e.own_file.is_some() && e.owns(here)).collect();
+        let live_owners = owners.iter().filter(|e| !e.remote_deleted).count();
+        let kind = if live_owners > 1 {
+            "twice"
+        } else if !owners.is_empty() {
+            continue;
+        } else if at_path.iter().any(|e| e.synced_placement.is_some()) {
+            "path_only"
+        } else if !at_path.is_empty() {
+            "slot"
+        } else {
+            "unowned"
+        };
+        let ids: Vec<i64> = owners.iter().map(|e| e.id.server_id).chain(at_path.iter().map(|e| e.id.server_id)).collect();
+        out.push((kind, format!("{p:?} records {ids:?}")));
+    }
+    out
 }

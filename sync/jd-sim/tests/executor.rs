@@ -98,6 +98,7 @@ fn fresh(id: EntityId, parent: Option<i64>, name: &str, status: LocalStatus) -> 
         replaces: None,
         stand_in: None,
         own_file: None,
+        last_seen_sha: None,
     }
 }
 
@@ -237,10 +238,15 @@ fn a_local_delete_goes_to_the_trash_not_to_oblivion() {
     let (_clock, _server, device) = world();
     device.fs.user_write("old.txt", b"still wanted, maybe");
     let id = EntityId::file(1);
-    device
-        .store
-        .put_entry(&fresh(id, None, "old.txt", LocalStatus::Synced))
-        .unwrap();
+    // Agreed on, as every file a plan trashes is (`Entry::is_established`):
+    // the trash takes only the file both sides agreed on.
+    let mut entry = fresh(id, None, "old.txt", LocalStatus::Synced);
+    entry.synced_content = Some(ContentId {
+        sha256: jd_sim::sha256_hex(b"still wanted, maybe"),
+        size: 19,
+    });
+    entry.synced_placement = Some(entry.remote.clone());
+    device.store.put_entry(&entry).unwrap();
 
     let report = do_one(&device, id, Action::TrashLocal);
     assert_eq!(report.done, 1);
@@ -254,6 +260,30 @@ fn a_local_delete_goes_to_the_trash_not_to_oblivion() {
         "the bytes are still there, not just the name"
     );
     assert!(device.store.get_entry(id).unwrap().is_none());
+}
+
+/// Where the disk cannot say which file is a record's own, a local trash
+/// takes only the file both sides agreed on: another file at its path -- a
+/// swap put it there -- stays, and so does the record, for the next scan
+/// (kill2 75129; `specs/drive_file_ownership.md`).
+#[test]
+fn a_local_trash_takes_only_the_file_it_agreed_on() {
+    let (_clock, _server, device) = world();
+    device.fs.user_write("old.txt", b"another file, swapped onto this path");
+    let id = EntityId::file(1);
+    let mut entry = fresh(id, None, "old.txt", LocalStatus::Synced);
+    entry.synced_content = Some(ContentId {
+        sha256: jd_sim::sha256_hex(b"the file the server deleted"),
+        size: 27,
+    });
+    entry.synced_placement = Some(entry.remote.clone());
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(&device, id, Action::TrashLocal);
+    assert_eq!(report.overtaken, 1, "{report:?}");
+    assert_eq!(device.fs.peek("old.txt").as_deref(), Some(&b"another file, swapped onto this path"[..]));
+    assert!(device.fs.trashed().is_empty(), "{:?}", device.fs.trashed());
+    assert!(device.store.get_entry(id).unwrap().is_some(), "the record waits for the next scan");
 }
 
 // ---------------------------------------------------------------------------
@@ -2707,4 +2737,348 @@ fn an_adoption_records_the_fingerprint_of_the_file_it_hashed() {
         Some(first),
         "the first file's fingerprint was recorded beside the other file's hash"
     );
+}
+
+/// A download meets a file saved at its name and never sent, and moves it
+/// aside. The file's record goes with it, record first: it says where the
+/// file now stands, and the file is never nobody's
+/// (`specs/drive_file_ownership.md`, design 2). Left behind, the record
+/// named the download's path while its file stood under the conflict name,
+/// owned by nothing until the next scan.
+#[test]
+fn a_download_that_makes_room_takes_a_never_sent_record_along_with_its_file() {
+    let (_clock, server, device) = world();
+    let body = b"the server's file at this name";
+    let file_id = server.seed_file(None, "a.txt", body);
+    device.fs.user_write("a.txt", b"saved here, never sent");
+    let mine = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut never_sent = fresh(mine, None, "a.txt", LocalStatus::PendingUpload);
+    never_sent.own_file = Some(device.fs.fingerprint_at("a.txt").unwrap().identity());
+    device.store.put_entry(&never_sent).unwrap();
+    let id = EntityId::file(file_id);
+    let mut download = fresh(id, None, "a.txt", LocalStatus::PendingDownload);
+    download.remote_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+    device.store.put_entry(&download).unwrap();
+
+    let report = do_one(&device, id, Action::Download);
+    assert_eq!(report.done, 1);
+    assert_eq!(device.fs.peek("a.txt").as_deref(), Some(&body[..]));
+    let after = device.store.get_entry(mine).unwrap().expect("the never-sent record is kept");
+    assert_eq!(
+        device.fs.peek(&after.remote.name).as_deref(),
+        Some(&b"saved here, never sent"[..]),
+        "the record does not say where its file went: {:?}",
+        after.remote
+    );
+    assert_eq!(jd_sim::scenario::files_nobody_owns(&device, &Default::default()), Vec::new());
+}
+
+/// A conflict copy's record is written before the file is renamed. Killed
+/// in between, the copy's record already owns the file where it still
+/// stands, and the step run again finishes the rename: one copy, one
+/// record, never a second record minted for the same file
+/// (`specs/drive_file_ownership.md`, design 2).
+#[test]
+fn a_conflict_copy_interrupted_before_its_rename_is_finished_not_minted_again() {
+    let (_clock, _server, device) = world();
+    device.fs.user_write("a.txt", b"this record's edit");
+    let id = EntityId::file(1);
+    let mut entry = owning(&device, id, "a.txt");
+    let here = entry.own_file;
+    // What the step writes before its rename.
+    let copy_id = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut copy = fresh(copy_id, None, "a (conflicted copy).txt", LocalStatus::PendingUpload);
+    copy.own_file = here;
+    entry.synced_fingerprint = None;
+    entry.own_file = None;
+    entry.status = LocalStatus::PendingDownload;
+    device.store.put_entry(&copy).unwrap();
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(&device, id, Action::PreserveLocalAs { name: "a (conflicted copy).txt".into() });
+    assert_eq!(report.done, 1);
+    assert_eq!(device.fs.peek("a (conflicted copy).txt").as_deref(), Some(&b"this record's edit"[..]));
+    let records = device.store.every_entry().unwrap();
+    assert_eq!(records.len(), 2, "a second record was minted for the copy: {records:?}");
+    assert_eq!(jd_sim::scenario::files_nobody_owns(&device, &Default::default()), Vec::new());
+}
+
+/// An upload adopts the server file its own crashed attempt left under a
+/// conflict name, and the disk follows that name. The file standing there
+/// has the same bytes, and it is another record's own. Trashed as a
+/// redundant copy, that record read its file's absence as the user deleting
+/// it; it goes aside with its record instead (`specs/drive_file_ownership.md`,
+/// design 2).
+#[test]
+fn a_blocker_with_the_same_bytes_is_trashed_only_if_nobody_else_owns_it() {
+    let (_clock, server, device) = world();
+    let bytes = b"one body, two records";
+    server.seed_file(None, "a.txt", b"the file already at the name");
+    let aside = jd_vfs::conflict_copy_name("a.txt", "2026-07-31", "laptop", 1);
+    server.seed_file(None, &aside, bytes);
+    let theirs = server.seed_file(None, "elsewhere.txt", bytes);
+    device.fs.user_write("a.txt", bytes);
+    device.fs.user_write(&aside, bytes);
+    let mine = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut uploading = fresh(mine, None, "a.txt", LocalStatus::PendingUpload);
+    uploading.own_file = Some(device.fs.fingerprint_at("a.txt").unwrap().identity());
+    device.store.put_entry(&uploading).unwrap();
+    let other = EntityId::file(theirs);
+    device.store.put_entry(&owning(&device, other, &aside)).unwrap();
+
+    do_one(
+        &device,
+        mine,
+        Action::UploadAsNew { placement: Placement { parent: None, name: "a.txt".into() } },
+    );
+    let after = device.store.get_entry(other).unwrap().expect("the other record is kept");
+    let own = after.own_file.expect("it still knows its file");
+    let stands = device
+        .fs
+        .all_paths()
+        .into_iter()
+        .any(|p| device.fs.fingerprint_at(&p).is_some_and(|f| f.identity() == own));
+    assert!(stands, "another record's file went to the trash as a redundant copy");
+    assert_eq!(jd_sim::scenario::files_nobody_owns(&device, &Default::default()), Vec::new());
+}
+
+/// A download finds its own bytes already standing at its path, owned by a
+/// record saved there and never sent: its own earlier placement, or its own
+/// upload whose answer was lost. The download takes the file in the same
+/// step and the waiting record is forgotten: one record owns the file,
+/// never two (`specs/drive_file_ownership.md`, design 1b).
+#[test]
+fn a_download_that_finds_its_own_bytes_takes_the_file_from_the_record_waiting_there() {
+    let (_clock, server, device) = world();
+    let body = b"the same bytes on both sides";
+    let file_id = server.seed_file(None, "a.txt", body);
+    device.fs.user_write("a.txt", body);
+    let waiting = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut record = fresh(waiting, None, "a.txt", LocalStatus::PendingUpload);
+    record.own_file = Some(device.fs.fingerprint_at("a.txt").unwrap().identity());
+    device.store.put_entry(&record).unwrap();
+    let id = EntityId::file(file_id);
+    let mut download = fresh(id, None, "a.txt", LocalStatus::PendingDownload);
+    download.remote_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+    device.store.put_entry(&download).unwrap();
+
+    let report = do_one(&device, id, Action::Download);
+    assert_eq!(report.done, 1);
+    assert!(device.store.get_entry(waiting).unwrap().is_none(), "the waiting record still owns the file too");
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert_eq!(after.own_file, record.own_file, "the download does not own the file it found");
+    assert_eq!(jd_sim::scenario::files_nobody_owns(&device, &Default::default()), Vec::new());
+}
+
+/// A never-sent record's file, carried into another folder in the pass, is
+/// set aside there by a download. The record does not follow it across: the
+/// next scan does, and decides again whether it goes up sealed and whether
+/// it is held there. Followed here, a file saved in a vault and carried out
+/// was sent in the clear by the upload already queued for it (hostile2 74427;
+/// `specs/drive_file_ownership.md`, design 2).
+#[test]
+fn a_never_sent_file_carried_into_another_folder_is_not_followed_there_by_a_make_room() {
+    let (_clock, server, device) = world();
+    let private = server.seed_encrypted_folder(None, "Private");
+    let plain = server.seed_folder(None, "Plain");
+    let incoming = b"the plain file the server has at this name";
+    let arriving = server.seed_file(Some(plain), "doc.txt", incoming);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    for (id, name, encrypted) in [(private, "Private", true), (plain, "Plain", false)] {
+        device.fs.user_mkdir(name);
+        let mut folder = fresh(EntityId::folder(id), None, name, LocalStatus::Synced);
+        folder.is_encrypted = encrypted;
+        folder.synced_placement = Some(folder.remote.clone());
+        let dir = jd_vfs::Vfs::directory_id(&device.fs, &root.join(name)).unwrap().unwrap();
+        folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir));
+        device.store.put_entry(&folder).unwrap();
+    }
+    // Saved in the vault, never sent, and carried into Plain in the pass.
+    device.fs.user_write("Plain/doc.txt", b"saved in the vault, never sent");
+    let mine = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut never_sent = fresh(mine, Some(private), "new.txt", LocalStatus::PendingUpload);
+    never_sent.is_encrypted = true;
+    never_sent.own_file = Some(device.fs.fingerprint_at("Plain/doc.txt").unwrap().identity());
+    device.store.put_entry(&never_sent).unwrap();
+    let id = EntityId::file(arriving);
+    let mut download = fresh(id, Some(plain), "doc.txt", LocalStatus::PendingDownload);
+    download.remote_content = Some(ContentId { sha256: sha256_hex(incoming), size: incoming.len() as u64 });
+    device.store.put_entry(&download).unwrap();
+
+    do_one(&device, id, Action::Download);
+    let after = device.store.get_entry(mine).unwrap().expect("kept");
+    assert_eq!(after.remote.parent, Some(private), "followed across into a plain folder: {:?}", after.remote);
+}
+
+/// A never-sent record's file was set aside since its upload was planned,
+/// and its record says the aside. The upload was decided for the place it
+/// left, so it stands down and sends nothing; the next pass decides from
+/// where the file stands (`specs/drive_file_ownership.md`, design 2).
+#[test]
+fn an_upload_planned_before_its_file_was_set_aside_stands_down() {
+    let (_clock, server, device) = world();
+    device.fs.user_write("a (conflicted copy).txt", b"set aside since the plan");
+    let mine = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut never_sent = fresh(mine, None, "a (conflicted copy).txt", LocalStatus::PendingUpload);
+    never_sent.own_file = Some(device.fs.fingerprint_at("a (conflicted copy).txt").unwrap().identity());
+    device.store.put_entry(&never_sent).unwrap();
+
+    let report = do_one(&device, mine, Action::UploadAsNew { placement: Placement { parent: None, name: "a.txt".into() } });
+    assert_eq!(report.overtaken, 1, "{report:?}");
+    assert!(server.files().is_empty(), "sent under the name planned for the place it left: {:?}", server.files());
+}
+
+/// A download's bytes are what its record has last seen: the agreement
+/// writes `last_seen_sha`, so the scan never names the record by the bytes it
+/// had before (a5's B2; `specs/drive_weak_volume_identity.md`, layer 1).
+#[test]
+fn a_download_records_the_bytes_it_placed_as_last_seen() {
+    let (_clock, server, device) = world();
+    let body = b"the version that just arrived";
+    let file_id = server.seed_file(None, "r.txt", body);
+    let id = EntityId::file(file_id);
+    let mut entry = fresh(id, None, "r.txt", LocalStatus::PendingDownload);
+    entry.last_seen_sha = Some(sha256_hex(b"what it held before"));
+    device.store.put_entry(&entry).unwrap();
+    assert_eq!(do_one(&device, id, Action::Download).done, 1);
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert_eq!(after.last_seen_sha.as_deref(), Some(sha256_hex(body).as_str()));
+}
+
+/// A folder the server deleted, on a volume with no ids: a child whose file
+/// is gone with the folder is not "moved out" to another record's copy of the
+/// same bytes -- those bytes name two records, so they name neither, and no
+/// second record is minted for the copy (a5's B3;
+/// `specs/drive_file_ownership.md`, E1b).
+#[test]
+fn a_folder_trash_mints_no_record_for_another_records_copy() {
+    let (clock, server, device) = world();
+    device.fs.file_ids(jd_sim::FileIds::MountSession);
+    let body = b"the same bytes in two places";
+    let folder = server.seed_folder(None, "P");
+    let child = server.seed_file(Some(folder), "a.txt", body);
+    let copy = server.seed_file(None, "c.txt", body);
+    let agreed = ContentId { sha256: sha256_hex(body), size: body.len() as u64 };
+    let placed = |id: EntityId, parent: Option<i64>, name: &str| {
+        let mut e = fresh(id, parent, name, LocalStatus::Synced);
+        e.synced_placement = Some(e.remote.clone());
+        if id.entity_type == jd_core::model::EntityType::File {
+            e.synced_content = Some(agreed.clone());
+            e.remote_content = Some(agreed.clone());
+            e.last_seen_sha = Some(agreed.sha256.clone());
+        }
+        e
+    };
+    device.fs.user_mkdir("P");
+    device.fs.user_write("c.txt", body);
+    for e in [
+        placed(EntityId::folder(folder), None, "P"),
+        placed(EntityId::file(child), Some(folder), "a.txt"),
+        placed(EntityId::file(copy), None, "c.txt"),
+    ] {
+        device.store.put_entry(&e).unwrap();
+    }
+    // Another device deletes the folder on the server.
+    let desk = Device::new("desk", &server, clock.clone(), 8);
+    desk.store.put_entry(&placed(EntityId::folder(folder), None, "P")).unwrap();
+    assert_eq!(do_one(&desk, EntityId::folder(folder), Action::TrashRemote).done, 1);
+
+    do_one(&device, EntityId::folder(folder), Action::TrashLocal);
+    let files: Vec<EntityId> = device
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.id.entity_type == jd_core::model::EntityType::File)
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(files, vec![EntityId::file(copy)], "c.txt has one record");
+}
+
+/// A folder parked off a contested name while its own directory stands at
+/// another path keeps its placement and its directory: it was moved, and the
+/// next pass re-derives that rename by directory identity. Disowned, its
+/// directory stood on with no record and was minted as a new folder, a
+/// vault's sealed files with it (WP2's row 4; hostile2 74424).
+#[test]
+fn a_folder_parked_while_its_directory_stands_elsewhere_keeps_it() {
+    let (_clock, _server, device) = world();
+    device.fs.user_mkdir("moved-here");
+    device.fs.user_mkdir("contested");
+    let mine = device.fs.file_id_of("moved-here").expect("a directory id");
+    let id = EntityId::folder(501);
+    let mut entry = fresh(id, None, "contested", LocalStatus::Synced);
+    entry.synced_placement = Some(entry.remote.clone());
+    entry.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(mine));
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::DuplicateName { with: "contested".into() } },
+    );
+    assert_eq!(report.done, 1, "{report:?}");
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert_eq!(after.synced_fingerprint.map(|f| f.file_id), Some(mine), "the directory stays its own");
+    assert!(after.synced_placement.is_some(), "the placement stays");
+    assert!(!matches!(after.status, LocalStatus::Unsyncable(_)), "{:?}", after.status);
+    assert!(after.local_name.as_deref().is_some_and(|n| n.starts_with(".jd-swap-")), "{:?}", after.local_name);
+}
+
+/// The same on a USB stick, where neither a file nor a directory has an id:
+/// the aside's folder is found by the records' paths, and the held record
+/// follows its file there. Asked of the directory id alone, nothing followed,
+/// and the aside was minted a new PLAIN file and sent in the clear (FAT
+/// hostile2 74403). RED without the path fallback in `aside_placement`.
+#[test]
+fn a_held_file_set_aside_by_a_download_on_a_usb_stick_keeps_its_record() {
+    let (_clock, server, device) = world();
+    device.fs.file_ids(jd_sim::FileIds::MountSession);
+    let private = server.seed_encrypted_folder(None, "Private");
+    let plain = server.seed_folder(None, "Plain");
+    let incoming = b"the plain file the server has at this name";
+    let arriving = server.seed_file(Some(plain), "doc.txt", incoming);
+
+    for (id, name, encrypted) in [(private, "Private", true), (plain, "Plain", false)] {
+        device.fs.user_mkdir(name);
+        let mut folder = fresh(EntityId::folder(id), None, name, LocalStatus::Synced);
+        folder.is_encrypted = encrypted;
+        folder.synced_placement = Some(folder.remote.clone());
+        device.store.put_entry(&folder).unwrap();
+    }
+    let held_body = b"sealed on the server, held here outside its vault";
+    device.fs.user_write("Plain/doc.txt", held_body);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let fingerprint = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("Plain/doc.txt")).unwrap();
+    assert_eq!(fingerprint.map(|f| f.file_id), Some(0), "construction: the stick shows no ids");
+    let held_id = EntityId::file(9_902);
+    let mut held = fresh(held_id, Some(private), "out.txt", LocalStatus::Synced);
+    held.is_encrypted = true;
+    held.synced_placement = Some(Placement { parent: Some(plain), name: "doc.txt".into() });
+    held.synced_fingerprint = fingerprint;
+    held.synced_content = Some(ContentId { sha256: sha256_hex(held_body), size: held_body.len() as u64 });
+    held.last_seen_sha = Some(sha256_hex(held_body));
+    device.store.put_entry(&held).unwrap();
+
+    let id = EntityId::file(arriving);
+    let mut entry = fresh(id, Some(plain), "doc.txt", LocalStatus::PendingDownload);
+    entry.remote_content = Some(ContentId { sha256: sha256_hex(incoming), size: incoming.len() as u64 });
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(&device, id, Action::Download);
+    assert_eq!(report.done, 1, "the download should land");
+    assert_eq!(device.fs.peek("Plain/doc.txt").unwrap(), incoming);
+
+    let after = device.store.get_entry(held_id).unwrap().unwrap();
+    let agreed = after.synced_placement.clone().expect("the held record keeps an agreement");
+    assert!(
+        agreed.parent == Some(plain) && agreed.name != "doc.txt",
+        "the held record did not follow its file aside: {agreed:?}"
+    );
+    assert_eq!(
+        device.fs.peek(&format!("Plain/{}", agreed.name)).as_deref(),
+        Some(&held_body[..]),
+        "the held record does not name where its file now is"
+    );
+    assert_eq!(after.remote, held.remote, "the held record's server side moved");
 }
