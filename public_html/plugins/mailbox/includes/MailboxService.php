@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.53 - Trash lists newest-first with no unread/starred sections; rows carry no purge_time
  * @version 1.52 - setSpamVerdict stamps iem_spam_corrected_time (what spam learning teaches)
  * @version 1.51 - the list never parses relay-sealed mail (it says `parsing`); opening a thread parses its pending rows
  * @version 1.49 - a relay-sealed row no vault here can open is marked sealed.unopenable
@@ -1195,12 +1196,14 @@ class MailboxService {
 		// whatever the source's \Seen said when it was pulled, or the ingest
 		// default of false, and never something the member decided. Ranking by it
 		// sorted 25,000 never-opened imported sent messages above today's send, so
-		// the top of Sent was months old. Those two views are strictly
+		// the top of Sent was months old. Trash has no such question either: it
+		// is discarded mail, and what the member looks for there is something
+		// they just threw away. Those three views are strictly
 		// reverse-chronological instead, which is also what every mail client
 		// does. Emitting rank 2 (rather than dropping the column) keeps the reader
 		// rendering one plain list with no section header
 		// (specs/bugfix_sent_view_ordering.md).
-		$sectioned = !$sent && !$drafts;
+		$sectioned = !$sent && !$drafts && !$trash;
 		$rank_sql = $sectioned
 			? "CASE
 						WHEN COUNT(*) FILTER (WHERE iem_is_read = false) > 0 THEN 0
@@ -1228,7 +1231,6 @@ class MailboxService {
 					BOOL_OR(iem_is_archived) AS any_archived,
 					MAX(iem_ai_danger_score) AS danger_score,
 					BOOL_OR(iem_direct_verified) AS any_direct_verified,
-					MIN(iem_delete_time) AS trashed_time,
 					$rank_sql AS section_rank,
 					ARRAY_AGG(iem_inbound_email_message_id) AS member_ids,
 					(ARRAY_AGG(iem_inbound_email_message_id ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS latest_id
@@ -1275,12 +1277,6 @@ class MailboxService {
 		// selection's Labels panel (ticked when every selected conversation
 		// has the label, mixed when some do). One query for the page.
 		$labels_of = $this->labelIdsByMessage(array_unique($page_ids));
-
-		// When this thread purges, for the Trash list's date column. Computed for
-		// display and never stored: the window is a setting an operator can change,
-		// so a stored date would be a promise the next edit breaks. The earliest
-		// discard in the thread decides, since that message goes first.
-		$purge_days = $trash ? self::trashRetentionDays() : 0;
 
 		$section_for = array(0 => 'unread', 1 => 'starred', 2 => 'other');
 		$any_fortress = false;
@@ -1368,11 +1364,6 @@ class MailboxService {
 				// Fortress thread.
 				'sealed'       => null,
 				'latest_id'    => $latest_id,
-				// Trash only: when this thread is permanently deleted (UTC), or null
-				// when nothing purges it — retention 0, or any other view.
-				'purge_time'   => ($purge_days > 0 && !empty($r['trashed_time']))
-					? LibraryFunctions::time_shift($r['trashed_time'], $purge_days . ' days', 'Y-m-d H:i:s')
-					: null,
 			);
 			// A Fortress thread's newest message (specs/client_custody_mail.md
 			// § R4): subject, sender and snippet stay sealed for the reader to
@@ -1397,7 +1388,7 @@ class MailboxService {
 		if ($trash) {
 			// The window itself, so the Trash view can say what it is (0 = nothing
 			// purges) without the client inferring it from absent dates.
-			$result['trash_retention_days'] = $purge_days;
+			$result['trash_retention_days'] = self::trashRetentionDays();
 		}
 		if ($search_locked) {
 			// The vault-holding mailbox being searched has no open window — the

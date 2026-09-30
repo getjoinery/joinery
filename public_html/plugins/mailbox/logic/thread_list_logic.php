@@ -8,8 +8,9 @@
  * exact shapes the web reader's list endpoint serves; every row is scoped
  * by MailboxViewer (specs/implemented/mobile_native_email_server_api_and_ios.md).
  * The `drafts` param switches to the Drafts view (specs/mailbox_compose_maturity.md);
- * `trash` switches to the Trash view (specs/mailbox_trash_folder.md), whose rows
- * carry a purge_time; `sent` switches to the Sent view (conversations carrying
+ * `trash` switches to the Trash view (specs/mailbox_trash_folder.md), newest
+ * first and unsectioned, with the retention window as `trash_retention_days`;
+ * `sent` switches to the Sent view (conversations carrying
  * an outbound row).
  *
  * A thread whose newest message is Fortress (specs/client_custody_mail.md
@@ -24,6 +25,7 @@
  * With `device_only` (every mailbox in view is Fortress) there is no `q`: the
  * ids are the whole search, and the term never reaches the server.
  *
+ * @version 1.6.1 - comment: Trash rows carry no purge_time
  * @version 1.6.0 - device_only: a search over end-to-end mail alone sends no term
  * @version 1.5.0 - device_hits: a browser's search over its own Fortress index
  * @version 1.4.0 - Fortress threads travel sealed; `fortress` on the response

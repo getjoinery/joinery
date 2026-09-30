@@ -1,6 +1,9 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.88 — relay-sealed mail waiting to be parsed starts the drain at
+ * No framework. @version 2.90 — "Load more" no longer repeats the notes above the list
+ * (Trash retention, unlock-to-search, search scope, still indexing)
+ * @version 2.89 — Trash rows show the received date, like every other list
+ * @version 2.88 — relay-sealed mail waiting to be parsed starts the drain at
  * once (`parsing`) and refreshes the list as it lands; the list read no longer parses.
  * @version 2.87 — one fmtDate and one fmtBytes (B1); every multipart post
  *   goes through joineryApi.postForm, keepalive for the unload save (B2); unlockVault()
@@ -1343,7 +1346,10 @@
 				}
 				listEl.appendChild(threadRow(t));
 			});
-			if (data.search_locked) {
+			// Every note pinned above the rows is drawn on a reset render only: "Load
+			// more" appends the next page below what is there, and the notes from the
+			// first page are still on screen.
+			if (reset && data.search_locked) {
 				// A search over a sealed mailbox with no open window — prompt unlock,
 				// then re-run the same query.
 				var row = el('li', 'mbx-unlock-banner');
@@ -1358,7 +1364,7 @@
 				listEl.insertBefore(row, listEl.firstChild);
 			}
 			if (reset) { showFortressListBanner(listEl, seq); }
-			if (data.search_scope === 'all_mail') {
+			if (reset && data.search_scope === 'all_mail') {
 				// The Inbox tab is open but the search covered All Mail (archived
 				// and sent included) — say so, or a hit outside the Inbox looks
 				// like it leaked in from nowhere.
@@ -1368,7 +1374,7 @@
 			if (deviceSearch && reset) {
 				listEl.insertBefore(deviceSearchNote(deviceSearch), listEl.firstChild);
 			}
-			if (data.search_indexing) {
+			if (reset && data.search_indexing) {
 				// The index does not cover the whole mailbox yet (it catches up in
 				// the background while the vault is open) — without this, mail the
 				// index has not reached would read as mail that does not exist.
@@ -1386,7 +1392,7 @@
 			}
 			// The retention line sits above whatever the list holds, empty included —
 			// an empty Trash is exactly when someone wonders where it all went.
-			if (state.trashView) {
+			if (reset && state.trashView) {
 				state.trashRetentionDays = data.trash_retention_days || 0;
 				listEl.insertBefore(trashNoteRow(), listEl.firstChild);
 			}
@@ -1742,18 +1748,7 @@
 			li.appendChild(clip);
 		}
 
-		if (state.trashView) {
-			// In Trash the date that matters is when this goes for good, not when it
-			// arrived. Computed server-side from the retention window.
-			var purge = el('span', 'mbx-thread-time mbx-thread-purge',
-				t.purge_time ? fmtDate(t.purge_time) : 'Kept');
-			purge.title = t.purge_time
-				? 'Permanently deleted on ' + fmtDate(t.purge_time)
-				: 'Kept indefinitely — trash retention is switched off';
-			li.appendChild(purge);
-		} else {
-			li.appendChild(el('span', 'mbx-thread-time', fmtTime(t.latest_time)));
-		}
+		li.appendChild(el('span', 'mbx-thread-time', fmtTime(t.latest_time)));
 
 		li.addEventListener('click', function () {
 			if (state.draftsView) { openDraft(t.latest_id); }

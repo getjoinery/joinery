@@ -18,7 +18,8 @@
  *  - restore: the message returns with read, star, archive and label state intact
  *  - getThread: opens under the Trash scope, refused under the read scope
  *  - purge: the row, the attachment File and the refold queue entry
- *  - purge dates: computed from the retention setting, absent when it is 0
+ *  - order and dates: Trash is newest-first with no unread section, rows show
+ *    their received date, and the view reports the retention window
  *  - a sealed (relay-sealed, pending-parse) message purges with no unlock window
  *  - the retention rule: the declared policy, the window, and 0 = never purge
  *  - the search index holds trashed mail and the read scope decides (Change 2a),
@@ -32,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/mailbox_trash_test.php
  *
+ * @version 1.2 - Trash order and dates replace purge dates (rows carry no purge_time)
  * @version 1.1 - the second window on this table: unmatched-mail retention
  */
 
@@ -231,26 +233,40 @@ check(in_array('<state@x>', $keys($svc->listThreads($mine_alias, array())), true
 check(count($keys($svc->listThreads($mine_alias, array('trash' => true)))) === 1,
 	'and out of Trash');
 
-// ---- purge dates ---------------------------------------------------------
-section('purge dates');
+// ---- order and dates -----------------------------------------------------
+// Trash is newest-first by received date, never sectioned by unread: 370 unread
+// discards once buried every read message someone had just deleted. Each row's
+// date is its received date, as in every other list.
+section('Trash order and dates');
 
-$rows = $svc->listThreads($mine_alias, array('trash' => true))['threads'];
-$trashed_at = $col($m_trash, 'iem_delete_time');
-$expected = LibraryFunctions::time_shift($trashed_at, '30 days', 'Y-m-d');
-check(count($rows) === 1 && !empty($rows[0]['purge_time'])
-	&& strpos((string)$rows[0]['purge_time'], $expected) === 0,
-	'the Trash row carries a purge date 30 days after it was trashed',
-	json_encode(array('got' => $rows[0]['purge_time'] ?? null, 'want' => $expected)));
-check($svc->listThreads($mine_alias, array('trash' => true))['trash_retention_days'] === 30,
-	'the view reports the window');
+$m_old_unread = $make_msg($mine_alias, '<old-unread@x>', 'Old unread', 'oldunreadbody');
+$m_new_read = $make_msg($mine_alias, '<new-read@x>', 'New read', 'newreadbody');
+$old_time = gmdate('Y-m-d H:i:s', time() - 2 * 86400);
+$new_time = gmdate('Y-m-d H:i:s', time() - 3600);
+InboundEmailMessage::updateColumns($m_old_unread, array('iem_received_time' => $old_time));
+InboundEmailMessage::updateColumns($m_new_read, array('iem_received_time' => $new_time));
+$svc->markRead(array($m_new_read), true);
+$svc->softDelete(array($m_old_unread, $m_new_read));
+
+$listed = $svc->listThreads($mine_alias, array('trash' => true));
+check($keys($listed) === array('<gone@x>', '<new-read@x>', '<old-unread@x>'),
+	'newest first, the read message above the older unread one', json_encode($keys($listed)));
+$by_key = array();
+foreach ($listed['threads'] as $t) { $by_key[$t['thread_key']] = $t; }
+check(strpos((string)($by_key['<new-read@x>']['latest_time'] ?? ''), $new_time) === 0,
+	'a row carries its received date', json_encode($by_key['<new-read@x>']['latest_time'] ?? null));
+check(!array_key_exists('purge_time', $by_key['<new-read@x>'] ?? array()), 'and no purge date');
+check(count(array_unique(array_column($listed['threads'], 'section'))) === 1,
+	'one section: nothing is grouped by unread or starred',
+	json_encode(array_column($listed['threads'], 'section')));
+check($listed['trash_retention_days'] === 30, 'the view reports the window');
 check(!isset($svc->listThreads($mine_alias, array())['trash_retention_days']),
 	'no other view reports one');
-
 harness_set_setting_mem('mailbox_trash_retention_days', '0');
-$off = $svc->listThreads($mine_alias, array('trash' => true));
-check($off['threads'][0]['purge_time'] === null && $off['trash_retention_days'] === 0,
-	'retention 0 means no purge date at all');
+check($svc->listThreads($mine_alias, array('trash' => true))['trash_retention_days'] === 0,
+	'retention 0 reports 0');
 harness_set_setting_mem('mailbox_trash_retention_days', '30');
+$svc->purgeFromTrash(array($m_old_unread, $m_new_read));
 
 // ---- purge reclaims ------------------------------------------------------
 section('delete forever reclaims');
