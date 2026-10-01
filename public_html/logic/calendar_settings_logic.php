@@ -1,22 +1,25 @@
 <?php
 /**
- * Calendar email settings (/profile/calendar_settings), also exposed as the
+ * Calendar settings (/profile/calendar_settings), also exposed as the
  * calendar_settings API action.
  *
- * Three per-user choices, stored in cpr_calendar_preferences (absence of a
- * row = everything off): summary frequency (none/daily/weekly), the local
- * hour summaries go out at, and the default reminder lead applied to entries
- * without their own override. The page form submits through
- * /api/v1/action/calendar_settings with action=save; the render branch feeds
- * the web view its current values.
+ * The protection level (Standard / Private) is shown here from the shared
+ * picker and changed through the calendar_level_change action
+ * (docs/calendar.md § Protection level). The three email choices, stored in
+ * cpr_calendar_preferences (absence of a row = everything off): summary
+ * frequency (none/daily/weekly), the local hour summaries go out at, and the
+ * default reminder lead applied to entries without their own override. The
+ * page form submits through /api/v1/action/calendar_settings with
+ * action=save; the render branch feeds the web view its current values.
  *
+ * @version 1.2 - the read branch reports the protection level, whether the
+ *                member holds a vault (Private needs one), and the rows a level
+ *                change has still to converge
  * @version 1.1 - the read branch reports the site-wide send blocker
  *                (EmailSender::transactionalSendBlocker), so the page can say
  *                these emails cannot currently send instead of taking
  *                preferences for a dead letterbox
  */
-
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function calendar_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -54,8 +57,16 @@ function calendar_settings_logic(array $input): LogicResult {
 
 	// JSON-safe on purpose — this same branch answers the API read call.
 	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+	require_once(PathHelper::getIncludePath('includes/calendar/CalendarLevel.php'));
 	$pref = CalendarPreference::get_for($user_id);
 	return LogicResult::render(array(
+		'protection_level'         => $pref->protection_level(),
+		// Private needs a vault to seal to; without one the card is offered
+		// with a pointer to where a vault is set up.
+		'has_vault'                => CalendarLevel::ownerHasVault((int)$user_id),
+		// Rows a level change has still to converge (a change that stopped
+		// part-way carries on from this page).
+		'level_remaining'          => (new CalendarLevel((int)$user_id))->remaining(),
 		'summary_frequency'        => $pref->get('cpr_summary_frequency') ?: 'none',
 		'summary_hour'             => (int)$pref->get('cpr_summary_hour'),
 		'reminder_default_minutes' => (int)$pref->get('cpr_reminder_default_minutes'),
@@ -68,7 +79,7 @@ function calendar_settings_logic(array $input): LogicResult {
 
 function calendar_settings_logic_descriptor(): array {
 	return [
-		'description' => 'Read or save the signed-in member\'s calendar email preferences (summaries and reminder default).',
+		'description' => 'Read or save the signed-in member\'s calendar preferences (summaries and reminder default; the read also reports the protection level, changed through calendar_level_change).',
 		'mutates'     => true,
 		'requires_session'        => true,
 		'input'       => [

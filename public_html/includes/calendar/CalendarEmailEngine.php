@@ -29,6 +29,8 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  * session-gated compose transport is structurally unavailable — never route
  * these through resolveOutboundTransport().
  *
+ * @version 1.3 - a sealed entry (Private calendar) reminds with its time only and lists in a
+ *                summary as "Private entry": cron holds no window, so nothing is decrypted
  * @version 1.2 - reminderVars() carries location/link/notes (escaped); summary lines name the location
  * @version 1.1 - run() counts delivery failures ('failed') so the task can
  *                report them instead of a clean "Sent 0"
@@ -71,7 +73,7 @@ class CalendarEmailEngine {
 				if (!$this->alreadyClaimed($cand['dedup_key'])) {
 					$result['reminders']++;
 					$result['preview'][] = 'Reminder to ' . $cand['user']->get('usr_email')
-						. ': "' . ($cand['entry']->get('cal_title') ?: 'Busy') . '" at '
+						. ': "' . ($cand['entry']->rowIsSealed() ? self::PRIVATE_LABEL : ($cand['entry']->get('cal_title') ?: 'Busy')) . '" at '
 						. $cand['occurrence_start_utc'] . ' UTC (lead ' . $cand['lead'] . 'm)';
 				}
 				continue;
@@ -219,25 +221,30 @@ class CalendarEmailEngine {
 		return $due;
 	}
 
+	/** What a summary calls an entry it may not open (a sealed entry, from cron). */
+	const PRIVATE_LABEL = 'Private entry';
+
 	/**
 	 * What a reminder email may say about an entry — the single chokepoint for
-	 * content decisions. When the calendar protection-level dial lands, the
-	 * Private-entry check goes here: a sealed entry keeps only the time vars
-	 * and the template's conditionals render the generic form.
+	 * content decisions. A sealed entry (a Private calendar's) keeps only the
+	 * time vars: this runs from cron, which never holds a window, so no decrypt
+	 * is attempted and the template's conditionals render the generic
+	 * "You have a calendar entry coming up" form.
 	 */
 	public function reminderVars(CalendarEntry $entry, string $start_utc, string $end_utc, User $user): array {
 		$tz = $entry->get('cal_timezone') ?: ($user->get('usr_timezone') ?: 'UTC');
+		$sealed = $entry->rowIsSealed();
 		return [
 			'recipient'     => $user->export_as_array(),
-			'title'         => (string)$entry->get('cal_title'),
+			'title'         => $sealed ? '' : (string)$entry->get('cal_title'),
 			'tentative'     => (($entry->get('cal_status') ?: 'confirmed') === 'tentative') ? '1' : '',
 			// Details are escaped HERE: the template renderer substitutes
 			// raw, and an AI-extracted entry's notes came from a stranger's
 			// email. The link is http(s) by construction (normalize_link()).
 			// notes keeps its newlines for the template's |nl2br modifier.
-			'location'      => htmlspecialchars((string)$entry->get('cal_location'), ENT_QUOTES, 'UTF-8'),
-			'link'          => htmlspecialchars((string)$entry->get('cal_link'), ENT_QUOTES, 'UTF-8'),
-			'notes'         => htmlspecialchars((string)$entry->get('cal_notes'), ENT_QUOTES, 'UTF-8'),
+			'location'      => $sealed ? '' : htmlspecialchars((string)$entry->get('cal_location'), ENT_QUOTES, 'UTF-8'),
+			'link'          => $sealed ? '' : htmlspecialchars((string)$entry->get('cal_link'), ENT_QUOTES, 'UTF-8'),
+			'notes'         => $sealed ? '' : htmlspecialchars((string)$entry->get('cal_notes'), ENT_QUOTES, 'UTF-8'),
 			'start_display' => LibraryFunctions::convert_time($start_utc, 'UTC', $tz, 'l, M j, Y g:i A T'),
 			'end_display'   => LibraryFunctions::convert_time($end_utc, 'UTC', $tz, 'g:i A T'),
 			'start_short'   => LibraryFunctions::convert_time($start_utc, 'UTC', $tz, 'g:i A'),
@@ -334,8 +341,11 @@ class CalendarEmailEngine {
 				? 'All day'
 				: LibraryFunctions::convert_time($item->start_utc, 'UTC', $tz, 'g:i A')
 					. ' – ' . LibraryFunctions::convert_time($item->end_utc, 'UTC', $tz, 'g:i A');
-			$line = $when . ' — ' . ($item->title !== null && $item->title !== '' ? $item->title : 'Busy');
-			if ($item->location !== null && $item->location !== '') {
+			// A locked item is a sealed entry this pass cannot open (cron has no
+			// window): its time is real, its name is not for an email to carry.
+			$line = $when . ' — ' . ($item->locked ? self::PRIVATE_LABEL
+				: ($item->title !== null && $item->title !== '' ? $item->title : 'Busy'));
+			if (!$item->locked && $item->location !== null && $item->location !== '') {
 				$line .= ' @ ' . $item->location;
 			}
 			if ($item->status === 'tentative') {

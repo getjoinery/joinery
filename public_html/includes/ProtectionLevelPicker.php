@@ -49,6 +49,9 @@
  * The picker echoes its markup, so it belongs in a direct-output form (not one
  * built with FormWriter's deferred_output).
  *
+ * @version 1.6.0 - the calendar flavour (SERVICE_CALENDAR, two cards); service notes: a line
+ *   the catalog itself adds under one service's card wherever that card is shown (mail's
+ *   Fortress card says the contact list stays server custody)
  * @version 1.5.1 - mail's Fortress card no longer says mobile apps are unavailable
  * @version 1.5.0 - mail cards in the owner's words: encryption, who it suits, team features and apps;
  *   renderLinked(): the cards shown on a page where the level is decided elsewhere
@@ -68,6 +71,7 @@ class ProtectionLevelPicker {
 	const SERVICE_DEFAULT   = 'default';
 	const SERVICE_MESSAGING = 'messaging';
 	const SERVICE_MAIL      = 'mail';
+	const SERVICE_CALENDAR  = 'calendar';
 
 	/** Add-on keys the catalog carries copy for. */
 	const ADDON_RELAY_SEALS_TO_OWNER = 'relay_seals_to_owner';
@@ -138,7 +142,43 @@ class ProtectionLevelPicker {
 					'Everyone in it needs protection set up first, and this cannot be undone later.',
 				),
 			),
+			self::SERVICE_CALENDAR => array(
+				ProtectionLevel::STANDARD => array(
+					'Your appointments are stored as written.',
+					'Best for a calendar with nothing on it you would mind someone reading.',
+					'Nothing to set up.',
+				),
+				ProtectionLevel::PRIVATE_ => array(
+					'Titles, places, links and notes are encrypted at rest; times stay readable so your availability still works.',
+					'Best for a calendar that says where you go and who you see.',
+					'Reminder emails stop naming the entry, and you unlock to see what is on your calendar.',
+				),
+			),
 		);
+	}
+
+	/**
+	 * A line the catalog itself adds under one service's card, shown wherever
+	 * that card is — the picker, the linked cards — because it is true of the
+	 * service everywhere, not of one page. A consumer's own `notes` come after.
+	 */
+	protected static function serviceNotes(): array {
+		return array(
+			self::SERVICE_MAIL => array(
+				// Contacts are a cache of the mailbox and take its level, but under
+				// a Fortress mailbox they stay server custody (sealed to the adding
+				// member's vault, opened in their window): autocomplete, the contact
+				// panel and the Direct contact gate read them server-side.
+				ProtectionLevel::FORTRESS => array(
+					'Your contact list is encrypted on the server and opens while you\'re signed in — it is not end to end.',
+				),
+			),
+		);
+	}
+
+	/** The catalog's own extra lines under one card (none for most). */
+	public static function notesFor(string $level, string $service = self::SERVICE_DEFAULT): array {
+		return self::serviceNotes()[$service][ProtectionLevel::normalize($level)] ?? array();
 	}
 
 	/**
@@ -410,7 +450,7 @@ class ProtectionLevelPicker {
 	 * card in force the add-ons that are on (Add-ons rule 4).
 	 */
 	protected static function cardLines(string $level, string $service, $notes, array $active): array {
-		$lines = array_merge(self::copy($level, $service), array_values((array)$notes));
+		$lines = array_merge(self::copy($level, $service), self::notesFor($level, $service), array_values((array)$notes));
 		if ($active && self::levelTakesAddons($level)) {
 			$lines[] = self::ADDONS_HEADING . ' on: ' . implode(', ', $active) . '.';
 		}

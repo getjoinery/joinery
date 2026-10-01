@@ -1272,6 +1272,7 @@ There is no second ceremony.
 | Best for | mailboxes without sensitive data (customer service, clubs, newsletters) | most users | mail that must stay private even from a hacked server |
 | Team features (shared mailboxes) | yes | no | no |
 | Phone apps | yes | yes | yes, once a computer hands the phone the key |
+| Contacts (the mailbox's address book) | plaintext | sealed to the adding member's vault, opened in their window | the same — server custody, not end to end; the card says so (§ Contacts) |
 
 **Extra protection — the add-ons on a Private domain**
 (specs/protection_levels_platform.md § Add-ons). The domain editor renders the level
@@ -3672,11 +3673,30 @@ Scope is a property of the row, not of the sealing: a row seals to the **adding 
 vault, so two grantees sharing one mailbox each keep their own contacts, readable only by
 them.
 
-Rows are sealed when that user holds a vault (`imc_address` / `imc_display_name` under a
-per-row DEK); dedup is `imc_address_hash` — a keyed blind index for vault holders (never
-leaks the sealed address), plain SHA-256 otherwise. The hash covers the **mailbox and the
-address together**, which is what makes the existing `(hash, user)` unique constraint mean
-one row per (user, mailbox, address) without a composite key over an encrypted column.
+**A contact has no level of its own: it takes its mailbox's.** A row is sealed
+(`imc_address` / `imc_display_name` under a per-row DEK, to the adding user's vault) when
+that user holds a vault **and** the mailbox seals content (`InboundEmailAlias::seals_content()`,
+Private or Fortress); on a Standard mailbox a vault holder's contacts are plaintext, because
+the mail beside them is. Dedup is `imc_address_hash` — a keyed blind index on a sealing
+mailbox (never leaks the sealed address), plain SHA-256 otherwise. The hash covers the
+**mailbox and the address together**, which is what makes the existing `(hash, user)` unique
+constraint mean one row per (user, mailbox, address) without a composite key over an
+encrypted column.
+
+A mailbox's level change takes its contacts with it. `MailboxContactConvergence`
+(`includes/MailboxProtectionLevel.php`) converges every row whose seal state disagrees with
+its mailbox's posture, in **each adding user's own window**, in both directions: the digest
+is keyed only on a sealing mailbox, so it is rewritten with the content (the keyed form needs
+the user's index key, the plain form the decrypted address), and a sealed row beside a plain
+digest would hand an attacker with the database a dictionary attack on the address. The
+driver is the vault's deferred work (consumer `mailbox_contact_level`), so the rows converge
+wherever the adder is next unlocked; a row that fails is stamped (`imc_level_attempt_time`)
+and passed by for an hour; a row whose new digest matches one the user added after the flip
+is merged into it (use counts summed). The raise and lowering receipts name the contacts
+still to converge. Under a Fortress mailbox the contact list stays server custody — opened in
+the adder's window, readable by the server then — and the Fortress card says so; the
+alternative, contacts in the `mail` client-custody vault, would stop autocomplete, the contact
+panel and the Joinery Direct contact gate from answering server-side.
 
 The composer fetches the whole (small) decrypted list for one mailbox and filters it
 client-side for To/Cc/Bcc autocomplete (no server prefix-search over ciphertext); a locked

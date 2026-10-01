@@ -29,7 +29,12 @@
  * logic/calendar_logic.php do the field/recurrence writes and the
  * scope-aware series splits.
  *
- * @version 1.2.0
+ * On a Private calendar a new entry seals with the owner's public key, so a
+ * create works with the window closed; editing a sealed entry's content needs
+ * the window, and a closed one answers an error carrying `locked: true`.
+ *
+ * @version 1.3.0
+ * @changelog 1.3.0 - locked: editing sealed content with the window closed
  * @changelog 1.2.0 - location, link, notes (specs/calendar_entry_details.md)
  */
 
@@ -205,6 +210,8 @@ function calendar_entry_save_logic(array $input): LogicResult {
 		return LogicResult::render(array('saved' => true, 'entry_id' => (int)$entry->key));
 	} catch (SystemAuthenticationError $e) {
 		return LogicResult::error('Entry not found.');
+	} catch (VaultLockedException $e) {
+		return LogicResult::error('Unlock your vault to edit this entry.', array('locked' => true));
 	}
 }
 

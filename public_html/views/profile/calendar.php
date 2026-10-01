@@ -105,7 +105,12 @@ $page = new PublicPage();
 $hoptions = ['is_valid_page' => true, 'title' => 'My Calendar', 'breadcrumbs' => ['My Profile' => '/profile', 'Calendar' => '']];
 $page->public_header($hoptions, NULL);
 $hoptions['app'] = true;
-$hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown">'
+// The calendar's protection level, as a chip linking to where it is chosen
+// (docs/calendar.md § Protection level).
+$level_chip = '<a class="jy-ui cal-level-chip is-' . htmlspecialchars($protection_level) . '" href="/profile/calendar_settings"'
+    . ' title="Calendar protection: ' . htmlspecialchars(ProtectionLevel::label($protection_level)) . '. Change it in calendar settings.">'
+    . htmlspecialchars(ProtectionLevelPicker::summary($protection_level)) . '</a>';
+$hoptions['header_action'] = $level_chip . '<details class="jy-ui jy-actions-dropdown">'
     . '<summary class="btn btn-secondary">Actions</summary>'
     . '<div class="jy-actions-menu"><button type="button" data-cal-import>Import from another calendar (.ics)&hellip;</button></div>'
     . '</details>';
@@ -188,6 +193,15 @@ echo ComponentRenderer::render(null, 'calendar_grid', [
             <p class="cal-rec-desc is-static"><?php echo htmlspecialchars($cur_rec_desc); ?></p>
         <?php endif; ?>
         <?php if (!empty($errors)):  ?><div class="cal-error"><?php foreach ($errors as $e) { echo htmlspecialchars($e) . '<br>'; } ?></div><?php endif; ?>
+<?php if (!empty($entry_locked)): ?>
+        <!-- A Private calendar's entry with the vault window closed: the form
+             cannot show its content, so the unlock is offered instead. -->
+        <p class="cal-locked-note">This entry is encrypted and your vault is locked. Unlock to see and edit it.</p>
+        <div class="cal-form-actions">
+            <button type="button" class="btn btn-primary" id="cal-form-unlock">Unlock</button>
+            <button type="button" class="btn btn-secondary" id="cal-form-cancel">Cancel</button>
+        </div>
+<?php else: ?>
 <?php
 $formwriter = $page->getFormWriter('form1', ['action' => '/profile/calendar']);
 $formwriter->begin_form();
@@ -408,6 +422,7 @@ $is_recurring_delete = $is_edit && ($display_entry->is_recurring_parent() || $is
             <button type="submit" form="delform" name="btn_delete" class="btn btn-danger-soft cal-form-delete"<?php echo $is_recurring_delete ? ' id="btn-delete-rec"' : ''; ?>><?php echo $is_recurring_delete ? 'Delete…' : 'Delete entry'; ?></button>
             <?php endif; ?>
         </div>
+<?php endif; // $entry_locked ?>
     </div><!-- .cal-full-form -->
     </dialog>
 <?php endif; // $show_full_form ?>
@@ -437,6 +452,12 @@ $is_recurring_delete = $is_edit && ($display_entry->is_recurring_parent() || $is
         <div class="cal-popup-line" id="cal-popup-location" hidden></div>
         <div class="cal-popup-line" id="cal-popup-link" hidden></div>
         <div class="cal-popup-notes" id="cal-popup-notes" hidden></div>
+        <!-- A locked entry (Private calendar, window closed): the time is real,
+             the content waits for the unlock. -->
+        <div class="cal-popup-locked" id="cal-popup-locked" hidden>
+            <p>This entry is encrypted. Unlock to see it.</p>
+            <button type="button" class="btn btn-primary btn-sm" id="cal-popup-unlock">Unlock</button>
+        </div>
     </div>
 <?php
 $popwriter = $page->getFormWriter('cal-pop-form', ['action' => '/api/v1/action/calendar_entry_save']);
@@ -544,6 +565,18 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
         formDialog.addEventListener('close', function(){ window.location.href = backUrl; });
         var cancelBtn = document.getElementById('cal-form-cancel');
         if (cancelBtn) { cancelBtn.addEventListener('click', function(){ formDialog.close(); }); }
+        // A locked entry's dialog offers the unlock in place of the form; once
+        // the window is open the page reloads with the form filled in.
+        var formUnlock = document.getElementById('cal-form-unlock');
+        if (formUnlock) {
+            formUnlock.addEventListener('click', function(){
+                if (!window.JoineryVaultLock) { window.location.href = '/profile/security'; return; }
+                formUnlock.disabled = true;
+                JoineryVaultLock.unlock().then(function(ok){
+                    if (ok) { window.location.reload(); } else { formUnlock.disabled = false; }
+                });
+            });
+        }
         // A click on the backdrop is Cancel. The backdrop reports the dialog
         // itself as the target, so the test is "outside the dialog's box" —
         // a click in its padding stays put. A question stacked on top (the
@@ -742,9 +775,13 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
             linkEl.appendChild(a);
         }
         linkEl.hidden = !it.link;
+        var lockedEl = document.getElementById('cal-popup-locked');
+        lockedEl.hidden = !it.locked;
         viewEl.hidden = false; form.hidden = true;
-        editBtn.hidden = false; deleteBtn.hidden = false;
+        // A locked entry shows its time and the unlock; editing waits for the window.
+        editBtn.hidden = !!it.locked; deleteBtn.hidden = !!it.locked;
         positionPopup(rect);
+        if (it.locked) { return; }
         // Repeats + notes stay off the feed; fetch them for the one entry shown.
         joineryApi.post('calendar_entry', {entry_id: it.entry_id}).then(function(data){
             var e = data && data.entry;
@@ -776,6 +813,38 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
     function closePopup(){ popup.style.display='none'; viewed = null; clearError(); }
 
     if(!popup||!form) return;
+
+    // The unlock, from a locked entry's popover: the platform's one ceremony,
+    // then the grid redraws from the feed (the lock-chip event below).
+    var popUnlock = document.getElementById('cal-popup-unlock');
+    if (popUnlock) {
+        popUnlock.addEventListener('click', function(){
+            if (!window.JoineryVaultLock) { window.location.href = '/profile/security'; return; }
+            popUnlock.disabled = true;
+            JoineryVaultLock.unlock().then(function(){ popUnlock.disabled = false; });
+        });
+    }
+    // An unlock or lock made anywhere on the page (the lock chip, the popover)
+    // changes what the feed may show: redraw the grid and drop a stale popover.
+    ['joinery:vault-unlocked', 'joinery:vault-locked'].forEach(function(name){
+        document.addEventListener(name, function(){
+            closePopup();
+            window.dispatchEvent(new CustomEvent('calendarentrychanged'));
+        });
+    });
+
+    // A level change that stopped part-way (the tab closed mid-way) carries
+    // on here, quietly; the grid redraws once it has.
+    var levelRemaining = <?php echo (int)($level_remaining ?? 0); ?>;
+    function convergeLevel(){
+        if (levelRemaining <= 0) { return; }
+        joineryApi.post('calendar_level_batch', {}).then(function(d){
+            levelRemaining = (d && d.remaining) | 0;
+            if (levelRemaining > 0 && ((d && d.converted) | 0) > 0) { convergeLevel(); return; }
+            window.dispatchEvent(new CustomEvent('calendarentrychanged'));
+        }).catch(function(){ /* a closed window or a stuck row: the deferred work carries on */ });
+    }
+    convergeLevel();
 
     if(allDayEl) allDayEl.addEventListener('change', syncAllDay);
     closeBtn.addEventListener('click', closePopup);

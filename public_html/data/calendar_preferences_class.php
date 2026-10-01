@@ -2,11 +2,14 @@
 /**
  * CalendarPreference and MultiCalendarPreference classes
  *
- * Per-user calendar email preferences: summary frequency + send hour, and the
- * default reminder lead applied to entries that don't carry their own override.
- * One row per user; absence of a row means the factory defaults (everything
- * off). Edited on /profile/calendar_settings; consumed by CalendarEmailEngine.
+ * Per-user calendar preferences: the calendar's protection level, summary
+ * frequency + send hour, and the default reminder lead applied to entries that
+ * don't carry their own override. One row per user; absence of a row means the
+ * factory defaults (Standard, everything off). Edited on
+ * /profile/calendar_settings; consumed by CalendarEmailEngine and CalendarLevel.
  *
+ * @version 1.1 - cpr_protection_level: the member's calendar is Standard or Private
+ *   (docs/calendar.md § Protection level); CalendarLevel reads and flips it
  * @version 1.0
  */
 
@@ -50,6 +53,10 @@ class CalendarPreference extends SystemBase {
 	public static $field_specifications = array(
 		'cpr_calendar_preference_id'   => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
 		'cpr_usr_user_id'              => array('type' => 'int4', 'required' => true, 'unique' => true),
+		// The calendar's protection level: standard | private (ProtectionLevel).
+		// Private seals every entry's title, location, link and notes to the
+		// member's vault (CalendarEntry::$sealed_fields); times stay plaintext.
+		'cpr_protection_level'         => array('type' => 'varchar(10)', 'is_nullable' => false, 'default' => 'standard'),
 		// none | daily | weekly
 		'cpr_summary_frequency'        => array('type' => 'varchar(10)', 'default' => 'none'),
 		// Local hour (0-23, in the user's usr_timezone) summaries go out at.
@@ -73,10 +80,16 @@ class CalendarPreference extends SystemBase {
 		}
 		$pref = new CalendarPreference(NULL);
 		$pref->set('cpr_usr_user_id', (int)$user_id);
+		$pref->set('cpr_protection_level', ProtectionLevel::STANDARD);
 		$pref->set('cpr_summary_frequency', 'none');
 		$pref->set('cpr_summary_hour', 7);
 		$pref->set('cpr_reminder_default_minutes', 0);
 		return $pref;
+	}
+
+	/** This calendar's protection level — the one read of cpr_protection_level. */
+	public function protection_level(): string {
+		return ProtectionLevel::normalize($this->get('cpr_protection_level'));
 	}
 }
 

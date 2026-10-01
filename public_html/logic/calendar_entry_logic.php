@@ -8,7 +8,12 @@
  * its own occurrence_date context (from the feed item) when editing a single
  * occurrence — the stored fields returned here are the series values.
  *
- * @version 1.1.1
+ * A sealed entry (Private calendar) whose owner's window is closed answers
+ * `locked: true` with its times and no content; the editor runs the unlock
+ * and asks again.
+ *
+ * @version 1.2.0
+ * @changelog 1.2.0 - locked: a sealed entry read with the window closed
  * @changelog 1.1.0 - location, link, notes in the payload
  */
 
@@ -56,20 +61,23 @@ function calendar_entry_logic(array $input): LogicResult {
 	}
 
 	$is_recurring = $entry->is_recurring_parent();
+	$content = $entry->content();
 
 	return LogicResult::render(array(
+		'locked' => $content['locked'],
 		'entry' => array(
 			'entry_id'               => (int)$entry->key,
-			'title'                  => (string)($entry->get('cal_title') ?: ''),
+			'locked'                 => $content['locked'],
+			'title'                  => $content['locked'] ? '' : (string)($content['title'] ?: ''),
 			'date'                   => $date,
 			'start_time'             => $start_t,
 			'end_time'               => $end_t,
 			'timezone'               => $tz,
 			'all_day'                => (bool)$entry->get('cal_all_day'),
 			'blocks_availability'    => (bool)$entry->get('cal_blocks_availability'),
-			'location'               => (string)($entry->get('cal_location') ?: ''),
-			'link'                   => (string)($entry->get('cal_link') ?: ''),
-			'notes'                  => (string)($entry->get('cal_notes') ?: ''),
+			'location'               => (string)($content['location'] ?: ''),
+			'link'                   => (string)($content['link'] ?: ''),
+			'notes'                  => (string)($content['notes'] ?: ''),
 			'is_recurring_parent'    => $is_recurring,
 			'recurrence_description' => $is_recurring ? $entry->get_recurrence_description() : '',
 			'recurrence' => array(

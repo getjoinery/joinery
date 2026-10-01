@@ -37,6 +37,15 @@
  * rotation leaves every hash valid; the contacts payload still de-duplicates by decrypted
  * address on read (this store is a cache), so a stray second row is harmless.
  *
+ * THE LEVEL IS THE MAILBOX'S. A contact row has no level of its own: it is Private when the
+ * mailbox it belongs to seals content and Standard when it does not, and a change to the
+ * mailbox's level converges its contact rows in each adding user's window
+ * (MailboxContactConvergence, plugins/mailbox/includes/MailboxProtectionLevel.php). Both
+ * directions need that window, because the blind index is keyed only on a sealing mailbox
+ * and so is rewritten with the content. imc_level_attempt_time lets a pass go by a row that
+ * just failed to convert.
+ *
+ * @version 1.5 - imc_level_attempt_time; the level-follows-the-mailbox rule stated
  * @version 1.4
  */
 
@@ -96,6 +105,9 @@ class MailboxContact extends SystemBase {
 		'imc_sealed_key'         => array('type'=>'text', 'is_nullable'=>true),
 		'imc_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 		'imc_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
+		// A mailbox level change stamps a row whose conversion failed, so the
+		// next passes take the rows behind it for a while.
+		'imc_level_attempt_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'imc_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 

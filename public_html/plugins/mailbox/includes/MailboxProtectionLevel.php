@@ -12,16 +12,25 @@
  *                            caller's window; other holders' rows converge in
  *                            theirs.
  *
+ *   MailboxContactConvergence the mailbox's contact rows (imc_mailbox_contacts)
+ *                            whose seal state disagrees with its posture, in
+ *                            each adding user's window — both directions, because
+ *                            the blind index is keyed only on a sealing mailbox
+ *                            and is rewritten with the content. Driven by the
+ *                            vault's deferred work (`mailbox_contact_level`).
+ *
  * A Fortress raise moves mail in its owner's window as the vault's deferred
  * work (MailboxFortressLevel), and a Fortress lowering is the owner's browser
  * moving keys back: neither converges in a request, so a scope at Fortress has
- * nothing pending here.
+ * nothing pending here. Contacts take the mailbox's level under Fortress too,
+ * and stay server custody there (the Fortress card says so).
  *
  * Product rules stay with the editors that call change(): the sending lock
  * comes off first, a group mailbox stays Standard, the add-ons and AI consent
  * have their own gates, and a mailbox lowers before its grants sync and raises
  * after.
  *
+ * @version 1.1 - MailboxContactConvergence: a level change takes the contacts with it
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
@@ -225,8 +234,249 @@ class MailboxUnsealConvergence implements ProtectionLevelConvergence {
 }
 
 /**
+ * One member's contact rows whose seal state disagrees with their mailbox's
+ * posture (specs/implemented/calendar_contacts_private.md § Contacts): plaintext rows on a
+ * mailbox that seals, sealed rows on one that does not. A contact has no level
+ * of its own — the row is Private exactly when its mailbox seals content — so
+ * a mailbox's level change leaves these rows to converge, and this is what
+ * converges them.
+ *
+ * Every conversion runs in the ADDING user's window, in both directions. The
+ * content alone could be sealed with the public key, but the dedup digest
+ * (imc_address_hash) is a keyed blind index only on a sealing mailbox and a
+ * plain SHA-256 otherwise (MailboxContacts::addressHash()), so it changes with
+ * the posture and is rewritten with the content: the keyed form needs the
+ * user's index key, the plain form needs the decrypted address. A sealed row
+ * beside a plain hash would hand an attacker with the database a dictionary
+ * attack on the address the seal exists to hide, so the row moves whole.
+ *
+ * A row whose new digest collides with one the user added after the flip is
+ * merged into it (use counts summed) and dropped: the later row already has
+ * the right shape.
+ */
+class MailboxContactConvergence implements ProtectionLevelConvergence {
+
+	/** How long a pass passes by a row whose conversion failed before trying it again. */
+	const RETRY_SECONDS = 3600;
+
+	/** The deferred-work consumer id (VaultDeferredWork::register). */
+	const DEFERRED_WORK_ID = 'mailbox_contact_level';
+
+	private $user_id;
+	private $scope_sql;
+	private $rows;
+
+	/** @param ?InboundEmailDomain $domain one domain, or null for every mailbox the user holds contacts on */
+	public function __construct(int $user_id, ?InboundEmailDomain $domain = null, int $alias_scope_id = 0, int $rows = 100) {
+		$this->user_id = $user_id;
+		$this->rows = $rows;
+		$this->scope_sql = self::scopeSql($domain !== null ? intval($domain->key) : 0, $alias_scope_id);
+	}
+
+	/** The joins that put a contact row's mailbox posture in reach: its mailbox and that mailbox's domain. */
+	public static function postureJoin(): string {
+		return 'JOIN iea_inbound_email_aliases a ON a.iea_inbound_email_alias_id = c.imc_iea_inbound_email_alias_id
+			 JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id';
+	}
+
+	/** SQL over c/a/d: a row whose seal flag disagrees with its mailbox's posture, narrowed to a domain or a mailbox. */
+	private static function scopeSql(int $domain_id, int $alias_scope_id): string {
+		$sql = 'c.imc_content_sealed <> (' . mailbox_protection_seals_sql() . ')';
+		if ($domain_id > 0) {
+			$sql .= ' AND d.ied_inbound_email_domain_id = ' . $domain_id;
+		}
+		if ($alias_scope_id > 0) {
+			$sql .= ' AND c.imc_iea_inbound_email_alias_id = ' . $alias_scope_id;
+		}
+		return $sql;
+	}
+
+	private static function readySql(): string {
+		return "(c.imc_level_attempt_time IS NULL OR c.imc_level_attempt_time < NOW() AT TIME ZONE 'UTC' - INTERVAL '"
+			. self::RETRY_SECONDS . " seconds')";
+	}
+
+	public function pending(int $limit): array {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT c.imc_mailbox_contact_id, (' . mailbox_protection_seals_sql() . ') AS seals
+			 FROM imc_mailbox_contacts c ' . self::postureJoin() . '
+			 WHERE c.imc_usr_user_id = ? AND ' . $this->scope_sql . ' AND ' . self::readySql() . '
+			 ORDER BY c.imc_mailbox_contact_id ASC LIMIT ' . intval($limit));
+		$stmt->execute(array($this->user_id));
+		return $stmt->fetchAll(PDO::FETCH_ASSOC);
+	}
+
+	/** Contacts are server custody under every level: nothing here is a browser's. */
+	public function browserSealed($item): bool {
+		return false;
+	}
+
+	/**
+	 * Move one row to its mailbox's posture, in the user's window. Throws
+	 * VaultLockedException when the window is closed; any other failure is
+	 * stamped so the next passes take the rows behind it.
+	 */
+	public function convertOne($item): ?int {
+		$id = intval($item['imc_mailbox_contact_id']);
+		$key = VaultUnlock::secretKey($this->user_id);
+		if ($key === null) {
+			throw new VaultLockedException();
+		}
+		try {
+			return $this->convertRow($id, in_array($item['seals'], array(true, 't', 1, '1'), true), $key);
+		} catch (VaultLockedException $e) {
+			throw $e;
+		} catch (\Throwable $e) {
+			MailboxContact::updateColumns($id, array('imc_level_attempt_time' => gmdate('Y-m-d H:i:s')));
+			throw $e;
+		}
+	}
+
+	private function convertRow(int $id, bool $seal, VaultKey $key): ?int {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT * FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = ? AND imc_usr_user_id = ?');
+		$stmt->execute(array($id, $this->user_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			return null;
+		}
+		$sealed_now = in_array($row['imc_content_sealed'], array(true, 't', 1, '1'), true);
+		if ($sealed_now === $seal) {
+			return null;   // already there (another pass, or a hand-add's re-stamp)
+		}
+		$alias_id = intval($row['imc_iea_inbound_email_alias_id']);
+		$contacts = new MailboxContacts();
+
+		if ($seal) {
+			$vault = UserEncryptionVault::loadForUser($this->user_id);
+			if ($vault === null) {
+				// Nobody to seal to: a vault holder's mailbox was raised and the vault is
+				// gone since. Stamped and left counted, as a mail row with no holder is.
+				throw new RuntimeException('contact ' . $id . ': user ' . $this->user_id . ' holds no vault to seal to');
+			}
+			$addr = strtolower(trim((string)$row['imc_address']));
+			$name = (string)$row['imc_display_name'];
+			$index_key = MailboxContactIndexKey::openForUser($this->user_id, $vault, $key);
+			$hash = $contacts->addressHash($addr, $index_key, $alias_id);
+			if ($this->mergeInto($row, $hash)) {
+				return 0;
+			}
+			// The digest first, the seal second: a crash between the two leaves a
+			// plaintext row with the keyed digest, still pending, and the next pass
+			// computes the same digest again. The other order would leave a sealed
+			// row beside a plain digest, which no pass would revisit.
+			MailboxContact::updateColumns($id, array('imc_address_hash' => $hash, 'imc_level_attempt_time' => null));
+			MailboxContact::sealColumns($id, $vault, array(
+				'imc_address'      => $addr,
+				'imc_display_name' => $name,
+			));
+			return 0;
+		}
+
+		// Opening: the decrypt needs the sealing owner's window — this user's, since
+		// a row seals to the user who added it. A row sealed to someone else is not
+		// this user's to open and stays counted.
+		$sealed_owner = intval($row['imc_sealed_owner_user_id'] ?? 0);
+		if ($sealed_owner > 0 && $sealed_owner !== $this->user_id) {
+			throw new RuntimeException('contact ' . $id . ' is sealed to user ' . $sealed_owner . ', not to its adding user');
+		}
+		$addr = strtolower(trim((string)MailboxContact::decryptSealedFieldStatic('imc_address', $row['imc_address'], $row)));
+		$name = (string)MailboxContact::decryptSealedFieldStatic('imc_display_name', $row['imc_display_name'], $row);
+		$hash = $contacts->addressHash($addr, null, $alias_id);
+		if ($this->mergeInto($row, $hash)) {
+			return 0;
+		}
+		// One UPDATE: content, digest and the seal columns move together.
+		MailboxContact::updateColumns($id, array(
+			'imc_address'              => $addr,
+			'imc_display_name'         => $name,
+			'imc_address_hash'         => $hash,
+			'imc_content_sealed'       => false,
+			'imc_sealed_key'           => null,
+			'imc_sealed_owner_user_id' => null,
+			'imc_key_generation'       => 0,
+			'imc_level_attempt_time'   => null,
+		));
+		return 0;
+	}
+
+	/**
+	 * When another row of this user already carries $hash (the same address
+	 * added again after the flip, in the new shape), fold this row's use count
+	 * into it and drop this row. True when merged.
+	 */
+	private function mergeInto(array $row, string $hash): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT imc_mailbox_contact_id FROM imc_mailbox_contacts
+			WHERE imc_usr_user_id = ? AND imc_address_hash = ? AND imc_mailbox_contact_id <> ? LIMIT 1');
+		$stmt->execute(array($this->user_id, $hash, intval($row['imc_mailbox_contact_id'])));
+		$other = intval($stmt->fetchColumn());
+		if ($other <= 0) {
+			return false;
+		}
+		$db->prepare('UPDATE imc_mailbox_contacts SET imc_use_count = imc_use_count + ?,
+			imc_last_used_time = GREATEST(imc_last_used_time, ?) WHERE imc_mailbox_contact_id = ?')
+			->execute(array(max(0, intval($row['imc_use_count'])), (string)$row['imc_last_used_time'], $other));
+		$db->prepare('DELETE FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = ?')
+			->execute(array(intval($row['imc_mailbox_contact_id'])));
+		return true;
+	}
+
+	public function remaining(): int {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT COUNT(*) FROM imc_mailbox_contacts c ' . self::postureJoin() . '
+			 WHERE c.imc_usr_user_id = ? AND ' . $this->scope_sql);
+		$stmt->execute(array($this->user_id));
+		return intval($stmt->fetchColumn());
+	}
+
+	public function budget(): array {
+		return array('rows' => $this->rows);
+	}
+
+	/**
+	 * Rows of EVERY user on a domain (or one mailbox) not at the posture — the
+	 * receipt's fact: each converges in its adding user's own window.
+	 */
+	public static function backlogCount(int $domain_id, int $alias_scope_id = 0): int {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT COUNT(*) FROM imc_mailbox_contacts c ' . self::postureJoin() . '
+			 WHERE ' . self::scopeSql($domain_id, $alias_scope_id));
+		$stmt->execute();
+		return intval($stmt->fetchColumn());
+	}
+
+	// ------------------------------------------------------ the deferred driver
+
+	/** The deferred-work predicate: a row of $user_id's not at its mailbox's posture that a pass may take now. */
+	public static function hasWork(int $user_id): bool {
+		if ($user_id <= 0) {
+			return false;
+		}
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT 1 FROM imc_mailbox_contacts c ' . self::postureJoin() . '
+			 WHERE c.imc_usr_user_id = ? AND ' . self::scopeSql(0, 0) . ' AND ' . self::readySql() . ' LIMIT 1');
+		$stmt->execute(array($user_id));
+		return (bool)$stmt->fetchColumn();
+	}
+
+	/** Converge $user_id's contacts until done, stuck, locked or out of time; returns the rows converted. */
+	public static function drain(int $user_id, float $deadline): int {
+		$convergence = new self($user_id);
+		$done = 0;
+		do {
+			$pass = ProtectionLevelChange::convergeBatch($convergence, null, $deadline);
+			$done += $pass['converted'];
+		} while (!$pass['locked'] && $pass['converted'] > 0 && $pass['remaining'] > 0 && microtime(true) < $deadline);
+		return $done;
+	}
+}
+
+/**
  * What a mail scope converges once its promise has flipped: sealing at
  * Private, the caller's unseal at Standard, nothing in a request at Fortress.
+ * The scope's contact rows converge beside it in each adding user's window
+ * (MailboxContactConvergence, as the vault's deferred work).
  */
 abstract class MailboxLevelScope implements ProtectionLevelScope {
 
@@ -281,9 +531,14 @@ abstract class MailboxLevelScope implements ProtectionLevelScope {
 		return mailbox_protection_required_ok($rows) ? null : mailbox_protection_first_failure($rows);
 	}
 
-	/** Re-read after a flip: the convergence follows the level it now promises. */
+	/**
+	 * Re-read after a flip: the convergence follows the level it now promises,
+	 * and the contacts' memoized posture is dropped so a read in this same
+	 * request sees the new level.
+	 */
 	protected function forgetConvergence(): void {
 		$this->convergence = null;
+		MailboxContacts::forgetPosture();
 	}
 
 	private function convergence(): ?ProtectionLevelConvergence {

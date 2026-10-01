@@ -5,6 +5,11 @@
         "reseals": true,
         "client_reseals": ["drive"]
     },
+    "calendar_sealed": {
+        "bootstrap": "includes/calendar/CalendarSealed.php",
+        "order": 65,
+        "reseals": true
+    },
     "direct_spool": {
         "bootstrap": "includes/joinery_direct/DirectSpoolDrain.php",
         "order": 70,

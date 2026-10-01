@@ -340,6 +340,13 @@ Accessibility ids (`cal_*`) are the stable UI-test API: `cal_loading`,
 `cal_entry_delete`, `cal_entry_error`. (JoineryMailKit's `mail_*` ids follow
 the same convention.)
 
+**Locked entries.** On a Private calendar (`docs/calendar.md` § Protection
+level) a native item read with the vault window closed arrives with
+`locked: true`, its times, the placeholder title and no `url`, `location` or
+`link`; `calendar_entry` for such an entry answers `locked: true` with the
+times and empty content. The flag is the contract: the module renders a
+locked agenda row and runs the native unlock before fetching again.
+
 Not in the module (the web calendar remains for them): `.ics` import and
 the quick-entry popover's time-prefix parsing.
 

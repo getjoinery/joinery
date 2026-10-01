@@ -32,6 +32,11 @@ class NativeCalendarItemSource implements CalendarItemSource {
         $non_recurring = new MultiCalendarEntry(array_merge($base_opts, ['non_recurring_only' => true]));
         $non_recurring->load();
 
+        // Content is read only where it may be shown (the busy projection
+        // never opens a sealed row), and a closed window makes the item
+        // locked rather than failing the feed (CalendarEntry::content()).
+        $details = ($visibility === CalendarItem::VIS_DETAILS);
+
         foreach ($non_recurring as $entry) {
             $s = $entry->get('cal_start_utc');
             $e = $entry->get('cal_end_utc');
@@ -44,15 +49,17 @@ class NativeCalendarItemSource implements CalendarItemSource {
             if (!($s < $end_utc && $e > $start_utc)) {
                 continue;
             }
+            $content = $details ? $entry->content()
+                : ['title' => null, 'location' => null, 'link' => null, 'notes' => null, 'locked' => false];
             $items[] = new CalendarItem([
                 'start_utc'           => $s,
                 'end_utc'             => $e,
                 'all_day'             => (bool)$entry->get('cal_all_day'),
                 'type'                => $entry->get('cal_type') ?: CalendarItem::TYPE_PERSONAL,
-                'title'               => $entry->get('cal_title') ?: 'Busy',
-                'url'                 => '/profile/calendar?edit_entry=' . $entry->key,
-                'location'            => $entry->get('cal_location'),
-                'link'                => $entry->get('cal_link'),
+                'title'               => $details ? ($content['title'] ?: 'Busy') : null,
+                'url'                 => ($details && !$content['locked']) ? '/profile/calendar?edit_entry=' . $entry->key : null,
+                'location'            => $details ? $content['location'] : null,
+                'link'                => $details ? $content['link'] : null,
                 'blocks_availability' => (bool)$entry->get('cal_blocks_availability'),
                 'status'              => (string)($entry->get('cal_status') ?: 'confirmed'),
                 'visibility'          => $visibility,
@@ -60,6 +67,7 @@ class NativeCalendarItemSource implements CalendarItemSource {
                 'source_key'          => 'native:cal-' . $entry->key,
                 'entry_id'            => (int)$entry->key,
                 'timezone'            => $entry->get('cal_timezone') ?: null,
+                'locked'              => $content['locked'],
             ]);
         }
 

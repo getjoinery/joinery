@@ -35,6 +35,7 @@
  * sealed to their vault (MailboxContactIndexKey) and opened in-window like any row DEK, so
  * a vault rotation moves its wrapping and every hash survives.
  *
+ * @version 2.5 - forgetPosture(): a level flip in the same request drops the memoized posture
  * @version 2.4.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 2.4
  * @changelog 2.4 - the blind index is keyed by the user's sealed index key
@@ -63,6 +64,11 @@ class MailboxContacts {
 
 	/** @var array<int,bool> request-scoped: does this mailbox's domain seal content? */
 	private static $seals_cache = array();
+
+	/** Forget the memoized posture — a level flip in this request changed the answer. */
+	public static function forgetPosture(): void {
+		self::$seals_cache = array();
+	}
 
 	/**
 	 * The vault a contact row on this mailbox seals under, or null when rows

@@ -124,6 +124,11 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         'models'         => $models,
         'model_privacy'  => $model_privacy,
         'model_trust'    => $model_trust,
+        // Where this member's Private content may be read by AI
+        // (PrivateContentConsent): the composer greys out the models a Private
+        // chat may not use, before the send refuses them.
+        'private_ai_consent' => PrivateContentConsent::forUser((int)$session->get_user_id()),
+        'egress_restricted'  => $selected ? (bool)$selected->get('aic_egress_restricted') : false,
         'data_access'    => $selected ? (bool)$selected->get('aic_data_access') : false,
         'web_search'     => $selected ? (bool)$selected->get('aic_web_search') : $default_web_search,
         'history_access' => $selected ? (bool)$selected->get('aic_history_access') : false,

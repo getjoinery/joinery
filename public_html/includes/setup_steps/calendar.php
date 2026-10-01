@@ -1,19 +1,53 @@
 <?php
 /**
  * Setup wizard step: Calendar (specs/setup_wizard.md § Step 6).
- * The same IcsImporter path the calendar page uses, plus the reminder/summary
+ * The protection level (the shared picker's two cards, offered above the
+ * import when the viewer holds a vault, so imported entries land sealed), the
+ * same IcsImporter path the calendar page uses, and the reminder/summary
  * preferences forwarded to the calendar_settings action. Included by
  * views/setup.php with $page, $page_vars, $viewer, $next_key in scope.
  *
+ * @version 1.1 - the protection level, first, when the viewer holds a vault
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+require_once(PathHelper::getIncludePath('includes/ProtectionLevelPicker.php'));
+require_once(PathHelper::getIncludePath('includes/calendar/CalendarLevel.php'));
 
 $setup_cal_pref = CalendarPreference::get_for((int)$viewer->key);
 $setup_cal_blocker = EmailSender::transactionalSendBlocker();
 $setup_cal_summary = $page_vars['calendar_import_summary'] ?? null;
+$setup_cal_has_vault = CalendarLevel::ownerHasVault((int)$viewer->key);
+$setup_cal_level_saved = !empty($page_vars['calendar_level_saved']);
 ?>
+
+	<div class="jy-fieldset">
+		<h4>How protected is your calendar?</h4>
+<?php if ($setup_cal_has_vault) { ?>
+<?php if ($setup_cal_level_saved) { ?>
+		<div class="jy-callout jy-callout-info"><div class="jy-callout-title">Saved</div><p>Your calendar is <?php echo htmlspecialchars(ProtectionLevel::label($setup_cal_pref->protection_level())); ?>. Entries you import below land that way.</p></div>
+<?php } ?>
+<?php
+$setup_cal_level_form = $page->getFormWriter('setup-cal-level', array('action' => '/setup', 'method' => 'POST'));
+$setup_cal_level_form->begin_form();
+$setup_cal_level_form->hiddeninput('action', '', array('value' => 'calendar_level'));
+$setup_cal_level_form->hiddeninput('step', '', array('value' => 'calendar'));
+ProtectionLevelPicker::render($setup_cal_level_form, 'protection_level', array(
+	'service'  => ProtectionLevelPicker::SERVICE_CALENDAR,
+	'levels'   => CalendarLevel::LEVELS,
+	'value'    => $setup_cal_pref->protection_level(),
+	'label'    => 'Protection level',
+	'helptext' => 'Choose before importing, so the entries land with this protection. Events and bookings shown on your calendar keep the protection of the place they were made.',
+));
+echo $setup_cal_level_form->submitbutton('btn_cal_level', 'Save protection level', array('class' => 'btn btn-secondary'));
+$setup_cal_level_form->end_form();
+?>
+<?php } else { ?>
+		<p class="jy-muted">A private calendar needs your personal encryption key. Set one up in <a href="/profile/security">your security settings</a>, then choose a level in <a href="/profile/calendar_settings">calendar settings</a>.</p>
+<?php } ?>
+	</div>
+
 
 <?php if (is_array($setup_cal_summary)) { ?>
 <?php if (!empty($setup_cal_summary['error'])) { ?>
@@ -31,7 +65,7 @@ $setup_cal_summary = $page_vars['calendar_import_summary'] ?? null;
 <?php } ?>
 <?php } ?>
 
-	<div class="jy-fieldset">
+	<div class="jy-fieldset jy-mt-3">
 		<h4>Bring an existing calendar</h4>
 <?php
 $setup_cal_form = $page->getFormWriter('setup-cal-import', array(
