@@ -615,6 +615,32 @@ From a management node, the `site_census` job runs the same script over the
 agent (read-only, so it runs on a dormant copy and a frozen source too), and
 `JobResultProcessor::census_of($job)` returns the count it kept.
 
+### Handing a chain to a copy
+
+A copy of a site on another machine applies its source's chain, which is sealed
+to the source's site key and recorded in the source's ledger, not the copy's.
+Three agent words carry it across (`specs/site_copy.md`), and the management
+node that dispatches them can read none of it:
+
+- **`copy_export`, on the source.** The source's own operator approves it on
+  the source's Backups page with the recovery key (the `export` approval scope),
+  against a statement naming the copy by its agent key fingerprint. The source
+  then requires the chain's local manifest to match its ledger, opens the chain
+  data key with its own `config/backup_site_key`, and seals the key, the
+  manifest's hash (the vouch) and the host's certificate and DKIM keys to the
+  copy's agent key, signed with its own. `backup_site_key` itself never leaves.
+- **`copy_import`, on the copy.** It checks the signature by the source key its
+  dormant install recorded, the target, the expiry and that the bundle is newer
+  than the last one taken, then writes `chain.key` into `restore_<chain_id>`,
+  the vouch to `/etc/joinery/sites/<site>/vouched`, and the certificates.
+- **`copy_stage`, on the copy.** It downloads the chain from the source's
+  backup storage, keeps the manifest only when its hash is vouched for, and
+  checks every artifact against it (`CopyStaging`). The ordinary staging,
+  which trusts only this machine's own ledger and key, is not used.
+
+`copy_restore` then runs `restore_chain.sh --adopt-secret-key --skip-ssl` over
+that workspace.
+
 ## Key model: one envelope per backup
 
 Every run mints its own random data key, encrypts the archive with it, and seals

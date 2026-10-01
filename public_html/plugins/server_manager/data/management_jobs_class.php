@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.29 - copy_export's claim budget (its owner's approval window inside it) and copy_stage's; copy_stage
+ *                 and copy_import carry the chain ceiling (site_copy.md WP4)
  * @version 1.28 - copy_restore's claim budget: restore_chain's work (2h20m) and slack, with no approval
  *                 window (site_copy.md WP2)
  * @version 1.27 - site_quiet's claim budget: 18m against the node's 16m (lock wait, then the wait for
@@ -284,6 +286,11 @@ class ManagementJob extends SystemBase {
 		// A dormant copy's restore: the same script and work, and no approval
 		// to wait for (the owner approved at the source).
 		'copy_restore'          => 8700,  // 2h20m + slack
+		// The source's export: seconds of work and the source owner's approval
+		// window, held inside the claim as every approval is.
+		'copy_export'           => 4500,  // 10m + 60m approval + slack
+		// A copy's chain download: stage_chain's transfer, under its source's slug.
+		'copy_stage'            => 8700,  // 2h20m + slack
 		// Bringing a backup back from backup storage. Mirrors upload_backup's budget,
 		// because it is the same transfer in the other direction and S3Signer's
 		// window is what bounds both.
@@ -345,14 +352,16 @@ class ManagementJob extends SystemBase {
 	/**
 	 * The words that carry a whole backup chain's signed links, and their two
 	 * bounds, matched on the node (agent primitives.ChainParamsBytes and
-	 * chainLinksMax, 1.45.0). A chain job carries a link for every object in
+	 * chainLinksMax, 1.45.0). copy_import is here for its size, not links: a
+	 * copy's export, which outgrows MAX_PARAMS_BYTES on a machine with a few
+	 * certificates. A chain job carries a link for every object in
 	 * the chain, runs × artifacts per run, so it outgrows MAX_PARAMS_BYTES long
 	 * before a chain is unreasonably long. 4 KiB under
 	 * AgentChannelEndpoint::MAX_CLAIM_BODY. An agent before 1.45.0 took 64
 	 * links (CHAIN_LINKS_BEFORE_CLAIM_BYTES) under MAX_PARAMS_BYTES, and is told
 	 * apart by the claim_bytes its claim does not carry.
 	 */
-	const CHAIN_WORDS                    = ['stage_chain', 'verify_backup'];
+	const CHAIN_WORDS                    = ['stage_chain', 'verify_backup', 'copy_stage', 'copy_import'];
 	const CHAIN_PARAMS_BYTES             = 1044480;
 	const CHAIN_LINKS_MAX                = 1024;
 	const CHAIN_LINKS_BEFORE_CLAIM_BYTES = 64;

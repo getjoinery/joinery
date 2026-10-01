@@ -8,6 +8,10 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.85 - build_copy_export / build_copy_import / build_copy_stage (agent 1.49.0): the source seals its
+ *                 chain key, certificate and DKIM keys to its copy under its owner's approval, the copy opens
+ *                 them, and stages its source's chain under the source's slug (site_copy.md WP4); chain links
+ *                 for a copy row are signed on the node its backups belong to (ManagedNode::backup_node_of)
  * @version 1.84 - build_site_census / build_site_census_primitive (agent 1.48.0): count a site's rows, files
  *                 and sealed secrets, for checking a copy against its source (site_copy.md WP3)
  * @version 1.83 - build_copy_restore / build_copy_restore_primitive (agent 1.47.0): apply a staged chain of
@@ -393,7 +397,7 @@ class JobCommandBuilder {
 	 * this list decides what the plane will not ask for, and the agent decides
 	 * what it will not do.
 	 */
-	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain', 'decommission_site'];
+	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain', 'decommission_site', 'copy_export'];
 
 	/**
 	 * May this node be sent a destructive primitive job?
@@ -2105,6 +2109,127 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * Hand a dormant copy what its source holds and it cannot make: the
+	 * chain's data key, the certificate and its account, the DKIM keys
+	 * (specs/site_copy.md WP4). Run on the SOURCE. Its agent seals all of it to
+	 * the copy's agent key and signs it; this plane carries the bundle and can
+	 * read none of it.
+	 *
+	 * Destructive on the node, for what that class means there: never
+	 * unattended. The source's own operator approves each export on the
+	 * source's own Backups page, against a statement that names the copy by
+	 * its key fingerprint. The key sent here is the one this plane recorded
+	 * when the copy joined; the owner checks it against the copy's own page.
+	 *
+	 * $copy is the copy's row: in state `copy`, recorded as a copy of $node.
+	 *
+	 * $params:
+	 *   chain_id  - the chain the copy will apply (required)
+	 *   profile   - whose backups it is among: manager (default) or site
+	 */
+	public static function build_copy_export($node, $copy, $params) {
+		if (!self::has_primitive($node, 'copy_export')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot hand its site to a copy. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['copy_export']));
+		}
+		return self::build_copy_export_primitive($node, $copy, $params);
+	}
+
+	public static function build_copy_export_primitive($node, $copy = null, $params = []) {
+		if (!$copy || trim((string)$copy->get('mgn_install_state')) !== 'copy'
+				|| (int)$copy->get('mgn_copy_of_node_id') !== (int)$node->key) {
+			throw new Exception("An export goes only to a dormant copy of '{$node->get('mgn_slug')}', recorded as one.");
+		}
+		$target_key = trim((string)$copy->get('mgn_agent_public_key'));
+		$raw = base64_decode($target_key, true);
+		if ($raw === false || strlen($raw) !== 32) {
+			throw new Exception("The copy '{$copy->get('mgn_slug')}' has no agent key on record, so there is nothing "
+				. 'to seal the export to. It is recorded when the copy joins.');
+		}
+		$chain_id = trim((string)($params['chain_id'] ?? ''));
+		if ($chain_id === '' || strlen($chain_id) > 64 || !preg_match('/^chain-[0-9_]+$/', $chain_id)) {
+			throw new Exception('An export needs the chain id (for example chain-20260807_231507).');
+		}
+		$profile = trim((string)($params['profile'] ?? '')) ?: 'manager';
+		if (!in_array($profile, ['site', 'manager'], true)) {
+			throw new Exception("An export's chain is among the site's or the manager's backups, not '{$profile}'.");
+		}
+		return ['primitive' => 'copy_export', 'params' => [
+			'profile'           => $profile,
+			'chain_id'          => $chain_id,
+			'target_public_key' => base64_encode($raw),
+		]];
+	}
+
+	/**
+	 * Give a dormant copy the bundle its source's copy_export returned
+	 * (specs/site_copy.md WP4). The copy checks the source's signature by the
+	 * key its install recorded, that the bundle is sealed to its own key, that
+	 * it has not expired and is newer than the last it took, and only then
+	 * writes the chain keys, the vouched runs and the certificates. This plane
+	 * passes the bundle on as it came: it cannot open it, and any change to it
+	 * is refused.
+	 *
+	 * @param string $bundle what JobResultProcessor::bundle_of() kept
+	 */
+	public static function build_copy_import($node, $bundle) {
+		if (!self::has_primitive($node, 'copy_import')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot take a copy's export. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['copy_import']));
+		}
+		return self::build_copy_import_primitive($node, $bundle);
+	}
+
+	/** The largest bundle a copy takes: the agent's copyExportMaxBundle. */
+	const COPY_EXPORT_MAX_BUNDLE = 204800;
+
+	public static function build_copy_import_primitive($node, $bundle = '') {
+		$bundle = (string)$bundle;
+		if ($bundle === '' || strlen($bundle) > self::COPY_EXPORT_MAX_BUNDLE) {
+			throw new Exception('An import needs the bundle the source exported, as it was returned.');
+		}
+		return ['primitive' => 'copy_import', 'params' => ['bundle' => $bundle]];
+	}
+
+	/**
+	 * Download, onto a dormant copy, the chain it will apply
+	 * (specs/site_copy.md WP4, G7). The links are signed under the SOURCE's
+	 * slug on the source's backup target, because the chain is the source's
+	 * (sign_chain_links asks ManagedNode::backup_node_of). The copy keeps the
+	 * manifest only when its hash is one the source vouched for, and checks
+	 * every artifact against it; it writes no key.
+	 *
+	 * $params:
+	 *   chain_id  - the chain (required)
+	 *   profile   - whose backups the source's chain is among: manager (default) or site
+	 *   seq       - stage as at this run; default the newest
+	 */
+	public static function build_copy_stage($node, $params = []) {
+		if (!self::has_primitive($node, 'copy_stage')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot stage a copy's chain. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['copy_stage']));
+		}
+		return self::build_copy_stage_primitive($node, $params);
+	}
+
+	public static function build_copy_stage_primitive($node, $params = []) {
+		if (trim((string)$node->get('mgn_install_state')) !== 'copy') {
+			throw new Exception("Node '{$node->get('mgn_slug')}' is not a dormant copy. A site's own chains are "
+				. 'staged with stage_chain.');
+		}
+		$signed = self::sign_chain_links($node, $params, 'copy_stage');
+		// No shelf on the copy: it checks the chain against its source's vouch,
+		// not a ledger of its own.
+		$primitive_params = $signed['params'];
+		unset($primitive_params['profile']);
+		self::assert_chain_job_fits('copy_stage', $primitive_params);
+		return ['primitive' => 'copy_stage', 'params' => $primitive_params];
+	}
+
+	/**
 	 * Where the disk went: the filesystem's figures, the site tree's biggest
 	 * directories to depth two, and the usual machine directories
 	 * (specs/disk_headroom_and_unit_diagnosis.md § 11). PRIMITIVE ONLY, and it
@@ -2943,16 +3068,19 @@ class JobCommandBuilder {
 			throw new Exception('Staging a chain needs the chain id (for example chain-20260807_231507).');
 		}
 
-		$target = self::get_target($node);
+		// A dormant copy's chain is its source's: under the source's slug, on
+		// the source's target. Every other row is its own backup node.
+		$owner = ManagedNode::backup_node_of($node);
+		$target = self::get_target($owner);
 		if (!$target) {
-			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target.");
+			throw new Exception("Node '{$owner->get('mgn_slug')}' has no enabled cloud backup target.");
 		}
 		$creds = $target->get_credentials();
 		if (empty($creds)) {
 			throw new Exception('The backup target has no stored credentials, so no download can be signed.');
 		}
 
-		$slug = trim((string)$node->get('mgn_slug'));
+		$slug = trim((string)$owner->get('mgn_slug'));
 		if (!preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
 			throw new Exception("Node slug '{$slug}' cannot be used as a bucket path segment.");
 		}

@@ -84,6 +84,37 @@
     `--adopt-secret-key` onto T with another key and password: the canary and every sealed value
     open with T's config, T keeps its password, and the census is exactly equal. A second apply after
     an edit, a new file and a new row on T removes all three.
+- **WP4 built (2026-10-01); unit- and gate-tested, not yet on a real copy:** agent 1.49.0
+  (`copy_export` destructive, `copy_import` and `copy_stage` operate), `ApprovalChallenge` 1.2 (the
+  `export` scope, with its two settings rows), `CopyStaging` 1.0 with `utils/copy_stage.php`, and on M
+  `build_copy_export`, `build_copy_import`, `build_copy_stage`, `process_copy_export` with
+  `bundle_of()`, `ManagedNode::backup_node_of()` with the column `mgn_copy_of_node_id`, and claim
+  budgets (export 4500 s, stage 8700 s). **Not yet applied:** `install.sh` 2.90 (`--copy-of-key`) and
+  `_site_state.sh` 1.3 (records `copy_of_key`; clearing removes it and `copy_import_issued`), held
+  until the owner stops dev's converger timer. Choices made while building:
+  - **The seal** (`copy_seal.go`): ephemeral X25519, HKDF-SHA256 bound to both public keys,
+    AES-256-GCM, to T's Ed25519 key converted to X25519 (the public half by u = (1+y)/(1−y), the
+    private half by the scalar Ed25519 derives from its seed). `curve25519.X25519` refuses a
+    low-order key. No new dependency.
+  - **The signature** covers the body's exact bytes, which travel base64-encoded, under
+    `joinery-copy-export-v1`. The agent lends its key to words only as `SignDomain` (a message must
+    begin with its own domain; the request domain is refused) and `OpenSealed`; no word holds it.
+  - **The bundle** (gzipped inside the seal): each chain with its data key and the vouched manifest
+    hash, and the host bundle. A bundle is valid for six hours, may be issued at most fifteen minutes
+    ahead of T's clock, and must be newer than the last one T took (`copy_import_issued`, raised
+    last). At most 200 KiB on the wire, so `copy_import` carries the chain ceiling.
+  - **One manifest version is vouched:** the one on S's disk, required to match S's ledger. A backup
+    on S between an export and a stage makes `copy_stage` refuse by name; export again. At the final
+    copy S is frozen, so it cannot happen there.
+  - **The host bundle takes each certbot lineage's current version only:** the four files `live/`
+    links to, the links themselves, the renewal file, the account directory, `/etc/letsencrypt/*.ini`
+    and `/etc/opendkim/keys/`. Entries travel as a root by name and a path inside it; a link must point
+    into its own lineage's archive. Owners travel by name; one T has no account for is written as
+    root's and named in the result.
+  - **The statement** names T by the 16-character fingerprint both admin pages show and by the full
+    SHA-256, with the chain, its newest upload time, the certificate names and the DKIM key count.
+  - **HTTPS on T:** the vhost template picks `/etc/letsencrypt/live/<domain>/` over the placeholder
+    when Apache parses its config, and clearing the quiet state reloads Apache. Nothing re-renders.
 - Decided:
   - D1: a faithful copy, with switching over and deleting kept separate; the old Clone is retired.
   - D2: the backup chain carries the copy.
@@ -93,8 +124,8 @@
   - D5: the certificate and the DKIM keys travel.
 - **Goal set by the owner (Q1):** copy between any two servers — across Linode accounts and regions,
   and to another provider. Linode to Hetzner is the design target.
-- Open: Q8 and Q9 (2026-09-28, before WP4 is built), and G1 for the owner's nod. Q6 and Q7 answered
-  2026-09-28 (WP4's side on T).
+- Q6–Q9 answered (Q6, Q7 2026-09-28; Q8, Q9 and G7 2026-10-01): WP4 seals to T's agent key and asks
+  the owner on S at every export; T stages S's chain with its own word.
 - **Q3 answered (2026-09-28):** the test domain is `jeremytunnell.info`.
 - **Q5 answered (2026-09-28):** L0 creates its own source each run.
 - **Q4 answered (2026-09-28):** jeremytunnell switches by changing its Cloudflare origin (WP7a).
@@ -555,8 +586,9 @@ container target, which is out of scope. A container source is never dormant.
      every secret the site has. M's web tier sees only ciphertext today.
 4. **Export and restore.**
    - **`copy_export`, one word on S, run at the first copy, at each refresh and at the final copy.**
-     It returns one bundle, sealed to T's own `backup_site_key` and signed with S's agent identity key
-     under its own domain prefix (`joinery-copy-export-v1`, never a request signature). It holds:
+     It returns one bundle, sealed to T's agent key (the key whose fingerprint the owner approved,
+     Q8) and signed with S's agent identity key under its own domain prefix
+     (`joinery-copy-export-v1`, never a request signature). It holds:
      - **the runs T may apply:** chain id and manifest hash of each, read from S's own upload ledger.
        The manifest fixes every artifact's hash, so T refuses any byte S did not upload. S's backup
        runs are unchanged (design rule).
@@ -569,8 +601,9 @@ container target, which is out of scope. A container source is never dormant.
        - any DKIM keys under `/etc/opendkim/keys/`.
 
      It is re-sent whole every time, so a certificate renewed on S in between always reaches T.
-   - **Fetching.** `ManagedNode::backup_slug()` answers with S's slug for a row in state `copy`, so the
-     existing download builders sign links under S's prefix for T, and only while the row is a copy.
+   - **Fetching.** `ManagedNode::backup_node_of()` answers with S's row for a row in state `copy`, so
+     the chain link builder signs links under S's prefix, on S's target, for T, and only while the row
+     is a copy. T downloads with `copy_stage` (G7).
    - **Restoring.** `copy_restore`, allowed only under `quiet copy`, runs `restore_chain.sh
      --key-file … --adopt-secret-key`, with `--skip-ssl` passed through to the reconcile. The restore
      lock (B27) and on-disk staging (B26) are WP0 fixes to every restore, not a copy mode. On the
@@ -719,7 +752,7 @@ ordinary delete.
 | `public_html/` (custom themes and plugins included) | chain `code` part, onto T installed at S's exact release | census |
 | `vendor/` | never; T installs S's release, so its own matches | the site runs |
 | `secret_box_key` | from `config/`, spliced into T's own config (`--adopt-secret-key`) | canary opens, 0 dead secrets |
-| Chain data keys | `copy_export`, sealed to T's own `backup_site_key` | opening the chain |
+| Chain data keys | `copy_export`, sealed to T's agent key | opening the chain |
 | `backup_site_key` | never; T keeps its own | T's first backup |
 | Each run's integrity | `copy_export`'s signed list of manifest hashes | `restore_chain` checks every artifact against the manifest |
 | Database password, paths | never; T keeps its own | the reconcile's database open |
@@ -736,8 +769,8 @@ ordinary delete.
 Steps 2, 4, 5, 9 and 10, without `copy_export` and the freeze.
 - **Keys.** With no S to seal anything, the owner opens the newest chain's data key once, with the
   recovery key, in a ceremony on T's site. The browser opens the recovery-sealed data key and
-  re-seals it to T's `backup_site_key`: the same input `copy_export` gives Phase 1, so everything
-  after it is shared. Older chains open by the recovery ceremony, as any rotated key does.
+  re-seals it to T, which writes it as the chain's `chain.key`: what `copy_import` leaves in Phase 1,
+  so everything after it is shared. Older chains open by the recovery ceremony, as any rotated key does.
 - **Trust.** The ceremony's statement names the chain, its date and its manifest hash, and stands in
   for the ledger check. The owner is the authority, because no machine that made the archive is
   left to vouch for it.
@@ -873,8 +906,8 @@ WP7 unchanged; only the ceremony (WP10) is its own, and it produces the same inp
 
 In build order. Each is built and tested on its own (design rule).
 
-**New agent words (six):** `copy_export` (S), `copy_import` (T, Q6), `copy_restore` (T), `site_census`
-(any, read-only), `site_quiet on|off` (S; T's `off` at step 10), and the node-id word (T).
+**New agent words (seven):** `copy_export` (S), `copy_import` (T, Q6), `copy_stage` (T, G7),
+`copy_restore` (T), `site_census` (any, read-only), `site_quiet on|off` (S; T's `off` at step 10), and the node-id word (T).
 
 - **WP1 — The documents tell the truth (B22).** Correct the five documents and the
   `reconcile_site.sh` message to what is true today, and again when the copy lands. Small; first.
@@ -911,13 +944,15 @@ In build order. Each is built and tested on its own (design rule).
   - The census script with its one exclusion list, and the read-only `site_census` agent word.
   - M's compare: informational at copy time, exact at the final copy.
 - **WP4 — Approval and export.**
-  - The export approval on S: a scope of the folded approval (WP0), naming T's fingerprint.
-  - `copy_export`: the vouched runs from S's ledger, each chain's data key sealed to T's
-    `backup_site_key`, and the host bundle, signed; re-sent whole every time.
-  - `ManagedNode::backup_slug()`: S's slug for a row in state `copy`, so the existing download
-    builders serve the copy.
-  - The agent's `SignBlob` with a domain prefix, and a libsodium-compatible seal
-    (`golang.org/x/crypto/nacl/box`).
+  - The export approval on S: a scope of the folded approval (WP0), naming T's fingerprint, asked at
+    every export (Q9).
+  - `copy_export`: the vouched runs from S's ledger, each chain's data key and the host bundle sealed
+    to T's agent key (Q8), signed by S; re-sent whole every time.
+  - `ManagedNode::backup_node_of()`: S's row for a row in state `copy` (`mgn_copy_of_node_id`), so
+    the chain link builder serves the copy.
+  - The agent's key lent to the copy words as `SignDomain` (a domain prefix) and `OpenSealed`; the
+    seal to T's agent key (`copy_seal.go`). S opens its chain envelope, a libsodium sealed box, with
+    `golang.org/x/crypto/nacl/box`.
   - **`copy_import` on T (Q6)**, trusting only the S key the dormant install recorded (Q7):
     `install.sh --copy-of` takes S's agent public key with its node id. Pinned from the WP3 review:
     - it runs only under `quiet copy`, as `copy_restore` does: a live site never takes a bundle;
@@ -925,8 +960,8 @@ In build order. Each is built and tested on its own (design rule).
       state directory, raised only after a bundle checks out;
     - `_site_state.sh` clearing removes the recorded S key with `copy_of` and `vouched`, so a
       promoted T stops trusting S's key.
-  - **G1 (found 2026-09-28 at the start of WP4; proposed, awaiting the owner's nod): T needs its own
-    staging word, `copy_stage`.** The ordinary `stage_chain` accepts only artifacts in T's own upload
+  - **G7 (found 2026-09-28 at the start of WP4; accepted 2026-10-01): T needs its own staging word,
+    `copy_stage`.** The ordinary `stage_chain` accepts only artifacts in T's own upload
     ledger and opens the chain with T's own site key, so it refuses S's chain on both counts.
     `copy_stage` (operate, only under `quiet copy`) downloads the chain M links under S's prefix,
     accepts the manifest only when its hash is in `vouched`, and checks every artifact against the
@@ -1095,7 +1130,7 @@ In build order. Each is built and tested on its own (design rule).
   jobs and the compare.)
   - Hardening: S's own admin page already shows S's agent fingerprint, served by S and not by M.
     The printed command shows the fingerprint it carries and tells the owner to compare the two.
-- **Q8 — Open (2026-09-28): which key the export is sealed to.** The seal must go to a key S can
+- **Q8 — Answered 2026-10-01: (a), T's agent key.** Which key the export is sealed to: The seal must go to a key S can
   prove is T's, or a compromised M substitutes its own key and reads every secret in the bundle.
   - **(a) T's agent key.** The key the owner approved T's join by, and the fingerprint the export
     approval names, so S seals to exactly the key the owner saw. No extra step. Catch: one key both
@@ -1105,7 +1140,7 @@ In build order. Each is built and tested on its own (design rule).
     tell T's backup key from one M made up, so T must publish it signed by its agent key: one more
     word and one more job before every export.
   - Recommendation: (a).
-- **Q9 — Open (2026-09-28): how often the owner approves on S.** S exports at the first copy, at
+- **Q9 — Answered 2026-10-01: (a), every export.** How often the owner approves on S: S exports at the first copy, at
   each refresh and at the final copy, inside the downtime.
   - **(a) Every export.** The restore approval's mechanism as it is. Catch: each refresh needs the
     recovery key, and the final copy waits on the owner inside the downtime (about a minute when
