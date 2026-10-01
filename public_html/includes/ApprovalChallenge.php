@@ -59,6 +59,9 @@
  * Beyond that, a machine whose web tier you suspect is not a machine to
  * restore in place — it is a machine to rebuild.
  *
+ * @version 1.3 - pending() says whether the waiting request has been answered, and a second answer to
+ *                one already answered is refused: the page reloads before the agent has read the
+ *                first, and showed the same request again as if nothing had been sent
  * @version 1.2 - the export scope: this site's owner approving that its backup key, certificate and DKIM keys
  *                be sealed to a copy of it on another machine (specs/site_copy.md WP4)
  * @version 1.1 - the scope table says expiry_tail is markup, echoed as written
@@ -72,6 +75,9 @@ class ApprovalChallenge {
 	const RESTORE      = 'restore';
 	const DECOMMISSION = 'decommission';
 	const EXPORT       = 'export';
+
+	/** A second answer to a request already answered, before the agent has taken the first. */
+	const ALREADY_ANSWERED = 'This request has already been answered. This machine\'s agent picks the answer up within a few seconds.';
 
 	/**
 	 * Every scope, keyed by name. The handoff fields must match the agent's
@@ -298,7 +304,16 @@ class ApprovalChallenge {
 			return null;
 		}
 
+		// An answer for this job already written and not yet taken by the
+		// agent, which reads and clears it within seconds of the page posting.
+		$answered = null;
+		$ans = json_decode((string)self::read_setting($s['answer_setting']), true);
+		if (is_array($ans) && (int)($ans['job_id'] ?? 0) === (int)$req['job_id']) {
+			$answered = !empty($ans['declined']) ? 'declined' : 'approved';
+		}
+
 		return array(
+			'answered'     => $answered,
 			'job_id'       => (int)$req['job_id'],
 			'primitive'    => (string)($req['primitive'] ?? ''),
 			'summary'      => (string)($req['summary'] ?? ''),
@@ -336,6 +351,9 @@ class ApprovalChallenge {
 		if ((int)$job_id !== $pending['job_id']) {
 			throw new ApprovalChallengeException($s['wrong_job']);
 		}
+		if ($pending['answered'] !== null) {
+			throw new ApprovalChallengeException(self::ALREADY_ANSWERED);
+		}
 		$answer = trim((string)$answer);
 		if ($answer === '') {
 			throw new ApprovalChallengeException(
@@ -361,6 +379,9 @@ class ApprovalChallenge {
 		$pending = self::pending($scope);
 		if ($pending === null || (int)$job_id !== $pending['job_id']) {
 			throw new ApprovalChallengeException($s['none_to_decline']);
+		}
+		if ($pending['answered'] !== null) {
+			throw new ApprovalChallengeException(self::ALREADY_ANSWERED);
 		}
 		self::write_setting($s['answer_setting'], (string)json_encode(array(
 			'job_id'   => (int)$job_id,
