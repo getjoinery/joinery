@@ -6001,6 +6001,15 @@ pub(crate) fn blank(id: EntityId, placement: &Placement) -> Entry {
 /// What the walk cannot see is swept up separately, before any of this runs —
 /// see [`sweep_stranded_entries`].
 pub(crate) fn all_entries(env: &ExecEnv) -> Result<Vec<Entry>, ExecError> {
+    // One read of the table, then the same walk from the root in memory: a
+    // query per folder, on every one of the dozens of calls a pass makes, was
+    // a third of the daemon's CPU on the soak rig (perf, run 1504). The order
+    // is the one `children_of` gave, and an entry no walk from the root
+    // reaches is left out as before.
+    let mut children: HashMap<Option<i64>, Vec<Entry>> = HashMap::new();
+    for entry in env.store.every_entry()? {
+        children.entry(entry.remote.parent).or_default().push(entry);
+    }
     let mut out = Vec::new();
     let mut queue: Vec<Option<i64>> = vec![None];
     let mut guard = 0;
@@ -6009,7 +6018,7 @@ pub(crate) fn all_entries(env: &ExecEnv) -> Result<Vec<Entry>, ExecError> {
         if guard > 100_000 {
             return Err(ExecError::Contract("the entry tree has a loop".into()));
         }
-        for entry in env.store.children_of(parent)? {
+        for entry in children.get(&parent).cloned().unwrap_or_default() {
             if entry.id.entity_type == EntityType::Folder {
                 queue.push(Some(entry.id.server_id));
             }

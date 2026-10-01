@@ -2304,7 +2304,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         // completion of each one is its own request. A lost completion answer
         // is kept from producing a second copy by dedup at init, which matches
         // the retry on content hash.
-        idempotency_key: Some(op.idempotency_key.clone()),
+        idempotency_key: Some(key_base(op)),
         encrypted_metadata: None,
         wrapped_file_keys: Vec::new(),
         modified_time: None,
@@ -2397,9 +2397,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 if e.may_be_about_the_name()
                     && held_by_a_rename_this_device_owes(env, &params.name, params.folder_id)? =>
             {
-                return Ok(OpOutcome::Retry(
-                    "the name is spoken for by something this device is renaming".into(),
-                ));
+                return waits_after_a_refusal(env, op, "the name is spoken for by something this device is renaming");
             }
             // The server already holds OUR bytes under that name. This is not a
             // contested name at all: it is a lost record, and the repair is to
@@ -2501,7 +2499,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 // A fresh key per name, for the reason the folder create gives:
                 // a key is a promise that the request behind it does not change.
                 params.idempotency_key =
-                    Some(format!("{}-n{attempt}", op.idempotency_key));
+                    Some(format!("{}-n{attempt}", key_base(op)));
             }
             // A refusal that would not say why. Read strictly this arm does not
             // exist, and a server answering in prose alone leaves the upload
@@ -2542,7 +2540,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                     n += 1;
                 }
                 params.idempotency_key =
-                    Some(format!("{}-n{attempt}-{}", op.idempotency_key, n));
+                    Some(format!("{}-n{attempt}-{}", key_base(op), n));
             }
             Err(e) => return Err(e.into()),
         }
@@ -3105,6 +3103,41 @@ fn the_tie_break_of_its_file(env: &ExecEnv, entity: EntityId) -> Result<(), Exec
 // Structure
 // ---------------------------------------------------------------------------
 
+/// The base of every idempotency key an op sends. The op's own key, until
+/// the op has met a definite refusal it chose to wait out: then a generation
+/// is added, so the next attempt is a new request.
+///
+/// The server stores a refusal with its key and replays it for the same key,
+/// as it replays a success. An op that waited for a name this device was
+/// renaming away asked again under the key that had been refused, and was
+/// told the old answer for as long as it asked -- the name long free by then
+/// (the soak rig on 0.8.452, whose server replays refusals). A lost answer
+/// raises no generation: the retry has to be the same request, so a create
+/// or an upload that landed unheard is replayed, never made twice.
+fn key_base(op: &Op) -> String {
+    let generation = serde_json::from_str::<Value>(&op.params)
+        .ok()
+        .and_then(|p| p.get("refused_generation").and_then(Value::as_u64))
+        .unwrap_or(0);
+    match generation {
+        0 => op.idempotency_key.clone(),
+        g => format!("{}-g{g}", op.idempotency_key),
+    }
+}
+
+/// Note on the op that its last request was refused, definitely, and that it
+/// is waiting to ask again: the next attempt sends under a new key base.
+fn waits_after_a_refusal(env: &ExecEnv, op: &Op, why: &str) -> Result<OpOutcome, ExecError> {
+    // The params as stored now, not as this attempt began: a write the
+    // attempt made to them before its refusal is kept.
+    let stored = env.store.get_op(op.op_id)?.map(|o| o.params).unwrap_or_else(|| op.params.clone());
+    let mut params = serde_json::from_str::<Value>(&stored).unwrap_or_else(|_| json!({}));
+    let next = params.get("refused_generation").and_then(Value::as_u64).unwrap_or(0) + 1;
+    params["refused_generation"] = json!(next);
+    env.store.set_op_params(op.op_id, &params.to_string())?;
+    Ok(OpOutcome::Retry(why.into()))
+}
+
 /// Is that name held by something this batch is already about to move off it?
 ///
 /// The refusal itself cannot say. `name_taken` means the server has something
@@ -3245,8 +3278,8 @@ fn create_remote_folder(
         // request -- under the original key the server would refuse every
         // attempt after the first, identically and forever.
         let key = match attempt {
-            0 => op.idempotency_key.clone(),
-            n => format!("{}-n{n}", op.idempotency_key),
+            0 => key_base(op),
+            n => format!("{}-n{n}", key_base(op)),
         };
         match env.api.action_idempotent("drive_folder_create", body, &key) {
             Ok(out) => break out,
@@ -3262,9 +3295,7 @@ fn create_remote_folder(
                 if e.name_taken()
                     && held_by_a_rename_this_device_owes(env, &wanted, placement.parent)? =>
             {
-                return Ok(OpOutcome::Retry(
-                    "the name is spoken for by something this device is renaming".into(),
-                ));
+                return waits_after_a_refusal(env, op, "the name is spoken for by something this device is renaming");
             }
             Err(e) if e.name_taken() && attempt < 1000 => {
                 attempt += 1;
@@ -3792,7 +3823,14 @@ fn move_remote(
     // Rename and reparent are separate calls, and a crash between them leaves
     // the entry renamed but not moved. That is a state the next round reads
     // correctly and finishes, which is why they do not need to be one call.
-    let reparent = || -> Result<(), ExecError> {
+    // `attempt` keys the reparent as it keys the rename. The body names no
+    // name, so a reparent after a rename to a conflict name is byte for byte
+    // the request that was refused before it -- and the server stores a
+    // refusal and replays it for the same key. Under one key the move was
+    // refused once for the name, then replayed as refused a thousand times
+    // while each attempt renamed the folder afresh: it stood under the
+    // thousandth conflict name, never moved (soak run 1499).
+    let reparent = |attempt: u32, stage: &str| -> Result<(), ExecError> {
         let mut body = json!({ "entity_type": t, "entity_id": op.entity.server_id });
         // `parent_id`, which is the only destination key `drive_move` declares.
         // Sending anything else is not a rejected request -- an undeclared key
@@ -3803,8 +3841,11 @@ fn move_remote(
             Some(p) => json!(p),
             None => Value::Null,
         };
-        env.api
-            .action_idempotent("drive_move", body, &format!("{}-move", op.idempotency_key))?;
+        let key = match attempt {
+            0 => format!("{}-move{stage}", key_base(op)),
+            n => format!("{}-move{stage}-n{n}", key_base(op)),
+        };
+        env.api.action_idempotent("drive_move", body, &key)?;
         Ok(())
     };
     // An encrypted FILE has no plaintext name to send. Its name lives inside
@@ -3858,7 +3899,13 @@ fn move_remote(
     // late -- and the rename sent again under the key it already used is
     // replayed, not applied.
     let out_of_its_park = is_this_ops_park(env, op, &entry.remote.name)?;
-    let rename = |wanted: &str, attempt: u32| -> Result<(), ExecError> {
+    // `stage` names where in the sequence a call stands: empty for the first
+    // order, or after the step that came before it. A rename retried after a
+    // reparent is not the request that was refused before it, whatever its
+    // body says, and the server replays a stored refusal for the same key --
+    // so the fallback's rename asked again under the first rename's key was
+    // refused for ever by an answer about a neighbour it had already left.
+    let rename = |wanted: &str, attempt: u32, stage: &str| -> Result<(), ExecError> {
         let body = match &sealed_body {
             Some(body) => body.clone(),
             None => json!({
@@ -3869,8 +3916,8 @@ fn move_remote(
         };
         let step = if out_of_its_park { "unpark" } else { "rename" };
         let key = match attempt {
-            0 => format!("{}-{step}", op.idempotency_key),
-            n => format!("{}-{step}-n{n}", op.idempotency_key),
+            0 => format!("{}-{step}{stage}", key_base(op)),
+            n => format!("{}-{step}{stage}-n{n}", key_base(op)),
         };
         env.api.action_idempotent("drive_rename", body, &key)?;
         Ok(())
@@ -3906,7 +3953,7 @@ fn move_remote(
                 "entity_id": op.entity.server_id,
                 "name": scratch,
             }),
-            &format!("{}-park", op.idempotency_key),
+            &format!("{}-park", key_base(op)),
         )?;
         Ok(())
     };
@@ -3949,21 +3996,21 @@ fn move_remote(
     // the same place.
     let orders = |wanted: &str, attempt: u32| -> Result<(), ExecError> {
         match (reparenting, renaming || attempt > 0) {
-            (true, true) => match rename(wanted, attempt) {
-                Ok(()) => reparent()?,
-                Err(ExecError::Proto(p)) if p.may_be_about_the_name() => match reparent() {
-                    Ok(()) => rename(wanted, attempt)?,
+            (true, true) => match rename(wanted, attempt, "") {
+                Ok(()) => reparent(attempt, "")?,
+                Err(ExecError::Proto(p)) if p.may_be_about_the_name() => match reparent(attempt, "-first") {
+                    Ok(()) => rename(wanted, attempt, "-after-move")?,
                     Err(ExecError::Proto(p)) if p.may_be_about_the_name() => {
                         park()?;
-                        reparent()?;
-                        rename(wanted, attempt)?;
+                        reparent(attempt, "-after-park")?;
+                        rename(wanted, attempt, "-after-park")?;
                     }
                     Err(e) => return Err(e),
                 },
                 Err(e) => return Err(e),
             },
-            (true, false) => reparent()?,
-            (false, true) => rename(wanted, attempt)?,
+            (true, false) => reparent(attempt, "")?,
+            (false, true) => rename(wanted, attempt, "")?,
             (false, false) => {}
         }
         Ok(())
@@ -3995,9 +4042,7 @@ fn move_remote(
             Ok(()) => break,
             Err(ExecError::Proto(p)) if p.name_taken() && !sealed_name && attempt < 1000 => {
                 if held_by_a_rename_this_device_owes(env, &wanted, to.parent)? {
-                    return Ok(OpOutcome::Retry(
-                        "the name is spoken for by something this device is renaming".into(),
-                    ));
+                    return waits_after_a_refusal(env, op, "the name is spoken for by something this device is renaming");
                 }
                 attempt += 1;
                 wanted = (env.conflict_name)(&to.name, attempt);
@@ -4037,9 +4082,7 @@ fn move_remote(
                     && attempt < 2 =>
             {
                 if held_by_a_rename_this_device_owes(env, &wanted, to.parent)? {
-                    return Ok(OpOutcome::Retry(
-                        "the name is spoken for by something this device is renaming".into(),
-                    ));
+                    return waits_after_a_refusal(env, op, "the name is spoken for by something this device is renaming");
                 }
                 // As the upload does: a conflict name this device already
                 // knows the server holds earns the same refusal, and two such

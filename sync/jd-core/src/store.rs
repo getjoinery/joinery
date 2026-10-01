@@ -458,7 +458,7 @@ impl Store {
 
     pub fn put_entry(&self, e: &Entry) -> StoreResult<()> {
         let (status, reason) = encode_status(&e.status);
-        self.conn.execute(
+        self.conn.prepare_cached(
             "INSERT INTO entries (
                 entity_type, server_id, parent_folder_id, remote_name, local_name,
                 is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
@@ -500,6 +500,7 @@ impl Store {
                 own_file_id = excluded.own_file_id,
                 own_file_birth_ns = excluded.own_file_birth_ns,
                 last_seen_sha256 = excluded.last_seen_sha256",
+        )?.execute(
             params![
                 e.id.entity_type.to_string(),
                 e.id.server_id,
@@ -539,9 +540,12 @@ impl Store {
     }
 
     pub fn get_entry(&self, id: EntityId) -> StoreResult<Option<Entry>> {
+        // Cached: a pass asks this for every ancestor of every record it
+        // places, and parsing the statement afresh each time was most of the
+        // daemon's CPU on the soak rig (perf, run 1504).
         Ok(self
             .conn
-            .query_row(
+            .prepare_cached(
                 "SELECT entity_type, server_id, parent_folder_id, remote_name, local_name,
                         is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
                         head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
@@ -551,9 +555,8 @@ impl Store {
                         replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
                         synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
                    FROM entries WHERE entity_type = ?1 AND server_id = ?2",
-                params![id.entity_type.to_string(), id.server_id],
-                row_to_entry,
-            )
+            )?
+            .query_row(params![id.entity_type.to_string(), id.server_id], row_to_entry)
             .optional()?)
     }
 
@@ -915,7 +918,7 @@ impl Store {
                         synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
                      FROM entries
                     ORDER BY entity_type, server_id";
-        let mut stmt = self.conn.prepare(sql)?;
+        let mut stmt = self.conn.prepare_cached(sql)?;
         let rows = stmt.query_map([], row_to_entry)?;
         let mut out = Vec::new();
         for r in rows {
@@ -937,7 +940,7 @@ impl Store {
                      FROM entries
                     WHERE parent_folder_id IS ?1
                     ORDER BY entity_type, server_id";
-        let mut stmt = self.conn.prepare(sql)?;
+        let mut stmt = self.conn.prepare_cached(sql)?;
         let rows = stmt.query_map(params![parent], row_to_entry)?;
         let mut out = Vec::new();
         for r in rows {
