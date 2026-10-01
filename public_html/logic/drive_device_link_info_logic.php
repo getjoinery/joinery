@@ -60,6 +60,7 @@ function drive_device_link_info_logic(array $input): LogicResult {
 
 function drive_device_link_info_logic_descriptor(): array {
 	return array(
+		'requires_setting' => 'drive_active',
 		'description'      => 'Details of a pending device-link ceremony, looked up by its code, so the approval page can show the user what is asking for access.',
 		'requires_session' => true,
 		'mutates'          => false,

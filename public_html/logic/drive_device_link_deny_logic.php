@@ -48,6 +48,7 @@ function drive_device_link_deny_logic(array $input): LogicResult {
 
 function drive_device_link_deny_logic_descriptor(): array {
 	return array(
+		'requires_setting' => 'drive_active',
 		'description'      => 'Refuse a pending device-link ceremony so the waiting client is told no immediately instead of timing out.',
 		'requires_session' => true,
 		'mutates'          => true,
