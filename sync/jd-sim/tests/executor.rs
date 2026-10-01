@@ -1038,6 +1038,7 @@ fn a_move_with_nowhere_to_move_from_forgets_where_it_thought_the_file_was() {
                 parent: Some(destination),
                 name: "receipt.pdf".into(),
             },
+            agree_at: None,
         },
     );
 
@@ -2675,7 +2676,7 @@ fn a_local_move_without_births_carries_no_file_saved_over_its_own() {
     let report = do_one(
         &device,
         id,
-        Action::ApplyRemoteMove { to: Placement { parent: None, name: "c.txt".into() } },
+        Action::ApplyRemoteMove { to: Placement { parent: None, name: "c.txt".into() }, agree_at: None },
     );
     assert!(device.fs.peek("c.txt").is_none(), "the file saved over it was carried to the new name");
     assert_eq!(device.fs.peek("a.txt").as_deref(), Some(&b"saved over it, a new file"[..]));
@@ -2697,7 +2698,7 @@ fn a_local_move_carries_only_the_records_own_file() {
     let report = do_one(
         &device,
         id,
-        Action::ApplyRemoteMove { to: Placement { parent: None, name: "c.txt".into() } },
+        Action::ApplyRemoteMove { to: Placement { parent: None, name: "c.txt".into() }, agree_at: None },
     );
     assert!(device.fs.peek("c.txt").is_none(), "another record's file was carried to the new name");
     assert_eq!(device.fs.peek("a.txt").as_deref(), Some(&b"another record's file"[..]));

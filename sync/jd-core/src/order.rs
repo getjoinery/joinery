@@ -580,7 +580,7 @@ mod tests {
         let items = vec![
             PlanItem::new(
                 EntityId::folder(501),
-                Action::ApplyRemoteMove { to: placement(Some(507), "Sub 2") },
+                Action::ApplyRemoteMove { to: placement(Some(507), "Sub 2"), agree_at: None },
                 0,
             )
             .moving(placement(None, "Sub 2"), placement(Some(507), "Sub 2")),
@@ -621,9 +621,9 @@ mod tests {
         parents.local.insert(1, None);
         parents.local.insert(2, Some(1));
         let items = vec![
-            PlanItem::new(EntityId::folder(1), Action::ApplyRemoteMove { to: placement(Some(2), "A") }, 0)
+            PlanItem::new(EntityId::folder(1), Action::ApplyRemoteMove { to: placement(Some(2), "A"), agree_at: None }, 0)
                 .moving(placement(None, "A"), placement(Some(2), "A")),
-            PlanItem::new(EntityId::folder(2), Action::ApplyRemoteMove { to: placement(None, "B") }, 1)
+            PlanItem::new(EntityId::folder(2), Action::ApplyRemoteMove { to: placement(None, "B"), agree_at: None }, 1)
                 .moving(placement(Some(1), "B"), placement(None, "B")),
         ];
         let p = plan(items, &jd_vfs::Personality::linux(), &parents);
@@ -631,7 +631,7 @@ mod tests {
         assert_eq!(order, vec![EntityId::folder(2), EntityId::folder(1)], "{p:?}");
         assert!(p.broken_cycles.is_empty());
 
-        let items = vec![PlanItem::new(EntityId::folder(1), Action::ApplyRemoteMove { to: placement(Some(2), "A") }, 0)
+        let items = vec![PlanItem::new(EntityId::folder(1), Action::ApplyRemoteMove { to: placement(Some(2), "A"), agree_at: None }, 0)
             .moving(placement(None, "A"), placement(Some(2), "A"))];
         let p = plan(items, &jd_vfs::Personality::linux(), &parents);
         assert!(p.ops.is_empty(), "a move into its own subtree with nothing leaving was planned: {p:?}");

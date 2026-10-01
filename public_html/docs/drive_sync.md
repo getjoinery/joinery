@@ -178,6 +178,13 @@ Report (conflicted copy 2026-07-31 from MacBook).xlsx
 Both versions exist on both sides within one sync round, and the conflict always
 lands in the issues panel.
 
+A file or folder moved on both sides keeps both changes when they do not
+overlap: if one side changed only its name and the other only its folder, it
+ends in the new folder under the new name, on every device. Any other pair of
+moves (both changed the folder, both changed the name, or one changed both) is
+settled by the server's placement, and the issues panel says the local move
+lost.
+
 ### The mass-delete guard
 
 If one round would delete more than `max(50, 25%)` of the settled entries — in

@@ -5630,6 +5630,27 @@ fn frozen_a_download_lands_in_its_folders_own_directory_seed() {
     }
 }
 
+/// hostile2 74403: a plain folder's recorded directory was taken as its own
+/// by a conflict copy, and the vault's directory had rotated onto the plain
+/// folder's path. Refreshed to the directory at its path, the plain record
+/// took the vault's id, and the vault's sealed file went up in the clear. A
+/// record's directory is refreshed only to one no other live record names.
+#[test]
+fn frozen_a_folder_never_takes_a_directory_another_record_names_seed() {
+    never_fires(&["sealed_never_in_the_clear", "converged"], || {
+        workload_core_with(
+            74_403,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+}
+
 /// plat3 75422: the server trashed a vault subfolder while a file saved in
 /// it, never sent, had been traded onto a plain file's path. Forgotten with
 /// the folder, its bytes went up as the plain file's version; kept, its

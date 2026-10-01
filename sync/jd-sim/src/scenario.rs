@@ -2669,6 +2669,27 @@ pub fn assert_no_two_records_on_one_directory(world: &World) {
             }
         }
 
+        // And by the directory's own id, where the volume's ids hold: two
+        // records can carry one id at two paths (the soak's stores-whole
+        // reading). A positional id names whatever stands in the slot, so
+        // it says nothing there.
+        if !personality.positional_file_ids {
+            let mut carried: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
+            for entry in folders.values() {
+                if entry.remote_deleted || entry.id.is_provisional() {
+                    continue;
+                }
+                let Some(id) = entry.synced_fingerprint.map(|f| f.file_id).filter(|id| *id != 0) else {
+                    continue;
+                };
+                if let Some(other) = carried.insert(id, entry.id.server_id) {
+                    panic!(
+                        "{}: folders {} and {} both carry directory {} -- one directory, two owners",
+                        device.name, other, entry.id.server_id, id,
+                    );
+                }
+            }
+        }
     }
 }
 

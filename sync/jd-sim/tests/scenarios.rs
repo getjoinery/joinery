@@ -15925,3 +15925,394 @@ fn an_empty_folder_at_the_head_of_an_open_chain_keeps_its_identity() {
     assert_converged(&world);
     assert_nothing_lost(&world, &committed);
 }
+
+/// A folder renamed and its old name made again by a save through it before
+/// the folder's file was ever sent: nothing the engine knows says where the
+/// folder went, so the directory it moved to is minted as a new folder. The
+/// old record then stands on the rebuilt directory, and must say so -- one
+/// directory, one record. Left holding the moved directory's id, two records
+/// claimed one directory and every identity reader was misled (soak run 1504,
+/// the stores-whole finding).
+#[test]
+fn a_folder_renamed_and_its_old_name_made_again_leaves_one_record_per_directory() {
+    let world = World::new(9_980, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("P");
+    assert!(world.settle().is_some());
+    laptop.fs.user_rename("P", "P2");
+    laptop.fs.user_write("P2/new.txt", b"saved into the renamed folder, not sent yet");
+    laptop.fs.user_write("P/Sub/x.txt", b"saved through the old name, which makes it again");
+    assert!(world.settle().is_some());
+
+    jd_sim::scenario::assert_no_two_records_on_one_directory(&world);
+    assert_converged(&world);
+}
+
+/// A folder renamed and its old name made again by a save through it, while
+/// a peer's new version of a file inside it is coming down. The folder's
+/// own rename has not reached the server yet, so its record still names the
+/// old path, and the download landed in the rebuilt directory standing
+/// there -- a folder the user never put the file in. The next scan read the
+/// file's own inode there as a move, and both devices followed it out of
+/// the folder it belongs to (soak run 1504, the custody finding). A download
+/// lands only in its folder's own directory; standing elsewhere, it waits a
+/// pass for the folder to be placed.
+#[test]
+fn a_download_never_lands_in_a_directory_rebuilt_at_its_folders_old_name() {
+    let world = World::new(9_979, &["x", "y"]);
+    let x = world.device("x");
+    let y = world.device("y");
+    let mut committed = Committed::default();
+    x.fs.user_mkdir("P");
+    x.fs.user_write("P/f.txt", b"the first version");
+    assert!(world.settle().is_some());
+    y.fs.user_rename("P", "P2");
+    y.fs.user_write("P/Sub/new.txt", b"saved through the old name, which makes it again");
+    committed.note("P/Sub/new.txt", b"saved through the old name, which makes it again");
+    x.fs.user_write("P/f.txt", b"the second version, made on x");
+    world.pass(x);
+    committed.note("P2/f.txt", b"the second version, made on x");
+    y.net.set_faults(NetFaults { refuse_before: Some("drive_rename".into()), ..NetFaults::none() });
+    world.pass(y);
+    y.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some());
+
+    let f = world.server.files().into_iter().find(|f| f.name == "f.txt" && !f.trashed).expect("f is on the server");
+    let folder = world.server.folders().into_iter().find(|d| Some(d.id) == f.folder).expect("f's folder");
+    assert_eq!(folder.name, "P2", "f left the folder the user put it in: {:?}", world.server.tree());
+    assert_eq!(y.fs.peek("P2/f.txt").as_deref(), Some(&b"the second version, made on x"[..]));
+    jd_sim::scenario::assert_no_two_records_on_one_directory(&world);
+    assert_converged(&world);
+}
+
+/// A folder renamed, its old name made again by a save through it, and one of
+/// its own files moved into the rebuilt directory -- all before the next
+/// pass. The folder's own directory stands under the new name with the rest
+/// of its files, so the folder was renamed and one file moved out. Read
+/// instead as "the rebuilt directory holds a known file, so it is contested,
+/// and the files elsewhere did not move wholesale", the folder stayed on the
+/// rebuilt directory, the directory it moved to was minted as a new folder,
+/// and every file was carried into it -- on the peer too, out of the
+/// directory its user had put them in (soak run 1508, segment 6).
+#[test]
+fn a_renamed_folder_one_of_whose_files_went_back_into_its_rebuilt_name_is_still_renamed() {
+    let world = World::new(9_978, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    laptop.fs.user_mkdir("P");
+    laptop.fs.user_write("P/a.txt", b"a, moved back under the old name");
+    laptop.fs.user_write("P/b.txt", b"b, stays with the folder");
+    laptop.fs.user_write("P/S/c.txt", b"c, in a subfolder");
+    assert!(world.settle().is_some());
+    desktop.fs.user_write("P/d.txt", b"d, the peer's own file");
+    assert!(world.settle().is_some());
+    let p = world
+        .server
+        .folders()
+        .into_iter()
+        .find(|f| f.name == "P" && !f.trashed)
+        .expect("P is on the server")
+        .id;
+
+    laptop.fs.user_rename("P", "P2");
+    laptop.fs.user_write("P/X/new.txt", b"saved through the old name, which makes it again");
+    laptop.fs.user_rename("P2/a.txt", "P/X/a.txt");
+    assert!(world.settle().is_some());
+
+    let folder = world.server.folders().into_iter().find(|f| f.id == p).expect("P's folder");
+    assert!(
+        folder.name == "P2" && !folder.trashed,
+        "the folder was not renamed; a new one was made for its directory: {:?}",
+        world.server.tree()
+    );
+    assert_eq!(desktop.fs.peek("P2/d.txt").as_deref(), Some(&b"d, the peer's own file"[..]));
+    assert_eq!(desktop.fs.peek("P/X/a.txt").as_deref(), Some(&b"a, moved back under the old name"[..]));
+    jd_sim::scenario::assert_no_two_records_on_one_directory(&world);
+    assert_converged(&world);
+}
+
+/// One file moved out of a folder into a new folder, and the folder renamed,
+/// both before the next scan. The folder's own directory and the rest of
+/// its files stand at the new name; only the one file stands in the new
+/// folder. That is a rename plus a move, not a folder whose directory and
+/// files went different ways. Read as the latter, the folder was held for
+/// good at its old name: its rename never reached the server, nothing saved
+/// in it afterwards was sent, and the user was asked a question about a
+/// split that never happened (soak run 1509).
+#[test]
+fn a_folder_renamed_as_one_file_moves_out_of_it_is_renamed_not_held() {
+    let world = World::new(9_978, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("A/f1.txt", b"moved out on its own");
+    laptop.fs.user_write("A/f2.txt", b"stays with the folder");
+    laptop.fs.user_write("A/Sub/g.txt", b"in a subfolder that stays too");
+    assert!(world.settle().is_some());
+    // "B" sorts before "Z": the one-file candidate is read first.
+    laptop.fs.user_mkdir("B");
+    laptop.fs.user_rename("A/f1.txt", "B/f1.txt");
+    laptop.fs.user_rename("A", "Z");
+    assert!(world.settle().is_some());
+    laptop.fs.user_write("Z/later.txt", b"saved in the renamed folder afterwards");
+    assert!(world.settle().is_some());
+
+    let tree = world.server.tree();
+    for path in ["Z/f2.txt", "Z/Sub/g.txt", "Z/later.txt", "B/f1.txt"] {
+        assert!(tree.contains_key(path), "{path} is not on the server: {:?}", tree.keys().collect::<Vec<_>>());
+    }
+    let held: Vec<String> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "directory_disagrees")
+        .map(|i| i.detail)
+        .collect();
+    assert!(held.is_empty(), "the folder was held for a split that never happened: {held:?}");
+    assert_converged(&world);
+}
+
+/// The server trashes a folder (another device deleted it) while this
+/// device renames it. The rename wins and the folder is made again on the
+/// server under a new id, but the files inside it are still where the
+/// server put them: in the trashed folder, under its old id. The trash
+/// cascade is silent, so nothing else will ever say so. Their records must
+/// not claim the new folder as agreed: carried across with the folder's
+/// id, they read as settled in a folder the server never put them in, and
+/// were never sent again (soak run 1509: doc-12 and doc-14 in 406770, on
+/// the server only in the trashed 406763).
+#[test]
+fn files_in_a_folder_renamed_here_as_the_server_trashes_it_reach_the_folder_made_again() {
+    let world = World::new(9_977, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    laptop.fs.user_write("A/f.txt", b"in the folder the server trashes");
+    laptop.fs.user_write("A/Sub/g.txt", b"one level further down");
+    assert!(world.settle().is_some());
+    let a = world.server.folders().into_iter().find(|f| f.name == "A").expect("A is on the server").id;
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": a }))
+        .unwrap();
+    laptop.fs.user_rename("A", "B");
+    committed.note("B/f.txt", b"in the folder the server trashes");
+    committed.note("B/Sub/g.txt", b"one level further down");
+    assert!(world.settle().is_some());
+
+    let tree = world.server.tree();
+    for path in ["B/f.txt", "B/Sub/g.txt"] {
+        assert!(tree.contains_key(path), "{path} is not on the server: {:?}", tree.keys().collect::<Vec<_>>());
+    }
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The same race inside a vault. The files the trash took go up again as
+/// never-sent records, and a record minted that way must seal exactly as a
+/// scan-minted one does: the only way this path can fail is a plaintext
+/// upload, and nothing else races a server trash against a local rename in
+/// a vault.
+#[test]
+fn files_in_a_vault_folder_renamed_here_as_the_server_trashes_it_go_up_sealed() {
+    let vault = SimVault::new(9_975);
+    let mut world = World::new(9_975, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault should arrive");
+
+    let laptop = world.device("laptop");
+    let f = b"a memo in the folder the server trashes";
+    let g = b"a memo one level further down";
+    laptop.fs.user_write("Private/A/f.txt", f);
+    laptop.fs.user_write("Private/A/Sub/g.txt", g);
+    assert!(world.settle().is_some());
+    let folders = world.server.folders();
+    let private = folders.iter().find(|d| d.name == "Private").expect("the vault is on the server").id;
+    let a = folders
+        .iter()
+        .find(|d| d.parent == Some(private) && !d.trashed)
+        .expect("A is on the server")
+        .id;
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": a }))
+        .unwrap();
+    world.device("laptop").fs.user_rename("Private/A", "Private/B");
+    committed.note("Private/B/f.txt", f);
+    committed.note("Private/B/Sub/g.txt", g);
+    assert!(world.settle().is_some());
+
+    for body in [&f[..], &g[..]] {
+        assert!(
+            world.server.blob(&jd_sim::sha256_hex(body)).is_none(),
+            "a re-minted file went up in the clear"
+        );
+    }
+    let names = world.server.tree();
+    assert!(
+        !names.keys().any(|p| p.ends_with("f.txt") || p.ends_with("g.txt")),
+        "a real name reached the server: {names:?}"
+    );
+    // Sealed and in the folder made again: the peer opens both there.
+    assert_eq!(world.device("desktop").fs.peek("Private/B/f.txt").as_deref(), Some(&f[..]));
+    assert_eq!(world.device("desktop").fs.peek("Private/B/Sub/g.txt").as_deref(), Some(&g[..]));
+    jd_sim::scenario::assert_the_vault_opens(&world);
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A folder renamed while a peer's new version of a file inside it is
+/// coming down, the rename not yet on the server, and nothing at the old
+/// name any more. The download's path is built from the record, which still
+/// names the old path, and landing it made the missing directory again: the
+/// engine rebuilt the folder's old name itself. The next scan read the
+/// rebuilt path as the folder and the renamed directory as a new one, moved
+/// what it could identify across, and the peer trashed a folder the other
+/// device had just filled (soak run 1509, device-b, folder 406763). A
+/// download lands only in its folder's own directory: standing elsewhere,
+/// it waits a pass for the folder to be placed, whether the old path holds
+/// another directory or none.
+#[test]
+fn a_download_never_rebuilds_a_renamed_folders_old_name() {
+    let world = World::new(9_976, &["x", "y"]);
+    let x = world.device("x");
+    let y = world.device("y");
+    x.fs.user_mkdir("P");
+    x.fs.user_write("P/f.txt", b"the first version");
+    assert!(world.settle().is_some());
+    y.fs.user_rename("P", "P2");
+    x.fs.user_write("P/f.txt", b"the second version, made on x");
+    world.pass(x);
+    y.net.set_faults(NetFaults { refuse_before: Some("drive_rename".into()), ..NetFaults::none() });
+    world.pass(y);
+    y.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some());
+
+    let folders: Vec<String> = world.server.folders().into_iter().filter(|f| !f.trashed).map(|f| f.name).collect();
+    assert_eq!(folders, vec!["P2".to_string()], "the old name was made again: {:?}", world.server.tree());
+    assert_eq!(y.fs.peek("P2/f.txt").as_deref(), Some(&b"the second version, made on x"[..]));
+    assert_converged(&world);
+}
+
+/// Each side's open move-race issues, as the user would see them.
+fn move_races_lost(device: &jd_sim::engine::Device) -> Vec<String> {
+    device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "reconcile" && i.detail.starts_with("MoveRaceServerWon"))
+        .map(|i| i.detail)
+        .collect()
+}
+
+/// Soak run 1508: one device renames a file in place, the other moves it into
+/// a new folder before it has heard. Neither touched what the other changed,
+/// so both are kept: the file ends in the folder one user chose, under the
+/// name the other gave it, on every device and the server -- and nobody is
+/// told they lost, because nobody did. Server-wins put the file back where
+/// the mover had taken it from.
+#[test]
+fn a_rename_on_one_device_and_a_move_on_another_are_both_kept() {
+    let world = World::new(9_975, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    a.fs.user_mkdir("Projects");
+    a.fs.user_write("Projects/doc-7.txt", b"the seventh document");
+    assert!(world.settle().is_some());
+    b.fs.user_rename("Projects/doc-7.txt", "Projects/DOC-7.TXT");
+    world.pass(b);
+    a.fs.user_mkdir("Projects/Sub 12");
+    a.fs.user_rename("Projects/doc-7.txt", "Projects/Sub 12/doc-7.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+
+    let tree = world.server.tree();
+    assert!(tree.contains_key("Projects/Sub 12/DOC-7.TXT"), "both changes are not on the server: {tree:?}");
+    for device in [a, b] {
+        let disk = disk_tree(device);
+        assert!(disk.contains_key("Projects/Sub 12/DOC-7.TXT"), "{}: both changes are not here: {disk:?}", device.name);
+        assert!(move_races_lost(device).is_empty(), "{}: told of a race nobody lost: {:?}", device.name, move_races_lost(device));
+    }
+    assert_converged(&world);
+}
+
+/// The same race the other way round: the device that has not heard renamed
+/// the file, and the peer's move reached the server first.
+#[test]
+fn a_move_on_one_device_and_a_rename_on_another_are_both_kept() {
+    let world = World::new(9_974, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    a.fs.user_mkdir("Projects");
+    a.fs.user_write("Projects/doc-7.txt", b"the seventh document");
+    assert!(world.settle().is_some());
+    b.fs.user_mkdir("Projects/Sub 12");
+    b.fs.user_rename("Projects/doc-7.txt", "Projects/Sub 12/doc-7.txt");
+    world.pass(b);
+    a.fs.user_rename("Projects/doc-7.txt", "Projects/notes.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+
+    let tree = world.server.tree();
+    assert!(tree.contains_key("Projects/Sub 12/notes.txt"), "both changes are not on the server: {tree:?}");
+    for device in [a, b] {
+        let disk = disk_tree(device);
+        assert!(disk.contains_key("Projects/Sub 12/notes.txt"), "{}: both changes are not here: {disk:?}", device.name);
+        assert!(move_races_lost(device).is_empty(), "{}: told of a race nobody lost: {:?}", device.name, move_races_lost(device));
+    }
+    assert_converged(&world);
+}
+
+/// A folder, not a file: one device renames it, the other moves it into
+/// another folder. It ends under the new parent with the new name, its file
+/// with it.
+#[test]
+fn a_folder_renamed_on_one_device_and_moved_on_another_keeps_both() {
+    let world = World::new(9_973, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    a.fs.user_mkdir("Projects/Old");
+    a.fs.user_mkdir("Archive");
+    a.fs.user_write("Projects/Old/inside.txt", b"inside the folder");
+    assert!(world.settle().is_some());
+    b.fs.user_rename("Projects/Old", "Projects/New");
+    world.pass(b);
+    a.fs.user_rename("Projects/Old", "Archive/Old");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+
+    let tree = world.server.tree();
+    assert!(tree.contains_key("Archive/New/inside.txt"), "both changes are not on the server: {tree:?}");
+    for device in [a, b] {
+        let disk = disk_tree(device);
+        assert!(disk.contains_key("Archive/New/inside.txt"), "{}: both changes are not here: {disk:?}", device.name);
+        assert!(move_races_lost(device).is_empty(), "{}: told of a race nobody lost: {:?}", device.name, move_races_lost(device));
+    }
+    assert_converged(&world);
+}
+
+/// The guard: both devices moved the file, into different folders. Two
+/// folders cannot both be kept, so the server's wins and the device that
+/// lost is told.
+#[test]
+fn two_moves_to_different_folders_still_go_to_the_server_and_are_reported() {
+    let world = World::new(9_972, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    a.fs.user_mkdir("Projects");
+    a.fs.user_mkdir("A");
+    a.fs.user_mkdir("B");
+    a.fs.user_write("Projects/doc.txt", b"one document, two destinations");
+    assert!(world.settle().is_some());
+    b.fs.user_rename("Projects/doc.txt", "B/doc.txt");
+    world.pass(b);
+    a.fs.user_rename("Projects/doc.txt", "A/doc.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+
+    let tree = world.server.tree();
+    assert!(tree.contains_key("B/doc.txt"), "the server's move did not win: {tree:?}");
+    assert!(!tree.contains_key("A/doc.txt"), "the losing move reached the server: {tree:?}");
+    assert!(disk_tree(a).contains_key("B/doc.txt"), "the losing device did not follow: {:?}", disk_tree(a));
+    assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}

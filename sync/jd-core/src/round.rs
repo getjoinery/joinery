@@ -188,7 +188,7 @@ pub fn run_round(
                 Action::Download | Action::CreateLocalFolder { .. } => {
                     under_a_going_folder(input.entry.remote.parent)
                 }
-                Action::ApplyRemoteMove { to } => under_a_going_folder(to.parent),
+                Action::ApplyRemoteMove { to, .. } => under_a_going_folder(to.parent),
                 _ => false,
             };
             if arriving_under_a_going_folder {
@@ -243,7 +243,7 @@ pub fn run_round(
 
 fn move_target(action: &Action) -> Option<crate::model::Placement> {
     match action {
-        Action::ApplyLocalMove { to } | Action::ApplyRemoteMove { to } => Some(to.clone()),
+        Action::ApplyLocalMove { to } | Action::ApplyRemoteMove { to, .. } => Some(to.clone()),
         _ => None,
     }
 }
