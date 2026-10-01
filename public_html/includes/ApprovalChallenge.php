@@ -59,6 +59,8 @@
  * Beyond that, a machine whose web tier you suspect is not a machine to
  * restore in place — it is a machine to rebuild.
  *
+ * @version 1.2 - the export scope: this site's owner approving that its backup key, certificate and DKIM keys
+ *                be sealed to a copy of it on another machine (specs/site_copy.md WP4)
  * @version 1.1 - the scope table says expiry_tail is markup, echoed as written
  * @version 1.0 - one class for every scope; restore and decommission were two copies
  */
@@ -69,6 +71,7 @@ class ApprovalChallenge {
 
 	const RESTORE      = 'restore';
 	const DECOMMISSION = 'decommission';
+	const EXPORT       = 'export';
 
 	/**
 	 * Every scope, keyed by name. The handoff fields must match the agent's
@@ -168,6 +171,51 @@ class ApprovalChallenge {
 			'approved_notice' => 'Approved. The host is checking your answer and will remove this site permanently.',
 			'declined_notice' => 'Declined. Nothing was deleted, and the removal is reported refused.',
 		),
+
+		// A copy of this site is being made on another machine, and this
+		// machine's agent will hand it the secrets it cannot make for itself:
+		// the backup chain's key, the certificate and its account, the DKIM
+		// keys. Sealed so only the machine named by its key fingerprint can
+		// open them. Asked at every export: the first copy, each refresh, and
+		// the final copy during the switch-over.
+		self::EXPORT => array(
+			'request_setting' => 'copy_export_approval_request',
+			'answer_setting'  => 'copy_export_approval_answer',
+			'info'            => 'joinery-copy-export-approval:',
+			'approve_action'  => 'approve_copy_export',
+			'decline_action'  => 'decline_copy_export',
+			'approve_form'    => 'copy_export_approval_form',
+			'decline_form'    => 'copy_export_decline_form',
+			'id_prefix'       => 'ce',
+
+			'none_waiting'    => 'There is no copy waiting for approval on this machine — it may have expired, or the '
+			                   . 'management node may have given up on it. Ask for the copy again.',
+			'wrong_job'       => 'That approval is for a different copy than the one waiting. Reload this page.',
+			'none_to_decline' => 'There is no copy waiting for approval on this machine.',
+
+			'box_title'       => 'Approve handing this site to its copy',
+			'headline'        => 'A copy of this site on another machine is waiting for this site\'s keys.',
+			// The fingerprint is the point of this screen. Every other check is
+			// a machine checking a machine, and a management node that had been
+			// compromised could ask for an export to a key of its own. Only a
+			// person can see that the fingerprint here is not the one on the
+			// copy's own admin page — so it is said here, above the key box.
+			'intro'           => 'Approving hands the machine named below this site\'s backup key, its certificate and '
+			                   . 'its DKIM keys, sealed so only that machine can open them. Everything below was written '
+			                   . 'by this machine. Before you approve, open the copy\'s own admin page and check that its '
+			                   . 'agent key fingerprint is the one shown here. If it is not, decline.',
+			'expiry_tail'     => '. Until you answer it, <strong>this machine runs nothing else</strong> — no backup, no '
+			                   . 'status check, no upgrade. If you are not going to approve it, press <em>Decline</em> '
+			                   . 'rather than closing this page: declining frees the machine now. Either way nothing '
+			                   . 'leaves until you approve, and the copy can ask again.',
+			'key_label'       => 'Paste your recovery key to approve',
+			'key_help'        => 'The same key that opens this machine\'s backups. It is used in your browser and never '
+			                   . 'sent anywhere — approving proves you hold it, which is the whole of the check.',
+			'approve_button'  => 'Approve — hand this site to its copy',
+			'decline_button'  => 'No — keep this site\'s keys here',
+			'approved_notice' => 'Approved. This machine is checking your answer and will seal the keys to the copy.',
+			'declined_notice' => 'Declined. Nothing was handed over, and the copy is reported refused.',
+		),
 	);
 
 	/**
@@ -176,7 +224,7 @@ class ApprovalChallenge {
 	 * recovery-readiness.js binds one window.rrApproval and two key boxes on
 	 * one screen is how a person answers the wrong one.
 	 */
-	const PRECEDENCE = array(self::DECOMMISSION, self::RESTORE);
+	const PRECEDENCE = array(self::DECOMMISSION, self::RESTORE, self::EXPORT);
 
 	/** One scope's entry. An unknown name is a programming error. */
 	public static function scope(string $name): array {

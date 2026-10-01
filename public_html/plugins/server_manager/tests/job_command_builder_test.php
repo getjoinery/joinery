@@ -2274,4 +2274,125 @@ section('reset_failed_unit: clear a failed unit from the same list (specs/disk_h
 }
 
 
+section('site copy: the source exports to its copy, the copy stages the source\'s chain (site_copy.md WP4)');
+
+// A source with its own backup target, and a dormant copy of it with none. The
+// copy's chain is the source's: signed under the source's slug, on its target.
+$cp_bkt = new BackupTarget(NULL);
+$cp_bkt->set('bkt_name', 'HarnessTest Copy Target ' . bin2hex(random_bytes(3)));
+$cp_bkt->set('bkt_provider', 'b2');
+$cp_bkt->set('bkt_bucket', 'harness-copy-bucket');
+$cp_bkt->set('bkt_enabled', true);
+$cp_bkt->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
+$cp_bkt->save();
+harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $cp_bkt->key);
+$cp_source = jcb_node(array(
+	'mgn_slug'                 => 'copysrc-' . bin2hex(random_bytes(2)),
+	'mgn_bkt_backup_target_id' => $cp_bkt->key,
+	'mgn_agent_public_key'     => base64_encode(str_repeat("\x07", 32))));
+$cp_copy_key = base64_encode(str_repeat("\x08", 32));
+$cp_copy = jcb_node(array(
+	'mgn_install_state'    => 'copy',
+	'mgn_copy_of_node_id'  => $cp_source->key,
+	'mgn_agent_public_key' => $cp_copy_key));
+$cp_target = JobCommandBuilder::get_target($cp_source);
+if (!$cp_target) {
+	harness_skip('copy_stage builder', 'no enabled backup target on this management node to resolve a shelf against');
+} else {
+	$cp_prefix = rtrim((string)($cp_target->get('bkt_path_prefix') ?: 'joinery-backups'), '/')
+		. '/' . $cp_source->get('mgn_slug') . '/manager/chain-20260930_010203/';
+	JobCommandBuilder::set_shelf_listing_for_tests(array(
+		array('key' => $cp_prefix . 'manifest.json',         'size' => 900),
+		array('key' => $cp_prefix . 'files-0000.tar.gz.enc', 'size' => 1000),
+		array('key' => $cp_prefix . 'db-0000.sql.gz.enc',    'size' => 110),
+	));
+	harness_defer(function () { JobCommandBuilder::set_shelf_listing_for_tests(null); });
+
+	$cp_stage = JobCommandBuilder::build_copy_stage($cp_copy, array('chain_id' => 'chain-20260930_010203'));
+	check($cp_stage['primitive'] === 'copy_stage', 'the copy stages with copy_stage');
+	check(strpos($cp_stage['params']['manifest_url'], '/' . $cp_source->get('mgn_slug') . '/manager/chain-20260930_010203/manifest.json') !== false,
+		'its links are signed under the SOURCE\'s slug, where the chain is', $cp_stage['params']['manifest_url']);
+	check(array_keys($cp_stage['params']['artifact_urls']) === array('files-0000.tar.gz.enc', 'db-0000.sql.gz.enc'),
+		'every object of the chain is linked by bare name');
+	check(!isset($cp_stage['params']['profile']), 'no shelf travels: the copy checks the chain against its source\'s vouch');
+	check(strpos($cp_stage['params']['manifest_url'], 'X-Amz-Expires=' . ManagementJob::PRIMITIVE_CLAIM_BUDGETS['copy_stage']) !== false,
+		'the links expire with copy_stage\'s claim budget');
+	check(ManagementJob::params_ceiling('copy_stage') === ManagementJob::CHAIN_PARAMS_BYTES
+		&& ManagementJob::params_ceiling('copy_import') === ManagementJob::CHAIN_PARAMS_BYTES,
+		'copy_stage and copy_import carry the chain ceiling');
+
+	$threw = '';
+	try { JobCommandBuilder::build_copy_stage($cp_source, array('chain_id' => 'chain-20260930_010203')); }
+	catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'not a dormant copy') !== false, 'a site that is not a copy is not staged as one', $threw);
+}
+
+$cp_orphan = jcb_node(array('mgn_install_state' => 'copy', 'mgn_agent_public_key' => base64_encode(str_repeat("\x09", 32))));
+$threw = '';
+try { JobCommandBuilder::build_copy_stage($cp_orphan, array('chain_id' => 'chain-20260930_010203')); }
+catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'does not record which node') !== false, 'a copy that does not say whose copy it is is refused by name', $threw);
+check(ManagedNode::backup_node_of($cp_source)->key === $cp_source->key, 'every other row is its own backup node');
+
+$cp_export = JobCommandBuilder::build_copy_export($cp_source, $cp_copy, array('chain_id' => 'chain-20260930_010203'));
+check($cp_export === array('primitive' => 'copy_export', 'params' => array(
+		'profile' => 'manager', 'chain_id' => 'chain-20260930_010203', 'target_public_key' => $cp_copy_key)),
+	'the export names the chain and the copy\'s recorded agent key, and nothing else', var_export($cp_export, true));
+check(in_array('copy_export', JobCommandBuilder::DESTRUCTIVE_PRIMITIVES, true),
+	'an export is routed as a destructive word: only to an agent that asks its own operator');
+foreach (array('a working node' => $cp_source, 'a copy of another node' => $cp_orphan) as $what => $not_its_copy) {
+	$threw = '';
+	try { JobCommandBuilder::build_copy_export($cp_source, $not_its_copy, array('chain_id' => 'chain-20260930_010203')); }
+	catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'only to a dormant copy') !== false, "an export to {$what} is refused", $threw);
+}
+$threw = '';
+try { JobCommandBuilder::build_copy_export($cp_source, $cp_copy, array('chain_id' => '../x')); }
+catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'chain id') !== false, 'an export needs a chain id', $threw);
+
+$cp_import = JobCommandBuilder::build_copy_import($cp_copy, '{"body":"x","signature":"y"}');
+check($cp_import === array('primitive' => 'copy_import', 'params' => array('bundle' => '{"body":"x","signature":"y"}')),
+	'the import carries the bundle as it came');
+foreach (array('' => 'an empty bundle', str_repeat('x', JobCommandBuilder::COPY_EXPORT_MAX_BUNDLE + 1) => 'an oversized bundle') as $bad => $what) {
+	$threw = false;
+	try { JobCommandBuilder::build_copy_import($cp_copy, $bad); } catch (Exception $e) { $threw = true; }
+	check($threw, "{$what} is not sent");
+}
+
+// The bundle comes back inside the agent's envelope, and is kept for the import.
+$cp_envelope = function ($data) {
+	return "=== [Step 1/1] copy_export ===\n" . json_encode(array('api_version' => '1.0', 'data' => $data)) . "\n[Step 1/1 OK]";
+};
+$cp_job = new ManagementJob(NULL);
+$cp_job->set('mjb_mgn_managed_node_id', $cp_source->key);
+$cp_job->set('mjb_job_type', 'copy_export');
+$cp_job->set('mjb_status', 'completed');
+$cp_job->set('mjb_commands', array());
+$cp_job->set('mjb_output', $cp_envelope(array('bundle' => '{"body":"b","signature":"s"}', 'chain_id' => 'chain-20260930_010203',
+	'manifest_sha256' => str_repeat('d', 64), 'target_fingerprint' => str_repeat('e', 16), 'certificates' => array('example.org', '../x'),
+	'dkim_keys' => 2, 'issued' => '2026-10-01T00:00:00Z')));
+$cp_job->save();
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $cp_job->key);
+JobResultProcessor::process($cp_job);
+$cp_job->load();
+check(JobResultProcessor::bundle_of($cp_job) === '{"body":"b","signature":"s"}', 'the bundle is kept as the source returned it');
+$cp_r = $cp_job->get('mjb_result');
+$cp_r = is_string($cp_r) ? json_decode($cp_r, true) : $cp_r;
+check(($cp_r['certificates'] ?? null) === array('example.org') && ($cp_r['dkim_keys'] ?? null) === 2,
+	'with what it says it holds, a name that is not a lineage dropped', var_export($cp_r, true));
+
+$cp_none = new ManagementJob(NULL);
+$cp_none->set('mjb_mgn_managed_node_id', $cp_source->key);
+$cp_none->set('mjb_job_type', 'copy_export');
+$cp_none->set('mjb_status', 'failed');
+$cp_none->set('mjb_commands', array());
+$cp_none->set('mjb_output', 'the operator of this machine declined this copy export on its own admin page');
+$cp_none->save();
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $cp_none->key);
+JobResultProcessor::process($cp_none);
+$cp_none->load();
+check(JobResultProcessor::bundle_of($cp_none) === null, 'a declined export keeps no bundle');
+
+
 harness_finish();

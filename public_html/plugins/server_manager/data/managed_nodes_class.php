@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.29 - mgn_copy_of_node_id and backup_node_of(): a dormant copy reads its source's backup storage, so
+ *                the chain download builders serve a copy without learning that copies exist (site_copy.md WP4)
  * @version 1.28 - is_operational() and INSTALL_STATES: every install state (installing, install_failed,
  *                and the site copy's copy, switching and retired) is a node no automation acts on; one list,
  *                asked by the fleet backups, rollouts, pruning, uptime checks and notices (site_copy.md WP5)
@@ -213,6 +215,10 @@ class ManagedNode extends SystemBase {
 		'mgn_ssl_state'           => array('type'=>'varchar(20)'),
 		'mgn_port'                => array('type'=>'int4'),
 		'mgn_install_state'       => array('type'=>'varchar(20)'),
+		// The node this row is a copy of (specs/site_copy.md): set when the
+		// management node records a dormant copy, and read only while the row's
+		// install state is `copy` (backup_node_of()).
+		'mgn_copy_of_node_id'     => array('type'=>'int8'),
 		'mgn_notes'               => array('type'=>'text'),
 		'mgn_uptime_enabled'              => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'mgn_uptime_check_type'           => array('type'=>'varchar(20)', 'default'=>'http_status', 'is_nullable'=>false),
@@ -369,6 +375,33 @@ class ManagedNode extends SystemBase {
 	/** The rule is_operational() applies, over anything that answers get() for the column. */
 	public static function is_operational_from($node): bool {
 		return trim((string)$node->get('mgn_install_state')) === '';
+	}
+
+	/**
+	 * The node whose backup storage this row's chain downloads read: the row
+	 * itself, or, for a dormant copy, the node it is a copy of
+	 * (specs/site_copy.md WP4). A copy's chain is its source's, under its
+	 * source's slug and on its source's backup target; asking here is how the
+	 * download builders serve a copy without a copy case of their own.
+	 *
+	 * Takes anything that answers get() for the columns, as is_operational_from()
+	 * does. A copy that does not say whose copy it is throws: signing links
+	 * under its own slug would find nothing, and say so less clearly.
+	 */
+	public static function backup_node_of($node) {
+		if (trim((string)$node->get('mgn_install_state')) !== 'copy') {
+			return $node;
+		}
+		$source_id = (int)$node->get('mgn_copy_of_node_id');
+		if ($source_id <= 0) {
+			throw new Exception("Node '" . $node->get('mgn_slug') . "' is a copy, but does not record which node it "
+				. 'is a copy of, so there is no backup storage to fetch its chain from.');
+		}
+		$source = new ManagedNode($source_id, TRUE);
+		if ($source->get('mgn_delete_time')) {
+			throw new Exception("Node '" . $node->get('mgn_slug') . "' is a copy of a node that has been deleted.");
+		}
+		return $source;
 	}
 
 	/** The fleet list's words for this node's install state, or '' for a working node. */

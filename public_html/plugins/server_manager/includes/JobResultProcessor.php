@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.45 - process_copy_export keeps the sealed bundle a source made for its copy; bundle_of() reads it back
+ *                 for the copy's import (site_copy.md WP4)
  * @version 1.44 - process_page_probe keeps the node's `error` (a probe that could not run) and fails the
  *                 job with it, where it had recorded a completed job with status 0 and no reason
  * @version 1.43 - process_site_census keeps the census a node counted; census_of() reads it back
@@ -2339,6 +2341,53 @@ HTML;
 			$job->set('mjb_result', json_encode(['measured' => true, 'census' => $census]));
 		}
 		$job->save();
+	}
+
+	/**
+	 * A copy_export job: the bundle a source sealed to its copy's key and
+	 * signed (specs/site_copy.md WP4), kept in mjb_result for the copy's
+	 * copy_import, with what it says it holds. This plane cannot open it and
+	 * passes it on as it came; the copy refuses it if a byte changed.
+	 *
+	 * An answer with no bundle (a refusal, a decline on the source's own
+	 * page, an expired approval) records that none was made.
+	 */
+	private static function process_copy_export($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$bundle = is_array($data) ? (string)($data['bundle'] ?? '') : '';
+		if ($bundle === '' || strlen($bundle) > JobCommandBuilder::COPY_EXPORT_MAX_BUNDLE) {
+			$job->set('mjb_result', json_encode(['exported' => false]));
+			$job->save();
+			return;
+		}
+		$certificates = array();
+		foreach ((array)($data['certificates'] ?? array()) as $name) {
+			if (is_string($name) && preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/', $name)) {
+				$certificates[] = $name;
+			}
+		}
+		$job->set('mjb_result', json_encode([
+			'exported'           => true,
+			'bundle'             => $bundle,
+			'chain_id'           => preg_match('/^chain-[0-9_]{1,58}$/', (string)($data['chain_id'] ?? '')) ? (string)$data['chain_id'] : '',
+			'manifest_sha256'    => preg_match('/^[0-9a-f]{64}$/', (string)($data['manifest_sha256'] ?? '')) ? (string)$data['manifest_sha256'] : '',
+			'target_fingerprint' => preg_match('/^[0-9a-f]{16}$/', (string)($data['target_fingerprint'] ?? '')) ? (string)$data['target_fingerprint'] : '',
+			'certificates'       => array_slice($certificates, 0, 50),
+			'dkim_keys'          => max(0, (int)($data['dkim_keys'] ?? 0)),
+			'issued'             => substr((string)($data['issued'] ?? ''), 0, 40),
+		]));
+		$job->save();
+	}
+
+	/** The bundle a finished copy_export job kept, or null when it made none. */
+	public static function bundle_of($job): ?string {
+		if ((string)$job->get('mjb_job_type') !== 'copy_export') {
+			return null;
+		}
+		$result = $job->get('mjb_result');
+		$result = is_string($result) ? json_decode($result, true) : $result;
+		return (is_array($result) && !empty($result['exported']) && is_string($result['bundle'] ?? null))
+			? $result['bundle'] : null;
 	}
 
 	/** The census a finished site_census job kept, or null when it has none. */
