@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.91 - The closing site check reads the Location header as sent: a front page that sends a
+#               new visitor to /login is a responding site, not a redirect to the bare IP (specs/site_copy.md B30)
 #VERSION 2.90 - --copy-of-key=BASE64 (specs/site_copy.md WP4): a dormant copy records its source's agent public
 #               key beside copy_of, the one key copy_import trusts an export from. Required with --copy-of
 #VERSION 2.89 - The dormant step holds the host runner lock while it writes and asserts the state
@@ -1193,6 +1195,31 @@ name_resolves() {
     [ -n "$ip" ] || ip="$(getent ahostsv6 "$name" 2>/dev/null | awk '{print $1; exit}')"
     [ -n "$ip" ] && printf '%s' "$ip"
     return 0
+}
+
+# Ask for the site's front page by its configured domain, the way a visitor
+# reaches it, at the base URL given ($1, no trailing slash). Sets HTTP_CODE and
+# LOCATION: the Location header exactly as the site sent it. curl's redirect_url
+# resolves a relative one against the probe address, so a front page that sends
+# a new visitor to /login read as a redirect to the machine's bare IP.
+probe_site_front() {
+    local headers
+    headers=$(curl -s -o /dev/null -D - -H "Host: $DOMAIN_NAME" "$1/" 2>/dev/null | tr -d '\r' || true)
+    HTTP_CODE=$(printf '%s\n' "$headers" | awk 'NR == 1 { print $2 }')
+    LOCATION=$(printf '%s\n' "$headers" | awk 'tolower($1) == "location:" { print $2; exit }')
+    [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
+}
+
+# Whether LOCATION keeps the visitor on this site: a path, or this site's own
+# domain. Such a redirect is a site at work (a new site's front page sends a
+# visitor to /login), not a fault.
+redirect_stays_on_site() {
+    case "$LOCATION" in
+        //*) return 1 ;;
+        /*) return 0 ;;
+        "http://$DOMAIN_NAME"|"http://$DOMAIN_NAME/"*|"https://$DOMAIN_NAME"|"https://$DOMAIN_NAME/"*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # Which site's vhost answers for a name, and how: echoes "<sitename> proxy" for
@@ -4710,23 +4737,23 @@ EOF
         # the configured domain in the Host header. Apache answering on
         # localhost proves liveness, not reachability — a vhost can 301 every
         # request naming the real domain while localhost sails through.
-        PROBE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" -H "Host: $DOMAIN_NAME" "http://127.0.0.1:$PORT/" 2>/dev/null || true)
-        HTTP_CODE="${PROBE%% *}"
-        REDIRECT_URL="${PROBE#* }"
-        [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
+        probe_site_front "http://127.0.0.1:$PORT"
 
         if [ "$HTTP_CODE" = "200" ]; then
             print_success "Site is responding with HTTP 200"
             break
-        elif [[ "$HTTP_CODE" == 3* ]] && [[ "$REDIRECT_URL" == https://* ]] && [ "$NO_SSL" = true ]; then
+        elif [[ "$HTTP_CODE" == 3* ]] && [[ "$LOCATION" == https://* ]] && [ "$NO_SSL" = true ]; then
             # The state --no-ssl must never report green: every request naming
             # the domain lands on an HTTPS vhost this install did not create.
             # Waiting cannot fix configuration, so this is a stop, not a retry.
-            print_error "Requests for Host: $DOMAIN_NAME redirect to $REDIRECT_URL"
+            print_error "Requests for Host: $DOMAIN_NAME redirect to $LOCATION"
             print_error "This install used --no-ssl, so no HTTPS vhost exists — nobody can load this site by its domain"
             exit 1
+        elif [[ "$HTTP_CODE" == 3* ]] && redirect_stays_on_site; then
+            print_success "Site is responding (HTTP $HTTP_CODE to $LOCATION)"
+            break
         elif [[ "$HTTP_CODE" == 3* ]]; then
-            print_warning "Site redirects to ${REDIRECT_URL:-an undisclosed location} (HTTP $HTTP_CODE)"
+            print_warning "Site redirects to ${LOCATION:-an undisclosed location} (HTTP $HTTP_CODE)"
         elif [ "$HTTP_CODE" = "500" ]; then
             print_warning "Site returned HTTP 500 - may still be initializing..."
         else
@@ -5003,19 +5030,18 @@ do_site_baremetal() {
     # machine's primary address is as good as any; localhost when it has none.
     PROBE_HOST=$(hostname -I 2>/dev/null | awk '{print $1}')
     [ -n "$PROBE_HOST" ] || PROBE_HOST="localhost"
-    PROBE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" -H "Host: $DOMAIN_NAME" "http://${PROBE_HOST}/" 2>/dev/null || true)
-    HTTP_CODE="${PROBE%% *}"
-    REDIRECT_URL="${PROBE#* }"
-    [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
+    probe_site_front "http://${PROBE_HOST}"
 
     if [ "$HTTP_CODE" = "200" ]; then
         print_success "Site is responding with HTTP 200"
-    elif [[ "$HTTP_CODE" == 3* ]] && [[ "$REDIRECT_URL" == https://* ]] && [ "$NO_SSL" = true ]; then
-        print_error "Requests for Host: $DOMAIN_NAME redirect to $REDIRECT_URL"
+    elif [[ "$HTTP_CODE" == 3* ]] && [[ "$LOCATION" == https://* ]] && [ "$NO_SSL" = true ]; then
+        print_error "Requests for Host: $DOMAIN_NAME redirect to $LOCATION"
         print_error "This install used --no-ssl, so no HTTPS vhost exists — nobody can load this site by its domain"
         exit 1
+    elif [[ "$HTTP_CODE" == 3* ]] && redirect_stays_on_site; then
+        print_success "Site is responding (HTTP $HTTP_CODE to $LOCATION)"
     elif [[ "$HTTP_CODE" == 3* ]]; then
-        print_warning "Site redirects to ${REDIRECT_URL:-an undisclosed location} (HTTP $HTTP_CODE) - may need manual verification"
+        print_warning "Site redirects to ${LOCATION:-an undisclosed location} (HTTP $HTTP_CODE) - may need manual verification"
     else
         print_warning "Site returned HTTP $HTTP_CODE - may need manual verification"
     fi

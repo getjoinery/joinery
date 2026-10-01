@@ -129,10 +129,14 @@
     `_site_init.sh` never runs `update_database`, the one place that seeds the registry and mints
     the canary, so until the first upgrade a site cannot tell a wrong key from a corrupt value, and
     the census's canary check reads `absent` on both sides. Worked around on S by running
-    `update_database`. Fix: the install seeds the registry and mints the canary.
+    `update_database`. Fixed in `_site_init.sh` 3.9: a bare-metal install runs `update_database`
+    once, after the plugin bundle, as a container does at every start (`installer_contract`).
   - **B30 — The install's last check follows a redirect to the bare IP.** OBSERVED on S: it reported
     `http://66.228.35.148/login` (302) before the certificate existed; the domain redirects
-    correctly. Cosmetic, but the warning reads like a fault.
+    correctly. TRACED: the front page sends a new visitor to `/login`, and curl's `redirect_url`
+    resolves that relative path against the probe address. Fixed in `install.sh` 2.91: both closing
+    checks read the `Location` header as sent, and a redirect that stays on the site is a responding
+    site (`installer_contract`).
   - **B32 — A new site's admin cannot sign in.** OBSERVED on S (ERR_TOO_MANY_REDIRECTS at
     `/terms-accept`), TRACED: since every signed-in page runs the navigation gates (a5d22d7e,
     2026-09-24), the terms gate sent an admin who owes a password change off
@@ -147,8 +151,9 @@
   - **B33 — M learns a newly proven recovery key up to six hours late.** OBSERVED: the join's first
     `recovery_key_report` ran before the owner set the key, read `unconfigured`, and the six-hour
     throttle on that report kept every backup of S refused ("no backup recovery key") until the
-    report was asked by hand. A node whose last answer is not `proven` should be asked again
-    without the throttle, or the node's Backups page should say so to M when the proof lands.
+    report was asked by hand. Fixed in `JobResultProcessor` 1.46: the window is six hours once a
+    node's key is proven and two minutes otherwise, so the next status check (hourly, or the one the
+    node detail page tells the operator to run) asks again (`job_result_processor` 222/222).
   - S's first backup from dev: full, 70.8 MB (code 68.8 MB, data 1.9 MB, database 140 KB),
     `chain-20261001_161743` in dev's bucket, 11 s.
   - **B34 — Any unrecognised argument starts a second agent.** OBSERVED on T: `joinery-agent
@@ -196,7 +201,19 @@
     already held a connection to S got S's 404 for the look link until Chrome's sockets were
     flushed: worth one line wherever the look link is shown.
   - **B31 — Postfix on 26.04:** `postfix/postlog: not owned by root: /var/spool/postfix/etc/resolv.conf`,
-    and `/etc/aliases` has no root alias. OBSERVED on S; not yet traced.
+    and `/etc/aliases` has no root alias. OBSERVED on S, TRACED, both cosmetic. (1) The Ubuntu
+    package's `configure-instance.sh` copies `/etc/resolv.conf` into the chroot at every Postfix
+    start through `syncfiles.pl`, which keeps the source's owner, and on 26.04 resolved's file is
+    owned by `systemd-resolve`; no Postfix service on our hosts runs chrooted, so the copy is never
+    read. (2) Debian's postinst creates `/etc/aliases` with only `postmaster: root` when nobody
+    answered `postfix/root_address`, and warns once, in the install log, on every fresh install
+    unless a root alias already exists (answering `none` does not quiet it). The alias would be
+    inert: `mydestination` is `localhost` only (`install_email.sh`), so root's mail is addressed to
+    the box's mail name and never delivered locally. DECIDED (owner, 2026-10-01): no change to
+    either. The first is Ubuntu's packaging bug and touches nothing we use; the second is a
+    low-level channel the platform does not use, since a failed system job is a failed systemd
+    unit (logrotate, certbot, apt and e2scrub are timers on 26.04), which the node's host report
+    carries to M's fleet attention notice.
 - Decided:
   - D1: a faithful copy, with switching over and deleting kept separate; the old Clone is retired.
   - D2: the backup chain carries the copy.

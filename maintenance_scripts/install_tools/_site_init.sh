@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.9 - A bare-metal install runs update_database once, after the plugin bundle, so a
+#                new site has its sealed-secret registry, key canary and file signing key
+#                (specs/site_copy.md B29). A container already runs it at every start.
 # VERSION: 3.8 - The bare-metal vhost is rendered with no address: the template answers on any
 #                address (default_virtualhost.conf 2.08, specs/site_copy.md B25)
 # VERSION: 3.7 - The release verification key is written before the plugin bundle installs:
@@ -771,6 +774,29 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ] && [ "$BUNDLE_NAME" != "none
             log_error "Warning: the '$BUNDLE_NAME' bundle did not install cleanly."
             log_error "Install what you need from /admin/admin_plugins."
         fi
+    fi
+fi
+
+# =============================================================================
+# FIRST DATABASE UPDATE (bare metal)
+# =============================================================================
+#
+# The shipped database is a schema and its seed rows; nothing in it is this
+# site's own. The sealed-secret registry, the key canary and the file signing
+# key are made by update_database from this site's secret_box_key, and until
+# they exist the site cannot tell a wrong key from a corrupt value. A container
+# runs update_database at every start, straight after this script; a bare-metal
+# site runs it here, once, rather than at its first upgrade. After the bundle,
+# so the registry covers the plugins it installed. Non-fatal: every upgrade
+# runs it again.
+if [ "$DOCKER_MODE" = false ]; then
+    log "Running update_database..."
+    if php "$SITE_ROOT/public_html/utils/update_database.php" --upgrade >/dev/null 2>&1; then
+        log "Database updated: sealed-secret registry, key canary and signing key in place"
+    else
+        log_error "Warning: update_database did not finish cleanly. Run"
+        log_error "  php $SITE_ROOT/public_html/utils/update_database.php"
+        log_error "before storing any secret on this site."
     fi
 fi
 

@@ -129,6 +129,17 @@ check(strpos($handoff_b, '${JOINERY_SSH_KEY') === false && strpos($handoff_b, '/
 section('No shared admin credential ships with a release');
 
 check($site_init_src !== '', '_site_init.sh is readable', $site_init);
+// A bare-metal site runs update_database once at install, as a container does
+// at every start, so it has its sealed-secret registry, key canary and file
+// signing key before its first upgrade (site_copy.md B29). After the plugin
+// bundle, so the registry covers what the bundle installed.
+$ud_at  = strpos($site_init_src, 'utils/update_database.php" --upgrade');
+$bun_at = strpos($site_init_src, 'php "$BUNDLE_TOOL"');
+$svc_at = strpos($site_init_src, '# OPTIONAL SERVICES');
+check($ud_at !== false && $bun_at !== false && $svc_at !== false && $bun_at < $ud_at && $ud_at < $svc_at,
+    'a bare-metal install runs update_database after the plugin bundle and before the optional services');
+check(preg_match('/if \[ "\$DOCKER_MODE" = false \]; then\n    log "Running update_database\.\.\."/', $site_init_src) === 1,
+    'only on bare metal: a container runs it at every start, straight after _site_init.sh');
 check(strpos($site_init_src, 'reset_admin_password.php') !== false,
 	'_site_init.sh sets a per-site admin password on install');
 check(strpos($site_init_src, 'JOINERY_ADMIN_PASSWORD') !== false,
@@ -410,6 +421,58 @@ if (is_resource($server)) { proc_terminate($server, 9); proc_close($server); }
 foreach (array('/served/static_files', '/served', '/elsewhere') as $d) { array_map('unlink', glob($rr . $d . '/*') ?: array()); @rmdir($rr . $d); }
 array_map('unlink', glob($rr . '/*') ?: array());
 @rmdir($rr);
+
+// The closing site check reads the Location header as the site sent it. curl's
+// redirect_url resolved a new site's relative "/login" against the probe
+// address, and the install ended warning of a redirect to the bare IP
+// (site_copy.md B30).
+$front_fn = '';
+$stays_fn = '';
+if (preg_match('/^probe_site_front\(\) \{.*?^\}$/ms', $install_src, $m)) { $front_fn = $m[0]; }
+if (preg_match('/^redirect_stays_on_site\(\) \{.*?^\}$/ms', $install_src, $m)) { $stays_fn = $m[0]; }
+check($front_fn !== '' && $stays_fn !== '', 'the closing site check and its redirect test are findable');
+check(strpos($install_src, '%{redirect_url}') === false,
+    'no site check reads curl\'s resolved redirect_url, which names the probe address');
+check(substr_count($install_src, 'redirect_stays_on_site; then') === 2,
+    'both closing checks (Docker and bare metal) count a redirect that stays on the site as responding');
+$fr = harness_scratch_dir('front_probe');
+$fport = 19000 + (getmypid() % 1000);
+file_put_contents($fr . '/srv.py', "import http.server, sys\n"
+    . "class H(http.server.BaseHTTPRequestHandler):\n"
+    . "    def do_GET(self):\n"
+    . "        loc = {'example.test': '/login', 'away.test': 'http://203.0.113.9/login'}.get(self.headers.get('Host'), '')\n"
+    . "        self.send_response(302 if loc else 200)\n"
+    . "        if loc: self.send_header('Location', loc)\n"
+    . "        self.end_headers()\n"
+    . "    def log_message(self, *a): pass\n"
+    . "http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()\n");
+$fserver = proc_open('exec python3 ' . escapeshellarg($fr . '/srv.py') . ' ' . $fport . ' >/dev/null 2>&1', array(), $fpipes);
+$fup = false;
+for ($i = 0; $i < 30 && !$fup; $i++) {
+    usleep(100000);
+    $sock = @fsockopen('127.0.0.1', $fport, $errno, $errstr, 0.5);
+    if ($sock) { $fup = true; fclose($sock); }
+}
+check($fup, 'a local http server is listening for the front-page probe', "127.0.0.1:$fport");
+$front = function (string $domain) use ($front_fn, $stays_fn, $fr, $fport): string {
+    $script = $fr . '/front.sh';
+    file_put_contents($script, "set -euo pipefail\n" . $front_fn . "\n" . $stays_fn . "\n"
+        . 'DOMAIN_NAME=' . escapeshellarg($domain) . "\n"
+        . 'probe_site_front http://127.0.0.1:' . $fport . "\n"
+        . "if redirect_stays_on_site; then s=stays; else s=leaves; fi\n"
+        . "echo \"\$HTTP_CODE \$LOCATION \$s\"\n");
+    return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>/dev/null'));
+};
+if ($fup && $front_fn !== '' && $stays_fn !== '') {
+    check($front('example.test') === '302 /login stays',
+        'a front page that sends a new visitor to /login is a responding site, reported as /login');
+    check($front('away.test') === '302 http://203.0.113.9/login leaves',
+        'a redirect to another host is still reported, by the address the site named');
+    check($front('plain.test') === '200  leaves', 'a 200 reads as a 200');
+}
+if (is_resource($fserver)) { proc_terminate($fserver, 9); proc_close($fserver); }
+array_map('unlink', glob($fr . '/*') ?: array());
+@rmdir($fr);
 
 // The early DNS check's Cloudflare branch tells the owner the one thing that
 // matters at the edge, and the post-attempt check is what decides deferral.
@@ -2366,22 +2429,22 @@ section('The health probe reports reachability, not liveness');
 // site's health — it is not a probe line. Nor is the reach probe
 // (name_reaches_here), which fetches a nonce THROUGH the name on purpose:
 // asking by Host header would prove nothing about the path the CA takes.
+// Both closing checks go through probe_site_front, which asks by Host header.
+$probe_calls = preg_match_all('/^\s+probe_site_front "http/m', $install_exec);
+check($probe_calls === 2, 'both install paths probe the site', 'probe calls found: ' . $probe_calls);
 $probe_lines = array_values(array_filter(
     preg_split('/\R/', $install_exec),
-    function ($l) { return strpos($l, '%{http_code}') !== false && strpos($l, 'curl') !== false
+    function ($l) { return strpos($l, 'curl') !== false && strpos($l, '-D -') !== false
         && strpos($l, 'clone_export') === false && strpos($l, 'url_effective') === false; }
 ));
-check(count($probe_lines) >= 2, 'both install paths probe the site',
-    'probe lines found: ' . count($probe_lines));
+check(count($probe_lines) === 1, 'the site probe is one curl, in probe_site_front', 'probe lines found: ' . count($probe_lines));
 foreach ($probe_lines as $l) {
     check(strpos($l, '-H "Host: $DOMAIN_NAME"') !== false,
         'the probe asks for the site by its configured domain', trim($l));
-    // curl -w already prints 000 on failure; `|| echo "000"` printed a second
-    // one, reporting "HTTP response: 000000".
     check(strpos($l, '|| echo "000"') === false,
         'a failed probe reports 000 once, not twice', trim($l));
 }
-check(substr_count($install_exec, '"$REDIRECT_URL" == https://*') >= 2
+check(substr_count($install_exec, '"$LOCATION" == https://*') >= 2
     && substr_count($install_exec, '[ "$NO_SSL" = true ]') >= 2,
     'a redirect to https:// under --no-ssl is a recognized failure state');
 // And it is a stop: waiting cannot fix configuration.
@@ -3447,7 +3510,7 @@ foreach (array('DB_PUBLISH', 'resolve_database_publish_address', 'allow_declared
 }
 check(strpos($install_b10, 'grep -q ":${port}->"') !== false,
 	'a port published on any address counts as in use');
-check(strpos($install_b10, '"http://127.0.0.1:$PORT/"') !== false && strpos($install_b10, '"http://localhost:$PORT/"') === false,
+check(strpos($install_b10, 'probe_site_front "http://127.0.0.1:$PORT"') !== false && strpos($install_b10, 'localhost:$PORT') === false,
 	'the post-start probe asks 127.0.0.1, where the port is published');
 check((bool)preg_match('/elif iptables -C DOCKER-USER -i "\$PUBLIC_IFACE" -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP.*?iptables -I DOCKER-USER -i "\$PUBLIC_IFACE" -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP/s', $install_b10),
 	'install.sh docker blocks the database-port range on the public interface, once');
