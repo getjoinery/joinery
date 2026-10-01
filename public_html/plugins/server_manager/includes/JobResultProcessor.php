@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.46 - recovery_report_window(): a node whose key is not yet proven is asked again after two
+ *                 minutes, not six hours, so a key set up on the node is seen at the next status check
+ *                 (site_copy.md B33)
  * @version 1.45 - process_copy_export keeps the sealed bundle a source made for its copy; bundle_of() reads it back
  *                 for the copy's import (site_copy.md WP4)
  * @version 1.44 - process_page_probe keeps the node's `error` (a probe that could not run) and fails the
@@ -594,14 +597,12 @@ class JobResultProcessor {
 			// Queued rather than done inline because measuring it means running a
 			// script on the node, which is a job, not a page render.
 			//
-			// Asked for at most once per node per six hours. Every primitive
+			// Asked for at most once per window (recovery_report_window()), and
+			// never beside a report already queued or running. Every primitive
 			// status check carries backup_recovery_state forward, so every one of
 			// them wants this job; the fleet status sweep runs them together and
 			// on 08-28 that queued 33 identical reports across nine nodes inside a
-			// minute. A recovery key that changes does so at a human's pace, so
-			// one measurement per node in a six-hour window is as fresh as the
-			// answer can usefully be, and the check below also refuses to pile on
-			// a report that is already queued or running.
+			// minute.
 			//
 			// A node that has NEVER had it measured wants the job just as much:
 			// nothing is carried because there is nothing to carry from, and the
@@ -620,7 +621,8 @@ class JobResultProcessor {
 			if ($node->hosts_site()
 					&& self::wants_recovery_key_report($folded)
 					&& JobCommandBuilder::has_primitive($node, 'recovery_key_report')
-					&& !ManagementJob::activeOrRecentForNode($node->key, 'recovery_key_report', 6 * 3600)) {
+					&& !ManagementJob::activeOrRecentForNode($node->key, 'recovery_key_report',
+						self::recovery_report_window($folded))) {
 				try {
 					$built = JobCommandBuilder::build_recovery_key_report($node);
 					ManagementJob::createFromBuild($node->key, 'recovery_key_report', $built, null,
@@ -727,6 +729,27 @@ class JobResultProcessor {
 		$carried = $folded[self::STATUS_CARRIED_KEY] ?? [];
 		return in_array('backup_recovery_state', is_array($carried) ? $carried : [], true)
 			|| !array_key_exists('backup_recovery_state', $folded);
+	}
+
+	/** How long a proven key's answer stands: a recovery key changes at a human's pace. */
+	const RECOVERY_REPORT_PROVEN_SECONDS = 6 * 3600;
+
+	/** How long any other answer stands: long enough to fold a status sweep's burst into one report. */
+	const RECOVERY_REPORT_PENDING_SECONDS = 120;
+
+	/**
+	 * How long after one recovery_key_report a status check may ask for another.
+	 * Six hours once the node's key is proven. Two minutes while it is not: then
+	 * every backup of the node is refused until this plane hears that its
+	 * administrator has set up and proven a key, and the node detail page tells
+	 * that administrator a status check is what clears it. A six-hour window
+	 * there kept a node's backups refused for hours after its key was proven
+	 * (site_copy.md B33).
+	 */
+	public static function recovery_report_window(array $folded): int {
+		return (($folded['backup_recovery_state'] ?? '') === 'proven')
+			? self::RECOVERY_REPORT_PROVEN_SECONDS
+			: self::RECOVERY_REPORT_PENDING_SECONDS;
 	}
 
 	/**

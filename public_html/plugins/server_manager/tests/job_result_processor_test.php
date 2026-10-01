@@ -735,6 +735,25 @@ check(!JobResultProcessor::wants_recovery_key_report(array(
 check(!JobResultProcessor::wants_recovery_key_report(array('backup_recovery_state' => 'unconfigured')),
 	'a measured "unconfigured" is an answer, not a gap');
 
+section('A node still waiting on its recovery key is asked again within minutes');
+
+// A node whose first report read "unconfigured" was not asked again for six
+// hours, and every backup of it was refused for those hours after its owner had
+// set up and proven the key (site_copy.md B33).
+check(JobResultProcessor::recovery_report_window(array('backup_recovery_state' => 'proven'))
+		=== JobResultProcessor::RECOVERY_REPORT_PROVEN_SECONDS,
+	'a proven key is measured again only after six hours');
+foreach (array('unconfigured', 'unproven', 'invalid') as $rk_state) {
+	check(JobResultProcessor::recovery_report_window(array('backup_recovery_state' => $rk_state))
+			=== JobResultProcessor::RECOVERY_REPORT_PENDING_SECONDS,
+		"a node reading '$rk_state' is asked again at the next status check two minutes on");
+}
+check(JobResultProcessor::recovery_report_window(array('load_1m' => '0.1'))
+		=== JobResultProcessor::RECOVERY_REPORT_PENDING_SECONDS,
+	'a node never measured is asked at the next status check');
+check(JobResultProcessor::RECOVERY_REPORT_PENDING_SECONDS >= 60,
+	'the short window still folds a status sweep\'s burst of checks into one report');
+
 section('A node that hosts no site is never asked for its recovery key');
 
 // The Docker host, enrolled in machine posture: an agent, no web root, and an
