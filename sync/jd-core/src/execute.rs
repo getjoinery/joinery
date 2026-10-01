@@ -245,7 +245,13 @@ fn encode(action: &Action) -> (&'static str, Value) {
         Action::CreateRemoteFolder { placement } => ("create_remote_folder", place(placement)),
         Action::CreateLocalFolder { placement } => ("create_local_folder", place(placement)),
         Action::ApplyLocalMove { to } => ("move_remote", place(to)),
-        Action::ApplyRemoteMove { to } => ("move_local", place(to)),
+        Action::ApplyRemoteMove { to, agree_at } => {
+            let mut params = place(to);
+            if let Some(at) = agree_at {
+                params["agree_at"] = place(at);
+            }
+            ("move_local", params)
+        }
         Action::TrashLocal => ("trash_local", json!({})),
         Action::TrashRemote => ("trash_remote", json!({})),
         Action::PreserveLocalAs { name, parent } => ("preserve_local_as", json!({ "name": name, "parent": parent })),
@@ -1581,19 +1587,53 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // that other folder, one the user never put the file in (hidden hostile2
     // 74401). On a volume whose ids hold, the directory's id says whose it
     // is; the download stands down and the next pass places it where its
-    // folder now is. Only another live folder's directory: an id this folder
-    // merely no longer recognises refuses nothing.
+    // folder now is. An id this folder merely no longer recognises -- its own
+    // directory standing nowhere, a restore or a re-made root -- refuses
+    // nothing.
+    //
+    // Nor a directory the user made again at the folder's old name while the
+    // folder's own directory stands elsewhere: the folder was renamed, a save
+    // through the old name rebuilt it, and the folder's own rename had not
+    // reached its record yet. The bytes landed in the rebuilt directory, the
+    // next scan read the file's own inode there as a move, and both devices
+    // carried the file out of the folder it belongs to (soak run 1504). The
+    // download waits a pass for the scan to place its folder. A folder whose
+    // own directory is parked under an engine scratch name also reads as
+    // standing elsewhere; that download waits for the park to lift.
     if !env.vfs.personality().positional_file_ids {
         if let (Some(pid), Some(dir)) = (entry.local_placement().parent, path.parent()) {
             if let Some(here) = env.vfs.directory_id(dir)?.filter(|id| *id != 0) {
-                let mine = env.store.get_entry(EntityId::folder(pid))?.and_then(|f| f.synced_fingerprint).map(|f| f.file_id);
-                if mine != Some(here) {
+                let mine = env.store.get_entry(EntityId::folder(pid))?.and_then(|f| f.synced_fingerprint).map(|f| f.file_id).filter(|id| *id != 0);
+                if let Some(mine) = mine.filter(|mine| *mine != here) {
                     for other in env.store.live_holders_of(EntityType::Folder, here)? {
                         if other.id != EntityId::folder(pid) && !other.id.is_provisional() {
                             return Ok(OpOutcome::Overtaken(
                                 "the folder it belongs in is another folder's directory here; deciding again from where its folder is".into(),
                             ));
                         }
+                    }
+                    let (_, dir_identity) = crate::pass::observed_dirs(env)?;
+                    if dir_identity.values().any(|id| *id == mine) {
+                        return Ok(OpOutcome::Overtaken(
+                            "the folder it belongs in stands elsewhere; the directory at its old name is a new one".into(),
+                        ));
+                    }
+                }
+            } else {
+                // Nothing at the folder's old name at all, and its own
+                // directory standing elsewhere: renamed, its record not caught
+                // up. Landing makes the missing directories, so the download
+                // itself rebuilt the folder's old name; the next scan read the
+                // rebuilt path as the folder and its real directory as a new
+                // one, and a folder the peer had just filled was trashed (soak
+                // run 1509, device-b). It waits a pass, as above.
+                let mine = env.store.get_entry(EntityId::folder(pid))?.and_then(|f| f.synced_fingerprint).map(|f| f.file_id).filter(|id| *id != 0);
+                if let Some(mine) = mine {
+                    let (_, dir_identity) = crate::pass::observed_dirs(env)?;
+                    if dir_identity.values().any(|id| *id == mine) {
+                        return Ok(OpOutcome::Overtaken(
+                            "the folder it belongs in stands elsewhere; nothing stands at its old name".into(),
+                        ));
                     }
                 }
             }
@@ -3375,9 +3415,22 @@ fn create_remote_folder(
             redirect_queued_parent(env, entry.id.server_id, new_id)?;
             return Ok(OpOutcome::Done);
         }
+        // A folder the server deleted while this device kept it, made again
+        // (`restore_remotely`): what it held went into the server's trash with
+        // it, under the old id, and the cascade is silent, so nothing else will
+        // ever say so. Asked now, before anything changes here, so an answer
+        // that does not come retries the whole create.
+        let taken_by_the_trash = if entry.id.is_provisional() {
+            Vec::new()
+        } else {
+            what_the_trash_took(env, entry.id)?
+        };
         env.store.rekey_entry(entry.id, target)?;
         redirect_queued_parent(env, entry.id.server_id, new_id)?;
         entry.id = target;
+        for id in taken_by_the_trash {
+            never_sent_again(env, id)?;
+        }
     }
     entry.remote = placement;
     // On a RETRY the answer cannot be taken at face value. An idempotent replay
@@ -3406,6 +3459,79 @@ fn create_remote_folder(
     entry.synced_placement = Some(entry.remote.clone());
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
+}
+
+/// The descendants a folder's server trash took with it: every real record
+/// under it that the server now calls deleted. One the server spares -- moved
+/// out of the folder before the trash ran -- is absorbed where the server has
+/// it instead, as the forget path does.
+fn what_the_trash_took(env: &ExecEnv, root: EntityId) -> Result<Vec<EntityId>, ExecError> {
+    let real: Vec<EntityId> = env
+        .store
+        .subtree_ids(root)?
+        .into_iter()
+        .filter(|id| *id != root && !id.is_provisional())
+        .collect();
+    if real.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut taken = Vec::new();
+    for (id, state) in crate::pass::stat_all(env, &real)? {
+        if state.deleted {
+            taken.push(id);
+        } else {
+            crate::pass::absorb_remote(env, id, &state)?;
+        }
+    }
+    Ok(taken)
+}
+
+/// A record whose server side went into the trash with its folder, while the
+/// folder came back: the file or folder is still here, inside the folder made
+/// again, and goes up again as new -- the record a scan would have minted for
+/// it, keeping what it knows of its own file, its bytes and its sealing.
+///
+/// Carried across with the folder's re-key instead, its agreement named the
+/// folder made again, where the server never put it: it read as settled and
+/// was never sent (soak run 1509, doc-12 and doc-14 in 406770 while the server
+/// had them only in the trashed 406763).
+fn never_sent_again(env: &ExecEnv, id: EntityId) -> Result<(), ExecError> {
+    let fresh = EntityId {
+        entity_type: id.entity_type,
+        server_id: env.store.next_provisional_id()?,
+    };
+    // Its children follow it to the new id; they are re-minted in their turn.
+    env.store.rekey_entry(id, fresh)?;
+    for op in env.store.queued_ops()? {
+        if op.entity == fresh {
+            env.store.drop_op(op.op_id)?;
+        }
+    }
+    let Some(mut entry) = env.store.get_entry(fresh)? else {
+        return Ok(());
+    };
+    let here = Placement {
+        name: entry.effective_local_name().to_string(),
+        parent: entry.local_placement().parent,
+    };
+    let bytes = entry
+        .last_seen_sha
+        .clone()
+        .or(entry.synced_content.as_ref().map(|c| c.sha256.clone()));
+    let mut minted = crate::pass::blank(fresh, &here);
+    minted.is_encrypted = entry.is_encrypted;
+    if fresh.entity_type == EntityType::Folder {
+        // A folder's own directory, as a minted folder knows it.
+        minted.synced_fingerprint = entry.synced_fingerprint;
+    } else {
+        minted.own_file = entry.own_file.take();
+        minted.last_seen_sha = bytes;
+    }
+    if minted.is_encrypted && env.vault.is_none() {
+        minted.status = LocalStatus::PendingKey;
+    }
+    env.store.put_entry(&minted)?;
+    Ok(())
 }
 
 fn create_local_folder(
@@ -4666,7 +4792,16 @@ fn move_local(
             Some(ref n) if *n != to.name => Some(n.clone()),
             _ => None,
         };
-        entry.synced_placement = Some(to);
+        // The server's half of a race each side won half of: the file now
+        // stands at `to`, the server still has it at `agree_at`, and the
+        // agreement is the server's. Recorded at `to`, the next scan would
+        // read the server's placement as a fresh remote move and take the
+        // file back, dropping the half this side won; recorded at the
+        // server's, it reads that half as this side's own move and sends it.
+        let agree_at = serde_json::from_str::<Value>(&op.params)
+            .ok()
+            .and_then(|p| p.get("agree_at").and_then(|v| read_place(v).ok()));
+        entry.synced_placement = Some(agree_at.unwrap_or(to));
     }
     // A fingerprint is only ever recorded about bytes that have been looked at.
     //

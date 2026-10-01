@@ -41,7 +41,14 @@ pub enum Action {
     /// Create the folder on this computer.
     CreateLocalFolder { placement: Placement },
     /// Move/rename the local file to match the server.
-    ApplyRemoteMove { to: Placement },
+    ///
+    /// `agree_at` is set only when this move takes the server's half of a
+    /// race the two sides each won half of (see `merged_placement`): the file
+    /// goes to `to`, which is not where the server has it, and the agreement
+    /// recorded is `agree_at`, the server's own placement. The next scan then
+    /// reads the half this side won as an ordinary local move and sends it.
+    /// `None` everywhere else: the agreement is `to`.
+    ApplyRemoteMove { to: Placement, agree_at: Option<Placement> },
     /// Move/rename on the server to match local.
     ApplyLocalMove { to: Placement },
     /// Send the local file to the OS trash.
@@ -203,13 +210,22 @@ pub fn reconcile(entry: &Entry, local: &Delta, remote: &Delta, ctx: &Context) ->
     match (local.placement(), remote.placement()) {
         (Some(l), Some(r)) => {
             if l != r {
-                // Both moved, to different places. Somebody has to win, and it
-                // has to be the same winner on every device — so it is the
-                // server, always, and the user is told.
-                res.actions.push(Action::ApplyRemoteMove { to: r.clone() });
-                res.issues.push(Issue::MoveRaceServerWon {
-                    local_wanted: l.clone(),
-                });
+                if let Some(merged) = merged_placement(entry.synced_placement.as_ref(), l, r) {
+                    // One side renamed it and the other moved it, and neither
+                    // touched what the other changed: both are kept. This
+                    // side takes the server's half now; its own half follows
+                    // as an ordinary local move, so every device ends at the
+                    // same placement and nobody lost anything to be told of.
+                    res.actions.push(Action::ApplyRemoteMove { to: merged, agree_at: Some(r.clone()) });
+                } else {
+                    // Both moved, to different places. Somebody has to win,
+                    // and it has to be the same winner on every device — so
+                    // it is the server, always, and the user is told.
+                    res.actions.push(Action::ApplyRemoteMove { to: r.clone(), agree_at: None });
+                    res.issues.push(Issue::MoveRaceServerWon {
+                        local_wanted: l.clone(),
+                    });
+                }
             }
             // Same target: they agree. Nothing to move — but the agreement
             // still has to be written down, and that is not a formality.
@@ -233,7 +249,7 @@ pub fn reconcile(entry: &Entry, local: &Delta, remote: &Delta, ctx: &Context) ->
             }
         }
         (Some(l), None) => res.actions.push(Action::ApplyLocalMove { to: l.clone() }),
-        (None, Some(r)) => res.actions.push(Action::ApplyRemoteMove { to: r.clone() }),
+        (None, Some(r)) => res.actions.push(Action::ApplyRemoteMove { to: r.clone(), agree_at: None }),
         (None, None) => {}
     }
 
@@ -286,6 +302,27 @@ pub fn reconcile(entry: &Entry, local: &Delta, remote: &Delta, ctx: &Context) ->
     }
 
     res
+}
+
+/// Where a move race lands when each side changed a different half of the
+/// placement since the last agreement: one only the folder, the other only
+/// the name. The folder comes from the side that moved it and the name from
+/// the side that renamed it, so both changes survive; every device derives
+/// the same answer, because the server ends there too. `None` -- the server
+/// wins -- when there is no agreement to measure against, or when
+/// both sides changed the same half (two folders or two names cannot both
+/// be kept).
+fn merged_placement(agreed: Option<&Placement>, local: &Placement, remote: &Placement) -> Option<Placement> {
+    let agreed = agreed?;
+    let only_parent = |p: &Placement| p.parent != agreed.parent && p.name == agreed.name;
+    let only_name = |p: &Placement| p.parent == agreed.parent && p.name != agreed.name;
+    if only_parent(local) && only_name(remote) {
+        Some(Placement { parent: local.parent, name: remote.name.clone() })
+    } else if only_name(local) && only_parent(remote) {
+        Some(Placement { parent: remote.parent, name: local.name.clone() })
+    } else {
+        None
+    }
 }
 
 /// The delete rules. Separated out because "one side removed it" is not a value
@@ -691,7 +728,8 @@ mod tests {
             r.actions,
             vec![
                 Action::ApplyRemoteMove {
-                    to: placement(Some(9), "a.txt")
+                    to: placement(Some(9), "a.txt"),
+                    agree_at: None
                 },
                 Action::UploadVersion,
             ]
@@ -777,6 +815,66 @@ mod tests {
     }
 
     #[test]
+    fn a_rename_against_a_move_keeps_both_halves() {
+        let mut e = established("a.txt", "aaa");
+        e.synced_placement = Some(placement(Some(1), "a.txt"));
+        // Local moved it into folder 2; the server renamed it in folder 1.
+        let r = reconcile(
+            &e,
+            &Delta::Moved { to: placement(Some(2), "a.txt") },
+            &Delta::Moved { to: placement(Some(1), "b.txt") },
+            &ctx(),
+        );
+        assert_eq!(
+            r.actions,
+            vec![Action::ApplyRemoteMove {
+                to: placement(Some(2), "b.txt"),
+                agree_at: Some(placement(Some(1), "b.txt")),
+            }]
+        );
+        assert!(r.issues.is_empty(), "nobody lost: {:?}", r.issues);
+        // The other way round: local renamed, the server moved.
+        let r = reconcile(
+            &e,
+            &Delta::Moved { to: placement(Some(1), "b.txt") },
+            &Delta::Moved { to: placement(Some(2), "a.txt") },
+            &ctx(),
+        );
+        assert_eq!(
+            r.actions,
+            vec![Action::ApplyRemoteMove {
+                to: placement(Some(2), "b.txt"),
+                agree_at: Some(placement(Some(2), "a.txt")),
+            }]
+        );
+        assert!(r.issues.is_empty());
+    }
+
+    #[test]
+    fn a_race_over_the_same_half_still_goes_to_the_server() {
+        let mut e = established("a.txt", "aaa");
+        e.synced_placement = Some(placement(Some(1), "a.txt"));
+        for (mine, theirs) in [
+            (placement(Some(2), "a.txt"), placement(Some(3), "a.txt")),
+            (placement(Some(1), "b.txt"), placement(Some(1), "c.txt")),
+            (placement(Some(2), "b.txt"), placement(Some(1), "c.txt")),
+        ] {
+            let r = reconcile(&e, &Delta::Moved { to: mine }, &Delta::Moved { to: theirs.clone() }, &ctx());
+            assert_eq!(r.actions, vec![Action::ApplyRemoteMove { to: theirs, agree_at: None }]);
+            assert!(matches!(r.issues[0], Issue::MoveRaceServerWon { .. }));
+        }
+        // No agreement to measure against: nothing to merge.
+        e.synced_placement = None;
+        let r = reconcile(
+            &e,
+            &Delta::Moved { to: placement(Some(2), "a.txt") },
+            &Delta::Moved { to: placement(Some(1), "b.txt") },
+            &ctx(),
+        );
+        assert!(matches!(r.issues.first(), Some(Issue::MoveRaceServerWon { .. })), "{:?}", r);
+    }
+
+    #[test]
     fn a_move_race_is_settled_by_the_server_and_reported() {
         let e = established("a.txt", "aaa");
         let r = reconcile(
@@ -792,7 +890,8 @@ mod tests {
         assert_eq!(
             r.actions,
             vec![Action::ApplyRemoteMove {
-                to: placement(Some(2), "theirs.txt")
+                to: placement(Some(2), "theirs.txt"),
+                agree_at: None
             }]
         );
         // Deterministic across devices, and the user is told which lost.

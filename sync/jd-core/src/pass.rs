@@ -2653,9 +2653,14 @@ pub(crate) fn observed_dirs_and_tie_breaks(
 /// placement, and either no id yet or one that stands nowhere on this disk
 /// any more (a restore, a re-created root, a volume swap -- the id is a
 /// cache of evidence and its absence is ordinary). A record whose id stands
-/// ELSEWHERE is left alone: that disagreement is evidence, and reading it is
-/// the readers' job, not this one's. Nothing here changes what the engine
-/// plans; what it changes is what the next pass can know.
+/// ELSEWHERE is left alone while no other live record carries that id: the
+/// disagreement is evidence, and reading it is the readers' job, not this
+/// one's. Once another live record carries it, the readers have had their
+/// pass and given the directory away, and this record takes the directory at
+/// its own path instead. In every case a record never takes an id another
+/// live record already carries: one directory, one record, both ways round.
+/// Nothing here changes what the engine plans; what it changes is what the
+/// next pass can know.
 fn record_directory_identities(
     env: &ExecEnv,
     agreed_paths: &HashMap<String, i64>,
@@ -2663,6 +2668,17 @@ fn record_directory_identities(
 ) -> Result<(), ExecError> {
     let on_disk: std::collections::HashSet<u64> =
         dir_identity.values().copied().filter(|id| *id != 0).collect();
+    // Which live folder records name each directory id as their own.
+    let mut carriers: HashMap<u64, Vec<i64>> = HashMap::new();
+    for e in env.store.every_entry()? {
+        if e.id.entity_type != EntityType::Folder || e.remote_deleted || e.id.is_provisional() {
+            continue;
+        }
+        if let Some(id) = e.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0) {
+            carriers.entry(id).or_default().push(e.id.server_id);
+        }
+    }
+    let carried_by_another = |id: u64, me: i64| carriers.get(&id).is_some_and(|c| c.iter().any(|o| *o != me));
     for (path, server_id) in agreed_paths {
         let Some(&id) = dir_identity.get(path) else {
             continue;
@@ -2681,14 +2697,28 @@ fn record_directory_identities(
             // Gone from the disk, or standing under this folder's own path
             // -- a recycled id on a directory made inside the folder (C5);
             // either way not this folder's directory any more.
+            // Or settled against it: the directory it names stands elsewhere
+            // and another live folder record now holds it as its own, while
+            // a different directory stands at this record's path. The
+            // readers had their pass at that disagreement and gave the
+            // directory to the other record; kept here, two records claimed
+            // one directory, and every identity reader after was misled (a
+            // folder renamed and its old name made again by a save through
+            // it, its files not yet sent: soak run 1504).
             Some(fp) => {
                 !on_disk.contains(&fp.file_id)
                     || dir_identity
                         .iter()
                         .any(|(at, id)| *id == fp.file_id && at.starts_with(&format!("{path}/")))
+                    || (fp.file_id != id && carried_by_another(fp.file_id, *server_id))
             }
         };
-        if stale {
+        // Never by taking a directory another live record already names as
+        // its own: that makes the same two claims, the other way round. A
+        // plain folder whose path a vault's directory had rotated onto took
+        // the vault's id, and the vault's sealed file was read as the plain
+        // folder's and went up in the clear (hostile2 74403).
+        if stale && !carried_by_another(id, *server_id) {
             entry.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(id));
             env.store.put_entry(&entry)?;
         }
@@ -4861,19 +4891,38 @@ fn detect_folder_moves(
                     continue;
                 }
                 let kids = children.get(old_path).map(|k| k.as_slice()).unwrap_or(&[]);
-                let matched = kids
-                    .iter()
-                    .filter(|(name, file_id)| {
-                        by_path
-                            .get(format!("{candidate}/{name}").as_str())
-                            .is_some_and(|o| o.fingerprint.file_id == *file_id)
-                    })
-                    .count()
-                    + usize::from(child_folder_under(id, candidate));
+                let matched_at = |at: &str| -> usize {
+                    kids.iter()
+                        .filter(|(name, file_id)| {
+                            by_path
+                                .get(format!("{at}/{name}").as_str())
+                                .is_some_and(|o| o.fingerprint.file_id == *file_id)
+                        })
+                        .count()
+                        + usize::from(child_folder_under(id, at))
+                };
+                let matched = matched_at(candidate);
                 if matched == 0 {
                     continue;
                 }
-                if whole_only && !moved_wholesale(old_path, candidate) {
+                // Wholesale guards against dragging a folder after one file
+                // moved out of it. Where the folder's OWN directory stands
+                // at the candidate, holding files of its own, nothing is
+                // being dragged: the directory went there, and a file of it
+                // found elsewhere is the file that moved out. The user
+                // renamed the folder, saved through its old name, and moved
+                // one file into the rebuilt directory; left to wholesale,
+                // the folder stayed on the rebuilt directory, its own was
+                // minted as a new folder, and every file was carried into
+                // it, out of the directory the peer's user had put them in
+                // (soak run 1508). Contents still have to propose it, so a
+                // plain folder's id claims nothing on its own; not where ids
+                // are positions.
+                let own_directory_here = !env.vfs.personality().positional_file_ids
+                    && record_identity
+                        .get(id)
+                        .is_some_and(|own| dir_identity.get(*candidate) == Some(own));
+                if whole_only && !own_directory_here && !moved_wholesale(old_path, candidate) {
                     continue;
                 }
                 // The contents propose this directory; where does the
@@ -4884,7 +4933,27 @@ fn detect_folder_moves(
                 // taken -- the folder is left where its directory stands,
                 // present and unmoved, and the disagreement is said out loud
                 // rather than resolved by whichever rule ran first.
+                //
+                // Unless the folder's contents say it is where its directory
+                // stands as well: the directory and its files went the same
+                // way, and what this candidate holds was moved out of the
+                // folder on its own. That is a rename and a move, and the
+                // candidate standing where its directory stands takes the
+                // folder in its turn. Held instead, it was held for good at
+                // its old name: the directory never came back to it, so its
+                // rename never went up and nothing saved in it afterwards
+                // did either (soak run 1509: one file moved into a new folder
+                // and the folder renamed, both before the next scan).
                 if let Some(stands_at) = record_identity.get(id).and_then(|rid| where_id_stands.get(rid)) {
+                    if **stands_at != **candidate
+                        && **stands_at != *old_path
+                        && candidates.contains(stands_at)
+                        && !taken.contains(*stands_at)
+                        && matched_at(stands_at) > 0
+                        && (!whole_only || moved_wholesale(old_path, stands_at))
+                    {
+                        continue;
+                    }
                     if **stands_at != **candidate && **stands_at != *old_path {
                         scan.present.insert(*id);
                         scan.held.insert((*stands_at).clone());
