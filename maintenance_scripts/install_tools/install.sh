@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.90 - --copy-of-key=BASE64 (specs/site_copy.md WP4): a dormant copy records its source's agent public
+#               key beside copy_of, the one key copy_import trusts an export from. Required with --copy-of
 #VERSION 2.89 - The dormant step holds the host runner lock while it writes and asserts the state
 #VERSION 2.88 - site takes --dormant --copy-of=NODE_ID (specs/site_copy.md WP5): a bare-metal install
 #               that makes no certificate attempt and ends quiet (`quiet copy`, _site_state.sh), the
@@ -3392,6 +3394,7 @@ do_site_create() {
     local ADMIN_EMAIL=""
     local DORMANT=false
     local COPY_OF=""
+    local COPY_OF_KEY=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -3459,6 +3462,14 @@ do_site_create() {
                 ;;
             --copy-of)
                 COPY_OF="$2"
+                shift 2
+                ;;
+            --copy-of-key=*)
+                COPY_OF_KEY="${1#*=}"
+                shift
+                ;;
+            --copy-of-key)
+                COPY_OF_KEY="$2"
                 shift 2
                 ;;
             --management-node=*)
@@ -3554,6 +3565,8 @@ do_site_create() {
                 echo "                         machine, no certificate attempt, and quiet when done"
                 echo "                         (no visitors, nothing sent, no cron, no installers)"
                 echo "                         until it takes over node ID's identity"
+                echo "  --copy-of-key=BASE64   With --copy-of: the source's agent public key, the one"
+                echo "                         key this copy takes the source's export from"
                 echo "  --memory=SIZE          Memory budget for the container (512m, 2g)."
                 echo "                         Unlimited by default. Set it on any host running"
                 echo "                         more than one site: PostgreSQL sizes its memory"
@@ -3637,9 +3650,15 @@ do_site_create() {
     # act before then. It says whose copy it is, it is bare metal and alone on
     # the machine (the quiet state quiets the machine), and it makes no
     # certificate attempt: the source's certificate travels with the copy.
-    if [ "$DORMANT" = true ] || [ -n "$COPY_OF" ]; then
+    if [ "$DORMANT" = true ] || [ -n "$COPY_OF" ] || [ -n "$COPY_OF_KEY" ]; then
         if [ "$DORMANT" != true ] || ! [[ "$COPY_OF" =~ ^[1-9][0-9]{0,17}$ ]]; then
             print_error "--dormant and --copy-of=NODE_ID go together, and NODE_ID is the source's node number"
+            exit 1
+        fi
+        # The source's agent public key: 32 bytes, base64. The copy trusts an
+        # export signed by this key and no other (copy_import).
+        if ! [[ "$COPY_OF_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+            print_error "--copy-of-key=BASE64 is the source's agent public key, as the management node prints it"
             exit 1
         fi
         if [ -n "$CLONE_FROM" ] || [ "$WITH_TEST_SITE" = true ] || [ "$FORCE_MODE" = "docker" ] || [ -n "$PORT" ]; then
@@ -3805,6 +3824,7 @@ do_site_create() {
             exit 1
         fi
         export JOINERY_DORMANT_COPY_OF="$COPY_OF"
+        export JOINERY_DORMANT_COPY_OF_KEY="$COPY_OF_KEY"
     fi
 
     print_header "Creating Joinery Site: $SITENAME"
@@ -5015,7 +5035,7 @@ do_site_baremetal() {
              && hold_host_runner_lock "$SITENAME" "/var/www/html/$SITENAME" "The site is not dormant yet." \
              && . "${SCRIPT_DIR}/_site_state.sh" \
              && site_state_init "$SITENAME" \
-             && site_state_write copy "$JOINERY_DORMANT_COPY_OF" \
+             && site_state_write copy "$JOINERY_DORMANT_COPY_OF" "${JOINERY_DORMANT_COPY_OF_KEY:-}" \
              && site_state_assert copy ); then
             print_success "Dormant: quiet copy of node ${JOINERY_DORMANT_COPY_OF}"
         else
