@@ -89,9 +89,9 @@
   `export` scope, with its two settings rows), `CopyStaging` 1.0 with `utils/copy_stage.php`, and on M
   `build_copy_export`, `build_copy_import`, `build_copy_stage`, `process_copy_export` with
   `bundle_of()`, `ManagedNode::backup_node_of()` with the column `mgn_copy_of_node_id`, and claim
-  budgets (export 4500 s, stage 8700 s). **Not yet applied:** `install.sh` 2.90 (`--copy-of-key`) and
-  `_site_state.sh` 1.3 (records `copy_of_key`; clearing removes it and `copy_import_issued`), held
-  until the owner stops dev's converger timer. Choices made while building:
+  budgets (export 4500 s, stage 8700 s), with `install.sh` 2.90 (`--copy-of-key`) and
+  `_site_state.sh` 1.3 (records `copy_of_key`; clearing removes it and `copy_import_issued`).
+  Released in 0.8.452. Choices made while building:
   - **The seal** (`copy_seal.go`): ephemeral X25519, HKDF-SHA256 bound to both public keys,
     AES-256-GCM, to T's Ed25519 key converted to X25519 (the public half by u = (1+y)/(1−y), the
     private half by the scalar Ed25519 derives from its seed). `curve25519.X25519` refuses a

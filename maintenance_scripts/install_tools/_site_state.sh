@@ -3,6 +3,8 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.3 - a copy records its source's agent key (copy_of_key) beside copy_of; clearing removes it
+#               and copy_import's high-water mark with the vouched record (site_copy.md WP4)
 # Version: 1.2 - clearing removes a copy's vouched record with its copy_of (site_copy.md WP2)
 # Version: 1.1 - review: the boot unit orders after nftables.service and firewalld.service (a stock
 #               nftables.conf flushes the ruleset); a copy_of record always means a copy
@@ -103,14 +105,18 @@ site_state_read() {
     esac
 }
 
-# site_state_write REASON [COPY_OF] - the file itself, nothing else.
+# site_state_write REASON [COPY_OF [COPY_OF_KEY]] - the file itself, and a
+# copy's record of whose copy it is and the key its source signs with.
 site_state_write() {
-    local reason="$1" copy_of="${2:-}"
+    local reason="$1" copy_of="${2:-}" copy_of_key="${3:-}"
     mkdir -p "${SS_DIR}" && chmod 700 "${SS_SITES_DIR}" "${SS_DIR}" 2>/dev/null
     printf 'quiet %s\n' "${reason}" > "${SS_STATE}.tmp" && chmod 644 "${SS_STATE}.tmp" \
         && mv -f "${SS_STATE}.tmp" "${SS_STATE}" || return 1
     if [[ -n "${copy_of}" ]]; then
         printf '%s\n' "${copy_of}" > "${SS_DIR}/copy_of" && chmod 644 "${SS_DIR}/copy_of"
+    fi
+    if [[ -n "${copy_of_key}" ]]; then
+        printf '%s\n' "${copy_of_key}" > "${SS_DIR}/copy_of_key" && chmod 644 "${SS_DIR}/copy_of_key"
     fi
 }
 
@@ -428,7 +434,8 @@ site_state_clear() {
 
     if [[ "${rc}" == "0" ]]; then
         rm -rf "${SS_HELD}"
-        rm -f "${SS_LOOK_FILE}" "${SS_DIR}/copy_of" "${SS_DIR}/vouched"
+        rm -f "${SS_LOOK_FILE}" "${SS_DIR}/copy_of" "${SS_DIR}/copy_of_key" "${SS_DIR}/vouched" \
+              "${SS_DIR}/copy_import_issued"
         rmdir "${SS_DIR}" 2>/dev/null
     fi
     return "${rc}"

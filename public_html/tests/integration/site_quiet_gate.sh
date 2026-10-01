@@ -149,23 +149,27 @@ touch "$ST/on.certbot.timer"
 echo "=== quiet copy: set by the installer, never by on, never cleared by a bare off ==="
 . "$TOOLS/_site_state.sh"
 site_state_init qsite
-site_state_write copy 417
+QKEY="$(printf 'k%.0s' $(seq 32) | base64)"
+site_state_write copy 417 "$QKEY"
 site_state_assert copy >/dev/null 2>&1
 out="$(bash "$Q" on 2>&1)"; rc=$?
 chk "on over a copy: refused" "$rc:$(cat "$SD/state")" "2:quiet copy"
 out="$(bash "$Q" off 2>&1)"; rc=$?
 chk "off over a copy: refused" "$rc:$(cat "$SD/state")" "2:quiet copy"
 chk "the copy remembers its source's node id" "$(cat "$SD/copy_of")" "417"
+chk "and its source's agent key (WP4)" "$(cat "$SD/copy_of_key")" "$QKEY"
 secret="$(cat "$SD/look_secret")"
 chk "a copy has a look secret, 32 hex, 0600" "$([[ "$secret" =~ ^[0-9a-f]{32}$ ]] && echo ok):$(stat -c %a "$SD/look_secret")" "ok:600"
 CONF="$R/etc/apache2/conf-available/joinery-quiet-qsite.conf"
 chk "the look path sets the cookie" "$(grep -c "<Location \"/.joinery-look/${secret}\">" "$CONF"):$(grep -c "Set-Cookie \"joinery_look=${secret};" "$CONF")" "1:1"
 chk "without the cookie, 503" "$(grep -c "HTTP_COOKIE} =~ /(?:^|;\\\\s\*)joinery_look=${secret}(?:;|\\$)/" "$CONF"):$(grep -c 'Redirect 503' "$CONF")" "1:1"
 chk "on --copy-promoted is refused" "$(bash "$Q" on --copy-promoted >/dev/null 2>&1; echo $?)" "2"
-# The runs its source vouched for (WP2) go with the copy's other records.
+# The runs its source vouched for (WP2), and the last export it took (WP4), go
+# with the copy's other records: a promoted copy trusts its source's key no more.
 printf '%s chain-20260927_120000\n' "$(printf '0%.0s' $(seq 64))" > "$SD/vouched"; chmod 600 "$SD/vouched"
+echo "2026-10-01T00:00:00Z" > "$SD/copy_import_issued"; chmod 600 "$SD/copy_import_issued"
 out="$(bash "$Q" off --copy-promoted 2>&1)"; rc=$?
-chk "off --copy-promoted clears a copy, its vouched runs included" "$rc:$([ -e "$SD" ] && echo left || echo gone)" "0:gone"
+chk "off --copy-promoted clears a copy, its vouched runs, source key and last import included" "$rc:$([ -e "$SD" ] && echo left || echo gone)" "0:gone"
 
 echo "=== A state file that says anything else is quiet, the strict way ==="
 site_state_write switchover; echo "garbage" > "$SD/state"
