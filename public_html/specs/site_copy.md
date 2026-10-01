@@ -115,6 +115,33 @@
     SHA-256, with the chain, its newest upload time, the certificate names and the DKIM key count.
   - **HTTPS on T:** the vhost template picks `/etc/letsencrypt/live/<domain>/` over the placeholder
     when Apache parses its config, and clearing the quiet state reloads Apache. Nothing re-renders.
+- **First live run (L0-copy, started 2026-10-01): the copy steps by hand, before WP7a and WP8.** The
+  owner chose to prove WP2–WP5 on real machines before building on them. No switch-over: S, then
+  a dormant T, then export, import, stage, restore and the census, then a private look at T.
+  - S: node 75176 `copytest`, `copytest.jeremytunnell.info` (Linode DNS, account getjoinery),
+    66.228.35.148, Ubuntu 26.04.1, 1 GB, release 0.8.452, agent 1.49.0, backups to B2
+    `joinery-test-bucket`. Seeded: three stored messages, a sealed OAuth secret, an IMAP account
+    with a sealed password, a custom theme `copytest-custom`, a DKIM key. No offloaded file
+    (owner: skip cloud storage this run).
+  - Jobs are queued from dev by a scratch helper through `JobCommandBuilder` and
+    `ManagementJob::createFromBuild`, and the copy row is linked by hand, since WP8 does both.
+  - **B29 — A fresh install has no sealed-secret canary and an empty registry.** OBSERVED on S.
+    `_site_init.sh` never runs `update_database`, the one place that seeds the registry and mints
+    the canary, so until the first upgrade a site cannot tell a wrong key from a corrupt value, and
+    the census's canary check reads `absent` on both sides. Worked around on S by running
+    `update_database`. Fix: the install seeds the registry and mints the canary.
+  - **B30 — The install's last check follows a redirect to the bare IP.** OBSERVED on S: it reported
+    `http://66.228.35.148/login` (302) before the certificate existed; the domain redirects
+    correctly. Cosmetic, but the warning reads like a fault.
+  - **B32 — A new site's admin cannot sign in.** OBSERVED on S (ERR_TOO_MANY_REDIRECTS at
+    `/terms-accept`), TRACED: since every signed-in page runs the navigation gates (a5d22d7e,
+    2026-09-24), the terms gate sent an admin who owes a password change off
+    `/change-password-required` and the password gate sent them back; the wizard gate did the same
+    to `/terms-accept`. Fixed in `SessionControl` 1.8: the first gate owed holds its own page and
+    ends the check (`navigation_gate_target()`, tested in `setup_wizard_gates`). Every fresh install
+    since 2026-09-24 is affected until it takes the release with the fix.
+  - **B31 — Postfix on 26.04:** `postfix/postlog: not owned by root: /var/spool/postfix/etc/resolv.conf`,
+    and `/etc/aliases` has no root alias. OBSERVED on S; not yet traced.
 - Decided:
   - D1: a faithful copy, with switching over and deleting kept separate; the old Clone is retired.
   - D2: the backup chain carries the copy.
