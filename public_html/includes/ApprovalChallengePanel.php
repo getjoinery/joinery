@@ -22,6 +22,8 @@
  * records. Nothing on this screen came from the management node, which is the
  * party being checked.
  *
+ * @version 1.1 - an answered request shows that it was answered, not the form again: the page
+ *                reloaded before the agent took the answer, and the owner approved a second time
  * @version 1.0 - one panel for every scope; restore and decommission were two copies
  */
 
@@ -56,6 +58,19 @@ class ApprovalChallengePanel {
 			return false;
 		}
 		$id = $s['id_prefix'];
+
+		// Answered, and the agent has not taken it yet: say so instead of
+		// asking again. The page reloads until the request is gone.
+		if ($pending['answered'] !== null) {
+			echo '<div class="alert alert-info mb-3">';
+			echo '<strong>' . htmlspecialchars($s['headline']) . '</strong> ';
+			echo htmlspecialchars($pending['answered'] === 'declined'
+				? 'You declined this. This machine\'s agent is picking up the answer and will report the job refused.'
+				: 'You approved this. This machine\'s agent is picking up the answer and carries on in a few seconds.');
+			echo '</div>';
+			echo '<script>setTimeout(function () { window.location.reload(); }, 4000);</script>';
+			return true;
+		}
 
 		echo '<div class="alert alert-danger mb-3">';
 		echo '<strong>' . htmlspecialchars($s['headline']) . '</strong> ';

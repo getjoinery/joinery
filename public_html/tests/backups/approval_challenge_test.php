@@ -171,6 +171,16 @@ foreach (array_keys(ApprovalChallenge::SCOPES) as $scope) {
 	check(($posted['answer'] ?? '') === $recovered,
 		'and carries what the browser recovered, unaltered — this side cannot check it, and does not try');
 
+	// Found on the site copy's first live run (2026-10-01): the page reloads
+	// before the agent takes the answer, and it showed the same request again,
+	// so the owner approved twice.
+	$p = ApprovalChallenge::pending($scope);
+	check(($p['answered'] ?? null) === 'approved', 'until the agent takes it, the request reads as approved');
+	check(ac_refused(function () use ($scope, $recovered) { ApprovalChallenge::answer($scope, 4242, $recovered); }),
+		'a second answer to it is refused');
+	check(ac_refused(function () use ($scope) { ApprovalChallenge::decline($scope, 4242); }),
+		'and so is a decline after the approval');
+
 	// ── Declining ───────────────────────────────────────────────────────────
 	section("[$scope] Declining is a first-class answer");
 
@@ -181,6 +191,8 @@ foreach (array_keys(ApprovalChallenge::SCOPES) as $scope) {
 		'a decline is recorded against the job, so the agent reports it refused rather than timed out');
 	check(ac_refused(function () use ($scope) { ApprovalChallenge::decline($scope, 1); }),
 		'and cannot be aimed at a job that is not waiting');
+	$p = ApprovalChallenge::pending($scope);
+	check(($p['answered'] ?? null) === 'declined', 'until the agent takes it, the request reads as declined');
 
 	ac_clear_all();
 }
@@ -288,6 +300,12 @@ foreach (ApprovalChallenge::SCOPES as $name => $s) {
 	check(strpos($html, '"keyInputId":"' . $s['id_prefix'] . '-privkey"') !== false,
 		'the ceremony bridge names this panel\'s own key box');
 	check(strpos($html, htmlspecialchars($s['approve_button'])) !== false, 'the approve button says what it does');
+	ApprovalChallenge::answer($name, 6000, rtrim($s['info'], ':') . ' ' . base64_encode('x'));
+	ob_start();
+	ApprovalChallengePanel::render($page, $name);
+	$html = ob_get_clean();
+	check(strpos($html, 'You approved this.') !== false && strpos($html, $s['approve_action']) === false,
+		'once answered, it says so and offers no second approval');
 	ac_clear_all();
 	ob_start();
 	$rendered = ApprovalChallengePanel::render($page, $name);

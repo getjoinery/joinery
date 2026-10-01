@@ -3,6 +3,10 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.4 - the firewall rule lets the web user and Postfix answer a connection someone else
+#               opened (ct direction reply). It rejected every packet they sent off the machine,
+#               replies included, so no visitor reached a quiet site at all: not its 503, not the
+#               owner's look, not Postfix's deferral (found on the copy's first live run).
 # Version: 1.3 - a copy records its source's agent key (copy_of_key) beside copy_of; clearing removes it
 #               and copy_import's high-water mark with the vouched record (site_copy.md WP4)
 # Version: 1.2 - clearing removes a copy's vouched record with its copy_of (site_copy.md WP2)
@@ -144,13 +148,17 @@ ss_render_nft() {
 # The quiet state of ${SS_SITE} (specs/site_copy.md WP5). Written by _site_state.sh;
 # loaded at boot by ${SS_UNIT_NAME} and every minute by the host converger.
 # The web user and Postfix's client reach nothing but this machine. Root does:
-# the agent, the backup run and a restore still reach storage.
+# the agent, the backup run and a restore still reach storage. Replies to a
+# connection someone else opened pass, so a visitor sees the 503 (or the owner
+# the look) and a sending server sees Postfix's deferral; a connection the web
+# user or Postfix opens itself never does.
 table inet ${SS_NFT_TABLE}
 delete table inet ${SS_NFT_TABLE}
 table inet ${SS_NFT_TABLE} {
     chain output {
         type filter hook output priority 0; policy accept;
         oifname "lo" accept
+        ct direction reply accept
         meta skuid { ${uids} } meta l4proto tcp reject with tcp reset
         meta skuid { ${uids} } reject with icmpx type admin-prohibited
     }

@@ -140,6 +140,61 @@
     to `/terms-accept`. Fixed in `SessionControl` 1.8: the first gate owed holds its own page and
     ends the check (`navigation_gate_target()`, tested in `setup_wizard_gates`). Every fresh install
     since 2026-09-24 is affected until it takes the release with the fix.
+  - **G8 — A site that backs up only to its own bucket cannot be copied.** The copy fetches the chain
+    through links M signs on M's target under S's slug (`backup_node_of`); a site-owned target's
+    credential is on S, never on M. Sites whose backups M runs are covered. The run backs S up from
+    dev, as production does; the site-owned target set on S at first was removed.
+  - **B33 — M learns a newly proven recovery key up to six hours late.** OBSERVED: the join's first
+    `recovery_key_report` ran before the owner set the key, read `unconfigured`, and the six-hour
+    throttle on that report kept every backup of S refused ("no backup recovery key") until the
+    report was asked by hand. A node whose last answer is not `proven` should be asked again
+    without the throttle, or the node's Backups page should say so to M when the proof lands.
+  - S's first backup from dev: full, 70.8 MB (code 68.8 MB, data 1.9 MB, database 140 KB),
+    `chain-20261001_161743` in dev's bucket, 11 s.
+  - **B34 — Any unrecognised argument starts a second agent.** OBSERVED on T: `joinery-agent
+    version` printed "starting joinery-agent v1.49.0" and ran the service in the foreground beside
+    systemd's, under the node's identity (I1: two agents claim one node's jobs). `runCLI` returns
+    "not handled" for anything it does not know, and `main` then starts the service. Every real
+    launch (systemd, the cron keepalive, `build_installer.sh`) passes no argument. Fixed in agent
+    1.49.1: an unrecognised argument prints the usage and exits 2; only no argument starts the
+    service.
+  - T: Linode 107213311 `copytest-t`, 173.255.229.58, us-east, created through dev's operator
+    token with a generated root password; dormant install 6 min, ending in `quiet copy` (firewall,
+    web drop-in, cron and certbot held, Postfix deferring; visitors get 503). Join request 2437,
+    fingerprint `d895a76d1b225869`.
+  - **B35 — An approval had to be given twice.** OBSERVED on S's export: the answer posted at
+    16:43:27, the page reloaded at once and still showed the request with its form, the agent took
+    the answer at 16:43:28, and the owner approved again at 16:43:35 to a request already gone.
+    Fixed for every scope: `ApprovalChallenge` 1.3 (`pending()` reports `answered`; a second
+    answer or a decline after an answer is refused) and `ApprovalChallengePanel` 1.1 (an answered
+    request says so and reloads until the agent has taken it). `approval_challenge` 125/125.
+  - Export (job 49570): owner approved on S in about three minutes; 22 KB bundle, chain
+    `chain-20261001_161743`, 1 certificate lineage, 1 DKIM key, 27 host files, sealed to
+    `d895a76d1b225869`. Import on T (job 49571): signature and seal checked, chain key, vouch and
+    27 host files written.
+  - Stage on T (job 49577): 5 artifacts, 70.8 MB, each checked against the vouched manifest.
+    Restore on T (job 49578): T kept its own config and site key, adopted S's secret key, loaded the
+    database, re-rendered its vhost, no certificate attempt.
+  - **Census, S against T: 3 sealed secrets present on both, 0 dead, canary `ok` on both; every
+    file digest equal; 207 tables, two differing** (`rql_request_logs` 75 vs 50,
+    `vse_visitor_events` 57 vs 50: S logged the owner's visits after its backup). Informational
+    compare: no blocking difference. T serves S's certificate (same SHA-256), holds S's DKIM key
+    (same hash, same owner and mode) and the custom theme.
+  - **B36 — A quiet site answers no one off the machine.** OBSERVED on T, TRACED with nft counters:
+    the quiet rule rejects every packet the web user (33) or Postfix (106) sends off the machine,
+    replies to inbound connections included. Apache's response left as uid 33 and was rejected, so
+    a visitor got no 503, the owner's look could not work, and a sending server got no deferral,
+    only a timeout. WP5 proved the rule from the machine itself, over loopback. Fix,
+    `_site_state.sh` 1.4: `ct direction reply accept` before the rejects. Trialled live on T: no
+    cookie 503, look link 303 with the cookie, login 200 with it, and the web user's own outbound
+    connection still refused. `site_quiet` gate 57/57. Applied on dev; T takes it from S's tree at
+    the next refresh.
+  - **The look (2026-10-01 17:40): passed.** The owner pointed `copytest` at T in Linode DNS, T's
+    converger was paused and the B36 rule put in by hand for the look, and in the owner's own
+    browser: the look link set the cookie, the passkey made on S signed in on T, and the vault made
+    on S opened. T's converger restarted afterwards and the hand rule is gone. A browser that
+    already held a connection to S got S's 404 for the look link until Chrome's sockets were
+    flushed: worth one line wherever the look link is shown.
   - **B31 — Postfix on 26.04:** `postfix/postlog: not owned by root: /var/spool/postfix/etc/resolv.conf`,
     and `/etc/aliases` has no root alias. OBSERVED on S; not yet traced.
 - Decided:
