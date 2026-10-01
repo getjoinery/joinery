@@ -770,7 +770,16 @@ impl Custody {
                     Some(k) => *k,
                     None => {
                         let k = self.file_key(&w.path);
-                        match self.handle_of(di, d, Self::parent_of(&w.path)) {
+                        // The folder it was written into, by the birth read
+                        // at the write: read by its path now, a rotation
+                        // since had given that name to another folder, and
+                        // the file the engine kept where the user put it read
+                        // as misplaced (shown kill2 75111).
+                        let at_write = w.parent_birth.map(|b| {
+                            self.handles.entry((di, b)).or_insert(None);
+                            (di, b)
+                        });
+                        match at_write.or_else(|| self.handle_of(di, d, Self::parent_of(&w.path))) {
                             Some(h) => self.placed[k].push(h),
                             // Its folder is gone before this could read it (a
                             // folder the engine trashed, the rescue net
@@ -1738,6 +1747,38 @@ fn the_sealed_oracle_sees_a_file_the_workload_sealed() {
         why.contains("flags encrypted") && why.contains(&format!("file {sealed_id} ")),
         "the oracle fired for the wrong reason: {why}"
     );
+}
+
+/// Dating knowledge when it was had never excuses the pass that had it:
+/// bytes the walk saw in a vault -- listed there, and the record's own -- and
+/// that reach the server plain later in that same pass are a leak. Both are
+/// dated at the pass's start; with every source dated at its end instead,
+/// the oracle passed exactly the leak it exists to catch. A property, not
+/// one mechanism: either source alone keeps it red.
+#[test]
+fn a_body_the_walk_saw_in_a_vault_and_sent_plain_in_that_pass_fires() {
+    let seed = 2;
+    let world = sweep_world(seed, &[("laptop", Platform::Linux)], 0, false, Vault::FolderRings);
+    let laptop = world.device("laptop");
+    let body = b"a sealed body leaked by the pass whose walk saw it";
+    laptop.fs.user_write(&format!("{VAULT_ROOT}/plan.txt"), body);
+    let server = world.server.clone();
+    let mut once = true;
+    world.server.while_completing_an_upload(move || {
+        if std::mem::take(&mut once) {
+            server.seed_file(None, "leaked.dat", body);
+        }
+    });
+    world.pass(laptop);
+    world.server.while_completing_an_upload(|| {});
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_sealed_content_never_reached_the_clear(&world, seed)
+    }));
+    let why = match verdict {
+        Ok(()) => panic!("the oracle passed plaintext sent in the pass whose walk saw it in a vault"),
+        Err(e) => e.downcast_ref::<String>().cloned().unwrap_or_default(),
+    };
+    assert!(why.contains("leaked.dat"), "{why}");
 }
 
 /// Defect AI's regression pin: two files trading names keep two separate
@@ -5482,6 +5523,161 @@ fn frozen_a_sealed_name_is_held_after_a_restart_on_a_linux_stick_seed() {
         );
     });
     FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// kill2 75123 on a Linux FAT stick: a trade carried a sealed body out of
+/// its vault before any walk saw it, and it went up plain; later in the same
+/// pass an operation listed it in a vault. Knowledge is dated when it was
+/// had: that listing, and bytes found at a record's path after a pass, are
+/// known as of then, not as of the pass's start. Dated early, the send no
+/// engine could have refused read as a leak.
+#[test]
+fn frozen_knowledge_is_dated_when_it_was_had_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    never_fires(&["sealed_never_in_the_clear"], || {
+        workload_core_with(
+            75_123,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// kill2 75125 on a Windows stick: a sealed record's file id, recorded
+/// before the disk was read as positional, names a directory slot, and the
+/// bytes a trade put in that slot were credited as known sealed. The engine
+/// reads no own id on such a volume, and neither does the oracle.
+#[test]
+fn frozen_a_slot_id_proves_nothing_on_a_windows_stick_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    never_fires(&["sealed_never_in_the_clear"], || {
+        workload_core_with(
+            75_125,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// kill2 75111: a file written mid-pass into a directory that a rotation
+/// then renamed is credited to the folder it was written into, by that
+/// directory's birth read at the write -- not to whichever folder wears the
+/// name when the world settles.
+#[test]
+fn frozen_a_write_belongs_to_the_folder_it_was_written_into_seed() {
+    never_fires(&["every_file_in_a_folder_the_user_put_it_in"], || {
+        workload_core_with(
+            75_111,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+}
+
+/// kill2 75112 with the swapper off: a vault this device had parked on the
+/// server under a scratch name stood at the end of a chain of folder names
+/// the round was vacating. Naming read the chain as stopped there and judged
+/// every arrival behind it a duplicate; the park of one whose own directory
+/// stood at its own name sent that directory to the trash and rescued a save
+/// not yet sent out to the root as a new file, in a folder the user never put
+/// it in. A holder under a scratch name leaves its arrivals pending a pass.
+#[test]
+fn frozen_an_arrival_behind_a_scratch_named_holder_waits_seed() {
+    never_fires(&["every_file_in_a_folder_the_user_put_it_in", "converged"], || {
+        workload_core_with(
+            75_112,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::Off,
+        );
+    });
+}
+
+/// hostile2 74401 with births hidden: a folder's record still named the path
+/// another folder's directory stood at, its own move off it agreed later in
+/// the batch, and a download for it landed in the other folder. A download
+/// lands only in its folder's own directory.
+#[test]
+fn frozen_a_download_lands_in_its_folders_own_directory_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(
+            74_401,
+            30,
+            &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// plat3 75422: the server trashed a vault subfolder while a file saved in
+/// it, never sent, had been traded onto a plain file's path. Forgotten with
+/// the folder, its bytes went up as the plain file's version; kept, its
+/// record follows its file, held. The plain file's own file went to the
+/// trash with the folder, and a record whose own file stands nowhere is
+/// deleted, whatever stands at its path -- read as unchanged beside the held
+/// file, it never came down again.
+#[test]
+fn frozen_a_never_sent_file_out_of_a_trashed_folder_follows_its_file_seed() {
+    never_fires(&["sealed_never_in_the_clear", "converged", "no_entity_holds_both_sides_of_a_swap"], || {
+        workload_core_with(
+            75_422,
+            40,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)],
+            true,
+            Vault::FolderRings,
+            false,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+}
+
+/// kill2 75122 with births hidden: a cycle's planner park, retried, ran
+/// again after its move had renamed the file, and landed with its answer
+/// lost. The move, reading the record, finished with the reparent alone, and
+/// the file stood on the server under the engine's scratch name for good. A
+/// retried move asks the server where the file is, and renames out of its
+/// own park under a key of its own.
+#[test]
+fn frozen_a_move_retried_after_a_park_lost_its_answer_still_renames_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(
+            75_122,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
 }
 
 /// kill2 75112 on a macOS FAT32 stick: the trade and a three-ring rotation

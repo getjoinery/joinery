@@ -3610,6 +3610,115 @@ fn a_file_saved_in_a_vault_and_moved_out_before_it_was_sent_is_held() {
     assert_converged(&world);
 }
 
+/// The same, with the plain folder it went into renamed in the same
+/// interval. The scan finds the file by its own identity in the renamed
+/// folder; the record is not forgotten because the folder's record still
+/// has its old name when the pass asks whether the file is gone. RED
+/// without it: the record went, the file was minted afresh where it stood,
+/// plain, and sent in the clear (plat3 75401, hidden kill2 75109).
+#[test]
+fn a_file_moved_out_of_a_vault_into_a_folder_renamed_at_once_is_held() {
+    let (world, _, _) = a_vault_of_two(9_986, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_write("Plain/keep.txt", b"a plain file in the first folder");
+    holder.fs.user_mkdir("Other");
+    holder.fs.user_write("Other/keep.txt", b"a plain file in the second folder");
+    assert!(world.settle().is_some());
+    let body = b"written in the vault, carried out, then into a folder renamed";
+    holder.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    holder.fs.user_write("Private/draft.txt", body);
+    world.pass(holder);
+    holder.net.set_faults(NetFaults::none());
+    holder.fs.user_rename("Private/draft.txt", "Plain/draft.txt");
+    assert!(world.settle().is_some());
+    holder.fs.user_rename("Plain/draft.txt", "Other/draft.txt");
+    holder.fs.user_rename("Other", "Elsewhere");
+    assert!(world.settle().is_some());
+
+    no_plaintext_of(&world, body);
+    assert!(holder.fs.exists("Elsewhere/draft.txt"));
+    let told = held_issues(holder);
+    assert!(
+        told.len() == 1 && told[0].starts_with("draft.txt was saved in a vault and moved out before it was uploaded"),
+        "{told:?}"
+    );
+    assert_converged(&world);
+}
+
+/// A file saved in a vault subfolder and moved out before it was sent,
+/// while a peer trashed that subfolder on the server. The vault itself is
+/// still there: the file is held, not published as the file of a vault the
+/// server has deleted. RED with every encrypted folder the server trashed
+/// read as a deleted vault: its sealing was cleared and it went up plain.
+#[test]
+fn a_file_moved_out_of_a_trashed_vault_subfolder_is_held() {
+    let world = a_vault_of_two(9_985, &["holder", "peer"]).0;
+    let holder = world.device("holder");
+    let peer = world.device("peer");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_write("Plain/keep.txt", b"a plain file in the plain folder");
+    holder.fs.user_mkdir("Private/Sub");
+    holder.fs.user_write("Private/Sub/keep.txt", b"a sealed file in the subfolder");
+    assert!(world.settle().is_some());
+    let body = b"written in the vault subfolder, never sent, moved out";
+    holder.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    holder.fs.user_write("Private/Sub/draft.txt", body);
+    world.pass(holder);
+    holder.net.set_faults(NetFaults::none());
+    peer.fs.user_remove("Private/Sub");
+    world.pass(peer);
+    holder.fs.user_rename("Private/Sub/draft.txt", "Plain/draft.txt");
+    assert!(world.settle().is_some());
+
+    no_plaintext_of(&world, body);
+    assert!(holder.fs.exists("Plain/draft.txt"));
+    assert_converged(&world);
+}
+
+/// A plain file the user moved into a vault subfolder a peer had trashed,
+/// and a sealed file never sent moved onto its name in the same interval.
+/// The subfolder's trash takes the plain file's own file with it; the sealed
+/// file follows its own file and is held where it stands. The plain record's
+/// own file is then nowhere, so it is deleted, whatever stands at its path:
+/// read as unchanged beside the held file, it held its name with no file
+/// behind it, and the server's copy never came down again (plat3 75422).
+#[test]
+fn a_file_whose_own_file_is_gone_is_deleted_though_a_held_file_stands_at_its_path() {
+    let world = a_vault_of_two(9_982, &["holder", "peer"]).0;
+    let holder = world.device("holder");
+    let peer = world.device("peer");
+    holder.fs.user_mkdir("Private/Sub");
+    holder.fs.user_write("Private/Sub/keep.txt", b"a sealed file in the subfolder");
+    holder.fs.user_write("Report.txt", b"the plain report");
+    assert!(world.settle().is_some());
+    let body = b"written in the vault subfolder, never sent, then traded out";
+    holder.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    holder.fs.user_write("Private/Sub/draft.txt", body);
+    world.pass(holder);
+    holder.net.set_faults(NetFaults::none());
+    peer.fs.user_remove("Private/Sub");
+    world.pass(peer);
+    // The trade lands mid-pass: after the scan, as another file's upload
+    // completes, before the subfolder's trash runs.
+    holder.fs.user_write("other.txt", b"a plain file whose upload carries the moment");
+    let fs = holder.fs.clone();
+    let mut once = true;
+    world.server.while_completing_an_upload(move || {
+        if std::mem::take(&mut once) {
+            fs.user_rename("Report.txt", "Private/Sub/Report.txt");
+            fs.user_rename("Private/Sub/draft.txt", "Report.txt");
+        }
+    });
+    world.pass(holder);
+    world.server.while_completing_an_upload(|| {});
+    assert!(world.settle().is_some());
+
+    no_plaintext_of(&world, body);
+    assert_eq!(holder.fs.peek("Report.txt").as_deref(), Some(&body[..]), "the held file stands where the user put it");
+    assert_converged(&world);
+}
+
 /// A file saved in a vault and moved out before it was sent, and a peer then
 /// sends a plain file under the name it stands at. The peer's file takes the
 /// name and the one here is moved aside, still held: it is never uploaded
@@ -15442,4 +15551,377 @@ fn a_parked_vault_emptied_and_renamed_on_a_stick_is_followed_by_its_directory() 
     no_plaintext_of(&world, HELD_BODY);
     assert!(world.server.tree().keys().any(|p| p.starts_with("Private/")), "the vault's server name changed: {:?}", world.server.tree());
     assert_converged(&world);
+}
+
+/// A file edited here while a peer moved it to another folder and edited it
+/// there: the peer's version takes the server's place, and this device's
+/// edit is kept as a conflict copy in the folder the user edited it in --
+/// not beside the peer's version, in a folder the user never put it in
+/// (hostile2 74424, E10).
+#[test]
+fn a_conflict_copy_of_an_edit_stays_in_the_folder_it_was_made_in() {
+    let world = World::new(9_984, &["here", "peer"]);
+    let here = world.device("here");
+    let peer = world.device("peer");
+    let mut committed = Committed::default();
+    here.fs.user_mkdir("Work");
+    here.fs.user_write("Work/notes.txt", b"the first version");
+    assert!(world.settle().is_some());
+    peer.fs.user_rename("Work/notes.txt", "notes.txt");
+    peer.fs.user_write("notes.txt", b"the peer's edit, made at the root");
+    world.pass(peer);
+    here.fs.user_write("Work/notes.txt", b"this device's edit, made in Work");
+    committed.note("notes.txt", b"the peer's edit, made at the root");
+    assert!(world.settle().is_some());
+
+    let tree = world.server.tree();
+    let mine = jd_sim::sha256_hex(b"this device's edit, made in Work");
+    let at: Vec<&String> = tree.iter().filter(|(_, h)| h.as_deref() == Some(mine.as_str())).map(|(p, _)| p).collect();
+    assert!(at.len() == 1 && at[0].starts_with("Work/notes (conflicted copy"), "{tree:?}");
+    assert_eq!(tree.get("notes.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"the peer's edit, made at the root")));
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A folder whose directory already stands where the server has it has
+/// arrived, and a duplicate-name verdict naming read off the records before
+/// the scan -- against a record that has since left that name on this disk --
+/// gives nothing up. Two folders traded names here while this device's own
+/// rename of one of them was half-way (parked on the server under a scratch
+/// name, its finisher still queued) and a peer moved the other onto the
+/// freed name. Naming judged the arrival a duplicate of the lagging record
+/// and parked it; the park found the folder's own directory standing at its
+/// server name and wrote a scratch local name nothing wore, the round's
+/// adoption of that placement ran in the same batch, and the next scan read
+/// the folder as deleted by the user and trashed it on the server (shown
+/// kill2 75112).
+#[test]
+fn a_folder_already_at_its_server_name_is_not_trashed_for_a_name_a_lagging_record_held() {
+    use jd_core::model::{EntityId, Placement};
+    use serde_json::json;
+
+    let world = World::new(75_112, &["mac"]);
+    let mac = world.device("mac");
+    let mut committed = Committed::default();
+
+    let v = world.server.seed_folder(None, "ring-1");
+    let p = world.server.seed_folder(None, "ring-2");
+    world.server.seed_file(Some(v), "v.txt", b"in the first folder");
+    world.server.seed_file(Some(p), "p.txt", b"in the second folder");
+    assert!(world.settle().is_some(), "settle before staging");
+
+    // The user traded the two folders' names on this disk.
+    mac.fs.user_rename("ring-1", "between");
+    mac.fs.user_rename("ring-2", "ring-1");
+    mac.fs.user_rename("between", "ring-2");
+    committed.note("ring-2/v.txt", b"in the first folder");
+    committed.note("ring-1/p.txt", b"in the second folder");
+
+    // This device's rename of the first folder: parked on the server under a
+    // scratch name, the finisher still queued (a kill between the two).
+    let key = "key-of-a-trade-half-way";
+    mac.store
+        .queue_op(
+            "move_remote",
+            EntityId::folder(v),
+            &json!({ "parent": null, "name": "ring-2", "from": { "parent": null, "name": "ring-1" } })
+                .to_string(),
+            key,
+        )
+        .unwrap();
+    let scratch = jd_core::order::swap_name(key);
+    world
+        .server
+        .action("drive_rename", &json!({ "entity_type": "folder", "entity_id": v, "name": scratch }))
+        .expect("the park itself succeeds");
+    let mut e = mac.store.get_entry(EntityId::folder(v)).unwrap().unwrap();
+    e.remote = Placement { parent: None, name: scratch };
+    mac.store.put_entry(&e).unwrap();
+
+    // The second folder moved onto the freed name on the server, by a peer.
+    world
+        .server
+        .action("drive_rename", &json!({ "entity_type": "folder", "entity_id": p, "name": "ring-1" }))
+        .expect("the peer's rename lands");
+
+    assert!(world.settle().is_some(), "did not settle");
+    let trashed: Vec<_> = world.server.folders().into_iter().filter(|f| f.trashed).collect();
+    assert!(
+        trashed.is_empty(),
+        "a folder the user never deleted went to the trash on the server: {trashed:?}"
+    );
+    assert_eq!(world.server.folder_id_at("ring-1"), Some(p), "{:?}", world.server.tree());
+    assert_eq!(world.server.folder_id_at("ring-2"), Some(v), "{:?}", world.server.tree());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+const A_NEW_FILE_ON_THE_STICK: &[u8] = b"a new file on the stick, never sent yet";
+
+/// A Windows FAT stick, where nothing tells two files apart but their bytes.
+/// Two files share their bytes; a file not yet sent trades names with one of
+/// them, and a mid-pass trade carries the copy's bytes on before its move goes
+/// up. The copy's record stays at a name whose file is the new one, at home by
+/// the bytes it was last seen with. Naming parks the copy; the park asked only
+/// the claimant's agreed bytes, which a file never sent has none of, stood down
+/// every pass, and the new file's upload was refused under the copy's claim:
+/// never settled (win kill2 75102). RED without the last-seen bytes in the
+/// park's ownership check.
+#[test]
+fn a_new_file_traded_onto_a_shared_copys_name_on_a_windows_stick_settles() {
+    let world = World::new(9_989, &["stick", "desk"]);
+    let desk = world.device("desk");
+    desk.fs.user_write("orig.txt", b"the same bytes in two files");
+    desk.fs.user_write("copy.txt", b"the same bytes in two files");
+    desk.fs.user_write("other.txt", b"a third file");
+    assert!(world.settle().is_some());
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    assert!(world.settle().is_some());
+    stick.fs.user_write("new.txt", A_NEW_FILE_ON_THE_STICK);
+    stick.fs.fail_next(FsOp::OpenRead, Some("new.txt"), FailureKind::Io, 1);
+    world.pass(stick);
+    assert!(
+        stick.store.every_entry().unwrap().iter().any(|e| e.id.is_provisional()),
+        "the shape needs the new file still unsent"
+    );
+    world.swap_names_by_chaos("stick", "copy.txt", "new.txt");
+    // A folder arriving from the desk is created mid-pass, after the scan and
+    // before the copy's move goes up: the moment the trade lands.
+    desk.fs.user_mkdir("D");
+    world.pass(desk);
+    let disk = stick.fs.clone();
+    let mut done = false;
+    stick.fs.while_creating_a_dir(move |_| {
+        if done {
+            return;
+        }
+        done = true;
+        disk.user_rename("new.txt", ".t");
+        disk.user_rename("other.txt", "new.txt");
+        disk.user_rename(".t", "other.txt");
+    });
+    world.pass(stick);
+    assert!(world.settle().is_some(), "the device must go quiet");
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(A_NEW_FILE_ON_THE_STICK)).is_some(),
+        "the new file never reached the server: {:?}",
+        world.server.tree()
+    );
+    assert_converged(&world);
+}
+
+/// A Windows FAT stick with the vault parked: a sealed file dragged out of it
+/// is held (D1), and then carried back into a folder the user made in the
+/// vault. Every vault on the stick is parked, so the record follows its file
+/// there and the server is asked nothing. Sent as a move, it waited for the
+/// new folder to reach the server, which a parked vault never sends, and
+/// retried for ever (win kill2 75102). RED without the follow.
+#[test]
+fn a_held_file_carried_into_a_new_folder_of_a_parked_vault_follows_it() {
+    let (world, _, out) = a_vault_of_two(9_995, &["stick", "desk"]);
+    let desk = world.device("desk");
+    desk.fs.user_mkdir("Plain");
+    desk.fs.user_write("Plain/p.txt", b"a plain file in a plain folder");
+    assert!(world.settle().is_some());
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    assert!(world.settle().is_some(), "the vault is parked on the stick");
+    stick.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some(), "held outside its vault");
+    stick.fs.user_mkdir("Private/Sub");
+    stick.fs.user_rename("Plain/out.txt", "Private/Sub/out.txt");
+    assert!(world.settle().is_some(), "the device must go quiet");
+    no_plaintext_of(&world, HELD_BODY);
+    assert!(server_folder_of(&world, out).is_some(), "the sealed file left the server");
+    assert_converged(&world);
+}
+
+const FIRST_SAVED_IN_THE_PARKED_VAULT: &[u8] = b"the first file saved in the parked vault";
+const SECOND_SAVED_IN_THE_PARKED_VAULT: &[u8] = b"the second file saved in the parked vault";
+
+/// A Windows FAT stick with the vault parked, and two plain files with the
+/// same bytes. One trades names with a file saved in the vault: its record's
+/// bytes now stand in the vault, held by a claimant that keeps the server's
+/// plain copy until the file can go up sealed. Then the copy trades into the
+/// vault too. The copy's record followed its bytes to the nearest file
+/// holding them -- the claimant's own, at home -- so the claimant read as
+/// deleted and was forgotten with its conversion, and the first plain
+/// record, its path holding a held sealed file, stood unchanged with no file
+/// for ever: the server's copy never came down and was never let go (win
+/// hostile2 74407). RED without the claimant's at-home file kept out of
+/// another record's follow.
+#[test]
+fn a_copys_bytes_traded_into_a_parked_vault_leave_the_claimant_its_file() {
+    let (world, _, _) = a_vault_of_two(9_994, &["stick", "desk"]);
+    let desk = world.device("desk");
+    desk.fs.user_write("a.txt", b"the same plain bytes twice");
+    desk.fs.user_write("Copy of a.txt", b"the same plain bytes twice");
+    assert!(world.settle().is_some());
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    assert!(world.settle().is_some(), "the vault is parked on the stick");
+    stick.fs.user_write("Private/s.txt", FIRST_SAVED_IN_THE_PARKED_VAULT);
+    stick.fs.user_write("Private/z.txt", SECOND_SAVED_IN_THE_PARKED_VAULT);
+    assert!(world.settle().is_some());
+    world.swap_names_by_chaos("stick", "a.txt", "Private/s.txt");
+    assert!(world.settle().is_some());
+    assert!(
+        stick.store.every_entry().unwrap().iter().any(|e| e.id.is_provisional() && e.replaces.is_some()),
+        "the shape needs a claimant holding the first file's conversion"
+    );
+    world.swap_names_by_chaos("stick", "Copy of a.txt", "Private/z.txt");
+    assert!(world.settle().is_some(), "the device must go quiet");
+    no_plaintext_of(&world, FIRST_SAVED_IN_THE_PARKED_VAULT);
+    no_plaintext_of(&world, SECOND_SAVED_IN_THE_PARKED_VAULT);
+    no_plaintext_of(&world, HELD_BODY);
+    assert_converged(&world);
+}
+
+/// The folders a world's server holds live, and whether any was trashed.
+fn live_and_trashed_folders(world: &World) -> (usize, Vec<String>) {
+    let all = world.server.folders();
+    let live = all.iter().filter(|f| !f.trashed).count();
+    let trashed = all.iter().filter(|f| f.trashed).map(|f| f.name.clone()).collect();
+    (live, trashed)
+}
+
+/// An open chain of folder renames: B renamed to a new name C, then A
+/// renamed onto the B it left. A's old path is left empty, so A is missing,
+/// and a chain walked only from a folder standing in somebody else's way
+/// started at B's path and ended one link long. A was read as deleted and its
+/// directory, standing at B, was minted as a new folder (plat3 75415, E8).
+/// Each folder keeps its identity: A is at B, B is at C, nothing trashed or
+/// minted on the server.
+#[test]
+fn an_open_chain_of_folder_renames_from_an_emptied_path_keeps_each_folder() {
+    let world = World::of(9_311, &[("box", jd_sim::Platform::Linux), ("pc", jd_sim::Platform::Windows)]);
+    let box_dev = world.device("box");
+    let mut committed = Committed::default();
+    let in_a: &[u8] = b"lives in the folder first called A";
+    let in_b: &[u8] = b"lives in the folder first called B";
+    let fa = world.server.seed_folder(None, "A");
+    world.server.seed_file(Some(fa), "a.txt", in_a);
+    let fb = world.server.seed_folder(None, "B");
+    world.server.seed_file(Some(fb), "b.txt", in_b);
+    assert!(world.settle().is_some(), "the premise");
+    box_dev.fs.user_rename("B", "C");
+    box_dev.fs.user_rename("A", "B");
+    committed.note("B/a.txt", in_a);
+    committed.note("C/b.txt", in_b);
+
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(world.server.folder_id_at("B"), Some(fa), "{:?}", world.server.tree());
+    assert_eq!(world.server.folder_id_at("C"), Some(fb), "{:?}", world.server.tree());
+    assert_eq!(live_and_trashed_folders(&world), (2, vec![]), "{:?}", world.server.folders());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The same open chain, on a device that has not yet heard a peer trade the
+/// two folders' names on the server. The server's trade wins the race for
+/// the folder whose rename lost; neither folder is trashed or minted again,
+/// and the device settles. Before, the chain's missing head was never walked:
+/// A read as deleted, its directory minted as a new folder that carried its
+/// id, and two refusals -- a create onto B's directory and B's move onto a
+/// directory not its own -- were retried for ever (plat3 75415, E8).
+#[test]
+fn an_open_chain_of_folder_renames_against_a_peers_trade_settles() {
+    let world = World::of(9_312, &[("box", jd_sim::Platform::Linux), ("pc", jd_sim::Platform::Windows)]);
+    let box_dev = world.device("box");
+    let pc = world.device("pc");
+    let mut committed = Committed::default();
+    let in_a: &[u8] = b"lives in the folder first called A";
+    let in_b: &[u8] = b"lives in the folder first called B";
+    let fa = world.server.seed_folder(None, "A");
+    world.server.seed_file(Some(fa), "a.txt", in_a);
+    let fb = world.server.seed_folder(None, "B");
+    world.server.seed_file(Some(fb), "b.txt", in_b);
+    assert!(world.settle().is_some(), "the premise");
+    pc.fs.user_rename("A", "tmp-swap");
+    pc.fs.user_rename("B", "A");
+    pc.fs.user_rename("tmp-swap", "B");
+    for _ in 0..3 {
+        world.pass(pc);
+    }
+    box_dev.fs.user_rename("B", "C");
+    box_dev.fs.user_rename("A", "B");
+    committed.note("B/a.txt", in_a);
+    committed.note("A/b.txt", in_b);
+
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(world.server.folder_id_at("B"), Some(fa), "{:?}", world.server.tree());
+    assert_eq!(world.server.folder_id_at("A"), Some(fb), "{:?}", world.server.tree());
+    assert_eq!(live_and_trashed_folders(&world), (2, vec![]), "{:?}", world.server.folders());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The same race with the renamed folder's only file moved out of it first,
+/// so its directory standing at the new name holds nothing that says whose
+/// it is, and the chain cannot be closed there. A's directory standing at
+/// B's path still says, by its own id, that the path is A's: B's record no
+/// longer counts as present there. Before, B was read as present at its old
+/// path by name while the path map and the executor both read it as A's,
+/// and the device's moves were refused for ever (plat3 75415 with the swap
+/// verb on, E8). A keeps its identity, and nothing is trashed on the server.
+#[test]
+fn a_path_holding_another_folders_directory_is_not_its_old_holders() {
+    let world = World::of(9_313, &[("box", jd_sim::Platform::Linux), ("pc", jd_sim::Platform::Windows)]);
+    let box_dev = world.device("box");
+    let pc = world.device("pc");
+    let mut committed = Committed::default();
+    let in_a: &[u8] = b"lives in the folder first called A";
+    let in_b: &[u8] = b"lives in the folder first called B";
+    let fa = world.server.seed_folder(None, "A");
+    world.server.seed_file(Some(fa), "a.txt", in_a);
+    let fb = world.server.seed_folder(None, "B");
+    world.server.seed_file(Some(fb), "b.txt", in_b);
+    assert!(world.settle().is_some(), "the premise");
+    pc.fs.user_rename("A", "tmp-swap");
+    pc.fs.user_rename("B", "A");
+    pc.fs.user_rename("tmp-swap", "B");
+    for _ in 0..3 {
+        world.pass(pc);
+    }
+    box_dev.fs.user_rename("B/b.txt", "b.txt");
+    box_dev.fs.user_rename("B", "C");
+    box_dev.fs.user_rename("A", "B");
+    committed.note("B/a.txt", in_a);
+    committed.note("b.txt", in_b);
+
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(world.server.folder_id_at("B"), Some(fa), "{:?}", world.server.tree());
+    let (_, trashed) = live_and_trashed_folders(&world);
+    assert!(trashed.is_empty(), "a folder the user never deleted was trashed: {:?}", world.server.folders());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The same open chain with the folder at its head empty: nothing in it can
+/// say where it went, so only the chain can -- its own directory standing at
+/// the path the next folder left, that folder's own directory and files at
+/// the new name. Walked only from folders standing in another's way, the
+/// empty folder was read as deleted by the user and trashed on the server,
+/// and its directory minted as a new folder (plat3 75415, E8).
+#[test]
+fn an_empty_folder_at_the_head_of_an_open_chain_keeps_its_identity() {
+    let world = World::of(9_314, &[("box", jd_sim::Platform::Linux), ("pc", jd_sim::Platform::Windows)]);
+    let box_dev = world.device("box");
+    let mut committed = Committed::default();
+    let in_b: &[u8] = b"lives in the folder first called B";
+    let fa = world.server.seed_folder(None, "A");
+    let fb = world.server.seed_folder(None, "B");
+    world.server.seed_file(Some(fb), "b.txt", in_b);
+    assert!(world.settle().is_some(), "the premise");
+    box_dev.fs.user_rename("B", "C");
+    box_dev.fs.user_rename("A", "B");
+    committed.note("C/b.txt", in_b);
+
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(world.server.folder_id_at("B"), Some(fa), "{:?}", world.server.folders());
+    assert_eq!(world.server.folder_id_at("C"), Some(fb), "{:?}", world.server.folders());
+    assert_eq!(live_and_trashed_folders(&world), (2, vec![]), "{:?}", world.server.folders());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
 }

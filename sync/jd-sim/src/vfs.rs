@@ -107,6 +107,16 @@ pub enum FileIds {
     MountSession,
 }
 
+/// The server's latest change id, read when a listing is made.
+#[derive(Clone)]
+pub struct ChangeClock(pub std::sync::Arc<dyn Fn() -> i64 + Send + Sync>);
+
+impl std::fmt::Debug for ChangeClock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ChangeClock")
+    }
+}
+
 #[derive(Debug)]
 struct MemFsState {
     /// Relative path (`/`-joined, `""` is the root) → node. A `BTreeMap` so
@@ -205,8 +215,11 @@ struct MemFsState {
     sealed_names_known: BTreeSet<String>,
     /// Bodies and leaf names the engine's own directory listings have shown
     /// it under a sealed directory since the harness last took them: what a
-    /// scan saw in a vault, at the moment it looked.
-    listed_in_a_vault: Vec<(String, String)>,
+    /// scan saw in a vault, at the moment it looked, with the server's change
+    /// id at that moment when a clock is set.
+    listed_in_a_vault: Vec<(String, String, Option<i64>)>,
+    /// The server's change id now, for stamping a listing when it is made.
+    change_clock: Option<ChangeClock>,
     /// Every directory answers 0 for its identity. See
     /// [`MemFs::directory_ids_unreadable`].
     directory_ids_unreadable: bool,
@@ -224,6 +237,10 @@ pub struct UserWrite {
     /// there already chooses no name: the name was given when that file was
     /// made, by the user or by the engine.
     pub created: bool,
+    /// The birth of the directory the file was written into, read when it
+    /// was written: the folder the user put it in, whatever that directory
+    /// is called by the time anyone asks.
+    pub parent_birth: Option<u64>,
 }
 
 /// The virtual disk. Cloning shares it — that is what makes "restart the
@@ -297,6 +314,7 @@ impl MemFs {
                 sealed_known: BTreeMap::new(),
                 sealed_names_known: BTreeSet::new(),
                 listed_in_a_vault: Vec::new(),
+                change_clock: None,
                 directory_ids_unreadable: false,
             })),
             personality,
@@ -533,11 +551,13 @@ impl MemFs {
         Self::watch_loss(&st, &key, "the user saving over it");
         st.touched.insert(key.clone());
         let in_sealed_dir = Self::under_a_sealed_dir(&st, &key);
+        let parent_birth = st.births.get(key.rsplit_once('/').map(|(d, _)| d).unwrap_or("")).copied();
         st.user_writes.push(UserWrite {
             path: key.clone(),
             sha256: crate::sha256_hex(bytes),
             in_sealed_dir,
             created,
+            parent_birth,
         });
         st.nodes.insert(
             key,
@@ -588,7 +608,15 @@ impl MemFs {
     /// pass instead, a file carried out of the vault after that read and
     /// before the walk was counted as seen there when no engine ever saw it
     /// (FAT plat3 75428, a trade landing mid-pass).
-    pub fn take_listed_in_a_vault(&self) -> Vec<(String, String)> {
+    /// Stamp every listing in a vault with the server's change id at the
+    /// moment it is made (a5's Q1, read per listing): a listing an operation
+    /// makes late in a pass, after the pass's own uploads, is not known as of
+    /// the pass's start.
+    pub fn set_change_clock(&self, clock: ChangeClock) {
+        self.state.lock().unwrap().change_clock = Some(clock);
+    }
+
+    pub fn take_listed_in_a_vault(&self) -> Vec<(String, String, Option<i64>)> {
         std::mem::take(&mut self.state.lock().unwrap().listed_in_a_vault)
     }
 
@@ -1276,8 +1304,10 @@ impl MemFs {
                 }
             }
         }
+        let clock = st.change_clock.clone();
         drop(st);
-        self.state.lock().unwrap().listed_in_a_vault.extend(sealed_here);
+        let stamp = clock.map(|c| (c.0)());
+        self.state.lock().unwrap().listed_in_a_vault.extend(sealed_here.into_iter().map(|(h, n)| (h, n, stamp)));
         Ok(out)
     }
 }

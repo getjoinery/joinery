@@ -48,10 +48,10 @@ pub enum Action {
     TrashLocal,
     /// Trash the entry on the server.
     TrashRemote,
-    /// Preserve the losing local content beside the canonical file under this
-    /// name, then upload it as a new entry. The remote head keeps the path the
-    /// user knows.
-    PreserveLocalAs { name: String },
+    /// Preserve the losing local content under this name in `parent`, the
+    /// folder the local version stands in, then upload it as a new entry. The
+    /// remote head keeps the path the server gives it.
+    PreserveLocalAs { name: String, parent: Option<i64> },
     /// Both sides removed it. Drop the entry; there is nothing left to track.
     Forget,
     /// The two sides already agree. Record the agreement (last-agreed state
@@ -255,8 +255,16 @@ pub fn reconcile(entry: &Entry, local: &Delta, remote: &Delta, ctx: &Context) ->
                 res.actions.push(Action::Adopt);
             } else {
                 // A real conflict. Nothing is overwritten: the remote head keeps
-                // the path the user knows, and the local version lands beside it
-                // under a name that says where it came from.
+                // the path the server gives it, and the local version is kept
+                // under a name that says where it came from -- in the folder it
+                // stands in here, which is the folder the user put it in. A
+                // peer that moved the file while it was edited here moves its
+                // own version; set beside that one, the edit made in one folder
+                // turned up in another (hostile2 74424).
+                let beside = match local.placement() {
+                    Some(l) => l.parent,
+                    None => entry.synced_placement.as_ref().map_or(entry.remote.parent, |p| p.parent),
+                };
                 let copy = jd_vfs::conflict_copy_name(
                     &remote_display_name(entry, remote),
                     &ctx.date,
@@ -264,7 +272,7 @@ pub fn reconcile(entry: &Entry, local: &Delta, remote: &Delta, ctx: &Context) ->
                     ctx.conflict_suffix,
                 );
                 res.actions
-                    .push(Action::PreserveLocalAs { name: copy.clone() });
+                    .push(Action::PreserveLocalAs { name: copy.clone(), parent: beside });
                 res.actions.push(Action::Download);
                 res.issues.push(Issue::ConflictResolved {
                     kept_remote: remote_display_name(entry, remote),
@@ -832,7 +840,8 @@ mod tests {
             r.actions,
             vec![
                 Action::PreserveLocalAs {
-                    name: "Report (conflicted copy 2026-07-16 from MacBook).xlsx".into()
+                    name: "Report (conflicted copy 2026-07-16 from MacBook).xlsx".into(),
+                    parent: None,
                 },
                 Action::Download,
             ]
@@ -857,7 +866,7 @@ mod tests {
             &ctx(),
         );
         let preserved = r.actions.iter().find_map(|a| match a {
-            Action::PreserveLocalAs { name } => Some(name.clone()),
+            Action::PreserveLocalAs { name, .. } => Some(name.clone()),
             _ => None,
         });
         assert_eq!(
