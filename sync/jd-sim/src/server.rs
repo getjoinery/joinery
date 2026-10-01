@@ -195,7 +195,12 @@ struct ServerState {
     /// the promise: the platform stores a body hash beside the key and refuses a
     /// second, different request that reuses it (`ApiLogicEndpoint`
     /// § idempotencyResolveExisting).
-    idempotency: BTreeMap<String, (String, Value, Value)>,
+    /// Every outcome a key produced, refusals included: the platform stores
+    /// the response whatever its status and replays it for the same key
+    /// (`ApiLogicEndpoint::idempotencyResolveExisting`). Kept successes only,
+    /// the mock let a client re-ask a refused request under its old key and
+    /// get a fresh answer the real server never gives.
+    idempotency: BTreeMap<String, (String, Value, ServerResult)>,
     /// How many times a key was offered for a second, different request. A
     /// client that cannot reproduce its own request byte for byte is refused
     /// here every time it asks, so any count above zero is a client that will
@@ -1064,14 +1069,14 @@ impl MockServer {
             }
         };
         if let Some(prior_response) = prior {
-            return Ok(prior_response);
+            return prior_response;
         }
-        let out = self.action(name, body)?;
+        let out = self.action(name, body);
         self.state.lock().unwrap().idempotency.insert(
             key.to_string(),
             (name.to_string(), body.clone(), out.clone()),
         );
-        Ok(out)
+        out
     }
 
     /// How many times a key was offered for a second, different request.

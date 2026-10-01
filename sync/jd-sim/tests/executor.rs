@@ -1130,6 +1130,32 @@ fn a_move_that_is_also_a_rename_falls_back_when_the_old_neighbours_hold_the_new_
     );
 }
 
+/// A folder moved into a folder that already holds one of its name: the move
+/// is refused for the name, and the folder lands beside its namesake under a
+/// conflict name. The move after the conflict rename is a new request under a
+/// key of its own -- the server stores a refusal and replays it for the same
+/// key, so under the first move's key every conflict name was renamed to and
+/// then refused again, a thousand times, and the folder never moved (soak run
+/// 1499 on a 0.8.452 server).
+#[test]
+fn a_folder_moved_onto_a_namesake_lands_beside_it_under_a_conflict_name() {
+    let (_clock, server, device) = world();
+    let from = server.seed_folder(None, "From");
+    let into = server.seed_folder(None, "Into");
+    server.seed_folder(Some(into), "Sub");
+    let id = EntityId::folder(server.seed_folder(Some(from), "Sub"));
+    let mut entry = fresh(id, Some(from), "Sub", LocalStatus::Synced);
+    entry.synced_placement = Some(entry.remote.clone());
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(&device, id, Action::ApplyLocalMove { to: Placement { parent: Some(into), name: "Sub".into() } });
+
+    assert_eq!(report.done, 1, "{report:?}");
+    let it = server.folders().into_iter().find(|f| f.id == id.server_id).expect("the folder");
+    assert_eq!(it.parent, Some(into), "the folder never moved: {:?}", server.tree());
+    assert!(it.name.starts_with("Sub (conflicted copy"), "{}", it.name);
+}
+
 #[test]
 fn a_rescue_lands_in_the_folder_its_name_was_chosen_for() {
     // The server deleted this file while the user had it open somewhere else,
