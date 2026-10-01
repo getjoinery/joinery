@@ -110,6 +110,11 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.8 - an owed password change or terms acceptance holds the person on its own page:
+ *                no later gate runs there. Every signed-in page runs the gates, and the
+ *                terms gate sent a fresh install's admin off /change-password-required while
+ *                the password gate sent them back (and the wizard gate did the same to
+ *                /terms-accept), so a new site's admin could not sign in.
  * @version 1.7 - DisplayMessage carries an optional error reference and renders the
  *                "Report a problem" link that follows an error message (specs/implemented/bug_reports.md)
  * @version 1.6 - the vault re-enrollment gate's message says what the factor is for: signing
@@ -1624,6 +1629,11 @@ class SessionControl{
 	 * logic only asks is_logged_in() cannot step around them. Each gate names
 	 * the paths it leaves alone (its own page, /logout, /api/v1/ for the
 	 * enrollment calls). No web request, no gate.
+	 *
+	 * The gates are in order, and the first one owed decides: the password
+	 * change and the terms each hold the person on their own page and end the
+	 * check there, so a later gate never sends them off the page that settles
+	 * an earlier one.
 	 */
 	public function enforce_navigation_gates(): void {
 		if (!isset($_SESSION['loggedin'])) {
@@ -1646,21 +1656,36 @@ class SessionControl{
 			return;
 		}
 
+		$to = $this->navigation_gate_target($current_path);
+		if ($to !== NULL) {
+			header('Location: ' . $to);
+			exit();
+		}
+	}
+
+	/**
+	 * Where the navigation gates send a signed-in person viewing $path, or NULL
+	 * to let the page render. The first gate owed decides.
+	 *
+	 * @param string $path the request path
+	 * @return string|null
+	 */
+	public function navigation_gate_target(string $path): ?string {
 		// Check if user must change password before accessing any other page
 		if ($this->must_change_password()) {
 			// Don't redirect if already on the password change page or logging out
-			if ($current_path !== '/change-password-required' && $current_path !== '/logout') {
-				header('Location: /change-password-required');
-				exit();
+			if ($path !== '/change-password-required' && $path !== '/logout') {
+				return '/change-password-required';
 			}
+			return NULL;
 		}
 
 		// Check if user must accept terms before accessing any other page
 		if ($this->must_accept_terms()) {
-			if ($current_path !== '/terms-accept' && $current_path !== '/logout') {
-				header('Location: /terms-accept');
-				exit();
+			if ($path !== '/terms-accept' && $path !== '/logout') {
+				return '/terms-accept';
 			}
+			return NULL;
 		}
 
 		// First-login setup wizard (specs/setup_wizard.md): an account that
@@ -1670,9 +1695,8 @@ class SessionControl{
 		// there; dismissing without enrolling lands on the stricter gates
 		// below. SetupSteps::interruptExempt() lists the paths left alone.
 		require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
-		if (!SetupSteps::interruptExempt((string)$current_path) && SetupSteps::shouldInterrupt()) {
-			header('Location: /setup');
-			exit();
+		if (!SetupSteps::interruptExempt($path) && SetupSteps::shouldInterrupt()) {
+			return '/setup';
 		}
 
 		// Enforce a second factor on admin accounts when totp_require_admins
@@ -1686,12 +1710,11 @@ class SessionControl{
 		// enrollment impossible. Protected content over the API is already
 		// independently vault-gated.
 		if ($this->must_enable_totp_for_admin()) {
-			if ($current_path !== '/profile/security' && $current_path !== '/setup'
-					&& $current_path !== '/logout'
-					&& strpos((string)$current_path, '/api/v1/') !== 0) {
+			if ($path !== '/profile/security' && $path !== '/setup'
+					&& $path !== '/logout'
+					&& strpos($path, '/api/v1/') !== 0) {
 				$msgtxt = urlencode('Your administrator account requires a second factor: an authenticator app or a passkey.');
-				header('Location: /profile/security?msgtext=' . $msgtxt);
-				exit();
+				return '/profile/security?msgtext=' . $msgtxt;
 			}
 		}
 
@@ -1701,14 +1724,14 @@ class SessionControl{
 		// alone (the setup ceremony says so up front). Same surface +
 		// exemptions as the admin gate.
 		if ($this->must_enroll_2fa_for_vault()) {
-			if ($current_path !== '/profile/security' && $current_path !== '/setup'
-					&& $current_path !== '/logout'
-					&& strpos((string)$current_path, '/api/v1/') !== 0) {
+			if ($path !== '/profile/security' && $path !== '/setup'
+					&& $path !== '/logout'
+					&& strpos($path, '/api/v1/') !== 0) {
 				$msgtxt = urlencode('Your account holds an encrypted vault, so it needs a second way to sign in - add a passkey or an authenticator app to continue.');
-				header('Location: /profile/security?msgtext=' . $msgtxt);
-				exit();
+				return '/profile/security?msgtext=' . $msgtxt;
 			}
 		}
+		return NULL;
 	}
 
 	/**

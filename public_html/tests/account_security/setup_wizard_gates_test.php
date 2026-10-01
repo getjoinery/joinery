@@ -74,4 +74,47 @@ check(SetupSteps::leftWizard($dismisser), 'and for a dismissed one (the fixture 
 unset($_SESSION['usr_user_id'], $_SESSION['loggedin'], $_SESSION['permission']);
 SetupSteps::resetViewer();
 
+section('A fresh install\'s admin owes a password change and the terms, and can settle both');
+// Found on the site copy's first live run (2026-10-01): every signed-in page
+// runs the gates, and the terms gate sent the admin off the password page
+// while the password gate sent them back, so a new site's admin could not
+// sign in. The first gate owed holds its own page; nothing loops.
+$fresh = make_user('GateFresh', 10);
+$fresh->set('usr_force_password_change', 1);
+$fresh->set('usr_terms_accepted_time', null);
+$fresh->save();
+$_SESSION['usr_user_id'] = (int)$fresh->key;
+$_SESSION['loggedin'] = true;
+$_SESSION['permission'] = 10;
+$session = SessionControl::get_instance();
+$owe = function () { unset($_SESSION['force_password_change'], $_SESSION['terms_accepted']); };
+$settles = function ($start) use ($session) {
+	$path = $start;
+	for ($i = 0; $i < 4; $i++) {
+		$to = $session->navigation_gate_target($path);
+		if ($to === NULL) { return $path; }
+		$path = (string)parse_url($to, PHP_URL_PATH);
+	}
+	return 'loop from ' . $start;
+};
+
+$owe();
+check($session->navigation_gate_target('/change-password-required') === NULL,
+	'owing both, the password page renders');
+foreach (array('/', '/terms-accept', '/setup', '/profile/security', '/admin') as $path) {
+	check($settles($path) === '/change-password-required', "owing both, $path settles on the password page",
+		$settles($path));
+}
+
+$fresh->set('usr_force_password_change', 0);
+$fresh->save();
+$owe();
+check($session->navigation_gate_target('/terms-accept') === NULL, 'owing the terms, the terms page renders');
+foreach (array('/', '/change-password-required', '/setup', '/profile/security') as $path) {
+	check($settles($path) === '/terms-accept', "owing the terms, $path settles on the terms page", $settles($path));
+}
+check($session->navigation_gate_target('/logout') === NULL, 'and /logout is always open');
+unset($_SESSION['usr_user_id'], $_SESSION['loggedin'], $_SESSION['permission']);
+$owe();
+
 harness_finish();
