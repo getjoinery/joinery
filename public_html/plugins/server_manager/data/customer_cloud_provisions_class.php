@@ -39,6 +39,8 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.11 - install mode 'copy' (specs/site_copy.md WP8): a dormant copy of cvp_source_node_id, bare metal,
+ *                 installed at cvp_release, admin origin only
  * @version 1.10 - is_test_purchase() / external_name_prefix(): a site bought with a test-mode payment names
  *                 everything the pipeline creates for it outside the platform with test_ in front
  * @version 1.9 - the buyer origin and the pre-payment states (draft, pending_payment); the draft's
@@ -103,8 +105,11 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_instance_type'          => array('type'=>'varchar(50)'),
 		'cvp_mgn_managed_node_id'            => array('type'=>'int8'),
 		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker', 'allowed_values'=>array('docker', 'bare-metal')),
-		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'from_backup', 'bare')),
+		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'from_backup', 'bare', 'copy')),
 		'cvp_source_node_id'         => array('type'=>'int8'),
+		// A copy's install: the release it is installed at, its source's exact
+		// release (vendor/ never travels in a backup). Empty for every other mode.
+		'cvp_release'                => array('type'=>'varchar(20)'),
 		'cvp_backup_source'          => array('type'=>'varchar(10)'),
 		'cvp_port'                   => array('type'=>'int4', 'is_nullable'=>false, 'default'=>8080),
 		// The instance's root password, sealed (SecretBox) for the length of the
@@ -220,11 +225,26 @@ class CustomerCloudProvision extends SystemBase {
 			throw new CustomerCloudProvisionException("Unknown docker mode '{$docker_mode}'.");
 		}
 		$install_mode = $this->get('cvp_install_mode') ?: 'fresh';
-		if (!in_array($install_mode, array('fresh', 'from_backup', 'bare'), true)) {
+		if (!in_array($install_mode, array('fresh', 'from_backup', 'bare', 'copy'), true)) {
 			throw new CustomerCloudProvisionException("Unknown install mode '{$install_mode}'.");
 		}
 		if ($install_mode === 'from_backup' && empty($this->get('cvp_source_node_id'))) {
 			throw new CustomerCloudProvisionException('Source node is required for from-backup provisions.');
+		}
+		// A dormant copy: of a node, on bare metal, at a release, made by an admin.
+		if ($install_mode === 'copy') {
+			if (empty($this->get('cvp_source_node_id'))) {
+				throw new CustomerCloudProvisionException('A copy names the node it copies.');
+			}
+			if ($docker_mode !== 'bare-metal') {
+				throw new CustomerCloudProvisionException('A copy is installed on bare metal only.');
+			}
+			if (!preg_match('/^\d+\.\d+\.\d+$/', (string)$this->get('cvp_release'))) {
+				throw new CustomerCloudProvisionException('A copy names the release it is installed at.');
+			}
+			if ($origin !== 'admin') {
+				throw new CustomerCloudProvisionException('Copy provisions must be admin-origin.');
+			}
 		}
 		// A bare instance (no site install) has no order to fulfill — it exists
 		// for infrastructure roles like relay shards, which only admins create.

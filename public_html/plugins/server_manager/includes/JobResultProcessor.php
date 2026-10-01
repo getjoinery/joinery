@@ -5,6 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.48 - sanitise_host_report keeps cpus and an answer of quiet (host_report 1.6)
+ * @version 1.47 - site copy WP8: process_copy_import keeps the copy's look path (look_path_of()); process_take_node_id
+ *                 records what the copy staged, and complete_take_node_id() makes the row swap only in the answer
+ *                 to that result; process_install_node leaves a copy's row in state copy
  * @version 1.46 - recovery_report_window(): a node whose key is not yet proven is asked again after two
  *                 minutes, not six hours, so a key set up on the node is seen at the next status check
  *                 (site_copy.md B33)
@@ -1562,10 +1566,15 @@ class JobResultProcessor {
 		$output = $job->get('mjb_output') ?: '';
 
 		if ($status === 'completed' && strpos($output, 'INSTALL_SUCCESS') !== false) {
-			$node->set('mgn_install_state', null);
+			// A dormant copy's install ends quiet, and its row stays a copy: the
+			// site it will hold is its source's, and nothing may treat it as a
+			// working site of its own (specs/site_copy.md).
+			$is_copy = (int)$node->get('mgn_copy_of_node_id') > 0;
+			$node->set('mgn_install_state', $is_copy ? 'copy' : null);
 			// A bare instance (a Docker host with no site) has no domain to
-			// certify; everything else awaits its certificate from here.
-			if ($node->get('mgn_ssl_state') !== 'active' && !$node->get('mgn_skip_joinery_checks')) {
+			// certify; everything else awaits its certificate from here. A copy
+			// gets its source's certificate with the export.
+			if (!$is_copy && $node->get('mgn_ssl_state') !== 'active' && !$node->get('mgn_skip_joinery_checks')) {
 				$node->set('mgn_ssl_state', 'pending');
 			}
 			// Ground truth for the port ledger: install.sh auto-picks a different
@@ -2402,6 +2411,88 @@ HTML;
 		$job->save();
 	}
 
+	/**
+	 * copy_import: what the copy took, and the path that sets its look cookie
+	 * (agent 1.50.0+), which the copy page shows the owner as the look link.
+	 */
+	private static function process_copy_import($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$ok = (string)$job->get('mjb_status') === 'completed' && is_array($data);
+		$chains = array();
+		foreach ((array)($ok ? ($data['chains'] ?? array()) : array()) as $c) {
+			if (is_string($c) && preg_match('/^chain-[0-9_]{1,58}$/', $c)) {
+				$chains[] = $c;
+			}
+		}
+		$look = $ok ? (string)($data['look_path'] ?? '') : '';
+		$job->set('mjb_result', json_encode([
+			'imported'   => $ok,
+			'chains'     => array_slice($chains, 0, 20),
+			'host_files' => $ok ? max(0, (int)($data['host_files'] ?? 0)) : 0,
+			'look_path'  => preg_match('#^/\.joinery-look/[0-9a-f]{32}$#', $look) ? $look : '',
+		]));
+		$job->save();
+	}
+
+	/** The look path a finished copy_import reported, or '' when it reported none. */
+	public static function look_path_of($job): string {
+		if ((string)$job->get('mjb_job_type') !== 'copy_import') {
+			return '';
+		}
+		$r = json_decode((string)$job->get('mjb_result'), true);
+		return is_array($r) ? (string)($r['look_path'] ?? '') : '';
+	}
+
+	/**
+	 * take_node_id: record what the copy staged. The swap itself is NOT made
+	 * here: a processor also runs from page views and sweeps, and a swap the
+	 * copy never hears about strands it (it would keep signing as itself
+	 * against a row that no longer holds its key). The swap is made only in
+	 * the answer to the copy's result, by complete_take_node_id().
+	 */
+	private static function process_take_node_id($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$staged = (string)$job->get('mjb_status') === 'completed' && is_array($data) && !empty($data['staged']);
+		$job->set('mjb_result', json_encode([
+			'staged'  => $staged,
+			'node_id' => $staged ? (int)($data['node_id'] ?? 0) : 0,
+			'taken'   => false,
+			'reason'  => $staged ? 'The management node did not answer the result with the swap.'
+				: trim((string)$job->get('mjb_error_message')),
+		]));
+		$job->save();
+	}
+
+	/**
+	 * The swap a copy's take_node_id result asks for, made while answering that
+	 * result (AgentChannelEndpoint::handle_result). Returns the node id the copy
+	 * may now take, or 0 when it must stay what it was. The job's result says
+	 * which, and why.
+	 */
+	public static function complete_take_node_id($job): int {
+		if ((string)$job->get('mjb_job_type') !== 'take_node_id') {
+			return 0;
+		}
+		$result = json_decode((string)$job->get('mjb_result'), true);
+		if (!is_array($result) || empty($result['staged']) || !empty($result['taken'])) {
+			return 0;
+		}
+		$source_id = (int)($result['node_id'] ?? 0);
+		try {
+			$copy = new ManagedNode((int)$job->get('mjb_mgn_managed_node_id'), TRUE);
+			$source = new ManagedNode($source_id, TRUE);
+			SiteCopySwap::take_over($source, $copy);
+			$result['taken'] = true;
+			$result['reason'] = '';
+		} catch (Throwable $e) {
+			$result['taken'] = false;
+			$result['reason'] = mb_substr($e->getMessage(), 0, 500);
+		}
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+		return !empty($result['taken']) ? $source_id : 0;
+	}
+
 	/** The bundle a finished copy_export job kept, or null when it made none. */
 	public static function bundle_of($job): ?string {
 		if ((string)$job->get('mjb_job_type') !== 'copy_export') {
@@ -3029,6 +3120,8 @@ HTML;
 			'disk'                         => $disk,
 			'memory'                       => self::host_report_gauge($in['memory'] ?? null),
 			'swap'                         => self::host_report_gauge($in['swap'] ?? null),
+			// Processors, for reading the load average against (host_report 1.6).
+			'cpus'                         => self::host_report_count($in['cpus'] ?? null),
 			'reboot_required'              => $reboot,
 			'unattended_upgrades_last_run' => self::host_report_count($in['unattended_upgrades_last_run'] ?? null),
 			'os'                           => self::host_report_os($in['os'] ?? null),
@@ -3050,12 +3143,13 @@ HTML;
 		return $out;
 	}
 
-	/** The three services' answers: yes, no or unknown each. */
+	/** The three services' answers: yes, no, quiet or unknown each. */
 	private static function host_report_answers($v) {
 		$out = [];
 		foreach (['apache2', 'php-fpm', 'postgresql'] as $k) {
 			$a = (is_array($v) && isset($v[$k]) && is_string($v[$k])) ? $v[$k] : '';
-			$out[$k] = in_array($a, ['yes', 'no', 'unknown'], true) ? $a : 'unknown';
+			// quiet: the site's pages are the quiet state's own (host_report 1.6).
+			$out[$k] = in_array($a, ['yes', 'no', 'unknown', 'quiet'], true) ? $a : 'unknown';
 		}
 		return $out;
 	}

@@ -49,7 +49,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,memory,swap,reboot_required,unattended_upgrades_last_run,os,answers,served_certificates,containers,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,memory,swap,cpus,reboot_required,unattended_upgrades_last_run,os,answers,served_certificates,containers,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -84,11 +84,12 @@ chk "os names its four parts" "$(jv "$T/real.json" os keys)" "id,version,codenam
 chk "os version is dotted digits or unknown" "$( v=$(jv "$T/real.json" os.version); [ "$v" = unknown ] || [[ "$v" =~ ^[0-9]+(\.[0-9]+)*$ ]]; echo $? )" "0"
 chk "the offered upgrade is a version, none or unknown" "$( v=$(jv "$T/real.json" os.release_upgrade.offered); [ "$v" = none ] || [ "$v" = unknown ] || [[ "$v" =~ ^[0-9]+(\.[0-9]+)*$ ]]; echo $? )" "0"
 chk "the upgrade check time is a time or unknown" "$( t=$(jv "$T/real.json" os.release_upgrade.checked_at type); [ "$t" = integer ] || [ "$(jv "$T/real.json" os.release_upgrade.checked_at)" = unknown ]; echo $? )" "0"
+chk "cpus is a count or unknown" "$( v=$(jv "$T/real.json" cpus); [ "$v" = unknown ] || [[ "$v" =~ ^[0-9]+$ ]]; echo $? )" "0"
 chk "answers names the three services" "$(jv "$T/real.json" answers keys)" "apache2,php-fpm,postgresql"
 for u in apache2 php-fpm postgresql; do
     s="$(jv "$T/real.json" answers.$u)"
-    case "$s" in yes|no|unknown) ok=1 ;; *) ok=0 ;; esac
-    chk "answers.$u is yes, no or unknown ($s)" "$ok" "1"
+    case "$s" in yes|no|unknown|quiet) ok=1 ;; *) ok=0 ;; esac
+    chk "answers.$u is yes, no, unknown or quiet ($s)" "$ok" "1"
 done
 chk "served certificates is a list or unknown" "$( t=$(jv "$T/real.json" served_certificates type); [ "$t" = list ] || [ "$(jv "$T/real.json" served_certificates)" = unknown ]; echo $? )" "0"
 chk "containers is a list, none or unknown" "$( t=$(jv "$T/real.json" containers type); v=$(jv "$T/real.json" containers); [ "$t" = list ] || [ "$v" = none ] || [ "$v" = unknown ]; echo $? )" "0"
@@ -254,6 +255,7 @@ chk "answers: Apache and PHP answer through the site's own name" "$(jv "$T/root.
 chk "answers: pg_isready saying no response is no" "$(jv "$T/root.json" answers.postgresql)" "no"
 chk "served certificates mark the vhost's ServerName as primary" "$( for i in 0 1 2; do [ "$(jv "$T/root.json" served_certificates.$i.primary)" = true ] && echo x; done | wc -l | tr -d ' ' )" "1"
 eval "$(sed -n '/^emit_answers() {/,/^}/p' "$SCRIPT")"
+site_is_quiet() { return 1; }
 for case in "502:no" "503:no" "301:unknown" "403:unknown" "200:unknown"; do
     st="${case%%:*}"; want="${case##*:}"
     site_server_name() { echo site.example; }
@@ -262,6 +264,12 @@ for case in "502:no" "503:no" "301:unknown" "403:unknown" "200:unknown"; do
     got="$(emit_answers | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["php-fpm"];')"
     chk "a headerless $st says php-fpm is $want" "$got" "$want"
 done
+# A quiet site (a dormant copy, a frozen source) answers every page with the
+# quiet state's 503: that is not PHP failing, and must never read as no.
+site_is_quiet() { return 0; }
+loopback_headers() { printf 'HTTP/1.1 503 Service Unavailable\r\n\r\n'; }
+got="$(emit_answers | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["apache2"] . "/" . $o["php-fpm"];')"
+chk "a quiet site's 503 says Apache answers and php-fpm is quiet, never no" "$got" "yes/quiet"
 sc_ok=0; sc_n="$(jv "$T/root.json" served_certificates count)"
 for i in $(seq 0 $(( ${sc_n:-0} - 1 ))); do
     d="$(jv "$T/root.json" served_certificates.$i.domain)"; l="$(jv "$T/root.json" served_certificates.$i.days_left)"

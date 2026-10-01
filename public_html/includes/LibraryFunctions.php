@@ -966,6 +966,35 @@ class LibraryFunctions {
 		return self::convert_time($starttime, $fromtz, $totz, $format);
 	}
 
+	/**
+	 * A past UTC time as a person reads it at a glance: "just now" under a
+	 * minute, "N minutes ago" under an hour, "N hours ago" under a day,
+	 * "N days ago, 3:15 PM" (the time of day in $totz) under a week, and the
+	 * date and time in $format beyond that. A time in the future is the date
+	 * and time too: "ago" would be wrong, and "in N hours" is not asked for.
+	 */
+	static function time_ago($starttime, $totz, $format = 'M j, g:i A') {
+		if (empty($starttime)) return '';
+		$ts = strtotime($starttime . ' UTC');
+		if ($ts === false) return '';
+		$age = time() - $ts;
+		if ($age < -60) return self::convert_time($starttime, 'UTC', $totz, $format);
+		if ($age < 60) return 'just now';
+		if ($age < 3600) {
+			$m = intdiv($age, 60);
+			return $m . ' minute' . ($m === 1 ? '' : 's') . ' ago';
+		}
+		if ($age < 86400) {
+			$h = intdiv($age, 3600);
+			return $h . ' hour' . ($h === 1 ? '' : 's') . ' ago';
+		}
+		if ($age < 7 * 86400) {
+			$d = intdiv($age, 86400);
+			return $d . ' day' . ($d === 1 ? '' : 's') . ' ago, ' . self::convert_time($starttime, 'UTC', $totz, 'g:i A');
+		}
+		return self::convert_time($starttime, 'UTC', $totz, $format);
+	}
+
 	//RETURN NEW TIME SHIFTED BY INTERVAL FROM INPUT TIME
 	static function time_shift($starttime, $interval='7 days', $format='M j, Y g:i a T'){
 		// Same reasoning as convert_time: '' is not a time. Shifting it by the

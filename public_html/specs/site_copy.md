@@ -21,15 +21,10 @@
   - the dormant install runs its one installer pass as any site does, then sets `quiet copy`;
   - Postfix defers at every smtpd service, not at the `joinery` transport;
   - the firewall rejects rather than drops, and covers Postfix's own client too;
-  - the fleet badge reads "Copy — dormant" until WP8 links the copy row to S.
+  - the fleet badge reads "Copy — dormant" on a row in state `copy`.
   - **Review (public-html-a5, 2026-09-28):** R1, R4, R5, R6 and the low items fixed. Two limits
-    carried to WP8, and true until it lands:
-    - **Nothing on M sets `copy` yet.** A dormant install joined to M today is a row with no install
-      state: M treats it as live, and its backups, uptime checks and notices fail against the quiet
-      copy. Do not join a dormant install to M before WP8.
-    - **`install.sh` has no release pin.** `--dormant` installs whatever release the upgrade server
-      serves now, not S's. Until WP8 adds the pin, a copy is only correct when S is on the current
-      release.
+    were carried to WP8, which closed both: M sets `copy` on the copy's row, and a copy is
+    installed from S's exact release (WP8 below).
 - **WP2 built (2026-09-28); gate-tested on fixture chains, not yet on a real copy:** `restore_chain.sh`
   1.7.0 (`--adopt-secret-key`, `--skip-ssl` passed to the reconcile), agent 1.47.0 (`copy_restore`),
   and on M `build_copy_restore` with an 8700 s claim budget. Choices made while building:
@@ -115,6 +110,78 @@
     SHA-256, with the chain, its newest upload time, the certificate names and the DKIM key count.
   - **HTTPS on T:** the vhost template picks `/etc/letsencrypt/live/<domain>/` over the placeholder
     when Apache parses its config, and clearing the quiet state reloads Apache. Nothing re-renders.
+- **WP8 built (2026-10-01), copy side; unit- and db-tested, not yet live:** on M the node's **Copy**
+  tab (`node_detail_tabs/copy.php`), `SiteCopy` (`scp_site_copies`), `SiteCopyRunner` and the
+  **Advance Site Copies** task; install mode `copy` in `build_install_node` and the provisioning
+  pipeline (`cvp_release`); `process_install_node` keeps a copy row in `copy`; agent 1.50.0
+  (`take_node_id`, and `copy_import` reports the look path); `SiteCopySwap` and
+  `JobResultProcessor::complete_take_node_id`, answered from `AgentChannelEndpoint::handle_result`.
+  Schema applied on dev. Owner decisions while building (2026-10-01):
+  - **Q1: switching over waits for WP7a.** The Switch Over button (steps 7–10 and the way back)
+    arrives with the first way to move the address. WP8 builds the two pieces that are not about
+    the address: the node-id word and the row swap, in both directions.
+  - **Q2: the platform never deletes a cloud instance, copies included.** Discard removes the
+    copy's row and names the server (provider, instance, address) for the owner to delete at the
+    provider; the retired source likewise. The spec's earlier "the ordinary node delete deletes
+    the instance" was never true: no Server Manager delete deletes a server.
+  Choices made while building:
+  - **The release pin is in the fetch, not an `install.sh` flag.** T fetches
+    `latest_release?version=<S's release>` (which existed, unused by installs), and that tree's own
+    `install.sh` runs. An `--release` flag would exist only in releases after this one, and T runs
+    S's. `UpgradeRetention` already keeps the archive of any release a managed node runs.
+  - **The floor is 0.8.453** (`JobCommandBuilder::COPY_SOURCE_MIN_VERSION`), not WP5's release: T
+    runs S's tree, so S's release must carry `install.sh` 2.90 (`--copy-of-key`), `restore_chain`'s
+    `--adopt-secret-key`, the converger gate and `_site_state.sh` 1.4 (B36). 0.8.453 is the first.
+  - **Preflight** refuses also: a web root outside `/var/www/html/<site>/public_html`, no https
+    site address, and a copy row of S that exists already (the L0 run's hand-linked node 75177
+    counts: remove it before copying copytest again).
+  - **A run is seven jobs, one at a time:** `host_report` on T first, then a fit check from both
+    host reports (memory at least S's; free disk at least the chain staged, twice the files, six
+    times the compressed database, and 2 GiB, an estimate stated as one), then export, import,
+    stage, restore, a census on each side and the informational compare. The first job that does
+    not do its part stops the run by name. A run takes the newest manager-profile chain and
+    requires it under 24 hours old, the preflight's rule, at every run.
+  - **The first run starts by itself** once T's agent has joined and reported its words.
+  - **Joining a brought server:** the tab lists pending requests from an agent that claims S's
+    site name; the owner compares the fingerprint with `joinery-agent status` on T. Approving makes
+    the row (`<S> (copy)`, state `copy`, `mgn_copy_of_node_id`). A server M created is approved
+    onto its existing row after the provider check, as any provisioned join.
+  - **The look link** comes from T: `copy_import`'s result carries `/.joinery-look/<secret>`
+    (agent 1.50.0); the tab shows it with the hosts-file line and the stale-socket note.
+  - **Discard waits for an install in progress** (a discard under a running pipeline would leave
+    it making a copy nobody tracks) and withdraws a provision not yet started.
+  - **`take_node_id` is two-phase.** T stages its identity under S's id beside the live one and
+    posts its result; M swaps the rows while answering and says `node_id_taken`; only then does T
+    make the staged identity live and restart (it refuses unless a supervisor is proven, as
+    `restart_agent` does). No answer, no change. The processor that runs from page views and sweeps
+    records what was staged and never swaps, so a swap T does not hear about cannot happen.
+  - **The swap moves machine columns only** (`SiteCopySwap::MACHINE_COLUMNS`: agent key and what
+    its agent reports, host, SSH fields) and provision links; name, slug, site URL, web root,
+    backup policy and status data stay on the node. `go_back` leaves the node `switching` and the
+    other row `copy`.
+  - Tests: `site_copy_runner` 63/63 (install command, provision rules, a finished install, the
+    word's builder, the swap answered and not, preflight, a brought server end to end with fake
+    job results, a declined export, a short disk, a moved release, Discard); agent `go test ./...`
+    with `take_node_id`'s refusals, the confirmed and unconfirmed take, and the look path.
+  - **B37 — Every dormant copy opens a case for a PHP-FPM that is fine.** OBSERVED on T (case 1814,
+    "php-fpm is active and does not answer", three refused restarts), TRACED: `host_report`'s
+    `answers` probe asks for the site's own name, and on a quiet site every page is the quiet
+    state's 503 without serve.php's header, which the script read as PHP-FPM failing. Fixed in
+    `host_report.sh` 1.6: on a quiet site PHP-FPM reads `quiet`, which the `service_health` recipe
+    already takes as unknown (it passes, and the open case closes at its next check). The probe does
+    not send the look cookie to get past the 503: that would write request rows into a copy whose
+    rows must match its source's at the exact census. The Host card says "quiet". Tests:
+    `host_report` gate and the recipe's table.
+  - **B38 — A node that joins on its own never records its site address.** OBSERVED on dev: S and T
+    (75176, 75177) have no `mgn_site_url`, so the Copy tab refuses S ("no https site address").
+    `adoptJoin` sets a site URL only for this machine's own join, and nothing a node reports carries
+    its domain. The refusal says where to set it (the Site URL field in the Overview's connection
+    settings). OPEN, root fix not built: `check_status` reports the site's address and its
+    processor fills an empty `mgn_site_url`, as it already fills an empty web root.
+  - **Carried to WP7a:** the switch-over itself. One finding for it: after step 10, T is live and
+    answers as S's node id; going back swaps T's key off the node, so T can no longer reach M. The
+    way back must quiet T (`site_quiet on`, while T is still the node) before `go_back`, then
+    discard it.
 - **First live run (L0-copy, started 2026-10-01): the copy steps by hand, before WP7a and WP8.** The
   owner chose to prove WP2–WP5 on real machines before building on them. No switch-over: S, then
   a dormant T, then export, import, stage, restore and the census, then a private look at T.
@@ -745,7 +812,8 @@ The copy can stay dormant as long as the owner likes.
 - **Refresh:** steps 4–5 again. T downloads the artifacts it does not hold yet and runs the same full
   apply at the newest run, from its local archives. A new chain on S is just a new plan; there is no
   progress file and no fall-back logic (M2).
-- **Discard:** the copy row's ordinary node delete, which deletes the instance.
+- **Discard:** the copy row leaves the dashboard; its server is the owner's to delete at the
+  provider (the platform never deletes a cloud instance; owner 2026-10-01).
 
 ### Switch over (steps 7–10; a separate action, on the owner's word)
 
@@ -814,8 +882,9 @@ The copy can stay dormant as long as the owner likes.
          the node, now on T.
        - T's copy row takes S's old key and host and becomes `retired` ("Retired source of S" in the
          fleet list). S's provision row is re-pointed to it, and T's to the node.
-       - `is_operational()` keeps the retired row out of every automation. Its delete is the ordinary
-         node delete, which deletes S's instance. The way back reads S's key from it.
+       - `is_operational()` keeps the retired row out of every automation. Removing it is the
+         ordinary node removal; S's server is the owner's to delete at the provider. The way back
+         reads S's key from it.
     3. `site_quiet off` on T. The agent allows it now, because T holds S's node id. The next
        converger tick writes the cron, runs the installers (the mailbox's arms Postfix and sets the
        `iemap_` role's password) and certbot's timer comes on. An installer that fails is retried
@@ -828,8 +897,8 @@ The copy can stay dormant as long as the owner likes.
     before the switch stay sealed to S's site key and the recovery key: they open by the recovery
     ceremony, as after any key change.
 
-S ends powered off, whole and quiet. Deleting it is the owner's separate action: the retired row's
-ordinary delete.
+S ends powered off, whole and quiet. Deleting it is the owner's separate action: the retired row
+removed from the dashboard, and the server deleted at its provider.
 
 ### The way back
 
@@ -1073,27 +1142,29 @@ In build order. Each is built and tested on its own (design rule).
     - the vouch record `/etc/joinery/sites/{site}/vouched`, written whole each time with one
       `<manifest sha256> <chain id>` line per vouched run, root-owned 0600, and written only after
       the bundle's signature and seal check out.
-- **WP7a — Proxied origin change (the first switch built; L0).**
+- **WP7a — Switch over, and the proxied origin change (the first switch built; L0).**
+  - The switch-over on M (steps 7–10 and the way back, moved here from WP8): freeze S, the final
+    never-roll run and exact census, the move, `take_node_id` and `site_quiet off` on T, and the
+    way back (quiet T while it is still the node, then `SiteCopySwap::go_back`).
   - The preflight: every record naming S's address is proxied; list any proxy-only firewall on S.
   - The record change through M's DNS driver (Cloudflare first), the proof through the proxy, the
     change back on failure, and `mgn_host`.
   - No forwarding, no TTL lowering, no resolver watch: those are WP7.
   - Its live test is L0, on a proxied record under `jeremytunnell.info` (Q3).
-- **WP8 — Copy and Switch Over on the management node.**
-  - Carried from WP5's review:
+- **WP8 — Copy on the management node (built 2026-10-01; see the status above).**
+  - Carried from WP5's review (all four done):
     - M sets the copy row's install state to `copy` when it creates the row or approves its join;
       `JobResultProcessor`'s install-success path (which writes NULL) must not clear it.
-    - `install.sh site --release=X.Y.Z`, with the upgrade server serving that release's archives,
-      so T installs S's exact release (vendor/ is never in the chain).
-    - The copy preflight refuses an S older than the WP5 release: the converger's quiet gate and
-      its helper live in the tree `copy_restore` lands on T.
+    - T installs S's exact release (vendor/ is never in the chain): fetched as
+      `latest_release?version=X.Y.Z`.
+    - The copy preflight refuses an S older than 0.8.453: the tree T runs is S's.
     - T installs under S's site name and S's domain: `restore_chain.sh` refuses a target whose
       directory name differs from the one the archive carries, the project name is also the
       database name, and `copy_restore` passes no `--domain`, so T keeps its config's own.
   - **Copy to a new server:** preflight, then "create it for me" or "I'll bring a server", then
     steps 2–6, progress, Refresh and Discard.
-  - **Switch over:** steps 7–10 and the way back.
   - The node-id word, and the row swap (both directions).
+  - **Switch over** (steps 7–10 and the way back) moved to WP7a (owner, 2026-10-01).
 - **WP9 — Retire Clone.**
   - Delete `clone_export.php`, `clone_export_arm.php`, the `from_backup` install mode,
     `cvp_clone_key_sealed`, the `clone_export_key` setting, `scrub_sealed_secrets.php` and their

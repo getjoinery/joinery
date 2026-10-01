@@ -36,6 +36,7 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.28 - a take_node_id result is answered with node_id_taken when the row swap was made (site copy WP8)
  * @version 1.27 - a claim reports claim_bytes, the largest claim its agent reads (1.45.0); the job handed out
  *                 is held to it, up to MAX_CLAIM_BODY, and a claim without it to MAX_JOB_BODY. A chain job
  *                 an agent without it cannot take (over 64 links) fails at dispatch naming the update
@@ -1314,6 +1315,18 @@ class AgentChannelEndpoint {
 
 		$job = self::load_running_job((int)$in['job_id'], (int)$node->key);
 		self::record_result($node, $job, $in);
+
+		// A copy's take_node_id result is answered with the swap, or without
+		// it: the copy takes its source's node id only when this answer says
+		// node_id_taken (specs/site_copy.md D4). The swap is made here and
+		// nowhere else, because only here does the copy hear about it.
+		if ((string)$job->get('mjb_job_type') === 'take_node_id' && $in['status'] === 'completed') {
+			$job->load();
+			$taken = JobResultProcessor::complete_take_node_id($job);
+			if ($taken > 0) {
+				api_success(['recorded' => true, 'node_id_taken' => $taken], '', 200);
+			}
+		}
 
 		api_success(['recorded' => true], '', 200);
 	}

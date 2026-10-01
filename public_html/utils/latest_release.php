@@ -15,15 +15,20 @@
  *
  * An optional ?version= asks for one specific release instead of the newest.
  * It exists so a build can be reproduced — for a bug report, or for a review
- * that has to see the same bytes twice — and is deliberately not what any
- * install path uses. A pinned installer needs a bump on every publish, and a
- * stale pin hands out old code to people who asked for current code.
+ * that has to see the same bytes twice — and for the one install that must not
+ * take the newest: a dormant site copy, installed at its source's exact release
+ * because vendor/ never travels in a backup (specs/site_copy.md). Every other
+ * install path takes the newest. A pinned installer needs a bump on every
+ * publish, and a stale pin hands out old code to people who asked for current
+ * code. A pinned version is served only from this site's own archives, which
+ * UpgradeRetention keeps for any version a managed node runs.
  *
  * Usage:
  *   curl -sL https://getjoinery.com/utils/latest_release | tar xz
  *   curl -LO https://getjoinery.com/utils/latest_release
  *   curl -LO 'https://getjoinery.com/utils/latest_release?version=0.8.198'
  *
+ * @version 1.3 - the header names the dormant copy as the install that pins a version
  * @version 1.2
  */
 

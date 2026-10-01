@@ -9,6 +9,14 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.31 - every time on the page reads as an age (LibraryFunctions::time_ago): minutes, hours, days with
+ *                 the time of day, the date beyond a week; a quiet site's scheduled tasks read as held, never as
+ *                 the last-run time its database carries from before it went quiet; a live site's last run is told
+ *                 against the status check that measured it, not against now
+ * @version 1.30 - the page leads with the node at a glance (node number, address, site, release, OS, how long it has
+ *                 run); Health shows bars for disk, memory, swap and load, and each service running or not; the
+ *                 agent and the machine's security each have their own box; disk and memory are shown once
+ * @version 1.29 - the Host card says a quiet site's PHP-FPM is quiet (host_report 1.6); the copy banner links to its source's Copy tab; the retired banner says removing the row does not delete the server
  * @version 1.28 - a banner for each of the site copy's install states (copy, switching, retired), and the
  *                 certificate card's DNS check skips any node in an install state
  * @version 1.27 - Remove from Dashboard's confirmation says what else goes with the node, and what is kept
@@ -106,38 +114,6 @@
 	<?php echo SmAdminCsrf::field(); ?>
 </form>
 <?php
-	// Install state banner (takes precedence over regular status)
-	$install_state = $node->get('mgn_install_state');
-	if ($install_state === 'installing') {
-		echo '<div class="alert alert-info"><strong>Install in progress.</strong> The install job is running against this node. ';
-		$install_job = ManagementJob::latestForNode($node->key, 'install_node');
-		if ($install_job) {
-			echo '<a href="/admin/server_manager/job_detail?job_id=' . $install_job->key . '">View job #' . $install_job->key . '</a>';
-		}
-		echo '</div>';
-	} elseif ($install_state === 'install_failed') {
-		echo '<div class="alert alert-danger"><strong>Install failed.</strong> The last install attempt did not complete.';
-		$install_job = ManagementJob::latestForNode($node->key, 'install_node');
-		if ($install_job) {
-			echo ' <a href="/admin/server_manager/job_detail?job_id=' . $install_job->key . '" class="alert-link">View job #' . $install_job->key . ' output</a>.';
-		}
-		echo '<div class="mt-2"><form method="post" class="svm-inline-form" id="retry_install_form">';
-		echo '<input type="hidden" name="action" value="retry_install">';
-		echo SmAdminCsrf::field();
-		echo '<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm(\'Before retrying: SSH to the target and remove any partial install (e.g. rm -rf /var/www/html/SITENAME, drop the DB). install.sh will refuse if the site directory already exists. Continue?\', function(){ document.getElementById(\'retry_install_form\').submit(); })">Retry Install</button></form></div>';
-		echo '</div>';
-	} elseif ($install_state === 'copy') {
-		echo '<div class="alert alert-info"><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
-			. 'This server holds a copy of another node\'s site. It is quiet: it serves no visitors, sends nothing and runs no scheduled task, '
-			. 'and no backup, upgrade or uptime check runs against it.</div>';
-	} elseif ($install_state === 'switching') {
-		echo '<div class="alert alert-warning"><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
-			. 'This site is frozen while it moves to its copy. Visitors see a maintenance page until the switch-over finishes or is undone.</div>';
-	} elseif ($install_state === 'retired') {
-		echo '<div class="alert alert-secondary"><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
-			. 'This is the old server of a site that has moved. It is kept, quiet, for the way back; removing it deletes the server.</div>';
-	}
-
 	// Status summary card
 	$status_data = $node->get('mgn_last_status_data');
 	if (is_string($status_data)) {
@@ -181,13 +157,28 @@
 		$status_color = 'success';
 	}
 
-	echo '<div class="mb-3">';
-	echo '<div class="d-flex justify-content-between align-items-center py-2 px-3 mb-2">';
-	echo '<div class="d-flex align-items-center">';
-	echo '<span class="badge bg-' . $status_color . ' me-2">&bull;</span>';
-	echo '<strong>' . $node_name . '</strong>';
-	if ($node->get('mgn_site_url')) {
-		echo '<a href="' . htmlspecialchars($node->get('mgn_site_url')) . '" target="_blank" class="ms-2 small">' . htmlspecialchars($node->get('mgn_site_url')) . '</a>';
+	// The machine as its agent last described it (host_report), sanitised
+	// once here for the header, the health box, the agent and security boxes.
+	$host_report = $node->get('mgn_last_host_report');
+	if (is_string($host_report)) { $host_report = json_decode($host_report, true); }
+	$host_report_time = trim((string)$node->get('mgn_last_host_report_time'));
+	$hr = is_array($host_report) ? JobResultProcessor::sanitise_host_report($host_report) : null;
+	$hr_str = function ($v) { return htmlspecialchars(is_scalar($v) ? (string)$v : 'unknown', ENT_QUOTES, 'UTF-8'); };
+	$hr_when = function ($unix) use ($session) {
+		if (!is_int($unix)) { return 'unknown'; }
+		return LibraryFunctions::time_ago(gmdate('Y-m-d H:i:s', $unix), $session->get_timezone());
+	};
+
+	// ── The node at a glance: who it is, where it is, what it runs ──
+	echo '<div class="border rounded p-3 mb-3">';
+	echo '<div class="d-flex justify-content-between align-items-start gap-3">';
+	echo '<div class="d-flex align-items-center flex-wrap gap-2">';
+	echo '<span class="badge bg-' . $status_color . '" title="Overall health from the last status check">&bull;</span>';
+	echo '<span class="fs-4 fw-semibold">' . $node_name . '</span>';
+	echo '<span class="badge bg-secondary">Node #' . (int)$node->key . '</span>';
+	if (!$node->is_operational()) {
+		echo '<span class="badge bg-' . JobCommandBuilder::install_state_color((string)$node->get('mgn_install_state')) . '">'
+			. htmlspecialchars($node->install_state_label()) . '</span>';
 	}
 	echo '</div>';
 	?>
@@ -255,7 +246,7 @@
 			// fail2ban housekeeping now, through the host runner: the host_converge
 			// operate word. Idempotent, and what the host timer already runs daily;
 			// the job's transcript says what it did, and a host_report follows so
-			// the Host card shows the machine after the run.
+			// the Health box shows the machine after the run.
 			if (JobCommandBuilder::has_primitive($node, 'host_converge')): ?>
 				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run fail2ban housekeeping on this machine now, as root, through the host runner? Idempotent: it is what the host timer runs daily, and the transcript shows what it did.', function(){ document.getElementById('host_converge_form').submit(); }); return false;">Run Host Housekeeping</a></li>
 			<?php endif; ?>
@@ -332,12 +323,77 @@
 	<?php
 	echo '</div>';
 
-	echo '<div class="d-flex align-items-center gap-2 ps-3 mt-1">';
+	// The facts a person looks for first, each where the eye lands.
+	$fact = function ($label, $value_html) {
+		echo '<div><div class="text-muted small text-uppercase">' . $label . '</div>'
+			. '<div class="fw-semibold" style="overflow-wrap:anywhere">' . $value_html . '</div></div>';
+	};
+	echo '<div class="svm-facts mt-3">';
+
+	$addr_html = '<code>' . htmlspecialchars((string)$node->get('mgn_host')) . '</code>';
+	$head_provision = class_exists('CustomerCloudProvision') ? CustomerCloudProvision::latest_for_node($node->key) : null;
+	if ($head_provision && trim((string)$head_provision->get('cvp_instance_ipv6')) !== '') {
+		$addr_html .= '<div class="small fw-normal"><code>' . htmlspecialchars((string)$head_provision->get('cvp_instance_ipv6')) . '</code></div>';
+	}
+	$fact('Address', $addr_html);
+
+	if ($node->get('mgn_site_url')) {
+		$head_url = htmlspecialchars((string)$node->get('mgn_site_url'));
+		$fact('Site', '<a href="' . $head_url . '" target="_blank" rel="noopener">' . htmlspecialchars((string)parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: $head_url) . ' ↗</a>');
+	} elseif ($node->hosts_site()) {
+		$fact('Site', '<span class="text-muted fw-normal">no address recorded</span>');
+	} else {
+		$fact('Site', '<span class="text-muted fw-normal">none: a machine only</span>');
+	}
+
+	$cp_version = LibraryFunctions::get_joinery_version();
+	$node_version = $node->get('mgn_joinery_version');
+	$version_cmp = ($cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $node_version ?? ''))
+		? version_compare($node_version, $cp_version) : null;
+	if ($node_version) {
+		$rel = htmlspecialchars($node_version);
+		if ($version_cmp === -1) {
+			$rel .= ' <span class="badge bg-warning">' . htmlspecialchars($cp_version) . ' available</span>';
+		} elseif ($version_cmp === 1) {
+			$rel .= ' <span class="badge bg-danger">ahead of this management node</span>';
+		} elseif ($version_cmp === 0) {
+			$rel .= ' <span class="badge bg-success">current</span>';
+		}
+		$fact('Release', $rel);
+	}
+
+	if ($hr && is_array($hr['os']) && $hr['os']['version'] !== 'unknown') {
+		$os = $hr['os'];
+		$os_html = htmlspecialchars(ucfirst($os['id']) . ' ' . $os['version']);
+		if (!in_array($os['release_upgrade']['offered'], array('none', 'unknown'), true)) {
+			$os_html .= '<div class="small fw-normal text-info">' . htmlspecialchars($os['release_upgrade']['offered']) . ' offered</div>';
+		}
+		$fact('Operating system', $os_html);
+	}
+
+	// Up: how long the machine has run, and whether the site answers from outside.
+	$up_html = !empty($status_data['uptime']) ? htmlspecialchars((string)$status_data['uptime']) : '<span class="text-muted fw-normal">unknown</span>';
+	$uptime_enabled = $node->get('mgn_uptime_enabled');
+	$uptime_status  = $node->get('mgn_uptime_last_status');
+	$uptime_down    = $node->get('mgn_uptime_down_since');
+	if (!$uptime_enabled) {
+		$up_html .= '<div class="small fw-normal text-muted">not monitored</div>';
+	} elseif ($uptime_status === 'down') {
+		$up_html .= '<div class="small text-danger">site down since ' . htmlspecialchars($uptime_down
+			? LibraryFunctions::time_ago($uptime_down, $session->get_timezone()) : 'unknown') . '</div>';
+	} elseif ($uptime_status === 'up') {
+		$up_html .= '<div class="small fw-normal text-success">site answering</div>';
+	} else {
+		$up_html .= '<div class="small fw-normal text-muted">site not yet checked</div>';
+	}
+	$fact('Running for', $up_html);
+	echo '</div>';
+	echo '<div class="d-flex align-items-center gap-2 flex-wrap mt-3">';
 	if ($last_check) {
 		// "Measured", not "checked": the word has to survive the distinction the
 		// value now respects, or the honest number reads as the old claim.
-		echo '<small class="text-muted">Figures measured: '
-			. LibraryFunctions::convert_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A')
+		echo '<small class="text-muted">Figures measured '
+			. htmlspecialchars(LibraryFunctions::time_ago($last_check, $session->get_timezone()))
 			. '</small>';
 		if ($figures_stale && $status_data) {
 			echo '<small class="text-warning">Too old to judge health by &mdash; run a status check.</small>';
@@ -353,7 +409,7 @@
 		echo ' <button type="submit" form="nodeActionInstallReport" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="How the first-boot install went: DNS, certificate, and the tail of the install log">Install Report</button>';
 	}
 	// The machine, read now: units, jails, sshd posture, reboot-required. The
-	// Host card below renders the answer.
+	// Health and Security boxes below render the answer.
 	if (JobCommandBuilder::has_primitive($node, 'host_report')) {
 		echo ' <button type="submit" form="nodeActionHostReport" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="Read the machine now: failed units, fail2ban jails, SSH auth failures, sshd posture, reboot-required">Host Report</button>';
 	}
@@ -370,7 +426,7 @@
 		}
 		$tab_missing = AgentVocabulary::missing_words($node, $tab_words);
 		if ($tab_missing) {
-			echo '<div class="mt-2 ps-3">' . AgentVocabulary::needs_newer_agent_html($node, $tab_missing) . '</div>';
+			echo '<div class="mt-2">' . AgentVocabulary::needs_newer_agent_html($node, $tab_missing) . '</div>';
 		}
 	}
 
@@ -383,7 +439,7 @@
 	$has_file_head = JobCommandBuilder::has_primitive($node, 'file_head');
 	if ($has_site_log || $has_log_table || $has_file_head) {
 		$log_refusal = JobCommandBuilder::log_access_refusal($node);
-		echo '<details class="mt-2 ps-3"><summary class="small text-muted" style="cursor:pointer;">Logs</summary>';
+		echo '<details class="mt-2"><summary class="small text-muted" style="cursor:pointer;">Logs</summary>';
 		if ($log_refusal !== null) {
 			echo '<div class="small text-muted mt-1">' . htmlspecialchars($log_refusal) . '</div>';
 		} else {
@@ -453,7 +509,7 @@
 	$has_page_probe = JobCommandBuilder::has_primitive($node, 'page_probe');
 	$has_reclaim = JobCommandBuilder::has_primitive($node, 'reclaim_managed_file');
 	if ($has_schema_probe || $has_run_installer || $has_page_probe || $has_reclaim) {
-		echo '<details class="mt-2 ps-3"><summary class="small text-muted" style="cursor:pointer;">Diagnose and repair</summary>';
+		echo '<details class="mt-2"><summary class="small text-muted" style="cursor:pointer;">Diagnose and repair</summary>';
 		echo '<div class="d-flex flex-wrap gap-4 mt-2">';
 		if ($has_schema_probe) {
 			echo '<div>';
@@ -516,136 +572,447 @@
 		echo '</div></details>';
 	}
 
-	// Uptime monitoring status
-	$uptime_enabled = $node->get('mgn_uptime_enabled');
-	$uptime_status  = $node->get('mgn_uptime_last_status');
-	$uptime_down    = $node->get('mgn_uptime_down_since');
-	$monitor_health = NodeMonitorHealth::evaluate($node);
-	echo '<div class="mt-1 ps-3"><small>';
-	if (!$uptime_enabled) {
-		echo '<span class="text-muted">Uptime monitoring: disabled</span>';
-	} elseif ($uptime_status === 'down') {
-		$down_display = $uptime_down
-			? LibraryFunctions::convert_time($uptime_down, 'UTC', $session->get_timezone(), 'M j, g:i A')
-			: 'unknown';
-		echo '<span class="text-danger"><strong>Uptime: Down since ' . htmlspecialchars($down_display) . '</strong></span>';
-	} elseif ($uptime_status === 'up') {
-		echo '<span class="text-success">Uptime: Up</span>';
-	} else {
-		echo '<span class="text-muted">Uptime: not yet checked</span>';
-	}
-	echo '</small></div>';
+	echo '</div>'; // end the node at a glance
 
-	// Monitoring-health banner. A node whose checks cannot conclude reports no
-	// up/down at all, so without this it reads as merely unchecked — which is
-	// how a broken check hides indefinitely behind a healthy-looking node.
+	// Install state banner (takes precedence over regular status)
+	$install_state = $node->get('mgn_install_state');
+	if ($install_state === 'installing') {
+		echo '<div class="alert alert-info"><div><strong>Install in progress.</strong> The install job is running against this node. ';
+		$install_job = ManagementJob::latestForNode($node->key, 'install_node');
+		if ($install_job) {
+			echo '<a href="/admin/server_manager/job_detail?job_id=' . $install_job->key . '">View job #' . $install_job->key . '</a>';
+		}
+		echo '</div></div>';
+	} elseif ($install_state === 'install_failed') {
+		echo '<div class="alert alert-danger"><div><strong>Install failed.</strong> The last install attempt did not complete.';
+		$install_job = ManagementJob::latestForNode($node->key, 'install_node');
+		if ($install_job) {
+			echo ' <a href="/admin/server_manager/job_detail?job_id=' . $install_job->key . '" class="alert-link">View job #' . $install_job->key . ' output</a>.';
+		}
+		echo '<div class="mt-2"><form method="post" class="svm-inline-form" id="retry_install_form">';
+		echo '<input type="hidden" name="action" value="retry_install">';
+		echo SmAdminCsrf::field();
+		echo '<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm(\'Before retrying: SSH to the target and remove any partial install (e.g. rm -rf /var/www/html/SITENAME, drop the DB). install.sh will refuse if the site directory already exists. Continue?\', function(){ document.getElementById(\'retry_install_form\').submit(); })">Retry Install</button></form></div>';
+		echo '</div></div>';
+	} elseif ($install_state === 'copy') {
+		echo '<div class="alert alert-info"><div><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
+			. 'This server holds a copy of another node\'s site. It is quiet: it serves no visitors, sends nothing and runs no scheduled task, '
+			. 'and no backup, upgrade or uptime check runs against it. It is refreshed and discarded from the '
+			. '<a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$node->get('mgn_copy_of_node_id')
+			. '&tab=copy" class="alert-link">Copy tab of the site it copies</a>.</div></div>';
+	} elseif ($install_state === 'switching') {
+		echo '<div class="alert alert-warning"><div><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
+			. 'This site is frozen while it moves to its copy. Visitors see a maintenance page until the switch-over finishes or is undone.</div></div>';
+	} elseif ($install_state === 'retired') {
+		echo '<div class="alert alert-secondary"><div><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
+			. 'This is the old server of a site that has moved. It is kept, quiet, for the way back. Removing it from the dashboard '
+			. 'does not delete the server; delete that at its provider.</div></div>';
+	}
+
+
+	// ── What needs a person, right under the header ──
+	$monitor_health = NodeMonitorHealth::evaluate($node);
 	if ($monitor_health['is_problem']) {
-		echo '<div class="alert alert-warning mt-2 mb-0" role="alert">';
+		echo '<div class="alert alert-warning" role="alert"><div>';
 		echo '<strong>' . htmlspecialchars($monitor_health['label']) . ':</strong> ';
 		echo htmlspecialchars($monitor_health['detail']);
-		echo ' <a href="' . $base_url . '&tab=overview#node-settings">Fix in settings</a>';
-		echo '</div>';
+		echo ' <a href="' . $base_url . '&tab=overview&edit=1#connectionSettings">Fix in settings</a>';
+		echo '</div></div>';
+	}
+	$open_cases = 0;
+	foreach (IncidentCaseCard::cases_for((int)$node->key) as $c) {
+		if ((string)$c->get('inc_status') === IncidentRecord::STATUS_OPEN) { $open_cases++; }
+	}
+	if ($open_cases > 0) {
+		echo '<div class="alert alert-danger"><div><strong>' . $open_cases . ' open case' . ($open_cases === 1 ? '' : 's') . '.</strong> '
+			. 'A recipe on the node gave up and a person is the next actor. <a href="#node-cases" class="alert-link">See Cases below</a>.</div></div>';
 	}
 
-	// TLS certificate expiry — populated by the uptime tick for self-renewed,
-	// directly-exposed nodes (e.g. the Caddy DNS servers the SSL tile can't see).
-	$cert_expiry = $node->get('mgn_cert_expiry_ts');
-	if ($cert_expiry) {
-		$cert_warn_days = (int)Globalvars::get_instance()->get_setting('server_manager_cert_expiry_warn_days');
-		if ($cert_warn_days <= 0) { $cert_warn_days = 21; }
-		$cert_expiry_ts   = strtotime($cert_expiry . ' UTC');
-		$cert_days_left   = (int)floor(($cert_expiry_ts - time()) / 86400);
-		$cert_expiry_disp = LibraryFunctions::convert_time($cert_expiry, 'UTC', $session->get_timezone(), 'M j, Y');
-		echo '<div class="mt-1 ps-3"><small>';
-		if ($cert_days_left < $cert_warn_days) {
-			echo '<span class="text-danger"><strong>TLS cert: expires ' . htmlspecialchars($cert_expiry_disp) . ' (' . $cert_days_left . ' days)</strong></span>';
-		} else {
-			echo '<span class="text-muted">TLS cert: expires ' . htmlspecialchars($cert_expiry_disp) . ' (' . $cert_days_left . ' days)</span>';
+	// ── Health at a glance ──
+	// Bars for everything that is a share of a capacity, coloured by one rule
+	// (green under 75%, amber 75-90%, red over 90%; the marks on each bar sit at
+	// 75% and 90%), and one plain sentence per service. Figures come from the
+	// host report where the node sent one (bytes, the node's own free space),
+	// else from the status check.
+	$gauge_class = function ($pct) {
+		return $pct > 90 ? 'bg-danger' : ($pct >= 75 ? 'bg-warning' : 'bg-success');
+	};
+	$gauge = function ($label, $pct, $class, $big, $line, $extra = '') {
+		echo '<div><div class="border rounded p-3 h-100">';
+		echo '<div class="d-flex justify-content-between align-items-baseline gap-2">'
+			. '<span class="text-muted small text-uppercase">' . $label . '</span>'
+			. '<span class="fs-5 fw-semibold">' . $big . '</span></div>';
+		if ($pct !== null) {
+			echo '<div class="svm-gauge mt-2" title="Green under 75%, amber 75 to 90%, red over 90%">'
+				. '<div class="svm-gauge-fill ' . $class . '" style="--svm-pct:' . max(0, min(100, (int)$pct)) . '%"></div></div>';
 		}
-		echo '</small></div>';
-	}
+		echo '<div class="text-muted small mt-2">' . $line . '</div>' . $extra;
+		echo '</div></div>';
+	};
+	$size = function ($bytes) { return htmlspecialchars(JobResultProcessor::format_size((int)$bytes)); };
+	$have = function ($g) { return is_array($g) && is_int($g['used_bytes'] ?? null) && is_int($g['total_bytes'] ?? null); };
 
-	echo '</div>';
+	if ($status_data || $hr) {
+		$page->begin_box(['title' => 'Health']);
+		echo '<div class="svm-grid">';
 
-	// ── System Health panel ──
-	if ($status_data) {
-		$pageoptions = ['title' => 'System Health'];
-		$page->begin_box($pageoptions);
-
-		$cp_version = LibraryFunctions::get_joinery_version();
-		$node_version = $node->get('mgn_joinery_version');
-		$version_cmp = ($cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $node_version ?? ''))
-			? version_compare($node_version, $cp_version) : null;
-
-		// Stat tile grid — each tile: label on top, large value, optional subline/progress bar.
-		echo '<div class="row g-3">';
-
-		// Disk
-		if (isset($status_data['disk_usage_percent'])) {
-			$pct = intval($status_data['disk_usage_percent']);
-			$bar = $pct > 90 ? 'bg-danger' : ($pct > 80 ? 'bg-warning' : 'bg-success');
-			$sub = '';
-			if (!empty($status_data['disk_total'])) {
-				$sub = htmlspecialchars($status_data['disk_used'] . ' / ' . $status_data['disk_total'] . ' used · ' . ($status_data['disk_available'] ?? '?') . ' free');
+		// Disk: free space is the node's own avail, not total minus used (the
+		// root reserve is exactly what is not there when a disk fills).
+		if ($hr && $have($hr['disk']) && $hr['disk']['total_bytes'] > 0) {
+			$d = $hr['disk'];
+			$pct = (int)round($d['used_bytes'] * 100 / $d['total_bytes']);
+			$free = is_int($d['avail_bytes']) ? $d['avail_bytes'] : $d['total_bytes'] - $d['used_bytes'];
+			$class = ($free < $d['total_bytes'] * 0.10) ? 'bg-danger' : $gauge_class($pct);
+			$extra = '';
+			if (is_int($d['inodes_used_pct'])) {
+				$extra .= '<div class="small mt-2 ' . ($d['inodes_used_pct'] >= 90 ? 'text-danger' : 'text-muted') . '">Inodes: '
+					. (int)$d['inodes_used_pct'] . '% used</div>';
 			}
-			echo '<div class="col-md-6 col-xl-4">';
-			echo '<div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase">Disk</div>';
-			echo '<div class="fs-3 fw-semibold mt-1">' . $pct . '<span class="fs-5 text-muted">%</span></div>';
-			echo '<div class="progress mt-2 svm-progress-thin"><div class="progress-bar ' . $bar . ' svm-progress-bar" style="--svm-pct:' . $pct . '%"></div></div>';
-			if ($sub) echo '<div class="text-muted small mt-2">' . $sub . '</div>';
-			echo '</div></div>';
+			if (JobCommandBuilder::has_primitive($node, 'disk_usage')) {
+				$extra .= '<div class="mt-2"><button type="submit" form="nodeActionDiskUsage" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="The biggest directories in the site tree and the usual machine directories, sizes only">What is using it?</button></div>';
+			}
+			$gauge('Disk', $pct, $class, $pct . '%', $size($d['used_bytes']) . ' of ' . $size($d['total_bytes']) . ' used · <strong>' . $size($free) . ' free</strong>', $extra);
+		} elseif (isset($status_data['disk_usage_percent'])) {
+			$pct = (int)$status_data['disk_usage_percent'];
+			$line = !empty($status_data['disk_total'])
+				? htmlspecialchars($status_data['disk_used'] . ' of ' . $status_data['disk_total'] . ' used · ' . ($status_data['disk_available'] ?? '?') . ' free') : '';
+			$gauge('Disk', $pct, $gauge_class($pct), $pct . '%', $line);
 		}
 
 		// Memory
-		if (isset($status_data['memory_used_mb'], $status_data['memory_total_mb']) && $status_data['memory_total_mb'] > 0) {
-			$used = (int)$status_data['memory_used_mb'];
-			$total = (int)$status_data['memory_total_mb'];
-			$pct = (int)round($used * 100 / $total);
-			$bar = $pct > 90 ? 'bg-danger' : ($pct > 80 ? 'bg-warning' : 'bg-success');
-			echo '<div class="col-md-6 col-xl-4">';
-			echo '<div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase">Memory</div>';
-			echo '<div class="fs-3 fw-semibold mt-1">' . $pct . '<span class="fs-5 text-muted">%</span></div>';
-			echo '<div class="progress mt-2 svm-progress-thin"><div class="progress-bar ' . $bar . ' svm-progress-bar" style="--svm-pct:' . $pct . '%"></div></div>';
-			$mem_line = $used . ' / ' . $total . ' MB';
-			if (isset($status_data['swap_total_mb'])) {
-				$swap_total = (int)$status_data['swap_total_mb'];
-				$mem_line .= $swap_total > 0
-					? ' · swap ' . (int)($status_data['swap_used_mb'] ?? 0) . ' / ' . $swap_total . ' MB'
-					: ' · no swap';
+		if ($hr && $have($hr['memory']) && $hr['memory']['total_bytes'] > 0) {
+			$m = $hr['memory'];
+			$pct = (int)round($m['used_bytes'] * 100 / $m['total_bytes']);
+			$gauge('Memory', $pct, $gauge_class($pct), $pct . '%', $size($m['used_bytes']) . ' of ' . $size($m['total_bytes']) . ' used');
+		} elseif (isset($status_data['memory_used_mb'], $status_data['memory_total_mb']) && $status_data['memory_total_mb'] > 0) {
+			$pct = (int)round($status_data['memory_used_mb'] * 100 / $status_data['memory_total_mb']);
+			$gauge('Memory', $pct, $gauge_class($pct), $pct . '%', (int)$status_data['memory_used_mb'] . ' of ' . (int)$status_data['memory_total_mb'] . ' MB used');
+		}
+
+		// Swap
+		$sw_used = null; $sw_total = null;
+		if ($hr && $have($hr['swap'])) {
+			$sw_used = $hr['swap']['used_bytes']; $sw_total = $hr['swap']['total_bytes'];
+		} elseif (isset($status_data['swap_total_mb'])) {
+			$sw_used = (int)($status_data['swap_used_mb'] ?? 0) * 1048576; $sw_total = (int)$status_data['swap_total_mb'] * 1048576;
+		}
+		if ($sw_total !== null) {
+			if ($sw_total > 0) {
+				$pct = (int)round($sw_used * 100 / $sw_total);
+				$gauge('Swap', $pct, $gauge_class($pct), $pct . '%', $size($sw_used) . ' of ' . $size($sw_total) . ' used');
+			} else {
+				$gauge('Swap', null, '', '<span class="text-muted fs-6">none</span>', 'This machine has no swap.');
 			}
-			echo '<div class="text-muted small mt-2">' . $mem_line . '</div>';
-			echo '</div></div>';
 		}
 
-		// Load average
+		// Load, read against the processors that share it.
 		if (isset($status_data['load_1m'])) {
-			$l1 = $status_data['load_1m'] ?? '-';
-			$l5 = $status_data['load_5m'] ?? '-';
-			$l15 = $status_data['load_15m'] ?? '-';
-			echo '<div class="col-md-6 col-xl-4">';
-			echo '<div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase">Load Average</div>';
-			echo '<div class="fs-3 fw-semibold mt-1">' . htmlspecialchars((string)$l1) . '</div>';
-			echo '<div class="text-muted small mt-2">' . htmlspecialchars("{$l5} (5m) · {$l15} (15m)") . '</div>';
+			$l1 = (float)$status_data['load_1m'];
+			$loads = htmlspecialchars(($status_data['load_1m'] ?? '-') . ' · ' . ($status_data['load_5m'] ?? '-') . ' · ' . ($status_data['load_15m'] ?? '-'))
+				. ' <span class="text-muted">(1, 5, 15 min)</span>';
+			$cpus = ($hr && is_int($hr['cpus'] ?? null) && $hr['cpus'] > 0) ? $hr['cpus'] : null;
+			if ($cpus) {
+				$pct = (int)round($l1 * 100 / $cpus);
+				$gauge('Load', $pct, $gauge_class($pct), $pct . '%', $loads . '<br>on ' . $cpus . ' processor' . ($cpus === 1 ? '' : 's'));
+			} else {
+				$gauge('Load', null, '', htmlspecialchars((string)$status_data['load_1m']), $loads
+					. '<br>Its processor count arrives with the node\'s next release, and with it a bar.');
+			}
+		}
+		echo '</div>';
+
+		echo '<div class="svm-grid mt-3">';
+
+		// Services: running or not, one word each.
+		$svc_names = array('apache2' => 'Web server', 'php-fpm' => 'PHP', 'postgresql' => 'Database',
+			'cron' => 'Scheduled tasks', 'fail2ban' => 'fail2ban');
+		// Running or not, as systemd says. Whether a service also answers is the
+		// node's own business: its service_health recipe restarts one that does
+		// not and opens a case if that fails, so it reaches this page as a case.
+		$svc_status = function ($state) {
+			if ($state === 'active')                          { return array('Running', 'success'); }
+			if ($state === 'failed' || $state === 'inactive') { return array('Not running', 'danger'); }
+			if ($state === 'absent')                          { return array('Not on this machine', 'secondary'); }
+			return array('Unknown', 'secondary');
+		};
+		$units_known = $hr && count(array_filter($hr['expected_units'], function ($st) { return $st !== 'unknown'; })) > 0;
+		// A quiet site (a dormant copy, a frozen source) runs none of its
+		// scheduled tasks, and the last-run time in its database is whatever
+		// was there before it went quiet: on a copy, its source's, from before
+		// its backup. Neither may read as this machine's tasks running.
+		$site_quiet = in_array(trim((string)$node->get('mgn_install_state')), array('copy', 'switching'), true);
+		$tasks_held = '<div class="small text-muted">site tasks held while the site is quiet</div>';
+		// When the site's tasks last ran, said only as far as it was measured:
+		// the time comes from the last status check, so it is told against
+		// that check ("ran 1 minute before the last status check"), never
+		// against now, where it would age by the hour between checks. More
+		// than twenty minutes before the check is late.
+		$tasks_ran = function () use ($status_data, $last_check) {
+			// The reading's own measurement time where the status carries one.
+			$meta = JobResultProcessor::status_meta($status_data);
+			$measured = (string)($meta['cron_last_run']['m'] ?? $last_check);
+			if (empty($status_data['cron_last_run']) || $measured === '') { return array('', true); }
+			$ran = strtotime($status_data['cron_last_run'] . ' UTC');
+			$at = strtotime($measured . ' UTC');
+			if (!$ran || !$at) { return array('', true); }
+			$gap = max(0, $at - $ran);
+			if ($gap < 60) {
+				$words = 'less than a minute';
+			} elseif ($gap < 3600) {
+				$n = intdiv($gap, 60); $words = $n . ' minute' . ($n === 1 ? '' : 's');
+			} elseif ($gap < 86400) {
+				$n = intdiv($gap, 3600); $words = $n . ' hour' . ($n === 1 ? '' : 's');
+			} else {
+				$n = intdiv($gap, 86400); $words = $n . ' day' . ($n === 1 ? '' : 's');
+			}
+			return array('site tasks ran ' . $words . ' before the last status check', $gap < 1200);
+		};
+		if ($hr && !$units_known && trim((string)$node->get('mgn_container_name')) !== '') {
+			// A site in a container: its agent sees the container, not the
+			// host's services, which the host's own agent reports.
+			echo '<div class="svm-span-2"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase mb-2">Services</div>';
+			echo '<div>This site runs in a container. The machine\'s services are reported by its host\'s own agent';
+			$svc_host = null;
+			if ((int)$node->get('mgn_mgh_managed_host_id') > 0 && class_exists('ManagedHost')) {
+				$mh = new ManagedHost((int)$node->get('mgn_mgh_managed_host_id'), TRUE);
+				$svc_host = $mh->key ? $mh->host_node() : null;
+			}
+			echo $svc_host
+				? ': <a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$svc_host->key . '">' . htmlspecialchars((string)$svc_host->get('mgn_name')) . ' (node #' . (int)$svc_host->key . ')</a>.</div>'
+				: '.</div>';
+			if (!empty($status_data['postgres_status'])) {
+				$pg_ok = $status_data['postgres_status'] === 'accepting connections';
+				echo '<div class="mt-2">Database <span class="badge bg-' . ($pg_ok ? 'success' : 'danger') . '">' . ($pg_ok ? 'Running' : 'Not running') . '</span></div>';
+			}
+			if ($site_quiet) {
+				echo $tasks_held;
+			} else {
+				list($ran_words, $ran_ok) = $tasks_ran();
+				if ($ran_words !== '') {
+					echo '<div class="mt-1 small ' . ($ran_ok ? 'text-muted' : 'text-warning') . '">' . htmlspecialchars(ucfirst($ran_words)) . '</div>';
+				}
+			}
+			echo '</div></div>';
+		} elseif ($hr) {
+			$can_restart = JobCommandBuilder::has_primitive($node, 'restart_unit');
+			echo '<div class="svm-span-2"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase mb-2">Services</div>';
+			echo '<table class="table table-sm mb-0 align-middle"><tbody>';
+			foreach ($hr['expected_units'] as $unit => $state) {
+				list($text, $cls) = $svc_status($state);
+				$note = '';
+				if ($unit === 'cron' && $site_quiet) {
+					$note = $tasks_held;
+				} elseif ($unit === 'cron') {
+					list($ran_words, $ran_ok) = $tasks_ran();
+					if ($ran_words !== '') {
+						$note = '<div class="small ' . ($ran_ok ? 'text-muted' : 'text-warning') . '">' . htmlspecialchars($ran_words) . '</div>';
+					}
+				}
+				if ($unit === 'postgresql' && !empty($status_data['current_db'])) {
+					$note = '<div class="small text-muted">database <code>' . htmlspecialchars($status_data['current_db']) . '</code></div>';
+				}
+				echo '<tr><td>' . htmlspecialchars($svc_names[$unit] ?? $unit) . ' <span class="text-muted small">' . $hr_str($unit) . '</span></td>';
+				echo '<td><span class="badge bg-' . $cls . '">' . htmlspecialchars($text) . '</span>' . $note . '</td><td class="text-end">';
+				if ($can_restart && !in_array($state, array('absent', 'unknown'), true) && array_key_exists($unit, JobCommandBuilder::RESTART_UNIT_UNITS)) {
+					$form_id = 'nodeActionRestartUnit_' . $unit;
+					$confirm = 'Restart ' . JobCommandBuilder::RESTART_UNIT_UNITS[$unit] . ' on this machine now? '
+						. 'Connections it holds are dropped; nothing stored is lost.';
+					echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+						. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+							. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
+					echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
+						. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+						. '<input type="hidden" name="action" value="restart_unit">'
+						. '<input type="hidden" name="unit" value="' . $hr_str($unit) . '">'
+						. SmAdminCsrf::field() . '</form>';
+				}
+				echo '</td></tr>';
+			}
+			echo '</tbody></table>';
+			// A Docker host's site containers, each with a Restart.
+			$containers = $hr['containers'] ?? null;
+			if (is_array($containers) && $containers) {
+				$can_restart_c = JobCommandBuilder::has_primitive($node, 'restart_container');
+				echo '<div class="text-muted small text-uppercase mt-3 mb-1">Site containers</div>';
+				echo '<table class="table table-sm mb-0 align-middle"><tbody>';
+				foreach ($containers as $c) {
+					if ($c['state'] !== 'running') {
+						$ctext = 'Not running'; $ccls = 'danger';
+					} else {
+						$ctext = 'Running'; $ccls = 'success';
+					}
+					echo '<tr><td>' . $hr_str($c['name']) . '</td><td><span class="badge bg-' . $ccls . '">' . $hr_str($ctext) . '</span></td><td class="text-end">';
+					if ($can_restart_c) {
+						$form_id = 'nodeActionRestartContainer_' . $c['name'];
+						$confirm = 'Restart the container ' . $c['name'] . '? The site is down while it restarts; its data and volumes are kept.';
+						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+								. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
+						echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
+							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+							. '<input type="hidden" name="action" value="restart_container">'
+							. '<input type="hidden" name="name" value="' . $hr_str($c['name']) . '">'
+							. SmAdminCsrf::field() . '</form>';
+					}
+					echo '</td></tr>';
+				}
+				echo '</tbody></table>';
+			}
+			echo '</div></div>';
+		} elseif (!empty($status_data['postgres_status']) || !empty($status_data['cron_last_run'])) {
+			// No host report: what the status check says about the two it sees.
+			echo '<div class="svm-span-2"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase mb-2">Services</div>';
+			if (!empty($status_data['postgres_status'])) {
+				$pg_ok = $status_data['postgres_status'] === 'accepting connections';
+				echo '<div>Database <span class="badge bg-' . ($pg_ok ? 'success' : 'danger') . '">' . ($pg_ok ? 'Running' : 'Not running') . '</span></div>';
+			}
+			if ($site_quiet) {
+				echo '<div class="mt-1">Scheduled tasks</div>' . $tasks_held;
+			} else {
+				list($ran_words, $ran_ok) = $tasks_ran();
+				if ($ran_words !== '') {
+					echo '<div class="mt-1">Scheduled tasks <span class="badge bg-' . ($ran_ok ? 'success' : 'warning') . '">'
+						. ($ran_ok ? 'Running' : 'Not running') . '</span></div>'
+						. '<div class="small text-muted">' . htmlspecialchars($ran_words) . '</div>';
+				}
+			}
+			echo '<div class="small text-muted mt-2">' . (JobCommandBuilder::has_primitive($node, 'host_report')
+				? 'The rest arrives with the node\'s first host report.'
+				: htmlspecialchars(AgentVocabulary::needs_newer_agent_text($node, ['host_report']))) . '</div>';
 			echo '</div></div>';
 		}
 
-		// Uptime
-		if (!empty($status_data['uptime'])) {
-			echo '<div class="col-md-6 col-xl-4">';
-			echo '<div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase">Uptime</div>';
-			echo '<div class="fs-5 fw-semibold mt-1">' . htmlspecialchars($status_data['uptime']) . '</div>';
+		// Certificates: what each of the site's names serves, read on the machine
+		// (the node's certificate_expiry recipe renews one under 14 days).
+		$cert_rows = array();
+		if ($hr && is_array($hr['served_certificates'] ?? null)) {
+			foreach ($hr['served_certificates'] as $c) {
+				$cert_rows[] = array($c['domain'], (int)$c['days_left']);
+			}
+		}
+		$cert_expiry = $node->get('mgn_cert_expiry_ts');
+		if (!$cert_rows && $cert_expiry) {
+			$cert_rows[] = array(parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: (string)$node->get('mgn_host'),
+				(int)floor((strtotime($cert_expiry . ' UTC') - time()) / 86400));
+		}
+		if (!$cert_rows && !empty($status_data['ssl_expiry_ts'])) {
+			$cert_rows[] = array(parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: 'this site',
+				(int)(($status_data['ssl_expiry_ts'] - time()) / 86400));
+		}
+		$ssl_state = $node->get('mgn_ssl_state');
+		if ($cert_rows || $ssl_state !== null) {
+			echo '<div><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase mb-2">Certificates</div>';
+			foreach ($cert_rows as $row) {
+				$days = $row[1];
+				$cls = $days < 14 ? 'danger' : ($days <= 30 ? 'warning' : 'success');
+				echo '<div class="d-flex flex-wrap justify-content-between align-items-center gap-1 mb-1"><span class="small">' . htmlspecialchars($row[0]) . '</span>'
+					. '<span class="badge bg-' . $cls . '" style="white-space:nowrap">' . ($days < 0 ? 'expired' : $days . ' days') . '</span></div>';
+			}
+			if (!$cert_rows) {
+				$ssl_words = array('pending' => array('Waiting for DNS and certbot', 'warning'), 'failed' => array('Failed: see SSL Setup below', 'danger'),
+					'active' => array('Active', 'success'));
+				$sw = $ssl_words[$ssl_state] ?? array('None configured', 'secondary');
+				echo '<span class="badge bg-' . $sw[1] . '">' . htmlspecialchars($sw[0]) . '</span>';
+			}
+			echo '<div class="small text-muted mt-2">Green over 30 days, amber 14 to 30, red under 14 (the node renews at 14).</div>';
 			echo '</div></div>';
 		}
 
+		// The machine: what wants a person's eye, and when it last updated itself.
+		// A container site's agent cannot see its host; the host's node says it.
+		if ($hr && ($units_known || trim((string)$node->get('mgn_container_name')) === '')) {
+			echo '<div><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase mb-2">Machine</div>';
+			if ($hr['reboot_required'] === true) {
+				echo '<div><span class="badge bg-warning">Reboot required</span></div>';
+			} elseif ($hr['reboot_required'] === false) {
+				echo '<div><span class="badge bg-success">No reboot pending</span></div>';
+			}
+			if ($hr['failed_units'] === 'unknown') {
+				echo '<div class="mt-2 text-muted small">Failed units: unknown</div>';
+			} elseif (count($hr['failed_units']) === 0) {
+				echo '<div class="mt-2"><span class="badge bg-success">No failed units</span></div>';
+			} else {
+				// A failed unit the plane can name and could not ask about was
+				// the whole reason unit_journal exists. The buttons are offered
+				// for a unit on the compiled list; anything else is named
+				// without one, because the node would refuse it.
+				$can_ask = JobCommandBuilder::has_primitive($node, 'unit_journal')
+					&& JobCommandBuilder::log_access_refusal($node) === null;
+				// Clear needs no log access: it reads nothing.
+				$can_clear = JobCommandBuilder::has_primitive($node, 'reset_failed_unit');
+				echo '<div class="mt-2 small text-uppercase text-danger">Failed units</div><ul class="list-unstyled mb-0 text-danger">';
+				foreach ($hr['failed_units'] as $unit) {
+					echo '<li>' . $hr_str($unit);
+					$bare = preg_replace('/\.service$/', '', (string)$unit);
+					if ($can_ask && array_key_exists($bare, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
+						echo ' <button type="submit" form="nodeActionUnitJournal_' . $hr_str($bare)
+							. '" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+							. ' title="Read this unit\'s state, its exit status and the last 100 lines of its journal, redacted on the node">Why?</button>';
+						echo '<form id="nodeActionUnitJournal_' . $hr_str($bare) . '" method="post" action="'
+							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+							. '<input type="hidden" name="action" value="unit_journal">'
+							. '<input type="hidden" name="unit" value="' . $hr_str($bare) . '">'
+							. '<input type="hidden" name="lines" value="100">'
+							. SmAdminCsrf::field() . '</form>';
+					}
+					if ($can_clear && array_key_exists($bare, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
+						$form_id = 'nodeActionResetUnit_' . $bare;
+						$confirm = 'Clear the failed record for ' . $bare . '? This clears the record only: it does not start, '
+							. 'stop or fix the unit. If the unit is still broken it fails again the next time it runs, '
+							. 'and this page names it again.';
+						echo ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+							. ' title="Clear systemd\'s record that this unit failed"'
+							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+								. json_encode($form_id) . ').submit(); })') . '">Clear</button>';
+						echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
+							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+							. '<input type="hidden" name="action" value="reset_failed_unit">'
+							. '<input type="hidden" name="unit" value="' . $hr_str($bare) . '">'
+							. SmAdminCsrf::field() . '</form>';
+					}
+					echo '</li>';
+				}
+				echo '</ul>';
+				if (count($hr['failed_units']) >= JobResultProcessor::HOST_REPORT_MAX_LIST) {
+					echo '<small class="text-muted">first ' . (int)JobResultProcessor::HOST_REPORT_MAX_LIST . ' only</small>';
+				}
+			}
+			// The three kernel events that explain a write that failed: counts only.
+			if (is_array($hr['kernel_events_24h'])) {
+				$bits = array();
+				foreach (array('oom' => 'out of memory', 'enospc' => 'disk full', 'io_error' => 'I/O errors') as $k => $word) {
+					if (is_int($hr['kernel_events_24h'][$k]) && $hr['kernel_events_24h'][$k] > 0) { $bits[] = $hr['kernel_events_24h'][$k] . ' ' . $word; }
+				}
+				echo $bits
+					? '<div class="mt-2 text-danger small">Kernel, last 24h: ' . $hr_str(implode(', ', $bits)) . '</div>'
+					: '<div class="mt-2 text-muted small">Kernel, last 24h: nothing to report</div>';
+			}
+			echo '<div class="small text-muted mt-1">Security updates last ran ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . '</div>';
+			if (is_array($hr['os'])) {
+				$ru = $hr['os']['release_upgrade'];
+				if ($ru['offered'] !== 'unknown') {
+					$checked = is_int($ru['checked_at']) ? $ru['checked_at'] : null;
+					$stale = ($checked === null || $checked < time() - 7 * 86400);
+					echo '<div class="small ' . ($ru['offered'] !== 'none' ? 'text-info' : 'text-muted') . '">Release upgrade: '
+						. $hr_str($ru['offered'] === 'none' ? 'none offered' : $ru['offered'] . ' offered')
+						. ' <span class="' . ($stale ? 'text-warning' : 'text-muted') . '">(checked ' . $hr_str($hr_when($checked))
+						. ($stale ? '; Ubuntu re-checks only when someone logs in' : '') . ')</span></div>';
+				}
+			}
+			echo '</div></div>';
+		}
+		if ($status_data) {
 		// Service, for a machine this plane reaches by probing it. The DNS boxes
 		// and the mail relay carry no agent and host no site, so what their own
 		// health document says about them is the only account of them there is.
 		if (isset($status_data['status']) || isset($status_data['port_reachable'])) {
-			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div>';
 			echo '<div class="border rounded p-3 h-100">';
 			echo '<div class="text-muted small text-uppercase">Service</div>';
 			if (isset($status_data['port_reachable'])) {
@@ -672,33 +1039,6 @@
 			echo '</div></div>';
 		}
 
-		// PostgreSQL
-		if (!empty($status_data['postgres_status'])) {
-			$pg_class = $status_data['postgres_status'] === 'accepting connections' ? 'success' : 'danger';
-			echo '<div class="col-md-6 col-xl-4">';
-			echo '<div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase">PostgreSQL</div>';
-			echo '<div class="mt-1"><span class="badge bg-' . $pg_class . '">' . htmlspecialchars($status_data['postgres_status']) . '</span></div>';
-			if (!empty($status_data['current_db'])) {
-				echo '<div class="text-muted small mt-2">Current DB: <code>' . htmlspecialchars($status_data['current_db']) . '</code></div>';
-			}
-			echo '</div></div>';
-		}
-
-		// Cron health
-		if (!empty($status_data['cron_last_run'])) {
-			$cron_ts = strtotime($status_data['cron_last_run']);
-			$cron_ok = $cron_ts && (time() - $cron_ts) < 1200;
-			$cron_badge = $cron_ok ? 'success' : 'warning';
-			$cron_label = $cron_ok ? 'Active' : 'Stale';
-			echo '<div class="col-md-6 col-xl-4">';
-			echo '<div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase">Cron</div>';
-			echo '<div class="mt-1"><span class="badge bg-' . $cron_badge . '">' . $cron_label . '</span></div>';
-			echo '<div class="text-muted small mt-2">Last run: ' . htmlspecialchars(LibraryFunctions::time_ago_or_time($status_data['cron_last_run'], 'UTC', $session->get_timezone(), 'M j, g:i A')) . '</div>';
-			echo '</div></div>';
-		}
-
 		// Sealed-secret health. Counts only ride up in the status blob — never a
 		// value. A dead operator credential or a re-mint awaiting acknowledgement
 		// is fixed ON the node (the management node holds none of the node's keys),
@@ -706,7 +1046,7 @@
 		if (isset($status_data['sealed_secrets']) && is_array($status_data['sealed_secrets'])) {
 			$ss = $status_data['sealed_secrets'];
 			$ss_attention = (int)($ss['dead_operator'] ?? 0) + (int)($ss['dead_needs_ack'] ?? 0);
-			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div>';
 			echo '<div class="border rounded p-3 h-100">';
 			echo '<div class="text-muted small text-uppercase">Stored Secrets</div>';
 			if ($ss_attention > 0) {
@@ -733,7 +1073,7 @@
 		if (isset($status_data['plugin_checks']['checks']) && is_array($status_data['plugin_checks']['checks'])) {
 			$pc_failing = JobCommandBuilder::plugin_checks_failing($status_data);
 			$pc_total = count($status_data['plugin_checks']['checks']);
-			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div>';
 			echo '<div class="border rounded p-3 h-100">';
 			echo '<div class="text-muted small text-uppercase">Plugin Checks</div>';
 			if (count($pc_failing)) {
@@ -753,423 +1093,193 @@
 			}
 			$pc_checked = (string)($status_data['plugin_checks']['checked'] ?? '');
 			if ($pc_checked !== '' && strtotime($pc_checked . ' UTC')) {
-				echo '<div class="text-muted small mt-2">Checked on the node: ' . htmlspecialchars(LibraryFunctions::time_ago_or_time(
-					substr($pc_checked, 0, 19), 'UTC', $session->get_timezone(), 'M j, g:i A')) . '</div>';
+				echo '<div class="text-muted small mt-2">Checked on the node ' . htmlspecialchars(LibraryFunctions::time_ago(
+					substr($pc_checked, 0, 19), $session->get_timezone())) . '</div>';
 			}
 			echo '</div></div>';
 		}
-
-		// Joinery version
-		if ($node_version) {
-			$badge = '';
-			$subline = '';
-			if ($version_cmp === -1) {
-				$badge = ' <span class="badge bg-warning ms-1">upgrade available</span>';
-				$subline = 'Management node: ' . htmlspecialchars($cp_version);
-			} elseif ($version_cmp === 1) {
-				$badge = ' <span class="badge bg-danger ms-1">ahead of management node</span>';
-				$subline = 'Management node: ' . htmlspecialchars($cp_version);
-			} elseif ($version_cmp === 0) {
-				$badge = ' <span class="badge bg-success ms-1">up to date</span>';
-			}
-			echo '<div class="col-md-6 col-xl-4">';
-			echo '<div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase">Joinery Version</div>';
-			echo '<div class="fs-5 fw-semibold mt-1">' . htmlspecialchars($node_version) . $badge . '</div>';
-			if ($subline) echo '<div class="text-muted small mt-2">' . $subline . '</div>';
-			echo '</div></div>';
-		}
-
-		// SSL
-		$ssl_tile_state = $node->get('mgn_ssl_state');
-		if ($ssl_tile_state !== null || (is_array($status_data) && array_key_exists('ssl_state', $status_data))) {
-			switch ($ssl_tile_state) {
-				case 'active':
-					$ssl_badge = 'success'; $ssl_label = 'active'; break;
-				case 'pending':
-					$ssl_badge = 'warning'; $ssl_label = 'pending'; break;
-				case 'failed':
-					$ssl_badge = 'danger';  $ssl_label = 'failed';  break;
-				default:
-					$ssl_badge = 'secondary'; $ssl_label = 'not configured';
-			}
-			$ssl_sub = '';
-			if ($ssl_tile_state === 'active') {
-				$ssl_method = $status_data['ssl_detection_method'] ?? null;
-				// Explicit booleans from updated detection code; fall back to inferring from method for legacy data
-				$le_val    = $status_data['ssl_le_cert']    ?? ($ssl_method === 'letsencrypt' ? true : null);
-				$probe_val = $status_data['ssl_https_probe'] ?? ($ssl_method === 'https_probe' ? true : null);
-				$ok   = '<span class="text-success">✓</span>';
-				$fail = '<span class="text-danger">✗</span>';
-				$dash = '<span class="text-muted">—</span>';
-				// When no method confirmed SSL (e.g. edge/CDN like Cloudflare), show — rather
-				// than ✗ — "undetectable by this method" is not the same as "SSL broken"
-				if ($ssl_method === null) {
-					if ($le_val    === false) $le_val    = null;
-					if ($probe_val === false) $probe_val = null;
-				}
-				$le_icon    = $le_val    === true ? $ok : ($le_val    === false ? $fail : $dash);
-				$probe_icon = $probe_val === true ? $ok : ($probe_val === false ? $fail : $dash);
-				$ssl_sub = '<div class="mt-2 small">'
-					. '<div class="d-flex justify-content-between gap-3"><span class="text-muted">Let\'s Encrypt cert</span>' . $le_icon . '</div>'
-					. '<div class="d-flex justify-content-between gap-3 mt-1"><span class="text-muted">HTTPS probe</span>' . $probe_icon . '</div>';
-				if (!empty($status_data['ssl_expiry_ts'])) {
-					$days_left  = (int)(($status_data['ssl_expiry_ts'] - time()) / 86400);
-					$expiry_str = date('M j, Y', $status_data['ssl_expiry_ts']);
-					$ssl_sub .= '<div class="mt-1">' . ($days_left < 30
-						? '<span class="badge bg-warning">Expires ' . htmlspecialchars($expiry_str) . '</span>'
-						: '<span class="text-muted">Expires ' . htmlspecialchars($expiry_str) . '</span>') . '</div>';
-				}
-				$ssl_sub .= '</div>';
-			} elseif ($ssl_tile_state === 'pending') {
-				$ssl_sub = '<span class="text-muted small">Waiting for DNS / certbot</span>';
-			} elseif ($ssl_tile_state === 'failed') {
-				$ssl_sub = '<span class="text-muted small">See SSL Setup below</span>';
-			}
-			echo '<div class="col-md-6 col-xl-4">';
-			echo '<div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase">SSL</div>';
-			echo '<div class="mt-1"><span class="badge bg-' . $ssl_badge . '">' . $ssl_label . '</span></div>';
-			if ($ssl_sub) echo $ssl_sub;
-			echo '</div></div>';
 		}
 
 		echo '</div>'; // end .row
 
-		// Secondary info that doesn't warrant its own tile.
-		if (!empty($status_data['db_list']) && count($status_data['db_list']) > 1) {
-			echo '<div class="text-muted small mt-3"><strong>All databases:</strong> ' . htmlspecialchars(implode(', ', $status_data['db_list'])) . '</div>';
+		// When these figures were read, and the one rule every bar follows.
+		$read_bits = array();
+		if ($last_check) {
+			$read_bits[] = 'status check ' . LibraryFunctions::time_ago($last_check, $session->get_timezone());
 		}
-
+		if ($hr && $host_report_time !== '') {
+			$read_bits[] = 'host report ' . LibraryFunctions::time_ago($host_report_time, $session->get_timezone());
+		}
+		echo '<div class="small text-muted mt-3">Bars are green under 75%, amber from 75% to 90%, red over 90% (a disk under 10% free is red too); '
+			. 'the marks on each bar sit at 75% and 90%.'
+			. ($read_bits ? ' Read from the ' . htmlspecialchars(implode(' and the ', $read_bits)) . '.' : '') . '</div>';
+		if (!empty($status_data['db_list']) && count($status_data['db_list']) > 1) {
+			echo '<div class="text-muted small mt-1"><strong>All databases:</strong> ' . htmlspecialchars(implode(', ', $status_data['db_list'])) . '</div>';
+		}
 		$page->end_box();
 	}
 
-	// ── Host card ──
-	// The machine as the host_report observe word last described it. Shown for
-	// every node that has an agent (the only thing that can answer) and for any
-	// node holding a report. Everything in it came from the node: the intake
-	// capped it (JobResultProcessor::sanitise_host_report) and this renders
-	// every value through htmlspecialchars, so nothing a node says reaches the
-	// page as markup, a link or a command.
-	$host_report = $node->get('mgn_last_host_report');
-	if (is_string($host_report)) { $host_report = json_decode($host_report, true); }
-	$host_report_time = trim((string)$node->get('mgn_last_host_report_time'));
-	if (is_array($host_report) || JobCommandBuilder::has_agent_channel($node)) {
-		$page->begin_box(['title' => 'Host']);
+	// ── Agent ──
+	// How this management node reaches the machine, which is a different
+	// question from whether the machine is well: whether the agent checks in,
+	// what it runs, and what it watches on its own clock (its recipes). Keys and
+	// pairing are managed on the API Keys tab.
+	$agent_key = trim((string)$node->get('mgn_agent_public_key'));
+	$recipes = AgentChannelEndpoint::recipes_of($node);
+	if ($agent_key !== '' || count($recipes) > 0) {
+		$page->begin_box(['title' => 'Agent', 'altlinks' => ['Keys and pairing' => $base_url . '&tab=api_keys']]);
+		echo '<div class="svm-grid">';
 
-		// The recipes the agent runs on its own clock, their mode, and what
-		// each check last said, as it reported them at its last poll. One
-		// line: a person reading the node page can see whether a node acts
-		// and whether its check passes. Every name, mode and verdict was
-		// re-validated on intake (AgentChannelEndpoint::normalised_recipes)
-		// and is escaped again here.
-		$recipes = AgentChannelEndpoint::recipes_of($node);
+		// Checking in
+		$last_poll = $node->get('mgn_agent_last_poll');
+		$quiet_time = $node->get('mgn_agent_quiet_time');
+		$switched_off = $quiet_time && (!$last_poll || $last_poll <= $quiet_time);
+		$age = $last_poll ? time() - strtotime($last_poll . ' UTC') : null;
+		if ($switched_off) {
+			$conn = array('Switched off by its owner', 'secondary');
+		} elseif ($age === null) {
+			$conn = array('Has not checked in yet', 'warning');
+		} elseif ($age < 900) {
+			$conn = array('Connected', 'success');
+		} elseif ($age < 7200) {
+			$conn = array('Late to check in', 'warning');
+		} else {
+			$conn = array('Not checking in', 'danger');
+		}
+		echo '<div><div class="border rounded p-3 h-100">';
+		echo '<div class="text-muted small text-uppercase mb-2">Connection</div>';
+		echo '<div><span class="badge bg-' . $conn[1] . '">' . htmlspecialchars($conn[0]) . '</span></div>';
+		echo '<div class="small text-muted mt-2">Last check-in: ' . ($last_poll
+			? htmlspecialchars(LibraryFunctions::time_ago($last_poll, $session->get_timezone())) : 'never') . '</div>';
+		if ($agent_key !== '') {
+			$raw = base64_decode($agent_key, true);
+			if ($raw !== false) {
+				echo '<div class="small text-muted">Key <code>' . htmlspecialchars(AgentJoinRequest::display_fingerprint(AgentJoinRequest::fingerprint($raw))) . '</code></div>';
+			}
+		}
+		$log_access = (string)$node->get('mgn_agent_log_access');
+		if ($log_access !== '') {
+			echo '<div class="small text-muted">Its owner ' . ($log_access === 'on' ? 'lets' : 'does not let') . ' this management node read its logs.</div>';
+		}
+		echo '</div></div>';
+
+		// Version
+		$av = AgentVocabulary::version($node);
+		$newest = AgentVocabulary::newest();
+		echo '<div><div class="border rounded p-3 h-100">';
+		echo '<div class="text-muted small text-uppercase mb-2">Version</div>';
+		echo '<div class="fs-5 fw-semibold">' . ($av !== '' ? htmlspecialchars($av) : '<span class="text-muted fs-6">not reported</span>');
+		if (AgentVocabulary::below_floor($node)) {
+			echo ' <span class="badge bg-danger">too old: update it</span>';
+		} elseif ($av !== '' && $newest && version_compare($av, $newest, '<')) {
+			echo ' <span class="badge bg-warning">' . htmlspecialchars($newest) . ' available</span>';
+		} elseif ($av !== '' && $newest) {
+			echo ' <span class="badge bg-success">current</span>';
+		}
+		echo '</div>';
+		$trust = (string)$node->get('mgn_script_trust');
+		if ($trust !== '' && $trust !== 'ok') {
+			echo '<div class="mt-2"><span class="badge bg-danger">' . ($trust === 'untrusted_file' ? 'A script on the node does not match its release' : 'Cannot verify its scripts') . '</span></div>';
+			if ($node->get('mgn_script_trust_reason')) {
+				echo '<div class="small text-muted mt-1">' . htmlspecialchars((string)$node->get('mgn_script_trust_reason')) . '</div>';
+			}
+		} elseif ($agent_key !== '') {
+			echo '<div class="small text-muted mt-2">Its scripts verify against their signed release.</div>';
+		}
+		echo '</div></div>';
+
+		// Recipes: what the agent checks and repairs on its own clock.
 		$verdicts = AgentChannelEndpoint::recipe_verdicts_of($node);
+		$recipe_words = array(
+			'agent_supervision'  => 'The agent stays running',
+			'certificate_expiry' => 'Certificates renew in time',
+			'container_health'   => 'Site containers run and answer',
+			'disk_headroom'      => 'The disk keeps free space',
+			'fail2ban'           => 'fail2ban runs and bans',
+			'service_health'     => 'Database, PHP and web server answer',
+		);
+		$mode_words = array('armed' => 'repairs', 'report-only' => 'reports only', 'not-applicable' => 'not here');
+		echo '<div class="svm-span-2"><div class="border rounded p-3 h-100">';
+		echo '<div class="text-muted small text-uppercase mb-2">What it watches</div>';
 		if (count($recipes) === 0) {
-			echo '<div class="mb-2 text-muted">Recipes: none reported. An agent from 1.27.0 checks fail2ban every ten minutes and reports here.</div>';
+			echo '<div class="small text-muted">Nothing reported. An agent from 1.27.0 checks on its own clock and reports here.</div>';
 		} else {
-			$parts = [];
+			echo '<table class="table table-sm mb-0 align-middle"><tbody>';
 			foreach ($recipes as $name => $mode) {
-				$label = htmlspecialchars($mode, ENT_QUOTES, 'UTF-8');
-				if (isset($verdicts[$name])) {
-					$label .= ', check: ' . htmlspecialchars($verdicts[$name], ENT_QUOTES, 'UTF-8');
-				}
-				$parts[] = htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ' (' . $label . ')';
+				$v = $verdicts[$name] ?? '';
+				$vcls = $v === 'pass' ? 'success' : ($v === 'fail' ? 'danger' : 'secondary');
+				$vtext = $v === 'pass' ? 'OK' : ($v === 'fail' ? 'Failing' : ($mode === 'not-applicable' ? 'n/a' : 'not yet'));
+				echo '<tr><td>' . htmlspecialchars($recipe_words[$name] ?? $name) . ' <span class="small text-muted">'
+					. htmlspecialchars($mode_words[$mode] ?? $mode) . '</span></td>'
+					. '<td class="text-end"><span class="badge bg-' . $vcls . '">' . htmlspecialchars($vtext) . '</span></td></tr>';
 			}
-			$caption = 'checked every ten minutes on the node; armed repairs after two failing checks in a row, report-only records what it would repair and changes nothing.';
-			if (in_array('fail', $verdicts, true)) {
-				$caption .= ' A check that fails is repaired on the node\'s own clock; one that keeps failing after three attempts opens a case below.';
-			}
-			if (in_array('not-applicable', $recipes, true)) {
-				$caption .= ' Not-applicable: the recipe\'s subject is out of this agent\'s reach — a container agent cannot see the host (the host\'s own agent watches it), and a machine with no site has no site tree to run the agent installer from.';
-			}
-			echo '<div class="mb-2">Recipes: ' . implode(', ', $parts)
-				. ' <small class="text-muted">— ' . $caption . '</small></div>';
+			echo '</tbody></table>';
+			echo '<div class="small text-muted mt-2">Checked every ten minutes on the node. One that repairs acts after two failing checks in a row; '
+				. 'one that keeps failing after three attempts opens a case.</div>';
 		}
+		echo '</div></div>';
 
-		if (!is_array($host_report)) {
-			echo '<p class="text-muted mb-0">This node has not sent a host report yet.';
-			if (JobCommandBuilder::has_primitive($node, 'host_report')) {
-				echo ' One is queued on the status cadence; Host Report above reads the machine now.';
-			} else {
-				echo ' ' . htmlspecialchars(AgentVocabulary::needs_newer_agent_text($node, ['host_report']));
-			}
-			echo '</p>';
+		echo '</div>';
+		$page->end_box();
+	}
+
+	// ── Security ──
+	// Who is knocking, and how the door is set. A container site's agent sees
+	// neither; its host's node does.
+	if ($hr && !(trim((string)$node->get('mgn_container_name')) !== '' && $hr['fail2ban_jails'] === 'unknown')) {
+		$page->begin_box(['title' => 'Security']);
+		echo '<div class="svm-grid">';
+		echo '<div class="svm-span-2"><div class="border rounded p-3 h-100">';
+		echo '<div class="text-muted small text-uppercase mb-2">SSH</div>';
+		echo '<div>Failed sign-ins, last 24 hours: <strong>' . $hr_str($hr['ssh_auth_failures_24h']) . '</strong></div>';
+		$sshd = $hr['sshd'];
+		$pw = $sshd['password_authentication'];
+		$rl = $sshd['permit_root_login'];
+		echo '<div class="mt-1">Passwords accepted: <span class="badge bg-' . ($pw === 'yes' ? 'warning' : ($pw === 'no' ? 'success' : 'secondary')) . '">' . $hr_str($pw) . '</span></div>';
+		echo '<div class="mt-1">Root may sign in: <span class="badge bg-' . ($rl === 'yes' ? 'warning' : 'secondary') . '">' . $hr_str($rl) . '</span></div>';
+		// The effective settings a lockout turns on (sshd -T, compiled keys
+		// only). Shown only when this node's report carries them.
+		$more = array();
+		if (isset($sshd['pubkey_authentication'])) { $more[] = 'Keys accepted: ' . $sshd['pubkey_authentication']; }
+		if (isset($sshd['kbd_interactive_authentication'])) { $more[] = 'Keyboard-interactive: ' . $sshd['kbd_interactive_authentication']; }
+		if (isset($sshd['max_auth_tries'])) { $more[] = 'Tries per connection: ' . (is_scalar($sshd['max_auth_tries']) ? $sshd['max_auth_tries'] : 'unknown'); }
+		foreach (array('ports' => 'Port', 'allow_users' => 'Allowed users', 'allow_groups' => 'Allowed groups') as $k => $label) {
+			if (!isset($sshd[$k])) { continue; }
+			$v = $sshd[$k];
+			$more[] = $label . ': ' . (is_array($v) ? ($v ? implode(', ', $v) : 'any') : 'unknown');
+		}
+		if ($more) {
+			echo '<div class="small text-muted mt-2">' . htmlspecialchars(implode(' · ', $more)) . '</div>';
+		}
+		echo '</div></div>';
+
+		echo '<div class="svm-span-2"><div class="border rounded p-3 h-100">';
+		echo '<div class="text-muted small text-uppercase mb-2">fail2ban</div>';
+		if ($hr['fail2ban_jails'] === 'unknown') {
+			echo '<div class="text-muted">unknown</div>';
+		} elseif (count($hr['fail2ban_jails']) === 0) {
+			echo '<span class="badge bg-warning">No jails</span>';
 		} else {
-			$hr = JobResultProcessor::sanitise_host_report($host_report);
-			$hr_str = function ($v) { return htmlspecialchars(is_scalar($v) ? (string)$v : 'unknown', ENT_QUOTES, 'UTF-8'); };
-			$hr_state_class = function ($state) {
-				switch ($state) {
-					case 'active':  return 'text-success';
-					case 'failed':  return 'text-danger';
-					default:        return 'text-muted';
-				}
-			};
-			$hr_when = function ($unix) use ($session) {
-				if (!is_int($unix)) { return 'unknown'; }
-				return LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s', $unix), 'UTC', $session->get_timezone(), 'M j, g:i A');
-			};
-
-			echo '<div class="row g-3">';
-
-			// Expected units
-			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
-			echo '<div class="text-uppercase small text-muted">Services</div>';
-			// Running is not answering: host_report 1.5 says whether Apache,
-			// PHP-FPM and PostgreSQL answer, and the node's service_health
-			// recipe restarts one that runs and does not. Restart is the same
-			// word, offered for a service on the node's own list.
-			$answers = is_array($hr['answers'] ?? null) ? $hr['answers'] : null;
-			$can_restart = JobCommandBuilder::has_primitive($node, 'restart_unit');
-			echo '<ul class="list-unstyled mb-0">';
-			foreach ($hr['expected_units'] as $unit => $state) {
-				echo '<li><span class="' . $hr_state_class($state) . '">' . $hr_str($unit) . ': ' . $hr_str($state) . '</span>';
-				if ($answers !== null && isset($answers[$unit])) {
-					$a = $answers[$unit];
-					echo ' <small class="' . ($a === 'no' ? 'text-danger' : 'text-muted') . '">'
-						. ($a === 'yes' ? 'answers' : ($a === 'no' ? 'does not answer' : 'answer unknown')) . '</small>';
-				}
-				if ($can_restart && $state !== 'absent' && array_key_exists($unit, JobCommandBuilder::RESTART_UNIT_UNITS)) {
-					$form_id = 'nodeActionRestartUnit_' . $unit;
-					$confirm = 'Restart ' . JobCommandBuilder::RESTART_UNIT_UNITS[$unit] . ' on this machine now? '
-						. 'Connections it holds are dropped; nothing stored is lost.';
-					echo ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-						. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-							. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
-					echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
-						. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
-						. '<input type="hidden" name="action" value="restart_unit">'
-						. '<input type="hidden" name="unit" value="' . $hr_str($unit) . '">'
-						. SmAdminCsrf::field() . '</form>';
-				}
-				echo '</li>';
-			}
-			echo '</ul>';
-			if ($answers === null) {
-				echo '<small class="text-muted">Whether each service answers: not reported by this node\'s agent.</small>';
-			}
-			// The certificate each of the site's names serves, read on the
-			// machine itself: the node's certificate_expiry recipe renews one
-			// under 14 days.
-			$served = $hr['served_certificates'] ?? null;
-			if (is_array($served) && $served) {
-				echo '<div class="mt-2 small">';
-				foreach ($served as $c) {
-					$thin = $c['days_left'] < 14;
-					echo '<div class="' . ($thin ? 'text-danger' : 'text-muted') . '">' . $hr_str($c['domain'])
-						. ': certificate, ' . $hr_str($c['days_left']) . ' days left</div>';
-				}
-				echo '</div>';
-			}
-			// A Docker host's site containers, each with a Restart.
-			$containers = $hr['containers'] ?? null;
-			if (is_array($containers) && $containers) {
-				$can_restart_c = JobCommandBuilder::has_primitive($node, 'restart_container');
-				echo '<div class="mt-2 small"><div class="text-uppercase text-muted">Site containers</div>';
-				foreach ($containers as $c) {
-					$bad = $c['state'] !== 'running' || $c['answers'] === 'no';
-					echo '<div class="' . ($bad ? 'text-danger' : '') . '">' . $hr_str($c['name']) . ': ' . $hr_str($c['state'])
-						. ($c['answers'] === 'yes' ? ', answers' : ($c['answers'] === 'no' ? ', does not answer' : ''));
-					if ($can_restart_c) {
-						$form_id = 'nodeActionRestartContainer_' . $c['name'];
-						$confirm = 'Restart the container ' . $c['name'] . '? The site is down while it restarts; its data and volumes are kept.';
-						echo ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-								. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
-						echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
-							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
-							. '<input type="hidden" name="action" value="restart_container">'
-							. '<input type="hidden" name="name" value="' . $hr_str($c['name']) . '">'
-							. SmAdminCsrf::field() . '</form>';
-					}
-					echo '</div>';
-				}
-				echo '</div>';
-			}
-			echo '</div></div>';
-
-			// Failed units
-			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
-			echo '<div class="text-uppercase small text-muted">Failed units</div>';
-			if ($hr['failed_units'] === 'unknown') {
-				echo '<div class="text-muted">unknown</div>';
-			} elseif (count($hr['failed_units']) === 0) {
-				echo '<div class="text-success">none</div>';
-			} else {
-				// A failed unit the plane can name and could not ask about was
-				// the whole reason unit_journal exists. The button is offered
-				// for a unit on the compiled list; anything else is named
-				// without one, because the node would refuse it.
-				$can_ask = JobCommandBuilder::has_primitive($node, 'unit_journal')
-					&& JobCommandBuilder::log_access_refusal($node) === null;
-				// Clear needs no log access: it reads nothing.
-				$can_clear = JobCommandBuilder::has_primitive($node, 'reset_failed_unit');
-				echo '<ul class="list-unstyled mb-0 text-danger">';
-				foreach ($hr['failed_units'] as $unit) {
-					echo '<li>' . $hr_str($unit);
-					$bare = preg_replace('/\.service$/', '', (string)$unit);
-					if ($can_ask && array_key_exists($bare, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
-						echo ' <button type="submit" form="nodeActionUnitJournal_' . $hr_str($bare)
-							. '" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-							. ' title="Read this unit\'s state, its exit status and the last 100 lines of its journal, redacted on the node">Why?</button>';
-						echo '<form id="nodeActionUnitJournal_' . $hr_str($bare) . '" method="post" action="'
-							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
-							. '<input type="hidden" name="action" value="unit_journal">'
-							. '<input type="hidden" name="unit" value="' . $hr_str($bare) . '">'
-							. '<input type="hidden" name="lines" value="100">'
-							. SmAdminCsrf::field() . '</form>';
-					}
-					if ($can_clear && array_key_exists($bare, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
-						$form_id = 'nodeActionResetUnit_' . $bare;
-						$confirm = 'Clear the failed record for ' . $bare . '? This clears the record only: it does not start, '
-							. 'stop or fix the unit. If the unit is still broken it fails again the next time it runs, '
-							. 'and the Host card names it again.';
-						echo ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-							. ' title="Clear systemd\'s record that this unit failed"'
-							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-								. json_encode($form_id) . ').submit(); })') . '">Clear</button>';
-						echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
-							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
-							. '<input type="hidden" name="action" value="reset_failed_unit">'
-							. '<input type="hidden" name="unit" value="' . $hr_str($bare) . '">'
-							. SmAdminCsrf::field() . '</form>';
-					}
-					echo '</li>';
-				}
-				echo '</ul>';
-				if (count($hr['failed_units']) >= JobResultProcessor::HOST_REPORT_MAX_LIST) {
-					echo '<small class="text-muted">first ' . (int)JobResultProcessor::HOST_REPORT_MAX_LIST . ' only</small>';
-				}
-			}
-			echo '</div></div>';
-
-			// fail2ban jails
-			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
-			echo '<div class="text-uppercase small text-muted">fail2ban jails</div>';
-			if ($hr['fail2ban_jails'] === 'unknown') {
-				echo '<div class="text-muted">unknown</div>';
-			} elseif (count($hr['fail2ban_jails']) === 0) {
-				echo '<div class="text-warning">no jails</div>';
-			} else {
-				echo '<ul class="list-unstyled mb-0">';
-				foreach ($hr['fail2ban_jails'] as $jail) {
-					echo '<li>' . $hr_str($jail['name']) . ': ' . $hr_str($jail['banned']) . ' banned</li>';
-				}
-				echo '</ul>';
-			}
-			echo '</div></div>';
-
-			// SSH
-			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
-			echo '<div class="text-uppercase small text-muted">SSH</div>';
-			echo '<div>Auth failures, last 24h: <strong>' . $hr_str($hr['ssh_auth_failures_24h']) . '</strong></div>';
-			$pw = $hr['sshd']['password_authentication'];
-			$rl = $hr['sshd']['permit_root_login'];
-			echo '<div class="' . ($pw === 'yes' ? 'text-warning' : '') . '">Password authentication: ' . $hr_str($pw) . '</div>';
-			echo '<div class="' . ($rl === 'yes' ? 'text-warning' : '') . '">Root login: ' . $hr_str($rl) . '</div>';
-			// The effective settings a lockout turns on (sshd -T, compiled keys
-			// only). Shown only when this node's report carries them.
-			$sshd = $hr['sshd'];
-			if (isset($sshd['pubkey_authentication'])) {
-				echo '<div>Public-key authentication: ' . $hr_str($sshd['pubkey_authentication']) . '</div>';
-			}
-			if (isset($sshd['kbd_interactive_authentication'])) {
-				echo '<div>Keyboard-interactive: ' . $hr_str($sshd['kbd_interactive_authentication']) . '</div>';
-			}
-			if (isset($sshd['max_auth_tries'])) {
-				echo '<div>Max auth tries: ' . $hr_str($sshd['max_auth_tries']) . '</div>';
-			}
-			foreach (['ports' => 'Port', 'allow_users' => 'Allowed users', 'allow_groups' => 'Allowed groups'] as $k => $label) {
-				if (!isset($sshd[$k])) { continue; }
-				$v = $sshd[$k];
-				$line = is_array($v) ? ($v ? implode(', ', $v) : 'any') : 'unknown';
-				echo '<div>' . $hr_str($label) . ': ' . htmlspecialchars($line) . '</div>';
-			}
-			echo '</div></div>';
-
-			// Machine
-			echo '<div class="col-md-6 col-xl-4"><div class="border rounded p-3 h-100">';
-			echo '<div class="text-uppercase small text-muted">Machine</div>';
-			if ($hr['reboot_required'] === true) {
-				echo '<div class="text-warning">Reboot required</div>';
-			} elseif ($hr['reboot_required'] === false) {
-				echo '<div>No reboot pending</div>';
-			} else {
-				echo '<div class="text-muted">Reboot required: unknown</div>';
-			}
-			echo '<div>Unattended upgrades last ran: ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . '</div>';
-			// The operating system, and the release upgrade Ubuntu's own daily
-			// check last offered. That check runs only when someone logs in, so
-			// its date is shown with the answer and an old one is said to be old.
-			if (is_array($hr['os'])) {
-				$os = $hr['os'];
-				$os_line = ($os['id'] === 'unknown' && $os['version'] === 'unknown')
-					? 'unknown'
-					: ucfirst($os['id']) . ' ' . $os['version'] . ($os['codename'] !== 'unknown' ? ' (' . $os['codename'] . ')' : '');
-				echo '<div>OS: ' . $hr_str($os_line) . '</div>';
-				$ru = $os['release_upgrade'];
-				if ($ru['offered'] === 'unknown') {
-					echo '<div class="text-muted">Release upgrade: unknown — Ubuntu has no recorded check on this machine</div>';
-				} else {
-					$checked = is_int($ru['checked_at']) ? $ru['checked_at'] : null;
-					$stale = ($checked === null || $checked < time() - 7 * 86400);
-					$answer = ($ru['offered'] === 'none') ? 'none offered' : $ru['offered'] . ' offered';
-					echo '<div class="' . ($ru['offered'] !== 'none' ? 'text-info' : '') . '">Release upgrade: ' . $hr_str($answer)
-						. ' <small class="' . ($stale ? 'text-warning' : 'text-muted') . '">(checked ' . $hr_str($hr_when($checked))
-						. ($stale ? '; Ubuntu re-checks only when someone logs in' : '') . ')</small></div>';
-				}
-			}
-			foreach (['disk' => 'Disk', 'memory' => 'Memory', 'swap' => 'Swap'] as $key => $label) {
-				$used = $hr[$key]['used_bytes']; $total = $hr[$key]['total_bytes'];
-				$line = (is_int($used) && is_int($total) && $total > 0)
-					? JobResultProcessor::format_size($used) . ' of ' . JobResultProcessor::format_size($total)
-					: 'unknown';
-				echo '<div>' . $hr_str($label) . ': ' . $hr_str($line);
-				// Free space is the figure a filling disk is judged by, and it
-				// is the node's own avail rather than total minus used: the
-				// difference is the root reserve, which is exactly the part
-				// that is not there when it matters.
-				if ($key === 'disk' && is_int($hr['disk']['avail_bytes'])) {
-					$thin = is_int($total) && $total > 0 && ($hr['disk']['avail_bytes'] < $total * 0.10);
-					echo ' <span class="' . ($thin ? 'text-warning' : 'text-muted') . '">('
-						. $hr_str(JobResultProcessor::format_size($hr['disk']['avail_bytes'])) . ' free)</span>';
-				}
-				echo '</div>';
-			}
-			if (is_int($hr['disk']['inodes_used_pct'])) {
-				echo '<div class="' . ($hr['disk']['inodes_used_pct'] >= 90 ? 'text-warning' : '')
-					. '">Inodes used: ' . $hr_str($hr['disk']['inodes_used_pct']) . '%</div>';
-			}
-			// The three kernel events, and the reason this card carries them:
-			// a write that failed is explained by one of them, and all three
-			// are counts — nothing from a kernel message is quoted.
-			if (is_array($hr['kernel_events_24h'])) {
-				$ke = $hr['kernel_events_24h'];
-				$any = false;
-				foreach ($ke as $n) { if (is_int($n) && $n > 0) { $any = true; } }
-				if ($any) {
-					$bits = [];
-					foreach (['oom' => 'out of memory', 'enospc' => 'disk full', 'io_error' => 'I/O errors'] as $k => $word) {
-						if (is_int($ke[$k]) && $ke[$k] > 0) { $bits[] = $ke[$k] . ' ' . $word; }
-					}
-					echo '<div class="text-danger">Kernel, last 24h: ' . $hr_str(implode(', ', $bits)) . '</div>';
-				} else {
-					echo '<div class="text-muted">Kernel, last 24h: nothing</div>';
-				}
-			}
-			if (JobCommandBuilder::has_primitive($node, 'disk_usage')) {
-				echo '<div class="mt-2"><button type="submit" form="nodeActionDiskUsage"'
-					. ' class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-					. ' title="The biggest directories in the site tree and the usual machine directories — sizes only">'
-					. 'What is using it?</button></div>';
-			}
-			echo '</div></div>';
-
-			echo '</div>';
-			echo '<small class="text-muted d-block mt-2">Read '
-				. ($host_report_time !== '' ? htmlspecialchars(LibraryFunctions::convert_time($host_report_time, 'UTC', $session->get_timezone(), 'M j, g:i A'), ENT_QUOTES, 'UTF-8') : 'unknown')
-				. ', generated on the node at ' . $hr_str($hr_when($hr['generated_at'])) . '.</small>';
+			$banned = 0;
+			foreach ($hr['fail2ban_jails'] as $jail) { $banned += is_int($jail['banned']) ? $jail['banned'] : 0; }
+			echo '<div><strong>' . (int)$banned . '</strong> address' . ($banned === 1 ? '' : 'es') . ' banned now, in '
+				. count($hr['fail2ban_jails']) . ' jail' . (count($hr['fail2ban_jails']) === 1 ? '' : 's') . '</div>';
+			$parts = array();
+			foreach ($hr['fail2ban_jails'] as $jail) { $parts[] = $jail['name'] . ' ' . (is_scalar($jail['banned']) ? $jail['banned'] : '?'); }
+			echo '<div class="small text-muted mt-2">' . htmlspecialchars(implode(' · ', $parts)) . '</div>';
 		}
+		echo '</div></div>';
+		echo '</div>';
+		$page->end_box();
+	} elseif (!$hr && JobCommandBuilder::has_agent_channel($node)) {
+		$page->begin_box(['title' => 'Security']);
+		echo '<p class="text-muted mb-0">This node has not sent a host report yet.';
+		if (JobCommandBuilder::has_primitive($node, 'host_report')) {
+			echo ' One is queued on the status cadence; Host Report above reads the machine now.';
+		} else {
+			echo ' ' . htmlspecialchars(AgentVocabulary::needs_newer_agent_text($node, ['host_report']));
+		}
+		echo '</p>';
 		$page->end_box();
 	}
 
@@ -1180,6 +1290,7 @@
 	// what they saw. Everything in a case came from the node and is escaped
 	// by the card (IncidentCaseCard); nothing in it is a link.
 	if (JobCommandBuilder::has_agent_channel($node) || count(IncidentCaseCard::cases_for((int)$node->key)) > 0) {
+		echo '<div id="node-cases"></div>';
 		$page->begin_box(['title' => 'Cases']);
 		echo IncidentCaseCard::render_for_node($node, $base_url);
 		$page->end_box();
@@ -1296,7 +1407,7 @@
 		$page->end_box();
 	}
 
-	// ── Connection Info panel (read-only summary) ──
+	// ── Connection Info panel (read-only summary; the address and site are in the header) ──
 	$pageoptions = ['title' => 'Connection Info'];
 	$page->begin_box($pageoptions);
 	echo '<table class="table table-sm mb-0 align-middle">';
@@ -1309,7 +1420,6 @@
 		echo '</tr>';
 	};
 
-	$conn_row('Host', '<code>' . htmlspecialchars($node->get('mgn_host')) . '</code>');
 	$conn_row('SSH', '<code>' . htmlspecialchars($node->get('mgn_ssh_user')) . '@' . htmlspecialchars($node->get('mgn_host')) . ':' . intval($node->get('mgn_ssh_port') ?: 22) . '</code>');
 
 	if ($node->get('mgn_container_name')) {
@@ -1322,11 +1432,6 @@
 	if ($node->get('mgn_web_root')) {
 		$conn_row('Web root', '<code>' . htmlspecialchars($node->get('mgn_web_root')) . '</code>');
 	}
-	if ($node->get('mgn_site_url')) {
-		$site_url = htmlspecialchars($node->get('mgn_site_url'));
-		$conn_row('Site URL', '<a href="' . $site_url . '" target="_blank" rel="noopener">' . $site_url . ' ↗</a>');
-	}
-
 	$target_id = $node->get('mgn_bkt_backup_target_id');
 	if ($target_id) {
 		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
@@ -1422,7 +1527,7 @@
 		echo '<td><a href="/admin/server_manager/job_detail?job_id=' . $oj->key . '">#' . $oj->key . '</a></td>';
 		echo '<td>' . htmlspecialchars(str_replace('_', ' ', $oj->get('mjb_job_type'))) . '</td>';
 		echo '<td><span class="badge bg-' . $oj_sc . '">' . htmlspecialchars($oj->get('mjb_status')) . '</span></td>';
-		echo '<td>' . $oj->get_local('mjb_create_time', 'M j, g:i A') . '</td>';
+		echo '<td>' . htmlspecialchars(LibraryFunctions::time_ago($oj->get('mjb_create_time'), $session->get_timezone())) . '</td>';
 		echo '<td>' . $oj_dur . '</td>';
 		echo '</tr>';
 	}

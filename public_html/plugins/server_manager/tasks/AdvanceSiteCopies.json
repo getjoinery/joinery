@@ -1,0 +1,7 @@
+{
+  "name": "Advance Site Copies",
+  "description": "Moves a site copy along: links a new copy server once its install starts, starts the first copy run when its agent has joined, then queues each step's agent job (host report, export on the source, import, stage, restore, census on both sides) when the one before it finished well, and stops at the first that did not. A run takes minutes to hours; this tick is what carries it between jobs.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {}
+}

@@ -780,14 +780,15 @@ install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME [DOMAIN] [PORT] [OPTI
   --with-test-site       Create a companion test site (bare-metal only)
   --themes               Download stock themes/plugins from upgrade server
   --no-ssl               Skip automatic SSL setup
-  --dormant --copy-of=ID The target of a site copy: bare metal, alone on the machine,
+  --dormant --copy-of=ID --copy-of-key=KEY
+                         The target of a site copy: bare metal, alone on the machine,
                          no certificate attempt, quiet once installed (see below)
   --clone-from=URL       Clone DB + uploads from an existing site (key in JOINERY_CLONE_KEY)
 ```
 
 If no password is given (and no `--password-file`), the installer auto-generates a 24-character password.
 
-`--dormant --copy-of=ID` installs the target of a site copy (`specs/site_copy.md`): the site that will be replaced whole by node `ID`'s backups. It installs as any bare-metal site does, makes no certificate attempt (the source's certificate travels with the copy), and ends in the quiet state `quiet copy` ([Deploy and Upgrade](deploy_and_upgrade.md), *The quiet state*), with the source's node id recorded beside it. It refuses on a machine that hosts any other site or runs Docker containers, because the quiet state quiets the whole machine, and with `--clone-from`, `--with-test-site`, `--docker` or a port.
+`--dormant --copy-of=ID --copy-of-key=KEY` installs the target of a site copy (`specs/site_copy.md`): the site that will be replaced whole by node `ID`'s backups. `KEY` is node `ID`'s agent public key (base64), by which the copy checks every export its source signs. It installs as any bare-metal site does, makes no certificate attempt (the source's certificate travels with the copy), and ends in the quiet state `quiet copy` ([Deploy and Upgrade](deploy_and_upgrade.md), *The quiet state*), with the source's node id and key recorded beside it. The three flags go together. A copy is installed from the source's own release (`utils/latest_release?version=X.Y.Z`), because `vendor/` never travels in a backup; the source's **Copy** tab on its management node shows the whole command. It refuses on a machine that hosts any other site or runs Docker containers, because the quiet state quiets the whole machine, and with `--clone-from`, `--with-test-site`, `--docker` or a port.
 
 ### Supporting scripts
 

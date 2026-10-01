@@ -61,6 +61,8 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.5 - install mode copy (specs/site_copy.md WP8): the node row records its source and stays in state copy
+ *               after a finished install; no admin password, no fleet seeding, no certificate wait
  * @version 2.4 - a test purchase's instance label and node name start with test_ (CustomerCloudProvision::external_name_prefix)
  * @version 2.3 - the instance's IPv6 is recorded at boot; join_approval_check accepts either address, takes a null node for the
  *                dashboard's host-join adoption, and machine_node_ids sees host records at either address
@@ -262,7 +264,7 @@ class ProvisionCustomerCloud {
 	 * failing the provision when the source cannot be armed.
 	 */
 	private function arm_clone_source($provision): bool {
-		$source = $this->clone_source($provision);
+		$source = $this->source_node($provision);
 		if (!$source) {
 			$this->alert_and_fail($provision, 'The clone source node no longer exists. No instance was created.');
 			return false;
@@ -329,8 +331,8 @@ class ProvisionCustomerCloud {
 		return $job && (int)($this->job_params($job)['provision_id'] ?? 0) === (int)$provision->key;
 	}
 
-	/** The source node of a from_backup provision, or null. */
-	private function clone_source($provision) {
+	/** The node a from_backup or copy provision names in cvp_source_node_id, or null. */
+	private function source_node($provision) {
 		$id = (int)$provision->get('cvp_source_node_id');
 		if (!$id) return null;
 		$source = new ManagedNode($id, TRUE);
@@ -412,7 +414,7 @@ class ProvisionCustomerCloud {
 		// from the source the moment it runs.
 		$clone = null;
 		if ($install_mode === 'from_backup') {
-			$source = $this->clone_source($provision);
+			$source = $this->source_node($provision);
 			if (!$source) {
 				$this->alert_and_fail($provision, 'The clone source node no longer exists.');
 				return 1;
@@ -431,6 +433,23 @@ class ProvisionCustomerCloud {
 				return 1;
 			}
 			$clone = ['from' => rtrim((string)$source->get('mgn_site_url'), '/'), 'key' => $opened['value']];
+		}
+
+		// A dormant copy installs at its source's release, recording the
+		// source's node id and agent key (specs/site_copy.md WP8).
+		$copy_source = null;
+		if ($install_mode === 'copy') {
+			$copy_source = $this->source_node($provision);
+			if (!$copy_source || $copy_source->get('mgn_delete_time')) {
+				$this->alert_and_fail($provision, 'The node this copy is of no longer exists. The instance is left in place for manual review.');
+				return 1;
+			}
+			$source_key = trim((string)$copy_source->get('mgn_agent_public_key'));
+			if (!preg_match('#^[A-Za-z0-9+/]{43}=$#', $source_key)) {
+				$this->alert_and_fail($provision, "The copy's source '{$copy_source->get('mgn_slug')}' has no agent key on record, "
+					. 'and a copy checks every export by it. The instance is left in place for manual review.');
+				return 1;
+			}
 		}
 
 		// Same duplicate-slug rule as shared-host fulfillment: an existing
@@ -453,6 +472,10 @@ class ProvisionCustomerCloud {
 			$node->set('mgn_name', $provision->external_name_prefix() . $domain);
 			$node->set('mgn_slug', $slug);
 		}
+		if ($copy_source) {
+			$node->set('mgn_name', $copy_source->get('mgn_name') . ' (copy)');
+			$node->set('mgn_copy_of_node_id', (int)$copy_source->key);
+		}
 
 		$node->set('mgn_host',          $instance['ip']);
 		$node->set('mgn_ssh_user',      'root');
@@ -470,7 +493,8 @@ class ProvisionCustomerCloud {
 		} else {
 			$node->set('mgn_web_root',  "/var/www/html/{$sitename}/public_html");
 			$node->set('mgn_site_url',  'https://' . $domain);
-			$node->set('mgn_ssl_state', 'pending');
+			// A copy's certificate is its source's, and arrives with the export.
+			$node->set('mgn_ssl_state', $copy_source ? null : 'pending');
 			if ($docker_mode === 'docker') {
 				$node->set('mgn_port', $port);
 			}
@@ -506,7 +530,7 @@ class ProvisionCustomerCloud {
 		// password that opens nothing.
 		$admin_email = trim((string)$provision->get('cvp_buyer_email'));
 		$wants_admin_password = ($admin_email !== '' && !$is_bare
-			&& $install_mode !== 'from_backup'
+			&& $install_mode !== 'from_backup' && $install_mode !== 'copy'
 			&& $provision->admin_password_state() !== 'revealed');
 		if ($wants_admin_password && $provision->admin_password_state() === 'none') {
 			$admin_pass = self::mint_admin_password();
@@ -526,6 +550,11 @@ class ProvisionCustomerCloud {
 			// JobCommandBuilder::build_install_node.
 			'admin_password_stdin' => $wants_admin_password,
 		];
+		if ($copy_source) {
+			$job_params['copy_of']     = (int)$copy_source->key;
+			$job_params['copy_of_key'] = trim((string)$copy_source->get('mgn_agent_public_key'));
+			$job_params['release']     = (string)$provision->get('cvp_release');
+		}
 		if ($clone !== null) {
 			$job_params['source_node_id'] = (int)$provision->get('cvp_source_node_id');
 			$job_params['clone_from']     = $clone['from'];
@@ -585,13 +614,26 @@ class ProvisionCustomerCloud {
 
 		$node = new ManagedNode($provision->get('cvp_mgn_managed_node_id'), TRUE);
 
-		if ($node->get('mgn_install_state') === null) {
+		if (self::installed($provision, $node)) {
 			$this->complete($provision, $node);
 		} else {
 			$this->alert_and_fail($provision,
 				"Install job #{$job->key} finished '{$status}' with install_state '{$node->get('mgn_install_state')}' — see the job detail page.");
 		}
 		return 1;
+	}
+
+	/**
+	 * Whether the install finished: the node's install state is what a
+	 * finished install leaves, which is none for a site and `copy` for a
+	 * dormant copy.
+	 */
+	private static function installed($provision, $node): bool {
+		$state = $node->get('mgn_install_state');
+		if (($provision->get('cvp_install_mode') ?: 'fresh') === 'copy') {
+			return $state === 'copy';
+		}
+		return $state === null;
 	}
 
 	/**
@@ -619,7 +661,7 @@ class ProvisionCustomerCloud {
 			return 0; // failed before a node existed — nothing to recover from
 		}
 		$node = new ManagedNode($node_id, TRUE);
-		if (!$node->key || $node->get('mgn_install_state') !== null) {
+		if (!$node->key || !self::installed($provision, $node)) {
 			return 0; // node gone or still broken — stay failed, no re-alert
 		}
 
@@ -682,7 +724,7 @@ class ProvisionCustomerCloud {
 			return;
 		}
 		$provision->set('cvp_clone_key_sealed', null);
-		$source = $this->clone_source($provision);
+		$source = $this->source_node($provision);
 		if (!$source) {
 			return;
 		}
@@ -718,7 +760,8 @@ class ProvisionCustomerCloud {
 	// instances have no site to seed.
 
 	private function seeding_applies($provision): bool {
-		if (($provision->get('cvp_install_mode') ?: 'fresh') === 'bare') {
+		// A bare box has nothing to seed; a copy takes everything from its source.
+		if (in_array($provision->get('cvp_install_mode') ?: 'fresh', array('bare', 'copy'), true)) {
 			return false;
 		}
 		$seeder = PathHelper::getIncludePath('plugins/mailbox/includes/FleetProvisionSeeding.php');
