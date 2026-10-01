@@ -9,10 +9,33 @@ require_once(PathHelper::getIncludePath('includes/calendar/CalendarItem.php'));
 
 class CalendarEntryException extends SystemBaseException {}
 
+/**
+ * A native calendar entry (docs/calendar.md).
+ *
+ * PROTECTION LEVEL (docs/calendar.md § Protection level). A member's calendar
+ * is Standard or Private (CalendarPreference::cpr_protection_level). On a
+ * Private calendar the four CONTENT columns — title, location, link, notes —
+ * seal to the member's vault through the generic Sealed Vault model hook
+ * ($sealed_fields + the four convention columns; docs/sealed_vault.md). Every
+ * other column stays plaintext on purpose: the times, zone, all-day and
+ * busy/free flags describe the schedule rather than its content (the busy
+ * projection and the booking pages read them with no window), and
+ * cal_source / cal_source_event_id are the opaque dedup key an upsert must
+ * find in plaintext. shouldSeal() decides per row at write time; creating a
+ * sealed entry needs only the owner's public key, so an .ics import, the
+ * quick-create popover, the API save and an approved AI proposal all work
+ * with the window closed. Editing sealed content needs the window.
+ *
+ * @version 1.1 - sealed content columns on a Private calendar; cal_level_attempt_time
+ *   lets a level change pass by a row that just failed to convert
+ */
 class CalendarEntry extends SystemBase {
 	public static $prefix = 'cal';
 	public static $tablename = 'cal_entries';
 	public static $pkey_column = 'cal_entry_id';
+
+	/** The content a Private calendar seals; everything else describes the schedule. */
+	public static $sealed_fields = array('cal_title', 'cal_location', 'cal_link', 'cal_notes');
 
 	// AI model surface (joinery_ai) — plugins/joinery_ai/docs/overview.md
 	public static $ai_readable = true;
@@ -38,7 +61,9 @@ class CalendarEntry extends SystemBase {
 		'cal_timezone' => array('type'=>'varchar(64)', 'is_nullable'=>true),
 		'cal_tzdata_version' => array('type'=>'varchar(10)', 'is_nullable'=>true),
 		'cal_all_day' => array('type'=>'bool', 'default'=>false),
-		'cal_title' => array('type'=>'varchar(255)'),
+		// text, not varchar: a sealed value (base64 + AEAD overhead) outgrows
+		// any varchar cap. The plaintext caps live in the setters.
+		'cal_title' => array('type'=>'text'),
 		'cal_blocks_availability' => array('type'=>'bool', 'default'=>true),
 		// Firmness axis (specs/joinery_ai_calendar_ai_surface.md), distinct from
 		// busy/free (cal_blocks_availability). tentative | confirmed | cancelled.
@@ -53,9 +78,19 @@ class CalendarEntry extends SystemBase {
 		// Details (specs/calendar_entry_details.md): where it is, the one
 		// link that gets the owner in (join/ticket/confirmation; http(s)
 		// only), and plain-text notes. Written only via set_detail_fields().
-		'cal_location' => array('type'=>'varchar(255)', 'is_nullable'=>true),
+		'cal_location' => array('type'=>'text',         'is_nullable'=>true),
 		'cal_link'     => array('type'=>'text',         'is_nullable'=>true),
 		'cal_notes'    => array('type'=>'text',         'is_nullable'=>true),
+		// Sealed Vault convention columns (docs/sealed_vault.md): a Private
+		// calendar's entries hold ciphertext in the four content columns above,
+		// under a per-row DEK sealed to the owner's vault public key.
+		'cal_content_sealed'       => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'cal_sealed_key'           => array('type'=>'text', 'is_nullable'=>true),
+		'cal_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
+		'cal_key_generation'       => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
+		// A level change stamps a row whose conversion failed, so the next pass
+		// takes the rows behind it for a while (CalendarLevel::RETRY_SECONDS).
+		'cal_level_attempt_time'   => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'cal_visibility' => array('type'=>'varchar(16)', 'default'=>'details'),
 		'cal_type' => array('type'=>'varchar(16)', 'default'=>'personal'),
 		'cal_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -120,6 +155,59 @@ class CalendarEntry extends SystemBase {
 	/** The CalendarSubject this entry belongs to. */
 	function subject() {
 		return new CalendarSubject($this->get('cal_subject_type'), $this->get('cal_subject_id'));
+	}
+
+	/**
+	 * Per-row sealing policy: a row seals when its subject is a member whose
+	 * calendar is Private and who holds a vault (CalendarLevel::sealsFor()).
+	 * Reserved subject types have no calendar of their own and stay Standard.
+	 */
+	protected static function shouldSeal(array $row): bool {
+		if (($row['cal_subject_type'] ?? '') !== CalendarSubject::TYPE_USER) {
+			return false;
+		}
+		return CalendarLevel::sealsFor((int)($row['cal_subject_id'] ?? 0));
+	}
+
+	/** Whose vault: the owner recorded at seal time, else the user subject. */
+	protected static function sealedOwnerUserIdFor(array $row): ?int {
+		$owner = parent::sealedOwnerUserIdFor($row);
+		if ($owner !== null) {
+			return $owner;
+		}
+		if (($row['cal_subject_type'] ?? '') !== CalendarSubject::TYPE_USER) {
+			return null;
+		}
+		$id = (int)($row['cal_subject_id'] ?? 0);
+		return $id > 0 ? $id : null;
+	}
+
+	/**
+	 * The entry's content as a reader may show it: title, location, link and
+	 * notes, or — when the owner's window is closed — `locked` true with the
+	 * placeholder title and nothing else. A closed window is a state, never an
+	 * error, and this is the one place the four reads are wrapped.
+	 *
+	 * @return array{title:?string, location:?string, link:?string, notes:?string, locked:bool}
+	 */
+	public function content(): array {
+		try {
+			return array(
+				'title'    => $this->get('cal_title'),
+				'location' => $this->get('cal_location'),
+				'link'     => $this->get('cal_link'),
+				'notes'    => $this->get('cal_notes'),
+				'locked'   => false,
+			);
+		} catch (VaultLockedException $e) {
+			return array(
+				'title'    => CalendarItem::LOCKED_TITLE,
+				'location' => null,
+				'link'     => null,
+				'notes'    => null,
+				'locked'   => true,
+			);
+		}
 	}
 
 	/**
@@ -463,6 +551,11 @@ class CalendarEntry extends SystemBase {
 		$utc_tz   = new DateTimeZone('UTC');
 		$all_day  = (bool)$this->get('cal_all_day');
 		$parent_id = $this->key;
+		// Content is read once for the series, and only where it may be shown;
+		// a closed window makes every occurrence a locked item.
+		$details = ($visibility === CalendarItem::VIS_DETAILS);
+		$content = $details ? $this->content()
+			: array('title' => null, 'location' => null, 'link' => null, 'notes' => null, 'locked' => false);
 
 		foreach ($dates as $date) {
 			if (isset($exceptions[$date])) {
@@ -499,12 +592,15 @@ class CalendarEntry extends SystemBase {
 				'end_utc'             => $inst_end_utc,
 				'all_day'             => $all_day,
 				'type'                => $this->get('cal_type') ?: CalendarItem::TYPE_PERSONAL,
-				'title'               => $visibility === CalendarItem::VIS_DETAILS ? ($this->get('cal_title') ?: 'Busy') : null,
-				'url'                 => $visibility === CalendarItem::VIS_DETAILS
+				'title'               => $details ? ($content['title'] ?: 'Busy') : null,
+				// A locked occurrence keeps its edit coordinates (a tap offers
+				// the unlock) but no url: the url carries nothing the title does not.
+				'url'                 => ($details && !$content['locked'])
 					? '/profile/calendar/entry/' . $parent_id . '/occurrence/' . $date
 					: null,
-				'location'            => $visibility === CalendarItem::VIS_DETAILS ? $this->get('cal_location') : null,
-				'link'                => $visibility === CalendarItem::VIS_DETAILS ? $this->get('cal_link') : null,
+				'location'            => $details ? $content['location'] : null,
+				'link'                => $details ? $content['link'] : null,
+				'locked'              => $content['locked'],
 				'blocks_availability' => (bool)$this->get('cal_blocks_availability'),
 				'status'              => (string)($this->get('cal_status') ?: 'confirmed'),
 				'visibility'          => $visibility,

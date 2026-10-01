@@ -119,12 +119,19 @@ if (!function_exists('joai_pin_svg')) {
                                 <option value="<?php echo htmlspecialchars((string)$mid, ENT_QUOTES, 'UTF-8'); ?>"
                                     data-private="<?php echo !empty($model_privacy[$mid]) ? '1' : '0'; ?>"
                                     data-local="<?php echo ChatLevel::isLocalModel((string)$mid) ? '1' : '0'; ?>"
+                                    data-trust="<?php echo htmlspecialchars((string)($model_trust[$mid] ?? 'cloud'), ENT_QUOTES, 'UTF-8'); ?>"
                                     <?php echo $mid === $active_model ? 'selected' : ''; ?>>
                                     <?php echo htmlspecialchars((string)$mlabel, ENT_QUOTES, 'UTF-8'); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
                     </label>
+                    <p class="joai-chat-consent-note" id="joai-consent-note" hidden
+                       style="margin:4px 0 0;font-size:12px;color:#6b5200;">
+                        Private content stays <?php echo htmlspecialchars(PrivateContentConsent::where($private_ai_consent ?? 'local'), ENT_QUOTES, 'UTF-8'); ?>,
+                        so models elsewhere are greyed out for this chat. Change that under
+                        <a href="/profile/security#private-ai-consent-block">Security › Encrypted Vault › Private content and AI</a>.
+                    </p>
 
                     <?php
                     // Privacy level. Standard is always offered; Private needs a
@@ -684,16 +691,37 @@ if (!function_exists('joai_pin_svg')) {
         return !!(levelSelect && levelSelect.value === 'private'
             && localOnlyToggle && localOnlyToggle.checked);
     }
+    // Where this member's private content may be read by AI
+    // (PrivateContentConsent): a chat holding private content — Private, or
+    // with a sealed-derived transcript — may only use models within it. The
+    // same comparison chat_send and the resolver make, shown before it bites.
+    var CONSENT_RANK = { local: 0, trusted: 1, cloud: 2 };
+    var JOAI_CONSENT = <?php echo json_encode(PrivateContentConsent::normalize($private_ai_consent ?? 'local')); ?>;
+    var JOAI_EGRESS_RESTRICTED = <?php echo !empty($egress_restricted) ? 'true' : 'false'; ?>;
+    var consentNote = document.getElementById('joai-consent-note');
+    function consentGateInEffect() {
+        return JOAI_EGRESS_RESTRICTED || !!(levelSelect && levelSelect.value === 'private');
+    }
+    function consentAllows(opt) {
+        var trust = (opt.getAttribute('data-trust') || 'cloud').toLowerCase();
+        var rank = CONSENT_RANK.hasOwnProperty(trust) ? CONSENT_RANK[trust] : 2;
+        return rank <= CONSENT_RANK[JOAI_CONSENT];
+    }
     function applyLocalOnlyModelGate() {
         if (localOnlyWrap && levelSelect) localOnlyWrap.hidden = levelSelect.value !== 'private';
         if (!modelSelect) { updateSettingsSummary(); return; }
         var localOnly = localOnlyInEffect();
+        var gated = consentGateInEffect();
+        var anyGreyed = false;
         var firstLocal = null;
         Array.prototype.forEach.call(modelSelect.options, function (opt) {
             var isLocal = opt.getAttribute('data-local') === '1';
-            opt.disabled = localOnly && !isLocal;
+            var outsideConsent = gated && !consentAllows(opt);
+            opt.disabled = (localOnly && !isLocal) || outsideConsent;
+            if (outsideConsent) anyGreyed = true;
             if (isLocal && firstLocal === null) firstLocal = opt.value;
         });
+        if (consentNote) consentNote.hidden = !anyGreyed;
         if (localOnly && modelSelect.selectedOptions[0]
                 && modelSelect.selectedOptions[0].getAttribute('data-local') !== '1'
                 && firstLocal !== null) {

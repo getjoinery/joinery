@@ -15,9 +15,24 @@ and changing a level follows one sequence wherever it happens.
 
 `ProtectionLevel::ORDER` is the ladder, weakest first; position is rank. A
 service shows only the rungs it implements: mail offers all three, Drive offers
-all three but changes only Standard ↔ Private on the server, chat offers
-Standard and Private. Hardening one of a service's doors is an **add-on**, a
-flag stored beside the level, never a rung (see the class docblock).
+all three but changes only Standard ↔ Private on the server, chat and the
+calendar offer Standard and Private. Hardening one of a service's doors is an
+**add-on**, a flag stored beside the level, never a rung (see the class
+docblock). Mail contacts have no level of their own: a contact row takes the
+level of the mailbox it belongs to, and a mailbox's level change converges its
+contacts with its mail (the mailbox plugin overview § Contacts).
+
+## Where Private content may be read by AI
+
+Private content is readable by AI inside its owner's unlock window, and the
+owner decides how far it may travel to be read: `PrivateContentConsent`
+(`includes/PrivateContentConsent.php`, `usr_private_ai_consent`) is one
+member-level answer — `local` (default) | `trusted` | `cloud` — over every
+Private chat and everything a Private chat opens (Drive, calendar, mail). A
+chat holding Private content may not run on a model outside it: the send is
+refused with the way out stated, and the model resolver's floor follows the
+setting (the joinery_ai overview § Private content and cloud models). Mail's
+per-domain consent governs pipeline recipes over mail.
 
 ## Changing a level
 
@@ -102,9 +117,11 @@ mailbox to its device key — implements `ProtectionLevelConvergence` alone.
 | Mail mailbox (IMAP) | `MailboxAliasLevel` (same file) | same |
 | Mail Fortress moves | `MailboxFortressRaise`, `MailboxFortressSettle` (`MailboxFortressLevel.php`) | vault deferred work |
 | AI chat | `ChatConversationLevel` (`plugins/joinery_ai/includes/ChatConversationLevel.php`) | `joinery_ai/chat_level_batch`; deferred work `ai_chat_level` |
+| Personal calendar | `CalendarLevel` (`includes/calendar/CalendarLevel.php`) | `calendar_level_batch`; deferred work `calendar_level` |
 
 Tests: `tests/vault/protection_level_change_test.php` pins each rule against a
 fake scope; `tests/functional/drive/level_change_test.php`,
-`plugins/mailbox/tests/domain_level_change_test.php` and
-`plugins/joinery_ai/tests/chat_level_change_test.php` drive each consumer end
+`plugins/mailbox/tests/domain_level_change_test.php`,
+`plugins/joinery_ai/tests/chat_level_change_test.php` and
+`tests/functional/calendar/level_change_test.php` drive each consumer end
 to end.

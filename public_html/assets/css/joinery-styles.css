@@ -1892,6 +1892,19 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-ui .calgrid-chip.is-past { background: var(--jy-color-surface-alt); color: var(--jy-color-text-muted); border-left-color: var(--chip-color); }
 .jy-ui .calgrid-chip.is-past:hover { filter: none; background: var(--jy-color-surface); }
 .jy-ui .calgrid-chip.is-past .calgrid-chip-time { opacity: .7; }
+/* A locked item (a Private calendar's entry, vault window closed): the time is
+   real, the title is a placeholder, and the chip wears a lock so the reader
+   knows an unlock will fill it in. */
+.jy-ui .calgrid-chip.is-locked { background: var(--jy-color-surface-alt); color: var(--jy-color-text-muted); border-left-color: var(--chip-color); font-style: italic; }
+.jy-ui .calgrid-chip.is-locked::before { content: "\1F512\00A0"; font-style: normal; font-size: .85em; }
+.jy-ui .calgrid-chip.is-locked:hover { filter: none; background: var(--jy-color-surface); }
+/* The calendar's protection-level chip in the page header, beside Actions. */
+.jy-ui.cal-level-chip, .jy-ui .cal-level-chip { display: inline-flex; align-items: center; margin-right: .5rem; padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--jy-color-border); background: var(--jy-color-surface-alt); color: var(--jy-color-text-muted); font-size: .8rem; font-weight: 600; text-decoration: none; vertical-align: middle; }
+.jy-ui.cal-level-chip.is-private, .jy-ui .cal-level-chip.is-private { border-color: var(--jy-color-primary); color: var(--jy-color-primary); background: var(--jy-color-bg); }
+.jy-ui.cal-level-chip:hover, .jy-ui .cal-level-chip:hover { text-decoration: none; filter: brightness(.96); }
+.jy-ui .cal-popup-locked { border-top: 1px solid var(--jy-color-border); padding-top: .5rem; margin-top: .3rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.jy-ui .cal-popup-locked p { margin: 0; color: var(--jy-color-text-muted); }
+.jy-ui .cal-locked-note { color: var(--jy-color-text-muted); }
 .jy-ui .calgrid-week-day { border: 1px solid var(--cg-border); border-bottom: none; padding: .5rem .6rem; display: flex; gap: .8rem; background: var(--jy-color-bg); }
 .jy-ui .calgrid-week-day:first-of-type { border-radius: 8px 8px 0 0; }
 .jy-ui .calgrid-week-day:last-of-type { border-bottom: 1px solid var(--cg-border); border-radius: 0 0 8px 8px; }

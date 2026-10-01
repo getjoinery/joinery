@@ -30,6 +30,8 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.9 - the raise and lowering receipts name the contact rows still to converge
+ *   (MailboxContactConvergence::backlogCount), which move in each adding user's window
  * @version 2.8 - the three receipts share mailbox_receipt_open/_row/_dot
  * @version 2.7 - the seal and unseal batches are ProtectionLevelChange::convergeBatch() passes (MailboxProtectionLevel)
  * @version 2.6 - the checklist's fixes are buttons for one form outside it (mailbox_protection_fix_form());
@@ -924,6 +926,7 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 	$html .= mailbox_receipt_row($seal_dot, $seal_fact, ' id="receipt-seal-row"', ' id="receipt-seal-text" data-ceremony-text', true);
 	$html .= mailbox_receipt_row('pass', 'New mail seals on arrival');
 	$html .= mailbox_receipt_row('pass', htmlspecialchars($unlock_fact));
+	$html .= mailbox_contacts_receipt_row(intval($domain->key), $alias_scope_id, 'encrypted');
 	$html .= '</ul>';
 	$html .= '<div style="margin-top:.75rem;"><a id="receipt-action" class="btn btn-primary'
 		. ($backlog > 0 ? ' d-none' : '') . '"' . ($backlog > 0 ? ' data-ceremony-when-done hidden' : '')
@@ -943,6 +946,22 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 	}
 	$html .= '</div>';
 	return $html;
+}
+
+/**
+ * The receipt's contacts fact: contact rows on the scope not yet at its new
+ * posture, which converge in each adding user's own window as the vault's
+ * deferred work (MailboxContactConvergence), or '' when there are none.
+ * $verb is what the rows are waiting to be: 'encrypted' on a raise, 'opened'
+ * on a lowering.
+ */
+function mailbox_contacts_receipt_row(int $domain_id, int $alias_scope_id, string $verb): string {
+	$n = MailboxContactConvergence::backlogCount($domain_id, $alias_scope_id);
+	if ($n <= 0) {
+		return '';
+	}
+	return mailbox_receipt_row('info', $n . ' contact' . ($n === 1 ? '' : 's') . ' will be ' . $verb
+		. ' when the people who added them next unlock', ' id="receipt-contacts-row"', ' id="receipt-contacts-text"');
 }
 
 /**
@@ -1020,6 +1039,7 @@ function mailbox_lowering_receipt_render(InboundEmailDomain $domain, array $stat
 		$html .= mailbox_receipt_row('info', $others . ' message' . ($others === 1 ? '' : 's')
 			. ' stay sealed until their readers next unlock', ' id="lowering-others-row"', ' id="lowering-others-text"');
 	}
+	$html .= mailbox_contacts_receipt_row(intval($domain->key), $alias_scope_id, 'opened');
 	$html .= '</ul>';
 	$html .= '<div style="margin-top:.75rem;"><a id="lowering-action" class="btn btn-primary'
 		. (($own > 0 && $window_open) ? ' d-none' : '') . '" href="/plugins/mailbox/admin/admin_mailbox_reader">'

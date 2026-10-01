@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.25 - registers the mailbox_contact_level deferred-work consumer (MailboxContactConvergence)
  * @version 1.24 - registers the mailbox_spam_learn deferred-work consumer (SpamLearning)
  * @version 1.23 - the mail rotation re-makes the relay pins (mailbox-reseal.js)
  * @version 1.22 - a `mail` rotation does not commit while the relay may still seal to
@@ -440,6 +441,22 @@ VaultDeferredWork::register(
 	},
 	function (int $user_id, VaultKey $key, float $deadline): int {
 		return MailboxFortressLevel::drainSettle($user_id, $key, $deadline);
+	}
+);
+
+// A contact row takes its mailbox's level, and a mailbox's level change leaves
+// its contact rows to converge — in each adding user's window, both ways,
+// because the blind index is keyed only on a sealing mailbox and moves with
+// the content (MailboxContactConvergence). This is the one driver: the
+// editor's receipt converges mail, and names the contacts still to follow.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxProtectionLevel.php'));
+VaultDeferredWork::register(
+	MailboxContactConvergence::DEFERRED_WORK_ID,
+	function (int $user_id): bool {
+		return MailboxContactConvergence::hasWork($user_id);
+	},
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return MailboxContactConvergence::drain($user_id, $deadline);
 	}
 );
 

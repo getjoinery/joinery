@@ -1,7 +1,10 @@
 # Platform Protection Levels — one three-rung vocabulary for every service
 
 **Status: DRAFT 2026-08-02, reshaped 2026-09-23 — doctrine + gap matrix; the
-matrix below is the work list. Companion spec:
+matrix below is the work list. 2026-10-01: every item is built (6 per
+`specs/implemented/calendar_contacts_private.md`, 8 per
+`specs/implemented/private_content_cloud_floor.md`; 7 schedules nothing). The doctrine
+lives on in `docs/protection_levels.md`. Companion spec:
 `specs/implemented/sealed_content_egress.md` (the egress choke point is what
 makes the Private rung meaningful platform-wide).**
 
@@ -239,14 +242,14 @@ seals to is a protection choice — the add-on — and no level depends on it.
 |---|---|---|---|
 | Dial | none; always zero-knowledge client custody | none — the matrix records it as **Fortress-only, no picker**. Offering weaker levels for credentials is a footgun, not flexibility | no-op (document) |
 
-### Calendar — gains a two-card dial (Standard / Private)
+### Calendar — two-card dial (Standard / Private), BUILT 2026-10-01
 
 | Facet | Current | Target | Gap |
 |---|---|---|---|
-| Dial | none; plaintext (`cal_entries`) | per **calendar** (the member's personal calendar), two cards: Standard / Private. No add-ons (calendar has no ingress/egress doors to guard) and no Fortress (client custody would blackout AI scheduling for a promise nobody has asked calendar to make) | **fill-in** |
-| Private | — | entry titles/descriptions/locations sealed at rest (Layer 0 columns), opened in-window; times and busy/free stay plaintext (they describe the schedule, not its content — same counts-survive rule as run purging) | fill-in |
-| Reminders | full-content from cron | Private entries send **generic** reminders ("You have an appointment at 2pm") — cron holds no window; the relay-sealed-mail generic-push pattern | fill-in |
-| ICS feeds | include everything | Private entries **excluded** from feeds (an ICS URL is an unauthenticated pull with no window); stated on the card | fill-in |
+| Dial | per **calendar** (`cpr_protection_level`), two cards: Standard / Private, shared picker (`SERVICE_CALENDAR`) on calendar settings and the wizard's Calendar step; chip on the calendar page. No add-ons (calendar has no ingress/egress doors to guard) and no Fortress (client custody would blackout AI scheduling for a promise nobody has asked calendar to make) | unchanged | **built** |
+| Private | title / location / link / notes sealed at rest (Layer 0 columns on `cal_entries`), opened in-window; times and busy/free stay plaintext (they describe the schedule, not its content — same counts-survive rule as run purging). `CalendarLevel` scope, `calendar_level_change` / `calendar_level_batch`, deferred work `calendar_level`, core consumer `calendar_sealed` | unchanged | built |
+| Reminders | a sealed entry reminds with its time only and lists in a summary as "Private entry" — cron holds no window; the relay-sealed-mail generic-push pattern (`CalendarEmailEngine::reminderVars()`) | unchanged | built |
+| ICS feeds | none exist: the calendar has `.ics` import only, no feed URL and no CalDAV | a feed, if ever built, excludes Private entries (an ICS URL is an unauthenticated pull with no window) | no-op (document) |
 | Shared/group events | plaintext | stay Standard — multi-reader sealing is the messaging problem, out of scope | no-op (document) |
 | Rationale | | Hand-typed entries ("appointment with oncologist") are exactly what the demand-driven rule never protects — it only covers what AI writes. A calendar is too revealing to be the one service without the dial | — |
 
@@ -332,11 +335,37 @@ varies, and it varies in exactly one part: where the key wrapping lives. See
    `specs/implemented/` are history and stay as written. Done with item 3, so
    the runbooks match the code they test. *(docs, small)*
 6. **Calendar Private** — the two-card dial, sealed content columns, generic
-   reminders, ICS exclusion. Much smaller than Drive (no chunked content, no
-   sharing surface, no sync) — a good first consumer of the shared picker
-   component after mail. *(fill-in, medium)*
+   reminders. (ICS exclusion is moot: the calendar has import only, no feed
+   URL.) **BUILT 2026-10-01** per `specs/implemented/calendar_contacts_private.md`,
+   together with the contacts gap (contacts take their mailbox's level and
+   converge on a level change in each adder's window; the Fortress mail card
+   says they stay server custody). Current state: `docs/calendar.md`
+   § Protection level, mailbox overview § Contacts.
 7. **Notes/memories** — nothing to schedule; the egress spec's demand-driven
    rule already owns it. Recorded here so the matrix is complete.
+8. **Cloud floor for Private content outside mail** *(owner, 2026-10-01, from
+   `specs/implemented/calendar_contacts_private.md` Q1)*. Today the only cloud consent is
+   mail's per-domain `ied_ai_processing_consent` (local / trusted / cloud),
+   enforced on pipeline recipes by `RecipeVaultScope`. Private Drive content
+   (and Private calendar content once item 6 lands) has no equivalent: an
+   in-window chat on a cloud model can read it through the generic model tool
+   with only the composer's passive sensitivity banner and the chat's optional
+   "Local models only" add-on in the way. The rule to build to: **never an
+   absolute block on the AI account a member chooses, but very clear, and
+   impossible by mistake, to send Private content to a cloud that is not
+   private.** The shape already exists on both sides — a trust floor (mail's
+   three consent values) compared against the model catalog's trust class
+   (`local` / `trusted` / `cloud`, the same class the sensitivity banner
+   reads) — so the work is one member-level floor over their Private content
+   outside mail, default local, checked at turn start; a turn whose model sits
+   below the floor is refused with the choice to raise the floor stated in
+   place, never a silent send. **BUILT 2026-10-01** per
+   `specs/implemented/private_content_cloud_floor.md`: `PrivateContentConsent`
+   (`usr_private_ai_consent`, default local), set under Security › Encrypted
+   Vault; bound by every chat holding Private content (sealed rows reach a
+   chat only in a Private chat) at `chat_send` and in the resolver's trust
+   floor. Current state: the joinery_ai overview § Private content and cloud
+   models.
 
 ## Interaction with sealed_content_egress.md
 

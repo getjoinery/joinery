@@ -217,6 +217,7 @@ function calendar_logic(array $input): LogicResult {
         }
 
         if (empty($page_vars['errors'])) {
+          try {
             // An occurrence edit is identified by the occurrence_date, NOT by the
             // scope field (which is set by modal JS and can be absent). If JS didn't
             // run, default to the safe 'this occurrence only' rather than falling
@@ -253,6 +254,11 @@ function calendar_logic(array $input): LogicResult {
                 $entry->save();
             }
             return LogicResult::redirect('/profile/calendar?saved=1' . _calendar_month_param($date));
+          } catch (VaultLockedException $e) {
+            // Editing a sealed entry's content (a Private calendar) needs the
+            // owner's window; the form comes back with what was typed.
+            $page_vars['errors'][] = 'Unlock your vault to edit this entry, then save again.';
+          }
         }
     }
 
@@ -301,10 +307,23 @@ function calendar_logic(array $input): LogicResult {
     $page_vars['saved']   = !empty($input['saved']);
     $page_vars['deleted'] = !empty($input['deleted']);
 
+    // An entry opened for editing on a Private calendar with the window
+    // closed: the form cannot show its content, so the page offers the
+    // unlock instead (docs/calendar.md § Protection level).
+    $page_vars['entry_locked'] = $page_vars['entry']->key ? $page_vars['entry']->content()['locked'] : false;
+
     // The owner's default reminder lead, so the entry form's "Use my default"
     // option can say what it currently means.
     require_once(PathHelper::getIncludePath('data/calendar_preferences_class.php'));
-    $page_vars['reminder_default_minutes'] = (int)CalendarPreference::get_for($user_id)->get('cpr_reminder_default_minutes');
+    $pref = CalendarPreference::get_for($user_id);
+    $page_vars['reminder_default_minutes'] = (int)$pref->get('cpr_reminder_default_minutes');
+
+    // The calendar's protection level, for the header chip, and the rows a
+    // level change has still to converge — a change that stopped part-way
+    // (the tab closed) carries on from this page as it does on a chat.
+    require_once(PathHelper::getIncludePath('includes/calendar/CalendarLevel.php'));
+    $page_vars['protection_level'] = $pref->protection_level();
+    $page_vars['level_remaining']  = (new CalendarLevel($user_id))->remaining();
 
     // Has this subject authored (or imported) anything of its own yet? Drives the
     // first-run import prompt, which retires permanently on the first entry.
@@ -348,6 +367,10 @@ function _calendar_set_fields(
     ?string $end_utc,
     string $tz
 ): void {
+    // A row still sealed on a calendar lowered to Standard is opened before
+    // the edit (owner's window), so the new content lands as plaintext.
+    require_once(PathHelper::getIncludePath('includes/calendar/CalendarLevel.php'));
+    CalendarLevel::settleBeforeEdit($entry);
     $entry->set_core_fields($title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
 }
 

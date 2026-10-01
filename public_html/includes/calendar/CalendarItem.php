@@ -23,6 +23,9 @@ class CalendarItem {
     const VIS_DETAILS = 'details';   // owner sees title/url
     const VIS_BUSY    = 'busy';      // opaque block, no title/url
 
+    /** The title a locked native entry shows in place of its sealed one. */
+    const LOCKED_TITLE = 'Locked entry';
+
     public $start_utc;
     public $end_utc;
     public $all_day = false;
@@ -51,6 +54,13 @@ class CalendarItem {
     // instants above are UTC regardless; this lets a viewer in another zone
     // see "9:00 AM in Los Angeles" beside their own local rendering.
     public $timezone = null;
+
+    // A native entry on a Private calendar whose owner's vault window is
+    // closed: the times are real, the title is LOCKED_TITLE, location, link
+    // and url are stripped, and the edit coordinates stay so a tap can offer
+    // the unlock (docs/calendar.md § Protection level). A closed window is a
+    // state the item carries, never an error the feed throws.
+    public $locked = false;
 
     /** Default colour per type; a source may override via the `color` key. */
     private $color = null;
@@ -118,6 +128,7 @@ class CalendarItem {
             'entry_id'            => $this->entry_id,
             'occurrence_date'     => $this->occurrence_date,
             'timezone'            => $this->timezone,
+            'locked'              => (bool)$this->locked,
         ];
     }
 }

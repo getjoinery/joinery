@@ -175,6 +175,11 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    // path in. Only counts as a reset path once verified.
 	    'usr_recovery_email' => array('type'=>'varchar(64)'),
 	    'usr_recovery_email_verified_time' => array('type'=>'timestamp(6)'),
+	    // Where this member's Private content may be read by AI: the most
+	    // permissive endpoint trust class it may reach — local | trusted | cloud
+	    // (PrivateContentConsent). Starts at local: private content never
+	    // travels until the member says so.
+	    'usr_private_ai_consent' => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'local'),
 	);
 
 private static function UcName($string) {

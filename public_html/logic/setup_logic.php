@@ -6,6 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.10 - the Calendar step's protection level (action calendar_level)
  * @version 2.9.1
  * @changelog 2.9.1 - services_disconnect releases both services, mail and shelf
  * @changelog 2.9 - services_connect / services_disconnect link this site to a getjoinery
@@ -280,6 +281,25 @@ function setup_logic(array $input): LogicResult {
 					CalendarSubject::user((int)$viewer->key), $session->get_timezone());
 				SetupSteps::invalidateSessionCache();
 			}
+		}
+	}
+
+	// The calendar's protection level: the same change the settings page makes
+	// (calendar_level_change), run here as a form post. A fresh calendar asks
+	// no step-up; one with entries follows every rule the action applies. The
+	// step stays open afterwards so the import lands under the chosen level.
+	$calendar_level_saved = false;
+	if ($action === 'calendar_level') {
+		require_once(PathHelper::getIncludePath('logic/calendar_level_change_logic.php'));
+		$lvl = calendar_level_change_logic(array('level' => (string)($input['protection_level'] ?? '')));
+		if ($lvl->error) {
+			if (!empty($lvl->data['requires_stepup'])) {
+				return SessionControl::stepup_redirect('/setup?step=calendar');
+			}
+			$error = $lvl->error;
+		} else {
+			$calendar_level_saved = true;
+			SetupSteps::invalidateSessionCache();
 		}
 	}
 
@@ -718,6 +738,7 @@ function setup_logic(array $input): LogicResult {
 		'heartbeat_warning' => $heartbeat_warning,
 		'force_render_step' => $force_render_step,
 		'calendar_import_summary' => $calendar_import_summary,
+		'calendar_level_saved'    => $calendar_level_saved,
 		'https_diagnosis' => $https_diagnosis,
 		'https_dns_box' => $https_dns_box,
 	), $totp_forward));

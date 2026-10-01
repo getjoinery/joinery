@@ -119,6 +119,17 @@ class AiModelRequirementBuilder {
             ->withPolicy(self::sitePolicy())
             ->withPurpose('this chat');
 
+        // A chat that holds Private content — a Private chat, or one whose
+        // transcript became sealed-derived — may only reach the endpoints its
+        // owner allows for their private content (PrivateContentConsent; the
+        // plugin overview § Private content and cloud models). Enforced by the
+        // resolver, so a pin outside it is refused even when the model changed
+        // under the turn; chat_send says the same thing earlier, in plain words.
+        if ($conversation->isProtected() || $conversation->get('aic_egress_restricted')) {
+            require_once(PathHelper::getIncludePath('includes/PrivateContentConsent.php'));
+            $req = $req->tightenTrustFloor(PrivateContentConsent::trustFloor(
+                PrivateContentConsent::forUser((int)$conversation->get('aic_owner_user_id'))));
+        }
         if ($conversation->localModelsOnly()) {
             // A local-only chat's content never leaves the box. Enforced by the
             // resolver from the add-on, so there is no second definition of

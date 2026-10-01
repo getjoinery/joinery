@@ -168,6 +168,33 @@ class ChatLevel {
     }
 
     /**
+     * Why a turn of this chat on $model may not run, or null: the chat holds
+     * Private content (it is Private, or its transcript became sealed-derived)
+     * and $model runs on an endpoint the owner's PrivateContentConsent does not
+     * allow. The words name the model's class, where the owner's setting keeps
+     * private content, and both ways out — never a silent switch of model.
+     */
+    public static function privateContentRefusal(AiConversation $c, string $model, int $owner_id): ?string {
+        if (!$c->isProtected() && !$c->get('aic_egress_restricted')) return null;
+        require_once(PathHelper::getIncludePath('includes/PrivateContentConsent.php'));
+        $consent = PrivateContentConsent::forUser($owner_id);
+        $model = trim($model);
+        try {
+            $trust = AiEndpointRegistry::trustForModel($model);
+        } catch (Throwable $e) {
+            $trust = null;
+        }
+        if (PrivateContentConsent::allows($consent, $trust)) return null;
+        $labels = LlmProviderFactory::allModels();
+        $label = (string)($labels[$model] ?? ($model !== '' ? $model : 'the chosen model'));
+        $class = $trust === null ? 'an endpoint this site has not classified' : 'a ' . $trust . ' endpoint';
+        return 'This chat holds private content and ' . $label . ' runs on ' . $class
+            . ', which would send that content off your hardware. Your setting keeps private content '
+            . PrivateContentConsent::where($consent) . '. Pick a local model for this chat, or allow it under '
+            . 'Security › Encrypted Vault › Private content and AI.';
+    }
+
+    /**
      * Change an existing conversation's level (specs/joinery_ai_chat_encryption.md
      * § Phase 6). The sequence and its security rules are ProtectionLevelChange's:
      * a recent second factor for an owner who has one, the prerequisites

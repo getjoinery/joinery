@@ -1026,6 +1026,41 @@ all. `EmailPipelineJobBase` folds a recipe's whole bound set to the **strictest*
 answer any bound address gives, and `RecipeVaultScope::consentTrustFloor()` folds
 that into every pipeline recipe's requirement.
 
+### Private content and cloud models
+
+A member decides where their **own Private content** may be read by AI, once,
+for every service: `usr_private_ai_consent` holds the most permissive endpoint
+trust class it may reach — `local` (the default) | `trusted` | `cloud`, the same
+vocabulary as a domain's consent and an endpoint's declaration
+(`PrivateContentConsent`, `includes/PrivateContentConsent.php`). It is set on the
+Security page under the Encrypted Vault ("Private content and AI") through the
+`private_ai_consent` action; loosening it asks for a recent second factor, as
+loosening a domain's consent does.
+
+It binds every chat that holds Private content: a Private chat (whose sealed
+transcript, and every sealed Drive row, calendar entry or mail it reads, is
+that content) and a Standard chat whose transcript became sealed-derived
+(`aic_egress_restricted`). Sealed rows reach a chat only in a Private chat —
+`ChatTurnContext::sealedReadsAllowed()` is the chat's level, and the generic
+reader excludes sealed rows for a Standard chat as it does for a locked vault —
+so the chat's level is the whole surface. Two gates make one comparison:
+
+- `chat_send` refuses a turn whose model sits outside the setting before
+  anything is persisted (`ChatLevel::privateContentRefusal()`), in words that
+  name the model's class, where the setting keeps private content, and both
+  ways out: pick a local model, or allow it in Security settings. Never a
+  silent switch of model.
+- `AiModelRequirementBuilder::forConversation()` tightens the turn's trust floor
+  to the setting (`PrivateContentConsent::trustFloor()`), so the resolver
+  refuses a pin outside it even when the model changed under the turn. The
+  Local models only add-on stays the stricter pin on top.
+
+The composer shows the gate before it bites: on a Private chat the models the
+setting excludes are greyed out (`data-trust` on each option) with a note
+linking to the setting. Mail's per-domain consent keeps governing pipeline
+recipes, where mail never enters a member's transcript; agent-mode recipes keep
+the floor the operator stated or the platform's conservative fallback.
+
 ### The provider layer
 
 Providers are **transport only**. They know how to speak one wire format; they do not

@@ -769,9 +769,60 @@
                     <button type="button" class="btn btn-secondary" id="vault-download-keyfile-btn">Download Key File</button>
                     <button type="button" class="btn btn-primary" id="vault-codes-done-btn">Done</button>
                 </div>
+
+                <!-- Where this member's Private content may be read by AI
+                     (PrivateContentConsent): one answer for Private chats and
+                     everything they open — Drive, calendar, mail. Saved through
+                     the private_ai_consent action; loosening asks a step-up. -->
+                <div class="jy-mt-4" id="private-ai-consent-block">
+                    <h3>Private content and AI</h3>
+                    <div id="private-ai-consent-alert" hidden></div>
+<?php
+require_once(PathHelper::getIncludePath('includes/PrivateContentConsent.php'));
+$pac_writer = $page->getFormWriter('private-ai-consent-form', array('action' => '/profile/security'));
+$pac_writer->begin_form();
+$pac_writer->radioinput('private_ai_consent', 'Where your private content may be read by AI', array(
+    'options'  => PrivateContentConsent::options(),
+    'value'    => PrivateContentConsent::forUser((int)SessionControl::get_instance()->get_user_id()),
+    'helptext' => 'Applies to Private chats and to everything they open: your Private files, calendar entries and mail. '
+        . 'On the first, a Private chat can only use a model running on hardware this site controls, and asking it to '
+        . 'use a cloud model is refused and says why. Loosening it lets that content be sent to such a model, which '
+        . 'then holds it in the clear. Tightening it back stops those chats at their next message.',
+));
+$pac_writer->end_form();
+?>
+                </div>
             </div>
 
             <script defer>
+            // Where private content may be read by AI: a card click saves at
+            // once; loosening confirms it is you (a passkey in place, or the
+            // confirmation page), then saves.
+            document.addEventListener('DOMContentLoaded', function () {
+                var form = document.getElementById('private-ai-consent-form');
+                var note = document.getElementById('private-ai-consent-alert');
+                if (!form || !window.joineryApi) return;
+                var radios = Array.prototype.slice.call(form.querySelectorAll('[name="private_ai_consent"]'));
+                var current = (form.querySelector('[name="private_ai_consent"]:checked') || {}).value || 'local';
+                function say(msg, kind) { note.hidden = !msg; note.className = 'alert alert-' + (kind || 'info'); note.textContent = msg || ''; }
+                function reset() { radios.forEach(function (r) { r.checked = (r.value === current); }); }
+                radios.forEach(function (radio) {
+                    radio.addEventListener('change', function () {
+                        if (!radio.checked || radio.value === current) return;
+                        var call = function () { return joineryApi.post('private_ai_consent', { action: 'save', consent: radio.value }); };
+                        var run = (window.JoineryPasskeys && JoineryPasskeys.withStepUp)
+                            ? JoineryPasskeys.withStepUp(call, location.pathname + '#private-ai-consent-block') : call();
+                        run.then(function (d) {
+                            current = (d && d.consent) || radio.value;
+                            reset();
+                            say('Saved. Private chats follow this from their next message.', 'success');
+                        }).catch(function (err) {
+                            reset();
+                            say((err && err.message) || 'The change could not be saved.', 'danger');
+                        });
+                    });
+                });
+            });
             document.addEventListener('DOMContentLoaded', function () {
                 var panel = document.getElementById('vault-panel');
                 if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) return;

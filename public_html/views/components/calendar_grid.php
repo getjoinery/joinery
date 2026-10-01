@@ -17,6 +17,7 @@
  *                    reply's `timezone` overrides)
  *
  * @version 1.5.0 - items render in the calendar's timezone, not the browser's
+ * @version 1.5.0 - a locked item (feed `locked`) renders as a lock chip
  * @version 1.4.1 - the chip tooltip carries the location
  * @version 1.4.0 - high-contrast restyle: blue default chips with a left
  *                  handle, past items grey with the colour on the handle
@@ -169,6 +170,10 @@ $cid = 'calgrid_' . substr(md5(uniqid('', true)), 0, 8);
         var isNative = it.source_key && String(it.source_key).indexOf('native:') === 0;
         var el = document.createElement(isNative ? 'button' : (it.url ? 'a' : 'span'));
         el.className = 'calgrid-chip';
+        // A locked native entry (a Private calendar, vault window closed): the
+        // time is real, the title is the placeholder; the chip says so and
+        // the popover offers the unlock.
+        if (it.locked) { el.className += ' is-locked'; }
         // Past items render grey with the colour kept on the left handle
         // (all-day items stay current for their whole day).
         var isPast = it.all_day

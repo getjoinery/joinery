@@ -72,11 +72,22 @@ function chat_send_logic(array $input): LogicResult {
         $is_new = true;
     }
 
+    $protected = $conversation->isProtected();
+
+    // Private content stays where its owner allows: a chat holding it may not
+    // run on a model outside the owner's PrivateContentConsent. Refused here,
+    // before anything is persisted, in words that name the way out; the
+    // resolver enforces the same floor on the worker (forConversation()).
+    $refusal = ChatLevel::privateContentRefusal($conversation,
+        (string)$conversation->get('aic_model') ?: ChatRunner::defaultModel(), $uid);
+    if ($refusal !== null) {
+        return LogicResult::error($refusal, ['requires_consent' => true]);
+    }
+
     // Unlock-first: a protected conversation seals with the public key alone, but
     // the turn must decrypt its history to build the model payload — so continuing
     // (or starting) one requires an open vault window. Locked → prompt unlock
     // before anything is persisted; the client unlocks then resubmits.
-    $protected = $conversation->isProtected();
     // A chat lowered to Standard whose history has not all converged back still
     // holds sealed turns: reading them needs the window just the same.
     $needs_window = $protected || (!$is_new && ChatSeal::holdsSealedContent($conversation));
