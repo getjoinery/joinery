@@ -194,4 +194,32 @@ check(LibraryFunctions::time_ago_or_time($future, 'UTC', 'UTC') === 'just now',
 check(LibraryFunctions::time_ago_or_time('', 'UTC', 'UTC') === '',
 	'An empty input produces no relative time');
 
+// ---------------------------------------------------------------------------
+section('time_ago: minutes, hours, days with the time of day, then the date');
+
+$ago = function ($seconds) { return gmdate('Y-m-d H:i:s', time() - $seconds); };
+$cases = array(
+	array(20, 'just now'),
+	array(60, '1 minute ago'),
+	array(59 * 60, '59 minutes ago'),
+	array(3600, '1 hour ago'),
+	array(23 * 3600 + 3000, '23 hours ago'),
+);
+foreach ($cases as $c) {
+	$got = LibraryFunctions::time_ago($ago($c[0]), 'UTC');
+	check($got === $c[1], 'An age of ' . $c[0] . 's reads ' . $c[1], $got);
+}
+$two_days = $ago(2 * 86400 + 600);
+$got = LibraryFunctions::time_ago($two_days, 'America/New_York');
+check($got === '2 days ago, ' . LibraryFunctions::convert_time($two_days, 'UTC', 'America/New_York', 'g:i A'),
+	'Under a week: the days, and the time of day in the viewer\'s zone', $got);
+check(strpos(LibraryFunctions::time_ago($ago(86400), 'UTC'), '1 day ago, ') === 0, 'One day is singular');
+$old = $ago(8 * 86400);
+$got = LibraryFunctions::time_ago($old, 'UTC');
+check($got === LibraryFunctions::convert_time($old, 'UTC', 'UTC', 'M j, g:i A'), 'A week and beyond: the date and time', $got);
+$future = gmdate('Y-m-d H:i:s', time() + 3 * 3600);
+check(LibraryFunctions::time_ago($future, 'UTC') === LibraryFunctions::convert_time($future, 'UTC', 'UTC', 'M j, g:i A'),
+	'A time in the future is the date and time, never a negative age');
+check(LibraryFunctions::time_ago('', 'UTC') === '' && LibraryFunctions::time_ago(null, 'UTC') === '', 'No time, no text');
+
 harness_finish();

@@ -21,6 +21,19 @@
 .svm-progress-thin { height: 4px; }
 .svm-progress-bar { width: var(--svm-pct, 0%); }
 .svm-w100 { width: 100px; }
+/* Node overview: the facts under the name, and the tile grids (as many
+   columns as fit; a wide tile spans two, one column on a phone). */
+.svm-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.75rem 1.5rem; }
+.svm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; }
+.svm-span-2 { grid-column: span 2; }
+@media (max-width: 600px) { .svm-span-2 { grid-column: auto; } }
+/* Health bars: a track with marks at 75% and 90%, the amber and red lines. */
+.svm-gauge { position: relative; height: 10px; border-radius: 5px; background: #e9ecef; overflow: hidden; }
+.svm-gauge::before, .svm-gauge::after { content: ''; position: absolute; top: 0; bottom: 0; width: 2px;
+                                        background: rgba(0, 0, 0, 0.28); z-index: 1; }
+.svm-gauge::before { left: 75%; }
+.svm-gauge::after { left: 90%; }
+.svm-gauge-fill { height: 100%; width: var(--svm-pct, 0%); border-radius: 5px 0 0 5px; }
 
 /* --- Target info --- */
 .svm-mw600 { max-width: 600px; }

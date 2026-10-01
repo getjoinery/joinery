@@ -9,6 +9,7 @@
  * includes/, not views/, so a partial is never reachable as a standalone URL
  * that would bypass this file's node loading and check_permission(10).
  *
+ * @version 2.4 - Copy tab (specs/site_copy.md WP8)
  * @version 2.3 - drop the local flash-message block; admin_header already renders them (they showed twice)
  * @version 2.2 - Console tab (ad-hoc command on the node, per-node opt-in)
  * @version 2.1
@@ -56,7 +57,7 @@ $skip_joinery = $node->get('mgn_skip_joinery_checks');
 // than assumed.
 $valid_tabs = $skip_joinery
 	? ['overview', 'jobs', 'api_keys']
-	: ['overview', 'backups', 'database', 'updates', 'jobs', 'api_keys'];
+	: ['overview', 'backups', 'database', 'updates', 'copy', 'jobs', 'api_keys'];
 if (!in_array($tab, $valid_tabs)) {
 	$tab = 'overview';
 }
@@ -123,6 +124,7 @@ echo '<script>var smNodeName = '
 		<li class="nav-item"><a class="nav-link <?php echo $tab === 'backups' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=backups">Backups</a></li>
 		<li class="nav-item"><a class="nav-link <?php echo $tab === 'database' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=database">Database</a></li>
 		<li class="nav-item"><a class="nav-link <?php echo $tab === 'updates' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=updates">Updates</a></li>
+		<li class="nav-item"><a class="nav-link <?php echo $tab === 'copy' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=copy">Copy</a></li>
 	<?php endif; ?>
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'jobs' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=jobs">Jobs</a></li>
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'api_keys' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=api_keys">API Keys</a></li>

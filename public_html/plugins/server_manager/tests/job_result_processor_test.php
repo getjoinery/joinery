@@ -414,10 +414,16 @@ $hostile = array(
 	'generated_at' => 1.5,
 	'os' => array('id' => 'Ubuntu <b>', 'version' => '24.04; reboot', 'codename' => array('x'),
 		'release_upgrade' => array('offered' => "New release '26.04'", 'checked_at' => 'yesterday')),
+	'cpus' => '4; reboot',
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 16, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+check(!isset($capped['surprise']) && count($capped) === 17, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+check($capped['cpus'] === 'unknown', 'a processor count that is not a count reads unknown');
+check(JobResultProcessor::sanitise_host_report(array('cpus' => 4))['cpus'] === 4, 'a processor count is kept');
+$quiet = JobResultProcessor::sanitise_host_report(array('answers' => array('apache2' => 'yes', 'php-fpm' => 'quiet', 'postgresql' => 'maybe')));
+check($quiet['answers'] === array('apache2' => 'yes', 'php-fpm' => 'quiet', 'postgresql' => 'unknown'),
+	'a quiet site\'s PHP stays quiet, never no, and an answer outside the set reads unknown', var_export($quiet['answers'], true));
 // Fields an older node never sent are "not reported" (null), never a value
 // (specs/agent_recipes_and_vocabulary.md, rule 11).
 check($capped['answers'] === null && $capped['served_certificates'] === null && $capped['containers'] === null,

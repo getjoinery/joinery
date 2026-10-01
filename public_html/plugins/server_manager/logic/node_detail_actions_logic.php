@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.34 - site copy (specs/site_copy.md WP8): copy_new_server, copy_own_server, copy_approve_join, copy_again,
+ *                 copy_discard, superadmin-only, through SiteCopyRunner
  * @version 1.33 - save_api_credential reads the secret through FormWriterV2Base::process_secretinput()
  *                 (Reset and save blank removes it); clear_api_credential is gone
  * @version 1.32 - reset_failed_unit: the Clear button beside a failed unit
@@ -140,6 +142,11 @@ class NodeDetailActions {
 		'delete_node'              => 'overview',
 		'decommission_node'        => 'overview',
 		'purge_node'               => 'overview',
+		'copy_new_server'          => 'copy',
+		'copy_own_server'          => 'copy',
+		'copy_approve_join'        => 'copy',
+		'copy_again'               => 'copy',
+		'copy_discard'             => 'copy',
 	];
 
 	/**
@@ -690,6 +697,62 @@ class NodeDetailActions {
 				return $base_url . '&tab=api_keys';
 			}
 
+			// ── Site copy (specs/site_copy.md WP8) ──
+			// Superadmin-only, every one: a copy carries every secret the site
+			// has to another machine (its owner still approves each export on
+			// the site itself).
+
+			case 'copy_new_server':
+			case 'copy_own_server':
+			case 'copy_approve_join':
+			case 'copy_again':
+			case 'copy_discard': {
+				if ($session->get_permission() < 10) {
+					self::fail($session, $page_regex, 'Copying a site is superadmin-only.');
+					return $base_url . '&tab=copy';
+				}
+				$copy_url = $base_url . '&tab=copy';
+				if ($action === 'copy_new_server') {
+					SiteCopyRunner::start_new_server($node, [
+						'account' => (string)($_POST['copy_account'] ?? ''),
+						'region'  => (string)($_POST['copy_region'] ?? ''),
+						'type'    => (string)($_POST['copy_type'] ?? ''),
+					], $uid);
+					self::ok($session, $page_regex, 'The new server is being created. Its install takes a few minutes; '
+						. 'the copy starts once its agent has joined.');
+					return $copy_url;
+				}
+				if ($action === 'copy_own_server') {
+					SiteCopyRunner::start_own_server($node, $uid);
+					return $copy_url;
+				}
+				$site_copy = SiteCopy::live_for_source((int)$node->key);
+				if (!$site_copy) {
+					self::fail($session, $page_regex, 'This site has no copy.');
+					return $copy_url;
+				}
+				if ($action === 'copy_approve_join') {
+					$request = self::load_join_request((int)($_POST['ajr_agent_join_request_id'] ?? 0), $session, $page_regex);
+					if (!$request) {
+						return $copy_url;
+					}
+					$copy_node = SiteCopyRunner::approve_join($site_copy, $request);
+					self::ok($session, $page_regex, 'The copy\'s agent is connected (key '
+						. AgentJoinRequest::display_fingerprint((string)$request->get('ajr_fingerprint')) . ') as '
+						. $copy_node->get('mgn_name') . '. The first copy run starts when it reports what it can do.');
+					return $copy_url;
+				}
+				if ($action === 'copy_again') {
+					SiteCopyRunner::copy_again($site_copy, $uid);
+					return $copy_url;
+				}
+				$server = SiteCopyRunner::server_to_delete($site_copy);
+				SiteCopyRunner::discard($site_copy);
+				self::ok($session, $page_regex, 'The copy is discarded.' . ($server !== ''
+					? ' Delete its server at the provider: ' . $server . '.' : ''));
+				return $copy_url;
+			}
+
 			// ── The agent channel (specs/agent_on_node_architecture.md §3.1) ──
 
 			case 'approve_join': {
@@ -960,6 +1023,13 @@ class NodeDetailActions {
 			return true;
 		}
 		return $session->user_has_second_factor($account) && !$session->has_recent_second_factor();
+	}
+
+	private static function ok($session, $page_regex, string $message): void {
+		$session->save_message(new DisplayMessage(
+			$message, 'Success', $page_regex,
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
 	}
 
 	private static function fail($session, $page_regex, string $message): void {

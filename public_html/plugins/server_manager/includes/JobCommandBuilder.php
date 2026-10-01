@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.86 - site copy WP8: build_install_node mode 'copy' (a dormant install at the source's release, fetched
+ *                 with latest_release?version=, --dormant --copy-of --copy-of-key); build_take_node_id (agent 1.50.0);
+ *                 COPY_SOURCE_MIN_VERSION
  * @version 1.85 - build_copy_export / build_copy_import / build_copy_stage (agent 1.49.0): the source seals its
  *                 chain key, certificate and DKIM keys to its copy under its owner's approval, the copy opens
  *                 them, and stages its source's chain under the source's slug (site_copy.md WP4); chain links
@@ -385,6 +388,17 @@ class JobCommandBuilder {
 	 * page reads.
 	 */
 	const DECOMMISSION_PANEL_MIN_CORE_VERSION = '0.8.357';
+
+	/**
+	 * The oldest release a site can be copied from (specs/site_copy.md WP8). A
+	 * copy installs the source's own release, and what that release's tree
+	 * carries is what the copy runs: the dormant install that records the
+	 * source's key (install.sh 2.90), restore_chain's --adopt-secret-key, the
+	 * converger's quiet gate, and a quiet state that answers the owner's look
+	 * from off the machine (_site_state.sh 1.4). 0.8.453 is the first release
+	 * with all of them.
+	 */
+	const COPY_SOURCE_MIN_VERSION = '0.8.453';
 
 	/**
 	 * Operations the agent registers as ClassDestructive.
@@ -2227,6 +2241,36 @@ class JobCommandBuilder {
 		unset($primitive_params['profile']);
 		self::assert_chain_job_fits('copy_stage', $primitive_params);
 		return ['primitive' => 'copy_stage', 'params' => $primitive_params];
+	}
+
+	/**
+	 * Tell a dormant copy to take over its source's node id, keeping its own
+	 * key (specs/site_copy.md D4, step 10). The copy stages the new identity
+	 * and takes it only once this plane's answer to the result confirms the
+	 * two rows were swapped (JobResultProcessor::process_take_node_id). The
+	 * node accepts only the id its dormant install recorded.
+	 *
+	 * $copy is the copy's row, in state `copy`, recorded as a copy of $source.
+	 */
+	public static function build_take_node_id($copy, $source) {
+		if (!self::has_primitive($copy, 'take_node_id')) {
+			throw new Exception(
+				"Node '{$copy->get('mgn_slug')}' cannot take over its source's node id. "
+				. AgentVocabulary::needs_newer_agent_text($copy, ['take_node_id']));
+		}
+		return self::build_take_node_id_primitive($copy, $source);
+	}
+
+	public static function build_take_node_id_primitive($copy, $source = null) {
+		if (!$source || !$source->key || trim((string)$copy->get('mgn_install_state')) !== 'copy'
+				|| (int)$copy->get('mgn_copy_of_node_id') !== (int)$source->key) {
+			throw new Exception("Node '{$copy->get('mgn_slug')}' takes over only the node id of the site it is "
+				. 'recorded as a dormant copy of.');
+		}
+		return ['primitive' => 'take_node_id', 'params' => [
+			'node_id'   => (int)$source->key,
+			'node_slug' => (string)$source->get('mgn_slug'),
+		]];
 	}
 
 	/**
@@ -4178,11 +4222,35 @@ class JobCommandBuilder {
 		if ($docker !== 'docker' && $docker !== 'bare-metal') {
 			throw new Exception("install_node requires docker_mode = 'docker' or 'bare-metal' (got: " . var_export($docker, true) . ")");
 		}
-		if (!in_array($mode, ['fresh', 'from_backup', 'bare'], true)) {
-			throw new Exception("install_node requires mode = 'fresh', 'from_backup' or 'bare' (got: " . var_export($mode, true) . ")");
+		if (!in_array($mode, ['fresh', 'from_backup', 'bare', 'copy'], true)) {
+			throw new Exception("install_node requires mode = 'fresh', 'from_backup', 'bare' or 'copy' (got: " . var_export($mode, true) . ")");
 		}
 		if ($mode === 'bare' && $docker !== 'docker') {
 			throw new Exception('A bare instance is a Docker host with no site; it has no bare-metal shape.');
+		}
+		// A dormant copy (specs/site_copy.md): bare metal only (v1), at the
+		// source's exact release, recording the source's node id and agent key.
+		// The release is pinned because vendor/ is never in a backup: the copy's
+		// installed dependencies must be the ones the source's code was built for.
+		$copy_flags = '';
+		$copy_release = '';
+		if ($mode === 'copy') {
+			if ($docker !== 'bare-metal') {
+				throw new Exception('A copy is installed on bare metal only; a container target is not supported.');
+			}
+			$copy_of  = (int)($params['copy_of'] ?? 0);
+			$copy_key = (string)($params['copy_of_key'] ?? '');
+			$copy_release = (string)($params['release'] ?? '');
+			if ($copy_of <= 0) {
+				throw new Exception('A copy needs the node id of the site it copies (copy_of).');
+			}
+			if (!preg_match('#^[A-Za-z0-9+/]{43}=$#', $copy_key)) {
+				throw new Exception('A copy needs its source\'s agent public key (copy_of_key), which its install records to check every export by.');
+			}
+			if (!preg_match('/^\d+\.\d+\.\d+$/', $copy_release)) {
+				throw new Exception('A copy needs its source\'s release (X.Y.Z); it is installed at exactly that release.');
+			}
+			$copy_flags = ' --dormant --copy-of=' . $copy_of . ' --copy-of-key=' . escapeshellarg($copy_key);
 		}
 		// The site name becomes a container name, a directory and a database
 		// name on the target, so it is a shape, not an escaped string.
@@ -4203,9 +4271,10 @@ class JobCommandBuilder {
 		if ($admin_email !== '' && !filter_var($admin_email, FILTER_VALIDATE_EMAIL)) {
 			throw new Exception("install_node: '{$admin_email}' is not an address the site's admin account can be created with.");
 		}
-		$admin_flags = ($admin_email !== '' && $mode !== 'bare')
+		// A copy takes its accounts from its source's database, so it creates none.
+		$admin_flags = ($admin_email !== '' && $mode !== 'bare' && $mode !== 'copy')
 			? ' --admin-email=' . escapeshellarg($admin_email) : '';
-		$admin_password_stdin = !empty($params['admin_password_stdin']) && $mode !== 'bare';
+		$admin_password_stdin = !empty($params['admin_password_stdin']) && $mode !== 'bare' && $mode !== 'copy';
 
 		// Per-job path, and NOT under /tmp: the extracted release stays on the
 		// machine (the deferred-SSL timer may run its setup_ssl.sh until the
@@ -4220,6 +4289,9 @@ class JobCommandBuilder {
 		$settings = Globalvars::get_instance();
 		$webdir = $settings->get_setting('webDir') ?: $_SERVER['HTTP_HOST'] ?? 'dev.getjoinery.com';
 		$release_url = "https://{$webdir}/utils/latest_release";
+		if ($copy_release !== '') {
+			$release_url .= '?version=' . $copy_release;
+		}
 		$release_url_esc = escapeshellarg($release_url);
 
 		// This plane's own address, for the machine to join. It comes from the
@@ -4362,7 +4434,7 @@ class JobCommandBuilder {
 			         . ' ./install.sh -y -q server;'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
-			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$clone_flags}";
+			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$clone_flags}{$copy_flags}";
 		}
 		$lines[] = 'echo INSTALL_SUCCESS';
 

@@ -7,6 +7,13 @@
 # is pending, when unattended-upgrades last ran, and the operating system with
 # the release upgrade Ubuntu last said it offers.
 #
+# Version: 1.6 - cpus: how many processors the machine has (nproc), so a load
+#                average can be read against it.
+#                answers: on a quiet site (/etc/joinery/sites/<site>/state, a
+#                dormant copy or a frozen source) every page is the quiet
+#                state's 503, so php-fpm reads "quiet", not "no": the probe
+#                never reaches PHP by design, and a "no" there opened a case
+#                and tried restarts on every dormant copy (site copy B37).
 # Version: 1.5 - sshd widens to the effective settings a lockout turns on
 #                (specs/agent_recipes_and_vocabulary.md, Host files): public-key
 #                and keyboard-interactive authentication, maximum auth tries,
@@ -304,6 +311,14 @@ emit_swap() {
     printf '{"used_bytes":%s,"total_bytes":%s}' "$(kb_to_bytes_or_unknown "$used")" "$(kb_to_bytes_or_unknown "$total")"
 }
 
+# How many processors this machine has, which a load average is read against:
+# a number, or "unknown" when nproc does not answer.
+emit_cpus() {
+    local n
+    n="$(run nproc)"
+    if [[ "$n" =~ ^[0-9]{1,4}$ ]]; then printf '%s' "$n"; else printf '"unknown"'; fi
+}
+
 # ---------------------------------------------------------------------------
 # The three events that explain a write that failed, last 24 hours: THREE
 # COUNTS and nothing else.
@@ -442,8 +457,11 @@ emit_os() {
 #                read (the site's config is a secret), so this is the
 #                credential-free form of SELECT 1.
 #
-# Each is yes, no, or unknown (no site on this machine, no tool). Only the
-# verdicts are printed; the site's name is read to address the request and
+# Each is yes, no, or unknown (no site on this machine, no tool). On a quiet
+# site php-fpm is "quiet": the quiet state answers every page itself with a
+# 503, so the probe cannot reach PHP, and sending the look cookie to get past it
+# would write request rows into a copy whose rows must match its source's.
+# Only the verdicts are printed; the site's name is read to address the request and
 # never reaches the object.
 # ---------------------------------------------------------------------------
 site_vhost() {
@@ -474,6 +492,11 @@ loopback_headers() {
     printf '%s' "$h"
 }
 
+# Whether this site is quiet: its state file exists (_site_state.sh).
+site_is_quiet() {
+    [[ -e "/etc/joinery/sites/$(basename "$SITE_ROOT")/state" ]]
+}
+
 emit_answers() {
     local name headers code apache=unknown fpm=unknown pg=unknown
     name="$(site_server_name)"
@@ -487,6 +510,7 @@ emit_answers() {
             # or anything else without the header says nothing about FPM.
             code="$(printf '%s\n' "$headers" | awk 'NR==1 {print $2}')"
             if printf '%s\n' "$headers" | grep -q -i '^x-joinery-version:'; then fpm=yes
+            elif site_is_quiet; then fpm=quiet
             elif [[ "$code" == 502 || "$code" == 503 || "$code" == 504 ]]; then fpm=no
             else fpm=unknown
             fi
@@ -597,6 +621,7 @@ printf '"sshd":%s,' "$(emit_sshd)"
 printf '"disk":%s,' "$(emit_disk)"
 printf '"memory":%s,' "$(emit_memory)"
 printf '"swap":%s,' "$(emit_swap)"
+printf '"cpus":%s,' "$(emit_cpus)"
 printf '"reboot_required":%s,' "$(emit_reboot_required)"
 printf '"unattended_upgrades_last_run":%s,' "$(emit_unattended_upgrades_last_run)"
 printf '"os":%s,' "$(emit_os)"

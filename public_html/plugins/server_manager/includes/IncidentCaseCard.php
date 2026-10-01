@@ -13,6 +13,7 @@
  * wire, was capped on intake, and is escaped again as it is printed. Nothing
  * in a case is ever a link; the only links on this card are the plane's own.
  *
+ * @version 1.1 - a case's times read as ages (LibraryFunctions::time_ago), in the viewer's timezone
  * @version 1.0
  */
 class IncidentCaseCard {
@@ -57,7 +58,7 @@ class IncidentCaseCard {
 		$when = function ($stored) {
 			$stored = trim((string)$stored);
 			if ($stored === '') { return 'unknown'; }
-			return gmdate('M j, H:i', strtotime($stored . ' UTC')) . ' UTC';
+			return LibraryFunctions::time_ago($stored, SessionControl::get_instance()->get_timezone());
 		};
 		$open = $case->is_open();
 		$id = (int)$case->key;
