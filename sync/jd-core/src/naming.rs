@@ -854,7 +854,14 @@ fn trading_names(
         }
     }
     let mut wants: HashMap<EntityId, (Option<i64>, String)> = HashMap::new();
+    // Holders the server has under an engine scratch name: a park this
+    // pass's put-back owns, so where each stands next is decided this pass,
+    // as for a busy holder.
+    let mut scratch_named: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
     for entry in crate::pass::all_entries(env)? {
+        if jd_vfs::is_internal(&entry.remote.name) {
+            scratch_named.insert(entry.id);
+        }
         if leaving_this_pass.contains(&entry.id) {
             wants.insert(
                 entry.id,
@@ -933,8 +940,14 @@ fn trading_names(
                 paired = true;
                 break;
             }
-            if busy.contains(next) {
-                // Pending: the holder is mid-operation on this device.
+            if busy.contains(next) || scratch_named.contains(next) {
+                // Pending: the holder is mid-operation on this device, or
+                // stands under a scratch name the put-back is resolving. A
+                // chain stopped there judged every arrival behind it a
+                // duplicate of names the round was vacating, and the park of
+                // an arrival whose own directory stood at its own name sent
+                // that directory to the trash, rescuing a save not yet sent
+                // out to the root as a new file (shown kill2 75112, swap off).
                 pending.insert(start);
                 break;
             }

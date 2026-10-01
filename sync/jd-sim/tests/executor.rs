@@ -2627,6 +2627,35 @@ fn a_local_trash_takes_only_the_records_own_file() {
 /// put another record's file at `a.txt`. The move would have carried that
 /// file to `c.txt` under this record's name. Only the record's own file is
 /// moved.
+/// The same with no births, where an id alone says which file is which, and
+/// the file at the path a new one nobody owns yet: the user saved over the
+/// record's file after the scan. The move stands down and carries nothing;
+/// the next scan reads the save (hidden plat3 75419).
+#[test]
+fn a_local_move_without_births_carries_no_file_saved_over_its_own() {
+    let (_clock, _server, device) = world();
+    device.fs.hide_births(true);
+    device.fs.user_write("a.txt", b"the file the server renamed");
+    let id = EntityId::file(1);
+    let mut moving = fresh(id, None, "c.txt", LocalStatus::Synced);
+    moving.synced_placement = Some(Placement { parent: None, name: "a.txt".into() });
+    let fp = device.fs.fingerprint_at("a.txt").expect("the file stands there");
+    moving.synced_fingerprint = Some(fp);
+    moving.own_file = Some(fp.identity());
+    device.store.put_entry(&moving).unwrap();
+    device.fs.user_remove("a.txt");
+    device.fs.user_write("a.txt", b"saved over it, a new file");
+
+    let report = do_one(
+        &device,
+        id,
+        Action::ApplyRemoteMove { to: Placement { parent: None, name: "c.txt".into() } },
+    );
+    assert!(device.fs.peek("c.txt").is_none(), "the file saved over it was carried to the new name");
+    assert_eq!(device.fs.peek("a.txt").as_deref(), Some(&b"saved over it, a new file"[..]));
+    assert_eq!((report.done, report.overtaken), (0, 1), "the move stands down");
+}
+
 #[test]
 fn a_local_move_carries_only_the_records_own_file() {
     let (_clock, _server, device) = world();
@@ -2663,7 +2692,7 @@ fn a_conflict_copy_sets_aside_only_the_records_own_file() {
     device.store.put_entry(&owning(&device, EntityId::file(2), "b.txt")).unwrap();
     swap_names(&device, "a.txt", "b.txt");
 
-    let report = do_one(&device, id, Action::PreserveLocalAs { name: "a (conflicted copy).txt".into() });
+    let report = do_one(&device, id, Action::PreserveLocalAs { name: "a (conflicted copy).txt".into(), parent: None });
     assert!(device.fs.peek("a (conflicted copy).txt").is_none(), "another record's file was set aside");
     assert_eq!(device.fs.peek("a.txt").as_deref(), Some(&b"another record's file"[..]));
     let records = device.store.every_entry().unwrap();
@@ -2795,7 +2824,7 @@ fn a_conflict_copy_interrupted_before_its_rename_is_finished_not_minted_again() 
     device.store.put_entry(&copy).unwrap();
     device.store.put_entry(&entry).unwrap();
 
-    let report = do_one(&device, id, Action::PreserveLocalAs { name: "a (conflicted copy).txt".into() });
+    let report = do_one(&device, id, Action::PreserveLocalAs { name: "a (conflicted copy).txt".into(), parent: None });
     assert_eq!(report.done, 1);
     assert_eq!(device.fs.peek("a (conflicted copy).txt").as_deref(), Some(&b"this record's edit"[..]));
     let records = device.store.every_entry().unwrap();
@@ -2908,6 +2937,134 @@ fn a_never_sent_file_carried_into_another_folder_is_not_followed_there_by_a_make
     do_one(&device, id, Action::Download);
     let after = device.store.get_entry(mine).unwrap().expect("kept");
     assert_eq!(after.remote.parent, Some(private), "followed across into a plain folder: {:?}", after.remote);
+}
+
+/// A sealed file never sent, whose own file the user moved out of a vault
+/// subfolder before the server's trash of that subfolder reached here,
+/// follows its file when the folder goes: kept, sealed, where it stands.
+/// Forgotten with the folder, a trade had carried it onto a plain record's
+/// path and its bytes went up as that record's version (plat3 75422).
+#[test]
+fn a_never_sent_sealed_file_moved_out_of_a_trashed_folder_follows_its_file() {
+    let (clock, server, device) = world();
+    let private = server.seed_encrypted_folder(None, "Private");
+    let sub = server.seed_encrypted_folder(Some(private), "Sub");
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    for (id, parent, name, path) in [(private, None, "Private", "Private"), (sub, Some(private), "Sub", "Private/Sub")] {
+        device.fs.user_mkdir(path);
+        let mut folder = fresh(EntityId::folder(id), parent, name, LocalStatus::Synced);
+        folder.is_encrypted = true;
+        folder.synced_placement = Some(folder.remote.clone());
+        let dir = jd_vfs::Vfs::directory_id(&device.fs, &root.join(path)).unwrap().unwrap();
+        folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir));
+        device.store.put_entry(&folder).unwrap();
+    }
+    // Saved in the subfolder, never sent, and moved out to the root since.
+    device.fs.user_write("out.txt", b"saved in the vault, never sent, moved out");
+    let mine = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut never_sent = fresh(mine, Some(sub), "draft.txt", LocalStatus::PendingUpload);
+    never_sent.is_encrypted = true;
+    never_sent.own_file = Some(device.fs.fingerprint_at("out.txt").unwrap().identity());
+    device.store.put_entry(&never_sent).unwrap();
+    // Another device trashes the subfolder on the server.
+    let desk = Device::new("desk", &server, clock.clone(), 8);
+    let mut on_desk = fresh(EntityId::folder(sub), Some(private), "Sub", LocalStatus::Synced);
+    on_desk.is_encrypted = true;
+    on_desk.synced_placement = Some(on_desk.remote.clone());
+    desk.store.put_entry(&on_desk).unwrap();
+    assert_eq!(do_one(&desk, EntityId::folder(sub), Action::TrashRemote).done, 1);
+
+    do_one(&device, EntityId::folder(sub), Action::TrashLocal);
+    let after = device.store.get_entry(mine).unwrap().expect("the record follows its file");
+    assert_eq!(after.remote, Placement { parent: None, name: "out.txt".into() });
+    assert!(after.is_encrypted, "still sealed");
+}
+
+/// A move whose rename landed on its first attempt, its reparent refused,
+/// and the cycle's park then landed over it unheard -- the server holds the
+/// file under the park in the old folder while the record still names the
+/// rename. The retry asks the server where the file is, and renames out of
+/// the park under a key of its own: under the rename's key, already used,
+/// the server replays the old answer and renames nothing, and the file ended
+/// at its new folder under the scratch name for good (hidden kill2 75122).
+#[test]
+fn a_retried_move_renames_out_of_a_park_that_landed_unheard() {
+    let (clock, server, device) = world();
+    let body = b"the file being moved";
+    let folder = server.seed_folder(None, "F");
+    let file = server.seed_file(Some(folder), "in.txt", body);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    device.fs.user_mkdir("F");
+    let mut f = fresh(EntityId::folder(folder), None, "F", LocalStatus::Synced);
+    f.synced_placement = Some(f.remote.clone());
+    f.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(jd_vfs::Vfs::directory_id(&device.fs, &root.join("F")).unwrap().unwrap()));
+    device.store.put_entry(&f).unwrap();
+    // The user moved it to the root under a new name.
+    device.fs.user_write("doc.txt", body);
+    let id = EntityId::file(file);
+    let mut e = fresh(id, Some(folder), "in.txt", LocalStatus::Synced);
+    e.synced_placement = Some(e.remote.clone());
+    e.synced_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+    e.remote_content = e.synced_content.clone();
+    device.store.put_entry(&e).unwrap();
+
+    // First attempt: the rename lands, the reparent is refused.
+    device.net.set_faults(NetFaults { refuse_before: Some("drive_move".into()), ..NetFaults::none() });
+    let first = do_one(&device, id, Action::ApplyLocalMove { to: Placement { parent: None, name: "doc.txt".into() } });
+    device.net.set_faults(NetFaults::none());
+    assert_eq!(first.done, 0, "{first:?}");
+    let op = device.store.queued_ops().unwrap().into_iter().find(|o| o.entity == id).expect("the move is still queued");
+    assert!(op.attempts > 0);
+    // The record as the next walk leaves it: the rename it asked for.
+    let mut walked = device.store.get_entry(id).unwrap().unwrap();
+    walked.remote = Placement { parent: Some(folder), name: "doc.txt".into() };
+    device.store.put_entry(&walked).unwrap();
+    // The cycle's park lands over it, its answer lost.
+    let tag = device.store.park_tag(&op.idempotency_key).unwrap();
+    let scratch = jd_core::order::tagged_swap_name(&tag, &op.idempotency_key);
+    server.action("drive_rename", &serde_json::json!({ "entity_type": "file", "entity_id": file, "name": scratch })).expect("the park lands");
+
+    clock.advance_secs(30 * 60);
+    let now = device.now();
+    run_queued(&env(&device, &now)).expect("run");
+    let it = server.files().into_iter().find(|f| f.id == file).unwrap();
+    assert_eq!((it.folder, it.name.as_str()), (None, "doc.txt"), "{:?}", server.tree());
+}
+
+/// A download lands in its folder's own directory. Folder P's record still
+/// names the path where folder Q's directory now stands (P's own move off it
+/// is agreed later in the batch); the download stands down instead of
+/// writing P's file into Q, a folder the user never put it in (hidden
+/// hostile2 74401).
+#[test]
+fn a_download_never_lands_in_another_folders_directory() {
+    let (_clock, server, device) = world();
+    device.fs.hide_births(true);
+    let body = b"the file that belongs in P";
+    let p = server.seed_folder(None, "P");
+    let q = server.seed_folder(None, "Q");
+    let file = server.seed_file(Some(p), "f.txt", body);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    device.fs.user_mkdir("X");
+    device.fs.user_mkdir("Y");
+    let dir_of = |name: &str| jd_vfs::Fingerprint::of_directory(jd_vfs::Vfs::directory_id(&device.fs, &root.join(name)).unwrap().unwrap());
+    // P's record names X, but X is Q's directory; P's own stands at Y.
+    let mut pe = fresh(EntityId::folder(p), None, "P", LocalStatus::Synced);
+    pe.synced_placement = Some(Placement { parent: None, name: "X".into() });
+    pe.synced_fingerprint = Some(dir_of("Y"));
+    let mut qe = fresh(EntityId::folder(q), None, "Q", LocalStatus::Synced);
+    qe.synced_placement = Some(Placement { parent: None, name: "X".into() });
+    qe.synced_fingerprint = Some(dir_of("X"));
+    device.store.put_entry(&pe).unwrap();
+    device.store.put_entry(&qe).unwrap();
+    let id = EntityId::file(file);
+    let mut fe = fresh(id, Some(p), "f.txt", LocalStatus::PendingDownload);
+    fe.remote_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+    device.store.put_entry(&fe).unwrap();
+
+    let report = do_one(&device, id, Action::Download);
+    assert!(device.fs.peek("X/f.txt").is_none(), "P's file was written into Q's directory");
+    assert_eq!((report.done, report.overtaken), (0, 1), "{report:?}");
 }
 
 /// A never-sent record's file was set aside since its upload was planned,

@@ -248,7 +248,7 @@ fn encode(action: &Action) -> (&'static str, Value) {
         Action::ApplyRemoteMove { to } => ("move_local", place(to)),
         Action::TrashLocal => ("trash_local", json!({})),
         Action::TrashRemote => ("trash_remote", json!({})),
-        Action::PreserveLocalAs { name } => ("preserve_local_as", json!({ "name": name })),
+        Action::PreserveLocalAs { name, parent } => ("preserve_local_as", json!({ "name": name, "parent": parent })),
         Action::Forget => ("forget", json!({})),
         Action::Adopt => ("adopt", json!({})),
         Action::AdoptPlacement { to } => ("adopt_placement", place(to)),
@@ -1575,6 +1575,30 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
     };
+    // A download lands in its folder's own directory. The folder's record can
+    // name a path where ANOTHER folder's directory stands -- its own move off
+    // that path agreed later in this same batch -- and the bytes went into
+    // that other folder, one the user never put the file in (hidden hostile2
+    // 74401). On a volume whose ids hold, the directory's id says whose it
+    // is; the download stands down and the next pass places it where its
+    // folder now is. Only another live folder's directory: an id this folder
+    // merely no longer recognises refuses nothing.
+    if !env.vfs.personality().positional_file_ids {
+        if let (Some(pid), Some(dir)) = (entry.local_placement().parent, path.parent()) {
+            if let Some(here) = env.vfs.directory_id(dir)?.filter(|id| *id != 0) {
+                let mine = env.store.get_entry(EntityId::folder(pid))?.and_then(|f| f.synced_fingerprint).map(|f| f.file_id);
+                if mine != Some(here) {
+                    for other in env.store.live_holders_of(EntityType::Folder, here)? {
+                        if other.id != EntityId::folder(pid) && !other.id.is_provisional() {
+                            return Ok(OpOutcome::Overtaken(
+                                "the folder it belongs in is another folder's directory here; deciding again from where its folder is".into(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Abandoning the download is right in both cases below -- there is nothing
     // to fetch. Abandoning it and saying nothing is what was wrong: the record
@@ -2932,8 +2956,15 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
     };
+    // The folder the local version stands in, as reconcile read it; an op
+    // journaled before the plan said so keeps the server's folder.
+    let beside = match params.get("parent") {
+        Some(Value::Null) => None,
+        Some(v) => Some(v.as_i64().ok_or_else(|| ExecError::UnknownOp("a conflict copy's folder is not an id".into()))?),
+        None => entry.remote.parent,
+    };
     let kept = Placement {
-        parent: entry.remote.parent,
+        parent: beside,
         name: name.clone(),
     };
     let to = match path_for(env, &kept)? {
@@ -2974,7 +3005,7 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
     // A name the server has already given to another device's rescue is the
     // same problem seen from the other side: landing here would earn a refusal
     // that never lifts, because the file holding the name has settled.
-    let spoken_for = names_the_server_has(env, entry.remote.parent)?;
+    let spoken_for = names_the_server_has(env, beside)?;
     let to = if env.vfs.fingerprint(&to)?.is_some() || spoken_for.iter().any(|t| t == &kept.name) {
         free_conflict_path(env, &to, &entry.remote.name, &spoken_for)?
     } else {
@@ -2990,7 +3021,7 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
     // soak rig's duplicate names came from, and a permissive server took every
     // one of them without complaint.
     let kept = Placement {
-        parent: entry.remote.parent,
+        parent: beside,
         name: to
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -3010,7 +3041,9 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         remote_modified_time: None,
         head_change_id: 0,
         remote_deleted: false,
-        is_encrypted: entry.is_encrypted,
+        // Never less sealed than the file it was, nor than the folder it is
+        // kept in.
+        is_encrypted: entry.is_encrypted || crate::pass::parent_is_encrypted(env, beside)?,
         // A rescued copy is a NEW file with its own key: the content id and the
         // grant belong to the file it was copied away from, and carrying them
         // here would claim this file's bytes are that file's bytes.
@@ -3442,7 +3475,9 @@ fn create_local_folder(
         // adopted) was tried in the reset's WP2 and fired only while the
         // scan was still wrong about a never-materialized tracker; with the
         // scan right it had no reachable shape (both 75415 shapes, the E1
-        // pins, the sweep seed with the swap off), and it came out.
+        // pins, the sweep seed with the swap off), and it came out. A
+        // download that lands only in its folder's own directory gave it one,
+        // and it is back, below.
         for other in env.store.every_entry()? {
             if other.id == op.entity
                 || other.id.entity_type != EntityType::Folder
@@ -3462,26 +3497,37 @@ fn create_local_folder(
             if other.id.is_provisional() {
                 continue;
             }
-            if let Ok(Placed::At(theirs)) = local_path(env, &other) {
-                if theirs == path {
-                    // Not this folder's directory, and not this operation's
-                    // problem to solve. Standing down re-derives the plan next
-                    // pass, which is where the answer comes from: naming keeps
-                    // the name for an entrant whose rival is on its way out,
-                    // and gives the entrant a name of its own when the rival
-                    // is staying. Waiting here instead cost three attempts at
-                    // guessing who was coming back -- a settled folder that
-                    // was never leaving, a provisional being uploaded that
-                    // could not leave, and a leaver stuck behind one of those
-                    // -- each a fresh forever-loop. The executor knows a
-                    // directory is not its own; it does not know who will
-                    // eventually own the name. Estate v28 seeds 24079086 and
-                    // 24042460.
-                    return Ok(OpOutcome::Overtaken(format!(
-                        "{} belongs to another folder; deciding again from what is there now",
-                        path.display(),
-                    )));
-                }
+            // And by the directory's own id, on a volume whose ids hold: a
+            // directory another server-backed folder knows as its own is that
+            // folder's, wherever its record says it is. A folder the user
+            // renamed here onto the name the server gives a folder this device
+            // has not met still names its old path by its record; the
+            // newcomer's create took its directory by the path, the two shared
+            // it, and a download for the newcomer then had no folder of its own
+            // to land in (the download's own-directory check, hidden hostile2
+            // 74401). Refused here, naming gives the newcomer a name of its own.
+            let its_directory = !env.vfs.personality().positional_file_ids
+                && other.synced_fingerprint.map(|f| f.file_id).filter(|id| *id != 0).is_some_and(|own| {
+                    env.vfs.directory_id(&path).ok().flatten() == Some(own)
+                });
+            if its_directory || matches!(local_path(env, &other), Ok(Placed::At(ref theirs)) if *theirs == path) {
+                // Not this folder's directory, and not this operation's
+                // problem to solve. Standing down re-derives the plan next
+                // pass, which is where the answer comes from: naming keeps
+                // the name for an entrant whose rival is on its way out,
+                // and gives the entrant a name of its own when the rival
+                // is staying. Waiting here instead cost three attempts at
+                // guessing who was coming back -- a settled folder that
+                // was never leaving, a provisional being uploaded that
+                // could not leave, and a leaver stuck behind one of those
+                // -- each a fresh forever-loop. The executor knows a
+                // directory is not its own; it does not know who will
+                // eventually own the name. Estate v28 seeds 24079086 and
+                // 24042460.
+                return Ok(OpOutcome::Overtaken(format!(
+                    "{} belongs to another folder; deciding again from what is there now",
+                    path.display(),
+                )));
             }
         }
     }
@@ -3582,6 +3628,21 @@ fn move_remote(
         return Ok(OpOutcome::Overtaken(
             "it does not exist on the server yet".into(),
         ));
+    }
+    // A retry asks the server where the entity is before deciding anything.
+    // An earlier attempt of this op, or a park ahead of it in the round, may
+    // have landed with its answer lost, and the record still names where the
+    // last walk saw it. Read from the record, a park that landed unheard
+    // after this op's own rename had landed looked like that rename, half
+    // done: the move finished with the reparent alone and left the file under
+    // the scratch name for good (hidden kill2 75122).
+    if op.attempts > 0 {
+        if let Some((_, state)) = crate::pass::stat_all(env, &[op.entity])?.into_iter().next() {
+            crate::pass::absorb_remote(env, op.entity, &state)?;
+            if let Some(fresh) = env.store.get_entry(op.entity)? {
+                entry = fresh;
+            }
+        }
     }
     // Where the server had this when the move was decided. If it has since put
     // it somewhere else, somebody else moved it and this op describes a journey
@@ -3792,6 +3853,11 @@ fn move_remote(
     // later attempt asks for a conflict name under a key of its own, for the
     // reason the folder create gives: a key is a promise that the request
     // behind it does not change.
+    // A rename out of this op's own park is a request of its own: the park
+    // can land AFTER this op's rename did -- a park retried and answered too
+    // late -- and the rename sent again under the key it already used is
+    // replayed, not applied.
+    let out_of_its_park = is_this_ops_park(env, op, &entry.remote.name)?;
     let rename = |wanted: &str, attempt: u32| -> Result<(), ExecError> {
         let body = match &sealed_body {
             Some(body) => body.clone(),
@@ -3801,9 +3867,10 @@ fn move_remote(
                 "name": wanted,
             }),
         };
+        let step = if out_of_its_park { "unpark" } else { "rename" };
         let key = match attempt {
-            0 => format!("{}-rename", op.idempotency_key),
-            n => format!("{}-rename-n{n}", op.idempotency_key),
+            0 => format!("{}-{step}", op.idempotency_key),
+            n => format!("{}-{step}-n{n}", op.idempotency_key),
         };
         env.api.action_idempotent("drive_rename", body, &key)?;
         Ok(())
@@ -4297,6 +4364,23 @@ fn move_local(
             }
         }
     }
+    // On a volume whose ids hold, a file at the path with an id other than
+    // the record's own is another file: one the user saved over this one
+    // after the scan, whoever owns it yet. Its id says so with no birth to
+    // back it -- two files never share an id at once -- and the move stands
+    // down for the next scan to read the save. Moved, a save made as a
+    // download landed was carried into the folder this record was going to,
+    // a folder the user never put it in (hidden plat3 75419; the positional
+    // case above is the same seed on a FAT stick).
+    if op.entity.entity_type == EntityType::File && !env.vfs.personality().positional_file_ids {
+        if let (Some(own), Some(fp)) = (entry.own_file_id().filter(|id| *id != 0), env.vfs.fingerprint(&from)?) {
+            if fp.file_id != 0 && fp.file_id != own {
+                return Ok(OpOutcome::Overtaken(
+                    "the file here is another file; deciding again from what is there now".into(),
+                ));
+            }
+        }
+    }
     let dest = match path_for(env, &to)? {
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
@@ -4721,9 +4805,30 @@ fn the_file_here_is_another_entrys(
         // branch gives up can be lost.
         // A claimant with no agreed content cannot be matched against
         // anything, so it does not earn the read.
-        let Some(agreed) = other.synced_content.as_ref() else {
+        //
+        // On a volume that cannot say which file is which, the bytes the
+        // claimant's scan last saw count as well: the scan paired it with
+        // this file by them and reads it at home here, so asking only the
+        // agreement reads one disk two ways. A claimant never sent has no
+        // agreement at all; refused here, naming parked this entry for the
+        // claimant's name every pass and the park stood down every pass,
+        // while the claimant's upload was vetoed by this entry's claim on
+        // the slot (win kill2 75102).
+        //
+        // The argument above does not cover this arm: a claimant never sent
+        // has bytes the server does not hold. It is safe for another reason.
+        // The park moves no file and deletes none -- the file stays on the
+        // disk where it stands -- and the claimant's own scan has already
+        // paired that file to the claimant by these bytes. What this entry
+        // gives up is a claim on the slot, never bytes: the file is the
+        // claimant's, and the claimant sends it.
+        let seen = other
+            .last_seen_sha
+            .as_deref()
+            .filter(|_| !personality.stable_file_identity);
+        if other.synced_content.is_none() && seen.is_none() {
             continue;
-        };
+        }
         let hash = match &here {
             Some(h) => h.clone(),
             None => {
@@ -4732,7 +4837,9 @@ fn the_file_here_is_another_entrys(
                 h
             }
         };
-        if agreed.sha256 == hash {
+        if other.synced_content.as_ref().is_some_and(|agreed| agreed.sha256 == hash)
+            || seen == Some(hash.as_str())
+        {
             return Ok(true);
         }
     }
@@ -4864,6 +4971,23 @@ fn unmaterialize_and_park(
             if let Some(mine) = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0) {
                 let (_, dir_identity) = crate::pass::observed_dirs(env)?;
                 if dir_identity.values().any(|id| *id == mine) {
+                    // Standing where the server has it, the folder has already
+                    // arrived: the clash naming judged, against the records
+                    // before the scan, is with a record that has since left
+                    // that name on this disk. Nothing here is given up, and no
+                    // scratch name is written that nothing wears -- the
+                    // round's adoption of that placement, in this same batch,
+                    // kept such a name, and the next scan read the folder as
+                    // deleted by the user and trashed it on the server (shown
+                    // kill2 75112).
+                    if let Placed::At(there) = path_for(env, &entry.remote)? {
+                        if env.vfs.directory_id(&there)?.filter(|id| *id != 0) == Some(mine) {
+                            return Ok(OpOutcome::Overtaken(
+                                "its own directory already stands where the server has it"
+                                    .into(),
+                            ));
+                        }
+                    }
                     entry.local_name = Some(crate::order::swap_name(&op.idempotency_key));
                     env.store.put_entry(&entry)?;
                     return Ok(OpOutcome::Done);
@@ -5477,9 +5601,7 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
     //
     // Nothing is lost by it here: a local file that has not reached the server
     // is rescued out of the folder before the trash, not forgotten with it.
-    for id in provisional {
-        env.store.forget_entry(id)?;
-    }
+    // One the user moved out of the folder first follows its file, below.
 
     // With nothing real under it there is nothing to ask the server, but a
     // held file placed here on this disk is still asked after below.
@@ -5618,6 +5740,26 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
         .filter(|id| id.entity_type == EntityType::Folder)
         .map(|id| id.server_id)
         .collect();
+    // A file never uploaded whose own file the user moved out of the folder
+    // before the server's delete reached this device follows its file, as
+    // the pass follows one (T1-C): the record is where it stands, and whether
+    // it goes up sealed is decided from there. Forgotten, a trade had carried
+    // a sealed one onto a plain record's path, the next scan read it as that
+    // record's edit, and the vault's bytes went up as a plain version (plat3
+    // 75422). Still inside, it goes with the folder to the trash.
+    for id in &provisional {
+        if id.entity_type == EntityType::File {
+            if let (Some(file), Some(root_dir), Some(mut entry)) = (moved_out(id)?, env.vfs.root(), env.store.get_entry(*id)?) {
+                if let Some(placement) = aside_placement(env, &root_dir.join(&file.path))?
+                    .filter(|p| !p.parent.is_some_and(|f| doomed_folders.contains(&f)))
+                {
+                    crate::pass::follow_its_file(env, &mut entry, placement)?;
+                    continue;
+                }
+            }
+        }
+        env.store.forget_entry(*id)?;
+    }
     for held in &everyone {
         if held.id.entity_type != EntityType::File
             || held.remote_deleted

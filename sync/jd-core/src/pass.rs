@@ -709,6 +709,16 @@ pub fn run_pass(
     let sealed_names_at_risk = sealed_names_this_disk_cannot_vouch_for(env, &observed)?;
     let mut names_held: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
     for mut entry in all_entries(env)? {
+        // Where the scan found this record's own file, when it found it
+        // somewhere its record did not say: the path the gone check below
+        // reads. Built from the record, that path names each folder by its
+        // record, and a folder the user renamed in the same interval is not
+        // renamed in its record until the round -- the file was looked for
+        // under the folder's old name, not found, and the record forgotten,
+        // its file then minted afresh where it stood. Carried out of a vault
+        // into that folder, the one record that knew it was sealed went, and
+        // it went up in the clear (plat3 75401, hidden kill2 75109).
+        let mut found_at: Option<String> = None;
         // A file never uploaded follows its own file: where the scan found it
         // is where it is (the reset's T1-C). Its placement is where it stands
         // now, and whether it goes up sealed is decided again from there. The
@@ -728,6 +738,10 @@ pub fn run_pass(
                     let out_of_a_dead_vault = entry.is_encrypted
                         && !into_a_vault
                         && in_a_deleted_vault(env, entry.remote.parent)?;
+                    found_at = Some(match to_path.rsplit_once('/') {
+                        Some((dir, _)) => format!("{dir}/{}", to.name),
+                        None => to.name.clone(),
+                    });
                     entry.remote = to;
                     entry.local_name = None;
                     if into_a_vault && !entry.is_encrypted {
@@ -783,7 +797,11 @@ pub fn run_pass(
         // Only an operation in flight comes first: a record whose upload is
         // mid-air is forgotten when the upload reports, not here.
         if entry.id.is_provisional() {
-            let gone = match relative_path(env, &entry)? {
+            let path = match found_at {
+                Some(path) => Some(path),
+                None => relative_path(env, &entry)?,
+            };
+            let gone = match path {
                 // The sweep at the top of the pass has already removed anything
                 // with no way back to the root; belt and braces.
                 None => true,
@@ -867,9 +885,16 @@ pub fn run_pass(
         // Left behind, the file stood unclaimed in the other vault's folder
         // (hidden hostile2 74418). One moved OUT of the park is the
         // exception below.
+        //
+        // And for a sealed file held outside its vault and carried back into
+        // one: every vault on this disk is parked, so the server is asked
+        // nothing here either. Sent as a move, it waited for a folder of the
+        // parked vault to reach the server, which it never does, and retried
+        // for ever (win kill2 75102).
         if entry.id.entity_type == EntityType::File
             && !entry.id.is_provisional()
-            && entry.local_placement().parent.is_some_and(|p| held_by_park.contains(&p))
+            && (entry.is_encrypted
+                || entry.local_placement().parent.is_some_and(|p| held_by_park.contains(&p)))
         {
             if let Some(LocalChange::Moved { to_path, .. } | LocalChange::MovedAndEdited { to_path, .. }) =
                 scan.change_for(entry.id)
@@ -4515,7 +4540,16 @@ fn detect_folder_moves(
             _ => None,
         }
     };
-    let pool: Vec<(String, EntityId)> = ring_paths.clone();
+    // A chain may start from a folder whose old path is empty as well as from
+    // one standing in another's way: B renamed to a new name and then A
+    // renamed onto the B it left leaves A's path empty, and A at the head of
+    // the chain. Walked only from the folders in the way, the chain started
+    // at B's path, ended one link long and was dropped; A was read as deleted
+    // and its directory, standing at B, was minted as a new folder carrying
+    // its id -- refused at the disk by identity for ever after (plat3 75415,
+    // swaps off). The head's first link is proven the way every other one
+    // is, by its own directory standing at the next path.
+    let pool: Vec<(String, EntityId)> = ring_paths.iter().chain(missing.iter()).cloned().collect();
     let old_path_of = |id: EntityId| pool.iter().find(|(_, e)| *e == id).map(|(p, _)| p.clone());
     let mut chains: Vec<Vec<(&String, EntityId)>> = Vec::new();
     for (_, head) in pool.iter() {
@@ -4693,8 +4727,54 @@ fn detect_folder_moves(
             None => scan.deferred.push((*id, (*candidate).clone())),
         }
     }
+    // The same for a PLAIN folder holding a path, by its record, where another
+    // folder's own directory stands: identity says the path is not its, and it
+    // stops counting as present there. The vault's claim above has said so
+    // since the reset's C8b; a plain holder kept the path by its name. Two
+    // folders renamed in one breath against a peer's trade of their names:
+    // A renamed onto B's name and B onto a new one, B's only file moved out
+    // first. B's record named the path where A's directory stood, the path
+    // map and the executor read it as A's, the scan read it as B's -- and
+    // A's create there and B's move away from it were refused for ever
+    // (plat3 75415 with the swap verb on). Only the holder's presence goes:
+    // the path joins the candidates, and whether the other folder takes it is
+    // for its own files to propose, as for any directory -- a plain folder's
+    // id still claims nothing on its own. Not on a volume whose ids are
+    // positions, where a directory's id says nothing of whose it is.
+    let mut freed_by_identity: Vec<&String> = Vec::new();
+    if !env.vfs.personality().positional_file_ids {
+        let unplaced: Vec<EntityId> = missing
+            .iter()
+            .chain(displaced.iter())
+            .chain(contested.iter())
+            .map(|(_, id)| *id)
+            .filter(|id| !claimed.contains(id) && !held_ids.contains(id))
+            .collect();
+        for (path, holder) in tracked.iter() {
+            if encrypted.contains(holder) || claimed.contains(holder) || taken.contains(path) || scan.held.contains(path.as_str()) {
+                continue;
+            }
+            let Some(here) = dir_identity.get(path).copied().filter(|d| *d != 0) else { continue };
+            let Some(owner) = carrier_of(here) else { continue };
+            if owner == *holder || !unplaced.contains(&owner) {
+                continue;
+            }
+            scan.present.remove(holder);
+            lost_to_identity.push((path.clone(), *holder));
+            if let Some(dir) = dirs_on_disk.iter().find(|d| *d == path) {
+                freed_by_identity.push(dir);
+            }
+        }
+    }
+    for dir in freed_by_identity {
+        if !candidates.contains(&dir) {
+            candidates.push(dir);
+        }
+    }
+    candidates.sort_by_key(|d| (depth_of(d), d.to_string()));
     // A record that lost its path to identity is matched as a contested one
     // from here on: its path holds a directory that is somebody else's.
+    let lost_their_paths: Vec<EntityId> = lost_to_identity.iter().map(|(_, id)| *id).collect();
     let mut contested_after_claims: Vec<(String, EntityId)> = contested.clone();
     for (path, lost) in lost_to_identity {
         displaced.retain(|(_, e)| *e != lost);
@@ -4755,7 +4835,7 @@ fn detect_folder_moves(
                     // leaves two records on one directory.
                     if tracked
                         .get(*candidate)
-                        .is_some_and(|owner| owner != id && !claimed.contains(owner))
+                        .is_some_and(|owner| owner != id && !claimed.contains(owner) && !lost_their_paths.contains(owner))
                     {
                         continue;
                     }
@@ -5840,13 +5920,28 @@ pub(crate) fn held_outside_its_vault(env: &ExecEnv, entry: &Entry) -> Result<boo
 /// Does this folder hold encrypted content? `None` is the drive root, which is
 /// never itself a vault.
 /// Is this folder, or a vault folder above it, one the server has deleted?
+/// A record never sent placed where its own file now stands. Its `remote`
+/// is where it will be created, not anything the server said -- it has no
+/// server side -- so the pass writes it, as the pass writes it for a file
+/// the scan finds moved (T1-C).
+pub(crate) fn follow_its_file(env: &ExecEnv, entry: &mut Entry, to: Placement) -> Result<(), ExecError> {
+    debug_assert!(entry.id.is_provisional());
+    entry.remote = to;
+    entry.local_name = None;
+    env.store.put_entry(entry)?;
+    Ok(())
+}
+
 fn in_a_deleted_vault(env: &ExecEnv, mut parent: Option<i64>) -> Result<bool, ExecError> {
     let mut guard = 0;
     while let Some(id) = parent {
         let Some(folder) = env.store.get_entry(EntityId::folder(id))? else {
             return Ok(false);
         };
-        if folder.is_encrypted && folder.remote_deleted {
+        // The vault itself, not a folder inside one: a subfolder of a live
+        // vault trashed upstream leaves the vault there to keep its files in,
+        // and a sealed file moved out of it is held, not published.
+        if folder.is_encrypted && folder.remote_deleted && !parent_is_encrypted(env, folder.remote.parent)? {
             return Ok(true);
         }
         guard += 1;

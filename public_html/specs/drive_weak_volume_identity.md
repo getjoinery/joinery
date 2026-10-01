@@ -1,9 +1,11 @@
 # Drive sync: knowing which file is which on disks that cannot say
 
 **Status: BUILT, reviewed VALID by a5 on 2026-09-30 (tree d8bb8ca4, with file
-ownership): zero G->R on the 420-seed sweep in all five disk modes, vault seeds
-counted; every rule red under its own knockout. What stays open is the open-set
-list below. Design settled 2026-09-28; owner accepted D1 to D3 the same day; Q4
+ownership; landed as 2deb8c52): zero G->R on the 420-seed sweep in all five disk
+modes, vault seeds counted; every rule red under its own knockout. The open set
+was closed on 2026-10-01 (tree af8143ec, reviewed VALID by a5): 420 of 420 green
+in all five modes. What stays open is shown kill2 75110, green by time only, and
+the deferred items: R4, the remount copy-swap shape and layer 2. Design settled 2026-09-28; owner accepted D1 to D3 the same day; Q4
 decided (a); facts F1, F2 and F4 traced on Linux, macOS and Windows (exFAT on
 Linux untested).** Owner decision 2026-09-28: close this
 limit rather than exempt it ("if we can diagnose the problem, explain it, and
@@ -925,6 +927,94 @@ Excused by the time-ordered credit, and each traced:
 Still open on 1b5b7a6e: shown off plat3 75415, kill2 75111, 75112, 75118,
 plat3 75401, 75415, 75422; hidden kill2 75109, 75122, plat3 75419; win
 hostile2 74407, 74409, kill2 75102, 75123, 75125; linux and mac kill2 75123.
+
+**The open set closed (2026-10-01, tree af8143ec, reviewed VALID by a5).**
+Every seed in the table above was traced to a cause before anything was
+changed. Ten were engine bugs, and six were the harness misreading what an
+engine could know. Each fix has a pin that is red with that fix alone knocked
+out. The sweep is 420 of 420 green in shown, hidden, win, linux and mac, with
+no G->R against 2deb8c52. The engine fixes, each stated as the rule now held:
+
+- **A record never sent is not gone while the scan found its own file.** The
+  check builds its path from where the scan found the file. A path rebuilt from
+  records names a folder by its record, and a folder the user renamed in the
+  same interval is not yet renamed there (plat3 75401, hidden kill2 75109).
+- **When the server trashes a folder, a never-sent file the user moved out of
+  it first follows its file.** It is no longer forgotten (plat3 75422).
+- **A deleted vault is the vault's root.** A trashed subfolder of a live vault
+  leaves the vault there to hold its files, so a sealed file moved out of that
+  subfolder is held, not published. Found while pinning the rule above: it
+  needs no chaos, just a peer's delete and this device's move.
+- **A record whose own file stands nowhere is deleted, whatever stands at its
+  path.** The scan's last step had an exception that read it as unchanged when
+  another record's file stood there at home. That exception had no pin and no
+  stated reason. It left a held file and a record with no file holding one name
+  for ever (plat3 75422).
+- **A local move carries only its record's own file.** On a volume whose ids
+  hold, a different id at the source is another file, with or without a birth
+  (hidden plat3 75419).
+- **A folder park stands down when the folder's own directory already stands
+  where the server has it.** It wrote a scratch local name nothing wore, and the
+  next scan trashed the folder on the server (kill2 75112).
+- **A retried server move asks the server where the entity is before deciding,
+  and renames out of its own park under a key of its own.** A park retried and
+  landed unheard after the move's rename looked like a half-done move. The
+  rename key, already used, was replayed rather than applied, and the file
+  stayed under `.jd-swap-` (hidden kill2 75122).
+- **A copy's bytes do not take a claimant's or held file's own file at its own
+  path** (win hostile2 74407).
+- **Folder chains may start from a missing folder.** A plain folder loses its
+  presence at a path that holds another unplaced folder's directory, and the
+  freed path becomes a candidate for that folder's contents. A plain folder
+  still never claims by id alone (plat3 75415, swaps on and off).
+- **On a weak volume, a claimant's last-seen bytes count in the executor's
+  ownership check, and a held file carried into a parked vault follows it
+  locally** (win kill2 75102). The park gives up a claim on a slot, never bytes:
+  the file stays where it stands.
+- **A conflict copy is kept in the folder the local version stands in**, not
+  beside the peer's moved version (hostile2 74424, exposed by the park fix).
+- **Two latent bugs that the extra server read in retried moves made
+  reachable,** by shifting every later fault draw:
+  - A naming chain that reaches a holder under a scratch name leaves its
+    arrivals pending a pass (kill2 75112, swaps off).
+  - A download stands down when its folder's path holds another folder's
+    directory. The folder create's identity check, taken out in the reset's
+    WP2 for want of a reachable shape, is back, with this as its shape (hidden
+    hostile2 74401). Tried first on its own, it had no reachable pin and was
+    left out.
+
+The harness fixes. These read the oracle more precisely and loosen it, and a5
+ruled each one a refinement of Q1 and Q4:
+
+- **Knowledge is dated when an engine could first have read it.**
+  - Each vault listing carries the server's change id at the moment it was made.
+  - After a pass, bytes at a record's path that are not the record's own are
+    dated at the pass's end, since a trade put them there after the walk.
+  - The record's own bytes and the walk's listing keep the pass-start date, so
+    a plaintext sent by the pass whose walk saw the bytes still fires. A pin
+    holds that property.
+  - Seeds: kill2 75123 on every weak disk, and kill2 75118.
+- **On a positional volume no own id is credited**, because the engine reads
+  none (win kill2 75125, hostile2 74409).
+- **A file the harness writes is credited to the folder born at the write**, as
+  workload writes are, not to whichever folder wears the name at settle (kill2
+  75111).
+
+Still open, by name:
+
+- **shown kill2 75110: green by time only.** Body 6b3d73 was written in the
+  vault on pc, traded into plain ring-2 before pc's next walk, minted plain and
+  sent at change 26. The landed tree sends the same plaintext and counts it as
+  never known. Here a later conflict copy makes it known at change 31, after
+  the send. No engine could have refused it. It is a Q4 shape, not a fix.
+- **Liveness (pre-existing stuck-park shape).** A holder parked under a scratch
+  name by a device that never comes back leaves the arrivals behind it pending
+  for ever. This is the stuck-park shape the busy-holder rule already carries,
+  now reached by the chain rule too.
+- **Harness note.** A killed pass's listings are discarded by the next pass's
+  pre-pass take, while the engine's R3 table keeps them. The post-pass snapshot
+  still credits records' own bytes. The gap is bytes a dying pass listed in a
+  vault that no record held, which the oracle does not count as known.
 
 **A shortcut that does not work (tried 2026-09-29).** Running every pass on a
 weak disk as a device with no vault key covers the server side: nothing in

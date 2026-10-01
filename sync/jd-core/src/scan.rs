@@ -616,8 +616,12 @@ fn folder_of(path: &str) -> &str {
 ///    record owns.
 /// 5. **Found by content.** A record still unsettled whose agreed bytes stand
 ///    on a file no record owns has moved: another volume, a restore.
-/// 6. The rest are deleted, except a live record whose path holds another
-///    record's at-home file, which is left to naming.
+/// 6. The rest are deleted: a record whose own file stands nowhere. Another
+///    record's file at home at its path is that record's, and does not keep
+///    this one standing -- read as unchanged, it held a name with no file
+///    behind it, a never-sent file held at that path claimed none, and
+///    naming had nothing to settle: the server's file never came down again
+///    (plat3 75422).
 ///
 /// A claimant's own file standing anywhere but at its path is its source's
 /// again: the source follows it (step 2), which is what ends the hold, and
@@ -702,8 +706,25 @@ pub fn pair_files(
         .filter(|(key, n)| *n == 1 && standing.get(key).is_some_and(|m| *m == 1 || !key.contains('#')))
         .map(|(key, _)| key)
         .collect();
+    // A claimant, or a file held outside its vault, reads by none of this,
+    // but a file standing at its own path with the bytes it was last seen
+    // with is its file at home all the same, and names nobody else: another
+    // record whose bytes are equal follows to a copy of them elsewhere, never
+    // onto that one. Taken by such a follow, the claimant read as deleted and
+    // was forgotten with its conversion, and the plain record it replaced kept
+    // its server copy for ever (win hostile2 74407).
+    let home_of_the_unkeyed: HashSet<&str> = known
+        .iter()
+        .filter(|k| k.claimant_for.is_some() || k.server_home.is_some())
+        .filter(|k| k.last_seen_sha.as_deref().is_some_and(|seen| at_path.get(k.path.as_str()) == Some(&seen)))
+        .map(|k| k.path.as_str())
+        .collect();
     let own = |k: &KnownLocal| key(k).map(|sha| refined(sha, k.tie_break)).filter(|key| named.contains(key));
-    let identity = |o: &ObservedFile| Some(refined(o.sha256.clone(), o.tie_break_id)).filter(|key| named.contains(key));
+    let identity = |o: &ObservedFile| {
+        Some(refined(o.sha256.clone(), o.tie_break_id))
+            .filter(|key| named.contains(key))
+            .filter(|_| !home_of_the_unkeyed.contains(o.path.as_str()))
+    };
     pair_by(known, observed, awaiting_bytes, own, identity, |_: &ObservedFile| None, Steps::AtHomeAndFollowed)
 }
 
@@ -973,9 +994,7 @@ fn pair_by<K: Clone + Eq + std::hash::Hash>(
         if settled[n] || own(k).is_none() {
             continue;
         }
-        let twin = !k.server_deleted
-            && at_path.get(k.path.as_str()).is_some_and(|i| home_taken.contains(i));
-        out.changes.push((k.id, if twin { LocalChange::Unchanged } else { LocalChange::Deleted }));
+        out.changes.push((k.id, LocalChange::Deleted));
     }
 
     // In the order the records were given, whichever step settled them.

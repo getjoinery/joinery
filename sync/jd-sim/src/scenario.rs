@@ -252,6 +252,8 @@ impl World {
                     Platform::Decomposing => MemFs::hfs_plus(clock.clone()),
                     Platform::Windows => MemFs::windows(clock.clone()),
                 };
+                let changes = server.clone();
+                fs.set_change_clock(crate::vfs::ChangeClock(std::sync::Arc::new(move || changes.latest_change_id())));
                 Device::new(name, &server, clock.clone(), seed).with_fs(fs)
             })
             .collect();
@@ -723,7 +725,7 @@ impl World {
         // listed the bytes in a vault is later than the stamp, and fires.
         let as_of = self.server.latest_change_id();
         device.fs.take_listed_in_a_vault();
-        device.fs.know_sealed(recorded_in_a_vault(device), as_of);
+        device.fs.know_sealed(recorded_in_a_vault(device, as_of, as_of).into_iter().map(|(h, n, _)| (h, n)), as_of);
         // What the daemon does before a pass on a volume with no file ids:
         // every path the watcher reported loses its cached hash, and all of
         // them do when it lost track (`specs/drive_weak_volume_identity.md`,
@@ -744,12 +746,22 @@ impl World {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             run_pass(&e, &ctx, DeletePolicy::Guard, &mut keys)
         }));
-        device.fs.know_sealed(recorded_in_a_vault(device), as_of);
+        // What a record held at the walk is known as of the pass's start;
+        // what stands on the disk now, if the walk did not read it, only as
+        // of now -- a trade landing mid-pass put it there after the pass's
+        // own sends (kill2 75123).
+        let after = self.server.latest_change_id();
+        for (h, n, at) in recorded_in_a_vault(device, as_of, after) {
+            device.fs.know_sealed([(h, n)], at);
+        }
         match outcome {
             Ok(o) => {
                 // The scan ran to the end of a pass that completed: what its
-                // walk listed in a vault, as it listed it.
-                device.fs.know_sealed(device.fs.take_listed_in_a_vault(), as_of);
+                // walk listed in a vault, as it listed it, each listing as of
+                // the moment it was made.
+                for (h, n, at) in device.fs.take_listed_in_a_vault() {
+                    device.fs.know_sealed([(h, n)], at.map_or(as_of, |at| at.max(as_of)));
+                }
                 o
             }
             Err(payload) => {
@@ -1941,9 +1953,12 @@ pub fn held_waiting(device: &Device) -> Vec<(jd_core::model::EntityId, String)> 
 
 /// Bodies and leaf names a record on this device places in a vault: an
 /// encrypted record's agreed body, the file standing at its path, and the
-/// file carrying its own id. Wider than the record alone can prove, which
-/// only ever makes the sealed oracle stricter.
-pub fn recorded_in_a_vault(device: &Device) -> Vec<(String, String)> {
+/// file carrying its own id -- not on a volume whose ids are only
+/// positions, where the engine reads no own id and a slot's id names
+/// whatever stands in it now (win kill2 75125). Each with when it was
+/// known: `walked` for bytes the record itself holds or last saw, `now` for
+/// any other bytes found on the disk, which the walk did not read.
+pub fn recorded_in_a_vault(device: &Device, walked: i64, now: i64) -> Vec<(String, String, i64)> {
     if jd_vfs::Vfs::root(&device.fs).is_none() {
         return Vec::new();
     }
@@ -1955,8 +1970,15 @@ pub fn recorded_in_a_vault(device: &Device) -> Vec<(String, String)> {
         let placement = e.synced_placement.as_ref().unwrap_or(&e.remote);
         let name = e.local_name.clone().unwrap_or_else(|| placement.name.clone());
         if let Some(c) = e.synced_content.as_ref() {
-            out.push((c.sha256.clone(), name.clone()));
+            out.push((c.sha256.clone(), name.clone(), walked));
         }
+        let seen = |sha: &str| {
+            if e.last_seen_sha.as_deref() == Some(sha) || e.synced_content.as_ref().is_some_and(|c| c.sha256 == sha) {
+                walked
+            } else {
+                now
+            }
+        };
         let path = match placement.parent {
             None => Some(name.clone()),
             Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{name}")),
@@ -1974,12 +1996,17 @@ pub fn recorded_in_a_vault(device: &Device) -> Vec<(String, String)> {
                 .is_some_and(|f| f.is_encrypted)
         });
         if let Some(bytes) = path.as_deref().filter(|_| in_a_vault).and_then(|p| device.fs.peek(p)) {
-            out.push((crate::sha256_hex(&bytes), name.clone()));
+            let sha = crate::sha256_hex(&bytes);
+            let at = seen(&sha);
+            out.push((sha, name.clone(), at));
         }
-        if let Some(own) = e.own_file.map(|o| o.file_id).filter(|i| *i != 0) {
+        let positional = jd_vfs::Vfs::personality(&device.fs).positional_file_ids;
+        if let Some(own) = e.own_file.map(|o| o.file_id).filter(|i| *i != 0 && !positional) {
             for p in files.iter().filter(|p| device.fs.file_id_of(p) == Some(own)) {
                 if let Some(bytes) = device.fs.peek(p) {
-                    out.push((crate::sha256_hex(&bytes), p.rsplit('/').next().unwrap_or(p).to_string()));
+                    let sha = crate::sha256_hex(&bytes);
+                    let at = seen(&sha);
+                    out.push((sha, p.rsplit('/').next().unwrap_or(p).to_string(), at));
                 }
             }
         }
