@@ -218,6 +218,7 @@ function _device_link_approve_bound(DeviceLink $link, int $user_id, string $devi
 
 function drive_device_link_approve_logic_descriptor(): array {
 	return array(
+		'requires_setting' => 'drive_active',
 		'description'      => 'Approve a pending device-link ceremony: mints the device\'s session credential (none for a ceremony a signed-in app opened, which keeps its own), creates or updates its SyncDevice identity, and (optionally) stores browser-sealed vault keys for the device to collect: the drive key in `sealed_vault_key`, any other client-custody vault in `sealed_vault_keys` ({scope: blob}). Requires a signed-in browser session and a recent step-up. Every sealed key is opaque ciphertext produced in the browser — the server cannot open it.',
 		'requires_session' => true,
 		'mutates'          => true,
