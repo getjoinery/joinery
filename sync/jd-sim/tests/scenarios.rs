@@ -3756,6 +3756,41 @@ fn a_never_sent_file_moved_aside_by_a_download_stays_held() {
     assert_converged(&world);
 }
 
+/// A file saved in a vault and never sent traded places with a synced plain
+/// file, and a peer edits the plain file meanwhile. The plain file's bytes
+/// went into the vault here, so the plain file reads as deleted, the peer's
+/// edit wins, and it comes back down to its path -- where the never-sent
+/// file now stands. That file holds no name, so the download sets it aside
+/// and lands. Refused instead ("not the one this download was decided
+/// against"), the download was planned and refused every pass for ever, and
+/// the device never went quiet (kill2 75110).
+#[test]
+fn a_download_sets_aside_a_never_sent_file_that_traded_places_with_it() {
+    let world = a_vault_of_two(9_974, &["holder", "peer"]).0;
+    let holder = world.device("holder");
+    let peer = world.device("peer");
+    holder.fs.user_write("Plain/a.txt", b"the plain file");
+    assert!(world.settle().is_some());
+    let body = b"written in the vault, never sent";
+    holder.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    holder.fs.user_write("Private/draft.txt", body);
+    world.pass(holder);
+    holder.net.set_faults(NetFaults::none());
+    holder.fs.user_rename("Plain/a.txt", "Plain/swap.tmp");
+    holder.fs.user_rename("Private/draft.txt", "Plain/a.txt");
+    holder.fs.user_rename("Plain/swap.tmp", "Private/draft.txt");
+    let edit = b"the peer's edit of the plain file";
+    peer.fs.user_write("Plain/a.txt", edit);
+    world.pass(peer);
+    assert!(world.settle().is_some(), "never settled");
+
+    no_plaintext_of(&world, body);
+    assert_eq!(holder.fs.peek("Plain/a.txt").as_deref(), Some(&edit[..]), "the peer's edit never came down");
+    let told = held_issues(holder);
+    assert!(told.iter().any(|t| t.starts_with("a (conflicted copy")), "the never-sent file is not held aside: {told:?}");
+    assert_converged(&world);
+}
+
 /// O1: a held file renamed in place, and a stranger saved at its old name.
 /// The held file is the renamed one -- its own identity says so, and a held
 /// file is never read as a backup -- and the stranger is a new file in a
@@ -4322,7 +4357,11 @@ fn a_folder_record_knows_its_directory_and_relearns_it_after_a_restore() {
 /// contents alone, `Docs` is paired with `Other` -- the folder dragged after
 /// its one file, the AC shape, and `Moved` minted as a stranger. Read by
 /// identity alone, a plain folder's id may not claim (a recycled id would
-/// hand a stranger's files a folder's history). So the engine stands down:
+/// hand a stranger's files a folder's history), and on this disk, which
+/// reports no birth times, nothing proves the id is still the same
+/// directory (where births are reported it does, and the folder follows its
+/// directory: `a_folder_whose_only_file_moved_out_before_its_rename_is_
+/// renamed_not_held`). So the engine stands down:
 /// `Docs` is present and unmoved, `Moved` is held from adoption, `f.txt`
 /// lands in `Other`, and an issue names both readings. The user puts one of
 /// them back -- here, renames `Moved` back to `Docs` -- and the folder is
@@ -4332,6 +4371,7 @@ fn a_folder_record_knows_its_directory_and_relearns_it_after_a_restore() {
 fn a_folder_whose_directory_and_files_went_different_ways_is_held_not_guessed() {
     let world = World::new(9_958, &["laptop"]);
     let laptop = world.device("laptop");
+    laptop.fs.hide_births(true);
     let mut committed = Committed::default();
     laptop.fs.user_mkdir("Docs");
     laptop.fs.user_write("Docs/f.txt", b"the one file");
@@ -4559,11 +4599,13 @@ fn a_restored_folder_with_a_vanished_id_is_read_by_its_contents() {
 /// A held directory is nobody's candidate (c6's C2 on reader 1): row 5, and
 /// then before the user resolves it a second folder's files are moved into
 /// the held directory. The hold survives, the directory is not adopted by
-/// the second folder, and the issue is not dismissed as if resolved.
+/// the second folder, and the issue is not dismissed as if resolved. On a
+/// disk with no birth times, the only one where row 5 still holds.
 #[test]
 fn a_held_directory_is_not_adopted_by_a_folder_whose_files_land_in_it() {
     let world = World::new(9_962, &["laptop"]);
     let laptop = world.device("laptop");
+    laptop.fs.hide_births(true);
     laptop.fs.user_mkdir("Docs");
     laptop.fs.user_write("Docs/f.txt", b"the one file");
     laptop.fs.user_mkdir("Second");
@@ -16068,6 +16110,81 @@ fn a_folder_renamed_as_one_file_moves_out_of_it_is_renamed_not_held() {
         .map(|i| i.detail)
         .collect();
     assert!(held.is_empty(), "the folder was held for a split that never happened: {held:?}");
+    assert_converged(&world);
+}
+
+/// The folder's only file moved into a new folder, then the folder renamed
+/// and a file saved in it, all before the next scan. Nothing inside the
+/// renamed directory is a file the folder had, so its contents cannot say
+/// where it went; its directory can, by id and birth together, which a
+/// directory made in a deleted one's place never shares. Held as a split,
+/// the rename never reached the server and nothing saved in the folder did
+/// either (soak runs 1512, 1513 and 1518).
+#[test]
+fn a_folder_whose_only_file_moved_out_before_its_rename_is_renamed_not_held() {
+    let world = World::new(9_976, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    let mut committed = Committed::default();
+    laptop.fs.user_write("A/f.txt", b"the only file");
+    assert!(world.settle().is_some());
+    let a = world.server.folder_id_at("A").expect("A is on the server");
+
+    laptop.fs.user_mkdir("B");
+    laptop.fs.user_rename("A/f.txt", "B/f.txt");
+    laptop.fs.user_rename("A", "Z");
+    laptop.fs.user_write("Z/new.txt", b"saved in the renamed folder");
+    committed.note("B/f.txt", b"the only file");
+    committed.note("Z/new.txt", b"saved in the renamed folder");
+    assert!(world.settle().is_some());
+
+    let folders = world.server.folders();
+    let record = folders.iter().find(|f| f.id == a).expect("A's folder");
+    assert!(record.name == "Z" && !record.trashed, "the folder was not renamed: {folders:?}");
+    let tree = world.server.tree();
+    for path in ["Z/new.txt", "B/f.txt"] {
+        assert!(tree.contains_key(path), "{path} is not on the server: {:?}", tree.keys().collect::<Vec<_>>());
+    }
+    let held: Vec<String> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "directory_disagrees")
+        .map(|i| i.detail)
+        .collect();
+    assert!(held.is_empty(), "the folder was held though its directory said where it went: {held:?}");
+    assert_eq!(desktop.fs.peek("Z/new.txt").as_deref(), Some(&b"saved in the renamed folder"[..]));
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// `rm -rf A; mkdir B` on a disk that hands B A's id: B is a new folder,
+/// not A renamed. Its birth is new, so A's id standing at B proves nothing,
+/// and A's sharing and history never move onto a folder the user made for
+/// something else.
+#[test]
+fn a_new_directory_that_inherits_a_deleted_folders_id_is_not_that_folder() {
+    let world = World::new(9_975, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.reuse_file_ids(true);
+    laptop.fs.user_mkdir("A");
+    assert!(world.settle().is_some());
+    let a = world.server.folder_id_at("A").expect("A is on the server");
+    let a_dir = jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new("/sync/A")).unwrap().unwrap();
+
+    laptop.fs.user_remove("A");
+    laptop.fs.user_mkdir("B");
+    let b_dir = jd_vfs::Vfs::directory_id(&laptop.fs, std::path::Path::new("/sync/B")).unwrap().unwrap();
+    assert_eq!(a_dir, b_dir, "the disk did not hand A's id to B; the scenario needs it to");
+    assert!(world.settle().is_some());
+
+    let folders = world.server.folders();
+    assert!(folders.iter().any(|f| f.id == a && f.trashed), "A was not deleted: {folders:?}");
+    assert!(
+        folders.iter().any(|f| f.id != a && f.name == "B" && !f.trashed),
+        "B was taken for A renamed: {folders:?}"
+    );
     assert_converged(&world);
 }
 

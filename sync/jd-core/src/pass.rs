@@ -325,7 +325,7 @@ pub fn run_pass(
     // the loop below can treat it like any other entry. Folders first: a new
     // file inside a new folder cannot say where it lives until the folder has
     // one.
-    let (dirs_on_disk, dir_identity, dir_tie_breaks) = observed_dirs_and_tie_breaks(env)?;
+    let (dirs_on_disk, dir_identity, dir_tie_breaks, dir_births) = observed_dirs_and_tie_breaks(env)?;
     let mut folder_ids = folder_paths(env)?;
     // What each folder record says its own path is, before this pass moves
     // anything: the only pairings a record may learn its directory from.
@@ -351,6 +351,7 @@ pub fn run_pass(
         &observed,
         &dirs_on_disk,
         &dir_identity,
+        &dir_births,
         &mut folder_ids,
         &followed,
         &traded_with_a_vault,
@@ -451,7 +452,7 @@ pub fn run_pass(
             .get(dir)
             .copied()
             .filter(|id| *id != 0)
-            .map(jd_vfs::Fingerprint::of_directory);
+            .map(|id| jd_vfs::Fingerprint::of_directory(id, dir_births.get(dir).copied().unwrap_or(0)));
         entry.is_encrypted = parent_is_encrypted(env, placement.parent)?;
         // A folder made inside a vault this device cannot open waits for a
         // key, exactly as a file made there does (below). Pushed instead, it
@@ -472,7 +473,7 @@ pub fn run_pass(
     }
     let mut folders = folders;
     folders.place_deferred(env, &folder_ids)?;
-    record_directory_identities(env, &agreed_paths, &dir_identity)?;
+    record_directory_identities(env, &agreed_paths, &dir_identity, &dir_births)?;
     // Sealed files this scan finds outside every vault while the server keeps
     // them in one: held from this pass on, and their names in the vault are
     // theirs from the start of the pass. The hold is written when the round
@@ -2581,22 +2582,24 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
 /// on this disk is a fact about the disk, and a parked folder's directory
 /// stands as surely as any other.
 pub(crate) fn observed_dirs(env: &ExecEnv) -> Result<(Vec<String>, HashMap<String, u64>), ExecError> {
-    let (out, identity, _) = observed_dirs_and_tie_breaks(env)?;
+    let (out, identity, _, _) = observed_dirs_and_tie_breaks(env)?;
     Ok((out, identity))
 }
 
 /// The same, with each directory's tie-break id (`DirEntry::tie_break_id`)
-/// where the volume's ids may break a tie.
+/// where the volume's ids may break a tie, and each directory's birth where
+/// the volume reports one (absent where it does not).
 #[allow(clippy::type_complexity)]
 pub(crate) fn observed_dirs_and_tie_breaks(
     env: &ExecEnv,
-) -> Result<(Vec<String>, HashMap<String, u64>, HashMap<String, u64>), ExecError> {
+) -> Result<(Vec<String>, HashMap<String, u64>, HashMap<String, u64>, HashMap<String, u64>), ExecError> {
     let Some(root) = env.vfs.root() else {
-        return Ok((Vec::new(), HashMap::new(), HashMap::new()));
+        return Ok((Vec::new(), HashMap::new(), HashMap::new(), HashMap::new()));
     };
     let mut out = Vec::new();
     let mut identity = HashMap::new();
     let mut tie_breaks = HashMap::new();
+    let mut births = HashMap::new();
     let mut queue = vec![(root, String::new())];
     let mut guard = 0;
     while let Some((dir, rel)) = queue.pop() {
@@ -2614,6 +2617,9 @@ pub(crate) fn observed_dirs_and_tie_breaks(
                 format!("{rel}/{}", child.name)
             };
             identity.insert(path.clone(), child.fingerprint.map(|fp| fp.file_id).unwrap_or(0));
+            if let Some(birth) = child.fingerprint.map(|fp| fp.birth_ns).filter(|b| *b != 0) {
+                births.insert(path.clone(), birth);
+            }
             if child.tie_break_id != 0 {
                 tie_breaks.insert(path.clone(), child.tie_break_id);
             }
@@ -2629,7 +2635,7 @@ pub(crate) fn observed_dirs_and_tie_breaks(
     // Shallowest first, so a parent always has an identity before its children
     // need one.
     out.sort_by_key(|p| (depth_of(p), p.clone()));
-    Ok((out, identity, tie_breaks))
+    Ok((out, identity, tie_breaks, births))
 }
 
 /// A folder record learns which directory is its own.
@@ -2665,6 +2671,7 @@ fn record_directory_identities(
     env: &ExecEnv,
     agreed_paths: &HashMap<String, i64>,
     dir_identity: &HashMap<String, u64>,
+    dir_births: &HashMap<String, u64>,
 ) -> Result<(), ExecError> {
     let on_disk: std::collections::HashSet<u64> =
         dir_identity.values().copied().filter(|id| *id != 0).collect();
@@ -2686,6 +2693,7 @@ fn record_directory_identities(
         if id == 0 {
             continue;
         }
+        let birth = dir_births.get(path).copied().unwrap_or(0);
         let Some(mut entry) = env.store.get_entry(EntityId::folder(*server_id))? else {
             continue;
         };
@@ -2705,8 +2713,13 @@ fn record_directory_identities(
             // one directory, and every identity reader after was misled (a
             // folder renamed and its old name made again by a save through
             // it, its files not yet sent: soak run 1504).
+            // Or its own directory at its own path with a birth the record
+            // has not got: one it never learned (a record from before
+            // directories had births), or a new directory that took a
+            // deleted one's id at this path.
             Some(fp) => {
-                !on_disk.contains(&fp.file_id)
+                (fp.file_id == id && fp.birth_ns != birth)
+                    || !on_disk.contains(&fp.file_id)
                     || dir_identity
                         .iter()
                         .any(|(at, id)| *id == fp.file_id && at.starts_with(&format!("{path}/")))
@@ -2719,7 +2732,7 @@ fn record_directory_identities(
         // the vault's id, and the vault's sealed file was read as the plain
         // folder's and went up in the clear (hostile2 74403).
         if stale && !carried_by_another(id, *server_id) {
-            entry.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(id));
+            entry.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(id, birth));
             env.store.put_entry(&entry)?;
         }
     }
@@ -3780,6 +3793,7 @@ fn detect_folder_moves(
     observed: &[ObservedFile],
     dirs_on_disk: &[String],
     dir_identity: &HashMap<String, u64>,
+    dir_births: &HashMap<String, u64>,
     folder_ids: &mut HashMap<String, i64>,
     followed: &std::collections::HashSet<EntityId>,
     traded_with_a_vault: &[(EntityId, String)],
@@ -3790,6 +3804,8 @@ fn detect_folder_moves(
     // Which directory each tracked folder knows to be its own, where it
     // knows (`record_directory_identities`), and which are vaults.
     let mut record_identity: HashMap<EntityId, u64> = HashMap::new();
+    // The birth beside each of those ids, where the record knows one.
+    let mut record_birth: HashMap<EntityId, u64> = HashMap::new();
     let mut encrypted: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
     // Records that resolve to a path another record holds; see the tracked
     // loop. They join the contested pool below.
@@ -3952,6 +3968,9 @@ fn detect_folder_moves(
         }
         if let Some(id) = own_id {
             record_identity.insert(entry.id, id);
+            if let Some(birth) = entry.synced_fingerprint.map(|fp| fp.birth_ns).filter(|b| *b != 0) {
+                record_birth.insert(entry.id, birth);
+            }
         }
         if entry.is_encrypted {
             encrypted.insert(entry.id);
@@ -3965,6 +3984,25 @@ fn detect_folder_moves(
     // is dismissed here. Without this the hold lasted one pass: the files,
     // once placed elsewhere, no longer proposed anything, and the folder read
     // as an ordinary deletion the pass after the user was told it would not.
+    //
+    // Where each folder's own directory stands PROVEN: its id and its birth
+    // both the record's, on a volume whose identities hold. A disk hands a
+    // deleted directory's id to the next one made (`rm -rf A; mkdir B` gives
+    // B A's inode on ext4), which is why a plain folder's id alone claims
+    // nothing; but the new directory arrives with a new birth, so the pair
+    // names the one directory the record knew and no other. A proven
+    // directory is the folder, wherever it went and whatever is in it.
+    let proven_at: HashMap<EntityId, &String> = if env.vfs.personality().stable_file_identity {
+        record_birth
+            .iter()
+            .filter_map(|(id, birth)| {
+                let at = *where_id_stands.get(record_identity.get(id)?)?;
+                (dir_births.get(at) == Some(birth)).then_some((*id, at))
+            })
+            .collect()
+    } else {
+        HashMap::new()
+    };
     let mut held_ids: Vec<EntityId> = Vec::new();
     let mut held_by_issue: Vec<(EntityId, i64, Option<&String>)> = Vec::new();
     for issue in env.store.open_issues()? {
@@ -3977,14 +4015,18 @@ fn detect_folder_moves(
     }
     for (id, issue_id, stands_at) in held_by_issue {
         // Lifted only when the directory stands at the record's own path
-        // again (corroborated above) or nowhere. Never because something
-        // else took it: that is the outcome the hold exists to prevent.
+        // again (corroborated above) or nowhere, or is proven the folder's
+        // own wherever it stands: then there is nothing left to ask, and the
+        // folder goes where its directory went like any other. Never because
+        // something else took it: that is the outcome the hold exists to
+        // prevent.
         let at_own_path = tracked
             .iter()
             .any(|(path, tid)| *tid == id && stands_at == Some(path));
         match stands_at {
             None => env.store.dismiss_issue(issue_id)?,
             Some(_) if at_own_path => env.store.dismiss_issue(issue_id)?,
+            Some(d) if proven_at.get(&id) == Some(&d) => env.store.dismiss_issue(issue_id)?,
             Some(d) => {
                 scan.present.insert(id);
                 scan.held.insert(d.clone());
@@ -4845,7 +4887,7 @@ fn detect_folder_moves(
             if taken.contains(candidate) {
                 continue;
             }
-            let mut best: Option<(EntityId, String, usize)> = None;
+            let mut best: Option<(EntityId, String, (bool, usize))> = None;
             for (old_path, id) in pool.iter() {
                 if contested_pool {
                     // Already placed by the ring walk: spoken for.
@@ -4902,7 +4944,12 @@ fn detect_folder_moves(
                         + usize::from(child_folder_under(id, at))
                 };
                 let matched = matched_at(candidate);
-                if matched == 0 {
+                // The folder's own directory, proven, stands here: the
+                // folder renamed or moved, whatever its files did. Nothing
+                // inside need propose it -- its only file may have been
+                // moved out on its own, or it never had one.
+                let proven_here = proven_at.get(id) == Some(candidate);
+                if matched == 0 && !proven_here {
                     continue;
                 }
                 // Wholesale guards against dragging a folder after one file
@@ -4944,13 +4991,21 @@ fn detect_folder_moves(
                 // rename never went up and nothing saved in it afterwards
                 // did either (soak run 1509: one file moved into a new folder
                 // and the folder renamed, both before the next scan).
+                //
+                // Or unless the directory standing there is proven the
+                // folder's own: then the files' proposal is files moved out,
+                // whatever they number, and there is nothing to ask. Held
+                // instead, a folder whose only file the user moved into a
+                // new folder before renaming it was held for good, and
+                // nothing saved in it afterwards reached the server (soak
+                // runs 1512, 1513 and 1518).
                 if let Some(stands_at) = record_identity.get(id).and_then(|rid| where_id_stands.get(rid)) {
                     if **stands_at != **candidate
                         && **stands_at != *old_path
                         && candidates.contains(stands_at)
                         && !taken.contains(*stands_at)
-                        && matched_at(stands_at) > 0
-                        && (!whole_only || moved_wholesale(old_path, stands_at))
+                        && (proven_at.get(id) == Some(stands_at)
+                            || (matched_at(stands_at) > 0 && (!whole_only || moved_wholesale(old_path, stands_at))))
                     {
                         continue;
                     }
@@ -4980,12 +5035,13 @@ fn detect_folder_moves(
                         continue;
                     }
                 }
-                // The most corroborated match wins, and ties break on the folder id
-                // so two devices reach the same answer.
-                if best.as_ref().is_none_or(|(bid, _, count)| {
-                    matched > *count || (matched == *count && *id < *bid)
-                }) {
-                    best = Some((*id, old_path.clone(), matched));
+                // A proven directory wins: the folder IS this directory, and
+                // another folder's files found in it were moved into it.
+                // Then the most corroborated match, and ties break on the
+                // folder id so two devices reach the same answer.
+                let rank = (proven_here, matched);
+                if best.as_ref().is_none_or(|(bid, _, best_rank)| rank > *best_rank || (rank == *best_rank && *id < *bid)) {
+                    best = Some((*id, old_path.clone(), rank));
                 }
             }
 
@@ -5454,9 +5510,16 @@ fn known_local(env: &ExecEnv, tie_breaks: &HashMap<EntityId, u64>) -> Result<Vec
     let mut out = Vec::new();
     let mut deleted = Vec::new();
     let all = all_entries(env)?;
+    // Sources whose bytes a claimant holds elsewhere on this disk -- a file
+    // carried into a vault, going up sealed as a new file that replaces it.
+    // Not only while the claimant waits: once it has landed the source is
+    // still on the server until its trash lands, and a stranger at its old
+    // path is no more its file then than before. Read by path the pass the
+    // claimant landed, the stranger went up as the source's next version and
+    // its history held both (kill2 75110).
     let held: std::collections::HashSet<EntityId> = all
         .iter()
-        .filter(|e| e.id.is_provisional())
+        .filter(|e| !e.remote_deleted && e.status != LocalStatus::OutOfScope)
         .filter_map(|e| e.replaces)
         .collect();
     for entry in all {

@@ -127,12 +127,14 @@ struct MemFsState {
     file_ids: BTreeMap<String, u64>,
     next_file_id: u64,
     /// Path -> the directory's birth: a number handed out once, in creation
-    /// order, and never again. An id is a disk fact and under `reuse_file_ids`
-    /// a deleted directory's id comes straight back on the next mkdir; a birth
-    /// is a harness fact, so an oracle that keeps a handle on a directory
-    /// across the run (`zz_sweep`'s custody oracle) keys it by birth and can
-    /// never mistake the folder that inherited an id for the one that died
-    /// with it. Carried by a rename like the id, dropped by a remove.
+    /// order, and never again. Under `reuse_file_ids` a deleted directory's
+    /// id comes straight back on the next mkdir; its birth never does, so an
+    /// oracle that keeps a handle on a directory across the run (`zz_sweep`'s
+    /// custody oracle) keys it by birth and can never mistake the folder that
+    /// inherited an id for the one that died with it. The engine is shown it
+    /// too, as a real disk shows a directory's btime (`Fingerprint::birth_ns`
+    /// on a directory's entry), except where births are hidden or ids are
+    /// positions. Carried by a rename like the id, dropped by a remove.
     births: BTreeMap<String, u64>,
     next_birth: u64,
     /// Path -> the FILE's birth, which unlike a directory's is a disk fact:
@@ -448,7 +450,7 @@ impl MemFs {
         }
     }
 
-    /// Report no file's birth: the volume with no birth time, whose
+    /// Report no file's or directory's birth: the volume with no birth time, whose
     /// personality then says its file identity is weak, where the engine reads
     /// the disk by its older rules.
     pub fn hide_births(&self, on: bool) {
@@ -1222,6 +1224,19 @@ impl MemFs {
         st.file_ids.get(key).copied().unwrap_or(0)
     }
 
+    /// A directory's birth as the engine is shown it: 0 wherever its id is,
+    /// and where births are hidden.
+    fn directory_birth_of(st: &MemFsState, key: &str) -> u64 {
+        if st.births_hidden || Self::directory_id_of(st, key) == 0 {
+            return 0;
+        }
+        st.births.get(key).copied().unwrap_or(0)
+    }
+
+    fn directory_fingerprint_of(st: &MemFsState, key: &str) -> Fingerprint {
+        Fingerprint::of_directory(Self::directory_id_of(st, key), Self::directory_birth_of(st, key))
+    }
+
     /// A file's fingerprint as the engine is shown it. On a FAT or exFAT
     /// model the volume is named positional and reports no id and no birth,
     /// as `OsVfs` does (`Personality::positional_file_ids`); the disk's own
@@ -1293,7 +1308,7 @@ impl MemFs {
                     Node::File { .. } => EntryKind::File,
                 },
                 fingerprint: match node {
-                    Node::Dir => Some(Fingerprint::of_directory(Self::directory_id_of(&st, k))),
+                    Node::Dir => Some(Self::directory_fingerprint_of(&st, k)),
                     Node::File { .. } => Self::fingerprint_of(&st, k),
                 },
                 tie_break_id: Self::tie_break_of(&st, k),
@@ -1365,6 +1380,16 @@ impl Vfs for MemFs {
         let st = self.state.lock().unwrap();
         Ok(match st.nodes.get(&key) {
             Some(Node::Dir) => Some(Self::directory_id_of(&st, &key)),
+            _ => None,
+        })
+    }
+
+    fn directory_identity(&self, path: &Path) -> VfsResult<Option<jd_vfs::FileIdentity>> {
+        let key = self.key_for(path)?;
+        self.check_failure(FsOp::Fingerprint, &key, path)?;
+        let st = self.state.lock().unwrap();
+        Ok(match st.nodes.get(&key) {
+            Some(Node::Dir) => Some(Self::directory_fingerprint_of(&st, &key).identity()),
             _ => None,
         })
     }
@@ -1910,7 +1935,7 @@ mod tests {
         f.user_write("uno/deep/f.txt", b"x");
         let deep = f.directory_id(&p("uno/deep")).unwrap().unwrap();
         let listed = f.read_dir(&p("uno")).unwrap();
-        assert_eq!(listed[0].fingerprint, Some(Fingerprint::of_directory(deep)));
+        assert_eq!(listed[0].fingerprint, Some(Fingerprint::of_directory(deep, f.birth_of("uno/deep").unwrap())));
         assert_eq!(f.directory_id(&p("uno/deep/f.txt")).unwrap(), None);
         // Removed, the id is released; with reuse on, the next directory made
         // gets it back -- the recycled-directory world a scenario can reach.

@@ -2139,6 +2139,17 @@ no named flaw is a reason to name one.
   its own directory id, so an empty or never-uploaded plain folder renamed
   while its old name is rebuilt keeps today's reading, including hostile2
   74414's files rescued to the root.
+- **Owner decision D3a (2026-10-02): directory births narrow D3.** A folder
+  record keeps its directory's birth beside its id, and a plain folder
+  follows a directory whose id AND birth are both its own, on a strong
+  volume. A recycled id arrives with a new birth, so the `rm -rf A; mkdir B`
+  reason does not reach it. D3 stands where births are not reported or the
+  volume is weak. Prompted by soak runs 1512, 1513 and 1518: a folder whose
+  only file was moved into a new folder before it was renamed was held for
+  good (`directory_disagrees`), and nothing saved in it reached the server.
+  Pins: `a_folder_whose_only_file_moved_out_before_its_rename_is_renamed_
+  not_held`, `a_new_directory_that_inherits_a_deleted_folders_id_is_not_that_
+  folder`; the row 5 hold pins run with births hidden.
 - **C10 + C11 (2026-09-22), NEEDED and VALID (public-html-25), awaiting the
   owner's commit.** C10: a device puts back only a park it made. Scratch
   names carry a device tag (`.jd-swap-{tag}-{token}`, tag hashed from the

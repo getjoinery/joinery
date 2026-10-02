@@ -107,6 +107,23 @@ the file to another record.
   on its path, and a swap between the scan and the op is corrected only by
   the next scan.
 
+### A folder's own directory
+
+A folder record keeps its directory's identity the same way: the directory's
+id and birth, recorded when the record is minted, when it moves, and from the
+directory standing at its agreed path on each scan.
+
+- **Proven: id and birth both match**, on a strong volume. The folder follows
+  its directory wherever it went, whatever is inside it, even when every file
+  the folder had was moved out first. A directory made where another was
+  deleted can inherit its id (`rm -rf A; mkdir B` hands `B` `A`'s inode on
+  ext4) but never its birth, so a proven directory is never a stranger.
+- **Id only** (no birth reported, or a weak volume). The id corroborates what
+  the folder's files propose and never claims on its own. A folder whose
+  files point to one new directory while its id stands at another is held,
+  present and unmoved: the issues panel names both places, and the hold lifts
+  when the directory is back at the folder's own path or gone.
+
 ---
 
 ## One pass
