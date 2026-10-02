@@ -10,8 +10,15 @@
  *   - it holds and one is active: refresh its title, severity and detail when
  *     they changed, with no event and no notice;
  *   - it is gone and one is active: clear it, with an event.
- * An active incident whose node is no longer watched (removed, or in an
- * install state such as a dormant copy) is cleared, saying so.
+ * An active incident whose node is no longer watched (removed, disabled, or
+ * in an install state such as a dormant copy) is cleared, saying so.
+ *
+ * A DISABLED NODE IS NOT WATCHED. Disabling a node (mgn_enabled false) is a
+ * person saying this plane no longer looks after it — a site whose owner told
+ * us to stop managing it, for one. Several sources read columns that froze
+ * when its agent went (its script trust, its last host report), so watching it
+ * would reopen the same incidents every tick for a machine nobody here can act
+ * on.
  *
  * Only a scheduled task runs this (ReconcileIncidents): a page view never
  * writes. One advisory lock, so two overlapping ticks never open twice.
@@ -21,6 +28,7 @@
  * each addressed to every superadmin. Notify gives each the bell, and email
  * by the signal's default (critical: on) or their own preference.
  *
+ * @version 1.1 - a disabled node is not watched; close_for_node() closes a node's open incidents with a reason
  * @version 1.0
  */
 class IncidentReconciler {
@@ -65,7 +73,7 @@ class IncidentReconciler {
 				if ($node_ids !== null && !in_array((int)$node->key, $node_ids, true)) {
 					continue;
 				}
-				if (!$node->is_operational()) {
+				if (!$node->is_operational() || !$node->get('mgn_enabled')) {
 					continue;
 				}
 				foreach ($sources as $source) {
@@ -95,7 +103,7 @@ class IncidentReconciler {
 				if (isset($watched[(int)$inc->get('inc_mgn_managed_node_id') . '|' . (string)$inc->get('inc_source')])) {
 					continue;
 				}
-				self::clear($inc, 'This node is no longer watched: it was removed, or it is being installed or is a copy.');
+				self::clear($inc, 'This node is no longer watched: it was removed or disabled, or it is being installed or is a copy.');
 				$counts['cleared']++;
 			}
 		} finally {
@@ -164,6 +172,21 @@ class IncidentReconciler {
 		}
 		$inc->save();
 		return true;
+	}
+
+	/**
+	 * Close every open incident on one node, each saying why. For a person's
+	 * act that ends the watching (Stop managing); the reconciler's own skip of
+	 * a disabled node keeps them closed. Returns how many were closed.
+	 */
+	public static function close_for_node(int $node_id, string $why): int {
+		$closed = 0;
+		foreach (new MultiIncidentRecord(array('node_id' => $node_id, 'status' => IncidentRecord::STATUS_OPEN,
+				'deleted' => false)) as $inc) {
+			self::clear($inc, $why);
+			$closed++;
+		}
+		return $closed;
 	}
 
 	private static function clear(IncidentRecord $inc, string $why): void {

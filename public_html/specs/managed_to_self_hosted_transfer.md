@@ -1,8 +1,9 @@
 # Managed to Self-Hosted — Hand the Server to the Customer's Linode Account
 
-**Status:** Draft, 2026-10-02. All owner decisions taken 2026-10-02 (§10). Design review by
-`public-html-91` 2026-10-02: R1–R22 folded in (§12). Ready to build; the live dev run waits on A1
-(the new operator token).
+**Status:** Built 2026-10-02 on the mocked driver (`instance_transfer` suite, 80 checks); schema
+and email templates applied on dev. All owner decisions taken 2026-10-02 (§10). Design review by
+`public-html-91` 2026-10-02: R1–R22 folded in (§12). The live dev run (§8) waits on A1 (the new
+operator token). Build notes in §13.
 
 **Companions:** `hosted_trial_provisioning.md` (the Managed tier this ends — its open item A1 and
 the §7 "move to your own Linode" off-ramp), `services_phase2_platform.md` (self-hosted sites using
@@ -275,13 +276,13 @@ minutes, reads the status of every `code_issued` / `accepted` row, moves state, 
 
 ## 7. Data model
 
-New `itr_instance_transfers` (`InstanceTransfer` / `MultiInstanceTransfer`):
-`itr_cvp_customer_cloud_provision_id`, `itr_mgn_managed_node_id`, `itr_usr_user_id`,
-`itr_instance_id`, `itr_state` (`requested|invited|code_issued|accepted|finishing|done|failed|canceled`),
-`itr_token_sealed` (SecretBox; cleared on any terminal state), `itr_token_expiry`,
-`itr_linode_status`, `itr_linode_checked_time`, `itr_check_result` (jsonb),
-`itr_finish_step`, `itr_operator_todo`, `itr_deletion_withdrawn` (bool), `itr_error`,
-`itr_requested_by` (`operator|customer`), the email timestamps, create/update/delete times. At most
+New `itx_instance_transfers` (`InstanceTransfer` / `MultiInstanceTransfer`):
+`itx_cvp_customer_cloud_provision_id`, `itx_mgn_managed_node_id`, `itx_usr_user_id`,
+`itx_instance_id`, `itx_state` (`requested|invited|code_issued|accepted|finishing|done|failed|canceled`),
+`itx_token_sealed` (SecretBox; held only in `code_issued` and `accepted`), `itx_token_expiry`,
+`itx_linode_status`, `itx_linode_checked_time`, `itx_check_result` (jsonb),
+`itx_finish_step`, `itx_operator_todo`, `itx_deletion_withdrawn` (bool), `itx_error`,
+`itx_requested_by` (`operator|customer`), the email timestamps, create/update/delete times. At most
 one open row per provision.
 
 Changes to existing models:
@@ -383,3 +384,29 @@ Re-read by `public-html-91` the same day: dispositions hold. **P1** (traced, re-
 incidents on a stopped node reopen every tick for sources reading frozen columns → the reconciler
 skips disabled nodes (§6, §7). **P2** (traced, re-derived): the node script already renders the
 `services` banner state (§5 step 6).
+
+## 13. Build notes (2026-10-02)
+
+Where the build differs from the text above, and why:
+
+- **Prefix `itx`, not `itr`.** `itr` is ItemRelation's (items plugin); a shared prefix makes
+  column-name filters ambiguous. The table is `itx_instance_transfers`.
+- **The code is held through `accepted`, not cleared at `code_issued`.** The provider's status is
+  asked by the code, so an accepted transfer could not otherwise be followed to `completed`. It is
+  held in `code_issued` and `accepted` only, and erased in every other state.
+- **The provider calls are a capability interface,** `CloudInstanceTransfers`, beside
+  `CloudComputeProvider`: a driver without the capability does not implement it, and the caller
+  says "not supported" (five test fakes implement `CloudComputeProvider` and are unaffected).
+- **`PollInstanceTransfers` is a phase** of Advance customer provisioning, before the hosted
+  phases, rather than a task of its own.
+- **The operator never sees the code.** The queue shows its expiry; only the customer's own
+  signed-in page shows the code (§2).
+- **A canceled move of a shut-down site raises the deletion again** (`hosted.deletion_required`),
+  since Start had withdrawn it.
+- **Paid-until** for the Services rows: the local store's period end; else the trial end; for a
+  site in grace or shut down, the failed-payment time (its services lapse into their own grace);
+  else 30 days out with an operator to-do to confirm it.
+- **Operator alerts** are one signal, `hosted.transfer_attention` (asked, blocked at code issue,
+  refused by Linode, failed, finished, accepted unexpectedly); the deletion withdrawal is
+  `hosted.deletion_withdrawn`.
+

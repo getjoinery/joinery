@@ -24,6 +24,10 @@
  *   shutdown    the grace ran out. The instance is powered off and a deletion
  *               task has been raised for a person; the backups are kept until
  *               htr_shelf_ends_time.
+ *   transferred the instance was handed to the customer's own cloud account
+ *               (specs/managed_to_self_hosted_transfer.md). Hosting from us is
+ *               over and its subscription cancelled; nothing on this row is
+ *               worked again, and no store signal moves it.
  *
  * SENDING HEALTH IS NOT TRACKED HERE AT ALL. The mail provider enforces the
  * monthly send limit on the customer's own subaccount and applies its own
@@ -34,6 +38,7 @@
  * site. Shutdown is the strongest automatic action there is, and the deletion
  * that stops the bill is a person at the provider.
  *
+ * @version 1.2 - the transferred state
  * @version 1.1
  */
 
@@ -61,6 +66,7 @@ class HostedTrial extends SystemBase {
 	const STATE_SUBSCRIBED = 'subscribed';
 	const STATE_GRACE      = 'grace';
 	const STATE_SHUTDOWN   = 'shutdown';
+	const STATE_TRANSFERRED = 'transferred';
 
 	/** The states in which the site is still running and still ours to watch. */
 	const LIVE_STATES = array(self::STATE_TRIAL, self::STATE_SUBSCRIBED, self::STATE_GRACE);
@@ -69,7 +75,7 @@ class HostedTrial extends SystemBase {
 		'htr_hosted_trial_id'                  => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'htr_cvp_customer_cloud_provision_id'    => array('type'=>'int8', 'required'=>true, 'is_nullable'=>false, 'unique'=>true),
 		'htr_state'               => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'trial',
-			'allowed_values'=>array('trial', 'subscribed', 'grace', 'shutdown')),
+			'allowed_values'=>array('trial', 'subscribed', 'grace', 'shutdown', 'transferred')),
 		// The subscription line this hosting is billed on. It is an ORDER ITEM
 		// id, not a provider subscription id: the store's signals carry the
 		// order item, and matching on anything else would mean holding a second
@@ -108,7 +114,7 @@ class HostedTrial extends SystemBase {
 			throw new HostedTrialException('A hosted trial row belongs to a provision.');
 		}
 		$state = $this->get('htr_state') ?: self::STATE_TRIAL;
-		if (!in_array($state, array_merge(self::LIVE_STATES, array(self::STATE_SHUTDOWN)), true)) {
+		if (!in_array($state, array_merge(self::LIVE_STATES, array(self::STATE_SHUTDOWN, self::STATE_TRANSFERRED)), true)) {
 			throw new HostedTrialException("Unknown hosted state '{$state}'.");
 		}
 		$this->set('htr_update_time', gmdate('Y-m-d H:i:s'));

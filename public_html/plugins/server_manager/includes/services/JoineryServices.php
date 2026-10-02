@@ -26,6 +26,13 @@
  * THE MASTER KEYS NEVER LEAVE THIS MACHINE. What crosses to a site is one
  * SMTP username and password inside its own subaccount, or nothing (backup storage).
  *
+ * A NODE-LINKED ROW — a Managed site moved to its customer's own cloud
+ * account (specs/managed_to_self_hosted_transfer.md §5a) — is reached only
+ * from this side: the reconcile and the operator. Its backup storage is the
+ * node's fleet backups, so its suspend and reactivate switch those, and its
+ * figure is what the node's backups occupy.
+ *
+ * @version 1.1 - node-linked rows: backup storage acts on the node's fleet backups (NodeBackupShelf)
  * @version 1.0
  */
 class JoineryServicesException extends Exception {}
@@ -403,6 +410,10 @@ class JoineryServices {
 	 * measured in an earlier month reads as 0 until this month's first event.
 	 */
 	public static function currentFigure(ServiceTenant $row): int {
+		if ((string)$row->get('svt_service') === ServiceTenant::SERVICE_SHELF && $row->is_node_linked()) {
+			$node = $row->linked_node();
+			return $node !== null ? NodeBackupShelf::bytes($node) : (int)$row->get('svt_figure');
+		}
 		if ((string)$row->get('svt_service') === ServiceTenant::SERVICE_MAIL) {
 			$measured = trim((string)$row->get('svt_figure_time'));
 			if ($measured === '' || substr($measured, 0, 7) !== gmdate('Y-m')) {
@@ -492,6 +503,13 @@ class JoineryServices {
 				}
 				$client->closeSubaccount($subaccount);
 			}
+		} elseif ($row->is_node_linked()) {
+			// No broker serves this row: the node's own fleet backups are the
+			// service, so stopping it is switching them off.
+			$node = $row->linked_node();
+			if ($node !== null) {
+				NodeBackupShelf::suspend($node);
+			}
 		}
 		$row->set('svt_state', $state);
 		$row->set('svt_revoked_time', $now);
@@ -516,6 +534,11 @@ class JoineryServices {
 					throw new JoineryServicesException('Outbound mail cannot be restarted: no mail provider is configured on this plane.');
 				}
 				$client->reopenSubaccount($subaccount);
+			}
+		} elseif ($row->is_node_linked()) {
+			$node = $row->linked_node();
+			if ($node !== null) {
+				NodeBackupShelf::reactivate($node);
 			}
 		}
 		$row->set('svt_state', ServiceTenant::STATE_ACTIVE);

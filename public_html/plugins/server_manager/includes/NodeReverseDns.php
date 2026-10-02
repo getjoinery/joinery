@@ -18,6 +18,13 @@
  * and retry. A hosted instance has no grant, so it never raises reconnect: a
  * missing or refused operator token is fixed on the Provisioning Setup page.
  *
+ * A TRANSFERRED instance — a Managed site handed to its customer's own Linode
+ * account (specs/managed_to_self_hosted_transfer.md) — is on an account this
+ * plane holds no grant for, so its reverse DNS is the customer's to set in
+ * their own Cloud Manager. That is said plainly, with no reconnect: there is
+ * no grant to reconnect.
+ *
+ * @version 1.2 - a transferred instance's reverse DNS is the customer's, in their own Cloud Manager
  * @version 1.1 - a hosted instance is reached with the operator cloud token (it had been sent to the
  *                customer-grant path, which a hosted provision never has, so its PTR was never set);
  *                setQuietly() reports reconnect, so a pipeline can tell a dead grant from "not yet"
@@ -44,6 +51,10 @@ class NodeReverseDnsException extends Exception {
 }
 
 class NodeReverseDns {
+
+	/** What a transferred instance's reverse DNS answer is: the customer's own panel. */
+	const TRANSFERRED_MESSAGE = 'This server was moved to its customer\'s own Linode account, so its reverse DNS is set '
+		. 'there: Cloud Manager → the Linode → Network → the IPv4 address → Edit RDNS.';
 
 	/**
 	 * The provision row that birthed this node, or null if the node was not
@@ -105,6 +116,10 @@ class NodeReverseDns {
 				'This node has no cloud-provision record, so its reverse DNS cannot be managed here — set it in the hosting provider\'s panel.');
 		}
 
+		if ($provision->is_transferred()) {
+			throw new NodeReverseDnsException(self::TRANSFERRED_MESSAGE);
+		}
+
 		$ip = (string)$provision->get('cvp_instance_ip');
 
 		// The provider rejects rDNS values whose forward record does not point
@@ -149,6 +164,9 @@ class NodeReverseDns {
 	 * @param string|null $operator_token  Tests only; null reads the configured operator token.
 	 */
 	public static function driverForProvision($provision, ?string $operator_token = null) {
+		if ($provision->is_transferred()) {
+			throw new NodeReverseDnsException(self::TRANSFERRED_MESSAGE);
+		}
 		if ($provision->get('cvp_provider') !== 'linode') {
 			throw new NodeReverseDnsException(
 				"No reverse-DNS driver for provider '{$provision->get('cvp_provider')}'.");

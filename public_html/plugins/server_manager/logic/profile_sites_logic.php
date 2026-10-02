@@ -25,6 +25,14 @@
  * same card (§7), and submitting one returns the registration to the queue
  * under the same paid-line guard.
  *
+ * A Managed site can move to its buyer's own Linode account
+ * (specs/managed_to_self_hosted_transfer.md §6): each such site carries where
+ * its move stands, and the card's buttons call the transfer_customer API
+ * action. After the move the site is no longer hosted, so its plan and mail
+ * lines go and the move's card tells the whole story, with "Stop managing this
+ * site" once the customer wants us gone.
+ *
+ * @version 1.2 - the move-to-your-own-Linode card's state per site
  * @version 1.1 - the pre-payment cards (draft, pending_payment) with Edit/Delete, and the taken-name
  *                alternate action (specs/managed_hosting_phase1_purchase.md §4.5, §7)
  * @version 1.0
@@ -182,6 +190,7 @@ function profile_sites_logic(array $input): LogicResult {
 			// anything.
 			'password_state'  => ($status === 'done' || $provision->admin_password_state() === 'revealed')
 				? $provision->admin_password_state() : 'pending',
+			'transfer'        => $provision->is_pre_payment() ? null : profile_sites_transfer($provision, $session),
 			'mail_state'      => (string)$provision->get('cvp_mail_state'),
 			'plan_state'      => $trial ? (string)$trial->get('htr_state') : '',
 			'plan_until'      => $trial ? (string)($trial->get('htr_state') === HostedTrial::STATE_GRACE
@@ -204,6 +213,41 @@ function profile_sites_logic(array $input): LogicResult {
 		'configure_url'     => ManagedSiteDraft::CONFIGURE_URL,
 		'availability_js'   => ManagedDomainIntake::availabilityScript('alternate_domain', 'alternate_domain_status'),
 	));
+}
+
+/**
+ * Where a site's move to its buyer's own Linode account stands, for the card,
+ * or null when the card has nothing to say (not a Managed site we could hand
+ * over, and no move in its history).
+ */
+function profile_sites_transfer($provision, $session): ?array {
+	$row = InstanceTransfer::latest_for_provision((int)$provision->key);
+	if ($row !== null && $row->state() === InstanceTransfer::STATE_CANCELED) {
+		$row = null;
+	}
+	$offerable = $provision->is_operator_hosted() && (string)$provision->get('cvp_status') === 'done'
+		&& trim((string)$provision->get('cvp_instance_id')) !== ''
+		&& in_array((string)$provision->get('cvp_origin'), array('order', 'buyer'), true)
+		&& (string)$provision->get('cvp_install_mode') !== 'bare';
+	if ($row === null && !$offerable) {
+		return null;
+	}
+	$tz = $session->get_timezone();
+	$expiry = $row ? trim((string)$row->get('itx_token_expiry')) : '';
+	$paid_until = $row ? trim((string)$row->get('itx_paid_until')) : '';
+	$node = InstanceTransfers::node_of($provision);
+	$referral = trim((string)Globalvars::get_instance()->get_setting('server_manager_linode_referral_url', false, true));
+	return array(
+		'state'        => $row ? $row->state() : '',
+		'state_label'  => $row ? $row->state_label() : '',
+		'code_expiry'  => $expiry !== '' ? LibraryFunctions::convert_time($expiry, 'UTC', $tz, 'F j \a\t g:i a') : '',
+		'cancelable'   => $row !== null && $row->cancelable(),
+		'was_shut_down' => $row !== null && (bool)$row->get('itx_deletion_withdrawn'),
+		'paid_until'   => $paid_until !== '' ? LibraryFunctions::convert_time($paid_until, 'UTC', $tz, 'F j, Y') : '',
+		'managed'      => $node !== null && (bool)$node->get('mgn_enabled'),
+		'signup_url'   => strpos($referral, 'https://') === 0 ? $referral : 'https://www.linode.com/',
+		'label'        => InstanceTransfers::label_hint($provision),
+	);
 }
 
 /** One line describing a draft: the domain, and what the buyer will pay. */

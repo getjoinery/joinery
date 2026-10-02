@@ -14,6 +14,8 @@
  *   ip     string  first public IPv4, '' until assigned
  *   label  string  provider-side label
  *
+ * @version 1.3 - CloudInstanceTransfers: the optional capability to hand an instance to another
+ *                account of the same provider (specs/managed_to_self_hosted_transfer.md)
  * @version 1.2 - shutdownInstance()/bootInstance()/getTransfer(): the plane's only lever over a
  *                hosted instance is power, and the account's transfer pool is what it watches.
  * @version 1.1 - rebuildInstance(): replace an instance's contents in place.
@@ -128,6 +130,61 @@ interface CloudComputeProvider {
 	 * @throws CloudComputeException on any API failure.
 	 */
 	public function setReverseDns(string $instance_id, string $ip, string $hostname): array;
+}
+
+/**
+ * The optional capability to hand an instance, running and with its addresses,
+ * to another account of the same provider.
+ *
+ * A separate contract rather than four more methods on CloudComputeProvider:
+ * most providers have no such thing, and a driver that cannot answers by not
+ * implementing it — the caller asks `instanceof CloudInstanceTransfers` and
+ * says "not supported" instead of a driver throwing from a stub.
+ *
+ * The transfer token a create returns is a bearer secret: whoever redeems it
+ * gets the instance and every byte on it. Implementations never put it in an
+ * exception message.
+ */
+interface CloudInstanceTransfers {
+
+	/**
+	 * Everything on the provider's side that stops this instance being handed
+	 * over, or is worth saying first. Each entry:
+	 *   key     string  stable name of the check
+	 *   label   string  what was checked, in plain words
+	 *   result  string  'pass' | 'blocker' | 'warning'
+	 *   detail  string  what was found (empty on a pass)
+	 *   fix     string  what to do about it (empty on a pass)
+	 *
+	 * @throws CloudComputeException when the provider cannot be asked at all.
+	 */
+	public function transferEligibility(string $instance_id): array;
+
+	/**
+	 * Start a transfer of one instance. Returns
+	 *   token   string  the code the receiving account redeems
+	 *   status  string  provider status ('pending')
+	 *   expiry  string  UTC 'Y-m-d H:i:s' the code stops working
+	 *
+	 * @throws CloudComputeException carrying the provider's own reason on refusal.
+	 */
+	public function createTransfer(string $instance_id): array;
+
+	/**
+	 * Where a transfer stands:
+	 *   status  string  pending | accepted | completed | failed | canceled | stale
+	 *   expiry  string  UTC 'Y-m-d H:i:s', or ''
+	 *
+	 * @throws CloudComputeException on any API failure.
+	 */
+	public function getTransferStatus(string $token): array;
+
+	/**
+	 * Withdraw a transfer. Only a pending one can be withdrawn.
+	 *
+	 * @throws CloudComputeException on any API failure.
+	 */
+	public function cancelTransfer(string $token): void;
 }
 
 class CloudComputeException extends Exception {}

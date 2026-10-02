@@ -14,6 +14,8 @@
  *            customer's own release and the reconcile use.
  *
  * Managed sites are invisible here by construction: they have no tenant row.
+ * A Managed site that moved to its customer's own cloud account has two —
+ * node-linked, reached only from here and the reconcile.
  *
  * @version 1.0
  */

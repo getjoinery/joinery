@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.33 - the Move to customer's Linode panel on a Managed site's node: the transfer check, run when the
+ *                 tab opens, with Re-check and Start, and the transfer's state linked to its queue row
+ *                 (specs/managed_to_self_hosted_transfer.md §6); a moved site's Reverse DNS panel says it is the customer's
  * @version 1.32 - the Cases card is the Incidents card (incident_triage.md WP1): this node's incidents, linked
  *                 to their own pages, and the alert under the header counts what needs a person by the header line's rule
  * @version 1.31 - every time on the page reads as an age (LibraryFunctions::time_ago): minutes, hours, days with
@@ -1456,6 +1459,92 @@
 	echo '</tbody></table>';
 	$page->end_box();
 
+	// ── Move to customer's Linode (a Managed site's node) ──
+	// The check reads the operator's Linode account several times, so it runs
+	// from the page once the tab has drawn rather than holding the page up.
+	$xfer_provision = CustomerCloudProvision::latest_for_node($node->key);
+	$xfer_row = $xfer_provision ? InstanceTransfer::latest_for_provision((int)$xfer_provision->key) : null;
+	if ($xfer_row !== null && $xfer_row->state() === InstanceTransfer::STATE_CANCELED && !$xfer_provision->is_operator_hosted()) {
+		$xfer_row = null;
+	}
+	// Sold sites only: a relay shard and an operator-account site copy are on our account too.
+	$xfer_sold = $xfer_provision && in_array((string)$xfer_provision->get('cvp_origin'), array('order', 'buyer'), true)
+		&& (string)$xfer_provision->get('cvp_install_mode') !== 'bare';
+	if ($xfer_sold && ($xfer_provision->is_operator_hosted() || $xfer_row !== null)) {
+		$page->begin_box(['title' => 'Move to customer\'s Linode']);
+		if ($xfer_row !== null && $xfer_row->state() !== InstanceTransfer::STATE_CANCELED) {
+			echo '<p class="mb-2"><strong>' . htmlspecialchars($xfer_row->state_label()) . '</strong> &middot; '
+				. '<a href="/admin/server_manager/transfers?itx_instance_transfer_id=' . (int)$xfer_row->key . '">open in the transfer queue</a></p>';
+		}
+		if ($xfer_provision->is_operator_hosted()) {
+			$xfer_startable = $xfer_row === null || in_array($xfer_row->state(),
+				array(InstanceTransfer::STATE_REQUESTED, InstanceTransfer::STATE_CANCELED, InstanceTransfer::STATE_DONE), true);
+			echo '<p class="text-muted small mb-2">Hands this server — running, with its disks and addresses — to the customer\'s own '
+				. 'Linode account. Linode bills them from then on; their mail and backups carry on through us.</p>';
+			echo '<ul id="xferCheck" class="list-unstyled small mb-2" data-provision="' . (int)$xfer_provision->key . '">'
+				. '<li class="text-muted">Checking&hellip;</li></ul>';
+			echo '<button type="button" class="btn btn-sm btn-outline-secondary" id="xferRecheck">Re-check</button> ';
+			if ($xfer_startable) {
+				echo '<button type="button" class="btn btn-sm btn-primary" id="xferStart" disabled '
+					. 'data-confirm="Start the move? The customer is emailed how to get ready and fetch their transfer code.">Start</button>';
+			}
+			echo '<p id="xferNotice" class="small mt-2 mb-0" role="status" aria-live="polite"></p>';
+			?>
+<script>
+(function () {
+	var list = document.getElementById('xferCheck');
+	var start = document.getElementById('xferStart');
+	var notice = document.getElementById('xferNotice');
+	var provision = parseInt(list.dataset.provision, 10);
+	var marks = { pass: '✓', warning: '!', blocker: '✗' };
+	var colours = { pass: 'text-success', warning: 'text-warning', blocker: 'text-danger' };
+	function show(check) {
+		list.textContent = '';
+		(check.items || []).forEach(function (item) {
+			if (item.result === 'pass') { return; }
+			var li = document.createElement('li');
+			li.className = colours[item.result] || '';
+			li.textContent = marks[item.result] + ' ' + item.label + (item.detail ? ' — ' + item.detail : '') + (item.fix ? ' ' + item.fix : '');
+			list.appendChild(li);
+		});
+		var summary = document.createElement('li');
+		summary.className = check.blockers ? 'text-danger' : 'text-success';
+		summary.textContent = check.blockers ? check.blockers + ' thing(s) to fix before it can start.'
+			: 'Ready to hand over' + (check.warnings ? ' (' + check.warnings + ' warning(s) above).' : '.');
+		list.insertBefore(summary, list.firstChild);
+		if (start) { start.disabled = check.blockers > 0; }
+	}
+	function run(what) {
+		notice.textContent = '';
+		return joineryApi.post('server_manager/transfer_operator', { 'do': what, provision_id: provision });
+	}
+	function check() {
+		list.innerHTML = '<li class="text-muted">Checking…</li>';
+		run('check').then(function (data) { show(data.check); }).catch(function (err) {
+			list.innerHTML = '';
+			notice.className = 'small mt-2 mb-0 text-danger';
+			notice.textContent = err && err.message ? err.message : 'The check could not run.';
+		});
+	}
+	document.getElementById('xferRecheck').addEventListener('click', check);
+	if (start) {
+		start.addEventListener('click', function () {
+			if (!window.confirm(start.dataset.confirm)) { return; }
+			start.disabled = true;
+			run('start').then(function () { window.location.reload(); }).catch(function (err) {
+				notice.className = 'small mt-2 mb-0 text-danger';
+				notice.textContent = err && err.message ? err.message : 'It could not start.';
+			});
+		});
+	}
+	check();
+})();
+</script>
+			<?php
+		}
+		$page->end_box();
+	}
+
 	// ── DNS publish box ──
 	// Above Reverse DNS deliberately: a provider only accepts a PTR once the
 	// forward record it names already resolves, so the forward record is the
@@ -1488,21 +1577,26 @@
 		$page->begin_box($pageoptions);
 		echo '<div class="mb-2"><span class="text-muted small">' . htmlspecialchars($rdns_ip) . ' currently answers: </span>';
 		echo '<code>' . htmlspecialchars($rdns_current ?: 'no PTR record') . '</code></div>';
-		echo '<p class="text-muted small mb-2">Sets the PTR through the cloud account that provisioned this node. The hostname\'s A record must already point at ' . htmlspecialchars($rdns_ip) . '.</p>';
+		if ($rdns_provision->is_transferred()) {
+			echo '<p class="text-muted small mb-0">' . htmlspecialchars(NodeReverseDns::TRANSFERRED_MESSAGE) . '</p>';
+			$page->end_box();
+		} else {
+			echo '<p class="text-muted small mb-2">Sets the PTR through the cloud account that provisioned this node. The hostname\'s A record must already point at ' . htmlspecialchars($rdns_ip) . '.</p>';
 
-		$fw_rdns = $page->getFormWriter('rdns_form', [
-			'action' => $base_url . '&tab=overview',
-			'values' => ['rdns_hostname' => $rdns_suggest],
-		]);
-		$fw_rdns->begin_form();
-		$fw_rdns->hiddeninput('action', '', ['id' => 'rdns_action', 'value' => 'set_reverse_dns']);
-		$fw_rdns->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
-		$fw_rdns->textinput('rdns_hostname', 'Hostname', [
-			'placeholder' => 'mail.example.com',
-		]);
-		$fw_rdns->submitbutton('btn_rdns_set', 'Set Reverse DNS', ['class' => 'btn btn-sm btn-primary']);
-		$fw_rdns->end_form();
-		$page->end_box();
+			$fw_rdns = $page->getFormWriter('rdns_form', [
+				'action' => $base_url . '&tab=overview',
+				'values' => ['rdns_hostname' => $rdns_suggest],
+			]);
+			$fw_rdns->begin_form();
+			$fw_rdns->hiddeninput('action', '', ['id' => 'rdns_action', 'value' => 'set_reverse_dns']);
+			$fw_rdns->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
+			$fw_rdns->textinput('rdns_hostname', 'Hostname', [
+				'placeholder' => 'mail.example.com',
+			]);
+			$fw_rdns->submitbutton('btn_rdns_set', 'Set Reverse DNS', ['class' => 'btn btn-sm btn-primary']);
+			$fw_rdns->end_form();
+			$page->end_box();
+		}
 	}
 
 	// Recent jobs for this node

@@ -7,6 +7,7 @@
  * item shows its live state with a one-click action where the platform can
  * do the work itself.
  *
+ * @version 1.7 - the operator token's helptext names the scopes a server handover needs
  * @version 1.6 - stored credentials are locked fields with Reset (passwordinput 'stored'); the promotion code's remove box is gone
  * @version 1.5 - the hosted card's master-key field is named hosted_smtp2go_master_key: smtp2go_api_key is the core email provider's declared setting, which FormWriter refuses to hand-draw
  * @version 1.4 - the registrar promotion code on the domain card; the domain question card serves
@@ -355,7 +356,8 @@ echo $fw_hosted->begin_form();
 echo '<input type="hidden" name="action" value="save_hosted">';
 $fw_hosted->passwordinput('operator_cloud_token', 'Operator cloud token', [
 	'stored' => $hosted['token_present'],
-	'helptext' => 'A Linode personal access token scoped linodes:read_write.'
+	'helptext' => 'A Linode personal access token scoped linodes:read_write, account:read_write (to hand a server to its'
+		. ' customer\'s own Linode account), firewall:read_only and volumes:read_only (the check before a handover).'
 		. ' It stays on this management node — no machine this plane creates ever receives it.']);
 $fw_hosted->passwordinput('hosted_smtp2go_master_key', 'SMTP2GO master API key', [
 	'stored' => $hosted['smtp2go_present'],

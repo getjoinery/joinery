@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.29.2",
+  "version": "1.30.0",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -100,6 +100,12 @@
           "title": "Service Tenants",
           "url": "/admin/server_manager/service_tenants",
           "order": 11
+        },
+        {
+          "slug": "server-manager-transfers",
+          "title": "Server Transfers",
+          "url": "/admin/server_manager/transfers",
+          "order": 12
         }
       ]
     }
@@ -406,7 +412,7 @@
       "secret": true,
       "group": "hosted",
       "label": "Operator cloud token",
-      "helptext": "The Linode personal access token (scope linodes:read_write) hosted instances are created on. Set it on the Provisioning Setup page, which seals it at rest. It stays on this management node and never reaches a machine this plane creates."
+      "helptext": "The Linode personal access token hosted instances are created on, with scopes linodes:read_write, account:read_write (handing a server to its customer's own account), firewall:read_only and volumes:read_only (the check before a handover). Set it on the Provisioning Setup page, which seals it at rest. It stays on this management node and never reaches a machine this plane creates."
     },
     {
       "name": "server_manager_smtp2go_api_key",
@@ -610,6 +616,12 @@
       "locator": "cvp_customer_cloud_provisions.cvp_admin_pass_sealed"
     },
     {
+      "label": "Server transfer code",
+      "feature": "Hosted tier",
+      "kind": "ephemeral",
+      "locator": "itx_instance_transfers.itx_token_sealed"
+    },
+    {
       "label": "Managed site draft's domain registrant contact",
       "feature": "Hosted tier",
       "kind": "operator",
@@ -685,6 +697,44 @@
         "default_email": true,
         "title_template": "Critical, {node_name}: {title}",
         "body_template": "{summary}",
+        "link_template": "{link}"
+      }
+    },
+    "hosted.deletion_withdrawn": {
+      "label": "A hosted instance's deletion is withdrawn",
+      "description": "A shut-down hosted site is being handed to its customer's own Linode account, so the deletion asked for earlier must not happen: deleting it now would fail the transfer.",
+      "category": "Hosting",
+      "payload": {
+        "provision_id": "Customer cloud provision id",
+        "domain": "The site's domain",
+        "instance_id": "Provider instance id"
+      },
+      "notify": {
+        "ntf_type": "system",
+        "supports_topic": true,
+        "default_email": true,
+        "title_template": "Do not delete the hosted instance for {domain}",
+        "body_template": "Instance {instance_id} for {domain} is being handed to its customer's own Linode account. The deletion asked for earlier is withdrawn.",
+        "link_template": "/admin/server_manager/transfers"
+      }
+    },
+    "hosted.transfer_attention": {
+      "label": "A server transfer needs a look",
+      "description": "Something about handing a Managed site's server to its customer's own Linode account: a customer asked, a code could not be issued, Linode failed the move, a move finished, or a code was redeemed that should not have been.",
+      "category": "Hosting",
+      "payload": {
+        "provision_id": "Customer cloud provision id",
+        "domain": "The site's domain",
+        "title": "What happened, in plain words",
+        "detail": "What to do about it",
+        "link": "The transfer's row in the queue"
+      },
+      "notify": {
+        "ntf_type": "system",
+        "supports_topic": true,
+        "default_email": true,
+        "title_template": "{domain}: {title}",
+        "body_template": "{detail}",
         "link_template": "{link}"
       }
     },
