@@ -29,6 +29,8 @@ pub struct Summary {
     pub convergence_ms: Vec<u64>,
     pub first_ts_ms: u64,
     pub last_ts_ms: u64,
+    /// The last settle's no-loss coverage, as its verdict put it.
+    pub coverage: Option<String>,
 }
 
 impl Summary {
@@ -107,6 +109,9 @@ pub fn summarize(records: &[Record]) -> Summary {
                 detail,
                 ..
             } => {
+                if assertion == "no-loss-coverage" {
+                    s.coverage = Some(detail.clone());
+                }
                 if *ok {
                     s.verdicts_passed += 1;
                 } else {
@@ -178,6 +183,9 @@ pub fn render(summary: &Summary) -> String {
         summary.convergence_max_ms() / 1000
     ));
     out.push_str(&format!("Assertions passed {}\n", summary.verdicts_passed));
+    if let Some(coverage) = &summary.coverage {
+        out.push_str(&format!("No-loss coverage {coverage}\n"));
+    }
 
     if !summary.actor_ops.is_empty() {
         out.push_str("\nBy persona\n");
@@ -248,6 +256,7 @@ mod tests {
             sha256: Some("aa".into()),
             size: 1,
             mtime_ms: None,
+            parent_inode: None,
             ts_ms: ts,
         }
     }

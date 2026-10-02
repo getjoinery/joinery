@@ -246,6 +246,10 @@ fn a_campaign_storms_settles_and_leaves_a_full_timeline_behind() {
         "issues-honest",
         "settle-holds",
         "leak-watch",
+        "no-loss-coverage",
+        "swaps-apart",
+        "custody",
+        "stores-whole",
     ] {
         assert!(
             assertions.contains(expected),

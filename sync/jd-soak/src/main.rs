@@ -396,6 +396,16 @@ fn cmd_orchestrate(rest: &[String]) -> Result<bool, String> {
         orchestrate::run(&fleet, &campaign, &api, &reach, &stop).map_err(|e| e.to_string())?;
 
     println!("\n{} cycle(s) run", outcome.cycles);
+    // One fixed line, for the ledger to read: how much of the last no-loss
+    // verdict was a judgement.
+    if let Some(c) = outcome.coverage {
+        println!(
+            "NO-LOSS COVERAGE: judged {} of {} live claim(s); {} at dead paths",
+            c.claims - c.at_dead_paths,
+            c.claims,
+            c.at_dead_paths
+        );
+    }
     if outcome.clean() {
         println!("No invariant was broken.");
     } else {

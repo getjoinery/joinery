@@ -1438,6 +1438,7 @@ dependencies = [
  "jd-proto",
  "jd-vfs",
  "libc",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

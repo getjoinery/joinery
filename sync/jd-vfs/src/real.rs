@@ -622,16 +622,7 @@ impl Vfs for OsVfs {
     }
 
     fn directory_identity(&self, path: &Path) -> VfsResult<Option<crate::FileIdentity>> {
-        match path.symlink_metadata() {
-            Ok(md) if md.is_dir() && !md.file_type().is_symlink() => Ok(Some(if self.personality.positional_file_ids {
-                crate::FileIdentity { file_id: 0, birth_ns: 0 }
-            } else {
-                crate::FileIdentity { file_id: directory_id_of(path, &md), birth_ns: birth_of(&md) }
-            })),
-            Ok(_) => Ok(None),
-            Err(e) if not_there(&e) => Ok(None),
-            Err(e) => Err(io_err(path, e)),
-        }
+        directory_identity_at(path, &self.personality)
     }
 
     fn tie_break_id(&self, path: &Path) -> VfsResult<u64> {
@@ -697,11 +688,16 @@ impl Vfs for OsVfs {
         let name = format!(".jd-tmp-{}", (self.next_token)());
         let path = self.spool_dir.join(name);
         let file = File::create(&path).map_err(|e| io_err(&path, e))?;
+        let folder_at_open = match target.parent() {
+            Some(folder) => directory_identity_at(folder, &self.personality)?,
+            None => None,
+        };
         Ok(Box::new(OsSpoolFile {
             file: Some(file),
             path,
             personality: self.personality,
             target: target.to_path_buf(),
+            folder_at_open,
         }))
     }
 
@@ -834,6 +830,23 @@ struct OsSpoolFile {
     personality: Personality,
     #[allow(dead_code)]
     target: PathBuf,
+    /// The directory standing where the target lands when the spool was
+    /// opened; `None` if there was none (see `SpoolFile::commit`).
+    folder_at_open: Option<crate::FileIdentity>,
+}
+
+/// The identity of the directory at `path`, `None` where none stands there.
+fn directory_identity_at(path: &Path, personality: &Personality) -> VfsResult<Option<crate::FileIdentity>> {
+    match path.symlink_metadata() {
+        Ok(md) if md.is_dir() && !md.file_type().is_symlink() => Ok(Some(if personality.positional_file_ids {
+            crate::FileIdentity { file_id: 0, birth_ns: 0 }
+        } else {
+            crate::FileIdentity { file_id: directory_id_of(path, &md), birth_ns: birth_of(&md) }
+        })),
+        Ok(_) => Ok(None),
+        Err(e) if not_there(&e) => Ok(None),
+        Err(e) => Err(io_err(path, e)),
+    }
 }
 
 impl OsSpoolFile {
@@ -920,7 +933,14 @@ impl OsSpoolFile {
         }
 
         if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+            match self.folder_at_open {
+                Some(was) => {
+                    if directory_identity_at(parent, &self.personality)? != Some(was) {
+                        return Err(VfsError::FolderMoved(parent.to_path_buf()));
+                    }
+                }
+                None => fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?,
+            }
         }
         fs::rename(&self.path, target).map_err(|e| io_err(&self.path, e))?;
 
@@ -1129,6 +1149,30 @@ mod tests {
 
         spool.commit(&target, None).unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"partial");
+    }
+
+    #[test]
+    fn a_spool_never_makes_again_a_folder_moved_while_it_was_filled() {
+        let d = TempDir::new("moved");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        fs::create_dir(root.join("P")).unwrap();
+        let target = root.join("P").join("plans.txt");
+
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"in flight").unwrap();
+        fs::rename(root.join("P"), root.join("P2")).unwrap();
+        let err = spool.commit(&target, None).unwrap_err();
+        assert!(matches!(&err, VfsError::FolderMoved(p) if p == &root.join("P")), "got {err:?}");
+        assert!(!root.join("P").exists(), "the folder's old name was made again");
+        assert!(!root.join("P2").join("plans.txt").exists());
+
+        // A folder missing when the spool opened is made, as it always was.
+        let fresh = root.join("Q").join("notes.txt");
+        let mut spool = v.spool(&fresh).unwrap();
+        spool.write_all(b"into a folder not made yet").unwrap();
+        spool.commit(&fresh, None).unwrap();
+        assert_eq!(fs::read(&fresh).unwrap(), b"into a folder not made yet");
     }
 
     #[test]

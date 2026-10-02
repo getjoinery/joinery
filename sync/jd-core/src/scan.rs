@@ -126,6 +126,10 @@ pub struct ScanOutcome {
     /// against a file that is not the one it knew -- restored from a backup,
     /// saved again with the same bytes -- which no change reports.
     pub bound: Vec<(EntityId, jd_vfs::FileIdentity)>,
+    /// Records never sent whose file the scan read as the next version of the
+    /// record it was renamed over (`pair_files` step 2): they were never a
+    /// file of their own, and the pass forgets them.
+    pub superseded: Vec<EntityId>,
 }
 
 impl ScanOutcome {
@@ -872,6 +876,47 @@ fn pair_by<K: Clone + Eq + std::hash::Hash>(
             out.bound.extend(bind(obs).map(|id| (known[s].id, id)));
             out.changes.push((known[s].id, moved(&known[s], obs)));
             continue;
+        }
+        // A file never sent, renamed over a record whose own file stands
+        // nowhere, is that record's next version: a save by rename whose
+        // temporary file a pass saw first. It is what step 3 reads when no
+        // pass saw the temporary file; the record never sent has nothing on
+        // the server to keep. Followed, the record read as deleted here, a
+        // peer's edit beat that, and its download waited for ever on the name
+        // the new file held (run 1531). Only where identity holds: bytes that
+        // stand nowhere may be a file edited where it went, and read as gone
+        // a swap partner's bytes became the record's edit (hidden kill2 75107).
+        // There a save seen mid-save reads, as any move-and-edit does, as a
+        // delete plus a creation.
+        if steps == Steps::All
+            && !held(k)
+            && k.claimant_for.is_none()
+            && k.id.is_provisional()
+            && k.fingerprint.is_none()
+            && k.sha256.is_none()
+        {
+            let to = observed[c].path.as_str();
+            let mut replaced: Vec<usize> = (0..known.len())
+                .filter(|r| {
+                    let r_rec = &known[*r];
+                    !settled[*r]
+                        && r_rec.path == to
+                        && !r_rec.server_deleted
+                        && !held(r_rec)
+                        && r_rec.claimant_for.is_none()
+                        && !awaiting_bytes.contains(to)
+                        && own(r_rec).is_some_and(|id| by_identity.get(&id).is_none_or(|v| v.is_empty()))
+                })
+                .collect();
+            replaced.sort_by_key(|r| contender_rank(*r));
+            if let Some(&r) = replaced.first() {
+                claimed[c] = true;
+                settled[r] = true;
+                out.bound.extend(bind(&observed[c]).map(|id| (known[r].id, id)));
+                out.changes.push((known[r].id, unchanged_or_edited(&known[r], &observed[c])));
+                out.superseded.push(k.id);
+                continue;
+            }
         }
         let backup = !held(k)
             && folder_of(&observed[c].path) == folder_of(&k.path)

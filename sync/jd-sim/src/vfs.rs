@@ -1233,6 +1233,13 @@ impl MemFs {
         st.births.get(key).copied().unwrap_or(0)
     }
 
+    /// The identity of the directory at this key as the engine is shown it,
+    /// `None` where none stands; read without the failures a look by the
+    /// engine can be given.
+    fn directory_at(st: &MemFsState, key: &str) -> Option<jd_vfs::FileIdentity> {
+        matches!(st.nodes.get(key), Some(Node::Dir)).then(|| Self::directory_fingerprint_of(st, key).identity())
+    }
+
     fn directory_fingerprint_of(st: &MemFsState, key: &str) -> Fingerprint {
         Fingerprint::of_directory(Self::directory_id_of(st, key), Self::directory_birth_of(st, key))
     }
@@ -1556,11 +1563,13 @@ impl Vfs for MemFs {
         st.next_spool += 1;
         let name = format!(".jd-spool-{}", st.next_spool);
         st.spools.insert(name.clone(), Vec::new());
+        let folder_at_open = MemFs::directory_at(&st, MemFs::parent_key(&key));
         drop(st);
         Ok(Box::new(MemSpool {
             fs: self.clone(),
             name,
             buf: Vec::new(),
+            folder_at_open,
         }))
     }
 
@@ -1652,6 +1661,9 @@ struct MemSpool {
     fs: MemFs,
     name: String,
     buf: Vec<u8>,
+    /// The directory standing where the target lands when the spool was
+    /// opened, as `OsSpoolFile` keeps it.
+    folder_at_open: Option<jd_vfs::FileIdentity>,
 }
 
 impl Write for MemSpool {
@@ -1741,6 +1753,16 @@ impl SpoolFile for MemSpool {
         // exist and cannot until somebody moves that file.
         if let Some(blocker) = MemFs::file_in_the_way(&st, &key) {
             return Err(VfsError::AlreadyExists(MemFs::path_of(&blocker)));
+        }
+
+        // The folder it lands in is the one that stood there when the spool
+        // opened, as `OsSpoolFile` holds it: gone or replaced since, the
+        // commit is refused rather than making the folder again.
+        if let Some(was) = self.folder_at_open {
+            let folder = MemFs::parent_key(&key).to_string();
+            if MemFs::directory_at(&st, &folder) != Some(was) {
+                return Err(VfsError::FolderMoved(MemFs::path_of(&folder)));
+            }
         }
 
         MemFs::watch_loss(&st, &key, "a download committing on top of it");

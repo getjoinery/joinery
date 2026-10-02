@@ -24,6 +24,17 @@
 //!    name on it.
 //! 6. **Leak watch.** Memory, descriptors, spool residue and store size,
 //!    sampled every settle so a slow leak is visible before it is an outage.
+//! 7. **Swaps keep their histories apart.** No file on the server holds both
+//!    bodies of a swap the user made -- a trade read as two edits mixes two
+//!    files' histories while every tree still agrees.
+//! 8. **Custody.** A content stands in the folder the user put it in, judged
+//!    by that folder's directory inode on the device that put it there.
+//! 9. **The stores hold together.** No record whose parent is not in its
+//!    store, and no directory held by two folder records.
+//!
+//! And one honesty check beside them: how many no-loss claims named a path
+//! nothing is at and so were not judged, which past a threshold is a run that
+//! cannot say much about loss at all.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -77,6 +88,16 @@ pub struct Verification {
     pub server_contents: BTreeSet<String>,
     /// Every lost content in full, because the verdict names only the first ten.
     pub losses: Losses,
+    /// How much of the no-loss check was a judgement.
+    pub coverage: Coverage,
+}
+
+/// The live claims the no-loss check had, and how many of them it could not
+/// judge because they named a path nothing is at.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Coverage {
+    pub claims: usize,
+    pub at_dead_paths: usize,
 }
 
 /// Everything a settle found missing, untruncated.
@@ -551,7 +572,7 @@ pub fn check_no_loss(
     previously_on_server: &BTreeSet<String>,
     standing: &BTreeSet<String>,
     personality: &Personality,
-) -> (Verdict, Losses) {
+) -> (Verdict, Losses, Coverage) {
     let latest = journal::last_committed(records);
     let mut lost_live: Vec<String> = Vec::new();
     let mut at_dead_paths: Vec<String> = Vec::new();
@@ -655,6 +676,7 @@ pub fn check_no_loss(
                 format!("{} live paths findable; {history}{}", latest.len(), stale),
             ),
             Losses::default(),
+            Coverage { claims: latest.len(), at_dead_paths: at_dead_paths.len() },
         );
     }
 
@@ -692,7 +714,405 @@ pub fn check_no_loss(
             live: lost_live,
             history: lost_history,
         },
+        Coverage { claims: latest.len(), at_dead_paths: at_dead_paths.len() },
     )
+}
+
+/// Claims the no-loss check could not judge, past which a run cannot speak to
+/// loss: more than this many, and more than a fifth of all live claims.
+pub const DEAD_PATH_ALARM_MIN: usize = 10;
+
+/// The count `check_no_loss` drops, as a verdict of its own.
+///
+/// A claim keyed by a path nothing is at is not judged (see `check_no_loss`
+/// for why), and that was one clause in a detail string a reader skims past.
+/// A handful is the rig's renames outrunning the claim keys; a fifth of every
+/// claim is a run whose "no-loss green" says almost nothing, and that is a
+/// finding, not a footnote.
+pub fn check_no_loss_coverage(coverage: Coverage) -> Verdict {
+    let detail = format!(
+        "judged {} of {} live claim(s); {} named a path nothing is at",
+        coverage.claims - coverage.at_dead_paths,
+        coverage.claims,
+        coverage.at_dead_paths
+    );
+    if coverage.at_dead_paths > DEAD_PATH_ALARM_MIN && coverage.at_dead_paths * 5 > coverage.claims {
+        Verdict::fail("no-loss-coverage", format!("{detail}: the no-loss verdict cannot vouch for this run"))
+    } else {
+        Verdict::pass("no-loss-coverage", detail)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 7 — swaps keep their histories apart
+// ---------------------------------------------------------------------------
+
+/// The workspace the name-swapper persona trades names in. Shared by every
+/// device, as `standing_key` and `orchestrate::run` place it.
+pub const SWAP_WORKSPACE: &str = "Shared-name-swapper";
+
+/// The two bodies of every swap an actor committed.
+///
+/// A swap journals the two names it exchanged as two consecutive commits of
+/// one actor's own stream, each with the content now standing at that name.
+/// Every body the persona writes is its own (`content_bytes` from a fresh
+/// seed) and it never rewrites a name, so two bodies of one swap are two
+/// files, always.
+pub fn swap_pairs(records: &[Record]) -> Vec<(String, String)> {
+    let mut open: BTreeMap<String, (u64, String)> = BTreeMap::new();
+    let mut pairs = Vec::new();
+    for record in records {
+        let Record::ActorCommit { seq, actor, op, sha256, .. } = record else {
+            continue;
+        };
+        let Some(sha) = sha256.as_ref().filter(|_| op == "swap") else {
+            open.remove(actor);
+            continue;
+        };
+        match open.remove(actor) {
+            Some((first_seq, first)) if first_seq + 1 == *seq && first != *sha => {
+                pairs.push((first, sha.clone()));
+            }
+            _ => {
+                open.insert(actor.clone(), (*seq, sha.clone()));
+            }
+        }
+    }
+    pairs
+}
+
+/// No file's history holds both bodies of one swap.
+///
+/// `histories` is each file's saved version hashes, by file id, with its path
+/// for the report. A file holding both is a trade read as two edits: each
+/// record took the other file's bytes as a new version of itself (Defects AH
+/// and AI), and the trees can agree perfectly while it happens.
+pub fn check_swap_histories(
+    histories: &BTreeMap<i64, (String, Vec<String>)>,
+    pairs: &[(String, String)],
+    unread: usize,
+) -> Verdict {
+    if pairs.is_empty() {
+        return Verdict::pass("swaps-apart", "vacuous — no swap was committed this run");
+    }
+    let mut mixed = Vec::new();
+    for (id, (path, hashes)) in histories {
+        for (a, b) in pairs {
+            if hashes.iter().any(|h| h == a) && hashes.iter().any(|h| h == b) {
+                mixed.push(format!("file {id} ({path}) holds {} and {}", &a[..a.len().min(12)], &b[..b.len().min(12)]));
+            }
+        }
+    }
+    let note = if unread > 0 {
+        format!("; {unread} history(ies) the server would not identify were not judged")
+    } else {
+        String::new()
+    };
+    if mixed.is_empty() {
+        Verdict::pass(
+            "swaps-apart",
+            format!("{} swap(s) over {} file history(ies), none mixed{note}", pairs.len(), histories.len()),
+        )
+    } else {
+        Verdict::fail(
+            "swaps-apart",
+            format!("{} history(ies) hold both sides of a swap: {}{note}", mixed.len(), mixed.iter().take(10).cloned().collect::<Vec<_>>().join("; ")),
+        )
+    }
+}
+
+/// Read the version history of every file in the swap workspace, live or
+/// trashed. Bounded by `budget` calls; a history the server lists without
+/// naming its contents is counted, not guessed.
+fn swap_workspace_histories(
+    api: &dyn DriveApi,
+    tree: &ServerTree,
+    budget: usize,
+) -> (BTreeMap<i64, (String, Vec<String>)>, usize) {
+    let mut histories = BTreeMap::new();
+    let mut unread = 0;
+    let prefix = format!("{SWAP_WORKSPACE}/");
+    for file in tree.files.values() {
+        let Some(path) = tree.path_of(file).filter(|p| p.starts_with(&prefix)) else {
+            continue;
+        };
+        if histories.len() + unread >= budget {
+            unread += 1;
+            continue;
+        }
+        match server::version_contents(api, file.id) {
+            Ok(h) if h.unidentified == 0 => {
+                histories.insert(file.id, (path, h.hashes));
+            }
+            _ => unread += 1,
+        }
+    }
+    (histories, unread)
+}
+
+// ---------------------------------------------------------------------------
+// 8 — custody
+// ---------------------------------------------------------------------------
+
+/// What one device's disk holds, for the custody check: every file with its
+/// content and the inode of the directory it stands in, and every directory
+/// inode on the disk.
+#[derive(Debug, Clone, Default)]
+pub struct Placement {
+    pub files: Vec<(String, String, u64)>,
+    pub dirs: BTreeSet<u64>,
+}
+
+/// Read a device's placement off its disk.
+#[cfg(unix)]
+pub fn placement_on_disk(root: &Path, tree: &LocalTree) -> Placement {
+    use std::os::unix::fs::MetadataExt;
+    let mut out = Placement::default();
+    for entry in tree.entries.values() {
+        let full = root.join(&entry.path);
+        if entry.is_dir {
+            if let Ok(m) = std::fs::metadata(&full) {
+                out.dirs.insert(m.ino());
+            }
+            continue;
+        }
+        let (Some(sha), Some(parent)) = (entry.sha256.as_ref(), full.parent()) else {
+            continue;
+        };
+        if let Ok(m) = std::fs::metadata(parent) {
+            out.files.push((entry.path.clone(), sha.clone(), m.ino()));
+        }
+    }
+    if let Ok(m) = std::fs::metadata(root) {
+        out.dirs.insert(m.ino());
+    }
+    out
+}
+
+#[cfg(not(unix))]
+pub fn placement_on_disk(_root: &Path, _tree: &LocalTree) -> Placement {
+    Placement::default()
+}
+
+/// Every content stands in a folder the user put it in.
+///
+/// Each content's placing commits (a write, an append, a save, a rename or
+/// swap carrying it in) say, by directory inode, where its writer put it on
+/// the writer's own disk; a later commit at the same path with other bytes,
+/// or a delete or rename away from that path, withdraws one. On each device
+/// that still holds the content and still has one of those directories, the
+/// content must stand in one of them. Standing only somewhere else, the
+/// engine carried it into a folder the user never put it in -- a conflict copy
+/// beside a peer's moved version, a save taken along by another file's move
+/// -- which no tree comparison sees, because every device agrees on the
+/// wrong place.
+///
+/// What a device did not write is not judged on it: a peer's move, or the
+/// remote actor's, is applied by the engine and lands where that user put it.
+/// Nor is a content another device's user placed after this one did: that
+/// user moved it on (a peer renaming the file a create-create clash left at
+/// its own path, which was this device's), and the content's folder is that
+/// user's choice, which this device's inodes cannot name (soak run 1520).
+pub fn check_custody(records: &[Record], placements: &BTreeMap<String, Placement>) -> Verdict {
+    // (device, workspace path) -> (content, directory inode) of the placing
+    // commit standing there now.
+    let mut at: BTreeMap<(String, String), (String, u64)> = BTreeMap::new();
+    // Content -> the device whose user placed it last.
+    let mut last_placed_by: BTreeMap<String, String> = BTreeMap::new();
+    // Actor -> the directory the content it is renaming stood in, between
+    // its `rename` and `rename_into` records.
+    let mut renaming_from: BTreeMap<String, u64> = BTreeMap::new();
+    for record in records {
+        let Record::ActorCommit { actor, persona, op, path, sha256, parent_inode, .. } = record else {
+            continue;
+        };
+        let device = actor.split('/').next().unwrap_or_default().to_string();
+        let key = (device, workspace_path(actor, persona, path));
+        match (sha256, parent_inode) {
+            (Some(sha), Some(inode)) => {
+                // A rename within one directory names the content and chooses
+                // no folder: its folder is still the one whoever placed it
+                // last chose. A peer's user who moved it meanwhile chose that,
+                // and the engine keeps both, the peer's folder with this name
+                // (run 1541).
+                let in_place = op == "rename_into" && renaming_from.remove(actor.as_str()) == Some(*inode);
+                if !in_place {
+                    last_placed_by.insert(sha.clone(), key.0.clone());
+                }
+                at.insert(key, (sha.clone(), *inode));
+            }
+            _ => {
+                // The directory the content is leaving: as the actor read it
+                // before the rename, or, from an older journal, where this
+                // device's user last placed it.
+                if op == "rename" {
+                    match parent_inode.or_else(|| at.get(&key).map(|(_, inode)| *inode)) {
+                        Some(inode) => renaming_from.insert(actor.clone(), inode),
+                        None => renaming_from.remove(actor.as_str()),
+                    };
+                }
+                // No content, or a placement this check cannot read: whatever
+                // stood at this path stands there no longer by this record.
+                if matches!(op.as_str(), "remove" | "remove_dir" | "rename" | "trash") {
+                    let prefix = format!("{}/", key.1);
+                    at.retain(|(d, p), _| !(d == &key.0 && (p == &key.1 || p.starts_with(&prefix))));
+                } else {
+                    at.remove(&key);
+                }
+            }
+        }
+    }
+    let mut wanted: BTreeMap<(String, String), BTreeSet<u64>> = BTreeMap::new();
+    for ((device, _), (sha, inode)) in &at {
+        wanted.entry((device.clone(), sha.clone())).or_default().insert(*inode);
+    }
+    let mut astray = Vec::new();
+    let mut judged = 0usize;
+    for ((device, sha), dirs) in &wanted {
+        let Some(placement) = placements.get(device) else { continue };
+        if last_placed_by.get(sha).is_some_and(|by| by != device) {
+            continue;
+        }
+        let standing: Vec<&(String, String, u64)> = placement.files.iter().filter(|(_, s, _)| s == sha).collect();
+        let still_there: BTreeSet<u64> = dirs.iter().copied().filter(|d| placement.dirs.contains(d)).collect();
+        if standing.is_empty() || still_there.is_empty() {
+            continue;
+        }
+        judged += 1;
+        if !standing.iter().any(|(_, _, d)| still_there.contains(d)) {
+            astray.push(format!(
+                "{device}: {} stands at {} and in none of the {} folder(s) the user put it in",
+                &sha[..sha.len().min(12)],
+                standing.iter().map(|(p, _, _)| p.as_str()).take(3).collect::<Vec<_>>().join(", "),
+                still_there.len()
+            ));
+        }
+    }
+    if astray.is_empty() {
+        Verdict::pass("custody", format!("{judged} content(s) judged, every one in a folder the user put it in"))
+    } else {
+        Verdict::fail(
+            "custody",
+            format!("{} content(s) stand in a folder the user never put them in: {}", astray.len(), astray.iter().take(10).cloned().collect::<Vec<_>>().join("; ")),
+        )
+    }
+}
+
+/// A claim's path from the sync root, as `standing_key` places it.
+fn workspace_path(actor: &str, persona: &str, path: &str) -> String {
+    let device = actor.split('/').next().unwrap_or_default();
+    if persona == "sqlite-app" || persona == "browser" {
+        format!("{device}-{persona}/{path}")
+    } else {
+        format!("Shared-{persona}/{path}")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 9 — the stores hold together
+// ---------------------------------------------------------------------------
+
+/// One device's state store against itself, read-only, after the settle.
+///
+/// Two things the engine's own sweeps exist to keep true, judged from outside:
+/// no live record whose parent is not in the store (stranded: no pass ever
+/// walks down to it, and it is never decided about again), and no directory
+/// held by two live folder records, by its id or by its name in its parent
+/// (one directory, two owners: a delete of either takes the other's files).
+pub fn store_findings(db: &Path, personality: &Personality) -> Result<Vec<String>, rusqlite::Error> {
+    use rusqlite::{Connection, OpenFlags};
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    conn.busy_timeout(Duration::from_secs(5))?;
+    struct Row {
+        folder: bool,
+        id: i64,
+        parent: Option<i64>,
+        name: String,
+        deleted: bool,
+        holds: bool,
+        dir_id: Option<i64>,
+    }
+    let mut stmt = conn.prepare(
+        "SELECT entity_type, server_id, parent_folder_id, remote_name, local_name, remote_deleted,
+                synced_parent_id, synced_name, stand_in_parent_id, stand_in_name, synced_fp_file_id
+           FROM entries",
+    )?;
+    let rows: Vec<Row> = stmt
+        .query_map([], |r| {
+            let synced_name: Option<String> = r.get(7)?;
+            let stand_in_name: Option<String> = r.get(9)?;
+            let local_name: Option<String> = r.get(4)?;
+            let remote_name: String = r.get(3)?;
+            // The placement this disk has: agreed, else a stand-in, else the
+            // server's (the engine's `local_placement`).
+            let (parent, placed) = if synced_name.is_some() {
+                (r.get::<_, Option<i64>>(6)?, synced_name.clone())
+            } else if stand_in_name.is_some() {
+                (r.get::<_, Option<i64>>(8)?, stand_in_name.clone())
+            } else {
+                (r.get::<_, Option<i64>>(2)?, None)
+            };
+            Ok(Row {
+                folder: r.get::<_, String>(0)? == "folder",
+                id: r.get(1)?,
+                parent,
+                name: local_name.or(placed).unwrap_or(remote_name),
+                deleted: r.get::<_, i64>(5)? != 0,
+                holds: synced_name.is_some() || stand_in_name.is_some(),
+                dir_id: r.get::<_, Option<i64>>(10)?.filter(|id| *id != 0),
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    let folders: BTreeSet<i64> = rows.iter().filter(|r| r.folder).map(|r| r.id).collect();
+    let mut findings = Vec::new();
+    for row in rows.iter().filter(|r| !r.deleted) {
+        if let Some(p) = row.parent.filter(|p| !folders.contains(p)) {
+            findings.push(format!(
+                "{} {} ({}) is stranded: its parent {p} is not in the store",
+                if row.folder { "folder" } else { "file" },
+                row.id,
+                row.name
+            ));
+        }
+    }
+    let mut by_dir: BTreeMap<i64, i64> = BTreeMap::new();
+    let mut by_slot: BTreeMap<(Option<i64>, String), i64> = BTreeMap::new();
+    for row in rows.iter().filter(|r| r.folder && !r.deleted && r.holds) {
+        if let Some(dir) = row.dir_id {
+            if let Some(other) = by_dir.insert(dir, row.id) {
+                findings.push(format!("folders {other} and {} both hold directory {dir}", row.id));
+            }
+        }
+        let slot = (row.parent, jd_vfs::comparison_key(&row.name, personality));
+        if let Some(other) = by_slot.insert(slot, row.id) {
+            findings.push(format!("folders {other} and {} both claim {} in folder {:?}", row.id, row.name, row.parent));
+        }
+    }
+    Ok(findings)
+}
+
+/// Every device's store, one verdict.
+pub fn check_stores(devices: &[(String, std::path::PathBuf)], personality: &Personality) -> Verdict {
+    let mut findings = Vec::new();
+    let mut unread = Vec::new();
+    for (name, db) in devices {
+        match store_findings(db, personality) {
+            Ok(found) => findings.extend(found.into_iter().map(|f| format!("{name}: {f}"))),
+            Err(e) => unread.push(format!("{name}: {e}")),
+        }
+    }
+    if !unread.is_empty() && findings.is_empty() {
+        // A store that cannot be read is not a store that holds together.
+        return Verdict::fail("stores-whole", format!("could not read: {}", unread.join("; ")));
+    }
+    if findings.is_empty() {
+        Verdict::pass("stores-whole", format!("{} store(s): nothing stranded, no directory held twice", devices.len()))
+    } else {
+        Verdict::fail(
+            "stores-whole",
+            format!("{} finding(s): {}", findings.len(), findings.iter().take(10).cloned().collect::<Vec<_>>().join("; ")),
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,6 +1579,7 @@ pub fn settle(
                 convergence_ms,
                 server_contents: BTreeSet::new(),
                 losses: Losses::default(),
+                coverage: Coverage::default(),
             };
         }
     };
@@ -1227,7 +1648,7 @@ pub fn settle(
             )),
         }
     }
-    let (mut no_loss, losses) = check_no_loss(
+    let (mut no_loss, losses, coverage) = check_no_loss(
         records,
         &recoverable,
         previously_on_server,
@@ -1255,8 +1676,27 @@ pub fn settle(
         );
     }
     verdicts.push(no_loss);
+    verdicts.push(check_no_loss_coverage(coverage));
 
     verdicts.push(check_no_ciphertext(&server_tree, &trees, &statuses));
+
+    // 7 and 8 read what the walks above already hold, plus one history call
+    // per file in the swap workspace -- a handful, the persona keeps three.
+    let pairs = swap_pairs(records);
+    let (histories, unread) = if pairs.is_empty() {
+        (BTreeMap::new(), 0)
+    } else {
+        swap_workspace_histories(api, &server_tree, VERSION_LOOKUP_BUDGET)
+    };
+    verdicts.push(check_swap_histories(&histories, &pairs, unread));
+    let placements: BTreeMap<String, Placement> = fleet
+        .devices
+        .iter()
+        .filter_map(|d| trees.get(&d.name).map(|t| (d.name.clone(), placement_on_disk(&d.root, t))))
+        .collect();
+    verdicts.push(check_custody(records, &placements));
+    let stores: Vec<(String, std::path::PathBuf)> = fleet.devices.iter().map(|d| (d.name.clone(), d.state_db())).collect();
+    verdicts.push(check_stores(&stores, personality));
     verdicts.push(check_issues_honest(&statuses));
 
     // Asked last, so the window it covers is the whole audit and not a slice of
@@ -1283,6 +1723,7 @@ pub fn settle(
         convergence_ms,
         server_contents: server_tree.head_contents(),
         losses,
+        coverage,
     }
 }
 
@@ -1303,6 +1744,7 @@ mod tests {
             sha256: Some(sha.into()),
             size: 10,
             mtime_ms: Some(1),
+            parent_inode: None,
             ts_ms: 1,
         }
     }
@@ -1418,7 +1860,7 @@ mod tests {
     #[test]
     fn a_content_still_on_a_device_is_not_lost() {
         let records = vec![commit("a.txt", "aa", "write")];
-        let (verdict, _losses) =
+        let (verdict, _losses, _coverage) =
             check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new(), &standing(&["a.txt"]), &Personality::linux());
         assert!(verdict.ok, "{}", verdict.detail);
     }
@@ -1452,7 +1894,7 @@ mod tests {
         // The finding this whole rig exists to produce. It has to say which
         // file, who wrote it and when, or nobody can investigate it.
         let records = vec![commit("Projects/Report.docx", "abcdef0123456789", "write")];
-        let (verdict, _losses) =
+        let (verdict, _losses, _coverage) =
             check_no_loss(
             &records,
             &recoverable(&[], &[], &[]),
@@ -1485,7 +1927,7 @@ mod tests {
         let taken: BTreeSet<String> = ["first".to_string()].into_iter().collect();
 
         let live = standing(&["a.txt"]);
-        let (gone, _losses) = check_no_loss(
+        let (gone, _losses, _coverage) = check_no_loss(
             &records,
             &recoverable(&["second"], &[], &[]),
             &taken,
@@ -1499,7 +1941,7 @@ mod tests {
             gone.detail
         );
 
-        let (still_there, _l2) =
+        let (still_there, _l2, _coverage) =
             check_no_loss(
             &records,
             &recoverable(&["second"], &["first"], &[]),
@@ -1515,7 +1957,7 @@ mod tests {
         // "all 0 contents the server had taken are still there" reads as a check
         // that ran and found nothing wrong. On a first settle no check ran.
         let records = vec![commit("a.txt", "aa", "write")];
-        let (verdict, _losses) =
+        let (verdict, _losses, _coverage) =
             check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new(), &standing(&["a.txt"]), &Personality::linux());
         assert!(verdict.ok);
         assert!(
@@ -1537,7 +1979,7 @@ mod tests {
             commit("a.txt", "first", "write"),
             commit("a.txt", "second", "write"),
         ];
-        let (verdict, _losses) = check_no_loss(
+        let (verdict, _losses, _coverage) = check_no_loss(
             &records,
             &recoverable(&["second"], &[], &[]),
             &BTreeSet::new(),
@@ -1561,7 +2003,7 @@ mod tests {
         // one. Counted, because an oracle that quietly stops judging things is
         // worth less than one that says how much it could not judge.
         let records = vec![commit("Projects/Sub 9/doc.txt", "abcdef0123456789", "write")];
-        let (verdict, losses) = check_no_loss(
+        let (verdict, losses, _coverage) = check_no_loss(
             &records,
             &recoverable(&[], &[], &[]),
             &BTreeSet::new(),
@@ -1582,7 +2024,7 @@ mod tests {
 
         // And the guard must not be a way to switch the check off: the same
         // claim, at a path something IS standing at, still fails.
-        let (still_fails, _l) = check_no_loss(
+        let (still_fails, _l, _coverage) = check_no_loss(
             &records,
             &recoverable(&[], &[], &[]),
             &BTreeSet::new(),
@@ -1606,12 +2048,13 @@ mod tests {
                 sha256: None,
                 size: 0,
                 mtime_ms: None,
+                parent_inode: None,
                 ts_ms: 2,
             },
         ];
         // The content still has to be findable historically, but no live path
         // claims it.
-        let (verdict, _losses) = check_no_loss(
+        let (verdict, _losses, _coverage) = check_no_loss(
             &records,
             &recoverable(&[], &["aa"], &[]),
             &BTreeSet::new(),
@@ -1917,6 +2360,201 @@ mod tests {
         assert!(poll_interval(Duration::ZERO) > Duration::ZERO);
     }
 
+    fn placed(seq: u64, actor: &str, op: &str, path: &str, sha: Option<&str>, inode: Option<u64>) -> Record {
+        Record::ActorCommit {
+            seq,
+            actor: actor.into(),
+            persona: actor.split('/').nth(1).unwrap_or("remote-user").into(),
+            op: op.into(),
+            path: path.into(),
+            sha256: sha.map(String::from),
+            size: 1,
+            mtime_ms: None,
+            parent_inode: inode,
+            ts_ms: seq,
+        }
+    }
+
+    fn histories(files: &[(i64, &str, &[&str])]) -> BTreeMap<i64, (String, Vec<String>)> {
+        files
+            .iter()
+            .map(|(id, path, hashes)| (*id, (path.to_string(), hashes.iter().map(|h| h.to_string()).collect())))
+            .collect()
+    }
+
+    #[test]
+    fn a_swap_read_as_two_edits_mixes_one_files_history_and_fails() {
+        // The name-swapper traded a and b: two consecutive commits of its own.
+        let records = vec![
+            placed(7, "device-a/name-swapper", "swap", "slot-1.dat", Some("bodyB"), Some(5)),
+            placed(8, "device-a/name-swapper", "swap", "slot-2.dat", Some("bodyA"), Some(5)),
+        ];
+        let pairs = swap_pairs(&records);
+        assert_eq!(pairs, vec![("bodyB".to_string(), "bodyA".to_string())]);
+        // One file took the other's bytes as a version of itself.
+        let mixed = histories(&[(901, "Shared-name-swapper/slot-1.dat", &["bodyA", "bodyB"]), (902, "Shared-name-swapper/slot-2.dat", &["bodyB"])]);
+        let verdict = check_swap_histories(&mixed, &pairs, 0);
+        assert!(!verdict.ok, "{}", verdict.detail);
+        assert!(verdict.detail.contains("file 901"), "{}", verdict.detail);
+        // Each file kept its own body: the trade moved names, not bytes.
+        let apart = histories(&[(901, "Shared-name-swapper/slot-1.dat", &["bodyA"]), (902, "Shared-name-swapper/slot-2.dat", &["bodyB"])]);
+        assert!(check_swap_histories(&apart, &pairs, 0).ok);
+    }
+
+    #[test]
+    fn swap_commits_from_two_actors_or_two_swaps_never_pair_across() {
+        let records = vec![
+            placed(7, "device-a/name-swapper", "swap", "slot-1.dat", Some("x"), Some(5)),
+            placed(3, "device-b/name-swapper", "swap", "slot-1.dat", Some("y"), Some(6)),
+            placed(8, "device-a/name-swapper", "swap", "slot-2.dat", Some("z"), Some(5)),
+            placed(9, "device-a/name-swapper", "swap", "slot-3.dat", Some("w"), Some(5)),
+        ];
+        assert_eq!(swap_pairs(&records), vec![("x".to_string(), "z".to_string())]);
+        assert!(check_swap_histories(&BTreeMap::new(), &[], 0).detail.starts_with("vacuous"));
+    }
+
+    fn disk(files: &[(&str, &str, u64)], dirs: &[u64]) -> Placement {
+        Placement {
+            files: files.iter().map(|(p, s, d)| (p.to_string(), s.to_string(), *d)).collect(),
+            dirs: dirs.iter().copied().collect(),
+        }
+    }
+
+    #[test]
+    fn a_content_carried_into_a_folder_the_user_never_put_it_in_fails_custody() {
+        // Written into the directory with inode 40 on device-a.
+        let records = vec![placed(1, "device-a/office", "write", "Work/notes.txt", Some("cc"), Some(40))];
+        // It stands in directory 41 -- a conflict copy put beside a peer's
+        // moved version, say -- while directory 40 is still there.
+        let astray = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Other/notes (conflicted copy).txt", "cc", 41)], &[40, 41]))]);
+        let verdict = check_custody(&records, &astray);
+        assert!(!verdict.ok, "{}", verdict.detail);
+        assert!(verdict.detail.contains("device-a"), "{}", verdict.detail);
+        // Standing in the folder it was written into.
+        let home = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Work/notes.txt", "cc", 40)], &[40, 41]))]);
+        assert!(check_custody(&records, &home).ok);
+    }
+
+    #[test]
+    fn a_users_own_later_move_or_a_gone_folder_is_not_misplacement() {
+        // The user moved it on: the rename journals its new folder.
+        let moved = vec![
+            placed(1, "device-a/office", "write", "Work/notes.txt", Some("cc"), Some(40)),
+            placed(2, "device-a/office", "rename", "Work/notes.txt", None, None),
+            placed(3, "device-a/office", "rename_into", "Other/notes.txt", Some("cc"), Some(41)),
+        ];
+        let there = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Other/notes.txt", "cc", 41)], &[40, 41]))]);
+        assert!(check_custody(&moved, &there).ok, "{}", check_custody(&moved, &there).detail);
+        // The folder it was put in is gone: nothing to hold it to.
+        let written = vec![placed(1, "device-a/office", "write", "Work/notes.txt", Some("cc"), Some(40))];
+        let folder_gone = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Other/notes.txt", "cc", 41)], &[41]))]);
+        assert!(check_custody(&written, &folder_gone).ok);
+        // A peer's device is not judged by device-a's write.
+        let on_b = BTreeMap::from([("device-b".to_string(), disk(&[("Shared-office/Other/notes.txt", "cc", 77)], &[77, 78]))]);
+        assert!(check_custody(&written, &on_b).ok);
+    }
+
+    #[test]
+    fn a_peers_user_moving_the_content_on_is_not_misplacement() {
+        // device-b wrote it into directory 40; device-a's user then moved the
+        // same bytes into a folder of its own. On device-b the engine carries
+        // it to that folder, directory 41 there, while 40 still stands.
+        let records = vec![
+            placed(1, "device-b/office", "write", "Work/notes.txt", Some("cc"), Some(40)),
+            placed(2, "device-a/office", "rename", "Work/notes.txt", None, None),
+            placed(3, "device-a/office", "rename_into", "Other/notes.txt", Some("cc"), Some(90)),
+        ];
+        let on_b = BTreeMap::from([("device-b".to_string(), disk(&[("Shared-office/Other/notes.txt", "cc", 41)], &[40, 41]))]);
+        assert!(check_custody(&records, &on_b).ok, "{}", check_custody(&records, &on_b).detail);
+        // Without the peer's move, the same disk is a misplacement.
+        let alone = vec![placed(1, "device-b/office", "write", "Work/notes.txt", Some("cc"), Some(40))];
+        assert!(!check_custody(&alone, &on_b).ok);
+    }
+
+    #[test]
+    fn a_rename_in_place_after_a_peers_move_chooses_no_folder() {
+        // device-a wrote it into directory 40; device-b's user moved it into a
+        // folder of its own; device-a's user, not yet told, renamed it where
+        // it stood. The engine keeps both: the peer's folder, this name.
+        let records = vec![
+            placed(1, "device-a/office", "write", "Work/notes.txt", Some("cc"), Some(40)),
+            placed(2, "device-b/office", "rename", "Work/notes.txt", None, None),
+            placed(3, "device-b/office", "rename_into", "Other/notes.txt", Some("cc"), Some(91)),
+            placed(4, "device-a/office", "rename", "Work/notes.txt", None, None),
+            placed(5, "device-a/office", "rename_into", "Work/NOTES.TXT", Some("cc"), Some(40)),
+        ];
+        let on_a = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Other/NOTES.TXT", "cc", 41)], &[40, 41]))]);
+        assert!(check_custody(&records, &on_a).ok, "{}", check_custody(&records, &on_a).detail);
+        // Without the peer's move, the same disk is a misplacement.
+        let alone: Vec<Record> = records.iter().filter(|r| !matches!(r, Record::ActorCommit { actor, .. } if actor.starts_with("device-b"))).cloned().collect();
+        assert!(!check_custody(&alone, &on_a).ok);
+        // The writer swapped: device-b's user wrote it, device-a has it by
+        // download and its user renames it in place. The rename record says
+        // which directory it left.
+        let downloaded = vec![
+            placed(1, "device-b/office", "write", "Work/notes.txt", Some("cc"), Some(80)),
+            placed(2, "device-b/office", "rename", "Work/notes.txt", None, None),
+            placed(3, "device-b/office", "rename_into", "Other/notes.txt", Some("cc"), Some(81)),
+            placed(4, "device-a/office", "rename", "Work/notes.txt", None, Some(40)),
+            placed(5, "device-a/office", "rename_into", "Work/NOTES.TXT", Some("cc"), Some(40)),
+        ];
+        assert!(check_custody(&downloaded, &on_a).ok, "{}", check_custody(&downloaded, &on_a).detail);
+        // And a rename into another folder is a placement of its own.
+        let mut moved = records.clone();
+        moved[4] = placed(5, "device-a/office", "rename_into", "Mine/NOTES.TXT", Some("cc"), Some(42));
+        let on_a = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Other/NOTES.TXT", "cc", 41)], &[40, 41, 42]))]);
+        assert!(!check_custody(&moved, &on_a).ok);
+    }
+
+    #[test]
+    fn a_no_loss_check_that_could_not_judge_a_fifth_of_its_claims_says_so() {
+        let narrowed = check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 13 });
+        assert!(!narrowed.ok, "{}", narrowed.detail);
+        assert!(narrowed.detail.contains("judged 47 of 60"), "{}", narrowed.detail);
+        assert!(check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 11 }).ok);
+        assert!(check_no_loss_coverage(Coverage { claims: 20, at_dead_paths: 9 }).ok, "a handful is not an alarm");
+    }
+
+    fn store(tag: &str, rows: &[(&str, i64, Option<i64>, &str, Option<i64>, Option<&str>, Option<i64>, i64)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("jd-soak-store-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE entries (entity_type TEXT, server_id INTEGER, parent_folder_id INTEGER, remote_name TEXT,
+             local_name TEXT, remote_deleted INTEGER, synced_parent_id INTEGER, synced_name TEXT,
+             stand_in_parent_id INTEGER, stand_in_name TEXT, synced_fp_file_id INTEGER)",
+        )
+        .unwrap();
+        for (kind, id, parent, name, synced_parent, synced_name, dir_id, deleted) in rows {
+            conn.execute(
+                "INSERT INTO entries VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, NULL, NULL, ?8)",
+                rusqlite::params![kind, id, parent, name, deleted, synced_parent, synced_name, dir_id],
+            )
+            .unwrap();
+        }
+        db
+    }
+
+    #[test]
+    fn a_store_with_a_stranded_record_or_a_directory_held_twice_fails() {
+        let p = Personality::linux();
+        let stranded = store("stranded", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("file", 10, Some(2), "x.txt", Some(2), Some("x.txt"), Some(5), 0)]);
+        let found = store_findings(&stranded, &p).unwrap();
+        assert!(found.iter().any(|f| f.contains("stranded")), "{found:?}");
+        let by_id = store("byid", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("folder", 2, None, "B", None, Some("B"), Some(100), 0)]);
+        assert!(store_findings(&by_id, &p).unwrap().iter().any(|f| f.contains("directory 100")));
+        let by_slot = store("byslot", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("folder", 2, None, "A", None, Some("A"), Some(101), 0)]);
+        assert!(store_findings(&by_slot, &p).unwrap().iter().any(|f| f.contains("both claim")));
+        let verdict = check_stores(&[("device-a".into(), by_id)], &p);
+        assert!(!verdict.ok, "{}", verdict.detail);
+        // A server-deleted record is a tombstone, not a hole; and a whole store is clean.
+        let whole = store("whole", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("file", 10, Some(1), "x.txt", Some(1), Some("x.txt"), Some(5), 0), ("file", 11, Some(9), "gone.txt", Some(9), Some("gone.txt"), Some(6), 1)]);
+        assert!(store_findings(&whole, &p).unwrap().is_empty());
+        assert!(check_stores(&[("device-a".into(), whole)], &p).ok);
+    }
+
     #[test]
     fn a_verification_reports_every_failure_rather_than_the_first() {
         let v = Verification {
@@ -1929,6 +2567,7 @@ mod tests {
             convergence_ms: BTreeMap::new(),
             server_contents: BTreeSet::new(),
             losses: Default::default(),
+            coverage: Default::default(),
         };
         assert!(v.violated());
         assert_eq!(v.failures().len(), 2);

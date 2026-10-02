@@ -317,6 +317,7 @@ pub fn run_pass(
     let scan = pair_files(&known, &observed, &awaiting, strong_volume);
     adopt_own_files(env, &known, &observed)?;
     bind_own_files(env, &scan, strong_volume)?;
+    forget_what_a_save_superseded(env, &scan)?;
     note_what_each_record_saw(env, &known, &observed, &scan)?;
     note_the_tie_breaks_each_record_saw(env, &known, &observed, &scan)?;
     say_where_two_files_may_have_swapped(env, &known, &scan)?;
@@ -3991,13 +3992,15 @@ fn detect_folder_moves(
     // B A's inode on ext4), which is why a plain folder's id alone claims
     // nothing; but the new directory arrives with a new birth, so the pair
     // names the one directory the record knew and no other. A proven
-    // directory is the folder, wherever it went and whatever is in it.
+    // directory is the folder, wherever it went and whatever is in it --
+    // except under one of the engine's own scratch names: a park is
+    // mid-cycle, not a place the folder went.
     let proven_at: HashMap<EntityId, &String> = if env.vfs.personality().stable_file_identity {
         record_birth
             .iter()
             .filter_map(|(id, birth)| {
                 let at = *where_id_stands.get(record_identity.get(id)?)?;
-                (dir_births.get(at) == Some(birth)).then_some((*id, at))
+                (dir_births.get(at) == Some(birth) && !at.split('/').any(jd_vfs::is_internal)).then_some((*id, at))
             })
             .collect()
     } else {
@@ -4598,9 +4601,10 @@ fn detect_folder_moves(
     // each other went, not a plain folder claiming a stranger. The last
     // lands on an untracked directory, where a plain folder's id alone
     // proves nothing: its files must say so too, wholesale, as they would
-    // for any contested folder. Not onto a held path or one the server is
-    // giving another folder, and not for a held record or an id two records
-    // carry. Before this a chain never resolved: its end waited for the
+    // for any contested folder -- unless its directory is proven there (id
+    // and birth), which needs no files. Not onto a held path or one the
+    // server is giving another folder, and not for a held record or an id
+    // two records carry. Before this a chain never resolved: its end waited for the
     // member moving into its old path, which could not be placed until the
     // end left, and the member was read as gone (kill2 75123, with the path
     // map reading its files as in it: the server's trade of the plain ring
@@ -4650,9 +4654,12 @@ fn detect_folder_moves(
             }
             links.push((at, cur));
             match tracked.get(at).copied() {
-                // The end: a path no record holds. Its files must agree.
+                // The end: a path no record holds. Its files must agree --
+                // or its own directory is proven there, which needs no files,
+                // as a vault's needs none.
                 None => {
                     break encrypted.contains(&cur)
+                        || proven_at.get(&cur) == Some(&at)
                         || (children.get(&old).is_some_and(|kids| {
                             kids.iter().any(|(name, file_id)| {
                                 by_path
@@ -4679,9 +4686,21 @@ fn detect_folder_moves(
         if let Some(old) = old_path_of(*id) {
             if folder_ids.get(&old) == Some(&id.server_id) {
                 folder_ids.remove(&old);
+                // The path a member left is free for whoever's directory
+                // stands there, judged as any candidate is. Left out, the
+                // head of a chain walked from another head -- a third folder
+                // renamed onto the path the first member left -- had nowhere
+                // to be matched, read as gone, and its directory was minted
+                // as a new folder.
+                if let Some(dir) = dirs_on_disk.iter().find(|d| **d == old) {
+                    if !candidates.contains(&dir) && !taken.contains(dir) && !scan.held.contains(dir.as_str()) {
+                        candidates.push(dir);
+                    }
+                }
             }
         }
     }
+    candidates.sort_by_key(|d| (depth_of(d), d.to_string()));
     for (path, id) in &chain_members {
         folder_ids.insert((*path).clone(), id.server_id);
     }
@@ -5469,6 +5488,31 @@ fn bind_own_files(env: &ExecEnv, scan: &ScanOutcome, strong_volume: bool) -> Res
             entry.own_file = Some(identity);
             env.store.put_entry(&entry)?;
         }
+    }
+    Ok(())
+}
+
+/// A file never sent that the scan read as the next version of the record it
+/// was renamed over -- a save by rename whose temporary file a pass saw -- was
+/// never a file of its own. Its record goes now, before anything acts, with
+/// anything queued for it. Kept until the round, it still owned the file: the
+/// conflict copy of that save was handed back to it under the temporary name,
+/// and its upload sent the save up again as a new file (run 1531).
+fn forget_what_a_save_superseded(env: &ExecEnv, scan: &ScanOutcome) -> Result<(), ExecError> {
+    if scan.superseded.is_empty() {
+        return Ok(());
+    }
+    let interrupted = env.store.interrupted_ops()?;
+    let queued = env.store.queued_ops()?;
+    for id in &scan.superseded {
+        // An upload a crash left mid-air is resumed, and reports first.
+        if interrupted.iter().any(|op| op.entity == *id) {
+            continue;
+        }
+        for op in queued.iter().filter(|op| op.entity == *id) {
+            env.store.drop_op(op.op_id)?;
+        }
+        env.store.delete_entry(*id)?;
     }
     Ok(())
 }

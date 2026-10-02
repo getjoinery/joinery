@@ -16433,3 +16433,230 @@ fn two_moves_to_different_folders_still_go_to_the_server_and_are_reported() {
     assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
     assert_converged(&world);
 }
+
+/// Run 1531: a save by rename whose temporary file a pass saw before the
+/// rename, while a peer edited the file. The temporary file is the file's next
+/// version, as it is when no pass sees it, so the two edits are a conflict and
+/// both survive. Read as a new file, the file read as deleted here, the peer's
+/// edit beat that, and its download waited for ever on the name the new file
+/// held: a device never quiet again.
+#[test]
+fn a_save_by_rename_seen_mid_save_while_a_peer_edits_keeps_both() {
+    let world = World::new(9_976, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    let save = b"mac's save";
+    mac.fs.user_write("Art/shot.psd.tmp1453", save);
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    let edit = b"pc's edit";
+    pc.fs.user_write("Art/shot.psd", edit);
+    world.pass(pc);
+    mac.fs.user_remove("Art/shot.psd");
+    mac.fs.user_rename("Art/shot.psd.tmp1453", "Art/shot.psd");
+    assert!(world.settle().is_some(), "never settled");
+
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "{tree:?}");
+    assert!(
+        tree.iter().any(|(p, sha)| p.starts_with("Art/shot (conflicted copy") && *sha == Some(jd_sim::sha256_hex(save))),
+        "mac's save is not kept beside it: {tree:?}"
+    );
+    assert_converged(&world);
+}
+
+/// The same save with nobody else editing: the file's next version, under the
+/// file's own history, as it is when no pass sees the temporary file.
+#[test]
+fn a_save_by_rename_seen_mid_save_is_the_files_next_version() {
+    let world = World::new(9_977, &["mac", "pc"]);
+    let mac = world.device("mac");
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    let shot = world.server.files().into_iter().find(|f| f.name == "shot.psd").unwrap().id;
+    let save = b"mac's save";
+    mac.fs.user_write("Art/shot.psd.tmp1453", save);
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    mac.fs.user_remove("Art/shot.psd");
+    mac.fs.user_rename("Art/shot.psd.tmp1453", "Art/shot.psd");
+    assert!(world.settle().is_some(), "never settled");
+
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert_eq!(live.len(), 1, "{live:?}");
+    assert_eq!(live[0].id, shot, "the save went up as a new file, and the file's history ended: {live:?}");
+    assert_eq!(live[0].sha256, jd_sim::sha256_hex(save));
+    assert_converged(&world);
+}
+
+/// The same, read by the bytes: no births on either disk.
+#[test]
+fn a_save_by_rename_seen_mid_save_while_a_peer_edits_keeps_both_hidden() {
+    let world = World::new(9_976, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.hide_births(true);
+    pc.fs.hide_births(true);
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    let save = b"mac's save";
+    mac.fs.user_write("Art/shot.psd.tmp1453", save);
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    let edit = b"pc's edit";
+    pc.fs.user_write("Art/shot.psd", edit);
+    world.pass(pc);
+    mac.fs.user_remove("Art/shot.psd");
+    mac.fs.user_rename("Art/shot.psd.tmp1453", "Art/shot.psd");
+    assert!(world.settle().is_some(), "never settled");
+
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "{tree:?}");
+    assert!(
+        tree.iter().any(|(p, sha)| p.starts_with("Art/shot (conflicted copy") && *sha == Some(jd_sim::sha256_hex(save))),
+        "mac's save is not kept beside it: {tree:?}"
+    );
+    assert_converged(&world);
+}
+
+/// Run 1540: a file edited here while a peer's swap has it under a scratch
+/// name on the server. Both edits survive, and the copy kept beside the
+/// server's is named after what the file is called here. Named after the
+/// scratch name, it wore the reserved prefix, could never be sent, and the
+/// device was never quiet again.
+#[test]
+fn a_file_edited_while_a_peers_swap_has_it_under_a_scratch_name_keeps_both() {
+    let world = World::new(9_978, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Notes/notes.txt", b"the first version");
+    assert!(world.settle().is_some());
+    let notes = world.server.files().into_iter().find(|f| f.name == "notes.txt").unwrap().id;
+    let theirs = b"the peer's edit";
+    pc.fs.user_write("Notes/notes.txt", theirs);
+    world.pass(pc);
+    world
+        .server
+        .action("drive_rename", &serde_json::json!({ "entity_type": "file", "entity_id": notes, "name": ".jd-swap-8651a33e-b0d2fe77" }))
+        .expect("the peer's park lands");
+    let mine = b"mac's edit";
+    mac.fs.user_write("Notes/notes.txt", mine);
+    world.pass(mac);
+    world
+        .server
+        .action("drive_rename", &serde_json::json!({ "entity_type": "file", "entity_id": notes, "name": "notes.txt" }))
+        .expect("the peer's swap finishes");
+    assert!(world.settle().is_some(), "never settled");
+
+    let tree = world.server.tree();
+    assert!(tree.keys().all(|p| !p.contains(".jd-")), "a scratch name reached a file for good: {tree:?}");
+    assert_eq!(tree.get("Notes/notes.txt").cloned().flatten(), Some(jd_sim::sha256_hex(theirs)), "{tree:?}");
+    assert!(
+        tree.iter().any(|(p, sha)| p.starts_with("Notes/notes (conflicted copy") && *sha == Some(jd_sim::sha256_hex(mine))),
+        "mac's edit is not kept beside it: {tree:?}"
+    );
+    assert_converged(&world);
+}
+
+/// Run 1536: the user renames a folder while a file the server has in it is
+/// downloading. The file lands in the folder where the user has it now, or
+/// waits a pass to: never in a folder made again at the old name. Landing
+/// made the old name again, the next scan read the file as moved into a new
+/// folder there, and every device carried it out of the folder the user put
+/// it in.
+#[test]
+fn a_download_never_makes_again_a_folder_the_user_renamed_while_it_landed() {
+    let world = World::new(9_979, &["x", "y"]);
+    let x = world.device("x");
+    let y = world.device("y");
+    x.fs.user_write("P/f.txt", b"already there");
+    assert!(world.settle().is_some());
+    let p = world.server.folder_id_at("P").expect("P is on the server");
+    let body = b"saved on x while y renamed the folder";
+    x.fs.user_write("P/plans.txt", body);
+    world.pass(x);
+    let disk = y.fs.clone();
+    let mut fired = false;
+    y.fs.while_a_download_lands(move |target| {
+        if !fired && target.ends_with("P/plans.txt") {
+            fired = true;
+            disk.user_rename("P", "P2");
+        }
+    });
+    assert!(world.settle().is_some(), "never settled");
+
+    let plans = world.server.files().into_iter().find(|f| f.name == "plans.txt" && !f.trashed).expect("plans is on the server");
+    assert_eq!(plans.folder, Some(p), "plans left the folder the user put it in: {:?}", world.server.tree());
+    assert_eq!(y.fs.peek("P2/plans.txt").as_deref(), Some(&body[..]), "{:?}", disk_tree(y));
+    assert!(world.server.folder_id_at("P").is_none(), "the old name was made again: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// An empty plain folder at the end of a chain three long: B is renamed to
+/// a new name, A onto the name B left, C onto the name A left. Each member
+/// but the last lands on a path its owner has left; the last, B, lands on an
+/// untracked directory with nothing in it to say so. Its own directory -- its
+/// id and its birth -- is B all the same, as a vault's is: the chain ends
+/// there. Without that, every member waited on the next, A and B were read
+/// as gone, and their directories were minted as new folders.
+#[test]
+fn an_empty_folder_at_the_end_of_a_chain_is_followed_by_its_own_directory() {
+    let world = World::new(9_981, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    laptop.fs.user_write("A/a.txt", b"a file in A");
+    laptop.fs.user_mkdir("B");
+    laptop.fs.user_write("C/c.txt", b"a file in C");
+    assert!(world.settle().is_some());
+    let a = world.server.folder_id_at("A").expect("A");
+    let b = world.server.folder_id_at("B").expect("B");
+    let c = world.server.folder_id_at("C").expect("C");
+    laptop.fs.user_rename("B", "X");
+    laptop.fs.user_rename("A", "B");
+    laptop.fs.user_rename("C", "A");
+    assert!(world.settle().is_some(), "never settled");
+
+    let tree = world.server.tree();
+    assert_eq!(world.server.folder_id_at("X"), Some(b), "B was not followed to X: {tree:?}");
+    assert_eq!(world.server.folder_id_at("B"), Some(a), "A did not take B's old name: {tree:?}");
+    assert_eq!(world.server.folder_id_at("A"), Some(c), "C did not take A's old name: {tree:?}");
+    assert_eq!(desktop.fs.peek("B/a.txt").as_deref(), Some(&b"a file in A"[..]));
+    assert_eq!(desktop.fs.peek("A/c.txt").as_deref(), Some(&b"a file in C"[..]));
+    assert_converged(&world);
+}
+
+/// A chain three long whose members all hold files: B is renamed to a new
+/// name, A onto the name B left, C onto the name A left. Walked from A, the
+/// chain places A and B; the name A left is then free for C, whose own
+/// directory and files stand there. Never offered to C, C read as gone and
+/// its directory was minted as a new folder.
+#[test]
+fn a_chain_three_long_keeps_its_head() {
+    let world = World::new(9_981, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    laptop.fs.user_write("A/a.txt", b"a file in A");
+    laptop.fs.user_write("B/b.txt", b"a file in B");
+    laptop.fs.user_write("C/c.txt", b"a file in C");
+    assert!(world.settle().is_some());
+    let a = world.server.folder_id_at("A").expect("A");
+    let b = world.server.folder_id_at("B").expect("B");
+    let c = world.server.folder_id_at("C").expect("C");
+    laptop.fs.user_rename("B", "X");
+    laptop.fs.user_rename("A", "B");
+    laptop.fs.user_rename("C", "A");
+    assert!(world.settle().is_some(), "never settled");
+
+    let tree = world.server.tree();
+    assert_eq!(world.server.folder_id_at("X"), Some(b), "B was not followed to X: {tree:?}");
+    assert_eq!(world.server.folder_id_at("B"), Some(a), "A did not take B's old name: {tree:?}");
+    assert_eq!(world.server.folder_id_at("A"), Some(c), "C did not take A's old name: {tree:?}");
+    assert_eq!(desktop.fs.peek("B/a.txt").as_deref(), Some(&b"a file in A"[..]));
+    assert_eq!(desktop.fs.peek("A/c.txt").as_deref(), Some(&b"a file in C"[..]));
+    assert_converged(&world);
+}

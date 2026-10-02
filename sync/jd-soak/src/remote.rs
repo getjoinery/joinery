@@ -129,6 +129,8 @@ impl<'a> RemoteActor<'a> {
                         sha256: sha,
                         size,
                         mtime_ms: None,
+                        // The server has no directory for it to have landed in.
+                        parent_inode: None,
                         ts_ms: now_ms(),
                     })?;
                 }
