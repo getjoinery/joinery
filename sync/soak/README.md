@@ -14,6 +14,13 @@ with real faults injected on a schedule, for weeks. Specified in
 | `setup-host.sh` | Creates the accounts, directories, fleet description and units. Run once, as root. |
 | `soak-device@.service` | Written by `setup-host.sh`. One instance per device, `Restart=always`. |
 | `jd-soak.service` | Written by `setup-host.sh`. The campaign. |
+| `soak_forever.sh` | Runs campaigns back to back, each on a fresh account, and writes one line per run to `/soak/ledger.txt`. Copied to `/root/` on the box. |
+| `soak_reset.sh` | Archives the last run's evidence to `/root/soak-evidence/`, wipes the devices and provisions the next `soak-rig-N` account. Called by `soak_forever.sh`. |
+| `soak_clear_partitions.sh` | Lifts any partition a killed campaign left in iptables. Called by `soak_forever.sh`. |
+| `soak_account_setup.php` | Creates a soak account on the soak instance through the model classes. Run inside the instance's container by `soak_reset.sh`. |
+| `purge_soak.php` | Purges the Drive data of retired soak accounts so the instance's volume does not fill, keeping the newest accounts still holding files in each pool (`soak-rig-*`, `soak-mac-*`). Run inside the container by `soak_forever.sh`. |
+| `soak_mac_pool.sh` | Run from the dev box: makes the next `soak-mac-N` accounts on the rig for the Mac mini's campaign, adds them to the mini's `~/soak-mac/accounts.txt`, and installs `purge_soak.php`. |
+| `soak_clock.py` | Reads the ledger and reports how far the current client build is along the release bar. |
 
 ## Shape
 
@@ -73,6 +80,26 @@ looked like at the tail rather than on average.
 If the report says *no fault was injected in this window*, stop and fix that
 before believing anything else it says. A green run with no adversary in it
 proves nothing.
+
+### The ledger and the release bar
+
+`soak_forever.sh` appends one line per run to `/soak/ledger.txt`: the account,
+the client and its seed, the violation count, stuck ops, daemon CPU, when the
+run ended, its actor ops and daemon kills, and the verdict (`no-loss green`, or
+the first `FAIL` line).
+
+```bash
+python3 /root/soak_clock.py         # the release-bar stretch for the newest build
+```
+
+The release bar (spec `drive_sync_soak.md`, S8) is one unbroken stretch of
+clean runs on one client build: 7 days, at least 1M actor ops and 100 daemon
+kills, zero violations. The clock counts from the build's first run, or from
+the last run that was not clean, whichever is later, so deploying a new client
+starts it again. A smoke failure or a run that checked nothing breaks the
+stretch like any failure. The bar's other terms (three filesystem
+personalities, every persona and drill, every deadline miss diagnosed) are not
+in the ledger, and the clock prints them as open rather than counting them.
 
 ## Doing one thing by hand
 

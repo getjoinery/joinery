@@ -1556,7 +1556,7 @@ impl Vfs for MemFs {
         Ok(())
     }
 
-    fn spool(&self, target: &Path) -> VfsResult<Box<dyn SpoolFile>> {
+    fn spool(&self, target: &Path, _op: i64) -> VfsResult<Box<dyn SpoolFile>> {
         let key = self.key_for(target)?;
         self.check_failure(FsOp::Spool, &key, target)?;
         let mut st = self.state.lock().unwrap();
@@ -2149,7 +2149,7 @@ mod tests {
     #[test]
     fn a_spool_is_invisible_until_it_commits() {
         let f = fs();
-        let mut s = f.spool(&p("download.bin")).unwrap();
+        let mut s = f.spool(&p("download.bin"), 0).unwrap();
         s.write_all(b"partial").unwrap();
         assert!(
             !f.exists("download.bin"),
@@ -2163,7 +2163,7 @@ mod tests {
     #[test]
     fn a_discarded_spool_leaves_nothing_behind() {
         let f = fs();
-        let mut s = f.spool(&p("download.bin")).unwrap();
+        let mut s = f.spool(&p("download.bin"), 0).unwrap();
         s.write_all(b"abandoned").unwrap();
         s.discard();
         assert!(!f.exists("download.bin"));
@@ -2179,7 +2179,7 @@ mod tests {
         f.user_write("doc.txt", b"original");
         let before = f.fingerprint(&p("doc.txt")).unwrap().unwrap();
 
-        let mut s = f.spool(&p("doc.txt")).unwrap();
+        let mut s = f.spool(&p("doc.txt"), 0).unwrap();
         s.write_all(b"from the server").unwrap();
         f.user_write("doc.txt", b"the user's unsaved work");
 
@@ -2193,7 +2193,7 @@ mod tests {
         let f = fs();
         f.user_write("doc.txt", b"original");
         let before = f.fingerprint(&p("doc.txt")).unwrap().unwrap();
-        let mut s = f.spool(&p("doc.txt")).unwrap();
+        let mut s = f.spool(&p("doc.txt"), 0).unwrap();
         s.write_all(b"from the server").unwrap();
         s.commit(&p("doc.txt"), Some(before)).unwrap();
         assert_eq!(f.peek("doc.txt").unwrap(), b"from the server");

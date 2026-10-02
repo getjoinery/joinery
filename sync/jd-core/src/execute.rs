@@ -1724,7 +1724,7 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         ));
     }
 
-    let mut spool = env.vfs.spool(&path)?;
+    let mut spool = env.vfs.spool(&path, op.op_id)?;
     let mut landing = match (&file_key, &content_id) {
         (Some(key), Some(cid)) => Arrival::encrypted(&mut *spool, key, cid),
         _ => Arrival::plain(&mut *spool),

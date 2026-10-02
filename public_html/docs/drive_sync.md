@@ -617,6 +617,12 @@ FSEvents reports *resolved* paths, with symlinks followed. A watcher started on
 reports itself perfectly healthy. So the root is resolved once, up front, and
 never spelled any other way.
 
+A file goes to the Trash through `NSFileManager`, never by asking Finder. Finder
+takes the request as an AppleEvent, which a background daemon has no
+permission to send: every trash would wait two minutes and fail. The one thing
+given up is "Put Back", which some macOS versions leave off a file trashed this
+way; the file is in the Trash all the same.
+
 ### Windows
 
 Every filesystem call goes out as an extended-length (`\\?\`) path, so the
@@ -663,6 +669,16 @@ stood at its folder's path when the spool was opened: a folder the user moved
 or replaced while the bytes were in flight is never made again at its old name
 (`VfsError::FolderMoved`). The download stands down and the next pass places it
 where the folder now is. Only a folder missing when the spool opened is made.
+
+The spool lives with the state store, so a sync root on another volume (an
+external disk, a second partition, a mount point inside the root) cannot take
+the rename. The commit then copies the bytes beside the target under
+`.jd-land-<op>-<token>` (never over a file already standing there), makes them
+durable, asks every gate again, because the copy is the widest window the
+commit has, and renames them into place on the target's own volume. A landing
+name that outlives its commit is trashed by the next walk unless its op is
+still open in the journal; the server still holds the bytes, so the download is
+simply planned again.
 
 **Uploads** commit their hash at init, read from the same open handle the
 bytes are sent from. A file whose bytes change mid-upload fails verification

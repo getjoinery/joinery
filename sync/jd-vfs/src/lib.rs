@@ -34,6 +34,7 @@ pub use dirty::{DirtyPath, DirtySet, Hint};
 pub use names::{
     comparison_key, conflict_copy_name, is_internal, nfc, numbered_name, path_fits,
     resolve_siblings, to_local_name, EscapeReason, LocalName, Resolved, UnsyncableReason,
+    land_name, landing_op, LAND_PREFIX,
 };
 pub use paths::{canonical_root, is_inside, is_verbatim, strip_verbatim};
 pub use personality::{IdTieBreak, Personality};
@@ -316,10 +317,12 @@ pub trait Vfs: Send + Sync {
     /// to be recoverable by the person it happened to.
     fn trash(&self, path: &Path) -> VfsResult<()>;
 
-    /// Open a spool file to receive content destined for `target`. Placed on
-    /// the same volume as the root where possible, so the commit is a rename
-    /// rather than a copy.
-    fn spool(&self, target: &Path) -> VfsResult<Box<dyn SpoolFile>>;
+    /// Open a spool file to receive content destined for `target`, for the
+    /// download op `op`. Placed on the same volume as the root where possible,
+    /// so the commit is a rename rather than a copy; where it is not, the
+    /// commit copies the bytes beside the target under [`land_name`] for `op`
+    /// first.
+    fn spool(&self, target: &Path, op: i64) -> VfsResult<Box<dyn SpoolFile>>;
 
     /// Open a scratch file: written, read back, never visible. See
     /// [`ScratchFile`] for what it is for.

@@ -19,6 +19,25 @@ use crate::personality::Personality;
 /// because a real name starting with this prefix is itself refused.
 pub const INTERNAL_PREFIX: &str = ".jd-";
 
+/// The name a download stands under, beside its target, while it is copied
+/// onto a sync root that is on another volume from the spool. Renamed onto the
+/// target the moment the copy is durable. It carries the id of the op landing
+/// it ([`land_name`]), so a pass can tell a landing whose op is still open
+/// from the remains of one that never finished.
+pub const LAND_PREFIX: &str = ".jd-land-";
+
+/// The landing name for op `op`'s download: `.jd-land-<op>-<token>`.
+pub fn land_name(op: i64, token: &str) -> String {
+    format!("{LAND_PREFIX}{op}-{token}")
+}
+
+/// The op a landing name was made for; `None` for any other name, including
+/// a user's file that only starts like one.
+pub fn landing_op(name: &str) -> Option<i64> {
+    let (op, _) = name.strip_prefix(LAND_PREFIX)?.split_once('-')?;
+    op.parse().ok()
+}
+
 /// What happened when a server name met this filesystem.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocalName {

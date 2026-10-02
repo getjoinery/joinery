@@ -11195,6 +11195,54 @@ fn a_file_wearing_the_reserved_prefix_says_so() {
     assert_converged(&world);
 }
 
+/// A download copied onto a sync root on another volume stands beside its
+/// target under a landing name until it is renamed into place (B1). One left
+/// by a commit that never finished is the engine's own litter, not the
+/// user's file: it is cleared, and never reported as a reserved name. One
+/// whose op is still open is that op's and is left alone. Which is which is
+/// read from the journal, not from which thread is running.
+#[test]
+fn a_landing_left_by_a_download_that_never_finished_is_cleared() {
+    use jd_core::model::EntityId;
+    let world = World::new(4802, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Work");
+    laptop.fs.user_write("Work/report.txt", b"an ordinary file");
+    assert!(world.settle().is_some(), "the tree settles first");
+
+    // Open, and not due for the life of the test.
+    let open = laptop
+        .store
+        .queue_op("download", EntityId::file(999_999), "{}", "key-land")
+        .unwrap();
+    laptop
+        .store
+        .record_op_failure(open, "held open for the test", i64::MAX / 2)
+        .unwrap();
+    let live = format!("Work/{}", jd_vfs::land_name(open, "a"));
+    let stale = format!("Work/{}", jd_vfs::land_name(open + 1000, "b"));
+    laptop.fs.user_write(&live, b"mid-copy");
+    laptop.fs.user_write(&stale, b"left by a commit that never finished");
+    laptop
+        .fs
+        .user_write("Work/.jd-tmp-x", b"a file the user named themselves");
+    world.pass(laptop);
+
+    assert!(laptop.fs.peek(&live).is_some(), "a landing whose op is open is that op's");
+    assert!(laptop.fs.peek(&stale).is_none(), "the remains of one that never finished are cleared");
+    let said: Vec<String> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "reserved_prefix")
+        .map(|i| i.detail)
+        .collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("Work/.jd-tmp-x"), "the user's own file is still reported: {said:?}");
+    assert!(!said[0].contains(".jd-land-"), "a landing is never the user's reserved name: {said:?}");
+}
+
 #[test]
 fn probe_escaped_name_lands_escaped() {
     let world = World::of(9001, &[("box", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);

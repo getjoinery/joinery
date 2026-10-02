@@ -82,6 +82,23 @@ pub fn phase_a_mix(rng: &mut Rng) -> Fault {
     }
 }
 
+/// The Phase A mix, drawn again until it lands on a fault `can` says this
+/// device can take.
+///
+/// A device that cannot be partitioned (a Mac device running unprivileged)
+/// refused three draws in ten, and a run whose faults mostly did not happen
+/// is weaker than it reads. Where every fault can be injected this is
+/// `phase_a_mix` draw for draw, so a rig that can partition sees exactly the
+/// sequence it always did.
+pub fn injectable_mix(rng: &mut Rng, can: impl Fn(&Fault) -> bool) -> Fault {
+    loop {
+        let fault = phase_a_mix(rng);
+        if can(&fault) {
+            return fault;
+        }
+    }
+}
+
 /// How the rig reaches a device to break it.
 ///
 /// A trait rather than a straight call to `docker`, so the scheduling and the
@@ -93,6 +110,12 @@ pub trait Reach: Send + Sync {
     /// Drop or restore this device's traffic to the server.
     fn set_partition(&self, device: &Device, server_host: &str, on: bool) -> Result<(), String>;
     fn restart(&self, device: &Device) -> Result<(), String>;
+    /// Whether this device's traffic can be cut on its own. Asked before a
+    /// partition is drawn for it; `set_partition` still refuses honestly if
+    /// it cannot.
+    fn can_partition(&self, _device: &Device) -> bool {
+        true
+    }
 }
 
 /// The real one: `docker exec` for a containerized device, plain signals for a
@@ -118,6 +141,12 @@ impl RealReach {
 }
 
 impl Reach for RealReach {
+    fn can_partition(&self, device: &Device) -> bool {
+        // The one refusal known before trying: pf needs root (see
+        // `set_partition`). A containerized device is cut with iptables.
+        device.container.is_some() || !cfg!(target_os = "macos")
+    }
+
     fn signal(&self, device: &Device, signal: &str) -> Result<(), String> {
         match &device.container {
             Some(container) => RealReach::run(&[
@@ -134,7 +163,8 @@ impl Reach for RealReach {
                 // directory they were started with — the process names are
                 // identical, and killing by name would take out the whole fleet
                 // on every fault.
-                let pid = host_pid(device)
+                let pid = device
+                    .daemon_pid()
                     .ok_or_else(|| format!("no daemon found for {}", device.name))?;
                 RealReach::run(&["kill", &format!("-{signal}"), &pid.to_string()])
             }
@@ -170,6 +200,14 @@ impl Reach for RealReach {
                 device.name
             )
         })?;
+        if cfg!(target_os = "macos") {
+            // pf can cut one account's traffic, but only as root, and the Mac
+            // device runs unprivileged. Refused, so the report says so.
+            return Err(format!(
+                "{} runs on macOS without root, and pf needs root to cut one daemon's traffic",
+                device.name
+            ));
+        }
         RealReach::run(&[
             "iptables",
             rule,
@@ -196,30 +234,19 @@ impl Reach for RealReach {
                 device.name
             )
         })?;
+        if cfg!(target_os = "macos") {
+            // The Mac device's supervisor is a loop in this account's own
+            // session, not launchd: a daemon launchd starts in the GUI session
+            // reaches the login keychain, and two devices under one account
+            // would then share one credential. Stopping the daemon cleanly is
+            // the stop half; the loop is the start half.
+            let pid = device
+                .daemon_pid()
+                .ok_or_else(|| format!("no daemon found for {} under {service}", device.name))?;
+            return RealReach::run(&["kill", "-TERM", &pid.to_string()]);
+        }
         RealReach::run(&["systemctl", "restart", service])
     }
-}
-
-/// The daemon on this host that was started with a given device's home.
-fn host_pid(device: &Device) -> Option<u32> {
-    let home = device.home.to_string_lossy().to_string();
-    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
-        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
-            continue;
-        };
-        let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
-            continue;
-        };
-        if !String::from_utf8_lossy(&cmdline).contains("joinery-drive") {
-            continue;
-        }
-        if let Ok(environ) = std::fs::read(format!("/proc/{pid}/environ")) {
-            if String::from_utf8_lossy(&environ).contains(&format!("JOINERY_DRIVE_HOME={home}")) {
-                return Some(pid);
-            }
-        }
-    }
-    None
 }
 
 /// The per-device fault agent.
@@ -523,6 +550,26 @@ mod tests {
             seen.into_iter().collect::<Vec<_>>(),
             vec!["freeze", "kill", "partition", "restart"]
         );
+    }
+
+    #[test]
+    fn a_device_that_cannot_be_partitioned_draws_only_faults_it_can_take() {
+        let mut rng = Rng::new(4242);
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..500 {
+            seen.insert(injectable_mix(&mut rng, |f| !matches!(f, Fault::Partition { .. })).kind());
+        }
+        assert_eq!(seen.into_iter().collect::<Vec<_>>(), vec!["freeze", "kill", "restart"]);
+    }
+
+    #[test]
+    fn where_every_fault_can_be_injected_the_draws_are_the_phase_a_mix() {
+        // The Linux rig's sequence must not move: a seed replayed after this
+        // change draws what it drew before.
+        let (mut a, mut b) = (Rng::new(7), Rng::new(7));
+        for _ in 0..1000 {
+            assert_eq!(injectable_mix(&mut a, |_| true), phase_a_mix(&mut b));
+        }
     }
 
     #[test]
