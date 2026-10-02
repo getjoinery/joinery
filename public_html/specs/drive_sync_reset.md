@@ -1789,23 +1789,73 @@ no named flaw is a reason to name one.
   a sealed name reaching the server. A write now records whether it made the
   file; only a made name or a rename's destination counts. A symptom of the
   harness judging by name rather than by where a name came from.
-- **B1, open (public-html-e9, 2026-09-25, read): a sync root on a different
-  volume from the state directory cannot download.** `OsSpoolFile::commit`
-  places a file with a bare `fs::rename` (`jd-vfs` `real.rs`), which fails
-  across volumes, while `jd-platform` `dirs.rs` says the commit is then a
-  copy and still correct. It is older than file identity and not part of it;
-  file identity reads a placed file's identity from the committed target so
-  that it stays right whichever way this is fixed.
-- **B2, open (2026-09-25, traced in plain2 75292): a server move whose
-  response was lost is Overtaken on its retry, not Done.** The move lands,
+- **B1, fixed 2026-10-02 (public-html-e9, 2026-09-25, read): a sync root on
+  a different volume from the state directory cannot download.**
+  `OsSpoolFile::commit` placed a file with a bare `fs::rename` (`jd-vfs`
+  `real.rs`), which fails across volumes, while `jd-platform` `dirs.rs` says
+  the commit is then a copy and still correct. Approach NEEDED and VALID with
+  four changes (public-html-a5, 2026-10-02). On `CrossesDevices` only, the
+  commit copies the spool beside the target under `.jd-land-<op>-<token>`
+  (`create_new`, never over a file already there), makes it durable, asks
+  every gate again (the post-copy run is the load-bearing one: the copy
+  widens the window), and renames it into place. A landing left by a commit
+  that never finished is trashed by the walk unless its op is still open,
+  read from the journal like the swap names. Pins: a real `/dev/shm` root
+  over a `/tmp` state (`a_download_lands_on_a_root_on_another_volume`), the
+  post-copy re-check, a folder replaced mid-copy, a squatter at the landing
+  name, and the walk rule (`a_landing_left_by_a_download_that_never_finished_is_cleared`).
+  Residuals, named and not fixed by B1:
+  - `OsVfs::rename` for a local move across a mount point INSIDE the root
+    fails `CrossesDevices` too; today that is a `move_local` that retries
+    for ever, with no issue naming the mount point. A copy and delete there
+    would change the file's identity (new inode, new birth), so it is not
+    the same fix. It needs an issue, not a loop.
+  - `trash` goes through the `trash` crate, which on Linux needs a
+    `.Trash-<uid>` at the volume's top and makes one; on a read-only or odd
+    volume it fails with an error that is already surfaced.
+  - Scratch files never leave the spool directory; unaffected.
+- **B15, open (2026-10-02, read; found by the Mac mini soak): two drives
+  under one OS account share one stored credential.** `jd-daemon` opens
+  `SecretStore::open("com.joinery.drive", ...)` with fixed account names
+  (`api-secret`, `device-key`, `vault-key`), although `secret.rs` says the
+  service exists to tell installations apart. Two `JOINERY_DRIVE_HOME`s
+  under one macOS account (a personal and a work drive) read and write the
+  same Keychain items, so linking the second overwrites the first's
+  credential; Windows Credential Manager and libsecret take the same names.
+  The close: key the service by the installation. Not hit by a single drive;
+  the soak runs its devices from SSH, where the Keychain is locked and each
+  device keeps its credential in a file in its own home.
+- **B-mac1, fixed 2026-10-02 (found by the first Mac mini soak run, traced):
+  the macOS client cannot trash.** The `trash` crate defaults to asking
+  Finder through an AppleEvent; a daemon has no permission to, so every
+  trash waited two minutes and failed (-1712), and a convergence and an
+  audited-green violation followed from one `trash_local`. `OsVfs::trash`
+  now uses `NSFileManager` on macOS (`trash_context`), which needs no
+  permission and costs only "Put Back" on some macOS versions. NEEDED and
+  VALID (public-html-a5, 2026-10-02). Pin
+  `trashing_on_macos_needs_no_permission_to_control_finder`, run over SSH on
+  the mini; with Finder it fails after 120 s with -1712.
+- **B2, narrowed (re-checked 2026-10-02 on `10b2b55d`: seed green in all
+  five modes; a plain file's completed move is agreed Done on its own
+  identity, `completed_here`, pinned by
+  `a_move_whose_answer_was_lost_is_finished_on_the_retry`; folders, sealed
+  files and files with no stable id still read Overtaken for one pass, the
+  residual recorded under file identity) (2026-09-25, traced in plain2
+  75292): a server move whose response was lost is Overtaken on its retry,
+  not Done.** The move lands,
   the response is lost ("connection reset while reading the response"), and
   the retry finds the server already at the op's own destination and answers
   "the server has moved it since this was planned" (`execute.rs`
   `move_remote`). The agreement stays at the old name for a pass while the
   server has the new one, which is the state a later misreading started from
   in that seed. Older than file identity; commit 1 does the same.
-- **B3, open (2026-09-25, traced in plain2 75208): a move finishes a park
-  whose answer was lost, from a placement that answer made stale.** Two
+- **B3, closed by `496e0fd7` (re-checked 2026-10-02: a retried move asks
+  the server first and recognises its own park; pinned by
+  `frozen_a_move_retried_after_a_park_lost_its_answer_still_renames_seed`
+  and `a_retried_move_renames_out_of_a_park_that_landed_unheard`; seed green
+  in all five modes. Unpinned neighbour: a park that retries after its
+  finisher completed) (2026-09-25, traced in plain2 75208): a move finishes
+  a park whose answer was lost, from a placement that answer made stale.** Two
   records trade names across folders; the planner parks one under a
   `.jd-swap-` name and a second op finishes the move. The park lands but its
   answer is lost, so it retries, and the store still has the name before the
@@ -1816,8 +1866,12 @@ no named flaw is a reason to name one.
   `renaming`). Commit 1 has the same code; its run of this seed never parks.
   A prototype (the finishing move waits while its park op is queued) clears
   the seed and brings three new reds on 90 neighbours, untraced.
-- **B4, open (2026-09-25, traced in kill2 75123): a plain folder cannot take
-  back its own directory once a naming park breaks a folder ring.** Two
+- **B4, closed on strong volumes by D3a, `a5621993` (re-checked 2026-10-02:
+  `proven_at` is this entry's proposed close, made safe by birth; on weak
+  volumes the folder is held as `directory_disagrees`, decision 2A; seed
+  green in all five modes) (2026-09-25, traced in kill2 75123): a plain
+  folder cannot take back its own directory once a naming park breaks a
+  folder ring.** Two
   devices rotate three folders; a park takes one out of the folder scan's
   path map, the ring no longer closes, and a folder whose own directory
   stands at a path no record accounts for is left reading its old path
@@ -1829,8 +1883,13 @@ no named flaw is a reason to name one.
   owns was tried and left directories unclaimed on three neighbours. Commit 1
   has the same gap (the draft's folder change reverted gives the same
   verdict).
-- **B5, open (2026-09-25, traced in kill2 75101): a vault folder and a plain
-  folder trading names do not swap when one side holds no known files.** The
+- **B5, open (re-checked 2026-10-02: the seed is green in all five modes,
+  but the vault-claim check still counts every folder the server names at a
+  path, moving or not; smallest close: count only folders whose server
+  placement differs from their agreed one, measured on the 420 x 5 against
+  a constructed pin first) (2026-09-25, traced in kill2 75101): a vault
+  folder and a plain folder trading names do not swap when one side holds no
+  known files.** The
   folder scan finds only one of the two paths contested, so no swap closes,
   and the vault's claim of its own directory is refused on every pass
   because `remote_wants` counts a folder that is not moving (`pass.rs`, the

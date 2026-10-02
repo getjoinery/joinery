@@ -1476,8 +1476,9 @@ fn dir_size(dir: &Path) -> (u64, u64) {
 /// Best effort: a device whose daemon is in a container this process cannot see
 /// into reports zero, and a zero is excluded from the trend rather than treated
 /// as a reading that went down.
+#[cfg(target_os = "linux")]
 fn daemon_rss_kb(device: &Device) -> Option<u64> {
-    let pid = daemon_pid(device)?;
+    let pid = device.daemon_pid()?;
     let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     for line in status.lines() {
         if let Some(rest) = line.strip_prefix("VmRSS:") {
@@ -1487,32 +1488,37 @@ fn daemon_rss_kb(device: &Device) -> Option<u64> {
     None
 }
 
+#[cfg(target_os = "linux")]
 fn daemon_fd_count(device: &Device) -> Option<u64> {
-    let pid = daemon_pid(device)?;
+    let pid = device.daemon_pid()?;
     Some(std::fs::read_dir(format!("/proc/{pid}/fd")).ok()?.count() as u64)
 }
 
-/// Find the daemon by the home directory it was started with, which is the only
-/// thing that tells two devices' daemons apart on one host.
-fn daemon_pid(device: &Device) -> Option<u32> {
-    let home = device.home.to_string_lossy().to_string();
-    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
-        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
-            continue;
-        };
-        let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
-            continue;
-        };
-        if !String::from_utf8_lossy(&cmdline).contains("joinery-drive") {
-            continue;
-        }
-        if let Ok(environ) = std::fs::read(format!("/proc/{pid}/environ")) {
-            if String::from_utf8_lossy(&environ).contains(&format!("JOINERY_DRIVE_HOME={home}")) {
-                return Some(pid);
-            }
-        }
-    }
-    None
+/// Off Linux the same two readings come from `ps` (kilobytes, as `/proc`
+/// reports them) and `lsof`.
+#[cfg(not(target_os = "linux"))]
+fn daemon_rss_kb(device: &Device) -> Option<u64> {
+    let pid = device.daemon_pid()?.to_string();
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn daemon_fd_count(device: &Device) -> Option<u64> {
+    let pid = device.daemon_pid()?.to_string();
+    let out = std::process::Command::new("lsof")
+        .args(["-n", "-P", "-p", &pid, "-F", "f"])
+        .output()
+        .ok()?;
+    // One `f` line per descriptor; `cwd`, `txt` and the like are not ones.
+    let count = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| l.strip_prefix('f').is_some_and(|n| n.parse::<u64>().is_ok()))
+        .count();
+    Some(count as u64)
 }
 
 // ---------------------------------------------------------------------------

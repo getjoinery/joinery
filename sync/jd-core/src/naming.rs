@@ -1200,7 +1200,7 @@ mod tests {
         fn trash(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<()> {
             unreachable!("naming never deletes anything")
         }
-        fn spool(&self, _t: &std::path::Path) -> jd_vfs::VfsResult<Box<dyn jd_vfs::SpoolFile>> {
+        fn spool(&self, _t: &std::path::Path, _op: i64) -> jd_vfs::VfsResult<Box<dyn jd_vfs::SpoolFile>> {
             unreachable!("naming does not transfer bytes")
         }
         fn open_read(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Box<dyn jd_vfs::ReadSeek>> {

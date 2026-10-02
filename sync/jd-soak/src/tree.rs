@@ -280,7 +280,9 @@ pub fn device_trash_contents(device: &Device) -> BTreeSet<String> {
 }
 
 pub fn trash_contents(home: &Path, roots: &[&Path]) -> BTreeSet<String> {
-    let mut places = vec![home.join(".local/share/Trash/files")];
+    // The freedesktop trash, and macOS's, which is `~/.Trash` with no
+    // `files/` beneath it.
+    let mut places = vec![home.join(".local/share/Trash/files"), home.join(".Trash")];
     if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
         places.push(Path::new(&data_home).join("Trash/files"));
     }

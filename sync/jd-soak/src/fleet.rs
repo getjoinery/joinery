@@ -112,6 +112,63 @@ impl Device {
     pub fn trash_home(&self) -> PathBuf {
         self.unix_home.clone().unwrap_or_else(|| self.home.clone())
     }
+
+    /// The daemon on this host that was started with this device's home.
+    ///
+    /// Two devices' daemons are told apart by the `JOINERY_DRIVE_HOME` they
+    /// were started with: the process names are identical, and anything that
+    /// found a daemon by name would hit the whole fleet.
+    pub fn daemon_pid(&self) -> Option<u32> {
+        let home = format!("JOINERY_DRIVE_HOME={}", self.home.to_string_lossy());
+        daemon_pid_with(&home)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn daemon_pid_with(home: &str) -> Option<u32> {
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+            continue;
+        };
+        if !String::from_utf8_lossy(&cmdline).contains("joinery-drive") {
+            continue;
+        }
+        if let Ok(environ) = std::fs::read(format!("/proc/{pid}/environ")) {
+            if String::from_utf8_lossy(&environ).contains(home) {
+                return Some(pid);
+            }
+        }
+    }
+    None
+}
+
+/// There is no `/proc` off Linux. `ps -E` prints each process's environment
+/// after its command, for processes this account owns, which is every device
+/// on a rig that runs unprivileged.
+#[cfg(not(target_os = "linux"))]
+fn daemon_pid_with(home: &str) -> Option<u32> {
+    let out = std::process::Command::new("ps")
+        .args(["-E", "-ww", "-A", "-o", "pid=,command="])
+        .output()
+        .ok()?;
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let line = line.trim_start();
+        let Some((pid, rest)) = line.split_once(' ') else {
+            continue;
+        };
+        if !rest.contains("joinery-drive") {
+            continue;
+        }
+        // Whole-word match: a home that is a prefix of another device's home
+        // must not find that device's daemon.
+        if rest.split_whitespace().any(|word| word == home) {
+            return pid.parse().ok();
+        }
+    }
+    None
 }
 
 /// The whole rig.

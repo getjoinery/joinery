@@ -34,7 +34,7 @@ use jd_proto::DriveApi;
 use jd_vfs::Personality;
 
 use crate::actor::{now_ms, Actor};
-use crate::chaos::{phase_a_mix, Chaos, Reach};
+use crate::chaos::{injectable_mix, Chaos, Fault, Reach};
 use crate::fleet::Fleet;
 use crate::journal::{self, Journal, Record};
 use crate::persona::{self, PHASE_A_LOCAL};
@@ -342,7 +342,10 @@ fn storm(
             // still — or, worse, one still cut off, which fails convergence on
             // the rig's own doing.
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let fault = trim_to_segment(phase_a_mix(&mut rng), remaining);
+            let drawn = injectable_mix(&mut rng, |f| {
+                !matches!(f, Fault::Partition { .. }) || chaos.reach.can_partition(device)
+            });
+            let fault = trim_to_segment(drawn, remaining);
             if let Err(e) = chaos.inject(device, fault, &|d| std::thread::sleep(d)) {
                 eprintln!("warning: the chaos journal failed: {e}");
             }

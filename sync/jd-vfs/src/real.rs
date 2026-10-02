@@ -678,13 +678,13 @@ impl Vfs for OsVfs {
         // extended-length paths — handed one it reports a path that does not
         // exist. Everywhere else this is a no-op.
         let shell_path = crate::paths::strip_verbatim(path);
-        trash::delete(&shell_path).map_err(|e| VfsError::Io {
+        trash_context().delete(&shell_path).map_err(|e| VfsError::Io {
             path: path.to_path_buf(),
             source: std::io::Error::other(e.to_string()),
         })
     }
 
-    fn spool(&self, target: &Path) -> VfsResult<Box<dyn SpoolFile>> {
+    fn spool(&self, target: &Path, op: i64) -> VfsResult<Box<dyn SpoolFile>> {
         let name = format!(".jd-tmp-{}", (self.next_token)());
         let path = self.spool_dir.join(name);
         let file = File::create(&path).map_err(|e| io_err(&path, e))?;
@@ -698,6 +698,9 @@ impl Vfs for OsVfs {
             personality: self.personality,
             target: target.to_path_buf(),
             folder_at_open,
+            op,
+            rename: |from, to| fs::rename(from, to),
+            after_copy: |_| {},
         }))
     }
 
@@ -833,6 +836,34 @@ struct OsSpoolFile {
     /// The directory standing where the target lands when the spool was
     /// opened; `None` if there was none (see `SpoolFile::commit`).
     folder_at_open: Option<crate::FileIdentity>,
+    /// The download op this spool lands for; carried in a landing name.
+    op: i64,
+    /// `fs::rename`. A seam so a test can make the spool's rename cross a
+    /// volume, which one machine's temp directory cannot be relied on to do.
+    rename: fn(&Path, &Path) -> std::io::Result<()>,
+    /// Runs between the copy onto another volume and the gates asked again
+    /// after it. Nothing, outside the test that changes the target there.
+    after_copy: fn(&Path),
+}
+
+/// How this platform moves a file to its trash.
+///
+/// On macOS the `trash` crate's default asks Finder to do it through an
+/// AppleEvent, which a background daemon may not send without the user
+/// granting it control of Finder: until they answer the prompt every trash
+/// waits two minutes and fails (-1712), and if they decline, every trash
+/// fails for good. `NSFileManager` needs no permission. Its one cost is a
+/// macOS bug that can leave "Put Back" off the file's menu in the Trash; the
+/// file is still there and still dragged out by hand.
+fn trash_context() -> trash::TrashContext {
+    #[allow(unused_mut)]
+    let mut ctx = trash::TrashContext::default();
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    ctx
 }
 
 /// The identity of the directory at `path`, `None` where none stands there.
@@ -862,6 +893,91 @@ impl OsSpoolFile {
             f.sync_all().map_err(|e| io_err(&self.path, e))?;
         }
 
+        self.guard_target(target, expect)?;
+
+        if let Some(parent) = target.parent() {
+            match self.folder_at_open {
+                Some(was) => {
+                    if directory_identity_at(parent, &self.personality)? != Some(was) {
+                        return Err(VfsError::FolderMoved(parent.to_path_buf()));
+                    }
+                }
+                None => fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?,
+            }
+        }
+        match (self.rename)(&self.path, target) {
+            Ok(()) => {}
+            // The spool is on the state store's volume and the sync root is
+            // not: an external disk, a second partition, a mount point inside
+            // the root. A rename cannot cross; the bytes are copied over and
+            // then renamed into place on the target's own volume.
+            Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+                self.land_across(target, expect)?
+            }
+            Err(e) => return Err(io_err(&self.path, e)),
+        }
+
+        let md = target.symlink_metadata().map_err(|e| io_err(target, e))?;
+        Ok(as_seen(fingerprint_of(target, &md), &self.personality))
+    }
+
+    /// The commit onto another volume: copy the spool beside the target under
+    /// a [`LAND_PREFIX`](crate::names::LAND_PREFIX) name, make it durable, ask
+    /// every gate again, and rename it into place.
+    ///
+    /// The gates are asked twice because the copy widens the window between
+    /// asking and acting from a few instructions to as long as the copy takes,
+    /// and a user editing the target or moving its folder in that time is the
+    /// very thing they exist for. Any failure leaves neither copy behind.
+    fn land_across(&mut self, target: &Path, expect: Option<Fingerprint>) -> VfsResult<()> {
+        let dir = target
+            .parent()
+            .ok_or_else(|| io_err(target, std::io::Error::other("a download target with no folder")))?;
+        // The folder the gates above just passed: whatever stands there
+        // after the copy must be this one.
+        let folder = directory_identity_at(dir, &self.personality)?;
+        let token = self
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().trim_start_matches(".jd-tmp-").to_string())
+            .unwrap_or_default();
+        let land = dir.join(crate::names::land_name(self.op, &token));
+
+        // Never over a file already standing at the name: whatever is there
+        // is not this commit's, so it is not this commit's to replace.
+        let out = File::create_new(&land).map_err(|e| io_err(&land, e))?;
+        let landed = (|| {
+            {
+                let mut out = out;
+                let mut from = File::open(&self.path).map_err(|e| io_err(&self.path, e))?;
+                std::io::copy(&mut from, &mut out).map_err(|e| io_err(&land, e))?;
+                out.sync_all().map_err(|e| io_err(&land, e))?;
+            } // Closed before anything renames or removes it: Windows refuses both on an open file.
+            (self.after_copy)(target);
+            self.guard_target(target, expect)?;
+            if directory_identity_at(dir, &self.personality)? != folder {
+                return Err(VfsError::FolderMoved(dir.to_path_buf()));
+            }
+            fs::rename(&land, target).map_err(|e| io_err(&land, e))?;
+            // The rename is durable when the directory entry is. Unix only:
+            // Windows has no directory handle to flush, and its rename is
+            // journaled by the volume.
+            #[cfg(unix)]
+            {
+                let _ = File::open(dir).and_then(|d| d.sync_all());
+            }
+            Ok(())
+        })();
+        if landed.is_err() {
+            let _ = fs::remove_file(&land);
+        }
+        landed?;
+        let _ = fs::remove_file(&self.path);
+        Ok(())
+    }
+
+    /// The gates on the file at the target, asked before it is replaced.
+    fn guard_target(&self, target: &Path, expect: Option<Fingerprint>) -> VfsResult<()> {
         // The guard against overwriting work done while we were downloading. If
         // the file at the target is no longer what the engine decided against,
         // somebody changed it in the meantime and this download is stale.
@@ -931,21 +1047,7 @@ impl OsSpoolFile {
                 Err(e) => return Err(io_err(target, e)),
             }
         }
-
-        if let Some(parent) = target.parent() {
-            match self.folder_at_open {
-                Some(was) => {
-                    if directory_identity_at(parent, &self.personality)? != Some(was) {
-                        return Err(VfsError::FolderMoved(parent.to_path_buf()));
-                    }
-                }
-                None => fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?,
-            }
-        }
-        fs::rename(&self.path, target).map_err(|e| io_err(&self.path, e))?;
-
-        let md = target.symlink_metadata().map_err(|e| io_err(target, e))?;
-        Ok(as_seen(fingerprint_of(target, &md), &self.personality))
+        Ok(())
     }
 }
 
@@ -1142,7 +1244,7 @@ mod tests {
         let v = vfs(&d);
         let target = v.root().unwrap().join("downloaded.txt");
 
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"partial").unwrap();
         // Mid-transfer: nothing at the destination yet.
         assert!(!target.exists());
@@ -1159,7 +1261,7 @@ mod tests {
         fs::create_dir(root.join("P")).unwrap();
         let target = root.join("P").join("plans.txt");
 
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"in flight").unwrap();
         fs::rename(root.join("P"), root.join("P2")).unwrap();
         let err = spool.commit(&target, None).unwrap_err();
@@ -1169,7 +1271,7 @@ mod tests {
 
         // A folder missing when the spool opened is made, as it always was.
         let fresh = root.join("Q").join("notes.txt");
-        let mut spool = v.spool(&fresh).unwrap();
+        let mut spool = v.spool(&fresh, 0).unwrap();
         spool.write_all(b"into a folder not made yet").unwrap();
         spool.commit(&fresh, None).unwrap();
         assert_eq!(fs::read(&fresh).unwrap(), b"into a folder not made yet");
@@ -1181,7 +1283,7 @@ mod tests {
         let v = vfs(&d);
         let target = v.root().unwrap().join("never.txt");
 
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"abandoned").unwrap();
         spool.discard();
 
@@ -1227,7 +1329,7 @@ mod tests {
         // The file is UNCHANGED, so the guard would say yes if it could look.
         // The only thing wrong is that it cannot look.
         fail_the_next_guard_stat(std::io::ErrorKind::Other);
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"the download").unwrap();
         let err = spool.commit(&target, Some(seen)).unwrap_err();
 
@@ -1243,7 +1345,7 @@ mod tests {
 
         // And the refusal is the transient thing it says it is: the next
         // attempt, with the stat answering again, lands.
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"the download").unwrap();
         spool.commit(&target, Some(seen)).unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"the download");
@@ -1258,7 +1360,7 @@ mod tests {
         fs::write(&target, b"a file the engine has never seen").unwrap();
 
         fail_the_next_guard_stat(std::io::ErrorKind::Other);
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"the download").unwrap();
         let err = spool.commit(&target, None).unwrap_err();
 
@@ -1285,7 +1387,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(10));
         fs::write(&target, b"the user's newer edit").unwrap();
 
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"stale download").unwrap();
         let err = spool.commit(&target, Some(seen)).unwrap_err();
 
@@ -1301,11 +1403,145 @@ mod tests {
         fs::write(&target, b"original").unwrap();
         let seen = v.fingerprint(&target).unwrap().unwrap();
 
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"new content").unwrap();
         spool.commit(&target, Some(seen)).unwrap();
 
         assert_eq!(fs::read(&target).unwrap(), b"new content");
+    }
+
+    /// A spool whose rename onto the root always crosses a volume, as it does
+    /// when the sync root is on another disk from the state store.
+    fn spool_across(v: &OsVfs, target: &Path, after_copy: fn(&Path)) -> Box<OsSpoolFile> {
+        let path = v.spool_dir.join(format!(".jd-tmp-{}", (v.next_token)()));
+        Box::new(OsSpoolFile {
+            file: Some(File::create(&path).unwrap()),
+            path,
+            personality: v.personality,
+            target: target.to_path_buf(),
+            folder_at_open: directory_identity_at(target.parent().unwrap(), &v.personality).unwrap(),
+            op: 7,
+            rename: |_, _| Err(std::io::Error::from(std::io::ErrorKind::CrossesDevices)),
+            after_copy,
+        })
+    }
+
+    /// Nothing of a commit left behind: no spool, and no landing name beside
+    /// the target.
+    fn no_litter(v: &OsVfs, dir: &Path) {
+        let spools = fs::read_dir(&v.spool_dir).unwrap().count();
+        assert_eq!(spools, 0, "a spool file outlived its commit");
+        let lands: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.starts_with(crate::names::LAND_PREFIX))
+            .collect();
+        assert!(lands.is_empty(), "landing copies left standing: {lands:?}");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_download_lands_on_a_root_on_another_volume() {
+        // B1: the spool lives with the state store, and a sync root on an
+        // external disk is on another volume. A rename cannot cross; before
+        // this the commit failed, deleted the spool, and nothing from the
+        // server ever arrived. Real volumes, no seam: the state under the temp
+        // directory, the root on /dev/shm (tmpfs).
+        let state = TempDir::new("across");
+        let shm = TempDir(PathBuf::from("/dev/shm").join(format!(
+            "jd-vfs-across-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        )));
+        let _ = fs::remove_dir_all(shm.path());
+        let root = shm.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        // The premise, checked rather than assumed: a pin that ran on one
+        // volume would prove nothing and pass.
+        let probe = state.path().join("probe");
+        fs::write(&probe, b"x").unwrap();
+        let crossing = fs::rename(&probe, root.join("probe")).unwrap_err();
+        assert_eq!(crossing.kind(), std::io::ErrorKind::CrossesDevices, "the two volumes must really differ");
+        let v = OsVfs::new(root.clone(), state.path().join("spool")).unwrap();
+
+        let edited = root.join("known.txt");
+        fs::write(&edited, b"original").unwrap();
+        let seen = v.fingerprint(&edited).unwrap().unwrap();
+        let mut spool = v.spool(&edited, 7).unwrap();
+        spool.write_all(b"the server's newer version").unwrap();
+        let fp = spool.commit(&edited, Some(seen)).unwrap();
+        assert_eq!(fs::read(&edited).unwrap(), b"the server's newer version");
+        assert_eq!(Some(fp), v.fingerprint(&edited).unwrap(), "the fingerprint is the landed file's own");
+
+        let fresh = root.join("Inbox").join("fresh.txt");
+        let mut spool = v.spool(&fresh, 8).unwrap();
+        spool.write_all(b"new from the server").unwrap();
+        spool.commit(&fresh, None).unwrap();
+        assert_eq!(fs::read(&fresh).unwrap(), b"new from the server");
+
+        no_litter(&v, &root);
+        no_litter(&v, &root.join("Inbox"));
+    }
+
+    #[test]
+    fn a_landing_never_replaces_a_file_already_at_its_name() {
+        // The landing name is the engine's, but a file can stand there that
+        // the engine did not put there. It is not this commit's to replace.
+        let d = TempDir::new("across-taken");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let target = root.join("t.txt");
+        let mut spool = spool_across(&v, &target, |_| {});
+        let token = spool.path.file_name().unwrap().to_string_lossy().trim_start_matches(".jd-tmp-").to_string();
+        let squatter = root.join(crate::names::land_name(7, &token));
+        fs::write(&squatter, b"not the engine's").unwrap();
+        spool.write_all(b"bytes").unwrap();
+        assert!(spool.commit(&target, None).is_err());
+        assert_eq!(fs::read(&squatter).unwrap(), b"not the engine's");
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn a_file_edited_while_a_download_is_copied_across_volumes_is_kept() {
+        // The copy is the widest window this commit has. The user's save in
+        // it is the edit the guard exists for, so the gates are asked again
+        // after the copy, not only before.
+        let d = TempDir::new("across-edit");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let target = root.join("contested.txt");
+        fs::write(&target, b"original").unwrap();
+        let seen = v.fingerprint(&target).unwrap().unwrap();
+
+        let mut spool = spool_across(&v, &target, |t| fs::write(t, b"the user's edit, made mid-copy").unwrap());
+        spool.write_all(b"stale download").unwrap();
+        let err = spool.commit(&target, Some(seen)).unwrap_err();
+
+        assert!(matches!(err, VfsError::AlreadyExists(_)), "got {err:?}");
+        assert_eq!(fs::read(&target).unwrap(), b"the user's edit, made mid-copy");
+        no_litter(&v, &root);
+    }
+
+    #[test]
+    fn a_folder_replaced_while_a_download_is_copied_across_volumes_gets_nothing() {
+        let d = TempDir::new("across-folder");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        fs::create_dir(root.join("P")).unwrap();
+        let target = root.join("P").join("x.txt");
+
+        let mut spool = spool_across(&v, &target, |t| {
+            let folder = t.parent().unwrap();
+            fs::rename(folder, folder.with_file_name("P2")).unwrap();
+            fs::create_dir(folder).unwrap();
+        });
+        spool.write_all(b"bytes").unwrap();
+        let err = spool.commit(&target, None).unwrap_err();
+
+        assert!(matches!(&err, VfsError::FolderMoved(p) if p == &root.join("P")), "got {err:?}");
+        assert!(!target.exists(), "nothing lands in a folder the user put in its place");
+        assert_eq!(fs::read_dir(&v.spool_dir).unwrap().count(), 0);
     }
 
     #[test]
@@ -1319,7 +1555,7 @@ mod tests {
         let v = vfs(&d);
         let target = v.root().unwrap().join("theirs.txt");
 
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"the download").unwrap();
         fs::write(&target, b"something the user just saved").unwrap();
         let err = spool.commit(&target, None).unwrap_err();
@@ -1352,7 +1588,7 @@ mod tests {
         let v = vfs(&d);
         let target = v.root().unwrap().join("deep/nested/file.txt");
 
-        let mut spool = v.spool(&target).unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
         spool.write_all(b"x").unwrap();
         spool.commit(&target, None).unwrap();
 
@@ -1383,7 +1619,7 @@ mod tests {
         // reasonably reads it as the target having changed underneath it, when
         // the target does not exist at all and never will while this stands.
         let child = occupied.join("notes.txt");
-        let mut spool = v.spool(&child).unwrap();
+        let mut spool = v.spool(&child, 0).unwrap();
         spool.write_all(b"a child of the folder").unwrap();
         let err = spool.commit(&child, None).unwrap_err();
         assert!(
@@ -1515,6 +1751,27 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
+    fn trashing_on_macos_needs_no_permission_to_control_finder() {
+        // A daemon has no permission to script Finder, and asking Finder to
+        // trash waited two minutes and failed (-1712) on every trash. Run
+        // from an SSH session, which holds no such permission either, this
+        // is exactly the daemon's position.
+        let d = TempDir::new("mac-trash");
+        let v = vfs(&d);
+        let doomed = v.root().unwrap().join("jd-vfs-trash-test.txt");
+        fs::write(&doomed, b"bound for the Trash").unwrap();
+        let started = std::time::Instant::now();
+        v.trash(&doomed).unwrap();
+        assert!(!doomed.exists(), "the file left the tree");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(30),
+            "a trash took {:?}: something is waiting on a permission",
+            started.elapsed()
+        );
+    }
+
+    #[test]
     fn trashing_something_already_gone_succeeds() {
         // Retry after a crash must not fail on its own prior success.
         let d = TempDir::new("trash-absent");
@@ -1526,7 +1783,7 @@ mod tests {
     fn sweeping_removes_leftover_spool_files() {
         let d = TempDir::new("sweep");
         let v = vfs(&d);
-        let mut spool = v.spool(&v.root().unwrap().join("t.txt")).unwrap();
+        let mut spool = v.spool(&v.root().unwrap().join("t.txt"), 0).unwrap();
         spool.write_all(b"interrupted").unwrap();
         drop(spool); // process died here — the spool file is orphaned
 

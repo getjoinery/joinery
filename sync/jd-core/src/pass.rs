@@ -2400,6 +2400,18 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
     // abandoned kind and is still swept. Estate seed 22081285.
     let busy_now: std::collections::HashSet<EntityId> =
         env.store.entities_with_open_ops()?.into_iter().collect();
+    // A landing name carries the id of the download op making it
+    // (`jd_vfs::land_name`). One whose op is still open is that op's, crash
+    // or no crash: the resumed download makes its own and this one goes the
+    // pass after. Asked of the journal, like the swap names, rather than of
+    // which thread happens to be running.
+    let open_ops: std::collections::HashSet<i64> = env
+        .store
+        .queued_ops()?
+        .into_iter()
+        .chain(env.store.interrupted_ops()?)
+        .map(|op| op.op_id)
+        .collect();
     let live_swap_names: std::collections::HashSet<String> = env
         .store
         .every_entry()?
@@ -2460,6 +2472,13 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                     && !live_swap_names.contains(&child.name)
                 {
                     env.vfs.trash(&dir.join(&child.name))?;
+                } else if let Some(op) = jd_vfs::landing_op(&child.name) {
+                    // A download copied onto this volume and never renamed
+                    // into place: the server still holds the bytes, and the
+                    // download is planned again from scratch.
+                    if !open_ops.contains(&op) {
+                        env.vfs.trash(&dir.join(&child.name))?;
+                    }
                 } else if !child.name.starts_with(crate::order::SWAP_PREFIX) {
                     // Not the engine's litter -- a file whose name the USER
                     // chose, which happens to start with the prefix this client
