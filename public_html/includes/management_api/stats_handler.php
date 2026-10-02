@@ -7,6 +7,7 @@
  * from SSH output, so the two transports populate mgn_last_status_data
  * identically.
  *
+ * @version 1.3 - site_domain: the site's own domain (webDir), the key the agent's check_status reports
  * @version 1.2 - plugin_checks: the recorded result of every plugin check declared fleet_report,
  *                the same record the agent's check_status reads
  * @version 1.1 - each backup profile's summary carries last_verify_time / _level / _outcome /
@@ -77,6 +78,13 @@ function stats_handler($request) {
 				$result['uptime'] = _mgmt_stats_format_uptime($secs);
 			}
 		}
+	}
+
+	// The site's own domain, so a management node can fill a node record that
+	// has no site address. Host only: no scheme, no trailing slash.
+	$domain = rtrim(preg_replace('#^https?://#i', '', trim((string)Globalvars::get_instance()->get_setting('webDir'))), '/');
+	if ($domain !== '') {
+		$result['site_domain'] = $domain;
 	}
 
 	// Joinery version
