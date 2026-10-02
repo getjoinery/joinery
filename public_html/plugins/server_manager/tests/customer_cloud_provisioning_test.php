@@ -24,6 +24,8 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.5 - reverse DNS reaches a hosted instance with the operator token, and a dead customer
+ *                grant is reported as reconnect by setQuietly
  * @version 1.4 - the buyer origin and its pre-payment states (specs/managed_hosting_phase1_purchase.md §5)
  * @version 1.3 - dismiss rules: which provisions can be cleared off the board, and what blocks the rest
  * @version 1.2 - node fixtures carry the HarnessTest prefix so a killed run's rows self-reclaim at the next db boot
@@ -1022,6 +1024,40 @@ class CustomerCloudProvisioningTest {
 		$quiet_ok = NodeReverseDns::setQuietly($node, 'rdns.example.com', $fake, true);
 		check($quiet_ok['ok'] === true && $fake->calls === 2 && $fake->last_hostname === 'rdns.example.com',
 			'setQuietly success reaches the provider');
+
+		// Whose account the driver acts on. The fake driver above skips this
+		// choice, which is how a hosted site went unable to set its PTR at all:
+		// it was sent to the customer-grant path, and a hosted site has no grant.
+		$hosted = new CustomerCloudProvision(NULL);
+		$hosted->set('cvp_provider', 'linode');
+		$hosted->set('cvp_hosting_mode', 'operator');
+		check(NodeReverseDns::driverForProvision($hosted, 'operator-token-for-test') instanceof LinodeComputeDriver,
+			'a hosted instance is reached with the operator token');
+		try {
+			NodeReverseDns::driverForProvision($hosted, '');
+			check(false, 'a hosted instance with no operator token names the Provisioning Setup page');
+		} catch (NodeReverseDnsException $e) {
+			check(!$e->reconnect && strpos($e->getMessage(), 'Provisioning Setup') !== false,
+				'a hosted instance with no operator token names the Provisioning Setup page, not a reconnect',
+				'got: ' . $e->getMessage());
+		}
+
+		$byo = new CustomerCloudProvision(NULL);
+		$byo->set('cvp_provider', 'linode');
+		$byo->set('cvp_hosting_mode', 'customer');
+		try {
+			NodeReverseDns::driverForProvision($byo, 'operator-token-for-test');
+			check(false, 'a bring-your-own instance never borrows the operator token');
+		} catch (NodeReverseDnsException $e) {
+			check($e->reconnect, 'a bring-your-own instance never borrows the operator token: no grant means reconnect');
+		}
+
+		// The pipeline needs to tell a dead grant from "not yet": the cloud-born
+		// node above is bring-your-own with no account link.
+		$quiet_dead = NodeReverseDns::setQuietly($node, 'rdns.example.com', null, true);
+		check($quiet_dead['ok'] === false && $quiet_dead['reconnect'] === true,
+			'setQuietly reports a dead customer grant as reconnect');
+		check($quiet_fail['reconnect'] === false, 'and a node with no provision is not a reconnect');
 	}
 
 	private $rdns_node_ids = [];

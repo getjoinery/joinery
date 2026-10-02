@@ -38,6 +38,9 @@
  * has four states rather than one call: waiting for an answer is a state the
  * phase already knew how to be in, because an unstamped step is simply retried.
  *
+ * @version 1.6 - the PTR step closes when the customer's cloud grant is dead instead of retrying
+ *                forever, which kept the domain from ever reaching active (and so from the
+ *                expiry countdown); set_reverse_dns() is a protected seam for tests
  * @version 1.5 - mail_dns waits on ManagedNode::is_operational_from(), the one rule for "not a working site"
  * @version 1.4 - a row whose site was removed from the dashboard is parked, never wired to the removed node
  * @version 1.3 - a name found taken after payment stamps rdm_taken_time, so the buyer's sites page
@@ -702,7 +705,22 @@ class ProvisionManagedDomains {
 			return 1;
 		}
 
-		$result = NodeReverseDns::setQuietly($node, 'mail.' . $domain);
+		$result = $this->set_reverse_dns($node, 'mail.' . $domain);
+		if (empty($result['ok']) && !empty($result['reconnect'])) {
+			// The customer's cloud grant is dead, and Linode issues no refresh
+			// token: no later tick can set this PTR, only the customer
+			// reconnecting can. Retrying would hold the domain short of active
+			// for good — and only an active domain is counted down to its
+			// expiry, so it would lapse unannounced. The PTR is left to the
+			// node page's Reverse DNS panel and the mailbox Setup tab's check,
+			// as the SSL-time attempt already leaves it.
+			error_log('ProvisionManagedDomains: PTR for ' . $domain . ' not set ('
+				. (string)$result['message'] . '); the step is closed so the domain can activate.');
+			$row->set('rdm_ptr_time', gmdate('Y-m-d H:i:s'));
+			$row->set('rdm_error', null);
+			$row->save();
+			return 1;
+		}
 		if (empty($result['ok'])) {
 			// Its forward-check gate needs the mail A record to have propagated
 			// first, so "not yet" is the ordinary answer for a minute or two.
@@ -714,6 +732,15 @@ class ProvisionManagedDomains {
 		$row->set('rdm_error', null);
 		$row->save();
 		return 1;
+	}
+
+	/**
+	 * Set the box's PTR. A seam so tests can answer for the provider.
+	 *
+	 * @return array {ok: bool, message: string, reconnect: bool}
+	 */
+	protected function set_reverse_dns($node, string $hostname): array {
+		return NodeReverseDns::setQuietly($node, $hostname);
 	}
 
 	// ==================================================================
