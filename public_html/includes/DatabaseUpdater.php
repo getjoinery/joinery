@@ -6,6 +6,10 @@
  * This class extracts the core functionality from update_database.php to make it
  * reusable for plugin installations and system repairs.
  *
+ * @version 1.3 - carryRenamedRows(): a migration that renames a table copies its rows with
+ *   the columns the old table actually has. A fixed column map written against the newest
+ *   old schema failed on a node that skipped the release that added one of those columns
+ *   (the drive soak rig, 0.8.256 to 0.8.452: del_debug_email_logs had no del_message).
  * @version 1.2 - a boolean or number default that differs from the spec is set to the spec's
  *   value (upgrade and cleanup runs). Both sides have one spelling, so the difference is
  *   real, not Postgres's normalization. dev's bkt_backup_targets.bkt_mint_run_keys
@@ -2038,6 +2042,42 @@ class DatabaseUpdater {
         }
 
         return ['current' => $current, 'is_called' => $is_called, 'max' => $max, 'behind' => $behind, 'advanced' => $advanced];
+    }
+
+    /**
+     * Copy a renamed table's rows into its successor, id for id.
+     *
+     * $columns maps old column => new column, primary key first. Only the
+     * mapped columns the old table actually has are carried: a node that
+     * skipped the release adding one of them has an older shape of the old
+     * table, and the column map is written against the newest. A column it
+     * lacks is left at its default in the new table. The primary key is
+     * required -- without it the rows cannot keep their ids.
+     *
+     * Rows whose id the new table already holds are skipped, so a migration
+     * that died part-way can run again.
+     *
+     * @return int rows copied
+     * @throws Exception when the old table lacks the primary key column
+     */
+    public static function carryRenamedRows(PDO $db, string $old_table, string $new_table, array $columns): int {
+        $q = $db->prepare(
+            "SELECT column_name FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = :t");
+        $q->execute(array(':t' => $old_table));
+        $present = array_flip($q->fetchAll(PDO::FETCH_COLUMN));
+        $old_pkey = array_key_first($columns);
+        if (!isset($present[$old_pkey])) {
+            throw new Exception("{$old_table} has no {$old_pkey}; its rows cannot be carried with their ids");
+        }
+        $new_pkey = $columns[$old_pkey];
+        $carried = array_intersect_key($columns, $present);
+        $old_cols = implode(', ', array_keys($carried));
+        $new_cols = implode(', ', array_values($carried));
+        return (int)$db->exec(
+            "INSERT INTO {$new_table} ({$new_cols})
+             SELECT {$old_cols} FROM {$old_table}
+              WHERE {$old_pkey} NOT IN (SELECT {$new_pkey} FROM {$new_table})");
     }
 
     /**

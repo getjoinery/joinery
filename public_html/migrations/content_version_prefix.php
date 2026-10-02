@@ -46,13 +46,9 @@ function content_version_prefix() {
         'cnv_create_time'         => 'cvn_create_time',
         'cnv_delete_time'         => 'cvn_delete_time',
     );
-    $old_cols = implode(', ', array_keys($columns));
-    $new_cols = implode(', ', array_values($columns));
-
-    $copied = $db->exec(
-        "INSERT INTO cvn_content_versions ({$new_cols})
-         SELECT {$old_cols} FROM cnv_content_versions
-          WHERE cnv_content_version_id NOT IN (SELECT cvn_content_version_id FROM cvn_content_versions)");
+    // Only the columns the old table has: a node that skipped a release has
+    // an older shape of it (DatabaseUpdater::carryRenamedRows).
+    $copied = DatabaseUpdater::carryRenamedRows($db, 'cnv_content_versions', 'cvn_content_versions', $columns);
 
     // The new table's serial starts at 1; move it past every id just kept.
     // update_database names a primary key's sequence {table}_{pkey}_seq and
