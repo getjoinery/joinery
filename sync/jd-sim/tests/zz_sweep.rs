@@ -5651,6 +5651,30 @@ fn frozen_a_folder_never_takes_a_directory_another_record_names_seed() {
     });
 }
 
+/// kill2 75110, shown, with directory births: a plain file traded places
+/// with a vault file on both devices while a peer edited it. On one, a
+/// never-sent sealed file stood at the plain file's path, and the edit's
+/// download was refused there every pass for ever; on the other, the plain
+/// file's bytes went up sealed, and the pass that copy landed a stranger at
+/// its old path was read as the plain file's next version. A download sets
+/// aside a never-sent file, which holds no name; a source stays held while
+/// any live claimant replaces it.
+#[test]
+fn frozen_a_traded_plain_file_neither_waits_nor_takes_a_stranger_seed() {
+    never_fires(&["converged", "no_entity_holds_both_sides_of_a_swap"], || {
+        workload_core_with(
+            75_110,
+            30,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            true,
+            Vault::FolderRings,
+            true,
+            Names::Ordinary,
+            Swaps::On,
+        );
+    });
+}
+
 /// plat3 75422: the server trashed a vault subfolder while a file saved in
 /// it, never sent, had been traded onto a plain file's path. Forgotten with
 /// the folder, its bytes went up as the plain file's version; kept, its

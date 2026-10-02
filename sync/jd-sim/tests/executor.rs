@@ -2550,7 +2550,7 @@ fn a_held_file_set_aside_by_a_download_on_its_own_path_keeps_its_record() {
         folder.synced_placement = Some(folder.remote.clone());
         // Its own directory, as the folder scan records it.
         let dir = jd_vfs::Vfs::directory_id(&device.fs, &root.join(name)).unwrap().unwrap();
-        folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir));
+        folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir, 0));
         device.store.put_entry(&folder).unwrap();
     }
     let held_body = b"sealed on the server, held here outside its vault";
@@ -2946,7 +2946,7 @@ fn a_never_sent_file_carried_into_another_folder_is_not_followed_there_by_a_make
         folder.is_encrypted = encrypted;
         folder.synced_placement = Some(folder.remote.clone());
         let dir = jd_vfs::Vfs::directory_id(&device.fs, &root.join(name)).unwrap().unwrap();
-        folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir));
+        folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir, 0));
         device.store.put_entry(&folder).unwrap();
     }
     // Saved in the vault, never sent, and carried into Plain in the pass.
@@ -2983,7 +2983,7 @@ fn a_never_sent_sealed_file_moved_out_of_a_trashed_folder_follows_its_file() {
         folder.is_encrypted = true;
         folder.synced_placement = Some(folder.remote.clone());
         let dir = jd_vfs::Vfs::directory_id(&device.fs, &root.join(path)).unwrap().unwrap();
-        folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir));
+        folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir, 0));
         device.store.put_entry(&folder).unwrap();
     }
     // Saved in the subfolder, never sent, and moved out to the root since.
@@ -3024,7 +3024,7 @@ fn a_retried_move_renames_out_of_a_park_that_landed_unheard() {
     device.fs.user_mkdir("F");
     let mut f = fresh(EntityId::folder(folder), None, "F", LocalStatus::Synced);
     f.synced_placement = Some(f.remote.clone());
-    f.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(jd_vfs::Vfs::directory_id(&device.fs, &root.join("F")).unwrap().unwrap()));
+    f.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(jd_vfs::Vfs::directory_id(&device.fs, &root.join("F")).unwrap().unwrap(), 0));
     device.store.put_entry(&f).unwrap();
     // The user moved it to the root under a new name.
     device.fs.user_write("doc.txt", body);
@@ -3074,7 +3074,7 @@ fn a_download_never_lands_in_another_folders_directory() {
     let root = jd_vfs::Vfs::root(&device.fs).unwrap();
     device.fs.user_mkdir("X");
     device.fs.user_mkdir("Y");
-    let dir_of = |name: &str| jd_vfs::Fingerprint::of_directory(jd_vfs::Vfs::directory_id(&device.fs, &root.join(name)).unwrap().unwrap());
+    let dir_of = |name: &str| jd_vfs::Fingerprint::of_directory(jd_vfs::Vfs::directory_id(&device.fs, &root.join(name)).unwrap().unwrap(), 0);
     // P's record names X, but X is Q's directory; P's own stands at Y.
     let mut pe = fresh(EntityId::folder(p), None, "P", LocalStatus::Synced);
     pe.synced_placement = Some(Placement { parent: None, name: "X".into() });
@@ -3193,7 +3193,7 @@ fn a_folder_parked_while_its_directory_stands_elsewhere_keeps_it() {
     let id = EntityId::folder(501);
     let mut entry = fresh(id, None, "contested", LocalStatus::Synced);
     entry.synced_placement = Some(entry.remote.clone());
-    entry.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(mine));
+    entry.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(mine, 0));
     device.store.put_entry(&entry).unwrap();
 
     let report = do_one(

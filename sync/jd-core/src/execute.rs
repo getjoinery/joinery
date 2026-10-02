@@ -1483,6 +1483,20 @@ fn aside_placement(env: &ExecEnv, aside: &std::path::Path) -> Result<Option<Plac
     Ok(Some(Placement { parent, name }))
 }
 
+/// Is the file standing at `path` another record's own file, of a record
+/// that holds no name on this disk (`held_and_never_sent`)?
+fn holds_no_name_here(env: &ExecEnv, entry: &Entry, path: &std::path::Path) -> Result<bool, ExecError> {
+    let Some(here) = env.vfs.fingerprint(path)? else {
+        return Ok(false);
+    };
+    for owner in env.store.owners_of_file(here.identity(), false)? {
+        if owner.id != entry.id && crate::pass::held_and_never_sent(env, &owner)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) fn make_room(
     env: &ExecEnv,
     path: &std::path::Path,
@@ -1806,7 +1820,16 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // With no agreement there is no fingerprint to guard the swap, so anything
     // already at this path is something the engine has never seen. It is not
     // overwritten.
-    if entry.synced_fingerprint.is_none() {
+    //
+    // Nor is a file standing here that holds no name: one saved in a vault
+    // and carried out before it was ever sent. It is never uploaded under any
+    // name, so naming gives the server's file this one; set aside, it is
+    // found by its own identity on the next scan, still held. Left standing,
+    // the gate below refused this download as decided against another file,
+    // the round planned it again, and the device never went quiet (a plain
+    // file traded places with a never-sent vault file while a peer edited
+    // it: kill2 75110).
+    if entry.synced_fingerprint.is_none() || holds_no_name_here(env, &entry, &path)? {
         // Compared in the plaintext domain: the question is whether the file
         // already sitting there is this same file, and what is on disk is
         // plaintext whatever the server holds.
@@ -4845,14 +4868,18 @@ fn move_local(
     // gone was trashed with the other's file inside.
     let agreed = entry.synced_content.as_ref().map(|c| c.sha256.clone());
     entry.synced_fingerprint = match (entry.id.entity_type, &agreed) {
-        (EntityType::Folder, _) => match directory_moved.filter(|_| from != dest && !landed) {
-            Some(id) => Some(jd_vfs::Fingerprint::of_directory(id)),
-            None => env
-                .vfs
-                .directory_id(&dest)?
-                .filter(|id| *id != 0)
-                .map(jd_vfs::Fingerprint::of_directory),
-        },
+        (EntityType::Folder, _) => {
+            // A rename keeps a directory's birth, so the one at `dest` is the
+            // moved directory's wherever its id is.
+            let at_dest = env.vfs.directory_identity(&dest)?.filter(|i| i.file_id != 0);
+            match directory_moved.filter(|_| from != dest && !landed) {
+                Some(id) => Some(jd_vfs::Fingerprint::of_directory(
+                    id,
+                    at_dest.filter(|i| i.file_id == id).map(|i| i.birth_ns).unwrap_or(0),
+                )),
+                None => at_dest.map(|i| jd_vfs::Fingerprint::of_directory(i.file_id, i.birth_ns)),
+            }
+        }
         (EntityType::File, Some(agreed))
             if env.vfs.hash(&dest).ok().as_deref() == Some(agreed.as_str()) =>
         {

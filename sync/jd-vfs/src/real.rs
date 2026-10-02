@@ -178,11 +178,11 @@ include_internal: bool,
             tie_break_id,
             fingerprint: match kind {
                 EntryKind::File => Some(as_seen(fingerprint_of(&entry.path(), &md), personality)),
-                EntryKind::Directory => Some(Fingerprint::of_directory(if personality.positional_file_ids {
-                    0
+                EntryKind::Directory => Some(if personality.positional_file_ids {
+                    Fingerprint::of_directory(0, 0)
                 } else {
-                    directory_id_of(&entry.path(), &md)
-                })),
+                    Fingerprint::of_directory(directory_id_of(&entry.path(), &md), birth_of(&md))
+                }),
                 _ => None,
             },
         });
@@ -615,6 +615,19 @@ impl Vfs for OsVfs {
             Ok(md) if md.is_dir() && !md.file_type().is_symlink() => {
                 Ok(Some(if self.personality.positional_file_ids { 0 } else { directory_id_of(path, &md) }))
             }
+            Ok(_) => Ok(None),
+            Err(e) if not_there(&e) => Ok(None),
+            Err(e) => Err(io_err(path, e)),
+        }
+    }
+
+    fn directory_identity(&self, path: &Path) -> VfsResult<Option<crate::FileIdentity>> {
+        match path.symlink_metadata() {
+            Ok(md) if md.is_dir() && !md.file_type().is_symlink() => Ok(Some(if self.personality.positional_file_ids {
+                crate::FileIdentity { file_id: 0, birth_ns: 0 }
+            } else {
+                crate::FileIdentity { file_id: directory_id_of(path, &md), birth_ns: birth_of(&md) }
+            })),
             Ok(_) => Ok(None),
             Err(e) if not_there(&e) => Ok(None),
             Err(e) => Err(io_err(path, e)),
@@ -1425,11 +1438,13 @@ mod tests {
         assert_eq!(v.fingerprint(&root.join("uno")).unwrap(), None, "fingerprint must stay None for a directory");
         fs::write(root.join("f.txt"), b"x").unwrap();
         assert_eq!(v.directory_id(&root.join("f.txt")).unwrap(), None, "a file has no directory id");
-        // And the listing carries the same id, with the fields that mean
-        // nothing for a directory pinned to zero.
+        // And the listing carries the same id and birth, with the fields
+        // that mean nothing for a directory pinned to zero.
         let listed = v.read_dir(&root).unwrap();
         let uno = listed.iter().find(|e| e.name == "uno").unwrap();
-        assert_eq!(uno.fingerprint, Some(Fingerprint::of_directory(one)));
+        let born = v.directory_identity(&root.join("uno")).unwrap().unwrap();
+        assert_eq!(born.file_id, one);
+        assert_eq!(uno.fingerprint, Some(Fingerprint::of_directory(one, born.birth_ns)));
     }
 
     #[test]

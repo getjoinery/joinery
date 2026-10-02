@@ -159,10 +159,11 @@ pub struct DirEntry {
     pub name: String,
     pub kind: EntryKind,
     /// For a file, the whole fingerprint. For a directory, its identity and
-    /// nothing else: `file_id` is the directory's inode (or file index), and
-    /// `size` and `mtime_ns` are 0 and mean nothing -- a directory's mtime
-    /// moves whenever a child is made, and nothing here may read it. A
-    /// symlink or anything else carries `None`.
+    /// nothing else: `file_id` is the directory's inode (or file index) and
+    /// `birth_ns` its birth, exactly as a file's, and `size` and `mtime_ns`
+    /// are 0 and mean nothing -- a directory's mtime moves whenever a child
+    /// is made, and nothing here may read it. A symlink or anything else
+    /// carries `None`.
     pub fingerprint: Option<Fingerprint>,
     /// The volume's own id for the entry, where its ids may break a tie
     /// (`Personality::id_tie_break`), and 0 everywhere else. Never identity:
@@ -173,12 +174,12 @@ pub struct DirEntry {
 impl Fingerprint {
     /// A directory's fingerprint: its identity, with the fields that mean
     /// nothing for a directory pinned to zero so nobody compares them.
-    pub fn of_directory(file_id: u64) -> Fingerprint {
+    pub fn of_directory(file_id: u64, birth_ns: u64) -> Fingerprint {
         Fingerprint {
             size: 0,
             mtime_ns: 0,
             file_id,
-            birth_ns: 0,
+            birth_ns,
         }
     }
 }
@@ -283,6 +284,13 @@ pub trait Vfs: Send + Sync {
     /// that would not open), which every reader treats as "unknown", never as
     /// a match.
     fn directory_id(&self, path: &Path) -> VfsResult<Option<u64>>;
+    /// The directory's id and birth ([`FileIdentity`]), read as a file's are:
+    /// a recycled id arrives with a new birth, so the pair names one
+    /// directory for as long as it exists. `None` exactly where
+    /// [`Vfs::directory_id`] is; a birth of 0 where the volume does not say.
+    fn directory_identity(&self, path: &Path) -> VfsResult<Option<FileIdentity>> {
+        Ok(self.directory_id(path)?.map(|file_id| FileIdentity { file_id, birth_ns: 0 }))
+    }
     /// The tie-break id of the file or directory at `path`
     /// (`DirEntry::tie_break_id`): 0 where the volume's ids may not break a
     /// tie, or nothing stands there.
