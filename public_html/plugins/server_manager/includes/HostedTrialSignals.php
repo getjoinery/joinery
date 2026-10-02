@@ -27,6 +27,13 @@
  * powering off a customer's machine from inside a webhook is how a retry, a
  * duplicate delivery or a provider outage becomes an outage of ours.
  *
+ * A TRANSFERRED ROW IS NEVER MOVED. Handing a site to its customer's own
+ * cloud account cancels its hosting subscription, and the store announces
+ * that cancel like any other; acting on it would put a site we no longer
+ * host into a grace period minutes after it left
+ * (specs/managed_to_self_hosted_transfer.md §5 step 3).
+ *
+ * @version 1.1 - a transferred row is left alone by every signal
  * @version 1.0
  */
 
@@ -45,6 +52,10 @@ class HostedTrialSignals {
 			return;
 		}
 
+		if ((string)$trial->get('htr_state') === HostedTrial::STATE_TRANSFERRED) {
+			return;
+		}
+
 		switch ($signal) {
 			case 'subscription.payment_failed':  self::start_grace($trial, 'a payment failed'); break;
 			case 'subscription.cancelled':       self::start_grace($trial, 'the subscription was cancelled'); break;
@@ -58,7 +69,7 @@ class HostedTrialSignals {
 	 */
 	private static function start_grace($trial, string $because): void {
 		if (in_array((string)$trial->get('htr_state'),
-				array(HostedTrial::STATE_GRACE, HostedTrial::STATE_SHUTDOWN), true)) {
+				array(HostedTrial::STATE_GRACE, HostedTrial::STATE_SHUTDOWN, HostedTrial::STATE_TRANSFERRED), true)) {
 			return;
 		}
 		$now = gmdate('Y-m-d H:i:s');
@@ -79,6 +90,9 @@ class HostedTrialSignals {
 
 	/** The charge went through. Everything pending is cancelled. */
 	private static function clear_grace($trial): void {
+		if ((string)$trial->get('htr_state') === HostedTrial::STATE_TRANSFERRED) {
+			return;
+		}
 		if ((string)$trial->get('htr_state') === HostedTrial::STATE_SHUTDOWN) {
 			// Already off. Bringing it back is a deliberate act with a person
 			// behind it — the machine may have been deleted at the provider by

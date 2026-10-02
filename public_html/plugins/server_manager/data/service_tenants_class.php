@@ -29,12 +29,22 @@
  *   released      the customer left the service (the switch-over) or the
  *                 account holder disconnected the site. Same retention clock.
  *
+ * A NODE-LINKED ROW (svt_mgn_managed_node_id set, no key) is a Managed site
+ * that moved to its customer's own cloud account
+ * (specs/managed_to_self_hosted_transfer.md §5a). It never ran the Connect
+ * flow, so the site cannot call enrol, status or release; the plane's
+ * reconcile and the operator's grant and release are the only things that
+ * reach it. Its backup storage is the fleet path under the node's own slug,
+ * not the broker's: the figure is the node's measured backup bytes, and
+ * suspending it switches the node's fleet backups off.
+ *
  * THE FIGURE IS NOT A METER THE PLANE TRUSTS. For mail it is the provider's
  * month-to-date count (read by the reconcile; the webhook nudges it between
  * reads); the provider enforces the limit. For backup storage it is the sum of
  * the ledger's completed objects, which the broker keeps exact; the broker
  * refuses a run that would cross the allowance.
  *
+ * @version 1.1 - svt_mgn_managed_node_id: the node-linked row of a site moved off Managed
  * @version 1.0
  */
 
@@ -75,6 +85,7 @@ class ServiceTenant extends SystemBase {
 		// Disconnect path handles by releasing first.
 		'svt_usr_user_id'     => array('action' => 'cascade'),
 		'svt_apk_api_key_id'  => array('action' => 'null'),
+		'svt_mgn_managed_node_id' => array('action' => 'null'),
 	);
 
 	public static $test_fixture = array(
@@ -88,6 +99,9 @@ class ServiceTenant extends SystemBase {
 		// that IS the site (D2). The key id moves to a new key on re-connect.
 		'svt_usr_user_id'        => array('type'=>'int8', 'is_nullable'=>false),
 		'svt_apk_api_key_id'     => array('type'=>'int8'),
+		// A Managed site moved to its customer's own cloud account: the node
+		// the row acts on, in place of a key the site never had.
+		'svt_mgn_managed_node_id' => array('type'=>'int8'),
 		// The site's host as it last reported it: a label, refreshed on every
 		// status call, never a key.
 		'svt_host'               => array('type'=>'varchar(255)'),
@@ -154,6 +168,35 @@ class ServiceTenant extends SystemBase {
 		return parent::save($debug);
 	}
 
+	/** A Managed site moved to its customer's own account: reached through its node, not a key. */
+	public function is_node_linked(): bool {
+		return (int)$this->get('svt_mgn_managed_node_id') > 0;
+	}
+
+	/** The node a node-linked row acts on, or null (not node-linked, or the node is gone). */
+	public function linked_node(): ?ManagedNode {
+		$id = (int)$this->get('svt_mgn_managed_node_id');
+		if ($id <= 0) {
+			return null;
+		}
+		$node = new ManagedNode($id, TRUE);
+		return ($node->key && !$node->get('mgn_delete_time')) ? $node : null;
+	}
+
+	/** A node's node-linked row for one service, or null. */
+	public static function forNode(int $node_id, string $service): ?ServiceTenant {
+		if ($node_id <= 0) {
+			return null;
+		}
+		$rows = new MultiServiceTenant(array(
+			'node_id' => $node_id, 'service' => $service, 'deleted' => false,
+		), array('svt_service_tenant_id' => 'DESC'), 1);
+		foreach ($rows as $row) {
+			return $row;
+		}
+		return null;
+	}
+
 	/** Is the date set and still ahead of now? The one question entitlement asks. */
 	public function entitled(?string $now = null): bool {
 		$until = trim((string)$this->get('svt_paid_until'));
@@ -213,6 +256,9 @@ class MultiServiceTenant extends SystemMultiBase {
 		}
 		if (isset($this->options['api_key_id'])) {
 			$filters['svt_apk_api_key_id'] = array((int)$this->options['api_key_id'], PDO::PARAM_INT);
+		}
+		if (isset($this->options['node_id'])) {
+			$filters['svt_mgn_managed_node_id'] = array((int)$this->options['node_id'], PDO::PARAM_INT);
 		}
 		if (isset($this->options['service'])) {
 			$filters['svt_service'] = array((string)$this->options['service'], PDO::PARAM_STR);

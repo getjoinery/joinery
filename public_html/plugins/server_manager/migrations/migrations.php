@@ -6,6 +6,8 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.5 - sm_009 seeds the editable emails of a server handover to the customer's own Linode account
+ *                and of the Services rows it leaves behind
  * @version 1.4 - sm_008 removes the provisioning records and hosted trials of nodes removed before
  *                ManagedNode 1.27
  * @version 1.3 - sm_007 drops the customer-cloud SSH key setting (keyless provisioning)
@@ -176,6 +178,70 @@ return [
 				WHERE n.mgn_managed_node_id = p.cvp_mgn_managed_node_id
 				  AND p.cvp_delete_time IS NULL AND n.mgn_delete_time IS NOT NULL
 			");
+		},
+	],
+	[
+		// The customer emails of handing a Managed site's server to the
+		// customer's own Linode account (specs/managed_to_self_hosted_transfer.md
+		// §6), and the two the Services rows it leaves behind send. Seeded once
+		// and editable on the email templates page: an existing row of the
+		// same name is never overwritten. None of them ever carries the
+		// transfer code — they link to the signed-in page that shows it.
+		'id' => 'sm_009_instance_transfer_email_templates',
+		'version' => '1.30.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$templates = array(
+				array('instance_transfer_invite', 'Your site can move to your own Linode account',
+					'<p>Hi *buyer_name*,</p>
+<p>Your site <strong>*domain*</strong> runs on its own server in our Linode account. It can now move into a Linode account of your own: the same server, still running, with the same address. Nothing is copied or rebuilt, and nothing about your domain changes.</p>
+<p>From then on Linode bills you for the server{monthly_cost} (*monthly_cost* at list price){end}, and we stop billing you for hosting. Your email and backups keep working through us, already paid for until the date your hosting was paid to.</p>
+<p><strong>To get ready:</strong></p>
+<ol>
+<li>Open a Linode account if you do not have one (<a href="*linode_signup_url*">sign up here</a>) and add a payment card to it.</li>
+<li>When it is ready, open <a href="*sites_url*">your sites</a> and press <em>I\'m ready — get my transfer code</em>.</li>
+</ol>
+<p>The page shows the code and the three steps to accept it in Linode\'s Cloud Manager.</p>'),
+				array('instance_transfer_code_ready', 'Your server transfer code is ready',
+					'<p>Hi *buyer_name*,</p>
+<p>The transfer code for <strong>*domain*</strong> is ready. It works until *code_expiry*.</p>
+<p>For your safety the code is not in this email: anyone holding it could take the server. <a href="*sites_url*">Open your sites</a> while signed in to see it, with the steps to accept it in Linode\'s Cloud Manager.</p>'),
+				array('instance_transfer_code_expired', 'Your server transfer code expired',
+					'<p>Hi *buyer_name*,</p>
+<p>The transfer code for <strong>*domain*</strong> ran out before it was accepted. Nothing has changed: your site is still with us, as it was.</p>
+<p>Whenever you are ready, <a href="*sites_url*">get a new code</a>.</p>'),
+				array('instance_transfer_failed', 'Moving your server: we are looking into it',
+					'<p>Hi *buyer_name*,</p>
+<p>Linode could not finish moving the server for <strong>*domain*</strong> into your account. Your site is still running, with us, as it was.</p>
+<p>We have been told and are looking into it. The most common cause is a server in your Linode account already named <code>*instance_label*</code>; if you have one, renaming it helps. We will email you when a new code is ready.</p>'),
+				array('instance_transfer_done', 'Your server is now in your own Linode account',
+					'<p>Hi *buyer_name*,</p>
+<p>The server for <strong>*domain*</strong> is now in your own Linode account. Linode bills you for it from here{monthly_cost} (*monthly_cost* at list price){end}{linode_backups}, including the Linode Backups that moved with it{end}. We have cancelled your hosting subscription.</p>
+{was_shut_down}<p><strong>It moved powered off.</strong> Boot it in Cloud Manager to bring the site back.</p>{end}
+<p><strong>What is yours now</strong></p>
+<ul>
+<li><strong>Root access.</strong> The server takes no password over SSH and holds no key of ours. To get in, reset the root password in Cloud Manager, sign in through the Lish console, and add your own SSH key.</li>
+<li><strong>Reverse DNS</strong> for its address is set in your own Cloud Manager now.</li>
+<li><strong>Email and backups</strong> carry on through us as a services subscription{paid_until}, paid until *paid_until*{end}. You can see them on <a href="*sites_url*/services">your connected sites</a>.</li>
+<li>We still look after the site — updates, backups and alerts — until you tell us to stop, from <a href="*sites_url*">your sites</a>.</li>
+</ul>
+{dns_records}<p><strong>DNS records we hold for you</strong></p>
+<pre>*dns_records*</pre>{end}'),
+				array('services_moved_grace', 'Email and backups for your site need paying',
+					'<p>Hi *buyer_name*,</p>
+<p>The paid-through date for the *services* on <strong>*domain*</strong> has passed. Everything keeps working{grace_ends} until *grace_ends*{end}; after that it stops.</p>
+<p>See where it stands on <a href="*manage_url*">your connected sites</a>.</p>'),
+				array('services_moved_suspended', 'Email and backups for your site have stopped',
+					'<p>Hi *buyer_name*,</p>
+<p>The *services* on <strong>*domain*</strong> stopped today: the paid-through date passed and the grace period ran out.</p>
+<p>Backups already stored with us are kept *retention_days* days and then deleted. Renew before then and it all carries on in place. See <a href="*manage_url*">your connected sites</a>.</p>'),
+			);
+			$insert = $dblink->prepare("INSERT INTO emt_email_templates (emt_name, emt_type, emt_subject, emt_body, emt_create_time, emt_update_time)
+				SELECT ?, 2, ?, ?, now(), now()
+				WHERE NOT EXISTS (SELECT 1 FROM emt_email_templates WHERE emt_name = ?)");
+			foreach ($templates as $t) {
+				$insert->execute(array($t[0], $t[1], $t[2], $t[0]));
+			}
 		},
 	],
 ];

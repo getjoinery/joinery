@@ -221,6 +221,105 @@ customer's subaccount and applies its own bounce and complaint controls there;
 this platform keeps no threshold of its own and removes nothing on the strength
 of a webhook.
 
+## Moving a site to its customer's own Linode account
+
+A hosted site runs on its own instance in this operator's Linode account, and it
+can move — running, same disks, same addresses — into the customer's own Linode
+account through Linode's **Service Transfer**. Nothing is copied or rebuilt, DNS
+does not change, and the recovery key is never involved. Linode bills the
+customer from then on; their hosting subscription is cancelled, and their mail
+and backups carry on through us as a Services subscription.
+
+**Who can move.** A hosted site a customer bought, on its own instance, finished
+setting up. A site in a container on a shared Docker host has no instance of its
+own; it moves with a [site copy](overview.md#site-copy) instead.
+
+**The check** (`InstanceTransfers::check`) runs when the node page's *Move to
+customer's Linode* panel opens, before every code is issued, and on Re-check.
+Each item passes, warns, or blocks, and every blocker says what to do:
+
+- *On Linode* (the operator token, through `CloudInstanceTransfers`): the
+  instance is on our account; no resource lock, Cloud Firewall, Block Storage
+  volume, NodeBalancer, shared or reserved IPv4, IPv6 range, or VLAN/VPC
+  interface; Linode Managed off; no pending transfer of it already. Linode
+  Backups on the instance, or the account auto-enrolling every instance, is a
+  warning: they move and the customer pays for them. A check the token cannot
+  make is a blocker that says so.
+- *Here*: a sold hosted site (not a relay shard, a bare machine or an operator
+  copy); the node working, with no site copy in progress and no job running;
+  the install password retired and no SSH key of ours recorded on the node — a
+  working credential of ours must not ride along; the mail leg finished. A
+  grace period, open incidents, or a dormant copy naming this node are warnings.
+  A site shut down for non-payment is a warning: Start withdraws its deletion.
+
+Linode enforces every restriction again when the code is created and when it is
+accepted; its own refusal is shown verbatim.
+
+**The flow.** The operator presses *Start* on the node page (or the customer
+asks from their sites page with *Move to my own Linode account*, which puts a
+row on the queue for the operator to start). The customer is emailed how to get
+ready — a Linode account with a card on it — and presses *I'm ready — get my
+transfer code* on their sites page. The plane creates the transfer and the page
+shows the code behind a button, its expiry, and the three Cloud Manager steps.
+The customer accepts in **Cloud Manager → Account → Service Transfers**; we
+never accept on their behalf, because that would need a grant on their account
+we do not otherwise hold.
+
+| Linode says | The row |
+|---|---|
+| pending | waits; Cancel withdraws the code at Linode |
+| accepted | can no longer be canceled; Linode moves the instance within about three hours |
+| completed | the finish runs |
+| stale (24 hours passed) | back to waiting, and the customer is emailed to get a new code |
+| failed | the operator is alerted and the customer told we are looking into it; the likeliest cause is a Linode on their account with the same label, `{slug}-{provision id}` |
+
+**The code is a bearer secret** for the whole machine. It is sealed on the row
+(`itx_token_sealed`) only while Linode's status is asked by it, shown only on
+the customer's own signed-in page, and never put in an email, a job, a log line
+or an error message.
+
+**A shut-down site.** Its deletion was asked of a person; deleting it now would
+fail the transfer. *Start* withdraws the deletion (`hosted.deletion_withdrawn`,
+and a note on the node). A move canceled afterwards raises the deletion again.
+The site moves powered off, and the last email tells the customer to boot it.
+
+**The finish** (`InstanceTransferFinish`) runs one recorded step at a time, so a
+crash resumes where it stopped:
+
+1. our token gets a 404 for the instance;
+2. the provision's hosting mode becomes `transferred` — neither ours to host nor
+   a bring-your-own-cloud row with a grant to reconnect;
+3. the hosting row becomes `transferred`, then the subscription is cancelled
+   immediately, with no refund and no store email (`OrderItem::cancel_subscription_by_system`).
+   The store's own cancel signal then finds a row it leaves alone. A
+   subscription sold by a store on another site is a to-do on the queue row;
+4. mail and backups become **node-linked Services rows**, paid to the day the
+   hosting was paid to: the mail row takes over the subaccount, SMTP user, sender
+   domain and records, and the provision lets go of them; backup storage stays
+   the node's fleet backups (see [Joinery-run services](overview.md#joinery-run-services-for-self-hosted-sites));
+5. a site that had been shut down gets its backups and uptime checks back;
+6. the site's banner switches to the services standing;
+7. the customer is emailed what is theirs now — root access (reset it in Cloud
+   Manager, use the Lish console: the server takes no SSH password and holds no
+   key of ours), reverse DNS in their own Cloud Manager, the Services date, and
+   the DNS records we still hold for them.
+
+Our agent stays. The node carries on as a managed node until the customer
+presses **Stop managing this site** on their sites page: the agent is
+forgotten, fleet backups and uptime checks stop, the node is disabled (the
+incident reconciler does not watch a disabled node), its open incidents close,
+and its backup storage row is released, which starts the 90-day retention
+clock. Mail carries on until its paid-through date.
+
+**The queue** — **Server Manager → Server Transfers** — lists every transfer:
+state, code expiry, what Linode last said and when, the last email, the last
+check, and any to-do, with Re-check, Start, Issue code now, Resend email,
+Cancel and To-do done.
+
+**The operator token** needs `linodes:read_write`, `account:read_write` (to
+create and cancel a transfer), `firewall:read_only` and `volumes:read_only` (the
+check).
+
 ## Setting it up
 
 **Server Manager → Provisioning → Hosted tier** takes everything: the cloud

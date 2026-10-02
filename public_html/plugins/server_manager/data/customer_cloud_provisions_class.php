@@ -39,6 +39,9 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.12 - hosting mode 'transferred': a Managed site whose instance was handed to its customer's own
+ *                 Linode account (specs/managed_to_self_hosted_transfer.md §5) — neither ours to host nor a
+ *                 bring-your-own-cloud row with an account grant
  * @version 1.11 - install mode 'copy' (specs/site_copy.md WP8): a dormant copy of cvp_source_node_id, bare metal,
  *                 installed at cvp_release, admin origin only
  * @version 1.10 - is_test_purchase() / external_name_prefix(): a site bought with a test-mode payment names
@@ -143,8 +146,12 @@ class CustomerCloudProvision extends SystemBase {
 		// §4.1). customer: the buyer granted us access to their own account
 		// and the provider bills them. operator: the plane's own token creates
 		// it on our account, there is no Connect wait, and the hosted legs —
-		// mail, trial, banners — apply.
-		'cvp_hosting_mode'           => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'customer', 'allowed_values'=>array('customer', 'operator')),
+		// mail, trial, banners — apply. transferred: it was operator, and the
+		// instance has since been handed to the customer's own account through
+		// the provider's transfer (specs/managed_to_self_hosted_transfer.md).
+		// Not customer: there is no account grant behind it, and nothing that
+		// reconnects a grant may ever pick it up.
+		'cvp_hosting_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'customer', 'allowed_values'=>array('customer', 'operator', 'transferred')),
 		// The site admin account's first password, sealed. Generated on the
 		// plane, handed to the install over the bootstrap session's stdin (it
 		// never appears in the job's stored steps or its output), and shown to
@@ -252,7 +259,7 @@ class CustomerCloudProvision extends SystemBase {
 			throw new CustomerCloudProvisionException('Bare provisions must be admin-origin.');
 		}
 		$hosting_mode = $this->get('cvp_hosting_mode') ?: 'customer';
-		if (!in_array($hosting_mode, array('customer', 'operator'), true)) {
+		if (!in_array($hosting_mode, array('customer', 'operator', 'transferred'), true)) {
 			throw new CustomerCloudProvisionException("Unknown hosting mode '{$hosting_mode}'.");
 		}
 		if (empty($this->get('cvp_usr_user_id'))) {
@@ -470,6 +477,11 @@ class CustomerCloudProvision extends SystemBase {
 	/** Is this provision's instance created on the operator's own account? */
 	public function is_operator_hosted(): bool {
 		return ($this->get('cvp_hosting_mode') ?: 'customer') === 'operator';
+	}
+
+	/** Was this Managed site's instance handed to its customer's own account? */
+	public function is_transferred(): bool {
+		return (string)$this->get('cvp_hosting_mode') === 'transferred';
 	}
 
 	/**

@@ -14,12 +14,16 @@
  *  3. SSL           provision certificates for hosts that are ready for them.
  *  4. Domains       register managed domains, wire their DNS to the box, set PTR.
  *  5. Domain watch  keep expiry current and move custody toward the buyer.
- *  6. Hosted mail   build outbound mail for a site this operator hosts: the
+ *  6. Transfers     follow a Managed site's server on its way to its
+ *                   customer's own Linode account, and finish the move once
+ *                   the provider says it is done. Before the hosted phases, so
+ *                   a site that just left stops being hosted before they look.
+ *  7. Hosted mail   build outbound mail for a site this operator hosts: the
  *                   customer's own subaccount, its sending domain and records,
  *                   the one SMTP credential that reaches their box.
- *  7. Hosted watch  the commercial half of a hosted site: the trial clock, the
+ *  8. Hosted watch  the commercial half of a hosted site: the trial clock, the
  *                   allowance banners, and what falls due when a payment fails.
- *  8. Services      the self-hosted sites renting our mail and backup storage:
+ *  9. Services      the self-hosted sites renting our mail and backup storage:
  *                   the paid-through date against the ladder, the meters, the
  *                   shelf ledger against a listing, and retention.
  *
@@ -37,6 +41,8 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
+ * @version 1.5 - server transfers to the customer's own Linode account run before the hosted phases
+ *                (specs/managed_to_self_hosted_transfer.md)
  * @version 1.4 - the services reconcile runs last (specs/services_phase2_platform.md §10 item 3)
  * @version 1.3 - the site-draft sweep runs first (specs/managed_hosting_phase1_purchase.md §10 item 5)
  * @version 1.2 - the hosted tier runs as two more phases, last: mail for a site this operator hosts,
@@ -57,6 +63,7 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 			'SSL'            => array($base . 'ProvisionPendingSsl.php', 'ProvisionPendingSsl'),
 			'Domains'        => array($base . 'ProvisionManagedDomains.php', 'ProvisionManagedDomains'),
 			'Domain watch'   => array($base . 'ManagedDomainWatch.php', 'ManagedDomainWatch'),
+			'Transfers'      => array($base . 'PollInstanceTransfers.php', 'PollInstanceTransfers'),
 			'Hosted mail'    => array($base . 'ProvisionHostedMail.php', 'ProvisionHostedMail'),
 			'Hosted watch'   => array($base . 'HostedTrialWatch.php', 'HostedTrialWatch'),
 			'Services'       => array($base . 'ServiceTenantWatch.php', 'ServiceTenantWatch'),

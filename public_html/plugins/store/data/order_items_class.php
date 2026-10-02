@@ -20,6 +20,8 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.2 - cancel_subscription_by_system(): the same provider cancel for a scheduled task acting on the
+ *                plane's own decision, with no signed-in user to check and no store emails
  * @version 1.1 - cancel_subscription_order_item() cancels with the provider that bills the subscription
  *                (Stripe or PayPal) and refuses an app-store one with where the buyer cancels it
  *                (subscription_cancel_blocker()); it called Stripe for every provider
@@ -287,29 +289,7 @@ function get_order() {
 
 		$this->assert_can_write($session);
 
-		$blocker = $this->subscription_cancel_blocker();
-		if ($blocker !== null) {
-			throw new SystemDisplayablePermanentError($blocker);
-		}
-
-		$provider_id = '';
-		if ($this->get_payment_source() === 'paypal') {
-			$provider_id = (string)$this->get('odi_paypal_subscription_id');
-			if (!$this->paypal_helper()->cancel_subscription($provider_id)) {
-				throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (" . $provider_id . ") Please contact the webmaster.");
-			}
-			$this->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
-			$this->set('odi_subscription_status', 'canceled');
-			$this->save();
-		}
-		else {
-			$provider_id = (string)$this->get('odi_stripe_subscription_id');
-			$stripe_helper = $this->stripe_helper();
-			if (!$stripe_helper->cancel_subscription($provider_id, $cancel_type)) {
-				throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (" . $provider_id . ") Please contact the webmaster.");
-			}
-			$stripe_helper->update_subscription_in_order_item($this);
-		}
+		$provider_id = $this->cancel_with_provider($cancel_type);
 
 		//SEND NOTIFICATION
 		if($send_email){
@@ -340,6 +320,50 @@ function get_order() {
 		
 	}
 	
+	/**
+	 * Cancel this subscription on the plane's own decision, from a scheduled
+	 * task: there is no signed-in user to check, and the buyer is told by the
+	 * caller in its own words, so no store email goes. Used when a hosting
+	 * subscription ends because its server moved to the customer's own cloud
+	 * account. Throws SystemDisplayablePermanentError as the user path does.
+	 */
+	function cancel_subscription_by_system($cancel_type) {
+		$this->cancel_with_provider($cancel_type);
+		return true;
+	}
+
+	/**
+	 * The provider half of a cancel: refuse what this store cannot cancel,
+	 * then cancel where the subscription is billed and record it. Returns the
+	 * provider's subscription id.
+	 */
+	private function cancel_with_provider($cancel_type) {
+		$blocker = $this->subscription_cancel_blocker();
+		if ($blocker !== null) {
+			throw new SystemDisplayablePermanentError($blocker);
+		}
+
+		$provider_id = '';
+		if ($this->get_payment_source() === 'paypal') {
+			$provider_id = (string)$this->get('odi_paypal_subscription_id');
+			if (!$this->paypal_helper()->cancel_subscription($provider_id)) {
+				throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (" . $provider_id . ") Please contact the webmaster.");
+			}
+			$this->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
+			$this->set('odi_subscription_status', 'canceled');
+			$this->save();
+		}
+		else {
+			$provider_id = (string)$this->get('odi_stripe_subscription_id');
+			$stripe_helper = $this->stripe_helper();
+			if (!$stripe_helper->cancel_subscription($provider_id, $cancel_type)) {
+				throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (" . $provider_id . ") Please contact the webmaster.");
+			}
+			$stripe_helper->update_subscription_in_order_item($this);
+		}
+		return $provider_id;
+	}
+
 	function readable_subscription_status(){
 		$settings = Globalvars::get_instance(); 
 		$session = SessionControl::get_instance();

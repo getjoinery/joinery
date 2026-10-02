@@ -25,6 +25,7 @@
  * never leaves the key live. A site someone was tricked into approving keeps
  * a key only until its owner finds this page.
  *
+ * @version 1.2 - a node-linked row (a site moved off Managed) is not a connection: sitesFor marks it, disconnect leaves it
  * @version 1.1 - disconnect cuts the key before it releases the services
  */
 class ServicesConnectException extends Exception {}
@@ -102,6 +103,14 @@ class ServicesConnect {
 		if (!$rows) {
 			throw new ServicesConnectException('No site by that name is connected to this account.');
 		}
+		// A site moved off Managed holds node-linked rows with no key. They are
+		// not a connection, and one Disconnect would close its mail: the
+		// customer leaves our mail through their own wizard, then the
+		// operator releases the row.
+		$rows = array_values(array_filter($rows, function ($row) { return !$row->is_node_linked(); }));
+		if (!$rows) {
+			throw new ServicesConnectException('That site moved from Managed hosting and is not a connection to disconnect.');
+		}
 		$keys = array();
 		foreach ($rows as $row) {
 			$key_id = (int)$row->get('svt_apk_api_key_id');
@@ -154,6 +163,7 @@ class ServicesConnect {
 				$sites[$host] = array(
 					'host'           => $host,
 					'key_id'         => $key_id,
+					'node_linked'    => $row->is_node_linked(),
 					'active'         => $active,
 					'connected_time' => $connected,
 					'services'       => array(),

@@ -6,6 +6,7 @@
  * was connected, and per service the state, the paid-through date and the
  * figure against the allowance. Disconnect (a POST) cuts a site off.
  *
+ * @version 1.1 - a site moved off Managed reads as such, with no Disconnect
  * @version 1.0.1 - the page carries its own styles (site block, facts grid, buttons)
  * @version 1.0 - specs/services_phase2_platform.md §4, E6
  */
@@ -46,10 +47,15 @@ echo PublicPage::BeginPage('Connected sites', $hoptions);
 	<article class="sms-site">
 		<h3><?php echo htmlspecialchars($site['host']); ?></h3>
 		<dl class="sms-facts">
+			<?php if ($site['node_linked']): ?>
+			<dt>Connected</dt>
+			<dd>Moved from Managed — mail and backups through us</dd>
+			<?php else: ?>
 			<dt>Connected</dt>
 			<dd><?php echo $site['connected_time'] !== ''
 				? htmlspecialchars(LibraryFunctions::convert_time($site['connected_time'], 'UTC', $session->get_timezone(), 'F j, Y'))
 				: '—'; ?><?php if (!$site['active']): ?> <span class="sms-note">(key inactive)</span><?php endif; ?></dd>
+			<?php endif; ?>
 			<?php foreach ($site['services'] as $service => $s): ?>
 			<dt><?php echo htmlspecialchars($service_labels[$service] ?? $service); ?></dt>
 			<dd>
@@ -66,7 +72,10 @@ echo PublicPage::BeginPage('Connected sites', $hoptions);
 			</dd>
 			<?php endforeach; ?>
 		</dl>
-		<?php if ($site['active']): ?>
+		<?php if ($site['node_linked']): ?>
+		<p class="sms-note">To send email another way, use your site's own setup wizard (its Email step) to switch to
+			your own email account, then tell us and we close this one.</p>
+		<?php elseif ($site['active']): ?>
 		<div class="sms-actions">
 			<?php echo PublicPage::action_button('Disconnect', $self_url, array(
 				'hidden'  => array('action' => 'disconnect', 'host' => $site['host']),

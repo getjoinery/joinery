@@ -7,6 +7,8 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.2 - the Move to your own Linode account card: its steps, the transfer code behind a button, and
+ *                Stop managing this site after the move (specs/managed_to_self_hosted_transfer.md §6)
  * @version 2.1 - the pre-payment cards (draft, pending_payment) with Continue, Finish payment, Edit and
  *                Delete; the taken-name card offering an alternate; a Set up a new site link
  *                (specs/managed_hosting_phase1_purchase.md §4.5, §7)
@@ -166,6 +168,67 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 			<p class="sms-note">Your admin password was shown once and we no longer have a copy. If you
 				lost it, use the Forgot password link on your own site.</p>
 		<?php endif; ?>
+
+		<?php if ($site['transfer'] !== null): $t = $site['transfer']; ?>
+		<section class="sms-move" data-provision="<?php echo (int)$site['id']; ?>">
+			<h3>Move to your own Linode account</h3>
+			<?php if ($t['state'] === ''): ?>
+				<p>Your site runs on its own server in our Linode account. It can move into a Linode account of your
+					own — running, with the same address, nothing copied or rebuilt. Linode then bills you for the
+					server, and we stop billing you for hosting. Your email and backups keep working through us.</p>
+				<button type="button" class="sms-secondary-btn" data-do="request">Move to my own Linode account</button>
+			<?php elseif ($t['state'] === 'requested'): ?>
+				<p><strong><?php echo htmlspecialchars($t['state_label']); ?>.</strong> We check your server first and
+					email you the next step.</p>
+			<?php elseif ($t['state'] === 'invited'): ?>
+				<ol class="sms-steps">
+					<li>Open a Linode account if you do not have one: <a href="<?php echo htmlspecialchars($t['signup_url']); ?>"
+						rel="noopener" target="_blank">sign up at Linode</a>, and add a payment card to it.</li>
+					<li>When it is ready, get your transfer code here. It works for 24 hours.</li>
+				</ol>
+				<button type="button" class="sms-visit" data-do="get_code">I'm ready — get my transfer code</button>
+			<?php elseif ($t['state'] === 'code_issued'): ?>
+				<p>Your transfer code is ready, valid until <strong><?php echo htmlspecialchars($t['code_expiry']); ?></strong>.
+					Anyone with this code can take the server, so keep it to yourself.</p>
+				<p class="sms-code" hidden><code data-code></code>
+					<button type="button" class="sms-secondary-btn" data-copy>Copy</button></p>
+				<button type="button" class="sms-reveal-btn" data-do="reveal_code">Show my transfer code</button>
+				<ol class="sms-steps">
+					<li>Sign in to Linode Cloud Manager with your own account.</li>
+					<li>Open <strong>Account</strong> (your name at the top right), then <strong>Service Transfers</strong>.</li>
+					<li>Choose <strong>Accept a Service Transfer</strong>, paste the code, review it and accept.</li>
+				</ol>
+				<p class="sms-note">Linode moves the server within about three hours of accepting, and the site keeps
+					running while it does. Your account must not already have a Linode named
+					<code><?php echo htmlspecialchars($t['label']); ?></code>.</p>
+			<?php elseif ($t['state'] === 'done'): ?>
+				<p><strong>Your server is now in your own Linode account.</strong>
+					<?php if ($t['was_shut_down']): ?>It moved powered off: boot it in Cloud Manager to bring the site back.<?php endif; ?></p>
+				<ul class="sms-steps">
+					<li>Your email and backups carry on through us<?php if ($t['paid_until'] !== ''): ?>, paid until
+						<?php echo htmlspecialchars($t['paid_until']); endif; ?>. See
+						<a href="/profile/server_manager/services">Connected sites</a>.</li>
+					<li>The server takes no password over SSH and holds no key of ours. To get in as root, reset the root
+						password in Cloud Manager, sign in through the Lish console, and add your own SSH key.</li>
+					<li>Reverse DNS for its address is now set in your own Cloud Manager.</li>
+				</ul>
+				<?php if ($t['managed']): ?>
+				<p class="sms-note">We still look after this site: updates, backups and alerts.</p>
+				<button type="button" class="sms-secondary-btn" data-do="stop_managing"
+					data-confirm="Stop our management of this site? We forget its agent and stop its updates, backups and alerts. Backups already stored with us are deleted after 90 days. Outbound email carries on until its paid-through date.">Stop managing this site</button>
+				<?php else: ?>
+				<p class="sms-note">We no longer manage this site.</p>
+				<?php endif; ?>
+			<?php else: ?>
+				<p><strong><?php echo htmlspecialchars($t['state_label']); ?>.</strong></p>
+			<?php endif; ?>
+			<?php if ($t['cancelable']): ?>
+				<button type="button" class="sms-secondary-btn" data-do="cancel"
+					data-confirm="Cancel the move? Your site stays with us as it is.">Cancel the move</button>
+			<?php endif; ?>
+			<p class="sms-move-notice" role="status" aria-live="polite"></p>
+		</section>
+		<?php endif; ?>
 	</article>
 <?php endforeach; ?>
 </section>
@@ -206,10 +269,55 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 .sms-actions .sms-visit { border: 0; font-size: 1em; cursor: pointer; margin-right: .5em; }
 .sms-secondary-btn { background: #fff; color: #1f2937; border: 1px solid #cbd5e1; padding: 8px 18px;
 	border-radius: 4px; font-size: .95em; cursor: pointer; }
+.sms-move { padding: 12px 16px; margin: 1em 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; }
+.sms-move h3 { margin: 0 0 .5em; font-size: 1.05em; }
+.sms-steps { margin: .5em 0 1em; padding-left: 1.4em; }
+.sms-code code { font-size: 1.1em; background: #fff; padding: 6px 10px; border: 1px solid #e2e2e2;
+	border-radius: 4px; display: inline-block; word-break: break-all; }
+.sms-move-notice:empty { display: none; }
+.sms-move-notice { color: #b42318; }
 .sms-taken { padding: 12px 16px; margin: 1em 0; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; }
 #alternate_domain_status[data-state="available"] { color: #1a7f37; }
 #alternate_domain_status[data-state="unavailable"] { color: #b42318; }
 </style>
+
+<script>
+/* The move card's buttons call the transfer_customer action; the code is
+   fetched only when its button is pressed, and never kept anywhere else. */
+document.querySelectorAll('.sms-move [data-do]').forEach(function (button) {
+	button.addEventListener('click', function () {
+		var card = button.closest('.sms-move');
+		var notice = card.querySelector('.sms-move-notice');
+		var what = button.getAttribute('data-do');
+		if (button.dataset.confirm && !window.confirm(button.dataset.confirm)) { return; }
+		notice.textContent = '';
+		button.disabled = true;
+		joineryApi.post('server_manager/transfer_customer', {
+			'do': what, provision_id: parseInt(card.getAttribute('data-provision'), 10)
+		}).then(function (data) {
+			if (what === 'reveal_code' && data && data.code) {
+				var box = card.querySelector('.sms-code');
+				box.querySelector('[data-code]').textContent = data.code;
+				box.hidden = false;
+				button.hidden = true;
+				return;
+			}
+			window.location.reload();
+		}).catch(function (err) {
+			button.disabled = false;
+			notice.textContent = (err && err.message) ? err.message : 'That did not work. Try again in a minute.';
+			var link = joineryApi.reportLink(err);
+			if (link) { notice.appendChild(document.createTextNode(' ')); notice.appendChild(link); }
+		});
+	});
+});
+document.querySelectorAll('.sms-move [data-copy]').forEach(function (button) {
+	button.addEventListener('click', function () {
+		var code = button.closest('.sms-code').querySelector('[data-code]').textContent;
+		if (navigator.clipboard) { navigator.clipboard.writeText(code); button.textContent = 'Copied'; }
+	});
+});
+</script>
 
 <?php if ($in_progress): ?>
 <script>

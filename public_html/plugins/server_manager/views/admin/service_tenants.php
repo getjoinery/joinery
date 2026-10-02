@@ -6,6 +6,7 @@
  * Every self-hosted site renting this plane's outbound mail or backup storage,
  * one row per service, with the grant (a date) and release acts.
  *
+ * @version 1.1 - a node-linked row (a site moved off Managed) names its node instead of a key
  * @version 1.0 - specs/services_phase2_platform.md §10 item 5
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -41,7 +42,9 @@ $page->begin_box(array());
 setup wizard, which creates its rows here <em>unpaid</em>; nothing works until you grant a paid-through
 date. The reconcile compares the date every pass: <?php echo (int)$grace_days; ?> days of grace after it
 passes, then the service stops and backup storage is kept <?php echo ServiceTenant::RETENTION_DAYS; ?> days
-before it is pruned. A new date before then reactivates in place. Managed sites do not appear here.</p>
+before it is pruned. A new date before then reactivates in place. Managed sites do not appear here; a Managed site
+that moved to its customer's own Linode account does, marked <em>moved from Managed</em>, and its backup storage is
+its node's fleet backups.</p>
 
 <?php if (!$mail_ready || $shelf_target === null): ?>
 <div class="alert alert-warning">
@@ -74,7 +77,11 @@ before it is pruned. A new date before then reactivates in place. Managed sites 
 		<tr>
 			<td><strong><?php echo htmlspecialchars($row->get('svt_host')); ?></strong><br>
 				<small class="text-muted"><?php echo htmlspecialchars($row->get('svt_slug')); ?>
+				<?php if ($row->is_node_linked()): ?>
+				&middot; <a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$row->get('svt_mgn_managed_node_id'); ?>">node #<?php echo (int)$row->get('svt_mgn_managed_node_id'); ?></a>, moved from Managed</small></td>
+				<?php else: ?>
 				&middot; key #<?php echo (int)$row->get('svt_apk_api_key_id'); ?></small></td>
+				<?php endif; ?>
 			<td><?php echo htmlspecialchars($t['account']); ?></td>
 			<td><?php echo htmlspecialchars($s['service']); ?>
 				<?php if ($s['service'] === 'mail' && $s['domain'] !== ''): ?><br>

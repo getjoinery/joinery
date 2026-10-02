@@ -39,6 +39,8 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.2 - the allowance pause and backup-storage prune are NodeBackupShelf's, shared with the
+ *                Services watch for a site moved to its customer's own cloud account
  * @version 1.1
  */
 
@@ -394,14 +396,13 @@ class HostedTrialWatch {
 		}
 		$allowance_gb = max(1, (int)Globalvars::get_instance()->get_setting(
 			'server_manager_hosted_shelf_allowance_gb', true, true));
-		$used_gb = ((int)$node->get('mgn_backup_shelf_bytes')) / 1073741824;
+		$used_gb = NodeBackupShelf::bytes($node) / 1073741824;
 
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupPolicy.php'));
-		$stored_mode = FleetBackupPolicy::stored_mode($node);
-
-		if ($used_gb >= $allowance_gb && $stored_mode !== 'off') {
-			$node->set('mgn_backup_policy', json_encode(array('enabled' => false, 'paused_for_shelf' => true)));
-			$node->save();
+		// Resumed when backup storage comes down — retention prunes it every
+		// cycle, so a customer who deletes a large upload gets their backups
+		// back without asking. Only a pause this put there is lifted.
+		$acted = NodeBackupShelf::apply_allowance($node, $allowance_gb * 1073741824);
+		if ($acted === 'paused') {
 			$trial->set('htr_note', 'Backups paused on ' . gmdate('Y-m-d') . ': backup storage at '
 				. self::gb($used_gb) . ' of ' . $allowance_gb . ' GB.');
 			$trial->save();
@@ -409,14 +410,7 @@ class HostedTrialWatch {
 				. ' — backup storage at ' . self::gb($used_gb) . ' of ' . $allowance_gb . ' GB.');
 			return 1;
 		}
-
-		// And back on when backup storage comes down — retention prunes it every
-		// cycle, so a customer who deletes a large upload gets their backups
-		// back without asking. Only a pause THIS put there is lifted: a policy
-		// somebody switched off deliberately stays off.
-		if ($used_gb < $allowance_gb && self::paused_for_shelf($node)) {
-			$node->set('mgn_backup_policy', null);
-			$node->save();
+		if ($acted === 'resumed') {
 			$trial->set('htr_note', null);
 			$trial->save();
 			error_log('HostedTrialWatch: fleet backups resumed for ' . $provision->get('cvp_domain')
@@ -426,18 +420,9 @@ class HostedTrialWatch {
 		return 0;
 	}
 
-	/**
-	 * Did THIS pause a node's backups, rather than a person?
-	 *
-	 * The marker is inside the stored policy, which FleetBackupPolicy ignores —
-	 * it copies only keys it recognises — so it rides along without changing
-	 * what the policy means. Without it, resuming would override an operator
-	 * who switched a node off on purpose.
-	 */
+	/** Did the allowance pause a node's backups, rather than a person? See NodeBackupShelf. */
 	public static function paused_for_shelf($node): bool {
-		$stored = $node->get('mgn_backup_policy');
-		if (is_string($stored)) { $stored = json_decode($stored, true); }
-		return is_array($stored) && !empty($stored['paused_for_shelf']);
+		return NodeBackupShelf::paused_for_shelf($node);
 	}
 
 	/**
@@ -550,43 +535,17 @@ class HostedTrialWatch {
 		if ($node === null) {
 			return 0;
 		}
-		$target = JobCommandBuilder::get_target($node);
-		if (!$target) {
-			return 0;
-		}
-		// keep = 0 is not expressible through prune(), which floors at one on
-		// purpose. Emptying a shelf is a different act from trimming one, and
-		// it is done here, explicitly, with the plane's own credential.
-		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
-		// The WHOLE slug prefix, both profiles. Everything under it is on this
-		// operator's backup storage and was kept under this operator's retention promise;
-		// a customer who pointed their own backups at their own bucket has
-		// nothing here to lose.
-		$creds  = $target->get_credentials();
-		$bucket = trim((string)$target->get('bkt_bucket'));
-		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
-		$base   = $prefix . '/' . trim((string)$node->get('mgn_slug')) . '/';
-		if ($bucket === '' || empty($creds)) {
-			return 0;
-		}
-		$objects = S3Signer::list($creds, $bucket, $base);
-		if (!is_array($objects)) {
+		// The whole slug prefix, both profiles: everything under it is on this
+		// operator's backup storage and was kept under this operator's promise.
+		try {
+			$deleted = NodeBackupShelf::prune($node);
+		} catch (RuntimeException $e) {
 			$this->errors[] = $provision->get('cvp_domain') . ': backup storage could not be listed for pruning.';
 			return 0;
 		}
-		$deleted = 0;
-		foreach ($objects as $object) {
-			$key = is_array($object) ? (string)($object['key'] ?? '') : (string)$object;
-			if ($key === '' || strpos($key, $base) !== 0) { continue; }
-			$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
-			$status = (int)($resp['status'] ?? 0);
-			if (($status >= 200 && $status < 300) || $status === 404) {
-				$deleted++;
-			}
+		if ($deleted === null) {
+			return 0;   // no target to reach yet; tried again next tick
 		}
-		$node->set('mgn_backup_shelf_bytes', 0);
-		$node->set('mgn_backup_shelf_checked_time', gmdate('Y-m-d H:i:s'));
-		$node->save();
 		$trial->set('htr_shelf_ends_time', null);
 		$trial->set('htr_note', 'Backup storage was pruned on ' . gmdate('Y-m-d') . '.');
 		$trial->save();
