@@ -20,6 +20,7 @@ visible diff here.
 | `DnsRecordPlan` | `includes/dns/DnsRecordPlan.php` | Everything one subsystem wants for one domain |
 | `DnsProvider` | `includes/dns/DnsProvider.php` | The driver contract, plus its declared capabilities |
 | `DnsDriverBase` | `includes/dns/DnsDriverBase.php` | HTTP plumbing and the quirks every driver shares |
+| `DnsProxiedOrigin` | `includes/dns/DnsProxiedOrigin.php` | A host that proxies: reports `$proxied`, and moves a proxied record's address |
 | `DnsRrsetDriverBase` | `includes/dns/DnsRrsetDriverBase.php` | Read-modify-write for providers that store record *sets* |
 | `DnsDriverRegistry` | `includes/dns/DnsDriverRegistry.php` | Discovers drivers by interface; resolves the deployment default |
 | `DnsReconciler` | `includes/dns/DnsReconciler.php` | The diff, the per-record apply, withdrawal |
@@ -214,6 +215,7 @@ rotating it:
 | The two ScrollDaddy DNS resolvers | **Yes** — one account-owned Cloudflare token, the same on both boxes, at `/etc/systemd/system/caddy.service.d/cloudflare.conf` (root, 0600): "Edit zone DNS" scoped to the zone `scrolldaddy.app` alone, no expiry, client IP filtering allowing exactly the two boxes over IPv4 and IPv6. Needed because `dns.scrolldaddy.app` has two A records and HTTP-01 lands on either box. Owner, verification and rotation are in `/etc/scrolldaddy/OPS_GUIDE.md` on each box; the management node alerts when its renewal is more than a day overdue. Whether it stays there is an open decision (specs/tls_and_origin_trust.md D1). |
 | The setup wizard's first-boot publish | No — `DnsInstallCredential`, sealed, deleted on first use. |
 | The admin DNS publish box | No — ephemeral, one request, never stored. |
+| A site copy's switch-over (Server Manager, Copy tab) | No — typed into each press that reads or moves the records, used in that request, never stored. |
 
 **Account selection needs nothing stored either.** A grant reaching one account
 — the common case — is used with no question asked. A grant reaching several (a
@@ -361,6 +363,26 @@ conflict the platform could not act on.
 A record that exists and *differs* is a conflict, shown with both values and
 resolved only by an explicit *adopt and overwrite* choice.
 
+### Moving a proxied record's origin
+
+One write touches records the platform neither created nor adopted: a site
+copy's switch-over (Server Manager, `plugins/server_manager/docs/overview.md`
+§ Site copy). The site sits behind a proxy (Cloudflare's orange cloud), and
+moving it to its new server means pointing the proxied A and AAAA records that
+name the old server's address at the new one. Visitors only ever reach the
+proxy, so they follow within seconds.
+
+It is narrow on purpose. A driver offers it by implementing `DnsProxiedOrigin`
+(`includes/dns/DnsProxiedOrigin.php`): `listRecords()` reports each address
+record's `$proxied`, and `setProxiedOrigin()` changes the address of a record
+that is already proxied, and nothing else about it; an unproxied record is
+refused. It is the one write that leaves a record proxied: a publish always
+writes DNS-only. The owner presses for it, with a token typed for that press,
+after the page has named every record it will change; a record that is not
+proxied, or a site name pointing somewhere else, stops it before anything is
+written. Nothing is recorded in `dnr_managed_dns_records`: the records stay the
+owner's. Cloudflare is the driver that implements it.
+
 ## Cutovers
 
 Creating a TXT record breaks nothing. Replacing MX moves live mail. Records whose
@@ -431,6 +453,9 @@ The static half declares capability, read before any credential exists:
 | `nameserverSuffixes()` | **How the driver is recognised.** Fragments of a nameserver name, matched as substrings. Defaults to `nameservers()`; override with the shared fragment for a vendor that assigns per-zone names, or the box can never lead with it |
 | `supportsZones()` | Whether `createZone()`/`deleteZone()` work |
 | `txtChunkingIsAutomatic()` | True only when the vendor splits over-length TXT itself |
+
+A driver for a host that proxies also implements `DnsProxiedOrigin` (see
+[Moving a proxied record's origin](#moving-a-proxied-records-origin)).
 
 The instance half is `zoneFor()`, `listRecords()`, `createRecord()`,
 `updateRecord()`, `deleteRecord()`, and optionally `createZone()`,

@@ -37,10 +37,37 @@
  * state it moves to before the next, and holds an advisory lock so two movers
  * never race. A crash between calls resumes where it stood.
  *
- * Switching over (steps 7-10) is not here: it arrives with the first way to
- * move a site's address (WP7a). Its two pieces that are not about the address
- * are built: the node-id word (take_node_id) and the row swap (SiteCopySwap).
+ * Switching over (steps 7-10, WP7a), from a dormant copy, each phase a run of
+ * steps like a copy run:
  *
+ *   begin_switch()  the owner's press, with a DNS token: every record naming
+ *                   the source's address must be proxied (ProxiedOriginMove::
+ *                   plan, read-only), then the source's row goes to
+ *                   `switching` and the final copy runs (freezing): site_quiet
+ *                   on, one more backup run, copy_vouch on the source (a
+ *                   signature, no secret: the frozen site's owner cannot reach
+ *                   an approval page, site_copy.md B44), copy_take_vouch,
+ *                   copy_stage, copy_restore, and both censuses, which must
+ *                   match exactly. Then `ready`.
+ *   move_address()  the owner's press, with the token again: the proxied
+ *                   records move to the copy, and the copy's own answer
+ *                   through the proxy proves it; unproven, they move back.
+ *                   Then (starting) take_node_id, which the management node
+ *                   answers with the row swap, and site_quiet off on the node
+ *                   that is now the copy's machine. Then `switched`.
+ *   go_back()       from any of these, and after the switch: the records move
+ *                   back (token) if they moved; after the swap, the copy's
+ *                   machine is quieted while it is still the node, the rows
+ *                   are swapped back, and the copy is discarded (its agent now
+ *                   answers as a node whose row holds another key); then the
+ *                   source runs again.
+ *   finish()        the owner keeps the switch: the retired row leaves the
+ *                   dashboard and its server is named for deleting.
+ *
+ * Nothing here holds a DNS credential: each press builds the driver from what
+ * the owner typed, and it is gone when the request ends.
+ *
+ * @version 1.4 - the switch-over and the way back by a proxied origin change (site_copy.md WP7a)
  * @version 1.3 - discard cancels the step job it was on (site_copy.md B42)
  * @version 1.2 - a passed step queues the next in the same call, and job_finished() advances a copy when its
  *                 step's result arrives: a run took two task ticks per step (site_copy.md B40)
@@ -63,12 +90,17 @@ class SiteCopyRunner {
 	 * The export holds the source owner's approval window inside its claim.
 	 */
 	const STEP_WAIT_MINUTES = array(
-		'host_report'  => 20,
-		'copy_export'  => 90,
-		'copy_import'  => 20,
-		'copy_stage'   => 160,
-		'copy_restore' => 160,
-		'site_census'  => 30,
+		'host_report'     => 20,
+		'copy_export'     => 90,
+		'copy_import'     => 20,
+		'copy_stage'      => 160,
+		'copy_restore'    => 160,
+		'site_census'     => 30,
+		'site_quiet'      => 25,
+		'backup_run'      => 270,
+		'copy_vouch'      => 20,
+		'copy_take_vouch' => 20,
+		'take_node_id'    => 20,
 	);
 
 	/** The steps of one run, in order. */
@@ -81,6 +113,34 @@ class SiteCopyRunner {
 		array('op' => 'site_census',  'on' => 'source'),
 		array('op' => 'site_census',  'on' => 'copy'),
 	);
+
+	/** The words a switch-over asks of the source, beyond a copy's. */
+	const SWITCH_SOURCE_WORDS = array('site_quiet', 'backup_run', 'copy_vouch', 'site_census');
+
+	/** The words a switch-over asks of the copy, beyond a copy's. */
+	const SWITCH_COPY_WORDS = array('copy_take_vouch', 'copy_stage', 'copy_restore', 'site_census', 'take_node_id', 'site_quiet');
+
+	/**
+	 * The final copy: the source frozen, one more backup run that extends the
+	 * copy's chain, the source's vouch for it, and the copy brought to it.
+	 */
+	const FREEZE_STEPS = array(
+		array('op' => 'site_quiet',      'on' => 'source', 'arg' => 'on'),
+		array('op' => 'backup_run',      'on' => 'source'),
+		array('op' => 'copy_vouch',      'on' => 'source'),
+		array('op' => 'copy_take_vouch', 'on' => 'copy'),
+		array('op' => 'copy_stage',      'on' => 'copy'),
+		array('op' => 'copy_restore',    'on' => 'copy'),
+		array('op' => 'site_census',     'on' => 'source'),
+		array('op' => 'site_census',     'on' => 'copy'),
+	);
+
+	/**
+	 * The final backup run's chain policy: the longest interval the agent
+	 * takes, so the run extends the chain the copy holds the key for rather
+	 * than starting a new one by age.
+	 */
+	const FINAL_RUN_FULL_INTERVAL_DAYS = 365;
 
 	/** The advisory lock every mover takes. */
 	const LOCK_KEY = 7720231001;
@@ -444,6 +504,9 @@ class SiteCopyRunner {
 				throw new SiteCopyException('A copy run starts on a dormant or stopped copy; this one is '
 					. strtolower($copy->status_label()) . '.');
 			}
+			if (self::in_switch_over($copy)) {
+				throw new SiteCopyException('This copy is in a switch-over. Go back first.');
+			}
 			if (!self::copy_row($copy, false)) {
 				throw new SiteCopyException('This copy has no server yet. Discard it and start again.');
 			}
@@ -464,6 +527,9 @@ class SiteCopyRunner {
 			$copy->load();
 			if (!$copy->is_live()) {
 				return;
+			}
+			if (self::in_switch_over($copy)) {
+				throw new SiteCopyException('This copy is in a switch-over. Go back, or keep the switch-over, instead.');
 			}
 			// A server being created or installed right now is left to finish:
 			// discarding under it would leave the pipeline making a copy nobody
@@ -499,19 +565,21 @@ class SiteCopyRunner {
 	 * node created the server, else the address the copy's row recorded.
 	 */
 	public static function server_to_delete(SiteCopy $copy): string {
-		$provision = self::provision($copy);
+		// The provision follows its machine through a swap, so the copy row's
+		// is the server on that row; one never joined has only the copy's own.
+		$node = self::copy_row($copy, false);
+		$provision = ($node ? CustomerCloudProvision::latest_for_node((int)$node->key) : null) ?: self::provision($copy);
 		if ($provision && trim((string)$provision->get('cvp_instance_id')) !== '') {
 			return ucfirst((string)$provision->get('cvp_provider')) . ' instance ' . $provision->get('cvp_instance_id')
 				. ' (' . $provision->get('cvp_instance_ip') . ')';
 		}
-		$node = self::copy_row($copy, true);
 		return $node ? 'the server at ' . $node->get('mgn_host') : '';
 	}
 
 	/** Move every live copy along. What the scheduled task calls. */
 	public static function advance_all(): int {
 		$moved = 0;
-		foreach (array(SiteCopy::STATUS_WAITING, SiteCopy::STATUS_COPYING) as $status) {
+		foreach (array_merge(array(SiteCopy::STATUS_WAITING), SiteCopy::MOVING_STATUSES) as $status) {
 			foreach (new MultiSiteCopy(array('status' => $status, 'deleted' => false)) as $copy) {
 				self::advance($copy);
 				$moved++;
@@ -562,10 +630,11 @@ class SiteCopyRunner {
 			self::advance_waiting($copy);
 		}
 		// A run that just began queues its first step now, too.
-		if ($copy->status() === SiteCopy::STATUS_COPYING) {
+		$status = $copy->status();
+		if (in_array($status, SiteCopy::MOVING_STATUSES, true)) {
 			// A passed step is followed at once by queuing the next; the loop
 			// stops at a step that is running, failed, or the run's end.
-			for ($i = 0; $i <= count($copy->steps()) && $copy->status() === SiteCopy::STATUS_COPYING; $i++) {
+			for ($i = 0; $i <= count($copy->steps()) && $copy->status() === $status; $i++) {
 				if (!self::advance_run($copy)) {
 					break;
 				}
@@ -668,6 +737,23 @@ class SiteCopyRunner {
 		}
 		$target = $step['on'] === 'source' ? $source : $node;
 
+		if ($step['op'] === 'go_back') {
+			// The one step with no job: the rows swapped back, here.
+			try {
+				SiteCopySwap::go_back($source, $node);
+			} catch (Exception $e) {
+				self::fail_step($copy, $steps, $pos, $e->getMessage());
+				return false;
+			}
+			$switch = $copy->switch_record();
+			$switch['swapped_back_time'] = gmdate('Y-m-d H:i:s');
+			$copy->set_switch_record($switch);
+			$steps[$pos]['verdict'] = 'passed';
+			$copy->set_steps($steps);
+			$copy->save();
+			return true;
+		}
+
 		if (empty($step['job_id'])) {
 			try {
 				$built = self::build_step($copy, $steps, $step, $source, $node);
@@ -735,6 +821,22 @@ class SiteCopyRunner {
 				return JobCommandBuilder::build_copy_restore($node, array('chain_id' => $chain['chain_id']));
 			case 'site_census':
 				return JobCommandBuilder::build_site_census($step['on'] === 'source' ? $source : $node);
+			case 'site_quiet':
+				return JobCommandBuilder::build_site_quiet($step['on'] === 'source' ? $source : $node, (string)($step['arg'] ?? ''));
+			case 'backup_run':
+				return JobCommandBuilder::build_backup_run($source, array('type' => 'project', 'mode' => 'chain',
+					'full_interval_days' => self::FINAL_RUN_FULL_INTERVAL_DAYS));
+			case 'copy_vouch':
+				return JobCommandBuilder::build_copy_vouch($source, $node, $chain);
+			case 'copy_take_vouch':
+				$made = self::step_job($steps, 'copy_vouch');
+				$vouch = $made ? JobResultProcessor::vouch_of($made) : null;
+				if ($vouch === null) {
+					throw new SiteCopyException('the source made no vouch');
+				}
+				return JobCommandBuilder::build_copy_take_vouch($node, $vouch);
+			case 'take_node_id':
+				return JobCommandBuilder::build_take_node_id($node, $source);
 		}
 		throw new SiteCopyException("unknown step {$op}");
 	}
@@ -779,6 +881,34 @@ class SiteCopyRunner {
 				return null;
 			case 'site_census':
 				return JobResultProcessor::census_of($job) === null ? 'the census could not be taken' : null;
+			case 'backup_run':
+				$r = json_decode((string)$job->get('mjb_result'), true);
+				if (!is_array($r) || !in_array($r['backup_status'] ?? '', array('success', 'warning'), true)) {
+					return 'the final backup did not succeed' . (is_array($r) && !empty($r['message']) ? ': ' . $r['message'] : '');
+				}
+				try {
+					$chain = self::newest_chain($source);
+				} catch (Exception $e) {
+					return $e->getMessage();
+				}
+				if ($chain['chain_id'] !== (string)$copy->get('scp_chain_id')) {
+					return 'the final backup started a new backup chain (' . $chain['chain_id'] . ') instead of extending '
+						. $copy->get('scp_chain_id') . ', and the copy holds the key only for that one. Go back, copy '
+						. 'again, then switch over again';
+				}
+				$copy->set('scp_chain_time', $chain['time']);
+				return null;
+			case 'copy_vouch':
+				$r = json_decode((string)$job->get('mjb_result'), true);
+				if (JobResultProcessor::vouch_of($job) === null) {
+					return 'the source made no vouch';
+				}
+				return (string)($r['chain_id'] ?? '') === (string)$copy->get('scp_chain_id') ? null
+					: 'the source vouched for chain ' . ($r['chain_id'] ?? '?') . ', not the copy\'s ' . $copy->get('scp_chain_id');
+			case 'take_node_id':
+				$r = json_decode((string)$job->get('mjb_result'), true);
+				return (is_array($r) && !empty($r['taken'])) ? null
+					: 'the copy did not take the site\'s node id' . (is_array($r) && !empty($r['reason']) ? ': ' . $r['reason'] : '');
 		}
 		return null;
 	}
@@ -820,8 +950,25 @@ class SiteCopyRunner {
 		return (int)$chain['bytes'] + 2 * (int)$chain['files'] + 6 * (int)$chain['db'] + self::DISK_HEADROOM;
 	}
 
-	/** The last step passed: compare the two censuses, informationally. */
+	/**
+	 * The last step passed. A copy run compares the two censuses
+	 * informationally; the final copy requires them equal; the start and the
+	 * way back each end their phase.
+	 */
 	private static function finish_run(SiteCopy $copy, array $steps): void {
+		if ($copy->status() === SiteCopy::STATUS_STARTING) {
+			$switch = $copy->switch_record();
+			$switch['switched_time'] = gmdate('Y-m-d H:i:s');
+			$copy->set_switch_record($switch);
+			$copy->set('scp_status', SiteCopy::STATUS_SWITCHED);
+			$copy->save();
+			return;
+		}
+		if ($copy->status() === SiteCopy::STATUS_RETURNING) {
+			self::finish_return($copy);
+			return;
+		}
+		$final = $copy->status() === SiteCopy::STATUS_FREEZING;
 		$s_job = self::step_job($steps, 'site_census', 'source');
 		$c_job = self::step_job($steps, 'site_census', 'copy');
 		$s = $s_job ? JobResultProcessor::census_of($s_job) : null;
@@ -830,15 +977,366 @@ class SiteCopyRunner {
 			self::halt($copy, 'The census of one side is missing.');
 			return;
 		}
-		$verdict = SiteCensus::compare($s, $c, false);
+		$verdict = SiteCensus::compare($s, $c, $final);
 		$copy->set('scp_census', $verdict);
 		if ((int)$verdict['blocking'] > 0) {
-			self::halt($copy, 'The census found ' . (int)$verdict['blocking']
-				. ' difference(s) the source being live does not explain. See the comparison below.');
+			self::halt($copy, $final
+				? 'The final census found ' . (int)$verdict['blocking'] . ' difference(s) between the frozen site and the '
+					. 'copy, so nothing moves. See the comparison below. Go back to start the site again.'
+				: 'The census found ' . (int)$verdict['blocking']
+					. ' difference(s) the source being live does not explain. See the comparison below.');
+			return;
+		}
+		if ($final) {
+			$switch = $copy->switch_record();
+			$switch['final_copied_time'] = gmdate('Y-m-d H:i:s');
+			$copy->set_switch_record($switch);
+			$copy->set('scp_status', SiteCopy::STATUS_READY);
+			$copy->set('scp_last_copied_time', gmdate('Y-m-d H:i:s'));
+			$copy->save();
 			return;
 		}
 		$copy->set('scp_status', SiteCopy::STATUS_DORMANT);
 		$copy->set('scp_last_copied_time', gmdate('Y-m-d H:i:s'));
+		$copy->save();
+	}
+
+	// ── Switching over (WP7a) ─────────────────────────────────────────────
+
+	/** Is this copy in a switch-over: started, under way, or done with the way back open? */
+	public static function in_switch_over(SiteCopy $copy): bool {
+		if (in_array($copy->status(), array(SiteCopy::STATUS_FREEZING, SiteCopy::STATUS_READY, SiteCopy::STATUS_STARTING,
+				SiteCopy::STATUS_SWITCHED, SiteCopy::STATUS_RETURNING), true)) {
+			return true;
+		}
+		$node = self::copy_row($copy, true);
+		if ($node && trim((string)$node->get('mgn_install_state')) === 'retired') {
+			return true;
+		}
+		try {
+			return trim((string)self::source_row($copy)->get('mgn_install_state')) === 'switching';
+		} catch (Exception $e) {
+			return false;
+		}
+	}
+
+	/**
+	 * Why this copy cannot switch over now: one line per reason, empty when it
+	 * can. Read-only; the DNS records are checked on the press, with the token.
+	 */
+	public static function switch_refusals(SiteCopy $copy): array {
+		if ($copy->status() !== SiteCopy::STATUS_DORMANT) {
+			return array('A switch-over starts from a dormant copy that is current; this one is '
+				. strtolower($copy->status_label()) . '.');
+		}
+		try {
+			$source = self::source_row($copy);
+		} catch (Exception $e) {
+			return array($e->getMessage());
+		}
+		$node = self::copy_row($copy, true);
+		if (!$node || trim((string)$node->get('mgn_install_state')) !== 'copy' || trim((string)$node->get('mgn_agent_public_key')) === '') {
+			return array('The copy\'s node record is gone or is no longer a dormant copy.');
+		}
+		$why = self::source_refusals($source, false);
+		$missing = array_values(array_filter(self::SWITCH_SOURCE_WORDS, function ($w) use ($source) {
+			return !JobCommandBuilder::has_primitive($source, $w);
+		}));
+		if ($missing) {
+			$why[] = 'The site: ' . AgentVocabulary::needs_newer_agent_text($source, $missing);
+		}
+		$missing = array_values(array_filter(self::SWITCH_COPY_WORDS, function ($w) use ($node) {
+			return !JobCommandBuilder::has_primitive($node, $w);
+		}));
+		if ($missing) {
+			$why[] = 'The copy: ' . AgentVocabulary::needs_newer_agent_text($node, $missing);
+		}
+		if ((string)$source->get('mgn_joinery_version') !== (string)$copy->get('scp_release')) {
+			$why[] = 'The site now runs release ' . $source->get('mgn_joinery_version') . ', and the copy was installed at '
+				. $copy->get('scp_release') . '. Discard the copy and copy again.';
+		}
+		if (!preg_match('#^/\.joinery-look/[0-9a-f]{32}$#', (string)$copy->get('scp_look_path'))) {
+			$why[] = 'The copy reported no look path. The switch-over asks for it through the proxy, because only the '
+				. 'copy answers it, to prove the proxy reaches the copy. Copy again.';
+		}
+		if (!$why) {
+			try {
+				$chain = self::newest_chain($source);
+				if ($chain['chain_id'] !== (string)$copy->get('scp_chain_id')) {
+					$why[] = 'The site\'s newest backup is in chain ' . $chain['chain_id'] . ', and the copy holds the key for '
+						. $copy->get('scp_chain_id') . '. Copy again first.';
+				}
+			} catch (Exception $e) {
+				$why[] = $e->getMessage();
+			}
+		}
+		return $why;
+	}
+
+	/**
+	 * Switch over: check the records with the owner's DNS token (read-only),
+	 * then freeze the site and run the final copy. The token is not kept; the
+	 * address moves on a second press, with the token again.
+	 */
+	public static function begin_switch(SiteCopy $copy, DnsProvider $driver, $user_id): void {
+		if (!self::lock()) {
+			throw new SiteCopyException('This copy is being moved along right now; try again in a moment.');
+		}
+		try {
+			$copy->load();
+			$why = self::switch_refusals($copy);
+			if ($why) {
+				throw new SiteCopyException('This copy cannot switch over yet: ' . implode(' ', $why));
+			}
+			$source = self::source_row($copy);
+			$node = self::copy_row($copy, true);
+			try {
+				$plan = ProxiedOriginMove::plan($driver, self::site_domain($source), $source, $node);
+			} catch (Exception $e) {
+				throw new SiteCopyException('Nothing was frozen: the address cannot be moved through the proxy. ' . $e->getMessage());
+			}
+			$source->set('mgn_install_state', 'switching');
+			$source->save();
+			$copy->set_switch_record(array(
+				'method'      => 'proxied_origin',
+				'provider'    => $driver::getKey(),
+				'zone'        => $plan['zone'],
+				'records'     => $plan['records'],
+				'address_at'  => 'source',
+				'frozen_time' => gmdate('Y-m-d H:i:s'),
+				'started_by'  => $user_id ? (int)$user_id : null,
+			));
+			$copy->set('scp_census', null);
+			self::lay_steps($copy, self::FREEZE_STEPS, SiteCopy::STATUS_FREEZING, 'freeze');
+			self::advance_locked($copy);
+		} finally {
+			self::unlock();
+		}
+	}
+
+	/** Step 10's two jobs: the node id, then the copy starts as the site. */
+	private static function start_steps(?ManagedNode $node): array {
+		$steps = array();
+		if (!$node || trim((string)$node->get('mgn_install_state')) !== 'retired') {
+			$steps[] = array('op' => 'take_node_id', 'on' => 'copy');
+		}
+		$steps[] = array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'off');
+		return $steps;
+	}
+
+	/**
+	 * Move the address (step 9) with the owner's DNS token, prove the proxy
+	 * reaches the copy, and start it (step 10). Unproven, the records move
+	 * back and the site stays frozen.
+	 */
+	public static function move_address(SiteCopy $copy, DnsProvider $driver, $user_id): void {
+		if (!self::lock()) {
+			throw new SiteCopyException('This copy is being moved along right now; try again in a moment.');
+		}
+		try {
+			$copy->load();
+			if ($copy->status() !== SiteCopy::STATUS_READY) {
+				throw new SiteCopyException('The address moves once the final copy has matched; this copy is '
+					. strtolower($copy->status_label()) . '.');
+			}
+			$source = self::source_row($copy);
+			$node = self::copy_row($copy, true);
+			if (trim((string)$source->get('mgn_install_state')) !== 'switching' || !$node
+					|| trim((string)$node->get('mgn_install_state')) !== 'copy') {
+				throw new SiteCopyException('The site and its copy are not as the final copy left them; go back.');
+			}
+			$domain = self::site_domain($source);
+			try {
+				$plan = ProxiedOriginMove::plan($driver, $domain, $source, $node);
+				ProxiedOriginMove::move($driver, $plan);
+			} catch (Exception $e) {
+				throw new SiteCopyException('The address did not move. ' . $e->getMessage());
+			}
+			// Recorded before the proof, so a request that dies here leaves the
+			// page knowing where the address points.
+			$switch = $copy->switch_record();
+			$switch['zone'] = $plan['zone'];
+			$switch['records'] = $plan['records'];
+			$switch['address_at'] = 'copy';
+			$switch['moved_time'] = gmdate('Y-m-d H:i:s');
+			$copy->set_switch_record($switch);
+			$copy->save();
+
+			$proof = ProxiedOriginMove::prove($domain, (string)$copy->get('scp_look_path'));
+			$switch['proof'] = $proof;
+			if (!$proof['proven']) {
+				try {
+					$left = ProxiedOriginMove::move_back($driver, $plan);
+				} catch (Exception $e) {
+					$copy->set_switch_record($switch);
+					$copy->save();
+					throw new SiteCopyException('The proxy did not reach the copy within ' . $proof['seconds'] . ' seconds (last '
+						. 'answer: ' . $proof['last'] . '), and moving the address back failed: ' . $e->getMessage()
+						. ' Visitors reach the copy, which is not open. Go back, with the token, to put the address back.');
+				}
+				$switch['address_at'] = 'source';
+				$switch['moved_back_time'] = gmdate('Y-m-d H:i:s');
+				$copy->set_switch_record($switch);
+				$copy->save();
+				throw new SiteCopyException('The proxy did not reach the copy within ' . $proof['seconds'] . ' seconds (last '
+					. 'answer: ' . $proof['last'] . '), so the address was moved back. The site is still frozen: try again, '
+					. 'or go back.' . ($left ? ' ' . implode(' ', $left) : ''));
+			}
+			$copy->set_switch_record($switch);
+			self::lay_steps($copy, self::start_steps($node), SiteCopy::STATUS_STARTING, 'start');
+			self::advance_locked($copy);
+		} finally {
+			self::unlock();
+		}
+	}
+
+	/** Start the copy again after its start stopped: what of step 10 is left. */
+	public static function retry_start(SiteCopy $copy): void {
+		if (!self::lock()) {
+			throw new SiteCopyException('This copy is being moved along right now; try again in a moment.');
+		}
+		try {
+			$copy->load();
+			$switch = $copy->switch_record();
+			if ($copy->status() !== SiteCopy::STATUS_HALTED || ($switch['phase'] ?? '') !== 'start'
+					|| ($switch['address_at'] ?? '') !== 'copy') {
+				throw new SiteCopyException('Only a start that stopped, with the address at the copy, is tried again.');
+			}
+			self::lay_steps($copy, self::start_steps(self::copy_row($copy, true)), SiteCopy::STATUS_STARTING, 'start');
+			self::advance_locked($copy);
+		} finally {
+			self::unlock();
+		}
+	}
+
+	/**
+	 * The way back, from anywhere in a switch-over: the address back to the
+	 * site's server (with the owner's token, when it moved), and the site
+	 * running there again. After the swap the copy's machine is quieted while
+	 * it is still the node, then the rows swap back, and the copy is
+	 * discarded: its agent answers as a node whose row holds another key.
+	 * Anything written on the copy since it started stays there.
+	 */
+	public static function go_back(SiteCopy $copy, ?DnsProvider $driver): void {
+		if (!self::lock()) {
+			throw new SiteCopyException('This copy is being moved along right now; try again in a moment.');
+		}
+		try {
+			$copy->load();
+			if ($copy->status() === SiteCopy::STATUS_RETURNING) {
+				throw new SiteCopyException('It is already going back.');
+			}
+			$source = self::source_row($copy);
+			$node = self::copy_row($copy, true);
+			$swapped = $node && trim((string)$node->get('mgn_install_state')) === 'retired';
+			if (!$swapped && trim((string)$source->get('mgn_install_state')) !== 'switching') {
+				throw new SiteCopyException('There is nothing to go back from: the site runs on its own server.');
+			}
+			$switch = $copy->switch_record();
+			if (($switch['address_at'] ?? 'source') === 'copy') {
+				if (!$driver) {
+					throw new SiteCopyException('The address points at the copy, and going back moves it back: enter the DNS token.');
+				}
+				try {
+					$left = ProxiedOriginMove::move_back($driver, array('zone' => $switch['zone'] ?? '', 'records' => $switch['records'] ?? array()));
+				} catch (Exception $e) {
+					throw new SiteCopyException('The address did not move back, and nothing else was done. ' . $e->getMessage());
+				}
+				$switch['address_at'] = 'source';
+				$switch['moved_back_time'] = gmdate('Y-m-d H:i:s');
+				$switch['moved_back_notes'] = $left;
+			}
+			$copy->set_switch_record($switch);
+			self::cancel_open_steps($copy->steps());
+			$template = $swapped
+				? array(
+					array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'on'),
+					array('op' => 'go_back',    'on' => 'source'),
+					array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'off'),
+				)
+				: array(array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'off'));
+			self::lay_steps($copy, $template, SiteCopy::STATUS_RETURNING, 'return');
+			self::advance_locked($copy);
+		} finally {
+			self::unlock();
+		}
+	}
+
+	/** The way back's last step passed: the site runs on its own server again. */
+	private static function finish_return(SiteCopy $copy): void {
+		try {
+			$source = self::source_row($copy);
+		} catch (Exception $e) {
+			self::halt($copy, $e->getMessage());
+			return;
+		}
+		if (trim((string)$source->get('mgn_install_state')) === 'switching') {
+			$source->set('mgn_install_state', null);
+			$source->save();
+		}
+		$switch = $copy->switch_record();
+		$switch['returned_time'] = gmdate('Y-m-d H:i:s');
+		$copy->set_switch_record($switch);
+		if (!empty($switch['swapped_back_time'])) {
+			// The copy's agent took the site's node id; its row holds its own
+			// key again, so it can no longer reach this management node.
+			$node = self::copy_row($copy, true);
+			if ($node) {
+				$node->soft_delete();
+			}
+			$copy->set('scp_status', SiteCopy::STATUS_DISCARDED);
+			$copy->save();
+			return;
+		}
+		if (!empty($switch['final_copied_time'])) {
+			$copy->set('scp_status', SiteCopy::STATUS_DORMANT);
+			$copy->save();
+			return;
+		}
+		self::halt($copy, 'Went back before the final copy finished. The site runs as before; copy again before switching over.');
+	}
+
+	/**
+	 * Keep the switch-over: the retired row (the old server) leaves the
+	 * dashboard and the way back closes. The old server is the owner's to
+	 * delete at its provider; this names it.
+	 */
+	public static function finish(SiteCopy $copy): string {
+		if (!self::lock()) {
+			throw new SiteCopyException('This copy is being moved along right now; try again in a moment.');
+		}
+		try {
+			$copy->load();
+			if ($copy->status() !== SiteCopy::STATUS_SWITCHED) {
+				throw new SiteCopyException('Only a finished switch-over is kept; this copy is ' . strtolower($copy->status_label()) . '.');
+			}
+			$server = self::server_to_delete($copy);
+			$node = self::copy_row($copy, true);
+			if ($node && trim((string)$node->get('mgn_install_state')) === 'retired') {
+				$node->soft_delete();
+			}
+			$copy->set('scp_status', SiteCopy::STATUS_FINISHED);
+			$copy->save();
+			return $server;
+		} finally {
+			self::unlock();
+		}
+	}
+
+	/** Lay out a phase's steps and enter its status. */
+	private static function lay_steps(SiteCopy $copy, array $template, string $status, string $phase): void {
+		$steps = array();
+		foreach ($template as $s) {
+			$steps[] = array('op' => $s['op'], 'on' => $s['on'], 'arg' => $s['arg'] ?? '', 'job_id' => null,
+				'verdict' => 'pending', 'reason' => '');
+		}
+		$switch = $copy->switch_record();
+		$switch['phase'] = $phase;
+		$copy->set_switch_record($switch);
+		$copy->set_steps($steps);
+		$copy->set('scp_halt_reason', null);
+		$copy->set('scp_run_started_time', gmdate('Y-m-d H:i:s'));
+		$copy->set('scp_status', $status);
 		$copy->save();
 	}
 
@@ -848,7 +1346,7 @@ class SiteCopyRunner {
 		$steps[$pos]['verdict'] = 'failed';
 		$steps[$pos]['reason'] = mb_substr($why, 0, 500);
 		$copy->set_steps(self::skip_pending($steps));
-		$label = $steps[$pos]['op'] . ' on the ' . $steps[$pos]['on'];
+		$label = $steps[$pos]['op'] . (!empty($steps[$pos]['arg']) ? ' ' . $steps[$pos]['arg'] : '') . ' on the ' . $steps[$pos]['on'];
 		self::halt($copy, $label . ': ' . $why);
 	}
 

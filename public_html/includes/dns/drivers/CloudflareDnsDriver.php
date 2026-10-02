@@ -14,22 +14,28 @@
  *    and hiding the real address from the SSL gate waiting on it. The write
  *    succeeds and the wrong thing resolves, which is exactly the silent failure
  *    this subsystem exists to end. Every record this driver writes is forced to
- *    DNS-only; proxying is not something a plan can opt into.
+ *    DNS-only; proxying is not something a plan can opt into. The one write
+ *    that keeps a record proxied is setProxiedOrigin() (DnsProxiedOrigin),
+ *    which changes only the address behind an already proxied record: a site
+ *    copy's switch-over moving its site to the new server.
  *  - **Email Routing owns MX** (and its own DKIM record). Cloudflare refuses
  *    writes to them while the feature is on. That refusal is reported by name —
  *    disable Email Routing in the Cloudflare dashboard — rather than as a
  *    generic API failure.
  *
+ * @version 1.4 - DnsProxiedOrigin: listed address records say whether they are proxied, and setProxiedOrigin()
+ *                 points a proxied record at another address (site copy switch-over)
  * @version 1.3 - the token field carries no help line; the guide behind its link holds the instructions
  * @version 1.2 - zoneNameservers() reads the account's assigned pair from the zone listing
  * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/dns/DnsDriverBase.php'));
+require_once(PathHelper::getIncludePath('includes/dns/DnsProxiedOrigin.php'));
 
 use GuzzleHttp\Exception\RequestException;
 
-class CloudflareDnsDriver extends DnsDriverBase {
+class CloudflareDnsDriver extends DnsDriverBase implements DnsProxiedOrigin {
 
 	const API_BASE = 'https://api.cloudflare.com/client/v4/';
 
@@ -126,6 +132,25 @@ class CloudflareDnsDriver extends DnsDriverBase {
 			. rawurlencode($live->provider_id), array('json' => $this->toApi($desired)));
 	}
 
+	public function setProxiedOrigin(string $zone, DnsRecord $live, string $address): void {
+		if (!in_array($live->type, array(DnsRecord::TYPE_A, DnsRecord::TYPE_AAAA), true) || $live->proxied !== true) {
+			throw new DnsProviderException('Cannot move ' . $live->describe() . ': only a proxied A or AAAA record '
+				. 'has an origin to move.');
+		}
+		$family = ($live->type === DnsRecord::TYPE_A) ? FILTER_FLAG_IPV4 : FILTER_FLAG_IPV6;
+		if (filter_var($address, FILTER_VALIDATE_IP, $family) === false) {
+			throw new DnsProviderException('Cannot point ' . $live->describe() . ' at ' . $address
+				. ': not an address of the record\'s family.');
+		}
+		if ($live->provider_id === '') {
+			throw new DnsProviderException('Cannot move ' . $live->describe() . ': no Cloudflare record id.');
+		}
+		// PATCH, with the content alone: the proxy, the TTL and the name stay
+		// as the zone's owner set them.
+		$this->request('PATCH', self::API_BASE . 'zones/' . $this->zoneId($zone) . '/dns_records/'
+			. rawurlencode($live->provider_id), array('json' => array('content' => $address)));
+	}
+
 	public function deleteRecord(string $zone, DnsRecord $live): void {
 		if ($live->provider_id === '') {
 			throw new DnsProviderException('Cannot delete ' . $live->describe() . ': no Cloudflare record id.');
@@ -200,6 +225,9 @@ class CloudflareDnsDriver extends DnsDriverBase {
 			$type === DnsRecord::TYPE_MX ? (int)($row['priority'] ?? 0) : null
 		);
 		$record->provider_id = (string)($row['id'] ?? '');
+		if (in_array($type, array(DnsRecord::TYPE_A, DnsRecord::TYPE_AAAA, DnsRecord::TYPE_CNAME), true)) {
+			$record->proxied = !empty($row['proxied']);
+		}
 		return $record;
 	}
 

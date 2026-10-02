@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.32 - a take_node_id result's swap is made before the site copy it belongs to moves on, so the
+ *                 switch-over judges the step by the swap (site_copy.md WP7a)
  * @version 1.31 - job_status: a node waiting for its operator's approval asks whether the job is still
  *                 wanted, and stops waiting when it was cancelled here (site_copy.md B42)
  * @version 1.30 - a site copy's step result advances its copy at once (SiteCopyRunner::job_finished; site_copy.md B40)
@@ -1330,23 +1332,22 @@ class AgentChannelEndpoint {
 		$job = self::load_running_job((int)$in['job_id'], (int)$node->key);
 		self::record_result($node, $job, $in);
 
-		// A site copy's step: its run moves on now, not at the next task tick.
-		$job->load();
-		SiteCopyRunner::job_finished($job);
-
 		// A copy's take_node_id result is answered with the swap, or without
 		// it: the copy takes its source's node id only when this answer says
 		// node_id_taken (specs/site_copy.md D4). The swap is made here and
 		// nowhere else, because only here does the copy hear about it.
+		$taken = 0;
 		if ((string)$job->get('mjb_job_type') === 'take_node_id' && $in['status'] === 'completed') {
 			$job->load();
 			$taken = JobResultProcessor::complete_take_node_id($job);
-			if ($taken > 0) {
-				api_success(['recorded' => true, 'node_id_taken' => $taken], '', 200);
-			}
 		}
 
-		api_success(['recorded' => true], '', 200);
+		// A site copy's step: its run moves on now, not at the next task tick.
+		// After the swap, so a switch-over judges take_node_id by what it did.
+		$job->load();
+		SiteCopyRunner::job_finished($job);
+
+		api_success($taken > 0 ? ['recorded' => true, 'node_id_taken' => $taken] : ['recorded' => true], '', 200);
 	}
 
 	/**

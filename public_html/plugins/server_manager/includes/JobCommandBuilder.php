@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.88 - build_copy_vouch / build_copy_take_vouch (agent 1.53.0): the switch-over's final copy is a
+ *                 signed vouch for the newest manifest, no secret and no approval (site_copy.md B44)
  * @version 1.87 - Clone is retired (site_copy.md WP9): build_clone_export_arm, mint_clone_export_key and
  *                 build_install_node's from_backup mode are gone; a site on a new machine is a site copy
  * @version 1.86 - site copy WP8: build_install_node mode 'copy' (a dormant install at the source's release, fetched
@@ -2207,6 +2209,55 @@ class JobCommandBuilder {
 			throw new Exception('An import needs the bundle the source exported, as it was returned.');
 		}
 		return ['primitive' => 'copy_import', 'params' => ['bundle' => $bundle]];
+	}
+
+	/**
+	 * The switch-over's final copy, on the frozen source (specs/site_copy.md
+	 * B44): sign the newest manifest of the chain its copy already holds the
+	 * key for, for the copy's agent key. A vouch carries no secret, so the
+	 * source asks its owner nothing; it runs only under quiet switchover.
+	 *
+	 * $params: chain_id (required), profile (manager by default).
+	 */
+	public static function build_copy_vouch($node, $copy, $params) {
+		if (!self::has_primitive($node, 'copy_vouch')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot vouch for its final backup to a copy. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['copy_vouch']));
+		}
+		return self::build_copy_vouch_primitive($node, $copy, $params);
+	}
+
+	public static function build_copy_vouch_primitive($node, $copy = null, $params = []) {
+		// The same target and chain an export names: the checks are the export's.
+		$export = self::build_copy_export_primitive($node, $copy, $params);
+		return ['primitive' => 'copy_vouch', 'params' => $export['params']];
+	}
+
+	/**
+	 * Give a dormant copy the vouch its frozen source's copy_vouch returned.
+	 * The copy checks the source's signature by the key its install recorded,
+	 * that the vouch is for its own key, newer than anything it took, and for
+	 * a chain whose key an approved export already gave it.
+	 */
+	public static function build_copy_take_vouch($node, $vouch) {
+		if (!self::has_primitive($node, 'copy_take_vouch')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot take its source's final vouch. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['copy_take_vouch']));
+		}
+		return self::build_copy_take_vouch_primitive($node, $vouch);
+	}
+
+	/** The largest vouch a copy takes: the agent's copyVouchMaxWire. */
+	const COPY_VOUCH_MAX = 4096;
+
+	public static function build_copy_take_vouch_primitive($node, $vouch = '') {
+		$vouch = (string)$vouch;
+		if ($vouch === '' || strlen($vouch) > self::COPY_VOUCH_MAX) {
+			throw new Exception('Taking a vouch needs the vouch the source returned, as it was returned.');
+		}
+		return ['primitive' => 'copy_take_vouch', 'params' => ['vouch' => $vouch]];
 	}
 
 	/**

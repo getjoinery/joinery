@@ -23,6 +23,23 @@
  *   halted     - the last run stopped, and why is in scp_halt_reason
  *   discarded  - the owner discarded the copy; its server is theirs to delete
  *
+ * and the switch-over's (WP7a), each a run of steps like a copy run:
+ *   freezing   - the source is frozen and the final copy runs
+ *   ready      - the final copy matched exactly; the source is still frozen,
+ *                waiting for the owner to move the address
+ *   starting   - the address points at the copy; it takes the source's node
+ *                id and starts as the site
+ *   switched   - the copy is the site; the way back is still open
+ *   returning  - going back: the source is being started again
+ *   finished   - the owner kept the switch-over; the old server is theirs to
+ *                delete
+ *
+ * scp_switch is the switch-over's record: the phase it is in or stopped in
+ * (freeze, start, return), how the address moves, the zone and each record
+ * moved (id, type, name, from, to), and when it was frozen, moved, proven and
+ * moved back.
+ *
+ * @version 1.1 - the switch-over's statuses and scp_switch (site_copy.md WP7a)
  * @version 1.0
  */
 
@@ -33,13 +50,22 @@ class SiteCopy extends SystemBase {
 	public static $tablename = 'scp_site_copies';
 	public static $pkey_column = 'scp_site_copy_id';
 
-	public static $json_vars = array('scp_steps', 'scp_census');
+	public static $json_vars = array('scp_steps', 'scp_census', 'scp_switch');
 
 	const STATUS_WAITING   = 'waiting';
 	const STATUS_COPYING   = 'copying';
 	const STATUS_DORMANT   = 'dormant';
 	const STATUS_HALTED    = 'halted';
 	const STATUS_DISCARDED = 'discarded';
+	const STATUS_FREEZING  = 'freezing';
+	const STATUS_READY     = 'ready';
+	const STATUS_STARTING  = 'starting';
+	const STATUS_SWITCHED  = 'switched';
+	const STATUS_RETURNING = 'returning';
+	const STATUS_FINISHED  = 'finished';
+
+	/** The statuses in which a run of steps is moving. */
+	const MOVING_STATUSES = array(self::STATUS_COPYING, self::STATUS_FREEZING, self::STATUS_STARTING, self::STATUS_RETURNING);
 
 	/** The words each status shows. */
 	const STATUS_LABELS = array(
@@ -48,6 +74,12 @@ class SiteCopy extends SystemBase {
 		self::STATUS_DORMANT   => 'Dormant copy, current',
 		self::STATUS_HALTED    => 'Stopped',
 		self::STATUS_DISCARDED => 'Discarded',
+		self::STATUS_FREEZING  => 'Switching over: the final copy',
+		self::STATUS_READY     => 'Switching over: ready to move the address',
+		self::STATUS_STARTING  => 'Switching over: starting the copy as the site',
+		self::STATUS_SWITCHED  => 'Switched over',
+		self::STATUS_RETURNING => 'Going back',
+		self::STATUS_FINISHED  => 'Switch-over finished',
 	);
 
 	public static $field_specifications = array(
@@ -69,6 +101,8 @@ class SiteCopy extends SystemBase {
 		// The path that sets the copy's look cookie, as its import reported it.
 		'scp_look_path'          => array('type'=>'varchar(64)'),
 		'scp_halt_reason'        => array('type'=>'text'),
+		// The switch-over's record (see the header).
+		'scp_switch'             => array('type'=>'jsonb'),
 		'scp_run_started_time'   => array('type'=>'timestamp(6)'),
 		'scp_last_copied_time'   => array('type'=>'timestamp(6)'),
 		'scp_created_by'         => array('type'=>'int8'),
@@ -106,6 +140,19 @@ class SiteCopy extends SystemBase {
 		return is_array($c) ? $c : null;
 	}
 
+	/** The switch-over's record, or an empty array before one starts. */
+	public function switch_record(): array {
+		$s = $this->get('scp_switch');
+		if (is_string($s)) {
+			$s = json_decode($s, true);
+		}
+		return is_array($s) ? $s : array();
+	}
+
+	public function set_switch_record(array $record): void {
+		$this->set('scp_switch', $record);
+	}
+
 	public function status(): string {
 		return (string)$this->get('scp_status');
 	}
@@ -114,9 +161,10 @@ class SiteCopy extends SystemBase {
 		return self::STATUS_LABELS[$this->status()] ?? $this->status();
 	}
 
-	/** Whether this copy is still the source's copy (anything but discarded). */
+	/** Whether this copy is still the source's copy (anything but discarded or finished). */
 	public function is_live(): bool {
-		return $this->status() !== self::STATUS_DISCARDED && !$this->get('scp_delete_time');
+		return !in_array($this->status(), array(self::STATUS_DISCARDED, self::STATUS_FINISHED), true)
+			&& !$this->get('scp_delete_time');
 	}
 
 	/** The source's live copy, or null. There is at most one. */
@@ -126,6 +174,19 @@ class SiteCopy extends SystemBase {
 			if ($c->is_live()) {
 				return $c;
 			}
+		}
+		return null;
+	}
+
+	/**
+	 * The source's most recent copy that ended (discarded, or a switch-over
+	 * kept) within $days, or null: its server is still the owner's to delete.
+	 */
+	public static function recently_ended_for_source(int $source_id, int $days = 7): ?SiteCopy {
+		foreach (new MultiSiteCopy(array('source_node_id' => $source_id, 'deleted' => false),
+				array('scp_update_time' => 'DESC'), 1) as $c) {
+			$when = strtotime((string)$c->get('scp_update_time') . ' UTC');
+			return (!$c->is_live() && $when && time() - $when < $days * 86400) ? $c : null;
 		}
 		return null;
 	}

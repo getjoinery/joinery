@@ -23,6 +23,7 @@
  * is finished is the failure this subsystem exists to end, so absence is part of
  * desired state rather than a hand-edit at the provider.
  *
+ * @version 1.3 - a live address record says whether the provider proxies it ($proxied)
  * @version 1.2 - SRV joins the vocabulary (Joinery Direct's capability record)
  */
 
@@ -80,6 +81,13 @@ class DnsRecord {
 	public $cutover = false;
 	/** @var string Provider-side record id. Only ever set on live records. */
 	public $provider_id = '';
+	/**
+	 * @var bool|null On a live address record at a provider that can proxy one
+	 * (Cloudflare's orange cloud): whether visitors reach the provider's edge
+	 * rather than the address itself. Null where the provider has no proxy.
+	 * Never compared, and never set by a plan: a publish writes DNS-only.
+	 */
+	public $proxied = null;
 	/**
 	 * @var bool True when the plan requires this record NOT to exist. Set only
 	 * by mustBeAbsent(); a record is present-by-default, because a plan that

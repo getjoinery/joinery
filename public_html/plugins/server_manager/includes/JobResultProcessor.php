@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.51 - process_copy_vouch keeps the frozen source's vouch for its copy; vouch_of() reads it back
+ *                 (site_copy.md B44)
  * @version 1.50 - Clone is retired (site_copy.md WP9): process_clone_export_arm and blank_install_clone_key are gone
  * @version 1.49 - process_check_status fills an empty mgn_site_url from the site domain the agent reports
  *                 (ManagedNode::adopt_reported_site_domain; site_copy.md B38)
@@ -2366,6 +2368,40 @@ HTML;
 			'issued'             => substr((string)($data['issued'] ?? ''), 0, 40),
 		]));
 		$job->save();
+	}
+
+	/**
+	 * A copy_vouch job: the frozen source's signed vouch for its newest
+	 * manifest (specs/site_copy.md B44), kept for the copy's copy_take_vouch.
+	 * It carries no secret; the copy refuses it if a byte changed.
+	 */
+	private static function process_copy_vouch($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$vouch = ((string)$job->get('mjb_status') === 'completed' && is_array($data)) ? (string)($data['vouch'] ?? '') : '';
+		if ($vouch === '' || strlen($vouch) > JobCommandBuilder::COPY_VOUCH_MAX) {
+			$job->set('mjb_result', json_encode(['vouched' => false]));
+			$job->save();
+			return;
+		}
+		$job->set('mjb_result', json_encode([
+			'vouched'         => true,
+			'vouch'           => $vouch,
+			'chain_id'        => preg_match('/^chain-[0-9_]{1,58}$/', (string)($data['chain_id'] ?? '')) ? (string)$data['chain_id'] : '',
+			'manifest_sha256' => preg_match('/^[0-9a-f]{64}$/', (string)($data['manifest_sha256'] ?? '')) ? (string)$data['manifest_sha256'] : '',
+			'uploaded'        => substr((string)($data['uploaded'] ?? ''), 0, 40),
+			'issued'          => substr((string)($data['issued'] ?? ''), 0, 40),
+		]));
+		$job->save();
+	}
+
+	/** The vouch a finished copy_vouch job kept, or null when it made none. */
+	public static function vouch_of($job): ?string {
+		if ((string)$job->get('mjb_job_type') !== 'copy_vouch') {
+			return null;
+		}
+		$result = json_decode((string)$job->get('mjb_result'), true);
+		return (is_array($result) && !empty($result['vouched']) && is_string($result['vouch'] ?? null))
+			? $result['vouch'] : null;
 	}
 
 	/**

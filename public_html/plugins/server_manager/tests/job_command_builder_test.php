@@ -2310,6 +2310,45 @@ foreach (array('' => 'an empty bundle', str_repeat('x', JobCommandBuilder::COPY_
 	check($threw, "{$what} is not sent");
 }
 
+// The switch-over's final copy (site_copy.md B44): a vouch, no secret.
+$cp_vouch = JobCommandBuilder::build_copy_vouch($cp_source, $cp_copy, array('chain_id' => 'chain-20260930_010203'));
+check($cp_vouch === array('primitive' => 'copy_vouch', 'params' => array(
+		'profile' => 'manager', 'chain_id' => 'chain-20260930_010203', 'target_public_key' => $cp_copy_key)),
+	'a vouch names the chain and the copy\'s recorded agent key, as an export does', var_export($cp_vouch, true));
+check(!in_array('copy_vouch', JobCommandBuilder::DESTRUCTIVE_PRIMITIVES, true),
+	'a vouch is not a destructive word: it carries no secret, and its owner cannot be asked (the site is frozen)');
+$threw = '';
+try { JobCommandBuilder::build_copy_vouch($cp_source, $cp_orphan, array('chain_id' => 'chain-20260930_010203')); }
+catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'only to a dormant copy') !== false, 'a vouch for a copy of another node is refused', $threw);
+$cp_take = JobCommandBuilder::build_copy_take_vouch($cp_copy, '{"body":"v","signature":"s"}');
+check($cp_take === array('primitive' => 'copy_take_vouch', 'params' => array('vouch' => '{"body":"v","signature":"s"}')),
+	'the copy is handed the vouch as it came');
+foreach (array('' => 'an empty vouch', str_repeat('x', JobCommandBuilder::COPY_VOUCH_MAX + 1) => 'an oversized vouch') as $bad => $what) {
+	$threw = false;
+	try { JobCommandBuilder::build_copy_take_vouch($cp_copy, $bad); } catch (Exception $e) { $threw = true; }
+	check($threw, "{$what} is not sent");
+}
+$cp_vjob = new ManagementJob(NULL);
+$cp_vjob->set('mjb_mgn_managed_node_id', $cp_source->key);
+$cp_vjob->set('mjb_job_type', 'copy_vouch');
+$cp_vjob->set('mjb_status', 'completed');
+$cp_vjob->set('mjb_commands', array());
+$cp_vjob->set('mjb_output', "=== [Step 1/1] copy_vouch ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+	'vouch' => '{"body":"v","signature":"s"}', 'chain_id' => 'chain-20260930_010203', 'manifest_sha256' => str_repeat('d', 64),
+	'uploaded' => '2026-10-02 18:00:00', 'issued' => '2026-10-02T18:01:00Z'))) . "\n[Step 1/1 OK]");
+$cp_vjob->save();
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $cp_vjob->key);
+JobResultProcessor::process($cp_vjob);
+$cp_vjob->load();
+check(JobResultProcessor::vouch_of($cp_vjob) === '{"body":"v","signature":"s"}', 'the vouch is kept as the source returned it');
+$cp_vjob->set('mjb_status', 'failed');
+$cp_vjob->set('mjb_result', null);
+$cp_vjob->save();
+JobResultProcessor::process($cp_vjob);
+$cp_vjob->load();
+check(JobResultProcessor::vouch_of($cp_vjob) === null, 'a failed vouch keeps nothing');
+
 // The bundle comes back inside the agent's envelope, and is kept for the import.
 $cp_envelope = function ($data) {
 	return "=== [Step 1/1] copy_export ===\n" . json_encode(array('api_version' => '1.0', 'data' => $data)) . "\n[Step 1/1 OK]";
