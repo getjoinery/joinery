@@ -877,10 +877,6 @@ abstract class PublicPageBase {
 		echo PluginHelper::renderActivePluginStyleLinks();
 		$this->render_brand_token_overrides();
 
-		if($settings->get_setting('custom_css')){
-			echo '<style>'.$settings->get_setting('custom_css').'</style>';
-		}
-
 		// Render tracking code (wrapped for consent if enabled)
 		echo $this->renderTrackingCode();
 
@@ -953,12 +949,58 @@ abstract class PublicPageBase {
 	}
 
 	/**
+	 * The applied look: a style theme layered over the page theme, named by
+	 * the theme_look setting, or null when there is none or the setting names
+	 * something that is no longer a style theme on disk (specs/style_themes.md).
+	 */
+	protected function get_look() {
+		if ($this->look_resolved) { return $this->look; }
+		$this->look_resolved = true;
+		$this->look = null;
+		$name = trim((string)Globalvars::get_instance()->get_setting('theme_look', true, true));
+		if ($name === '' || !preg_match('/^[A-Za-z0-9_-]+$/', $name)) { return null; }
+		try {
+			$theme = ThemeHelper::getInstance($name);
+			$row = Theme::get_by_theme_name($name);
+			if ($row && $row->is_style()) { $this->look = $theme; }
+		} catch (Exception $e) {
+			// No such theme or an unreadable manifest: no look.
+		}
+		return $this->look;
+	}
+	/** @var ThemeHelper|null */
+	protected $look = null;
+	protected $look_resolved = false;
+
+	/**
+	 * The theme tail: the applied look's stylesheets, each cache-busted by
+	 * file mtime, at /theme/<look>/<rel>. Every page class calls this right
+	 * after its own stylesheet link, so the look's rules load after the page
+	 * theme's and nothing is emitted after them. The one place that writes
+	 * the look into a page, and it writes it once.
+	 */
+	protected function render_theme_tail() {
+		if ($this->theme_tail_emitted) { return; }
+		$this->theme_tail_emitted = true;
+		$look = $this->get_look();
+		if ($look === null) { return; }
+		$name = $look->getName();
+		foreach ($look->styleSheets() as $rel) {
+			$url = '/theme/' . $name . '/' . $rel . '?v=' . $this->asset_mtime('theme/' . $name . '/' . $rel);
+			echo '<link rel="stylesheet" href="' . htmlspecialchars($url, ENT_QUOTES) . '" data-look="'
+				. htmlspecialchars($name, ENT_QUOTES) . '">' . "\n";
+		}
+	}
+	protected $theme_tail_emitted = false;
+
+	/**
 	 * Emit brand-token overrides for the kit's :root custom properties.
 	 *
 	 * Resolution per token, lowest to highest precedence:
 	 *   1. kit default (joinery-styles.css :root) — left untouched if nothing overrides it here
 	 *   2. the rendering theme's theme.json "brand_tokens" (developer-declared default)
-	 *   3. a matching stg_settings value, if an admin set one (admin override wins)
+	 *   3. the applied look's theme.json "brand_tokens"
+	 *   4. a matching stg_settings value, if an admin set one (admin override wins)
 	 *
 	 * Nothing is copied into the database: an empty setting simply defers to the
 	 * theme's declared brand, so switching themes picks up the new brand with no
@@ -972,17 +1014,18 @@ abstract class PublicPageBase {
 		$resolved = [];
 		try {
 			$theme = ThemeHelper::getInstance($this->get_render_theme());
-			$declared = $theme->get('brand_tokens', []);
-			if (is_array($declared)) {
-				foreach ($declared as $name => $val) {
-					if (is_string($name)) { $resolved[$name] = $val; }
-				}
-			}
+			$resolved = $theme->brandTokens();
 		} catch (Exception $e) {
 			// No resolvable theme/manifest — fall through to settings only.
 		}
 
-		// Layer 3: admin overrides. Only the settings-backed colour tokens have
+		// Layer 3: the look's tokens, one step above the page theme's.
+		$look = $this->get_look();
+		if ($look !== null) {
+			foreach ($look->brandTokens() as $name => $val) { $resolved[$name] = $val; }
+		}
+
+		// Layer 4: admin overrides. Only the settings-backed colour tokens have
 		// stg_settings rows; a non-empty value wins over the theme's declaration.
 		$setting_backed = [
 			'jy_color_primary', 'jy_color_primary_hover', 'jy_color_primary_text',

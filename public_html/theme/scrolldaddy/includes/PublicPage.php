@@ -5,6 +5,7 @@
  * themes style the markup but do not own the list
  * (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.1 - the theme tail (the applied look's stylesheets) after the theme stylesheet (specs/style_themes.md WP3)
  * @version 1.2.0
  */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
@@ -239,7 +240,7 @@ Career Area
     <link rel="stylesheet" href="/theme/scrolldaddy/assets/css/style.css">
     <!-- ScrollDaddy Plugin CSS -->
     <link rel="stylesheet" href="/theme/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=18">
-
+    <?php $this->render_theme_tail(); ?>
 </head>
 
 <body>

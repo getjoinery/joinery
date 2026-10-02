@@ -5,6 +5,8 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 /**
  * Theme — a theme's database row.
  *
+ * @version 1.2 - thm_kind: 'page' or 'style', decided by the theme's contents at
+ *                registration (specs/style_themes.md WP1); is_style()
  * @version 1.1 - thm_trust records who built the installed files (specs/package_signing.md WP3)
  */
 class Theme extends SystemBase {    public static $prefix = 'thm';
@@ -66,6 +68,13 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
         // from the verdict; NULL on a row that predates the record
         // (specs/package_signing.md WP3, R5).
         'thm_trust' => array('type'=>'varchar(16)', 'is_nullable'=>true),
+
+        // What the theme is: 'page' (views, logic, a page class — every theme
+        // shipped today) or 'style' (stylesheets, fonts and images only, which
+        // layers over the active page theme as the look). Set at registration
+        // from ThemeHelper::styleThemeRefusal(), never by hand
+        // (specs/style_themes.md).
+        'thm_kind' => array('type'=>'varchar(8)', 'default'=>'page'),
 
         'thm_status' => array('type'=>'varchar(20)', 'default'=>'installed'),
     
@@ -152,14 +161,17 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
             if (isset($themes_lookup[$theme_name])) {
                 $theme = $themes_lookup[$theme_name];
                 $theme_data['theme'] = $theme;
+                $theme_data['kind'] = $theme->is_style() ? 'style' : 'page';
                 $theme_data['is_active'] = (bool)$theme->get('thm_is_active');
                 $theme_data['display_name'] = $theme->get('thm_display_name') ?: $theme_name;
                 $theme_data['description'] = $theme->get('thm_description');
                 $theme_data['version'] = $theme->get('thm_version') ?: '1.0.0';
                 $theme_data['author'] = $theme->get('thm_author') ?: 'Unknown';
             } else {
-                // Not in DB — read from theme.json directly
+                // Not in DB — read from theme.json directly, and ask the
+                // directory what kind it is, as the sync will.
                 $theme_data['theme'] = null;
+                $theme_data['kind'] = ThemeHelper::styleThemeRefusal($theme_path) === null ? 'style' : 'page';
                 $theme_data['is_active'] = false;
                 if ($metadata) {
                     $theme_data['display_name'] = $metadata['name'] ?? $theme_name;
@@ -189,6 +201,7 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
                     'status' => 'stable',
                     'audience' => array(),
                     'theme' => $theme,
+                    'kind' => $theme->is_style() ? 'style' : 'page',
                     'is_active' => (bool)$theme->get('thm_is_active'),
                     'display_name' => $theme->get('thm_display_name') ?: $theme_name,
                     'description' => 'Theme directory not found',
@@ -206,6 +219,14 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
         });
 
         return $themes;
+    }
+
+    /**
+     * A style theme: stylesheets, fonts and images with no pages of its own.
+     * It is applied as the look over the active page theme, never activated.
+     */
+    public function is_style() {
+        return (string)$this->get('thm_kind') === 'style';
     }
 
     /**
@@ -252,6 +273,10 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
             $settings = Globalvars::get_instance();
             if ($settings->get_setting('theme_template') === $theme_name) {
                 $results['errors'][] = "Cannot delete active theme '$theme_name'. Switch to another theme first.";
+                return $results;
+            }
+            if (trim((string)$settings->get_setting('theme_look', true, true)) === $theme_name) {
+                $results['errors'][] = "Cannot delete '$theme_name' while it is the applied look. Remove the look first.";
                 return $results;
             }
 

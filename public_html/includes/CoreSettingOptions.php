@@ -69,13 +69,49 @@ class CoreSettingOptions {
 		return $options;
 	}
 
-	/** Themes present on disk, by directory name. */
+	/**
+	 * Page themes present on disk, by directory name. A style theme has no
+	 * pages, so it is never offered as the active theme; it is a look
+	 * (looks()). The two lists are disjoint.
+	 */
 	public static function themes(): array {
+		$style = self::styleThemeNames();
 		$options = array();
 		foreach (ThemeHelper::getAvailableThemes() as $name => $theme) {
+			if (isset($style[$name])) continue;
 			$options[$name] = $theme->get('display_name', $name);
 		}
 		return $options;
+	}
+
+	/**
+	 * The registered style themes, by directory name, for the look slot,
+	 * after "None": a site with no style theme installed still has a choice
+	 * to show, and an empty value is what none is stored as.
+	 */
+	public static function looks(): array {
+		$options = array('' => 'None');
+		foreach (self::styleThemeNames() as $name => $display) {
+			$options[$name] = $display;
+		}
+		return $options;
+	}
+
+	/** name => display name of every registered style theme that is on disk. */
+	private static function styleThemeNames(): array {
+		$out = array();
+		try {
+			$themes = new MultiTheme(array('thm_kind' => 'style'), array('thm_name' => 'ASC'));
+			foreach ($themes as $theme) {
+				$name = (string)$theme->get('thm_name');
+				if (!is_dir(PathHelper::getAbsolutePath('theme/' . $name))) continue;
+				$out[$name] = (string)($theme->get('thm_display_name') ?: $name);
+			}
+		} catch (\Throwable $e) {
+			// A settings page has to render on a half-configured install.
+			error_log('CoreSettingOptions::styleThemeNames failed: ' . $e->getMessage());
+		}
+		return $out;
 	}
 
 	/** Plugins that could supply the user interface when the theme is `plugin`. */

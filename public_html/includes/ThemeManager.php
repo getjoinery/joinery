@@ -5,8 +5,18 @@ require_once(PathHelper::getIncludePath('data/themes_class.php'));
 
 /**
  * ThemeManager - Manages theme installation, activation, and configuration
+ *
+ * @version 1.1 - style themes (specs/style_themes.md): the kind is recorded
+ *                at registration; applyLook()/removeLook() write the look
+ *                slot; activate() refuses a style theme; the sync clears a
+ *                stale look. Activate writes theme_template through
+ *                SettingsWriter so the vault gate the setting declares holds
+ *                from the themes page too (B3).
  */
 class ThemeManager extends AbstractExtensionManager {
+
+    /** The sentence Activate answers on a style theme. */
+    const STYLE_THEME_ACTIVATE_REFUSAL = 'it has no pages; apply it as a look instead';
     
     private static $instance = null;
     
@@ -146,6 +156,25 @@ class ThemeManager extends AbstractExtensionManager {
         $model->set('thm_author', $metadata['author'] ?? 'Unknown');
         $model->set('thm_receives_upgrades', $metadata['receives_upgrades'] ?? true);
         $model->set('thm_is_system', $metadata['is_system'] ?? false);
+        $model->set('thm_kind', $this->kindOf($name, true));
+    }
+
+    /**
+     * What kind of theme the directory holds, decided by its contents:
+     * 'style' when ThemeHelper::styleThemeRefusal() finds nothing to refuse,
+     * 'page' otherwise. With $say, the reason is logged, so a theme that was
+     * meant to be a look and is not says why: at registration, and when the
+     * kind changes, never on every sync.
+     */
+    protected function kindOf($name, $say = false) {
+        $why = ThemeHelper::styleThemeRefusal($this->getExtensionPath($name));
+        if ($why === null) {
+            return 'style';
+        }
+        if ($say) {
+            error_log("theme '$name' is a page theme: $why");
+        }
+        return 'page';
     }
 
     /**
@@ -165,6 +194,11 @@ class ThemeManager extends AbstractExtensionManager {
      * @throws Exception on validation failure
      */
     protected function onActivate($name, $model, $dblink) {
+        // A style theme has no pages to activate; it is applied as the look.
+        if ($model->is_style()) {
+            throw new Exception("Cannot activate theme '$name': " . self::STYLE_THEME_ACTIVATE_REFUSAL);
+        }
+
         // Requirements gate (mirrors the plugin path, which checks requires.* via
         // validatePlugin). Runs before any state mutation so the activate()
         // transaction rolls back cleanly on failure. checkRequirements() is
@@ -203,19 +237,131 @@ class ThemeManager extends AbstractExtensionManager {
         // Set this theme active
         $model->set('thm_is_active', true);
 
-        // Update the theme_template setting
-        require_once(PathHelper::getIncludePath('data/settings_class.php'));
-        $existing_setting = Setting::GetByColumn('stg_name', 'theme_template');
-        if ($existing_setting) {
-            $existing_setting->set('stg_value', $name);
-            $existing_setting->save();
-        } else {
-            $new_setting = new Setting(null);
-            $new_setting->set('stg_name', 'theme_template');
-            $new_setting->set('stg_value', $name);
-            $new_setting->set('stg_group_name', 'theme');
-            $new_setting->save();
+        // The theme_template setting is vault-gated, and the gate lives in
+        // SettingsWriter: writing the row directly from here let Activate on
+        // the themes page skip the unlock the settings page demands for the
+        // same change. A refusal throws, so the transaction rolls back.
+        $this->writeThemeSetting('theme_template', $name);
+    }
+
+    /**
+     * Write one of the two theme slots through the one path that enforces
+     * what the declaration says: the vault gate, the validation rule, and no
+     * no-op writes. Throws with the operator's sentence when the write is
+     * held back, so a caller inside a transaction rolls back.
+     */
+    protected function writeThemeSetting($setting, $value) {
+        $result = SettingsWriter::write(array($setting => $value), array(
+            'page'  => 'themes',
+            'names' => array($setting),
+        ));
+        if (!empty($result['vault_blocked'])) {
+            throw new Exception('Unlock your vault to change the ' . ($setting === 'theme_look' ? 'look' : 'active theme') . '.');
         }
+        if (!empty($result['errors'])) {
+            $lines = array();
+            foreach ($result['errors'] as $field => $messages) {
+                $lines[] = $field . ': ' . implode(' ', (array)$messages);
+            }
+            throw new Exception('The ' . $setting . ' setting refused the value: ' . implode(' | ', $lines));
+        }
+        if (!empty($result['refused'])) {
+            throw new Exception("The $setting setting is not declared, so it cannot be written.");
+        }
+        Globalvars::get_instance()->forget_setting($setting);
+    }
+
+    /**
+     * Apply a style theme as the site's look. The page theme stays active;
+     * the look's stylesheets are emitted after it on every page.
+     *
+     * @param string $name Theme directory name
+     * @throws Exception when the theme is not a registered style theme, or the vault gate holds the write back
+     */
+    public function applyLook($name) {
+        $theme = Theme::get_by_theme_name($name);
+        if (!$theme) {
+            throw new Exception("Theme '$name' not found in database.");
+        }
+        if (!$theme->is_style()) {
+            throw new Exception("Cannot apply theme '$name' as a look: it carries pages. Activate it instead.");
+        }
+        if (!$this->isInstalled($name)) {
+            throw new Exception("Theme '$name' is not on disk.");
+        }
+        $this->writeThemeSetting('theme_look', $name);
+        $this->clearStaticPageCache();
+    }
+
+    /**
+     * Remove the applied look. The page theme is untouched.
+     * @throws Exception when the vault gate holds the write back
+     */
+    public function removeLook() {
+        $this->writeThemeSetting('theme_look', '');
+        $this->clearStaticPageCache();
+    }
+
+    /**
+     * The applied look's name, or '' when there is none or the setting names
+     * a theme that is not a registered style theme on disk. The sync is what
+     * clears a stale value; this is what every reader sees meanwhile.
+     */
+    public function activeLook() {
+        $look = trim((string)Globalvars::get_instance()->get_setting('theme_look', true, true));
+        if ($look === '' || $this->lookStaleReason($look) !== null) {
+            return '';
+        }
+        return $look;
+    }
+
+    /**
+     * Why theme_look's value no longer names a look, or null when it does:
+     * the row is gone, the directory is gone, or the theme now carries pages.
+     */
+    protected function lookStaleReason($look) {
+        if (!preg_match('/^[A-Za-z0-9_-]+$/', $look)) {
+            return "'$look' is not a theme name";
+        }
+        $theme = Theme::get_by_theme_name($look);
+        if (!$theme) {
+            return "'$look' is not a registered theme";
+        }
+        if (!$theme->is_style()) {
+            return "$look now carries pages, so it is no longer applied as the look";
+        }
+        if (!$this->isInstalled($look)) {
+            return "'$look' is not on disk";
+        }
+        return null;
+    }
+
+    /**
+     * Clear theme_look when it names a theme that is gone or is no longer a
+     * style theme, and say so: one transcript line on a CLI run, one log
+     * line always. Returns the reason when something was cleared, null
+     * otherwise. Called by every sync, which is where a theme's kind is
+     * re-read from disk.
+     */
+    public function clearStaleLook() {
+        $look = trim((string)Globalvars::get_instance()->get_setting('theme_look', true, true));
+        if ($look === '') {
+            return null;
+        }
+        $why = $this->lookStaleReason($look);
+        if ($why === null) {
+            return null;
+        }
+        // Setting::put, not SettingsWriter: this is the platform keeping its
+        // own record straight after a sync, not an operator's change, and it
+        // happens on an upgrade with nobody's vault open.
+        Setting::put('theme_look', '');
+        error_log("theme_look cleared: $why");
+        if (php_sapi_name() === 'cli') {
+            echo "look cleared: $why\n";
+        }
+        $this->clearStaticPageCache();
+        return $why;
     }
 
     /**
@@ -264,6 +410,7 @@ class ThemeManager extends AbstractExtensionManager {
             'thm_author'       => $metadata['author'] ?? 'Unknown',
             'thm_metadata'     => json_encode($metadata),
             'thm_is_system'    => $metadata['is_system'] ?? false,
+            'thm_kind'         => $this->kindOf($name),
         );
 
         // receives_upgrades is admin-toggleable (writeManifestReceivesUpgrades)
@@ -277,6 +424,10 @@ class ThemeManager extends AbstractExtensionManager {
         $changed = false;
         foreach ($desired as $column => $value) {
             if ($model->get($column) != $value) {
+                if ($column === 'thm_kind') {
+                    // Say why, the one time it changes.
+                    $this->kindOf($name, true);
+                }
                 $model->set($column, $value);
                 $changed = true;
             }
@@ -341,6 +492,9 @@ class ThemeManager extends AbstractExtensionManager {
 
         // Sync active status based on theme_template setting
         $this->syncActiveStatus();
+
+        // A look whose theme is gone, or now carries pages, reads as none.
+        $result['look_cleared'] = $this->clearStaleLook();
 
         $result['components'] = $this->syncComponentTypes();
         return $result;

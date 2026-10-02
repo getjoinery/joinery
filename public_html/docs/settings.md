@@ -345,9 +345,9 @@ be turned on but never off.
 The method returns a `value => label` map. Adding a provider class adds its
 option — nothing else changes.
 
-Core lists live in `CoreSettingOptions`: themes, theme plugins, timezones, site
-folders, homepage candidates, email and mailing list services, email templates,
-connected mail accounts. Anything whose choices can be written down belongs in
+Core lists live in `CoreSettingOptions`: themes, looks (the registered style
+themes), theme plugins, timezones, site folders, homepage candidates, email
+and mailing list services, email templates, connected mail accounts. Anything whose choices can be written down belongs in
 the manifest as a literal `options` map instead.
 
 An option list keys on **what gets stored**, which is whatever the code that
@@ -554,8 +554,16 @@ pages, because changing them has consequences the settings form cannot check.
 
 | Setting | What it controls | Where to change |
 |---|---|---|
-| `theme_template` | Active visual theme | Admin → Settings |
+| `theme_template` | Active page theme: the pages, their logic and styling | Admin → Settings, or Activate on the Themes page |
+| `theme_look` | The style theme applied over the page theme (stylesheets, fonts, images), or none | Admin → Settings, or Apply and Remove on the Themes page |
 | `active_theme_plugin` | Plugin that provides the theme | Admin → Settings |
+
+Both theme slots are vault-gated, and the Themes page writes them through the
+same path as the settings page, so Activate and Apply refuse while the vault
+is locked exactly as the settings form does. A style theme never appears in
+the active theme list, and the sync clears `theme_look` when the theme it
+names is gone or has gained pages. See the
+[Plugin Developer Guide](plugin_developer_guide.md#style-themes).
 
 **Do not confuse `theme_template` with `site_template` in
 `config/Globalvars_site.php`.** The latter is the site installation directory

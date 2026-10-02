@@ -4,6 +4,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_themes_logic — the Themes page.
  *
+ * @version 1.2 - Apply and Remove for a style theme: the look slot beside the
+ *                page theme (specs/style_themes.md WP4)
  * @version 1.1 - an upload is a root request that root verifies; a refused
  *                one shows the warning and Install anyway (specs/package_signing.md WP6)
  */
@@ -137,6 +139,20 @@ function admin_themes_logic(array $input): LogicResult {
 						$message = 'Acknowledged. Root is asked to install the unsigned theme under the unsigned restrictions.';
 						break;
 
+					// The look slot: a style theme layers over the active page
+					// theme instead of replacing it. Both writes go through the
+					// vault gate the theme_look setting declares.
+					case 'apply_look':
+						$theme_name = (string)($input['theme_name'] ?? '');
+						$theme_manager->applyLook($theme_name);
+						$message = "'$theme_name' is applied as the look. Your page theme stays active.";
+						break;
+
+					case 'remove_look':
+						$theme_manager->removeLook();
+						$message = 'The look is removed. Pages use the active theme\'s styling alone.';
+						break;
+
 					case 'delete':
 						$theme_name = $input['theme_name'];
 						// Use ThemeManager::deleteTheme() which handles files AND database record
@@ -154,6 +170,9 @@ function admin_themes_logic(array $input): LogicResult {
 						}
 						if (!empty($result['updated'])) {
 							$parts[] = count($result['updated']) . ' theme(s) updated';
+						}
+						if (!empty($result['look_cleared'])) {
+							$parts[] = 'look cleared (' . $result['look_cleared'] . ')';
 						}
 						if (!empty($result['components'])) {
 							$c = $result['components'];
@@ -186,6 +205,9 @@ function admin_themes_logic(array $input): LogicResult {
 		'message' => $message,
 		'error' => $error,
 		'themes' => $themes,
+		// The two slots: the page theme and the look (specs/style_themes.md).
+		'page_theme' => (string)Globalvars::get_instance()->get_setting('theme_template', true, true),
+		'look' => $theme_manager->activeLook(),
 		'root_request_id' => $root_request_id,
 		'unsigned_warning' => $unsigned_warning,
 		'root_actor_notice' => AdminPage::root_actor_notice()

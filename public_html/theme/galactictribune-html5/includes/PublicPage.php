@@ -5,6 +5,7 @@
  * themes style the markup but do not own the list
  * (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.1 - the theme tail (the applied look's stylesheets) after the theme stylesheet (specs/style_themes.md WP3)
  * @version 1.2.0
  */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
@@ -39,6 +40,7 @@ class PublicPage extends PublicPageBase {
 
             <!-- CSS -->
             <link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>">
+            <?php $this->render_theme_tail(); ?>
 
             <script>
             document.addEventListener('DOMContentLoaded', function() {

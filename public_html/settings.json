@@ -1276,6 +1276,21 @@
       }
     },
     {
+      "name": "theme_look",
+      "default": "",
+      "group": "theme",
+      "label": "Look",
+      "type": "select",
+      "options_from": "CoreSettingOptions::looks",
+      "options_include": "includes/CoreSettingOptions.php",
+      "vault_gated": true,
+      "helptext": "A styling theme applied over the active theme: its stylesheets load after the theme's on every page. Styling themes are installed from the Themes page.",
+      "validation": {
+        "pattern": "/^[A-Za-z0-9_-]*$/",
+        "messages": { "pattern": "A theme is named by its folder: letters, digits, _ and - only." }
+      }
+    },
+    {
       "name": "member_area_app_chrome",
       "default": "1",
       "group": "theme",
@@ -1442,14 +1457,6 @@
       "label": "Privacy policy URL",
       "type": "text",
       "helptext": "Path to the privacy policy page, shown in the consent banner."
-    },
-    {
-      "name": "custom_css",
-      "default": "",
-      "group": "site_identity",
-      "label": "Custom CSS",
-      "type": "textarea",
-      "rows": 10
     },
     {
       "name": "defaultemail",

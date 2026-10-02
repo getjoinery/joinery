@@ -1632,6 +1632,16 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// The Custom CSS setting is retired (specs/style_themes.md): a style theme
+	// is what it was for. A site whose row held CSS has every superadmin
+	// emailed the text, then the row goes; an empty row just goes.
+	$migration = array();
+	$migration['database_version'] = '205';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'custom_css_retired.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
 	// Clone is retired (specs/site_copy.md WP9): nothing reads the export key
 	// any more, and a bearer token left in a site's settings is a secret with
 	// no purpose. A source still armed is disarmed by its row going.
