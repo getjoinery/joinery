@@ -33,7 +33,7 @@
  * Sections: the wait for a box; registration and its guards; DNS bootstrap;
  * mail DNS as a job (dispatch, park, consume, the DKIM hold, once-only
  * consumption, domain scoping, a node without the primitive); PTR including the
- * shared-host case; activation; terminal failure.
+ * shared-host case and a dead customer grant; activation; terminal failure.
  *
  * Run: php plugins/server_manager/tests/provision_managed_domains_test.php
  */
@@ -133,6 +133,17 @@ class PmdPhase extends ProvisionManagedDomains {
 		$this->alerts[] = array('domain' => (string)$row->get('rdm_domain'), 'reason' => $reason);
 	}
 	public $alerts = array();
+	// The provider edge of the PTR step. Unscripted ticks answer "not yet"
+	// rather than reaching a real cloud account.
+	public $rdns_answers = array();
+	public $rdns_calls = array();
+	protected function set_reverse_dns($node, string $hostname): array {
+		$this->rdns_calls[] = $hostname;
+		if (count($this->rdns_answers)) {
+			return array_shift($this->rdns_answers);
+		}
+		return array('ok' => false, 'message' => 'pmd: no scripted answer', 'reconnect' => false);
+	}
 }
 
 /** A DnsProvider that is never actually called (the reconciler is faked). */
@@ -742,6 +753,57 @@ foreach (array('pmd-both-a-' . $suffix . '.com', 'pmd-both-b-' . $suffix . '.com
 		$name . ' registers — the order paid for both');
 }
 check($registrar->register_calls === 2, 'two purchases, no more');
+
+// ---------------------------------------------------------------------------
+section('A cloud box\'s PTR: "not yet" retries, a dead grant closes the step, the domain activates');
+
+// The node becomes cloud-born: a provision row names it, which is what makes
+// the phase ask the provider for a per-domain PTR at all. Before this, a dead
+// customer grant was retried every tick forever, so the domain never reached
+// active — and only an active domain is counted down to its expiry.
+$cloud = new CustomerCloudProvision(NULL);
+$cloud->set('cvp_origin', 'admin');
+$cloud->set('cvp_usr_user_id', $buyer->key);
+$cloud->set('cvp_domain', 'pmd-cloud-' . $suffix . '.com');
+$cloud->set('cvp_slug', 'pmd-cloud-' . $suffix);
+$cloud->set('cvp_status', 'done');
+$cloud->set('cvp_instance_id', '990' . $suffix);
+$cloud->set('cvp_instance_ip', '198.51.100.20');
+$cloud->set('cvp_mgn_managed_node_id', $node->key);
+$cloud->save();
+$cloud->load();
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $cloud->key);
+
+$phase = new PmdPhase(new PmdFakeRegistrar(), new PmdFakeReconciler());
+$dead = pmd_row($buyer, $node, 'pmd-deadgrant-' . $suffix . '.com');
+pmd_tick($phase, $dead);                      // register
+pmd_tick($phase, $dead);                      // web
+pmd_tick($phase, $dead);                      // asks the node
+pmd_answer(pmd_prepare_jobs($node, $dead->get('rdm_domain'))[0], $good_payload);
+pmd_tick($phase, $dead);                      // mail
+
+check(pmd_tick($phase, $dead) === 0, 'a "not yet" PTR answer makes no progress');
+check(trim((string)$dead->get('rdm_ptr_time')) === '', 'the step stays open for the next tick');
+check(stripos((string)$dead->get('rdm_error'), 'Transient (PTR)') !== false, 'and says why');
+check(end($phase->rdns_calls) === 'mail.' . $dead->get('rdm_domain'), 'the PTR asked for is the mail hostname');
+
+$phase->rdns_answers[] = array('ok' => false, 'reconnect' => true,
+	'message' => 'The cloud account grant has expired. Re-connect it, then try again.');
+check(pmd_tick($phase, $dead) === 1, 'a dead grant resolves the tick');
+check(trim((string)$dead->get('rdm_ptr_time')) !== '', 'the PTR step is closed rather than retried forever');
+check(trim((string)$dead->get('rdm_error')) === '', 'with no error left on the row');
+pmd_tick($phase, $dead);
+check($dead->get('rdm_status') === RegisteredDomain::STATUS_ACTIVE, 'and the domain reaches active');
+
+$set = pmd_row($buyer, $node, 'pmd-ptrset-' . $suffix . '.com');
+pmd_tick($phase, $set);
+pmd_tick($phase, $set);
+pmd_tick($phase, $set);
+pmd_answer(pmd_prepare_jobs($node, $set->get('rdm_domain'))[0], $good_payload);
+pmd_tick($phase, $set);
+$phase->rdns_answers[] = array('ok' => true, 'reconnect' => false, 'message' => '198.51.100.20 now answers mail.x');
+check(pmd_tick($phase, $set) === 1 && trim((string)$set->get('rdm_ptr_time')) !== '',
+	'a PTR the provider accepted stamps the step');
 
 // ---------------------------------------------------------------------------
 section('The alert recipient chain resolves');

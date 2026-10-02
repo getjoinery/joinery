@@ -1,7 +1,12 @@
 <?php
 /**
  * NodeReverseDns - set the reverse-DNS (PTR) hostname for a cloud-born
- * managed node through the provision's cloud-account grant.
+ * managed node through the cloud account its instance lives on.
+ *
+ * Whose account that is follows the provision's hosting mode: a hosted
+ * (Managed) instance lives on the OPERATOR's account and is reached with the
+ * operator cloud token this plane holds; a bring-your-own-cloud instance lives
+ * on the customer's account and is reached through their grant.
  *
  * The forward A record must already resolve to the node's IP — providers
  * (Linode included) validate this and reject the update otherwise, so it is
@@ -10,8 +15,12 @@
  * Grant note: Linode access tokens are short-lived with no refresh token, so
  * a stale grant surfaces as NodeReverseDnsException with reconnect=true — the
  * caller should send the operator to /profile/server_manager/connect_cloud
- * and retry.
+ * and retry. A hosted instance has no grant, so it never raises reconnect: a
+ * missing or refused operator token is fixed on the Provisioning Setup page.
  *
+ * @version 1.1 - a hosted instance is reached with the operator cloud token (it had been sent to the
+ *                customer-grant path, which a hosted provision never has, so its PTR was never set);
+ *                setQuietly() reports reconnect, so a pipeline can tell a dead grant from "not yet"
  * @version 1.0
  */
 
@@ -57,14 +66,20 @@ class NodeReverseDns {
 	 * refusal just returns ok=false — the mailbox Setup tab's PTR check
 	 * remains the operator's checklist item for those cases.
 	 *
-	 * @return array {ok: bool, message: string}
+	 * reconnect is true only when the customer's cloud-account grant is dead.
+	 * That is not a "not yet": Linode issues no refresh token, so nothing a
+	 * later tick can do will bring it back without the customer.
+	 *
+	 * @return array {ok: bool, message: string, reconnect: bool}
 	 */
 	public static function setQuietly($node, $hostname, $driver = null, $skip_forward_check = false) {
 		try {
 			$r = self::set($node, $hostname, $driver, $skip_forward_check);
-			return array('ok' => true, 'message' => $r['ip'] . ' now answers ' . $r['rdns']);
+			return array('ok' => true, 'message' => $r['ip'] . ' now answers ' . $r['rdns'], 'reconnect' => false);
+		} catch (NodeReverseDnsException $e) {
+			return array('ok' => false, 'message' => $e->getMessage(), 'reconnect' => $e->reconnect);
 		} catch (Exception $e) {
-			return array('ok' => false, 'message' => $e->getMessage());
+			return array('ok' => false, 'message' => $e->getMessage(), 'reconnect' => false);
 		}
 	}
 
@@ -114,6 +129,10 @@ class NodeReverseDns {
 		try {
 			return $driver->setReverseDns((string)$provision->get('cvp_instance_id'), $ip, $hostname);
 		} catch (CloudComputeException $e) {
+			if ((int)$e->getCode() === 401 && $provision->is_operator_hosted()) {
+				throw new NodeReverseDnsException(
+					'The provider refused the operator cloud token. Replace it on the Provisioning Setup page, then try again.');
+			}
 			if ((int)$e->getCode() === 401) {
 				throw NodeReverseDnsException::reconnect(
 					'The cloud account grant has expired. Re-connect it, then try again.');
@@ -123,13 +142,26 @@ class NodeReverseDns {
 	}
 
 	/**
-	 * Build a driver from the provision's account grant, refreshing the token
-	 * when the provider supports it.
+	 * Build a driver for the account the provision's instance lives on: the
+	 * operator's token for a hosted instance, else the customer's grant,
+	 * refreshed when the provider supports it.
+	 *
+	 * @param string|null $operator_token  Tests only; null reads the configured operator token.
 	 */
-	private static function driverForProvision($provision) {
+	public static function driverForProvision($provision, ?string $operator_token = null) {
 		if ($provision->get('cvp_provider') !== 'linode') {
 			throw new NodeReverseDnsException(
 				"No reverse-DNS driver for provider '{$provision->get('cvp_provider')}'.");
+		}
+
+		if ($provision->is_operator_hosted()) {
+			$token = $operator_token ?? ProvisionCustomerCloud::operator_compute_token();
+			if ($token === '') {
+				throw new NodeReverseDnsException(
+					'This site is hosted on the operator\'s cloud account, and no operator cloud token is configured. '
+					. 'Set "Operator cloud token" on the Provisioning Setup page, then try again.');
+			}
+			return new LinodeComputeDriver($token);
 		}
 
 		$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');
