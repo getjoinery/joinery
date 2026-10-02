@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.37 - site copy switch-over (specs/site_copy.md WP7a): copy_switch, copy_move, copy_retry_start,
+ *                 copy_go_back, copy_finish; the DNS token is read from the form for that request only
  * @version 1.36 - Retry Install refuses an install the retired Clone made (mode from_backup), pointing at the Copy tab
  * @version 1.35 - case_note and case_read are gone: an incident's note and triage are set on its own page
  *                 (incident_triage.md WP1)
@@ -148,6 +150,11 @@ class NodeDetailActions {
 		'copy_approve_join'        => 'copy',
 		'copy_again'               => 'copy',
 		'copy_discard'             => 'copy',
+		'copy_switch'              => 'copy',
+		'copy_move'                => 'copy',
+		'copy_retry_start'         => 'copy',
+		'copy_go_back'             => 'copy',
+		'copy_finish'              => 'copy',
 	];
 
 	/**
@@ -681,7 +688,12 @@ class NodeDetailActions {
 			case 'copy_own_server':
 			case 'copy_approve_join':
 			case 'copy_again':
-			case 'copy_discard': {
+			case 'copy_discard':
+			case 'copy_switch':
+			case 'copy_move':
+			case 'copy_retry_start':
+			case 'copy_go_back':
+			case 'copy_finish': {
 				if ($session->get_permission() < 10) {
 					self::fail($session, $page_regex, 'Copying a site is superadmin-only.');
 					return $base_url . '&tab=copy';
@@ -719,6 +731,46 @@ class NodeDetailActions {
 				}
 				if ($action === 'copy_again') {
 					SiteCopyRunner::copy_again($site_copy, $uid);
+					return $copy_url;
+				}
+				// The switch-over (specs/site_copy.md WP7a). The DNS token lives
+				// for this request: the driver is built from the form and goes
+				// out of scope with it.
+				if ($action === 'copy_switch') {
+					if (empty($_POST['copy_confirm'])) {
+						self::fail($session, $page_regex, 'Tick the box to freeze the site; nothing was done.');
+						return $copy_url;
+					}
+					SiteCopyRunner::begin_switch($site_copy, self::copy_dns_driver($node, true), $uid);
+					self::ok($session, $page_regex, 'The records check out, and the site is frozen: visitors see the maintenance '
+						. 'page while the final copy runs. Move the address once it matches.');
+					return $copy_url;
+				}
+				if ($action === 'copy_move') {
+					SiteCopyRunner::move_address($site_copy, self::copy_dns_driver($node, true), $uid);
+					self::ok($session, $page_regex, 'The address points at the copy, and the proxy reaches it. The copy is '
+						. 'taking over as the site.');
+					return $copy_url;
+				}
+				if ($action === 'copy_retry_start') {
+					SiteCopyRunner::retry_start($site_copy);
+					return $copy_url;
+				}
+				if ($action === 'copy_go_back') {
+					$copy_row = SiteCopyRunner::copy_row($site_copy, true);
+					if ($copy_row && trim((string)$copy_row->get('mgn_install_state')) === 'retired' && empty($_POST['copy_confirm'])) {
+						self::fail($session, $page_regex, 'Tick the box: going back loses what was written on the new server '
+							. 'since it started. Nothing was done.');
+						return $copy_url;
+					}
+					SiteCopyRunner::go_back($site_copy, self::copy_dns_driver($node, false));
+					self::ok($session, $page_regex, 'Going back: the site starts again on its own server.');
+					return $copy_url;
+				}
+				if ($action === 'copy_finish') {
+					$server = SiteCopyRunner::finish($site_copy);
+					self::ok($session, $page_regex, 'The switch-over is kept, and the way back is closed.' . ($server !== ''
+						? ' Delete the old server at its provider: ' . $server . '.' : ''));
 					return $copy_url;
 				}
 				$server = SiteCopyRunner::server_to_delete($site_copy);
@@ -1018,6 +1070,39 @@ class NodeDetailActions {
 		return '/admin/server_manager/job_detail?job_id=' . $job->key;
 	}
 
+
+	/**
+	 * The DNS driver for a site copy's switch-over, built from the token the
+	 * owner typed into this form, for this request only. The host is the one
+	 * the site's domain is delegated to; only a host that proxies can move it.
+	 * Null when $required is false and no token was given.
+	 */
+	private static function copy_dns_driver(ManagedNode $node, bool $required): ?DnsProvider {
+		$domain = SiteCopyRunner::site_domain($node);
+		$class = $domain !== '' ? ProxiedOriginMove::driver_class_for($domain) : null;
+		$credential = array();
+		$given = false;
+		$missing = array();
+		foreach ($class ? $class::credentialFields() : array() as $field => $spec) {
+			$value = trim((string)($_POST['dns_cred_' . $field] ?? ''));
+			$given = $given || $value !== '';
+			if ($value === '') {
+				$missing[] = (string)($spec['label'] ?? $field);
+			}
+			$credential[$field] = $value;
+		}
+		if (!$given && !$required) {
+			return null;
+		}
+		if (!$class) {
+			throw new SiteCopyException('This site\'s DNS is not at a host that proxies (Cloudflare), so its address cannot '
+				. 'be moved through a proxy.');
+		}
+		if ($missing) {
+			throw new SiteCopyException('Enter the ' . implode(', ', $missing) . '.');
+		}
+		return new $class($credential);
+	}
 	/** Load a live, still-pending join request, or fail with a message and return null. */
 	private static function load_join_request(int $ajr_agent_join_request_id, $session, $page_regex) {
 		if ($ajr_agent_join_request_id <= 0) {

@@ -234,6 +234,61 @@
     answers as S's node id; going back swaps T's key off the node, so T can no longer reach M. The
     way back must quiet T (`site_quiet on`, while T is still the node) before `go_back`, then
     discard it.
+- **WP7a built (2026-10-02): the switch-over and the way back, by a proxied origin change;
+  unit- and db-tested, not yet live.** On M, the Copy tab's Switch over, Move the address, Go
+  back and Keep the switch-over (`SiteCopyRunner` 1.4, `SiteCopy` 1.1 with `scp_switch`,
+  `ProxiedOriginMove`, node detail actions 1.37, Copy tab 1.2); the Cloudflare driver reports
+  `proxied` and moves a proxied record's address (`DnsProxiedOrigin`, `CloudflareDnsDriver` 1.4,
+  `DnsRecord` 1.3); agent 1.53.0 (`copy_vouch`, `copy_take_vouch`); `JobCommandBuilder` 1.88,
+  `JobResultProcessor` 1.51, `AgentChannelEndpoint` 1.32. Schema applied on dev.
+  - **B44 — The owner cannot approve the final export.** FOUND 2026-10-02 while building, before
+    any code: step 8 ran `copy_export` again inside the freeze, and an export waits for the
+    owner's approval on S's own Backups page (Q9), but a frozen S answers every request, the
+    owner's included, with the maintenance page. Letting the owner past it does not work either:
+    whatever the visit writes after the final backup is lost at the switch, and breaks the exact
+    census. **Decided by the owner (2026-10-02): the final copy carries no secret, so it needs no
+    approval.** T already holds the chain key, the certificate and the DKIM keys from the last
+    approved export; the final run extends that chain, so the one new fact T needs is which
+    manifest S stands behind. `copy_vouch` (S, only under `quiet switchover`) signs that hash,
+    from S's upload ledger, for T's key under its own domain `joinery-copy-vouch-v1`, valid an
+    hour; `copy_take_vouch` (T, only under `quiet copy`) checks it against the recorded S key,
+    shares `copy_import`'s high-water mark, refuses a chain it holds no key for, and replaces the
+    vouch. Catches, accepted: a certificate renewed on S since the last Copy again does not
+    travel (T keeps the older, valid one and renews it itself after the switch); a final backup
+    that starts a new chain stops the switch-over (go back, copy again).
+  - **Choices made while building:**
+    - **The DNS token is typed twice:** once to check the records before anything freezes (read
+      only), once to move them. Nothing DNS-write-capable is stored on M (`docs/dns_management.md`),
+      and the move comes minutes after the check, in another request. The way back asks for it
+      again when the address had moved.
+    - **"Never roll" is the longest chain interval** (`full_interval_days` 365, the agent's
+      maximum) on the final backup run: no agent change. A chain still ends for another reason (a
+      lost snapshot, a rotated recovery key, 30 runs); the run's judge then sees a new chain id and
+      stops before the vouch, naming it.
+    - **The proof is the look path.** T has no health answer of its own while dormant; its
+      `/.joinery-look/<secret>` answers a 303 setting its look cookie, and only T knows the secret.
+      M asks it through the proxy at the site's name, with a fresh query string each time, for up
+      to a minute. Unproven, the records move back and S stays frozen and ready.
+    - **Which records move:** every A and AAAA naming one of S's addresses (its host, its
+      provision's addresses, and what its agent reported at join), compared as addresses. Each must
+      be proxied, the site's own name must point only at S, and T must have an address of each
+      family (T's IPv6 comes from its provision or its join). Refused, nothing is frozen.
+    - **Firewalls are not listed:** M has no view of S's firewall (the host report carries none).
+      The tab says that a rule letting only the proxy in must be given to T by the owner before
+      the move. A word that reports the firewall is a later addition if it is wanted.
+    - **`mgn_host` needs no separate update:** the row swap moves it with the machine.
+    - **The swap comes before the copy moves on:** `AgentChannelEndpoint` 1.32 answers a
+      `take_node_id` result with the swap first, then advances the copy, so the step is judged by
+      what the swap did.
+    - **After the way back from a switched site, the copy is discarded** (its agent answers as
+      S's node id against a row holding its own key); the tab names its server for deleting for a
+      week, as after any discard or a kept switch-over.
+  - Tests: `site_copy_switch` 44/44 (new: the records, the driver against a fake Cloudflare API,
+    the freeze, an exact census that differs, a new chain at the final backup, an unproven move,
+    the start, the way back after the switch, and keeping it), `job_command_builder` 383/383,
+    agent `go test ./...` (`copy_vouch_test.go`: the vouch moves the copy to the final run with no
+    secret, and each refusal); `db --changed` 357/365, the eight failures all in the
+    mailbox spam-learning work another session has in progress, none in this work's files.
 - **WP9 built (2026-10-02): Clone is retired; B1–B20 and B23 close with the code.** Deleted:
   `utils/clone_export.php`, `utils/clone_export_arm.php`, `utils/scrub_sealed_secrets.php`, the
   `clone_export_key` setting, the `from_backup` install mode (model, Install New Node form,
@@ -894,9 +949,13 @@ The copy can stay dormant as long as the owner likes.
      Postfix deferring, the firewall rule, and the wait for command-line PHP to finish.
    - S's agent stays on throughout; the way back needs it.
 8. **Final copy.**
-   - S runs one last chain run marked *never roll*, so it can never turn into a full.
-   - `copy_export` runs again. T downloads that increment and runs the full apply at it, which also
-     discards anything the owner's look changed.
+   - S runs one last chain run on the longest chain interval, so age never turns it into a full
+     (a chain that ends for another reason stops the switch-over: B44's catch).
+   - `copy_vouch` on S signs the chain's new manifest for T, and `copy_take_vouch` makes it T's
+     vouch (B44: no secret travels and no approval is asked, because T holds the chain key from
+     the last approved export and a frozen S's owner cannot reach its Backups page). T downloads
+     that increment and runs the full apply at it, which also discards anything the owner's look
+     changed.
    - The price of M2: the file part is unpacked again from local disk inside the downtime, about 1–3
      minutes for jeremytunnell's 3 GB, growing with the site. L1 measures it. Applying only the
      newest increment is G4, a separate piece for later if the minutes matter.
@@ -927,13 +986,14 @@ The copy can stay dormant as long as the owner likes.
      - Preflight (step 1) confirms through M's DNS driver that every record naming S's address is
        proxied. Any record that is not (a mail host, an unproxied subdomain) sends the copy to the IP
        swap or to the full DNS switch instead.
-     - Preflight also lists anything on S that allows only the proxy's addresses in (a firewall), so
-       T gets the same.
+     - M has no view of S's firewall: the tab tells the owner that a rule letting only the proxy's
+       addresses in must be given to T before the move.
      1. M changes the proxied record's address from S to T. Visitors follow within seconds, because
         they only ever see the proxy; there is no TTL wait.
-     2. Prove T answers through the proxy: HTTPS to the site's name gets the dormant health answer
-        from T. The certificate travelled, so a strict-TLS proxy accepts T.
-     3. Update `mgn_host` on M.
+     2. Prove T answers through the proxy: HTTPS to the site's name, at T's look path, gets the
+        303 only T gives (the path's secret is T's). The certificate travelled, so a strict-TLS
+        proxy accepts T.
+     3. `mgn_host` on M moves with the machine in the row swap (step 10).
      - Failure here is cheap too: M changes the record back and unfreezes S. T stays dormant.
      - Needs a DNS token for the zone on M, through the existing DNS credential flow.
    - **DNS (WP7; built later).**
@@ -1143,8 +1203,9 @@ WP7 unchanged; only the ceremony (WP10) is its own, and it produces the same inp
 
 In build order. Each is built and tested on its own (design rule).
 
-**New agent words (seven):** `copy_export` (S), `copy_import` (T, Q6), `copy_stage` (T, G7),
-`copy_restore` (T), `site_census` (any, read-only), `site_quiet on|off` (S; T's `off` at step 10), and the node-id word (T).
+**New agent words (nine):** `copy_export` (S), `copy_import` (T, Q6), `copy_stage` (T, G7),
+`copy_restore` (T), `site_census` (any, read-only), `site_quiet on|off` (S; T's `off` at step 10), the node-id word (T),
+and the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44).
 
 - **WP1 — The documents tell the truth (B22).** Correct the five documents and the
   `reconcile_site.sh` message to what is true today, and again when the copy lands. Small; first.
@@ -1211,7 +1272,8 @@ In build order. Each is built and tested on its own (design rule).
     - the vouch record `/etc/joinery/sites/{site}/vouched`, written whole each time with one
       `<manifest sha256> <chain id>` line per vouched run, root-owned 0600, and written only after
       the bundle's signature and seal check out.
-- **WP7a — Switch over, and the proxied origin change (the first switch built; L0).**
+- **WP7a — Switch over, and the proxied origin change (the first switch built; L0). Built
+  2026-10-02; see the status above.**
   - The switch-over on M (steps 7–10 and the way back, moved here from WP8): freeze S, the final
     never-roll run and exact census, the move, `take_node_id` and `site_quiet off` on T, and the
     way back (quiet T while it is still the node, then `SiteCopySwap::go_back`).
@@ -1389,3 +1451,5 @@ In build order. Each is built and tested on its own (design rule).
     withdraw, and a compromised M can push fresher data to T unasked (still readable only by T).
   - Recommendation: (a) for v1; L0 measures the cost, and (b) can be added later without changing
     the bundle.
+  - **Revised by B44 (2026-10-02):** the final copy is not an export. It carries no secret, so it
+    asks no approval; every export still does.
