@@ -44,15 +44,10 @@ function shared_prefixes_first_three() {
         if (!$exists($new_table)) {
             throw new Exception("{$new_table} not yet created - run the schema pass first");
         }
-        $old_cols = implode(', ', array_keys($columns));
-        $new_cols = implode(', ', array_values($columns));
-        $old_pkey = array_key_first($columns);
-        $new_pkey = $columns[$old_pkey];
-
-        $copied = $db->exec(
-            "INSERT INTO {$new_table} ({$new_cols})
-             SELECT {$old_cols} FROM {$old_table}
-              WHERE {$old_pkey} NOT IN (SELECT {$new_pkey} FROM {$new_table})");
+        $new_pkey = $columns[array_key_first($columns)];
+        // Only the columns the old table has: a node that skipped a release
+        // has an older shape of it (DatabaseUpdater::carryRenamedRows).
+        $copied = DatabaseUpdater::carryRenamedRows($db, $old_table, $new_table, $columns);
 
         // The new table's serial starts at 1; move it past every id just kept.
         // update_database names a primary key's sequence {table}_{pkey}_seq and

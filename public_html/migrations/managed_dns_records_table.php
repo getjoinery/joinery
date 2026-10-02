@@ -33,14 +33,22 @@ function managed_dns_records_table() {
         throw new Exception('dnr_managed_dns_records not yet created - run the schema pass first');
     }
 
-    $copied = $db->exec(
-        "INSERT INTO dnr_managed_dns_records
-            (dnr_managed_dns_record_id, dnr_domain, dnr_type, dnr_name, dnr_value, dnr_owner,
-             dnr_provider, dnr_zone, dnr_adopted, dnr_create_time, dnr_update_time, dnr_delete_time)
-         SELECT dnr_dns_record_id, dnr_domain, dnr_type, dnr_name, dnr_value, dnr_owner,
-                dnr_provider, dnr_zone, dnr_adopted, dnr_create_time, dnr_update_time, dnr_delete_time
-           FROM dnr_dns_records
-          WHERE dnr_dns_record_id NOT IN (SELECT dnr_managed_dns_record_id FROM dnr_managed_dns_records)");
+    // Only the columns the old table has: a node that skipped a release has
+    // an older shape of it (DatabaseUpdater::carryRenamedRows).
+    $copied = DatabaseUpdater::carryRenamedRows($db, 'dnr_dns_records', 'dnr_managed_dns_records', array(
+        'dnr_dns_record_id' => 'dnr_managed_dns_record_id',
+        'dnr_domain'        => 'dnr_domain',
+        'dnr_type'          => 'dnr_type',
+        'dnr_name'          => 'dnr_name',
+        'dnr_value'         => 'dnr_value',
+        'dnr_owner'         => 'dnr_owner',
+        'dnr_provider'      => 'dnr_provider',
+        'dnr_zone'          => 'dnr_zone',
+        'dnr_adopted'       => 'dnr_adopted',
+        'dnr_create_time'   => 'dnr_create_time',
+        'dnr_update_time'   => 'dnr_update_time',
+        'dnr_delete_time'   => 'dnr_delete_time',
+    ));
 
     // The new table's serial starts at 1; move it past every id just kept.
     // update_database names a primary key's sequence {table}_{pkey}_seq and
