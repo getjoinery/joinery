@@ -61,6 +61,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.6 - the region falls back to us-east
  * @version 2.5 - install mode copy (specs/site_copy.md WP8): the node row records its source and stays in state copy
  *               after a finished install; no admin password, no fleet seeding, no certificate wait
  * @version 2.4 - a test purchase's instance label and node name start with test_ (CustomerCloudProvision::external_name_prefix)
@@ -212,7 +213,7 @@ class ProvisionCustomerCloud {
 		if ($driver === null) return 0;
 
 		$settings = Globalvars::get_instance();
-		$region = $provision->get('cvp_region')        ?: ($settings->get_setting('server_manager_customer_cloud_region') ?: 'us-southeast');
+		$region = $provision->get('cvp_region')        ?: ($settings->get_setting('server_manager_customer_cloud_region') ?: 'us-east');
 		$type   = $provision->get('cvp_instance_type') ?: ($settings->get_setting('server_manager_customer_cloud_type')   ?: 'g6-nanode-1');
 		$image  = $settings->get_setting('server_manager_customer_cloud_image') ?: 'linode/ubuntu26.04';
 

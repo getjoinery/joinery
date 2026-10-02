@@ -12,6 +12,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.1 - the region falls back to us-east
  * @version 1.0
  */
 
@@ -102,7 +103,7 @@ if (!$site_copy) {
 		$fw = $page->getFormWriter('copy_new_server_form', [
 			'values' => [
 				'copy_region' => ($src_provision && $src_provision->get('cvp_region')) ? $src_provision->get('cvp_region')
-					: ($settings_g->get_setting('server_manager_customer_cloud_region') ?: 'us-southeast'),
+					: ($settings_g->get_setting('server_manager_customer_cloud_region') ?: 'us-east'),
 				'copy_type'   => ($src_provision && $src_provision->get('cvp_instance_type')) ? $src_provision->get('cvp_instance_type')
 					: ($settings_g->get_setting('server_manager_customer_cloud_type') ?: 'g6-nanode-1'),
 			],

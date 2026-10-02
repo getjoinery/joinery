@@ -27,15 +27,19 @@
  *                     deleted: the platform never deletes a cloud instance, so
  *                     the page names it for its owner to delete at the provider.
  *
- * advance() is called by the AdvanceSiteCopies task every tick (the Copy tab
- * only reads, so a page view writes nothing); it takes at most one step per call, saves every state it
- * moves to before the next, and holds an advisory lock so two movers never
- * race. A crash between calls resumes where it stood.
+ * advance() is called by the AdvanceSiteCopies task every tick, and by
+ * job_finished() when a node posts a copy step's result (the Copy tab only
+ * reads, so a page view writes nothing). A step that passes queues the next in
+ * the same call, so a run moves as fast as its jobs finish. It saves every
+ * state it moves to before the next, and holds an advisory lock so two movers
+ * never race. A crash between calls resumes where it stood.
  *
  * Switching over (steps 7-10) is not here: it arrives with the first way to
  * move a site's address (WP7a). Its two pieces that are not about the address
  * are built: the node-id word (take_node_id) and the row swap (SiteCopySwap).
  *
+ * @version 1.2 - a passed step queues the next in the same call, and job_finished() advances a copy when its
+ *                 step's result arrives: a run took two task ticks per step (site_copy.md B40)
  * @version 1.1 - the no-site-address refusal says a status check fills it (site_copy.md B38)
  * @version 1.0
  */
@@ -508,7 +512,31 @@ class SiteCopyRunner {
 		return $moved;
 	}
 
-	/** One step, under the lock. */
+	/**
+	 * A node posted a job's result: when the job is a copy's step, advance that
+	 * copy now instead of at the next task tick. Never throws; a copy that
+	 * cannot move here moves at the next tick.
+	 */
+	public static function job_finished(ManagementJob $job): void {
+		try {
+			$params = $job->get('mjb_parameters');
+			if (is_string($params)) {
+				$params = json_decode($params, true);
+			}
+			$copy_id = is_array($params) ? (int)($params['site_copy_id'] ?? 0) : 0;
+			if ($copy_id <= 0) {
+				return;
+			}
+			$copy = new SiteCopy($copy_id, TRUE);
+			if ($copy->key && !$copy->get('scp_delete_time')) {
+				self::advance($copy);
+			}
+		} catch (Throwable $e) {
+			error_log('SiteCopyRunner: advancing on job #' . (int)$job->key . "'s result failed: " . $e->getMessage());
+		}
+	}
+
+	/** Move a copy as far as it can go now, under the lock. */
 	public static function advance(SiteCopy $copy): void {
 		if (!self::lock()) {
 			return;
@@ -524,8 +552,16 @@ class SiteCopyRunner {
 	private static function advance_locked(SiteCopy $copy): void {
 		if ($copy->status() === SiteCopy::STATUS_WAITING) {
 			self::advance_waiting($copy);
-		} elseif ($copy->status() === SiteCopy::STATUS_COPYING) {
-			self::advance_run($copy);
+		}
+		// A run that just began queues its first step now, too.
+		if ($copy->status() === SiteCopy::STATUS_COPYING) {
+			// A passed step is followed at once by queuing the next; the loop
+			// stops at a step that is running, failed, or the run's end.
+			for ($i = 0; $i <= count($copy->steps()) && $copy->status() === SiteCopy::STATUS_COPYING; $i++) {
+				if (!self::advance_run($copy)) {
+					break;
+				}
+			}
 		}
 	}
 
@@ -597,7 +633,8 @@ class SiteCopyRunner {
 	 * One step of a run: queue the current step's job, or judge the job that
 	 * finished, or finish the run.
 	 */
-	private static function advance_run(SiteCopy $copy): void {
+	/** One move of a run. True when a step passed, so the next can be queued now. */
+	private static function advance_run(SiteCopy $copy): bool {
 		$steps = $copy->steps();
 		$pos = null;
 		foreach ($steps as $i => $s) {
@@ -608,7 +645,7 @@ class SiteCopyRunner {
 		}
 		if ($pos === null) {
 			self::finish_run($copy, $steps);
-			return;
+			return false;
 		}
 		$step = $steps[$pos];
 		try {
@@ -619,7 +656,7 @@ class SiteCopyRunner {
 			}
 		} catch (Exception $e) {
 			self::fail_step($copy, $steps, $pos, $e->getMessage());
-			return;
+			return false;
 		}
 		$target = $step['on'] === 'source' ? $source : $node;
 
@@ -630,20 +667,20 @@ class SiteCopyRunner {
 					array('site_copy_id' => (int)$copy->key), $copy->get('scp_created_by'));
 			} catch (Exception $e) {
 				self::fail_step($copy, $steps, $pos, 'it could not be queued: ' . $e->getMessage());
-				return;
+				return false;
 			}
 			$steps[$pos]['job_id'] = (int)$job->key;
 			$steps[$pos]['verdict'] = 'running';
 			$copy->set_steps($steps);
 			$copy->save();
-			return;
+			return false;
 		}
 
 		try {
 			$job = new ManagementJob((int)$step['job_id'], TRUE);
 		} catch (Exception $e) {
 			self::fail_step($copy, $steps, $pos, 'its job is gone');
-			return;
+			return false;
 		}
 		if (!in_array((string)$job->get('mjb_status'), JobResultProcessor::TERMINAL_STATUSES, true)) {
 			$queued = strtotime((string)$job->get('mjb_create_time') . ' UTC');
@@ -652,19 +689,20 @@ class SiteCopyRunner {
 				self::fail_step($copy, $steps, $pos, "it has not finished in {$limit} minutes (status "
 					. $job->get('mjb_status') . '; is the agent claiming jobs?)');
 			}
-			return;
+			return false;
 		}
 		JobResultProcessor::process_if_due($job);
 		$job->load();
 		$why = self::judge($copy, $step, $job, $source, $node);
 		if ($why !== null) {
 			self::fail_step($copy, $steps, $pos, $why);
-			return;
+			return false;
 		}
 		$steps[$pos]['verdict'] = 'passed';
 		$steps[$pos]['reason'] = '';
 		$copy->set_steps($steps);
 		$copy->save();
+		return true;
 	}
 
 	/** The job for one step. */

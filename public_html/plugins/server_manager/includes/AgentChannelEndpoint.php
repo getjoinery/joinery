@@ -36,6 +36,7 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.30 - a site copy's step result advances its copy at once (SiteCopyRunner::job_finished; site_copy.md B40)
  * @version 1.29 - a case is an incident (incident_triage.md WP1): stored with its plain title and
  *                severity, and its opening and its close recorded as timeline events
  * @version 1.28 - a take_node_id result is answered with node_id_taken when the row swap was made (site copy WP8)
@@ -1317,6 +1318,10 @@ class AgentChannelEndpoint {
 
 		$job = self::load_running_job((int)$in['job_id'], (int)$node->key);
 		self::record_result($node, $job, $in);
+
+		// A site copy's step: its run moves on now, not at the next task tick.
+		$job->load();
+		SiteCopyRunner::job_finished($job);
 
 		// A copy's take_node_id result is answered with the swap, or without
 		// it: the copy takes its source's node id only when this answer says

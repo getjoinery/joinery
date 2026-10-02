@@ -182,6 +182,36 @@
     from it, as the web root is filled. It never replaces a set address, and refuses an address
     another live node holds (a copy and its source excepted) and the management node's own.
     `job_result_processor` 239/239; agent `go test ./...`.
+  - **B39 — A copy on the operator's account is billed as a sold Managed site.** OBSERVED on the
+    first Copy-tab run (2026-10-02, copy 14, provision 10076, node 77547): `HostedTrialWatch` opened
+    a 60-day trial row (846) for the copy and pushed a `hosted_plan_notice`, which the quiet copy
+    refused (job 52528), and it re-files the push every tick. TRACED: the watch takes every
+    `cvp_hosting_mode = operator` provision that is done as a sold site; a copy made with the
+    operator token is `operator` with origin `admin`. At the trial's end plus grace the watch shuts
+    the instance down with the operator token, which after a switch-over would be the live site.
+    OPEN. Fix: one rule for a sold site (origin `order` or `buyer`, not `bare`), already written
+    inline as `$xfer_sold` in the overview by the transfer work, as
+    `CustomerCloudProvision::is_sold()`, and the watch skips a provision that is not sold; trial
+    row 846 removed.
+  - **B40 — A copy run moved one step per two task ticks.** OBSERVED on the first Copy-tab run
+    (copy 14): the host report finished at 18:31, passed at the 18:45 tick, and the export waited
+    for the 19:00 tick; seven steps at fifteen minutes a tick is about three and a half hours.
+    TRACED: `advance_run` either judged a finished step or queued the next, never both, and only
+    the Advance Site Copies task called it. Fixed in `SiteCopyRunner` 1.2: a passed step queues
+    the next in the same call (a run that begins queues its first step too), and
+    `AgentChannelEndpoint` 1.30 calls `SiteCopyRunner::job_finished()` when a node posts a copy
+    step's result, so a run moves as fast as its jobs finish. `site_copy_runner` 70/70.
+  - **B42 — Discard leaves the source's export request waiting.** OBSERVED 2026-10-02 (copy 14,
+    job 52708): discarding while `copy_export` waited for the owner on S marked the copy discarded,
+    but S's approval request stayed open until the agent's wait ran out; approving it would still
+    export a bundle for a copy nobody tracks (sealed to that copy's key, so readable only there).
+    OPEN. Fix: Discard withdraws a pending export on S (the approval's decline path) and cancels
+    the step's job.
+  - **First Copy-tab run (copy 14, 2026-10-02): abandoned by the owner at the export approval.**
+    New server installed quiet in 5 minutes (us-east, operator token), join approved (Linode
+    address check, IPv6 source), host report passed; found B39, B40, B42. Discarded; provision
+    10076 retired and its trial rows (846, 873) deleted. What a full run still has to show is in
+    the live verification queue.
   - **Carried to WP7a:** the switch-over itself. One finding for it: after step 10, T is live and
     answers as S's node id; going back swaps T's key off the node, so T can no longer reach M. The
     way back must quiet T (`site_quiet on`, while T is still the node) before `go_back`, then

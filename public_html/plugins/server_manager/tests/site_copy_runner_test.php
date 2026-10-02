@@ -302,6 +302,8 @@ $cnode->save();
 SiteCopyRunner::advance($copy); $copy->load();
 check($copy->status() === SiteCopy::STATUS_COPYING && $copy->get('scp_chain_id') === $chain_id,
 	'then the first run starts, on the newest chain');
+check($copy->steps()[0]['verdict'] === 'running' && !empty($copy->steps()[0]['job_id']),
+	'and its first step is queued in the same call');
 
 $step_job = function ($copy, int $i) {
 	$job = new ManagementJob((int)$copy->steps()[$i]['job_id'], TRUE);
@@ -340,7 +342,15 @@ foreach ($results as $i => $r) {
 		$params = json_decode((string)$job->get('mjb_parameters'), true);
 	}
 	$finish($job, $r[0], $r[1]);
-	SiteCopyRunner::advance($copy); $copy->load();
+	// The result arriving moves the run: the next step is queued at once,
+	// not at the next task tick (B40).
+	SiteCopyRunner::job_finished($job); $copy->load();
+	if ($i < count($results) - 1) {
+		check($copy->steps()[$i]['verdict'] === 'passed' && $copy->steps()[$i + 1]['verdict'] === 'running'
+			&& !empty($copy->steps()[$i + 1]['job_id']),
+			'its result passes step ' . ($i + 1) . ' and queues step ' . ($i + 2) . ' in the same call',
+			(string)$copy->get('scp_halt_reason'));
+	}
 }
 check($ops === array('host_report@copy', 'copy_export@source', 'copy_import@copy', 'copy_stage@copy', 'copy_restore@copy',
 	'site_census@source', 'site_census@copy'), 'one job at a time, each on its own machine, in order', implode(', ', $ops));

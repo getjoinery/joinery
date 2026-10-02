@@ -11,6 +11,7 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.12 - the relay region defaults to us-east
  * @version 2.11 - a lasting "Last tested" line: the relay's answer and the leak test's result
  * @version 2.10 - while an update re-images the relay, the health line says so instead of failing
  * @version 2.9 - a failed update or creation shows its reason, with Dismiss, while a relay exists
@@ -620,7 +621,7 @@ function mailbox_relay_section_render($page, array $v): void {
 				'helptext'    => 'The DNS name your domains\' mail will be addressed to. Pick a name in a zone you control.',
 			));
 			$cform->dropinput('cloud_region', 'Region', array(
-				'value'   => 'us-southeast',
+				'value'   => 'us-east',
 				'options' => array(
 					'us-southeast' => 'Atlanta, GA (US)',
 					'us-east'      => 'Newark, NJ (US)',

@@ -8,6 +8,7 @@
  * Reached from the Server Manager dashboard; tenant relay surfaces live on
  * the mailbox Setup/Settings tabs.
  *
+ * @version 1.5 - the shard region defaults to us-east
  * @version 1.4 - the fleet product box is Relay Hosting
  * @version 1.3 - shard relay version column + per-shard Rebuild
  */
@@ -136,7 +137,7 @@ if (!empty($fleet_service_on)) {
 		$sform->hiddeninput('action', '', array('value' => 'provision_shard'));
 		$sform->textinput('shard_hostname', 'Shard mail hostname', array('placeholder' => 'shard1.mx.example.com'));
 		$sform->dropinput('shard_region', 'Region', array(
-			'value'   => 'us-southeast',
+			'value'   => 'us-east',
 			'options' => array(
 				'us-southeast' => 'Atlanta, GA (US)', 'us-east' => 'Newark, NJ (US)', 'us-central' => 'Dallas, TX (US)',
 				'us-west' => 'Fremont, CA (US)', 'us-sea' => 'Seattle, WA (US)', 'us-mia' => 'Miami, FL (US)',

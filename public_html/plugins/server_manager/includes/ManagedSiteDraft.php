@@ -21,6 +21,7 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.2 - the region falls back to us-east
  * @version 1.1 - a domain whose slug would not fit the node slug column is refused with a sentence; the
  *                freeze on a cart line is read through ManagedSiteRequirement::frozen_from()
  * @version 1.0 - specs/managed_hosting_phase1_purchase.md §4, §5
@@ -211,7 +212,7 @@ class ManagedSiteDraft {
 		}
 		if (empty($out)) {
 			$default = trim((string)$settings->get_setting('server_manager_customer_cloud_region', false, true));
-			$out[] = $default !== '' ? $default : 'us-southeast';
+			$out[] = $default !== '' ? $default : 'us-east';
 		}
 		return array_values(array_unique($out));
 	}
