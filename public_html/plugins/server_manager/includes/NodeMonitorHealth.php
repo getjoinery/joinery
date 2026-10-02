@@ -13,6 +13,8 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.20 - note_reported_script_trust(): a poll's "ok" clears only an unusable manifest, never a
+ *                file that does not match its release, which the poll does not check
  * @version 1.19 - fleet_backup_health() results carry a kind (failed, stopped, unverified, ok): which backup
  *                incident each belongs to (incident_triage.md WP3)
  * @version 1.18 - evaluate(): a node in an install state is not monitored and is no problem, as the
@@ -521,10 +523,16 @@ class NodeMonitorHealth {
 	 * that is refusing but has no job dispatched to it never produces one.
 	 *
 	 * A node's own account of itself is the better evidence and wins, in both
-	 * directions — including clearing a state set from an old refusal, which is
-	 * the node saying it can verify scripts again without having to be sent a
-	 * job of the right type first. Only the caller decides whether it was said
-	 * at all; an absent answer never reaches here.
+	 * directions — including clearing a manifest state set from an old refusal,
+	 * which is the node saying it can verify scripts again without having to be
+	 * sent a job of the right type first. Only the caller decides whether it was
+	 * said at all; an absent answer never reaches here.
+	 *
+	 * The answer is about the MANIFEST only: the agent never hashes files for
+	 * its poll. So "ok" cannot clear a file that does not match its release —
+	 * that clears only when the job type that refused completes. Reading it as
+	 * clearing both flips the node between the two every poll, opening and
+	 * closing the same critical incident while the file stays modified.
 	 *
 	 * Does not save. The claim handler saves the node once, after folding
 	 * everything the poll reported.
@@ -535,7 +543,7 @@ class NodeMonitorHealth {
 
 		$current = (string)$node->get('mgn_script_trust');
 		if ($reported === 'ok') {
-			if ($current === '' || $current === 'ok') { return; }
+			if ($current !== 'untrusted_manifest') { return; }
 			$node->set('mgn_script_trust', 'ok');
 			$node->set('mgn_script_trust_since', null);
 			$node->set('mgn_script_trust_reason', '');
