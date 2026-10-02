@@ -410,6 +410,16 @@ class PublicPageJoinerySystem extends PublicPageBase {
     // =====================================================================
     // Sidebar vertical menu
     // =====================================================================
+
+    /** The number beside a menu entry (AdminMenuCounts), or '' when nothing waits. */
+    private static function menuCount(array $info): string {
+        $n = (int)($info['count'] ?? 0);
+        if ($n <= 0) {
+            return '';
+        }
+        return '<span class="nav-count" aria-label="' . $n . ' waiting">' . ($n > 99 ? '99+' : $n) . '</span>';
+    }
+
     public function vertical_menu($menu) {
         ?>
         <nav class="sidebar-nav">
@@ -426,6 +436,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
                       <a href="#" class="nav-link has-children<?php echo $is_active ? ' open' : ''; ?>">
                         <span class="nav-link-icon"><?php echo $icon; ?></span>
                         <span class="nav-link-text"><?php echo htmlspecialchars($menu_info['display']); ?></span>
+                        <?php echo self::menuCount($menu_info); ?>
                       </a>
                       <ul class="sidebar-subnav<?php echo $is_active ? ' open' : ''; ?>">
                         <?php foreach ($menu as $sub_id => $sub_info): ?>
@@ -434,6 +445,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
                             <a href="<?php echo htmlspecialchars($sub_info['defaultpage']); ?>"
                                class="nav-link<?php echo !empty($sub_info['currentsub']) ? ' active' : ''; ?>">
                               <?php echo htmlspecialchars($sub_info['display']); ?>
+                              <?php echo self::menuCount($sub_info); ?>
                             </a>
                           </li>
                           <?php endif; ?>
@@ -448,6 +460,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
                          class="nav-link<?php echo !empty($menu_info['currentmain']) ? ' active' : ''; ?>">
                         <span class="nav-link-icon"><?php echo $icon; ?></span>
                         <span class="nav-link-text"><?php echo htmlspecialchars($menu_info['display']); ?></span>
+                        <?php echo self::menuCount($menu_info); ?>
                       </a>
                     </li>
                     <?php

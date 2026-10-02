@@ -717,7 +717,7 @@ already sitting on the relay's spool, and a getjoinery API outage must not stop
 SSL being issued for a site provisioned an hour ago.
 
 `RunNodeUptimeChecks` stays a separate task deliberately: it is monitoring, not
-provisioning, and its up/down alerting must not sit behind a provisioning call
+provisioning, and its up/down verdicts (which become site-down incidents) must not sit behind a provisioning call
 that hangs.
 
 ### Subscription reconciliation

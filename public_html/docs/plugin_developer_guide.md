@@ -129,6 +129,16 @@ load, so it reads stored facts only and returns `''` unless there is something
 to do. The mailbox plugin's `MailboxAttentionNotice` is the reference
 implementation.
 
+**Counting what waits on a menu entry.** A plugin page where things wait for a
+person can show how many beside its admin menu entry: register a counter for
+the entry's slug from the bootstrap (`AdminMenuCounts::register('slug',
+callable)`). The counter returns an int and runs on every admin page load, so
+it reads stored facts only; 0 shows nothing, and a counter that throws is
+logged and shows nothing. A section shows the sum of its entries' counts, so a
+collapsed section still says something waits inside. Server Manager's
+Incidents entry (`IncidentNotice::menu_count`) is the reference
+implementation.
+
 ### Classes Resolve By Name
 
 Name a class and it loads. That covers every class in core `includes/` and

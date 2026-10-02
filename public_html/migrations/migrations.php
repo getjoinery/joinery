@@ -1620,3 +1620,14 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "DELETE FROM usa_users_addrs WHERE usa_usr_user_id IS NULL";
 	$migrations[] = $migration;
+
+	// Today's agent cases become incidents (incident_triage.md WP1): a
+	// plain title, a triage carried from the read stamp, and a timeline with
+	// the human note. A server_manager table, so the migration checks for the
+	// tables and columns itself; a case that already has a timeline is skipped.
+	$migration = array();
+	$migration['database_version'] = '204';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'incident_cases_carry_triage.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

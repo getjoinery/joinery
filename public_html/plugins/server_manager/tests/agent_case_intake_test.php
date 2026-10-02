@@ -24,13 +24,17 @@
  *   - the plane records the close the node reports and never writes one of
  *     its own, except the one truthful case: the node moved on to a newer
  *     case, which it can only do after closing the old one;
- *   - the card, the notices and the mail render every field escaped, and
- *     nothing in a case is ever a link.
+ *   - the incident pages, the notices and the mail render every field
+ *     escaped, and nothing in a case is ever a link.
  *
  * Throwaway node and case rows are permanently removed in cleanup.
  *
  * Run: php plugins/server_manager/tests/agent_case_intake_test.php
  *
+ * @version 1.4 - the fleet banners (failed units, failing recipes, failed backups) are gone: those conditions
+ *                are incidents, tested in incident_sources (incident_triage.md WP3)
+ * @version 1.3 - the incident pages (IncidentViews) and the incident line replace the case card and the
+ *                open-case notice (incident_triage.md WP1)
  * @version 1.2 - the failed-backup notice: loaded by the database, escaped, capped at five, linked
  *                to the failing run, silent for a healthy node and below permission 10
  * @version 1.1 - an unchanged case is not written on every poll; a newer note with a lower count is taken;
@@ -43,8 +47,8 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
-// The card's note form is a FormWriter form, which starts a session for its
-// own CSRF token; start it here, before the first line of output.
+// The incident views read the viewer's timezone from the session; start it
+// here, before the first line of output.
 if (session_status() === PHP_SESSION_NONE) {
 	@session_start();
 }
@@ -353,7 +357,7 @@ check(AgentChannelEndpoint::MAX_CASES_BYTES * 2 + AgentChannelEndpoint::MAX_VOCA
 	'Two full cases fields and the usual extras fit the request body with room');
 
 // ---------------------------------------------------------------------------
-section('The card, the notices and the mail render every field escaped');
+section('The incident pages, the notices and the mail render every field escaped');
 
 $rows = case_rows_for($node_id);
 $shown = null;
@@ -363,84 +367,29 @@ if ($shown !== null) {
 	$shown->set('inc_reason', '<script>alert("x")</script> & "quotes"');
 	$shown->set('inc_note_count', 2);
 	$shown->set('inc_last_note', '<img src=x onerror=alert(1)>');
-	$shown->set('inc_human_note', '<b>note</b>');
 	$body = $shown->body();
 	$body['attempts'][0]['detail'] = '<i>detail</i> http://evil.example/';
 	$shown->set('inc_body', $body);
 	$shown->save();
-	$html = IncidentCaseCard::render_case($shown, '/admin/server_manager/node_detail?mgn_managed_node_id=' . $node_id, SmAdminCsrf::token());
-	check(strpos($html, '<script>') === false && strpos($html, '&lt;script&gt;') !== false, 'The reason is escaped on the card');
-	check(strpos($html, '<img src=x') === false && strpos($html, '&lt;img') !== false, 'The newest note is escaped on the card');
-	check(strpos($html, '<b>note</b>') === false && strpos($html, '&lt;b&gt;note') !== false, 'The human note is escaped on the card');
-	check(strpos($html, '<i>detail</i>') === false && strpos($html, '&lt;i&gt;detail') !== false, 'An attempt detail is escaped on the card');
-	check(!preg_match('#href="[^"]*evil\.example#', $html), 'Nothing in a case becomes a link');
-	check(substr_count(strtolower($html), 'method="post"') >= 2 && substr_count($html, 'name="' . SmAdminCsrf::FIELD . '"') >= 2,
-		'The note and mark-read controls are POST forms carrying the CSRF token');
+	IncidentTriage::note($shown, '<b>note</b> http://evil.example/', (int)make_user('inc_note_' . bin2hex(random_bytes(3)), 10)->key);
+	$html = IncidentViews::table([$shown], ['show_node' => true, 'select' => 'f'])
+		. IncidentViews::evidence($shown)
+		. IncidentViews::timeline(IncidentEvent::for_incident((int)$shown->key));
+	check(strpos($html, '<script>') === false && strpos($html, '&lt;script&gt;') !== false, 'The reason is escaped on the incident pages');
+	check(strpos($html, '<img src=x') === false && strpos($html, '&lt;img') !== false, 'The newest failing check is escaped');
+	check(strpos($html, '<b>note</b>') === false && strpos($html, '&lt;b&gt;note') !== false, 'A person\'s note is escaped in the timeline');
+	check(strpos($html, '<i>detail</i>') === false && strpos($html, '&lt;i&gt;detail') !== false, 'An attempt detail is escaped');
+	check(!preg_match('#href="[^"]*evil\.example#', $html), 'Nothing in a case or a note becomes a link');
+	check(preg_match('#href="/admin/server_manager/incident\?id=' . (int)$shown->key . '"#', $html) === 1,
+		'The row links to the incident\'s own page by id');
 
-	$notice = FleetAttentionNotice::open_cases_for([$shown], [$node_id => '<b>' . $node->get('mgn_name') . '</b>']);
-	check(strpos($notice, '<script>') === false && strpos($notice, '<b>') === false && strpos($notice, '&lt;b&gt;') !== false,
-		'The open-case notice escapes the case and the node name');
-	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_managed_node_id=' . $node_id . '&amp;tab=overview"#', $notice) === 1,
-		'The notice links to the node page by id, never to anything the case said');
+	$notice = IncidentNotice::line_for(['needs_you' => 2, 'active' => 1, 'critical' => 0], 0);
+	check(strpos($notice, '2 incidents need you, 1 still happening.') !== false && strpos($notice, 'alert-warning') !== false
+		&& strpos($notice, 'href="/admin/server_manager/incidents"') !== false,
+		'The incident line counts, is amber with nothing critical, and links the Incidents page');
 
-	$units = FleetAttentionNotice::failed_units_for([$node_id => ['name' => '<b>' . $node->get('mgn_name') . '</b>', 'units' => ['<i>x</i>.service', 'fail2ban.service']]]);
-	check(strpos($units, '<b>') === false && strpos($units, '<i>') === false && strpos($units, '&lt;i&gt;x&lt;/i&gt;.service') !== false,
-		'The failed-unit notice escapes the unit names and the node name');
-	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_managed_node_id=' . $node_id . '&amp;tab=overview"#', $units) === 1,
-		'The failed-unit notice links to the node page by id');
-	$failing_recipes = FleetAttentionNotice::failing_recipes_for([$node_id => ['name' => '<b>' . $node->get('mgn_name') . '</b>', 'recipes' => ['<i>fail2ban</i>' => 'armed'], 'polled' => '2026-09-16 00:00:00']]);
-	check(strpos($failing_recipes, '<b>') === false && strpos($failing_recipes, '<i>') === false && strpos($failing_recipes, '&lt;i&gt;fail2ban&lt;/i&gt; armed') !== false,
-		'The failing-recipe notice escapes the recipe names and the node name');
-	check(preg_match('#href="/admin/server_manager/node_detail\?mgn_managed_node_id=' . $node_id . '&amp;tab=overview"#', $failing_recipes) === 1,
-		'The failing-recipe notice links to the node page by id');
-	check(FleetAttentionNotice::failed_units_for([]) === '' && FleetAttentionNotice::open_cases_for([], []) === ''
-		&& FleetAttentionNotice::failing_recipes_for([]) === '',
-		'All three fleet notices are silent with nothing to say');
-
-	// The failing-recipe notice asks the database which nodes to load: the
-	// stored list is canonical, so "an entry ends in :fail" is the whole question.
-	$failing_check = function () use ($node_id): bool {
-		foreach (new MultiManagedNode(['reports_failing_recipe' => true, 'deleted' => false]) as $n) {
-			if ((int)$n->key === $node_id) { return true; }
-		}
-		return false;
-	};
-	$recipes_before = $node->get('mgn_agent_recipes');
-	foreach ([
-		['fail2ban:armed:fail', true, 'a recipe whose check last failed'],
-		['agent_supervision:armed:fail,fail2ban:armed:pass', true, 'a failing recipe first in the list'],
-		['fail2ban:armed:pass', false, 'a passing recipe'],
-		['fail2ban:armed:unknown', false, 'a recipe whose check could not answer'],
-		['fail2ban:armed', false, 'a recipe with no verdict yet'],
-		['', false, 'no recipes'],
-	] as [$stored, $expect, $label]) {
-		$node->set('mgn_agent_recipes', $stored);
-		$node->save();
-		check($failing_check() === $expect, ($expect ? 'Loaded' : 'Not loaded') . ' for the failing-recipe notice: ' . $label);
-	}
-	$node->set('mgn_agent_recipes', $recipes_before);
-	$node->save();
-
-	// The failed-unit notice asks the database which nodes to load, so a
-	// healthy fleet costs no decoding on an admin page.
-	$reporting = function () use ($node_id): bool {
-		foreach (new MultiManagedNode(['reports_failed_units' => true, 'deleted' => false]) as $n) {
-			if ((int)$n->key === $node_id) { return true; }
-		}
-		return false;
-	};
-	$node->set('mgn_last_host_report', json_encode(JobResultProcessor::sanitise_host_report(['failed_units' => ['fail2ban.service']])));
-	$node->save();
-	check($reporting(), 'A node whose report names a failed unit is loaded for the failed-unit notice');
-	$node->set('mgn_last_host_report', json_encode(JobResultProcessor::sanitise_host_report(['failed_units' => []])));
-	$node->save();
-	check(!$reporting(), 'A node whose report names no failed unit is not loaded');
-	$node->set('mgn_last_host_report', json_encode(JobResultProcessor::sanitise_host_report([])));
-	$node->save();
-	check(!$reporting(), 'A node whose report could not list units (unknown) is not loaded');
-	$node->set('mgn_last_host_report', null);
-	$node->save();
-	check(!$reporting(), 'A node with no report is not loaded');
+	check(IncidentNotice::line_for(['needs_you' => 0, 'active' => 0, 'critical' => 0], 0) === '',
+		'The incident line is silent with nothing to say');
 
 	$mail = RecipeCaseNotice::mail_body([
 		'id' => 9, 'source' => 'recipe:fail2ban', 'recipe' => 'fail2ban', 'status' => 'open',
@@ -452,68 +401,5 @@ if ($shown !== null) {
 	check(strpos($mail, 'http://') === false && strpos($mail, 'https://') === false, 'The mail carries no link at all');
 	check(strpos($mail, "as reported by the agent's ledger") !== false, 'The mail says the record is as reported by the agent\'s ledger');
 }
-
-// ---------------------------------------------------------------------------
-section('A failed scheduled backup is named in the header');
-
-$failed_backup_loaded = function () use ($node_id): bool {
-	foreach (new MultiManagedNode(['reports_failed_backup' => true, 'deleted' => false]) as $n) {
-		if ((int)$n->key === $node_id) { return true; }
-	}
-	return false;
-};
-foreach ([['success', false], ['warning', false], [null, false], ['failed', true]] as [$outcome, $expect]) {
-	$node->set('mgn_last_backup_outcome', $outcome);
-	$node->set('mgn_last_backup_time', '2026-09-22 04:00:09');
-	$node->save();
-	check($failed_backup_loaded() === $expect, ($expect ? 'Loaded' : 'Not loaded') . ' for the failed-backup notice: outcome '
-		. var_export($outcome, true));
-}
-
-// The newest backup_run job, when it is the failure, supplies the reason and the link.
-$bjob = new ManagementJob(NULL);
-$bjob->set('mjb_mgn_managed_node_id', $node_id);
-$bjob->set('mjb_job_type', 'backup_run');
-$bjob->set('mjb_status', 'completed');
-$bjob->set('mjb_commands', array('primitive' => 'backup_run', 'params' => array()));
-$bjob->set('mjb_result', array('backup_status' => 'error', 'message' => '<b>No space left on device</b>'));
-$bjob->save();
-$bjob->load();
-harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $bjob->key);
-
-$_SESSION['permission'] = 10;
-$html = FleetAttentionNotice::render_failed_backups();
-check(strpos($html, 'mgn_managed_node_id=' . $node_id . '&amp;tab=backups') !== false, 'The node is named, linked to its Backups tab');
-check(strpos($html, 'job_detail?job_id=' . (int)$bjob->key) !== false, 'The failing run is linked');
-check(strpos($html, '&lt;b&gt;No space left on device') !== false && strpos($html, '<b>No space') === false,
-	'The run\'s reason is shown, escaped');
-check(strpos($html, 'at 2026-09-22 04:00 UTC') !== false, 'It says when');
-$_SESSION['permission'] = 5;
-check(FleetAttentionNotice::render_failed_backups() === '', 'Silent below permission 10');
-$_SESSION['permission'] = 10;
-
-// A job that succeeded after the stamp is not this failure's reason.
-$bjob->set('mjb_result', array('backup_status' => 'success'));
-$bjob->save();
-$html = FleetAttentionNotice::render_failed_backups();
-check(strpos($html, 'job_detail?job_id=' . (int)$bjob->key) === false, 'A successful newest job is not offered as the failure');
-
-$node->set('mgn_last_backup_outcome', 'success');
-$node->save();
-check(strpos(FleetAttentionNotice::render_failed_backups(), 'mgn_managed_node_id=' . $node_id . '&amp;') === false,
-	'A node whose next run succeeded is no longer named');
-
-section('The failed-backup notice, pure');
-check(FleetAttentionNotice::failed_backups_for([]) === '', 'Silent with nothing to say');
-$seven = [];
-for ($i = 1; $i <= 7; $i++) {
-	$seven[1000 + $i] = ['name' => 'node-' . $i, 'time' => '', 'reason' => '', 'job_id' => 0];
-}
-$capped = FleetAttentionNotice::failed_backups_for($seven);
-check(strpos($capped, 'node-5') !== false && strpos($capped, 'node-6') === false, 'Five nodes are named');
-check(strpos($capped, 'and 2 more') !== false, 'and the rest are counted');
-check(strpos($capped, '7 nodes') !== false, 'The lead counts them all');
-$escaped = FleetAttentionNotice::failed_backups_for([$node_id => ['name' => '<i>n</i>', 'time' => '', 'reason' => '', 'job_id' => 0]]);
-check(strpos($escaped, '<i>') === false && strpos($escaped, '&lt;i&gt;n') !== false, 'The node name is escaped');
 
 harness_finish();

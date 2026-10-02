@@ -1,6 +1,9 @@
 # Incident Triage — One Inbox for Everything a Node Needs a Person For
 
-**Status:** Draft (2026-10-01), unbuilt. Owner direction 2026-10-01: incidents of many types, noticed
+**Status:** Built 2026-10-01 (all four work packages; dev schema applied, carry-over run on dev;
+tests `incident_triage`, `incident_reconciler`, `incident_sources`, `incident_analysis`,
+`cert_renewal_verdict` and `agent_case_intake` pass; one live analysis of a real case on dev, on the
+local model). Owner direction 2026-10-01: incidents of many types, noticed
 without stacking banners, a list page, states a person sets (resolved, ignored and the like), and
 room for an AI to analyze one, now or later. All four questions answered 2026-10-01: **one inbox for
 every source**, built in steps (Q1); problem reports from sites stay on their own page, counted in
@@ -222,14 +225,45 @@ after a delay so a blip that clears in minutes costs nothing, is a later step.
 - **WP1 — Triage, pages and the agent's cases.** The new columns and `ine_incident_events`, the
   carry-over of today's cases, the Incidents page, the incident page, the node page's Incidents card,
   the header line (replacing `fleet_open_cases`), the menu count. Plain titles for agent cases.
+  - Built as: `IncidentTriage` (every write), `IncidentViews` (every rendering), `IncidentTitles`,
+    `IncidentNotice` (the header line and the menu count), `IncidentEvent`, pages `incidents` and
+    `incident`, the `incident_triage` API action (superadmin, not callable by the AI), migration 204
+    (the carry-over). The menu count is a general core registry, `AdminMenuCounts`, which a plugin
+    fills from its bootstrap as it does `AdminNotices`. **Resolve all cleared** acts within the
+    list's node and type filters, as its count does. `inc_human_note`, `inc_read_time` and
+    `inc_read_by` are no longer declared; they stay in the table until an update_database cleanup
+    pass drops them.
 - **WP2 — The reconciler and the first plane source.** `IncidentSources` (registration),
   `IncidentReconciler` and its task, `plane:site_down`, the `incident.opened` signal (bell; email for
   critical), retiring the site-down email.
+  - Built as: `IncidentSource` (the interface), `IncidentSources` (the registry, filled from the
+    bootstrap), `IncidentSourceSiteDown`, `IncidentReconciler` and the **Reconcile Incidents** task.
+    The uptime task keeps the failing probe's message (`mgn_uptime_down_reason`) for the evidence and
+    sends no up/down mail. **Notification is two signals, not one:** `incident.opened` (warning,
+    email off by default) and `incident.opened_critical` (email on by default), each addressed to
+    every superadmin, so the Q4 defaults hold and each superadmin can still change either on the
+    preferences page. An active incident on a node that is removed or enters an install state is
+    cleared, saying the node is no longer watched.
 - **WP3 — The other plane sources**, one at a time, each retiring the banner or email it replaces:
   backups (three sources, retiring `fleet_failed_backups`), failed units (retiring
   `fleet_failed_units`), certificates (retiring the certificate emails), agent silent, unmanageable,
   monitoring broken. `fleet_failing_recipes` retires here too.
+  - Built as: one `IncidentSource` class per row of the Types table, registered from the bootstrap.
+    The three backup sources read `NodeMonitorHealth::fleet_backup_health()` through
+    `IncidentBackupVerdict`; its results now carry a `kind` (failed, stopped, unverified, ok), so the
+    incidents and the dashboard's backup panel cannot disagree. The certificate check stores the
+    current problem (`mgn_cert_problem`) instead of mailing it; `mgn_cert_alerted_ts` retired with
+    the mail. `FleetAttentionNotice` is gone with its three banners and the three `MultiManagedNode`
+    options only they used. The dashboard's panels stay.
 - **WP4 — AI analysis.**
+  - Built as: `IncidentAnalyst` (request, the worker's run, the observe menu, the closed answer) and
+    `cli/analyze_incident.php`; the Analysis box on the incident page. The model has two tools,
+    `observe` (the read-only menu) and `conclude` (the answer); node text reaches it inside joinery_ai's
+    untrusted envelope. joinery_ai's `CostGuard` gained `registerUsageCounter`, so the analysis's
+    cost-bearing tokens count toward the monthly ceiling. Live proof 2026-10-02: case 1814 on the
+    dormant copy, local qwen model, 36 seconds, 11k tokens, two words (unit_journal php-fpm,
+    site_log error); it found the restarts refused because the copy is dormant and handed it to a
+    person.
 - The header line counts new problem reports from sites beside incidents (Q2), from WP1.
 
 ## Test plan

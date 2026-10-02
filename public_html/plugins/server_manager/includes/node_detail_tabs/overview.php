@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.32 - the Cases card is the Incidents card (incident_triage.md WP1): this node's incidents, linked
+ *                 to their own pages, and the alert under the header counts what needs a person by the header line's rule
  * @version 1.31 - every time on the page reads as an age (LibraryFunctions::time_ago): minutes, hours, days with
  *                 the time of day, the date beyond a week; a quiet site's scheduled tasks read as held, never as
  *                 the last-run time its database carries from before it went quiet; a live site's last run is told
@@ -619,13 +621,14 @@
 		echo ' <a href="' . $base_url . '&tab=overview&edit=1#connectionSettings">Fix in settings</a>';
 		echo '</div></div>';
 	}
-	$open_cases = 0;
-	foreach (IncidentCaseCard::cases_for((int)$node->key) as $c) {
-		if ((string)$c->get('inc_status') === IncidentRecord::STATUS_OPEN) { $open_cases++; }
-	}
-	if ($open_cases > 0) {
-		echo '<div class="alert alert-danger"><div><strong>' . $open_cases . ' open case' . ($open_cases === 1 ? '' : 's') . '.</strong> '
-			. 'A recipe on the node gave up and a person is the next actor. <a href="#node-cases" class="alert-link">See Cases below</a>.</div></div>';
+	// The same rule as the header line: incidents a person still owes something.
+	$node_incidents = IncidentRecord::needs_you_counts((int)$node->key);
+	if ($node_incidents['needs_you'] > 0) {
+		$n = $node_incidents['needs_you'];
+		echo '<div class="alert ' . ($node_incidents['critical'] > 0 ? 'alert-danger' : 'alert-warning') . '"><div><strong>'
+			. $n . ' incident' . ($n === 1 ? ' needs' : 's need') . ' you'
+			. ($node_incidents['active'] > 0 ? ', ' . $node_incidents['active'] . ' still happening' : '') . '.</strong> '
+			. '<a href="#node-incidents" class="alert-link">See Incidents below</a>.</div></div>';
 	}
 
 	// ── Health at a glance ──
@@ -1283,16 +1286,20 @@
 		$page->end_box();
 	}
 
-	// ── Cases card ──
-	// The cases this node's agent opened (a recipe that gave up), open first,
-	// then closed, each with the note a human wrote and a mark-read control.
-	// The node closes a case when its check passes; a human here only says
-	// what they saw. Everything in a case came from the node and is escaped
-	// by the card (IncidentCaseCard); nothing in it is a link.
-	if (JobCommandBuilder::has_agent_channel($node) || count(IncidentCaseCard::cases_for((int)$node->key)) > 0) {
-		echo '<div id="node-cases"></div>';
-		$page->begin_box(['title' => 'Cases']);
-		echo IncidentCaseCard::render_for_node($node, $base_url);
+	// ── Incidents card ──
+	// This node's incidents: every one that needs a person, then the newest
+	// of the rest. Each links to its own page, where it is triaged. Whatever a
+	// node said is escaped by IncidentViews; nothing it said is a link.
+	$node_incident_rows = IncidentViews::for_node((int)$node->key);
+	if (JobCommandBuilder::has_agent_channel($node) || count($node_incident_rows) > 0) {
+		echo '<div id="node-incidents"></div>';
+		$page->begin_box(['title' => 'Incidents', 'altlinks' => ['All of this node\'s incidents' => IncidentViews::LIST_URL . '?view=all&node=' . (int)$node->key]]);
+		if (count($node_incident_rows) === 0) {
+			echo '<p class="text-muted mb-0">None. An incident opens when a recipe on the node gives up: three attempts in an hour '
+				. 'and its check still fails. A check-only recipe opens one as soon as its check fails.</p>';
+		} else {
+			echo IncidentViews::table($node_incident_rows);
+		}
 		$page->end_box();
 	}
 

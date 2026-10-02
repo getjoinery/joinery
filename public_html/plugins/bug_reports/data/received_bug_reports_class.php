@@ -24,6 +24,8 @@
  *                     (refused, timed out, private address, or no header —
  *                     a site behind an IP allowlist lands here too)
  *
+ * @version 1.2.0 - the admin notice yields to a management node's incident line, which counts new reports
+ *                  for the superadmins who see it (incident_triage.md Q2)
  * @version 1.1.0 - fingerprint grouping; automatic reports and their counts
  * @version 1.0.0
  */
@@ -211,6 +213,11 @@ class ReceivedBugReport extends SystemBase {
 		try {
 			$session = SessionControl::get_instance();
 			if ((int)$session->get_permission() < 9) {
+				return '';
+			}
+			// On a management node, the incident line counts new reports for
+			// superadmins beside the fleet's incidents: one line, not two.
+			if (class_exists('IncidentNotice') && (int)$session->get_permission() >= 10) {
 				return '';
 			}
 			$new = count(new MultiReceivedBugReport(array('status' => self::STATUS_NEW)));

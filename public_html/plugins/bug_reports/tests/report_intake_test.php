@@ -190,8 +190,17 @@ check(strpos($list_html, 'RENDER FAILED') === false, 'the grouped list renders')
 
 section('Notice');
 
-$session->set_api_user($admin->key);
+$reader = make_user('bri_reader', 9);
+$session->set_api_user($reader->key);
 check(strpos(ReceivedBugReport::admin_notice(), 'new problem report') !== false, 'an admin is told new reports are waiting');
+$session->clear_api_user();
+$session->set_api_user($admin->key);
+if (class_exists('IncidentNotice')) {
+	// A management node's incident line counts them for its superadmins.
+	check(ReceivedBugReport::admin_notice() === '', 'a superadmin on a management node reads the count in the incident line instead');
+} else {
+	check(strpos(ReceivedBugReport::admin_notice(), 'new problem report') !== false, 'a superadmin is told new reports are waiting');
+}
 $session->clear_api_user();
 check(ReceivedBugReport::admin_notice() === '', 'no one below permission 9 is told');
 

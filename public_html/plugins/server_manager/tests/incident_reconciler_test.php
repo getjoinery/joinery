@@ -1,0 +1,260 @@
+<?php
+/** @joinery-test
+ * name: incident_reconciler
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
+/**
+ * The reconciler and the first plane source (incident_triage.md WP2).
+ *
+ * What is worth testing, on a throwaway node, with the signals caught so no
+ * real superadmin is told anything:
+ *   - plane:site_down opens one critical incident when uptime monitoring has
+ *     stored 'down', with what the check saw as evidence, and tells the
+ *     superadmins once: never per tick;
+ *   - a changed detail refreshes the incident with no event and no signal;
+ *   - the site answering again clears it, with an event;
+ *   - down again within the hour reopens the same incident as new and tells
+ *     them again; an ignored one reopens still ignored and silent;
+ *   - after the hour it is a new incident with the next id;
+ *   - monitoring switched off clears it, saying so;
+ *   - a node in an install state is not watched: nothing opens on it, and an
+ *     active incident on it is cleared, saying so;
+ *   - a warning source sends incident.opened, a critical one
+ *     incident.opened_critical;
+ *   - a source that throws leaves its incident as it was;
+ *   - a second pass while one holds the lock does nothing.
+ *
+ * Run: php plugins/server_manager/tests/incident_reconciler_test.php
+ *
+ * @version 1.0
+ */
+
+if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
+
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
+
+$node = new ManagedNode(NULL);
+$node->set('mgn_name', 'Reconciler test');
+$node->set('mgn_slug', 'harnesstest-rec-' . bin2hex(random_bytes(3)));
+$node->set('mgn_host', '192.0.2.43');
+$node->set('mgn_ssh_user', 'root');
+$node->set('mgn_site_url', 'https://reconciler.example');
+$node->set('mgn_enabled', true);
+$node->set('mgn_uptime_enabled', true);
+$node->set('mgn_uptime_last_status', 'up');
+$node->save();
+$node->load();
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
+$node_id = (int)$node->key;
+
+// Hold the reconciler's lock for the whole test: the live task on this box
+// (another connection) then skips its passes, so it never sees this node down
+// and tells real superadmins. An advisory lock is re-entrant on one
+// connection, so this test's own passes still run.
+$main = DbConnector::get_instance()->get_db_link();
+$main->query('SELECT pg_advisory_lock(' . IncidentReconciler::LOCK_KEY . ')');
+
+$signals = array();
+IncidentReconciler::$dispatch = function ($signal, $payload) use (&$signals) { $signals[] = array($signal, $payload); };
+
+$site_down = new IncidentSourceSiteDown();
+$sources = array($site_down->name() => $site_down);
+$pass = function (?array $srcs = null) use (&$sources, $node_id) {
+	return IncidentReconciler::run($srcs ?? $sources, array($node_id));
+};
+$set = function (array $cols) use ($node) {
+	foreach ($cols as $k => $v) { $node->set($k, $v); }
+	$node->save();
+	$node->load();
+};
+$incidents = function (string $source = 'plane:site_down') use ($node_id): array {
+	$out = array();
+	foreach (new MultiIncidentRecord(array('node_id' => $node_id, 'source' => $source), array('inc_incident_record_id' => 'ASC')) as $r) {
+		harness_register_row('inc_incident_records', 'inc_incident_record_id', $r->key);
+		$out[] = $r;
+	}
+	return $out;
+};
+$kinds = function (int $id): array {
+	return array_map(function ($e) { return (string)$e->get('ine_kind'); }, IncidentEvent::for_incident($id));
+};
+
+// ---------------------------------------------------------------------------
+section('A site that is up opens nothing');
+
+$c = $pass();
+check($c['opened'] === 0 && count($incidents()) === 0 && count($signals) === 0, 'Up: no incident, no signal', json_encode($c));
+
+// ---------------------------------------------------------------------------
+section('Down opens one critical incident and tells the superadmins once');
+
+$set(array('mgn_uptime_last_status' => 'down', 'mgn_uptime_down_since' => gmdate('Y-m-d H:i:s', time() - 120),
+	'mgn_uptime_down_reason' => 'HTTP 502 from https://reconciler.example'));
+$c = $pass();
+$rows = $incidents();
+check($c['opened'] === 1 && count($rows) === 1, 'One incident opened', json_encode($c));
+$inc = $rows[0] ?? null;
+if ($inc !== null) {
+	$detail = $inc->get('inc_detail');
+	if (is_string($detail)) { $detail = json_decode($detail, true); }
+	check($inc->is_open() && $inc->is_critical() && $inc->title() === 'The site does not answer'
+		&& $inc->triage() === IncidentRecord::TRIAGE_NEW && (int)$inc->get('inc_node_case_id') === 1,
+		'Active, critical, plainly titled, new, the first of its source on the node');
+	check(($detail['What the check saw'] ?? '') === 'HTTP 502 from https://reconciler.example' && ($detail['Site'] ?? '') === 'https://reconciler.example',
+		'Its evidence is what the check saw and the site', json_encode($detail));
+	check($kinds((int)$inc->key) === array('opened'), 'One opened event');
+	check(count($signals) === 1 && $signals[0][0] === IncidentReconciler::SIGNAL_CRITICAL
+		&& (int)$signals[0][1]['incident_id'] === (int)$inc->key && count($signals[0][1]['recipients']) > 0
+		&& $signals[0][1]['link'] === '/admin/server_manager/incident?id=' . (int)$inc->key,
+		'One incident.opened_critical, to the superadmins, linking the incident', json_encode($signals));
+}
+$signals = array();
+$c = $pass();
+check($c['opened'] === 0 && $c['refreshed'] === 0 && count($incidents()) === 1 && count($signals) === 0,
+	'Still down on the next tick: nothing new, no signal', json_encode($c));
+
+// ---------------------------------------------------------------------------
+section('A changed detail refreshes; answering again clears');
+
+$set(array('mgn_uptime_down_reason' => 'connection refused'));
+$c = $pass();
+if ($inc !== null) {
+	$inc->load();
+	$detail = $inc->get('inc_detail');
+	if (is_string($detail)) { $detail = json_decode($detail, true); }
+	check($c['refreshed'] === 1 && ($detail['What the check saw'] ?? '') === 'connection refused'
+		&& $kinds((int)$inc->key) === array('opened') && count($signals) === 0,
+		'The evidence follows the check, with no event and no signal', json_encode($c));
+}
+$set(array('mgn_uptime_last_status' => 'up', 'mgn_uptime_down_since' => null, 'mgn_uptime_down_reason' => null));
+$c = $pass();
+if ($inc !== null) {
+	$inc->load();
+	$ev = IncidentEvent::for_incident((int)$inc->key);
+	check($c['cleared'] === 1 && !$inc->is_open() && $kinds((int)$inc->key) === array('opened', 'cleared')
+		&& (string)end($ev)->get('ine_text') === 'The site answers again.' && $inc->needs_you(),
+		'Cleared with an event; still needs a look', json_encode($c));
+}
+
+// ---------------------------------------------------------------------------
+section('Back within the hour reopens the same incident');
+
+if ($inc !== null) {
+	IncidentTriage::set($inc, IncidentRecord::TRIAGE_LOOKING, (int)make_user('rec_' . bin2hex(random_bytes(3)), 10)->key);
+}
+$set(array('mgn_uptime_last_status' => 'down', 'mgn_uptime_down_since' => gmdate('Y-m-d H:i:s')));
+$c = $pass();
+$rows = $incidents();
+if ($inc !== null) {
+	$inc->load();
+	check($c['reopened'] === 1 && count($rows) === 1 && $inc->is_open() && $inc->triage() === IncidentRecord::TRIAGE_NEW
+		&& end($rows)->key == $inc->key && array_slice($kinds((int)$inc->key), -1) === array('reopened'),
+		'Reopened, the same incident, new again', json_encode($c));
+	check(count($signals) === 1 && $signals[0][0] === IncidentReconciler::SIGNAL_CRITICAL, 'They are told once more');
+}
+$signals = array();
+if ($inc !== null) {
+	IncidentTriage::set($inc, IncidentRecord::TRIAGE_IGNORED, (int)make_user('rec2_' . bin2hex(random_bytes(3)), 10)->key);
+	$set(array('mgn_uptime_last_status' => 'up'));
+	$pass();
+	$set(array('mgn_uptime_last_status' => 'down'));
+	$c = $pass();
+	$inc->load();
+	check($c['reopened'] === 1 && $inc->is_open() && $inc->triage() === IncidentRecord::TRIAGE_IGNORED && count($signals) === 0,
+		'An ignored incident reopens still ignored, and nobody is told', json_encode($c));
+}
+
+// ---------------------------------------------------------------------------
+section('After the hour it is a new incident');
+
+$set(array('mgn_uptime_last_status' => 'up'));
+$pass();
+if ($inc !== null) {
+	$inc->load();
+	$inc->set('inc_closed_time', gmdate('Y-m-d H:i:s', time() - IncidentReconciler::REOPEN_WINDOW - 60));
+	$inc->save();
+}
+$set(array('mgn_uptime_last_status' => 'down'));
+$c = $pass();
+$rows = $incidents();
+check($c['opened'] === 1 && count($rows) === 2 && (int)$rows[1]->get('inc_node_case_id') === 2 && $rows[1]->triage() === IncidentRecord::TRIAGE_NEW
+	&& count($signals) === 1, 'A new incident with the next id, and a signal', json_encode($c));
+$second = $rows[1] ?? null;
+
+// ---------------------------------------------------------------------------
+section('Monitoring off, and a node no longer watched');
+
+$set(array('mgn_uptime_enabled' => false));
+$c = $pass();
+if ($second !== null) {
+	$second->load();
+	$ev = IncidentEvent::for_incident((int)$second->key);
+	check($c['cleared'] === 1 && !$second->is_open() && strpos((string)end($ev)->get('ine_text'), 'turned off') !== false,
+		'Monitoring switched off clears it, saying so', (string)end($ev)->get('ine_text'));
+}
+$set(array('mgn_uptime_enabled' => true));
+$pass();
+$open_now = array_values(array_filter($incidents(), function ($r) { return $r->is_open(); }));
+check(count($open_now) === 1, 'Setup: an active incident again', (string)count($open_now));
+$set(array('mgn_install_state' => 'copy'));
+$c = $pass();
+$open_now = array_values(array_filter($incidents(), function ($r) { return $r->is_open(); }));
+$ev = isset($rows) && count($incidents()) ? IncidentEvent::for_incident((int)end($incidents())->key) : array();
+check($c['cleared'] === 1 && count($open_now) === 0 && strpos((string)end($ev)->get('ine_text'), 'no longer watched') !== false,
+	'A node in an install state: its active incident is cleared, saying so', json_encode($c));
+$before = count($incidents());
+$c = $pass();
+check(count($incidents()) === $before && $c['opened'] + $c['reopened'] === 0, 'Nothing opens on it while it is in that state');
+$set(array('mgn_install_state' => null, 'mgn_uptime_last_status' => 'up'));
+$pass();
+
+// ---------------------------------------------------------------------------
+section('A warning source, and a source that throws');
+
+class ReconcilerTestWarning implements IncidentSource {
+	public static $holds = true;
+	public static $throws = false;
+	public function name(): string { return 'plane:harness_warning'; }
+	public function evaluate(ManagedNode $node): ?array {
+		if (self::$throws) { throw new RuntimeException('cannot decide'); }
+		return self::$holds ? array('title' => 'A harness warning', 'severity' => 'warning', 'detail' => array('x' => 1)) : null;
+	}
+	public function cleared_text(ManagedNode $node): string { return 'gone'; }
+}
+$warn = new ReconcilerTestWarning();
+$signals = array();
+$pass(array($warn->name() => $warn));
+$w = $incidents('plane:harness_warning');
+check(count($w) === 1 && !$w[0]->is_critical() && count($signals) === 1 && $signals[0][0] === IncidentReconciler::SIGNAL_WARNING,
+	'A warning opens with incident.opened', json_encode($signals));
+ReconcilerTestWarning::$throws = true;
+$c = $pass(array($warn->name() => $warn));
+$w = $incidents('plane:harness_warning');
+check($c['cleared'] === 0 && count($w) === 1 && $w[0]->is_open(), 'A source that throws leaves its incident as it was', json_encode($c));
+ReconcilerTestWarning::$throws = false;
+ReconcilerTestWarning::$holds = false;
+$pass(array($warn->name() => $warn));
+
+// ---------------------------------------------------------------------------
+section('One pass at a time');
+
+$main->query('SELECT pg_advisory_unlock(' . IncidentReconciler::LOCK_KEY . ')');
+$settings = Globalvars::get_instance();
+$other = new PDO('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname'),
+	$settings->get_setting('dbusername'), $settings->get_setting('dbpassword'));
+$held = (bool)$other->query('SELECT pg_try_advisory_lock(' . IncidentReconciler::LOCK_KEY . ')')->fetchColumn();
+check($held, 'Setup: another connection holds the lock');
+$c = $pass();
+check($c['busy'] === true, 'A pass while another holds the lock does nothing', json_encode($c));
+$other->query('SELECT pg_advisory_unlock(' . IncidentReconciler::LOCK_KEY . ')');
+$other = null;
+$main->query('SELECT pg_advisory_lock(' . IncidentReconciler::LOCK_KEY . ')');
+$c = $pass();
+check($c['busy'] === false, 'Once released, a pass runs');
+$main->query('SELECT pg_advisory_unlock(' . IncidentReconciler::LOCK_KEY . ')');
+
+IncidentReconciler::$dispatch = null;
+harness_finish();

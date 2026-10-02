@@ -2,6 +2,11 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.32 - the reports_failed_units, reports_failed_backup and reports_failing_recipe options are gone with
+ *                the fleet banners that used them (incident_triage.md WP3)
+ * @version 1.31 - mgn_cert_problem: the served certificate's current problem, read by the certificate incident;
+ *                mgn_cert_alerted_ts retired with the certificate mail (incident_triage.md WP3)
+ * @version 1.30 - mgn_uptime_down_reason: what the check saw while a site is down (incident_triage.md WP2)
  * @version 1.29 - mgn_copy_of_node_id and backup_node_of(): a dormant copy reads its source's backup storage, so
  *                the chain download builders serve a copy without learning that copies exist (site_copy.md WP4)
  * @version 1.28 - is_operational() and INSTALL_STATES: every install state (installing, install_failed,
@@ -79,7 +84,7 @@ class ManagedNode extends SystemBase {
 	public static $tablename = 'mgn_managed_nodes';
 	public static $pkey_column = 'mgn_managed_node_id';
 
-	public static $json_vars = array('mgn_last_status_data', 'mgn_backup_policy', 'mgn_last_host_report');
+	public static $json_vars = array('mgn_last_status_data', 'mgn_backup_policy', 'mgn_last_host_report', 'mgn_cert_problem');
 
 	protected static $foreign_key_actions = [
 		'mgn_mgh_managed_host_id' => ['action' => 'null'],
@@ -241,8 +246,15 @@ class ManagedNode extends SystemBase {
 		'mgn_uptime_last_status'          => array('type'=>'varchar(20)'),
 		'mgn_uptime_consecutive_failures' => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 		'mgn_uptime_down_since'           => array('type'=>'timestamp(6)'),
+		// What the newest failing probe saw while the site is down: the
+		// site-down incident's evidence. Cleared when it answers again.
+		'mgn_uptime_down_reason'          => array('type'=>'varchar(255)'),
 		'mgn_cert_expiry_ts'              => array('type'=>'timestamp(6)'),
-		'mgn_cert_alerted_ts'             => array('type'=>'timestamp(6)'),
+		// The served certificate's current problem, or null: renewal overdue,
+		// expiry near, www uncovered, or an origin presenting another name's
+		// certificate ({reason, title, not_after?, detail}). The certificate
+		// incident's evidence (IncidentSourceCertificate).
+		'mgn_cert_problem'                => array('type'=>'jsonb'),
 		// Hardened ingest relay (specs/relay_without_a_shell.md). A relay is a
 		// ManagedNode row in the DISPOSABLE posture so it gets the dashboard health
 		// dot: mgn_is_relay marks it (no Joinery app runs on it, so the Joinery-app
@@ -686,30 +698,6 @@ class MultiManagedNode extends SystemMultiBase {
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
-
-		// Nodes whose latest host report names at least one failed unit. The
-		// report is stored in the shape sanitise_host_report gives it, where
-		// failed_units is a list or the string unknown; a node with no report
-		// has a null there and is out.
-		if (!empty($this->options['reports_failed_units'])) {
-			// Both halves are evaluated whatever the first says, so the second
-			// must be safe on a string: a jsonb compare, not an array length.
-			$filters["jsonb_typeof(mgn_last_host_report->'failed_units')"] =
-				"= 'array' AND mgn_last_host_report->'failed_units' <> '[]'::jsonb";
-		}
-
-		// Nodes whose last scheduled backup failed. A warning (kept, but not
-		// vouched for) and a run still in flight are not failures.
-		if (!empty($this->options['reports_failed_backup'])) {
-			$filters['mgn_last_backup_outcome'] = "= 'failed'";
-		}
-
-		if (!empty($this->options['reports_failing_recipe'])) {
-			// The stored list is canonical (AgentChannelEndpoint::normalised_recipes):
-			// name:mode[:verdict], comma-separated, verdicts from a closed set,
-			// so "an entry ends in :fail" is the whole question.
-			$filters['mgn_agent_recipes'] = "~ ':fail(,|$)'";
-		}
 
 		if (isset($this->options['slug'])) {
 			$filters['mgn_slug'] = [$this->options['slug'], PDO::PARAM_STR];

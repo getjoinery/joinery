@@ -36,6 +36,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.29 - a case is an incident (incident_triage.md WP1): stored with its plain title and
+ *                severity, and its opening and its close recorded as timeline events
  * @version 1.28 - a take_node_id result is answered with node_id_taken when the row swap was made (site copy WP8)
  * @version 1.27 - a claim reports claim_bytes, the largest claim its agent reads (1.45.0); the job handed out
  *                 is held to it, up to MAX_CLAIM_BODY, and a claim without it to MAX_JOB_BODY. A chain job
@@ -1676,11 +1678,13 @@ class AgentChannelEndpoint {
 				$existing->set('inc_body', $c['body']);
 				$outcome = 'appended';
 			}
+			$cleared = false;
 			if ($existing->is_open() && $c['status'] === IncidentRecord::STATUS_CLOSED) {
 				$existing->set('inc_status', IncidentRecord::STATUS_CLOSED);
 				$existing->set('inc_closed_time', $c['closed'] ?? $now);
 				$existing->set('inc_close_reason', $c['close_reason']);
 				$outcome = 'closed';
+				$cleared = true;
 			}
 			if ($outcome === 'unchanged') {
 				if (!$existing->is_open()) {
@@ -1693,6 +1697,10 @@ class AgentChannelEndpoint {
 			}
 			$existing->set('inc_last_seen_time', $now);
 			$existing->save();
+			if ($cleared) {
+				IncidentEvent::record((int)$existing->key, IncidentEvent::KIND_CLEARED, $c['closed'] ?? $now, null,
+					(string)$c['close_reason']);
+			}
 			return $outcome;
 		}
 
@@ -1710,6 +1718,7 @@ class AgentChannelEndpoint {
 			$open->set('inc_close_reason', 'closed on the node before its case #' . $c['id']
 				. ' opened; the node\'s own close was not heard by this management node');
 			$open->save();
+			IncidentEvent::record((int)$open->key, IncidentEvent::KIND_CLEARED, $now, null, (string)$open->get('inc_close_reason'));
 		}
 		if ($c['status'] === IncidentRecord::STATUS_OPEN
 			&& IncidentRecord::open_count($node_id) >= self::MAX_OPEN_CASES_PER_NODE) {
@@ -1732,7 +1741,16 @@ class AgentChannelEndpoint {
 		$row->set('inc_body', $c['body']);
 		$row->set('inc_first_seen_time', $now);
 		$row->set('inc_last_seen_time', $now);
+		$row->set('inc_title', IncidentTitles::for_source($c['source']));
+		$row->set('inc_severity', IncidentRecord::SEVERITY_WARNING);
 		$row->save();
+		// The timeline, in the node's own times. A case first heard already
+		// closed (the node fixed it between polls) still opened and still
+		// needs a look: it is new, shown as cleared.
+		IncidentEvent::record((int)$row->key, IncidentEvent::KIND_OPENED, $c['opened'] ?? $now, null, (string)$c['reason']);
+		if ($c['status'] === IncidentRecord::STATUS_CLOSED) {
+			IncidentEvent::record((int)$row->key, IncidentEvent::KIND_CLEARED, $c['closed'] ?? $now, null, (string)$c['close_reason']);
+		}
 		return 'stored';
 	}
 

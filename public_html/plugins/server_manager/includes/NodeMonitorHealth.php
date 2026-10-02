@@ -13,6 +13,8 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.19 - fleet_backup_health() results carry a kind (failed, stopped, unverified, ok): which backup
+ *                incident each belongs to (incident_triage.md WP3)
  * @version 1.18 - evaluate(): a node in an install state is not monitored and is no problem, as the
  *                 uptime task skips it (ManagedNode::is_operational())
  * @version 1.17 - backup_runs_from_here rows carry `level` and `bytes` (null when the run did not say);
@@ -632,6 +634,20 @@ class NodeMonitorHealth {
 	}
 
 	/** Where one node's fleet backups stand. */
+	/** A result with the incident kind it belongs to. */
+	private static function kind(array $result, string $kind): array {
+		$result['kind'] = $kind;
+		return $result;
+	}
+
+	/**
+	 * Where one node's fleet backups stand. Besides the card's state, label,
+	 * detail and is_problem, 'kind' says which incident it is: failed (the last
+	 * run failed), stopped (backups are not happening: no recovery key, never,
+	 * not landing, or overdue), unverified (taken, but not proven whole: a
+	 * suspiciously small run, an incomplete stored backup, or verification
+	 * failed, stale or never done), or ok.
+	 */
 	public static function fleet_backup_health($node, array $policy): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
 
@@ -646,8 +662,8 @@ class NodeMonitorHealth {
 		// which invites someone to wait.
 		$rk = RecoveryKeyFleet::node_state($node);
 		if ($rk['state'] !== 'n/a' && !RecoveryKeyFleet::has_own_key($rk)) {
-			return self::result('backups', 'Cannot be backed up: no verified recovery key on the node',
-				RecoveryKeyFleet::blocker_summary($rk), $rk['state'] !== 'unknown');
+			return self::kind(self::result('backups', 'Cannot be backed up: no verified recovery key on the node',
+				RecoveryKeyFleet::blocker_summary($rk), $rk['state'] !== 'unknown'), 'stopped');
 		}
 
 		if (!$last) {
@@ -656,13 +672,13 @@ class NodeMonitorHealth {
 			// grace of two intervals distinguishes the two without a flag.
 			$age = strtotime((string)$node->get('mgn_create_time') . ' UTC');
 			if ($age !== false && (time() - $age) < (2 * 86400)) {
-				return self::result('backups', 'No backup yet',
+				return self::kind(self::result('backups', 'No backup yet',
 					'This node has not been backed up from here yet. Its first run is scheduled for '
-					. FleetBackupPolicy::slot_time($policy, (string)$node->get('mgn_slug')) . '.', false);
+					. FleetBackupPolicy::slot_time($policy, (string)$node->get('mgn_slug')) . '.', false), 'ok');
 			}
-			return self::result('backups', 'Never backed up',
+			return self::kind(self::result('backups', 'Never backed up',
 				'This node has been managed for more than two days and no backup taken from here has '
-				. 'ever completed.', true);
+				. 'ever completed.', true), 'stopped');
 		}
 
 		$age = time() - strtotime($last . ' UTC');
@@ -681,6 +697,7 @@ class NodeMonitorHealth {
 				. ($summary['reason'] !== '' ? 'the node said: ' . $summary['reason']
 					: 'its files archive was a tenth the size of the previous full, or smaller. Check it before trusting it.'),
 				true);
+			$r['kind'] = 'unverified';
 			if (!empty($summary['job_id'])) {
 				$r['job_id'] = $summary['job_id'];
 			}
@@ -697,6 +714,7 @@ class NodeMonitorHealth {
 				: self::backup_run_summary(array());
 			$r = self::result('backups', 'Last backup failed',
 				self::failed_backup_detail($summary, $age), true);
+			$r['kind'] = 'failed';
 			if (!empty($summary['job_id'])) {
 				$r['job_id'] = $summary['job_id'];
 			}
@@ -719,26 +737,26 @@ class NodeMonitorHealth {
 		$claimed = strtotime($last . ' UTC');
 		if ($checked !== false && $claimed !== false && $checked > $claimed
 			&& ($newest === false || $newest < $claimed - 3600)) {
-			return self::result('backups', 'Backups are not landing',
+			return self::kind(self::result('backups', 'Backups are not landing',
 				'This node reports its backups succeeding, but its backup storage was listed '
 				. self::humanize(time() - $checked) . ' ago and nothing has actually arrived since the '
-				. 'run it reported. The archive either never uploaded or went somewhere else.', true);
+				. 'run it reported. The archive either never uploaded or went somewhere else.', true), 'stopped');
 		}
 
 		if ($age > $window) {
-			return self::result('backups', 'Backups have stopped',
+			return self::kind(self::result('backups', 'Backups have stopped',
 				'The last successful backup from here was ' . self::humanize($age) . ' ago, which is longer '
-				. 'than this node\'s schedule allows for.', true);
+				. 'than this node\'s schedule allows for.', true), 'stopped');
 		}
 
 		// Backed up. Whether it is VERIFIED restorable is the next question,
 		// and it has four answers — see verify_state().
 		$verify = self::verify_state($node, $policy);
 		if ($verify['is_problem']) {
-			return self::result('backups', $verify['label'], $verify['detail'], true);
+			return self::kind(self::result('backups', $verify['label'], $verify['detail'], true), 'unverified');
 		}
-		return self::result('backups', 'Backed up',
-			'Last backup ' . self::humanize($age) . ' ago. ' . $verify['detail'], false);
+		return self::kind(self::result('backups', 'Backed up',
+			'Last backup ' . self::humanize($age) . ' ago. ' . $verify['detail'], false), 'ok');
 	}
 
 	/**
