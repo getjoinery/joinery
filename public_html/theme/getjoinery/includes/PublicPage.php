@@ -93,12 +93,7 @@ class PublicPage extends PublicPageBase {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/theme/getjoinery/assets/css/style.css?v=<?php echo $this->asset_mtime('theme/getjoinery/assets/css/style.css'); ?>">
-
-    <?php
-    if ($settings->get_setting('custom_css')) {
-        echo '<style>' . $settings->get_setting('custom_css') . '</style>';
-    }
-    ?>
+    <?php $this->render_theme_tail(); ?>
 </head>
 <body>
 

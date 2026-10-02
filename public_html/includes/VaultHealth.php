@@ -22,6 +22,8 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.8 - the unsigned row lists page themes only; a style theme has nothing
+ *                that runs (specs/style_themes.md WP4)
  * @version 1.7 - a ninth row: the unsigned plugins and themes present, by
  *   name — advice, never a gate (specs/package_signing.md WP6)
  * @version 1.6 - an eighth check: config/release_verify_keys is present, so
@@ -67,11 +69,16 @@ class VaultHealth {
 	}
 
 	/**
-	 * Every plugin and theme installed on a superadmin's acknowledgement of
-	 * the unsigned warning, by name. Each has everything the site has and
+	 * Every plugin and page theme installed on a superadmin's acknowledgement
+	 * of the unsigned warning, by name. Each has everything the site has and
 	 * nobody we know wrote it; the owner said yes, and this row is where
 	 * that stays visible. Advice, never a gate: nothing here deactivates
 	 * anything.
+	 *
+	 * A style theme is never listed: it is stylesheets, fonts and images,
+	 * which have everything the site has in the way a stylesheet does, and
+	 * that is what the operator chose when they applied it
+	 * (specs/style_themes.md).
 	 *
 	 * @param array|null $unsigned Injected for tests: ['plugins' => [...names], 'themes' => [...names]]
 	 */
@@ -85,6 +92,7 @@ class VaultHealth {
 					$unsigned['plugins'][] = (string)$p->get('plg_name');
 				}
 				foreach (new MultiTheme(['thm_trust' => 'unsigned']) as $t) {
+					if ($t->is_style()) { continue; }
 					$unsigned['themes'][] = (string)$t->get('thm_name');
 				}
 			} catch (\Throwable $e) {

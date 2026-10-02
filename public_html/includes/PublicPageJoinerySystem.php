@@ -590,9 +590,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
   <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <?php $_js_css_sys = PathHelper::getThemeFilePath('style.css', 'assets/css', 'system', 'joinery-system'); ?>
   <link rel="stylesheet" href="<?php echo PathHelper::getThemeFilePath('style.css', 'assets/css', 'web', 'joinery-system') . '?v=' . (file_exists($_js_css_sys) ? filemtime($_js_css_sys) : '1'); ?>">
-  <?php if ($settings->get_setting('custom_css')): ?>
-  <style><?php echo $settings->get_setting('custom_css'); ?></style>
-  <?php endif; ?>
+  <?php $this->render_theme_tail(); ?>
 </head>
 <body class="preload">
         <?php

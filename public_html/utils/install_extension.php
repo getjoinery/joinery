@@ -39,6 +39,11 @@
  *   php utils/install_extension.php plugin|theme --staged=<dir> [--replace] [--acknowledged]
  *   php utils/install_extension.php plugin|theme <name> --register [--uploaded]   (the database half alone)
  *
+ * @version 1.5 - A style theme (stylesheets, fonts and images, nothing that
+ *                runs: ThemeHelper::styleThemeRefusal) installs without the
+ *                warning when unsigned. Its row still records 'unsigned' and
+ *                the event log has a row naming the kind; nobody is emailed
+ *                (specs/style_themes.md WP4).
  * @version 1.4 - A theme keeps receiving upgrades unless it was uploaded:
  *                only the staged form is a local fork (review round 2, R2).
  * @version 1.3 - The acknowledged path and the unsigned restrictions
@@ -292,13 +297,35 @@ function install_extension_approver(int $approved_by, string $approved_ip, int $
 }
 
 /**
+ * What kind of theme a directory holds, said on the transcript: 'style' when
+ * ThemeHelper::styleThemeRefusal() finds nothing to refuse, 'page' otherwise,
+ * with the reason. A plugin is always 'page': it is code.
+ */
+function install_extension_kind(string $type, string $dir): string {
+	if ($type !== 'theme') {
+		return 'page';
+	}
+	$why = ThemeHelper::styleThemeRefusal($dir);
+	if ($why === null) {
+		echo "kind: style (stylesheets, fonts and images; nothing in it runs)\n";
+		return 'style';
+	}
+	echo "kind: page ($why)\n";
+	return 'page';
+}
+
+/**
  * The unsigned restrictions that are a record rather than a limit: the row
  * says 'unsigned' for good, every superadmin is told, and the event log has
  * it. Root does this after the web user's half, so the trust value is root's
  * word and not the migration's.
+ *
+ * A style theme is the one unsigned package nobody is warned about: the
+ * event log names the kind and the row records the verdict, and that is the
+ * whole record. There is nothing in it to deactivate.
  */
 function install_extension_record_unsigned(string $type, string $name, string $version, string $verdict_line,
-		array $approver, string $trust): void {
+		array $approver, string $trust, string $kind = 'page'): void {
 	if ($type === 'plugin') {
 		$row = Plugin::get_by_plugin_name($name);
 		$column = 'plg_trust';
@@ -318,8 +345,10 @@ function install_extension_record_unsigned(string $type, string $name, string $v
 	}
 
 	$site = (string)Globalvars::get_instance()->get_setting('webDir');
-	$note = "type=$type name=$name version=$version approved_by=" . $approver['who']
-		. ' ip=' . $approver['ip'] . ' at=' . $approver['at'] . ' verdict=' . $verdict_line;
+	$note = "type=$type kind=$kind name=$name version=$version"
+		. ($kind === 'style' ? ' installed_without_warning=yes' : ' approved_by=' . $approver['who']
+			. ' ip=' . $approver['ip'] . ' at=' . $approver['at'])
+		. ' verdict=' . $verdict_line;
 	try {
 		$log = new EventLog(NULL);
 		$log->set('evl_event', 'unsigned_package_installed');
@@ -327,9 +356,12 @@ function install_extension_record_unsigned(string $type, string $name, string $v
 		$log->set('evl_was_success', true);
 		$log->set('evl_note', $note);
 		$log->save();
-		echo "event log: unsigned_package_installed\n";
+		echo "event log: unsigned_package_installed (kind=$kind)\n";
 	} catch (Throwable $e) {
 		fwrite(STDERR, 'warning: could not write the event log row: ' . $e->getMessage() . "\n");
+	}
+	if ($kind === 'style') {
+		return;
 	}
 
 	$subject = "An unsigned $type was installed on $site: $name $version";
@@ -402,9 +434,11 @@ try {
 	}
 
 	// What root records on the row when the files are in place: 'signed' from
-	// the verifier, 'unsigned' from the owner's acknowledgement.
+	// the verifier, 'unsigned' from the owner's acknowledgement — or from
+	// nothing at all, for a style theme, which has nothing to warn about.
 	$trust = 'signed';
 	$verdict_line = '';
+	$kind = 'page';
 
 	if ($staged !== '') {
 		// ---- from a directory the web side unpacked and checked ------------
@@ -487,16 +521,25 @@ try {
 		// manifest name: this is the moment to ask who built it.
 		$verdict = install_extension_verify($dir, $tree_rel . $staged_name);
 		$verdict_line = $verdict->line();
+		// The kind is decided after the verdict and before anything moves: a
+		// style theme holds nothing that runs, so the unsigned warning has
+		// nothing to warn about and it installs; a page theme that is not
+		// ours is refused unless the owner acknowledged the warning.
+		$kind = install_extension_kind($type, $dir);
 		if (!$verdict->signed()) {
-			if (!$acknowledged) {
+			if ($kind === 'style') {
+				$trust = 'unsigned';
+				echo "unsigned style theme: nothing in it runs, so it installs without the warning\n";
+			} elseif (!$acknowledged) {
 				fwrite(STDERR, "install_extension: refusing to install an unverified $type ($verdict->verdict).\n"
 					. "This package was not built by Joinery. " . PackageAcknowledgement::warning() . "\n"
 					. "To install it anyway, answer the warning on the admin page, or re-run this command with --acknowledged.\n");
 				install_extension_rmtree($work);
 				exit(EXIT_UNVERIFIED);
+			} else {
+				$trust = 'unsigned';
+				echo "unsigned $type: installing on the owner's acknowledgement, under the unsigned restrictions\n";
 			}
-			$trust = 'unsigned';
-			echo "unsigned $type: installing on the owner's acknowledgement, under the unsigned restrictions\n";
 		}
 
 		$target = $dest_parent . '/' . $staged_name;
@@ -576,14 +619,19 @@ try {
 				if (!PackageSignature::publisherBox()) {
 					$verdict = install_extension_verify($dest_parent . '/' . $name, $tree_rel . $name);
 					$verdict_line = $verdict->line();
+					$kind = install_extension_kind($type, $dest_parent . '/' . $name);
 					if (!$verdict->signed()) {
 						// A row that already says 'unsigned' is a package the
 						// owner acknowledged once, still on disk as root left
 						// it (a repair, a reinstall after an uninstall that kept
 						// the files). It stays under the unsigned restrictions.
+						// A style theme never needed acknowledging.
 						$existing = $type === 'plugin' ? Plugin::get_by_plugin_name($name) : Theme::get_by_theme_name($name);
 						$trust_column = $type === 'plugin' ? 'plg_trust' : 'thm_trust';
-						if ($existing && (string)$existing->get($trust_column) === 'unsigned') {
+						if ($kind === 'style') {
+							$trust = 'unsigned';
+							echo "unsigned style theme: nothing in it runs, so it installs without the warning\n";
+						} elseif ($existing && (string)$existing->get($trust_column) === 'unsigned') {
 							$trust = 'unsigned';
 							echo "unsigned $type: previously acknowledged; installing under the unsigned restrictions\n";
 						} else {
@@ -618,7 +666,7 @@ try {
 	$manifest = json_decode((string)@file_get_contents($manifest_path), true);
 	$version = is_array($manifest) ? (string)($manifest['version'] ?? '') : '';
 	install_extension_record_unsigned($type, $name, $version, $verdict_line,
-		install_extension_approver($approved_by, $approved_ip, $approved_at), $trust);
+		install_extension_approver($approved_by, $approved_ip, $approved_at), $trust, $kind);
 
 	echo "installed $type: $name\n";
 	exit(0);

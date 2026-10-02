@@ -191,14 +191,7 @@ class PublicPageTailwindHTML5 extends PublicPageBase {
 		<!-- CSS -->
 
 		<link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>">
-		<?php
-		if($settings->get_setting('custom_css')){
-			echo '<style>'.$settings->get_setting('custom_css').'</style>';
-		}
-		?>			
-		
-
-		
+		<?php $this->render_theme_tail(); ?>
 	</head>
 	
 	<script>

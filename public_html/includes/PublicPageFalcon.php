@@ -496,14 +496,7 @@ class PublicPageFalcon extends PublicPageBase {
 	<link rel="stylesheet" type="text/css" id="stylesheet" href="<?php echo PathHelper::getThemeFilePath('simplebar.min.css', 'assets/vendors/simplebar', 'web', 'falcon'); ?>">
 	<link rel="stylesheet" type="text/css" id="style-default" href="<?php echo PathHelper::getThemeFilePath('theme.css', 'assets/css', 'web', 'falcon'); ?>">
 	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo PathHelper::getThemeFilePath('user_exceptions.css', 'assets/css', 'web', 'falcon'); ?>?v=<?php echo time(); ?>">
-	
-	
-
-	<?php
-	if($settings->get_setting('custom_css')){
-		echo '<style>'.$settings->get_setting('custom_css').'</style>';
-	}
-	?>		
+	<?php $this->render_theme_tail(); ?>
   </head>
 
 

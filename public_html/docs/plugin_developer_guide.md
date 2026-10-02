@@ -1006,7 +1006,7 @@ Validation failures throw. On `activate()` the plugin does not activate; on `syn
 
 **Orphan rows:** Settings dropped from the manifest in a later version are **not** automatically deleted. Use an SQL migration if you need the row gone. Orphan setting rows are otherwise harmless — nothing reads them.
 
-**Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS). `get_setting()` returns `''` for anything unset (and logs a notice — pass the `$fail_silently` flag to suppress it), so supply a floor in code: `intval(...) ?: 100`.
+**Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, a webhook URL). `get_setting()` returns `''` for anything unset (and logs a notice — pass the `$fail_silently` flag to suppress it), so supply a floor in code: `intval(...) ?: 100`.
 
 **Uninstall:** On uninstall, PluginManager deletes rows matching the names in the current manifest. Settings declared in an earlier version but dropped from the current manifest are left in place.
 
@@ -2082,6 +2082,90 @@ The `requires_plugins` field declares plugins that must be active for the theme 
 Use this when the theme directly uses plugin-provided classes, helpers, or pages — for example, a theme that renders a widget from a specific plugin's helper class, or whose navigation links to plugin-namespaced URLs.
 
 Themes also support the `status`, `deprecated`, and `superseded_by` fields described in the [plugin.json](#deprecation-fields) sections above. The behavior is identical for themes and plugins.
+
+### Style Themes
+
+A site runs two theme slots. The **page theme** (`theme_template`) supplies
+the pages: views, logic, a page class, routes. The **look** (`theme_look`)
+is a style theme layered over it: stylesheets, fonts and images, and nothing
+that runs. A style theme changes colours, fonts and images on the pages the
+site already has; the page theme stays active. The Themes page shows both
+slots above its table ("Pages: name", "Look: name or none"), and a Kind
+column reads Pages or Styling for every theme.
+
+**What makes a theme a style theme** is its contents, decided at
+registration (the sync that reads `theme.json` off disk) and at every
+install by `ThemeHelper::styleThemeRefusal()`. A theme is a style theme
+when nothing in it is refused:
+
+| Refused | Why |
+|---|---|
+| `.php`, `.phtml` | runs on the server |
+| `.js`, `.mjs` | runs in the browser with the session, the CSRF token and the unlocked vault |
+| `.html`, `.htm`, `.xml` | a document the browser would render from the site's origin |
+| any dotfile or dot-directory | `.htaccess` is a server directive; nothing in a style theme starts with a dot |
+| a stylesheet with an external reference | `@import` or `url()` naming another origin reports page visits there. Relative paths, same-origin absolute paths and `data:` URLs pass. |
+| anything else outside the allowed set | not a stylesheet, font or image |
+
+Allowed: `theme.json`, `.css`, fonts (`woff`, `woff2`, `ttf`, `otf`,
+`eot`), raster images (`png`, `jpg`, `jpeg`, `gif`, `webp`, `avif`, `ico`),
+`svg`, plain `txt` and `md` notes, and the signing record a published
+package carries. SVG is safe here because the static file server marks every
+SVG as an attachment: a direct visit downloads it, while `<img>` and CSS
+`url()` contexts render it without running its scripts. One file outside
+the set makes the whole package a page theme, and the transcript names the
+file and the reason. Every theme Joinery ships is a page theme.
+
+**The manifest** carries the fields every theme carries plus `styles`, the
+stylesheets to emit in order, relative to the theme directory. It is
+required: a look with no stylesheet is a page theme. `brand_tokens` is the
+same key a page theme may declare and resolves one step above the page
+theme's. `publicPageBase`, `requires_plugins`, `audience` and `cssFramework`
+are ignored on a style theme, which has no pages to need them.
+
+```json
+{
+  "name": "fluent-look",
+  "display_name": "Fluent",
+  "version": "1.0.0",
+  "author": "Your Name",
+  "styles": ["assets/css/look.css", "assets/css/print.css"],
+  "brand_tokens": { "jy_color_primary": "#0f6cbd" }
+}
+```
+
+**Install and trust.** A style theme is uploaded on the Themes page like any
+theme and verified like any package. One that Joinery did not sign installs
+with no warning, no second-factor step and no email: its row records the
+verdict (`thm_trust`) and the kind (`thm_kind`), the event log has one row
+naming the kind, and that is the record. The red Unsigned badge and the
+vault health row cover page themes only. A later version of a style theme
+that adds PHP or script is a page theme, with the full unsigned warning; if
+it is acknowledged and installed while it is the applied look, the sync
+clears the look and the transcript says so.
+
+**Apply and Activate.** On the Themes page a page theme has Activate and a
+style theme has Apply, or Remove when it is the look. Activate on a style
+theme is refused: it has no pages; apply it as a look instead. Both
+`theme_template` and `theme_look` are vault-gated settings, and both
+buttons write through `SettingsWriter`, so the themes page and the settings
+page enforce the same unlock. `ThemeManager::applyLook()` and
+`removeLook()` are the code paths. The look slot is also a select on the
+settings page, whose choices come from `CoreSettingOptions::looks()`; the
+active theme select (`CoreSettingOptions::themes()`) never offers a style
+theme.
+
+**The head order** on every page is fixed: the kit stylesheet, active
+plugins' stylesheets, the brand tokens, the page theme's stylesheet, the
+look's stylesheets. Every page class calls
+`PublicPageBase::render_theme_tail()` immediately after its own stylesheet
+link. The tail emits the look's `styles`, each cache-busted by file
+modification time, at `/theme/<look>/<path>`, and nothing else; a page class
+that extends a core page class inherits the call. A page class of your own
+calls it after its last stylesheet link.
+
+Brand tokens resolve, lowest to highest: the kit default, the page theme's
+`brand_tokens`, the look's `brand_tokens`, the admin's colour settings.
 
 ## ThemeHelper Enhanced Capabilities
 

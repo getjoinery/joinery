@@ -1,4 +1,5 @@
 <?php
+// @version 1.2 - the Kind column, the two slot lines, Apply and Remove for a style theme; the Unsigned badge on page themes only (specs/style_themes.md WP4)
 // @version 1.1 - the Unsigned badge, the warning block and the request panel's hand-off (specs/package_signing.md WP6)
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -24,6 +25,11 @@ $root_actor_notice = $page_vars['root_actor_notice'] ?? '';
 // anyway (specs/package_signing.md WP6).
 $unsigned_warning = $page_vars['unsigned_warning'] ?? null;
 $themes = $page_vars['themes'];
+// The two slots (specs/style_themes.md): the page theme, and the look
+// layered over it, or none.
+$page_theme = (string)($page_vars['page_theme'] ?? '');
+$look = (string)($page_vars['look'] ?? '');
+$look_help = 'A styling theme changes colours, fonts and images on the pages you already have. Your page theme stays active.';
 
 $page = new AdminPage();
 
@@ -96,10 +102,15 @@ $page->begin_box(array('altlinks' => $altlinks));
             
             <!-- Themes Table -->
             <h3>Installed Themes (<?= count($themes) ?>)</h3>
+            <p class="mb-3">
+                Pages: <strong><?= htmlspecialchars($page_theme !== '' ? $page_theme : 'none') ?></strong><br>
+                Look: <strong><?= htmlspecialchars($look !== '' ? $look : 'none') ?></strong>
+            </p>
             <table class="table table-striped">
                 <thead>
                     <tr>
                         <th>Theme</th>
+                        <th>Kind</th>
                         <th>Version</th>
                         <th>Author</th>
                         <th>Status</th>
@@ -122,15 +133,24 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 $is_deprecated = !empty($theme_data['deprecated']);
                                 $superseded_by = $theme_data['superseded_by'] ?? null;
                                 $files_exist = $theme_data['directory_exists'];
+                                // A style theme is stylesheets, fonts and images with no
+                                // pages: it is applied as the look, never activated.
+                                $is_style = (($theme_data['kind'] ?? 'page') === 'style');
+                                $is_look = $is_style && $look !== '' && $look === $theme_name;
 
                                 // Get status badge
                                 if (!$files_exist) {
                                     $status_badge = '<span class="badge bg-danger">Missing Files</span>';
+                                } elseif ($is_look) {
+                                    $status_badge = '<span class="badge bg-success">Applied</span>';
                                 } elseif ($is_active) {
                                     $status_badge = '<span class="badge bg-success">Active</span>';
                                 } else {
                                     $status_badge = '<span class="badge bg-secondary">Inactive</span>';
                                 }
+                                $kind_cell = $is_style
+                                    ? '<span title="' . htmlspecialchars($look_help) . '">Styling</span>'
+                                    : '<span title="Pages, logic and styling: the whole site. Activate it to use it.">Pages</span>';
 
                                 // Maturity badge from the manifest status field. Labels only —
                                 // an experimental theme installs and activates like a stable one.
@@ -160,8 +180,10 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 }
                                 // Installed on the owner's acknowledgement of
                                 // the warning: not built by Joinery. Stays for
-                                // as long as the row does.
-                                if ($theme && (string)$theme->get('thm_trust') === 'unsigned') {
+                                // as long as the row does. A style theme's row
+                                // records the same verdict and shows nothing
+                                // red: nothing in it runs.
+                                if ($theme && !$is_style && (string)$theme->get('thm_trust') === 'unsigned') {
                                     $badges[] = '<span class="badge bg-danger" title="Not built by Joinery; installed on a superadmin\'s acknowledgement of the warning.">Unsigned</span>';
                                 }
                                 $type_badge = implode(' ', $badges);
@@ -193,6 +215,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     echo '<br><small class="text-muted">' . htmlspecialchars($description) . '</small>';
                                 }
                                 echo '</td>';
+                                echo '<td>' . $kind_cell . '</td>';
                                 echo '<td>' . htmlspecialchars($version) . '</td>';
                                 echo '<td>' . htmlspecialchars($author) . '</td>';
                                 echo '<td>' . $status_badge . '</td>';
@@ -201,8 +224,16 @@ $page->begin_box(array('altlinks' => $altlinks));
 
                                 // Build actions array
                                 $actions = array();
+                                $action_note = '';
 
-                                if (!$is_active && $files_exist) {
+                                if ($is_style) {
+                                    if ($is_look) {
+                                        $actions['Remove'] = "javascript:submitAction('remove_look', '$theme_name')";
+                                    } elseif ($files_exist && $theme) {
+                                        $actions['Apply'] = "javascript:submitAction('apply_look', '$theme_name')";
+                                        $action_note = $look_help;
+                                    }
+                                } elseif (!$is_active && $files_exist) {
                                     $actions['Activate'] = "javascript:submitAction('activate', '$theme_name')";
                                 }
 
@@ -216,7 +247,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     }
 
                                     // Add delete option for non-system themes with missing files or inactive themes
-                                    if (!$is_system && (!$files_exist || !$is_active)) {
+                                    if (!$is_system && (!$files_exist || (!$is_active && !$is_look))) {
                                         $msg_json = htmlspecialchars(json_encode('Delete theme "' . $display_name . '"?'));
                                         $name_json = htmlspecialchars(json_encode($theme_name));
                                         $actions['Permanently Delete'] = "javascript:JoineryModal.confirm($msg_json, function(){ submitAction('delete', $name_json); }, { confirmLabel: 'Delete' })";
@@ -235,13 +266,16 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 } else {
                                     echo '<span class="text-muted">No actions</span>';
                                 }
+                                if ($action_note !== '') {
+                                    echo '<br><small class="text-muted">' . htmlspecialchars($action_note) . '</small>';
+                                }
 
                                 echo '</td>';
                                 echo '</tr>';
                             }
-                            
+
                             if (count($themes) === 0) {
-                                echo '<tr><td colspan="6" class="text-center">No themes installed</td></tr>';
+                                echo '<tr><td colspan="7" class="text-center">No themes installed</td></tr>';
                             }
                             ?>
                         </tbody>

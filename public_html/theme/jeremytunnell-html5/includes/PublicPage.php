@@ -4,6 +4,7 @@
  * seeded profile menu store via get_menu_data() — themes style the markup
  * but do not own the list (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.2 - the theme tail (the applied look's stylesheets) after the theme stylesheet; Custom CSS gone (specs/style_themes.md WP3)
  * @version 1.2.1 - the footer loads joinery-validate.js, which every FormWriter form's
  *   inline script expects; without it each form page logged a ReferenceError and
  *   validated nothing client-side
@@ -89,12 +90,7 @@ class PublicPage extends PublicPageBase {
     <?php $this->global_includes_top($options); ?>
 
     <link rel="stylesheet" href="/theme/jeremytunnell-html5/assets/css/style.css?v=1.0.3">
-
-    <?php
-    if($settings->get_setting('custom_css')){
-        echo '<style>' . $settings->get_setting('custom_css') . '</style>';
-    }
-    ?>
+    <?php $this->render_theme_tail(); ?>
 </head>
 <body>
 
