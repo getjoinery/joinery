@@ -189,10 +189,10 @@
     `cvp_hosting_mode = operator` provision that is done as a sold site; a copy made with the
     operator token is `operator` with origin `admin`. At the trial's end plus grace the watch shuts
     the instance down with the operator token, which after a switch-over would be the live site.
-    OPEN. Fix: one rule for a sold site (origin `order` or `buyer`, not `bare`), already written
-    inline as `$xfer_sold` in the overview by the transfer work, as
-    `CustomerCloudProvision::is_sold()`, and the watch skips a provision that is not sold; trial
-    row 846 removed.
+    Fixed: one rule for a sold site, `CustomerCloudProvision::is_sold()` (1.13: origin `order` or
+    `buyer`, not `bare`), which `HostedTrialWatch` 1.3 applies through `sold_sites()`; the node
+    page's move panel and Your sites ask it too, in place of their own copies. Trial rows 846 and
+    873 removed. `hosted_tier` 111/111; `db --changed` 199/199.
   - **B40 — A copy run moved one step per two task ticks.** OBSERVED on the first Copy-tab run
     (copy 14): the host report finished at 18:31, passed at the 18:45 tick, and the export waited
     for the 19:00 tick; seven steps at fifteen minutes a tick is about three and a half hours.
@@ -201,12 +201,30 @@
     the next in the same call (a run that begins queues its first step too), and
     `AgentChannelEndpoint` 1.30 calls `SiteCopyRunner::job_finished()` when a node posts a copy
     step's result, so a run moves as fast as its jobs finish. `site_copy_runner` 70/70.
+  - **B41 — Incidents outlive their nodes.** OBSERVED 2026-10-02 by this work's `db --changed`
+    gate: `referential_integrity` found 13 incidents on deleted fixture nodes and 10 events whose
+    incident was gone. TRACED, two causes: the live incident pass lists nodes and then opens
+    incidents on them, so a node deleted in between got an incident after its own were deleted
+    (and test fixtures deleted by raw SQL skip the deletion rules altogether); and a node's
+    incidents were a one-level `cascade`, so each incident's timeline stayed behind. Fixed:
+    `IncidentRecord` 1.2 deletes with the node by `permanent_delete` (timeline included);
+    `ManagedNode` 1.34's `permanent_delete()` takes `IncidentReconciler::LOCK_KEY`, so it waits
+    for a running pass; `IncidentReconciler` 1.2's full pass deletes any incident whose node row is
+    gone (`remove_nodeless`), and the task reports it. Dev cleaned; deletion rules regenerated.
+    `incident_reconciler` 27/27; `db --changed` 514/515 (the one is the agent bundle awaiting
+    publish); no orphans after the run.
   - **B42 — Discard leaves the source's export request waiting.** OBSERVED 2026-10-02 (copy 14,
     job 52708): discarding while `copy_export` waited for the owner on S marked the copy discarded,
     but S's approval request stayed open until the agent's wait ran out; approving it would still
     export a bundle for a copy nobody tracks (sealed to that copy's key, so readable only there).
-    OPEN. Fix: Discard withdraws a pending export on S (the approval's decline path) and cancels
-    the step's job.
+    TRACED: the source's agent holds one job at a time and nothing on M could stop a running one,
+    so no job sent to S could reach the request. Fixed: `SiteCopyRunner` 1.3's Discard cancels
+    every step job not yet finished; the new signed channel route `job_status`
+    (`AgentChannelEndpoint` 1.31) answers whether a node's job was withdrawn, and agent 1.52.0
+    asks it every 30 seconds while any approval waits, ending the wait as a refusal (which clears
+    the request) on an explicit withdrawn. Any other answer keeps waiting, and nothing on the route
+    can approve. `site_copy_runner` 73/73, `agent_channel_metering` 26/26, agent `go test ./...`.
+    Live check (S on 1.52.0) is in the verification queue.
   - **First Copy-tab run (copy 14, 2026-10-02): abandoned by the owner at the export approval.**
     New server installed quiet in 5 minutes (us-east, operator token), join approved (Linode
     address check, IPv6 source), host report passed; found B39, B40, B42. Discarded; provision
@@ -216,6 +234,23 @@
     answers as S's node id; going back swaps T's key off the node, so T can no longer reach M. The
     way back must quiet T (`site_quiet on`, while T is still the node) before `go_back`, then
     discard it.
+- **WP9 built (2026-10-02): Clone is retired; B1–B20 and B23 close with the code.** Deleted:
+  `utils/clone_export.php`, `utils/clone_export_arm.php`, `utils/scrub_sealed_secrets.php`, the
+  `clone_export_key` setting, the `from_backup` install mode (model, Install New Node form,
+  `build_install_node`, the provision pipeline's source arming), `cvp_clone_key_sealed` and the
+  unused `cvp_backup_source`, the `clone_key` stdin source, `JobResultProcessor`'s two clone
+  handlers, the installers' `--clone-from` / `--clone-key` / `JOINERY_CLONE_KEY` and the
+  `_site_init.sh` clone block (`install.sh` 2.92, `_site_init.sh` 3.10, `Dockerfile.template` 5.8),
+  and the clone load gate. The agent's `clone_export_arm` word is gone from agent 1.52.0; the
+  plane stopped sending it in the same release, and an older agent that still reports it is
+  simply never asked. Data: core migrations 206 and 207 remove the setting row and its sealed
+  key's registry row on every site; `sm_010_clone_retired` fails a from_backup provision still
+  working, records every from_backup row as `fresh`, and drops the two columns. Retry Install on
+  an old clone refuses, pointing at the Copy tab. Kept on purpose: the log redactors still mask
+  `export_key` / `clone_key` / `--clone-key=` (old job rows on a management node carry them), and
+  `rebase_site_container.sh` still knows a clone container's `CLONE_FROM` / `CLONE_KEY` variables
+  so it can rebuild one. Tests: `installer_contract` 787/787, `job_command_builder` 375/375,
+  `customer_cloud_provisioning` 115/115, `db --changed` 514/515 (the agent bundle awaits publish).
 - **First live run (L0-copy, started 2026-10-01): the copy steps by hand, before WP7a and WP8.** The
   owner chose to prove WP2–WP5 on real machines before building on them. No switch-over: S, then
   a dormant T, then export, import, stage, restore and the census, then a private look at T.
@@ -1199,7 +1234,7 @@ In build order. Each is built and tested on its own (design rule).
     steps 2–6, progress, Refresh and Discard.
   - The node-id word, and the row swap (both directions).
   - **Switch over** (steps 7–10 and the way back) moved to WP7a (owner, 2026-10-01).
-- **WP9 — Retire Clone.**
+- **WP9 — Retire Clone (built 2026-10-02; see the status above).**
   - Delete `clone_export.php`, `clone_export_arm.php`, the `from_backup` install mode,
     `cvp_clone_key_sealed`, the `clone_export_key` setting, `scrub_sealed_secrets.php` and their
     tests.

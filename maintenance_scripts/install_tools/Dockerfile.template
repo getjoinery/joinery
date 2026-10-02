@@ -1,4 +1,5 @@
 # Joinery Docker Template
+# VERSION 5.8 - No clone options: CLONE_FROM and JOINERY_CLONE_KEY are not read (site_copy.md WP9).
 # VERSION 5.7 - The vhost render substitutes no address: the template has had no {{SERVER_IP}} since
 #               default_virtualhost.conf 2.08 (specs/site_copy.md B25)
 # VERSION 5.6 - BASE_IMAGE_VERSION's default follows install.sh to 2.0.
@@ -159,9 +160,6 @@
 #                       promoted to ENV stays in the image, readable through
 #                       docker inspect and docker history long after the
 #                       container is gone.
-#   CLONE_FROM        - URL to clone database and uploads from (optional)
-#   JOINERY_CLONE_KEY - The clone source's export key (optional; read by _site_init.sh
-#                       from the environment, never passed as an argument)
 #   JOINERY_ADMIN_EMAIL    - Address for the site's admin account (optional;
 #                            the seeded admin@example.com stays without it)
 #   JOINERY_ADMIN_PASSWORD - Owner-chosen admin password (optional; one is
@@ -314,13 +312,9 @@ CMD set +H && \
         fi && \
         service postgresql reload; \
     fi && \
-    CLONE_OPTS="" && \
-    if [ -n "${CLONE_FROM}" ] && [ -n "${JOINERY_CLONE_KEY}" ]; then \
-        CLONE_OPTS="--clone-from=${CLONE_FROM}"; \
-    fi && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
-        JOINERY_DB_PASSWORD="${POSTGRES_PASSWORD}" ./_site_init.sh "${SITENAME}" "" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
+        JOINERY_DB_PASSWORD="${POSTGRES_PASSWORD}" ./_site_init.sh "${SITENAME}" "" "${DOMAIN_NAME}" --docker-mode)) && \
     chown -R root:root "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" && \
     ([ -d "/var/www/html/${SITENAME}/vendor" ] && chown -R root:root "/var/www/html/${SITENAME}/vendor" || true) && \
     chown root:root "/var/www/html/${SITENAME}" && chmod 755 "/var/www/html/${SITENAME}" && \

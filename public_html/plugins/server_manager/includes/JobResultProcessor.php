@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.50 - Clone is retired (site_copy.md WP9): process_clone_export_arm and blank_install_clone_key are gone
  * @version 1.49 - process_check_status fills an empty mgn_site_url from the site domain the agent reports
  *                 (ManagedNode::adopt_reported_site_domain; site_copy.md B38)
  * @version 1.48 - sanitise_host_report keeps cpus and an answer of quiet (host_report 1.6)
@@ -1991,27 +1992,6 @@ HTML;
 	}
 
 	/**
-	 * clone_export_arm: the source of a clone was armed (or disarmed).
-	 *
-	 * Records which, from the script's own line, and BLANKS THE KEY out of the
-	 * job row once the job is terminal: the row is redacted on display, but a
-	 * bearer token that opens a full-site export has no reason to outlive the
-	 * job that delivered it. The provision that minted the key holds it sealed
-	 * until it disarms the source.
-	 */
-	private static function process_clone_export_arm($job) {
-		$data   = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
-		$text   = is_array($data) && isset($data['output']) ? (string)$data['output'] : (string)($job->get('mjb_output') ?: '');
-		$result = ['armed' => strpos($text, 'CLONE_EXPORT_ARM=armed') !== false];
-		if (strpos($text, 'CLONE_EXPORT_ARM=disarmed') !== false) {
-			$result['disarmed'] = true;
-		}
-		self::blank_secret_params($job, ['export_key']);
-		$job->set('mjb_result', json_encode($result));
-		$job->save();
-	}
-
-	/**
 	 * fleet_enroll: the site's fleet credentials were seeded (or not).
 	 *
 	 * The secret half of the key pair rode the job row to the node. Once the
@@ -2067,34 +2047,6 @@ HTML;
 			'shown' => ($job->get('mjb_status') === 'completed'
 				&& strpos($text, 'HOSTED_PLAN_NOTICE=ok') !== false),
 		]));
-		$job->save();
-	}
-
-	/**
-	 * Blank the clone key out of a finished bootstrap job: the recorded
-	 * clone_key parameter and the --clone-key= value in the session's command.
-	 * Called by the provision at completion, once the source is disarmed.
-	 */
-	public static function blank_install_clone_key($job): void {
-		$params = $job->get('mjb_parameters');
-		if (is_string($params)) { $params = json_decode($params, true); }
-		$key = is_array($params) ? (string)($params['clone_key'] ?? '') : '';
-		if ($key === '') {
-			return;
-		}
-		$params['clone_key'] = '';
-		$job->set('mjb_parameters', json_encode($params));
-		$commands = $job->get('mjb_commands');
-		if (is_string($commands)) { $commands = json_decode($commands, true); }
-		if (is_array($commands) && isset($commands['steps']) && is_array($commands['steps'])) {
-			foreach ($commands['steps'] as &$step) {
-				if (isset($step['cmd'])) {
-					$step['cmd'] = str_replace($key, '', (string)$step['cmd']);
-				}
-			}
-			unset($step);
-			$job->set('mjb_commands', json_encode($commands));
-		}
 		$job->save();
 	}
 

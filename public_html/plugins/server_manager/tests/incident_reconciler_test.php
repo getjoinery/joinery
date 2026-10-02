@@ -24,10 +24,14 @@
  *   - a warning source sends incident.opened, a critical one
  *     incident.opened_critical;
  *   - a source that throws leaves its incident as it was;
- *   - a second pass while one holds the lock does nothing.
+ *   - a second pass while one holds the lock does nothing;
+ *   - a node that goes takes its incidents and their timelines with it, by
+ *     its model or (at the next pass) by raw SQL, and its deletion waits for
+ *     a running pass.
  *
  * Run: php plugins/server_manager/tests/incident_reconciler_test.php
  *
+ * @version 1.1 - a node's deletion and its incidents (site_copy.md B41)
  * @version 1.0
  */
 
@@ -254,7 +258,81 @@ $other = null;
 $main->query('SELECT pg_advisory_lock(' . IncidentReconciler::LOCK_KEY . ')');
 $c = $pass();
 check($c['busy'] === false, 'Once released, a pass runs');
+
+// ---------------------------------------------------------------------------
+section('A node that goes takes its incidents and their timelines with it (site_copy.md B41)');
+
+$down_node = function (string $tag) use ($site_down) {
+	$n = new ManagedNode(NULL);
+	$n->set('mgn_name', 'Reconciler test ' . $tag);
+	$n->set('mgn_slug', 'harnesstest-rec-' . $tag . '-' . bin2hex(random_bytes(3)));
+	$n->set('mgn_host', '192.0.2.44');
+	$n->set('mgn_ssh_user', 'root');
+	$n->set('mgn_site_url', 'https://reconciler-' . $tag . '.example');
+	$n->set('mgn_enabled', true);
+	$n->set('mgn_uptime_enabled', true);
+	$n->set('mgn_uptime_last_status', 'down');
+	$n->save();
+	$n->load();
+	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $n->key);
+	IncidentReconciler::run(array($site_down->name() => $site_down), array((int)$n->key));
+	$inc = IncidentRecord::open_for((int)$n->key, $site_down->name());
+	if ($inc) {
+		harness_register_row('inc_incident_records', 'inc_incident_record_id', $inc->key);
+	}
+	return array($n, $inc);
+};
+$left = function (int $inc_id) use ($main): array {
+	$i = $main->prepare('SELECT count(*) FROM inc_incident_records WHERE inc_incident_record_id = ?');
+	$i->execute(array($inc_id));
+	$e = $main->prepare('SELECT count(*) FROM ine_incident_events WHERE ine_inc_incident_record_id = ?');
+	$e->execute(array($inc_id));
+	return array((int)$i->fetchColumn(), (int)$e->fetchColumn());
+};
+
+list($gone, $gone_inc) = $down_node('model');
+check($gone_inc !== null && $left((int)$gone_inc->key) === array(1, 1), 'Setup: a down node has an incident with its opened event');
+$gone->permanent_delete();
+check($gone_inc !== null && $left((int)$gone_inc->key) === array(0, 0),
+	'Deleting the node deletes the incident and its timeline', $gone_inc ? json_encode($left((int)$gone_inc->key)) : '');
+
+list($raw, $raw_inc) = $down_node('raw');
+$main->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute(array((int)$raw->key));
+$removed = IncidentReconciler::remove_nodeless();
+check($raw_inc !== null && $removed >= 1 && $left((int)$raw_inc->key) === array(0, 0),
+	'A node deleted outside its model: the next pass deletes its incident and timeline', 'removed ' . $removed);
+
+// A pass holds the lock while it lists nodes and opens incidents on them; a
+// node deleted in between would get an incident with no node.
 $main->query('SELECT pg_advisory_unlock(' . IncidentReconciler::LOCK_KEY . ')');
+$settings = Globalvars::get_instance();
+$other = new PDO('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname'),
+	$settings->get_setting('dbusername'), $settings->get_setting('dbpassword'));
+$other->query('SELECT pg_advisory_lock(' . IncidentReconciler::LOCK_KEY . ')');
+$waits = new ManagedNode(NULL);
+$waits->set('mgn_name', 'Reconciler test waits');
+$waits->set('mgn_slug', 'harnesstest-rec-waits-' . bin2hex(random_bytes(3)));
+$waits->set('mgn_host', '192.0.2.45');
+$waits->set('mgn_ssh_user', 'root');
+$waits->save();
+$waits->load();
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $waits->key);
+$main->exec("SET lock_timeout = '300ms'");
+$refused = false;
+try {
+	$waits->permanent_delete();
+} catch (Throwable $e) {
+	$refused = true;
+}
+$main->exec('RESET lock_timeout');
+$still = new ManagedNode((int)$waits->key, TRUE);
+check($refused && $still->key, 'Deleting a node waits while a pass holds the lock');
+$other->query('SELECT pg_advisory_unlock(' . IncidentReconciler::LOCK_KEY . ')');
+$other = null;
+$waits->permanent_delete();
+$q = $main->prepare('SELECT count(*) FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?');
+$q->execute(array((int)$waits->key));
+check((int)$q->fetchColumn() === 0, 'and goes through once the pass is done');
 
 IncidentReconciler::$dispatch = null;
 harness_finish();

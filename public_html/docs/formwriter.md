@@ -1622,8 +1622,8 @@ FormWriter passes every label, every `helptext`, and every select/radio option v
 // ✅ CORRECT — plain text
 $formwriter->radioinput('install_mode', 'Install Type', [
     'options' => [
-        'fresh'       => 'Fresh install — empty site with default schema',
-        'from_backup' => 'Install from backup — clone an existing node',
+        'fresh' => 'Fresh install — empty site with default schema',
+        'bare'  => 'Bare instance — no site install',
     ]
 ]);
 

@@ -10,8 +10,8 @@
  * End-to-end coverage for sealed-settings reconciliation.
  *
  * Exercises the declaration reader, the seal()/open() contract, the key canary,
- * the seeded registry, the reconciler (regenerable auto-heal vs operator flag),
- * and the import scrub — all against the copied test database, whose stg_settings
+ * the seeded registry and the reconciler (regenerable auto-heal vs operator
+ * flag) — all against the copied test database, whose stg_settings
  * reference rows carry the real declared secret names.
  *
  * The registry table is created by update_database from the data class; if it is
@@ -27,7 +27,6 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 require_once(PathHelper::getIncludePath('includes/SealedSecretsDeclarations.php'));
 require_once(PathHelper::getIncludePath('includes/SecretReconciler.php'));
 require_once(PathHelper::getIncludePath('data/sealed_secret_registry_class.php'));
-require_once(PathHelper::getIncludePath('utils/scrub_sealed_secrets.php'));
 
 $dblink = DbConnector::get_instance()->get_db_link();
 
@@ -174,14 +173,5 @@ try { $dblink->query('SELECT 1')->fetchColumn(); } catch (\Throwable $e) { $heal
 $dblink->rollBack();
 check($counts === array('present' => 0, 'dead' => 0), 'a missing table counts nothing', json_encode($counts));
 check($healthy, 'and no statement against it failed (the transaction is not aborted)');
-
-// --- Import scrub -------------------------------------------------------------
-section('Import scrub');
-$plant_setting('oauth_google_client_secret', $DEAD_BLOB);   // re-plant (heal never runs on operator)
-$scrub = scrub_sealed_secrets(false);
-check($scrub['cleared'] >= 1, 'scrub clears at least the planted operator secret', 'cleared=' . $scrub['cleared']);
-$q = $dblink->prepare("SELECT stg_value FROM stg_settings WHERE stg_name = 'oauth_google_client_secret'");
-$q->execute();
-check((string)$q->fetchColumn() === '', 'the scrubbed operator secret is now empty (absent, not dead)');
 
 harness_finish();

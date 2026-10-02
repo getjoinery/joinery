@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.10 - The Clone path is gone: no --clone-from, --clone-key or JOINERY_CLONE_KEY, and
+#                 no clone block; a site moves to a new server by a site copy (specs/site_copy.md WP9)
 # VERSION: 3.9 - A bare-metal install runs update_database once, after the plugin bundle, so a
 #                new site has its sealed-secret registry, key canary and file signing key
 #                (specs/site_copy.md B29). A container already runs it at every start.
@@ -81,8 +83,6 @@
 # Options:
 #   --activate THEME       Set active theme
 #   --docker-mode          Running inside Docker container (skips virtualhost, serve.php)
-#   --clone-from=URL       Clone database and uploads from URL
-#   --clone-key=KEY        Discouraged (argv is readable); set JOINERY_CLONE_KEY instead
 #   --skip-db-validation   Skip default admin/settings validation
 #   -q, --quiet            Suppress most output
 #
@@ -136,9 +136,6 @@ fi
 DOCKER_MODE=false
 ACTIVATE_THEME=""
 QUIET=false
-CLONE_FROM=""
-# The export key comes from the environment; --clone-key below still overrides.
-CLONE_KEY="${JOINERY_CLONE_KEY:-}"
 SKIP_DB_VALIDATION=false
 
 # Parse options
@@ -150,12 +147,6 @@ while [[ $# -gt 0 ]]; do
         --activate)
             ACTIVATE_THEME="$2"
             shift
-            ;;
-        --clone-from=*)
-            CLONE_FROM="${1#*=}"
-            ;;
-        --clone-key=*)
-            CLONE_KEY="${1#*=}"
             ;;
         --skip-db-validation)
             SKIP_DB_VALIDATION=true
@@ -294,11 +285,7 @@ create_config_file() {
     chown root:www-data "$SITE_ROOT/config/Globalvars_site.php" 2>/dev/null || true
 }
 
-# In clone mode, delay config creation until clone completes successfully
-# This prevents partial clone state where config exists but clone failed partway
-if [ -z "$CLONE_FROM" ]; then
-    create_config_file
-fi
+create_config_file
 
 # =============================================================================
 # DATABASE SETUP
@@ -316,174 +303,9 @@ if psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$SITENAME"; th
     log "Database '$SITENAME' already exists. Skipping creation and restore."
 fi
 
-if [ -n "$CLONE_FROM" ]; then
+if [ "$DB_EXISTS" = false ]; then
     # ==========================================================================
-    # CLONE MODE: Stream database and uploads from source
-    # ==========================================================================
-
-    # Create database (ignore error if already exists)
-    log "Creating PostgreSQL database '$SITENAME'..."
-    createdb -T template0 "$SITENAME" -U postgres 2>/dev/null || true
-
-    set -o pipefail  # Catch failures anywhere in pipeline
-
-    log "Streaming database from clone source..."
-
-    CLONE_URL="${CLONE_FROM}/utils/clone_export"
-
-    # The key reaches curl as a header file and openssl as a key file, both
-    # 0600 in a private directory removed on exit - never an argument, which
-    # every process on the machine can read.
-    CLONE_SECRETS="$(mktemp -d)"
-    chmod 700 "$CLONE_SECRETS"
-    trap 'rm -rf "$CLONE_SECRETS"' EXIT
-    printf 'Authorization: Bearer %s\n' "$CLONE_KEY" > "$CLONE_SECRETS/auth"
-    printf '%s\n' "$CLONE_KEY" > "$CLONE_SECRETS/key"
-    chmod 600 "$CLONE_SECRETS/auth" "$CLONE_SECRETS/key"
-
-    # A dump carries the syntax of the server that wrote it, so one from a newer
-    # PostgreSQL cannot load here. Its header names that version before any SQL,
-    # so the check reads the first lines, refuses before a statement reaches
-    # psql, and otherwise passes the stream through untouched.
-    TARGET_PG_MAJOR=$(( $(psql -U postgres -XtAc 'SHOW server_version_num' 2>/dev/null | tr -cd '0-9') / 10000 ))
-    refuse_newer_dump() {
-        local line n=0
-        while IFS= read -r line; do
-            printf '%s\n' "$line"
-            n=$((n + 1))
-            if [[ "$line" =~ ^--\ Dumped\ from\ database\ version\ ([0-9]+) ]]; then
-                if (( TARGET_PG_MAJOR > 0 && BASH_REMATCH[1] > TARGET_PG_MAJOR )); then
-                    echo "The clone source runs PostgreSQL ${BASH_REMATCH[1]} and this server runs ${TARGET_PG_MAJOR}; a newer dump cannot load into an older server." >&2
-                    return 3
-                fi
-                break
-            fi
-            (( n >= 40 )) && break
-        done
-        cat
-    }
-
-    LOAD_ERR=$(mktemp)
-    curl -sf -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=database" | \
-        openssl enc -d -aes-256-cbc -pbkdf2 -pass file:"$CLONE_SECRETS/key" | \
-        gunzip | \
-        refuse_newer_dump 2>>"$LOAD_ERR" | \
-        psql -U postgres -d "$SITENAME" -q -v ON_ERROR_STOP=1 >/dev/null 2>>"$LOAD_ERR" || {
-            log_error "Failed to load database from clone source"
-            # What psql (or the version check) said is the reason; without it
-            # the failure is a line with nothing to act on.
-            tail -5 "$LOAD_ERR" | while IFS= read -r line; do log_error "  $line"; done
-            rm -f "$LOAD_ERR"
-            exit 1
-        }
-    rm -f "$LOAD_ERR"
-
-    log "Database cloned successfully"
-
-    # Download and extract uploads (skip if source has no uploads)
-    log "Downloading uploads from clone source..."
-
-    # Check Content-Type to determine if there are uploads to transfer
-    CONTENT_TYPE=$(curl -sI -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=uploads" 2>/dev/null | grep -i "^content-type:" | head -1)
-
-    if echo "$CONTENT_TYPE" | grep -qi "application/json"; then
-        # JSON response - no uploads to transfer
-        log "Source has no uploads to transfer"
-    else
-        # Binary response - download to temp file then extract (avoids pipe truncation issues)
-        TEMP_UPLOADS=$(mktemp)
-        if curl -sf -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=uploads" -o "$TEMP_UPLOADS"; then
-            tar -xzf "$TEMP_UPLOADS" -C "$SITE_ROOT/" || {
-                rm -f "$TEMP_UPLOADS"
-                log_error "Failed to extract uploads from clone source"
-                exit 1
-            }
-            rm -f "$TEMP_UPLOADS"
-            log "Uploads cloned successfully"
-        else
-            rm -f "$TEMP_UPLOADS"
-            log_error "Failed to download uploads from clone source"
-            exit 1
-        fi
-    fi
-
-    # Download and extract static_files (skip if source has no static_files)
-    log "Downloading static_files from clone source..."
-
-    # Check Content-Type to determine if there are static_files to transfer
-    CONTENT_TYPE=$(curl -sI -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=static_files" 2>/dev/null | grep -i "^content-type:" | head -1)
-
-    if echo "$CONTENT_TYPE" | grep -qi "application/json"; then
-        # JSON response - no static_files to transfer
-        log "Source has no static_files to transfer"
-    else
-        # Binary response - download to temp file then extract (avoids pipe truncation issues)
-        TEMP_STATIC=$(mktemp)
-        if curl -sf -H @"$CLONE_SECRETS/auth" "${CLONE_URL}?action=static_files" -o "$TEMP_STATIC"; then
-            tar -xzf "$TEMP_STATIC" -C "$SITE_ROOT/" || {
-                rm -f "$TEMP_STATIC"
-                log_error "Failed to extract static_files from clone source"
-                exit 1
-            }
-            rm -f "$TEMP_STATIC"
-            log "Static files cloned successfully"
-        else
-            rm -f "$TEMP_STATIC"
-            log_error "Failed to download static_files from clone source"
-            exit 1
-        fi
-    fi
-
-    log "Updating site settings for new domain..."
-
-    # The cloned site's host comes from webDir in config/Globalvars_site.php,
-    # written with the new domain further up. Nothing in the database names the
-    # host, so there is no settings row to repoint here.
-
-    # Disable clone export key on the new site (security)
-    psql -U postgres -d "$SITENAME" -q -c \
-        "DELETE FROM stg_settings WHERE stg_name = 'clone_export_key';" \
-        2>/dev/null || true
-
-    # Reset protocol_mode to 'auto' (cloned site may have different SSL config)
-    psql -U postgres -d "$SITENAME" -q -c \
-        "UPDATE stg_settings SET stg_value = 'auto' WHERE stg_name = 'protocol_mode';" \
-        2>/dev/null || true
-
-    SKIP_DB_VALIDATION=true
-
-    # Clone completed successfully - NOW create the config file
-    # This ensures that if clone fails partway, config won't exist and next attempt will retry
-    create_config_file
-
-    # Fix PostgreSQL sequences after clone
-    # Cloned databases often have sequences out of sync with their data
-    log "Synchronizing database sequences..."
-    if [ -f "$SITE_ROOT/public_html/utils/fix_sequences.php" ]; then
-        php "$SITE_ROOT/public_html/utils/fix_sequences.php" 2>/dev/null || {
-            log_error "Warning: Sequence synchronization failed (non-fatal)"
-        }
-        log "Sequences synchronized"
-    fi
-
-    # Scrub sealed secrets. The clone carries ciphertext sealed to the SOURCE
-    # site's secret_box_key, which this environment does not have, so every sealed
-    # value is dead here. Null them at their declared locators (read from the
-    # registry table that travelled inside the dump) so the copy lands clean —
-    # "not configured" rather than a pile of broken features. Runs after the
-    # config file exists (it needs DB credentials) and needs no plugin code.
-    log "Scrubbing sealed secrets from the cloned database..."
-    if [ -f "$SITE_ROOT/public_html/utils/scrub_sealed_secrets.php" ]; then
-        if php "$SITE_ROOT/public_html/utils/scrub_sealed_secrets.php" 2>/dev/null; then
-            log "Sealed secrets scrubbed"
-        else
-            log_error "Warning: Sealed-secret scrub failed (non-fatal); a later update_database reconcile will flag any dead secret"
-        fi
-    fi
-
-elif [ "$DB_EXISTS" = false ]; then
-    # ==========================================================================
-    # NORMAL MODE: Load from SQL file
+    # Load from SQL file
     # ==========================================================================
 
     # Create database (ignore error if already exists)
@@ -517,7 +339,7 @@ elif [ "$DB_EXISTS" = false ]; then
 fi
 
 # =============================================================================
-# DATABASE VALIDATION (skip for cloned sites)
+# DATABASE VALIDATION
 # =============================================================================
 
 if [ "$SKIP_DB_VALIDATION" = false ] && [ "$DB_EXISTS" = false ]; then
@@ -598,8 +420,7 @@ fi
 #
 # JOINERY_ADMIN_PASSWORD lets an unattended installer hand in a password the
 # owner chose on a deploy form. When it is set, nothing is generated and nothing
-# is written to disk — there is no file to go and read. Cloned sites are skipped:
-# they carry the source site's real accounts, not the seeded default.
+# is written to disk — there is no file to go and read.
 #
 # JOINERY_ADMIN_EMAIL moves the account to the owner's real address in the same
 # call. That ordering matters: a password reset needs a mailbox someone can
@@ -607,7 +428,7 @@ fi
 # where the only account on the site is unrecoverable.
 ADMIN_EMAIL="${JOINERY_ADMIN_EMAIL:-admin@example.com}"
 
-if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
+if [ "$DB_EXISTS" = false ]; then
     RESET_TOOL="${SITE_ROOT}/maintenance_scripts/sysadmin_tools/reset_admin_password.php"
 
     if [ ! -f "$RESET_TOOL" ]; then
@@ -684,12 +505,7 @@ fi
 # we pass --upgrade-server, so ours upgrade from wherever we said. Without this
 # a fresh site could come up believing it upgrades from somewhere it is already
 # ahead of.
-#
-# Clones are skipped. UPGRADE_SERVER is pointed at the clone source for the
-# duration of a clone, and that is a peer site rather than a release endpoint —
-# the cloned database already carries the source's own upgrade_source, which is
-# the right answer.
-if [ -z "$CLONE_FROM" ] && [ -n "${UPGRADE_SERVER:-}" ]; then
+if [ -n "${UPGRADE_SERVER:-}" ]; then
     UPGRADE_SOURCE_VALUE="${UPGRADE_SERVER%/}"
 
     psql -U postgres -d "$SITENAME" -q -c \
@@ -746,12 +562,12 @@ fi
 # disk and none of them are installed. The bundle is what makes the deployment
 # the product someone thought they were installing.
 #
-# Fresh installs only. A clone carries the source site's own plugin set, and a
-# site coming back up on an existing database has already been through this.
+# Fresh installs only: a site coming back up on an existing database has
+# already been through this.
 # Set JOINERY_INSTALL_BUNDLE=none to skip it.
 BUNDLE_NAME="${JOINERY_INSTALL_BUNDLE:-personal}"
 
-if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ] && [ "$BUNDLE_NAME" != "none" ]; then
+if [ "$DB_EXISTS" = false ] && [ "$BUNDLE_NAME" != "none" ]; then
     BUNDLE_TOOL="${SITE_ROOT}/maintenance_scripts/sysadmin_tools/install_bundle.php"
 
     if [ ! -f "$BUNDLE_TOOL" ]; then
@@ -827,7 +643,7 @@ tool_reason() {
     printf '%s\n' "$1" | sed -n 's/^reason=//p' | head -1
 }
 
-if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
+if [ "$DB_EXISTS" = false ]; then
     SITE_UTILS="${SITE_ROOT}/public_html/utils"
 
     if [ -n "${JOINERY_DNS_CREDENTIAL:-}" ]; then

@@ -164,7 +164,7 @@ For reference, these Ghost features already exist in Joinery:
 
 ### 19. Full Site Export / Backup — PARTIAL
 **Ghost:** Admin can export all content (posts, pages, members, settings) as a JSON archive.
-**Joinery:** Operator-level full-site clone exists (`utils/clone_export.php`, encrypted DB/uploads/themes); a portable *content*-level export is the deferred `specs/content_pack_feature.md`.
+**Joinery:** An operator-level full-site copy exists (site copy, from a node's Copy tab; `specs/site_copy.md`); a portable *content*-level export is the deferred `specs/content_pack_feature.md`.
 **Notes:** Remaining gap is admin-facing selective export (JSON/CSV), not backup.
 
 ---

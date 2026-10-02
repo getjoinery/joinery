@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.3 - the move card asks CustomerCloudProvision::is_sold()
  * @version 1.2 - the move-to-your-own-Linode card's state per site
  * @version 1.1 - the pre-payment cards (draft, pending_payment) with Edit/Delete, and the taken-name
  *                alternate action (specs/managed_hosting_phase1_purchase.md §4.5, §7)
@@ -227,8 +228,7 @@ function profile_sites_transfer($provision, $session): ?array {
 	}
 	$offerable = $provision->is_operator_hosted() && (string)$provision->get('cvp_status') === 'done'
 		&& trim((string)$provision->get('cvp_instance_id')) !== ''
-		&& in_array((string)$provision->get('cvp_origin'), array('order', 'buyer'), true)
-		&& (string)$provision->get('cvp_install_mode') !== 'bare';
+		&& $provision->is_sold();
 	if ($row === null && !$offerable) {
 		return null;
 	}

@@ -11,7 +11,10 @@
  *     they changed, with no event and no notice;
  *   - it is gone and one is active: clear it, with an event.
  * An active incident whose node is no longer watched (removed, disabled, or
- * in an install state such as a dormant copy) is cleared, saying so.
+ * in an install state such as a dormant copy) is cleared, saying so. An
+ * incident whose node row is gone altogether is deleted with its timeline: a
+ * node deleted outside its model (raw SQL, as some test fixtures do) skips the
+ * deletion rules, and nothing would ever close or show that incident.
  *
  * A DISABLED NODE IS NOT WATCHED. Disabling a node (mgn_enabled false) is a
  * person saying this plane no longer looks after it — a site whose owner told
@@ -28,6 +31,8 @@
  * each addressed to every superadmin. Notify gives each the bell, and email
  * by the signal's default (critical: on) or their own preference.
  *
+ * @version 1.2 - each full pass deletes incidents whose node row is gone (removed); ManagedNode's
+ *                permanent_delete() takes LOCK_KEY (site_copy.md B41)
  * @version 1.1 - a disabled node is not watched; close_for_node() closes a node's open incidents with a reason
  * @version 1.0
  */
@@ -52,17 +57,20 @@ class IncidentReconciler {
 	/**
 	 * One pass. $sources and $node_ids narrow it (tests); by default every
 	 * registered source and every node. Returns counts:
-	 * opened, reopened, refreshed, cleared, and busy when another pass holds
-	 * the lock.
+	 * opened, reopened, refreshed, cleared, removed, and busy when another
+	 * pass holds the lock.
 	 */
 	public static function run(?array $sources = null, ?array $node_ids = null): array {
-		$counts = array('opened' => 0, 'reopened' => 0, 'refreshed' => 0, 'cleared' => 0, 'busy' => false);
+		$counts = array('opened' => 0, 'reopened' => 0, 'refreshed' => 0, 'cleared' => 0, 'removed' => 0, 'busy' => false);
 		$db = DbConnector::get_instance()->get_db_link();
 		if (!(bool)$db->query('SELECT pg_try_advisory_lock(' . self::LOCK_KEY . ')')->fetchColumn()) {
 			$counts['busy'] = true;
 			return $counts;
 		}
 		try {
+			if ($node_ids === null) {
+				$counts['removed'] = self::remove_nodeless();
+			}
 			$sources = $sources ?? IncidentSources::all();
 			if (count($sources) === 0) {
 				return $counts;
@@ -110,6 +118,26 @@ class IncidentReconciler {
 			$db->query('SELECT pg_advisory_unlock(' . self::LOCK_KEY . ')');
 		}
 		return $counts;
+	}
+
+	/**
+	 * Delete every incident whose node row no longer exists, through the model
+	 * so its timeline goes too. Returns how many.
+	 */
+	public static function remove_nodeless(): int {
+		$ids = DbConnector::get_instance()->get_db_link()->query(
+			'SELECT inc_incident_record_id FROM inc_incident_records
+			 LEFT JOIN mgn_managed_nodes ON mgn_managed_node_id = inc_mgn_managed_node_id
+			 WHERE mgn_managed_node_id IS NULL')->fetchAll(PDO::FETCH_COLUMN);
+		$removed = 0;
+		foreach ($ids as $id) {
+			$inc = new IncidentRecord((int)$id, TRUE);
+			if ($inc->key) {
+				$inc->permanent_delete();
+				$removed++;
+			}
+		}
+		return $removed;
 	}
 
 	/** Open a new incident, or reopen one that cleared within the window. Returns 'opened' or 'reopened'. */

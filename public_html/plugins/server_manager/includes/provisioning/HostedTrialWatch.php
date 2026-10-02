@@ -39,6 +39,8 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.3 - sold sites only (CustomerCloudProvision::is_sold): a site copy on the operator's account
+ *                is never put on a trial (specs/site_copy.md B39)
  * @version 1.2 - the allowance pause and backup-storage prune are NodeBackupShelf's, shared with the
  *                Services watch for a site moved to its customer's own cloud account
  * @version 1.1
@@ -72,12 +74,7 @@ class HostedTrialWatch {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/HostedTrialSignals.php'));
 		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
 
-		$provisions = new MultiCustomerCloudProvision(array(
-			'hosting_mode' => 'operator',
-			'status'       => 'done',
-			'deleted'      => false,
-		));
-		$provisions->load();
+		$provisions = self::sold_sites();
 		if (count($provisions) === 0) {
 			return array('status' => 'skipped', 'message' => 'No hosted sites to watch.');
 		}
@@ -105,6 +102,26 @@ class HostedTrialWatch {
 			return array('status' => 'error', 'message' => $message);
 		}
 		return array('status' => 'success', 'message' => $message);
+	}
+
+	/**
+	 * The sites this watch bills: finished, on the operator's account, and
+	 * sold. A relay shard and a site copy are on the operator's account too,
+	 * and a trial ending would shut a copy down with the operator token: after
+	 * a switch-over, that copy is the live site.
+	 */
+	public static function sold_sites(): array {
+		$out = array();
+		foreach (new MultiCustomerCloudProvision(array(
+			'hosting_mode' => 'operator',
+			'status'       => 'done',
+			'deleted'      => false,
+		)) as $provision) {
+			if ($provision->is_sold()) {
+				$out[] = $provision;
+			}
+		}
+		return $out;
 	}
 
 	/** One site, one tick. Returns how many things changed. */

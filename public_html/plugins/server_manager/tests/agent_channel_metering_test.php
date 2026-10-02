@@ -42,6 +42,8 @@ check(AgentChannelEndpoint::meterOutcome('claim', 200) === false, 'a successful 
 check(AgentChannelEndpoint::meterOutcome('claim', 401) === true, 'a refused claim counts');
 check(AgentChannelEndpoint::meterOutcome('claim', 400) === true, 'a malformed claim counts');
 check(AgentChannelEndpoint::meterOutcome('claim', 429) === true, 'a throttled claim counts');
+check(AgentChannelEndpoint::meterOutcome('job_status', 200) === false, 'a successful job_status (asked through an approval wait) is not counted');
+check(AgentChannelEndpoint::meterOutcome('job_status', 401) === true, 'a refused job_status counts');
 foreach (['join', 'join_status', 'result', 'leave', 'quiet', 'artifact', '', 'nonsense'] as $ep) {
 	check(AgentChannelEndpoint::meterOutcome($ep, 200) === true && AgentChannelEndpoint::meterOutcome($ep, 404) === true,
 		"'{$ep}' counts whatever the outcome");

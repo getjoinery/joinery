@@ -14,12 +14,11 @@ Deploy Joinery on a fresh Ubuntu 24.04 or 26.04 LTS server, either in a Docker c
 6. [SSL Certificates](#ssl-certificates)
 7. [Cloudflare Proxy Support](#cloudflare-proxy-support)
 8. [Themes and Plugins](#themes-and-plugins)
-9. [Site Cloning](#site-cloning)
-10. [Domain Management](#domain-management)
-11. [Site Management](#site-management)
-12. [Maintenance Operations](#maintenance-operations)
-13. [Troubleshooting](#troubleshooting)
-14. [Script Reference](#script-reference)
+9. [Domain Management](#domain-management)
+10. [Site Management](#site-management)
+11. [Maintenance Operations](#maintenance-operations)
+12. [Troubleshooting](#troubleshooting)
+13. [Script Reference](#script-reference)
 
 ## Quick Start
 
@@ -346,8 +345,6 @@ Two separate things, which the installer keeps in agreement:
 
 `_site_init.sh` writes the second from the first, so whatever a site was installed from is what it upgrades from. Nothing to configure and nothing to keep in sync: pass `--upgrade-server` and both follow, leave it off and the site tracks stable releases.
 
-Cloned sites are the exception — they carry the source site's `upgrade_source`, which is the right answer for a copy of that site.
-
 ### Directory layout
 
 ```
@@ -461,66 +458,6 @@ php /var/www/html/mysite/public_html/utils/upgrade.php
 ```
 
 The `--themes` flag uses the same distribution system as `upgrade.php`. See [Deploy and Upgrade](deploy_and_upgrade.md) for the upgrade pipeline.
-
-## Site Cloning
-
-Clone an existing site — database, uploads, settings — to a new server. The target machine pulls from the source.
-
-### Enable export on the source
-
-`clone_export_key` is a managed setting: it is declared, but kept off the settings page so that an admin cannot turn on a full-site export from a browser. It is written in one of two ways.
-
-A management node that provisions a clone of a site it manages arms the source itself, through the source agent's `clone_export_arm` primitive (the setting name is compiled into `utils/clone_export_arm.php` on the source; the plane sends only the key), and disarms it the same way when the provision ends. See the Server Manager docs.
-
-By hand, in the source database:
-
-```sql
-UPDATE stg_settings SET stg_value = 'YourSecureRandomKey123' WHERE stg_name = 'clone_export_key';
-
--- When done:
-UPDATE stg_settings SET stg_value = '' WHERE stg_name = 'clone_export_key';
-```
-
-Use a strong random key (32+ chars, letters, digits, `_` and `-`). HTTPS is required. Clear the key after cloning. Clone requests are logged on the source. The key is also the password the database dump is encrypted under in transit.
-
-### Run the clone
-
-The installer reads the key from `JOINERY_CLONE_KEY`. A command-line argument is readable by every process on the machine, so the key is kept in the environment instead: `read -rs` takes it without echoing it or writing it to shell history, and `sudo --preserve-env` passes it through.
-
-```bash
-read -rs -p 'Clone key: ' JOINERY_CLONE_KEY && export JOINERY_CLONE_KEY
-
-# Docker
-sudo --preserve-env=JOINERY_CLONE_KEY ./install.sh site newsite newdomain.com 8080 \
-    --clone-from=https://sourcesite.com
-
-# Bare-metal
-sudo --preserve-env=JOINERY_CLONE_KEY ./install.sh site newsite newdomain.com \
-    --clone-from=https://sourcesite.com
-```
-
-### What gets cloned
-
-| Item                    | Behavior                                       |
-|-------------------------|------------------------------------------------|
-| Database (all tables)   | Exact copy from source                         |
-| All settings            | Exact copy from source                         |
-| Uploads directory       | Exact copy from source                         |
-| User accounts           | Preserved from source                          |
-| `clone_export_key`      | Cleared on the new site                        |
-| `Globalvars_site.php`   | Regenerated with new DB credentials            |
-| Themes & plugins        | Downloaded from the source site                |
-
-### Process
-
-1. Pre-flight: source reachable, key valid.
-2. Display manifest: DB size, uploads size, themes/plugins.
-3. Confirmation prompt (skip with `-y`).
-4. Deploy application code.
-5. Stream encrypted, compressed database; restore.
-6. Stream compressed uploads; extract.
-7. Update site URL.
-8. Standard setup: Composer, permissions, SSL.
 
 ## Domain Management
 
@@ -783,12 +720,11 @@ install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME [DOMAIN] [PORT] [OPTI
   --dormant --copy-of=ID --copy-of-key=KEY
                          The target of a site copy: bare metal, alone on the machine,
                          no certificate attempt, quiet once installed (see below)
-  --clone-from=URL       Clone DB + uploads from an existing site (key in JOINERY_CLONE_KEY)
 ```
 
 If no password is given (and no `--password-file`), the installer auto-generates a 24-character password.
 
-`--dormant --copy-of=ID --copy-of-key=KEY` installs the target of a site copy (`specs/site_copy.md`): the site that will be replaced whole by node `ID`'s backups. `KEY` is node `ID`'s agent public key (base64), by which the copy checks every export its source signs. It installs as any bare-metal site does, makes no certificate attempt (the source's certificate travels with the copy), and ends in the quiet state `quiet copy` ([Deploy and Upgrade](deploy_and_upgrade.md), *The quiet state*), with the source's node id and key recorded beside it. The three flags go together. A copy is installed from the source's own release (`utils/latest_release?version=X.Y.Z`), because `vendor/` never travels in a backup; the source's **Copy** tab on its management node shows the whole command. It refuses on a machine that hosts any other site or runs Docker containers, because the quiet state quiets the whole machine, and with `--clone-from`, `--with-test-site`, `--docker` or a port.
+`--dormant --copy-of=ID --copy-of-key=KEY` installs the target of a site copy (`specs/site_copy.md`): the site that will be replaced whole by node `ID`'s backups. `KEY` is node `ID`'s agent public key (base64), by which the copy checks every export its source signs. It installs as any bare-metal site does, makes no certificate attempt (the source's certificate travels with the copy), and ends in the quiet state `quiet copy` ([Deploy and Upgrade](deploy_and_upgrade.md), *The quiet state*), with the source's node id and key recorded beside it. The three flags go together. A copy is installed from the source's own release (`utils/latest_release?version=X.Y.Z`), because `vendor/` never travels in a backup; the source's **Copy** tab on its management node shows the whole command. It refuses on a machine that hosts any other site or runs Docker containers, because the quiet state quiets the whole machine, and with `--with-test-site`, `--docker` or a port.
 
 ### Supporting scripts
 

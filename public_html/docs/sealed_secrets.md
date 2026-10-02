@@ -8,8 +8,7 @@ unrelated feature failures.
 
 Three parts: a **registry** of every kind of sealed value, a **reconciler** that
 checks their health and acts by category, and the **surfaces** that tell an
-operator what needs a human — plus a **scrub** that keeps a copied database from
-inheriting foreign ciphertext.
+operator what needs a human.
 
 ## The registry
 
@@ -20,7 +19,7 @@ accounts. Fields:
 
 | field | meaning |
 |---|---|
-| `locator` | **Required, and the entry's id.** Where the secret lives, code-free: a setting name for a singleton (`file_signed_url_key`), or `table.column` for a row-scoped kind (`iia_inbound_imap_accounts.iia_password_enc`). Enough to count and scrub with no plugin code present. |
+| `locator` | **Required, and the entry's id.** Where the secret lives, code-free: a setting name for a singleton (`file_signed_url_key`), or `table.column` for a row-scoped kind (`iia_inbound_imap_accounts.iia_password_enc`). Enough to count with no plugin code present. |
 | `label`, `feature` | Human names for the health surface. |
 | `kind` | `operator` \| `regenerable` \| `regenerable-breaks-things` \| `ephemeral` (below). |
 | `reprovision` | For `regenerable`: `Class::method` that mints a fresh one. Optional on `regenerable-breaks-things` (used only by the operator-acknowledged re-mint). |
@@ -51,11 +50,11 @@ gets its own declaration.
   the **on-disk manifests** (every `plugin.json`, active or not), never the
   database. So it works the instant new code lands, with no dependency on a seed
   having run. `SealedSecretsDeclarations::isDeclared()` is the check.
-- **Durable memory** — the reconciler's orphan detection and the scrub — reads the
+- **Durable memory** — the reconciler's orphan detection — reads the
   **seeded table** `ssr_sealed_secret_registry`, mirrored from the manifests on
   each `update_database` (`SealedSecretRegistry::seed_from_manifests()`). A table
   row outlives a deleted plugin's `plugin.json`, so an orphaned sealed value can
-  still be counted and scrubbed. **A table row whose locator matches no on-disk
+  still be counted. **A table row whose locator matches no on-disk
   manifest is the orphan signal.**
 
 ## The reconciler
@@ -111,16 +110,9 @@ of a site against its source.
   provenance, ambers the node badge, and links **to the node** to fix it (the
   management node never holds the node's keys).
 
-## Prevention — scrub on copy
+## A database on another machine
 
-`utils/scrub_sealed_secrets.php` nulls every sealed value at its declared locator,
-driven by the registry table that travels **inside the dump**, so it needs no
-plugin code and no key. It runs on **import** — `_site_init.sh` calls it after a
-`clone_export` restore — because the export is a passthru `pg_dump` pipeline with
-no seam to scrub, and must never `UPDATE` the source. The copy lands **clean**
-(every sealed value `absent` = "not configured") rather than dead.
-
-A restore onto **another machine** scrubs nothing, and by default keeps nothing
+A restore onto **another machine** by default keeps nothing
 sealed either. The backup carries the source's `config/`, but the restore keeps the
 target machine's own `config/Globalvars_site.php`, and with it the target's own
 `secret_box_key`. Every value sealed on the source is therefore **dead** on the

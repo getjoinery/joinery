@@ -10,8 +10,8 @@ The original triggering use case (preserving getjoinery content through the site
 pivot) was handled instead by hand-rolled seeder scripts, which now live at
 `{site root}/content_packs/getjoinery/` — deliberately outside `public_html` so
 no release archive carries one site's copy to another's install. They are what
-this spec would replace. `utils/clone_export.php` is not: a full-site encrypted
-clone is heavier and different in kind from a portable content pack.
+this spec would replace. A site copy (`specs/site_copy.md`) is not: a whole site
+moved to a new server is heavier and different in kind from a portable content pack.
 
 ## Problem
 

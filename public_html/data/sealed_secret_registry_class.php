@@ -9,8 +9,8 @@
  * declaration (locator, kind, label, feature, source), which is the whole point:
  * a plugin deleted from disk takes its plugin.json with it, but its sealed rows
  * are still in the database. A registry row outlives the plugin's files, so the
- * reconciler can still count those orphans and the import scrub can still clear
- * them. A row whose locator matches no on-disk manifest IS the orphan signal.
+ * reconciler can still count those orphans. A row whose locator matches no
+ * on-disk manifest IS the orphan signal.
  *
  * The row also carries the reconciler's last verdict for the category, so the
  * setup-wizard pill and the management-node stats blob can read a cached health
@@ -18,6 +18,7 @@
  * The verdict is kept current by the reconciler and by the dead->alive /
  * alive->dead transitions the alert dedup already tracks.
  *
+ * @version 1.1 - the header names the reconciler as the registry's one reader
  * @version 1.0
  */
 class SealedSecretRegistry extends SystemBase {
@@ -57,7 +58,7 @@ class SealedSecretRegistry extends SystemBase {
 	 *
 	 * Upsert by locator, so a changed label or kind is picked up. Deliberately
 	 * does NOT prune rows absent from the manifests — that absence is the orphan
-	 * signal the reconciler and scrub rely on. Runs from update_database's
+	 * signal the reconciler relies on. Runs from update_database's
 	 * post-deploy step chain (never upgrade.php's pre-deploy pass).
 	 *
 	 * @return array{seeded:int} count of categories mirrored

@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.87 - Clone is retired (site_copy.md WP9): build_clone_export_arm, mint_clone_export_key and
+ *                 build_install_node's from_backup mode are gone; a site on a new machine is a site copy
  * @version 1.86 - site copy WP8: build_install_node mode 'copy' (a dormant install at the source's release, fetched
  *                 with latest_release?version=, --dormant --copy-of --copy-of-key); build_take_node_id (agent 1.50.0);
  *                 COPY_SOURCE_MIN_VERSION
@@ -3854,41 +3856,11 @@ class JobCommandBuilder {
 	 */
 	const MANAGED_DOMAIN_STATES = ['operator_managed', 'push_requested', 'push_sent', 'self_custody', ''];
 
-	// ── Two more compiled-names settings writers (specs/ssh_single_bootstrap.md) ──
+	// ── One more compiled-names settings writer (specs/ssh_single_bootstrap.md) ──
 	//
-	// Both are the shape of managed_domain_notice: values cross, the setting
-	// names live in a node-side script the release manifest covers. Neither
-	// has an SSH sibling, and neither may grow one.
-
-	/**
-	 * Arm the SOURCE of a clone: hand it one export key for the length of a
-	 * provision, so the new machine can pull the site over HTTPS from the
-	 * source's own utils/clone_export. An EMPTY key disarms, and that is how
-	 * the provision ends: nothing opens a shell on the source in either
-	 * direction.
-	 */
-	public static function build_clone_export_arm($node, $params) {
-		if (!self::has_primitive($node, 'clone_export_arm')) {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot be armed as a clone source: its agent does not "
-				. "offer the clone_export_arm primitive. Apply an update to the node; there is no SSH "
-				. "route for this.");
-		}
-		return self::build_clone_export_arm_primitive($node, $params);
-	}
-
-	public static function build_clone_export_arm_primitive($node, $params) {
-		$key = trim((string)($params['export_key'] ?? ''));
-		if ($key !== '' && !preg_match('/^[A-Za-z0-9_-]{16,128}$/', $key)) {
-			throw new Exception('A clone export key is letters, digits, _ and -, 16 to 128 long; empty disarms.');
-		}
-		return ['primitive' => 'clone_export_arm', 'params' => ['export_key' => $key]];
-	}
-
-	/** The key a provision arms its source with: 48 hex characters. */
-	public static function mint_clone_export_key() {
-		return bin2hex(random_bytes(24));
-	}
+	// The shape of managed_domain_notice: values cross, the setting names live
+	// in a node-side script the release manifest covers. It has no SSH
+	// sibling, and may not grow one.
 
 	/**
 	 * Seed a new site's fleet-service credentials: where the service is and
@@ -4105,7 +4077,7 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Build steps for one-click node install (fresh or from-backup).
+	 * Build steps for one-click node install (fresh, bare or a dormant copy).
 	 *
 	 * Target is assumed to be a bare host running an Ubuntu LTS the installer
 	 * supports (26.04 or 24.04), with SSH root access.
@@ -4113,13 +4085,10 @@ class JobCommandBuilder {
 	 * are needed based on the admin's choice, then creates the site.
 	 *
 	 * $params:
-	 *   mode           - 'fresh' or 'from_backup'
+	 *   mode           - 'fresh', 'bare' or 'copy'
 	 *   sitename       - site directory name (e.g. 'mysite' → /var/www/html/mysite)
-	 *   domain         - primary domain (fresh) or source domain (from-backup)
+	 *   domain         - the site's domain
 	 *   docker_mode    - 'docker' or 'bare-metal' (required; no auto-detect)
-	 *   source_node_id - (from-backup only) source node ID
-	 *   backup_source  - (from-backup only) 'new' or 'existing'
-	 *   db_backup_path / project_backup_path - (existing backup) remote paths on source
 	 */
 	/**
 	 * Next free published port for a host's Docker containers (base 8080). THE
@@ -4178,11 +4147,7 @@ class JobCommandBuilder {
 	 *    the :443 block guarded on the certificate path), written because the
 	 *    site command carries no --no-ssl;
 	 *  - the certificate attempt, and the host's own retry timer when DNS is
-	 *    not here yet — the host issues its own certificate;
-	 *  - a clone (mode from_backup): --clone-from pulls the source's database,
-	 *    uploads, themes and plugins over HTTPS from the source's own
-	 *    utils/clone_export. Nothing reaches the source's shell. The plane
-	 *    armed the source (clone_export_arm) before creating this machine.
+	 *    not here yet — the host issues its own certificate.
 	 *
 	 * Shapes: docker (a host agent, then a site container), bare-metal
 	 * (install.sh server, then a site whose agent is the machine's), and
@@ -4209,10 +4174,9 @@ class JobCommandBuilder {
 	 * one into a failed job rather than a silent fallback to a password
 	 * nobody holds.
 	 *
-	 * $params: mode (fresh|from_backup|bare), sitename, domain, docker_mode
-	 * (docker|bare-metal), admin_email, admin_password_stdin; for from_backup:
-	 * clone_from (the source site's https address) and clone_key (the key the
-	 * source was armed with).
+	 * $params: mode (fresh|bare|copy), sitename, domain, docker_mode
+	 * (docker|bare-metal), admin_email, admin_password_stdin; for copy, the
+	 * source and its release (below).
 	 */
 	public static function build_install_node($node, $params) {
 		$mode     = (string)($params['mode'] ?? 'fresh');
@@ -4222,8 +4186,8 @@ class JobCommandBuilder {
 		if ($docker !== 'docker' && $docker !== 'bare-metal') {
 			throw new Exception("install_node requires docker_mode = 'docker' or 'bare-metal' (got: " . var_export($docker, true) . ")");
 		}
-		if (!in_array($mode, ['fresh', 'from_backup', 'bare', 'copy'], true)) {
-			throw new Exception("install_node requires mode = 'fresh', 'from_backup', 'bare' or 'copy' (got: " . var_export($mode, true) . ")");
+		if (!in_array($mode, ['fresh', 'bare', 'copy'], true)) {
+			throw new Exception("install_node requires mode = 'fresh', 'bare' or 'copy' (got: " . var_export($mode, true) . ")");
 		}
 		if ($mode === 'bare' && $docker !== 'docker') {
 			throw new Exception('A bare instance is a Docker host with no site; it has no bare-metal shape.');
@@ -4308,26 +4272,6 @@ class JobCommandBuilder {
 		}
 		$plane_url_esc = escapeshellarg($plane_url);
 
-		// A clone pulls from the source site's web address with the key the
-		// plane armed it with. Both are shapes: the address is a bare https
-		// origin and the key is what clone_export_arm accepts.
-		$clone_flags = '';
-		if ($mode === 'from_backup') {
-			$clone_from = rtrim((string)($params['clone_from'] ?? ''), '/');
-			$clone_key  = (string)($params['clone_key'] ?? '');
-			if (!preg_match('#^https://[A-Za-z0-9.\-]+(:\d{1,5})?$#', $clone_from)) {
-				throw new Exception('A clone needs the source site\'s https address (clone_from); the source is reached by its web address, never its shell.');
-			}
-			if (!preg_match('/^[A-Za-z0-9_-]{16,128}$/', $clone_key)) {
-				throw new Exception('A clone needs the export key the source was armed with (clone_key).');
-			}
-			// The key itself never enters the command: mjb_commands is readable
-			// on the plane, and a command line is readable by every process on
-			// the target. It rides the session's stdin like the admin password
-			// (below), into JOINERY_CLONE_KEY, where install.sh looks for it.
-			$clone_flags = ' --clone-from=' . escapeshellarg($clone_from);
-		}
-
 		$sitename_esc = escapeshellarg($sitename);
 		$domain_esc   = escapeshellarg($domain);
 
@@ -4370,13 +4314,6 @@ class JobCommandBuilder {
 			$lines[] = 'test -n "$JOINERY_ADMIN_PASSWORD"';
 			$lines[] = 'export JOINERY_ADMIN_PASSWORD';
 		}
-		// A clone's export key, the next line of stdin, for the same reason and
-		// with the same rule: absent is a failed job, never a clone with no source.
-		if ($mode === 'from_backup') {
-			$lines[] = 'IFS= read -r JOINERY_CLONE_KEY';
-			$lines[] = 'test -n "$JOINERY_CLONE_KEY"';
-			$lines[] = 'export JOINERY_CLONE_KEY';
-		}
 		$lines[] = 'command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl; }';
 		$lines[] = "rm -rf {$remote_install_dir} && mkdir -p {$remote_install_dir}";
 		$lines[] = "curl -sL {$release_url_esc} | tar xz -C {$remote_install_dir}";
@@ -4408,7 +4345,7 @@ class JobCommandBuilder {
 			// container. Invisible on the production plane, where the two
 			// are the same machine.
 			$lines[] = "./install.sh -y -q site --docker {$sitename_esc} - {$domain_esc}{$port_arg}"
-				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$clone_flags}";
+				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}";
 			}
 		} else {
 			// Bare metal: prerequisites, then the site. install.sh server
@@ -4434,7 +4371,7 @@ class JobCommandBuilder {
 			         . ' ./install.sh -y -q server;'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
-			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$clone_flags}{$copy_flags}";
+			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$copy_flags}";
 		}
 		$lines[] = 'echo INSTALL_SUCCESS';
 
@@ -4442,13 +4379,11 @@ class JobCommandBuilder {
 		// setup, in one run: ninety minutes is a ceiling on a wedged install.
 		$step = ['type' => 'ssh', 'label' => 'Bootstrap: install, then the agent asks to join',
 			'cmd' => implode("\n", $lines), 'timeout' => 5400];
-		// NAMES, not values, in the order the session reads them: the executor
-		// looks each up (the password from the provision row, the clone key from
-		// the job's parameters) and writes them to this session's stdin. The
-		// stored step therefore carries no secret.
+		// NAMES, not values: the executor looks each up (the password from the
+		// provision row) and writes it to this session's stdin. The stored step
+		// therefore carries no secret.
 		$stdin_names = array();
 		if ($admin_password_stdin) { $stdin_names[] = 'admin_password'; }
-		if ($mode === 'from_backup') { $stdin_names[] = 'clone_key'; }
 		if ($stdin_names) {
 			$step['stdin'] = $stdin_names;
 		}

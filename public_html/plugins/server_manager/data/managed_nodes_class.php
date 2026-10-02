@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.34 - permanent_delete() takes the incident pass's lock, so a pass never opens an incident on
+ *                 a node being deleted under it (site_copy.md B41)
  * @version 1.33 - valid_site_domain() and adopt_reported_site_domain(): a status check fills an empty
  *                mgn_site_url from the domain the node's agent reports (site_copy.md B38)
  * @version 1.32 - the reports_failed_units, reports_failed_backup and reports_failing_recipe options are gone with
@@ -685,6 +687,35 @@ class ManagedNode extends SystemBase {
 	function soft_delete() {
 		$this->removal_notes = $this->key ? $this->release_site_records() : [];
 		return parent::soft_delete();
+	}
+
+	/**
+	 * Permanent deletion waits for a running incident pass and keeps the next
+	 * one out until it commits. A pass lists the nodes and then opens incidents
+	 * on them; a node deleted in between would otherwise get an incident after
+	 * its own incidents were deleted, one whose node no longer exists.
+	 */
+	public function permanent_delete($debug = false) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$own = !$debug && !$db->inTransaction();
+		if ($own) {
+			$db->beginTransaction();
+		}
+		try {
+			if (!$debug) {
+				$db->query('SELECT pg_advisory_xact_lock(' . IncidentReconciler::LOCK_KEY . ')');
+			}
+			$done = parent::permanent_delete($debug);
+			if ($own) {
+				$db->commit();
+			}
+			return $done;
+		} catch (Throwable $e) {
+			if ($own && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
 	}
 
 	public function removal_notes(): array {

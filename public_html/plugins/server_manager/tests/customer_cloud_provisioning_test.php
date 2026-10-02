@@ -266,126 +266,6 @@ class CustomerCloudProvisioningTest {
 				"{$label}: an instance is created and the provision boots", (string)$probe->lastFailReason);
 			$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$ok->key]);
 		}
-
-		// A clone arms its SOURCE before the instance exists: the key is sealed
-		// on the provision and travels to the source as a clone_export_arm job.
-		// A source whose agent cannot be armed refuses at ready, with no box.
-		$fake->lastCreateOpts = null;
-		$probe->lastFailReason = null;
-		$src_unpaired = new ManagedNode(NULL);
-		$src_unpaired->set('mgn_name', 'HarnessTest clone source ' . $suffix);
-		$src_unpaired->set('mgn_slug', 'clonesrc-' . $suffix);
-		$src_unpaired->set('mgn_host', '198.51.100.9');
-		$src_unpaired->set('mgn_site_url', 'https://clonesrc-' . $suffix . '.example.com');
-		$src_unpaired->set('mgn_uptime_enabled', false);
-		$src_unpaired->save();
-		$src_unpaired->load();
-		$clone = new CustomerCloudProvision(NULL);
-		$clone->set('cvp_origin', 'admin');
-		$clone->set('cvp_usr_user_id', $this->user_id);
-		$clone->set('cvp_domain', 'clone-' . $suffix . '.example.com');
-		$clone->set('cvp_slug', 'clone-' . $suffix);
-		$clone->set('cvp_status', 'ready');
-		$clone->set('cvp_install_mode', 'from_backup');
-		$clone->set('cvp_source_node_id', $src_unpaired->key);
-		$clone->save();
-		$probe->probeReady($clone);
-		$clone->load();
-		check($clone->get('cvp_status') === 'failed' && $fake->lastCreateOpts === null
-			&& strpos((string)$probe->lastFailReason, 'clone_export_arm') !== false,
-			'a clone whose source has no paired agent is refused at ready, naming the primitive, with no instance created');
-		check((string)$clone->get('cvp_clone_key_sealed') === '' && (string)$clone->get('cvp_root_pass_sealed') === '',
-			'and holds no credential of either kind');
-
-		$src_unpaired->set('mgn_agent_public_key', base64_encode(str_repeat("\x0e", 32)));
-		$src_unpaired->set('mgn_agent_version', AgentVocabulary::FLOOR);
-		$src_unpaired->set('mgn_agent_primitives', 'check_status,clone_export_arm');
-		$src_unpaired->save();
-		$clone->set('cvp_status', 'ready');
-		$clone->set('cvp_error', null);
-		$clone->save();
-		$probe->probeReady($clone);
-		$clone->load();
-		check($clone->get('cvp_status') === 'booting' && is_array($fake->lastCreateOpts),
-			'with a paired source the clone provision boots', (string)$probe->lastFailReason);
-		$sealed_key = (new SecretBox())->open((string)$clone->get('cvp_clone_key_sealed'));
-		check($sealed_key['state'] === 'ok' && preg_match('/^[a-f0-9]{48}$/', $sealed_key['value']) === 1,
-			'the export key is sealed on the provision row');
-		$arm_job = ManagementJob::latestForNode($src_unpaired->key, 'clone_export_arm');
-		$arm_env = $arm_job ? json_decode((string)$arm_job->get('mjb_commands'), true) : null;
-		check($arm_job && ($arm_env['primitive'] ?? '') === 'clone_export_arm'
-			&& ($arm_env['params']['export_key'] ?? '') === $sealed_key['value'],
-			'the source was handed exactly that key as a clone_export_arm job');
-
-		// One clone per source at a time: a second provision naming the same
-		// source waits at ready with the reason on its row, and mints nothing.
-		$fake->lastCreateOpts = null;
-		$second = new CustomerCloudProvision(NULL);
-		$second->set('cvp_origin', 'admin');
-		$second->set('cvp_usr_user_id', $this->user_id);
-		$second->set('cvp_domain', 'clone2-' . $suffix . '.example.com');
-		$second->set('cvp_slug', 'clone2-' . $suffix);
-		$second->set('cvp_status', 'ready');
-		$second->set('cvp_install_mode', 'from_backup');
-		$second->set('cvp_source_node_id', $src_unpaired->key);
-		$second->save();
-		$probe->probeReady($second);
-		$second->load();
-		check($second->get('cvp_status') === 'ready' && $fake->lastCreateOpts === null
-			&& strpos((string)$second->get('cvp_error'), 'armed for provision #' . $clone->key) !== false,
-			'a second clone from the same source waits at ready, naming the provision holding the key');
-		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$second->key]);
-
-		// A transient provider failure leaves the row at ready; the next tick
-		// does not re-arm (one key, one job) — the arm job count stays at one.
-		$arm_count = function () use ($db, $src_unpaired) {
-			$q = $db->prepare("SELECT COUNT(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'clone_export_arm'");
-			$q->execute([$src_unpaired->key]);
-			return (int)$q->fetchColumn();
-		};
-		check($arm_count() === 1, 'exactly one arm job so far');
-		$clone->set('cvp_status', 'ready');
-		$clone->save();
-		$probe->probeReady($clone);
-		$clone->load();
-		check($arm_count() === 1 && $clone->get('cvp_status') === 'booting',
-			'a re-run of ready for the same provision arms once and boots');
-
-		// booting waits for the source to report armed, then the bootstrap
-		// carries --clone-from (the source\'s web address); the armed key rides
-		// the session's stdin, named in the step, and is held in the job's
-		// parameters until the provision finishes.
-		$clone_ip = '198.51.100.' . random_int(20, 240);
-		$fake->getInstanceResult = ['id' => '77002', 'ip' => $clone_ip, 'status' => 'running'];
-		check($probe->probeBooting($clone) === 0 && $clone->get('cvp_status') === 'booting',
-			'the clone waits while the source has not answered its arm job');
-		$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_completed_time = now(), mjb_output = ? WHERE mjb_management_job_id = ?")
-			->execute([json_encode(['api_version' => '1.0', 'data' => ['output' => "CLONE_EXPORT_ARM=armed\n"]]), $arm_job->key]);
-		$probe->probeBooting($clone);
-		$clone->load();
-		check($clone->get('cvp_status') === 'installing', 'once the source reports armed, the clone dispatches its install',
-			(string)$probe->lastFailReason . ' ' . (string)$clone->get('cvp_error'));
-		$clone_node_id = (int)$clone->get('cvp_mgn_managed_node_id');
-		$clone_job = ManagementJob::latestForNode($clone_node_id, 'install_node');
-		$clone_boot = ''; $clone_stdin = null;
-		foreach ((json_decode((string)$clone_job->get('mjb_commands'), true)['steps'] ?? []) as $st) {
-			if (($st['type'] ?? '') === 'ssh') { $clone_boot = $st['cmd']; $clone_stdin = $st['stdin'] ?? null; }
-		}
-		$clone_params = json_decode((string)$clone_job->get('mjb_parameters'), true);
-		check(strpos($clone_boot, "--clone-from='https://clonesrc-" . $suffix . ".example.com'") !== false
-			&& strpos($clone_boot, $sealed_key['value']) === false,
-			'the bootstrap pulls from the source over HTTPS, and its command never carries the key', $clone_boot);
-		check(is_array($clone_stdin) && in_array('clone_key', $clone_stdin, true)
-			&& ($clone_params['clone_key'] ?? '') === $sealed_key['value'],
-			'the armed key is named for the session\'s stdin and held in the job\'s parameters', json_encode($clone_stdin));
-		check(strpos($clone_boot, "'clone-" . $suffix . ".example.com'") !== false,
-			'and the domain on the site command is the clone\'s own');
-
-		// Cleanup.
-		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id IN (?, ?)')->execute([$clone_node_id, $src_unpaired->key]);
-		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id IN (?, ?)')->execute([$clone_node_id, $src_unpaired->key]);
-		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host IN (?, ?)')->execute([$clone_ip, '198.51.100.9']);
-		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$clone->key]);
 	}
 
 	private function test_install_password_retirement() {
@@ -758,17 +638,18 @@ class CustomerCloudProvisioningTest {
 		$admin->set('cvp_slug', 'adminborn-example-com');
 		$admin->set('cvp_sitename', 'adminborn');
 		$admin->set('cvp_docker_mode', 'bare-metal');
-		$admin->set('cvp_install_mode', 'from_backup');
+		$admin->set('cvp_install_mode', 'copy');
 		$admin->set('cvp_source_node_id', 12345);
-		$admin->set('cvp_backup_source', 'new');
+		$admin->set('cvp_release', '0.8.460');
 		$admin->set('cvp_status', 'ready');
 		$admin->save();
 		$admin->load();
 		check($admin->key > 0 && $admin->get('cvp_external_order_item_id') === null,
 			'admin-origin provision saves without an order item');
 		check($admin->get('cvp_docker_mode') === 'bare-metal'
-			&& $admin->get('cvp_install_mode') === 'from_backup'
-			&& (int)$admin->get('cvp_source_node_id') === 12345,
+			&& $admin->get('cvp_install_mode') === 'copy'
+			&& (int)$admin->get('cvp_source_node_id') === 12345
+			&& $admin->get('cvp_release') === '0.8.460',
 			'install parameters persist on the row');
 
 		// A second admin provision also without an order item — the unique
@@ -841,19 +722,37 @@ class CustomerCloudProvisioningTest {
 			check(true, 'an unknown domain source rejected');
 		}
 
-		// From-backup demands a source node.
+		// A copy demands a source node.
 		try {
 			$bad = new CustomerCloudProvision(NULL);
 			$bad->set('cvp_origin', 'admin');
 			$bad->set('cvp_usr_user_id', $this->user_id);
 			$bad->set('cvp_domain', 'nosource.example.com');
 			$bad->set('cvp_slug', 'nosource-example-com');
-			$bad->set('cvp_install_mode', 'from_backup');
+			$bad->set('cvp_install_mode', 'copy');
+			$bad->set('cvp_docker_mode', 'bare-metal');
+			$bad->set('cvp_release', '0.8.460');
 			$bad->save();
-			check(false, 'from-backup without source node rejected');
+			check(false, 'a copy without a source node rejected');
 		} catch (CustomerCloudProvisionException $e) {
-			check(true, 'from-backup without source node rejected');
+			check(true, 'a copy without a source node rejected');
 		}
+
+		// The retired Clone's mode is not a mode (site_copy.md WP9).
+		$refused = false;
+		try {
+			$bad = new CustomerCloudProvision(NULL);
+			$bad->set('cvp_origin', 'admin');
+			$bad->set('cvp_usr_user_id', $this->user_id);
+			$bad->set('cvp_domain', 'oldclone.example.com');
+			$bad->set('cvp_slug', 'oldclone-example-com');
+			$bad->set('cvp_install_mode', 'from_backup');
+			$bad->set('cvp_source_node_id', 12345);
+			$bad->save();
+		} catch (Exception $e) {
+			$refused = true;
+		}
+		check($refused, 'from_backup is refused');
 
 		// Unknown docker mode rejected.
 		try {

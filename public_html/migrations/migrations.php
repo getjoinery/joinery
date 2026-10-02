@@ -1631,3 +1631,23 @@
 	$migration['migration_file'] = 'incident_cases_carry_triage.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Clone is retired (specs/site_copy.md WP9): nothing reads the export key
+	// any more, and a bearer token left in a site's settings is a secret with
+	// no purpose. A source still armed is disarmed by its row going.
+	$migration = array();
+	$migration['database_version'] = '206';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM stg_settings WHERE stg_name = 'clone_export_key') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'clone_export_key'";
+	$migrations[] = $migration;
+
+	// Its sealed key's registry row goes too (site_copy.md WP9): the column it
+	// names is dropped, so it is not an orphan of a missing plugin to count
+	// but a locator that reads nothing, and an error, on every pass.
+	$migration = array();
+	$migration['database_version'] = '207';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM ssr_sealed_secret_registry WHERE ssr_locator = 'cvp_customer_cloud_provisions.cvp_clone_key_sealed') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM ssr_sealed_secret_registry WHERE ssr_locator = 'cvp_customer_cloud_provisions.cvp_clone_key_sealed'";
+	$migrations[] = $migration;

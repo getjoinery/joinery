@@ -394,9 +394,33 @@ SiteCopyRunner::copy_again($copy, null); $copy->load();
 check($copy->status() === SiteCopy::STATUS_HALTED && strpos((string)$copy->get('scp_halt_reason'), 'exact release') !== false,
 	'a source on another release than its copy\'s stops the run: discard and copy again', (string)$copy->get('scp_halt_reason'));
 
+// Discard while the source waits for its owner to approve the export (B42):
+// the export job is cancelled, and the source, asking whether the job is still
+// wanted, hears that it was withdrawn and takes the request off its page.
+$src->set('mgn_joinery_version', '0.8.453');
+$src->save();
+$cnode->set('mgn_last_host_report', json_encode(array('memory' => array('total_bytes' => 1000000000),
+	'disk' => array('avail_bytes' => 9000000000))));
+$cnode->save();
+SiteCopyRunner::copy_again($copy, null); $copy->load();
+SiteCopyRunner::advance($copy); $copy->load();
+$finish($step_job($copy, 0), 'completed', array('reported' => true));
+SiteCopyRunner::advance($copy); $copy->load();
+$export = $step_job($copy, 1);
+$export->set('mjb_status', 'running');
+$export->save();
+$asked = AgentChannelEndpoint::job_status_answer((int)$src->key, (int)$export->key);
+check($asked !== null && $asked['withdrawn'] === false, 'while the export waits for approval the source hears it is still wanted');
+check(AgentChannelEndpoint::job_status_answer((int)$cnode->key, (int)$export->key) === null,
+	'and another node asking about it hears nothing');
+
 // Discard.
 $server = SiteCopyRunner::server_to_delete($copy);
 SiteCopyRunner::discard($copy); $copy->load(); $cnode->load();
+$export->load();
+$asked = AgentChannelEndpoint::job_status_answer((int)$src->key, (int)$export->key);
+check((string)$export->get('mjb_status') === 'cancelled' && $asked !== null && $asked['withdrawn'] === true,
+	'Discard cancels the waiting export, and the source hears it was withdrawn', (string)$export->get('mjb_status'));
 check($copy->status() === SiteCopy::STATUS_DISCARDED && $cnode->get('mgn_delete_time') && strpos($server, '192.0.2.70') !== false,
 	'Discard ends the copy and removes its row, and names the server for its owner to delete at the provider', $server);
 check(SiteCopy::live_for_source((int)$src->key) === null, 'and the site can be copied again');
