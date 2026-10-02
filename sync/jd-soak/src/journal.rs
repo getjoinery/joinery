@@ -66,6 +66,13 @@ pub enum Record {
         size: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mtime_ms: Option<u64>,
+        /// The inode of the directory the content landed in, read on the
+        /// writing device the moment it landed: the folder the user put it in,
+        /// whatever that folder is called later. Absent for anything with no
+        /// content, for the remote actor, and in journals older than the
+        /// custody check.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_inode: Option<u64>,
         ts_ms: u64,
     },
     /// Tried and the filesystem refused. Not a violation on its own — a persona
@@ -565,6 +572,7 @@ mod tests {
             sha256: sha.map(String::from),
             size: 10,
             mtime_ms: Some(ts),
+            parent_inode: None,
             ts_ms: ts,
         }
     }
@@ -586,6 +594,7 @@ mod tests {
             sha256: sha.map(String::from),
             size: 10,
             mtime_ms: Some(ts),
+            parent_inode: None,
             ts_ms: ts,
         }
     }

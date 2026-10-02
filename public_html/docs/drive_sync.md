@@ -97,6 +97,12 @@ the file to another record.
 - **The scan pairs by identity first** on a strong volume: a record's own file
   is that record's wherever it stands, and the path decides only for a file no
   record owns. A weak volume pairs path-first.
+- **A save by rename is an edit whichever pass sees it,** on a strong volume.
+  A file never sent, renamed over a record whose own file stands nowhere, is
+  that record's next version, as a file no record owns at that path is. The
+  record minted for it when a pass saw it under its temporary name is
+  dropped, with anything queued for it. A weak volume reads it, as any file
+  moved and edited between two scans, as a delete plus a creation.
 - **The executor acts only on the file it planned for.** On a strong volume a
   move, a park, a trash or a conflict copy of a file stands down
   (`Overtaken`) when the file at the path is not the record's own, and the
@@ -193,7 +199,9 @@ Report (conflicted copy 2026-07-31 from MacBook).xlsx
 ```
 
 Both versions exist on both sides within one sync round, and the conflict always
-lands in the issues panel.
+lands in the issues panel. The copy is named after what the file is called on
+the server, unless that is the scratch name a peer's swap holds it under for a
+moment (`.jd-swap-...`); then it is named after what the file is called here.
 
 A file or folder moved on both sides keeps both changes when they do not
 overlap: if one side changed only its name and the other only its folder, it
@@ -650,7 +658,11 @@ onto the target. A partial download is never something a user can open. The
 rename is guarded by the fingerprint the engine decided against, so a file
 edited while the download was in flight is not overwritten — the download is
 withdrawn and the local edit wins. A download's byte count comes from the bytes
-that reached the spool, never from a header.
+that reached the spool, never from a header. It lands in the directory that
+stood at its folder's path when the spool was opened: a folder the user moved
+or replaced while the bytes were in flight is never made again at its old name
+(`VfsError::FolderMoved`). The download stands down and the next pass places it
+where the folder now is. Only a folder missing when the spool opened is made.
 
 **Uploads** commit their hash at init, read from the same open handle the
 bytes are sent from. A file whose bytes change mid-upload fails verification

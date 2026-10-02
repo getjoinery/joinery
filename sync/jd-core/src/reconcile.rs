@@ -282,7 +282,7 @@ pub fn reconcile(entry: &Entry, local: &Delta, remote: &Delta, ctx: &Context) ->
                     None => entry.synced_placement.as_ref().map_or(entry.remote.parent, |p| p.parent),
                 };
                 let copy = jd_vfs::conflict_copy_name(
-                    &remote_display_name(entry, remote),
+                    &copy_named_after(entry, local, remote),
                     &ctx.date,
                     &ctx.device_name,
                     ctx.conflict_suffix,
@@ -475,6 +475,29 @@ fn remote_display_name(entry: &Entry, remote: &Delta) -> String {
         .placement()
         .map(|p| p.name.clone())
         .unwrap_or_else(|| entry.remote.name.clone())
+}
+
+/// The name a conflict copy is named after: what the file is called on the
+/// server now, unless that is the scratch name a peer's swap gives it for a
+/// moment -- then what it is called here, what both sides last agreed, or
+/// what the record last knew the server to call it, the first that is not a
+/// scratch name. Named after the scratch name, the copy wore the engine's
+/// reserved prefix and could never be sent: a device never quiet again (run
+/// 1540). Every one a scratch name (a swap interrupted here too): the name
+/// without the prefix, which is at least never reserved.
+fn copy_named_after(entry: &Entry, local: &Delta, remote: &Delta) -> String {
+    let now = remote_display_name(entry, remote);
+    let names = [
+        Some(now.clone()),
+        local.placement().map(|p| p.name.clone()),
+        entry.synced_placement.as_ref().map(|p| p.name.clone()),
+        Some(entry.remote.name.clone()),
+    ];
+    names
+        .into_iter()
+        .flatten()
+        .find(|name| !jd_vfs::is_internal(name))
+        .unwrap_or_else(|| now.trim_start_matches(jd_vfs::names::INTERNAL_PREFIX).to_string())
 }
 
 /// Would this round of deletes be a catastrophe rather than an intention?
@@ -972,6 +995,73 @@ mod tests {
             preserved.unwrap(),
             "new (conflicted copy 2026-07-16 from MacBook).txt"
         );
+    }
+
+    #[test]
+    fn a_conflict_copy_is_never_named_after_a_peers_scratch_name() {
+        // A peer mid-swap has the file under its scratch name on the server.
+        // The copy is named after what the file is called here: a copy wearing
+        // the reserved prefix can never be sent (run 1540).
+        let e = established("notes.txt", "aaa");
+        let r = reconcile(
+            &e,
+            &Delta::Edited {
+                content: content("local", 1),
+            },
+            &Delta::MovedAndEdited {
+                to: placement(None, ".jd-swap-8651a33e-b0d2fe77"),
+                content: content("remote", 2),
+            },
+            &ctx(),
+        );
+        let preserved = r.actions.iter().find_map(|a| match a {
+            Action::PreserveLocalAs { name, .. } => Some(name.clone()),
+            _ => None,
+        });
+        assert_eq!(preserved.unwrap(), "notes (conflicted copy 2026-07-16 from MacBook).txt");
+    }
+
+    #[test]
+    fn a_conflict_copy_never_wears_a_scratch_name_even_when_this_side_does() {
+        // Mid-swap on both sides: here too the file wears a scratch name (a
+        // swap interrupted here). The agreed name is the one left.
+        let mut e = established("notes.txt", "aaa");
+        e.local_name = Some(".jd-swap-local-1".into());
+        let r = reconcile(
+            &e,
+            &Delta::MovedAndEdited {
+                to: placement(None, ".jd-swap-local-1"),
+                content: content("local", 1),
+            },
+            &Delta::MovedAndEdited {
+                to: placement(None, ".jd-swap-8651a33e-b0d2fe77"),
+                content: content("remote", 2),
+            },
+            &ctx(),
+        );
+        let preserved = r.actions.iter().find_map(|a| match a {
+            Action::PreserveLocalAs { name, .. } => Some(name.clone()),
+            _ => None,
+        });
+        assert_eq!(preserved.unwrap(), "notes (conflicted copy 2026-07-16 from MacBook).txt");
+
+        // Nothing but scratch names anywhere: the prefix comes off.
+        let mut e = established(".jd-swap-old", "aaa");
+        e.remote.name = ".jd-swap-old".into();
+        let r = reconcile(
+            &e,
+            &Delta::Edited { content: content("local", 1) },
+            &Delta::MovedAndEdited {
+                to: placement(None, ".jd-swap-new"),
+                content: content("remote", 2),
+            },
+            &ctx(),
+        );
+        let preserved = r.actions.iter().find_map(|a| match a {
+            Action::PreserveLocalAs { name, .. } => Some(name.clone()),
+            _ => None,
+        });
+        assert!(!jd_vfs::is_internal(&preserved.clone().unwrap()), "{preserved:?}");
     }
 
     // ---- edit beats delete, in both directions -----------------------------

@@ -83,6 +83,8 @@ pub struct Outcome {
     pub cycles: u64,
     pub violations: Vec<String>,
     pub bundles: Vec<PathBuf>,
+    /// The last settle's no-loss coverage, for the run's headline.
+    pub coverage: Option<verify::Coverage>,
 }
 
 impl Outcome {
@@ -162,6 +164,7 @@ pub fn run(
         );
         leak_history.push(verification.samples.clone());
         seen_on_server.extend(verification.server_contents.iter().cloned());
+        outcome.coverage = Some(verification.coverage);
 
         for verdict in &verification.verdicts {
             let seq = conductor.next_seq();
@@ -743,6 +746,7 @@ mod tests {
             samples: Vec::new(),
             convergence_ms: BTreeMap::new(),
             server_contents: Default::default(),
+            coverage: Default::default(),
             losses: Default::default(),
         };
         let bundle = capture(&fleet, 3, &verification).unwrap();
@@ -775,6 +779,7 @@ mod tests {
             samples: Vec::new(),
             convergence_ms: BTreeMap::new(),
             server_contents: Default::default(),
+            coverage: Default::default(),
             losses: crate::verify::Losses {
                 live: live.clone(),
                 history: vec!["deadbeef".into()],
@@ -816,6 +821,7 @@ mod tests {
                 samples: Vec::new(),
                 convergence_ms: BTreeMap::new(),
                 server_contents: Default::default(),
+                coverage: Default::default(),
                 losses: Default::default(),
             },
         )
@@ -843,6 +849,7 @@ mod tests {
                 sha256: Some("aa".into()),
                 size: 1,
                 mtime_ms: None,
+                parent_inode: None,
                 ts_ms: 1,
             })
             .unwrap();

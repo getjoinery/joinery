@@ -1891,6 +1891,14 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // longer exists, and overwriting would discard an edit nobody has seen.
     let fingerprint = match spool.commit(&path, entry.synced_fingerprint) {
         Ok(fp) => fp,
+        // The user moved the folder while the bytes were in flight, after the
+        // checks above found it where its record says (soak run 1536). The
+        // next pass places the file where its folder now stands.
+        Err(jd_vfs::VfsError::FolderMoved(_)) => {
+            return Ok(OpOutcome::Overtaken(
+                "the folder it belongs in moved while this downloaded; deciding again from where it stands".into(),
+            ));
+        }
         Err(jd_vfs::VfsError::AlreadyExists(blocked)) => {
             let blocked = Some(blocked);
             // The guard fired. It compares fingerprints, and a fingerprint

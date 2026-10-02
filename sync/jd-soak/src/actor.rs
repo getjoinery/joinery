@@ -130,6 +130,7 @@ impl Actor {
                         sha256: done.sha256,
                         size: done.size,
                         mtime_ms: done.mtime_ms,
+                        parent_inode: done.parent_inode,
                         ts_ms: now_ms(),
                     })?;
                 }
@@ -210,14 +211,19 @@ impl Actor {
                     sha256: Some(sha),
                     size: len,
                     mtime_ms: mtime_ms(&target),
+                    parent_inode: parent_inode(&target),
                 }])
             }
             FsOp::Rename { from, to } => {
                 let source = self.resolve(from)?;
                 let dest = self.resolve(to)?;
                 self.parent_of(&dest)?;
+                // The directory it leaves, read before it leaves: the custody
+                // check tells a rename in place from a move by it, for a file
+                // this device's user never wrote (a download) as for one it did.
+                let left = parent_inode(&source);
                 std::fs::rename(&source, &dest)?;
-                let mut done = vec![Done::dir("rename", from)];
+                let mut done = vec![Done { parent_inode: left, ..Done::dir("rename", from) }];
                 // The destination carries the content forward, so it needs a
                 // commit of its own or the oracle stops looking for bytes that
                 // are still very much the user's.
@@ -229,6 +235,7 @@ impl Actor {
                         sha256: Some(sha),
                         size: len,
                         mtime_ms: mtime_ms(&dest),
+                        parent_inode: parent_inode(&dest),
                     });
                 } else {
                     done.push(Done::dir("rename_into", to));
@@ -252,6 +259,7 @@ impl Actor {
                             sha256: Some(sha),
                             size: len,
                             mtime_ms: mtime_ms(path),
+                            parent_inode: parent_inode(path),
                         });
                     }
                 }
@@ -287,6 +295,7 @@ impl Actor {
                     sha256: Some(sha),
                     size: len,
                     mtime_ms: mtime_ms(&target),
+                    parent_inode: parent_inode(&target),
                 }])
             }
         }
@@ -379,6 +388,8 @@ struct Done {
     sha256: Option<String>,
     size: u64,
     mtime_ms: Option<u64>,
+    /// The inode of the directory a content landed in, for the custody check.
+    parent_inode: Option<u64>,
 }
 
 impl Done {
@@ -389,6 +400,7 @@ impl Done {
             sha256: None,
             size: 0,
             mtime_ms: None,
+            parent_inode: None,
         }
     }
 
@@ -399,6 +411,7 @@ impl Done {
             sha256: Some(hash_bytes(bytes)),
             size: bytes.len() as u64,
             mtime_ms: mtime_ms(on_disk),
+            parent_inode: parent_inode(on_disk),
         }
     }
 }
@@ -412,6 +425,18 @@ pub fn hash_bytes(bytes: &[u8]) -> String {
 pub fn hash_file(path: &Path) -> std::io::Result<(String, u64)> {
     let file = std::fs::File::open(path)?;
     jd_proto::sha256_reader(file)
+}
+
+/// The inode of the directory `path` stands in, on the device that wrote it.
+#[cfg(unix)]
+pub fn parent_inode(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path.parent()?).ok().map(|m| m.ino())
+}
+
+#[cfg(not(unix))]
+pub fn parent_inode(_path: &Path) -> Option<u64> {
+    None
 }
 
 pub fn mtime_ms(path: &Path) -> Option<u64> {
@@ -511,6 +536,21 @@ mod tests {
         let oracle = journal::last_committed(&bed.records());
         assert_eq!(oracle["a/b.txt"].sha256, hash_bytes(&on_disk));
         assert_eq!(oracle["a/b.txt"].size, 1234);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_write_journals_the_directory_it_landed_in() {
+        use std::os::unix::fs::MetadataExt;
+        let bed = Bed::new("parent-inode");
+        let mut actor = bed.actor(vec![FsOp::Write { path: "notes.txt".into(), seed: 1, size: 10 }]);
+        actor.step().unwrap();
+        let workspace = std::fs::metadata(&bed.root).unwrap().ino();
+        let commit = bed.records().into_iter().find_map(|r| match r {
+            Record::ActorCommit { parent_inode, .. } => Some(parent_inode),
+            _ => None,
+        });
+        assert_eq!(commit, Some(Some(workspace)));
     }
 
     #[test]

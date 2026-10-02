@@ -48,6 +48,8 @@ pub enum VfsError {
     NotADirectory(PathBuf),
     #[error("{0} already exists")]
     AlreadyExists(PathBuf),
+    #[error("the folder {0} was moved or replaced while a file was landing in it")]
+    FolderMoved(PathBuf),
     #[error("permission denied: {0}")]
     PermissionDenied(PathBuf),
     #[error("the sync root {0} is not available")]
@@ -193,6 +195,14 @@ pub trait SpoolFile: std::io::Write {
     /// `expect` guards the replace: if the file at `target` no longer matches
     /// the fingerprint the engine decided against, the swap is refused so a
     /// change made while the download was in flight is not overwritten.
+    ///
+    /// The folder `target` lands in is the directory that stood there when
+    /// the spool was opened. If that directory has gone, or another stands in
+    /// its place, the commit is refused (`FolderMoved`) rather than making the
+    /// folder again: the user moved it while the bytes were in flight, and a
+    /// folder made again at its old name takes the file out of the folder the
+    /// user has (soak run 1536). Only a folder missing when the spool opened
+    /// is made.
     ///
     /// **A commit that fails leaves nothing behind.** It consumes the handle,
     /// so after it returns the caller has no way to clean up; a temporary file
