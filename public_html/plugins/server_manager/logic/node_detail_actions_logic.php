@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.36 - Retry Install refuses an install the retired Clone made (mode from_backup), pointing at the Copy tab
  * @version 1.35 - case_note and case_read are gone: an incident's note and triage are set on its own page
  *                 (incident_triage.md WP1)
  * @version 1.34 - site copy (specs/site_copy.md WP8): copy_new_server, copy_own_server, copy_approve_join, copy_again,
@@ -529,11 +530,11 @@ class NodeDetailActions {
 						. 'or delete the instance and provision again.');
 					return $base_url;
 				}
-				// A clone's key was blanked once the provision finished; a
-				// retry after that has no source to pull from.
-				if (($params['mode'] ?? '') === 'from_backup' && (string)($params['clone_key'] ?? '') === '') {
+				// An install made by the retired Clone (mode from_backup) has no
+				// bootstrap left to re-run: a site on a new server is a copy.
+				if (($params['mode'] ?? '') === 'from_backup') {
 					self::fail($session, $page_regex,
-						'This clone\'s export key was released when its provision finished; provision a new clone instead.');
+						'This install was a clone, and cloning is retired. Copy the source site from its node\'s Copy tab instead.');
 					return $base_url;
 				}
 				// The admin password rides the bootstrap's stdin and exists only

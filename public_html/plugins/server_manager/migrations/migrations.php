@@ -6,6 +6,8 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.6 - sm_010 ends the retired Clone's rows (site_copy.md WP9): from_backup provisions, and the
+ *                cvp_clone_key_sealed and cvp_backup_source columns
  * @version 1.5 - sm_009 seeds the editable emails of a server handover to the customer's own Linode account
  *                and of the Services rows it leaves behind
  * @version 1.4 - sm_008 removes the provisioning records and hosted trials of nodes removed before
@@ -241,6 +243,39 @@ return [
 				WHERE NOT EXISTS (SELECT 1 FROM emt_email_templates WHERE emt_name = ?)");
 			foreach ($templates as $t) {
 				$insert->execute(array($t[0], $t[1], $t[2], $t[0]));
+			}
+		},
+	],
+	[
+		// Clone is retired (specs/site_copy.md WP9): a site on a new server is
+		// a site copy. A from_backup provision still working has no pipeline
+		// left to finish it, so it fails, saying so; every from_backup row is
+		// then recorded as the install it was nearest to (fresh), since the
+		// mode no longer exists for the row to be saved with. The sealed clone
+		// key and the backup-source column go: nothing reads them, and a key
+		// left at rest is a secret with no purpose.
+		'id' => 'sm_010_clone_retired',
+		'version' => '1.30.1',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			if (!$dblink->query("SELECT to_regclass('cvp_customer_cloud_provisions') IS NOT NULL")->fetchColumn()) {
+				return;   // the table does not exist here: nothing was ever cloned
+			}
+			$cols = $dblink->query("SELECT column_name FROM information_schema.columns
+				WHERE table_name = 'cvp_customer_cloud_provisions'")->fetchAll(PDO::FETCH_COLUMN);
+			if (in_array('cvp_install_mode', $cols, true) && in_array('cvp_status', $cols, true)) {
+				$fail = $dblink->prepare("UPDATE cvp_customer_cloud_provisions
+					SET cvp_status = 'failed', cvp_error = ?
+					WHERE cvp_install_mode = 'from_backup'
+					  AND cvp_status IN ('pending_connect', 'ready', 'booting', 'installing')");
+				$fail->execute(array('Cloning is retired and this clone never finished. Copy the source site from its node\'s Copy tab.'));
+				$dblink->exec("UPDATE cvp_customer_cloud_provisions SET cvp_install_mode = 'fresh'
+					WHERE cvp_install_mode = 'from_backup'");
+			}
+			foreach (array('cvp_clone_key_sealed', 'cvp_backup_source') as $col) {
+				if (in_array($col, $cols, true)) {
+					$dblink->exec("ALTER TABLE cvp_customer_cloud_provisions DROP COLUMN {$col}");
+				}
 			}
 		},
 	],

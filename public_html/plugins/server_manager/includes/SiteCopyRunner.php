@@ -23,9 +23,12 @@
  *                     the source's own Backups page), copy_import, copy_stage,
  *                     copy_restore on the copy, then site_census on both and
  *                     the comparison (informational: the source is live).
- *   discard           the copy row leaves the dashboard. The server is not
- *                     deleted: the platform never deletes a cloud instance, so
- *                     the page names it for its owner to delete at the provider.
+ *   discard           the copy row leaves the dashboard and the step it was
+ *                     on is cancelled (a source waiting for its owner's export
+ *                     approval sees that and withdraws the request). The server
+ *                     is not deleted: the platform never deletes a cloud
+ *                     instance, so the page names it for its owner to delete at
+ *                     the provider.
  *
  * advance() is called by the AdvanceSiteCopies task every tick, and by
  * job_finished() when a node posts a copy step's result (the Copy tab only
@@ -38,6 +41,7 @@
  * move a site's address (WP7a). Its two pieces that are not about the address
  * are built: the node-id word (take_node_id) and the row swap (SiteCopySwap).
  *
+ * @version 1.3 - discard cancels the step job it was on (site_copy.md B42)
  * @version 1.2 - a passed step queues the next in the same call, and job_finished() advances a copy when its
  *                 step's result arrives: a run took two task ticks per step (site_copy.md B40)
  * @version 1.1 - the no-site-address refusal says a status check fills it (site_copy.md B38)
@@ -473,6 +477,10 @@ class SiteCopyRunner {
 				// Nothing was created yet: the provision is simply withdrawn.
 				$provision->soft_delete();
 			}
+			// The step it was on is withdrawn too. A source waiting for its
+			// owner to approve the export asks whether the job is still wanted,
+			// and takes the approval request off its page when it is not.
+			self::cancel_open_steps($copy->steps());
 			$node = self::copy_row($copy, false);
 			if ($node && !$node->get('mgn_delete_time')) {
 				$node->soft_delete();
@@ -848,6 +856,25 @@ class SiteCopyRunner {
 		$copy->set('scp_status', SiteCopy::STATUS_HALTED);
 		$copy->set('scp_halt_reason', mb_substr($why, 0, 2000));
 		$copy->save();
+	}
+
+	/** Cancel every step job not yet finished: queued, waiting to be claimed, or running. */
+	private static function cancel_open_steps(array $steps): void {
+		foreach ($steps as $s) {
+			if (empty($s['job_id'])) {
+				continue;
+			}
+			try {
+				$job = new ManagementJob((int)$s['job_id'], TRUE);
+			} catch (Exception $e) {
+				continue;
+			}
+			if ($job->key && in_array((string)$job->get('mjb_status'), array('queued', 'pending', 'running'), true)) {
+				$job->set('mjb_status', 'cancelled');
+				$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+				$job->save();
+			}
+		}
 	}
 
 	private static function skip_pending(array $steps): array {

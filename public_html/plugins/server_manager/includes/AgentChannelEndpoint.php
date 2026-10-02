@@ -6,7 +6,7 @@
  * job at a time, and posts the result back (specs/agent_on_node_architecture.md
  * §3.1, component D).
  *
- * Seven endpoints, all POST, all under /api/v1/agent/:
+ * Nine endpoints, all POST, all under /api/v1/agent/:
  *   join         node-initiated enrollment (Phase 1.5, decision A6): the node
  *                hands over the PUBLIC half of a keypair it generated and
  *                kept, plus a claimed name. NO secret exists in this exchange
@@ -19,6 +19,11 @@
  *   result       signed; the terminal report for one job
  *   leave        signed; the node ending the pairing from its own side — the
  *                same forgetting the plane-side Disconnect performs
+ *   quiet        signed; the node saying its agent is being switched off
+ *   job_status   signed; whether a job the node is holding is still wanted.
+ *                Asked while the node waits for its own operator's approval,
+ *                so a job withdrawn here takes its approval request off the
+ *                node's page. It can only stop a job, never approve one
  *   artifact     signed; the bytes of the agent's next binary, and of the
  *                signed support bundle. A DELIVERY ROUTE, NOT A TRUST CHANGE —
  *                see handle_artifact()
@@ -36,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.31 - job_status: a node waiting for its operator's approval asks whether the job is still
+ *                 wanted, and stops waiting when it was cancelled here (site_copy.md B42)
  * @version 1.30 - a site copy's step result advances its copy at once (SiteCopyRunner::job_finished; site_copy.md B40)
  * @version 1.29 - a case is an incident (incident_triage.md WP1): stored with its plain title and
  *                severity, and its opening and its close recorded as timeline events
@@ -264,7 +271,7 @@ class AgentChannelEndpoint {
 
 		// Resolve the endpoint BEFORE reading a body. An unknown path is a 404
 		// about the path, not a complaint about whatever was sent to it.
-		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result', 'leave', 'quiet', 'artifact'], true)) {
+		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result', 'leave', 'quiet', 'artifact', 'job_status'], true)) {
 			api_error('Unknown agent endpoint.', 'ActionError', 404);
 		}
 
@@ -292,6 +299,9 @@ class AgentChannelEndpoint {
 			case 'artifact':
 				self::handle_artifact($body);
 				break;
+			case 'job_status':
+				self::handle_job_status($body);
+				break;
 		}
 		exit;
 	}
@@ -307,10 +317,11 @@ class AgentChannelEndpoint {
 	 * query. Writing the steady-state poll would swamp the table that every
 	 * other rate limit on the platform reads. A claim that FAILED is not
 	 * steady state — an unsigned or mis-signed flood looks exactly like that —
-	 * so it counts.
+	 * so it counts. A job_status that succeeded is the same steady state: a
+	 * node waiting on an approval asks every half minute for up to an hour.
 	 */
 	public static function meterOutcome($endpoint, $status_code) {
-		return !($endpoint === 'claim' && (int)$status_code < 400);
+		return !(in_array($endpoint, array('claim', 'job_status'), true) && (int)$status_code < 400);
 	}
 
 	// ==================================================================
@@ -2271,6 +2282,45 @@ class AgentChannelEndpoint {
 		$node->save();
 
 		api_success(['acknowledged' => true, 'quiet_time' => $quiet_time], '', 200);
+	}
+
+	/**
+	 * Is a job this node holds still wanted? Answered for the node's own jobs
+	 * only. withdrawn is true when the job was cancelled or removed here (a site copy's
+	 * Discard cancels the step it was waiting on); the node then stops waiting
+	 * for its operator and clears the approval request from its own page.
+	 *
+	 * The answer can only end a job. Approval is the node operator's alone, and
+	 * nothing here or in the job carries one.
+	 */
+	private static function handle_job_status($body) {
+		$node = self::authenticate_node('/api/v1/agent/job_status', self::body_hash());
+		$in = self::validate($body, [
+			'node_id' => ['type' => 'int', 'required' => true],
+			'job_id'  => ['type' => 'int', 'required' => true],
+		]);
+		if ((int)$in['node_id'] !== (int)$node->key) {
+			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
+		}
+		$answer = self::job_status_answer((int)$node->key, (int)$in['job_id']);
+		if ($answer === null) {
+			api_error('No such job.', 'ActionError', 404);
+		}
+		api_success($answer, '', 200);
+	}
+
+	/** job_status's answer for one of this node's jobs; null when the job is not this node's. */
+	public static function job_status_answer(int $node_id, int $job_id): ?array {
+		try {
+			$job = new ManagementJob($job_id, TRUE);
+		} catch (Exception $e) {
+			return null;
+		}
+		if (!$job->key || (int)$job->get('mjb_mgn_managed_node_id') !== $node_id) {
+			return null;
+		}
+		$withdrawn = (string)$job->get('mjb_status') === 'cancelled' || (bool)$job->get('mjb_delete_time');
+		return array('job_id' => (int)$job->key, 'withdrawn' => $withdrawn);
 	}
 
 	public static function forgetAgent($node) {

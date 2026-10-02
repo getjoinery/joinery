@@ -173,7 +173,10 @@ Two consequences follow, and both are fleet-wide rather than hosted-only:
 
 ## The billing clock, and what happens when a payment fails
 
-`HostedTrialWatch` runs the commercial half. One `htr_hosted_trials` row per
+`HostedTrialWatch` runs the commercial half, for sold sites only
+(`CustomerCloudProvision::is_sold()`: an order or a buyer's checkout made it,
+and it is a whole site). A relay shard or a site copy on the operator's account
+is never billed, banner-pushed or shut down. One `htr_hosted_trials` row per
 provision holds the state — `trial`, `subscribed`, `grace`, `shutdown` — and
 nothing else: there are no meter columns, because every figure already lives
 with the party that measures it (the mail provider counts sends, the retention

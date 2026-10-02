@@ -857,7 +857,7 @@ The restore reconciles the result to the new box: the domain, the deployment sha
 
 Cross-shape rebuilds work in both directions with no extra step: a container backup landing on a plain server, or the reverse. Neither installs the virtualhost the backup carries — see the same section.
 
-**The dashboard** copies a working node onto a new server from its backups: the node's **Copy** tab (Server Manager, *Site copy*) installs a dormant copy at the node's own release and applies the node's newest backup chain there, its owner approving each export on the node itself. It cannot rebuild a node whose server is gone: its **restore_project** / **restore_chain** jobs restore a node's own backups onto that same node, which must already have a working site to approve them. The **install_node** job's Clone mode (`install_mode = from_backup`) is not a backup restore: it pulls the database, uploads and static files over HTTPS from the source node while that node is running, carries no `config/` or `storage/`, and scrubs every sealed value on arrival.
+**The dashboard** copies a working node onto a new server from its backups: the node's **Copy** tab (Server Manager, *Site copy*) installs a dormant copy at the node's own release and applies the node's newest backup chain there, its owner approving each export on the node itself. It cannot rebuild a node whose server is gone: its **restore_project** / **restore_chain** jobs restore a node's own backups onto that same node, which must already have a working site to approve them.
 
 **A PostgreSQL major-version jump needs nothing special, upwards.** The dump-and-restore path crosses it: a PG 16 dump restores onto PG 18 as an ordinary restore.
 
@@ -951,8 +951,6 @@ The setting is bounded: an `https` origin with a host name and optional port and
 
 It is not a decision anyone makes twice. `_site_init.sh` writes it at install time from the endpoint the install actually fetched its code from — `install.sh`'s `UPGRADE_SERVER`, which defaults to `https://getjoinery.com` and is overridden with `--upgrade-server=URL`. One rule covers both audiences: leave the flag off and the site tracks stable releases; pass it and the site follows wherever it was installed from.
 
-Clones are the exception: `UPGRADE_SERVER` points at the clone source for the duration of a clone, and that is a peer site rather than a release endpoint, so the cloned database keeps the source's own `upgrade_source`.
-
 ### The root node
 
 One deployment is the origin of the estate: the code is written there, and the
@@ -962,7 +960,7 @@ by domain — `dev.getjoinery.com` — and a site is the origin when its own
 settings page, because it is a fact about the estate's shape rather than a
 preference anyone tunes.
 
-Naming it by domain rather than raising a flag is what makes a clone or a
+Naming it by domain rather than raising a flag is what makes a site copy or a
 restored backup safe. The copy carries the same value, which still names the
 origin, and the copy correctly concludes it is not the origin itself.
 

@@ -15,7 +15,7 @@
  *           point it is an order-shaped row and the pipeline takes it.
  *
  * Install parameters travel on the row (cvp_docker_mode, cvp_install_mode,
- * cvp_source_node_id, cvp_backup_source, cvp_port) and are honored by the
+ * cvp_source_node_id, cvp_release, cvp_port) and are honored by the
  * ProvisionCustomerCloud scheduled task, which advances every provision.
  *
  * Status flow:
@@ -39,6 +39,10 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.14 - install mode from_backup, cvp_clone_key_sealed and cvp_backup_source are gone with the
+ *                 retired Clone (site_copy.md WP9)
+ * @version 1.13 - is_sold(): a site somebody bought (order or buyer origin, not bare), the one rule for
+ *                 what the billing watch, the move to a customer's account and Your sites treat as sold
  * @version 1.12 - hosting mode 'transferred': a Managed site whose instance was handed to its customer's own
  *                 Linode account (specs/managed_to_self_hosted_transfer.md §5) — neither ours to host nor a
  *                 bring-your-own-cloud row with an account grant
@@ -108,12 +112,11 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_instance_type'          => array('type'=>'varchar(50)'),
 		'cvp_mgn_managed_node_id'            => array('type'=>'int8'),
 		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker', 'allowed_values'=>array('docker', 'bare-metal')),
-		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'from_backup', 'bare', 'copy')),
+		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'bare', 'copy')),
 		'cvp_source_node_id'         => array('type'=>'int8'),
 		// A copy's install: the release it is installed at, its source's exact
 		// release (vendor/ never travels in a backup). Empty for every other mode.
 		'cvp_release'                => array('type'=>'varchar(20)'),
-		'cvp_backup_source'          => array('type'=>'varchar(10)'),
 		'cvp_port'                   => array('type'=>'int4', 'is_nullable'=>false, 'default'=>8080),
 		// The instance's root password, sealed (SecretBox) for the length of the
 		// install only. It is the sole credential for a keyless provision — no
@@ -132,11 +135,6 @@ class CustomerCloudProvision extends SystemBase {
 		// detail page retries. NULL: a provision that predates keyless
 		// provisioning, or one that never had an instance to hold a password for.
 		'cvp_install_password'       => array('type'=>'varchar(16)', 'allowed_values'=>array('held', 'retiring', 'retired', 'retire_failed')),
-		// from_backup: the export key this provision armed its SOURCE with
-		// (clone_export_arm), sealed for the length of the provision. The
-		// target presents it over HTTPS; the plane disarms the source and
-		// erases this when the provision is done. NULL otherwise.
-		'cvp_clone_key_sealed'       => array('type'=>'text'),
 		// Fleet enrollment seeding (mailbox plugin) travels over the agent
 		// channel, so it waits for the node's agent to pair: pending →
 		// dispatched → done | failed. NULL means no seeding applies.
@@ -232,11 +230,8 @@ class CustomerCloudProvision extends SystemBase {
 			throw new CustomerCloudProvisionException("Unknown docker mode '{$docker_mode}'.");
 		}
 		$install_mode = $this->get('cvp_install_mode') ?: 'fresh';
-		if (!in_array($install_mode, array('fresh', 'from_backup', 'bare', 'copy'), true)) {
+		if (!in_array($install_mode, array('fresh', 'bare', 'copy'), true)) {
 			throw new CustomerCloudProvisionException("Unknown install mode '{$install_mode}'.");
-		}
-		if ($install_mode === 'from_backup' && empty($this->get('cvp_source_node_id'))) {
-			throw new CustomerCloudProvisionException('Source node is required for from-backup provisions.');
 		}
 		// A dormant copy: of a node, on bare metal, at a release, made by an admin.
 		if ($install_mode === 'copy') {
@@ -482,6 +477,17 @@ class CustomerCloudProvision extends SystemBase {
 	/** Was this Managed site's instance handed to its customer's own account? */
 	public function is_transferred(): bool {
 		return (string)$this->get('cvp_hosting_mode') === 'transferred';
+	}
+
+	/**
+	 * Did somebody buy this site? An order or a buyer's checkout made it, and it
+	 * is a whole site, not a bare machine. A relay shard and a site copy are
+	 * on the operator's account too, made by the operator: they are never
+	 * billed, never put on a trial and never handed to a customer.
+	 */
+	public function is_sold(): bool {
+		return in_array((string)$this->get('cvp_origin'), array('order', 'buyer'), true)
+			&& (string)$this->get('cvp_install_mode') !== 'bare';
 	}
 
 	/**

@@ -599,6 +599,28 @@ check(ProvisionHostedMail::sandbox_users(), 'and on when the hosted card sets it
 harness_set_setting_mem('server_manager_smtp2go_sandbox_users', '0');
 
 // ---------------------------------------------------------------------------
+section('Only a sold site is billed: a copy on our account never gets a trial');
+
+// site_copy.md B39: a copy made with the operator token is an operator-mode,
+// admin-origin row. Taken as sold, it got a trial, a banner it refused, and at
+// the trial's end a shutdown that after a switch-over hits the live site.
+$copy_row = ht_provision('httest-copy-' . $suffix, 'operator', array(
+	'cvp_install_mode' => 'copy', 'cvp_source_node_id' => 1, 'cvp_docker_mode' => 'bare-metal',
+	'cvp_release' => '0.8.460', 'cvp_status' => 'done'));
+$shard_row = ht_provision('httest-shard-' . $suffix, 'operator', array(
+	'cvp_install_mode' => 'bare', 'cvp_status' => 'done'));
+check(!$copy_row->is_sold() && !$shard_row->is_sold(), 'a site copy and a relay shard are not sold');
+$sold_ids = array_map(function ($p) { return (int)$p->key; }, HostedTrialWatch::sold_sites());
+check(!in_array((int)$copy_row->key, $sold_ids, true) && !in_array((int)$shard_row->key, $sold_ids, true),
+	'so the watch passes over both');
+foreach (array('order', 'buyer') as $origin) {
+	$bought = new CustomerCloudProvision(NULL);
+	$bought->set('cvp_origin', $origin);
+	$bought->set('cvp_install_mode', 'fresh');
+	check($bought->is_sold(), 'a fresh site from the ' . $origin . ' origin is sold');
+}
+
+// ---------------------------------------------------------------------------
 section('Cleanup');
 
 check(true, 'fixtures were created inside the transaction');

@@ -605,23 +605,6 @@ check($self_node->get('mgn_ssl_state') === 'active', 'a node issuing for itself 
 // ---------------------------------------------------------------------------
 section('The secret a compiled-names job carried does not outlive the job');
 
-$arm_node = jrp_node(array());
-$arm_job = jrp_job($arm_node, 'clone_export_arm', json_encode(array('api_version' => '1.0',
-	'data' => array('output' => "CLONE_EXPORT_ARM=armed\n"))));
-$arm_job->set('mjb_commands', array('primitive' => 'clone_export_arm', 'params' => array('export_key' => 'deadbeefdeadbeefdeadbeef')));
-$arm_job->set('mjb_parameters', array('export_key' => 'deadbeefdeadbeefdeadbeef', 'provision_id' => 7));
-$arm_job->save();
-JobResultProcessor::process($arm_job);
-$arm_job->load();
-$arm_result = json_decode((string)$arm_job->get('mjb_result'), true);
-check(!empty($arm_result['armed']), 'the arm job records that the source armed', (string)$arm_job->get('mjb_result'));
-check(strpos((string)json_encode($arm_job->get('mjb_commands')), 'deadbeef') === false
-	&& strpos((string)json_encode($arm_job->get('mjb_parameters')), 'deadbeef') === false,
-	'the export key is blanked out of both the envelope and the record');
-$arm_record = $arm_job->get('mjb_parameters');
-if (is_string($arm_record)) { $arm_record = json_decode($arm_record, true); }
-check((int)($arm_record['provision_id'] ?? 0) === 7, 'the rest of the record survives', json_encode($arm_record));
-
 $fe_node = jrp_node(array());
 $fe_job = jrp_job($fe_node, 'fleet_enroll', json_encode(array('api_version' => '1.0',
 	'data' => array('output' => "FLEET_ENROLL=ok\nservice_url=https://x\n"))));

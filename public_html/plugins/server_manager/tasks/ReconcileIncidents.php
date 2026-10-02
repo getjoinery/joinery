@@ -7,6 +7,7 @@
  * condition on every node with the incidents on record. Cheap: every source
  * reads stored columns, never probes.
  *
+ * @version 1.1 - reports incidents removed because their node row is gone
  * @version 1.0
  */
 
@@ -20,7 +21,7 @@ class ReconcileIncidents implements ScheduledTaskInterface {
 			return array('status' => 'success', 'message' => 'Another pass is reconciling incidents; skipped.');
 		}
 		$parts = array();
-		foreach (array('opened', 'reopened', 'cleared', 'refreshed') as $k) {
+		foreach (array('opened', 'reopened', 'cleared', 'refreshed', 'removed') as $k) {
 			if ($c[$k] > 0) {
 				$parts[] = $c[$k] . ' ' . $k;
 			}

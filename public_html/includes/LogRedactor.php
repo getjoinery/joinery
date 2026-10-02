@@ -36,6 +36,7 @@
  * The key list is pinned equal to the agent's redact/keys.go by
  * tests/unit/agent_redactor_parity_test.php.
  *
+ * @version 1.0.1 - the clone keys are named as the retired Clone's leftovers
  * @version 1.0.0
  */
 class LogRedactor {
@@ -54,8 +55,8 @@ class LogRedactor {
 	private static $secret_keys = array(
 		'secret_key', 'access_key', 'application_key', 'app_key', 'api_key',
 		'api_secret', 'apk_secret_key', 'password', 'passwd', 'token', 'secret',
-		// The clone export key (clone_export_arm, and --clone-key= on the
-		// bootstrap command): a bearer token and the dump's encryption password.
+		// A bearer token and a dump password, in the job rows the retired
+		// Clone left on a management node.
 		'export_key', 'clone_key',
 		// A storage target's credential, as it travels in a backup job's
 		// parameters and in a config heredoc.

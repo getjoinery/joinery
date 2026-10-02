@@ -23,28 +23,27 @@
  *   - It runs two step types: 'local' steps here on the plane, 'ssh' steps
  *     on the target over the sealed password. build_install_node emits one of
  *     each — the release pre-flight, then the single bootstrap session — for
- *     every shape (fresh, from_backup, bare; docker or bare-metal). A clone
- *     pulls its source over HTTPS inside that session, so there is no scp
- *     and no step addressed to another machine (specs/ssh_single_bootstrap.md).
+ *     every shape (fresh, copy, bare; docker or bare-metal), so there is no
+ *     scp and no step addressed to another machine
+ *     (specs/ssh_single_bootstrap.md).
  *   - The password is unsealed only in memory and handed to ssh through the
  *     SSHPASS environment variable, never on a command line.
  *   - A step may declare `stdin` => a list of NAMES, not values:
  *     'admin_password' (the site admin account's first password, unsealed from
- *     the provision row) and 'clone_key' (the export key a clone pulls its
- *     source with, from the job's own parameters). The executor writes one line
- *     per name, in the order named, to that session's stdin, where the
- *     bootstrap's first lines read them into JOINERY_ADMIN_PASSWORD and
- *     JOINERY_CLONE_KEY. Same reason as SSHPASS — mjb_commands is readable on
+ *     the provision row). The executor writes one line per name, in the order
+ *     named, to that session's stdin, where the bootstrap's first lines read
+ *     it into JOINERY_ADMIN_PASSWORD. Same reason as SSHPASS — mjb_commands is readable on
  *     the plane and job output is logged, and a command line is readable by
  *     every process on the target, so the one place a secret may travel is a
  *     pipe. A single name as a string is the same as a list of one. A step that
  *     asks for a value and cannot get it FAILS: an install that was meant to
  *     carry the buyer's password must not silently fall back to one nobody
- *     holds, and a clone with no key has no source.
+ *     holds.
  *
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.9 - Clone is retired (site_copy.md WP9): no 'clone_key' stdin source
  * @version 1.8 - a step's stdin names a list: 'clone_key' joins 'admin_password', so a clone's export
  *                key reaches the bootstrap on its stdin and never on a command line (B7)
  * @version 1.7 - a retire_install_password job whose target refuses the install password before the script runs completes as
@@ -162,9 +161,6 @@ class InstallJobExecutor {
 			// Unsealed once, for the length of this job, and only used by a step
 			// that declared it needs it. Absent is the ordinary case.
 			'admin_password' => $this->resolve_admin_password($node),
-			// A clone's export key, from the job's own parameters (blanked there
-			// once the provision finishes). Only a step that names it reads it.
-			'clone_key' => self::job_clone_key($job),
 		);
 		if ($ctx['host'] === '') {
 			$this->finish($job, false, 'The target node has no host address.');
@@ -472,24 +468,11 @@ class InstallJobExecutor {
 						. 'password nobody has');
 				}
 				$lines .= $ctx['admin_password'] . "\n";
-			} elseif ($name === 'clone_key') {
-				if (trim((string)($ctx['clone_key'] ?? '')) === '') {
-					return array(null, 'this install is a clone and asks for its export key on stdin, and the job '
-						. 'holds none — it was released when the provision finished; provision a new clone');
-				}
-				$lines .= $ctx['clone_key'] . "\n";
 			} else {
 				return array(null, "unknown stdin source '{$name}'");
 			}
 		}
 		return array($lines, '');
-	}
-
-	/** A clone's export key from the job's parameters; '' for any other job. */
-	private static function job_clone_key($job): string {
-		$params = $job->get('mjb_parameters');
-		if (is_string($params)) { $params = json_decode($params, true); }
-		return is_array($params) ? (string)($params['clone_key'] ?? '') : '';
 	}
 
 	private function resolve_admin_password($node) {

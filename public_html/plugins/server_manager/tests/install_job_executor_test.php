@@ -165,12 +165,12 @@ check(strpos((string)$job2->get('mjb_error_message'), 'No sealed root password')
 section('Every install shape is a job the executor runs');
 
 // The bootstrap is one session whatever the shape (specs/ssh_single_bootstrap.md):
-// a clone pulls its source over HTTPS inside it, bare metal runs install.sh
-// server inside it, a bare instance is its docker half. None is refused on its
+// bare metal runs install.sh server inside it, a dormant copy is a bare-metal
+// site at its source's release, a bare instance is its docker half. None is refused on its
 // parameters, and none carries a step type the executor lacks.
 $node3 = ije_node('ijetest-shapes-' . $suffix, 'Aa1!' . bin2hex(random_bytes(10)));
 foreach (array(
-	array('mode' => 'from_backup', 'docker_mode' => 'docker'),
+	array('mode' => 'copy',        'docker_mode' => 'bare-metal'),
 	array('mode' => 'fresh',       'docker_mode' => 'bare-metal'),
 	array('mode' => 'bare',        'docker_mode' => 'docker'),
 ) as $shape) {

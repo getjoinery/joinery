@@ -324,70 +324,29 @@ check($boot_target->get('mgn_container_name') === 'bootsite',
 	'the container name is the site name this plane chose, recorded at build time');
 check((int)$boot_target->get('mgn_port') >= 8080, 'the published port is allocated and recorded');
 
-// A clone pulls from the source over HTTPS with the key the plane armed it with.
-$clone_key = JobCommandBuilder::mint_clone_export_key();
-$clone_target = jcb_node(array('mgn_web_root' => '/var/www/html/clonesite/public_html',
-	'mgn_site_url' => 'https://clone.example.com'));
-$clone_steps = JobCommandBuilder::build_install_node($clone_target, array(
-	'mode' => 'from_backup', 'sitename' => 'clonesite', 'domain' => 'clone.example.com',
-	'docker_mode' => 'docker', 'clone_from' => 'https://source.example.com', 'clone_key' => $clone_key));
-$clone_ssh = jcb_ssh_steps($clone_steps);
-check(count($clone_ssh) === 1 && !in_array('scp', jcb_step_types($clone_steps), true),
-	'a clone is the same single session: no scp, nothing addressed to the source');
-$clone_cmd = $clone_ssh[0]['cmd'];
-check(strpos($clone_cmd, "--clone-from='https://source.example.com'") !== false,
-	'the site command carries --clone-from', $clone_cmd);
-check(strpos($clone_cmd, $clone_key) === false && strpos($clone_cmd, '--clone-key') === false,
-	'and never the export key: the stored command and the target\'s process list stay free of it');
-check(($clone_ssh[0]['stdin'] ?? null) === array('clone_key'),
-	'the key is named for the session\'s stdin instead', json_encode($clone_ssh[0]['stdin'] ?? null));
-$read_at = strpos($clone_cmd, 'IFS= read -r JOINERY_CLONE_KEY');
-check($read_at !== false && $read_at < strpos($clone_cmd, 'install.sh')
-	&& strpos($clone_cmd, 'test -n "$JOINERY_CLONE_KEY"') !== false && strpos($clone_cmd, 'export JOINERY_CLONE_KEY') !== false,
-	'the session reads it before anything runs, fails without it, and hands it to install.sh in the environment');
-$clone_pw_steps = jcb_ssh_steps(JobCommandBuilder::build_install_node($clone_target, array(
-	'mode' => 'from_backup', 'sitename' => 'clonesite', 'domain' => 'clone.example.com', 'admin_password_stdin' => true,
-	'docker_mode' => 'docker', 'clone_from' => 'https://source.example.com', 'clone_key' => $clone_key)));
-$pw_cmd = $clone_pw_steps[0]['cmd'];
-check(($clone_pw_steps[0]['stdin'] ?? null) === array('admin_password', 'clone_key')
-	&& strpos($pw_cmd, 'read -r JOINERY_ADMIN_PASSWORD') < strpos($pw_cmd, 'read -r JOINERY_CLONE_KEY'),
-	'with an admin password too, the names are in the order the session reads them');
-list($in, $why_not) = InstallJobExecutor::step_stdin(array('admin_password', 'clone_key'),
-	array('admin_password' => 'pw-1', 'clone_key' => $clone_key));
-check($why_not === '' && $in === "pw-1\n" . $clone_key . "\n", 'the executor writes one line per name, in order');
-list($in, $why_not) = InstallJobExecutor::step_stdin(array('clone_key'), array('clone_key' => ''));
-check($in === null && strpos($why_not, 'export key') !== false, 'a clone whose key was released is refused, not run with none');
+// Clone is retired (site_copy.md WP9): a site on a new server is a copy.
+$old_target = jcb_node(array('mgn_web_root' => '/var/www/html/oldclone/public_html',
+	'mgn_site_url' => 'https://oldclone.example.com'));
+$threw = false;
+try {
+	JobCommandBuilder::build_install_node($old_target, array('mode' => 'from_backup', 'sitename' => 'oldclone',
+		'domain' => 'oldclone.example.com', 'docker_mode' => 'docker'));
+} catch (Exception $e) { $threw = true; }
+check($threw, 'install_node refuses the retired from_backup mode');
+
 list($in, $why_not) = InstallJobExecutor::step_stdin('admin_password', array('admin_password' => 'pw-2'));
 check($why_not === '' && $in === "pw-2\n", 'a single name as a string still works (jobs stored before the list)');
+list($in, $why_not) = InstallJobExecutor::step_stdin(array('clone_key'), array('clone_key' => 'x'));
+check($in === null && strpos($why_not, "unknown stdin source 'clone_key'") !== false,
+	'a retired clone\'s stdin name is refused by name, so an old clone job cannot be re-run');
 list($in, $why_not) = InstallJobExecutor::step_stdin(array('root_password'), array());
 check($in === null && strpos($why_not, "unknown stdin source 'root_password'") !== false, 'an unknown name is refused by name');
-check(strpos($clone_cmd, "'clone.example.com'") !== false,
-	'the domain on the command is the NEW site\'s own, not the source\'s');
-foreach ($clone_steps as $st) {
-	check(empty($st['node_id']), 'no step names another node');
-}
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmSecretRedactor.php'));
-$old_style = "./install.sh -y -q site --docker 'clonesite' - 'clone.example.com' --clone-key='" . $clone_key . "'";
+$old_key = bin2hex(random_bytes(24));
+$old_style = "./install.sh -y -q site --docker 'oldclone' - 'oldclone.example.com' --clone-key='" . $old_key . "'";
 $shown = SmSecretRedactor::redact($old_style);
-check(strpos($shown, $clone_key) === false && strpos($shown, '--clone-key=') !== false,
-	'a command stored before the key moved to stdin is still redacted on display', substr($shown, strpos($shown, '--clone-key='), 40));
-
-foreach (array(
-	'no clone_from'   => array('clone_key' => $clone_key),
-	'http clone_from' => array('clone_from' => 'http://source.example.com', 'clone_key' => $clone_key),
-	'a path'          => array('clone_from' => 'https://source.example.com/x', 'clone_key' => $clone_key),
-	'no key'          => array('clone_from' => 'https://source.example.com'),
-	'a short key'     => array('clone_from' => 'https://source.example.com', 'clone_key' => 'abc'),
-	'a shell key'     => array('clone_from' => 'https://source.example.com', 'clone_key' => $PAYLOAD),
-) as $why => $extra) {
-	$threw = false;
-	try {
-		JobCommandBuilder::build_install_node($clone_target, array_merge(array(
-			'mode' => 'from_backup', 'sitename' => 'clonesite', 'domain' => 'clone.example.com',
-			'docker_mode' => 'docker'), $extra));
-	} catch (Exception $e) { $threw = true; }
-	check($threw, 'a clone is refused with ' . $why);
-}
+check(strpos($shown, $old_key) === false && strpos($shown, '--clone-key=') !== false,
+	'a clone command stored on this plane is still redacted on display', substr($shown, strpos($shown, '--clone-key='), 40));
 
 // A bare instance is the docker half alone: a host agent, no site, and the
 // machine's node takes the site name.
@@ -469,18 +428,9 @@ check(($cert_built['primitive'] ?? '') === 'provision_certificate'
 check((int)JobCommandBuilder::certificate_issuer_for($cert_host_node)->key === (int)$cert_host_node->key,
 	'a bare-metal node with the primitive is its own issuer');
 
-// The two compiled-names settings writers.
+// The compiled-names settings writer.
 $arm_paired = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
-	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'clone_export_arm,fleet_enroll'));
-$arm_built = JobCommandBuilder::build_clone_export_arm($arm_paired, array('export_key' => $clone_key));
-check($arm_built === array('primitive' => 'clone_export_arm', 'params' => array('export_key' => $clone_key)),
-	'clone_export_arm carries the key and nothing else', json_encode($arm_built));
-check(JobCommandBuilder::build_clone_export_arm($arm_paired, array())['params']['export_key'] === '',
-	'an absent key is an explicit disarm');
-$threw = false;
-try { JobCommandBuilder::build_clone_export_arm($ssh_node, array('export_key' => $clone_key)); }
-catch (Exception $e) { $threw = true; }
-check($threw, 'an unpaired source cannot be armed — there is no SSH route for it');
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'fleet_enroll'));
 $fe_built = JobCommandBuilder::build_fleet_enroll($arm_paired, array(
 	'service_url' => 'https://operator.example.com', 'public_key' => 'public_abcdefgh12345678', 'secret_key' => 'secret_abcdefgh12345678'));
 check(($fe_built['primitive'] ?? '') === 'fleet_enroll' && count($fe_built['params']) === 3,
@@ -761,11 +711,11 @@ section('Teardown phase: scratch is torn down, deliverables are not');
 // until the host agent's bundle lands), and there is no later session to
 // delete anything in. So the audit here is that install_node emits NO
 // teardown step, rather than that every scratch path has one.
-$clone_docker_target = jcb_node(array(
-	'mgn_web_root' => '/var/www/html/dockclone/public_html',
-	'mgn_site_url' => 'https://dockclone.example.com'));
+$docker_target = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/docksite/public_html',
+	'mgn_site_url' => 'https://docksite.example.com'));
 $install_teardown = 0;
-foreach (JobCommandBuilder::build_install_node($clone_docker_target, array(
+foreach (JobCommandBuilder::build_install_node($docker_target, array(
 	'mode' => 'fresh', 'sitename' => 'freshsite', 'domain' => 'fresh.example.com',
 	'docker_mode' => 'docker')) as $step) {
 	if (!empty($step['teardown'])) { $install_teardown++; }
@@ -865,14 +815,14 @@ harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $bkt->key);
 
 // The installer directory is per-job, so two installs on one machine never
 // extract over each other.
-$fresh_a = jcb_cmds(JobCommandBuilder::build_install_node($clone_docker_target, array(
+$fresh_a = jcb_cmds(JobCommandBuilder::build_install_node($docker_target, array(
 	'mode' => 'fresh', 'sitename' => 'freshsite', 'domain' => 'fresh.example.com',
 	'docker_mode' => 'bare-metal')));
 check(preg_match('#/opt/joinery-install/[a-f0-9]{12}#', $fresh_a) === 1,
 	'the installer directory carries the per-job transfer id');
 check(strpos($fresh_a, '/tmp/joinery_install') === false,
 	'nothing lands under /tmp, which Ubuntu empties at boot');
-$fresh_b = jcb_cmds(JobCommandBuilder::build_install_node($clone_docker_target, array(
+$fresh_b = jcb_cmds(JobCommandBuilder::build_install_node($docker_target, array(
 	'mode' => 'fresh', 'sitename' => 'freshsite', 'domain' => 'fresh.example.com',
 	'docker_mode' => 'bare-metal')));
 preg_match('#/opt/joinery-install/[a-f0-9]{12}#', $fresh_a, $ma);

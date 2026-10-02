@@ -27,6 +27,8 @@
  * escaped again wherever it is shown. Nothing stored here is ever a shell
  * argument, a template, a link or a mail subject.
  *
+ * @version 1.2 - deleting a node permanently deletes its incidents through the model, so each one's
+ *                timeline goes with it (a cascade is one level; site_copy.md B41)
  * @version 1.1 - an incident: title, severity, triage (new, looking, snoozed, resolved, ignored) and a
  *                source's detail; the human note and read stamp moved into triage and IncidentEvent
  *                (incident_triage.md WP1)
@@ -111,7 +113,9 @@ class IncidentRecord extends SystemBase {
 	);
 
 	protected static $foreign_key_actions = [
-		'inc_mgn_managed_node_id' => ['action' => 'cascade'],
+		// Not 'cascade': a cascade is one flat delete, and an incident's own
+		// timeline (ine_incident_events) would be left behind.
+		'inc_mgn_managed_node_id' => ['action' => 'permanent_delete'],
 		'inc_triage_usr_user_id' => ['action' => 'null', 'source_table' => 'usr_users'],
 	];
 

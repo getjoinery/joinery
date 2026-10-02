@@ -6,7 +6,7 @@
  * `sealed_secrets` array in `settings.json` at the public_html root for core,
  * or in a plugin's `plugin.json` under `sealed_secrets`. The declaration is
  * what makes SecretBox::seal() refuse an unregistered value, and what the
- * reconciler and the import scrub walk.
+ * reconciler walks.
  *
  * This is deliberately NOT the same thing as a setting's `secret:true` flag.
  * `secret:true` means "mask this field in the settings form" — it says nothing
@@ -26,7 +26,7 @@
  *                  - a singleton gives its setting name  ("file_signed_url_key")
  *                  - a row-scoped kind gives "table.column" ("iem_account.iem_password")
  *                This is the part that persists into the seeded registry table,
- *                so it must be enough to count and scrub with no plugin code loaded.
+ *                so it must be enough to count with no plugin code loaded.
  *   label        Human name for the operator health surface.
  *   feature      The feature it belongs to, for the same surface.
  *   kind         operator | regenerable | regenerable-breaks-things | ephemeral
@@ -43,6 +43,7 @@
  *                owning plugin is loaded. The locator is the floor that always
  *                works; the enumerator is the ceiling that works when code is up.
  *
+ * @version 1.1 - the reconciler is what walks the declarations
  * @version 1.0
  */
 class SealedSecretsDeclarations {

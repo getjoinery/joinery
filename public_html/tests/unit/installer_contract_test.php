@@ -950,7 +950,7 @@ check(strpos($site_init_src, 'utils/install_backup_target.php') !== false
     'and points backups at the bucket the same way');
 check(preg_match('/JOINERY_MAIL_API_KEY/', $site_init_src) === 1
     && preg_match('/JOINERY_BACKUP_BUCKET/', $site_init_src) === 1
-    && preg_match('/-z "\$CLONE_FROM" \] && \[ "\$DB_EXISTS" = false \]/', $site_init_src) === 1,
+    && preg_match('/if \[ "\$DB_EXISTS" = false \]; then\n\s+SITE_UTILS=/', $site_init_src) === 1,
     'the services are honoured on fresh installs only');
 check(!preg_match('/install_mail_provider\.php[^\n]*\|\| (fail|exit)/', $site_init_src)
     && !preg_match('/install_backup_target\.php[^\n]*\|\| (fail|exit)/', $site_init_src)
@@ -1377,11 +1377,6 @@ check($has_at !== false && $write_at !== false && $has_at < $write_at,
     'minting over a live key orphans every secret encrypted under the old one');
 check(preg_match('/Globalvars_site\.php" \]; then.*?\n\s*return 0/s', $mk_config) === 1,
     'and an existing config returns rather than falling through');
-
-// The guard belongs inside the writer, not at one call site: clone mode calls
-// it from a second place after the clone completes.
-check(substr_count($init_src, 'create_config_file') >= 3,
-    'both call sites are covered because the guard is in the function');
 
 
 section('A rebuilt container gets its declared extensions back');
@@ -2424,18 +2419,16 @@ section('The health probe reports reachability, not liveness');
 // printed "Site is responding with HTTP 200". The probe now carries the
 // configured domain, and a redirect to a scheme the install did not configure
 // is a failure, not a pass.
-// The clone-source manifest check also keeps its HTTP status (to say why a
-// source refused), but it asks another site's export endpoint, not this
-// site's health — it is not a probe line. Nor is the reach probe
-// (name_reaches_here), which fetches a nonce THROUGH the name on purpose:
-// asking by Host header would prove nothing about the path the CA takes.
+// The reach probe (name_reaches_here) is not a probe line: it fetches a nonce
+// THROUGH the name on purpose, and asking by Host header would prove nothing
+// about the path the CA takes.
 // Both closing checks go through probe_site_front, which asks by Host header.
 $probe_calls = preg_match_all('/^\s+probe_site_front "http/m', $install_exec);
 check($probe_calls === 2, 'both install paths probe the site', 'probe calls found: ' . $probe_calls);
 $probe_lines = array_values(array_filter(
     preg_split('/\R/', $install_exec),
     function ($l) { return strpos($l, 'curl') !== false && strpos($l, '-D -') !== false
-        && strpos($l, 'clone_export') === false && strpos($l, 'url_effective') === false; }
+        && strpos($l, 'url_effective') === false; }
 ));
 check(count($probe_lines) === 1, 'the site probe is one curl, in probe_site_front', 'probe lines found: ' . count($probe_lines));
 foreach ($probe_lines as $l) {
@@ -3456,24 +3449,19 @@ $pg_start_at = strpos($template_b56, "    service postgresql start && \\\n");
 check($guard_at !== false && $pg_start_at !== false && $guard_at < $pg_start_at,
     'the start command refuses a foreign-major database before it starts PostgreSQL');
 
-section('A clone\'s export key and the source\'s database password never reach a command line (specs/fleet_ubuntu_2604_postgres_upgrade.md WP3b, B7)');
+section('The installers carry no Clone path: a site moves to a new server by a site copy (specs/site_copy.md WP9)');
 
-$install_b7  = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
-$template_b7 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
-$export_b7   = (string)file_get_contents($site_root . '/public_html/utils/clone_export.php');
-check(strpos($install_b7, '-e CLONE_KEY=') === false,
-    'docker run is never handed the key as an argument');
-check((bool)preg_match('/SITE_INIT_ENV_INPUTS=\([^)]*\bJOINERY_CLONE_KEY\b[^)]*\)/s', $install_b7),
-    'the key crosses to the container in the 0600 env file with the other _site_init.sh inputs');
-check(strpos($install_b7, '"--clone-key=${CLONE_KEY}"') === false && strpos($install_b7, 'export JOINERY_CLONE_KEY="$CLONE_KEY"') !== false,
-    'bare metal hands _site_init.sh the key in its environment, and a typed --clone-key is moved there at once');
-check(strpos($install_b7, 'Authorization: Bearer ${CLONE_KEY}"') === false && strpos($install_b7, '-H @"$CLONE_AUTH"') !== false,
-    'the manifest request reads its bearer header from a 0600 file');
-check(strpos($template_b7, '--clone-key=${') === false && strpos($template_b7, '-n "${JOINERY_CLONE_KEY}"') !== false,
-    'the container start command passes _site_init.sh no key argument');
-check(strpos($export_b7, '-pass pass:') === false && strpos($export_b7, 'PGPASSWORD=%s') === false
-    && strpos($export_b7, '-pass env:JOINERY_CLONE_KEY') !== false && strpos($export_b7, "'PGPASSWORD'        => (string)\$db_password") !== false,
-    'the source\'s export hands its pipeline the database password and the key in the environment, not a shell string');
+$install_wp9   = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
+$site_init_wp9 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_init.sh');
+foreach (array('install.sh' => $install_wp9, '_site_init.sh' => $site_init_wp9) as $name => $src) {
+    $body = preg_replace('/^#.*$/m', '', $src);
+    check($src !== '' && strpos($body, '--clone-from') === false && strpos($body, '--clone-key') === false
+        && strpos($body, 'JOINERY_CLONE_KEY') === false && strpos($body, 'CLONE_FROM') === false
+        && strpos($body, 'clone_export') === false,
+        $name . ' takes no clone source, no clone key and asks no export endpoint');
+}
+check(strpos($site_init_wp9, 'scrub_sealed_secrets') === false,
+    '_site_init.sh runs no sealed-secret scrub: a fresh site has no foreign ciphertext');
 
 section('PostgreSQL answers only locally, on every install (specs/fleet_ubuntu_2604_postgres_upgrade.md B8)');
 

@@ -11,6 +11,8 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.12 - the Clone install type is gone (site_copy.md WP9): a site on a new server is a copy, made
+ *                 from the source node's Copy tab
  * @version 1.11 - the region falls back to us-east
  * @version 1.10 - the Clone option names what it carries (database, uploads, static files) and what it does not
  * @version 1.9 - the instance-type fallback and hint name the 1 GB nanode, the size every instance should be
@@ -47,7 +49,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		$is_cloud_target = true; // the only target this form has
 		$is_bare         = ($mode === 'bare');
 
-		if (!in_array($mode, ['fresh', 'from_backup', 'bare'], true)) {
+		if (!in_array($mode, ['fresh', 'bare'], true)) {
 			$field_errors['install_mode'] = 'Choose an install type.';
 		}
 
@@ -90,25 +92,6 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			}
 		}
 
-		if ($mode !== 'from_backup') {
-			$source_node_id = 0;
-		} else {
-			$source_node_id = intval($_POST['source_node_id'] ?? 0);
-			if (!$source_node_id) {
-				$field_errors['source_node_id'] = 'Source node is required for a clone.';
-			} else {
-				// The clone pulls from the source's web address, so the source
-				// must have one, and its agent must be able to arm the export.
-				$source_node = new ManagedNode($source_node_id, TRUE);
-				if (!$source_node->key || !preg_match('#^https://#', (string)$source_node->get('mgn_site_url'))) {
-					$field_errors['source_node_id'] = 'The source node needs an https site URL; the clone pulls from it.';
-				} elseif (!JobCommandBuilder::has_primitive($source_node, 'clone_export_arm')) {
-					$field_errors['source_node_id'] = 'The source node\'s agent cannot arm a clone export. '
-						. AgentVocabulary::needs_newer_agent_text($source_node, array('clone_export_arm'));
-				}
-			}
-		}
-
 		if (empty($field_errors)) {
 			// Generate slug from display name; append counter if collision
 			$base_slug = strtolower(trim($_POST['mgn_name']));
@@ -145,9 +128,6 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_instance_type',  trim($_POST['cloud_instance_type']));
 				$provision->set('cvp_docker_mode',    $is_bare ? 'docker' : $docker_mode); // a bare instance IS a Docker host; the builder refuses any other shape for it
 				$provision->set('cvp_install_mode',   $mode);
-				if ($mode === 'from_backup') {
-					$provision->set('cvp_source_node_id', $source_node_id);
-				}
 				$provision->prepare();
 				$provision->save();
 
@@ -159,17 +139,6 @@ if ($_POST && isset($_POST['mgn_name'])) {
 	} catch (Exception $e) {
 		$error = $e->getMessage();
 	}
-}
-
-// Existing nodes — source options for from-backup mode and host dropdown
-$existing_nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);
-$existing_nodes->load();
-
-// Build source node dropdown options
-$source_node_options = ['' => '-- Select source node --'];
-foreach ($existing_nodes as $en) {
-	$label = $en->get('mgn_name') . ' (' . (parse_url($en->get('mgn_site_url'), PHP_URL_HOST) ?: $en->get('mgn_host')) . ')';
-	$source_node_options[$en->key] = $label;
 }
 
 // Connected cloud accounts — target options for cloud-instance birth
@@ -216,7 +185,6 @@ $formwriter = $page->getFormWriter('install_form', [
 		'docker_mode'    => $_POST['docker_mode'] ?? '',
 		'install_mode'   => $_POST['install_mode'] ?? 'fresh',
 		'domain'         => $_POST['domain'] ?? '',
-		'source_node_id' => $_POST['source_node_id'] ?? '',
 		'cca_account_id' => $_POST['cca_account_id'] ?? '',
 		'cloud_region'   => $_POST['cloud_region'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_region') ?: 'us-east'),
 		'cloud_instance_type' => $_POST['cloud_instance_type'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_type') ?: 'g6-nanode-1'),
@@ -280,7 +248,6 @@ $formwriter->radioinput('install_mode', 'Install Type', [
 	'required' => true,
 	'options'  => [
 		'fresh'       => 'Fresh install — empty Joinery site with default schema and admin user',
-		'from_backup' => 'Clone — pull a running managed node\'s database, uploads and static files over HTTPS (stored credentials are not carried)',
 		'bare'        => 'Bare instance — no site install (infrastructure node, e.g. mail relay shard); cloud target only',
 	],
 ]);
@@ -288,34 +255,19 @@ $formwriter->radioinput('install_mode', 'Install Type', [
 $formwriter->textinput('domain', 'Domain', [
 	'required'    => true,
 	'placeholder' => 'e.g., orgs.getjoinery.com',
-	'helptext'    => 'Domain only — no http:// or https://. The new site\'s own domain, for a clone too. A certificate is issued during the install when DNS already points here, otherwise on its own once it does.',
+	'helptext'    => 'Domain only — no http:// or https://. The new site\'s own domain. A certificate is issued during the install when DNS already points here, otherwise on its own once it does.',
 	'pattern'     => '^(?!https?://).+',
 ]);
 
-// Fresh install panel (empty placeholder — nothing extra needed)
-echo '<div id="panel_fresh"></div>';
-
-// Clone panel
-echo '<div id="panel_backup" hidden>';
-$formwriter->dropinput('source_node_id', 'Source Node', [
-	'options'      => $source_node_options,
-	'empty_option' => false,
-	'helptext'     => 'The new machine pulls the source over HTTPS from the source site\'s own address; the source\'s agent is armed with a one-time export key first. Nothing reaches the source\'s shell.',
-]);
-echo '</div>';
+echo '<p class="text-muted">To put an existing site on a new server, use <strong>Copy</strong> on that site\'s node page.</p>';
 
 $formwriter->submitbutton('btn_submit', 'Install');
 $formwriter->addReadyScript('
 
 function toggleModePanel() {
-	var fresh  = document.querySelector("input[name=install_mode][value=fresh]");
-	var backup = document.querySelector("input[name=install_mode][value=from_backup]");
-	var isFresh  = fresh && fresh.checked;
-	var isBackup = backup && backup.checked;
-	document.getElementById("panel_fresh").hidden  = !isFresh;
-	document.getElementById("panel_backup").hidden = !isBackup;
+	var fresh = document.querySelector("input[name=install_mode][value=fresh]");
 	var siteFields = document.getElementById("site_fields");
-	if (siteFields) siteFields.hidden = !(isFresh || isBackup);
+	if (siteFields) siteFields.hidden = !(fresh && fresh.checked);
 }
 
 // Wire up events

@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.34 - the move panel asks CustomerCloudProvision::is_sold()
  * @version 1.33 - the Move to customer's Linode panel on a Managed site's node: the transfer check, run when the
  *                 tab opens, with Re-check and Start, and the transfer's state linked to its queue row
  *                 (specs/managed_to_self_hosted_transfer.md §6); a moved site's Reverse DNS panel says it is the customer's
@@ -1468,8 +1469,7 @@
 		$xfer_row = null;
 	}
 	// Sold sites only: a relay shard and an operator-account site copy are on our account too.
-	$xfer_sold = $xfer_provision && in_array((string)$xfer_provision->get('cvp_origin'), array('order', 'buyer'), true)
-		&& (string)$xfer_provision->get('cvp_install_mode') !== 'bare';
+	$xfer_sold = $xfer_provision && $xfer_provision->is_sold();
 	if ($xfer_sold && ($xfer_provision->is_operator_hosted() || $xfer_row !== null)) {
 		$page->begin_box(['title' => 'Move to customer\'s Linode']);
 		if ($xfer_row !== null && $xfer_row->state() !== InstanceTransfer::STATE_CANCELED) {
