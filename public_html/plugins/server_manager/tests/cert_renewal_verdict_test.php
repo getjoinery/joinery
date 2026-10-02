@@ -22,9 +22,10 @@
  * minute — a CA jitters each certificate's window, so only the day is stable.
  *
  * The trigger built on that arithmetic is pinned too: renewal more than a day
- * overdue alerts on its own, and a www that reaches the origin without a
- * covering certificate is its own reason. Both are decided from injected
- * certificate arrays; nothing here touches the network.
+ * overdue is a problem on its own, and a www that reaches the origin without a
+ * covering certificate is its own reason. The problem stored for the
+ * certificate incident (mgn_cert_problem) is pinned from injected certificate
+ * arrays; nothing here touches the network.
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -138,28 +139,50 @@ check($www_gap($stranger, 'www.jeremytunnell.com') !== '',
 check($www_gap(null, 'www.jeremytunnell.com') === '',
 	'a failed handshake says nothing: reachability is the uptime probe\'s job');
 
-section('An origin answering with somebody else\'s certificate is its own alert reason');
+section('An origin answering with somebody else\'s certificate is its own problem');
 $cn = new ReflectionMethod('RunNodeUptimeChecks', 'cert_names');
 $cn->setAccessible(true);
-$ua = new ReflectionMethod('RunNodeUptimeChecks', 'uncovered_alert_text');
-$ua->setAccessible(true);
+$up = new ReflectionMethod('RunNodeUptimeChecks', 'uncovered_problem');
+$up->setAccessible(true);
 $names = $cn->invoke($task, $stranger);
 check($names === ['developers.getjoinery.com'], 'the names a certificate carries are read once, CN and SANs deduplicated', implode(',', $names));
 check($cn->invoke($task, $both) === ['jeremytunnell.com', 'www.jeremytunnell.com'], 'and every SAN is listed');
-$text = $ua->invoke($task, 'getjoinery', 'getjoinery.com', $names);
-check(strpos($text['subject'], 'does not cover getjoinery.com') !== false, 'the subject names the uncovered host', $text['subject']);
-check(strpos($text['body'], 'certificate for developers.getjoinery.com, not for getjoinery.com; Strict would take the site down') !== false,
-    'the body says which names were presented, which was wanted, and that Strict would take the site down');
-check(strpos($text['body'], 'issue_origin_cert.sh getjoinery.com') !== false, 'and names the tool that fixes it');
-check(strpos($ua->invoke($task, 'n', 'h.example', [])['body'], 'no name at all') !== false, 'a certificate with no names is said plainly');
-// The check itself: a foreign certificate reaches the alert path and stores nothing.
+$p = $up->invoke($task, 'getjoinery.com', $names);
+check($p['reason'] === 'uncovered' && strpos($p['title'], 'does not cover getjoinery.com') !== false, 'the title names the uncovered host', $p['title']);
+check(strpos($p['detail']['Presented'], 'certificate for developers.getjoinery.com, not for getjoinery.com; Strict would take the site down') !== false,
+    'it says which names were presented, which was wanted, and that Strict would take the site down');
+check(strpos($p['detail']['Fix'], 'issue_origin_cert.sh getjoinery.com') !== false, 'and names the tool that fixes it');
+check(strpos($up->invoke($task, 'h.example', [])['detail']['Presented'], 'no name at all') !== false, 'a certificate with no names is said plainly');
+// The check itself: a foreign certificate is recorded as the problem and its expiry is not stored.
 $src = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/tasks/RunNodeUptimeChecks.php'));
 $fn = '';
 if (preg_match('/private function check_cert_expiry\(.*?\n\t\}\n/s', $src, $m)) { $fn = $m[0]; }
-$uncovered_at = strpos($fn, 'send_uncovered_alert');
+$uncovered_at = strpos($fn, 'uncovered_problem');
 $store_at     = strpos($fn, "set('mgn_cert_expiry_ts'");
 check($uncovered_at !== false && $store_at !== false && $uncovered_at < $store_at,
-    'a certificate that does not cover the name alerts before, and instead of, storing an expiry that is not this node\'s');
+    'a certificate that does not cover the name is recorded before, and instead of, storing an expiry that is not this node\'s');
+check(strpos($src, 'EmailSender') === false, 'the uptime task mails nothing: what it finds is an incident');
+
+section('An expiring or unrenewed certificate is described from what was served');
+$ep = new ReflectionMethod('RunNodeUptimeChecks', 'expiry_problem');
+$ep->setAccessible(true);
+$served = ['validFrom_time_t' => $nb, 'validTo_time_t' => $na, 'serialNumberHex' => 'AB12',
+	'issuer' => ['O' => "Let's Encrypt", 'CN' => 'YE2']];
+$p = $ep->invoke($task, 'scrolldaddy.app', $served, 'overdue', '', strtotime('2026-09-10 12:00:00 UTC'));
+check($p['reason'] === 'overdue' && $p['title'] === 'TLS certificate renewal is overdue' && $p['not_after'] === $na,
+	'overdue, with when it expires for the severity', json_encode([$p['reason'], $p['title']]));
+check($p['detail']['Renewal due'] === '2026-08-31 ' . gmdate('H:i', $d) . ' UTC' && strpos($p['detail']['Renewal'], 'Overdue') === 0
+	&& $p['detail']['Issuer'] === "Let's Encrypt YE2" && $p['detail']['Serial'] === 'AB12',
+	'the diagnosis: renewal due, overdue, issuer, serial', json_encode($p['detail']));
+$p = $ep->invoke($task, 'scrolldaddy.app', $served, 'overdue', '', $na + 86400 * 2);
+check($p['reason'] === 'expired' && $p['title'] === 'The TLS certificate has expired', 'past its expiry it says expired');
+$p = $ep->invoke($task, 'jeremytunnell.com', $served, null, 'www.jeremytunnell.com is not covered by the origin certificate; Strict would reject it',
+	strtotime('2026-08-01 00:00:00 UTC'));
+check($p['reason'] === 'www' && strpos($p['detail']['www'], 'issue_origin_cert.sh jeremytunnell.com') !== false,
+	'a healthy certificate that leaves www uncovered is its own problem, with the fix');
+$p = $ep->invoke($task, 'x.example', ['validTo_time_t' => $na], 'expiring', '', $na - 10 * 86400);
+check(strpos($p['detail']['Renewal'], 'no usable issue date') !== false && !isset($p['detail']['Renewal due']),
+	'with no usable issue date it claims nothing about renewal');
 
 section('The issuer reads as a name a person recognises');
 check($issuer(['issuer' => ['O' => "Let's Encrypt", 'CN' => 'YE2']]) === "Let's Encrypt YE2",

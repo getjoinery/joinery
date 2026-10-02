@@ -4,9 +4,10 @@
  *
  * For each managed node where uptime monitoring is enabled, runs the
  * configured check (api or http_status) and updates live state on the
- * node. Fires a "down" email on the up->down transition and a
- * "recovered" email on the down->up transition. One alert per
- * transition; no re-alerting while still down.
+ * node: up, or down after two failing probes in a row, with when it went
+ * down and what the check saw. A site going down is an incident
+ * (IncidentSourceSiteDown reads these columns; ReconcileIncidents opens it
+ * and tells the superadmins), so this task sends no up/down mail.
  *
  * A probe only reports up or down when it actually reached the node. If it
  * failed in this machine's own name resolution it never left here, so it is
@@ -16,10 +17,14 @@
  *
  * Each enabled node also gets an independent TLS certificate check (over the
  * wire, pinned to the node's own IP, so it sees the origin certificate whether
- * or not an edge fronts the name) that warns when renewal is overdue, when
- * expiry is near, and when www reaches the origin uncovered. See
- * check_cert_expiry().
+ * or not an edge fronts the name) that records when renewal is overdue, when
+ * expiry is near, and when www reaches the origin uncovered, as the
+ * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.8 - no certificate mail: the current certificate problem is stored (mgn_cert_problem) and is an
+ *                incident (IncidentSourceCertificate; incident_triage.md WP3)
+ * @version 2.7 - no up/down mail: a site that goes down is an incident (incident_triage.md WP2);
+ *                the failing probe's message is kept in mgn_uptime_down_reason for its evidence
  * @version 2.6 - a node in an install state is not probed: a dormant copy answers 503 by design, and
  *                an uptime alarm on it would be noise (ManagedNode::is_operational())
  * @version 2.5 - a check_status is due when no check_status job completed inside the window, read
@@ -73,7 +78,6 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeHealthProbe.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
-		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 		require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 
 		$nodes = new MultiManagedNode([
@@ -82,8 +86,6 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$nodes->load();
 
 		$checked     = 0;
-		$alerts      = 0;
-		$cert_alerts = 0;
 		$skipped     = 0;
 		$not_due     = 0;
 		$errors      = [];
@@ -140,28 +142,17 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				// staleness is measured from real results only.
 				$node->set('mgn_uptime_last_error', null);
 				$node->set('mgn_uptime_last_conclusive', $now_utc);
-				// Capture down_since before apply_state clears it on the up->up
-				// recovery, so the recovered alert reports the real down duration
-				// instead of "unknown".
-				$down_since_for_alert = $node->get('mgn_uptime_down_since');
-				$transition = $this->apply_state($node, $result['ok']);
+				// A site going down or coming back is an incident
+				// (IncidentSourceSiteDown, from these columns), not a mail here.
+				$this->apply_state($node, $result['ok'], (string)($result['message'] ?? ''));
 				$node->save();
-
-				if ($transition === 'down' || $transition === 'recovered') {
-					if ($this->send_alert($node, $transition, $result, $down_since_for_alert)) {
-						$alerts++;
-					}
-				}
 			}
 
 			// Independent TLS certificate check on the node's own address; a no-op
 			// (and no save) when the node presents no certificate for its name.
-			$cert = $this->check_cert_expiry($node);
-			if ($cert['modified'] || $cert['alerted']) {
+			// What it finds is the certificate incident's to say.
+			if ($this->check_cert_expiry($node)['modified']) {
 				$node->save();
-			}
-			if ($cert['alerted']) {
-				$cert_alerts++;
 			}
 		}
 
@@ -175,7 +166,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$requeued = ManagementJob::requeueStaleClaims();
 		$refreshed = $this->refresh_status_facts($nodes, $now_utc);
 
-		$message = sprintf('Checked %d node(s); %d up/down alert(s); %d cert alert(s); %d skipped; %d not due.', $checked, $alerts, $cert_alerts, $skipped, $not_due);
+		$message = sprintf('Checked %d node(s); %d skipped; %d not due.', $checked, $skipped, $not_due);
 		if ($requeued > 0) {
 			$message .= sprintf(' %d stale agent claim(s) returned to the queue.', $requeued);
 		}
@@ -406,23 +397,29 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 
 	/**
 	 * Apply the up/down state machine. Returns one of:
-	 *   'down'       — just transitioned up -> down (fire down alert)
-	 *   'recovered'  — just transitioned down -> up (fire recovered alert)
+	 *   'down'       — just transitioned up -> down
+	 *   'recovered'  — just transitioned down -> up
 	 *   'no_change'  — no transition
+	 * While down, the newest failing probe's message is kept as what the
+	 * check saw (mgn_uptime_down_reason), for the incident's evidence.
 	 */
-	private function apply_state($node, bool $ok): string {
+	private function apply_state($node, bool $ok, string $message = ''): string {
 		$prev_status = $node->get('mgn_uptime_last_status');
 
 		if ($ok) {
 			$node->set('mgn_uptime_last_status', 'up');
 			$node->set('mgn_uptime_consecutive_failures', 0);
 			$node->set('mgn_uptime_down_since', NULL);
+			$node->set('mgn_uptime_down_reason', NULL);
 			return ($prev_status === 'down') ? 'recovered' : 'no_change';
 		}
 
 		$failures = (int)$node->get('mgn_uptime_consecutive_failures') + 1;
 		$node->set('mgn_uptime_consecutive_failures', $failures);
 
+		if ($failures >= self::FAILURE_THRESHOLD) {
+			$node->set('mgn_uptime_down_reason', $message !== '' ? mb_substr($message, 0, 255) : NULL);
+		}
 		if ($failures >= self::FAILURE_THRESHOLD && $prev_status !== 'down') {
 			$node->set('mgn_uptime_last_status', 'down');
 			$node->set('mgn_uptime_down_since', gmdate('Y-m-d H:i:s'));
@@ -432,95 +429,27 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	}
 
 	/**
-	 * Build and send the alert email. Returns true on send, false if no
-	 * recipient could be resolved (logged to error log).
-	 */
-	private function send_alert($node, string $transition, array $result, ?string $down_since = null): bool {
-		$to = $this->resolve_alert_recipient();
-		if (!$to) {
-			error_log('RunNodeUptimeChecks: no alert recipient resolved for node ' . $node->get('mgn_slug'));
-			return false;
-		}
-
-		$name = $node->get('mgn_name');
-		$url  = $node->get('mgn_site_url');
-		$now  = gmdate('Y-m-d H:i:s') . ' UTC';
-
-		if ($transition === 'down') {
-			$subject = '[' . $name . '] is down';
-			$body    = "Node: {$name}\n"
-			         . "URL:  {$url}\n"
-			         . "Time: {$now}\n"
-			         . "Error: " . ($result['message'] ?? 'unknown') . "\n";
-		} else { // recovered
-			// $down_since is captured by the caller before apply_state clears it.
-			$duration   = $down_since ? $this->format_duration(time() - strtotime($down_since . ' UTC')) : 'unknown';
-			$subject    = '[' . $name . '] recovered after ' . $duration;
-			$body       = "Node: {$name}\n"
-			            . "URL:  {$url}\n"
-			            . "Time: {$now}\n"
-			            . "Down duration: {$duration}\n";
-		}
-
-		try {
-			EmailSender::quickSend($to, $subject, $body);
-			return true;
-		} catch (\Throwable $e) {
-			error_log('RunNodeUptimeChecks: send failed for node ' . $node->get('mgn_slug') . ': ' . $e->getMessage());
-			return false;
-		}
-	}
-
-	/**
-	 * Resolve the alert recipient via fallback chain:
-	 *   1. server_manager_provisioning_admin_alert_email
-	 *   2. webmaster_email
-	 *   3. First permission-10 user's email
-	 */
-	private function resolve_alert_recipient(): string {
-		$settings = Globalvars::get_instance();
-		$email = trim((string)$settings->get_setting('server_manager_provisioning_admin_alert_email'));
-		if ($email !== '') return $email;
-
-		$email = trim((string)$settings->get_setting('webmaster_email'));
-		if ($email !== '') return $email;
-
-		require_once(PathHelper::getIncludePath('data/users_class.php'));
-		$admins = new MultiUser([
-			'permission_range' => [10, 10],
-			'deleted'          => false,
-			'not_system_users' => true,
-		], ['usr_user_id' => 'ASC'], 1);
-		$admins->load();
-		if (count($admins) > 0) {
-			$email = trim((string)$admins->get(0)->get('usr_email'));
-			if ($email !== '') return $email;
-		}
-		return '';
-	}
-
-	/**
 	 * Certificate check for a node. Independent of the up/down probe.
 	 *
 	 * The served cert is read over the wire pinned to mgn_host with correct
 	 * SNI, and must actually cover the hostname — a shared default-vhost
-	 * fallback cert is ignored. A name fronted by Cloudflare is watched the
-	 * same as one served direct: the edge renews its own certificate, but the
-	 * origin behind it holds another that expires on its own schedule, and on
-	 * Full (not Strict) that expiry is invisible from outside right up until
-	 * Strict is enabled and it becomes an outage.
+	 * fallback cert is ignored for its expiry. A name fronted by Cloudflare is
+	 * watched the same as one served direct: the edge renews its own
+	 * certificate, but the origin behind it holds another that expires on its
+	 * own schedule, and on Full (not Strict) that expiry is invisible from
+	 * outside right up until Strict is enabled and it becomes an outage.
 	 *
-	 * On success, stores mgn_cert_expiry_ts and, when cert_alert_verdict() or
-	 * www_gap() finds something to say, emails a warning (once, then
-	 * re-alerting every CERT_RECHECK_ALERT_DAYS while it persists). An origin
-	 * presenting a certificate for other names is its own reason, on the same
-	 * cadence, with nothing stored. Clears the alert stamp once nothing is
-	 * wrong any more.
+	 * Stores mgn_cert_expiry_ts for a certificate that covers the name, and
+	 * the current problem, or null, in mgn_cert_problem: renewal overdue,
+	 * expiry near, www reaching the origin uncovered, or an origin presenting a
+	 * certificate for other names. That column is what the certificate
+	 * incident reads (IncidentSourceCertificate); nothing is mailed from here.
+	 * A failed handshake changes nothing: reachability is the uptime check's.
 	 *
-	 * @return array{modified:bool,alerted:bool}
+	 * @return array{modified:bool}
 	 */
 	private function check_cert_expiry($node): array {
-		$out = ['modified' => false, 'alerted' => false];
+		$out = ['modified' => false];
 
 		$site = trim((string)$node->get('mgn_site_url'));
 		$host = trim((string)$node->get('mgn_host'));
@@ -535,57 +464,125 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		// The node's own address is probed with the site's name as SNI. Whether the
 		// name publicly resolves here or to an edge in front is irrelevant: the
 		// node holds and renews its own certificate either way, and that is the
-		// one at risk. cert_covers_host() is the sole "is this ours" test — a
-		// shared fallback certificate for some other name is declined below.
+		// one at risk. cert_covers_host() is the sole "is this ours" test.
 		$cert = $this->fetch_peer_cert($host, $hostname);
 		if ($cert === null || empty($cert['validTo_time_t'])) {
 			return $out; // handshake failure is the uptime check's job, not this one
 		}
-		$alerted_ts = $node->get('mgn_cert_alerted_ts');
-		$now        = time();
 		if (!$this->cert_covers_host($cert, $hostname)) {
 			// The origin answers TLS but with somebody else's certificate — a
 			// shared fallback vhost, or the placeholder minted at install. Under
 			// Full the site serves; under Full (Strict) it goes dark. Nothing is
-			// stored for a foreign certificate (its expiry is not this node's),
-			// but the gap is its own alert reason.
-			$due = ($alerted_ts === null || $alerted_ts === '')
-				|| ($now - strtotime($alerted_ts . ' UTC') >= self::CERT_RECHECK_ALERT_DAYS * 86400);
-			if ($due && $this->send_uncovered_alert($node, $hostname, $this->cert_names($cert))) {
-				$node->set('mgn_cert_alerted_ts', gmdate('Y-m-d H:i:s'));
-				$out['modified'] = true;
-				$out['alerted']  = true;
-			}
+			// stored for a foreign certificate's expiry (it is not this node's).
+			$out['modified'] = $this->set_cert_problem($node, $this->uncovered_problem($hostname, $this->cert_names($cert)));
 			return $out;
 		}
 
 		$not_after  = (int)$cert['validTo_time_t'];
 		$not_before = isset($cert['validFrom_time_t']) ? (int)$cert['validFrom_time_t'] : 0;
-		// Read before the overwrite: an expiry date unchanged since the previous
-		// pass is proof nothing renewed, which the alert says out loud.
-		$prev_expiry = trim((string)$node->get('mgn_cert_expiry_ts'));
 		$node->set('mgn_cert_expiry_ts', gmdate('Y-m-d H:i:s', $not_after));
 		$out['modified'] = true;
 
 		$warn_days = (int)Globalvars::get_instance()->get_setting('server_manager_cert_expiry_warn_days');
 		if ($warn_days <= 0) { $warn_days = 21; }
-		$days_left  = (int)floor(($not_after - $now) / 86400);
-
-		$reason  = $this->cert_alert_verdict($now, $not_before, $not_after, $warn_days);
+		$reason  = $this->cert_alert_verdict(time(), $not_before, $not_after, $warn_days);
 		$www_gap = $this->www_gap($host, $hostname);
-
-		if ($reason !== null || $www_gap !== '') {
-			$due = ($alerted_ts === null || $alerted_ts === '')
-				|| ($now - strtotime($alerted_ts . ' UTC') >= self::CERT_RECHECK_ALERT_DAYS * 86400);
-			if ($due && $this->send_cert_alert($node, $days_left, $cert, $prev_expiry, $alerted_ts, $reason, $www_gap)) {
-				$node->set('mgn_cert_alerted_ts', gmdate('Y-m-d H:i:s'));
-				$out['alerted'] = true;
-			}
-		} elseif ($alerted_ts !== null && $alerted_ts !== '') {
-			$node->set('mgn_cert_alerted_ts', NULL); // renewed — reset so a future dip re-alerts
-		}
-
+		$this->set_cert_problem($node, ($reason !== null || $www_gap !== '')
+			? $this->expiry_problem($hostname, $cert, $reason, $www_gap) : null);
 		return $out;
+	}
+
+	/** Store the current certificate problem (or none). True when it changed. */
+	private function set_cert_problem($node, ?array $problem): bool {
+		$before = $node->get('mgn_cert_problem');
+		if (is_string($before)) { $before = json_decode($before, true); }
+		if ($before == $problem) {
+			return false;
+		}
+		$node->set('mgn_cert_problem', $problem);
+		return true;
+	}
+
+	/**
+	 * The problem for an origin that presents a certificate for other names.
+	 * Pure, so it is pinned from an injected name list.
+	 *
+	 * @return array{reason:string,title:string,detail:array}
+	 */
+	private function uncovered_problem(string $hostname, array $presented): array {
+		$names = count($presented) > 0 ? implode(', ', $presented) : 'no name at all';
+		return [
+			'reason' => 'uncovered',
+			'title'  => 'The origin certificate does not cover ' . $hostname,
+			'detail' => [
+				'Host'      => $hostname,
+				'Presented' => "The origin presents a certificate for {$names}, not for {$hostname}; Strict would take the site down.",
+				'Why'       => 'Under Cloudflare Full the site serves anyway, which is why nothing else looks wrong. Under Full (Strict) '
+				             . 'the edge rejects the handshake and the site goes dark. The certificate on the wire is somebody else\'s: '
+				             . 'a shared fallback vhost on this host, or the placeholder minted at install.',
+				'Fix'       => 'Issue the certificate for the apex and www on the box that terminates TLS for it: '
+				             . "sudo /var/www/html/*/maintenance_scripts/sysadmin_tools/issue_origin_cert.sh {$hostname}",
+			],
+		];
+	}
+
+	/**
+	 * The problem for a certificate that covers the name but is expiring, not
+	 * renewing, or leaves www uncovered: the diagnosis read off the served
+	 * certificate (issue date, lifetime, renewal due, issuer, serial). Pure
+	 * over the parsed certificate.
+	 *
+	 * @param string|null $reason  cert_alert_verdict(): 'overdue', 'expiring' or null.
+	 * @param string      $www_gap www_gap(): the www reason, or '' when www is fine.
+	 * @return array{reason:string,title:string,not_after:int,detail:array}
+	 */
+	private function expiry_problem(string $hostname, array $cert, ?string $reason, string $www_gap, ?int $now = null): array {
+		$now       = $now ?? time();
+		$not_after = (int)$cert['validTo_time_t'];
+		$days_left = (int)floor(($not_after - $now) / 86400);
+		if ($days_left < 0) {
+			$key = 'expired';
+			$title = 'The TLS certificate has expired';
+		} elseif ($reason === 'overdue') {
+			$key = 'overdue';
+			$title = 'TLS certificate renewal is overdue';
+		} elseif ($reason === 'expiring') {
+			$key = 'expiring';
+			$title = 'The TLS certificate expires soon';
+		} else {
+			$key = 'www';
+			$title = 'www is not covered by the origin certificate';
+		}
+		$detail = ['Host' => $hostname, 'Expires' => gmdate('Y-m-d H:i', $not_after) . ' UTC'];
+		$issuer = $this->describe_issuer($cert);
+		if ($issuer !== '') {
+			$detail['Issuer'] = $issuer;
+		}
+		if (!empty($cert['serialNumberHex'])) {
+			$detail['Serial'] = (string)$cert['serialNumberHex'];
+		}
+		// Without a usable notBefore, when renewal was due cannot be measured
+		// from here; what was measured is said and nothing more is claimed.
+		$not_before = isset($cert['validFrom_time_t']) ? (int)$cert['validFrom_time_t'] : 0;
+		$due_ts     = $this->renewal_due_ts($not_before, $not_after);
+		if ($due_ts === null) {
+			$detail['Renewal'] = 'This certificate carries no usable issue date, so how overdue its renewal is cannot be measured from here.';
+		} else {
+			$detail['Issued']      = gmdate('Y-m-d H:i', $not_before) . ' UTC';
+			$detail['Lifetime']    = (int)round(($not_after - $not_before) / 86400) . ' days';
+			$detail['Renewal due'] = gmdate('Y-m-d H:i', $due_ts) . ' UTC';
+			if ($now >= $due_ts) {
+				$detail['Renewal'] = 'Overdue, so automatic renewal on this node is failing. It is not simply a certificate nearing the end of a normal life.';
+			} else {
+				$detail['Renewal'] = 'Not overdue yet. If the certificate has not been replaced by its due date, automatic renewal on this node is failing.';
+			}
+		}
+		if ($www_gap !== '') {
+			$detail['www'] = ucfirst($www_gap) . '. Re-issue the certificate for the apex and www together, on the node: '
+				. "sudo /var/www/html/*/maintenance_scripts/sysadmin_tools/issue_origin_cert.sh {$hostname}";
+		}
+		$detail['Where'] = 'The node issues and serves this certificate itself; why renewal fails is in its own certificate manager log.';
+		return ['reason' => $key, 'title' => $title, 'not_after' => $not_after, 'detail' => $detail];
 	}
 
 	/**
@@ -724,168 +721,6 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	}
 
 	/**
-	 * The reason and wording for an origin that presents a certificate for
-	 * other names. Pure, so it is pinned from an injected name list.
-	 *
-	 * @return array{subject:string,body:string}
-	 */
-	private function uncovered_alert_text(string $node_name, string $hostname, array $presented): array {
-		$names = count($presented) > 0 ? implode(', ', $presented) : 'no name at all';
-		return [
-			'subject' => '[' . $node_name . '] origin certificate does not cover ' . $hostname,
-			'body'    => "The origin presents a certificate for {$names}, not for {$hostname}; Strict would take the site down.\n\n"
-			           . "Under Cloudflare Full the site serves anyway, which is why nothing else looks wrong. Under Full (Strict)\n"
-			           . "the edge rejects the handshake and the site goes dark. The certificate on the wire is somebody\n"
-			           . "else's — a shared fallback vhost on this host, or the placeholder minted at install — so its\n"
-			           . "expiry is not this node's and is not recorded.\n\n"
-			           . "Issue the certificate for the apex and www on the box that terminates TLS for it:\n"
-			           . "  sudo /var/www/html/*/maintenance_scripts/sysadmin_tools/issue_origin_cert.sh {$hostname}\n",
-		];
-	}
-
-	/** Send the uncovered-origin alert. Returns true on send, false if no recipient resolved. */
-	private function send_uncovered_alert($node, string $hostname, array $presented): bool {
-		$to = $this->resolve_alert_recipient();
-		if (!$to) {
-			error_log('RunNodeUptimeChecks: no alert recipient for uncovered-origin warning on node ' . $node->get('mgn_slug'));
-			return false;
-		}
-		$text = $this->uncovered_alert_text((string)$node->get('mgn_name'), $hostname, $presented);
-		$ip   = trim((string)$node->get('mgn_host'));
-		$body = "Node: " . $node->get('mgn_name') . "\n"
-		      . "Host: {$hostname}" . ($ip !== '' ? " ({$ip})" : '') . "\n\n"
-		      . $text['body'];
-		$detail = $this->node_detail_url($node);
-		if ($detail !== '') {
-			$body .= "\nNode detail: {$detail}\n";
-		}
-		try {
-			EmailSender::quickSend($to, $text['subject'], $body);
-			return true;
-		} catch (\Throwable $e) {
-			error_log('RunNodeUptimeChecks: uncovered-origin alert send failed for node ' . $node->get('mgn_slug') . ': ' . $e->getMessage());
-			return false;
-		}
-	}
-
-	/**
-	 * Send the cert-expiry warning email. Returns true on send, false if no
-	 * recipient resolved.
-	 *
-	 * "Expires in N days" on its own does not say whether anything is wrong —
-	 * a healthy 90-day certificate spends every day of its life expiring. What
-	 * says something is wrong is that the renewal date has already passed and
-	 * the certificate on the wire is still the old one. Both facts are read
-	 * straight off the served certificate, so the mail carries the diagnosis
-	 * instead of the guess it used to make.
-	 *
-	 * @param array       $cert        Parsed served cert (openssl_x509_parse shape).
-	 * @param string      $prev_expiry mgn_cert_expiry_ts as it stood before this pass.
-	 * @param string|null $alerted_ts  mgn_cert_alerted_ts, i.e. when we last warned.
-	 * @param string|null $reason      cert_alert_verdict(): 'overdue', 'expiring' or null.
-	 * @param string      $www_gap     www_gap(): the www reason, or '' when www is fine.
-	 */
-	private function send_cert_alert($node, int $days_left, array $cert, string $prev_expiry = '', ?string $alerted_ts = null, ?string $reason = 'expiring', string $www_gap = ''): bool {
-		$to = $this->resolve_alert_recipient();
-		if (!$to) {
-			error_log('RunNodeUptimeChecks: no alert recipient for cert warning on node ' . $node->get('mgn_slug'));
-			return false;
-		}
-		$name      = $node->get('mgn_name');
-		$host      = parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST);
-		$ip        = trim((string)$node->get('mgn_host'));
-		$not_after = (int)$cert['validTo_time_t'];
-		$expiry    = gmdate('Y-m-d H:i:s', $not_after) . ' UTC';
-
-		if ($days_left < 0) {
-			$subject  = '[' . $name . '] TLS certificate EXPIRED';
-			$headline = 'The TLS certificate has EXPIRED (' . abs($days_left) . ' day(s) ago).';
-		} elseif ($reason === 'overdue') {
-			$subject  = '[' . $name . '] TLS certificate renewal is overdue';
-			$headline = 'Renewal of the TLS certificate is overdue; it expires in ' . $days_left . ' day(s).';
-		} elseif ($reason === 'expiring') {
-			$subject  = '[' . $name . '] TLS certificate expires in ' . $days_left . ' day(s)';
-			$headline = 'The TLS certificate expires in ' . $days_left . ' day(s).';
-		} else {
-			$subject  = '[' . $name . '] www is not covered by the origin certificate';
-			$headline = 'The origin certificate is healthy (' . $days_left . ' day(s) left) but does not cover www.';
-		}
-
-		$facts = "Expires:     {$expiry}\n";
-		$issuer = $this->describe_issuer($cert);
-		if ($issuer !== '') {
-			$facts .= "Issuer:      {$issuer}\n";
-		}
-		if (!empty($cert['serialNumberHex'])) {
-			$facts .= "Serial:      " . $cert['serialNumberHex'] . "\n";
-		}
-
-		// The renewal verdict. Without a usable notBefore we cannot say when
-		// renewal was due, so we state what we measured and claim nothing more.
-		$not_before = isset($cert['validFrom_time_t']) ? (int)$cert['validFrom_time_t'] : 0;
-		$due_ts     = $this->renewal_due_ts($not_before, $not_after);
-		if ($due_ts === null) {
-			$verdict = "This certificate carries no usable issue date, so how overdue its renewal is\n"
-			         . "cannot be measured from here. Check the certificate manager on the node.\n";
-		} else {
-			$lifetime_days = (int)round(($not_after - $not_before) / 86400);
-			$facts .= "Issued:      " . gmdate('Y-m-d H:i:s', $not_before) . " UTC\n"
-			        . "Lifetime:    {$lifetime_days} days\n"
-			        . "Renewal due: " . gmdate('Y-m-d H:i:s', $due_ts) . " UTC";
-
-			$overdue_days = (int)floor((time() - $due_ts) / 86400);
-			if ($overdue_days >= 0) {
-				$facts  .= " — " . $overdue_days . " day(s) ago\n";
-				$verdict = "Renewal is {$overdue_days} day(s) overdue, so automatic renewal on this node is\n"
-				         . "failing. It is not simply a certificate nearing the end of a normal life.\n";
-			} else {
-				$facts  .= " — in " . abs($overdue_days) . " day(s)\n";
-				$verdict = "Renewal is not overdue yet; it is due in " . abs($overdue_days) . " day(s). If the certificate\n"
-				         . "has not been replaced by then, automatic renewal on this node is failing.\n";
-			}
-		}
-
-		// An unchanged expiry date across two alerts means no new certificate was
-		// issued in between — the strongest evidence we can gather from outside.
-		if ($alerted_ts !== null && $alerted_ts !== '' && $prev_expiry !== ''
-			&& strtotime($prev_expiry . ' UTC') === $not_after) {
-			$verdict .= "\nThis is the same certificate reported in the previous alert on "
-			          . gmdate('Y-m-d', strtotime($alerted_ts . ' UTC')) . ";\nnothing has renewed since.\n";
-		}
-
-		if ($www_gap !== '') {
-			$verdict .= "\n" . ucfirst($www_gap) . ". A visitor who types www reaches this origin under that\n"
-			          . "name, so under Cloudflare Full (Strict) the www address goes dark. Re-issue the\n"
-			          . "certificate for the apex and www together, on the node:\n"
-			          . "  sudo /var/www/html/*/maintenance_scripts/sysadmin_tools/issue_origin_cert.sh {$host}\n";
-		}
-
-		$where = "\nThis certificate is issued and served by the node itself. This system only reads\n"
-		       . "it over the wire, so the reason renewal is failing is in the node's own\n"
-		       . "certificate manager log, not here.\n";
-
-		$body = "Node: {$name}\n"
-		      . "Host: {$host}" . ($ip !== '' ? " ({$ip})" : '') . "\n\n"
-		      . "{$headline}\n\n"
-		      . $facts . "\n"
-		      . $verdict
-		      . $where;
-
-		$detail = $this->node_detail_url($node);
-		if ($detail !== '') {
-			$body .= "\nNode detail: {$detail}\n";
-		}
-
-		try {
-			EmailSender::quickSend($to, $subject, $body);
-			return true;
-		} catch (\Throwable $e) {
-			error_log('RunNodeUptimeChecks: cert alert send failed for node ' . $node->get('mgn_slug') . ': ' . $e->getMessage());
-			return false;
-		}
-	}
-
-	/**
 	 * When a standard ACME client would have replaced this certificate: at two
 	 * thirds of its life, i.e. one third of the lifetime before expiry. That is
 	 * what Let's Encrypt's renewal window works out to for a 90-day cert (day
@@ -915,26 +750,5 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			}
 		}
 		return implode(' ', array_unique($parts));
-	}
-
-	/**
-	 * Absolute URL of this node's detail page, or '' when the site's own
-	 * address is not configured.
-	 */
-	private function node_detail_url($node): string {
-		$web = trim((string)Globalvars::get_instance()->get_setting('webDir'), " /");
-		$id  = (int)$node->get('mgn_managed_node_id');
-		if ($web === '' || $id <= 0) {
-			return '';
-		}
-		return 'https://' . $web . '/admin/server_manager/node_detail?mgn_managed_node_id=' . $id;
-	}
-
-	private function format_duration(int $seconds): string {
-		if ($seconds < 60)   return $seconds . 's';
-		if ($seconds < 3600) return intval(round($seconds / 60)) . 'm';
-		$h = intval($seconds / 3600);
-		$m = intval(($seconds % 3600) / 60);
-		return $m > 0 ? "{$h}h{$m}m" : "{$h}h";
 	}
 }

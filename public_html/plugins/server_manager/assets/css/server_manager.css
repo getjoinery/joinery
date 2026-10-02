@@ -61,3 +61,7 @@
     .host-accordion .accordion-button,
     .host-accordion .accordion-button .d-flex { flex-wrap: wrap; }
 }
+
+/* --- Incidents (IncidentViews) --- */
+.svm-incident-pick { width: 1%; }
+.svm-incident-text { white-space: pre-wrap; overflow-wrap: anywhere; }

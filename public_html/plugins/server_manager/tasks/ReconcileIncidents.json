@@ -1,0 +1,7 @@
+{
+  "name": "Reconcile Incidents",
+  "description": "Turns what this management node's own checks stored (a site uptime monitoring says is down, and the like) into incidents: opens one when a condition starts, clears it when the condition is gone, reopens it if it comes back within an hour, and tells the superadmins when one opens. Reads stored facts only; never probes.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {}
+}

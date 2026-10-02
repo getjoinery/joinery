@@ -247,7 +247,7 @@ Each invocation creates an `rcr_recipe_runs` row with:
 
 `RecipeRunner::run($recipe)` drives the tool-use loop: send the conversation to the active LLM provider, dispatch any `tool_use` blocks back through `RecipeToolRegistry::get($name)->execute($input, $ctx)`, append the `tool_result`, repeat until the model emits a final text response or the cost guard trips.
 
-The `CostGuard` enforces per-run input/output token and dollar ceilings configured in plugin settings; trips raise an exception that the runner logs as `error`.
+The `CostGuard` enforces per-run input/output token and dollar ceilings configured in plugin settings; trips raise an exception that the runner logs as `error`. The plugin-wide monthly ceiling counts recipe runs, chat messages, and the cost-bearing tokens any other plugin reports through `CostGuard::registerUsageCounter($name, fn($month_start_utc): int)` from its bootstrap (Server Manager's incident analysis does), so the ceiling holds whichever surface spent the tokens.
 
 ### Runs that read protected content
 

@@ -1,6 +1,6 @@
 {
   "name": "Run Node Uptime Checks",
-  "description": "For each managed node with uptime monitoring enabled, runs the configured check (api or http_status) and updates live status. Fires an email alert on up->down and down->up transitions. One alert per transition; no re-alerting while still down.",
+  "description": "For each managed node with uptime monitoring enabled, runs the configured check (api or http_status) and updates live status: up, or down after two failing probes in a row, with what the check saw. A site that goes down becomes an incident (Reconcile Incidents opens it and tells the superadmins). Also checks each node's TLS certificate and warns by email when renewal is overdue or expiry is near.",
   "activate_on_install": true,
   "default_frequency": "every_run",
   "config_fields": {}

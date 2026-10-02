@@ -28,6 +28,8 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/service_tenant_watch_test.php
  *
+ * @version 1.1 - its timeline runs in 2036-2037: a grant is judged against the real clock, so a paid-through date
+ *                in 2026 failed the suite once that day had passed
  * @version 1.0
  */
 
@@ -133,7 +135,7 @@ section('mail: the ladder against the date');
 JoineryServices::enrol($owner->key, $key_id, 'mail', $host, $client);
 $mail = ServiceTenant::forKey($key_id, 'mail');
 $cleanup[] = array('svt_service_tenants', 'svt_service_tenant_id', (int)$mail->key);
-JoineryServices::grant($mail, '2026-10-01', $client);
+JoineryServices::grant($mail, '2036-10-01', $client);
 $reply(array(array('subaccount_id' => 'sub-w'), array(),
 	array('domains' => array(array('domain' => array('fulldomain' => 'mail.' . $host, 'dkim_selector' => 's', 'dkim_value' => 'v',
 		'rpath_selector' => 'r', 'rpath_value' => 'w', 'dkim_verified' => true, 'rpath_verified' => true)))),
@@ -146,31 +148,31 @@ check((string)$mail->get('svt_state') === 'active', 'the mail tenant is active')
 
 // Entitled: checked, and the provider's count read.
 $reply(array(array('sent' => 42)));
-$acted = $watch->watch($mail, '2026-09-20 12:00:00');
+$acted = $watch->watch($mail, '2036-09-20 12:00:00');
 $mail = ServiceTenant::forKey($key_id, 'mail');
 check($paths($drain()) === array('stats/email_summary') && (int)$mail->get('svt_figure') === 42
-	&& substr((string)$mail->get('svt_figure_time'), 0, 19) === '2026-09-20 12:00:00',
+	&& substr((string)$mail->get('svt_figure_time'), 0, 19) === '2036-09-20 12:00:00',
 	'an entitled pass reads the provider\'s month-to-date count');
-check(substr((string)$mail->get('svt_checked_time'), 0, 19) === '2026-09-20 12:00:00', 'the check time is stamped (Q1)');
-$watch->watch($mail, '2026-09-20 12:30:00');
+check(substr((string)$mail->get('svt_checked_time'), 0, 19) === '2036-09-20 12:00:00', 'the check time is stamped (Q1)');
+$watch->watch($mail, '2036-09-20 12:30:00');
 check(count($drain()) === 0, 'the count is not re-read inside the hour');
 $reply(array(array('sent' => 43)));
-$watch->watch($mail, '2026-09-20 13:00:01');
+$watch->watch($mail, '2036-09-20 13:00:01');
 check($paths($drain()) === array('stats/email_summary'), 'and is re-read after it');
 
 // The date passes: lapse, grace, suspend.
 $reply(array(array('sent' => 43)));
-$watch->watch($mail, '2026-10-02 00:00:00');
+$watch->watch($mail, '2036-10-02 00:00:00');
 $drain();
 $mail = ServiceTenant::forKey($key_id, 'mail');
-check(substr((string)$mail->get('svt_lapse_time'), 0, 19) === '2026-10-02 00:00:00' && (string)$mail->get('svt_state') === 'active',
+check(substr((string)$mail->get('svt_lapse_time'), 0, 19) === '2036-10-02 00:00:00' && (string)$mail->get('svt_state') === 'active',
 	'the day after the date: lapsed, still active');
 $reply(array(array('sent' => 43)));
-$watch->watch($mail, '2026-10-10 00:00:00');
+$watch->watch($mail, '2036-10-10 00:00:00');
 $mail = ServiceTenant::forKey($key_id, 'mail');
 check((string)$mail->get('svt_state') === 'active' && !in_array('subaccount/close', $paths($drain()), true), 'inside the grace window nothing closes');
 $reply(array(array(), array('sent' => 43)));   // subaccount/close, then the figure
-$watch->watch($mail, '2026-10-16 00:00:01');
+$watch->watch($mail, '2036-10-16 00:00:01');
 $calls = $paths($drain());
 $mail = ServiceTenant::forKey($key_id, 'mail');
 check(in_array('subaccount/close', $calls, true) && (string)$mail->get('svt_state') === 'suspended'
@@ -178,10 +180,10 @@ check(in_array('subaccount/close', $calls, true) && (string)$mail->get('svt_stat
 	'past the grace window the subaccount is closed and the row says why', json_encode($calls));
 
 // A new date: reactivated by the reconcile.
-$mail->set('svt_paid_until', '2027-01-01 00:00:00');
+$mail->set('svt_paid_until', '2037-01-01 00:00:00');
 $mail->save();
 $reply(array(array(), array('sent' => 0)));      // subaccount/reopen, then the figure
-$watch->watch($mail, '2026-11-01 00:00:00');
+$watch->watch($mail, '2036-11-01 00:00:00');
 $calls = $paths($drain());
 $mail = ServiceTenant::forKey($key_id, 'mail');
 check(in_array('subaccount/reopen', $calls, true) && (string)$mail->get('svt_state') === 'active'
@@ -191,20 +193,20 @@ check(in_array('subaccount/reopen', $calls, true) && (string)$mail->get('svt_sta
 section('mail: the allowance re-sets the limit; a refused act is retried');
 harness_set_setting_mem('server_manager_hosted_send_allowance', '2500');
 $reply(array(array()));                          // subaccount/edit
-$watch->watch($mail, '2026-11-01 00:30:00');
+$watch->watch($mail, '2036-11-01 00:30:00');
 $calls = $drain();
 check(($calls[0]['path'] ?? '') === 'subaccount/edit' && ($calls[0]['body']['limit'] ?? 0) === 2500
 	&& (int)ServiceTenant::forKey($key_id, 'mail')->get('svt_allowance') === 2500, 'a changed allowance re-sets the subaccount limit');
-$watch->watch($mail, '2026-11-01 00:31:00');
+$watch->watch($mail, '2036-11-01 00:31:00');
 check(count($drain()) === 0, 'an unchanged allowance touches nothing');
 
 // The provider refuses the close: the row is suspended, the act retried next pass.
-$mail->set('svt_paid_until', '2026-01-01 00:00:00');
-$mail->set('svt_lapse_time', '2026-01-02 00:00:00');
+$mail->set('svt_paid_until', '2036-01-01 00:00:00');
+$mail->set('svt_lapse_time', '2036-01-02 00:00:00');
 $mail->save();
 $mock->append(new \GuzzleHttp\Psr7\Response(500, array(), json_encode(array('data' => array('error' => 'provider down')))));
 try {
-	$watch->watch($mail, '2026-02-01 00:00:00');
+	$watch->watch($mail, '2036-02-01 00:00:00');
 	check(false, 'the refused close surfaces');
 } catch (\Throwable $e) {
 	check(strpos($e->getMessage(), 'provider down') !== false, 'the refused close surfaces as the pass\'s error');
@@ -214,7 +216,7 @@ $mail = ServiceTenant::forKey($key_id, 'mail');
 check((string)$mail->get('svt_state') === 'suspended' && $mail->get('svt_revoked_time') === null,
 	'the row is on the suspended rung with no revoked time: the act did not land');
 $reply(array(array(), array('sent' => 0)));
-$watch->watch($mail, '2026-02-01 00:15:00');
+$watch->watch($mail, '2036-02-01 00:15:00');
 $calls = $paths($drain());
 $mail = ServiceTenant::forKey($key_id, 'mail');
 check(in_array('subaccount/close', $calls, true) && $mail->get('svt_revoked_time') !== null, 'the next pass retries the close until it lands');
@@ -224,7 +226,7 @@ section('shelf: the ladder starts the retention clock; prune when its day comes'
 JoineryServices::enrol($owner->key, $key_id, 'shelf', $host, $client);
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 $cleanup[] = array('svt_service_tenants', 'svt_service_tenant_id', (int)$shelf->key);
-JoineryServices::grant($shelf, '2026-10-01', $client);
+JoineryServices::grant($shelf, '2036-10-01', $client);
 JoineryServices::enrol($owner->key, $key_id, 'shelf', $host, $client);
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 $slug = (string)$shelf->get('svt_slug');
@@ -246,7 +248,7 @@ $shelf = ServiceTenant::forKey($key_id, 'shelf');
 check((int)$shelf->get('svt_figure') === 90, 'three chains: 90 bytes on the ledger');
 
 section('shelf: retention keeps the newest chains per profile, whole');
-$watch->watch($shelf, '2026-09-21 00:00:00');
+$watch->watch($shelf, '2036-09-21 00:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 $keys = s3fx_keys($fx);
 check(!in_array('shelf/' . $base . 'site/chain-20260901_010000/db', $keys, true)
@@ -255,7 +257,7 @@ check(!in_array('shelf/' . $base . 'site/chain-20260901_010000/db', $keys, true)
 check(in_array('shelf/' . $base . 'site/chain-20260910_010000/db', $keys, true)
 	&& in_array('shelf/' . $base . 'site/chain-20260920_010000/files', $keys, true), 'the newest two stay');
 check((int)$shelf->get('svt_figure') === 60 && ShelfObject::completedBytes((int)$shelf->key) === 60, 'the figure follows: 60 bytes');
-check(substr((string)$shelf->get('svt_reconciled_time'), 0, 19) === '2026-09-21 00:00:00', 'the first pass reconciled against the listing');
+check(substr((string)$shelf->get('svt_reconciled_time'), 0, 19) === '2036-09-21 00:00:00', 'the first pass reconciled against the listing');
 
 // A chain with an open run is never touched, and a manager chain is its own family.
 $open = ShelfBroker::beginRun($shelf, 'site', 'chain-20260830_010000', array(array('name' => 'chain-20260830_010000/db', 'bytes' => 1)));
@@ -267,7 +269,7 @@ $cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$m['run_id']);
 ShelfBroker::sign($shelf, (int)$m['run_id'], 'chain-20260801_010000/db', 'put', array('bytes' => 5));
 $put_raw($base . 'manager/chain-20260801_010000/db', 'xxxxx');
 ShelfBroker::finishRun($shelf, (int)$m['run_id'], array(array('name' => 'chain-20260801_010000/db', 'bytes' => 5)));
-$watch->watch($shelf, '2026-09-21 00:10:00');
+$watch->watch($shelf, '2036-09-21 00:10:00');
 $keys = s3fx_keys($fx);
 check(in_array('shelf/' . $base . 'site/chain-20260830_010000/db', $keys, true), 'an older chain with an open run is left alone');
 check(in_array('shelf/' . $base . 'manager/chain-20260801_010000/db', $keys, true), 'the manager family is aged on its own');
@@ -280,7 +282,7 @@ $shelf->save();
 // Something in backup storage the ledger never saw, and a ledger row for something gone.
 $put_raw($base . 'site/chain-20260920_010000/stray', str_repeat('s', 7));
 $db->exec("UPDATE svo_shelf_objects SET svo_key = '" . $base . "site/chain-20260920_010000/vanished' WHERE svo_key = '" . $base . "site/chain-20260910_010000/db'");
-$watch->watch($shelf, '2026-09-22 00:00:00');
+$watch->watch($shelf, '2036-09-22 00:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 check((string)(new ShelfRun((int)$open['run_id'], TRUE))->get('svr_state') === 'aborted', 'a run open 48 hours is aborted');
 check(ShelfObject::forKey((int)$shelf->key, $base . 'site/chain-20260920_010000/vanished') === null, 'a ledger row backup storage does not have is dropped');
@@ -291,25 +293,25 @@ check($stray !== null && (int)$stray->get('svo_bytes') === 7 && $stray->get('svo
 check((int)$shelf->get('svt_figure') === ShelfObject::completedBytes((int)$shelf->key), 'the figure is the reconciled ledger');
 
 section('shelf: the ladder suspends, the day comes, the prefix is pruned once');
-$watch->watch($shelf, '2026-10-02 00:00:00');
-$watch->watch($shelf, '2026-10-17 00:00:00');
+$watch->watch($shelf, '2036-10-02 00:00:00');
+$watch->watch($shelf, '2036-10-17 00:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 check((string)$shelf->get('svt_state') === 'suspended' && ShelfBroker::refusal($shelf) !== ''
-	&& substr((string)$shelf->get('svt_prune_after_time'), 0, 10) === '2027-01-15', 'suspended past grace; prune-after is 90 days out');
+	&& substr((string)$shelf->get('svt_prune_after_time'), 0, 10) === '2037-01-15', 'suspended past grace; prune-after is 90 days out');
 $before = count(s3fx_keys($fx));
-$watch->watch($shelf, '2026-12-01 00:00:00');
+$watch->watch($shelf, '2036-12-01 00:00:00');
 check(count(s3fx_keys($fx)) === $before && ServiceTenant::forKey($key_id, 'shelf')->get('svt_pruned_time') === null, 'before its day nothing is pruned');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
-$shelf->set('svt_paid_until', '2027-06-01 00:00:00');
+$shelf->set('svt_paid_until', '2037-06-01 00:00:00');
 $shelf->save();
-$watch->watch($shelf, '2026-12-02 00:00:00');
+$watch->watch($shelf, '2036-12-02 00:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 check((string)$shelf->get('svt_state') === 'active' && $shelf->get('svt_prune_after_time') === null && ShelfBroker::refusal($shelf) === '',
 	'a new date before the prune reactivates in place, clock cleared');
-$shelf->set('svt_paid_until', '2026-01-01 00:00:00');
-$shelf->set('svt_lapse_time', '2026-01-02 00:00:00');
+$shelf->set('svt_paid_until', '2036-01-01 00:00:00');
+$shelf->set('svt_lapse_time', '2036-01-02 00:00:00');
 $shelf->save();
-$watch->watch($shelf, '2026-02-01 00:00:00');
+$watch->watch($shelf, '2036-02-01 00:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 $watch->watch($shelf, (string)$shelf->get('svt_prune_after_time'));
 $watch->watch($shelf, LibraryFunctions::time_shift((string)$shelf->get('svt_prune_after_time'), '1 second', 'Y-m-d H:i:s'));
@@ -319,7 +321,7 @@ check($left === array(), 'on its day the whole prefix is gone', json_encode(arra
 check($shelf->get('svt_pruned_time') !== null && (int)$shelf->get('svt_figure') === 0
 	&& ShelfObject::completedBytes((int)$shelf->key) === 0 && strpos((string)$shelf->get('svt_notice'), 'pruned on') !== false,
 	'the row says it was pruned, the ledger is empty, the figure is 0');
-$watch->watch($shelf, '2027-06-01 00:00:00');
+$watch->watch($shelf, '2037-06-01 00:00:00');
 check(ServiceTenant::forKey($key_id, 'shelf')->get('svt_pruned_time') !== null, 'pruning happens once');
 
 section('the phase runs inside the provisioning task');

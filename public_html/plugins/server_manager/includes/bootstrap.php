@@ -6,20 +6,34 @@
  * Registrations only: no request work, no output, nothing that assumes a
  * signed-in user.
  *
- * Registers the four admin-header notices that read what the fleet has said
- * (FleetAttentionNotice): a node whose latest host report names a failed
- * unit, a node whose agent says a recipe's check is failing, a node with an
- * open case nobody has marked read, and a node whose last scheduled backup
- * failed. All read stored facts and never probe (specs/agent_tier1_recipes.md,
- * WP3 and slice 7; specs/disk_headroom_and_unit_diagnosis.md §3).
+ * Registers the one admin-header line that says what needs a person
+ * (IncidentNotice: how many incidents need you, and new problem reports from
+ * sites), the same count beside the Incidents menu entry (AdminMenuCounts),
+ * and the conditions this management node watches on every node as incident
+ * sources (IncidentSources), which the Reconcile Incidents task turns into
+ * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.6 - incident analysis registers its token spend with joinery_ai's CostGuard
+ * @version 1.5 - every plane source (backups three ways, failed units, certificates, agent silent,
+ *                unmanageable, monitoring broken); the fleet_failed_units, fleet_failing_recipes and
+ *                fleet_failed_backups notices are gone, their conditions now incidents
+ * @version 1.4 - the incident sources this management node watches: plane:site_down
+ * @version 1.3 - fleet_incidents replaces fleet_open_cases; the Incidents menu entry counts what needs a person
  * @version 1.2 - fleet_failed_backups
  * @version 1.1 - fleet_failing_recipes
  * @version 1.0
  */
 
-AdminNotices::register('fleet_failed_units', array('FleetAttentionNotice', 'render_failed_units'));
-AdminNotices::register('fleet_failing_recipes', array('FleetAttentionNotice', 'render_failing_recipes'));
-AdminNotices::register('fleet_open_cases', array('FleetAttentionNotice', 'render_open_cases'));
-AdminNotices::register('fleet_failed_backups', array('FleetAttentionNotice', 'render_failed_backups'));
+AdminNotices::register('fleet_incidents', array('IncidentNotice', 'render'));
+AdminMenuCounts::register('server-manager-incidents', array('IncidentNotice', 'menu_count'));
+foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'IncidentSourceBackupsStopped', 'IncidentSourceBackupUnverified',
+	'IncidentSourceFailedUnits', 'IncidentSourceCertificate', 'IncidentSourceAgentSilent', 'IncidentSourceUnmanageable',
+	'IncidentSourceMonitoringBroken') as $incident_source) {
+	IncidentSources::register(new $incident_source());
+}
+// Incident analysis spends model tokens through joinery_ai; they count toward
+// its monthly ceiling.
+if (class_exists('CostGuard') && method_exists('CostGuard', 'registerUsageCounter')) {
+	CostGuard::registerUsageCounter('incident_analysis', array('IncidentAnalyst', 'usage_since'));
+}
 ?>

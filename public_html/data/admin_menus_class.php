@@ -118,6 +118,9 @@ class MultiAdminMenu extends SystemMultiBase {
 
 		$finalmenu = array();
 		$current_parent_menu = null;
+		// A number beside an entry: how many things wait on its page
+		// (AdminMenuCounts). The menu editor (get_all) draws none.
+		$counts = $get_all ? array() : AdminMenuCounts::all();
 		foreach ($entries as $entry){
 			//IF THE SETTING IS OFF, SKIP IT 
 			if($entry->amu_setting_activate && !$settings->get_setting($entry->amu_setting_activate, true, true)){
@@ -139,7 +142,7 @@ class MultiAdminMenu extends SystemMultiBase {
 				$defaultpage_link = '/admin/'.($entry->amu_defaultpage ?? '');
 			}
 			
-			$finalmenu[$entry->amu_admin_menu_id] = array('parent'=>$entry->amu_parent_menu_id, 'currentmain'=>FALSE, 'currentsub'=>FALSE, 'defaultpage'=>$defaultpage_link, 'display'=>$entry->amu_menudisplay, 'icon'=>$entry->amu_icon, 'has_subs'=>$has_subs);
+			$finalmenu[$entry->amu_admin_menu_id] = array('parent'=>$entry->amu_parent_menu_id, 'currentmain'=>FALSE, 'currentsub'=>FALSE, 'defaultpage'=>$defaultpage_link, 'display'=>$entry->amu_menudisplay, 'icon'=>$entry->amu_icon, 'has_subs'=>$has_subs, 'count'=>(int)($counts[$entry->amu_slug] ?? 0));
 
 			if($current_menu_slug == $entry->amu_slug){
 				$finalmenu[$entry->amu_admin_menu_id]['currentsub'] = 1;
@@ -154,6 +157,14 @@ class MultiAdminMenu extends SystemMultiBase {
 		
 		if($current_parent_menu){
 			$finalmenu[$current_parent_menu]['currentmain'] = 1;	
+		}
+
+		// A section shows the sum of its entries' counts, so a collapsed
+		// section still says something waits inside it.
+		foreach ($finalmenu as $id => $item) {
+			if ($item['parent'] && $item['count'] > 0 && isset($finalmenu[$item['parent']])) {
+				$finalmenu[$item['parent']]['count'] += $item['count'];
+			}
 		}
 
 		return $finalmenu;

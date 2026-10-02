@@ -13,6 +13,8 @@
  * on that site's schedule, under its own key, and are not this management node's
  * to schedule, count or alarm about.
  *
+ * @version 1.5 - is_eligible(): the rule eligible_nodes() applies, for one node, so the backup incidents ask the same
+ *                question (incident_triage.md WP3)
  * @version 1.4 - eligible_nodes() skips every node in an install state, not only one installing
  *                (ManagedNode::is_operational(); site_copy.md WP5)
  * @version 1.3 - keep_days is the fewest days of backups kept for a node (7 by default); the site's
@@ -94,12 +96,20 @@ class FleetBackupPolicy {
 
 		$out = array();
 		foreach ($nodes as $node) {
-			if (!$node->get('mgn_web_root')) continue;
-			if ($node->get('mgn_skip_joinery_checks')) continue;
-			if (!$node->is_operational()) continue;
-			$out[] = $node;
+			if (self::is_eligible($node)) {
+				$out[] = $node;
+			}
 		}
 		return $out;
+	}
+
+	/** The rule eligible_nodes() applies to one node: the one place it is written. */
+	public static function is_eligible($node): bool {
+		return (bool)$node->get('mgn_enabled')
+			&& trim((string)$node->get('mgn_delete_time')) === ''
+			&& (bool)$node->get('mgn_web_root')
+			&& !$node->get('mgn_skip_joinery_checks')
+			&& $node->is_operational();
 	}
 
 	/**

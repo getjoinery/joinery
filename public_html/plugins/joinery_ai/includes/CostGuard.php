@@ -29,12 +29,29 @@ class CapExceededException extends Exception {
  * The plugin-wide ceiling is the one cost concern shared across surfaces, so
  * it is also exposed standalone via enforceGlobalCap() — no Recipe, no owner
  * email — for the interactive chat to call before each turn. Its month total
- * (globalUsedThisMonth) unions recipe-run and chat-message token usage so the
+ * (globalUsedThisMonth) unions recipe-run and chat-message token usage, and
+ * whatever registered usage counters report (registerUsageCounter), so the
  * cap is meaningful regardless of which surface spent the tokens. The
  * per-recipe caps and the 80% soft-alert emails stay recipe-only and live in
  * check($recipe).
  */
 class CostGuard {
+
+    /**
+     * Token spend outside joinery_ai's own tables that counts toward the
+     * plugin-wide monthly ceiling: name => fn(string $month_start_utc): int,
+     * returning the cost-bearing tokens spent since then. Another plugin that
+     * calls a model through the resolver (Server Manager's incident analysis)
+     * registers one from its bootstrap, so the ceiling holds whichever surface
+     * spent the tokens.
+     *
+     * @var array<string, callable>
+     */
+    private static $usage_counters = [];
+
+    public static function registerUsageCounter(string $name, callable $counter): void {
+        self::$usage_counters[$name] = $counter;
+    }
 
     /**
      * Enforce only the plugin-wide monthly ceiling, without a Recipe. Throws
@@ -142,7 +159,25 @@ class CostGuard {
             error_log('[joinery_ai CostGuard] chat token sum skipped: ' . $e->getMessage());
         }
 
-        return $recipe_used + $chat_used;
+        // Counters register from plugin bootstraps, which load lazily; pull
+        // them in so a counter is never missed for want of an admin page.
+        if (class_exists('PluginBootstraps')) {
+            try {
+                PluginBootstraps::load();
+            } catch (Throwable $e) {
+                error_log('[joinery_ai CostGuard] plugin bootstraps failed to load: ' . $e->getMessage());
+            }
+        }
+        $other_used = 0;
+        foreach (self::$usage_counters as $name => $counter) {
+            try {
+                $other_used += (int)call_user_func($counter, $month_start);
+            } catch (Throwable $e) {
+                error_log('[joinery_ai CostGuard] usage counter ' . $name . ' skipped: ' . $e->getMessage());
+            }
+        }
+
+        return $recipe_used + $chat_used + $other_used;
     }
 
     private static function tokensUsedSince(string $since_utc, ?int $recipe_id): int {
