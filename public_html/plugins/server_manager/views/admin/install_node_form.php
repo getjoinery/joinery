@@ -11,6 +11,7 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.11 - the region falls back to us-east
  * @version 1.10 - the Clone option names what it carries (database, uploads, static files) and what it does not
  * @version 1.9 - the instance-type fallback and hint name the 1 GB nanode, the size every instance should be
  * @version 1.8 - a bare instance is encoded as docker_mode 'docker' (it is a Docker host with no site); the
@@ -217,7 +218,7 @@ $formwriter = $page->getFormWriter('install_form', [
 		'domain'         => $_POST['domain'] ?? '',
 		'source_node_id' => $_POST['source_node_id'] ?? '',
 		'cca_account_id' => $_POST['cca_account_id'] ?? '',
-		'cloud_region'   => $_POST['cloud_region'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_region') ?: 'us-southeast'),
+		'cloud_region'   => $_POST['cloud_region'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_region') ?: 'us-east'),
 		'cloud_instance_type' => $_POST['cloud_instance_type'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_type') ?: 'g6-nanode-1'),
 	],
 ]);
@@ -251,7 +252,7 @@ if ($has_cloud_accounts) {
 		. '<a href="/profile/server_manager/connect_cloud" class="alert-link">Connect a Linode account</a>, then return here.</div>';
 }
 $formwriter->textinput('cloud_region', 'Region', [
-	'placeholder' => 'e.g., us-southeast',
+	'placeholder' => 'e.g., us-east',
 ]);
 $formwriter->textinput('cloud_instance_type', 'Instance Type', [
 	'placeholder' => 'e.g., g6-nanode-1',

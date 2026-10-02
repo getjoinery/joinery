@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.29.1",
+  "version": "1.29.2",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -212,7 +212,7 @@
     },
     {
       "name": "server_manager_customer_cloud_region",
-      "default": "us-southeast",
+      "default": "us-east",
       "helptext": "Default region for customer-cloud instances.",
       "group": "provisioning",
       "label": "Customer cloud region",
