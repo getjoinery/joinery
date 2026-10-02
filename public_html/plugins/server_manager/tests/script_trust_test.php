@@ -211,6 +211,21 @@ check($recovered->get('mgn_script_trust') === 'ok',
 	'a node reporting ok clears a state set by an earlier refusal');
 check(empty($recovered->get('mgn_script_trust_since')), 'and releases the first-seen stamp');
 
+// The poll answers for the manifest, never for a file. A node whose manifest is
+// fine but whose script was modified reports "ok" on every poll while refusing
+// that script on every run, so "ok" must leave a file mismatch standing.
+$modified = st_node();
+NodeMonitorHealth::note_script_trust($modified, st_job($modified, 'apply_update', 'refused', $FILE_MODIFIED));
+$modified->load();
+check($modified->get('mgn_script_trust') === 'untrusted_file', 'marked untrusted_file from a refusal first');
+$since = (string)$modified->get('mgn_script_trust_since');
+NodeMonitorHealth::note_reported_script_trust($modified, 'ok');
+$modified->save();
+$modified->load();
+check($modified->get('mgn_script_trust') === 'untrusted_file',
+	'a poll reporting ok does not clear a file that does not match its release');
+check((string)$modified->get('mgn_script_trust_since') === $since, 'and keeps its first-seen stamp');
+
 // A reason already recorded from a refusal is the more useful of the two and is
 // kept rather than replaced by the generic poll wording.
 $keeps = st_node();
