@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.49 - process_check_status fills an empty mgn_site_url from the site domain the agent reports
+ *                 (ManagedNode::adopt_reported_site_domain; site_copy.md B38)
  * @version 1.48 - sanitise_host_report keeps cpus and an answer of quiet (host_report 1.6)
  * @version 1.47 - site copy WP8: process_copy_import keeps the copy's look path (look_path_of()); process_take_node_id
  *                 records what the copy staged, and complete_take_node_id() makes the row swap only in the answer
@@ -543,6 +545,9 @@ class JobResultProcessor {
 			// it. Before the save, so the recovery-key report below is asked of
 			// a node that now hosts a site.
 			ManagedNode::adopt_reported_web_root($node, $result['web_root'] ?? null, 'status check');
+			// Likewise its site address: a node that joined on its own has none,
+			// and uptime checks and site copies need one.
+			ManagedNode::adopt_reported_site_domain($node, $result['site_domain'] ?? null, 'status check');
 			if ($ssl_new_state !== null) {
 				$node->set('mgn_ssl_state', $ssl_new_state);
 			} elseif ($ssl_token !== null && !$ssl_token['found']) {

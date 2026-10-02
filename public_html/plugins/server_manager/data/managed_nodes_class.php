@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.33 - valid_site_domain() and adopt_reported_site_domain(): a status check fills an empty
+ *                mgn_site_url from the domain the node's agent reports (site_copy.md B38)
  * @version 1.32 - the reports_failed_units, reports_failed_backup and reports_failing_recipe options are gone with
  *                the fleet banners that used them (incident_triage.md WP3)
  * @version 1.31 - mgn_cert_problem: the served certificate's current problem, read by the certificate incident;
@@ -498,6 +500,83 @@ class ManagedNode extends SystemBase {
 		error_log('ManagedNode: node ' . (int)$node->key . ' reported web root ' . $path . ' in its ' . $source
 			. ', but its record says ' . $current . '; the record is kept');
 		return 'mismatch';
+	}
+
+	/**
+	 * A site domain as a node's agent reports it (webDir from its config), or
+	 * null when it is not one: a lowercase hostname of two or more labels whose
+	 * last label starts with a letter. An address, a port, a scheme or a path
+	 * is refused: the value becomes an https site address on the record.
+	 */
+	public static function valid_site_domain($domain): ?string {
+		if (!is_string($domain)) {
+			return null;
+		}
+		$domain = strtolower(trim($domain));
+		if ($domain === '' || strlen($domain) > 253) {
+			return null;
+		}
+		$label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+		if (!preg_match('/^(?:' . $label . '\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $domain)) {
+			return null;
+		}
+		return $domain;
+	}
+
+	/**
+	 * Take the site domain the node's agent reported ($source names where). It
+	 * fills an empty mgn_site_url as https://<domain>, so a node that joined on
+	 * its own gets the site address uptime checks and site copies need. It never
+	 * replaces a set one: a different host is logged for the operator and left
+	 * alone. It refuses this management node's own address (that row is the
+	 * plane's own) and an address another live node holds, unless the two are a
+	 * copy and its source. Sets the field and leaves saving to the caller.
+	 *
+	 * Returns what happened: filled, same, mismatch, refused, taken, or none.
+	 */
+	public static function adopt_reported_site_domain($node, $reported, string $source): string {
+		if ($reported === null || $reported === '') {
+			return 'none';
+		}
+		$domain = self::valid_site_domain($reported);
+		if ($domain === null) {
+			error_log('ManagedNode: node ' . (int)$node->key . ' reported a site domain that is not one in its ' . $source
+				. ', ignored: ' . substr(preg_replace('/[^\x20-\x7e]/', '?', (string)$reported), 0, 200));
+			return 'refused';
+		}
+		$current = rtrim(trim((string)$node->get('mgn_site_url')), '/');
+		if ($current !== '') {
+			if (strtolower((string)parse_url($current, PHP_URL_HOST)) === $domain) {
+				return 'same';
+			}
+			error_log('ManagedNode: node ' . (int)$node->key . ' reported site domain ' . $domain . ' in its ' . $source
+				. ', but its record says ' . $current . '; the record is kept');
+			return 'mismatch';
+		}
+		$url = 'https://' . $domain;
+		$own = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
+		if (strcasecmp($own, $url) === 0) {
+			error_log('ManagedNode: node ' . (int)$node->key . ' reported this management node\'s own domain ' . $domain
+				. ' in its ' . $source . '; its site address is left empty');
+			return 'taken';
+		}
+		$copy_of = (int)$node->get('mgn_copy_of_node_id');
+		foreach (array($url, $url . '/') as $candidate) {
+			foreach (new MultiManagedNode(array('mgn_site_url' => $candidate, 'deleted' => false)) as $holder) {
+				if ((int)$holder->key === (int)$node->key) {
+					continue;
+				}
+				$pair = ($copy_of && (int)$holder->key === $copy_of)
+					|| ((int)$holder->get('mgn_copy_of_node_id') === (int)$node->key && $node->key);
+				if (!$pair) {
+					error_log('ManagedNode: node ' . (int)$node->key . ' reported site domain ' . $domain . ' in its ' . $source
+						. ', which node ' . (int)$holder->key . ' already holds; its site address is left empty');
+					return 'taken';
+				}
+			}
+		}
+		$node->set('mgn_site_url', $url);
+		return 'filled';
 	}
 
 	/**

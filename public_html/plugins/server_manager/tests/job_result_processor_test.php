@@ -829,6 +829,60 @@ JobResultProcessor::process(jrp_job($wr_bad, 'check_status', $wr_status('/var/ww
 $wr_bad = new ManagedNode($wr_bad->key, TRUE);
 check(trim((string)$wr_bad->get('mgn_web_root')) === '', 'a malformed report is refused and fills nothing');
 
+section('A status check fills an empty site address, and leaves a set one alone');
+
+// B38: a node that joins on its own has no site address; the agent reports its
+// domain from the site's config, and the status check fills it.
+$sd_status = function ($domain) {
+	return "=== [Step 1/1] check_status ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+		'site_domain' => $domain, 'load_1m' => 0.3, 'uptime' => 'up 2 days'))) . "\n[Step 1/1 OK]";
+};
+$sd_tag = bin2hex(random_bytes(3));
+$sd_domain = 'sd' . $sd_tag . '.example.com';
+$sd_node = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1d", 32)), 'mgn_site_url' => ''));
+JobResultProcessor::process(jrp_job($sd_node, 'check_status', $sd_status($sd_domain)));
+$sd_node = new ManagedNode($sd_node->key, TRUE);
+check($sd_node->get('mgn_site_url') === 'https://' . $sd_domain,
+	'an empty site address is filled as https://<domain>', (string)$sd_node->get('mgn_site_url'));
+
+JobResultProcessor::process(jrp_job($sd_node, 'check_status', $sd_status('other' . $sd_tag . '.example.com')));
+$sd_node = new ManagedNode($sd_node->key, TRUE);
+check($sd_node->get('mgn_site_url') === 'https://' . $sd_domain,
+	'a set site address is never replaced by a different report', (string)$sd_node->get('mgn_site_url'));
+
+// Another live node already holds that address: nothing is filled, so two rows
+// never claim one site.
+$sd_twin = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1e", 32)), 'mgn_site_url' => ''));
+check(ManagedNode::adopt_reported_site_domain($sd_twin, $sd_domain, 'status check') === 'taken'
+	&& trim((string)$sd_twin->get('mgn_site_url')) === '',
+	'an address another node holds is refused', (string)$sd_twin->get('mgn_site_url'));
+
+// ...unless the two are a copy and its source.
+$sd_copy = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1f", 32)), 'mgn_site_url' => '',
+	'mgn_install_state' => 'copy', 'mgn_copy_of_node_id' => (int)$sd_node->key));
+check(ManagedNode::adopt_reported_site_domain($sd_copy, $sd_domain, 'status check') === 'filled'
+	&& $sd_copy->get('mgn_site_url') === 'https://' . $sd_domain,
+	'a copy may carry its source\'s address', (string)$sd_copy->get('mgn_site_url'));
+
+// This management node's own address is never taken by another row: is_self()
+// reads it, and that row is the plane's own.
+$sd_own_host = strtolower((string)parse_url((string)LibraryFunctions::get_absolute_url(), PHP_URL_HOST));
+$sd_self = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x20", 32)), 'mgn_site_url' => ''));
+check(ManagedNode::adopt_reported_site_domain($sd_self, $sd_own_host, 'status check') === 'taken'
+	&& trim((string)$sd_self->get('mgn_site_url')) === '',
+	'this management node\'s own domain is refused', $sd_own_host);
+
+foreach (array('192.0.2.7', 'localhost', 'example.com:8080', 'https://example.com', 'exa mple.com', '::1', '-bad.example.com') as $bad) {
+	check(ManagedNode::valid_site_domain($bad) === null, 'not a site domain: ' . $bad);
+}
+check(ManagedNode::valid_site_domain('Copytest.Jeremytunnell.INFO') === 'copytest.jeremytunnell.info',
+	'a domain is read lowercase');
+
+$sd_bad = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x21", 32)), 'mgn_site_url' => ''));
+JobResultProcessor::process(jrp_job($sd_bad, 'check_status', $sd_status('203.0.113.9')));
+$sd_bad = new ManagedNode($sd_bad->key, TRUE);
+check(trim((string)$sd_bad->get('mgn_site_url')) === '', 'a reported address that is not a domain fills nothing');
+
 section('verify_backup: the node\'s VERIFY_* lines become the plane\'s copy, in plain words');
 
 $vpass = "fetching files-0000.tar.gz.enc\nVERIFY_RESULT=pass\nVERIFY_LEVEL=2\nVERIFY_RUN=chain-20260912_044520/3\n"

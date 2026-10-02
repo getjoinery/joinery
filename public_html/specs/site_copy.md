@@ -176,8 +176,12 @@
     (75176, 75177) have no `mgn_site_url`, so the Copy tab refuses S ("no https site address").
     `adoptJoin` sets a site URL only for this machine's own join, and nothing a node reports carries
     its domain. The refusal says where to set it (the Site URL field in the Overview's connection
-    settings). OPEN, root fix not built: `check_status` reports the site's address and its
-    processor fills an empty `mgn_site_url`, as it already fills an empty web root.
+    settings). Fixed (2026-10-02): agent 1.51.0's `check_status` reports `site_domain` (webDir from
+    the site's config; the management API's stats endpoint 1.3 reports it too), and
+    `ManagedNode::adopt_reported_site_domain` fills an empty `mgn_site_url` as `https://<domain>`
+    from it, as the web root is filled. It never replaces a set address, and refuses an address
+    another live node holds (a copy and its source excepted) and the management node's own.
+    `job_result_processor` 239/239; agent `go test ./...`.
   - **Carried to WP7a:** the switch-over itself. One finding for it: after step 10, T is live and
     answers as S's node id; going back swaps T's key off the node, so T can no longer reach M. The
     way back must quiet T (`site_quiet on`, while T is still the node) before `go_back`, then

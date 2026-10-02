@@ -36,6 +36,7 @@
  * move a site's address (WP7a). Its two pieces that are not about the address
  * are built: the node-id word (take_node_id) and the row swap (SiteCopySwap).
  *
+ * @version 1.1 - the no-site-address refusal says a status check fills it (site_copy.md B38)
  * @version 1.0
  */
 class SiteCopyRunner {
@@ -152,7 +153,8 @@ class SiteCopyRunner {
 		}
 		if (self::site_domain($source) === '') {
 			$why[] = 'It has no https site address on record, and the copy is installed under its domain. '
-				. 'Set the Site URL in the node\'s connection settings on its Overview tab.';
+				. 'Its next status check fills it from the site\'s own config (agent 1.51.0 or later); '
+				. 'or set the Site URL in the node\'s connection settings on its Overview tab.';
 		}
 		if ($for_new_copy) {
 			if (SiteCopy::live_for_source((int)$source->key)) {
