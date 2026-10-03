@@ -24,6 +24,7 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.6 - the account's own name and the list of accounts a server is created on (B47)
  * @version 1.5 - reverse DNS reaches a hosted instance with the operator token, and a dead customer
  *                grant is reported as reconnect by setQuietly
  * @version 1.4 - the buyer origin and its pre-payment states (specs/managed_hosting_phase1_purchase.md §5)
@@ -71,6 +72,7 @@ class CustomerCloudProvisioningTest {
 	function run() {
 		try {
 			$this->test_driver();
+			$this->test_account_name();
 			$this->test_account_tokens();
 			$this->test_provision_model();
 			$this->test_dismiss_rules();
@@ -487,6 +489,21 @@ class CustomerCloudProvisioningTest {
 		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$prov->key]);
 	}
 
+	private function test_account_name() {
+		section('The account\'s own name (B47)');
+		$driver = $this->driverWith([
+			$this->jsonResponse(200, ['username' => 'getjoinery']),
+			$this->jsonResponse(200, ['company' => 'Joinery']),
+		]);
+		check($driver instanceof CloudAccountIdentity && $driver->accountName() === 'Joinery (user getjoinery)',
+			'the account\'s company with the token\'s user');
+		$driver = $this->driverWith([
+			$this->jsonResponse(200, ['username' => 'getjoinery']),
+			$this->jsonResponse(401, ['errors' => [['reason' => 'Your OAuth token is not authorized to use this endpoint.']]]),
+		]);
+		check($driver->accountName() === 'user getjoinery', 'a token without the account scope is named by its user');
+	}
+
 	private function test_account_tokens() {
 		section('CustomerCloudAccount token round-trip');
 
@@ -519,6 +536,21 @@ class CustomerCloudProvisioningTest {
 
 		check(CustomerCloudAccount::get_for_user($this->user_id, 'linode') !== null, 'get_for_user finds the link');
 		check(CustomerCloudAccount::get_for_user($this->user_id, 'other') === null, 'get_for_user scopes by provider');
+
+		// The accounts a server can be created on: named as the provider names
+		// them, and an expired connection is said, not offered (B47).
+		$loaded->set('cca_account_name', 'Acme (user acme)');
+		$loaded->save();
+		$targets = CustomerCloudAccount::provision_targets(false);
+		check(strpos($targets['options'][(string)$loaded->key] ?? '', 'Linode — Acme (user acme), connected by') === 0,
+			'a connected account is offered under its provider name', json_encode($targets['options']));
+		$loaded->set('cca_token_expires', gmdate('Y-m-d H:i:s', time() - 60));
+		$loaded->set('cca_refresh_token', null);
+		$loaded->save();
+		$targets = CustomerCloudAccount::provision_targets(false);
+		$said = array_filter($targets['unusable'], function ($w) { return strpos($w, 'permission expired') !== false; });
+		check(!isset($targets['options'][(string)$loaded->key]) && $said, 'an expired connection is not offered, and says why',
+			json_encode($targets));
 	}
 
 	private function test_provision_model() {

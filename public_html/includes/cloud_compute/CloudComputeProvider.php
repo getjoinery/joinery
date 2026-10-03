@@ -14,6 +14,7 @@
  *   ip     string  first public IPv4, '' until assigned
  *   label  string  provider-side label
  *
+ * @version 1.5 - CloudAccountIdentity: the provider's own name for the account a token reaches
  * @version 1.4 - CloudAddressSwap: the optional capability to swap two instances' IPv4 addresses
  *                (specs/site_copy.md WP12)
  * @version 1.3 - CloudInstanceTransfers: the optional capability to hand an instance to another
@@ -234,3 +235,18 @@ interface CloudAddressSwap {
 }
 
 class CloudComputeException extends Exception {}
+
+/**
+ * Optional capability: the provider's own name for the account a token
+ * reaches, so a page offering accounts names each as the provider does rather
+ * than by who connected it. The caller asks `instanceof CloudAccountIdentity`.
+ */
+interface CloudAccountIdentity {
+
+	/**
+	 * A short name the account's owner recognizes at the provider.
+	 *
+	 * @throws CloudComputeException when the token cannot read it
+	 */
+	public function accountName(): string;
+}

@@ -6,6 +6,7 @@
  * POST actions delegate to ProvisioningSetup and redirect back with a
  * session message; GET renders the live status of every checklist item.
  *
+ * @version 1.6 - saving the hosted card reads the operator token's account name (server_manager_operator_cloud_account)
  * @version 1.5 - credentials go through FormWriterV2Base::process_secretinput(); the promotion code's
  *   remove box is gone (Reset and save blank removes it)
  * @version 1.4 - the master-key field arrives as hosted_smtp2go_master_key (the view's field name; smtp2go_api_key is core's)
@@ -101,9 +102,21 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				ProvisioningSetup::writeSetting('server_manager_storage_referral_url',
 					trim($input['storage_referral_url'] ?? ''));
 				$save_secret('operator_cloud_token', 'server_manager_operator_cloud_token');
+				// The account's own name, so pages offering it say which account it is.
+				$account_name = '';
+				$operator_token = trim(ProvisioningSetup::readSecret('server_manager_operator_cloud_token'));
+				if ($operator_token !== '') {
+					try {
+						$account_name = mb_substr((new LinodeComputeDriver($operator_token))->accountName(), 0, 255);
+					} catch (Exception $e) {
+						$error = 'Hosted tier settings saved, but the operator token could not read its account\'s name: '
+							. $e->getMessage();
+					}
+				}
+				ProvisioningSetup::writeSetting('server_manager_operator_cloud_account', $account_name);
 				$save_secret('hosted_smtp2go_master_key', 'server_manager_smtp2go_api_key');
 				$save_secret('smtp2go_webhook_secret', 'server_manager_smtp2go_webhook_secret');
-				$message = 'Hosted tier settings saved.';
+				$message = $error ? null : 'Hosted tier settings saved.';
 			} else {
 				$error = 'Unknown action.';
 			}
