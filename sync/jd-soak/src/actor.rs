@@ -130,7 +130,9 @@ impl Actor {
                         sha256: done.sha256,
                         size: done.size,
                         mtime_ms: done.mtime_ms,
-                        parent_inode: done.parent_inode,
+                        parent_inode: done.folder.inode,
+                        parent_birth_ns: done.folder.birth_ns,
+                        replaces_sha256: done.replaces,
                         ts_ms: now_ms(),
                     })?;
                 }
@@ -159,16 +161,17 @@ impl Actor {
                 let target = self.resolve(path)?;
                 std::fs::create_dir_all(&target)?;
                 make_tree_writable(&self.root, &target);
-                Ok(vec![Done::dir(op.kind(), path)])
+                Ok(vec![Done::dir(op.kind(), path, Folder::of(&target))])
             }
             FsOp::Write { path, seed, size } => {
                 let target = self.resolve(path)?;
                 self.parent_of(&target)?;
                 let bytes = content_bytes(*seed, *size);
+                let replaces = content_of(&target);
                 let mut file = std::fs::File::create(&target)?;
                 file.write_all(&bytes)?;
                 file.flush()?;
-                Ok(vec![Done::content(op.kind(), path, &bytes, &target)])
+                Ok(vec![Done { replaces, ..Done::content(op.kind(), path, &bytes, &target) }])
             }
             FsOp::AtomicWrite {
                 path,
@@ -184,15 +187,17 @@ impl Actor {
                 file.write_all(&bytes)?;
                 file.flush()?;
                 drop(file);
+                let replaces = content_of(&final_path);
                 std::fs::rename(&temp_path, &final_path)?;
                 // One commit, for the destination. The temp file never existed
                 // as far as anything downstream is concerned, and journaling it
                 // would put a path in the oracle that is *supposed* to vanish.
-                Ok(vec![Done::content(op.kind(), path, &bytes, &final_path)])
+                Ok(vec![Done { replaces, ..Done::content(op.kind(), path, &bytes, &final_path) }])
             }
             FsOp::Append { path, seed, size } => {
                 let target = self.resolve(path)?;
                 self.parent_of(&target)?;
+                let replaces = content_of(&target);
                 let mut file = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
@@ -211,7 +216,8 @@ impl Actor {
                     sha256: Some(sha),
                     size: len,
                     mtime_ms: mtime_ms(&target),
-                    parent_inode: parent_inode(&target),
+                    folder: Folder::of(&target),
+                    replaces,
                 }])
             }
             FsOp::Rename { from, to } => {
@@ -219,11 +225,12 @@ impl Actor {
                 let dest = self.resolve(to)?;
                 self.parent_of(&dest)?;
                 // The directory it leaves, read before it leaves: the custody
-                // check tells a rename in place from a move by it, for a file
-                // this device's user never wrote (a download) as for one it did.
-                let left = parent_inode(&source);
+                // check withdraws what stood under this name there, and tells
+                // a rename in place from a move by it, for a file this
+                // device's user never wrote (a download) as for one it did.
+                let left = Folder::of(&source);
                 std::fs::rename(&source, &dest)?;
-                let mut done = vec![Done { parent_inode: left, ..Done::dir("rename", from) }];
+                let mut done = vec![Done::dir("rename", from, left)];
                 // The destination carries the content forward, so it needs a
                 // commit of its own or the oracle stops looking for bytes that
                 // are still very much the user's.
@@ -235,10 +242,11 @@ impl Actor {
                         sha256: Some(sha),
                         size: len,
                         mtime_ms: mtime_ms(&dest),
-                        parent_inode: parent_inode(&dest),
+                        folder: Folder::of(&dest),
+                        replaces: None,
                     });
                 } else {
-                    done.push(Done::dir("rename_into", to));
+                    done.push(Done::dir("rename_into", to, Folder::of(&dest)));
                 }
                 Ok(done)
             }
@@ -259,7 +267,8 @@ impl Actor {
                             sha256: Some(sha),
                             size: len,
                             mtime_ms: mtime_ms(path),
-                            parent_inode: parent_inode(path),
+                            folder: Folder::of(path),
+                            replaces: None,
                         });
                     }
                 }
@@ -267,19 +276,22 @@ impl Actor {
             }
             FsOp::Remove { path } => {
                 let target = self.resolve(path)?;
+                let left = Folder::of(&target);
                 std::fs::remove_file(&target)?;
-                Ok(vec![Done::dir(op.kind(), path)])
+                Ok(vec![Done::dir(op.kind(), path, left)])
             }
             FsOp::RemoveDir { path } => {
                 let target = self.resolve(path)?;
+                let left = Folder::of(&target);
                 std::fs::remove_dir_all(&target)?;
-                Ok(vec![Done::dir(op.kind(), path)])
+                Ok(vec![Done::dir(op.kind(), path, left)])
             }
             FsOp::Touch {
                 path,
                 mtime_delta_secs,
             } => {
                 let target = self.resolve(path)?;
+                let replaces = content_of(&target);
                 let file = std::fs::File::options().write(true).open(&target)?;
                 let base = SystemTime::now();
                 let when = if *mtime_delta_secs >= 0 {
@@ -295,7 +307,8 @@ impl Actor {
                     sha256: Some(sha),
                     size: len,
                     mtime_ms: mtime_ms(&target),
-                    parent_inode: parent_inode(&target),
+                    folder: Folder::of(&target),
+                    replaces,
                 }])
             }
         }
@@ -388,19 +401,39 @@ struct Done {
     sha256: Option<String>,
     size: u64,
     mtime_ms: Option<u64>,
-    /// The inode of the directory a content landed in, for the custody check.
-    parent_inode: Option<u64>,
+    /// The directory the commit happened in, for the custody check.
+    folder: Folder,
+    /// The content of the file a write, save, append or touch wrote over.
+    replaces: Option<String>,
+}
+
+/// A directory by identity, as the custody check reads where a commit
+/// happened: its inode, and its birth where the filesystem keeps one, so a
+/// later directory that takes over a freed inode is not mistaken for it.
+#[derive(Debug, Clone, Copy, Default)]
+struct Folder {
+    inode: Option<u64>,
+    birth_ns: Option<u64>,
+}
+
+impl Folder {
+    /// The directory `path` stands in, on this device, now.
+    fn of(path: &Path) -> Folder {
+        path.parent().map(dir_identity).unwrap_or_default()
+    }
 }
 
 impl Done {
-    fn dir(op: &str, path: &str) -> Done {
+    /// A commit with no content: a delete, a mkdir, either half of a rename.
+    fn dir(op: &str, path: &str, folder: Folder) -> Done {
         Done {
             op: op.into(),
             path: path.into(),
             sha256: None,
             size: 0,
             mtime_ms: None,
-            parent_inode: None,
+            folder,
+            replaces: None,
         }
     }
 
@@ -411,7 +444,8 @@ impl Done {
             sha256: Some(hash_bytes(bytes)),
             size: bytes.len() as u64,
             mtime_ms: mtime_ms(on_disk),
-            parent_inode: parent_inode(on_disk),
+            folder: Folder::of(on_disk),
+            replaces: None,
         }
     }
 }
@@ -427,16 +461,34 @@ pub fn hash_file(path: &Path) -> std::io::Result<(String, u64)> {
     jd_proto::sha256_reader(file)
 }
 
-/// The inode of the directory `path` stands in, on the device that wrote it.
+/// The content of the file at `path`, if a file stands there: what a write
+/// about to go over it replaces.
+fn content_of(path: &Path) -> Option<String> {
+    if !path.is_file() {
+        return None;
+    }
+    hash_file(path).ok().map(|(sha, _)| sha)
+}
+
+/// A directory's inode and birth time, as the custody check compares them.
 #[cfg(unix)]
-pub fn parent_inode(path: &Path) -> Option<u64> {
+fn dir_identity(dir: &Path) -> Folder {
     use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(path.parent()?).ok().map(|m| m.ino())
+    match std::fs::metadata(dir) {
+        Ok(m) => Folder { inode: Some(m.ino()), birth_ns: birth_ns(&m) },
+        Err(_) => Folder::default(),
+    }
 }
 
 #[cfg(not(unix))]
-pub fn parent_inode(_path: &Path) -> Option<u64> {
-    None
+fn dir_identity(_dir: &Path) -> Folder {
+    Folder::default()
+}
+
+/// A birth time in nanoseconds since the epoch, where the filesystem keeps
+/// one (ext4 and APFS do).
+pub fn birth_ns(m: &std::fs::Metadata) -> Option<u64> {
+    m.created().ok()?.duration_since(UNIX_EPOCH).ok().map(|d| d.as_nanos() as u64)
 }
 
 pub fn mtime_ms(path: &Path) -> Option<u64> {
@@ -551,6 +603,88 @@ mod tests {
             _ => None,
         });
         assert_eq!(commit, Some(Some(workspace)));
+    }
+
+    #[test]
+    fn a_write_journals_the_content_it_wrote_over() {
+        // The custody check follows a file across its versions: a peer's user
+        // who moves the file moves this device's edit with it (soak run 1586).
+        let bed = Bed::new("replaces");
+        let mut actor = bed.actor(vec![
+            FsOp::Write { path: "a.txt".into(), seed: 1, size: 10 },
+            FsOp::Write { path: "a.txt".into(), seed: 2, size: 10 },
+            FsOp::AtomicWrite { path: "a.txt".into(), temp: ".a.tmp".into(), seed: 3, size: 10 },
+            FsOp::Append { path: "a.txt".into(), seed: 4, size: 10 },
+            FsOp::Touch { path: "a.txt".into(), mtime_delta_secs: -60 },
+            FsOp::Rename { from: "a.txt".into(), to: "b.txt".into() },
+        ]);
+        for _ in 0..6 {
+            actor.step().unwrap();
+        }
+        let commits: Vec<(String, Option<String>, Option<String>)> = bed
+            .records()
+            .into_iter()
+            .filter_map(|r| match r {
+                Record::ActorCommit { op, sha256, replaces_sha256, .. } => Some((op, sha256, replaces_sha256)),
+                _ => None,
+            })
+            .collect();
+        let ops: Vec<&str> = commits.iter().map(|(op, _, _)| op.as_str()).collect();
+        assert_eq!(ops, ["write", "write", "atomic_write", "append", "touch", "rename", "rename_into"]);
+        assert_eq!(commits[0].2, None, "the first write went over nothing");
+        for i in 1..5 {
+            assert_eq!(commits[i].2, commits[i - 1].1, "{} replaces what stood there", commits[i].0);
+            assert!(commits[i].2.is_some());
+        }
+        // A move carries a content; it is no version of anything.
+        assert_eq!(commits[6].2, None);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn every_commit_journals_the_directory_it_happened_in() {
+        // The custody check keys every placement and every withdrawal by the
+        // directory it happened in, so a delete, a mkdir and both halves of a
+        // rename carry one as a write does (soak run 1572).
+        use std::os::unix::fs::MetadataExt;
+        let bed = Bed::new("every-folder");
+        let mut actor = bed.actor(vec![
+            FsOp::Mkdir { path: "d".into() },
+            FsOp::Write { path: "d/x.txt".into(), seed: 1, size: 10 },
+            FsOp::Rename { from: "d/x.txt".into(), to: "e/x.txt".into() },
+            FsOp::Rename { from: "e".into(), to: "f".into() },
+            FsOp::Remove { path: "f/x.txt".into() },
+            FsOp::RemoveDir { path: "d".into() },
+        ]);
+        for _ in 0..6 {
+            actor.step().unwrap();
+        }
+        let m = std::fs::metadata(&bed.root).unwrap();
+        let workspace = (Some(m.ino()), birth_ns(&m));
+        let at: Vec<(String, (Option<u64>, Option<u64>))> = bed
+            .records()
+            .into_iter()
+            .filter_map(|r| match r {
+                Record::ActorCommit { op, parent_inode, parent_birth_ns, .. } => Some((op, (parent_inode, parent_birth_ns))),
+                _ => None,
+            })
+            .collect();
+        let ops: Vec<&str> = at.iter().map(|(op, _)| op.as_str()).collect();
+        assert_eq!(ops, ["mkdir", "write", "rename", "rename_into", "rename", "rename_into", "remove", "remove_dir"]);
+        assert!(at.iter().all(|(_, (inode, _))| inode.is_some()), "{at:?}");
+        let folder = |i: usize| at[i].1;
+        // mkdir d, both halves of the folder's rename e -> f, and remove_dir d
+        // happened in the workspace.
+        for i in [0, 4, 5, 7] {
+            assert_eq!(folder(i), workspace, "{}", at[i].0);
+        }
+        // The file was written in d and left it.
+        assert_eq!(folder(1), folder(2));
+        assert_ne!(folder(1), workspace);
+        // It came into e, and was deleted from that same directory, by then
+        // called f.
+        assert_eq!(folder(3), folder(6));
+        assert_ne!(folder(3), folder(1));
     }
 
     #[test]

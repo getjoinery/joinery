@@ -1861,7 +1861,47 @@ no named flaw is a reason to name one.
   placeholder-follow rename in `pass.rs` must `continue` on `NoFolder` once
   placeholders follow across parents at all (they do not today: separate
   bug). Run 1572's custody failure in the same window was the oracle's, not
-  the engine's (path-keyed placements); that fix is its own piece.
+  the engine's (path-keyed placements): B-1572.
+- **B-1572, fixed 2026-10-03 (soak rig run 1572, the custody oracle in
+  `jd-soak`): the custody check keyed placements by path.** Two errors
+  conspired. A user's own folder rename withdrew every placement beneath it
+  by prefix, and a peer's folder rename, which the engine applies with no
+  actor record, left placements under names no later commit could find.
+  Run 1572 failed a file standing exactly where its user put it. The close:
+  **placements and withdrawals are keyed by the directory and the name in
+  it, never by path**. Actors journal the directory's inode and birth on
+  every commit (deletes, mkdirs and both halves of a rename included). A
+  recycled inode with another birth is not the folder. A commit with no
+  directory (an older journal) takes nothing. With that keying the check
+  judges about twice as many contents. The old one skipped most of what
+  sat under a renamed folder, and the soak's messy user renames constantly.
+  Judging them exposed a false positive (run 1586: one device saves over a
+  file while a peer moves it; the engine keeps one file, the edit in the
+  peer's folder). Writes therefore journal the content they replace
+  (`replaces_sha256`), custody follows a file across its versions, and only
+  a commit that chooses a folder (a write over nothing, a move into another
+  directory, a swap) sets who placed the file. A write over a file chooses
+  none, like an in-place rename (run 1541). Pins: the real run-1572 and
+  run-1586 records, a user's own folder rename, a peer's folder rename with a
+  carry-back, a recycled inode, a delete, the edit before and after a peer's
+  move, a peer's edit with a stray conflict copy, an edit reviving no earlier
+  placement, and the actor journaling both fields. Each knockout is red on
+  exactly its pins. Replayed on every frozen rig snapshot (placements rebuilt
+  from the state stores, test `custody_on_a_frozen_snapshot`): run 1572 fails
+  under the old check on the same content and passes under the new one. 21
+  snapshots of the old client that the old check passed fail under the new
+  one. Two traced are real engine misplacements. One is run 1619: a peer
+  renamed `Sub 12` and made a new `Sub 12`, and device-a took its existing
+  directory for the new folder (adoption by name, the AC/AE family).
+  `create_local_folder`'s guard against a directory another folder holds did
+  not fire. Open; trace it if it recurs on the F2 client. Coverage cost,
+  for the owner: an edit over a file a peer created and this device never
+  moved is judged nowhere. Judging every version on the file's placer to
+  recover it false-positives a legitimate pre-move conflict copy. BUILD
+  review NEEDS MORE on the first lineage rule (last writer placed the
+  file), then VALID on the folder-choosing rule (public-html-a5,
+  2026-10-03). Deployed to the rig and the Mac before the commit, with the
+  reviewer's agreement.
 - **B2, narrowed (re-checked 2026-10-02 on `10b2b55d`: seed green in all
   five modes; a plain file's completed move is agreed Done on its own
   identity, `completed_here`, pinned by

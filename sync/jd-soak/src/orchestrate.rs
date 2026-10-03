@@ -853,6 +853,8 @@ mod tests {
                 size: 1,
                 mtime_ms: None,
                 parent_inode: None,
+                parent_birth_ns: None,
+                replaces_sha256: None,
                 ts_ms: 1,
             })
             .unwrap();
