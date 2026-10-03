@@ -11,6 +11,7 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.13 - connected accounts named as the provider names them; an expired connection is not offered (B47)
  * @version 1.12 - the Clone install type is gone (site_copy.md WP9): a site on a new server is a copy, made
  *                 from the source node's Copy tab
  * @version 1.11 - the region falls back to us-east
@@ -142,17 +143,8 @@ if ($_POST && isset($_POST['mgn_name'])) {
 }
 
 // Connected cloud accounts — target options for cloud-instance birth
-$cloud_accounts = new MultiCustomerCloudAccount(['status' => 'active', 'deleted' => false]);
-$cloud_accounts->load();
-$cloud_account_options = ['' => '-- Select a connected account --'];
-foreach ($cloud_accounts as $ca) {
-	$ca_user = new User($ca->get('cca_usr_user_id'), TRUE);
-	$who = $ca_user->key
-		? trim($ca_user->get('usr_first_name') . ' ' . $ca_user->get('usr_last_name'))
-		: ('user #' . $ca->get('cca_usr_user_id'));
-	$cloud_account_options[$ca->key] = ucfirst($ca->get('cca_provider')) . ' — ' . $who
-		. (CustomerCloudAccount::grant_expired($ca) ? ' (grant expired — re-connect first)' : '');
-}
+$cloud_targets = CustomerCloudAccount::provision_targets(false);
+$cloud_account_options = ['' => '-- Select a connected account --'] + $cloud_targets['options'];
 $has_cloud_accounts = count($cloud_account_options) > 1;
 
 $page = new AdminPage();
@@ -218,6 +210,9 @@ if ($has_cloud_accounts) {
 } else {
 	echo '<div class="alert alert-info mb-3">No cloud account is connected yet. '
 		. '<a href="/profile/server_manager/connect_cloud" class="alert-link">Connect a Linode account</a>, then return here.</div>';
+}
+foreach ($cloud_targets['unusable'] as $why) {
+	echo '<p class="small text-muted">Not offered: ' . htmlspecialchars($why) . '</p>';
 }
 $formwriter->textinput('cloud_region', 'Region', [
 	'placeholder' => 'e.g., us-east',

@@ -6,6 +6,8 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.11 - instanceTypes(): the shared-CPU plans with their memory and disk
+ * @version 1.10 - CloudAccountIdentity: accountName() from the account's company, else the token's user
  * @version 1.9 - CloudAddressSwap: addressReport (public IPv4s, IPv6, Network Helper by the instance's
  *                interface generation), ipAddress, assignIpv4 (POST networking/ips/assign), instanceFirewalls,
  *                rebootInstance (specs/site_copy.md WP12). The swap needs ips:read_write.
@@ -38,7 +40,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
-class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap {
+class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity {
 
 	const API_BASE = 'https://api.linode.com/v4/';
 
@@ -480,6 +482,22 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			: $add($key, $label, 'pass');
 	}
 
+	/**
+	 * The shared-CPU plans (Nanode and Standard), smallest first, each as
+	 * [id, memory_mb, disk_mb].
+	 */
+	public function instanceTypes(): array {
+		$out = array();
+		foreach ((array)($this->request('GET', 'linode/types?page_size=500')['data'] ?? array()) as $t) {
+			if (!in_array($t['class'] ?? '', array('nanode', 'standard'), true)) {
+				continue;
+			}
+			$out[] = array('id' => (string)$t['id'], 'memory_mb' => (int)($t['memory'] ?? 0), 'disk_mb' => (int)($t['disk'] ?? 0));
+		}
+		usort($out, function ($a, $b) { return $a['memory_mb'] <=> $b['memory_mb'] ?: $a['disk_mb'] <=> $b['disk_mb']; });
+		return $out;
+	}
+
 	/** An instance type's list price a month, in US dollars, or null when Linode does not say. */
 	public function typeMonthlyPrice(string $type): ?float {
 		$info = $this->request('GET', 'linode/types/' . rawurlencode($type));
@@ -569,6 +587,25 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			'label'  => isset($instance['label']) ? (string)$instance['label'] : '',
 			'region' => isset($instance['region']) ? (string)$instance['region'] : '',
 		);
+	}
+
+	/**
+	 * The account's company name when the token may read the account, and
+	 * the token's own user either way: "Joinery (user getjoinery)". A token
+	 * without the account scope still reads its own profile.
+	 */
+	public function accountName(): string {
+		$user = trim((string)($this->request('GET', 'profile')['username'] ?? ''));
+		$company = '';
+		try {
+			$company = trim((string)($this->request('GET', 'account')['company'] ?? ''));
+		} catch (CloudComputeException $e) {
+			// No account scope: the user names it alone.
+		}
+		if ($user === '') {
+			return $company;
+		}
+		return $company !== '' ? $company . ' (user ' . $user . ')' : 'user ' . $user;
 	}
 
 	/**

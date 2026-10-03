@@ -96,6 +96,9 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.7 - the new server is the source's size: its own plan when this management node created it, else
+ *                 the smallest plan with its memory and the copy's disk (same_size_type); a container site's
+ *                 copy is not held to its shared server's memory
  * @version 1.6 - a container site and a management node (not this one) are copied from their backups; a
  *                 copy from backups has its own release floor, the first with the copy's key page
  * @version 1.5 - the switch by IP swap (site_copy.md WP12) and the copy from backups (WP10)
@@ -116,6 +119,9 @@ class SiteCopyRunner {
 
 	/** The words a copy from backups must report before a run starts. */
 	const BACKUPS_COPY_WORDS = array('host_report', 'copy_look', 'copy_take_key', 'copy_stage', 'copy_restore', 'site_census');
+
+	/** What the operating system and the installed release take on the copy's disk, beside what the copy needs. */
+	const OS_DISK = 6442450944;
 
 	/** How old the source's newest backup may be when a run starts. */
 	const BACKUP_MAX_AGE_HOURS = 24;
@@ -344,6 +350,55 @@ class SiteCopyRunner {
 		return $why;
 	}
 
+	/** The plan this management node created the source's server on, or ''. */
+	public static function source_instance_type(ManagedNode $source): string {
+		if (trim((string)$source->get('mgn_container_name')) !== '') {
+			return '';   // a container's plan is its shared server's, not its own
+		}
+		$p = CustomerCloudProvision::latest_for_node($source->key);
+		return ($p && (string)$p->get('cvp_provider') === 'linode') ? trim((string)$p->get('cvp_instance_type')) : '';
+	}
+
+	/** The memory the source's machine reports, in bytes, or 0 when it has not said. */
+	public static function source_memory_bytes(ManagedNode $source): int {
+		$report = json_decode((string)$source->get('mgn_last_host_report'), true);
+		$bytes = is_array($report) ? (int)($report['memory']['total_bytes'] ?? 0) : 0;
+		if ($bytes <= 0) {
+			$status = json_decode((string)$source->get('mgn_last_status_data'), true);
+			$bytes = is_array($status) ? (int)($status['memory_total_mb'] ?? 0) * 1048576 : 0;
+		}
+		return $bytes;
+	}
+
+	/**
+	 * The copy's server is the source's size: the source's own plan when this
+	 * management node created its server, otherwise the smallest plan with at
+	 * least the memory the source's machine reports and the disk this copy
+	 * needs (a container reports its whole shared server's memory).
+	 *
+	 * @param callable $types returns the provider's plans, [id, memory_mb, disk_mb], smallest first
+	 * @throws SiteCopyException when the source's size is not known
+	 */
+	public static function same_size_type(ManagedNode $source, string $from, callable $types): string {
+		$own = self::source_instance_type($source);
+		if ($own !== '') {
+			return $own;
+		}
+		$memory = self::source_memory_bytes($source);
+		if ($memory <= 0) {
+			throw new SiteCopyException('This site\'s server has not reported its memory, so the copy\'s size is not known. '
+				. 'Run a status check on it, then try again.');
+		}
+		$disk = self::disk_needed(self::newest_chain($source, self::chain_age_limit($from))) + self::OS_DISK;
+		foreach ($types() as $t) {
+			if ($t['memory_mb'] * 1048576 >= $memory && $t['disk_mb'] * 1048576 >= $disk) {
+				return $t['id'];
+			}
+		}
+		throw new SiteCopyException('No plan has ' . BackupRunner::human($memory) . ' of memory and '
+			. BackupRunner::human($disk) . ' of disk.');
+	}
+
 	/** The source's site directory name: what the copy is installed under. */
 	public static function site_name(ManagedNode $source): string {
 		return basename(dirname(rtrim((string)$source->get('mgn_web_root'), '/')));
@@ -414,8 +469,8 @@ class SiteCopyRunner {
 		$account = (string)($opts['account'] ?? '');
 		$region = trim((string)($opts['region'] ?? ''));
 		$type = trim((string)($opts['type'] ?? ''));
-		if (!preg_match('/^[a-z0-9-]{2,40}$/', $region) || !preg_match('/^[a-z0-9-]{2,60}$/', $type)) {
-			throw new SiteCopyException('Choose the new server\'s region and type.');
+		if (!preg_match('/^[a-z0-9-]{2,40}$/', $region)) {
+			throw new SiteCopyException('Choose the new server\'s region.');
 		}
 
 		$provision = new CustomerCloudProvision(NULL);
@@ -438,6 +493,16 @@ class SiteCopyRunner {
 			$provision->set('cvp_cca_customer_cloud_account_id', (int)$cca->key);
 			$provision->set('cvp_usr_user_id', (int)$cca->get('cca_usr_user_id'));
 			$provision->set('cvp_provider', $cca->get('cca_provider'));
+		}
+		if ($type === '') {
+			$token = $account === 'operator' ? ProvisionCustomerCloud::operator_compute_token()
+				: (string)(($t = $cca->getToken()) ? $t->getAccessToken() : '');
+			$type = self::same_size_type($source, $from, function () use ($token) {
+				return (new LinodeComputeDriver($token))->instanceTypes();
+			});
+		}
+		if (!preg_match('/^[a-z0-9-]{2,60}$/', $type)) {
+			throw new SiteCopyException('Choose the new server\'s type.');
 		}
 		$provision->set('cvp_origin', 'admin');
 		$provision->set('cvp_domain', self::site_domain($source));
@@ -1109,7 +1174,9 @@ class SiteCopyRunner {
 			return 'the copy\'s server did not report its disk';
 		}
 		$t_mem = (int)($t['memory']['total_bytes'] ?? 0);
-		$s_mem = is_array($s) ? (int)($s['memory']['total_bytes'] ?? 0) : 0;
+		// A container reports its whole shared server's memory, not the
+		// site's, so a container site may be copied onto a smaller server.
+		$s_mem = (is_array($s) && trim((string)$source->get('mgn_container_name')) === '') ? (int)($s['memory']['total_bytes'] ?? 0) : 0;
 		if ($s_mem > 0 && $t_mem > 0 && $t_mem < $s_mem * 0.9) {
 			return 'the copy\'s server has ' . BackupRunner::human($t_mem) . ' of memory and the source has '
 				. BackupRunner::human($s_mem) . '; a copy needs at least the source\'s';

@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.39 - a copy from backups starts with no tick: nothing it does before the switch-over touches the site,
+ *                 and the switch-over asks that the old server is off
  * @version 1.38 - the switch-over's method (proxied origin, IP swap, the owner's own DNS change) and a copy from
  *                backups (site_copy.md WP12, WP10)
  * @version 1.37 - site copy switch-over (specs/site_copy.md WP7a): copy_switch, copy_move, copy_retry_start,
@@ -702,13 +704,8 @@ class NodeDetailActions {
 				}
 				$copy_url = $base_url . '&tab=copy';
 				// Where the copy comes from: the running site, or its backups
-				// alone when its server is dead (WP10).
+				// alone (WP10).
 				$copy_from = (string)($_POST['copy_from'] ?? SiteCopy::FROM_SOURCE);
-				if (in_array($action, array('copy_new_server', 'copy_own_server'), true)
-						&& $copy_from === SiteCopy::FROM_BACKUPS && empty($_POST['copy_dead_confirm'])) {
-					self::fail($session, $page_regex, 'Tick the box: a copy from backups is for a site whose server is dead. Nothing was done.');
-					return $copy_url;
-				}
 				if ($action === 'copy_new_server') {
 					SiteCopyRunner::start_new_server($node, [
 						'account' => (string)($_POST['copy_account'] ?? ''),

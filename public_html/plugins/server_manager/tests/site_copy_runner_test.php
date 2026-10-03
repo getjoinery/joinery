@@ -14,6 +14,7 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.1 - the copy's server is the source's size
  * @version 1.0
  */
 
@@ -234,6 +235,43 @@ $listing = array('chains' => array(array('chain_id' => $chain_id, 'profile' => B
 SiteCopyRunner::$chain_lister = function ($node) use (&$listing) { return $listing; };
 $chain = SiteCopyRunner::newest_chain($src);
 check($chain['chain_id'] === $chain_id && $chain['time'] === $chain_time, 'the copy is made from the newest manager chain');
+
+// The copy's server is the source's size.
+$plans = function () {
+	return array(
+		array('id' => 'g6-nanode-1', 'memory_mb' => 1024, 'disk_mb' => 25600),
+		array('id' => 'g6-standard-1', 'memory_mb' => 2048, 'disk_mb' => 51200),
+		array('id' => 'g6-standard-2', 'memory_mb' => 4096, 'disk_mb' => 81920),
+	);
+};
+check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $plans) === 'g6-nanode-1',
+	'a 1 GB server (it reports a little less) is copied onto the 1 GB plan');
+$n = new ManagedNode($src->key, TRUE);
+$n->set('mgn_last_host_report', json_encode(array('memory' => array('total_bytes' => 4106113024))));
+check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans) === 'g6-standard-2', 'a 4 GB server onto the 4 GB plan');
+$n->set('mgn_last_host_report', null);
+$n->set('mgn_last_status_data', json_encode(array('memory_total_mb' => 1900)));
+check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans) === 'g6-standard-1',
+	'with no host report, the memory its status reports');
+$n->set('mgn_last_status_data', null);
+$threw = '';
+try { SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans); } catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'not reported its memory') !== false, 'with no memory reported, the size is not guessed', $threw);
+$own = new CustomerCloudProvision(NULL);
+foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => 'scpsize.example.org', 'cvp_slug' => 'harnessscr-size-' . bin2hex(random_bytes(3)),
+	'cvp_status' => 'done', 'cvp_docker_mode' => 'bare-metal', 'cvp_provider' => 'linode', 'cvp_instance_type' => 'g6-standard-1',
+	'cvp_mgn_managed_node_id' => (int)$src->key) as $k => $v) {
+	$own->set($k, $v);
+}
+$own->save();
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $own->key);
+check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $plans) === 'g6-standard-1',
+	'a server this management node created is copied onto its own plan');
+$n = new ManagedNode($src->key, TRUE);
+$n->set('mgn_container_name', 'scpsite');
+check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans) === 'g6-nanode-1',
+	'a container\'s plan is its shared server\'s: sized by memory instead');
+$own->permanent_delete();
 $stale = $listing;
 $stale['chains'][0]['runs'][0]['time'] = gmdate('Y-m-d\TH:i:s\Z', time() - 30 * 3600);
 SiteCopyRunner::$chain_lister = function ($node) use ($stale) { return $stale; };
@@ -386,6 +424,18 @@ SiteCopyRunner::advance($copy); $copy->load();
 check($copy->status() === SiteCopy::STATUS_HALTED && strpos((string)$copy->get('scp_halt_reason'), 'free') !== false
 	&& empty($copy->steps()[1]['job_id']), 'a copy without the disk for the run stops before the export',
 	(string)$copy->get('scp_halt_reason'));
+
+// Memory: a copy holds at least its source's, except a container site's,
+// whose report is its whole shared server's.
+$small = new ManagedNode($cnode->key, TRUE);
+$small->set('mgn_last_host_report', json_encode(array('memory' => array('total_bytes' => 1000000000),
+	'disk' => array('avail_bytes' => 90000000000))));
+$big = new ManagedNode($src->key, TRUE);
+$big->set('mgn_last_host_report', json_encode(array('memory' => array('total_bytes' => 4106113024))));
+$why = (string)SiteCopyRunner::fit_refusal($copy, $big, $small);
+check(strpos($why, 'of memory') !== false, 'a 1 GB copy of a 4 GB bare-metal server is refused', $why);
+$big->set('mgn_container_name', 'scpsite');
+check(SiteCopyRunner::fit_refusal($copy, $big, $small) === null, 'a 1 GB copy of a container site on a 4 GB shared server is not');
 
 // The source moved to another release: the copy cannot follow.
 $src->set('mgn_joinery_version', '0.8.454');

@@ -18,6 +18,10 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.6 - the size is a choice of plans with the source's own size chosen
+ * @version 1.5 - cloud accounts named as the provider names them; an expired connection is not offered (B47)
+ * @version 1.4 - the start box says what each way of copying needs in one line each; a copy from backups is not
+ *                 only for a dead server: its start asks nothing, and the switch-over asks that the old server is off
  * @version 1.3 - the IP swap, the owner's own DNS change, and a copy from backups (site_copy.md WP12, WP10)
  * @version 1.2 - the switch-over and the way back
  * @version 1.1 - the region falls back to us-east
@@ -81,18 +85,8 @@ if (!$site_copy) {
 			. '). If you have not yet, delete its server at the provider: <strong>' . $copy_h($ended_server) . '</strong>.</div>';
 	}
 	$page->begin_box(['title' => 'Copy this site to a new server']);
-	?>
-	<p>A copy puts this whole site on another server: its database, its files, its custom themes and plugins,
-	its sealed secrets (which open there), its certificate and its DKIM keys. It is made from the backups this
-	management node takes of the site, so every copy is also a real restore of them.</p>
-	<p>Nothing changes here. The copy stays <strong>dormant</strong>: it serves no visitors, sends nothing and runs
-	no scheduled task, until a switch-over makes it the site. You can look at it privately, refresh it from newer
-	backups as often as you like, or discard it.</p>
-	<p class="text-muted">Each copy run asks this site's owner to approve the export on this site's own Backups
-	page, with the backup recovery key, because the export hands the site's secrets to the new server.</p>
-	<?php
-	// Two places a copy can come from: the running site, or, when its server
-	// is dead, its backups alone. Each has its own preflight.
+	// Two places a copy can come from: the running site, or its backups
+	// alone. Each has its own preflight.
 	$copy_from_notes = array();
 	$copy_from_refusals = array();
 	foreach (array(SiteCopy::FROM_SOURCE, SiteCopy::FROM_BACKUPS) as $from) {
@@ -100,9 +94,8 @@ if (!$site_copy) {
 		if (!$why) {
 			try {
 				$chain = SiteCopyRunner::newest_chain($node, SiteCopyRunner::chain_age_limit($from));
-				$copy_from_notes[$from] = 'Backup ' . $chain['chain_id'] . ', last added to at '
-					. gmdate('Y-m-d H:i', (int)strtotime($chain['time'])) . ' UTC ('
-					. BackupRunner::human($chain['bytes']) . '). The new server needs about '
+				$copy_from_notes[$from] = 'Uses the backup of ' . gmdate('M j, H:i', (int)strtotime($chain['time'])) . ' UTC ('
+					. BackupRunner::human($chain['bytes']) . '); the new server needs about '
 					. BackupRunner::human(SiteCopyRunner::disk_needed($chain)) . ' free.';
 			} catch (Exception $e) {
 				$why[] = $e->getMessage();
@@ -115,7 +108,7 @@ if (!$site_copy) {
 		$copy_from_options[SiteCopy::FROM_SOURCE] = 'From this running site';
 	}
 	if (!$copy_from_refusals[SiteCopy::FROM_BACKUPS]) {
-		$copy_from_options[SiteCopy::FROM_BACKUPS] = 'From its backups (its server is dead)';
+		$copy_from_options[SiteCopy::FROM_BACKUPS] = 'From its backups';
 	}
 	if (!$copy_from_options) {
 		echo '<div class="alert alert-warning"><strong>This site cannot be copied yet.</strong><ul class="mb-0">';
@@ -126,52 +119,43 @@ if (!$site_copy) {
 		$page->end_box();
 		return;
 	}
+	echo '<p>Puts this site on a new server at its release (' . $copy_h($node->get('mgn_joinery_version')) . '). Nothing '
+		. 'changes here: the copy serves no visitors, sends nothing and runs no scheduled task until you switch over, and you '
+		. 'can look at it privately first.</p>';
+	echo '<ul>';
 	if (isset($copy_from_options[SiteCopy::FROM_SOURCE])) {
-		echo '<p><strong>From this running site:</strong> ' . $copy_h($copy_from_notes[SiteCopy::FROM_SOURCE]) . '</p>';
+		echo '<li><strong>From this running site:</strong> ' . $copy_h($copy_from_notes[SiteCopy::FROM_SOURCE])
+			. ' You approve the export on this site\'s Backups page with its recovery key.</li>';
 	} else {
-		echo '<div class="alert alert-light border"><strong>From this running site:</strong> not now. '
-			. $copy_h(implode(' ', $copy_from_refusals[SiteCopy::FROM_SOURCE])) . '</div>';
+		echo '<li class="text-muted"><strong>From this running site:</strong> not available. '
+			. $copy_h(implode(' ', $copy_from_refusals[SiteCopy::FROM_SOURCE])) . '</li>';
 	}
 	if (isset($copy_from_options[SiteCopy::FROM_BACKUPS])) {
-		echo '<p><strong>If this site\'s server is dead:</strong> a copy can be made from its backups alone. '
-			. $copy_h($copy_from_notes[SiteCopy::FROM_BACKUPS]) . ' Anything written after that backup is lost. You open the '
-			. 'backup with its recovery key on the new server\'s own page (never here), and the switch-over powers the old server '
-			. 'off when this management node created it. Two servers must never run the site at once, so use this only when the '
-			. 'old one cannot come back.</p>';
+		echo '<li><strong>From its backups:</strong> ' . $copy_h($copy_from_notes[SiteCopy::FROM_BACKUPS])
+			. ' You type the recovery key on the new server\'s own page. '
+			. 'The new server gets its own certificate at the switch-over.</li>';
 	}
-	echo '<p>The new server installs release ' . $copy_h($node->get('mgn_joinery_version')) . ', this site\'s own, under the same '
-		. 'site name and domain.</p>';
+	echo '</ul>';
 	$page->end_box();
 
-	// The two fields both start forms carry.
+	// Where the copy comes from, on both start forms: a choice only when both
+	// ways are open.
 	$copy_from_fields = function ($fw) use ($copy_from_options) {
 		if (count($copy_from_options) === 1) {
 			$fw->hiddeninput('copy_from', ['value' => (string)array_key_first($copy_from_options)]);
-			if (isset($copy_from_options[SiteCopy::FROM_BACKUPS])) {
-				$fw->checkboxinput('copy_dead_confirm', 'This site\'s server is dead and will not come back.');
-			}
 			return;
 		}
-		$fw->dropinput('copy_from', 'Copy', ['options' => $copy_from_options, 'visibility_rules' => [
-			SiteCopy::FROM_SOURCE  => ['hide' => ['copy_dead_confirm']],
-			SiteCopy::FROM_BACKUPS => ['show' => ['copy_dead_confirm']],
-		]]);
-		$fw->checkboxinput('copy_dead_confirm', 'This site\'s server is dead and will not come back.');
+		$fw->dropinput('copy_from', 'Copy', ['options' => $copy_from_options]);
 	};
 
 	// Create it for me
 	$page->begin_box(['title' => 'Create the new server for me']);
 	$src_provision = class_exists('CustomerCloudProvision') ? CustomerCloudProvision::latest_for_node($node->key) : null;
 	$settings_g = Globalvars::get_instance();
-	$account_options = array();
-	if (ProvisionCustomerCloud::operator_compute_token() !== '') {
-		$account_options['operator'] = 'This management node\'s own cloud account (operator token)';
-	}
-	foreach (new MultiCustomerCloudAccount(['status' => 'active', 'deleted' => false]) as $ca) {
-		$ca_user = new User($ca->get('cca_usr_user_id'), TRUE);
-		$who = $ca_user->key ? trim($ca_user->get('usr_first_name') . ' ' . $ca_user->get('usr_last_name')) : ('user #' . $ca->get('cca_usr_user_id'));
-		$account_options[(string)$ca->key] = ucfirst($ca->get('cca_provider')) . ' — ' . $who
-			. (CustomerCloudAccount::grant_expired($ca) ? ' (grant expired — re-connect first)' : '');
+	$targets = CustomerCloudAccount::provision_targets();
+	$account_options = $targets['options'];
+	foreach ($targets['unusable'] as $why) {
+		echo '<p class="small text-muted">Not offered: ' . $copy_h($why) . '</p>';
 	}
 	if (!$account_options) {
 		echo '<p class="text-muted">No cloud account is available: set an operator cloud token on the Provisioning Setup page, '
@@ -181,8 +165,6 @@ if (!$site_copy) {
 			'values' => [
 				'copy_region' => ($src_provision && $src_provision->get('cvp_region')) ? $src_provision->get('cvp_region')
 					: ($settings_g->get_setting('server_manager_customer_cloud_region') ?: 'us-east'),
-				'copy_type'   => ($src_provision && $src_provision->get('cvp_instance_type')) ? $src_provision->get('cvp_instance_type')
-					: ($settings_g->get_setting('server_manager_customer_cloud_type') ?: 'g6-nanode-1'),
 			],
 			'action' => $base_url . '&tab=copy',
 		]);
@@ -192,9 +174,37 @@ if (!$site_copy) {
 		$copy_from_fields($fw);
 		$fw->dropinput('copy_account', 'Cloud account', ['options' => $account_options, 'required' => true]);
 		$fw->textinput('copy_region', 'Region', ['required' => true,
-			'helptext' => 'The provider\'s region id, e.g. us-east. Any region works; a switch by address swap needs this site\'s, on the same account.']);
-		$fw->textinput('copy_type', 'Instance type', ['required' => true,
-			'helptext' => 'Memory at least this site\'s server, and room for the disk figure above.']);
+			'helptext' => 'The provider\'s region id, e.g. us-east.']);
+		// The plans to choose from, with this site's own size chosen. A
+		// container reports its whole shared server's memory, so a container
+		// site is the one most often copied onto a smaller plan.
+		$copy_plans = array();
+		try {
+			$copy_plans = (new LinodeComputeDriver(''))->instanceTypes();   // a public listing: no token
+		} catch (Exception $e) {
+			$copy_plans = array();
+		}
+		$copy_same = '';
+		try {
+			$copy_same = SiteCopyRunner::same_size_type($node, (string)array_key_last($copy_from_options),
+				function () use ($copy_plans) { return $copy_plans; });
+		} catch (Exception $e) {
+			$copy_same = '';
+		}
+		if ($copy_plans) {
+			$copy_plan_options = array();
+			foreach ($copy_plans as $plan) {
+				$copy_plan_options[$plan['id']] = $plan['id'] . ' — ' . round($plan['memory_mb'] / 1024) . ' GB memory, '
+					. round($plan['disk_mb'] / 1024) . ' GB disk' . ($plan['id'] === $copy_same ? ' (this site\'s size)' : '');
+			}
+			$fw->dropinput('copy_type', 'Size', ['options' => $copy_plan_options, 'required' => true,
+				'value' => $copy_same !== '' ? $copy_same : (string)array_key_first($copy_plan_options),
+				'helptext' => trim("Chosen to match this site's server; pick another to resize. Disk needs room for the figure above."
+					. ($node->get('mgn_container_name') ? ' A container site\'s size is its whole shared server\'s, so a smaller plan often fits.' : ''))]);
+		} else {
+			$fw->textinput('copy_type', 'Instance type', ['required' => true, 'value' => $copy_same,
+				'helptext' => 'Linode\'s plan list did not answer. A plan id such as g6-standard-2.']);
+		}
 		$fw->submitbutton('btn_copy_new', 'Create the server and copy');
 		$fw->end_form();
 	}
@@ -242,7 +252,8 @@ if ($copy_status === SiteCopy::STATUS_HALTED && $site_copy->get('scp_halt_reason
 
 if ($copy_status === SiteCopy::STATUS_WAITING) {
 	if ($copy_provision) {
-		echo '<p>This management node is creating the server: <strong>' . $copy_h($copy_provision->get('cvp_status')) . '</strong>';
+		echo '<p>This management node is creating the server (' . $copy_h($copy_provision->get('cvp_instance_type')) . '): <strong>'
+			. $copy_h($copy_provision->get('cvp_status')) . '</strong>';
 		if ($copy_provision->get('cvp_instance_ip')) {
 			echo ' at ' . $copy_h($copy_provision->get('cvp_instance_ip'));
 		}
@@ -428,12 +439,17 @@ $copy_records_list = function () use ($copy_switch, $copy_h) {
 if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 	$page->begin_box(['title' => 'Switch over to the copy']);
 	if ($copy_backups) {
-		echo '<p>A switch-over makes the copy the site. This site\'s server is dead, so nothing is frozen and there is no final '
-			. 'copy: the copy is as of the backup above. When this management node created the old server, it powers it off '
-			. 'first, so two servers never run the site; otherwise make sure it is off. Then you move the address, the copy '
-			. 'takes over this node, starts, and gets its certificate (none could travel from a dead server, so until then '
-			. 'browsers warn, and a proxy set to check the origin\'s certificate strictly refuses it). Until the copy takes '
-			. 'over, you can go back; after that there is nothing to go back to.</p>';
+		// The old server is powered off by the switch-over only when this
+		// management node created it (never a container's shared server);
+		// otherwise the owner turns it off.
+		$copy_powers_off = ($sp = IpSwapMove::provision_of($node)) && (string)$sp->get('cvp_provider') === 'linode'
+			&& !$sp->is_transferred();
+		echo '<p>A switch-over makes the copy the site, as of the backup above: nothing is frozen and there is no final copy. '
+			. ($copy_powers_off ? 'This management node powers the old server off first. '
+				: '<strong>Turn the old server off first</strong> (for a container, stop it and turn off its restart): this '
+				. 'management node did not create it and cannot. ')
+			. 'Then the address moves, the copy takes over this node, starts and gets its own certificate; until then browsers '
+			. 'warn, and a proxy set to strict refuses it. You can go back until the copy takes over, not after.</p>';
 	} else {
 		echo '<p>A switch-over makes the copy the site. This site is frozen (visitors see a short "back in a few minutes" page), '
 			. 'one final backup is copied across and both are counted, which must match exactly. Then you move the address, the '
@@ -448,7 +464,9 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 		echo '</ul></div>';
 	} else {
 		$confirm = $copy_backups
-			? 'Start the switch-over. The old server is powered off if this management node created it.'
+			? ($copy_powers_off
+				? 'Power the old server off and switch over. Anything written to it after the backup is lost.'
+				: 'The old server is off. Anything written to it after the backup is lost.')
 			: 'Freeze this site now. Visitors see the maintenance page until the switch-over finishes or I go back.';
 		$any = false;
 		foreach (SiteCopyRunner::switch_methods($site_copy) as $method => $method_why) {

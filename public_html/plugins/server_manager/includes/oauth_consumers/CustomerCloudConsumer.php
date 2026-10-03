@@ -13,6 +13,7 @@
  * Discovered by interface from this plugin's includes/oauth_consumers/;
  * no registration call is needed.
  *
+ * @version 1.1 - records the provider's own name for the account it connects
  * @version 1.0
  */
 
@@ -47,6 +48,7 @@ class CustomerCloudConsumer implements OAuth2Consumer {
 		}
 		$account->storeToken($token);
 		$account->set('cca_status', 'active');
+		$account->set('cca_account_name', self::account_name($provider, $token->getAccessToken()));
 		$account->save();
 
 		$waiting = new MultiCustomerCloudProvision(array(
@@ -65,6 +67,21 @@ class CustomerCloudConsumer implements OAuth2Consumer {
 		}
 
 		return self::CONNECT_URL . '?connected=1';
+	}
+
+	/**
+	 * The provider's own name for the account just connected, or '' when it
+	 * cannot be read (the connection works without it).
+	 */
+	private static function account_name(string $provider, string $access_token): string {
+		if ($provider !== 'linode') {
+			return '';
+		}
+		try {
+			return mb_substr((new LinodeComputeDriver($access_token))->accountName(), 0, 255);
+		} catch (Exception $e) {
+			return '';
+		}
 	}
 }
 ?>
