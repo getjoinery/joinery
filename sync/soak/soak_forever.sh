@@ -148,6 +148,17 @@ while true; do
     ls -1dt /root/soak-evidence/*/ 2>/dev/null | tail -n +41 | while read -r old_archive; do
         rm -rf "$old_archive"
     done
+    # A failed run's own evidence is about 200MB and was never removed either:
+    # 49 of them and 8.2GB by run 1623, with 6GB left. The newest 25 cover every
+    # open investigation by a wide margin. Newest by run number, not by date:
+    # reading a state store in one touches its directory.
+    for frozen in /root/run*-loss /root/run*-audited; do
+        [ -d "$frozen" ] || continue
+        n=${frozen#/root/run}
+        echo "${n%%-*} $frozen"
+    done | sort -n | head -n -25 | while read -r _ old_frozen; do
+        rm -rf "$old_frozen"
+    done
 
     # Every run provisions a fresh account and none of them were ever reclaimed,
     # so the SERVED deployment grew about 150MB a run forever -- the real reason

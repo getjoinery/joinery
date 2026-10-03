@@ -4139,9 +4139,25 @@ fn detect_folder_moves(
         return Ok(scan);
     }
 
-    // What the engine believes about the files in each tracked folder.
-    let mut children: HashMap<String, Vec<(String, u64)>> = HashMap::new();
+    // What the engine believes about the files in each folder, keyed by the
+    // folder record whose files they are -- never by the path that record
+    // resolves to. Two records can resolve to one path (a server folder made
+    // under a name the user's own folder has just left), and credited by path
+    // the newcomer, which has never held a file, was matched on the other
+    // record's files and given its directory; the owner, its directory proven
+    // by identity, read as deleted (soak run 1633).
+    let mut children: HashMap<EntityId, Vec<(String, u64)>> = HashMap::new();
     let mut known_file_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    // Every folder in the store, as `relative_path` resolves each parent: not
+    // `all_entries`, whose walk from the root by server parent leaves out a
+    // folder it cannot reach and would stop the credit there.
+    let folder_parent: HashMap<i64, Option<i64>> = env
+        .store
+        .every_entry()?
+        .into_iter()
+        .filter(|e| e.id.entity_type == EntityType::Folder)
+        .map(|e| (e.id.server_id, e.local_placement().parent))
+        .collect();
     for entry in all_entries(env)? {
         if entry.id.entity_type != EntityType::File {
             continue;
@@ -4162,14 +4178,21 @@ fn detect_folder_moves(
         // direct files only, the commonest shape of a folder -- subfolders
         // and nothing loose -- could not be matched at all, and a vault of
         // that shape was trashed for a rename (Defect Q).
-        let mut cut = path.rfind('/');
-        while let Some(i) = cut {
-            let dir = &path[..i];
+        // The same walk `relative_path` made: the file's parent chain, one
+        // folder per path component.
+        let parts: Vec<&str> = path.split('/').collect();
+        let mut folder = entry.local_placement().parent;
+        let mut depth = 1;
+        while let Some(id) = folder {
+            if depth >= parts.len() {
+                break;
+            }
             children
-                .entry(dir.to_string())
+                .entry(EntityId::folder(id))
                 .or_default()
-                .push((path[i + 1..].to_string(), own_id));
-            cut = dir.rfind('/');
+                .push((parts[parts.len() - depth..].join("/"), own_id));
+            folder = folder_parent.get(&id).copied().flatten();
+            depth += 1;
         }
     }
 
@@ -4243,7 +4266,7 @@ fn detect_folder_moves(
                 return rec == here;
             }
         }
-        let Some(kids) = children.get(path) else {
+        let Some(kids) = tracked.get(path).and_then(|id| children.get(id)) else {
             // Nothing to check it by -- an empty folder, or one whose files
             // have never been agreed. The path standing is all the evidence
             // there is, and it is enough: an empty folder cannot be matched
@@ -4350,7 +4373,7 @@ fn detect_folder_moves(
     // directory on that reading drags the whole folder after the file and
     // strands whatever else was in it. A renaming folder takes everything with
     // it; a folder that has merely lent out a file does not.
-    let moved_wholesale = |old_path: &String, candidate: &str| -> bool {
+    let moved_wholesale = |id: &EntityId, candidate: &str| -> bool {
         let mut here = 0;
         // A child folder standing under the candidate, beside the folder's
         // own id there, counts as here -- and a file inside THAT child
@@ -4359,7 +4382,7 @@ fn detect_folder_moves(
         // it, and asking for them at the old relative path would read the
         // whole folder as moved elsewhere.
         let mut child_dirs_here: Vec<&String> = Vec::new();
-        if let Some(id) = tracked.get(old_path) {
+        {
             if child_folder_under(id, candidate) {
                 here += 1;
                 if let Some(kids) = child_folders.get(id) {
@@ -4373,7 +4396,7 @@ fn detect_folder_moves(
                 }
             }
         }
-        let kids = children.get(old_path).map(|k| k.as_slice()).unwrap_or(&[]);
+        let kids = children.get(id).map(|k| k.as_slice()).unwrap_or(&[]);
         for (name, file_id) in kids {
             match by_file_id.get(file_id) {
                 // Not on this disk at all any more. Deleted, or never written
@@ -4508,7 +4531,7 @@ fn detect_folder_moves(
         let mut found: Option<EntityId> = None;
         let mut ambiguous = false;
         for (other_path, other_id) in tracked.iter() {
-            if other_path == path || !moved_wholesale(other_path, path) {
+            if other_path == path || !moved_wholesale(other_id, path) {
                 continue;
             }
             if found.is_some() {
@@ -4679,13 +4702,13 @@ fn detect_folder_moves(
                 None => {
                     break encrypted.contains(&cur)
                         || proven_at.get(&cur) == Some(&at)
-                        || (children.get(&old).is_some_and(|kids| {
+                        || (children.get(&cur).is_some_and(|kids| {
                             kids.iter().any(|(name, file_id)| {
                                 by_path
                                     .get(format!("{at}/{name}").as_str())
                                     .is_some_and(|o| o.fingerprint.file_id == *file_id)
                             })
-                        }) && moved_wholesale(&old, at));
+                        }) && moved_wholesale(&cur, at));
                 }
                 // Its holder was already placed elsewhere this pass.
                 Some(holder) if claimed.contains(&holder) => break true,
@@ -4970,7 +4993,7 @@ fn detect_folder_moves(
                 if claimed.contains(id) {
                     continue;
                 }
-                let kids = children.get(old_path).map(|k| k.as_slice()).unwrap_or(&[]);
+                let kids = children.get(id).map(|k| k.as_slice()).unwrap_or(&[]);
                 let matched_at = |at: &str| -> usize {
                     kids.iter()
                         .filter(|(name, file_id)| {
@@ -5007,7 +5030,7 @@ fn detect_folder_moves(
                     && record_identity
                         .get(id)
                         .is_some_and(|own| dir_identity.get(*candidate) == Some(own));
-                if whole_only && !own_directory_here && !moved_wholesale(old_path, candidate) {
+                if whole_only && !own_directory_here && !moved_wholesale(id, candidate) {
                     continue;
                 }
                 // The contents propose this directory; where does the
@@ -5043,7 +5066,7 @@ fn detect_folder_moves(
                         && candidates.contains(stands_at)
                         && !taken.contains(*stands_at)
                         && (proven_at.get(id) == Some(stands_at)
-                            || (matched_at(stands_at) > 0 && (!whole_only || moved_wholesale(old_path, stands_at))))
+                            || (matched_at(stands_at) > 0 && (!whole_only || moved_wholesale(id, stands_at))))
                     {
                         continue;
                     }
@@ -5144,7 +5167,7 @@ fn detect_folder_moves(
     // Shallowest first, so a renamed vault is placed before a folder inside it.
     let mut empty_and_encrypted: Vec<(String, EntityId)> = Vec::new();
     for (old_path, id) in missing.iter() {
-        if claimed.contains(id) || children.contains_key(old_path) {
+        if claimed.contains(id) || children.contains_key(id) {
             continue;
         }
         if env

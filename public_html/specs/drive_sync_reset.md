@@ -1902,6 +1902,38 @@ no named flaw is a reason to name one.
   file), then VALID on the folder-choosing rule (public-html-a5,
   2026-10-03). Deployed to the rig and the Mac before the commit, with the
   reviewer's agreement.
+- **B-1633, fixed 2026-10-03 (soak rig run 1633, client `893314a1`, the
+  first custody failure under the identity checker, traced from both state
+  stores' ops and issues and the server's change log): the folder scan
+  credited files to folders by path.** Both users renamed one folder at
+  once (device-a to `Sub 1 (29)`, landing first; device-b to `Sub 1 (23)`),
+  and device-a saved through the old name, making `Sub 1` again as a new
+  server folder. On device-b the newcomer, never placed there, resolved to
+  the same path as the renamed folder's own record. `detect_folder_moves`
+  evicted the owner and let the newcomer take that path. Its files were
+  credited by path, so the newcomer was matched on the owner's files and
+  given the owner's directory, though that directory was proven the owner's
+  by identity. The owner read as deleted and was made again empty. device-b
+  moved its two files into the newcomer, and device-a followed. No loss.
+  The close: **a folder is credited with the files whose parent is that
+  folder, never with the files at the path it resolves to** (`children`
+  keyed by record, walking each file's parent ids). Pin
+  `a_folder_renamed_on_both_devices_keeps_its_files_when_its_old_name_is_made_again`,
+  red without the change. 420 seeds x 5 modes byte-identical. Approach: a
+  skip for never-placed folders was REDIRECTED as a guard (a5: the false
+  statement was crediting by path). BUILD NEEDS MORE once (the parent walk
+  must resolve every folder in the store, as `relative_path` does), then
+  VALID (public-html-a5, 2026-10-03). On FAT and exFAT the same scenario
+  leaves every file at its user's path on the old code and the new; the
+  server's folder ids swap there, which is the positional-id residual. Open,
+  recorded:
+  - the run-228 shape (a folder released from a hold, then moved by a peer)
+    fails on FAT and exFAT on the old code and the new;
+  - when two records resolve to one path, `agreed_paths` keeps the last, which
+    can stop the real folder learning its directory;
+  - a directory proven one record's can still go to another across pools when
+    a third folder's files were moved into it;
+  - run 1619 (the old client) has a related shape that no probe reproduces yet.
 - **B2, narrowed (re-checked 2026-10-02 on `10b2b55d`: seed green in all
   five modes; a plain file's completed move is agreed Done on its own
   identity, `completed_here`, pinned by
