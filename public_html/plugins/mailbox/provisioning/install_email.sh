@@ -2,6 +2,9 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.19 - Section 5's milter list ends with rspamd (11332) whenever the scanner
+#                provisioner is here, so a re-run no longer drops the scanner from
+#                Postfix until section 5b appends it again.
 # Version: 2.18 - Section 5b's scanner is stateless rspamd (provision_spam_scanner.sh 2.0):
 #                no redis, no ingest re-scan, no learning loop. Section 5b also checks
 #                for rspamd_stateless.sh, which the scanner provisioner sources.
@@ -120,8 +123,9 @@
 #                 the connecting IP it sees at the milter stage — the IP the PHP
 #                 pipe never gets), RejectFailures false (stamp only, never
 #                 block; enforcement is out of scope).
-#   - main.cf   : smtpd_milters = inet:localhost:8891, inet:localhost:8893
-#                 (opendkim first so opendmarc can consume its DKIM result),
+#   - main.cf   : smtpd_milters = inet:localhost:8891, inet:localhost:8893,
+#                 inet:localhost:11332 (opendkim first so opendmarc can consume
+#                 its DKIM result; rspamd last so it scores on both),
 #                 milter_default_action = accept (a down/keyless milter must
 #                 never block or defer mail). Received mail is thereby stamped
 #                 with an Authentication-Results header the app reads for its
@@ -689,10 +693,18 @@ fi
 # milter_default_action = accept guarantees a down/keyless milter never blocks
 # or defers mail. non_smtpd_milters keeps only opendkim (it signs locally
 # submitted outbound; opendmarc applies to inbound, not local submission).
+# rspamd (section 5b) closes the list whenever its provisioner is here: the
+# whole list is written once, so a re-run never leaves Postfix taking mail
+# without the scanner's headers. Until rspamd listens on a first install,
+# default action accept passes it over.
+SMTPD_MILTERS="inet:localhost:8891, inet:localhost:8893"
+if [[ -f "${SCRIPT_DIR}/provision_spam_scanner.sh" && -f "${SCRIPT_DIR}/rspamd_stateless.sh" ]]; then
+    SMTPD_MILTERS="${SMTPD_MILTERS}, inet:localhost:11332"
+fi
 postconf -e "milter_default_action = accept"
-postconf -e "smtpd_milters = inet:localhost:8891, inet:localhost:8893"
+postconf -e "smtpd_milters = ${SMTPD_MILTERS}"
 postconf -e "non_smtpd_milters = inet:localhost:8891"
-echo "main.cf: milters wired (opendkim:8891 then opendmarc:8893; default action accept)"
+echo "main.cf: milters wired (${SMTPD_MILTERS}; default action accept)"
 
 arm_service opendkim
 arm_service opendmarc

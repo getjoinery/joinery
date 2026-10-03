@@ -2,7 +2,7 @@
 
 ## Status
 
-Spec written 2026-10-02. **Built 2026-10-02/03, all three WPs; reviewed by public-html-91 (10-03).** Moves to implemented/ once the first node upgrades and the converger runs scanner 2.1 there (redis gone, rspamd stateless). Owner decisions 10-02:
+Spec written 2026-10-02. **Built 2026-10-02/03, all three WPs; reviewed by public-html-91 (10-03).** Live fleet-wide in 0.8.455 (10-03): migration iem_019 applied on every node with mailbox active, and scanner 2.1 removed redis and left rspamd stateless on the first upgraded node. Owner decisions 10-02:
 - Learning moves into core, and every box runs one stateless rspamd
   configuration.
 - A clear sender fingerprint on sealed mailboxes: **yes**.
