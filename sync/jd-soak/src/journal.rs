@@ -66,13 +66,24 @@ pub enum Record {
         size: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mtime_ms: Option<u64>,
-        /// The inode of the directory the content landed in, read on the
-        /// writing device the moment it landed: the folder the user put it in,
-        /// whatever that folder is called later. Absent for anything with no
-        /// content, for the remote actor, and in journals older than the
-        /// custody check.
+        /// The inode of the directory the commit happened in, read on the
+        /// actor's device as it happened: the folder the user put a content
+        /// in, or took it from, whatever that folder is called later. Absent
+        /// for the remote actor and in journals older than the custody check;
+        /// before 2026-10-03, absent too for a delete, a mkdir and a
+        /// directory's rename.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_inode: Option<u64>,
+        /// That directory's birth time, in nanoseconds since the epoch, where
+        /// the filesystem keeps one: what tells the folder the user chose from
+        /// a later one that took over its freed inode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_birth_ns: Option<u64>,
+        /// For a write, a save, an append or a touch, the content of the file
+        /// it wrote over, where one stood: the content it is the next version
+        /// of. A peer's user who moves that file moves this version with it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replaces_sha256: Option<String>,
         ts_ms: u64,
     },
     /// Tried and the filesystem refused. Not a violation on its own — a persona
@@ -573,6 +584,8 @@ mod tests {
             size: 10,
             mtime_ms: Some(ts),
             parent_inode: None,
+            parent_birth_ns: None,
+            replaces_sha256: None,
             ts_ms: ts,
         }
     }
@@ -595,6 +608,8 @@ mod tests {
             size: 10,
             mtime_ms: Some(ts),
             parent_inode: None,
+            parent_birth_ns: None,
+            replaces_sha256: None,
             ts_ms: ts,
         }
     }

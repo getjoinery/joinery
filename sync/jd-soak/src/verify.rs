@@ -856,11 +856,24 @@ fn swap_workspace_histories(
 
 /// What one device's disk holds, for the custody check: every file with its
 /// content and the inode of the directory it stands in, and every directory
-/// inode on the disk.
+/// on the disk by inode, with its birth time where the filesystem keeps one.
 #[derive(Debug, Clone, Default)]
 pub struct Placement {
     pub files: Vec<(String, String, u64)>,
-    pub dirs: BTreeSet<u64>,
+    pub dirs: BTreeMap<u64, Option<u64>>,
+}
+
+impl Placement {
+    /// Whether the directory a commit named still stands on this disk: its
+    /// inode is here, and, where both sides know a birth, it is the same
+    /// directory and not a later one that took over the freed inode.
+    fn holds(&self, inode: u64, birth_ns: Option<u64>) -> bool {
+        match (self.dirs.get(&inode), birth_ns) {
+            (None, _) => false,
+            (Some(Some(now)), Some(then)) => *now == then,
+            (Some(_), _) => true,
+        }
+    }
 }
 
 /// Read a device's placement off its disk.
@@ -872,7 +885,7 @@ pub fn placement_on_disk(root: &Path, tree: &LocalTree) -> Placement {
         let full = root.join(&entry.path);
         if entry.is_dir {
             if let Ok(m) = std::fs::metadata(&full) {
-                out.dirs.insert(m.ino());
+                out.dirs.insert(m.ino(), crate::actor::birth_ns(&m));
             }
             continue;
         }
@@ -884,7 +897,7 @@ pub fn placement_on_disk(root: &Path, tree: &LocalTree) -> Placement {
         }
     }
     if let Ok(m) = std::fs::metadata(root) {
-        out.dirs.insert(m.ino());
+        out.dirs.insert(m.ino(), crate::actor::birth_ns(&m));
     }
     out
 }
@@ -897,15 +910,23 @@ pub fn placement_on_disk(_root: &Path, _tree: &LocalTree) -> Placement {
 /// Every content stands in a folder the user put it in.
 ///
 /// Each content's placing commits (a write, an append, a save, a rename or
-/// swap carrying it in) say, by directory inode, where its writer put it on
-/// the writer's own disk; a later commit at the same path with other bytes,
-/// or a delete or rename away from that path, withdraws one. On each device
-/// that still holds the content and still has one of those directories, the
-/// content must stand in one of them. Standing only somewhere else, the
-/// engine carried it into a folder the user never put it in -- a conflict copy
-/// beside a peer's moved version, a save taken along by another file's move
-/// -- which no tree comparison sees, because every device agrees on the
-/// wrong place.
+/// swap carrying it in) say, by directory identity, where its writer put it
+/// on the writer's own disk; a later commit under the same name in the same
+/// directory, with other bytes, or a delete or rename away from that name in
+/// that directory, withdraws one. On each device that still holds the content
+/// and still has one of those directories, the content must stand in one of
+/// them. Standing only somewhere else, the engine carried it into a folder
+/// the user never put it in -- a conflict copy beside a peer's moved version,
+/// a save taken along by another file's move -- which no tree comparison
+/// sees, because every device agrees on the wrong place.
+///
+/// Placements are keyed by the directory and the name in it, never by path:
+/// renaming a folder, by this device's user or by a peer's (which the engine
+/// applies here with no record of its own), changes no directory's identity,
+/// so it neither withdraws what stands beneath the folder nor leaves a
+/// placement under a name the next commit cannot find (soak run 1572). A
+/// removed folder drops out by leaving the disk. A commit that names no
+/// directory, from a journal older than these identities, takes nothing.
 ///
 /// What a device did not write is not judged on it: a peer's move, or the
 /// remote actor's, is applied by the engine and lands where that user put it.
@@ -913,68 +934,89 @@ pub fn placement_on_disk(_root: &Path, _tree: &LocalTree) -> Placement {
 /// user moved it on (a peer renaming the file a create-create clash left at
 /// its own path, which was this device's), and the content's folder is that
 /// user's choice, which this device's inodes cannot name (soak run 1520).
+/// Placed means placed as a file: a write over a file is that file's next
+/// version, and a peer's user who moves the file, before or after this
+/// device's user saved over it, moves this version with it (soak run 1586).
+/// Only a commit that chooses a folder places the file: a write over nothing,
+/// a move into another directory, a swap. A write over a file, like a rename
+/// in place, chooses none, so a peer's edit never takes the file from the
+/// user who placed it. A file whose first version nobody here placed (the
+/// remote actor's, a download of a server-made file) has no placer, and an
+/// edit of it is judged on the device that made the edit.
 pub fn check_custody(records: &[Record], placements: &BTreeMap<String, Placement>) -> Verdict {
-    // (device, workspace path) -> (content, directory inode) of the placing
-    // commit standing there now.
-    let mut at: BTreeMap<(String, String), (String, u64)> = BTreeMap::new();
-    // Content -> the device whose user placed it last.
+    // (device, directory inode, name in it) -> (content, directory birth) of
+    // the placing commit standing there now.
+    let mut at: BTreeMap<(String, u64, String), (String, Option<u64>)> = BTreeMap::new();
+    // Content -> the first version of the file it is a version of.
+    let mut file_of: BTreeMap<String, String> = BTreeMap::new();
+    // File, by its first version -> the device whose user placed it last.
     let mut last_placed_by: BTreeMap<String, String> = BTreeMap::new();
     // Actor -> the directory the content it is renaming stood in, between
     // its `rename` and `rename_into` records.
     let mut renaming_from: BTreeMap<String, u64> = BTreeMap::new();
     for record in records {
-        let Record::ActorCommit { actor, persona, op, path, sha256, parent_inode, .. } = record else {
+        let Record::ActorCommit { actor, op, path, sha256, parent_inode, parent_birth_ns, replaces_sha256, .. } = record else {
+            continue;
+        };
+        if let (Some(sha), Some(earlier)) = (sha256, replaces_sha256) {
+            let first = file_of.get(earlier).cloned().unwrap_or_else(|| earlier.clone());
+            file_of.entry(sha.clone()).or_insert(first);
+        }
+        let Some(dir) = *parent_inode else {
+            if op == "rename" {
+                renaming_from.remove(actor.as_str());
+            }
             continue;
         };
         let device = actor.split('/').next().unwrap_or_default().to_string();
-        let key = (device, workspace_path(actor, persona, path));
-        match (sha256, parent_inode) {
-            (Some(sha), Some(inode)) => {
+        let name = path.rsplit('/').next().unwrap_or(path).to_string();
+        let key = (device, dir, name);
+        match sha256 {
+            Some(sha) => {
                 // A rename within one directory names the content and chooses
                 // no folder: its folder is still the one whoever placed it
                 // last chose. A peer's user who moved it meanwhile chose that,
                 // and the engine keeps both, the peer's folder with this name
                 // (run 1541).
-                let in_place = op == "rename_into" && renaming_from.remove(actor.as_str()) == Some(*inode);
-                if !in_place {
-                    last_placed_by.insert(sha.clone(), key.0.clone());
+                let in_place = op == "rename_into" && renaming_from.remove(actor.as_str()) == Some(dir);
+                let chooses_a_folder = match op.as_str() {
+                    "rename_into" => !in_place,
+                    "swap" => true,
+                    _ => replaces_sha256.is_none(),
+                };
+                if chooses_a_folder {
+                    let file = file_of.get(sha).unwrap_or(sha);
+                    last_placed_by.insert(file.clone(), key.0.clone());
                 }
-                at.insert(key, (sha.clone(), *inode));
+                at.insert(key, (sha.clone(), *parent_birth_ns));
             }
-            _ => {
-                // The directory the content is leaving: as the actor read it
-                // before the rename, or, from an older journal, where this
-                // device's user last placed it.
+            None => {
                 if op == "rename" {
-                    match parent_inode.or_else(|| at.get(&key).map(|(_, inode)| *inode)) {
-                        Some(inode) => renaming_from.insert(actor.clone(), inode),
-                        None => renaming_from.remove(actor.as_str()),
-                    };
+                    renaming_from.insert(actor.clone(), dir);
+                } else if op == "rename_into" {
+                    renaming_from.remove(actor.as_str());
                 }
-                // No content, or a placement this check cannot read: whatever
-                // stood at this path stands there no longer by this record.
-                if matches!(op.as_str(), "remove" | "remove_dir" | "rename" | "trash") {
-                    let prefix = format!("{}/", key.1);
-                    at.retain(|(d, p), _| !(d == &key.0 && (p == &key.1 || p.starts_with(&prefix))));
-                } else {
-                    at.remove(&key);
-                }
+                // A delete or a rename away: what stood under this name in
+                // this directory stands there no longer. A directory's own
+                // commit withdraws nothing beneath it.
+                at.remove(&key);
             }
         }
     }
-    let mut wanted: BTreeMap<(String, String), BTreeSet<u64>> = BTreeMap::new();
-    for ((device, _), (sha, inode)) in &at {
-        wanted.entry((device.clone(), sha.clone())).or_default().insert(*inode);
+    let mut wanted: BTreeMap<(String, String), BTreeSet<(u64, Option<u64>)>> = BTreeMap::new();
+    for ((device, dir, _), (sha, birth)) in &at {
+        wanted.entry((device.clone(), sha.clone())).or_default().insert((*dir, *birth));
     }
     let mut astray = Vec::new();
     let mut judged = 0usize;
     for ((device, sha), dirs) in &wanted {
         let Some(placement) = placements.get(device) else { continue };
-        if last_placed_by.get(sha).is_some_and(|by| by != device) {
+        let file = file_of.get(sha).unwrap_or(sha);
+        if last_placed_by.get(file).is_some_and(|by| by != device) {
             continue;
         }
         let standing: Vec<&(String, String, u64)> = placement.files.iter().filter(|(_, s, _)| s == sha).collect();
-        let still_there: BTreeSet<u64> = dirs.iter().copied().filter(|d| placement.dirs.contains(d)).collect();
+        let still_there: BTreeSet<u64> = dirs.iter().filter(|(d, born)| placement.holds(*d, *born)).map(|(d, _)| *d).collect();
         if standing.is_empty() || still_there.is_empty() {
             continue;
         }
@@ -995,16 +1037,6 @@ pub fn check_custody(records: &[Record], placements: &BTreeMap<String, Placement
             "custody",
             format!("{} content(s) stand in a folder the user never put them in: {}", astray.len(), astray.iter().take(10).cloned().collect::<Vec<_>>().join("; ")),
         )
-    }
-}
-
-/// A claim's path from the sync root, as `standing_key` places it.
-fn workspace_path(actor: &str, persona: &str, path: &str) -> String {
-    let device = actor.split('/').next().unwrap_or_default();
-    if persona == "sqlite-app" || persona == "browser" {
-        format!("{device}-{persona}/{path}")
-    } else {
-        format!("Shared-{persona}/{path}")
     }
 }
 
@@ -1751,6 +1783,8 @@ mod tests {
             size: 10,
             mtime_ms: Some(1),
             parent_inode: None,
+            parent_birth_ns: None,
+            replaces_sha256: None,
             ts_ms: 1,
         }
     }
@@ -2055,6 +2089,8 @@ mod tests {
                 size: 0,
                 mtime_ms: None,
                 parent_inode: None,
+                parent_birth_ns: None,
+                replaces_sha256: None,
                 ts_ms: 2,
             },
         ];
@@ -2377,6 +2413,8 @@ mod tests {
             size: 1,
             mtime_ms: None,
             parent_inode: inode,
+            parent_birth_ns: None,
+            replaces_sha256: None,
             ts_ms: seq,
         }
     }
@@ -2422,7 +2460,7 @@ mod tests {
     fn disk(files: &[(&str, &str, u64)], dirs: &[u64]) -> Placement {
         Placement {
             files: files.iter().map(|(p, s, d)| (p.to_string(), s.to_string(), *d)).collect(),
-            dirs: dirs.iter().copied().collect(),
+            dirs: dirs.iter().map(|d| (*d, None)).collect(),
         }
     }
 
@@ -2441,12 +2479,240 @@ mod tests {
         assert!(check_custody(&records, &home).ok);
     }
 
+    fn born(seq: u64, actor: &str, op: &str, path: &str, sha: Option<&str>, inode: u64, birth: u64) -> Record {
+        let mut record = placed(seq, actor, op, path, sha, Some(inode));
+        if let Record::ActorCommit { parent_birth_ns, .. } = &mut record {
+            *parent_birth_ns = Some(birth);
+        }
+        record
+    }
+
+    #[test]
+    fn run_1572_a_content_moved_under_a_folder_renamed_twice_stands_where_its_user_put_it() {
+        // device-a's journal for doc-4, as soak run 1572 recorded it. Its user
+        // wrote it into Projects (directory 1043024) and renamed it in place;
+        // device-b's user renamed Projects to Projects (8), which the engine
+        // applied here with no record; device-a's user moved it into Sub 9
+        // (1043182) and renamed it back; then renamed Projects (8) itself five
+        // times. It stands in 1043182, where its user put it, and the check
+        // failed the run: a folder rename withdrew the true placement by path,
+        // and the stale one under the old name was never withdrawn.
+        let a = "device-a/messy-human";
+        let records = vec![
+            placed(552208, a, "write", "Projects/doc-4.txt", Some("b6ce29"), Some(1043024)),
+            placed(554555, a, "rename", "Projects/doc-4.txt", None, Some(1043024)),
+            placed(554556, a, "rename_into", "Projects/DOC-4.TXT", Some("b6ce29"), Some(1043024)),
+            placed(573073, a, "rename", "Projects (8)/DOC-4.TXT", None, Some(1043024)),
+            placed(573074, a, "rename_into", "Projects (8)/Sub 9/DOC-4.TXT", Some("b6ce29"), Some(1043182)),
+            placed(576650, a, "rename", "Projects (8)/Sub 9/DOC-4.TXT", None, Some(1043182)),
+            placed(576652, a, "rename_into", "Projects (8)/Sub 9/doc-4.txt", Some("b6ce29"), Some(1043182)),
+            placed(585766, a, "rename", "Projects (8)", None, Some(1042071)),
+            placed(585766, a, "rename_into", "Projects (8) (13)", None, None),
+            placed(592839, a, "rename", "Projects (8) (13)", None, Some(1042071)),
+            placed(592839, a, "rename_into", "Projects (8) (13) (17)", None, None),
+            placed(659475, a, "rename", "Projects (8) (13) (17) (32) (33)", None, Some(1042071)),
+            placed(659475, a, "rename_into", "Projects (8) (13) (17) (32) (33) (38)", None, None),
+        ];
+        let at = |dir: u64| {
+            BTreeMap::from([(
+                "device-a".to_string(),
+                disk(&[("Shared-messy-human/Projects (8) (13) (17) (32) (33) (38)/Sub 9 (10)/doc-4.txt", "b6ce29", dir)], &[1042071, 1043024, 1043182]),
+            )])
+        };
+        let verdict = check_custody(&records, &at(1043182));
+        assert!(verdict.ok, "{}", verdict.detail);
+        assert!(verdict.detail.starts_with("1 content(s) judged"), "{}", verdict.detail);
+        // Still judged: carried back into the Projects folder it was moved out
+        // of, it is astray.
+        assert!(!check_custody(&records, &at(1043024)).ok);
+    }
+
+    #[test]
+    fn run_1586_an_edit_goes_where_a_peers_user_moves_its_file() {
+        // Soak run 1586: device-b's user wrote Projects/doc-5.txt; device-a
+        // downloaded it and its user wrote over it; device-b's user, not yet
+        // told, moved the file into Sub 8/Sub 10. The engine keeps one file,
+        // device-a's edit in device-b's folder. The edit's custody is the
+        // file's, and the peer moved the file.
+        let records = |replaces: Option<&str>| {
+            let mut edit = placed(206072, "device-a/messy-human", "write", "Projects/doc-5.txt", Some("0f2964"), Some(1042194));
+            if let Record::ActorCommit { replaces_sha256, .. } = &mut edit {
+                *replaces_sha256 = replaces.map(String::from);
+            }
+            vec![
+                placed(192648, "device-b/messy-human", "write", "Projects/doc-5.txt", Some("1a88bb"), Some(1042315)),
+                edit,
+                placed(208824, "device-b/messy-human", "mkdir", "Projects/Sub 8/Sub 10", None, Some(1042423)),
+                placed(208825, "device-b/messy-human", "rename", "Projects/doc-5.txt", None, Some(1042315)),
+                placed(208826, "device-b/messy-human", "rename_into", "Projects/Sub 8/Sub 10/doc-5.txt", Some("1a88bb"), Some(1042448)),
+            ]
+        };
+        let on_a = BTreeMap::from([(
+            "device-a".to_string(),
+            disk(&[("Shared-messy-human/Projects (19)/Sub 8 (11) (13)/Sub 10/doc-5.txt", "0f2964", 1042470)], &[1042194, 1042452, 1042470]),
+        )]);
+        let verdict = check_custody(&records(Some("1a88bb")), &on_a);
+        assert!(verdict.ok, "{}", verdict.detail);
+        // A write that went over nothing is a file of its own: device-b moved
+        // another file, and this one is astray in device-b's folder.
+        assert!(!check_custody(&records(None), &on_a).ok);
+    }
+
+    fn edit(seq: u64, actor: &str, path: &str, sha: &str, over: &str, inode: u64) -> Record {
+        let mut record = placed(seq, actor, "write", path, Some(sha), Some(inode));
+        if let Record::ActorCommit { replaces_sha256, .. } = &mut record {
+            *replaces_sha256 = Some(over.into());
+        }
+        record
+    }
+
+    #[test]
+    fn an_edit_goes_where_a_peers_user_moved_its_file_before_the_edit() {
+        // Run 1586 in the other order: device-b's user wrote Projects/doc.txt
+        // and moved it into Sub; device-a's user, not yet told, wrote over it
+        // at Projects/doc.txt. The engine keeps one file, the edit in Sub.
+        let records = vec![
+            placed(1, "device-b/office", "write", "Projects/doc.txt", Some("v1"), Some(70)),
+            placed(2, "device-b/office", "rename", "Projects/doc.txt", None, Some(70)),
+            placed(3, "device-b/office", "rename_into", "Projects/Sub/doc.txt", Some("v1"), Some(71)),
+            edit(4, "device-a/office", "Projects/doc.txt", "v2", "v1", 40),
+        ];
+        let on_a = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Projects/Sub/doc.txt", "v2", 41)], &[40, 41]))]);
+        let verdict = check_custody(&records, &on_a);
+        assert!(verdict.ok, "{}", verdict.detail);
+    }
+
+    #[test]
+    fn a_peers_edit_takes_no_custody_of_this_devices_conflict_copy() {
+        // device-a's user wrote Work/notes.txt (40) and edited it; device-b's
+        // user, holding the first version, edited it later. The engine keeps
+        // device-b's as the file and device-a's edit as a conflict copy. Put
+        // in Other (41) on device-a, it is astray: device-b chose no folder.
+        let records = vec![
+            placed(1, "device-a/office", "write", "Work/notes.txt", Some("v1"), Some(40)),
+            edit(2, "device-a/office", "Work/notes.txt", "v3", "v1", 40),
+            edit(3, "device-b/office", "Work/notes.txt", "v2", "v1", 70),
+        ];
+        let on_a = |copy_in: u64| {
+            BTreeMap::from([(
+                "device-a".to_string(),
+                disk(&[("Shared-office/Work/notes.txt", "v2", 40), ("Shared-office/Other/notes (conflicted copy).txt", "v3", copy_in)], &[40, 41]),
+            )])
+        };
+        assert!(!check_custody(&records, &on_a(41)).ok);
+        let verdict = check_custody(&records, &on_a(40));
+        assert!(verdict.ok && verdict.detail.starts_with("1 content(s) judged"), "{}", verdict.detail);
+    }
+
+    #[test]
+    fn an_edit_where_a_peer_moved_the_file_revives_no_earlier_placement() {
+        // device-a wrote v1 into Work (40); device-b's user moved the file
+        // into Other, which the engine applied on device-a with no record;
+        // device-a's user then edited it there (41). The file is still
+        // device-b's to place, so device-a's placement of v1 in 40 does not
+        // come back: v1 surviving beside the file is not astray.
+        let records = vec![
+            placed(1, "device-a/office", "write", "Work/notes.txt", Some("v1"), Some(40)),
+            placed(2, "device-b/office", "rename", "Work/notes.txt", None, Some(70)),
+            placed(3, "device-b/office", "rename_into", "Other/notes.txt", Some("v1"), Some(71)),
+            edit(4, "device-a/office", "Other/notes.txt", "v2", "v1", 41),
+        ];
+        let on_a = BTreeMap::from([(
+            "device-a".to_string(),
+            disk(&[("Shared-office/Other/notes.txt", "v2", 41), ("Shared-office/Other/notes (conflicted copy).txt", "v1", 41)], &[40, 41]),
+        )]);
+        let verdict = check_custody(&records, &on_a);
+        assert!(verdict.ok, "{}", verdict.detail);
+        // A touch there is a write over the file too.
+        let mut touched = records.clone();
+        touched[3] = edit(4, "device-a/office", "Other/notes.txt", "v1", "v1", 41);
+        if let Record::ActorCommit { op, .. } = &mut touched[3] {
+            *op = "touch".into();
+        }
+        let verdict = check_custody(&touched, &on_a);
+        assert!(verdict.ok, "{}", verdict.detail);
+    }
+
+    #[test]
+    fn a_users_own_folder_rename_leaves_what_stands_beneath_it_judged() {
+        // device-a's user wrote it into P (directory 40) and then renamed P.
+        // The rename changes no directory: the content is still held to 40,
+        // and carried out of it, it is astray.
+        let a = "device-a/office";
+        let records = vec![
+            placed(1, a, "write", "P/notes.txt", Some("cc"), Some(40)),
+            placed(2, a, "rename", "P", None, Some(10)),
+            placed(3, a, "rename_into", "Q", None, Some(10)),
+        ];
+        let carried = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Other/notes.txt", "cc", 41)], &[10, 40, 41]))]);
+        assert!(!check_custody(&records, &carried).ok);
+        let home = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Q/notes.txt", "cc", 40)], &[10, 40, 41]))]);
+        let verdict = check_custody(&records, &home);
+        assert!(verdict.ok && verdict.detail.starts_with("1 content(s) judged"), "{}", verdict.detail);
+    }
+
+    #[test]
+    fn a_peers_folder_rename_leaves_no_stale_placement_to_bless_a_carry_back() {
+        // device-a's user wrote it into P (directory 40). device-b's user
+        // renamed P to P2, which the engine applied on device-a with no record
+        // there. device-a's user then moved P2/notes.txt into P2/Sub (42). The
+        // move withdraws the placement in 40 whatever 40 is called now, so the
+        // engine carrying the content back into 40 is astray.
+        let records = vec![
+            placed(1, "device-a/office", "write", "P/notes.txt", Some("cc"), Some(40)),
+            placed(2, "device-b/office", "rename", "P", None, Some(70)),
+            placed(3, "device-b/office", "rename_into", "P2", None, Some(70)),
+            placed(4, "device-a/office", "rename", "P2/notes.txt", None, Some(40)),
+            placed(5, "device-a/office", "rename_into", "P2/Sub/notes.txt", Some("cc"), Some(42)),
+        ];
+        let back = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/P2/notes.txt", "cc", 40)], &[40, 42]))]);
+        assert!(!check_custody(&records, &back).ok);
+        let moved = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/P2/Sub/notes.txt", "cc", 42)], &[40, 42]))]);
+        assert!(check_custody(&records, &moved).ok, "{}", check_custody(&records, &moved).detail);
+    }
+
+    #[test]
+    fn a_folder_that_took_over_a_freed_inode_is_not_the_folder_the_user_chose() {
+        // Written into Work (inode 40, born at 1000); its user then removed
+        // Work, and a later folder took inode 40 over (born at 2000). The
+        // folder the user chose is gone, so there is nothing to hold the
+        // content to, wherever it stands.
+        let records = vec![
+            born(1, "device-a/office", "write", "Work/notes.txt", Some("cc"), 40, 1000),
+            born(2, "device-a/office", "remove_dir", "Work", None, 10, 900),
+        ];
+        let mut later = disk(&[("Shared-office/Other/notes.txt", "cc", 41)], &[10, 41]);
+        later.dirs.insert(40, Some(2000));
+        let disks = BTreeMap::from([("device-a".to_string(), later.clone())]);
+        let verdict = check_custody(&records, &disks);
+        assert!(verdict.ok && verdict.detail.starts_with("0 content(s) judged"), "{}", verdict.detail);
+        // The same inode with the same birth is the same folder, still held.
+        later.dirs.insert(40, Some(1000));
+        assert!(!check_custody(&records, &BTreeMap::from([("device-a".to_string(), later)])).ok);
+    }
+
+    #[test]
+    fn a_delete_withdraws_the_placement_it_ends() {
+        // device-b's user and then device-a's user each wrote the same bytes,
+        // and device-a's user deleted its copy from directory 40. device-a
+        // still has device-b's, downloaded into 41: device-a placed nothing
+        // that still stands, so nothing is held to 40.
+        let records = vec![
+            placed(1, "device-b/office", "write", "V/same.txt", Some("cc"), Some(70)),
+            placed(2, "device-a/office", "write", "W/same.txt", Some("cc"), Some(40)),
+            placed(3, "device-a/office", "remove", "W/same.txt", None, Some(40)),
+        ];
+        let on_a = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/V/same.txt", "cc", 41)], &[40, 41]))]);
+        let verdict = check_custody(&records, &on_a);
+        assert!(verdict.ok && verdict.detail.starts_with("0 content(s) judged"), "{}", verdict.detail);
+    }
+
     #[test]
     fn a_users_own_later_move_or_a_gone_folder_is_not_misplacement() {
         // The user moved it on: the rename journals its new folder.
         let moved = vec![
             placed(1, "device-a/office", "write", "Work/notes.txt", Some("cc"), Some(40)),
-            placed(2, "device-a/office", "rename", "Work/notes.txt", None, None),
+            placed(2, "device-a/office", "rename", "Work/notes.txt", None, Some(40)),
             placed(3, "device-a/office", "rename_into", "Other/notes.txt", Some("cc"), Some(41)),
         ];
         let there = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Other/notes.txt", "cc", 41)], &[40, 41]))]);
@@ -2467,7 +2733,7 @@ mod tests {
         // it to that folder, directory 41 there, while 40 still stands.
         let records = vec![
             placed(1, "device-b/office", "write", "Work/notes.txt", Some("cc"), Some(40)),
-            placed(2, "device-a/office", "rename", "Work/notes.txt", None, None),
+            placed(2, "device-a/office", "rename", "Work/notes.txt", None, Some(70)),
             placed(3, "device-a/office", "rename_into", "Other/notes.txt", Some("cc"), Some(90)),
         ];
         let on_b = BTreeMap::from([("device-b".to_string(), disk(&[("Shared-office/Other/notes.txt", "cc", 41)], &[40, 41]))]);
@@ -2484,9 +2750,9 @@ mod tests {
         // it stood. The engine keeps both: the peer's folder, this name.
         let records = vec![
             placed(1, "device-a/office", "write", "Work/notes.txt", Some("cc"), Some(40)),
-            placed(2, "device-b/office", "rename", "Work/notes.txt", None, None),
+            placed(2, "device-b/office", "rename", "Work/notes.txt", None, Some(90)),
             placed(3, "device-b/office", "rename_into", "Other/notes.txt", Some("cc"), Some(91)),
-            placed(4, "device-a/office", "rename", "Work/notes.txt", None, None),
+            placed(4, "device-a/office", "rename", "Work/notes.txt", None, Some(40)),
             placed(5, "device-a/office", "rename_into", "Work/NOTES.TXT", Some("cc"), Some(40)),
         ];
         let on_a = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/Other/NOTES.TXT", "cc", 41)], &[40, 41]))]);
@@ -2499,7 +2765,7 @@ mod tests {
         // which directory it left.
         let downloaded = vec![
             placed(1, "device-b/office", "write", "Work/notes.txt", Some("cc"), Some(80)),
-            placed(2, "device-b/office", "rename", "Work/notes.txt", None, None),
+            placed(2, "device-b/office", "rename", "Work/notes.txt", None, Some(80)),
             placed(3, "device-b/office", "rename_into", "Other/notes.txt", Some("cc"), Some(81)),
             placed(4, "device-a/office", "rename", "Work/notes.txt", None, Some(40)),
             placed(5, "device-a/office", "rename_into", "Work/NOTES.TXT", Some("cc"), Some(40)),
@@ -2760,5 +3026,64 @@ mod frozen {
                 }
             }
         }
+    }
+
+    /// Custody, replayed on a frozen snapshot: the journal as it stood, and
+    /// each device's placement rebuilt from its state store (every live file
+    /// in the directory its folder record holds, every folder by the inode and
+    /// birth its record holds). A settled store says what its disk holds; the
+    /// replay is for telling the check's own errors from the engine's, not
+    /// for judging a run.
+    ///
+    /// ```text
+    /// FROZEN=/root/soak-evidence/run1618-*/violation-cycle-5-<ms> cargo test -p jd-soak custody_on_a -- --ignored --nocapture
+    /// ```
+    ///
+    /// It wants `journal/` and `device-<x>/state.db` or `device-<x>-state.db`
+    /// beside it.
+    #[test]
+    #[ignore] // needs frozen evidence; run it by name with FROZEN set
+    fn custody_on_a_frozen_snapshot() {
+        let Ok(dir) = std::env::var("FROZEN") else {
+            eprintln!("set FROZEN=/path/to/a snapshot");
+            return;
+        };
+        let dir = Path::new(&dir);
+        let records = journal::read_dir(&dir.join("journal")).expect("journal");
+        let mut placements = BTreeMap::new();
+        for device in ["device-a", "device-b", "device-c"] {
+            let db = [dir.join(device).join("state.db"), dir.join(format!("{device}-state.db"))].into_iter().find(|p| p.exists());
+            if let Some(db) = db {
+                placements.insert(device.to_string(), placement_from_store(&db).expect("state store"));
+            }
+        }
+        let verdict = check_custody(&records, &placements);
+        println!("CUSTODY {} {}: {}", dir.display(), if verdict.ok { "PASS" } else { "FAIL" }, verdict.detail);
+    }
+
+    fn placement_from_store(db: &Path) -> Result<Placement, rusqlite::Error> {
+        let conn = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let mut out = Placement::default();
+        let mut folders: BTreeMap<i64, u64> = BTreeMap::new();
+        let mut q = conn.prepare(
+            "SELECT server_id, synced_fp_file_id, synced_fp_birth_ns FROM entries
+             WHERE entity_type = 'folder' AND remote_deleted = 0 AND synced_fp_file_id IS NOT NULL",
+        )?;
+        for row in q.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?)))? {
+            let (id, inode, birth) = row?;
+            folders.insert(id, inode as u64);
+            out.dirs.insert(inode as u64, birth.map(|b| b as u64));
+        }
+        let mut q = conn.prepare(
+            "SELECT remote_name, COALESCE(last_seen_sha256, synced_content_sha256), parent_folder_id FROM entries
+             WHERE entity_type = 'file' AND remote_deleted = 0 AND parent_folder_id IS NOT NULL",
+        )?;
+        for row in q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, i64>(2)?)))? {
+            let (name, sha, parent) = row?;
+            if let (Some(sha), Some(inode)) = (sha, folders.get(&parent)) {
+                out.files.push((name, sha, *inode));
+            }
+        }
+        Ok(out)
     }
 }
