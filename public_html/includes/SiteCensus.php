@@ -39,6 +39,7 @@
  *   - the rows a backup run writes on the source after its dump
  *     (bkh_backup_history).
  *
+ * @version 1.1 - check(): one machine's census judged alone, for a copy from backups (site_copy.md WP10)
  * @version 1.0
  */
 class SiteCensus {
@@ -336,6 +337,38 @@ class SiteCensus {
 				true);
 		}
 
+		return self::verdict($diffs);
+	}
+
+	/**
+	 * One machine's census, with nothing to compare it against: a copy made
+	 * from backups when the source is gone (specs/site_copy.md WP10). Only what
+	 * the machine's own state says blocks: the canary not opening, any dead
+	 * sealed secret, or an offloaded file it cannot reach in the bucket. Counts
+	 * are reported, never judged. Same verdict shape as compare(), with the
+	 * source side empty.
+	 */
+	public static function check(array $copy): array {
+		$diffs = array();
+		$add = function ($what, $c) use (&$diffs) {
+			$diffs[] = array('what' => $what, 'source' => null, 'copy' => $c, 'blocking' => true);
+		};
+		if (($copy['version'] ?? null) !== self::VERSION) {
+			$add('census format', $copy['version'] ?? null);
+			return self::verdict($diffs);
+		}
+		$cs = (array)$copy['secrets'];
+		if ((string)($cs['canary'] ?? '') !== SecretBox::OPEN_OK) {
+			$add('key canary', (string)($cs['canary'] ?? ''));
+		}
+		if ((int)($cs['dead'] ?? 0) > 0) {
+			$add('dead sealed secrets', (int)$cs['dead']);
+		}
+		$co = (array)($copy['offloaded'] ?? array());
+		if ((string)($co['error'] ?? '') !== '' || (int)($co['answered'] ?? 0) < (int)($co['sampled'] ?? 0)) {
+			$add('offloaded files the copy reaches in the bucket', (string)($co['error'] ?? '') !== '' ? (string)$co['error']
+				: ((int)$co['answered'] . ' of ' . (int)$co['sampled'] . ' sampled; not answering: ' . implode(', ', (array)($co['missing'] ?? array()))));
+		}
 		return self::verdict($diffs);
 	}
 

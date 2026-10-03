@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.30 - copy_take_key's claim budget: the owner's hour at the copy's own page inside it
+ *                 (site_copy.md WP10)
  * @version 1.29 - copy_export's claim budget (its owner's approval window inside it) and copy_stage's; copy_stage
  *                 and copy_import carry the chain ceiling (site_copy.md WP4)
  * @version 1.28 - copy_restore's claim budget: restore_chain's work (2h20m) and slack, with no approval
@@ -289,6 +291,9 @@ class ManagementJob extends SystemBase {
 		// The source's export: seconds of work and the source owner's approval
 		// window, held inside the claim as every approval is.
 		'copy_export'           => 4500,  // 10m + 60m approval + slack
+		// A copy from backups taking its chain's key: the owner's hour at the
+		// copy's own page, held inside the claim as an approval is.
+		'copy_take_key'         => 4500,  // 5m + 60m wait for the owner + slack
 		// A copy's chain download: stage_chain's transfer, under its source's slug.
 		'copy_stage'            => 8700,  // 2h20m + slack
 		// Bringing a backup back from backup storage. Mirrors upload_backup's budget,

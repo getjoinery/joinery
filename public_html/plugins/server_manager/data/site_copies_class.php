@@ -30,15 +30,25 @@
  *   starting   - the address points at the copy; it takes the source's node
  *                id and starts as the site
  *   switched   - the copy is the site; the way back is still open
+ *   undoing    - an address swap that did not prove itself is being undone;
+ *                it ends ready again, with the source still frozen
  *   returning  - going back: the source is being started again
  *   finished   - the owner kept the switch-over; the old server is theirs to
  *                delete
  *
  * scp_switch is the switch-over's record: the phase it is in or stopped in
- * (freeze, start, return), how the address moves, the zone and each record
- * moved (id, type, name, from, to), and when it was frozen, moved, proven and
- * moved back.
+ * (freeze, start, undo, return), how the address moves (proxied_origin,
+ * ip_swap, manual), the zone and each record moved (id, type, name, from, to)
+ * or the swap's plan (each machine's instance, address and reverse DNS), and
+ * when it was frozen, moved, proven and moved back.
  *
+ * scp_from is where the copy comes from: 'source', the live site, which
+ * exports to it and is frozen at the switch (Phase 1); or 'backups', the
+ * site's backups alone, when its server is dead (Phase 2, WP10). A copy from
+ * backups gets its chain's key from the owner's recovery key, typed on the
+ * copy's own page, and its census is judged alone.
+ *
+ * @version 1.2 - scp_from (a copy from backups, site_copy.md WP10) and the undoing status (an IP swap undone, WP12)
  * @version 1.1 - the switch-over's statuses and scp_switch (site_copy.md WP7a)
  * @version 1.0
  */
@@ -63,9 +73,14 @@ class SiteCopy extends SystemBase {
 	const STATUS_SWITCHED  = 'switched';
 	const STATUS_RETURNING = 'returning';
 	const STATUS_FINISHED  = 'finished';
+	const STATUS_UNDOING   = 'undoing';
+
+	const FROM_SOURCE  = 'source';
+	const FROM_BACKUPS = 'backups';
 
 	/** The statuses in which a run of steps is moving. */
-	const MOVING_STATUSES = array(self::STATUS_COPYING, self::STATUS_FREEZING, self::STATUS_STARTING, self::STATUS_RETURNING);
+	const MOVING_STATUSES = array(self::STATUS_COPYING, self::STATUS_FREEZING, self::STATUS_STARTING, self::STATUS_UNDOING,
+		self::STATUS_RETURNING);
 
 	/** The words each status shows. */
 	const STATUS_LABELS = array(
@@ -78,6 +93,7 @@ class SiteCopy extends SystemBase {
 		self::STATUS_READY     => 'Switching over: ready to move the address',
 		self::STATUS_STARTING  => 'Switching over: starting the copy as the site',
 		self::STATUS_SWITCHED  => 'Switched over',
+		self::STATUS_UNDOING   => 'Switching over: putting the address back',
 		self::STATUS_RETURNING => 'Going back',
 		self::STATUS_FINISHED  => 'Switch-over finished',
 	);
@@ -91,6 +107,8 @@ class SiteCopy extends SystemBase {
 		'scp_cvp_customer_cloud_provision_id' => array('type'=>'int8'),
 		'scp_release'            => array('type'=>'varchar(20)', 'required'=>true, 'is_nullable'=>false),
 		'scp_status'             => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'waiting'),
+		// Where the copy comes from: the live source, or its backups (see the header).
+		'scp_from'               => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'source'),
 		'scp_steps'              => array('type'=>'jsonb'),
 		'scp_chain_id'           => array('type'=>'varchar(64)'),
 		// The newest upload time of the chain the run applied: what the copy is
@@ -151,6 +169,11 @@ class SiteCopy extends SystemBase {
 
 	public function set_switch_record(array $record): void {
 		$this->set('scp_switch', $record);
+	}
+
+	/** Is this a copy from the site's backups alone (its server is dead)? */
+	public function from_backups(): bool {
+		return (string)$this->get('scp_from') === self::FROM_BACKUPS;
 	}
 
 	public function status(): string {

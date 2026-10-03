@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.52 - process_copy_look and process_copy_take_key: a copy from backups (site_copy.md WP10)
  * @version 1.51 - process_copy_vouch keeps the frozen source's vouch for its copy; vouch_of() reads it back
  *                 (site_copy.md B44)
  * @version 1.50 - Clone is retired (site_copy.md WP9): process_clone_export_arm and blank_install_clone_key are gone
@@ -2423,6 +2424,35 @@ HTML;
 			'chains'     => array_slice($chains, 0, 20),
 			'host_files' => $ok ? max(0, (int)($data['host_files'] ?? 0)) : 0,
 			'look_path'  => preg_match('#^/\.joinery-look/[0-9a-f]{32}$#', $look) ? $look : '',
+		]));
+		$job->save();
+	}
+
+	/**
+	 * copy_look (site_copy.md WP10): the path that lets the owner past a
+	 * dormant copy's quiet state, to the copy's own page.
+	 */
+	private static function process_copy_look($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$look = ((string)$job->get('mjb_status') === 'completed' && is_array($data)) ? (string)($data['look_path'] ?? '') : '';
+		$job->set('mjb_result', json_encode([
+			'look_path' => preg_match('#^/\.joinery-look/[0-9a-f]{32}$#', $look) ? $look : '',
+		]));
+		$job->save();
+	}
+
+	/**
+	 * copy_take_key (site_copy.md WP10): which chain's key a copy made from
+	 * backups took, once its owner opened it on the copy's own page. Facts
+	 * only: the key stays on the copy.
+	 */
+	private static function process_copy_take_key($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$ok = (string)$job->get('mjb_status') === 'completed' && is_array($data);
+		$job->set('mjb_result', json_encode([
+			'chain_id'             => $ok && preg_match('/^chain-[0-9_]{1,58}$/', (string)($data['chain_id'] ?? '')) ? (string)$data['chain_id'] : '',
+			'manifest_sha256'      => $ok && preg_match('/^[0-9a-f]{64}$/', (string)($data['manifest_sha256'] ?? '')) ? (string)$data['manifest_sha256'] : '',
+			'recovery_fingerprint' => $ok && preg_match('/^[0-9a-f]{64}$/', (string)($data['recovery_fingerprint'] ?? '')) ? (string)$data['recovery_fingerprint'] : '',
 		]));
 		$job->save();
 	}

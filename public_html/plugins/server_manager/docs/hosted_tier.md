@@ -321,7 +321,7 @@ Cancel and To-do done.
 
 **The operator token** needs `linodes:read_write`, `account:read_write` (to
 create and cancel a transfer), `firewall:read_only` and `volumes:read_only` (the
-check).
+check). A site copy's switch-over by IP swap also needs `ips:read_write`.
 
 ## Setting it up
 

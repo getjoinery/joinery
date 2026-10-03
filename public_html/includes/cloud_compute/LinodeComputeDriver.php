@@ -6,6 +6,9 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.9 - CloudAddressSwap: addressReport (public IPv4s, IPv6, Network Helper by the instance's
+ *                interface generation), ipAddress, assignIpv4 (POST networking/ips/assign), instanceFirewalls,
+ *                rebootInstance (specs/site_copy.md WP12). The swap needs ips:read_write.
  * @version 1.8 - a transport failure (timeout, DNS, refused connection) is a CloudComputeException too, so a
  *                path carrying the transfer code is redacted on every failure, not only an HTTP error
  * @version 1.7 - CloudInstanceTransfers: the provider-side eligibility check, create, status and cancel of a
@@ -35,7 +38,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
-class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers {
+class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap {
 
 	const API_BASE = 'https://api.linode.com/v4/';
 
@@ -223,6 +226,82 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			'ip'   => (string)($result['address'] ?? $ip),
 			'rdns' => (string)($result['rdns'] ?? ''),
 		);
+	}
+
+	// ── IP swap (CloudAddressSwap) ────────────────────────────────────────────
+
+	public function addressReport(string $instance_id): array {
+		$base = 'linode/instances/' . rawurlencode($instance_id);
+		$instance = $this->request('GET', $base);
+		$out = $this->normalize($instance);
+		$public = array();
+		$ips = $this->request('GET', $base . '/ips');
+		foreach ((array)($ips['ipv4']['public'] ?? array()) as $ip) {
+			if (!empty($ip['address'])) {
+				$public[] = (string)$ip['address'];
+			}
+		}
+		$out['ipv4_public'] = $public;
+		if (!empty($ips['ipv6']['slaac']['address'])) {
+			$out['ipv6'] = strtolower((string)$ips['ipv6']['slaac']['address']);
+		}
+		// Network Helper writes the address into the machine's network config
+		// at boot. Where it is set depends on the instance's generation: the
+		// Linode-interfaces generation has one setting for the instance, the
+		// legacy one a helper flag on each configuration profile.
+		$out['network_helper'] = null;
+		try {
+			if ((string)($instance['interface_generation'] ?? '') === 'linode') {
+				$settings = $this->request('GET', $base . '/interfaces/settings');
+				if (array_key_exists('network_helper', $settings)) {
+					$out['network_helper'] = (bool)$settings['network_helper'];
+				}
+			} else {
+				$configs = (array)($this->request('GET', $base . '/configs')['data'] ?? array());
+				if ($configs) {
+					$on = true;
+					foreach ($configs as $config) {
+						$on = $on && !empty($config['helpers']['network']);
+					}
+					$out['network_helper'] = $on;
+				}
+			}
+		} catch (CloudComputeException $e) {
+			$out['network_helper'] = null;
+		}
+		return $out;
+	}
+
+	public function ipAddress(string $address): array {
+		$ip = $this->request('GET', 'networking/ips/' . rawurlencode($address));
+		return array(
+			'address'     => (string)($ip['address'] ?? $address),
+			'instance_id' => isset($ip['linode_id']) ? (string)$ip['linode_id'] : '',
+			'rdns'        => (string)($ip['rdns'] ?? ''),
+		);
+	}
+
+	public function assignIpv4(string $region, array $assignments): void {
+		$list = array();
+		foreach ($assignments as $address => $instance_id) {
+			$list[] = array('address' => (string)$address, 'linode_id' => (int)$instance_id);
+		}
+		$this->request('POST', 'networking/ips/assign', array('region' => $region, 'assignments' => $list));
+	}
+
+	public function instanceFirewalls(string $instance_id): array {
+		$out = array();
+		$listing = $this->request('GET', 'linode/instances/' . rawurlencode($instance_id) . '/firewalls');
+		foreach ((array)($listing['data'] ?? array()) as $fw) {
+			if (isset($fw['id'])) {
+				$out[(string)$fw['id']] = (string)($fw['label'] ?? $fw['id']);
+			}
+		}
+		return $out;
+	}
+
+	public function rebootInstance(string $instance_id): void {
+		$this->request('POST', 'linode/instances/' . rawurlencode($instance_id) . '/reboot');
 	}
 
 	// ── Service Transfer (CloudInstanceTransfers) ─────────────────────────────

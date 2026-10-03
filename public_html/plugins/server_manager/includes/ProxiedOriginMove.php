@@ -23,12 +23,16 @@
  *   prove()      ask the site's name, through the proxy, for the copy's look
  *                path. Only the copy knows that path, so its answer (a 303
  *                setting the look cookie) proves the proxy reaches the copy.
+ *                The other ways of moving the address prove themselves the
+ *                same way (an IP swap, a DNS change the owner made).
  *
  * The DNS credential lives for one request: the page builds the driver from
  * what the owner typed and hands it here; nothing here keeps it. These are the
  * owner's own records, changed on their press with a token they gave for it,
  * so nothing is recorded in the platform's DNS ownership table.
  *
+ * @version 1.1 - prove() takes how long to keep asking, so a step that is called again can ask briefly each time, and
+ *                whether to check the certificate (a copy from backups has none yet)
  * @version 1.0
  */
 
@@ -263,13 +267,18 @@ class ProxiedOriginMove {
 	}
 
 	/**
-	 * Does the proxy reach the copy? Asks https://<domain><look path> until the
-	 * copy's answer comes back or PROVE_SECONDS pass. Each ask carries a fresh
+	 * Does the site's name reach the copy? Asks https://<domain><look path>
+	 * until the copy's answer comes back or $seconds (PROVE_SECONDS when
+	 * null) pass. The proof is the 303 setting the copy's secret cookie, which
+	 * only the copy can give; $verify_tls false asks without checking the
+	 * certificate, for a copy made from backups, which has none until it is
+	 * the site. Each ask carries a fresh
 	 * query string, so no cache answers in the copy's place.
 	 *
 	 * @return array{proven:bool, asks:int, seconds:int, last:string}
 	 */
-	public static function prove(string $domain, string $look_path): array {
+	public static function prove(string $domain, string $look_path, ?int $seconds = null, bool $verify_tls = true): array {
+		$seconds = $seconds ?? self::PROVE_SECONDS;
 		$start = time();
 		$asks = 0;
 		$last = '';
@@ -281,12 +290,12 @@ class ProxiedOriginMove {
 		while ($asks < 100) {
 			$asks++;
 			$url = 'https://' . $domain . $look_path . '?switch_probe=' . bin2hex(random_bytes(6));
-			$got = self::$asker ? (self::$asker)($url) : self::ask($url);
+			$got = self::$asker ? (self::$asker)($url) : self::ask($url, $verify_tls);
 			if ((int)$got['status'] === 303 && strpos((string)$got['set_cookie'], 'joinery_look=' . $secret) !== false) {
 				return array('proven' => true, 'asks' => $asks, 'seconds' => time() - $start, 'last' => '303 from the copy');
 			}
 			$last = $got['error'] !== '' ? $got['error'] : 'HTTP ' . (int)$got['status'];
-			if (time() - $start >= self::PROVE_SECONDS) {
+			if (time() - $start >= $seconds) {
 				break;
 			}
 			self::$sleeper ? (self::$sleeper)(self::PROVE_INTERVAL) : sleep(self::PROVE_INTERVAL);
@@ -294,8 +303,8 @@ class ProxiedOriginMove {
 		return array('proven' => false, 'asks' => $asks, 'seconds' => time() - $start, 'last' => $last);
 	}
 
-	/** One HTTPS ask, no redirect followed, certificate checked. */
-	private static function ask(string $url): array {
+	/** One HTTPS ask, no redirect followed, the certificate checked unless told not to. */
+	private static function ask(string $url, bool $verify_tls = true): array {
 		$cookie = '';
 		$ch = curl_init($url);
 		curl_setopt_array($ch, array(
@@ -303,8 +312,8 @@ class ProxiedOriginMove {
 			CURLOPT_FOLLOWLOCATION => false,
 			CURLOPT_CONNECTTIMEOUT => 5,
 			CURLOPT_TIMEOUT        => 10,
-			CURLOPT_SSL_VERIFYPEER => true,
-			CURLOPT_SSL_VERIFYHOST => 2,
+			CURLOPT_SSL_VERIFYPEER => $verify_tls,
+			CURLOPT_SSL_VERIFYHOST => $verify_tls ? 2 : 0,
 			CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS,
 			CURLOPT_HTTPHEADER     => array('Cache-Control: no-cache'),
 			CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$cookie) {

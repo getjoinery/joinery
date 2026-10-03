@@ -14,6 +14,8 @@
  *   ip     string  first public IPv4, '' until assigned
  *   label  string  provider-side label
  *
+ * @version 1.4 - CloudAddressSwap: the optional capability to swap two instances' IPv4 addresses
+ *                (specs/site_copy.md WP12)
  * @version 1.3 - CloudInstanceTransfers: the optional capability to hand an instance to another
  *                account of the same provider (specs/managed_to_self_hosted_transfer.md)
  * @version 1.2 - shutdownInstance()/bootInstance()/getTransfer(): the plane's only lever over a
@@ -185,6 +187,50 @@ interface CloudInstanceTransfers {
 	 * @throws CloudComputeException on any API failure.
 	 */
 	public function cancelTransfer(string $token): void;
+}
+
+/**
+ * Optional capability: swap the public IPv4 addresses of two instances of one
+ * account in one region (a site copy's switch-over by IP swap,
+ * specs/site_copy.md WP12). The address moves, with its reverse DNS, and every
+ * fact bound to it (allow-lists, SPF, the A records) stays true. A driver that
+ * cannot answers by not implementing it; the caller asks
+ * `instanceof CloudAddressSwap`.
+ */
+interface CloudAddressSwap {
+
+	/**
+	 * The instance as the provider reports it, with what a swap needs:
+	 *   id, status, region, label
+	 *   ipv4_public    string[]  the public IPv4 addresses
+	 *   ipv6           string    the instance's own IPv6 address, or ''
+	 *   network_helper bool|null whether the provider configures the
+	 *                            address at boot (null: could not be read)
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function addressReport(string $instance_id): array;
+
+	/**
+	 * One address as the provider records it: address, instance_id, rdns.
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function ipAddress(string $address): array;
+
+	/**
+	 * Move the addresses at once: [address => instance id, ...], every
+	 * instance keeping at least one public IPv4.
+	 *
+	 * @throws CloudComputeException carrying the provider's reason
+	 */
+	public function assignIpv4(string $region, array $assignments): void;
+
+	/** The provider firewalls attached to an instance, as [id => label]. @throws CloudComputeException */
+	public function instanceFirewalls(string $instance_id): array;
+
+	/** Reboot a running instance; a stopped one is booted with bootInstance(). @throws CloudComputeException */
+	public function rebootInstance(string $instance_id): void;
 }
 
 class CloudComputeException extends Exception {}

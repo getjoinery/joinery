@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.2",
+  "version": "1.30.3",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -412,7 +412,7 @@
       "secret": true,
       "group": "hosted",
       "label": "Operator cloud token",
-      "helptext": "The Linode personal access token hosted instances are created on, with scopes linodes:read_write, account:read_write (handing a server to its customer's own account), firewall:read_only and volumes:read_only (the check before a handover). Set it on the Provisioning Setup page, which seals it at rest. It stays on this management node and never reaches a machine this plane creates."
+      "helptext": "The Linode personal access token hosted instances are created on, with scopes linodes:read_write, account:read_write (handing a server to its customer's own account), firewall:read_only and volumes:read_only (the check before a handover), and ips:read_write (a site copy's switch-over by swapping two servers' addresses). Set it on the Provisioning Setup page, which seals it at rest. It stays on this management node and never reaches a machine this plane creates."
     },
     {
       "name": "server_manager_smtp2go_api_key",

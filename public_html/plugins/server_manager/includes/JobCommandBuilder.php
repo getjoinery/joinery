@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.90 - build_copy_look / build_copy_take_key (agent 1.54.0): a copy from backups, its key taken
+ *                 with the recovery key on the copy's own page (site_copy.md WP10)
  * @version 1.89 - the rspamd_classifier_bayes and rspamd_redis descriptions say what each file means now
  *   that spam learning is in the app (an absent redis.conf is the expected answer)
  * @version 1.88 - build_copy_vouch / build_copy_take_vouch (agent 1.53.0): the switch-over's final copy is a
@@ -2260,6 +2262,65 @@ class JobCommandBuilder {
 			throw new Exception('Taking a vouch needs the vouch the source returned, as it was returned.');
 		}
 		return ['primitive' => 'copy_take_vouch', 'params' => ['vouch' => $vouch]];
+	}
+
+	/**
+	 * Ask a dormant copy for its look path (specs/site_copy.md WP10): the link
+	 * that lets its owner past the quiet state to the copy's own page, where a
+	 * copy from backups asks for the recovery key. A copy made from its live
+	 * source learns it from copy_import's result instead.
+	 */
+	public static function build_copy_look($node) {
+		if (!self::has_primitive($node, 'copy_look')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its look path. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['copy_look']));
+		}
+		return self::build_copy_look_primitive($node);
+	}
+
+	public static function build_copy_look_primitive($node) {
+		return ['primitive' => 'copy_look', 'params' => []];
+	}
+
+	/**
+	 * A dormant copy made from backups takes its chain's key (specs/site_copy.md
+	 * WP10). The copy shows its owner the backup on its own page, the owner
+	 * types the recovery key there, and the copy opens the chain's data key
+	 * with what their browser works out from it. Everything here is ciphertext
+	 * or a fact the owner checks: the chain, its manifest's hash, its newest
+	 * run, the recovery key's fingerprint, and the data key as sealed to the
+	 * recovery key in the chain's envelope.
+	 *
+	 * $request: SiteCopyRunner::key_request()'s shape.
+	 */
+	public static function build_copy_take_key($node, array $request) {
+		if (!self::has_primitive($node, 'copy_take_key')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot take a chain's key from its backups. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['copy_take_key']));
+		}
+		return self::build_copy_take_key_primitive($node, $request);
+	}
+
+	public static function build_copy_take_key_primitive($node, array $request = []) {
+		if (trim((string)$node->get('mgn_install_state')) !== 'copy') {
+			throw new Exception("Node '{$node->get('mgn_slug')}' is not a dormant copy.");
+		}
+		$params = [
+			'chain_id'             => (string)($request['chain_id'] ?? ''),
+			'manifest_sha256'      => (string)($request['manifest_sha256'] ?? ''),
+			'run_time'             => (string)($request['run_time'] ?? ''),
+			'recovery_fingerprint' => (string)($request['recovery_fingerprint'] ?? ''),
+			'recovery_sealed'      => (string)($request['recovery_sealed'] ?? ''),
+			'site'                 => (string)($request['site'] ?? ''),
+		];
+		if (!preg_match('/^chain-[0-9_]+$/', $params['chain_id']) || !preg_match('/^[0-9a-f]{64}$/', $params['manifest_sha256'])
+				|| !preg_match('/^[0-9a-f]{64}$/', $params['recovery_fingerprint'])
+				|| strlen((string)base64_decode($params['recovery_sealed'], true)) <= 48 || strlen($params['recovery_sealed']) > 512) {
+			throw new Exception('Taking a key from backups needs the chain, its manifest hash, and the key sealed to the recovery key.');
+		}
+		return ['primitive' => 'copy_take_key', 'params' => $params];
 	}
 
 	/**

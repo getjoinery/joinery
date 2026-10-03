@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.38 - the switch-over's method (proxied origin, IP swap, the owner's own DNS change) and a copy from
+ *                backups (site_copy.md WP12, WP10)
  * @version 1.37 - site copy switch-over (specs/site_copy.md WP7a): copy_switch, copy_move, copy_retry_start,
  *                 copy_go_back, copy_finish; the DNS token is read from the form for that request only
  * @version 1.36 - Retry Install refuses an install the retired Clone made (mode from_backup), pointing at the Copy tab
@@ -699,18 +701,26 @@ class NodeDetailActions {
 					return $base_url . '&tab=copy';
 				}
 				$copy_url = $base_url . '&tab=copy';
+				// Where the copy comes from: the running site, or its backups
+				// alone when its server is dead (WP10).
+				$copy_from = (string)($_POST['copy_from'] ?? SiteCopy::FROM_SOURCE);
+				if (in_array($action, array('copy_new_server', 'copy_own_server'), true)
+						&& $copy_from === SiteCopy::FROM_BACKUPS && empty($_POST['copy_dead_confirm'])) {
+					self::fail($session, $page_regex, 'Tick the box: a copy from backups is for a site whose server is dead. Nothing was done.');
+					return $copy_url;
+				}
 				if ($action === 'copy_new_server') {
 					SiteCopyRunner::start_new_server($node, [
 						'account' => (string)($_POST['copy_account'] ?? ''),
 						'region'  => (string)($_POST['copy_region'] ?? ''),
 						'type'    => (string)($_POST['copy_type'] ?? ''),
-					], $uid);
+					], $uid, $copy_from);
 					self::ok($session, $page_regex, 'The new server is being created. Its install takes a few minutes; '
 						. 'the copy starts once its agent has joined.');
 					return $copy_url;
 				}
 				if ($action === 'copy_own_server') {
-					SiteCopyRunner::start_own_server($node, $uid);
+					SiteCopyRunner::start_own_server($node, $uid, $copy_from);
 					return $copy_url;
 				}
 				$site_copy = SiteCopy::live_for_source((int)$node->key);
@@ -733,23 +743,29 @@ class NodeDetailActions {
 					SiteCopyRunner::copy_again($site_copy, $uid);
 					return $copy_url;
 				}
-				// The switch-over (specs/site_copy.md WP7a). The DNS token lives
-				// for this request: the driver is built from the form and goes
-				// out of scope with it.
+				// The switch-over (specs/site_copy.md WP7a, WP12, WP10). A DNS
+				// token lives for this request: the driver is built from the
+				// form and goes out of scope with it.
 				if ($action === 'copy_switch') {
 					if (empty($_POST['copy_confirm'])) {
-						self::fail($session, $page_regex, 'Tick the box to freeze the site; nothing was done.');
+						self::fail($session, $page_regex, 'Tick the box to start the switch-over; nothing was done.');
 						return $copy_url;
 					}
-					SiteCopyRunner::begin_switch($site_copy, self::copy_dns_driver($node, true), $uid);
-					self::ok($session, $page_regex, 'The records check out, and the site is frozen: visitors see the maintenance '
-						. 'page while the final copy runs. Move the address once it matches.');
+					$method = (string)($_POST['copy_method'] ?? '');
+					SiteCopyRunner::begin_switch($site_copy, $method,
+						$method === SiteCopyRunner::METHOD_PROXIED ? self::copy_dns_driver($node, true) : null, $uid);
+					self::ok($session, $page_regex, $site_copy->from_backups()
+						? 'The switch-over has begun. Move the address once the copy is ready.'
+						: 'The site is frozen: visitors see the maintenance page while the final copy runs. Move the address once it matches.');
 					return $copy_url;
 				}
 				if ($action === 'copy_move') {
-					SiteCopyRunner::move_address($site_copy, self::copy_dns_driver($node, true), $uid);
-					self::ok($session, $page_regex, 'The address points at the copy, and the proxy reaches it. The copy is '
-						. 'taking over as the site.');
+					$method = (string)($site_copy->switch_record()['method'] ?? SiteCopyRunner::METHOD_PROXIED);
+					SiteCopyRunner::move_address($site_copy,
+						$method === SiteCopyRunner::METHOD_PROXIED ? self::copy_dns_driver($node, true) : null, $uid);
+					self::ok($session, $page_regex, $method === SiteCopyRunner::METHOD_PROXIED
+						? 'The address points at the copy, and the proxy reaches it. The copy is taking over as the site.'
+						: 'The address is moving. This page follows it.');
 					return $copy_url;
 				}
 				if ($action === 'copy_retry_start') {

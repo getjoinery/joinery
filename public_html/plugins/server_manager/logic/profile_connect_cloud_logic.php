@@ -9,9 +9,14 @@
  * fails (the provision parks at pending_connect and a fresh grant resumes it).
  *
  * action=connect starts the platform OAuth2 consent flow (purpose
- * customer_cloud, scope linodes:read_write — the minimum that can create and
- * manage instances; no account/billing access is requested).
+ * customer_cloud): linodes:read_write, which creates and manages instances,
+ * and ips:read_write with firewall:read_only, which a site copy's switch-over
+ * by IP swap needs (move the addresses, and check the copy is behind the same
+ * firewalls; specs/site_copy.md WP12). No account or billing access is
+ * requested. A grant made before the swap existed lacks the two; re-connecting
+ * here grants them.
  *
+ * @version 1.3 - asks for ips:read_write and firewall:read_only too, for a site copy's switch by IP swap
  * @version 1.2 - grant_expired/grant_expires: an expired Linode grant is reported as expired, not connected
  * @version 1.1
  */
@@ -45,7 +50,7 @@ function profile_connect_cloud_logic(array $input): LogicResult {
 			$client = new OAuth2Client();
 			$consent_url = $client->beginConsent(
 				'linode',
-				array('linodes:read_write'),
+				array('linodes:read_write', 'ips:read_write', 'firewall:read_only'),
 				'customer_cloud',
 				array('user_id' => intval($user_id), 'provider' => 'linode'),
 				$self_url

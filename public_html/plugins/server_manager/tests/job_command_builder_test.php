@@ -2349,6 +2349,26 @@ JobResultProcessor::process($cp_vjob);
 $cp_vjob->load();
 check(JobResultProcessor::vouch_of($cp_vjob) === null, 'a failed vouch keeps nothing');
 
+// A copy from backups (site_copy.md WP10): the look path, and the chain key
+// opened by the owner on the copy's own page. The job carries ciphertext and
+// facts only.
+check(JobCommandBuilder::build_copy_look_primitive($cp_copy) === array('primitive' => 'copy_look', 'params' => array()),
+	'asking a copy for its look path takes nothing');
+$cp_req = array('chain_id' => 'chain-20260930_010203', 'manifest_sha256' => str_repeat('a', 64), 'run_time' => '2026-09-30T01:02:03Z',
+	'recovery_fingerprint' => str_repeat('b', 64), 'recovery_sealed' => base64_encode(random_bytes(92)), 'site' => 'scp.example.org');
+check(JobCommandBuilder::build_copy_take_key_primitive($cp_copy, $cp_req) === array('primitive' => 'copy_take_key', 'params' => $cp_req),
+	'taking a key from backups names the chain, its manifest, its newest run and the sealed key, and nothing else');
+check(!in_array('copy_take_key', JobCommandBuilder::DESTRUCTIVE_PRIMITIVES, true),
+	'it is not a destructive word: the owner answers on the copy\'s own page, in the word itself');
+foreach (array('a working node' => array($cp_source, $cp_req), 'a bad chain id' => array($cp_copy, array_merge($cp_req, array('chain_id' => '../x'))),
+	'no sealed key' => array($cp_copy, array_merge($cp_req, array('recovery_sealed' => ''))),
+	'an oversized sealed key' => array($cp_copy, array_merge($cp_req, array('recovery_sealed' => str_repeat('A', 600)))),
+	'a bad fingerprint' => array($cp_copy, array_merge($cp_req, array('recovery_fingerprint' => 'abc')))) as $what => $args) {
+	$threw = false;
+	try { JobCommandBuilder::build_copy_take_key_primitive($args[0], $args[1]); } catch (Exception $e) { $threw = true; }
+	check($threw, "a key request for {$what} is not sent");
+}
+
 // The bundle comes back inside the agent's envelope, and is kept for the import.
 $cp_envelope = function ($data) {
 	return "=== [Step 1/1] copy_export ===\n" . json_encode(array('api_version' => '1.0', 'data' => $data)) . "\n[Step 1/1 OK]";
