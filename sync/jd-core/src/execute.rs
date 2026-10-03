@@ -437,6 +437,14 @@ fn classify(e: &ExecError) -> OpOutcome {
         ExecError::Vfs(jd_vfs::VfsError::NotFound(p)) => {
             OpOutcome::Overtaken(format!("{} is no longer there", p.display()))
         }
+        // A move or a folder create into a folder that is not at its name
+        // here: the user moved or removed it since the pass looked, and no
+        // engine write makes it again (`Vfs::create_dir`). The next pass
+        // plans from where it now stands.
+        ExecError::Vfs(jd_vfs::VfsError::NoFolder(p)) => OpOutcome::Overtaken(format!(
+            "the folder {} it is going into is not on this disk; planning again",
+            p.display()
+        )),
         ExecError::Vfs(other) => OpOutcome::Retry(other.to_string()),
         ExecError::Contract(m) | ExecError::UnknownOp(m) => OpOutcome::Withdrawn(m.clone()),
         // A failing state store is not something the next attempt escapes.
@@ -1633,23 +1641,6 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                         ));
                     }
                 }
-            } else {
-                // Nothing at the folder's old name at all, and its own
-                // directory standing elsewhere: renamed, its record not caught
-                // up. Landing makes the missing directories, so the download
-                // itself rebuilt the folder's old name; the next scan read the
-                // rebuilt path as the folder and its real directory as a new
-                // one, and a folder the peer had just filled was trashed (soak
-                // run 1509, device-b). It waits a pass, as above.
-                let mine = env.store.get_entry(EntityId::folder(pid))?.and_then(|f| f.synced_fingerprint).map(|f| f.file_id).filter(|id| *id != 0);
-                if let Some(mine) = mine {
-                    let (_, dir_identity) = crate::pass::observed_dirs(env)?;
-                    if dir_identity.values().any(|id| *id == mine) {
-                        return Ok(OpOutcome::Overtaken(
-                            "the folder it belongs in stands elsewhere; nothing stands at its old name".into(),
-                        ));
-                    }
-                }
             }
         }
     }
@@ -1724,7 +1715,19 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         ));
     }
 
-    let mut spool = env.vfs.spool(&path, op.op_id)?;
+    // Nothing at the folder's name: the user renamed or removed it since the
+    // pass looked, and the spool will not make it again (`Vfs::spool`). The
+    // next pass places the file from where its folder now stands (soak runs
+    // 1509, 1571).
+    let mut spool = match env.vfs.spool(&path, op.op_id) {
+        Ok(spool) => spool,
+        Err(jd_vfs::VfsError::NoFolder(_)) => {
+            return Ok(OpOutcome::Overtaken(
+                "the folder it belongs in is not at its name here; deciding again from where it stands".into(),
+            ));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let mut landing = match (&file_key, &content_id) {
         (Some(key), Some(cid)) => Arrival::encrypted(&mut *spool, key, cid),
         _ => Arrival::plain(&mut *spool),
@@ -3720,10 +3723,11 @@ fn create_local_folder(
         }
     }
     match env.vfs.create_dir(&path) {
-        // A folder that was already there is `Ok`: the call underneath is
-        // `create_dir_all`, which is content to find its work done. Creating a
-        // folder is the one operation where "it was already done" and "I did
-        // it" are the same result, which is why it needs no key.
+        // A folder that was already there is `Ok`: `create_dir` is content to
+        // find its work done. Creating a folder is the one operation where "it
+        // was already done" and "I did it" are the same result, which is why
+        // it needs no key. A parent not on the disk is refused (`NoFolder`),
+        // never made, and reads as overtaken (`classify`).
         Ok(()) => {}
         // Room was just made at this path, so a refusal now is about one of the
         // folders ABOVE it -- a file stands where a parent should be. That

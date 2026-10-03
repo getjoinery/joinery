@@ -262,6 +262,14 @@ pub struct MemFs {
     #[allow(clippy::type_complexity)]
     landing: Arc<Mutex<Option<Box<dyn FnMut(&Path) + Send>>>>,
     dir_creating: Arc<Mutex<Option<Box<dyn FnMut(&Path) + Send>>>>,
+    /// Fires as a download's spool opens, before it looks at the folder
+    /// (`MemFs::while_a_spool_opens`).
+    #[allow(clippy::type_complexity)]
+    spool_opening: Arc<Mutex<Option<Box<dyn FnMut(&Path) + Send>>>>,
+    /// Fires as the engine renames something, before the rename looks at
+    /// either side (`MemFs::while_renaming`).
+    #[allow(clippy::type_complexity)]
+    renaming: Arc<Mutex<Option<Box<dyn FnMut(&Path, &Path) + Send>>>>,
     /// The disk changes under the executor between two of its reads of one
     /// path: the stored key, whether the first read has happened, and what
     /// the disk does before the second (`MemFs::between_reads`).
@@ -323,6 +331,8 @@ impl MemFs {
             clock,
             landing: Arc::new(Mutex::new(None)),
             dir_creating: Arc::new(Mutex::new(None)),
+            renaming: Arc::new(Mutex::new(None)),
+            spool_opening: Arc::new(Mutex::new(None)),
             between_reads: Arc::new(Mutex::new(None)),
         }
     }
@@ -372,6 +382,22 @@ impl MemFs {
     /// the simulator never has.
     pub fn while_creating_a_dir(&self, f: impl FnMut(&Path) + Send + 'static) {
         *self.dir_creating.lock().unwrap() = Some(Box::new(f));
+    }
+
+    /// Run this the instant a download's spool opens, before it has looked at
+    /// the folder it lands in: after every check the executor makes of that
+    /// folder and the server round trip that follows them. Use it to have the
+    /// user rename the folder in that window (soak run 1571: 8 ms).
+    pub fn while_a_spool_opens(&self, f: impl FnMut(&Path) + Send + 'static) {
+        *self.spool_opening.lock().unwrap() = Some(Box::new(f));
+    }
+
+    /// Run this the instant the engine renames something (`from`, `to`),
+    /// before the rename has looked at either side. Use it to have the user
+    /// move the folder a move is going into, after the engine planned the
+    /// move and before it lands.
+    pub fn while_renaming(&self, f: impl FnMut(&Path, &Path) + Send + 'static) {
+        *self.renaming.lock().unwrap() = Some(Box::new(f));
     }
 
     pub fn linux(clock: SimClock) -> MemFs {
@@ -1072,6 +1098,16 @@ impl MemFs {
         PathBuf::from("/sync").join(key)
     }
 
+    /// The folder `key` goes into is not on this disk: not the root, and no
+    /// directory at its key. The engine's writes refuse it (`NoFolder`) rather
+    /// than making it, as `OsVfs` does; only the scenario's `user_*` helpers
+    /// make missing folders, because users do.
+    fn no_folder(st: &MemFsState, key: &str) -> Option<VfsError> {
+        let folder = Self::parent_key(key);
+        (!folder.is_empty() && !matches!(st.nodes.get(folder), Some(Node::Dir)))
+            .then(|| VfsError::NoFolder(Self::path_of(folder)))
+    }
+
     fn ensure_parents(st: &mut MemFsState, key: &str) {
         let parts: Vec<&str> = key.split('/').collect();
         for i in 1..parts.len() {
@@ -1445,12 +1481,18 @@ impl Vfs for MemFs {
         if let Some(blocker) = Self::file_in_the_way(&st, &key) {
             return Err(VfsError::AlreadyExists(Self::path_of(&blocker)));
         }
-        Self::ensure_parents(&mut st, &key);
+        if let Some(refused) = Self::no_folder(&st, &key) {
+            return Err(refused);
+        }
         Self::make_dir(&mut st, &key);
         Ok(())
     }
 
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
+        // Taken and released before any lock, as the folder-create hook is.
+        if let Some(hook) = self.renaming.lock().unwrap().as_mut() {
+            hook(from, to);
+        }
         let f = self.key_for(from)?;
         // The destination's LITERAL bytes, not what `key_for` resolves them to.
         //
@@ -1518,7 +1560,9 @@ impl Vfs for MemFs {
         if let Some(blocker) = Self::file_in_the_way(&st, &t) {
             return Err(VfsError::AlreadyExists(Self::path_of(&blocker)));
         }
-        Self::ensure_parents(&mut st, &t);
+        if let Some(refused) = Self::no_folder(&st, &t) {
+            return Err(refused);
+        }
         Self::move_subtree(&mut st, &f, &t, self.clock.now_ns());
         Ok(())
     }
@@ -1559,11 +1603,22 @@ impl Vfs for MemFs {
     fn spool(&self, target: &Path, _op: i64) -> VfsResult<Box<dyn SpoolFile>> {
         let key = self.key_for(target)?;
         self.check_failure(FsOp::Spool, &key, target)?;
+        // Taken and released before the state lock, as the landing hook is.
+        if let Some(f) = self.spool_opening.lock().unwrap().as_mut() {
+            f(target);
+        }
         let mut st = self.state.lock().unwrap();
+        if let Some(blocker) = MemFs::file_in_the_way(&st, &key) {
+            return Err(VfsError::AlreadyExists(MemFs::path_of(&blocker)));
+        }
+        if let Some(refused) = MemFs::no_folder(&st, &key) {
+            return Err(refused);
+        }
+        let folder_at_open = MemFs::directory_at(&st, MemFs::parent_key(&key))
+            .unwrap_or_else(|| MemFs::directory_fingerprint_of(&st, "").identity());
         st.next_spool += 1;
         let name = format!(".jd-spool-{}", st.next_spool);
         st.spools.insert(name.clone(), Vec::new());
-        let folder_at_open = MemFs::directory_at(&st, MemFs::parent_key(&key));
         drop(st);
         Ok(Box::new(MemSpool {
             fs: self.clone(),
@@ -1662,8 +1717,8 @@ struct MemSpool {
     name: String,
     buf: Vec<u8>,
     /// The directory standing where the target lands when the spool was
-    /// opened, as `OsSpoolFile` keeps it.
-    folder_at_open: Option<jd_vfs::FileIdentity>,
+    /// opened, as `OsSpoolFile` keeps it. A spool never opens without one.
+    folder_at_open: jd_vfs::FileIdentity,
 }
 
 impl Write for MemSpool {
@@ -1758,16 +1813,18 @@ impl SpoolFile for MemSpool {
         // The folder it lands in is the one that stood there when the spool
         // opened, as `OsSpoolFile` holds it: gone or replaced since, the
         // commit is refused rather than making the folder again.
-        if let Some(was) = self.folder_at_open {
-            let folder = MemFs::parent_key(&key).to_string();
-            if MemFs::directory_at(&st, &folder) != Some(was) {
-                return Err(VfsError::FolderMoved(MemFs::path_of(&folder)));
-            }
+        let folder = MemFs::parent_key(&key).to_string();
+        let standing = if folder.is_empty() {
+            Some(MemFs::directory_fingerprint_of(&st, "").identity())
+        } else {
+            MemFs::directory_at(&st, &folder)
+        };
+        if standing != Some(self.folder_at_open) {
+            return Err(VfsError::FolderMoved(MemFs::path_of(&folder)));
         }
 
         MemFs::watch_loss(&st, &key, "a download committing on top of it");
         st.touched.insert(key.clone());
-        MemFs::ensure_parents(&mut st, &key);
         // Replacing a file keeps its id — the rename lands on top of it, which
         // is what a real filesystem does and what makes "same inode, new
         // content" a case the engine has to handle.

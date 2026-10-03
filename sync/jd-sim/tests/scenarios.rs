@@ -16337,8 +16337,9 @@ fn files_in_a_vault_folder_renamed_here_as_the_server_trashes_it_go_up_sealed() 
 /// what it could identify across, and the peer trashed a folder the other
 /// device had just filled (soak run 1509, device-b, folder 406763). A
 /// download lands only in its folder's own directory: standing elsewhere,
-/// it waits a pass for the folder to be placed, whether the old path holds
-/// another directory or none.
+/// it waits a pass for the folder to be placed. Another directory at the old
+/// path is the executor's to see; none at all, the spool refuses to open,
+/// because no engine write makes a folder (`Vfs::spool`).
 #[test]
 fn a_download_never_rebuilds_a_renamed_folders_old_name() {
     let world = World::new(9_976, &["x", "y"]);
@@ -16358,6 +16359,132 @@ fn a_download_never_rebuilds_a_renamed_folders_old_name() {
     let folders: Vec<String> = world.server.folders().into_iter().filter(|f| !f.trashed).map(|f| f.name).collect();
     assert_eq!(folders, vec!["P2".to_string()], "the old name was made again: {:?}", world.server.tree());
     assert_eq!(y.fs.peek("P2/f.txt").as_deref(), Some(&b"the second version, made on x"[..]));
+    assert_converged(&world);
+}
+
+/// The folder names on the server, live ones, as paths.
+fn live_folder_paths(world: &World) -> Vec<String> {
+    let folders: Vec<_> = world.server.folders().into_iter().filter(|f| !f.trashed).collect();
+    let mut out: Vec<String> = folders
+        .iter()
+        .map(|f| {
+            let mut path = f.name.clone();
+            let mut up = f.parent;
+            while let Some(p) = up.and_then(|id| folders.iter().find(|g| g.id == id)) {
+                path = format!("{}/{path}", p.name);
+                up = p.parent;
+            }
+            path
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// Soak run 1571. A new file from a peer is coming down into P, every check
+/// the executor makes of P has passed, and in the moment before the spool
+/// opens -- 8 ms on the rig, while the executor asked the server for the
+/// file -- the user renames P. Landing made P again by its old name and put
+/// the file in it; the next scan read the made-again P as a folder the user
+/// had made and the landing as the user's move, sent both, and every device
+/// ended with the file alone in a folder nobody made, apart from the
+/// sibling it was written beside. No engine write makes a folder: the spool
+/// refuses, and the next pass lands the file where P now is.
+#[test]
+fn a_download_never_makes_again_a_folder_renamed_as_its_spool_opens() {
+    let world = World::new(9_945, &["x", "y"]);
+    let x = world.device("x");
+    let y = world.device("y");
+    x.fs.user_mkdir("P");
+    x.fs.user_write("P/a.txt", b"a sibling");
+    assert!(world.settle().is_some());
+    x.fs.user_write("P/plans.txt", b"new on x");
+    world.pass(x);
+    let fs = y.fs.clone();
+    let renamed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = renamed.clone();
+    y.fs.while_a_spool_opens(move |target| {
+        if target.ends_with("P/plans.txt") && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            fs.user_rename("P", "P2");
+        }
+    });
+    world.pass(y);
+    assert!(renamed.load(std::sync::atomic::Ordering::SeqCst), "the premise: the folder was renamed as the spool opened");
+    assert!(world.settle().is_some());
+
+    assert_eq!(live_folder_paths(&world), vec!["P2".to_string()], "a folder nobody made: {:?}", world.server.tree());
+    for device in [x, y] {
+        assert_eq!(device.fs.peek("P2/plans.txt").as_deref(), Some(&b"new on x"[..]), "{}", device.name);
+        assert_eq!(device.fs.peek("P2/a.txt").as_deref(), Some(&b"a sibling"[..]), "{}", device.name);
+    }
+    assert_converged(&world);
+}
+
+/// The same for a move. A peer moved a file into P; as this device moves it
+/// there, the user renames P. The rename made P again by its old name and put
+/// the file in it, and the scan sent the made-again folder and the file in it
+/// as the user's own (the run-1571 family).
+#[test]
+fn a_move_never_makes_again_a_folder_renamed_as_it_lands() {
+    let world = World::new(9_944, &["x", "y"]);
+    let x = world.device("x");
+    let y = world.device("y");
+    x.fs.user_mkdir("P");
+    x.fs.user_mkdir("Q");
+    x.fs.user_write("P/a.txt", b"a sibling");
+    x.fs.user_write("Q/m.txt", b"moved by x");
+    assert!(world.settle().is_some());
+    x.fs.user_rename("Q/m.txt", "P/m.txt");
+    world.pass(x);
+    let fs = y.fs.clone();
+    let renamed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = renamed.clone();
+    y.fs.while_renaming(move |_, to| {
+        if to.ends_with("P/m.txt") && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            fs.user_rename("P", "P2");
+        }
+    });
+    assert!(world.settle().is_some());
+    assert!(renamed.load(std::sync::atomic::Ordering::SeqCst), "the premise: the folder was renamed as the move landed");
+
+    assert_eq!(live_folder_paths(&world), vec!["P2".to_string(), "Q".to_string()], "a folder nobody made: {:?}", world.server.tree());
+    for device in [x, y] {
+        assert_eq!(device.fs.peek("P2/m.txt").as_deref(), Some(&b"moved by x"[..]), "{}", device.name);
+        assert_eq!(device.fs.peek("P2/a.txt").as_deref(), Some(&b"a sibling"[..]), "{}", device.name);
+    }
+    assert_converged(&world);
+}
+
+/// The same for a folder create. A peer made P/Sub; as this device makes it,
+/// the user renames P. `create_dir_all` made P again by its old name around
+/// the new Sub, and the scan sent it as the user's own.
+#[test]
+fn a_folder_create_never_makes_again_its_parent_renamed_as_it_runs() {
+    let world = World::new(9_943, &["x", "y"]);
+    let x = world.device("x");
+    let y = world.device("y");
+    x.fs.user_mkdir("P");
+    x.fs.user_write("P/a.txt", b"a sibling");
+    assert!(world.settle().is_some());
+    x.fs.user_mkdir("P/Sub");
+    x.fs.user_write("P/Sub/s.txt", b"inside the new folder");
+    world.pass(x);
+    let fs = y.fs.clone();
+    let renamed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = renamed.clone();
+    y.fs.while_creating_a_dir(move |path| {
+        if path.ends_with("P/Sub") && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            fs.user_rename("P", "P2");
+        }
+    });
+    assert!(world.settle().is_some());
+    assert!(renamed.load(std::sync::atomic::Ordering::SeqCst), "the premise: the parent was renamed as the folder was made");
+
+    assert_eq!(live_folder_paths(&world), vec!["P2".to_string(), "P2/Sub".to_string()], "a folder nobody made: {:?}", world.server.tree());
+    for device in [x, y] {
+        assert_eq!(device.fs.peek("P2/Sub/s.txt").as_deref(), Some(&b"inside the new folder"[..]), "{}", device.name);
+        assert_eq!(device.fs.peek("P2/a.txt").as_deref(), Some(&b"a sibling"[..]), "{}", device.name);
+    }
     assert_converged(&world);
 }
 

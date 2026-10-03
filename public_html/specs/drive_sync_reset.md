@@ -1835,6 +1835,33 @@ no named flaw is a reason to name one.
   VALID (public-html-a5, 2026-10-02). Pin
   `trashing_on_macos_needs_no_permission_to_control_finder`, run over SSH on
   the mini; with Finder it fails after 120 s with -1712.
+- **B-1571, fixed 2026-10-03 (soak rig run 1571, client `38e16c3a`, traced
+  from both state stores' births): an engine write made a folder the user had
+  just renamed.** A download's spool opened 8 ms after device-b's user renamed
+  `Projects (1)`; the parent was missing at open, so the commit made the old
+  name again and landed the file in it. The next scan read the made-again
+  directory as a folder the user had made and the landing as the user's move,
+  sent both, and every device ended with the file alone in a folder nobody
+  made, apart from its siblings. No loss. A move (`OsVfs::rename`) and a
+  folder create (`create_dir`, which was `create_dir_all`) had the same
+  rule. The close is one sentence: **no engine write makes a directory it was
+  not asked to make**. A missing parent is refused (`VfsError::NoFolder`,
+  Overtaken), a file in the way keeps `AlreadyExists` (waited out). That
+  sentence closes the 1504/1509/1536/1571 family; the run-1509 branch in
+  `download()` was dead under it and is deleted (KO: its pin stays green
+  without the branch, red with the spool rule restored). Pins
+  `a_download_never_makes_again_a_folder_renamed_as_its_spool_opens`,
+  `a_move_never_makes_again_a_folder_renamed_as_it_lands`,
+  `a_folder_create_never_makes_again_its_parent_renamed_as_it_runs`, each red
+  against exactly its own rule; 420 seeds x 5 modes byte-identical. Approach
+  REDIRECTED from a spool permission parameter to deleting the rule, BUILD
+  VALID (public-html-a5, 2026-10-03). Open, recorded: a download into a
+  folder with no directory here yet whose name resolves to a stranger's
+  directory (unproven hypothesis, the 1504 branch skips `mine == None`); the
+  placeholder-follow rename in `pass.rs` must `continue` on `NoFolder` once
+  placeholders follow across parents at all (they do not today: separate
+  bug). Run 1572's custody failure in the same window was the oracle's, not
+  the engine's (path-keyed placements); that fix is its own piece.
 - **B2, narrowed (re-checked 2026-10-02 on `10b2b55d`: seed green in all
   five modes; a plain file's completed move is agreed Done on its own
   identity, `completed_here`, pinned by
