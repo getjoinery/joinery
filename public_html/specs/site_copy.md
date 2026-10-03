@@ -289,6 +289,93 @@
     agent `go test ./...` (`copy_vouch_test.go`: the vouch moves the copy to the final run with no
     secret, and each refusal); `db --changed` 357/365, the eight failures all in the
     mailbox spam-learning work another session has in progress, none in this work's files.
+- **WP12 built (2026-10-03): the switch-over by IP swap; unit- and db-tested, not yet live.**
+  `IpSwapMove` 1.0 (the plan and the local steps), `CloudAddressSwap` on the provider interface
+  (`CloudComputeProvider.php` 1.4) with `LinodeComputeDriver` 1.9 (`addressReport`, `ipAddress`,
+  `assignIpv4` on `POST networking/ips/assign`, `instanceFirewalls`, `rebootInstance`),
+  `SiteCopyRunner` 1.5 (`switch_methods()`, the method on `begin_switch`, local steps, the
+  `undoing` status), `SiteCopy` 1.2, `ProxiedOriginMove` 1.1 (`prove()` takes a time budget), node
+  detail actions 1.38, Copy tab 1.3, `utils/advance_site_copy.php` 1.0. The customer Connect grant
+  asks for `ips:read_write` and `firewall:read_only` too (`profile_connect_cloud_logic.php` 1.3);
+  the operator token's help names `ips:read_write` (`plugin.json` 1.30.3, Provisioning Setup 1.8).
+  Choices made while building:
+  - **The move is local steps, not one request.** Powering a server off, the swap, the copy's
+    restart and the probe each take seconds to minutes, so each is a step this management node
+    does itself (`power_off`, `ip_swap`, `power_cycle`, `probe`, beside `go_back`), safe to call
+    again: it asks the provider first and does only what is not done. The press that lays them
+    out starts a short worker that advances the copy every five seconds while its step is local;
+    without it, the next task tick carries on.
+  - **The provider credential is the one that made the servers** (the operator token, or the
+    connected account's stored grant), as reverse DNS already uses it. No token is typed.
+  - **Machines are named by instance id, never by node row:** the rows swap at step 10 and the
+    machines do not, so the way back after the swap acts on the same instances.
+  - **The records follow the machines:** after each swap, each provision's address is the one its
+    instance holds, and each row whose host was one of the two addresses names its machine's.
+  - **Reverse DNS** belongs to the address; after the swap each is read back and set again if the
+    provider dropped it.
+  - **The preflight refuses** a second public IPv4 on either server (a swap moves one), Network
+    Helper off or unreadable (read from the configuration profiles, or the interface settings on
+    the newer interface generation), a provider firewall on S that T lacks, and an AAAA record of
+    the site naming S's IPv6 (IPv6 never moves: remove it or point it at T's first). A connected
+    account's grant must carry `ips:read_write` and `firewall:read_only`; the operator token's
+    scopes cannot be read, so a missing one shows at the provider's first refusal.
+  - **Unproven, the swap is undone** (`undoing`): the addresses back, T restarted on its own, S
+    booted, still frozen; the copy is `ready` again with the reason. Step 9 said to shut T down;
+    restarting it instead leaves it a reachable dormant copy, so trying again or Copy again work.
+  - **The relay's Linode grant is unchanged** (`relay_admin.php`): a relay never switches over.
+  - Tests: `site_copy_ip_swap` 34/34 (the driver's calls against a fake Linode API, each preflight
+    refusal with nothing frozen, the switch end to end with the records and reverse DNS, the way
+    back after the swap, an unproven copy undone and then the way back).
+- **WP10 built (2026-10-03, ahead of the Phase 1 live proofs, owner's order): a copy from
+  backups when the source is dead; unit- and db-tested, not yet live.** On M: `SiteCopy` `scp_from`
+  (`backups`), the Copy tab's second kind of copy, `SiteCopyRunner::key_request()`, the run
+  `host_report`, `copy_look`, `copy_take_key`, `copy_stage`, `copy_restore`, `site_census` on the
+  copy alone, `SiteCensus::check()` (1.1), `JobCommandBuilder` 1.90, `JobResultProcessor` 1.52,
+  `ManagementJob` 1.30 (`copy_take_key`'s claim budget). Agent 1.54.0 (`copy_look`, observe;
+  `copy_take_key`, operate, only under `quiet copy`). On T's site: `CopyKeyHandoff` 1.0, the
+  `/copy-key` page (`views/copy-key.php`, `logic/copy_key_logic.php`, `assets/js/copy-key.js`) and
+  the settings rows `copy_key_request` and `copy_key_answer`. Schema applied on dev. Owner
+  decision while building (2026-10-03):
+  - **The recovery key is typed only on T's own page, never on M (Q10, below).** Typing it on M's
+    Copy tab would hand M's web tier every backup the key opens.
+  Choices made while building:
+  - **What the browser does, and what T does.** The chain's data key is sealed to the recovery key
+    in a libsodium sealed box, which WebCrypto cannot open. It can do the one step that needs the
+    recovery key: X25519 of it with the box's ephemeral public key. That value opens that one box
+    and nothing else; T finishes (`crypto_box`'s HSalsa20 key, the BLAKE2b-192 nonce of both public
+    keys, XSalsa20-Poly1305). So no JavaScript crypto library and no re-seal: the browser posts
+    that value and the recovery public key to T's own page over HTTPS, and M carries only the
+    sealed key in the job. Checked against PHP's libsodium both ways (a Go test vector, and
+    WebCrypto in Node against `sodium_crypto_scalarmult`).
+  - **The page needs no sign-in.** T is a blank site whose admin the owner does not know; the
+    quiet state lets only the look cookie's holder through, and the page does nothing unless T's
+    agent staged a request. A forged answer can only fail to open the box.
+  - **A wrong key is not the end:** T checks the key's fingerprint against the envelope's and the
+    box, writes the reason back to the page, and keeps waiting (an hour, as an approval does).
+  - **The look path comes first** (`copy_look`), so the tab can send the owner to T's page while
+    `copy_take_key` waits.
+  - **Any age:** the newest chain is taken whatever its age (`newest_chain($source, null)`); the tab
+    and T's page show it, since it is the data lost. A chain sealed to another recovery key than
+    the site last reported is named on M and not asked for.
+  - **The census is judged alone** (`SiteCensus::check()`): canary open, no dead secret, sampled
+    offloaded files answer. Counts are reported, not judged.
+  - **The switch-over from backups** freezes nothing and has no final copy. When M created S's
+    server, a local `power_off` step turns it off first (I1); otherwise the owner confirms it is
+    off. The address moves by IP swap or through the proxy as in Phase 1, or by the owner's own
+    DNS change (`manual`, Phase 2 only), proven by the look path at the site's name. There is no
+    way back once T has taken the node.
+  - **The certificate and DKIM keys do not travel** (D5). The proof at the site's name checks the
+    copy's look answer without checking the certificate (the look secret is the proof), and the
+    start ends with `provision_certificate` on the node, once its name points at T. Until then
+    browsers warn, and a proxy set to check the origin's certificate strictly refuses T: Phase 2's
+    accepted cost, said on the tab.
+  - Tests: `site_copy_from_backups` 30/30 (preflight with a dead source, the six steps on the copy,
+    the key request's sealed key opening only with the recovery key, a dead secret stopping the
+    run, the switch-over with the old server powered off and the owner's DNS change, no way back,
+    the page handoff's shapes); agent `copy_take_key_test.go` (the browser's value opens the box,
+    a libsodium vector, the word writing `chain.key` and the vouch, its refusals, `copy_look`) and
+    `copy_key_handoff_test.go` (a wrong answer shown and the wait going on, a decline, a withdrawn
+    job, the window).
 - **WP9 built (2026-10-02): Clone is retired; B1–B20 and B23 close with the code.** Deleted:
   `utils/clone_export.php`, `utils/clone_export_arm.php`, `utils/scrub_sealed_secrets.php`, the
   `clone_export_key` setting, the `from_backup` install mode (model, Install New Node form,
@@ -678,7 +765,7 @@ These are fixed whatever else happens.
     Hetzner retired that console and API on 2026-05-27, and it now answers 301 to the Cloud console.
   - DNS now lives in the Cloud API (`api.hetzner.cloud/v1/zones`), and old DNS-console tokens do not
     work there.
-  - Fix: rewrite the driver against the Cloud API. WP7 needs it for Hetzner.
+  - Fix: rewrite the driver against the Cloud API. The deferred DNS switch needs it for Hetzner.
 - **B25 — A site's web server config is pinned to the machine's IP address.** TRACED.
   - What happens: the vhost is rendered as `<VirtualHost {{SERVER_IP}}:80/443>` with the address from
     `hostname -I` (`install.sh:1132-1137`, `default_virtualhost.conf:73,154,219`). `render_vhost.sh`
@@ -755,7 +842,7 @@ the **management node** M and the **owner** O.
 
 **v1 scope: a bare-metal S onto a bare-metal T, one site per machine.** That covers jeremytunnell.
 - **Container sources** (the eight docker-prod sites) share one host address, so no IP swap is
-  possible for them. They come with the DNS switch (WP7).
+  possible for them. They come with the DNS switch, deferred to its own spec.
   - Their certificate, DKIM keys and proxy vhost live on the host.
   - Their cron belongs to the container's start command.
 - **Container targets** are out of scope.
@@ -847,7 +934,7 @@ container target, which is out of scope. A container source is never dormant.
    - **Any server, anywhere.** The owner creates an Ubuntu server (Linode, Hetzner, anything) and runs
      the command M shows. It is the existing `install.sh site … --enable-agent --management-node=URL`,
      plus `--dormant --copy-of=<S>`.
-   - **M creates it** through a provider driver: Linode today, Hetzner later (WP13). A Linode T is
+   - **M creates it** through a provider driver: Linode today, Hetzner later (WP13, deferred). A Linode T is
      created with S's own cloud account when an IP swap is planned.
    - Either way:
      - T installs **S's exact release**, because `vendor/` is never in a backup
@@ -957,7 +1044,7 @@ The copy can stay dormant as long as the owner likes.
      that increment and runs the full apply at it, which also discards anything the owner's look
      changed.
    - The price of M2: the file part is unpacked again from local disk inside the downtime, about 1–3
-     minutes for jeremytunnell's 3 GB, growing with the site. L1 measures it. Applying only the
+     minutes for jeremytunnell's 3 GB, growing with the site. L0 measures it. Applying only the
      newest increment is G4, a separate piece for later if the minutes matter.
    - M runs the census on S and on T and requires an exact match: S is frozen, so nothing drifts.
      On a mismatch, M stops and offers the way back (unfreeze S); nothing has moved yet.
@@ -968,7 +1055,7 @@ The copy can stay dormant as long as the owner likes.
        its dump and the census means something failed during the freeze, and is reported as the
        difference it is.
      - The census itself is frozen time: a row count of every table and a stat of every file on S
-       and on T (about a second on dev; more with jeremytunnell's 16.7 GiB of uploads). L1 measures
+       and on T (about a second on dev; more with jeremytunnell's 16.7 GiB of uploads). L0 measures
        it with the rest of the downtime.
 9. **Move the address, with T still dormant.**
    - **IP swap (WP12; the fleet's usual switch):**
@@ -996,14 +1083,8 @@ The copy can stay dormant as long as the owner likes.
      3. `mgn_host` on M moves with the machine in the row swap (step 10).
      - Failure here is cheap too: M changes the record back and unfreezes S. T stays dormant.
      - Needs a DNS token for the zone on M, through the existing DNS credential flow.
-   - **DNS (WP7; built later).**
-     - M lowers the TTLs during the copy.
-     - At this step S's drop-in turns from the maintenance page into forwarding to T, and T trusts
-       `X-Forwarded-For` from S's address through Apache's `mod_remoteip` in T's vhost, so its
-       per-address throttles see real visitors with no change to the site's code.
-     - M, or the owner, changes the records, and M waits until public resolvers agree plus one old
-       TTL.
-     - Postfix on S keeps deferring, so mail retries until MX reaches T.
+   - **DNS (deferred):** the switch between any two providers, with S forwarding visitors to T
+     until DNS settles, is its own spec, *Site Copy — Switch by DNS, and a Hetzner Server Driver*.
 10. **Start T.**
     1. T's agent is told to take S's node id, keeping its own key (D4).
     2. **M swaps the two rows (no new record type).**
@@ -1018,8 +1099,6 @@ The copy can stay dormant as long as the owner likes.
        converger tick writes the cron, runs the installers (the mailbox's arms Postfix and sets the
        `iemap_` role's password) and certbot's timer comes on. An installer that fails is retried
        every minute, as on any site.
-    4. On the DNS path, S stops forwarding once DNS has settled, and is powered off still `quiet
-       switchover`. If it is ever booted, it never runs the site.
 
     T is now the node. Its backups continue under the same node, and its first run is a new full
     backup, sealed to T's own `backup_site_key`, because its tree identity changed. Chains from
@@ -1063,18 +1142,23 @@ removed from the dashboard, and the server deleted at its provider.
 
 ## Part 3 — Copy from backups (Phase 2: the source is dead)
 
-Steps 2, 4, 5, 9 and 10, without `copy_export` and the freeze.
+Steps 2, 4, 5, 9 and 10, without `copy_export` and the freeze. Built as WP10 (see the status above).
 - **Keys.** With no S to seal anything, the owner opens the newest chain's data key once, with the
-  recovery key, in a ceremony on T's site. The browser opens the recovery-sealed data key and
-  re-seals it to T, which writes it as the chain's `chain.key`: what `copy_import` leaves in Phase 1,
-  so everything after it is shared. Older chains open by the recovery ceremony, as any rotated key does.
+  recovery key, on T's own page (`/copy-key`, reached through the look link). The browser works out
+  the X25519 of the recovery key with the sealed box's ephemeral key, which opens that one box; T
+  finishes opening it and writes the chain's `chain.key` and the vouch: what `copy_import` leaves in
+  Phase 1, so everything after it is shared. Older chains open by the recovery ceremony, as any
+  rotated key does.
 - **Trust.** The ceremony's statement names the chain, its date and its manifest hash, and stands in
   for the ledger check. The owner is the authority, because no machine that made the archive is
   left to vouch for it.
 - **Age.** The backup's age is the data lost. The ceremony shows it as an age, above the key box.
-- **Address.** DNS. There is no S left to forward; visitors whose DNS still names S's old
-  address fail until it settles, so the TTL matters. An IP swap is possible only if S's instance
-  still exists at the same provider.
+- **Address.** By IP swap when S's instance still exists at the same provider and account; through
+  the proxy for a proxied site; otherwise the owner changes DNS (`manual`): there is no S left to
+  forward, so visitors whose resolver still names S's old address fail until it settles, and the
+  TTL matters. M's own record change with a resolver watch is the deferred DNS switch's.
+- **One machine runs the site (I1).** When M created S's server, the switch-over powers it off
+  first; otherwise the owner confirms it is off.
 
 ## Decisions
 
@@ -1123,7 +1207,7 @@ a narrow direct channel between the two machines.
 - It is one engine instead of two.
 - Every copy tests the backups.
 
-L1 measures the real downtime. If it is too long, the middle path above is the fix, and it can be
+L0 measures the real downtime. If it is too long, the middle path above is the fix, and it can be
 added without changing anything else.
 
 **D3 — Decided 2026-09-27.**
@@ -1131,7 +1215,8 @@ added without changing anything else.
   servers.
 - **Build order (revised 2026-09-28):** the proxied origin change (WP7a) first, because it is the
   smallest switch and jeremytunnell's; then the IP swap (WP12); then the DNS switch with forwarding
-  (WP7), which completes the any-provider ability.
+  (WP7), which completes the any-provider ability. **WP7 and WP13 deferred (owner, 2026-10-03)** to
+  their own spec; this spec completes with WP12 and WP10.
 - **Why each switch (owner, 2026-09-28):**
   - **IP swap:** the medium-term switch for the whole fleet. Every node is on Linode, and almost
     none sits behind a proxy. Within one account and region it keeps every IP-bound fact, with
@@ -1195,17 +1280,18 @@ copy began. The record of the choice:
 - **Phase 2 cannot carry them:** a new certificate is issued once DNS points at T, and DKIM falls
   back to the database-held key for protected domains.
 
-**Order of building.** Phase 2 is built after Phase 1 is proven live. It reuses WP2, WP3, WP5 and
-WP7 unchanged; only the ceremony (WP10) is its own, and it produces the same input as
-`copy_export` (a data key sealed to T).
+**Order of building.** Phase 2 was planned after Phase 1's live proofs; the owner moved it ahead
+(2026-10-03). It reuses WP2, WP3, WP5, WP7a and WP12 unchanged; only the ceremony (WP10) is its
+own, and it leaves the same input as `copy_import` (`chain.key` and the vouch).
 
 ## Work packages
 
 In build order. Each is built and tested on its own (design rule).
 
-**New agent words (nine):** `copy_export` (S), `copy_import` (T, Q6), `copy_stage` (T, G7),
+**New agent words (eleven):** `copy_export` (S), `copy_import` (T, Q6), `copy_stage` (T, G7),
 `copy_restore` (T), `site_census` (any, read-only), `site_quiet on|off` (S; T's `off` at step 10), the node-id word (T),
-and the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44).
+the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44), and Phase 2's `copy_look` and
+`copy_take_key` (T, WP10).
 
 - **WP1 — The documents tell the truth (B22).** Correct the five documents and the
   `reconcile_site.sh` message to what is true today, and again when the copy lands. Small; first.
@@ -1280,7 +1366,7 @@ and the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44).
   - The preflight: every record naming S's address is proxied; list any proxy-only firewall on S.
   - The record change through M's DNS driver (Cloudflare first), the proof through the proxy, the
     change back on failure, and `mgn_host`.
-  - No forwarding, no TTL lowering, no resolver watch: those are WP7.
+  - No forwarding, no TTL lowering, no resolver watch: those are the deferred DNS switch's.
   - Its live test is L0, on a proxied record under `jeremytunnell.info` (Q3).
 - **WP8 — Copy on the management node (built 2026-10-01; see the status above).**
   - Carried from WP5's review (all four done):
@@ -1303,25 +1389,19 @@ and the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44).
   - Retire the agent's `clone_export_arm` under the vocabulary rules.
   - Update the documents.
 - **WP11 — Live proofs.** See the test plan.
-- **WP12 — IP swap (after the first live proofs; L0b).** The switch most of the fleet will use:
-  every node is on Linode, and almost none sits behind a proxy.
-  - `swapIpv4`, with `regions` and interface-model reads on the Linode driver.
+- **WP12 — IP swap (L0b). Built 2026-10-03; see the status above.** The switch most of the fleet
+  will use: every node is on Linode, and almost none sits behind a proxy.
+  - `assignIpv4`, with the address and interface-model reads, on the Linode driver (`CloudAddressSwap`).
   - The preflight: Network Helper, the scope, the firewall, the IPv6 list.
   - The sequence and its failure path from step 9.
   - The record updates.
-  - The Linode token request widened to `ips:read_write`, with a re-grant for existing tokens
-    (`plugin.json:403`, `profile_connect_cloud_logic.php:48`, `relay_admin.php:229`).
-- **WP7 — The switch by DNS (after WP12; the exit capability: any provider, Hetzner first).**
-  - TTL lowering, the record change and the resolver watch.
-  - Forwarding from S's drop-in, with `mod_remoteip` trusting S's address in T's vhost (no site code
-    change).
-  - The IP-bound list.
-  - Container sources onto bare metal.
-- **WP13 — A Hetzner compute driver (convenience).**
-  - `POST /servers` with the returned root password, never an SSH key; `change_dns_ptr`; locations.
-  - Its transfer counter is per server, which does not fit the interface's pooled `getTransfer()`.
-- **WP10 — Phase 2.** The recovery-key ceremony on T's site, re-sealing the data key to T, and the
-  owner's statement standing in for `copy_export`'s signed list.
+  - The Linode token request widened to `ips:read_write` (and `firewall:read_only` for the
+    customer grant), with a re-grant for existing tokens; the relay's grant is unchanged.
+- **WP7 (the switch by DNS) and WP13 (a Hetzner compute driver) are deferred** to their own
+  spec, *Site Copy — Switch by DNS, and a Hetzner Server Driver* (owner, 2026-10-03), with L1.
+- **WP10 — Phase 2. Built 2026-10-03; see the status above.** The recovery-key ceremony on T's own
+  page, T opening the chain's data key from the browser's one-box value, and the owner's statement
+  standing in for `copy_export`'s signed list.
 
 ## Test plan
 
@@ -1355,18 +1435,9 @@ and the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44).
 **Live, on test servers the owner provides.**
 - **L0 — Linode to Linode: copy, look, switch over by proxied origin change (WP7a; the first).**
   - Repeatable and self-contained (Q5): each run creates its own small S through M's normal keyless
-    creation path, installs the seeded test site from L1 on it under a proxied record in
-    `jeremytunnell.info`, copies it to a T that M creates, switches, checks, and deletes both
-    servers. It never depends on a box's history.
-  - Needs `jeremytunnell.info` on Cloudflare with a zone token on M (Q3).
-  - Pass: as L1, except visitors follow within seconds and there is no forwarding window.
-- **L0b — the same, switched by IP swap (once WP12 exists).** One account and region; needs the
-  operator Linode token re-granted with `ips:read_write`. Pass: the address and reverse DNS stay
-  the same.
-- **L1 — Linode to Hetzner: copy, look, switch over by DNS (once WP7 exists).**
-  - S is a test site on Linode, managed by dev.
-  - T is a Hetzner server the owner creates and joins with the owner-run command.
-  - The test domain is a direct (unproxied) record under `jeremytunnell.info` (Q3).
+    creation path, installs a seeded test site on it under a proxied record in
+    `jeremytunnell.info`, copies it to a T that M creates, switches, checks, and leaves both servers
+    for the owner to delete at the provider. It never depends on a box's history.
   - The source is a small site seeded for coverage:
     - sealed secrets set (a backup target, an OAuth secret, an IMAP account);
     - a passkey registered through a Playwright virtual authenticator;
@@ -1375,21 +1446,27 @@ and the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44).
     - an offloaded file;
     - a custom theme;
     - a DKIM key.
+  - Needs `jeremytunnell.info` on Cloudflare with a zone token typed at each press (Q3).
   - Pass:
     - The census is equal and there are 0 dead secrets.
     - The same browser signs in with the passkey and unlocks the vault.
     - The offloaded file downloads, and mail pickup resumes.
     - T's backup runs under the same node, and one agent polls.
-    - While DNS settles, a request to S's old address reaches T.
-    - S is powered off and whole.
+    - Visitors follow within seconds of the move.
+    - S is frozen and whole.
     - The certificate is unchanged.
     - The downtime is measured, against the D2 estimate.
+- **L0b — the same, switched by IP swap (once WP12 exists).** One account and region; needs the
+  operator Linode token re-granted with `ips:read_write`. Pass: the address and reverse DNS stay
+  the same, and S is powered off and whole.
 - **L2 — The way back and the dormant copy.**
   - Back out after step 8: S serves exactly as before.
   - Refresh a dormant copy, then discard it.
   - Go back after step 9: S serves, and the dashboard names what T wrote since it started.
 - **L3 — Phase 2.** Power S off for good and copy from its backups onto a new T with the recovery-key
-  ceremony, once WP10 exists.
+  ceremony on T's `/copy-key` page. Pass: the census holds, 0 dead secrets, the owner signs in with
+  the passkey, T's certificate is issued after the switch, and the recovery key never appears in
+  anything M stores (job parameters and results).
 - **L4 — jeremytunnell onto Ubuntu 26.04 by Cloudflare origin change (Q4).** Only after L0 and L2
   pass, and only on the owner's word. T can be in any
   region or account, since no address moves.
@@ -1407,7 +1484,7 @@ and the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44).
 - **Q2 — Answered 2026-09-27:** there is no Hetzner account yet; the owner will get one later. L0
   (Linode to Linode) comes first.
 - **Q3 — Answered 2026-09-28: `jeremytunnell.info`**, unused. It holds a proxied record for the WP7a
-  test and a direct one for L1.
+  test and a direct one for the deferred DNS switch's L1.
   - Its DNS is at Linode today, with one leftover A record (198.74.57.162, not a managed node). The
     WP7a test needs a proxy, so the owner adds it to Cloudflare's free plan and gives M a DNS token
     for that zone alone.
@@ -1453,3 +1530,9 @@ and the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44).
     the bundle.
   - **Revised by B44 (2026-10-02):** the final copy is not an export. It carries no secret, so it
     asks no approval; every export still does.
+- **Q10 — Answered 2026-10-03: the recovery key is typed on T's own page.** Where the owner types
+  the recovery key for a copy from backups (WP10). Typing it on M's Copy tab would put it in a page
+  M's web tier serves, which is giving M every backup the key opens. On T's own `/copy-key` page,
+  reached through the look link, the key stays where today's restore and export approvals keep it:
+  on the site's own pages. Catch, accepted: a hosts-file line, and T's site code knows one page
+  about being a copy.

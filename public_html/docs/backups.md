@@ -641,6 +641,20 @@ node that dispatches them can read none of it:
 `copy_restore` then runs `restore_chain.sh --adopt-secret-key --skip-ssl` over
 that workspace.
 
+**When the source is dead**, nothing is left to export, and the recovery key is
+the one holder of the chain's data key. A copy made from backups alone takes it
+with **`copy_take_key`** instead of an import: the copy's own `/copy-key` page
+shows the chain, its newest run, its manifest's hash and the recovery key's
+fingerprint; the owner pastes the recovery key there, and the browser works out
+the X25519 of it with the ephemeral key of the recovery recipient's sealed box.
+That value opens that one box and nothing else; the copy finishes opening it
+(`crypto_box`'s HSalsa20 key and BLAKE2b nonce) and writes `chain.key` and the
+stated manifest as the vouch, exactly as `copy_import` would. The recovery key
+never leaves the browser, and the page is the copy's own, so the management
+node never sees the key or what it opens. The owner's reading of the statement
+stands in for the source's vouch: no machine that made the archive is left to
+vouch for it.
+
 ## Key model: one envelope per backup
 
 Every run mints its own random data key, encrypts the archive with it, and seals

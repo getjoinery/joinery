@@ -319,7 +319,7 @@ check(SiteCopyRunner::switch_refusals($copy) === array(), 'a dormant, current co
 	implode(' | ', SiteCopyRunner::switch_refusals($copy)));
 $cf_reset(array_merge($site_records(), array(array('type' => 'A', 'name' => 'mail.example.org', 'content' => $S4, 'proxied' => false))));
 $threw = '';
-try { SiteCopyRunner::begin_switch($copy, $driver(), null); } catch (Exception $e) { $threw = $e->getMessage(); }
+try { SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_PROXIED, $driver(), null); } catch (Exception $e) { $threw = $e->getMessage(); }
 $src->load(); $copy->load();
 check(strpos($threw, 'Nothing was frozen') !== false && trim((string)$src->get('mgn_install_state')) === ''
 	&& $copy->status() === SiteCopy::STATUS_DORMANT, 'an unproxied record stops the switch-over before the site is frozen', $threw);
@@ -335,7 +335,7 @@ $src->save();
 section('The final copy, and the way back before anything moved');
 
 $cf_reset($site_records());
-SiteCopyRunner::begin_switch($copy, $driver(), null);
+SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_PROXIED, $driver(), null);
 $src->load(); $copy->load();
 check(trim((string)$src->get('mgn_install_state')) === 'switching' && !$src->is_operational()
 	&& $copy->status() === SiteCopy::STATUS_FREEZING, 'the site is frozen on the dashboard too: no automation touches it');
@@ -391,7 +391,7 @@ section('A new chain at the final backup stops the switch-over');
 
 $copy->set('scp_status', SiteCopy::STATUS_DORMANT);
 $copy->save();
-SiteCopyRunner::begin_switch($copy, $driver(), null);
+SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_PROXIED, $driver(), null);
 $copy->load();
 $rolled = $listing;
 $rolled['chains'][0]['chain_id'] = 'chain-' . gmdate('Ymd_His');
@@ -408,7 +408,7 @@ section('Move the address: unproven, it moves back');
 
 $copy->set('scp_status', SiteCopy::STATUS_DORMANT);
 $copy->save();
-SiteCopyRunner::begin_switch($copy, $driver(), null);
+SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_PROXIED, $driver(), null);
 $copy->load();
 $drive($copy, SiteCopy::STATUS_FREEZING, $freeze_results());
 check($copy->status() === SiteCopy::STATUS_READY && !empty($copy->switch_record()['final_copied_time']),
@@ -481,7 +481,7 @@ $cnode2 = $mk_node('copy2', array('mgn_web_root' => '/var/www/html/scwsite/publi
 $cnode = $cnode2;
 $copy2 = $mk_copy($cnode2);
 $cf_reset($site_records());
-SiteCopyRunner::begin_switch($copy2, $driver(), null);
+SiteCopyRunner::begin_switch($copy2, SiteCopyRunner::METHOD_PROXIED, $driver(), null);
 $copy2->load();
 $drive($copy2, SiteCopy::STATUS_FREEZING, $freeze_results());
 SiteCopyRunner::move_address($copy2, $driver(), null);

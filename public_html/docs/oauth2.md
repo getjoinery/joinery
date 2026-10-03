@@ -181,9 +181,11 @@ only the per-account "Connect" step.
 The Server Manager plugin's customer-cloud fulfillment mode (purpose
 `customer_cloud`, in `plugins/server_manager/includes/oauth_consumers/`) lets a
 hosting buyer grant access to their own Linode account so the provisioning
-pipeline can create their server there — billed by Linode to the buyer. Scope
-requested: `linodes:read_write` only (instance management, no account/billing
-access). The consumer stores the token set (encrypted) on the buyer's
+pipeline can create their server there — billed by Linode to the buyer. Scopes
+requested: `linodes:read_write` (instance management), and `ips:read_write`
+with `firewall:read_only` (a site copy's switch-over by swapping two servers'
+addresses, and its check that the copy is behind the same firewalls). No
+account or billing access. The consumer stores the token set (encrypted) on the buyer's
 `CustomerCloudAccount` and releases their waiting provisions. See
 [Server Manager → Customer-Cloud Fulfillment](/plugins/server_manager/docs/overview.md#customer-cloud-fulfillment).
 

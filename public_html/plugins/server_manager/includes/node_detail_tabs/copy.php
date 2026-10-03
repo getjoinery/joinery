@@ -6,15 +6,19 @@
  * the preflight, the two ways to get the new server (this management node
  * creates it, or the owner brings one and runs the command shown), the join,
  * each copy run's steps, the census comparison, the look link, Copy again and
- * Discard. Then the switch-over (WP7a): Switch over, Move the address, the way
- * back and Keep the switch-over, the first two and the way back asking for the
- * DNS token of the site's domain, which lives for that one request.
+ * Discard. A copy comes from the running site, or from its backups alone when
+ * its server is dead (WP10). Then the switch-over: Switch over, Move the
+ * address, the way back and Keep the switch-over, the address moving through
+ * the proxy (WP7a, asking for the DNS token, which lives for that one request),
+ * by an IP swap at Linode (WP12), or, from backups, by the owner's own DNS
+ * change.
  * SiteCopyRunner does the work, moved by the Advance Site Copies task; this
  * page only shows it, and reloads itself while a copy is moving.
  *
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.3 - the IP swap, the owner's own DNS change, and a copy from backups (site_copy.md WP12, WP10)
  * @version 1.2 - the switch-over and the way back
  * @version 1.1 - the region falls back to us-east
  * @version 1.0
@@ -37,6 +41,15 @@ $copy_step_labels = array(
 	'take_node_id/copy'     => 'The copy takes this site\'s node id',
 	'site_quiet:off/source' => 'Let the site run (visitors, scheduled tasks, mail)',
 	'go_back/source'        => 'Swap the node records back',
+	'copy_look/copy'        => 'Ask the copy for its look link',
+	'copy_take_key/copy'    => 'Open the backup with the recovery key, on the copy\'s own page',
+	'power_off:source/source'  => 'Power this site\'s server off',
+	'power_on:source/source'   => 'Power this site\'s server on',
+	'ip_swap:over/source'      => 'Swap the IP addresses at Linode',
+	'ip_swap:back/source'      => 'Swap the IP addresses back',
+	'power_cycle:copy/copy'    => 'Restart the copy\'s server on the address it holds',
+	'probe/copy'               => 'Ask for the copy\'s look link at the site\'s name',
+	'provision_certificate/source' => 'Issue the site\'s certificate on the new server',
 );
 $copy_verdict_badge = array(
 	'pending' => 'secondary', 'running' => 'primary', 'passed' => 'success', 'failed' => 'danger', 'skipped' => 'secondary',
@@ -78,30 +91,73 @@ if (!$site_copy) {
 	<p class="text-muted">Each copy run asks this site's owner to approve the export on this site's own Backups
 	page, with the backup recovery key, because the export hands the site's secrets to the new server.</p>
 	<?php
-	$refusals = SiteCopyRunner::source_refusals($node);
-	$chain_note = '';
-	if (!$refusals) {
-		try {
-			$chain = SiteCopyRunner::newest_chain($node);
-			$chain_note = 'The copy will be made from backup ' . $chain['chain_id'] . ', last added to at '
-				. $chain['time'] . ' (' . BackupRunner::human($chain['bytes']) . '). It needs about '
-				. BackupRunner::human(SiteCopyRunner::disk_needed($chain)) . ' free on the new server.';
-		} catch (Exception $e) {
-			$refusals[] = $e->getMessage();
+	// Two places a copy can come from: the running site, or, when its server
+	// is dead, its backups alone. Each has its own preflight.
+	$copy_from_notes = array();
+	$copy_from_refusals = array();
+	foreach (array(SiteCopy::FROM_SOURCE, SiteCopy::FROM_BACKUPS) as $from) {
+		$why = SiteCopyRunner::source_refusals($node, true, $from);
+		if (!$why) {
+			try {
+				$chain = SiteCopyRunner::newest_chain($node, SiteCopyRunner::chain_age_limit($from));
+				$copy_from_notes[$from] = 'Backup ' . $chain['chain_id'] . ', last added to at '
+					. gmdate('Y-m-d H:i', (int)strtotime($chain['time'])) . ' UTC ('
+					. BackupRunner::human($chain['bytes']) . '). The new server needs about '
+					. BackupRunner::human(SiteCopyRunner::disk_needed($chain)) . ' free.';
+			} catch (Exception $e) {
+				$why[] = $e->getMessage();
+			}
 		}
+		$copy_from_refusals[$from] = $why;
 	}
-	if ($refusals) {
+	$copy_from_options = array();
+	if (!$copy_from_refusals[SiteCopy::FROM_SOURCE]) {
+		$copy_from_options[SiteCopy::FROM_SOURCE] = 'From this running site';
+	}
+	if (!$copy_from_refusals[SiteCopy::FROM_BACKUPS]) {
+		$copy_from_options[SiteCopy::FROM_BACKUPS] = 'From its backups (its server is dead)';
+	}
+	if (!$copy_from_options) {
 		echo '<div class="alert alert-warning"><strong>This site cannot be copied yet.</strong><ul class="mb-0">';
-		foreach ($refusals as $why) {
+		foreach ($copy_from_refusals[SiteCopy::FROM_SOURCE] as $why) {
 			echo '<li>' . $copy_h($why) . '</li>';
 		}
 		echo '</ul></div>';
 		$page->end_box();
 		return;
 	}
-	echo '<p><strong>' . $copy_h($chain_note) . '</strong> The new server installs release '
-		. $copy_h($node->get('mgn_joinery_version')) . ', this site\'s own, under the same site name and domain.</p>';
+	if (isset($copy_from_options[SiteCopy::FROM_SOURCE])) {
+		echo '<p><strong>From this running site:</strong> ' . $copy_h($copy_from_notes[SiteCopy::FROM_SOURCE]) . '</p>';
+	} else {
+		echo '<div class="alert alert-light border"><strong>From this running site:</strong> not now. '
+			. $copy_h(implode(' ', $copy_from_refusals[SiteCopy::FROM_SOURCE])) . '</div>';
+	}
+	if (isset($copy_from_options[SiteCopy::FROM_BACKUPS])) {
+		echo '<p><strong>If this site\'s server is dead:</strong> a copy can be made from its backups alone. '
+			. $copy_h($copy_from_notes[SiteCopy::FROM_BACKUPS]) . ' Anything written after that backup is lost. You open the '
+			. 'backup with its recovery key on the new server\'s own page (never here), and the switch-over powers the old server '
+			. 'off when this management node created it. Two servers must never run the site at once, so use this only when the '
+			. 'old one cannot come back.</p>';
+	}
+	echo '<p>The new server installs release ' . $copy_h($node->get('mgn_joinery_version')) . ', this site\'s own, under the same '
+		. 'site name and domain.</p>';
 	$page->end_box();
+
+	// The two fields both start forms carry.
+	$copy_from_fields = function ($fw) use ($copy_from_options) {
+		if (count($copy_from_options) === 1) {
+			$fw->hiddeninput('copy_from', ['value' => (string)array_key_first($copy_from_options)]);
+			if (isset($copy_from_options[SiteCopy::FROM_BACKUPS])) {
+				$fw->checkboxinput('copy_dead_confirm', 'This site\'s server is dead and will not come back.');
+			}
+			return;
+		}
+		$fw->dropinput('copy_from', 'Copy', ['options' => $copy_from_options, 'visibility_rules' => [
+			SiteCopy::FROM_SOURCE  => ['hide' => ['copy_dead_confirm']],
+			SiteCopy::FROM_BACKUPS => ['show' => ['copy_dead_confirm']],
+		]]);
+		$fw->checkboxinput('copy_dead_confirm', 'This site\'s server is dead and will not come back.');
+	};
 
 	// Create it for me
 	$page->begin_box(['title' => 'Create the new server for me']);
@@ -133,9 +189,10 @@ if (!$site_copy) {
 		$fw->begin_form();
 		$fw->hiddeninput('action', ['value' => 'copy_new_server']);
 		echo SmAdminCsrf::field();
+		$copy_from_fields($fw);
 		$fw->dropinput('copy_account', 'Cloud account', ['options' => $account_options, 'required' => true]);
 		$fw->textinput('copy_region', 'Region', ['required' => true,
-			'helptext' => 'The provider\'s region id, e.g. us-east. Any region works; only a later switch by address swap needs the source\'s.']);
+			'helptext' => 'The provider\'s region id, e.g. us-east. Any region works; a switch by address swap needs this site\'s, on the same account.']);
 		$fw->textinput('copy_type', 'Instance type', ['required' => true,
 			'helptext' => 'Memory at least this site\'s server, and room for the disk figure above.']);
 		$fw->submitbutton('btn_copy_new', 'Create the server and copy');
@@ -146,10 +203,13 @@ if (!$site_copy) {
 	// I'll bring a server
 	$page->begin_box(['title' => 'I\'ll bring a server']);
 	echo '<p>Any fresh Ubuntu server, at any provider. The next page shows the commands to run on it as root.</p>';
-	echo '<form method="post" action="' . $copy_h($base_url . '&tab=copy') . '">';
-	echo '<input type="hidden" name="action" value="copy_own_server">';
+	$fw = $page->getFormWriter('copy_own_server_form', ['action' => $base_url . '&tab=copy']);
+	$fw->begin_form();
+	$fw->hiddeninput('action', ['value' => 'copy_own_server']);
 	echo SmAdminCsrf::field();
-	echo '<button type="submit" class="btn btn-outline-primary">Copy to a server I bring</button></form>';
+	$copy_from_fields($fw);
+	$fw->submitbutton('btn_copy_own', 'Copy to a server I bring', ['class' => 'btn btn-outline-primary']);
+	$fw->end_form();
 	$page->end_box();
 	return;
 }
@@ -228,6 +288,15 @@ if ($copy_steps) {
 		}
 		echo '</td><td><span class="badge bg-' . ($copy_verdict_badge[$s['verdict']] ?? 'secondary') . '">' . $copy_h($s['verdict']) . '</span></td>';
 		echo '<td>' . $copy_h($s['reason'] ?? '') . '</td></tr>';
+		if ($s['op'] === 'copy_take_key' && $s['verdict'] === 'running' && $copy_node) {
+			$domain = SiteCopyRunner::site_domain($node);
+			echo '<tr><td colspan="4" class="table-info">Waiting for you to open the backup on the copy\'s own page. Point your computer at '
+				. 'the copy with one hosts-file line, <code>' . $copy_h($copy_node->get('mgn_host') . ' ' . $domain) . '</code>, open '
+				. '<code>https://' . $copy_h($domain . $site_copy->get('scp_look_path')) . '</code> (it lets you past the copy\'s quiet state), '
+				. 'then <code>https://' . $copy_h($domain) . '/copy-key</code>. Paste the site\'s backup recovery key there: it is used in '
+				. 'your browser and never reaches this management node. The page names the backup and the key\'s fingerprint; check '
+				. 'both. Remove the hosts-file line afterwards.</td></tr>';
+		}
 		if ($s['op'] === 'copy_export' && $s['verdict'] === 'running') {
 			$approve_url = rtrim((string)$node->get('mgn_site_url'), '/') . '/admin/admin_backups';
 			echo '<tr><td colspan="4" class="table-info">Waiting for this site\'s owner to approve the export at '
@@ -241,9 +310,13 @@ if ($copy_steps) {
 $census = $site_copy->census();
 if ($census) {
 	if (!empty($census['match'])) {
-		echo '<p class="text-success">The census matches exactly: every table\'s rows, every directory\'s files and bytes, and every sealed secret.</p>';
+		echo $site_copy->from_backups()
+			? '<p class="text-success">The copy\'s census holds: its key canary opens, no sealed secret is dead, and the offloaded files it sampled answer.</p>'
+			: '<p class="text-success">The census matches exactly: every table\'s rows, every directory\'s files and bytes, and every sealed secret.</p>';
 	} else {
-		echo '<p>The census comparison (this site is live, so rows written since its backup differ, and are expected to):</p>';
+		echo $site_copy->from_backups()
+			? '<p>The copy\'s census, judged alone (there is no running site to compare it with):</p>'
+			: '<p>The census comparison (this site is live, so rows written since its backup differ, and are expected to):</p>';
 		echo '<table class="table table-sm"><thead><tr><th>What</th><th>This site</th><th>The copy</th><th></th></tr></thead><tbody>';
 		foreach ((array)($census['differences'] ?? array()) as $d) {
 			echo '<tr><td>' . $copy_h($d['what']) . '</td><td>' . $copy_h(is_scalar($d['source']) ? $d['source'] : json_encode($d['source']))
@@ -283,27 +356,40 @@ $page->end_box();
 
 // ── The switch-over (steps 7-10) ──
 $copy_switch = $site_copy->switch_record();
+$copy_method = (string)($copy_switch['method'] ?? '');
 $copy_domain = SiteCopyRunner::site_domain($node);
 $copy_dns_class = $copy_domain !== '' ? ProxiedOriginMove::driver_class_for($copy_domain) : null;
 $copy_address_at_copy = ($copy_switch['address_at'] ?? '') === 'copy';
 $copy_swapped = $copy_node && trim((string)$copy_node->get('mgn_install_state')) === 'retired';
+$copy_backups = $site_copy->from_backups();
+$copy_method_names = array(
+	SiteCopyRunner::METHOD_PROXIED => 'through the proxy in front of the site (Cloudflare)',
+	SiteCopyRunner::METHOD_IP_SWAP => 'by swapping the two servers\' IP addresses at Linode',
+	SiteCopyRunner::METHOD_MANUAL  => 'by your own change to the site\'s DNS',
+);
 
-// One form per press that carries the DNS token: the driver's own fields,
-// typed for that press and never kept.
-$copy_token_form = function ($action, $button, $btn_class, $confirm_label = '') use ($page, $base_url, $copy_dns_class, $copy_h) {
-	$fw = $page->getFormWriter('copy_' . $action . '_form', ['action' => $base_url . '&tab=copy']);
+// One form per press. A DNS token, where one is asked, is the driver's own
+// fields, typed for that press and never kept.
+$copy_press_form = function ($action, $button, $btn_class, $confirm_label = '', $hidden = array(), $token = false)
+		use ($page, $base_url, $copy_dns_class) {
+	$fw = $page->getFormWriter('copy_' . $action . '_' . md5(json_encode($hidden)) . '_form', ['action' => $base_url . '&tab=copy']);
 	$fw->begin_form();
 	$fw->hiddeninput('action', ['value' => $action]);
+	foreach ($hidden as $k => $v) {
+		$fw->hiddeninput($k, ['value' => $v]);
+	}
 	echo SmAdminCsrf::field();
-	$guide = $copy_dns_class ? $copy_dns_class::credentialGuide() : null;
-	foreach ($copy_dns_class ? $copy_dns_class::credentialFields() : array() as $field => $spec) {
-		$opts = ['autocomplete' => 'off', 'required' => true, 'help_modal' => $guide,
-			'helptext' => 'Used for this press only, and not kept.'];
-		$guide = null;
-		if (!empty($spec['secret'])) {
-			$fw->passwordinput('dns_cred_' . $field, $spec['label'] ?? $field, $opts);
-		} else {
-			$fw->textinput('dns_cred_' . $field, $spec['label'] ?? $field, $opts);
+	if ($token) {
+		$guide = $copy_dns_class ? $copy_dns_class::credentialGuide() : null;
+		foreach ($copy_dns_class ? $copy_dns_class::credentialFields() : array() as $field => $spec) {
+			$opts = ['autocomplete' => 'off', 'required' => true, 'help_modal' => $guide,
+				'helptext' => 'Used for this press only, and not kept.'];
+			$guide = null;
+			if (!empty($spec['secret'])) {
+				$fw->passwordinput('dns_cred_' . $field, $spec['label'] ?? $field, $opts);
+			} else {
+				$fw->textinput('dns_cred_' . $field, $spec['label'] ?? $field, $opts);
+			}
 		}
 	}
 	if ($confirm_label !== '') {
@@ -318,31 +404,42 @@ $copy_plain_form = function ($action, $button, $btn_class) use ($base_url, $copy
 	echo '<button type="submit" class="btn ' . $copy_h($btn_class) . '">' . $copy_h($button) . '</button></form>';
 };
 $copy_records_list = function () use ($copy_switch, $copy_h) {
-	if (empty($copy_switch['records'])) {
-		return;
+	if (!empty($copy_switch['records'])) {
+		echo '<ul class="small">';
+		foreach ((array)$copy_switch['records'] as $r) {
+			echo '<li><code>' . $copy_h($r['name']) . '</code> ' . $copy_h($r['type']) . ' (proxied): ' . $copy_h($r['from'])
+				. ' &rarr; ' . $copy_h($r['to']) . '</li>';
+		}
+		echo '</ul>';
 	}
-	echo '<ul class="small">';
-	foreach ((array)$copy_switch['records'] as $r) {
-		echo '<li><code>' . $copy_h($r['name']) . '</code> ' . $copy_h($r['type']) . ' (proxied): ' . $copy_h($r['from'])
-			. ' &rarr; ' . $copy_h($r['to']) . '</li>';
+	if (!empty($copy_switch['swap'])) {
+		$sw = $copy_switch['swap'];
+		echo '<ul class="small"><li>This site\'s server (Linode ' . $copy_h($sw['source']['instance_id']) . ') <code>'
+			. $copy_h($sw['source']['ip']) . '</code> &harr; the copy\'s server (Linode ' . $copy_h($sw['copy']['instance_id'])
+			. ') <code>' . $copy_h($sw['copy']['ip']) . '</code>, in ' . $copy_h($sw['region']) . '. Each address keeps its reverse DNS.</li>';
+		$v6 = IpSwapMove::ipv6_note($sw);
+		if ($v6 !== '') {
+			echo '<li>' . $copy_h($v6) . '</li>';
+		}
+		echo '</ul>';
 	}
-	echo '</ul>';
 };
 
 if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 	$page->begin_box(['title' => 'Switch over to the copy']);
-	echo '<p>A switch-over makes the copy the site. This site is frozen (visitors see a short "back in a few minutes" page), '
-		. 'one final backup is copied across and both are counted, which must match exactly. Then you move the address, the '
-		. 'copy takes over this node, and starts. Until you keep the switch-over, you can go back to this server.</p>';
-	echo '<p class="text-muted">The address moves through the proxy in front of the site (Cloudflare\'s orange cloud): visitors '
-		. 'follow within seconds. Every record pointing at this server must be proxied; the records are checked first, and '
-		. 'nothing is frozen if they do not qualify. If this server only lets the proxy\'s addresses in, give the new server the '
-		. 'same rule before moving: this page cannot see firewalls.</p>';
-	$why = SiteCopyRunner::switch_refusals($site_copy);
-	if (!$copy_dns_class) {
-		$why[] = ($copy_domain === '' ? 'The site has no https address on record.' : $copy_domain . '\'s DNS is not at a host '
-			. 'that proxies (Cloudflare).') . ' Switching by moving the IP address, or by changing DNS, is not built yet.';
+	if ($copy_backups) {
+		echo '<p>A switch-over makes the copy the site. This site\'s server is dead, so nothing is frozen and there is no final '
+			. 'copy: the copy is as of the backup above. When this management node created the old server, it powers it off '
+			. 'first, so two servers never run the site; otherwise make sure it is off. Then you move the address, the copy '
+			. 'takes over this node, starts, and gets its certificate (none could travel from a dead server, so until then '
+			. 'browsers warn, and a proxy set to check the origin\'s certificate strictly refuses it). Until the copy takes '
+			. 'over, you can go back; after that there is nothing to go back to.</p>';
+	} else {
+		echo '<p>A switch-over makes the copy the site. This site is frozen (visitors see a short "back in a few minutes" page), '
+			. 'one final backup is copied across and both are counted, which must match exactly. Then you move the address, the '
+			. 'copy takes over this node, and starts. Until you keep the switch-over, you can go back to this server.</p>';
 	}
+	$why = SiteCopyRunner::switch_refusals($site_copy);
 	if ($why) {
 		echo '<div class="alert alert-warning"><strong>It cannot switch over yet.</strong><ul class="mb-0">';
 		foreach ($why as $w) {
@@ -350,25 +447,61 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 		}
 		echo '</ul></div>';
 	} else {
-		echo '<p>Enter a DNS token for <strong>' . $copy_h($copy_domain) . '</strong>. You enter it again to move the address.</p>';
-		$copy_token_form('copy_switch', 'Check the records and freeze the site', 'btn-warning',
-			'Freeze this site now. Visitors see the maintenance page until the switch-over finishes or I go back.');
+		$confirm = $copy_backups
+			? 'Start the switch-over. The old server is powered off if this management node created it.'
+			: 'Freeze this site now. Visitors see the maintenance page until the switch-over finishes or I go back.';
+		$any = false;
+		foreach (SiteCopyRunner::switch_methods($site_copy) as $method => $method_why) {
+			echo '<hr><h6>Move the address ' . $copy_h($copy_method_names[$method]) . '</h6>';
+			if ($method_why) {
+				echo '<p class="small text-muted">Not available: ' . $copy_h(implode(' ', $method_why)) . '</p>';
+				continue;
+			}
+			$any = true;
+			if ($method === SiteCopyRunner::METHOD_PROXIED) {
+				echo '<p class="small">Visitors follow within seconds. Every record pointing at this server must be proxied; the records '
+					. 'are checked first, and nothing changes if they do not qualify. If this server only lets the proxy\'s addresses in, '
+					. 'give the new server the same rule before moving: this page cannot see firewalls. Enter a DNS token for <strong>'
+					. $copy_h($copy_domain) . '</strong>; you enter it again to move the address.</p>';
+				$copy_press_form('copy_switch', 'Check the records and start', 'btn-warning', $confirm,
+					array('copy_method' => $method), true);
+			} elseif ($method === SiteCopyRunner::METHOD_IP_SWAP) {
+				echo '<p class="small">The two servers swap their public IPv4 addresses at Linode, so every record, allow-list and '
+					. 'reverse DNS naming this site\'s address stays true, with no DNS wait. The old server is powered off for the swap '
+					. 'and the copy restarts on its new address, a few minutes. Both servers are checked at Linode first (one account, one '
+					. 'region, Network Helper on, this server\'s firewalls also on the copy), and nothing changes if they do not qualify. '
+					. 'IPv6 addresses do not move.</p>';
+				$copy_press_form('copy_switch', 'Check the servers and start', 'btn-warning', $confirm, array('copy_method' => $method));
+			} else {
+				echo '<p class="small">You point ' . $copy_h($copy_domain) . '\'s DNS at the copy yourself, at your DNS host. Visitors '
+					. 'whose resolvers still hold the old address fail until it expires, so the record\'s TTL is the wait.</p>';
+				$copy_press_form('copy_switch', 'Start, and I will change DNS', 'btn-warning', $confirm, array('copy_method' => $method));
+			}
+		}
+		if (!$any) {
+			echo '<p class="text-muted">No way to move this site\'s address is available.</p>';
+		}
 	}
 	$page->end_box();
 } elseif ($in_switch || in_array($copy_status, array(SiteCopy::STATUS_SWITCHED, SiteCopy::STATUS_RETURNING), true)) {
 	$page->begin_box(['title' => 'Switch-over']);
-	if (!empty($copy_switch['frozen_time']) && !in_array($copy_status, array(SiteCopy::STATUS_SWITCHED, SiteCopy::STATUS_RETURNING), true)) {
+	if (!$copy_backups && !empty($copy_switch['frozen_time']) && !in_array($copy_status, array(SiteCopy::STATUS_SWITCHED, SiteCopy::STATUS_RETURNING), true)) {
 		echo '<p><strong>This site has been frozen since ' . $copy_h($copy_switch['frozen_time']) . ' UTC.</strong> Visitors see the '
 			. 'maintenance page.</p>';
 	}
-	echo '<p>The address is at <strong>' . ($copy_address_at_copy ? 'the copy' : 'this site\'s own server') . '</strong>';
+	echo '<p>The address moves ' . $copy_h($copy_method_names[$copy_method] ?? $copy_method) . '. It is at <strong>'
+		. ($copy_address_at_copy ? 'the copy' : 'this site\'s own server') . '</strong>';
 	if (!empty($copy_switch['zone'])) {
 		echo ', zone ' . $copy_h($copy_switch['zone']);
 	}
 	echo '.</p>';
 	$copy_records_list();
 	if (!empty($copy_switch['proof']['proven'])) {
-		echo '<p class="text-success small">The proxy reached the copy after ' . (int)$copy_switch['proof']['seconds'] . ' s.</p>';
+		echo '<p class="text-success small">The site\'s name reached the copy after ' . (int)$copy_switch['proof']['seconds'] . ' s.</p>';
+	}
+	if (!empty($copy_switch['move_failure'])) {
+		echo '<div class="alert alert-warning small">The last move did not finish (' . $copy_h($copy_switch['move_failure']) . ')'
+			. ($copy_method === SiteCopyRunner::METHOD_IP_SWAP ? '; the addresses were put back.' : '.') . '</div>';
 	}
 	foreach ((array)($copy_switch['moved_back_notes'] ?? array()) as $note) {
 		echo '<div class="alert alert-warning small">' . $copy_h($note) . '</div>';
@@ -376,31 +509,53 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 
 	$phase = (string)($copy_switch['phase'] ?? '');
 	if ($copy_status === SiteCopy::STATUS_READY) {
-		echo '<p>The final copy matches this site exactly. Move the address now: the site is down until you do, or until you go back.</p>';
-		$copy_token_form('copy_move', 'Move the address to the copy', 'btn-primary');
+		echo '<p>' . ($copy_backups ? 'The copy is ready.' : 'The final copy matches this site exactly.')
+			. ' Move the address now' . ($copy_backups ? '.' : ': the site is down until you do, or until you go back.') . '</p>';
+		if ($copy_method === SiteCopyRunner::METHOD_PROXIED) {
+			$copy_press_form('copy_move', 'Move the address to the copy', 'btn-primary', '', array(), true);
+		} elseif ($copy_method === SiteCopyRunner::METHOD_IP_SWAP) {
+			$copy_press_form('copy_move', 'Swap the addresses now', 'btn-primary');
+		} else {
+			$to = (array)($copy_switch['to'] ?? array());
+			echo '<p>At your DNS host, point ' . $copy_h($copy_domain) . ' (and any other name served by the old server) at the copy: <code>'
+				. $copy_h(implode(', ', $to)) . '</code>. Then press the button; this management node asks the copy\'s look path at '
+				. $copy_h($copy_domain) . ' until the copy answers.</p>';
+			$copy_press_form('copy_move', 'The address points at the copy', 'btn-primary');
+		}
+	}
+	if (in_array($copy_status, array(SiteCopy::STATUS_STARTING, SiteCopy::STATUS_UNDOING), true)) {
+		echo '<p>This page follows the steps above as they happen.</p>';
 	}
 	if ($copy_status === SiteCopy::STATUS_SWITCHED) {
 		echo '<p><strong>Switched over</strong> at ' . $copy_h($copy_switch['switched_time'] ?? '') . ' UTC. This node is the new '
-			. 'server now; the old one is frozen, kept for the way back.</p>';
+			. 'server now' . ($copy_backups ? '.' : '; the old one is frozen, kept for the way back.') . '</p>';
 		$copy_plain_form('copy_finish', 'Keep the switch-over', 'btn-success');
-		echo '<p class="small text-muted mt-2">Keeping it closes the way back and removes the old server\'s record. The old '
-			. 'server itself is yours to delete at its provider.</p>';
+		echo '<p class="small text-muted mt-2">Keeping it ' . ($copy_backups ? '' : 'closes the way back and ') . 'removes the old server\'s '
+			. 'record. The old server itself is yours to delete at its provider.</p>';
 	}
 	if ($copy_status === SiteCopy::STATUS_HALTED && $phase === 'start' && $copy_address_at_copy) {
 		$copy_plain_form('copy_retry_start', 'Try starting the copy again', 'btn-primary');
 	}
-	if ($copy_status !== SiteCopy::STATUS_RETURNING && ($in_switch || $copy_status === SiteCopy::STATUS_SWITCHED)) {
+	$copy_way_back = $copy_status !== SiteCopy::STATUS_RETURNING && ($in_switch || $copy_status === SiteCopy::STATUS_SWITCHED)
+		&& !in_array($copy_status, array(SiteCopy::STATUS_STARTING, SiteCopy::STATUS_UNDOING), true)
+		&& !($copy_backups && $copy_swapped);
+	if ($copy_way_back) {
 		echo '<hr><h6>The way back</h6>';
 		if ($copy_swapped) {
 			echo '<p>This server becomes the site again. <strong>Anything written on the new server since it started is lost</strong>: '
 				. 'its server is discarded afterwards. Keeping those writes would be a copy in the other direction.</p>';
+		} elseif ($copy_backups) {
+			echo '<p>The copy stays a dormant copy, and the old server stays off.'
+				. ($copy_method === SiteCopyRunner::METHOD_MANUAL && $copy_address_at_copy ? ' Point the DNS back yourself.' : '') . '</p>';
 		} else {
 			echo '<p>This site runs again on its own server, as before. The copy stays a dormant copy.</p>';
 		}
-		if ($copy_address_at_copy) {
+		$confirm = $copy_swapped ? 'I understand that what was written on the new server since it started is lost.' : '';
+		if ($copy_method === SiteCopyRunner::METHOD_PROXIED && $copy_address_at_copy) {
 			echo '<p>The address points at the copy, so going back moves it back: enter the DNS token.</p>';
-			$copy_token_form('copy_go_back', 'Go back', 'btn-outline-danger',
-				$copy_swapped ? 'I understand that what was written on the new server since it started is lost.' : '');
+			$copy_press_form('copy_go_back', 'Go back', 'btn-outline-danger', $confirm, array(), true);
+		} elseif ($confirm !== '') {
+			$copy_press_form('copy_go_back', 'Go back', 'btn-outline-danger', $confirm);
 		} else {
 			$copy_plain_form('copy_go_back', 'Go back', 'btn-outline-danger');
 		}
@@ -409,6 +564,7 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 }
 
 if (in_array($copy_status, array_merge(array(SiteCopy::STATUS_WAITING), SiteCopy::MOVING_STATUSES), true)) {
-	// The run moves on the scheduled task's tick; the page follows it.
+	// The run moves on the scheduled task's tick, a node's posted result, or
+	// the worker following local steps; the page follows it.
 	echo '<script>setTimeout(function () { window.location.reload(); }, 15000);</script>';
 }

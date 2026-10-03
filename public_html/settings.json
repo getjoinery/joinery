@@ -2624,6 +2624,18 @@
       "helptext": "JSON handoff from this machine's root agent to its own Backups page: the same shape as restore_approval_request, staged when the agent has claimed a copy_export job that would seal this site's backup key, certificate and DKIM keys to a copy on another machine. The export's own row and HKDF context, so the screen names the act and the copy's key fingerprint. Cleared by the agent when the job ends."
     },
     {
+      "name": "copy_key_request",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON handoff from this machine's root agent to its own /copy-key page, on a dormant copy made from backups when its source's server is dead: the backup the copy would take (chain, newest run, manifest hash), the recovery key fingerprint its key is sealed to, and the sealed box's ephemeral public key. The owner opens it with their recovery key in their browser. Cleared by the agent when the job ends."
+    },
+    {
+      "name": "copy_key_answer",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON handoff the other way: {job_id, shared, public_key} or {job_id, declined}, written by the /copy-key page. shared is the X25519 of the owner's recovery key with the sealed box's ephemeral key: it opens that one box and nothing else, and the recovery key itself never leaves the browser. The agent checks the key's fingerprint and the box, and clears it."
+    },
+    {
       "name": "copy_export_approval_answer",
       "default": "",
       "managed": true,
