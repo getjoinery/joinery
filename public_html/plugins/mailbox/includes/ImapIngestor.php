@@ -53,6 +53,9 @@
  * interactive fetch (the reader's Refresh, the admin's Fetch now) stays inside
  * the time a browser, and the proxy in front of it, will wait.
  *
+ * @version 1.23
+ * @changelog 1.23 - an INBOX arrival of a spam row clears the verdict (the member said Not spam at the
+ *   source); neither folder's verdict overrides a correction not yet carried to the source
  * @version 1.22
  * @changelog 1.22 - specs/implemented/imap_client_hardening.md: certificates verified and the
  *   host pinned (F1, F17); a message that fails MAX_ATTEMPTS polls is skipped and
@@ -1862,9 +1865,12 @@ class ImapIngestor {
 		}
 
 		// Spam (specs/inbound_email_spam_filtering.md): a message the remote filed in
-		// a junk-role folder is spam — give the verdict its meaning for IMAP mail.
+		// a junk-role folder is spam — give the verdict its meaning for IMAP mail. One
+		// that arrives in INBOX was taken out of Junk at the source, and stops being spam.
 		if ($messageId > 0 && (string)$folder->get('iif_role') === InboundImapFolder::ROLE_JUNK) {
 			$this->markSpam($messageId);
+		} elseif ($messageId > 0 && (string)$folder->get('iif_role') === InboundImapFolder::ROLE_INBOX) {
+			$this->clearSpam($messageId);
 		}
 
 		// Trash arrival (§7.5): a message the remote moved to its Trash folder is a
@@ -1991,12 +1997,29 @@ class ImapIngestor {
 		return $id ? intval($id) : 0;
 	}
 
+	/**
+	 * The source's folders give a row its verdict only while the member has no
+	 * correction waiting to reach the source (ImapSyncer::pushSpam): their own
+	 * click wins over where the message sat when it was read.
+	 */
+	const NO_UNSENT_CORRECTION_SQL = '(iem_spam_corrected_time IS NULL OR iem_spam_synced_time >= iem_spam_corrected_time)';
+
 	/** Mark a row as spam (a message the remote filed in a junk-role folder). */
 	private function markSpam(int $messageId): void {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
 			"UPDATE iem_inbound_email_messages SET iem_spam_verdict = '" . InboundEmailMessage::SPAM_VERDICT_SPAM . "'
-			 WHERE iem_inbound_email_message_id = ?");
+			 WHERE iem_inbound_email_message_id = ? AND " . self::NO_UNSENT_CORRECTION_SQL);
+		$stmt->execute(array($messageId));
+	}
+
+	/** Clear a spam row the remote filed back in INBOX to the verdict fetched mail starts with. */
+	private function clearSpam(int $messageId): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"UPDATE iem_inbound_email_messages SET iem_spam_verdict = NULL
+			 WHERE iem_inbound_email_message_id = ? AND iem_spam_verdict = '" . InboundEmailMessage::SPAM_VERDICT_SPAM . "'
+			   AND " . self::NO_UNSENT_CORRECTION_SQL);
 		$stmt->execute(array($messageId));
 	}
 

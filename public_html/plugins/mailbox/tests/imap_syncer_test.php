@@ -15,6 +15,8 @@
  *  - VANISHED pull → membership cleared (clean) / skipped (dirty).
  *  - Deletion is the column: a local soft-delete pushes a COPY/MOVE to Trash; the
  *    locator follows so it is not re-pushed.
+ *  - Spam is the column: Report spam pushes a COPY/MOVE into Junk, Not spam a MOVE back
+ *    to INBOX, each once; the source's folders never override an unsent correction.
  *  - Label rail: custom labels are navigable; special-use (INBOX) and the \All
  *    coverage view are not (they are columns / coverage).
  *  - Import scope: widening "Existing mail" clears the per-folder cursor (the one
@@ -24,6 +26,7 @@
  *
  * Run: php plugins/mailbox/tests/imap_syncer_test.php  (requires schema synced).
  *
+ * @version 2.4 - spam corrections reach the source's Junk folder
  * @version 2.3
  */
 
@@ -251,6 +254,7 @@ class ImapSyncerTest {
 			$this->testVanishedSkipsDirty();
 			$this->testVanishedUidDiffFallback();
 			$this->testSoftDeletePushesToTrash();
+			$this->testSpamCorrectionReachesJunk();
 			$this->testFoldersExcludeCoverage();
 			$this->testRewindCursorsClearsFolderPosition();
 			$this->testRewoundFolderHonoursImportScope();
@@ -714,6 +718,87 @@ class ImapSyncerTest {
 		$this->account->set('iia_sync_deletes', false);
 		$this->account->prepare(); $this->account->save();
 		$this->account = new InboundImapAccount($this->account->key, TRUE);
+	}
+
+	// ── spam ─────────────────────────────────────────────────────────────────
+
+	private function testSpamCorrectionReachesJunk() {
+		$client = new FakeImapClient();
+		$this->makeFolder('INBOX', 'inbox');
+		// Junk need not be tracked: it is a push target, not a source.
+		$junk = InboundImapFolder::upsert(intval($this->account->key), 'Spam', 'junk', false);
+		$msg = $this->makeMessage('INBOX', 90);
+		$client->folders['INBOX'] = array('uidvalidity' => 1, 'uidnext' => 91,
+			'messages' => array(90 => array('flags' => array(), 'message_id' => $msg->get('iem_message_id_header'))));
+		$client->folders['Spam'] = array('uidvalidity' => 1, 'uidnext' => 1, 'messages' => array());
+		$intoJunk = function () use ($client) {
+			return count(array_filter($client->ops, function ($o) {
+				return in_array($o['op'], array('copy', 'move'), true) && ($o['dest'] ?? '') === 'Spam';
+			}));
+		};
+		$service = new MailboxService($this->allAccessViewer());
+
+		$service->setSpamVerdict(array(intval($msg->key)), InboundEmailMessage::SPAM_VERDICT_SPAM);
+		$this->syncer($client)->push(50);
+		$this->ok($intoJunk() === 1 && $client->opCount('copy') === 1,
+			'Report spam COPYs the source message into Junk (non-exclusive feed)');
+		$row = $this->reload($msg);
+		$this->ok($row->get('iem_imap_folder') === 'Spam', 'the locator follows to Junk');
+		$this->ok((string)$row->get('iem_spam_synced_time') === (string)$row->get('iem_spam_corrected_time'),
+			'the correction is marked sent');
+
+		$this->syncer($client)->push(50);
+		$this->ok($intoJunk() === 1, 'a sent correction is not pushed again');
+
+		// An unsent correction outranks the source's folders.
+		$service->setSpamVerdict(array(intval($msg->key)), InboundEmailMessage::SPAM_VERDICT_HAM);
+		$ingestor = new ImapIngestor($this->account, $client);
+		$markSpam = new ReflectionMethod($ingestor, 'markSpam');
+		$markSpam->setAccessible(true);
+		$markSpam->invoke($ingestor, intval($msg->key));
+		$this->ok($this->reload($msg)->get('iem_spam_verdict') === InboundEmailMessage::SPAM_VERDICT_HAM,
+			'a Junk arrival does not override an unsent Not spam');
+
+		$this->syncer($client)->push(50);
+		$back = array_filter($client->ops, function ($o) {
+			return $o['op'] === 'move' && $o['source'] === 'Spam' && $o['dest'] === 'INBOX';
+		});
+		$this->ok(count($back) === 1, 'Not spam MOVEs the message from Junk back to INBOX');
+		$this->ok($this->reload($msg)->get('iem_imap_folder') === 'INBOX', 'the locator follows back to INBOX');
+		$this->ok(count($client->folders['Spam']['messages']) === 0, 'nothing is left in Junk');
+
+		// Once sent, the source's folders speak again: a Junk arrival is spam, an
+		// INBOX arrival of a spam row is not.
+		$markSpam->invoke($ingestor, intval($msg->key));
+		$this->ok($this->reload($msg)->get('iem_spam_verdict') === InboundEmailMessage::SPAM_VERDICT_SPAM,
+			'with no unsent correction, a Junk arrival marks the row spam');
+		$clearSpam = new ReflectionMethod($ingestor, 'clearSpam');
+		$clearSpam->setAccessible(true);
+		$clearSpam->invoke($ingestor, intval($msg->key));
+		$this->ok($this->reload($msg)->get('iem_spam_verdict') === null,
+			'an INBOX arrival of a spam row clears the verdict');
+
+		// A read-only feed sends nothing.
+		$this->account->set('iia_sync_mode', 'pull');
+		$this->account->prepare(); $this->account->save();
+		$this->account = new InboundImapAccount($this->account->key, TRUE);
+		$ops = count($client->ops);
+		$service->setSpamVerdict(array(intval($msg->key)), InboundEmailMessage::SPAM_VERDICT_SPAM);
+		$timeline = (new MailboxMessageTimeline($this->reload($msg)))->build()["events"];
+		$line = null;
+		foreach ($timeline as $e) { if ($e['title'] === 'You marked this as spam') { $line = $e; } }
+		$this->ok($line !== null && strpos((string)$line['detail'], 'Only here') === 0,
+			'the timeline says a correction on a read-only feed stays here');
+		$this->account->set('iia_sync_mode', 'both');
+		$this->account->prepare(); $this->account->save();
+		$this->account = new InboundImapAccount($this->account->key, TRUE);
+		$this->syncer($client)->push(50);
+		$timeline = (new MailboxMessageTimeline($this->reload($msg)))->build()["events"];
+		$line = null;
+		foreach ($timeline as $e) { if ($e['title'] === 'You marked this as spam') { $line = $e; } }
+		$this->ok($line !== null && strpos((string)$line['detail'], 'Moved to the Junk folder') === 0,
+			'after the push the timeline says it reached the Junk folder');
+		$this->ok($ops < count($client->ops), 'switching the feed to two-way carries the waiting correction');
 	}
 
 	// ── coverage / folders ───────────────────────────────────────────────────

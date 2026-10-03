@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.55 - setSpamVerdict stamps the correction to the microsecond, so a two-way IMAP feed (which
+ *   marks a correction sent by copying that stamp) never mistakes a second one for the first
  * @version 1.54 - thread messages carry spam_reason_text; setSpamVerdict hands the correction to SpamLearning, which teaches the spam corpus in the request
  * @version 1.53 - Trash lists newest-first with no unread/starred sections; rows carry no purge_time
  * @version 1.52 - setSpamVerdict stamps iem_spam_corrected_time (what spam learning teaches)
@@ -2525,9 +2527,11 @@ class MailboxService {
 			return 0;
 		}
 		$in = implode(',', $ids);
+		$now = microtime(true);
+		$stamp = gmdate('Y-m-d H:i:s', (int)$now) . sprintf('.%06d', (int)(($now - floor($now)) * 1000000));
 		$sql = "UPDATE iem_inbound_email_messages
 				SET iem_spam_verdict = " . $this->db()->quote($verdict) . ",
-					iem_spam_corrected_time = " . $this->db()->quote(gmdate('Y-m-d H:i:s')) . "
+					iem_spam_corrected_time = " . $this->db()->quote($stamp) . "
 				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql() . "
 				RETURNING iem_inbound_email_message_id";
 		$stmt = $this->db()->prepare($sql);
