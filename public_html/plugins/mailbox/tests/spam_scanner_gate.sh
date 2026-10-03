@@ -24,7 +24,8 @@
 #   - the X-Spam header contract matches InboundEmailRouter, rejection stays
 #     off, remove unwires Postfix before purging and still purges redis-server
 #     for a box that never upgraded;
-#   - install_email.sh calls the provisioner unconditionally.
+#   - install_email.sh calls the provisioner unconditionally, and writes a
+#     milter list that already ends with rspamd, so a re-run never drops it.
 
 PROVISIONING="${PROVISIONING_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../provisioning" && pwd)}"
 SCANNER="$PROVISIONING/provision_spam_scanner.sh"
@@ -206,6 +207,13 @@ echo "== install_email.sh ships the scanner with the mail stack =="
 chk "calls the provisioner"      "$(grep -c 'SPAM_SCANNER_SCRIPT}" install' "$INSTALLER")" "1"
 chk "no policy gate"             "$(grep -c 'scanner-expected' "$INSTALLER")" "0"
 chk "installs no rspamd itself"  "$(grep -c 'apt-get install -y "${CS_MISSING' "$INSTALLER")" "0"
+# The installer's own milter list, computed by its own lines: with the
+# provisioner beside it the list must already carry the scanner, so the
+# scanner finds it wired instead of re-appending after a gap.
+milters=$(SCRIPT_DIR="$PROVISIONING" bash -c "$(sed -n '/^SMTPD_MILTERS=/,/^fi$/p' "$INSTALLER"); echo \"\$SMTPD_MILTERS\"")
+chk "installer list ends with rspamd" "$milters" "inet:localhost:8891, inet:localhost:8893, inet:localhost:11332"
+chk "installer writes that list"  "$(grep -c 'postconf -e "smtpd_milters = ${SMTPD_MILTERS}"' "$INSTALLER")" "1"
+chk "scanner reads it as wired"   "$(grep -c 'MILTER_ENTRY="inet:localhost:11332"' "$SCANNER")" "1"
 
 echo
 if [ "$failed" -eq 0 ]; then
