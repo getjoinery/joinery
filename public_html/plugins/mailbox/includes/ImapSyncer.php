@@ -22,12 +22,19 @@
  *     local soft-delete pushes a MOVE/COPY to the feed's Trash folder; a remote Trash
  *     arrival sets iem_delete_time at ingest (§7.5). Archive (iem_is_archived) stays
  *     local. INBOX is the default, not a label, so it is never a membership target.
+ *   - Spam is column-driven too: a member's Mark as spam / Not spam
+ *     (iem_spam_corrected_time later than iem_spam_synced_time) MOVEs/COPYs the message
+ *     into the feed's Junk folder, or MOVEs it from there back to INBOX, so the source's
+ *     own filter learns from it and every client agrees. The remote→local direction is
+ *     at ingest: a Junk arrival is spam, an INBOX arrival of a spam row is not.
  *
  * IMAP is touched only through the ImapClient seam (§6.2), shared with the ingestor so
  * the whole cycle runs on one connection.
  *
  * See specs/two_way_imap_sync.md and specs/inbound_email_labels.md.
  *
+ * @version 2.4 - pushSpam: a member's spam correction moves the message into or out of the
+ *   feed's Junk folder
  * @version 2.3 - specs/implemented/imap_client_hardening.md: every write and every pull match
  *   goes by a UID of the folder's CURRENT generation, re-found by Message-ID when
  *   stale (F2); a short UID answer removes nothing (F10); failed pushes back off
@@ -110,9 +117,14 @@ class ImapSyncer {
 
 	/** The Trash-role tracked folder, or null (delete target / arrival source). */
 	private function trashFolder(): ?InboundImapFolder {
+		return $this->roleFolder(InboundImapFolder::ROLE_TRASH);
+	}
+
+	/** The feed's folder with $role, tracked or not, or null. */
+	private function roleFolder(string $role): ?InboundImapFolder {
 		$rows = new MultiInboundImapFolder(array(
 			'account_id' => intval($this->account->key),
-			'role'       => InboundImapFolder::ROLE_TRASH,
+			'role'       => $role,
 		));
 		$rows->load();
 		return count($rows) ? new InboundImapFolder($rows->get(0)->key, TRUE) : null;
@@ -424,8 +436,10 @@ class ImapSyncer {
 		$flags = $this->pushFlags($maxPerRun);
 		$membership = $this->pushMembership($maxPerRun);
 		$trashed = $this->pushTrash($maxPerRun);
+		$spam = $this->pushSpam($maxPerRun);
 		$this->ingestor->lap('push', microtime(true) - $started);
-		return array('created' => $created, 'flags' => $flags, 'membership' => $membership, 'trashed' => $trashed);
+		return array('created' => $created, 'flags' => $flags, 'membership' => $membership,
+			'trashed' => $trashed, 'spam' => $spam);
 	}
 
 	/**
@@ -725,6 +739,88 @@ class ImapSyncer {
 			}
 		}
 		return $moved;
+	}
+
+	// ── Spam push (Two-way) ────────────────────────────────────────────────
+
+	/**
+	 * Carry each unsent spam correction on this feed to the source. Mark as spam puts
+	 * the message in the feed's Junk folder — MOVE (exclusive), or COPY on Gmail, which
+	 * treats a copy into Spam as reporting it and takes it out of every label — and its
+	 * label memberships on this feed go with it. Not spam MOVEs it from Junk to INBOX.
+	 * A row already where its verdict says is marked sent with no IMAP write. The
+	 * locator follows the message, so the pull that sees it leave its old folder has
+	 * nothing to re-point. A deleted row is pushTrash's.
+	 */
+	private function pushSpam(int $maxPerRun): int {
+		$junk = $this->roleFolder(InboundImapFolder::ROLE_JUNK);
+		if ($junk === null) {
+			return 0; // no Junk folder resolved — the correction stays local
+		}
+		$junkName = (string)$junk->get('iif_name');
+		$inbox = $this->roleFolder(InboundImapFolder::ROLE_INBOX);
+		$inboxName = $inbox !== null ? (string)$inbox->get('iif_name') : 'INBOX';
+		$exclusive = $this->account->foldersExclusive();
+		$stmt = $this->db()->prepare(
+			"SELECT iem_inbound_email_message_id AS id, iem_imap_folder AS folder, iem_imap_uid AS uid,
+					iem_imap_uidvalidity AS uidvalidity, iem_message_id_header AS mid, iem_spam_verdict AS verdict
+			 FROM iem_inbound_email_messages
+			 WHERE iem_iia_inbound_imap_account_id = ?
+			   AND iem_spam_corrected_time IS NOT NULL
+			   AND (iem_spam_synced_time IS NULL OR iem_spam_corrected_time > iem_spam_synced_time)
+			   AND iem_delete_time IS NULL
+			   AND iem_source_gone_time IS NULL
+			   AND iem_imap_folder IS NOT NULL AND iem_imap_uid IS NOT NULL
+			   AND (iem_push_retry_after IS NULL OR iem_push_retry_after <= now())
+			 ORDER BY iem_spam_corrected_time ASC
+			 LIMIT " . max(1, $maxPerRun));
+		$stmt->execute(array(intval($this->account->key)));
+
+		$moved = 0;
+		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			$msgId = intval($r['id']);
+			$spam = (string)$r['verdict'] === InboundEmailMessage::SPAM_VERDICT_SPAM;
+			$inJunk = strcasecmp((string)$r['folder'], $junkName) === 0;
+			if ($spam === $inJunk) {
+				$this->markSpamSynced($msgId);
+				continue;
+			}
+			try {
+				// Only a UID of the folder's current generation is moved (F2).
+				$uid = $this->validUid($msgId, (string)$r['folder'], $r['uid'], $r['uidvalidity'], (string)$r['mid']);
+				if ($uid === null) {
+					$this->pushFailed($msgId);
+					continue;
+				}
+				if ($spam) {
+					$dest = $junkName;
+					$newUid = $exclusive
+						? $this->moveMessage((string)$r['folder'], $uid, $junkName)
+						: $this->copyMessage((string)$r['folder'], $uid, $junkName);
+					InboundLabelMember::clearForFolders($msgId, $this->feedFolderIds());
+				} else {
+					$dest = $inboxName;
+					$newUid = $this->moveMessage($junkName, $uid, $inboxName);
+					InboundLabelMember::clearForFolders($msgId, array(intval($junk->key)));
+				}
+				$this->setLocator($msgId, $dest, $newUid ?? 0,
+					$newUid !== null ? $this->currentUidvalidity($dest) : null);
+				$this->pushSucceeded($msgId);
+				$this->markSpamSynced($msgId);
+				$moved++;
+			} catch (Throwable $e) {
+				$this->pushFailed($msgId);
+				$this->onWriteError($e, 'spam push');
+			}
+		}
+		return $moved;
+	}
+
+	/** The row's correction has reached the source: its sent mark catches up to it. */
+	private function markSpamSynced(int $msgId): void {
+		$this->db()->prepare(
+			"UPDATE iem_inbound_email_messages SET iem_spam_synced_time = iem_spam_corrected_time
+			 WHERE iem_inbound_email_message_id = ?")->execute(array($msgId));
 	}
 
 	// ── IMAP write primitives (idempotent) ─────────────────────────────────

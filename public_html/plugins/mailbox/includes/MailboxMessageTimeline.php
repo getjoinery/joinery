@@ -21,6 +21,7 @@
  * recipients (sealed with the mailbox), and a closed window drops exactly
  * those lines and sets locked:true beside the rest.
  *
+ * @version 1.4 - a correction on fetched mail says whether it reached the source's Junk folder
  * @version 1.3 - the spam line says which step decided (InboundEmailMessage::spamReasonText)
  * @version 1.2 - "You marked this" comes from the correction time, and says whether the filter learned it
  * @version 1.1 - a Fortress message shows routing events only (no header block)
@@ -140,6 +141,9 @@ class MailboxMessageTimeline {
 				$detail = 'The spam filter has learned from it';
 			} elseif ($train !== '' && MailboxSpamPolicy::learningEnabled() && !InboundEmailMessage::isBrowserSealed($m)) {
 				$detail = 'The spam filter will learn from it';
+			}
+			if (intval($m->get('iem_iia_inbound_imap_account_id')) > 0) {
+				$detail = $this->fetchedCorrectionText($m, $verdict === InboundEmailMessage::SPAM_VERDICT_SPAM);
 			}
 			$this->add($corrected, 'spam',
 				$verdict === InboundEmailMessage::SPAM_VERDICT_SPAM ? 'You marked this as spam' : 'You marked this as not spam',
@@ -505,6 +509,28 @@ class MailboxMessageTimeline {
 	}
 
 	// ── helpers ────────────────────────────────────────────────────────────
+
+	/**
+	 * Where a correction on fetched mail went: the source's own Junk folder is that
+	 * mail's spam verdict, and only a two-way feed carries the correction there
+	 * (ImapSyncer::pushSpam).
+	 */
+	private function fetchedCorrectionText(InboundEmailMessage $m, bool $spam): string {
+		$where = $spam ? 'Junk folder' : 'Inbox';
+		$synced = (string)$m->get('iem_spam_synced_time');
+		if ($synced !== '' && strcmp($synced, (string)$m->get('iem_spam_corrected_time')) >= 0) {
+			return 'Moved to the ' . $where . ' of the account it was fetched from too';
+		}
+		try {
+			$account = new InboundImapAccount(intval($m->get('iem_iia_inbound_imap_account_id')), TRUE);
+			if ($account->isTwoWay()) {
+				return 'Moves to the ' . $where . ' of the account it was fetched from at the next sync';
+			}
+		} catch (\Throwable $e) {
+			// The feed is gone: nothing will carry the correction anywhere.
+		}
+		return 'Only here: the account it was fetched from does not sync changes back, so its own Junk folder is unchanged';
+	}
 
 	private function add(?string $time, string $kind, string $title, ?string $detail, array $meta = array()): void {
 		$time = ($time === null || trim($time) === '') ? null : substr(trim($time), 0, 19);

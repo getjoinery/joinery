@@ -3964,9 +3964,12 @@ spam burns the platform's sending reputation and can relay abuse. The forward is
 suppressed and logged with status `spam_held`. A `forward_and_store` alias still
 stores the message (with its `spam` verdict) so it stays reviewable.
 
-**IMAP-polled mail** is neither classified nor taught. A message ingested into a
-folder whose `iif_role` is `junk` is marked `spam`; a correction on a polled row moves
-it here without touching the corpus.
+**IMAP-polled mail** is neither classified nor taught: the source's Junk folder is its
+verdict. A message ingested into a folder whose `iif_role` is `junk` is marked `spam`,
+and a `spam` row that arrives in INBOX (taken out of Junk at the source) is cleared. A
+correction on a polled row moves it here without touching the corpus; on a **Two-way**
+feed the sync also moves it into or out of the source's Junk folder, so the provider's
+own filter learns from it (see [Sync](#sync-read-only-and-two-way)).
 
 **Reader.** The default inbox (and the mailbox unread badges) exclude `spam`-verdict
 rows; a **Spam** entry in the per-mailbox folder rail shows only them. Per
@@ -4992,9 +4995,19 @@ writes. **Gmail is reconciled by the same folder model as every other host** —
 Gmail IMAP extensions are used.
 
 **State mapped to IMAP.** Read ↔ `\Seen`, star ↔ `\Flagged`, custom label ↔ the
-remote folder that mirrors it, deletion ↔ move to Trash. Standard state (read, star,
-spam, archive, deletion) is a column on the message; only **custom** labels are
-folder memberships.
+remote folder that mirrors it, deletion ↔ move to Trash, spam ↔ the Junk folder.
+Standard state (read, star, spam, archive, deletion) is a column on the message; only
+**custom** labels are folder memberships.
+
+**Spam corrections.** On a Two-way feed, **Report spam** `MOVE`s the message into the
+feed's Junk folder (a `COPY` on Gmail, which treats a copy into Spam as reporting it)
+and **Not spam** `MOVE`s it from Junk to INBOX; the Junk folder need not be tracked.
+A correction is unsent while `iem_spam_corrected_time` is later than
+`iem_spam_synced_time`, and `ImapSyncer::pushSpam()` catches the second up to the first
+once the move lands (or at once, when the message already sits where its verdict
+says). Until then the source's folders do not override it: a Junk or INBOX arrival
+changes the verdict only on a row with no unsent correction. On a Read-only feed a
+correction stays local and is never sent.
 
 **Custom labels are rows; folders are bindings.** A custom label is an
 `ilb_inbound_email_labels` row, and a message *has* it iff it carries an

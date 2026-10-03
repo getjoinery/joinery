@@ -106,6 +106,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.42 - iem_spam_synced_time: the correction a two-way IMAP feed last carried to the
+ *   source's Junk folder (ImapSyncer::pushSpam)
  * @version 1.41 - spamReasonText(); spam learning in core: iem_train_verdict, iem_learned_tokenizer, iem_spam_reason,
  *   iem_spam_meta, iem_sender_fingerprint, iem_sender_recorded
  * @version 1.40 - iem_spam_corrected_time: when a member marked the row spam / not spam, which is
@@ -453,6 +455,12 @@ class InboundEmailMessage extends SystemBase {
 		// When a member last marked this row spam / not spam (UTC); NULL = never
 		// corrected. Shown on the message timeline.
 		'iem_spam_corrected_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		// On an IMAP-polled row, the iem_spam_corrected_time a two-way feed last
+		// carried to the source (moved into or out of its Junk folder). The row's
+		// correction is unsent while iem_spam_corrected_time is later; NULL = none
+		// sent. A verdict the source's own folders give the row never overrides an
+		// unsent correction.
+		'iem_spam_synced_time'    => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		// What the user's own behaviour says about this message (specs/
 		// spam_learning_in_core.md § Teaching): 'spam' from Mark as spam, 'ham'
 		// from Not spam, Always allow, or a reply the user sent to it. NULL = no
