@@ -35,7 +35,7 @@ chk() {
 }
 
 W=$(mktemp -d /tmp/jy_sudo_gate_XXXXXX)
-trap 'rm -rf "$W"' EXIT
+trap 'rm -rf "${W:?}"' EXIT
 mkdir -p "$W/proj/sub" "$W/proj/config" "$W/out" "$W/narrow" "$W/refusing"
 echo hello > "$W/proj/a.txt"; echo more > "$W/proj/sub/b.txt"; echo key > "$W/key"
 

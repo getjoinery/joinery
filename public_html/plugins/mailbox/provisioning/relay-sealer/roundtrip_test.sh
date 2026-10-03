@@ -28,7 +28,7 @@ command -v go >/dev/null || { echo "FAIL: go toolchain not found" >&2; exit 1; }
 php -r 'exit(extension_loaded("sodium")?0:1);' || { echo "FAIL: php ext-sodium missing" >&2; exit 1; }
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "${WORK}"' EXIT
+trap 'rm -rf "${WORK:?}"' EXIT
 
 echo "== building relay-sealer =="
 ( cd "${SCRIPT_DIR}" && go build -o "${WORK}/relay-sealer" . )

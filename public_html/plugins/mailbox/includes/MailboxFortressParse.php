@@ -30,6 +30,7 @@
  * offset: PHP drops every upload past max_file_uploads (20 on this stack), and
  * a newsletter with more inline images than that is ordinary (B37).
  *
+ * @version 1.5 - the device parse records the spam reason and meta tokens; a reply noted at pull time is honoured
  * @version 1.4 - next() takes max_bytes; with no item to hand out it still counts what waits (and too_large)
  * @version 1.3 - rule_matches applied in the parse; forward_raw relays a matched forward
  * @version 1.2 - pendingCount() by domain, for the lowering receipt (B46)
@@ -224,11 +225,14 @@ class MailboxFortressParse {
 				'source' => (string)$row['iem_auth_source'],
 			);
 			$spam = (new InboundEmailRouter())->spamFromBrowserHeaders(
-				is_array($params['spam_headers'] ?? null) ? $params['spam_headers'] : array(), $auth);
+				is_array($params['spam_headers'] ?? null) ? $params['spam_headers'] : array(), $auth,
+				$row['iem_spam_reason'] ?? null, intval($row['iem_iea_inbound_email_alias_id'] ?? 0));
 			InboundEmailMessage::updateColumns($id, array(
 				'iem_pending_parse'    => false,
 				'iem_relay_sealed_raw' => null,
 				'iem_spam_verdict'     => $spam['verdict'],
+				'iem_spam_reason'      => $spam['reason'],
+				'iem_spam_meta'        => $spam['meta'],
 				'iem_spam_score'       => $spam['score'],
 			));
 			if ($rule_matches) {

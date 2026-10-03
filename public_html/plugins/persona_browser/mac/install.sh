@@ -56,7 +56,7 @@ if [ "$("$APP_DIR/node/bin/node" --version 2>/dev/null || true)" != "$NODE_VERSI
   echo "==> Downloading Node $NODE_VERSION ($NODE_ARCH)"
   TARBALL="node-$NODE_VERSION-$NODE_ARCH.tar.xz"
   curl -fsSL "https://nodejs.org/dist/$NODE_VERSION/$TARBALL" -o "/tmp/$TARBALL"
-  rm -rf "$APP_DIR/node"
+  rm -rf "${APP_DIR:?}/node"
   mkdir -p "$APP_DIR/node"
   tar -xJf "/tmp/$TARBALL" -C "$APP_DIR/node" --strip-components=1
   rm -f "/tmp/$TARBALL"

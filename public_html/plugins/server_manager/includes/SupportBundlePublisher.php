@@ -40,6 +40,7 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.10 - carries rspamd_stateless.sh, which provision_relay.sh sources
  * @version 1.9 - carries reclaim_managed_file.sh and _host_files.sh (host_housekeeping.sh sources it)
  * @version 1.8 - carries restart_unit.sh and restart_container.sh: the repairs of service_health and
  *                container_health, and the Restart buttons, work on a Docker host
@@ -158,6 +159,8 @@ class SupportBundlePublisher {
 		// The relay build, and the sealer it installs - one binary per
 		// `uname -m` name, which is how provision_relay.sh finds its own.
 		'public_html/plugins/mailbox/provisioning/provision_relay.sh',
+		// The one rspamd configuration, which provision_relay.sh sources.
+		'public_html/plugins/mailbox/provisioning/rspamd_stateless.sh',
 		'public_html/plugins/mailbox/provisioning/bin/relay-sealer-x86_64',
 		'public_html/plugins/mailbox/provisioning/bin/relay-sealer-aarch64',
 	);

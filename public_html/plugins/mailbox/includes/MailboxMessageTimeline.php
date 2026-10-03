@@ -21,6 +21,7 @@
  * recipients (sealed with the mailbox), and a closed window drops exactly
  * those lines and sets locked:true beside the rest.
  *
+ * @version 1.3 - the spam line says which step decided (InboundEmailMessage::spamReasonText)
  * @version 1.2 - "You marked this" comes from the correction time, and says whether the filter learned it
  * @version 1.1 - a Fortress message shows routing events only (no header block)
  * @version 1.0
@@ -119,21 +120,25 @@ class MailboxMessageTimeline {
 		}
 		$this->add($received, 'auth', 'Authentication: ' . $auth['headline'], $detail, array('state' => $auth['state']));
 
-		// Spam disposition.
+		// Spam disposition, with the step that decided it.
 		$verdict = (string)$m->get('iem_spam_verdict');
 		if ($verdict !== '') {
 			$score = $m->get('iem_spam_score');
-			$this->add($received, 'spam', $verdict === InboundEmailMessage::SPAM_VERDICT_SPAM ? 'Spam check: judged spam' : 'Spam check: not spam',
-				($score !== null && $score !== '') ? 'score ' . rtrim(rtrim(number_format((float)$score, 2, '.', ''), '0'), '.') : null);
+			$why = InboundEmailMessage::spamReasonText((string)$m->get('iem_spam_reason'), $verdict, $score,
+				(string)$m->get('iem_spam_meta'));
+			$title = $why ?? ($verdict === InboundEmailMessage::SPAM_VERDICT_SPAM ? 'Spam check: judged spam' : 'Spam check: not spam');
+			$this->add($received, 'spam', $title,
+				($score !== null && $score !== '') ? 'scanner score ' . rtrim(rtrim(number_format((float)$score, 2, '.', ''), '0'), '.') : null);
 		}
 		// A member's correction, and whether the spam filter has learned it yet.
 		$corrected = (string)$m->get('iem_spam_corrected_time');
 		$learned = (string)$m->get('iem_learned_verdict');
+		$train = (string)$m->get('iem_train_verdict');
 		if ($corrected !== '' && $verdict !== '') {
 			$detail = null;
-			if ($learned === $verdict) {
+			if ($train !== '' && $learned === $train && !InboundEmailMessage::isBrowserSealed($m)) {
 				$detail = 'The spam filter has learned from it';
-			} elseif (MailboxSpamPolicy::learningEnabled() && !InboundEmailMessage::isBrowserSealed($m)) {
+			} elseif ($train !== '' && MailboxSpamPolicy::learningEnabled() && !InboundEmailMessage::isBrowserSealed($m)) {
 				$detail = 'The spam filter will learn from it';
 			}
 			$this->add($corrected, 'spam',

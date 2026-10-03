@@ -226,6 +226,13 @@ function harness_boot(array $overrides = array()) {
 		harness_set_setting_mem('email_test_recipient', 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN);
 		$h['test_recipient'] = 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN;
 
+		// A test never teaches the deployment's spam corpus. It is one table of
+		// aggregate counts with no link back to a message, so a fixture's
+		// "Not spam" or reply would outlive the fixture in the live corpus.
+		// A suite about learning turns it on, in the test database
+		// (plugins/mailbox/tests/spam_learning_test.php).
+		harness_set_setting_mem('mailbox_spam_learning_enabled', '0');
+
 		// A test run must not copy files to the site's real backup storage. The
 		// offload tick asks BackupProfile::enabled() before it releases a row's
 		// local bytes and, when the site profile is enabled — as it is on dev,

@@ -1,0 +1,8 @@
+{
+    "name": "Prune spam corpus",
+    "description": "Weekly: removes spam-corpus tokens seen at most once that nothing has carried for 60 days, then the oldest low-count tokens past 2 million rows, and sender records with no sends, no teachings and no message in 180 days.",
+    "activate_on_install": true,
+    "default_frequency": "weekly",
+    "default_day_of_week": 0,
+    "default_time": "04:00:00"
+}

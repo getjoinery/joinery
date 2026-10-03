@@ -1,6 +1,7 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.90 — "Load more" no longer repeats the notes above the list
+ * No framework. @version 2.91 — the Spam view says which step filed a message (spam_reason_text)
+ * @version 2.90 — "Load more" no longer repeats the notes above the list
  * (Trash retention, unlock-to-search, search scope, still indexing)
  * @version 2.89 — Trash rows show the received date, like every other list
  * @version 2.88 — relay-sealed mail waiting to be parsed starts the drain at
@@ -2309,10 +2310,17 @@
 	//
 	// It says that in plain words and offers the deliberate act instead — an
 	// explicit "always allow" filter the user can see and undo on the Filters
-	// page. A content-scored message gets no banner: "Not spam" already teaches
-	// the scanner, and adding the sender to contacts already elevates them.
+	// page. Any other filing gets one line saying which step decided
+	// (spam_reason_text, the same words the message timeline uses): "Not spam"
+	// already teaches the filter, and adding the sender to contacts lifts them.
 	function spamReasonBanner(m, threadKey) {
-		if (!state.spamView || !m.spam_auth_rule || m.direction === 'outbound') return null;
+		if (!state.spamView || m.direction === 'outbound') return null;
+		if (!m.spam_auth_rule) {
+			if (!m.spam_reason_text) return null;
+			var line = el('div', 'mbx-spam-reason');
+			line.appendChild(el('div', 'mbx-spam-reason-head', m.spam_reason_text));
+			return line;
+		}
 		var addr = senderAddress(m.sender);
 		var banner = el('div', 'mbx-spam-reason');
 		banner.appendChild(el('div', 'mbx-spam-reason-head',

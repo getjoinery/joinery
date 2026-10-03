@@ -28,7 +28,7 @@ TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/maintenance_script
 RUNNER="$TOOLS/_plugin_installers_start.sh"
 INSTALLER="$TOOLS/install_host_converger.sh"
 T=$(mktemp -d)
-trap 'rm -rf "$T"' EXIT
+trap 'rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 
 chk() {

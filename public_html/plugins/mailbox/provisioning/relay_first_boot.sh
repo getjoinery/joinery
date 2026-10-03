@@ -23,6 +23,7 @@
 #   sed -e 's#__PLANE__#https://dev.example#' -e 's#__RUN_ID__#17#' ... relay_first_boot.sh > /root/first_boot.sh
 #   bash /root/first_boot.sh --keep-sshd
 #
+# Version: 1.2 - the bootstrap cleanup refuses an empty path (${BOOTSTRAP:?}).
 # Version: 1.1 - placeholders fall back to UDF environment variables, so one template
 #                serves both rendered user-data and the StackScript fallback
 set -euo pipefail
@@ -157,7 +158,7 @@ for attempt in 1 2 3 4 5 6; do
 done
 
 # --- 6. nothing of the boot outlives it -------------------------------------------
-rm -rf "${BOOTSTRAP}"
+rm -rf "${BOOTSTRAP:?}"
 if [[ "${posted}" -eq 1 ]]; then
     say "FIRST_BOOT_DONE"
     exit 0

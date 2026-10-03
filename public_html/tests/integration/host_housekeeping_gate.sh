@@ -34,7 +34,7 @@ SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SCRIPT="$SITE_ROOT/maintenance_scripts/install_tools/host_housekeeping.sh"
 RANGES="$SITE_ROOT/public_html/includes/cloudflare_ip_ranges.txt"
 T=$(mktemp -d)
-trap 'rm -rf "$T"' EXIT
+trap 'rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 
 chk() {
@@ -261,7 +261,7 @@ printf 'nothing the tuning names\n' > "$RH/usr/lib/php/8.5/php.ini-production"
 cp "$RH/usr/lib/php/8.5/php.ini-production" "$RH/etc/php/8.5/fpm/php.ini"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
 chk "a template the tuning cannot change is not announced as tuned (no restart a minute)" "$(printf '%s\n' "$out" | grep -c 'tuned .*8.5')" "0"
-rm -rf "$RH/etc/php/8.5" "$RH/usr/lib/php/8.5"
+rm -rf "${RH:?}/etc/php/8.5" "${RH:?}/usr/lib/php/8.5"
 # The extension lines the tuning used to write: commented back out only where
 # conf.d loads the same module, and nothing else in the file moves.
 mkdir -p "$RH/etc/php/8.3/fpm/conf.d"
@@ -275,7 +275,7 @@ chk "and it says so" "$(printf '%s\n' "$out" | grep -c 'stopped loading pdo_pgsq
 before="$(tree_sum "$RH")"
 JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" >/dev/null 2>&1
 chk "a second converge changes nothing" "$( [ "$(tree_sum "$RH")" = "$before" ] && echo same)" "same"
-rm -rf "$RH/etc/php/8.3/fpm/conf.d"
+rm -rf "${RH:?}/etc/php/8.3/fpm/conf.d"
 printf 'MaxRequestWorkers 400\n' > "$RH/etc/apache2/mods-available/mpm_event.conf"
 printf '[Journal]\nSystemMaxUse=2G\n' > "$RH/etc/systemd/journald.conf.d/size-limit.conf"
 JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" >/dev/null 2>&1

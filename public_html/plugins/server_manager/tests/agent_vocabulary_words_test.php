@@ -209,6 +209,17 @@ $f = json_decode((string)$fh_job->get('mjb_result'), true);
 check($f['read'] === true && $f['file'] === 'rspamd_redis' && $f['path'] === '/etc/rspamd/local.d/redis.conf' && $f['lines_returned'] === 2,
 	'a file_head result keeps the name, the path and the lines', var_export($f, true));
 check(in_array('file_head', ManagementJob::LOG_EXCERPT_TYPES, true), 'and its text ages out on the log-excerpt window');
+// A box whose scanner is stateless has no redis.conf: the word still reads, and
+// the answer is an absent file, not a failure.
+$fh_absent = avw_job($node, 'file_head', array('file' => 'rspamd_redis', 'path' => '/etc/rspamd/local.d/redis.conf', 'present' => false,
+	'size_bytes' => 0, 'modified_time' => '', 'lines_returned' => 0, 'truncated' => false, 'text' => ''));
+JobResultProcessor::process($fh_absent);
+$fa = json_decode((string)$fh_absent->get('mjb_result'), true);
+check($fa['read'] === true && $fa['present'] === false && $fa['file'] === 'rspamd_redis',
+	'an absent redis.conf is read as absent, the expected answer on an upgraded box', var_export($fa, true));
+check(strpos(JobCommandBuilder::FILE_HEAD_FILES['rspamd_redis'], 'absent on an upgraded box') !== false
+	&& strpos(JobCommandBuilder::FILE_HEAD_FILES['rspamd_classifier_bayes'], 'switched off') !== false,
+	'the rspamd words describe the stateless scanner');
 
 $sp = avw_job($node, 'schema_probe', array('table' => 'usr_users', 'exists' => true, 'row_count' => 42, 'row_count_exact' => true,
 	'columns' => array(array('name' => 'usr_user_id', 'type' => 'bigint', 'nullable' => false), array('name' => 'Bad;Name', 'type' => 'text<x>', 'nullable' => true)),

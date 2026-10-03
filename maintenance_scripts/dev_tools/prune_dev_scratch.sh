@@ -60,7 +60,7 @@ remove() { # path, reason [, bytes if already measured]
 	[ -n "$bytes" ] || { bytes=$(du -sb "$p" 2>/dev/null | cut -f1); bytes=${bytes:-0}; }
 	total=$((total + bytes))
 	if [ "$DO_DELETE" = 1 ]; then
-		rm -rf -- "$p" && echo "$(stamp) removed  $(human "$bytes")  $p  ($why)"
+		rm -rf -- "${p:?}" && echo "$(stamp) removed  $(human "$bytes")  $p  ($why)"
 	else
 		echo "$(stamp) would remove  $(human "$bytes")  $p  ($why)"
 	fi

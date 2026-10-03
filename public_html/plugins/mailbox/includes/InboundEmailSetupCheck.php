@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.54 - relayScannerResult reports a relay not delivering verdicts on its own (no ingest re-scan covers it)
  * @version 1.53 - run() tags every per-domain row with the domain it ran for (for_domain)
  * @version 1.52 - a Fortress mailbox with a device AI recipe shows an INFO row (address.device_ai)
  * @version 1.51 - a Fortress mailbox shows its mail-vault step (address.mail_vault); the
@@ -1328,12 +1329,9 @@ class InboundEmailSetupCheck {
 	/**
 	 * One relay health answer, as a check row.
 	 *
-	 * The severity is CONDITIONAL on whether this deployment still needs the
-	 * relay's scanner: since specs/implemented/mailbox_ingest_scan_decoupled_from_learning.md
-	 * a fronted deployment re-scans at ingest with its own rspamd, so a dead relay
-	 * scanner may be fully covered here. Covered is a warning (a component is
-	 * broken, but nothing is getting through unscanned); uncovered is a failure
-	 * (nothing anywhere is reading message content).
+	 * A relay that is not delivering verdicts is a failure on its own: this
+	 * server reads the scanner's headers and never scans mail itself, so while
+	 * the relay is broken the scanner's rules run nowhere.
 	 *
 	 * A dead scanner and a drifted header contract share a severity on purpose.
 	 * They are different faults but one finding — the relay's verdict is not
@@ -1341,13 +1339,9 @@ class InboundEmailSetupCheck {
 	 * the detail.
 	 *
 	 * Public and static so the severity matrix can be tested against synthetic
-	 * answers. $covered is the "is this server covering?" answer; null asks the
-	 * policy, which is what production does. A test passes it explicitly, because
-	 * whether local scanning is configured on the machine running the test is not
-	 * allowed to decide which half of the matrix gets exercised.
+	 * answers.
 	 */
-	public static function relayScannerResult(array $health, string $name, string $age_note = '', ?bool $covered = null) {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
+	public static function relayScannerResult(array $health, string $name, string $age_note = '') {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 		$row = function ($status, $summary, $detail = '', $fix = null) {
 			return array(
@@ -1392,20 +1386,15 @@ class InboundEmailSetupCheck {
 				$detail . $age_note);
 		}
 
-		if ($covered === null) {
-			$covered = MailboxSpamPolicy::scanAtIngest() && MailboxSpamPolicy::scannerAvailable();
-		}
-		if ($covered) {
-			return $row(self::WARN,
-				$name . ' is not delivering spam verdicts — this server is scanning the mail itself.',
-				$detail . ' Incoming mail is still being checked for spam here, so nothing is getting through '
-				. 'unscanned. The relay half of it is broken and worth fixing.' . $age_note,
-				$rebuild);
-		}
+		// The relay's scanner is reported on its own. This server never re-scans:
+		// its own filter (the user's corrections, contacts and replies) runs on
+		// every message either way, but the scanner's rules — phishing, malformed
+		// MIME, URL lists — run nowhere while the relay is broken.
 		return $row(self::FAIL,
-			$name . ' is not delivering spam verdicts, and nothing here is scanning either.',
-			$detail . ' Incoming mail is not being checked for spam anywhere. Fix the relay, or turn on '
-			. 'spam filing on this server so it scans at delivery.' . $age_note,
+			$name . ' is not delivering spam verdicts.',
+			$detail . ' Incoming mail reaches this server without the scanner\'s verdict, so its rules '
+			. '(phishing, malformed mail, known spam links) are not being applied. This server\'s own filter '
+			. 'still runs on every message.' . $age_note,
 			$rebuild);
 	}
 

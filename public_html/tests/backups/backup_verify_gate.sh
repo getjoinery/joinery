@@ -64,7 +64,7 @@ W=$(mktemp -d /tmp/jy_verify_gate_XXXXXX)
 SRC="jt_vb_src_$$"
 cleanup() {
     dropdb -U postgres --if-exists "$SRC" >/dev/null 2>&1
-    rm -rf "$W"
+    rm -rf "${W:?}"
 }
 trap cleanup EXIT
 mkdir -p "$W/site" "$W/arts"

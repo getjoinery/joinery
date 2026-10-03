@@ -38,7 +38,7 @@ command -v go >/dev/null 2>&1   || { echo "SKIP: no Go toolchain on this box"; e
 command -v node >/dev/null 2>&1 || { echo "SKIP: no Node on this box"; exit 0; }
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "${TMP:?}"' EXIT
 FIXTURE="$TMP/approval_fixture.json"
 
 echo "Sealing a challenge with the agent's own code..."

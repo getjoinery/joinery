@@ -1,6 +1,6 @@
 {
     "name": "Train spam filter from corrections",
-    "description": "Teaches rspamd's Bayes classifier the manual Mark-as-spam / Not-spam corrections members make in the Mailbox Reader. Runs every cron pass (every_run) but is a no-op unless this deployment learns from spam corrections; mail sealed to a member's vault is taught while their vault is open instead.",
+    "description": "Teaches the deployment's spam corpus what members mark (Mark as spam, Not spam, Always allow) and reply to, for mail stored in the clear that the request itself did not finish, and fills the sender facts (fingerprints, arrivals, sends) for mail stored before they existed. Mail sealed to a member's vault is taught and filled while their vault is open instead.",
     "activate_on_install": true,
     "default_frequency": "every_run"
 }

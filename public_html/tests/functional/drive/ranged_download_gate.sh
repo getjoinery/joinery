@@ -36,7 +36,7 @@ fi
 URL="$JOINERY_RANGE_URL"
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "${TMP:?}"' EXIT
 
 # --- full GET still behaves, and now advertises range support ----------------
 curl -sS -D "$TMP/full.h" -o "$TMP/full.bin" "$URL"

@@ -35,6 +35,7 @@
  * sealed to their vault (MailboxContactIndexKey) and opened in-window like any row DEK, so
  * a vault rotation moves its wrapping and every hash survives.
  *
+ * @version 2.6 - every add writes imc_sender_fingerprint, the spam filter's contact signal
  * @version 2.5 - forgetPosture(): a level flip in the same request drops the memoized posture
  * @version 2.4.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 2.4
@@ -228,12 +229,17 @@ class MailboxContacts {
 		$hash = $this->addressHash($addr, $index_key, $alias_id);
 		$db = $this->db();
 
+		// The spam filter's `contact` signal reads this at ingest, sealed rows
+		// included, so it is written with every add (SpamSenderRecords).
+		$fingerprint = SpamSenderRecords::fingerprint($addr);
+
 		$existing = $this->findRow($user_id, $addr, $index_key, $alias_id);
 		if ($existing !== null) {
 			$bump = $db->prepare('UPDATE imc_mailbox_contacts
-				SET imc_use_count = imc_use_count + 1, imc_last_used_time = now()
+				SET imc_use_count = imc_use_count + 1, imc_last_used_time = now(),
+					imc_sender_fingerprint = ?
 				WHERE imc_mailbox_contact_id = ?');
-			$bump->execute(array(intval($existing['imc_mailbox_contact_id'])));
+			$bump->execute(array($fingerprint, intval($existing['imc_mailbox_contact_id'])));
 			return;
 		}
 
@@ -241,6 +247,7 @@ class MailboxContacts {
 		$row->set('imc_usr_user_id', $user_id);
 		$row->set('imc_iea_inbound_email_alias_id', $alias_id);
 		$row->set('imc_address_hash', $hash);
+		$row->set('imc_sender_fingerprint', $fingerprint);
 		$row->set('imc_source', $source);
 		$row->set('imc_use_count', 1);
 		$row->set('imc_last_used_time', gmdate('Y-m-d H:i:s'));

@@ -28,6 +28,7 @@
  * A phase that throws is caught and recorded, and the later phases still run.
  * Phase 1 failing must not strand mail already sitting on the relay's spool.
  *
+ * @version 1.4 - phase 3 reports the relay's scanner on its own; its signals carry no coverage line
  * @version 1.3 - phase 5 walks each slot down the core ServiceTenantLadder; a blank grace setting
  *                reads as 14 days and 0 is honoured
  * @version 1.2 - phase 2 announces mailbox.relay_pickup_stopped / _recovered on transition
@@ -229,17 +230,12 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 	private function announceScanner(string $signal, MailboxRelay $relay, array $health): void {
 		try {
 			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
 
-			$covered = MailboxSpamPolicy::scanAtIngest() && MailboxSpamPolicy::scannerAvailable();
 			SignalBus::dispatch($signal, array(
 				'relay_name' => trim((string)$relay->get('mrl_name'))
 					?: (trim((string)$relay->get('mrl_mx_hostname')) ?: 'the relay'),
 				'reason'     => (string)($health['reason'] ?? ''),
 				'detail'     => (string)($health['detail'] ?? ''),
-				'coverage'   => $covered
-					? 'This server is scanning the mail itself, so nothing is arriving unscanned.'
-					: 'Nothing is scanning message content anywhere right now.',
 			));
 		} catch (Throwable $e) {
 			error_log('MailboxRelayReconcile: could not announce ' . $signal . ' — ' . $e->getMessage());

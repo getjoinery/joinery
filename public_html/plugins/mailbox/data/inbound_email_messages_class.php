@@ -60,8 +60,11 @@
  * CONTENT SPAM (specs/inbound_email_content_spam_filtering.md). A content scanner
  * (rspamd milter on the Postfix path; the provider's own spam flag on webhook paths)
  * is a second source OR'd into iem_spam_verdict by the router. iem_spam_score records
- * its numeric score for display/tuning only (never disposition); iem_learned_verdict
- * tracks what the LearnSpamFeedback task has taught rspamd's Bayes classifier.
+ * its numeric score. iem_spam_reason names which step of the verdict order
+ * decided (spam_learning_in_core.md); iem_train_verdict is what the user's
+ * own behaviour says about the message and iem_learned_verdict what SpamLearning
+ * has taught the corpus (ibt_inbound_bayes_tokens). iem_sender_fingerprint ties
+ * the row to its sender record (isr_inbound_sender_records).
  *
  * ENCRYPTION AT REST (specs/implemented/inbound_email_encryption_at_rest.md). When the
  * owning user (the alias's single grantee) holds a Sealed Vault (docs/sealed_vault.md),
@@ -103,6 +106,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.41 - spamReasonText(); spam learning in core: iem_train_verdict, iem_learned_tokenizer, iem_spam_reason,
+ *   iem_spam_meta, iem_sender_fingerprint, iem_sender_recorded
  * @version 1.40 - iem_spam_corrected_time: when a member marked the row spam / not spam, which is
  *   what the spam-learning pass teaches (a scanner's own verdict is never a correction)
  * @version 1.39 - iem_unseal_attempt_time / iem_seal_attempt_time: a level change passes a row that
@@ -441,15 +446,41 @@ class InboundEmailMessage extends SystemBase {
 		// Content spam (specs/inbound_email_content_spam_filtering.md). Recorded score
 		// from the scanner/provider (display/tuning only, NEVER read for disposition);
 		// NULL = none reported. iem_learned_verdict is the last verdict actually taught
-		// to rspamd's Bayes classifier — SpamLearning teaches a corrected row
-		// whenever it diverges from iem_spam_verdict; NULL = never taught.
+		// to the spam corpus (ibt_inbound_bayes_tokens) — SpamLearning teaches a
+		// row whenever iem_train_verdict diverges from it; NULL = never taught.
 		'iem_spam_score'          => array('type'=>'numeric'),
 		'iem_learned_verdict'     => array('type'=>'varchar(10)'),
 		// When a member last marked this row spam / not spam (UTC); NULL = never
-		// corrected. Only a correction is taught to the Bayes corpus — the verdict
-		// ingest wrote is the scanner's own answer, and teaching it back would
-		// only confirm the scanner to itself (SpamLearning).
+		// corrected. Shown on the message timeline.
 		'iem_spam_corrected_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		// What the user's own behaviour says about this message (specs/
+		// spam_learning_in_core.md § Teaching): 'spam' from Mark as spam, 'ham'
+		// from Not spam, Always allow, or a reply the user sent to it. NULL = no
+		// evidence, so a verdict ingest wrote is never taught and the classifier
+		// never trains on its own output.
+		'iem_train_verdict'       => array('type'=>'varchar(10)', 'is_nullable'=>true),
+		// SpamBayes::TOKENIZER_VERSION the row was taught under. Unteaching a row
+		// taught by an older tokenizer skips the token subtraction.
+		'iem_learned_tokenizer'   => array('type'=>'int2', 'is_nullable'=>true),
+		// The step of the verdict order that decided iem_spam_verdict
+		// (InboundEmailRouter::classifySpam): auth, scanner, reply, contact,
+		// correspondent, rescued, sender_history, bayes, none, or rule when a mail
+		// rule had the last word. Clear on every row, sealed ones included.
+		'iem_spam_reason'         => array('type'=>'varchar(20)', 'is_nullable'=>true),
+		// The meta tokens computed at ingest from clear facts (first contact,
+		// catch-all, auth results, scanner band, burst) and whether Bayes was
+		// voting then, in SpamMeta's short code form. Never a content word, so it
+		// is clear on sealed rows; teaching reads the same facts the verdict saw.
+		'iem_spam_meta'           => array('type'=>'text', 'is_nullable'=>true),
+		// HMAC of the header From address under mailbox_sender_fingerprint_key,
+		// computed while the plaintext is in hand (SpamSenderRecords). '' = the
+		// From had no usable address. NULL on Fortress mail, which the server
+		// never reads, and on rows the backfill has not reached.
+		'iem_sender_fingerprint'  => array('type'=>'varchar(64)', 'is_nullable'=>true),
+		// Whether this row's facts are in the sender record (isr_): an inbound
+		// row's arrival, an outbound row's recipients. Ingest and sending set it;
+		// the backfill takes the rows from before.
+		'iem_sender_recorded'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// AI security scan (specs/joinery_ai_email_security_scan.md). A danger
 		// score (0-10) plus the model's verdict/red-flags/summary for mail that
 		// passes the auth/spam filters above but is malicious in content — what
@@ -586,10 +617,16 @@ class InboundEmailMessage extends SystemBase {
 		array('columns' => array('iem_sealed_owner_user_id', 'iem_iea_inbound_email_alias_id',
 			'iem_ied_inbound_email_domain_id'),
 			'where' => '(iem_content_sealed = true OR iem_pending_parse = true) AND iem_delete_time IS NULL'),
-		// Spam corrections waiting to be taught (SpamLearning): a handful of rows
-		// in a whole mailbox, looked up by owner on every vault heartbeat.
+		// Rows with something to teach (SpamLearning): a handful in a whole
+		// mailbox, looked up by owner on every vault heartbeat.
 		array('columns' => array('iem_sealed_owner_user_id'),
-			'where' => 'iem_spam_corrected_time IS NOT NULL'),
+			'where' => 'iem_train_verdict IS NOT NULL'),
+		// The sender record's relationship lookups by mailbox and sender.
+		array('columns' => array('iem_iea_inbound_email_alias_id', 'iem_sender_fingerprint'),
+			'where' => 'iem_sender_fingerprint IS NOT NULL'),
+		// Rows the sender-record backfill has not reached; empty once it is done.
+		array('columns' => array('iem_sealed_owner_user_id'),
+			'where' => 'iem_sender_recorded = false'),
 		// The no-Message-ID dedup lookup (F6) — per feed, only rows that have a key.
 		array('columns' => array('iem_iia_inbound_imap_account_id', 'iem_source_message_key'),
 			'where' => 'iem_source_message_key IS NOT NULL'),
@@ -678,6 +715,53 @@ class InboundEmailMessage extends SystemBase {
 			return ($spf === 'fail' && $dkim === 'fail');
 		}
 		return false;
+	}
+
+	/**
+	 * Why a message is (or is not) in Spam, in plain words — the deciding step of
+	 * the verdict order (iem_spam_reason, spam_learning_in_core.md). The
+	 * message timeline and the Spam view say the same thing, so both ask here.
+	 * Null when the row records no reason (filing was off, or it was decided
+	 * before reasons were recorded).
+	 *
+	 * @param string|null $meta_json iem_spam_meta, for whether the filter was voting
+	 */
+	public static function spamReasonText(?string $reason, ?string $verdict, $score = null, ?string $meta_json = null): ?string {
+		$reason = (string)$reason;
+		$spam = ($verdict === self::SPAM_VERDICT_SPAM);
+		$texts = array(
+			'auth'           => 'Spam: the sender\'s domain failed authentication',
+			'reply'          => 'Not spam: a reply to mail you sent',
+			'contact'        => 'Not spam: the sender is one of your contacts',
+			'correspondent'  => 'Not spam: you have written to this sender',
+			'rescued'        => 'Not spam: you marked this sender\'s mail as not spam before',
+			'sender_history' => 'Spam: you marked this sender as spam at least twice',
+		);
+		if (isset($texts[$reason])) {
+			return $texts[$reason];
+		}
+		switch ($reason) {
+			case 'bayes':
+				return $spam ? 'Spam: learned from your corrections' : 'Not spam: learned from your corrections';
+			case 'rule':
+				return $spam ? 'Spam: one of your mail rules' : 'Not spam: one of your mail rules';
+			case 'scanner':
+			case 'none':
+				$text = ($reason === 'none') ? 'Not spam: nothing flagged it'
+					: (($score !== null && $score !== '' && (float)$score >= InboundEmailRouter::SCANNER_FLOOR)
+						? 'Spam: the scanner\'s score was very high' : 'Spam: the scanner flagged it');
+				if ($reason === 'scanner' && $score !== null && $score !== '' && (float)$score >= InboundEmailRouter::SCANNER_FLOOR) {
+					return $text;
+				}
+				$bayes = SpamMeta::decode($meta_json)['bayes'];
+				if ($bayes === 'untrained') {
+					$text .= ' (the filter was still learning and not voting yet)';
+				} elseif ($bayes === 'undecided') {
+					$text .= ' (the filter was undecided)';
+				}
+				return $text;
+		}
+		return null;
 	}
 
 	/**

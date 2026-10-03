@@ -8,6 +8,8 @@
  * identity and the health run: Setup is where you check whether things work.
  * One POST saves the whole form; values are read back fresh on the redirect.
  *
+ * @version 1.7 - learning is offered everywhere filing is on (no scanner-presence clamp); the
+ *   learning progress line (spam_learning_in_core.md)
  * @version 1.6 - the relay secret is forwarded only when posted: a locked stored secret is absent, which keeps it
  * @changelog 1.5
  */
@@ -25,6 +27,7 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	// number inputs clamped to a sensible floor.
 	$bool_keys = array(
 		'mailbox_spam_filtering_enabled',
+		'mailbox_spam_learning_enabled',
 		'mailbox_from_show_via',
 	);
 	$int_keys = array(
@@ -50,15 +53,6 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 			$to_write[$k] = empty($input[$k]) ? '0' : '1';
 		}
 
-		// Learning renders DISABLED when no scanner is running (a disabled
-		// checkbox never posts), so its absence is only "unchecked" while the
-		// scanner is present — otherwise saving would stomp the stored
-		// preference with '0' every time.
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
-		if (MailboxSpamPolicy::controllerReachable()) {
-			$to_write['mailbox_spam_learning_enabled'] =
-				empty($input['mailbox_spam_learning_enabled']) ? '0' : '1';
-		}
 		foreach ($int_keys as $k => $unused_min) {
 			if (array_key_exists($k, $input)) {
 				$to_write[$k] = trim((string)$input[$k]);
@@ -116,8 +110,6 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	foreach ($bool_keys as $k) {
 		$values[$k] = (string)$settings->get_setting($k) === '1';
 	}
-	$values['mailbox_spam_learning_enabled'] =
-		(string)$settings->get_setting('mailbox_spam_learning_enabled') === '1';
 	foreach ($int_keys as $k => $min) {
 		$values[$k] = intval($settings->get_setting($k));
 	}
@@ -138,15 +130,12 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 			|| mailbox_receive_relay_exists() || $fleet_url !== '');
 
 	// Where spam scanning happens is shown, not asked — it follows from the
-	// provider and topology already configured. Learning is offered only where
-	// a scanner is actually running (observed, not stored): the scanner ships
-	// with the mail stack, so on any box that hosts its own mail this is
-	// simply true; a webhook-only or relay-fronted-from-birth box never ran a
-	// root script of ours and gets a disabled checkbox with the reason instead
-	// of a command to paste.
+	// provider and topology already configured. Learning happens here, on every
+	// deployment, so it is always offered while filing is on; the line under it
+	// says how far the filter is from voting.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
 	$upstream = MailboxSpamPolicy::upstreamScanner();
-	$scanner_present = MailboxSpamPolicy::controllerReachable();
+	$learning_progress = '';
 	if (!MailboxSpamPolicy::filingEnabled()) {
 		$scanner_state = 'Spam filing is off, so nothing is being moved out of the inbox. '
 			. 'Every message still records its SPF, DKIM and DMARC results, so turning it '
@@ -154,26 +143,38 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	} else {
 		switch ($upstream) {
 			case 'provider':
-				$scanner_state = 'Mail is scanned by your email provider before it reaches this server.';
+				$scanner_state = 'Your email provider scans mail before it reaches this server.';
 				break;
 			case 'relay':
-				$scanner_state = 'Mail is scanned by your relay before it reaches this server.';
+				$scanner_state = 'Your relay scans mail before it reaches this server.';
 				break;
 			default:
-				$scanner_state = 'This server receives mail directly, so it scans mail itself.';
+				$scanner_state = 'This server receives mail directly, and its own scanner checks it on the way in.';
 		}
-		if ($upstream !== 'none' && $scanner_present) {
-			$scanner_state .= MailboxSpamPolicy::learningEnabled()
-				? ' This server scores that mail again itself, using what it has learned'
-					. ' from your corrections, and its own answer is the one that counts.'
-				: ' This server scores that mail again itself as a second opinion — it can'
-					. ' catch spam the upstream scanner missed, but it never overrules it.'
-					. ' Turn on learning below and its answer becomes the one that counts,'
-					. ' so marking a message "not spam" can bring it back.';
-		}
-		if (!$scanner_present) {
-			$scanner_state .= ' No spam scanner is running on this server, so mail is not'
-				. ' scored again here and learning from user corrections is unavailable.';
+		$scanner_state .= ' This server then decides: replies to your mail, your contacts and people you'
+			. ' write to stay in the inbox, and what you mark as spam or not spam teaches its filter.';
+		if (MailboxSpamPolicy::learningEnabled()) {
+			try {
+				$progress = SpamBayes::progress();
+				if ($progress['voting']) {
+					$learning_progress = sprintf('The filter has learned from %d spam and %d not-spam messages and is voting.',
+						$progress['spam'], $progress['ham']);
+				} else {
+					$need = array();
+					if ($progress['need_spam'] > 0) {
+						$need[] = $progress['need_spam'] . ' more spam';
+					}
+					if ($progress['need_ham'] > 0) {
+						$need[] = $progress['need_ham'] . ' more not-spam';
+					}
+					$learning_progress = sprintf('The filter has learned from %d spam and %d not-spam messages. '
+						. 'It needs %s examples before it votes; until then the scanner decides.',
+						$progress['spam'], $progress['ham'], implode(' and ', $need));
+				}
+			} catch (\Throwable $e) {
+				// The corpus table is missing until update_database has run.
+				$learning_progress = '';
+			}
 		}
 	}
 
@@ -208,7 +209,7 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		'fleet_secret_set'        => $fleet_secret_set,
 		'has_active_relay'        => (MailboxRelay::active() !== null),
 		'scanner_state'           => $scanner_state,
-		'scanner_present'         => $scanner_present,
+		'learning_progress'       => $learning_progress,
 	));
 }
 

@@ -25,9 +25,9 @@
  * Spam (specs/inbound_email_spam_filtering.md): the default list/switcher hide
  * judged-spam rows (iem_spam_verdict='spam'); the Spam view shows only them.
  * setSpamVerdict() is the manual "Mark as spam"/"Not spam" correction — which, with
- * learning on, is what SpamLearning teaches the local scanner
- * (specs/inbound_email_content_spam_filtering.md). getThread() returns the recorded
- * content-spam score (iem_spam_score) for display only.
+ * learning on, SpamLearning teaches the deployment's spam corpus
+ * (spam_learning_in_core.md). getThread() returns the recorded scanner
+ * score (iem_spam_score) for display only.
  *
  * Archive (specs/implemented/inbound_email_filters.md): the default Inbox view hides
  * archived rows (iem_is_archived); All Mail shows them. setArchived() is the manual
@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.54 - thread messages carry spam_reason_text; setSpamVerdict hands the correction to SpamLearning, which teaches the spam corpus in the request
  * @version 1.53 - Trash lists newest-first with no unread/starred sections; rows carry no purge_time
  * @version 1.52 - setSpamVerdict stamps iem_spam_corrected_time (what spam learning teaches)
  * @version 1.51 - the list never parses relay-sealed mail (it says `parsing`); opening a thread parses its pending rows
@@ -1647,6 +1648,7 @@ class MailboxService {
 					iem_sender, iem_recipient, iem_bcc, iem_to, iem_cc, iem_subject, iem_received_time,
 					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
 					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
+					iem_spam_verdict, iem_spam_reason, iem_spam_meta,
 					iem_mir_mail_import_run_id, iem_iia_inbound_imap_account_id,
 					iem_size_bytes, iem_message_id_header, iem_direction,
 					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
@@ -1711,6 +1713,10 @@ class MailboxService {
 				// Content-spam score (specs/inbound_email_content_spam_filtering.md):
 				// display only, NULL when none reported. Never drives disposition.
 				'spam_score'        => ($r['iem_spam_score'] !== null) ? (float)$r['iem_spam_score'] : null,
+				// Which step of the verdict order decided, in the words the timeline
+				// uses (spam_learning_in_core.md § Explaining a verdict).
+				'spam_reason_text'  => InboundEmailMessage::spamReasonText($r['iem_spam_reason'] ?? null,
+										$r['iem_spam_verdict'] ?? null, $r['iem_spam_score'], $r['iem_spam_meta'] ?? null),
 				// Why this message would be filed as spam by the AUTH rule, asked of
 				// the row's own stored verdicts (specs/mailbox_contact_spam_bypass.md).
 				// The reader shows the "allow this sender" offer only for 'auth',
@@ -1832,6 +1838,8 @@ class MailboxService {
 									$r['iem_auth_source'], $r['iem_spf_result'],
 									$r['iem_dkim_result'], $r['iem_dmarc_result'], null),
 			'spam_score'        => ($r['iem_spam_score'] !== null) ? (float)$r['iem_spam_score'] : null,
+			'spam_reason_text'  => InboundEmailMessage::spamReasonText($r['iem_spam_reason'] ?? null,
+									$r['iem_spam_verdict'] ?? null, $r['iem_spam_score'], $r['iem_spam_meta'] ?? null),
 			'spam_auth_rule'    => InboundEmailMessage::authRuleSaysSpam(array(
 									'spf'   => (string)$r['iem_spf_result'],
 									'dkim'  => (string)$r['iem_dkim_result'],
@@ -2517,15 +2525,23 @@ class MailboxService {
 			return 0;
 		}
 		$in = implode(',', $ids);
-		// The correction time is what makes the row something to teach the spam
-		// filter (SpamLearning); a verdict ingest wrote never is.
 		$sql = "UPDATE iem_inbound_email_messages
 				SET iem_spam_verdict = " . $this->db()->quote($verdict) . ",
 					iem_spam_corrected_time = " . $this->db()->quote(gmdate('Y-m-d H:i:s')) . "
-				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql();
+				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql() . "
+				RETURNING iem_inbound_email_message_id";
 		$stmt = $this->db()->prepare($sql);
 		$stmt->execute();
-		return $stmt->rowCount();
+		$changed = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN, 0) ?: array());
+		// The correction is evidence for the spam filter: SpamLearning records it on
+		// the rows it may teach from and teaches the ones stored in the clear now.
+		// A teaching failure never undoes the correction the user sees.
+		try {
+			SpamLearning::recordEvidence($changed, $verdict);
+		} catch (\Throwable $e) {
+			error_log('MailboxService::setSpamVerdict: recording the correction for the spam filter failed: ' . $e->getMessage());
+		}
+		return count($changed);
 	}
 
 	/**

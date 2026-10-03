@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 #
 # provision_spam_scanner.sh - install, remove or inspect this box's own spam
-# scanner (specs/mailbox_spam_filtering_simplification.md D6).
+# scanner (spam_learning_in_core.md § One rspamd configuration).
 #
+# Version: 2.1 - rspamd is reloaded, not restarted, when it is running (the milter on
+#                11332 stays up, so Postfix never tempfails mail mid-converge), and
+#                redis is purged only once rspamd is confirmed on the new configuration.
+# Version: 2.0 - STATELESS: writes the one rspamd configuration in
+#                rspamd_stateless.sh (shared with the relay): Bayes off, no
+#                redis, no controller. install deletes redis.conf and
+#                worker-controller.inc and purges redis-server; spam learning
+#                lives in the application.
 # Version: 1.1 - rbl.conf: DNS lists that cannot answer this box off (NiX Spam timed
 #                out every lookup and stalled a scan 5-8s; SURBL/URIBL refuse shared resolvers).
 # Version: 1.0 - Extracted from install_email.sh section 5b as a standalone,
@@ -11,51 +19,41 @@
 # WHY THIS EXISTS SEPARATELY
 #   The scanner SHIPS with the mail stack: install_email.sh calls `install`
 #   unconditionally, so every box that hosts its own mail has rspamd from
-#   birth and enabling spam learning later is a pure settings toggle — no
-#   day-2 command for the owner. This script stands alone so it can also be
-#   run directly: to repair config or milter-wiring drift (install is the
-#   repair — it is idempotent), to add a scanner to a box that never ran the
-#   mail installer (a webhook-only deployment opting into learning), or to
-#   push the scanner onto older boxes provisioned before it shipped with the
-#   stack (Server Manager node exec, fleet-wide).
+#   birth. This script stands alone so it can also be run directly: to repair
+#   config or milter-wiring drift (install is the repair — it is idempotent).
+#
+# HOW AN EXISTING BOX GETS THIS VERSION
+#   With no hand step. The host converger re-runs install_email.sh (the mailbox
+#   plugin's host_installer) when the deployed release changes, and
+#   install_email.sh calls `install` here. 0.8.450's rbl.conf reached
+#   jeremytunnell that way on 2026-09-30.
 #
 # WHAT install DOES
-#   - Installs rspamd + redis-server.
-#   - Writes the joinery-managed /etc/rspamd/local.d config: the X-Spam header
-#     contract InboundEmailRouter::readSpamHeader() parses, add_header-only
-#     actions (NEVER reject - the reviewable-verdict model), dead DNS lists
-#     off, the Bayes
-#     classifier on redis with autolearn, the loopback controller on 11334
-#     (trusted by origin, no password), and the milter worker on 11332.
+#   - Installs rspamd (without its recommended redis-server).
+#   - Writes the joinery-managed /etc/rspamd/local.d files from
+#     rspamd_stateless.sh: the X-Spam header contract
+#     InboundEmailRouter::readSpamHeader() parses, add_header-only actions
+#     (NEVER reject - the reviewable-verdict model), dead DNS lists off, Bayes
+#     off, and the milter worker on 11332.
+#   - Deletes the files an earlier version wrote for learning (redis.conf,
+#     worker-controller.inc), then stops and purges redis-server. On a
+#     joinery-provisioned box redis existed only for this scanner's Bayes
+#     corpus; the corpus now lives in the application's database.
 #   - Wires the milter into Postfix ONLY when Postfix is present. On a
-#     relay-fronted or webhook box there is no local Postfix to wire, and the
-#     scanner is used over HTTP at ingest instead; the milter worker just idles.
-#   - Fully idempotent: safe to re-run any time, and re-running is the repair
-#     for config or milter-wiring drift.
+#     relay-fronted or webhook box there is no local Postfix to wire and the
+#     milter worker idles.
+#   - Fully idempotent: safe to re-run any time, including on a box whose
+#     redis is already gone, and re-running is the repair for drift.
 #
 # WHAT remove DOES
-#   Operator escape hatch only — the platform never runs or surfaces it (the
-#   scanner is a permanent part of the mail stack). Purges rspamd and
-#   redis-server, deletes the joinery-managed local.d files, and strips the
-#   milter entry from smtpd_milters when Postfix is present. The Bayes corpus
-#   dies with redis, deliberately: it is the tenant's private model and must
-#   not linger on a reclaimed box. It is also disposable - Postgres
-#   (iem_spam_verdict) is the durable truth, and the corpus self-heals from
-#   stored corrections if the scanner is ever reinstalled, because the learn
-#   task re-teaches every unreconciled row.
-#
-#   ASSUMPTION: on a joinery-provisioned box redis exists solely for this
-#   scanner. The platform installs it nowhere else. If you added redis for
-#   something of your own, run `remove` by hand instead.
+#   Operator escape hatch only — the platform never runs or surfaces it.
+#   Purges rspamd, and redis-server for a box that never ran this version,
+#   deletes the joinery-managed local.d files, and strips the milter entry from
+#   smtpd_milters when Postfix is present.
 #
 # WHAT status DOES
 #   Prints machine-readable key=value markers (packages, services, milter
-#   wiring, controller reachability) for tests and the health probe.
-#
-# NOT the relay's scanner: provision_relay.sh installs a deliberately STATELESS
-# rspamd on the relay (Bayes off, no redis) because one model trained across
-# every tenant's mail would be both a privacy leak and a poisoning vector. This
-# script is only ever for a deployment's own box.
+#   wiring and listener) for tests and the health probe.
 #
 # Usage:  sudo bash provision_spam_scanner.sh install|remove|status
 #
@@ -68,19 +66,22 @@ if [[ "${VERB}" != "install" && "${VERB}" != "remove" && "${VERB}" != "status" ]
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RSPAMD_LOCAL_D="/etc/rspamd/local.d"
+RSPAMD_LOCAL_D="${RSPAMD_LOCAL_D:-/etc/rspamd/local.d}"
 MILTER_ENTRY="inet:localhost:11332"
+
+# The one configuration: RSPAMD_STATELESS_FILES and rspamd_stateless_render.
+# shellcheck source=rspamd_stateless.sh
+source "${SCRIPT_DIR}/rspamd_stateless.sh"
 
 # The local.d files this script owns. remove deletes exactly these and nothing
 # else, so a hand-written override elsewhere in local.d survives.
-MANAGED_CONFIGS=(
-    "milter_headers.conf"
-    "actions.conf"
-    "classifier-bayes.conf"
+MANAGED_CONFIGS=("${RSPAMD_STATELESS_FILES[@]}")
+
+# Files an earlier version wrote for the learning loop (the redis backend and
+# the controller the app used to post learn requests to). install deletes them.
+RETIRED_CONFIGS=(
     "redis.conf"
     "worker-controller.inc"
-    "worker-proxy.inc"
-    "rbl.conf"
 )
 
 # --- helpers -----------------------------------------------------------------
@@ -97,10 +98,32 @@ postfix_present() {
     command -v postconf >/dev/null 2>&1 && [[ -f /etc/postfix/main.cf ]]
 }
 
+# Installed, not merely known to dpkg: `dpkg -s` exits 0 for a removed-but-not-
+# purged package whose files are gone.
+pkg_installed() {
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+}
+
+# write_if_changed <dest> - content on stdin. Returns 0 when it WROTE and 1 when
+# the file already matched. USE ONLY AS AN `if` CONDITION.
+write_if_changed() {
+    local dest="$1"
+    local tmp; tmp="$(mktemp "${dest}.joinery-XXXXXX")"
+    cat > "${tmp}"
+    chmod 644 "${tmp}"
+    if [[ -f "${dest}" ]] && cmp -s "${tmp}" "${dest}"; then
+        rm -f "${tmp:?}"
+        return 1
+    fi
+    mv -f "${tmp}" "${dest}"
+    return 0
+}
+
 # Restart a service under systemd, falling back to sysv `service`, and finally
 # to a warning. In a container there is usually no init at all: the CMD restarts
 # services on boot and this script re-asserts config idempotently to match
 # (spec mail_stack_container_persistence).
+# Returns 1 when nothing could restart it.
 restart_service() {
     local svc="$1"
     systemctl enable "${svc}" >/dev/null 2>&1 || true
@@ -110,6 +133,48 @@ restart_service() {
         echo "${svc}: restarted (service)."
     else
         echo "WARNING: could not restart ${svc} automatically - start it manually." >&2
+        return 1
+    fi
+}
+
+# rspamd re-reads its configuration on reload, so a running one picks up new
+# local.d files with its milter still listening. Returns 1 when it could be
+# neither reloaded nor started.
+reload_or_start_rspamd() {
+    if service_running rspamd; then
+        if command -v systemctl >/dev/null 2>&1 && systemctl reload rspamd 2>/dev/null; then
+            echo "rspamd: reloaded (systemd)."
+            return 0
+        elif command -v service >/dev/null 2>&1 && service rspamd reload >/dev/null 2>&1; then
+            echo "rspamd: reloaded (service)."
+            return 0
+        fi
+    fi
+    restart_service rspamd
+}
+
+service_running() {
+    local svc="$1"
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "${svc}" 2>/dev/null; then
+        return 0
+    fi
+    pgrep -x "${svc}" >/dev/null 2>&1
+}
+
+# Stop redis and purge its package. Only ever redis-server: no autoremove,
+# which could take packages this script never installed.
+purge_redis() {
+    if ! pkg_installed redis-server; then
+        echo "redis-server: not installed - nothing to remove."
+        return 0
+    fi
+    systemctl disable redis-server >/dev/null 2>&1 || true
+    systemctl stop redis-server >/dev/null 2>&1 || service redis-server stop >/dev/null 2>&1 || true
+    export DEBIAN_FRONTEND=noninteractive
+    if apt-get purge -y redis-server >/dev/null 2>&1; then
+        echo "redis-server: purged (spam learning lives in the application's database)."
+    else
+        echo "WARNING: could not purge redis-server - remove it by hand (apt-get purge redis-server)." >&2
     fi
 }
 
@@ -122,115 +187,41 @@ do_install() {
         exit 1
     fi
 
-    echo "spam-scanner: installing rspamd + redis"
+    echo "spam-scanner: installing rspamd (stateless)"
 
-    local packages=(rspamd redis-server)
-    local missing=()
-    local pkg
-    for pkg in "${packages[@]}"; do
-        if dpkg -s "${pkg}" >/dev/null 2>&1; then
-            echo "Already installed: ${pkg}"
-        else
-            missing+=("${pkg}")
-        fi
-    done
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        echo "Installing: ${missing[*]}"
+    if pkg_installed rspamd; then
+        echo "Already installed: rspamd"
+    else
+        echo "Installing: rspamd"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y "${missing[@]}"
+        # --no-install-recommends: rspamd RECOMMENDS redis-server, which a
+        # stateless scanner has no use for.
+        apt-get install -y --no-install-recommends rspamd
     fi
 
     mkdir -p "${RSPAMD_LOCAL_D}"
 
-    # milter_headers: stamp X-Spam (binary flag) + X-Spam-Status (carries the score).
-    # The header NAMES are the contract InboundEmailRouter::readSpamHeader() parses;
-    # keep them in step with that class's SPAM_*_HEADER constants.
-    cat > "${RSPAMD_LOCAL_D}/milter_headers.conf" <<'RSPAMDHDR'
-# joinery-managed - content spam header contract (InboundEmailRouter::readSpamHeader).
-extended_spam_headers = true;
-use = ["spam-header", "x-spam-status", "authentication-results"];
-# spam-header adds 'X-Spam: Yes' on a spam verdict; x-spam-status adds
-# 'X-Spam-Status: Yes, score=...'. The app reads the flag + score from these.
-RSPAMDHDR
-
-    # actions: stamp headers only, NEVER reject/greylist (reviewable-verdict model).
-    cat > "${RSPAMD_LOCAL_D}/actions.conf" <<'RSPAMDACT'
-# joinery-managed - header-stamping only; rejection disabled (out of scope).
-reject = null;
-greylist = null;
-add_header = 6;
-RSPAMDACT
-
-    # Bayes classifier on redis (the override just pins the backend + autolearn).
-    # THIS is the capability a relay cannot provide: a corpus of this
-    # deployment's own mail, taught by its own users' corrections.
-    cat > "${RSPAMD_LOCAL_D}/classifier-bayes.conf" <<'RSPAMDBAYES'
-# joinery-managed - Bayes tokens persist in redis (disposable; Postgres is truth).
-backend = "redis";
-servers = "127.0.0.1:6379";
-autolearn = true;
-RSPAMDBAYES
-
-    cat > "${RSPAMD_LOCAL_D}/redis.conf" <<'RSPAMDREDIS'
-# joinery-managed - local redis for Bayes/statistics.
-servers = "127.0.0.1:6379";
-RSPAMDREDIS
-
-    # controller worker: loopback bind + loopback-trusted, so the privileged
-    # learn command needs NO password. This is the endpoint LearnSpamFeedback
-    # POSTs learn requests to and the ingest scan POSTs /checkv2 to.
-    cat > "${RSPAMD_LOCAL_D}/worker-controller.inc" <<'RSPAMDCTRL'
-# joinery-managed - controller on loopback; learn authorized by origin (no password).
-bind_socket = "127.0.0.1:11334";
-secure_ip = "127.0.0.1";
-secure_ip = "::1";
-RSPAMDCTRL
-
-    # proxy (milter) worker: self-scan milter mode on 11332 (rspamd's default,
-    # re-asserted so a non-default base image is corrected).
-    cat > "${RSPAMD_LOCAL_D}/worker-proxy.inc" <<'RSPAMDPROXY'
-# joinery-managed - Postfix milter (self-scan) on 11332.
-milter = yes;
-timeout = 120s;
-upstream "local" {
-  default = yes;
-  self_scan = yes;
-}
-bind_socket = "*:11332";
-RSPAMDPROXY
-
-    # rbl: a DNS list that cannot answer costs every scan lookups (a dead one ~5s)
-    # (the ingest scan is on the path that turns relay-sealed mail readable).
-    cat > "${RSPAMD_LOCAL_D}/rbl.conf" <<'RSPAMDRBL'
-# joinery-managed - DNS lists that cannot answer this box.
-# NiX Spam (ix.dnsbl.manitu.net) was shut down; its zone has no nameservers, so
-# every query waits out the DNS retransmits (timeout 1s x 5 = ~5s) and stalls
-# the scan, up to the 8s task timeout.
-# SURBL and URIBL refuse queries that arrive through a shared public resolver
-# (the provider's DNS this box uses): every answer is a "blocked" code, never
-# a verdict. Asking them only spends lookups.
-rbls {
-  nixspam {
-    enabled = false;
-  }
-  "SURBL_MULTI" {
-    enabled = false;
-  }
-  "SURBL_HASHBL" {
-    enabled = false;
-  }
-  "URIBL_MULTI" {
-    enabled = false;
-  }
-}
-RSPAMDRBL
-
-    echo "spam-scanner: wrote ${#MANAGED_CONFIGS[@]} joinery-managed config file(s) to ${RSPAMD_LOCAL_D}"
+    local changed=0 f
+    for f in "${MANAGED_CONFIGS[@]}"; do
+        if rspamd_stateless_render "${f}" | write_if_changed "${RSPAMD_LOCAL_D}/${f}"; then
+            echo "wrote ${RSPAMD_LOCAL_D}/${f}"
+            changed=1
+        fi
+    done
+    for f in "${RETIRED_CONFIGS[@]}"; do
+        if [[ -f "${RSPAMD_LOCAL_D}/${f}" ]]; then
+            rm -f "${RSPAMD_LOCAL_D:?}/${f:?}"
+            echo "removed ${RSPAMD_LOCAL_D}/${f} (the learning loop moved into the application)"
+            changed=1
+        fi
+    done
+    if [[ "${changed}" -eq 0 ]]; then
+        echo "spam-scanner: the ${#MANAGED_CONFIGS[@]} joinery-managed config files are current"
+    fi
 
     # Wire rspamd into Postfix AFTER opendkim+opendmarc so it scores on auth
-    # results. Only meaningful where Postfix actually receives mail: on a
-    # relay-fronted or webhook box the scanner is reached over HTTP at ingest.
+    # results. Only meaningful where Postfix actually receives mail.
     if postfix_present; then
         local current
         current="$(postconf -h smtpd_milters 2>/dev/null || true)"
@@ -250,13 +241,26 @@ RSPAMDRBL
             echo "postfix: reloaded."
         fi
     else
-        echo "spam-scanner: no local Postfix - scanner is HTTP-only (milter worker idles)."
+        echo "spam-scanner: no local Postfix - the milter worker idles."
     fi
 
-    restart_service redis-server
-    restart_service rspamd
+    # rspamd first, so it is running on the new configuration (and no longer
+    # reaching for redis) before redis goes. If it could not be reloaded or
+    # started (no init in a container), redis stays until a run that can: an
+    # rspamd still holding the old configuration would lose its backend.
+    local rspamd_current=1
+    if [[ "${changed}" -eq 1 ]] || ! service_running rspamd; then
+        reload_or_start_rspamd || rspamd_current=0
+    else
+        echo "rspamd: configuration unchanged and running - left alone."
+    fi
+    if [[ "${rspamd_current}" -eq 1 ]]; then
+        purge_redis
+    else
+        echo "spam-scanner: rspamd is not on the new configuration yet - redis-server left in place; re-run install once rspamd can start." >&2
+    fi
 
-    echo "spam-scanner: rspamd milter on 11332, controller on 127.0.0.1:11334 (loopback, no password)."
+    echo "spam-scanner: rspamd milter on 11332, stateless (no Bayes, no redis, no controller)."
     echo "  NOTE: rspamd queries DNS RBLs while scanning - ensure outbound DNS egress or scoring degrades."
 }
 
@@ -291,14 +295,15 @@ do_remove() {
     fi
 
     local f
-    for f in "${MANAGED_CONFIGS[@]}"; do
+    for f in "${MANAGED_CONFIGS[@]}" "${RETIRED_CONFIGS[@]}"; do
         if [[ -f "${RSPAMD_LOCAL_D}/${f}" ]]; then
-            rm -f "${RSPAMD_LOCAL_D}/${f}"
+            rm -f "${RSPAMD_LOCAL_D:?}/${f:?}"
             echo "removed ${RSPAMD_LOCAL_D}/${f}"
         fi
     done
 
     # Stop before purge so a systemd unit does not fight the package removal.
+    # redis-server is included for a box that never ran install 2.0.
     local svc
     for svc in rspamd redis-server; do
         systemctl disable "${svc}" >/dev/null 2>&1 || true
@@ -307,11 +312,9 @@ do_remove() {
 
     if command -v apt-get >/dev/null 2>&1; then
         export DEBIAN_FRONTEND=noninteractive
-        # The Bayes corpus goes with redis. Deliberate: it is the tenant's
-        # private model, and Postgres holds the durable verdicts it rebuilds from.
         apt-get purge -y rspamd redis-server >/dev/null 2>&1 || true
         apt-get autoremove -y >/dev/null 2>&1 || true
-        echo "spam-scanner: rspamd + redis purged (Bayes corpus discarded with redis)."
+        echo "spam-scanner: rspamd (and any redis-server) purged."
     else
         echo "WARNING: no apt-get - stop and uninstall rspamd/redis with your package manager." >&2
     fi
@@ -320,30 +323,30 @@ do_remove() {
 # --- status ------------------------------------------------------------------
 
 do_status() {
-    local pkg svc
+    local pkg
     for pkg in rspamd redis-server; do
-        if dpkg -s "${pkg}" >/dev/null 2>&1; then
+        if pkg_installed "${pkg}"; then
             echo "package_${pkg//-/_}=installed"
         else
             echo "package_${pkg//-/_}=absent"
         fi
     done
 
-    for svc in rspamd redis-server; do
-        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "${svc}" 2>/dev/null; then
-            echo "service_${svc//-/_}=active"
-        elif pgrep -x "${svc%%-*}" >/dev/null 2>&1; then
-            echo "service_${svc//-/_}=running"
-        else
-            echo "service_${svc//-/_}=inactive"
-        fi
-    done
+    if service_running rspamd; then
+        echo "service_rspamd=running"
+    else
+        echo "service_rspamd=inactive"
+    fi
 
-    local managed=0 f
+    local managed=0 retired=0 f
     for f in "${MANAGED_CONFIGS[@]}"; do
         [[ -f "${RSPAMD_LOCAL_D}/${f}" ]] && managed=$((managed + 1))
     done
+    for f in "${RETIRED_CONFIGS[@]}"; do
+        [[ -f "${RSPAMD_LOCAL_D}/${f}" ]] && retired=$((retired + 1))
+    done
     echo "managed_configs=${managed}/${#MANAGED_CONFIGS[@]}"
+    echo "retired_configs=${retired}"
 
     if postfix_present; then
         if postconf -h smtpd_milters 2>/dev/null | grep -q "${MILTER_ENTRY}"; then
@@ -355,14 +358,12 @@ do_status() {
         echo "milter_wired=n/a"
     fi
 
-    # The controller is what the app actually talks to - learn requests and the
-    # ingest-time scan both go through it, so reachability is the real signal.
-    if command -v curl >/dev/null 2>&1 && curl -sf -m 3 http://127.0.0.1:11334/ping >/dev/null 2>&1; then
-        echo "controller=reachable"
-    elif (echo >/dev/tcp/127.0.0.1/11334) >/dev/null 2>&1; then
-        echo "controller=listening"
+    # The milter is the scanner's only interface: Postfix hands it each message
+    # and it stamps headers the app reads.
+    if (echo >/dev/tcp/127.0.0.1/11332) >/dev/null 2>&1; then
+        echo "milter=listening"
     else
-        echo "controller=unreachable"
+        echo "milter=unreachable"
     fi
 }
 

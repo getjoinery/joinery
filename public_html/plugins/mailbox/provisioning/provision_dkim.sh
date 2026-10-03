@@ -2,6 +2,8 @@
 #
 # provision_dkim.sh - generate and wire one domain's DKIM signing key.
 #
+# Version: 1.5 - The key path is built with ${KEY_ROOT:?}/${DOMAIN:?}, so --remove can never
+#                name the whole key root.
 # Version: 1.4 - Never START a stopped opendkim: both the add and remove paths
 #                restart it through one guard that skips a unit systemd reports
 #                as disabled. A box whose local listener is decommissioned has
@@ -80,7 +82,7 @@ fi
 DOMAIN="$(printf '%s' "${DOMAIN}" | tr 'A-Z' 'a-z')"
 
 KEY_ROOT="/etc/opendkim/keys"
-KEY_DIR="${KEY_ROOT}/${DOMAIN}"
+KEY_DIR="${KEY_ROOT:?}/${DOMAIN:?}"
 PRIVATE_KEY="${KEY_DIR}/${SELECTOR}.private"
 TXT_FILE="${KEY_DIR}/${SELECTOR}.txt"
 KEY_TABLE="/etc/opendkim/key.table"

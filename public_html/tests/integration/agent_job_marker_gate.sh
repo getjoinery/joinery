@@ -43,7 +43,7 @@ INSTALLER="${SITE}/maintenance_scripts/install_tools/install_agent.sh"
 AGENT_SRC="${HOME}/joinery-agent/jobmarker.go"
 
 T=$(mktemp -d)
-trap 'rm -rf "$T"; [ -n "${FAKE_PID:-}" ] && kill "$FAKE_PID" 2>/dev/null' EXIT
+trap '[ -n "${FAKE_PID:-}" ] && kill "$FAKE_PID" 2>/dev/null; rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 
 chk() {

@@ -21,7 +21,7 @@ SCRIPT="$ROOT/maintenance_scripts/install_tools/site_housekeeping.sh"
 RUNNER="$ROOT/maintenance_scripts/install_tools/_plugin_installers_start.sh"
 INIT="$ROOT/maintenance_scripts/install_tools/_site_init.sh"
 T=$(mktemp -d)
-trap 'rm -rf "$T"' EXIT
+trap 'rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 chk() {
     if [ "$2" = "$3" ]; then echo "  PASS: $1"; passed=$((passed+1))

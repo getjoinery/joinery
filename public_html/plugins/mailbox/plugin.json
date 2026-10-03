@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.125.14",
+    "version": "1.126.0",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -140,7 +140,7 @@
         {
             "key": "content_spam_scanner",
             "label": "Spam scanner on this server",
-            "details": "Ships with the mail stack: install_email.sh installs rspamd + redis unconditionally, so spam learning can be enabled later as a pure settings toggle. Verified answering, and wired into Postfix's milter chain where this server receives mail directly. A box with no local mail stack (webhook-only, relay-fronted from birth) needs none and is not checked. provision_spam_scanner.sh install repairs drift; boxes provisioned before the scanner shipped with the stack get it the same way.",
+            "details": "Ships with the mail stack: install_email.sh installs rspamd, a stateless milter that stamps spam headers the app reads. Where this server receives mail directly, verified wired into Postfix's milter chain and answering on 11332. A deployment fronted by a relay or a webhook provider has its mail scanned before it arrives and is not checked. provision_spam_scanner.sh install repairs drift.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkContentSpamScanner"
@@ -493,18 +493,22 @@
             "group": "spam",
             "label": "Learn from what users mark as spam",
             "type": "checkbox",
-            "helptext": "Corrections in the reader train a spam filter on this deployment own mail, and its answer then outranks the upstream scanner's — which is what lets marking a message not spam bring it back. What it learns is yours alone — a shared relay is deliberately stateless and cannot learn for you.",
+            "helptext": "Mark as spam, Not spam and your replies teach this deployment's own spam filter. Once it has seen enough of both, its answer outranks the scanner's, which is what lets marking a message not spam bring that kind of mail back.",
             "show_when": {
                 "mailbox_spam_filtering_enabled": "1"
             }
         },
         {
-            "name": "mailbox_rspamd_controller_url",
-            "default": "http://127.0.0.1:11334",
-            "group": "spam",
-            "label": "Rspamd controller URL",
-            "type": "text",
-            "helptext": "Where the spam scanner's controller listens, e.g. http://127.0.0.1:11334."
+            "name": "mailbox_sender_fingerprint_key",
+            "default": "",
+            "managed": true,
+            "helptext": "Key for the spam filter's sender fingerprints (a keyed hash of each sender address). Minted on first use by MailboxSpamKeys, which never replaces it: a new key would orphan every sender record and contact fingerprint."
+        },
+        {
+            "name": "mailbox_spam_token_key",
+            "default": "",
+            "managed": true,
+            "helptext": "Key for the spam corpus's token hashes (ibt_inbound_bayes_tokens). Minted on first use by MailboxSpamKeys, which never replaces it: a new key would orphan the whole corpus."
         },
         {
             "name": "mailbox_local_listener",
@@ -686,15 +690,14 @@
             "payload": {
                 "relay_name": "The relay this is about",
                 "reason": "Which fault it is: dead, unwired or drift",
-                "detail": "What the relay reported, in plain terms",
-                "coverage": "Whether this server is scanning the mail itself in the meantime"
+                "detail": "What the relay reported, in plain terms"
             },
             "notify": {
                 "ntf_type": "system",
                 "supports_topic": true,
                 "default_email": true,
                 "title_template": "{relay_name} stopped scanning mail for spam",
-                "body_template": "{detail} {coverage}",
+                "body_template": "{detail} Until it is fixed, incoming mail is not checked against the scanner's rules; this server's own filter still runs.",
                 "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
             }
         },
@@ -744,8 +747,7 @@
             "payload": {
                 "relay_name": "The relay this is about",
                 "reason": "Empty on recovery",
-                "detail": "What the relay reported, in plain terms",
-                "coverage": "Whether this server is scanning the mail itself as well"
+                "detail": "What the relay reported, in plain terms"
             },
             "notify": {
                 "ntf_type": "system",

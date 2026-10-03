@@ -189,7 +189,7 @@ if [ "$IS_DOCKER" = true ]; then
     # Clean up build directory if exists
     BUILD_DIR="/root/${SITE_NAME}-build"
     if [ -d "$BUILD_DIR" ]; then
-        rm -rf "$BUILD_DIR"
+        rm -rf "${BUILD_DIR:?}"
         echo "Removed build directory: $BUILD_DIR"
     fi
 
@@ -227,14 +227,14 @@ if [ "$IS_BAREMETAL" = true ]; then
     # Remove website directories
     echo "Removing website directories..."
     if [ -d "$SITE_ROOT" ]; then
-        rm -rf "$SITE_ROOT"
+        rm -rf "${SITE_ROOT:?}"
         echo "Removed: $SITE_ROOT"
     else
         echo "Directory $SITE_ROOT does not exist"
     fi
 
     if [ -d "$TEST_SITE_ROOT" ]; then
-        rm -rf "$TEST_SITE_ROOT"
+        rm -rf "${TEST_SITE_ROOT:?}"
         echo "Removed: $TEST_SITE_ROOT"
     else
         echo "Directory $TEST_SITE_ROOT does not exist"

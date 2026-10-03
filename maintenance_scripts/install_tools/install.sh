@@ -1882,14 +1882,14 @@ download_core_archive() {
     # Download
     if ! curl -sf --max-time 300 -o "$tmp_archive" "$core_location"; then
         print_warning "Failed to download core archive — building with archive copy as-is"
-        rm -f "$tmp_archive"; rm -rf "$tmp_extract"
+        rm -f "$tmp_archive"; rm -rf "${tmp_extract:?}"
         return 0
     fi
 
     # Extract
     if ! tar -xzf "$tmp_archive" -C "$tmp_extract" 2>/dev/null; then
         print_warning "Failed to extract core archive — building with archive copy as-is"
-        rm -f "$tmp_archive"; rm -rf "$tmp_extract"
+        rm -f "$tmp_archive"; rm -rf "${tmp_extract:?}"
         return 0
     fi
 
@@ -1910,7 +1910,7 @@ download_core_archive() {
         print_warning "Core archive has unexpected structure — building with archive copy as-is"
     fi
 
-    rm -f "$tmp_archive"; rm -rf "$tmp_extract"
+    rm -f "$tmp_archive"; rm -rf "${tmp_extract:?}"
 }
 
 # Download a single theme or plugin
@@ -2492,7 +2492,7 @@ do_build_base() {
             "$BUILD_DIR/install_tools" || BUILD_STATUS=$?
     fi
 
-    rm -rf "$BUILD_DIR"
+    rm -rf "${BUILD_DIR:?}"
 
     if [ "$BUILD_STATUS" -eq 0 ]; then
         print_success "joinery-base:${BASE_IMAGE_VERSION} built successfully"
@@ -4376,7 +4376,7 @@ do_site_docker() {
 
     if [ -d "$BUILD_DIR" ]; then
         print_info "Cleaning up existing build directory..."
-        rm -rf "$BUILD_DIR"
+        rm -rf "${BUILD_DIR:?}"
     fi
 
     mkdir -p "$BUILD_DIR/$SITENAME"
@@ -4666,7 +4666,7 @@ EOF
         # spawned after this point (e.g., manage_domain.sh invocation) will
         # print "sh: 0: getcwd() failed" because the cwd was deleted.
         cd "$SCRIPT_DIR"
-        rm -rf "$BUILD_DIR"
+        rm -rf "${BUILD_DIR:?}"
         print_success "Build directory removed"
     fi
 

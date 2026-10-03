@@ -441,7 +441,7 @@ fi
 cleanup() {
     if [ -d "$TEMP_DIR" ]; then
         print_info "Cleaning up temporary files..."
-        rm -rf "$TEMP_DIR"
+        rm -rf "${TEMP_DIR:?}"
     fi
 }
 

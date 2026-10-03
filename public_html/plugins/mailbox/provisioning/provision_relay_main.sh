@@ -16,6 +16,8 @@
 #     ordinary on-disk signing key once its sending is locked to a vault-sealed
 #     key (specs/mailbox_relay_surface_simplification.md)
 #
+# Version: 3.2 - joinery-dkim-remove builds its key path with ${DOMAIN:?}, so an empty
+#                domain can never name the whole key directory.
 # Version: 3.1 - joinery-dkim-remove no longer starts a stopped opendkim: its
 #                reload fell through to `systemctl restart`, which starts a unit
 #                the listener decommission had disabled, so removing a signing
@@ -155,7 +157,7 @@ DOMAIN="$(echo "${DOMAIN}" | tr '[:upper:]' '[:lower:]')"
 
 SIGNING_TABLE="/etc/opendkim/signing.table"
 KEY_TABLE="/etc/opendkim/key.table"
-KEY_DIR="/etc/opendkim/keys/${DOMAIN}"
+KEY_DIR="/etc/opendkim/keys/${DOMAIN:?}"
 
 if [[ -f "${SIGNING_TABLE}" ]]; then
     sed -i "\#^\*@${DOMAIN}[[:space:]]#d" "${SIGNING_TABLE}"

@@ -30,7 +30,7 @@ WORK="$(mktemp -d)"
 # on the trap too: a run killed mid-`go test` (or one that fails under set -e)
 # must not leave a file behind that the next run, as another user, cannot
 # overwrite.
-trap 'rm -rf "${WORK}"; rm -f "${HERE}/zz_wire_gate_test.go"' EXIT
+trap 'rm -f "${HERE}/zz_wire_gate_test.go"; rm -rf "${WORK:?}"' EXIT
 
 command -v go >/dev/null   || { echo "SKIP: no go toolchain"; exit 0; }
 command -v php >/dev/null  || { echo "SKIP: no php"; exit 0; }

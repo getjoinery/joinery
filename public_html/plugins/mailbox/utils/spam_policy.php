@@ -2,22 +2,22 @@
 <?php
 /**
  * CLI surface of MailboxSpamPolicy — ops introspection for shell sessions
- * (specs/mailbox_spam_filtering_simplification.md D4).
+ * (spam_learning_in_core.md).
  *
- * The scanner ships with the mail stack, so nothing in provisioning consults
- * this anymore; it exists for a human on a node asking "what is this box's
- * spam posture and why". One key=value per line:
+ * It exists for a human on a node asking "what is this box's spam posture and
+ * why". One key=value per line:
  *
  *   php spam_policy.php show
  *     filing=            the master switch (file spam into the Spam view)
  *     learning=          learn from corrections (clamped off when filing is)
  *     upstream_scanner=  provider | relay | none — what scans before this box
- *     scan_at_ingest=    whether relay/webhook mail is re-scored locally
  *     mail_stack=        whether this box hosts its own Postfix stack
- *     scanner_present=   whether the rspamd controller is answering (observed)
- *     controller_url=    the endpoint the scan and learn calls use
+ *     milter_answering=  whether rspamd's milter is listening on 11332 (observed)
+ *     corpus_spam=       messages the spam corpus has learned as spam
+ *     corpus_ham=        messages the spam corpus has learned as not spam
+ *     corpus_voting=     whether the corpus has enough of both to vote
  *
- * @version 1.1
+ * @version 1.2 - learning lives in core: corpus totals replace the controller lines
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -40,10 +40,12 @@ try {
 	echo 'filing=' . (MailboxSpamPolicy::filingEnabled() ? '1' : '0') . "\n";
 	echo 'learning=' . (MailboxSpamPolicy::learningEnabled() ? '1' : '0') . "\n";
 	echo 'upstream_scanner=' . MailboxSpamPolicy::upstreamScanner() . "\n";
-	echo 'scan_at_ingest=' . (MailboxSpamPolicy::scanAtIngest() ? '1' : '0') . "\n";
 	echo 'mail_stack=' . (MailboxSpamPolicy::mailStackPresent() ? '1' : '0') . "\n";
-	echo 'scanner_present=' . (MailboxSpamPolicy::controllerReachable() ? '1' : '0') . "\n";
-	echo 'controller_url=' . MailboxSpamPolicy::controllerUrl() . "\n";
+	echo 'milter_answering=' . (MailboxSpamPolicy::milterAnswering() ? '1' : '0') . "\n";
+	$progress = SpamBayes::progress();
+	echo 'corpus_spam=' . $progress['spam'] . "\n";
+	echo 'corpus_ham=' . $progress['ham'] . "\n";
+	echo 'corpus_voting=' . ($progress['voting'] ? '1' : '0') . "\n";
 } catch (\Throwable $e) {
 	fwrite(STDERR, 'spam_policy: could not resolve the spam policy: ' . $e->getMessage() . "\n");
 	exit(2);

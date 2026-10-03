@@ -176,7 +176,7 @@ chk "a group-writable installer is refused" \
     "$(echo "$out" | grep -c 'installer refused.*install_parser_jail.sh')" "1"
 chk "and the ones that are fine still run" \
     "$(echo "$out" | grep -c 'install_agent.sh: ok')" "1"
-rm -rf "$TMP"
+rm -rf "${TMP:?}"
 # The runner takes its lock at the top of every mode (2.16); as root that file
 # is /run/joinery/host-installers.<tree name>.lock and outlives the tree. It is
 # this test's to remove, along with any earlier one of its own that nothing

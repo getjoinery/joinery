@@ -75,7 +75,7 @@ cleanup() {
     dropdb -U postgres --if-exists "$SRC" >/dev/null 2>&1
     dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1
     psql -U postgres -q -c "DROP ROLE IF EXISTS \"$ROLE_A\"; DROP ROLE IF EXISTS \"$ROLE_B\";" >/dev/null 2>&1
-    rm -rf "$WORK"
+    rm -rf "${WORK:?}"
 }
 trap cleanup EXIT
 

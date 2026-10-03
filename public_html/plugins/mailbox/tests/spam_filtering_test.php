@@ -6,499 +6,286 @@
  * needs: []
  */
 /**
- * Tests for inbound spam classification (specs/inbound_email_spam_filtering.md).
+ * The spam verdict and the classifier's pure parts (spam_learning_in_core.md).
  *
- * Exercises InboundEmailRouter::classifySpam() directly via reflection with
- * representative auth-verdict arrays — the method is pure given the settings gate,
- * so no DB write or message ingest is needed. The gate
- * (mailbox_spam_filtering_enabled) is toggled by injecting into the
- * Globalvars singleton's private settings (the same instance the router reads).
+ * Everything here runs without a database:
+ *   - classifySpam() is pure: every fact it reads is handed in, so each row of
+ *     the verdict order is asserted directly — filing off, the auth rule beating
+ *     everything, SCANNER_FLOOR beating a contact and a reply but only for a
+ *     score rspamd produced, the relationships and their DMARC requirement, a
+ *     single spam teaching cancelling contact / correspondent / rescued, sender
+ *     history, Bayes at 0.99 / 0.01, the scanner signal last;
+ *   - SpamBayes: the tokenizer (words, pairs up to 4 apart, URL hosts, sender,
+ *     meta tokens, the 2,000 cap), hashing with an explicit key, chi-square
+ *     combining against fixed counts, the 50/50 voting gate;
+ *   - the meta tokens per scanner source, so scales never mix;
+ *   - readSpamHeader / resolveContentSpam: the arriving signal, with its source;
+ *   - the plain-words reason text the timeline and the Spam view share;
+ *   - what the plugin manifest declares.
  *
- * Covers:
- *   - gate off → null verdict (behavior unchanged)
- *   - primary rule: DMARC fail → spam; DMARC pass → ham
- *   - no-DMARC fallback: SPF+DKIM both fail → spam; only one fails → ham;
- *     both pass → ham
- *   - the fallback fires for 'none' AND 'unverified' DMARC (Mailgun/SendGrid shape)
- *   - content layer (specs/mailbox_spam_filtering_simplification.md): classifySpam
- *     OR semantics, readSpamHeader parsing, and that resolveContentSpam reads an
- *     arriving verdict whether or not this box runs its own scanner
- *   - ingest-time re-scan, where something upstream scanned and a scanner runs
- *     here. Learning OFF: the scan runs and can only ADD — local spam fires on a
- *     message the upstream let through, but local ham never overturns an upstream
- *     spam verdict. Learning ON: the local verdict REPLACES the upstream one in
- *     BOTH directions, so local ham RESCUES a message the upstream flagged. A
- *     scanner that is down leaves the upstream verdict standing; a box with no
- *     scanner at all is never called.
- *   - the /checkv2 response reading, including the score fallback and garbage
- *
- * The ingest scan is exercised through a router subclass that substitutes the
- * transport, so the test needs no rspamd; the response READING is tested against
- * literal rspamd bodies. Scanner PRESENCE is pinned with
- * MailboxSpamPolicy::overrideScannerAvailable() rather than probed, so the same
- * assertions hold on a box that happens to be running rspamd and on one that is
- * not. Topology stays out of it — the webhook provider makes "something upstream
- * scanned" true from settings alone, so this stays a safe (no DB write, no host
- * state) test. The topology matrix is spam_policy_test.
+ * The database half (relationships looked up for real, teaching, the sealed
+ * window, the upgrade) is spam_learning_test (test-db).
  *
  * Run: php plugins/mailbox/tests/spam_filtering_test.php
  *
+ * @version 2.0 - the verdict order of spam learning in core; the ingest re-scan tests are gone
  * @version 1.5
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
-
-/**
- * Router whose contact lookup is scripted rather than read from a store, so the
- * ELEVATION RULE is testable without a database. $is_contact is the answer the
- * substituted lookup gives for every sender.
- */
-class ScriptedContactRouter extends InboundEmailRouter {
-	public $is_contact = false;
-	protected function senderIsContact($alias, string $sender): bool {
-		return $this->is_contact;
-	}
-}
-
-/**
- * Router with a scripted local scanner. $scan_result is what the substituted
- * transport returns — an array to stand in for a successful scan, null for a
- * scanner that is missing, down or unreadable.
- */
-class ScriptedScanRouter extends InboundEmailRouter {
-	public $scan_result = null;
-	public $scan_calls = 0;
-	protected function scanContentSpam(string $raw_email): ?array {
-		$this->scan_calls++;
-		return $this->scan_result;
-	}
-}
 
 class SpamFilteringTest {
 
-	private function out($msg) {
-		echo (php_sapi_name() === 'cli' ? '' : '<br>') . $msg . "\n";
-	}
 	private function eq($expected, $actual, $label) {
 		return check($expected === $actual, $label, 'expected ' . var_export($expected, true)
 			. ', got ' . var_export($actual, true));
 	}
 
-	/** Set one Globalvars setting by injecting into the singleton's private settings. */
-	private function setSetting(string $name, string $value): void {
-		$gv = Globalvars::get_instance();
-		$ref = new ReflectionProperty('Globalvars', 'settings');
-		$settings = $ref->getValue($gv);
-		if (!is_array($settings)) { $settings = array(); }
-		$settings[$name] = $value;
-		$ref->setValue($gv, $settings);
-	}
-
-	/** Force the master spam-filtering gate on/off. */
-	private function setGate(bool $on): void {
-		$this->setSetting('mailbox_spam_filtering_enabled', $on ? '1' : '0');
-	}
-
-	/** Force the learning switch (and with it the local scanner) on/off. */
-	private function setLearning(bool $on): void {
-		$this->setSetting('mailbox_spam_learning_enabled', $on ? '1' : '0');
-		MailboxSpamPolicy::reset();
-	}
-
-	/**
-	 * Put the deployment behind a webhook provider (or back on local Postfix).
-	 * A webhook provider makes "something upstream already scanned" true without
-	 * any relay row, which is what keeps the ingest-scan cases DB-free.
-	 */
-	private function setUpstreamScanned(bool $on): void {
-		$this->setSetting('mailbox_provider', $on ? 'mailgun' : 'postfix');
-		MailboxSpamPolicy::reset();
-	}
-
-	/** Invoke resolveContentSpam() on a router with a scripted local scanner. */
-	private function resolveWithScan($scan_result, string $raw, $provider_spam = null): array {
-		$router = new ScriptedScanRouter();
-		$router->scan_result = $scan_result;
-		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
-		return $m->invoke($router, $raw, $provider_spam);
-	}
-
-	/** Invoke the router's private interpretScanResponse() on a literal body. */
-	private function interpret(string $body) {
-		$router = new InboundEmailRouter();
-		$m = new ReflectionMethod('InboundEmailRouter', 'interpretScanResponse');
-		return $m->invoke($router, $body);
-	}
-
-	/** Invoke the router's private classifySpam() with an auth array (+ content signal). */
-	private function classify(array $auth, string $content_signal = 'none') {
-		$router = new InboundEmailRouter();
+	private function classify(array $facts): array {
 		$m = new ReflectionMethod('InboundEmailRouter', 'classifySpam');
-		return $m->invoke($router, $auth, $content_signal);
+		return $m->invoke(new InboundEmailRouter(), $facts);
 	}
 
-	/** Invoke the router's private elevateForContact() with a scripted lookup. */
-	private function elevate(bool $is_contact, $alias, array $content_spam,
-			string $sender = 'Someone <someone@example.test>'): array {
-		$router = new ScriptedContactRouter();
-		$router->is_contact = $is_contact;
-		$m = new ReflectionMethod('InboundEmailRouter', 'elevateForContact');
-		$m->setAccessible(true);
-		return $m->invoke($router, $alias, $sender, $content_spam);
+	/** classifySpam with a clean baseline: DMARC pass, no scanner signal, nothing known. */
+	private function verdict(array $over = array()): string {
+		$facts = $over + array(
+			'auth'    => $this->auth('pass', 'pass', 'pass'),
+			'scanner' => array('signal' => 'none', 'score' => null, 'source' => null),
+			'reply'   => false,
+			'contact' => false,
+			'record'  => null,
+			'bayes'   => array('state' => 'untrained', 'p' => null),
+		);
+		$r = $this->classify($facts);
+		return (string)$r['verdict'] . '/' . (string)$r['reason'];
 	}
 
-	/** Invoke the router's private readSpamHeader(). */
 	private function readSpamHeader(string $raw): array {
-		$router = new InboundEmailRouter();
 		$m = new ReflectionMethod('InboundEmailRouter', 'readSpamHeader');
-		return $m->invoke($router, $raw);
+		return $m->invoke(new InboundEmailRouter(), $raw);
 	}
 
-	/** Invoke the router's private resolveContentSpam(). */
 	private function resolveContentSpam(string $raw, $provider_spam = null): array {
-		$router = new InboundEmailRouter();
 		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
-		return $m->invoke($router, $raw, $provider_spam);
+		return $m->invoke(new InboundEmailRouter(), $raw, $provider_spam);
 	}
 
 	private function auth($spf, $dkim, $dmarc, $source = 'milter'): array {
 		return array('spf' => $spf, 'dkim' => $dkim, 'dmarc' => $dmarc, 'source' => $source);
 	}
 
+	private function rspamd(float $score, string $signal = 'none'): array {
+		return array('signal' => $signal, 'score' => $score, 'source' => 'rspamd');
+	}
+
 	function run() {
-		section('Spam classification');
+		harness_set_setting_mem('mailbox_spam_filtering_enabled', '1');
 
-		$HAM  = InboundEmailMessage::SPAM_VERDICT_HAM;
-		$SPAM = InboundEmailMessage::SPAM_VERDICT_SPAM;
+		section('filing off');
+		harness_set_setting_mem('mailbox_spam_filtering_enabled', '0');
+		$this->eq('/', $this->verdict(array('auth' => $this->auth('fail', 'fail', 'fail'))),
+			'filing off → no verdict, whatever failed');
+		harness_set_setting_mem('mailbox_spam_filtering_enabled', '1');
 
-		// Gate off: never evaluated, regardless of verdicts.
-		$this->setGate(false);
-		$this->eq(null, $this->classify($this->auth('fail', 'fail', 'fail')),
-			'gate off → null even when everything fails');
+		section('step 1: the auth rule beats everything');
+		$fail = $this->auth('pass', 'pass', 'fail');
+		$this->eq('spam/auth', $this->verdict(array('auth' => $fail, 'reply' => true, 'contact' => true,
+			'record' => array('sent' => 3, 'spam' => 0, 'ham' => 5),
+			'bayes' => array('state' => 'scored', 'p' => 0.0))),
+			'DMARC fail → spam despite a reply, a contact, a correspondent and Bayes ham');
+		$this->eq('spam/auth', $this->verdict(array('auth' => $this->auth('fail', 'fail', 'none'))),
+			'no DMARC + SPF and DKIM both fail → spam');
+		$this->eq('ham/none', $this->verdict(array('auth' => $this->auth('fail', 'pass', 'none'))),
+			'no DMARC + one failing → not the auth rule');
 
-		// Gate on for the rest.
-		$this->setGate(true);
+		section('step 2: SCANNER_FLOOR beats relationships, for rspamd scores only');
+		$this->eq('spam/scanner', $this->verdict(array('scanner' => $this->rspamd(15.0), 'contact' => true)),
+			'an rspamd score at the floor beats a contact');
+		$this->eq('spam/scanner', $this->verdict(array('scanner' => $this->rspamd(22.5), 'reply' => true)),
+			'and a reply');
+		$this->eq('ham/contact', $this->verdict(array('scanner' => $this->rspamd(14.9, 'spam'), 'contact' => true)),
+			'just under the floor, the contact wins');
+		$this->eq('ham/contact', $this->verdict(array(
+			'scanner' => array('signal' => 'spam', 'score' => 99.0, 'source' => 'mailgun'), 'contact' => true)),
+			'a webhook provider\'s score never triggers the floor');
 
-		// Primary DMARC rule.
-		$this->eq($SPAM, $this->classify($this->auth('pass', 'pass', 'fail')),
-			'DMARC fail → spam (even with SPF/DKIM passing)');
-		$this->eq($HAM, $this->classify($this->auth('pass', 'pass', 'pass')),
-			'DMARC pass → ham');
-		$this->eq($HAM, $this->classify($this->auth('fail', 'fail', 'pass')),
-			'DMARC pass wins over SPF/DKIM fails → ham');
+		section('step 3: relationships');
+		$this->eq('ham/reply', $this->verdict(array('reply' => true, 'scanner' => $this->rspamd(9, 'spam'))),
+			'a reply to the user\'s own mail is ham over a scanner spam flag');
+		$this->eq('ham/reply', $this->verdict(array('reply' => true, 'auth' => $this->auth('none', 'none', 'none'))),
+			'reply needs no DMARC pass');
+		$this->eq('ham/contact', $this->verdict(array('contact' => true)), 'a contact with DMARC pass → ham');
+		$this->eq('ham/none', $this->verdict(array('contact' => true, 'auth' => $this->auth('pass', 'pass', 'none'))),
+			'a contact without DMARC pass is not trusted');
+		$this->eq('ham/correspondent', $this->verdict(array('record' => array('sent' => 1, 'spam' => 0, 'ham' => 0))),
+			'someone the user wrote to → ham');
+		$this->eq('ham/rescued', $this->verdict(array('record' => array('sent' => 0, 'spam' => 0, 'ham' => 1))),
+			'a sender the user rescued before → ham');
+		$this->eq('ham/none', $this->verdict(array('contact' => true, 'record' => array('sent' => 2, 'spam' => 1, 'ham' => 3))),
+			'one spam teaching cancels contact, correspondent and rescued');
+		$this->eq('spam/scanner', $this->verdict(array('contact' => true, 'scanner' => $this->rspamd(8, 'spam'),
+			'record' => array('sent' => 0, 'spam' => 1, 'ham' => 0))),
+			'so the scanner decides that contact\'s mail');
 
-		// No-DMARC fallback (Mailgun/SendGrid shape): both SPF and DKIM must fail.
-		$this->eq($SPAM, $this->classify($this->auth('fail', 'fail', 'none')),
-			'no DMARC + SPF & DKIM both fail → spam');
-		$this->eq($SPAM, $this->classify($this->auth('fail', 'fail', 'unverified')),
-			'unverified DMARC + SPF & DKIM both fail → spam');
-		$this->eq($HAM, $this->classify($this->auth('fail', 'pass', 'none')),
-			'no DMARC + only SPF fails → ham (alignment caveat)');
-		$this->eq($HAM, $this->classify($this->auth('pass', 'fail', 'none')),
-			'no DMARC + only DKIM fails → ham (alignment caveat)');
-		$this->eq($HAM, $this->classify($this->auth('pass', 'pass', 'none')),
-			'no DMARC + SPF & DKIM both pass → ham');
-		$this->eq($HAM, $this->classify($this->auth('unverified', 'unverified', 'unverified')),
-			'fully unverified → ham (no fail signal)');
+		section('step 4: sender history');
+		$this->eq('spam/sender_history', $this->verdict(array('record' => array('sent' => 0, 'spam' => 2, 'ham' => 0))),
+			'taught spam twice, never ham → spam');
+		$this->eq('spam/sender_history', $this->verdict(array('auth' => $this->auth('none', 'none', 'none'),
+			'record' => array('sent' => 0, 'spam' => 3, 'ham' => 0))),
+			'needs no DMARC: the spam direction cannot be borrowed');
+		$this->eq('ham/none', $this->verdict(array('record' => array('sent' => 0, 'spam' => 2, 'ham' => 1))),
+			'one ham teaching keeps it from deciding');
+		$this->eq('ham/none', $this->verdict(array('record' => array('sent' => 0, 'spam' => 1, 'ham' => 0))),
+			'once is not enough');
 
-		// --- Content layer OR semantics (specs/inbound_email_content_spam_filtering.md) ---
-		// content=spam OR's in regardless of a passing auth verdict.
-		$this->eq($SPAM, $this->classify($this->auth('pass', 'pass', 'pass'), 'spam'),
-			'content=spam + auth=ham → spam (content OR fires)');
-		// auth=spam still fires even when content is ham/none.
-		$this->eq($SPAM, $this->classify($this->auth('pass', 'pass', 'fail'), 'ham'),
-			'content=ham + auth=spam → spam (auth rule still fires)');
-		$this->eq($HAM, $this->classify($this->auth('pass', 'pass', 'pass'), 'ham'),
-			'content=ham + auth=ham → ham');
-		$this->eq($HAM, $this->classify($this->auth('pass', 'pass', 'pass'), 'none'),
-			'content=none + auth=ham → ham (auth-only behavior unchanged)');
-		// Master gate off → null even if content says spam.
-		$this->setGate(false);
-		$this->eq(null, $this->classify($this->auth('pass', 'pass', 'pass'), 'spam'),
-			'master gate off → null even when content=spam');
-		$this->setGate(true);
+		section('steps 5-6: Bayes, only when voting, only past the thresholds');
+		$this->eq('spam/bayes', $this->verdict(array('bayes' => array('state' => 'scored', 'p' => 0.995))), 'p ≥ 0.99 → spam');
+		$this->eq('ham/bayes', $this->verdict(array('bayes' => array('state' => 'scored', 'p' => 0.005),
+			'scanner' => $this->rspamd(7, 'spam'))), 'p ≤ 0.01 → ham, over a scanner flag');
+		$this->eq('spam/scanner', $this->verdict(array('bayes' => array('state' => 'scored', 'p' => 0.6),
+			'scanner' => $this->rspamd(7, 'spam'))), 'undecided → the scanner decides');
+		$this->eq('spam/scanner', $this->verdict(array('bayes' => array('state' => 'untrained', 'p' => null),
+			'scanner' => $this->rspamd(7, 'spam'))), 'untrained → the scanner decides');
+		$this->eq('ham/none', $this->verdict(array('bayes' => array('state' => 'off', 'p' => null))),
+			'learning off → nothing to say');
 
-		// --- readSpamHeader() (Postfix milter path) ---
-		section('readSpamHeader');
-		$spamRaw = "From: a@b.com\nX-Spam: Yes\nX-Spam-Status: Yes, score=7.31 required=6.00\nSubject: hi\n\nbody";
-		$r = $this->readSpamHeader($spamRaw);
-		$this->eq('spam', $r['signal'], 'X-Spam: Yes → spam signal');
-		$this->eq(7.31, $r['score'], 'score parsed from X-Spam-Status score=');
+		section('steps 7-8: the scanner signal, else ham');
+		$this->eq('spam/scanner', $this->verdict(array(
+			'scanner' => array('signal' => 'spam', 'score' => 3.1, 'source' => 'sendgrid'))),
+			'a webhook provider\'s flag still counts at step 7');
+		$this->eq('ham/none', $this->verdict(), 'nothing said anything → ham');
 
-		$flagRaw = "From: a@b.com\nX-Spam-Flag: YES\nX-Spam-Score: 9.0\n\nbody";
-		$r = $this->readSpamHeader($flagRaw);
-		$this->eq('spam', $r['signal'], 'X-Spam-Flag: YES → spam signal');
-		$this->eq(9.0, $r['score'], 'bare X-Spam-Score preferred when present');
-
-		$hamRaw = "From: a@b.com\nSubject: hi\n\nbody with X-Spam: Yes in the text";
-		$r = $this->readSpamHeader($hamRaw);
-		$this->eq('none', $r['signal'], 'no header (body mention ignored) → none');
-		$this->eq(null, $r['score'], 'no score when absent');
-
-		$noRaw = "From: a@b.com\nX-Spam: No\n\nbody";
-		$this->eq('none', $this->readSpamHeader($noRaw)['signal'], 'X-Spam: No → none (header never asserts ham)');
-
-		// --- resolveContentSpam(): an arriving verdict is always read ---
-		section('resolveContentSpam');
-		$hamBody = "From: a@b.com\nSubject: hi\n\nbody";
-		// No scanner here, so this section reads arriving verdicts only — pinned
-		// rather than probed so it asserts the same on any box (and never fires a
-		// real HTTP scan from a test).
-		MailboxSpamPolicy::overrideScannerAvailable(false);
-		$this->setLearning(false);
-		$this->eq('spam', $this->resolveContentSpam($spamRaw)['signal'],
-			'no local scanner → the relay-stamped X-Spam header is still read');
-		$this->setLearning(true);
-		$this->setUpstreamScanned(false); // colocated: the milter already scored it
-		$this->eq('spam', $this->resolveContentSpam($spamRaw)['signal'],
-			'local scanner on → same reading, same result');
-		$this->setLearning(false);
-		$this->eq('none', $this->resolveContentSpam($hamBody)['signal'],
-			'no scanner verdict on the message → none');
-		// Webhook provider signal arrives as a sibling argument.
-		$prov = $this->resolveContentSpam('', array('result' => 'spam', 'score' => 4.2, 'source' => 'mailgun'));
-		$this->eq('spam', $prov['signal'], 'provider spam signal → spam');
-		$this->eq(4.2, $prov['score'], 'provider score recorded');
-		$provNone = $this->resolveContentSpam('', array('result' => 'none', 'score' => 1.0, 'source' => 'sendgrid'));
-		$this->eq('none', $provNone['signal'], 'provider result=none → none (score recorded, no flag)');
-		$this->eq(1.0, $provNone['score'], 'provider score still recorded');
-
-		// --- ingest-time re-scan ---
-		section('ingest re-scan');
-		$LOCAL_SPAM = array('signal' => 'spam', 'score' => 11.5);
-		$LOCAL_HAM  = array('signal' => 'ham',  'score' => -1.2);
-		MailboxSpamPolicy::overrideScannerAvailable(true);
-
-		// Learning off: the scan still RUNS — a stateless upstream's header may
-		// never have been stamped, which is indistinguishable from a clean
-		// verdict — but its answer can only ADD spam.
-		$this->setUpstreamScanned(true);
-		$this->setLearning(false);
-		$r = $this->resolveWithScan($LOCAL_SPAM, $hamBody);
-		$this->eq('spam', $r['signal'], 'learning off → local scan still adds spam the upstream missed');
-		$this->eq(11.5, $r['score'], 'the local score is recorded when the local scan is what fired');
-
-		// ...and it must NOT subtract. Without a corpus the local scan is the same
-		// static ruleset the upstream ran, minus the milter's live SMTP context.
-		$r = $this->resolveWithScan($LOCAL_HAM, $spamRaw);
-		$this->eq('spam', $r['signal'], 'learning off → local ham never overturns an upstream spam verdict');
-		$this->eq(7.31, $r['score'], 'the upstream score stands: it is what decided the disposition');
-		$r = $this->resolveWithScan($LOCAL_HAM, $hamBody,
-			array('result' => 'spam', 'score' => 9.9, 'source' => 'mailgun'));
-		$this->eq('spam', $r['signal'], 'learning off → nor does it overturn a webhook provider flag');
-
-		// A colocated box is never re-scanned even with a scanner right there:
-		// its own milter already ran exactly this scan.
-		$this->setUpstreamScanned(false);
-		$router = new ScriptedScanRouter();
-		$router->scan_result = $LOCAL_SPAM;
-		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
-		$m->invoke($router, $hamBody, null);
-		check($router->scan_calls === 0, 'colocated → the scanner is not called',
-			'scan_calls = ' . $router->scan_calls);
-		$this->setUpstreamScanned(true);
-
-		// Learning on, something upstream scanned: the local verdict wins.
-		$this->setLearning(true);
-		$r = $this->resolveWithScan($LOCAL_SPAM, $hamBody);
-		$this->eq('spam', $r['signal'], 'local scan says spam → overrides an upstream that said nothing');
-		$this->eq(11.5, $r['score'], 'the local score is the one recorded');
-
-		// The direction that only a local corpus can produce: rescuing a message
-		// the upstream static ruleset flagged. This is the whole reason the local
-		// verdict replaces rather than OR's.
-		$r = $this->resolveWithScan($LOCAL_HAM, $spamRaw);
-		$this->eq('ham', $r['signal'], 'local scan says ham → RESCUES a message the relay flagged');
-		$this->eq(-1.2, $r['score'], 'the rescuing scan\'s score is recorded');
-
-		// Same rescue against a webhook provider's own flag.
-		$r = $this->resolveWithScan($LOCAL_HAM, $hamBody,
-			array('result' => 'spam', 'score' => 9.9, 'source' => 'mailgun'));
-		$this->eq('ham', $r['signal'], 'local scan overrides a webhook provider spam flag too');
-		// ...but a provider payload carrying no raw message cannot be re-scanned,
-		// so its own flag is all there is.
-		$r = $this->resolveWithScan($LOCAL_HAM, '',
-			array('result' => 'spam', 'score' => 9.9, 'source' => 'mailgun'));
-		$this->eq('spam', $r['signal'], 'no raw to scan → the provider flag stands');
-
-		// Scanner missing or down: the message keeps whatever arrived with it and
-		// stores normally. Nothing is held, bounced or retried.
-		$r = $this->resolveWithScan(null, $spamRaw);
-		$this->eq('spam', $r['signal'], 'scanner down → the upstream verdict stands');
-		$r = $this->resolveWithScan(null, $hamBody);
-		$this->eq('none', $r['signal'], 'scanner down on an unflagged message → none');
-
-		// An empty raw is nothing to scan; do not spend a request on it.
-		$router = new ScriptedScanRouter();
-		$router->scan_result = $LOCAL_SPAM;
-		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
-		$m->invoke($router, '', null);
-		check($router->scan_calls === 0, 'empty raw → the scanner is not called',
-			'scan_calls = ' . $router->scan_calls);
-
-		// Colocated: the milter already ran this exact scan, so ingest does not
-		// repeat it even with learning on.
-		$this->setUpstreamScanned(false);
-		$router = new ScriptedScanRouter();
-		$router->scan_result = $LOCAL_SPAM;
-		$m->invoke($router, $hamBody, null);
-		check($router->scan_calls === 0,
-			'colocated + learning on → no ingest re-scan (the milter already scored it)',
-			'scan_calls = ' . $router->scan_calls);
-
-		// No scanner on the box: the posture still says "should", but nothing is
-		// attempted — a webhook-only deployment must not spend a failed request
-		// and an error_log line on every message it receives.
-		$this->setUpstreamScanned(true);
-		MailboxSpamPolicy::overrideScannerAvailable(false);
-		$router = new ScriptedScanRouter();
-		$router->scan_result = $LOCAL_SPAM;
-		$m->invoke($router, $hamBody, null);
-		check($router->scan_calls === 0, 'no scanner running → the scanner is not called',
-			'scan_calls = ' . $router->scan_calls);
-		check(MailboxSpamPolicy::scanAtIngest() === true,
-			'...though the posture still reads "scan" — presence is observed, not policy');
-
-		// Filing off short-circuits the whole feature, scanning included.
-		$this->setGate(false);
-		MailboxSpamPolicy::overrideScannerAvailable(true);
-		check(MailboxSpamPolicy::scanAtIngest() === false,
-			'filing off → no ingest scan (no verdict is recorded, so none could matter)');
-		$this->setGate(true);
-		MailboxSpamPolicy::overrideScannerAvailable(null);
-
-		// --- reading an rspamd /checkv2 response ---
-		// --- the address book elevates past CONTENT, never past AUTH ---
-		// (specs/mailbox_contact_spam_bypass.md). The rule is the whole point of
-		// the feature and the whole point of its limit, so both halves are pinned.
-		section('contact elevation');
-		$alias = new InboundEmailAlias();
-		$alias->key = 4242;   // elevateForContact needs only a saved alias's key
-		$spam_signal = array('signal' => 'spam', 'score' => 9.5);
-
-		$this->eq('none', $this->elevate(true, $alias, $spam_signal)['signal'],
-			'a contact\'s message is elevated past a content-scanner spam verdict');
-		$this->eq(9.5, $this->elevate(true, $alias, $spam_signal)['score'],
-			'the score survives the elevation — it is recorded for transparency');
-		$this->eq('spam', $this->elevate(false, $alias, $spam_signal)['signal'],
-			'a stranger is not elevated');
-		$this->eq('spam', $this->elevate(true, null, $spam_signal)['signal'],
-			'a catch-all row (no alias) has no address book to consult');
-		$this->eq('spam', $this->elevate(true, $alias, $spam_signal, '')['signal'],
-			'an empty sender is never a contact');
-		$ham = array('signal' => 'ham', 'score' => 0.1);
-		$this->eq('ham', $this->elevate(true, $alias, $ham)['signal'],
-			'a signal that is not spam is returned untouched');
-
-		// The limit: elevation removes the CONTENT signal, and classifySpam still
-		// files the message on the auth rule. This is what makes "I added them to
-		// my contacts and they still go to spam" the CORRECT behavior for a sender
-		// whose DMARC fails — their From is unattested, so contact membership is a
-		// claim about an address nobody verified.
-		$dmarc_fail = array('dkim'=>'fail', 'spf'=>'fail', 'dmarc'=>'fail', 'source'=>'postfix');
-		$elevated = $this->elevate(true, $alias, $spam_signal);
-		$this->eq(InboundEmailMessage::SPAM_VERDICT_SPAM,
-			$this->classify($dmarc_fail, $elevated['signal']),
-			'a contact whose DMARC fails is STILL spam — elevation never clears the auth rule');
-		$clean = array('dkim'=>'pass', 'spf'=>'pass', 'dmarc'=>'pass', 'source'=>'postfix');
-		$this->eq(InboundEmailMessage::SPAM_VERDICT_HAM,
-			$this->classify($clean, $elevated['signal']),
-			'a contact who authenticates reaches the inbox despite the content score');
-		$this->eq(InboundEmailMessage::SPAM_VERDICT_SPAM,
-			$this->classify($clean, $spam_signal['signal']),
-			'the same message from a stranger stays spam — elevation is what changed it');
-
-		// --- the auth rule has ONE definition ---
-		// The reader re-asks it of a stored row to explain why a message is in
-		// Spam, so a drift between the two would offer the "allow this sender"
-		// button on messages it cannot help, and withhold it where it would.
-		section('auth rule is single-sourced');
-		$rule_cases = array(
-			array(array('dmarc'=>'fail', 'spf'=>'pass', 'dkim'=>'pass'), true,  'DMARC fail'),
-			array(array('dmarc'=>'pass', 'spf'=>'fail', 'dkim'=>'fail'), false, 'DMARC pass outranks both'),
-			array(array('dmarc'=>'none', 'spf'=>'fail', 'dkim'=>'fail'), true,  'no DMARC + both fail'),
-			array(array('dmarc'=>'none', 'spf'=>'fail', 'dkim'=>'pass'), false, 'no DMARC + one fail'),
-			array(array('dmarc'=>'unverified', 'spf'=>'fail', 'dkim'=>'fail'), true, 'unverified DMARC + both fail'),
-			array(array('dmarc'=>'', 'spf'=>'pass', 'dkim'=>'pass'), false, 'nothing failing'),
-		);
-		foreach ($rule_cases as $case) {
-			list($auth, $expected, $label) = $case;
-			$this->eq($expected, InboundEmailMessage::authRuleSaysSpam($auth),
-				'authRuleSaysSpam: ' . $label);
-			// classifySpam must agree, since it now asks the same question.
-			$auth['source'] = 'postfix';
-			$this->eq($expected
-					? InboundEmailMessage::SPAM_VERDICT_SPAM
-					: InboundEmailMessage::SPAM_VERDICT_HAM,
-				$this->classify($auth, 'none'),
-				'classifySpam agrees: ' . $label);
+		section('SpamBayes tokenizer');
+		$words = SpamBayes::words('Hello, WORLD! a x' . str_repeat('y', 41) . ' Ünïcode 2026');
+		$this->eq(array('hello', 'world', 'ünïcode', '2026'), $words, 'words: lowercased, 2-40 characters, unicode kept');
+		$tokens = SpamBayes::tokens(array(
+			'subject' => 'Cheap watches', 'body_plain' => 'one two three four five six',
+			'body_html' => '<a href="https://Shop.Example.com/x">x</a>',
+			'sender' => '"Watch Guy" <guy@spam.example>', 'meta' => array('first_contact', 'dmarc:pass'),
+		));
+		foreach (array('meta:first_contact', 'meta:dmarc:pass', 'from_domain:spam.example', 'from_name:watch guy',
+				'url:shop.example.com', 's:cheap', 's:cheap watches', 'w:one', 'w:one two', 'w:one five') as $t) {
+			check(in_array($t, $tokens, true), 'token ' . $t);
 		}
+		check(!in_array('w:one six', $tokens, true), 'no pair more than 4 apart');
+		$many = SpamBayes::tokens(array('body_plain' => implode(' ', array_map(function ($i) { return 'w' . $i; }, range(1, 5000)))));
+		$this->eq(SpamBayes::MAX_TOKENS, count($many), 'capped at the first 2,000 distinct tokens');
+		$key = str_repeat("\x01", 32);
+		$h1 = SpamBayes::hashes(array('w:one', 'w:two', 'w:one'), $key);
+		$this->eq(2, count($h1), 'hashes are distinct');
+		check($h1 === array_values(array_unique($h1)) && $h1[0] <= $h1[1], 'and ascending (the lock order)');
+		check(!in_array(0, $h1, true), 'never 0 (the totals row)');
+		check(SpamBayes::hashes(array('w:one'), $key) !== SpamBayes::hashes(array('w:one'), str_repeat("\x02", 32)),
+			'keyed: another deployment\'s key gives other hashes');
+		$this->eq(1, SpamBayes::TOKENIZER_VERSION, 'the tokenizer version is stamped on what it teaches');
+		// A body past the 64 KB cut, with a multibyte character straddling it: the
+		// cut must not leave invalid UTF-8, or the unicode split drops every
+		// non-Latin word of the message.
+		$prefix = 'Привет ';
+		$long = $prefix . str_repeat('a', SpamBayes::MAX_TEXT_BYTES - 1 - strlen($prefix)) . 'é мир';
+		check(!mb_check_encoding(substr($long, 0, SpamBayes::MAX_TEXT_BYTES), 'UTF-8'), 'the fixture really splits a character at the cut');
+		$t = SpamBayes::tokens(array('body_plain' => $long));
+		check(in_array('w:привет', $t, true), 'a cut through a multibyte character keeps the non-Latin words');
 
-		section('interpretScanResponse');
-		$r = $this->interpret('{"score":12.4,"required_score":6.0,"action":"add header"}');
-		$this->eq('spam', $r['signal'], 'action=add header → spam');
-		$this->eq(12.4, $r['score'], 'score read from the response');
-		$this->eq('spam', $this->interpret('{"score":30,"action":"reject"}')['signal'],
-			'action=reject → spam (an operator may have re-enabled it)');
-		$this->eq('spam', $this->interpret('{"score":8,"action":"rewrite subject"}')['signal'],
-			'action=rewrite subject → spam');
-		$this->eq('ham', $this->interpret('{"score":0.4,"required_score":6.0,"action":"no action"}')['signal'],
-			'action=no action → ham (an assertion the X-Spam header never makes)');
-		$this->eq('ham', $this->interpret('{"score":2.0,"action":"greylist"}')['signal'],
-			'action=greylist → ham (not a spam disposition here)');
-		// Score fallback for a response without an action.
-		$this->eq('spam', $this->interpret('{"score":7.5,"required_score":6.0}')['signal'],
-			'no action + score at or over required → spam');
-		$this->eq('ham', $this->interpret('{"score":5.9,"required_score":6.0}')['signal'],
-			'no action + score under required → ham');
-		$this->eq('spam', $this->interpret('{"score":6.0,"required_score":6.0}')['signal'],
-			'no action + score exactly at required → spam');
-		// Unreadable bodies must yield null so the caller falls back, never a guess.
-		$this->eq(null, $this->interpret('not json at all'), 'garbage body → null');
-		$this->eq(null, $this->interpret('{"error":"scan failed"}'), 'no score in the body → null');
-		$this->eq(null, $this->interpret('{"score":"high"}'), 'non-numeric score → null');
-		$this->eq(null, $this->interpret(''), 'empty body → null');
+		section('SpamBayes scoring');
+		$spammy = array_fill(0, 20, array(40, 1));
+		$hammy  = array_fill(0, 20, array(1, 40));
+		check(SpamBayes::score($spammy, 50, 50) > 0.99, 'tokens seen in spam → near 1',
+			(string)SpamBayes::score($spammy, 50, 50));
+		check(SpamBayes::score($hammy, 50, 50) < 0.01, 'tokens seen in ham → near 0',
+			(string)SpamBayes::score($hammy, 50, 50));
+		$this->eq(0.5, SpamBayes::score(array(array(5, 5), array(10, 10)), 50, 50), 'neutral tokens → 0.5');
+		$this->eq(0.5, SpamBayes::score(array(), 50, 50), 'nothing known → 0.5');
+		$mixed = SpamBayes::score(array_merge(array_fill(0, 10, array(40, 1)), array_fill(0, 10, array(1, 40))), 50, 50);
+		check($mixed > 0.01 && $mixed < 0.99, 'evidence both ways → undecided', (string)$mixed);
+		$long = SpamBayes::score(array_fill(0, 400, array(500, 0)), 500, 500);
+		check($long > 0.99 && is_finite($long), 'many decisive tokens never underflow', (string)$long);
+		check(abs(SpamBayes::chi2Q(2.0, 2) - exp(-1.0)) < 1e-12, 'chi2Q(2, 2) = e^-1');
 
-		$this->setLearning(false);
-		$this->setUpstreamScanned(false);
+		section('the 50/50 gate');
+		check(!SpamBayes::trained(array('spam' => 49, 'ham' => 500)), '49 spam: not voting');
+		check(!SpamBayes::trained(array('spam' => 500, 'ham' => 49)), '49 ham: not voting');
+		check(SpamBayes::trained(array('spam' => 50, 'ham' => 50)), '50 and 50: voting');
 
-		// --- what the plugin manifest declares ---
-		// The factory defaults ARE the behavior on a fresh deployment, so they
-		// are worth asserting: a default that quietly reverts to 0 would file
-		// spam straight into the inbox on every new install.
+		section('meta tokens per scanner source');
+		$router = new InboundEmailRouter();
+		$meta = $router->spamMetaTokens(7, $this->auth('pass', 'fail', 'none'), $this->rspamd(7.3), null);
+		foreach (array('first_contact', 'dmarc:none', 'spf:pass', 'dkim:fail', 'scanner:rspamd:6') as $t) {
+			check(in_array($t, $meta, true), 'meta ' . $t, json_encode($meta));
+		}
+		check(!in_array('catch_all', $meta, true), 'a mailbox → not catch_all');
+		$meta = $router->spamMetaTokens(0, $this->auth('pass', 'pass', 'pass'),
+			array('signal' => 'spam', 'score' => 7.3, 'source' => 'mailgun'), array('messages' => 4));
+		check(in_array('scanner:mailgun:6', $meta, true) && !in_array('scanner:rspamd:6', $meta, true),
+			'a provider\'s score is tagged with the provider, never mixed with rspamd\'s');
+		check(in_array('catch_all', $meta, true) && !in_array('first_contact', $meta, true),
+			'catch_all without a mailbox; a known sender is not a first contact');
+
+		section('the stored meta form');
+		$all = array('first_contact', 'catch_all', 'burst', 'dmarc:temperror', 'spf:permerror', 'dkim:unverified', 'scanner:sendgrid:-20');
+		$enc = SpamMeta::encode($all, 'undecided');
+		check(strlen($enc) <= 64, 'the longest meta value stays under the sealed-egress limit of 64', $enc);
+		$this->eq(array('tokens' => $all, 'bayes' => 'undecided'), SpamMeta::decode($enc), 'it decodes to exactly the tokens encoded');
+		$canon = $router->spamMetaTokens(1, array('dmarc' => 'Weird', 'spf' => '', 'dkim' => 'PASS'),
+			array('signal' => 'none', 'score' => 3.0, 'source' => 'postmark'), array('messages' => 2));
+		$this->eq(array('dmarc:other', 'spf:unverified', 'dkim:pass', 'scanner:other:2'), $canon,
+			'odd values are canonical at ingest, so teaching reads back the same tokens');
+		$this->eq($canon, SpamMeta::decode(SpamMeta::encode($canon, 'off'))['tokens'], 'and round-trip');
+
+		section('readSpamHeader');
+		$r = $this->readSpamHeader("From: a@b.com\nX-Spam: Yes\nX-Spam-Status: Yes, score=7.31 required=6.00\n\nbody");
+		$this->eq(array('signal' => 'spam', 'score' => 7.31, 'source' => 'rspamd'), $r, 'flagged: spam, score, source rspamd');
+		$r = $this->readSpamHeader("From: a@b.com\nX-Spam-Status: No, score=1.20 required=6.00\n\nbody");
+		$this->eq(array('signal' => 'none', 'score' => 1.2, 'source' => 'rspamd'), $r,
+			'unflagged: the score is still read (the floor and the meta token need it)');
+		$r = $this->readSpamHeader("From: a@b.com\nX-Spam-Flag: YES\nX-Spam-Score: 9.0\n\nbody");
+		$this->eq(9.0, $r['score'], 'a bare X-Spam-Score is preferred');
+		$r = $this->readSpamHeader("From: a@b.com\nSubject: hi\n\nbody with X-Spam: Yes in the text");
+		$this->eq(array('signal' => 'none', 'score' => null, 'source' => null), $r, 'a body mention is not a header');
+
+		section('resolveContentSpam');
+		$prov = $this->resolveContentSpam('', array('result' => 'spam', 'score' => 4.2, 'source' => 'mailgun'));
+		$this->eq(array('signal' => 'spam', 'score' => 4.2, 'source' => 'mailgun'), $prov, 'a provider flag names its source');
+		$this->eq('rspamd', $this->resolveContentSpam("X-Spam: Yes\n\nb")['source'], 'a header is rspamd\'s');
+		check(!method_exists('InboundEmailRouter', 'scanContentSpam') && !method_exists('InboundEmailRouter', 'interpretScanResponse'),
+			'nothing in the router talks to a scanner');
+
+		section('the reason, in plain words');
+		$this->eq('Not spam: a reply to mail you sent', InboundEmailMessage::spamReasonText('reply', 'ham'), 'reply');
+		$this->eq('Spam: you marked this sender as spam at least twice',
+			InboundEmailMessage::spamReasonText('sender_history', 'spam'), 'sender history');
+		$this->eq('Spam: learned from your corrections', InboundEmailMessage::spamReasonText('bayes', 'spam'), 'bayes');
+		$this->eq('Spam: the scanner\'s score was very high', InboundEmailMessage::spamReasonText('scanner', 'spam', 18),
+			'the floor');
+		$this->eq('Spam: the scanner flagged it (the filter was still learning and not voting yet)',
+			InboundEmailMessage::spamReasonText('scanner', 'spam', 7, '|u'),
+			'below step 6, the timeline says Bayes was not voting');
+		$this->eq(null, InboundEmailMessage::spamReasonText(null, 'ham'), 'no reason recorded → no text');
+
 		section('declared settings');
-		$manifest = json_decode((string)file_get_contents(
-			PathHelper::getAbsolutePath('plugins/mailbox/plugin.json')), true);
+		$manifest = json_decode((string)file_get_contents(PathHelper::getAbsolutePath('plugins/mailbox/plugin.json')), true);
 		$declared = array();
 		foreach (($manifest['settings'] ?? array()) as $s) {
-			$declared[(string)($s['name'] ?? '')] = (string)($s['default'] ?? '');
+			$declared[(string)($s['name'] ?? '')] = $s;
 		}
-		$this->eq('1', $declared['mailbox_spam_filtering_enabled'] ?? null,
-			'mailbox_spam_filtering_enabled ships on');
-		$this->eq('1', $declared['mailbox_spam_learning_enabled'] ?? null,
-			'mailbox_spam_learning_enabled ships on (the scanner ships with the mail stack)');
-		check(!array_key_exists('mailbox_content_spam_filtering_enabled', $declared),
-			'the conflated content-scanner setting is gone from the manifest');
-		$this->eq('http://127.0.0.1:11334',
-			$declared['mailbox_rspamd_controller_url'] ?? null,
-			'the controller endpoint stays loopback');
-
-		// The health entry must point at the script that can actually fix it.
+		$this->eq('1', $declared['mailbox_spam_filtering_enabled']['default'] ?? null, 'filing ships on');
+		$this->eq('1', $declared['mailbox_spam_learning_enabled']['default'] ?? null, 'learning ships on');
+		check(!isset($declared['mailbox_rspamd_controller_url']), 'the controller URL setting is gone');
+		foreach (array('mailbox_sender_fingerprint_key', 'mailbox_spam_token_key') as $k) {
+			check(!empty($declared[$k]['managed']) && !isset($declared[$k]['label']) && ($declared[$k]['type'] ?? '') !== 'secret',
+				$k . ' is managed: machine-written, never on a form');
+		}
 		$prov = array();
 		foreach (($manifest['provisioners'] ?? array()) as $p) {
 			$prov[(string)($p['key'] ?? '')] = $p;
 		}
-		check(isset($prov['content_spam_scanner']), 'the scanner health entry exists');
-		$this->eq('provisioning/provision_spam_scanner.sh',
-			$prov['content_spam_scanner']['script'] ?? null,
-			'its fix command is the standalone scanner provisioner');
+		$this->eq('provisioning/provision_spam_scanner.sh', $prov['content_spam_scanner']['script'] ?? null,
+			'the scanner health entry\'s fix is the scanner provisioner');
+		check(stripos((string)($prov['content_spam_scanner']['details'] ?? ''), 'redis') === false,
+			'and its text names rspamd only');
 	}
 }
 
-$test = new SpamFilteringTest();
-$test->run();
+(new SpamFilteringTest())->run();
 harness_finish();

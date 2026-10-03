@@ -20,7 +20,7 @@
 set -u
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/utils/upgrade.php"
 T=$(mktemp -d)
-trap 'rm -rf "$T"' EXIT
+trap 'rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 
 chk() {

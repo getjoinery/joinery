@@ -24,9 +24,8 @@
  * Also covered:
  *   - every answer shape the relay can give, including PONG from a relay built
  *     before this check, which must never read as "scanner dead"
- *   - the severity matrix, with the local scanner PINNED — whether a dead relay
- *     scanner is a warning or a failure depends on whether this server is
- *     covering for it, not on whether rspamd happens to run on the test machine
+ *   - the severity of each answer: a relay not delivering verdicts fails on its
+ *     own, because this server never re-scans mail to cover for it
  *   - a drifted header contract on a perfectly healthy service, the exact fault
  *     a services-only ping would have called fine
  *   - transitions, so a relay that stays broken is announced once
@@ -34,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/relay_health_test.php
  *
+ * @version 1.1 - no coverage half: the ingest re-scan is gone (spam_learning_in_core.md)
  * @version 1.0
  */
 
@@ -41,7 +41,6 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
 
 class RelayHealthTest {
 
@@ -129,65 +128,38 @@ class RelayHealthTest {
 			'a non-zero exit is unreachable, not a scanner verdict');
 
 		// --- The severity matrix ----------------------------------------------
-		// Pinned, because "is a dead relay scanner a warning or a failure" depends
-		// on whether THIS server is covering — never on what runs on the test box.
-		section('severity depends on whether this server is covering');
+		// This server never re-scans mail, so a relay not delivering verdicts is
+		// reported on its own: nothing here covers for it.
+		section('severity of each relay answer');
 
-		// Row 1: delivering — coverage is irrelevant, so assert it under both.
-		foreach (array(true, false) as $covered) {
-			$row = InboundEmailSetupCheck::relayScannerResult($ok, 'mx.example.com', '', $covered);
-			$this->eq(InboundEmailSetupCheck::PASS, $row['status'],
-				'delivering verdicts → pass (covering: ' . var_export($covered, true) . ')');
-		}
+		$row = InboundEmailSetupCheck::relayScannerResult($ok, 'mx.example.com');
+		$this->eq(InboundEmailSetupCheck::PASS, $row['status'], 'delivering verdicts → pass');
 
-		// Row 2: not delivering, this server covering → a warning, not a failure.
-		$warn = InboundEmailSetupCheck::relayScannerResult($dead, 'mx.example.com', '', true);
-		$this->eq(InboundEmailSetupCheck::WARN, $warn['status'], 'not delivering, local scan covering → warn');
-		check(stripos($warn['summary'], 'scanning the mail itself') !== false,
-			'the warning says this server is covering', 'summary: ' . $warn['summary']);
-
-		// Same severity, different story: drift must not read as a quieter fault.
-		$drift_row = InboundEmailSetupCheck::relayScannerResult($drift, 'mx.example.com', '', true);
-		$this->eq($warn['status'], $drift_row['status'],
-			'a drifted contract lands on the same severity as a dead scanner');
-		check($drift_row['detail'] !== $warn['detail'],
-			'...while still saying which of the two it was');
-
-		// Row 3: not delivering, nothing covering → a failure.
+		$dead_row = InboundEmailSetupCheck::relayScannerResult($dead, 'mx.example.com');
 		foreach (array($dead, $unwired, $drift) as $broken) {
-			$row = InboundEmailSetupCheck::relayScannerResult($broken, 'mx.example.com', '', false);
+			$row = InboundEmailSetupCheck::relayScannerResult($broken, 'mx.example.com');
 			$this->eq(InboundEmailSetupCheck::FAIL, $row['status'],
-				'not delivering (' . $broken['reason'] . '), nothing scanning locally → fail');
-			check(stripos($row['detail'], 'not being checked') !== false,
-				'...and says plainly that nothing is scanning anywhere', 'detail: ' . $row['detail']);
+				'not delivering (' . $broken['reason'] . ') → fail, on its own');
+			check(stripos($row['detail'], 'not being applied') !== false
+					&& stripos($row['detail'], 'own filter still runs') !== false,
+				'...saying the scanner\'s rules are off while this server\'s own filter still runs',
+				'detail: ' . $row['detail']);
 		}
+		$drift_row = InboundEmailSetupCheck::relayScannerResult($drift, 'mx.example.com');
+		check($drift_row['detail'] !== $dead_row['detail'],
+			'a drifted contract and a dead scanner share a severity but say which it was');
 
-		// Row 4: legacy is INFO in BOTH coverage states — every existing relay
-		// answers PONG, and colouring that red on ship day would be a lie about
-		// relays that are very likely scanning fine.
-		foreach (array(true, false) as $covered) {
-			$row = InboundEmailSetupCheck::relayScannerResult($legacy, 'mx.example.com', '', $covered);
-			$this->eq(InboundEmailSetupCheck::INFO, $row['status'],
-				'PONG → info, never a warning (covering: ' . var_export($covered, true) . ')');
-		}
+		// Legacy is INFO — every existing relay answers PONG, and colouring that
+		// red on ship day would be a lie about relays very likely scanning fine.
+		$row = InboundEmailSetupCheck::relayScannerResult($legacy, 'mx.example.com');
+		$this->eq(InboundEmailSetupCheck::INFO, $row['status'], 'PONG → info, never a warning');
 
 		// An answer we could not get, or could not read, is honestly unknown.
 		foreach (array($refused, $truncated) as $unknowable) {
-			$row = InboundEmailSetupCheck::relayScannerResult($unknowable, 'mx.example.com', '', false);
+			$row = InboundEmailSetupCheck::relayScannerResult($unknowable, 'mx.example.com');
 			$this->eq(InboundEmailSetupCheck::UNKNOWN, $row['status'],
 				'no readable answer → unknown, never a scanner fault (' . $unknowable['state'] . ')');
 		}
-
-		// ...and with coverage left to the policy, a scanner this server cannot
-		// reach can never come out as "covered" — the production path, exercised.
-		section('with coverage left to the policy');
-		$was = MailboxSpamPolicy::scanAtIngest();
-		MailboxSpamPolicy::overrideScannerAvailable(false);
-		$this->eq(InboundEmailSetupCheck::FAIL,
-			InboundEmailSetupCheck::relayScannerResult($dead, 'mx.example.com')['status'],
-			'no local scanner reachable → fail, whatever the settings say');
-		MailboxSpamPolicy::overrideScannerAvailable(null);   // restore live probing
-		check($was === MailboxSpamPolicy::scanAtIngest(), 'the policy pin is released again');
 
 		// --- Transitions -------------------------------------------------------
 		section('a relay that stays broken is announced once');

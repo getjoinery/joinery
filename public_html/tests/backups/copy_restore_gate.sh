@@ -55,7 +55,7 @@ W="$(mktemp -d /tmp/jy_copy_gate_XXXXXX)"
 cleanup() {
     dropdb -U postgres --if-exists "$SRC_DB" >/dev/null 2>&1
     dropdb -U postgres --if-exists "$PROJ" >/dev/null 2>&1
-    rm -rf "$W"
+    rm -rf "${W:?}"
 }
 trap cleanup EXIT
 S="$W/src/$PROJ"; T="$W/dst/$PROJ"
