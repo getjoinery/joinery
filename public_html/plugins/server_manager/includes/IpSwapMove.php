@@ -36,6 +36,7 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.1 - a container site's shared server is never swapped or powered off
  * @version 1.0
  */
 
@@ -78,8 +79,15 @@ class IpSwapMove {
 	 */
 	const REBOOT_SETTLE_SECONDS = 90;
 
-	/** The provision that created a node's machine, with an instance, or null. */
+	/**
+	 * The provision that created a node's machine, with an instance, or null.
+	 * Null for a container site: its machine is shared with other sites, so
+	 * it is never this site's to power off or to take an address from.
+	 */
 	public static function provision_of(ManagedNode $node): ?CustomerCloudProvision {
+		if (trim((string)$node->get('mgn_container_name')) !== '') {
+			return null;
+		}
 		$rows = new MultiCustomerCloudProvision(array('node_id' => (int)$node->key, 'deleted' => false),
 			array('cvp_customer_cloud_provision_id' => 'DESC'));
 		foreach ($rows as $row) {
@@ -97,6 +105,10 @@ class IpSwapMove {
 	 */
 	public static function record_refusals(ManagedNode $source, ManagedNode $copy): array {
 		$why = array();
+		if (trim((string)$source->get('mgn_container_name')) !== '') {
+			return array('The site runs in a container on a server it shares with other sites; that server\'s address '
+				. 'is every one of theirs, so it is never swapped.');
+		}
 		$s = self::provision_of($source);
 		$c = self::provision_of($copy);
 		if (!$s || !$c) {

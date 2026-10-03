@@ -376,6 +376,38 @@
     a libsodium vector, the word writing `chain.key` and the vouch, its refusals, `copy_look`) and
     `copy_key_handoff_test.go` (a wrong answer shown and the wait going on, a decline, a withdrawn
     job, the window).
+- **getjoinery onto bare metal (2026-10-03): a container site and a management node, copied from
+  their backups; unit- and db-tested, not yet live.** Owner's goal: move getjoinery.com (node 33, a
+  container on docker-prod, behind the Cloudflare proxy, itself a management node) to a bare-metal
+  server on the new Linode account, using the copy from backups with the old site stopped by hand at
+  the cutover. A rehearsal copy (look, then Discard) comes first and changes nothing on the source.
+  - **A container site is copied from its backups.** Nothing is asked of its machine, and the
+    copy's own config is kept (`--adopt-secret-key` takes only the key), so a backup made in a
+    container restores onto bare metal as any site's does. A copy of the running site still refuses
+    a container: the freeze is a machine's firewall and boot unit, which a container cannot set on
+    itself.
+  - **A management node is copied from its backups,** never this management node itself (its own
+    row would be swapped from under it). Its secrets reach the copy only through the owner's
+    recovery key on the copy's page, and a dormant copy runs none of its fleet's work. A copy of a
+    running management node still refuses.
+  - **B45 — A copy from backups of a source on 0.8.453–0.8.455 has no key page.** TRACED: the copy
+    installs the source's release, and `/copy-key` (`views/copy-key.php`, `CopyKeyHandoff`) first
+    ships in 0.8.456; 0.8.455's archive carries neither, and the preflight's floor was the live
+    copy's 0.8.453. Fixed: `JobCommandBuilder::COPY_FROM_BACKUPS_MIN_VERSION` (0.8.456), applied by
+    `SiteCopyRunner::source_refusals()` (1.6) to a copy from backups.
+  - **B46 — The proxied move takes the other sites on a shared server.** TRACED: `ProxiedOriginMove::plan()`
+    took every A/AAAA in the zone naming the source's address. For getjoinery that is docker-prod's
+    address, so demo.getjoinery.com (proxied) would have moved to the copy, and
+    developers.getjoinery.com (unproxied, same address) refused the whole move. Fixed in
+    `ProxiedOriginMove` 1.2: a container site moves only its own name and `www.`; other names on the
+    shared address are left alone.
+  - **A container's server is never powered off or swapped:** `IpSwapMove` 1.1's `provision_of()`
+    answers null for a container site and `record_refusals()` names why, so the switch-over from
+    backups never powers off a shared server; the owner stops the container.
+  - Tests: `site_copy_from_backups` 37/37 (a container and a management node allowed from backups and
+    refused from the running site, this management node refused, the release floor, no swap or
+    power-off of a shared server), `site_copy_switch` 46/46 (sibling records on a shared address),
+    `site_copy_runner` 73/73, `site_copy_ip_swap` 34/34, `job_command_builder` 391/391.
 - **WP9 built (2026-10-02): Clone is retired; B1–B20 and B23 close with the code.** Deleted:
   `utils/clone_export.php`, `utils/clone_export_arm.php`, `utils/scrub_sealed_secrets.php`, the
   `clone_export_key` setting, the `from_backup` install mode (model, Install New Node form,
@@ -842,7 +874,9 @@ the **management node** M and the **owner** O.
 
 **v1 scope: a bare-metal S onto a bare-metal T, one site per machine.** That covers jeremytunnell.
 - **Container sources** (the eight docker-prod sites) share one host address, so no IP swap is
-  possible for them. They come with the DNS switch, deferred to its own spec.
+  possible for them. A copy of a running container site comes with the DNS switch, deferred to its
+  own spec; a container site is copied from its backups today, switched by a proxy or the owner's
+  DNS change (getjoinery, above).
   - Their certificate, DKIM keys and proxy vhost live on the host.
   - Their cron belongs to the container's start command.
 - **Container targets** are out of scope.
@@ -914,7 +948,7 @@ container target, which is out of scope. A container source is never dormant.
    - v1 scope: S is bare metal, and T hosts nothing else.
    - S's agent has the copy words.
    - S has a working backup target, a proven recovery key, and a successful backup under 24 hours old.
-   - S is not a management node.
+   - S is not a management node (a management node, and a container site, are copied from their backups).
    - T fits:
      - disk: the staged chain, plus the extracted tree, plus the dump staged on disk twice (gz and
        plain SQL), plus the live database, plus headroom;
@@ -1473,7 +1507,8 @@ the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44), and Phase 2's
 
 ## Out of scope
 
-- Copying the management node itself: it carries the agent signing key and the fleet's control.
+- Copying the management node itself, or a running management node: it carries the agent signing key and
+  the fleet's control. Another management node is copied from its backups only.
 - Changing the domain: a rename, with passkeys lost by design (I4).
 - Carrying hand-installed host services: they are listed, not copied.
 - A container site as the target, and any machine hosting more than one site (v1).

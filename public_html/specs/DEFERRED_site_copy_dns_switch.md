@@ -56,7 +56,8 @@ that moves the address (step 9 there) and the creation of a Hetzner server are n
   IP swap is possible for them; DNS is their switch.
   - Their certificate, DKIM keys and proxy vhost live on the host.
   - Their cron belongs to the container's start command.
-  - The copy's preflight refuses a container source until this lands.
+  - The copy of a running site refuses a container source until this lands; a container site is
+    already copied from its backups (the site copy spec), switched by a proxy or the owner's DNS change.
 
 **Phase 2 (a dead source)** already switches by DNS with no forwarding, by the owner's own
 change (the site copy spec's `manual` method): there is no S left to forward, so visitors whose

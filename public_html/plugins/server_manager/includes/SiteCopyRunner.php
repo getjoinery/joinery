@@ -96,6 +96,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.6 - a container site and a management node (not this one) are copied from their backups; a
+ *                 copy from backups has its own release floor, the first with the copy's key page
  * @version 1.5 - the switch by IP swap (site_copy.md WP12) and the copy from backups (WP10)
  * @version 1.4 - the switch-over and the way back by a proxied origin change (site_copy.md WP7a)
  * @version 1.3 - discard cancels the step job it was on (site_copy.md B42)
@@ -270,21 +272,33 @@ class SiteCopyRunner {
 		if (!$source->hosts_site()) {
 			return array('It hosts no Joinery site.');
 		}
-		if (trim((string)$source->get('mgn_container_name')) !== '') {
-			$why[] = 'It is a container site. A copy is bare metal to bare metal, one site per machine; container '
-				. 'sites move with the switch by DNS, which is not built yet.';
+		// A copy from backups asks nothing of the source's machine, so a
+		// container site's backups restore onto bare metal as any site's do.
+		// A copy of the running site freezes its machine, which a container
+		// cannot do to itself.
+		if (!$backups && trim((string)$source->get('mgn_container_name')) !== '') {
+			$why[] = 'It is a container site. A copy of a running site is bare metal to bare metal, one site per '
+				. 'machine; a container site is copied from its backups.';
 		}
 		if (!$source->is_operational()) {
 			$why[] = 'It is not a working site (' . $source->install_state_label() . ').';
 		}
-		if ($source->is_management_node()) {
-			$why[] = 'It is a management node. A management node carries the fleet\'s control and is never copied.';
+		// A management node is copied only from its backups: its secrets reach
+		// the copy through the owner's recovery key, and the dormant copy runs
+		// none of its fleet's work. Never this management node itself, whose
+		// own row the switch-over would swap from under it.
+		if ($source->is_self()) {
+			$why[] = 'It is this management node. A management node is never copied by itself.';
+		} elseif (!$backups && $source->is_management_node()) {
+			$why[] = 'It is a management node. A management node carries the fleet\'s control and is copied only from '
+				. 'its backups.';
 		}
+		$floor = $backups ? JobCommandBuilder::COPY_FROM_BACKUPS_MIN_VERSION : JobCommandBuilder::COPY_SOURCE_MIN_VERSION;
 		$version = trim((string)$source->get('mgn_joinery_version'));
 		if ($version === '') {
 			$why[] = 'Its release is not known yet. Run a status check on it.';
-		} elseif (version_compare($version, JobCommandBuilder::COPY_SOURCE_MIN_VERSION, '<')) {
-			$why[] = "It runs release {$version}. A copy needs " . JobCommandBuilder::COPY_SOURCE_MIN_VERSION
+		} elseif (version_compare($version, $floor, '<')) {
+			$why[] = "It runs release {$version}. A copy" . ($backups ? ' from backups' : '') . " needs {$floor}"
 				. ' or newer, because the copy installs the source\'s own release. Update it first.';
 		}
 		if (!$backups) {
