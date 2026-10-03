@@ -12,6 +12,7 @@ require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
  * and a field beside the check that grades it is worth more than tidiness. What
  * belongs here is the choices — which stack receives mail, which route sends it.
  *
+ * @version 1.5 - the spam box shows the learning progress line; learning is never disabled for want of a scanner
  * @version 1.4 - the inbound provider moved here from the Setup tab, beside the
  *                outbound route it pairs with
  */
@@ -66,20 +67,19 @@ if (!empty($webhook_url)) {
 $page->end_box();
 
 // --- Spam filtering ---
-// One question, plus one genuinely optional capability. Where the scanning
-// happens is SHOWN, not asked — it follows from the deployment's topology.
-// Learning is offered only where a scanner is running (it ships with the mail
-// stack, so that is every box hosting its own mail); elsewhere the control is
-// disabled and the state line says why. A disabled control never posts — the
-// logic writes the learning setting only while the scanner is present.
+// One question, plus one optional capability. Where the scanning happens is
+// SHOWN, not asked — it follows from the deployment's topology. Learning runs
+// in the application, so it is offered on every deployment.
 $page->begin_box(array('title' => 'Spam filtering'));
 // Saved state, above the controls: below them it would read as a consequence of
 // the control just changed and contradict it until the form is saved.
 echo '<p class="text-muted small">' . htmlspecialchars($scanner_state) . '</p>';
+if (!empty($learning_progress)) {
+	echo '<p class="text-muted small">' . htmlspecialchars($learning_progress) . '</p>';
+}
 SettingsFieldRenderer::renderGroup($form, 'spam', array(
 	'source'   => 'mailbox',
 	'only'     => array('mailbox_spam_filtering_enabled', 'mailbox_spam_learning_enabled'),
-	'disabled' => $scanner_present ? array() : array('mailbox_spam_learning_enabled'),
 	'values'   => array(
 		'mailbox_spam_filtering_enabled' => $values['mailbox_spam_filtering_enabled'] ? '1' : '0',
 		'mailbox_spam_learning_enabled'  => $values['mailbox_spam_learning_enabled'] ? '1' : '0',

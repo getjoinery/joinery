@@ -2,6 +2,9 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.18 - Section 5b's scanner is stateless rspamd (provision_spam_scanner.sh 2.0):
+#                no redis, no ingest re-scan, no learning loop. Section 5b also checks
+#                for rspamd_stateless.sh, which the scanner provisioner sources.
 # Version: 2.17 - Reads the database user and password from the site's own config instead
 #                of connecting as `psql -U postgres` on an inherited PGPASSWORD. That
 #                environment exists under the container CMD and under nothing else, so
@@ -696,17 +699,18 @@ arm_service opendmarc
 
 # --- 5b. local spam scanner (ships with the mail stack) -----------------------
 # The scanner is part of the mail stack, unconditionally: every box this script
-# provisions gets rspamd + redis, so turning spam learning on later is a pure
-# settings toggle - nothing to install on day 2, no command for the owner to
-# paste. Whether and how the scanner is USED (milter scoring, ingest re-scoring,
-# the learning loop) is decided in software by MailboxSpamPolicy; idle, it costs
-# a dormant service. The install itself lives in provision_spam_scanner.sh
-# (idempotent; also the repair for config or milter-wiring drift). The platform
-# never removes it - `provision_spam_scanner.sh remove` exists for operators
-# reclaiming a box by hand.
+# provisions gets rspamd as a stateless milter that stamps X-Spam headers the
+# app reads (spam_learning_in_core.md). There is no redis, no ingest
+# re-scan and no learning loop in rspamd: spam learning lives in the
+# application. The install itself lives in provision_spam_scanner.sh, which
+# writes the one configuration a relay writes too (rspamd_stateless.sh) and,
+# on a box provisioned before, removes redis. It is idempotent and also the
+# repair for config or milter-wiring drift. The platform never removes the
+# scanner - `provision_spam_scanner.sh remove` exists for operators reclaiming
+# a box by hand.
 SPAM_SCANNER_SCRIPT="${SCRIPT_DIR}/provision_spam_scanner.sh"
-if [[ ! -f "${SPAM_SCANNER_SCRIPT}" ]]; then
-    echo "WARNING: spam scanner provisioner missing - skipping (expected ${SPAM_SCANNER_SCRIPT})." >&2
+if [[ ! -f "${SPAM_SCANNER_SCRIPT}" || ! -f "${SCRIPT_DIR}/rspamd_stateless.sh" ]]; then
+    echo "WARNING: spam scanner provisioner or its rspamd_stateless.sh missing - skipping (expected both in ${SCRIPT_DIR})." >&2
 else
     echo "spam-scanner: installing (ships with the mail stack)"
     bash "${SPAM_SCANNER_SCRIPT}" install

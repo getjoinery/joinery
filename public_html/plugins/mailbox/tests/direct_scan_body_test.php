@@ -8,56 +8,38 @@
  */
 
 /**
- * What the spam scanner actually sees for a Direct message.
+ * What the spam filter reads of a message with both bodies — a Direct message
+ * among them, which arrives as parts, never a MIME document, and carries no
+ * scanner headers at all, so the classifier's tokens are all it is judged on.
  *
- * A Direct message never became a MIME document, so one is synthesized for the
- * scan. If that synthesis keeps only the plain body when one exists, spam hidden
- * in the HTML — link farms, hidden text, tracking URLs — rides in unseen behind
- * an innocuous plain part. The synthesized message must therefore carry BOTH
- * bodies, exactly as the scanner would receive them off the wire.
+ * Spam rides in the HTML behind an innocuous plain part: link farms and
+ * tracking URLs. The tokenizer reads its words from the plain part when there
+ * is one, so it must still take the URL hosts from the HTML; with no plain part
+ * it reads the HTML's readable text.
  *
+ * @version 2.0 - the classifier's tokenizer (spam_learning_in_core.md); no message is synthesized
  * @version 1.0
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 
-function scan_raw(string $plain, string $html): string {
-	$router = new InboundEmailRouter();
-	$m = new ReflectionMethod('InboundEmailRouter', 'synthesizeRawForScan');
-	$m->setAccessible(true);
-	return $m->invoke($router,
-		array('sender' => 'a@b.test', 'recipient' => 'c@d.test', 'subject' => 'S'), $plain, $html);
-}
+$plain = 'Hello, see you on Tuesday.';
+$html  = '<p>Hello, see you on Tuesday.</p><a href="https://Tracker.Spam-Farm.example/c?id=1">x</a>'
+	. '<span style="display:none">HIDDENHTMLWORD</span>';
 
-$PLAIN_MARK = 'PLAINBODYMARKER';
-$HTML_MARK  = 'HTMLBODYMARKER';
+section('Both bodies count');
+$t = SpamBayes::tokens(array('body_plain' => $plain, 'body_html' => $html));
+check(in_array('w:tuesday', $t, true), 'the plain part\'s words are read');
+check(in_array('url:tracker.spam-farm.example', $t, true), 'the HTML\'s link hosts are read even behind a plain part');
 
-// ---------------------------------------------------------------------------
-section('Both bodies reach the scanner');
-// ---------------------------------------------------------------------------
+section('HTML only');
+$t = SpamBayes::tokens(array('body_plain' => '', 'body_html' => $html));
+check(in_array('w:tuesday', $t, true), 'with no plain part, the HTML\'s readable text is read');
+check(in_array('url:tracker.spam-farm.example', $t, true), 'and its link hosts');
 
-$raw = scan_raw('Hi there ' . $PLAIN_MARK,
-	'<html><body><a href="http://spam.example/' . $HTML_MARK . '">click</a></body></html>');
-check(strpos($raw, $PLAIN_MARK) !== false, 'the plain body is present');
-check(strpos($raw, $HTML_MARK) !== false,
-	'and so is the HTML body — spam hidden in HTML behind a benign plain part is no longer invisible');
-check(stripos($raw, 'multipart/alternative') !== false,
-	'the two are presented as multipart/alternative, as a real client would send them');
-check(strpos($raw, '<a href') !== false,
-	'the HTML keeps its structure rather than being flattened, so the scanner reads its links');
-
-// ---------------------------------------------------------------------------
-section('A single body is presented as itself');
-// ---------------------------------------------------------------------------
-
-$html_only = scan_raw('', '<p>' . $HTML_MARK . '</p>');
-check(strpos($html_only, $HTML_MARK) !== false && stripos($html_only, 'text/html') !== false,
-	'an HTML-only message is scanned as HTML, not stripped to nothing');
-
-$plain_only = scan_raw($PLAIN_MARK, '');
-check(strpos($plain_only, $PLAIN_MARK) !== false && stripos($plain_only, 'text/plain') !== false,
-	'a plain-only message is scanned as plain text');
+section('Plain only');
+$t = SpamBayes::tokens(array('body_plain' => 'Visit http://plain-link.example/x today', 'body_html' => ''));
+check(in_array('url:plain-link.example', $t, true) && in_array('w:visit', $t, true), 'a plain message is read as itself');
 
 harness_finish();

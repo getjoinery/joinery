@@ -20,6 +20,8 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.25 - checkContentSpamScanner checks the milter (wired, answering on 11332) on a
+ *   deployment with no relay or webhook provider; the controller probe is gone
  * @version 1.24 - IPv4 and IPv6: the origin is this server's IPv4 and its public IPv6
  *                (originAddresses); the leak scan, the MX check (AAAA) and SPF look for both,
  *                compared as addresses (IpAddress)
@@ -331,58 +333,41 @@ class InboundEmailHealth {
     }
 
     /**
-     * Verify this server's own spam scanner
-     * (specs/mailbox_spam_filtering_simplification.md D6/D7).
+     * Verify this server's own spam scanner (spam_learning_in_core.md).
      *
-     * The scanner SHIPS with the mail stack — install_email.sh installs it
-     * unconditionally and the platform never removes it — so the rule is
-     * simply: a box hosting its own mail stack must have a working, wired
-     * scanner. There is no "installed" setting; presence is observed.
+     * The scanner is a header-stamping milter that ships with the mail stack:
+     * install_email.sh installs it unconditionally. Only a deployment with no
+     * relay and no webhook provider has one in its mail path, so only that one
+     * is checked: the milter must be in Postfix's chain and answering on 11332.
+     * A relay-fronted or webhook deployment has no local scanner to check — its
+     * mail is scanned before it arrives — and passes silently.
      *
-     *   - No local mail stack (webhook-only, relay-fronted from birth): passes
-     *     silently. Nothing of ours ever ran as root there, so nothing can be
-     *     required; a hand-installed scanner (an operator opting such a box
-     *     into learning) is equally fine.
-     *   - Mail stack present, controller not answering: fails with the install
-     *     command — the box was provisioned before the scanner shipped with
-     *     the stack, or the service is down.
-     *   - Direct-receiving (nothing upstream scans) with the scanner running
-     *     but absent from Postfix's milter chain: fails — mail would flow
-     *     unscored. Re-running the idempotent installer repairs the wiring.
+     * A missing scanner is never a delivery problem: mail flows without the
+     * scanner's headers and the rest of the verdict order still runs.
      *
-     * A missing scanner is never a delivery problem: ingest keeps whatever
-     * verdict arrived with each message and the learn task defers its rows.
-     *
-     * @throws ProvisioningCheckFailed when the scanner is missing or unwired.
+     * @throws ProvisioningCheckFailed when the milter is unwired or not answering.
      */
     public static function checkContentSpamScanner() {
         require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
 
-        if (!MailboxSpamPolicy::mailStackPresent()) {
+        if (!MailboxSpamPolicy::mailStackPresent() || MailboxSpamPolicy::upstreamScanner() !== 'none') {
             return;
         }
 
-        if (!MailboxSpamPolicy::controllerReachable()) {
-            $url = MailboxSpamPolicy::controllerUrl();
+        if (!MailboxSpamPolicy::milterWired()) {
             throw new ProvisioningCheckFailed(
-                'The spam scanner that ships with the mail stack is not answering ('
-                . $url . '). Mail is unaffected — each message keeps whatever verdict '
-                . 'arrived with it — but nothing is scored here and user spam/ham '
-                . 'corrections are not being learned. Install or repair it with: '
+                'Postfix is not handing mail to the spam scanner (' . MailboxSpamPolicy::MILTER_ENTRY
+                . ' is missing from smtpd_milters), so inbound mail carries no scanner verdict. '
+                . 'Re-run the idempotent installer to repair the wiring: '
                 . MailboxSpamPolicy::installCommand()
             );
         }
 
-        // Direct-receiving only: the scanner must actually be in Postfix's
-        // milter chain. A relay-fronted or webhook box reaches it over HTTP at
-        // ingest and needs no wiring — and a box whose scanner went in while
-        // Postfix was decommissioned, then restored its own listener, is
-        // exactly where this drift shows up.
-        if (MailboxSpamPolicy::upstreamScanner() === 'none' && !MailboxSpamPolicy::milterWired()) {
+        if (!MailboxSpamPolicy::milterAnswering()) {
             throw new ProvisioningCheckFailed(
-                'The spam scanner is running but Postfix is not handing mail to it ('
-                . MailboxSpamPolicy::MILTER_ENTRY . ' is missing from smtpd_milters), so inbound '
-                . 'mail is never scored. Re-run the idempotent installer to repair the wiring: '
+                'The spam scanner that ships with the mail stack is not answering on port '
+                . MailboxSpamPolicy::MILTER_PORT . '. Mail is unaffected (Postfix accepts it unscanned), '
+                . 'but it carries no scanner verdict. Install or repair it with: '
                 . MailboxSpamPolicy::installCommand()
             );
         }

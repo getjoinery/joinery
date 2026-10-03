@@ -245,8 +245,8 @@ put_manifest() {
 # <site>.conf (install.sh rewrites it) and every other enabled file on the
 # site's port (swap disables them). rollback puts back exactly this.
 save_host_vhosts() {
-    local d="${WORK}/host_vhosts" b
-    rm -rf "$d"; mkdir -p "${d}/other"
+    local d="${WORK:?}/host_vhosts" b
+    rm -rf "${d:?}"; mkdir -p "${d}/other"
     [ -d /etc/apache2/sites-available ] || return 0
     if [ -f "/etc/apache2/sites-available/${SITE}.conf" ]; then
         cp -p "/etc/apache2/sites-available/${SITE}.conf" "${d}/own.conf"
@@ -707,7 +707,7 @@ if [ "$STAGE" = "finish" ]; then
     docker volume rm "$BACKUP_VOL" > /dev/null
     docker rmi "$KEEP_IMAGE" > /dev/null 2>&1 || true
     rm -f "${WORK}/${DB}.dump" "${WORK}/run_args" "${WORK}/roles.sql" "${WORK}/RELEASE_MANIFEST" "${WORK}/RELEASE_MANIFEST.sig"
-    rm -rf "${WORK}/host_vhosts"
+    rm -rf "${WORK:?}/host_vhosts"
     state_set stage finished
     say "Finished: ${BACKUP_VOL}, ${KEEP_IMAGE} and the dump are gone. ${SITE} runs PostgreSQL ${TO}."
 fi

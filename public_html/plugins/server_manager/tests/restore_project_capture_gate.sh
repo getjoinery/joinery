@@ -22,7 +22,7 @@ set -uo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)/maintenance_scripts/sysadmin_tools/restore_project.sh"
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "${WORK:?}"' EXIT
 passed=0; failed=0
 chk() {
     if [ "$2" = "$3" ]; then

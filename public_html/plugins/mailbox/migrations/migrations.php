@@ -1238,4 +1238,40 @@ return [
 			return true;
 		},
 	],
+	[
+		// Spam learning moves into core (spam_learning_in_core.md § Moving
+		// to the new corpus). The redis corpus goes with redis; the corrections it
+		// was taught from are on the rows (iem_spam_corrected_time). Each becomes
+		// evidence (iem_train_verdict), and every learned marker is cleared, so
+		// the learner re-teaches all of them into ibt_inbound_bayes_tokens: clear
+		// rows on the next cron pass, sealed rows in their owner's window.
+		// IMAP-polled rows are never taught. The rspamd controller setting has
+		// no reader left and goes too.
+		'id' => 'iem_019_spam_reteach_into_core',
+		'version' => '1.126.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$q = $db->prepare(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'iem_inbound_email_messages'
+				   AND column_name IN ('iem_train_verdict', 'iem_learned_tokenizer', 'iem_spam_corrected_time')");
+			$q->execute();
+			if ((int)$q->fetchColumn() < 3) {
+				echo "iem_019: the spam learning columns are not on iem_inbound_email_messages yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+			$evidence = $db->exec(
+				"UPDATE iem_inbound_email_messages SET iem_train_verdict = iem_spam_verdict
+				  WHERE iem_spam_corrected_time IS NOT NULL AND iem_spam_verdict IN ('spam', 'ham')
+				    AND iem_direction = 'inbound' AND iem_iia_inbound_imap_account_id IS NULL
+				    AND iem_train_verdict IS NULL");
+			$cleared = $db->exec(
+				"UPDATE iem_inbound_email_messages SET iem_learned_verdict = NULL, iem_learned_tokenizer = NULL
+				  WHERE iem_learned_verdict IS NOT NULL");
+			$db->exec("DELETE FROM stg_settings WHERE stg_name = 'mailbox_rspamd_controller_url'");
+			echo "iem_019: " . (int)$evidence . " correction(s) recorded as evidence; " . (int)$cleared
+				. " learned marker(s) cleared for re-teaching into the in-core corpus.\n";
+			return true;
+		},
+	],
 ];

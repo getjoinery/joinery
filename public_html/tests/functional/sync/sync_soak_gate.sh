@@ -80,7 +80,7 @@ cleanup() {
 	for pid in $DAEMONS; do
 		kill -9 "$pid" 2>/dev/null || true
 	done
-	rm -rf "$BASE"
+	rm -rf "${BASE:?}"
 }
 trap cleanup EXIT
 

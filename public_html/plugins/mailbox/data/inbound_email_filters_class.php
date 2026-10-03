@@ -37,6 +37,7 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.7 - a rule that sets the spam verdict records iem_spam_reason = rule
  * @version 1.6 - device-run rules: deviceRule(), applyDeviceMatches() (a rule of the message's own scope switched
  *   off mid-drain is skipped, not refused), requestApplyExisting(), ief_device_backlog_requested_time (each owner's
  *   place in InboundEmailFilterDeviceProgress)
@@ -600,14 +601,15 @@ class InboundEmailFilter extends SystemBase {
 		$done = array();
 
 		// 1/2. Spam disposition — never_spam beats mark_spam.
+		// The rule is the deciding reason (iem_spam_reason), which the timeline shows.
 		if (!empty($a['never_spam'])) {
-			$db->prepare('UPDATE iem_inbound_email_messages SET iem_spam_verdict = ?
-				WHERE iem_inbound_email_message_id = ?')
+			$db->prepare("UPDATE iem_inbound_email_messages SET iem_spam_verdict = ?, iem_spam_reason = 'rule'
+				WHERE iem_inbound_email_message_id = ?")
 				->execute(array(InboundEmailMessage::SPAM_VERDICT_HAM, $mid));
 			$done[] = 'never_spam';
 		} elseif (!empty($a['mark_spam'])) {
-			$db->prepare('UPDATE iem_inbound_email_messages SET iem_spam_verdict = ?
-				WHERE iem_inbound_email_message_id = ?')
+			$db->prepare("UPDATE iem_inbound_email_messages SET iem_spam_verdict = ?, iem_spam_reason = 'rule'
+				WHERE iem_inbound_email_message_id = ?")
 				->execute(array(InboundEmailMessage::SPAM_VERDICT_SPAM, $mid));
 			$done[] = 'mark_spam';
 		}

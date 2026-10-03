@@ -41,7 +41,7 @@ chk() {
 }
 
 W=$(mktemp -d /tmp/jy_files_stream_gate_XXXXXX)
-trap 'chmod -R u+rwX "$W" 2>/dev/null; rm -rf "$W"' EXIT
+trap 'chmod -R u+rwX "$W" 2>/dev/null; rm -rf "${W:?}"' EXIT
 mkdir -p "$W/site/sub" "$W/file_mode" "$W/stream_mode" "$W/x"
 
 head -c 32 /dev/urandom | base64 > "$W/key"

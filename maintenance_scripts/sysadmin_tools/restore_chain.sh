@@ -406,7 +406,7 @@ mkdir -p "$PARENT"
 # dumpdir listing causes tar to delete.
 KEEP_TMP=$(mktemp -d)
 KEPT_FILES=()
-cleanup_kept() { rm -rf "$KEEP_TMP"; }
+cleanup_kept() { rm -rf "${KEEP_TMP:?}"; }
 trap cleanup_kept EXIT
 
 for rel in config/Globalvars_site.php config/backup_site_key; do
@@ -502,7 +502,7 @@ print_success "Files restored to ${PROJECT_DIR}"
 # than merged for the same reason — a merge would leave the archive's stale
 # entries sitting beside the live ones.
 if [ "$LEDGER_KEPT" = true ]; then
-    ${SUDO} rm -rf "${PROJECT_DIR}/${LEDGER_REL}"
+    ${SUDO} rm -rf "${PROJECT_DIR:?}/${LEDGER_REL:?}"
     ${SUDO} mkdir -p "${PROJECT_DIR}/config"
     if ${SUDO} cp -a "${KEEP_TMP}/${LEDGER_REL}" "${PROJECT_DIR}/${LEDGER_REL}"; then
         print_info "Put this machine's own ${LEDGER_REL} back"
@@ -630,7 +630,7 @@ fi
 META_TMP=""
 if [ -n "$META_ARCHIVE" ]; then
     META_TMP=$(mktemp -d)
-    cleanup_kept() { rm -rf "$KEEP_TMP" "$META_TMP"; }
+    cleanup_kept() { rm -rf "${KEEP_TMP:?}" "${META_TMP:?}"; }
     ( set -o pipefail
       openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "$META_ARCHIVE" 2>/dev/null \
         | tar -xzf - -C "$META_TMP" ) 3< "$KEY_FILE" || true

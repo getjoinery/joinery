@@ -837,6 +837,22 @@ owner. Where a pointer will do, store the pointer: an id resolved through the
 sealed reader at display time cannot leak and cannot go stale. See
 `specs/implemented/sealed_content_egress.md`.
 
+**The spam filter is the one deliberate exception.** It must decide at ingest,
+with no window open, so a few facts derived from sealed mail stay clear on every
+mailbox. None is content in a form that can be read back; each answers only a
+question asked with a guess:
+
+| What | What someone holding the database (and the keys, which are in it) can learn |
+|---|---|
+| `iem_sender_fingerprint`, `isr_inbound_sender_records` | For a guessed address: did it write to this mailbox, how often, when; has the mailbox written to it; how the owner taught its mail. The envelope sender is already clear in `iel_inbound_email_logs`; this adds the header From. |
+| `imc_sender_fingerprint` | For a guessed address: is it one of this mailbox's contacts. |
+| `iem_spam_reason`, `iem_spam_meta` | How a message relates to its owner (a reply to their mail, a contact, a first contact), with no address. |
+| `ibt_inbound_bayes_tokens` | For a guessed word, word pair or URL host: how often it appeared in mail taught spam or ham across the deployment, sealed mail included. Aggregate only, with no link to any message, mailbox or time. It is in backups and site copies. |
+
+The corpus is written only as integer token hashes, never a string of content, so the
+egress guard holds for the process that teaches it. See the mailbox plugin's
+[Spam filtering](../plugins/mailbox/docs/overview.md#spam-filtering).
+
 ## The hot-turn rule
 
 Reading protected content correctly still breaks the promise the moment the

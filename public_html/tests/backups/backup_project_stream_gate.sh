@@ -58,7 +58,7 @@ PROJ="jyps_$$"
 W=$(mktemp -d /tmp/jy_project_stream_gate_XXXXXX)
 cleanup() {
     psql -U postgres -h localhost -c "DROP DATABASE IF EXISTS \"$PROJ\"" >/dev/null 2>&1
-    chmod -R u+rwX "$W" 2>/dev/null; rm -rf "$W"
+    chmod -R u+rwX "$W" 2>/dev/null; rm -rf "${W:?}"
 }
 trap cleanup EXIT
 mkdir -p "$W/site/public_html/sub" "$W/site/config" "$W/site/vendor" "$W/site/backups" "$W/file" "$W/stream" "$W/x"

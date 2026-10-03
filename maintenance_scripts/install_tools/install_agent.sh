@@ -618,7 +618,7 @@ EOF
     say "installing joinery-agent v${DIST_VERSION} (was ${CURRENT:-none}) from shipped artifact"
 
     STAGE="$(mktemp -d)"
-    trap 'rm -rf "$STAGE"' EXIT
+    trap 'rm -rf "${STAGE:?}"' EXIT
 
     if ! gunzip -c "${DIST_DIR}/${DIST_FILE}" > "${STAGE}/joinery-agent" 2>/dev/null; then
         say "WARNING - could not decompress ${DIST_FILE}; leaving current agent in place"

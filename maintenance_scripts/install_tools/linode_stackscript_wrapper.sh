@@ -98,7 +98,7 @@ run_install() {
     apt-get update -qq
     apt-get install -y -qq curl ca-certificates tar
 
-    rm -rf "$WORKDIR"
+    rm -rf "${WORKDIR:?}"
     mkdir -p "$WORKDIR"
 
     echo "Fetching the current release..."

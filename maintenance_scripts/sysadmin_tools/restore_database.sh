@@ -139,7 +139,7 @@ KEY_TMP=""
 cleanup() {
     [ -n "$GZ_TMP" ]  && rm -f "$GZ_TMP"
     [ -n "$SQL_TMP" ] && rm -f "$SQL_TMP"
-    [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
+    [ -n "$STAGE_DIR" ] && rm -rf "${STAGE_DIR:?}"
     # An unsealed archive key must not outlive the restore that needed it.
     [ -n "$KEY_TMP" ] && rm -f "$KEY_TMP"
 }

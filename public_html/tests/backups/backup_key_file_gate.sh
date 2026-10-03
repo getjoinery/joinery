@@ -62,7 +62,7 @@ cleanup() {
     cd /
     psql -U postgres -c "DROP DATABASE IF EXISTS $SRC;" >/dev/null 2>&1
     psql -U postgres -c "DROP DATABASE IF EXISTS $DST;" >/dev/null 2>&1
-    rm -rf "$WORK"
+    rm -rf "${WORK:?}"
 }
 trap cleanup EXIT
 

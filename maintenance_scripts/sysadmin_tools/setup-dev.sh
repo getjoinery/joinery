@@ -40,7 +40,7 @@ if [ "$MODE" = "setup" ]; then
     echo "  Created backup at ${WEB_DIR}.backup"
     
     # Remove the deployed directory
-    sudo rm -rf "$WEB_DIR"
+    sudo rm -rf "${WEB_DIR:?}"
     
     # Clone fresh from repository
     git clone git@github.com:getjoinery/joinery.git "$WEB_DIR"

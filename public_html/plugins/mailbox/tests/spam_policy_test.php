@@ -6,15 +6,12 @@
  * needs: []
  */
 /**
- * MailboxSpamPolicy — the derived spam posture
- * (specs/mailbox_spam_filtering_simplification.md D2/D3/D4).
+ * MailboxSpamPolicy — the derived spam posture (spam_learning_in_core.md).
  *
  * A site owner answers one question (file spam?) plus one optional capability
- * (learn from corrections?). The scanner itself ships with the mail stack and
- * is never derived — what IS derived is how it is used: whether learning
- * resolves on (clamped by filing), what scanned a message upstream, whether
- * arriving mail is re-scored here, and whether that local answer replaces the
- * upstream one or merely adds to it. This test walks the full matrix:
+ * (learn from corrections?). Learning lives in the application, so the only
+ * other thing derived is what scanned a message before it reached this box.
+ * This test walks the matrix:
  *
  *   topology  colocated / self-hosted relay / hosted fleet slot
  *   provider  postfix / webhook (mailgun) / empty string (resolves to postfix)
@@ -26,19 +23,12 @@
  * and a hand-built fact array would step straight over the class of bug where
  * an unloaded collection silently reports nothing.
  *
- * The two cells that matter most are both on a fronted deployment. With
- * learning OFF, mail is still re-scored here — a stateless upstream's header
- * may never have been stamped, which looks exactly like a clean verdict — but
- * that answer can only ADD spam. With learning ON it REPLACES the upstream
- * verdict, the only arrangement in which "not spam" can subtract. Colocated
- * mail is never re-scored in any cell: its own milter already did this scan.
- *
- * scanAtIngest() is deliberately pure (settings + topology), never the live
- * scanner probe — that is scannerAvailable(), which the router ANDs in — so
- * this matrix asserts the same on a box with no rspamd running.
+ * Learning resolves the same way on every topology — webhook-only included —
+ * and is clamped off by filing.
  *
  * Run: php tests/run.php db --filter=spam_policy
  *
+ * @version 2.0 - learning in core: the re-scan and controller posture are gone
  * @version 1.2
  */
 
@@ -59,65 +49,28 @@ class SpamPolicyTest {
 	 * the same rule the implementation uses, which would only prove the code
 	 * agrees with itself.
 	 */
-	private function assertCell(string $label, bool $filing, bool $learning, array $expect): void {
+	private function assertCell(string $label, bool $filing, bool $learning, bool $expect_learning): void {
 		harness_set_setting_mem('mailbox_spam_filtering_enabled', $filing ? '1' : '0');
 		harness_set_setting_mem('mailbox_spam_learning_enabled', $learning ? '1' : '0');
 
 		check(MailboxSpamPolicy::filingEnabled() === $filing,
 			$label . ': filing is ' . ($filing ? 'on' : 'off'));
-		check(MailboxSpamPolicy::learningEnabled() === $expect['learning'],
-			$label . ': learning resolves ' . ($expect['learning'] ? 'on' : 'off'),
+		check(MailboxSpamPolicy::learningEnabled() === $expect_learning,
+			$label . ': learning resolves ' . ($expect_learning ? 'on' : 'off'),
 			'got ' . var_export(MailboxSpamPolicy::learningEnabled(), true));
-		check(MailboxSpamPolicy::scanAtIngest() === $expect['scan'],
-			$label . ': ingest re-scan ' . ($expect['scan'] ? 'on' : 'off'),
-			'got ' . var_export(MailboxSpamPolicy::scanAtIngest(), true));
-		check(MailboxSpamPolicy::localVerdictReplaces() === $expect['replaces'],
-			$label . ': local verdict ' . ($expect['replaces'] ? 'replaces' : 'only adds'),
-			'got ' . var_export(MailboxSpamPolicy::localVerdictReplaces(), true));
 	}
 
 	/**
-	 * The four (filing, learning) cells for a deployment where NOTHING upstream
-	 * scans — this box is the MX and its own milter is the only scanner.
+	 * The four (filing, learning) cells. They are the same on every topology:
+	 * the corpus is in the application, so nothing about where mail is scanned
+	 * makes learning more or less available.
 	 */
-	private function walkColocated(string $prefix): void {
-		// No ingest re-scan in any colocated cell: the box's own milter already
-		// scored the mail through the same rspamd and the same corpus.
-		$this->assertCell($prefix . ' filing=on learning=off', true, false,
-			array('learning' => false, 'scan' => false, 'replaces' => false));
-		// Learning adds the corpus but not a second scan of the same mail. The
-		// milter's verdict IS the local one, so there is nothing to replace.
-		$this->assertCell($prefix . ' filing=on learning=on', true, true,
-			array('learning' => true, 'scan' => false, 'replaces' => true));
-		// Filing off: nothing is filed, so nothing needs scanning or learning.
-		$this->assertCell($prefix . ' filing=off learning=off', false, false,
-			array('learning' => false, 'scan' => false, 'replaces' => false));
+	private function walkCells(string $prefix): void {
+		$this->assertCell($prefix . ' filing=on learning=off', true, false, false);
+		$this->assertCell($prefix . ' filing=on learning=on', true, true, true);
+		$this->assertCell($prefix . ' filing=off learning=off', false, false, false);
 		// Learning is CLAMPED by filing — a stored preference, inert.
-		$this->assertCell($prefix . ' filing=off learning=on (clamped)', false, true,
-			array('learning' => false, 'scan' => false, 'replaces' => false));
-	}
-
-	/**
-	 * The four cells for a deployment where something upstream (a relay or a
-	 * webhook provider) already scanned every message.
-	 */
-	private function walkFronted(string $prefix): void {
-		// Filing on, learning off: mail IS re-scored here. The upstream scanner
-		// is stateless and a header it never stamped is indistinguishable from a
-		// clean verdict, so the only way to know is to look. Without a corpus
-		// that local answer merely ADDS spam — it never overrules the upstream.
-		$this->assertCell($prefix . ' filing=on learning=off', true, false,
-			array('learning' => false, 'scan' => true, 'replaces' => false));
-		// Learning on: the corpus lives nowhere else, so the local answer now
-		// REPLACES the upstream one — the only arrangement in which a user's
-		// "not spam" correction can subtract.
-		$this->assertCell($prefix . ' filing=on learning=on', true, true,
-			array('learning' => true, 'scan' => true, 'replaces' => true));
-		// Filing off short-circuits the whole feature, scanning included.
-		$this->assertCell($prefix . ' filing=off learning=off', false, false,
-			array('learning' => false, 'scan' => false, 'replaces' => false));
-		$this->assertCell($prefix . ' filing=off learning=on (clamped)', false, true,
-			array('learning' => false, 'scan' => false, 'replaces' => false));
+		$this->assertCell($prefix . ' filing=off learning=on (clamped)', false, true, false);
 	}
 
 	/** Create a relay row so topology() resolves through a real collection load. */
@@ -163,15 +116,11 @@ class SpamPolicyTest {
 			return;
 		}
 
-		// Endpoint resolution is not a choice; assert the default and move on.
-		section('controller endpoint');
-		harness_set_setting_mem('mailbox_rspamd_controller_url', '');
-		check(MailboxSpamPolicy::controllerUrl() === MailboxSpamPolicy::DEFAULT_CONTROLLER_URL,
-			'empty setting falls back to the loopback controller',
-			'got ' . MailboxSpamPolicy::controllerUrl());
-		harness_set_setting_mem('mailbox_rspamd_controller_url', 'http://127.0.0.1:11334/');
-		check(MailboxSpamPolicy::controllerUrl() === 'http://127.0.0.1:11334',
-			'a trailing slash is trimmed so callers can append a path');
+		section('no scanner controller is consulted');
+		foreach (array('controllerUrl', 'controllerReachable', 'scannerAvailable', 'scanAtIngest',
+				'localVerdictReplaces', 'overrideScannerAvailable') as $gone) {
+			check(!method_exists('MailboxSpamPolicy', $gone), 'MailboxSpamPolicy::' . $gone . ' is gone');
+		}
 
 		// --- Colocated: this box IS the MX -----------------------------------
 		section('colocated Postfix (nothing upstream scans)');
@@ -180,7 +129,7 @@ class SpamPolicyTest {
 		check(MailboxSpamPolicy::upstreamScanner() === 'none',
 			'colocated + postfix → nothing upstream scans',
 			'got ' . MailboxSpamPolicy::upstreamScanner());
-		$this->walkColocated('colocated/postfix');
+		$this->walkCells('colocated/postfix');
 
 		// An empty or misspelled provider must not flip the derivation: the
 		// registry resolves both to Postfix, and the policy reads the RESOLVED
@@ -190,13 +139,13 @@ class SpamPolicyTest {
 		check(MailboxSpamPolicy::upstreamScanner() === 'none',
 			'empty provider resolves to postfix → nothing upstream scans',
 			'got ' . MailboxSpamPolicy::upstreamScanner());
-		$this->walkColocated('colocated/empty-provider');
+		$this->walkCells('colocated/empty-provider');
 
 		harness_set_setting_mem('mailbox_provider', 'not-a-real-provider');
 		check(MailboxSpamPolicy::upstreamScanner() === 'none',
 			'unknown provider resolves to postfix → nothing upstream scans',
 			'got ' . MailboxSpamPolicy::upstreamScanner());
-		$this->walkColocated('colocated/unknown-provider');
+		$this->walkCells('colocated/unknown-provider');
 
 		// --- Webhook provider, no relay --------------------------------------
 		section('webhook provider (provider scans upstream)');
@@ -204,7 +153,7 @@ class SpamPolicyTest {
 		check(MailboxSpamPolicy::upstreamScanner() === 'provider',
 			'webhook provider → the provider scanned it',
 			'got ' . MailboxSpamPolicy::upstreamScanner());
-		$this->walkFronted('webhook/mailgun');
+		$this->walkCells('webhook/mailgun');
 
 		// --- Self-hosted relay ------------------------------------------------
 		section('self-hosted relay (relay scans upstream)');
@@ -213,7 +162,7 @@ class SpamPolicyTest {
 		check(MailboxSpamPolicy::upstreamScanner() === 'relay',
 			'self-hosted relay → the relay scanned it',
 			'got ' . MailboxSpamPolicy::upstreamScanner());
-		$this->walkFronted('relay/self-hosted');
+		$this->walkCells('relay/self-hosted');
 
 		// A webhook provider in front of a relay row: the provider is the thing
 		// actually delivering mail, so it wins the description.
@@ -221,7 +170,7 @@ class SpamPolicyTest {
 		check(MailboxSpamPolicy::upstreamScanner() === 'provider',
 			'webhook provider outranks a relay row in the description',
 			'got ' . MailboxSpamPolicy::upstreamScanner());
-		$this->walkFronted('relay+webhook');
+		$this->walkCells('relay+webhook');
 		$this->dropRelays();
 
 		// --- Hosted fleet slot -------------------------------------------------
@@ -231,7 +180,7 @@ class SpamPolicyTest {
 		check(MailboxSpamPolicy::upstreamScanner() === 'relay',
 			'fleet slot behaves exactly like a self-hosted relay here',
 			'got ' . MailboxSpamPolicy::upstreamScanner());
-		$this->walkFronted('fleet');
+		$this->walkCells('fleet');
 		$this->dropRelays();
 
 		// --- Truthiness of the stored rows -------------------------------------

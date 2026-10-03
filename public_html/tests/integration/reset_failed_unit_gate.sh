@@ -21,7 +21,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SCRIPT="$ROOT/maintenance_scripts/sysadmin_tools/reset_failed_unit.sh"
 JOURNAL="$ROOT/maintenance_scripts/sysadmin_tools/unit_journal.sh"
 T=$(mktemp -d)
-trap 'rm -rf "$T"' EXIT
+trap 'rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 
 chk() {

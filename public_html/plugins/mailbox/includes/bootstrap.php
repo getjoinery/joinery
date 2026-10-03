@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.26 - registers the mailbox_spam_backfill deferred-work consumer (SpamSenderBackfill)
  * @version 1.25 - registers the mailbox_contact_level deferred-work consumer (MailboxContactConvergence)
  * @version 1.24 - registers the mailbox_spam_learn deferred-work consumer (SpamLearning)
  * @version 1.23 - the mail rotation re-makes the relay pins (mailbox-reseal.js)
@@ -405,10 +406,10 @@ VaultDeferredWork::register(
 	}
 );
 
-// Spam corrections on mail sealed to the owner's vault are taught to the local
-// scanner's Bayes corpus in their window (SpamLearning); the LearnSpamFeedback
-// cron pass teaches everything else. After parsing and row repair (a pending
-// row is never taught), and cheap: corrections are a handful of rows.
+// Spam corrections on mail sealed to the owner's vault are taught to the spam
+// corpus in their window (SpamLearning); clear rows are taught in the request.
+// After parsing and row repair (a pending row is never taught), and cheap:
+// corrections are a handful of rows.
 VaultDeferredWork::register(
 	'mailbox_spam_learn',
 	function (int $user_id): bool {
@@ -416,6 +417,20 @@ VaultDeferredWork::register(
 	},
 	function (int $user_id, VaultKey $key, float $deadline): int {
 		return SpamLearning::drainForUser($user_id, $deadline);
+	}
+);
+
+// The spam filter's sender facts for sealed mail and contacts stored before
+// they existed (SpamSenderBackfill): the fingerprint of each sender, and the
+// arrivals and composed sends the sender records count. Once per row, and
+// nothing written but fingerprints and counters.
+VaultDeferredWork::register(
+	'mailbox_spam_backfill',
+	function (int $user_id): bool {
+		return SpamSenderBackfill::hasWindowWork($user_id);
+	},
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return SpamSenderBackfill::drainForUser($user_id, $deadline);
 	}
 );
 

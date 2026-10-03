@@ -3,6 +3,7 @@
  * InboundEmailLog - Records all inbound email transactions.
  * Also used for rate limiting by counting recent entries.
  *
+ * @version 1.8 - index on iel_create_time (rate limits, the spam filter's burst token)
  * @version 1.7 - iel_iem_inbound_email_message_id links a transaction to the message row it
  *   stored, so the message timeline can show how it was routed
  *   (specs/mailbox_message_timeline.md A1)
@@ -83,6 +84,9 @@ class InboundEmailLog extends SystemBase {
 	 */
 	public static $index_specifications = array(
 		array('columns' => array('LOWER(iel_to_address)')),
+		// Recent lines by time: the forwarding rate limits and the spam filter's
+		// `burst` meta token both read the last few minutes only.
+		array('columns' => array('iel_create_time')),
 	);
 
 	/**

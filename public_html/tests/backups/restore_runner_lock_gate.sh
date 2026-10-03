@@ -32,7 +32,7 @@ fi
 
 WORK="$(mktemp -d)"
 HOLDER=""
-trap '[ -n "$HOLDER" ] && kill "$HOLDER" 2>/dev/null; rm -rf "$WORK"' EXIT
+trap '[ -n "$HOLDER" ] && kill "$HOLDER" 2>/dev/null; rm -rf "${WORK:?}"' EXIT
 SITE="rlock_$$"
 PROJECT="$WORK/$SITE"
 mkdir -p "$PROJECT"

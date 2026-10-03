@@ -47,29 +47,22 @@
  * inline-in-DB. IMAP ('remote') mail is untouched — its parts stay on the server and
  * are fetched on demand. See specs/inbound_raw_message_storage.md.
  *
- * Spam disposition (specs/inbound_email_spam_filtering.md): classifySpam() turns the
- * already-resolved auth verdicts into a 'ham'/'spam' verdict (primary rule: DMARC
- * fail; fallback for no-DMARC providers: SPF and DKIM both fail). It is recorded on
- * the stored row, and a judged-spam message is never relayed — the forward is
- * suppressed (logged spam_held) while forward_and_store still keeps a reviewable copy.
+ * Spam disposition (spam_learning_in_core.md): classifySpam() is the one
+ * decision, an ordered list of steps where the first that answers wins — the auth
+ * rule (DMARC fail; SPF and DKIM both failing where there is no DMARC), an rspamd
+ * score at its own reject level, the user's relationship with the sender (a reply
+ * to their mail, a contact, someone they write to, a sender they rescued), the
+ * sender's teaching history, the deployment's Bayes corpus (SpamBayes), and last
+ * the scanner signal that arrived with the message. spamDecision() gathers those
+ * facts while the plaintext is in hand and records the deciding step on the row
+ * (iem_spam_reason) beside the sender fingerprint and the meta tokens. A judged-spam
+ * message is never relayed — the forward is suppressed (logged spam_held) while
+ * forward_and_store still keeps a reviewable copy.
  *
- * Content spam (specs/mailbox_spam_filtering_simplification.md): a second verdict
- * source is OR'd into classifySpam() — a content scanner signal resolved per ingest
- * path by resolveContentSpam(). An arriving verdict is ALWAYS read, whatever this
- * box runs: the X-Spam header readSpamHeader() parses (stamped by the relay's rspamd
- * on a relay-fronted deployment, by the local milter on a colocated one) or a webhook
- * provider's own spam flag passed in as $provider_spam. On top of that, any deployment
- * with a scanner running re-scores relay- and webhook-sourced mail through its own
- * rspamd at ingest (scanContentSpam) — an upstream scanner is stateless and its header
- * may never have been stamped at all, which is indistinguishable from a clean verdict
- * until something here looks. That local verdict is OR'd into the upstream one, or
- * REPLACES it where the deployment learns from its users' corrections and so holds a
- * corpus the upstream cannot have; only replacement can rescue a false positive.
- * Colocated mail is not re-scored: its milter already did exactly this scan. A scanner
- * that is absent or down costs nothing — the upstream verdict stands and the message
- * stores normally. The scanner's numeric score is
- * recorded on the row (iem_spam_score) for transparency only — never read for
- * disposition. MailboxSpamPolicy owns every one of these decisions.
+ * The scanner signal (resolveContentSpam) is READ, never computed: the X-Spam
+ * headers a relay's or this box's rspamd stamped (readSpamHeader), or a webhook
+ * provider's own flag passed in as $provider_spam, tagged with who produced the
+ * score so scales never mix. Nothing here talks to a scanner.
  *
  * Inbound filters (specs/implemented/inbound_email_filters.md): after a locally-received
  * message is persisted and its spam verdict set, storeMessage runs every in-scope operator
@@ -90,6 +83,9 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.47 - the verdict order of spam_learning_in_core.md: classifySpam() decides from
+ *   facts spamDecision() gathers (relationships, sender record, the Bayes corpus); the
+ *   ingest re-scan through the rspamd controller and the contact elevation are gone
  * @version 1.46 - forwardStoredMessage() takes the raw an end-to-end message's device opened
  * @version 1.45 - storeRelayPending() takes a Fortress arrival the relay sealed to the
  *                browser-held key: the row keeps the relay's DEK as its own key
@@ -215,7 +211,7 @@ class InboundEmailRouter {
 	// Content-spam header contract (specs/inbound_email_content_spam_filtering.md).
 	// rspamd's milter_headers module stamps these on the Postfix path and
 	// readSpamHeader() parses the same names — this is the single place the name is
-	// pinned. The rspamd config in provisioning/provision_spam_scanner.sh stamps the
+	// pinned. The rspamd config in provisioning/rspamd_stateless.sh stamps the
 	// IDENTICAL names; keep the two in step. SPAM_FLAG_HEADER is the binary flag ('X-Spam: Yes').
 	// The numeric score is read from SPAM_SCORE_HEADER when present (SpamAssassin-style
 	// 'X-Spam-Score'), else from the 'score=' field of SPAM_STATUS_HEADER (rspamd's
@@ -224,12 +220,15 @@ class InboundEmailRouter {
 	const SPAM_SCORE_HEADER  = 'X-Spam-Score';
 	const SPAM_STATUS_HEADER = 'X-Spam-Status';
 
-	// Ingest-time scan budget. Deliberately tight: the scan is an improvement on
-	// a verdict already in hand, never a precondition for storing the message, so
-	// a slow scanner must cost a few seconds and then be abandoned. The scanned
-	// paths are the spool cron and webhook POSTs — never a live SMTP session.
-	const SCAN_CONNECT_TIMEOUT = 3;
-	const SCAN_TIMEOUT         = 10;
+	// rspamd's own reject level. A score this high is spam whatever else is known
+	// about the sender (classifySpam step 2) — only for a score rspamd produced,
+	// never a webhook provider's scale.
+	const SCANNER_FLOOR = 15.0;
+
+	// The burst meta token: one envelope sender reaching this many of the
+	// deployment's mailboxes within BURST_WINDOW_MINUTES.
+	const BURST_ALIASES = 5;
+	const BURST_WINDOW_MINUTES = 10;
 
 	private $settings;
 
@@ -295,10 +294,10 @@ class InboundEmailRouter {
 		// message's Authentication-Results header. No verdict => 'unverified'.
 		$auth = $this->readAuthResults($raw_email, $provider_auth);
 
-		// Content-spam signal, resolved per ingest path (the X-Spam header a relay or
-		// local milter stamped; the provider's own spam flag on webhook paths). No
-		// scanner verdict on the message => signal 'none'. OR'd into the verdict by
-		// classifySpam(); the score is recorded for transparency only.
+		// The scanner signal that arrived with the message (the X-Spam header a
+		// relay or local milter stamped; the provider's own spam flag on webhook
+		// paths). No scanner verdict on the message => signal 'none'. One input to
+		// classifySpam(), which owns the verdict.
 		$content_spam = $this->resolveContentSpam($raw_email, $provider_spam);
 
 		// Deliverability report? (specs/deliverability_report_ingest.md) Runs
@@ -336,15 +335,23 @@ class InboundEmailRouter {
 			}
 		}
 
-		// The address book elevates past the CONTENT score, never past the auth
-		// rule — see elevateForContact(). Applied here, before the forward
-		// decision below, so a contact's mail is not held from forwarding either.
-		$content_spam = $this->elevateForContact($alias, $this->senderDisplayString($parsed), $content_spam);
+		// The verdict, decided once for the message: the forward decision below and
+		// the stored row both read it, so a contact's mail is not held from
+		// forwarding either.
+		$content_spam['decision'] = $this->spamDecision($alias, $auth, $content_spam, $parsed,
+			$this->extractBodies($raw_email, $parsed));
 
 		// 4. Delivery mode (auth verdicts were resolved above as $auth).
 		$mode = $alias->get('iea_delivery_mode') ?: InboundEmailAlias::MODE_FORWARD;
 		$forwards = ($mode === InboundEmailAlias::MODE_FORWARD || $mode === InboundEmailAlias::MODE_FORWARD_AND_STORE);
 		$stores = ($mode === InboundEmailAlias::MODE_STORE || $mode === InboundEmailAlias::MODE_FORWARD_AND_STORE);
+
+		// A mailbox that only forwards stores no row, so its sender record counts
+		// the arrival here; otherwise every message to it would read as a first
+		// contact, a token whose weight the corpus learned from stored mail.
+		if (!$stores) {
+			SpamSenderRecords::recordArrival(intval($alias->key), (string)$content_spam['decision']['fingerprint']);
+		}
 
 		// Pure-store mode skips forwarding-side gates (rate limit, From-header check)
 		// because they only apply to relay attempts.
@@ -357,7 +364,7 @@ class InboundEmailRouter {
 		// reputation and can relay abuse. The forward is suppressed and logged
 		// spam_held; a forward_and_store alias still keeps the message (with its spam
 		// verdict) so it stays reviewable in the reader's Spam view.
-		if ($this->classifySpam($auth, $content_spam['signal']) === InboundEmailMessage::SPAM_VERDICT_SPAM) {
+		if ($content_spam['decision']['verdict'] === InboundEmailMessage::SPAM_VERDICT_SPAM) {
 			$held_id = null;
 			if ($stores) {
 				try {
@@ -590,9 +597,11 @@ class InboundEmailRouter {
 	 * (['dkim','spf','dmarc','source']); when null it is read here so a direct
 	 * caller still records honest verdicts.
 	 *
-	 * $content_spam is the content-spam signal from resolveContentSpam()
-	 * (['signal'=>spam|ham|none, 'score'=>?float]); when null it is resolved here
-	 * (Postfix milter X-Spam header), so a direct caller still records it.
+	 * $content_spam is the scanner signal from resolveContentSpam()
+	 * (['signal'=>spam|ham|none, 'score'=>?float, 'source'=>?string]), carrying
+	 * the spamDecision() under 'decision' when the live path already made it;
+	 * when null it is resolved here (Postfix milter X-Spam header), so a direct
+	 * caller still records it.
 	 *
 	 * $options tunes the store for callers that are not live delivery:
 	 *   run_filters   (bool, default true)  run the inbound filters after the store
@@ -650,10 +659,19 @@ class InboundEmailRouter {
 		$subject = substr($this->decodeMimeHeader($subject_raw), 0, 4000);
 		$sender = $this->senderDisplayString($parsed);
 
-		// Idempotent with the live path's own call above (an already-elevated signal
-		// returns untouched); this is what covers store-only, catch-all-store and
-		// archive-import callers, which reach the row build without passing here.
-		$content_spam = $this->elevateForContact($alias, $sender, $content_spam);
+		// The verdict. The live forward path decided it already; store-only,
+		// catch-all-store and archive-import callers decide it here. An archive
+		// import is old mail, not an arrival: no corpus vote and no burst.
+		// An outbound row (an archive's Sent mail) is the user's own message and
+		// is never judged as a sender.
+		$importing = !empty($options['import_run_id']);
+		if ($direction !== 'inbound') {
+			$decision = array('verdict' => $this->classifySpam(array('auth' => $auth, 'scanner' => $content_spam))['verdict'],
+				'reason' => null, 'meta' => null, 'fingerprint' => null);
+		} else {
+			$decision = $content_spam['decision']
+				?? $this->spamDecision($alias, $auth, $content_spam, $parsed, $importing ? null : $bodies, !$importing);
+		}
 
 		// Conversation grouping for the Mailbox Reader. Computed in-memory from
 		// the already-parsed In-Reply-To / References headers — the raw headers
@@ -717,8 +735,14 @@ class InboundEmailRouter {
 			'iem_spf_result'   => $auth['spf'],
 			'iem_dmarc_result' => $auth['dmarc'],
 			'iem_auth_source'  => $auth['source'],
-			'iem_spam_verdict' => $this->classifySpam($auth, $content_spam['signal']),
+			'iem_spam_verdict' => $decision['verdict'],
+			'iem_spam_reason'  => $decision['reason'],
+			'iem_spam_meta'    => $decision['meta'],
 			'iem_spam_score'   => $content_spam['score'],
+			'iem_sender_fingerprint' => $decision['fingerprint'],
+			// An inbound row's arrival is recorded in this transaction (below); an
+			// outbound one's recipients are counted by the backfill.
+			'iem_sender_recorded' => ($direction === 'inbound'),
 			'iem_size_bytes'  => strlen($raw_email),
 			// Imported mail carries its own Date header, so a decade-old message sorts
 			// where it belongs rather than all of them landing at the import's clock.
@@ -758,6 +782,9 @@ class InboundEmailRouter {
 
 		try {
 			$msg = InboundEmailMessage::CreateEntry($row);
+			if ($direction === 'inbound' && $alias && $alias->key) {
+				SpamSenderRecords::recordArrival(intval($alias->key), (string)$decision['fingerprint'], $row['iem_received_time']);
+			}
 		} catch (\Throwable $e) {
 			if ($owns_tx && $db->inTransaction()) {
 				$db->rollBack();
@@ -961,10 +988,10 @@ class InboundEmailRouter {
 			$this->addressListsFromHeaders($parsed['headers'] ?? array()));
 		$this->persistRawAndManifest(intval($msg->key), $raw, $alias, $dek);
 
-		// Content-spam classification now runs on the parsed plaintext, exactly as
-		// storeMessage does — the relay stamps X-Spam inside the sealed raw, and the
-		// auth verdicts were stored at pull time. Reuse the row's stored verdicts as
-		// the auth signal so classifySpam sees the same inputs receive-time ingest
+		// The verdict now runs on the parsed plaintext, exactly as storeMessage
+		// does — the relay stamps X-Spam inside the sealed raw, and the auth
+		// verdicts were stored at pull time. Reuse the row's stored verdicts as the
+		// auth signal so classifySpam sees the same inputs receive-time ingest
 		// would. (specs/mailbox_relay_fix_pack.md § Fix 8.)
 		$auth = array(
 			'dkim'   => (string)$msg->get('iem_dkim_result'),
@@ -973,18 +1000,25 @@ class InboundEmailRouter {
 			'source' => (string)$msg->get('iem_auth_source'),
 		);
 		$content_spam = $this->resolveContentSpam($raw);
-		$content_spam = $this->elevateForContact($alias, $sender, $content_spam);
-		$spam_verdict = $this->classifySpam($auth, $content_spam['signal']);
+		$decision = $this->spamDecision($alias, $auth, $content_spam, $parsed, $bodies);
 
 		// Clear the pending state, discard the sealed raw blob, and record the spam
 		// verdict/score — all via a TARGETED update so the sealed content columns
 		// just written behind the model's back are never clobbered by a full save().
 		InboundEmailMessage::updateColumns(intval($msg->key), array(
-			'iem_pending_parse'    => false,
-			'iem_relay_sealed_raw' => null,
-			'iem_spam_verdict'     => $spam_verdict,
-			'iem_spam_score'       => $content_spam['score'],
+			'iem_pending_parse'      => false,
+			'iem_relay_sealed_raw'   => null,
+			'iem_spam_verdict'       => $decision['verdict'],
+			'iem_spam_reason'        => $decision['reason'],
+			'iem_spam_meta'          => $decision['meta'],
+			'iem_spam_score'         => $content_spam['score'],
+			'iem_sender_fingerprint' => $decision['fingerprint'],
+			'iem_sender_recorded'    => true,
 		));
+		if ($alias && $alias->key) {
+			SpamSenderRecords::recordArrival(intval($alias->key), (string)$decision['fingerprint'],
+				(string)$msg->get('iem_received_time'));
+		}
 
 		// The search index folds a pending row as a no-op (its content fields
 		// did not exist); now they do, so the entry is owed a rebuild — the
@@ -1042,6 +1076,15 @@ class InboundEmailRouter {
 		$thread_key = $this->computeThreadKey($parsed, $message_id_header);
 		$auth = $this->authFromRelayMeta($meta, $authserv_id);
 
+		// A Fortress arrival is parsed on the owner's device, which never shows the
+		// server its From. The one relationship the server can still see is a reply
+		// to mail the user sent, from the Message-IDs the relay carried in the
+		// clear; it is noted now and read when the device's parse sets the verdict
+		// (spamFromBrowserHeaders). Such a row has no sender for the backfill.
+		$fortress_reply = ($client !== null && $alias && $alias->key
+			&& SpamSenderRecords::repliesToComposed(intval($alias->key),
+				SpamSenderRecords::referencedIds((string)($meta['references'] ?? ''), (string)($meta['in_reply_to'] ?? ''))));
+
 		$row = array(
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
@@ -1063,6 +1106,8 @@ class InboundEmailRouter {
 			'iem_relay_sealed_raw' => $sealed_raw,
 			'iem_relay_spool_id' => substr((string)($meta['spool_id'] ?? ''), 0, 255),
 			'iem_sealed_owner_user_id' => $owner_id > 0 ? $owner_id : null,
+			'iem_spam_reason' => $fortress_reply ? 'reply' : null,
+			'iem_sender_recorded' => ($client !== null),
 		);
 
 		$db = DbConnector::get_instance()->get_db_link();
@@ -1158,13 +1203,21 @@ class InboundEmailRouter {
 			}
 		}
 
-		// Consent elevates past scoring; anything else is scored exactly as SMTP
-		// mail would be. Sender-sealed content carries no relay-stamped verdict —
-		// no machine in the path could read it — so this local scan is the first
-		// moment the content is readable, which is inherent to the guarantee.
-		$content_spam = $verified_direct
-			? array('signal' => 'none', 'score' => null)
-			: $this->resolveContentSpam($this->synthesizeRawForScan($meta, $body_plain, $body_html));
+		// Consent elevates past scoring; anything else is judged exactly as SMTP
+		// mail would be, by the same verdict order. Sender-sealed content carries
+		// no scanner verdict — no machine in the path could read it — so the
+		// classifier here is the first thing to read the content, which is
+		// inherent to the guarantee.
+		$content_spam = array('signal' => 'none', 'score' => null, 'source' => null);
+		$direct_parsed = array('from' => $sender, 'from_email' => (MailboxContacts::parseAddress($sender)[0] ?? $sender),
+			'headers' => array('references' => (string)($meta['references'] ?? ''),
+				'in-reply-to' => (string)($meta['in_reply_to'] ?? '')));
+		$decision = $this->spamDecision($alias, $auth, $content_spam, $direct_parsed,
+			array('plain' => $body_plain, 'html' => $body_html), true, $subject);
+		if ($verified_direct) {
+			$decision['verdict'] = $this->spamFilingEnabled() ? InboundEmailMessage::SPAM_VERDICT_HAM : null;
+			$decision['reason'] = $this->spamFilingEnabled() ? 'contact' : null;
+		}
 
 		$owner_id = $this->attachmentOwnerId($alias);
 		// Identical posture rule and identical refusal to the SMTP store above —
@@ -1200,8 +1253,12 @@ class InboundEmailRouter {
 			'iem_spf_result'   => $auth['spf'],
 			'iem_dmarc_result' => $auth['dmarc'],
 			'iem_auth_source'  => $auth['source'],
-			'iem_spam_verdict' => $this->classifySpam($auth, $content_spam['signal']),
+			'iem_spam_verdict' => $decision['verdict'],
+			'iem_spam_reason'  => $decision['reason'],
+			'iem_spam_meta'    => $decision['meta'],
 			'iem_spam_score'   => $content_spam['score'],
+			'iem_sender_fingerprint' => $decision['fingerprint'],
+			'iem_sender_recorded' => true,
 			'iem_size_bytes'   => $size_bytes,
 			'iem_transport'    => 'joinery_direct',
 			// The mark is applied by the RECEIVER from verified transport plus
@@ -1222,6 +1279,9 @@ class InboundEmailRouter {
 
 		try {
 			$msg = InboundEmailMessage::CreateEntry($row);
+			if ($alias && $alias->key) {
+				SpamSenderRecords::recordArrival(intval($alias->key), (string)$decision['fingerprint'], $row['iem_received_time']);
+			}
 		} catch (\Throwable $e) {
 			if ($owns_tx && $db->inTransaction()) {
 				$db->rollBack();
@@ -1378,39 +1438,6 @@ class InboundEmailRouter {
 			throw $e;
 		}
 		return $manifest;
-	}
-
-	/**
-	 * A minimal RFC 5322 rendering of a Direct message, for the content spam
-	 * scanner only.
-	 *
-	 * The scanner wants a message; Direct never had one. Nothing here is stored
-	 * — the row's fields come from the parts themselves.
-	 */
-	private function synthesizeRawForScan(array $meta, string $body_plain, string $body_html): string {
-		$headers = "From: " . (string)($meta['sender'] ?? '') . "\r\n"
-			. "To: " . (string)($meta['recipient'] ?? '') . "\r\n"
-			. "Subject: " . (string)($meta['subject'] ?? '') . "\r\n"
-			. "MIME-Version: 1.0\r\n";
-
-		// Both bodies must reach the scanner. Spam routinely rides in the HTML —
-		// hidden text, link farms, tracking URLs — behind an innocuous plain part,
-		// so scanning only the plain body when one exists is an evasion the scanner
-		// never gets to see. Present the message as the scanner would receive it off
-		// the wire: multipart/alternative with BOTH parts, or the single part that
-		// exists, HTML kept as HTML (rspamd reads its structure) rather than flattened.
-		if ($body_html !== '' && $body_plain !== '') {
-			$boundary = '=_jdscan_' . bin2hex(random_bytes(12));
-			return $headers
-				. "Content-Type: multipart/alternative; boundary=\"" . $boundary . "\"\r\n\r\n"
-				. "--" . $boundary . "\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" . $body_plain . "\r\n"
-				. "--" . $boundary . "\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" . $body_html . "\r\n"
-				. "--" . $boundary . "--\r\n";
-		}
-		if ($body_html !== '') {
-			return $headers . "Content-Type: text/html; charset=utf-8\r\n\r\n" . $body_html;
-		}
-		return $headers . "Content-Type: text/plain; charset=utf-8\r\n\r\n" . $body_plain;
 	}
 
 	/**
@@ -3102,49 +3129,260 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Classify a message as 'ham' or 'spam' from its already-resolved auth verdicts
-	 * (specs/inbound_email_spam_filtering.md). Returns null when filtering is off, so
-	 * the stored verdict stays NULL and behavior is exactly as before.
+	 * The spam verdict (spam_learning_in_core.md § The verdict, in order).
+	 * Pure: every fact it reads was gathered beforehand (spamDecision), so the
+	 * order itself is testable with no database. The first step that answers wins:
 	 *
-	 *   - the auth rule fires (InboundEmailMessage::authRuleSaysSpam, which owns the
-	 *     DMARC-fail and SPF/DKIM-both-fail definitions) → spam.
-	 *   - otherwise → ham.
+	 *   0. filing off                                      → NULL
+	 *   1. the auth rule (InboundEmailMessage::authRuleSaysSpam) → spam   'auth'
+	 *   2. an rspamd score at or over SCANNER_FLOOR        → spam   'scanner'
+	 *   3. a relationship                                  → ham    'reply' | 'contact'
+	 *                                                               | 'correspondent' | 'rescued'
+	 *   4. the sender record: taught spam twice, never ham → spam   'sender_history'
+	 *   5. the corpus is voting and p ≥ SpamBayes::SPAM_AT → spam   'bayes'
+	 *   6. the corpus is voting and p ≤ SpamBayes::HAM_AT  → ham    'bayes'
+	 *   7. the scanner signal says spam                    → spam   'scanner'
+	 *   8. otherwise                                       → ham    'none'
 	 *
-	 * The address book elevates past the CONTENT signal before this is called
-	 * (elevateForContact) and deliberately not past the auth rule: a DMARC failure
-	 * means the From is unattested, so a contact entry for it is a claim about an
-	 * address nobody verified. Granting that sender the inbox anyway is an explicit
-	 * never_spam filter the user creates from the Spam view, never an inference.
+	 * Nothing overrides step 1: a DMARC failure means the From is unattested, so
+	 * no claim about the sender can rescue it. Nothing but a mail rule overrides
+	 * step 2: a score rspamd itself would reject at is spam even from a contact,
+	 * because a compromised correspondent passes DMARC and thread-hijack phishing
+	 * replays real Message-IDs. The Spam view's "Always allow sender" rule is the
+	 * deliberate way past both. Mail rules run after this and are final.
 	 *
-	 * This never computes verdicts — it only acts on the trusted ones already read.
-	 * The strict rule is safe because the disposition is a reviewable Spam view,
-	 * never rejection: a false positive costs a click, not a lost message.
+	 * Relationships other than `reply` count only when DMARC passed, so a spammer
+	 * cannot borrow a contact's address; `reply` needs no DMARC, because knowing a
+	 * private Message-ID is the proof. Any spam teaching for the sender cancels
+	 * `contact`, `correspondent` and `rescued`.
 	 *
-	 * Content layer (specs/mailbox_spam_filtering_simplification.md): the message is
-	 * spam if the content scanner flagged it OR the auth rule fires —
-	 *   verdict = spam  if  content_signal == 'spam'  OR  auth_rule == spam
-	 * The $content_signal is whichever scanner verdict resolveContentSpam() settled
-	 * on, so this just OR's it in. The filing switch below governs the whole feature:
-	 * with it off the verdict stays NULL regardless of what any scanner said.
+	 * The verdict is recorded on the row and is never rejection: a judged-spam
+	 * message is held out of the inbox and never forwarded, and a wrong guess
+	 * costs a click.
 	 *
-	 * @param array{dkim:string,spf:string,dmarc:string,source:string} $auth
-	 * @param string $content_signal  'spam' | 'ham' | 'none' (from resolveContentSpam).
-	 * @return string|null InboundEmailMessage::SPAM_VERDICT_*, or null when disabled.
+	 * @param array $f auth (array), scanner (['signal','score','source']), reply (bool),
+	 *                 contact (bool), record (?array: sent, spam, ham), bayes
+	 *                 (['state' => off|untrained|scored, 'p' => ?float])
+	 * @return array{verdict:?string, reason:?string}
 	 */
+	private function classifySpam(array $f): array {
+		if (!$this->spamFilingEnabled()) {
+			return array('verdict' => null, 'reason' => null);
+		}
+		$spam = function (string $reason) { return array('verdict' => InboundEmailMessage::SPAM_VERDICT_SPAM, 'reason' => $reason); };
+		$ham  = function (string $reason) { return array('verdict' => InboundEmailMessage::SPAM_VERDICT_HAM, 'reason' => $reason); };
+
+		$auth = (array)($f['auth'] ?? array());
+		if (InboundEmailMessage::authRuleSaysSpam($auth)) {
+			return $spam('auth');
+		}
+
+		$scanner = (array)($f['scanner'] ?? array());
+		$score = $scanner['score'] ?? null;
+		if (($scanner['source'] ?? null) === 'rspamd' && $score !== null && (float)$score >= self::SCANNER_FLOOR) {
+			return $spam('scanner');
+		}
+
+		$record = is_array($f['record'] ?? null) ? $f['record'] : array('sent' => 0, 'spam' => 0, 'ham' => 0);
+		if (!empty($f['reply'])) {
+			return $ham('reply');
+		}
+		if (strtolower((string)($auth['dmarc'] ?? '')) === 'pass' && intval($record['spam']) === 0) {
+			if (!empty($f['contact'])) {
+				return $ham('contact');
+			}
+			if (intval($record['sent']) >= 1) {
+				return $ham('correspondent');
+			}
+			if (intval($record['ham']) >= 1) {
+				return $ham('rescued');
+			}
+		}
+
+		if (intval($record['spam']) >= 2 && intval($record['ham']) === 0) {
+			return $spam('sender_history');
+		}
+
+		$bayes = (array)($f['bayes'] ?? array());
+		if (($bayes['state'] ?? '') === 'scored' && $bayes['p'] !== null) {
+			if ((float)$bayes['p'] >= SpamBayes::SPAM_AT) {
+				return $spam('bayes');
+			}
+			if ((float)$bayes['p'] <= SpamBayes::HAM_AT) {
+				return $ham('bayes');
+			}
+		}
+
+		if (($scanner['signal'] ?? 'none') === 'spam') {
+			return $spam('scanner');
+		}
+		return $ham('none');
+	}
+
+	/** Whether suspected spam is filed at all (the one switch most owners answer). */
+	private function spamFilingEnabled(): bool {
+		return (bool)$this->settings->get_setting('mailbox_spam_filtering_enabled');
+	}
+
+	/**
+	 * Gather everything the verdict reads about one arriving message, decide it,
+	 * and return what the row stores. The plaintext is in hand here and nowhere
+	 * later on a sealing mailbox, so the sender fingerprint and the meta tokens
+	 * are derived now, from clear facts.
+	 *
+	 * @param InboundEmailAlias|null $alias  the mailbox; null for catch-all mail
+	 * @param array      $auth          readAuthResults()
+	 * @param array      $content_spam  the arriving scanner signal (resolveContentSpam)
+	 * @param array      $parsed        parseEmail() shape: from, from_email, headers
+	 * @param array|null $bodies        ['plain','html'] for the corpus vote; null = no vote
+	 * @param bool       $arriving      false for mail that did not just arrive (an archive
+	 *                                  import): no burst token
+	 * @param string|null $subject      the decoded subject when $parsed has none to decode
+	 * @return array{verdict:?string, reason:?string, meta:?string, fingerprint:?string}
+	 */
+	public function spamDecision($alias, array $auth, array $content_spam, array $parsed, ?array $bodies,
+			bool $arriving = true, ?string $subject = null): array {
+		$alias_id = ($alias && $alias->key) ? intval($alias->key) : 0;
+		$sender = $this->senderDisplayString($parsed);
+		$fingerprint = SpamSenderRecords::fingerprintOfSender($sender);
+		$record = ($alias_id > 0) ? SpamSenderRecords::get($alias_id, $fingerprint) : null;
+
+		$meta = $this->spamMetaTokens($alias_id, $auth, $content_spam, $record,
+			$arriving ? (string)($parsed['from_email'] ?? '') : '');
+
+		// Steps 1 and 2 need none of what follows. Mail they decide — the kind that
+		// arrives in bursts — skips the relationship lookups and the corpus vote.
+		$at_floor = ($content_spam['source'] ?? null) === 'rspamd' && ($content_spam['score'] ?? null) !== null
+			&& (float)$content_spam['score'] >= self::SCANNER_FLOOR;
+		if (InboundEmailMessage::authRuleSaysSpam($auth) || $at_floor) {
+			$early = $this->classifySpam(array('auth' => $auth, 'scanner' => $content_spam));
+			return array(
+				'verdict'     => $early['verdict'],
+				'reason'      => $early['reason'],
+				'meta'        => self::spamMetaString($meta, array('state' => 'off')),
+				'fingerprint' => $fingerprint,
+			);
+		}
+
+		$headers = $parsed['headers'] ?? array();
+		$header = function (string $name) use ($headers): string {
+			$v = $headers[$name] ?? '';
+			return is_array($v) ? (string)($v[0] ?? '') : (string)$v;
+		};
+		$reply = ($alias_id > 0) && SpamSenderRecords::repliesToComposed($alias_id,
+			SpamSenderRecords::referencedIds($header('references'), $header('in-reply-to')));
+
+		$bayes = array('state' => 'off', 'p' => null);
+		if ($bodies !== null && MailboxSpamPolicy::learningEnabled()) {
+			$bayes = SpamBayes::classify(SpamBayes::hashes(SpamBayes::tokens(array(
+				'subject'    => $subject ?? $this->decodeMimeHeader((string)($parsed['subject'] ?? '')),
+				'body_plain' => (string)($bodies['plain'] ?? ''),
+				'body_html'  => (string)($bodies['html'] ?? ''),
+				'sender'     => $sender,
+				'meta'       => $meta,
+			))));
+		}
+
+		$verdict = $this->classifySpam(array(
+			'auth'    => $auth,
+			'scanner' => $content_spam,
+			'reply'   => $reply,
+			'contact' => $alias_id > 0 && SpamSenderRecords::isContact($alias_id, $fingerprint),
+			'record'  => $record,
+			'bayes'   => $bayes,
+		));
+		return array(
+			'verdict'     => $verdict['verdict'],
+			'reason'      => $verdict['reason'],
+			'meta'        => self::spamMetaString($meta, $bayes),
+			'fingerprint' => $fingerprint,
+		);
+	}
+
+	/**
+	 * The meta tokens: weak signals the corpus learns the weight of from the
+	 * user's own teaching instead of from weights tuned by hand. Computed from
+	 * clear facts only.
+	 *
+	 * @param string $burst_address the From address to test for a burst; '' skips it
+	 * @return string[]
+	 */
+	public function spamMetaTokens(int $alias_id, array $auth, array $content_spam, ?array $record,
+			string $burst_address = ''): array {
+		$tokens = array();
+		if ($record === null || intval($record['messages']) === 0) {
+			$tokens[] = 'first_contact';
+		}
+		if ($alias_id <= 0) {
+			$tokens[] = 'catch_all';
+		}
+		foreach (array('dmarc', 'spf', 'dkim') as $k) {
+			$tokens[] = $k . ':' . SpamMeta::canonicalAuth((string)($auth[$k] ?? ''));
+		}
+		$source = (string)($content_spam['source'] ?? '');
+		$score = $content_spam['score'] ?? null;
+		if ($source !== '' && $score !== null && is_numeric($score)) {
+			$band = (int)(floor(max(-20.0, min(40.0, (float)$score)) / 2) * 2);
+			$tokens[] = 'scanner:' . SpamMeta::canonicalSource($source) . ':' . $band;
+		}
+		if ($burst_address !== '' && $this->isBurst($burst_address, $alias_id)) {
+			$tokens[] = 'burst';
+		}
+		return $tokens;
+	}
+
+	/** iem_spam_meta: the meta tokens and whether the corpus was voting (SpamMeta's short form). */
+	private static function spamMetaString(array $tokens, array $bayes): string {
+		$state = (string)($bayes['state'] ?? 'off');
+		if ($state === 'scored') {
+			$p = (float)$bayes['p'];
+			$state = ($p >= SpamBayes::SPAM_AT) ? 'spam' : (($p <= SpamBayes::HAM_AT) ? 'ham' : 'undecided');
+		}
+		return SpamMeta::encode($tokens, $state);
+	}
+
+	/**
+	 * Did this sender reach BURST_ALIASES or more of this deployment's mailboxes
+	 * within the last BURST_WINDOW_MINUTES? Read from the routing log, which
+	 * carries the From (or, on a sealing mailbox, the envelope sender) of every
+	 * delivery. Never fails ingest.
+	 */
+	private function isBurst(string $address, int $alias_id): bool {
+		$address = strtolower(trim($address, " \t<>"));
+		if ($address === '' || strpos($address, '@') === false) {
+			return false;
+		}
+		try {
+			$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+				"SELECT COUNT(DISTINCT iel_iea_inbound_email_alias_id) FROM iel_inbound_email_logs
+				  WHERE iel_create_time > NOW() - INTERVAL '" . intval(self::BURST_WINDOW_MINUTES) . " minutes'
+				    AND iel_iea_inbound_email_alias_id IS NOT NULL
+				    AND iel_iea_inbound_email_alias_id <> ?
+				    AND LOWER(iel_from_address) LIKE ?");
+			$stmt->execute(array($alias_id, '%' . addcslashes($address, '%_\\') . '%'));
+			// The mailbox this message reached counts too.
+			return intval($stmt->fetchColumn()) + 1 >= self::BURST_ALIASES;
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: burst lookup failed: ' . $e->getMessage());
+			return false;
+		}
+	}
+
 	/**
 	 * The spam disposition of a Fortress row its owner's browser parsed
 	 * (mailbox/fortress_parse_store): the X-Spam* header values the browser
 	 * read out of the relay-sealed message, read by readSpamHeader() exactly
 	 * as they would be off the raw, and the auth verdicts the pull stored.
-	 * The relay's verdict is the verdict: there is no raw here to scan, and no
-	 * sender to look up in the address book, so neither the local scan nor
-	 * the contact elevation runs.
+	 * The server never sees the From, so the only relationship is a reply to
+	 * mail the user sent, noted at pull time ($prior_reason 'reply',
+	 * storeRelayPending), and there is no content for the corpus.
 	 *
 	 * @param array $spam_headers x_spam, x_spam_flag, x_spam_score, x_spam_status
 	 * @param array{dkim:string,spf:string,dmarc:string,source:string} $auth
-	 * @return array{verdict:?string, score:?float}
+	 * @return array{verdict:?string, reason:?string, meta:?string, score:?float}
 	 */
-	public function spamFromBrowserHeaders(array $spam_headers, array $auth): array {
+	public function spamFromBrowserHeaders(array $spam_headers, array $auth, ?string $prior_reason = null,
+			int $alias_id = 0): array {
 		$names = array('x_spam' => self::SPAM_FLAG_HEADER, 'x_spam_flag' => self::SPAM_FLAG_HEADER . '-Flag',
 			'x_spam_score' => self::SPAM_SCORE_HEADER, 'x_spam_status' => self::SPAM_STATUS_HEADER);
 		$block = '';
@@ -3154,110 +3392,29 @@ class InboundEmailRouter {
 				$block .= $name . ': ' . substr($value, 0, 500) . "\r\n";
 			}
 		}
-		$content = ($block === '') ? array('signal' => 'none', 'score' => null) : $this->readSpamHeader($block . "\r\n");
-		return array('verdict' => $this->classifySpam($auth, $content['signal']), 'score' => $content['score']);
-	}
-
-	private function classifySpam(array $auth, string $content_signal = 'none'): ?string {
-		if (!$this->settings->get_setting('mailbox_spam_filtering_enabled')) {
-			return null;
-		}
-
-		// Content scanner verdict, OR'd in ahead of the auth rule.
-		if ($content_signal === 'spam') {
-			return InboundEmailMessage::SPAM_VERDICT_SPAM;
-		}
-
-		// The auth rule itself lives on the model, so the reader can ask the same
-		// question of a stored row when it explains why a message is in Spam.
-		if (InboundEmailMessage::authRuleSaysSpam($auth)) {
-			return InboundEmailMessage::SPAM_VERDICT_SPAM;
-		}
-
-		return InboundEmailMessage::SPAM_VERDICT_HAM;
-	}
-
-
-	/**
-	 * Neutralize the CONTENT-spam signal when the sender is in the recipient
-	 * mailbox's address book (specs/mailbox_contact_spam_bypass.md).
-	 *
-	 * A contact is a deliberate act — MailboxContacts only ever writes a row from
-	 * manualAdd() or import(), never from mail traffic — so its presence is the
-	 * user saying "I know this person". That statement outranks a content score,
-	 * which is exactly what the address book is being asked to buy here, and it
-	 * mirrors what the Direct path already grants a verified contact in
-	 * storeDirectMessage().
-	 *
-	 * ELEVATION ONLY, and only over the CONTENT layer. The auth rule in
-	 * classifySpam() is untouched: a DMARC failure means the From header is not
-	 * attested, so "this address is a contact" is a statement about an address
-	 * nobody has verified, and letting it clear an auth failure would let anyone
-	 * spoofing a contact's address into the inbox. A contact whose domain has
-	 * broken DMARC therefore still files as spam — the Spam view offers the
-	 * one-click allow (an explicit never_spam filter) for that case, so the trust
-	 * is granted knowingly rather than inferred.
-	 *
-	 * The score is deliberately KEPT. iem_spam_score is recorded for transparency
-	 * on every path, and a reader that shows "scored 9.2, delivered because the
-	 * sender is a contact" is more honest than one that shows nothing.
-	 *
-	 * The lookup is the shared, unencrypted book (aliasHasContact): ingest is
-	 * keyless, so per-grantee contacts sealed under a closed vault are invisible
-	 * here and a Private mailbox gets no bypass. That is fail-closed and
-	 * matches the Direct gate's own reading of the same store.
-	 *
-	 * @param InboundEmailAlias|null $alias        recipient mailbox; null (catch-all) never elevates
-	 * @param string                 $sender       From display string or bare address
-	 * @param array                  $content_spam ['signal'=>..,'score'=>..] from resolveContentSpam()
-	 * @return array the same array, with 'signal' => 'none' when the sender is a contact
-	 */
-	private function elevateForContact($alias, string $sender, array $content_spam): array {
-		if (($content_spam['signal'] ?? 'none') !== 'spam') {
-			return $content_spam; // nothing to elevate past
-		}
-		if (!$alias || !$alias->key || trim($sender) === '') {
-			return $content_spam;
-		}
-		if (!$this->senderIsContact($alias, $sender)) {
-			return $content_spam;
-		}
-		$content_spam['signal'] = 'none';
-		$content_spam['contact_elevated'] = true;
-		return $content_spam;
+		$content = ($block === '') ? array('signal' => 'none', 'score' => null, 'source' => null)
+			: $this->readSpamHeader($block . "\r\n");
+		$verdict = $this->classifySpam(array(
+			'auth'    => $auth,
+			'scanner' => $content,
+			'reply'   => ($prior_reason === 'reply'),
+			'bayes'   => array('state' => 'off', 'p' => null),
+		));
+		// No sender, so no sender record: first_contact is unknowable and left out.
+		$meta = array_values(array_diff($this->spamMetaTokens($alias_id, $auth, $content, array('messages' => 1)),
+			array('first_contact')));
+		return array('verdict' => $verdict['verdict'], 'reason' => $verdict['reason'],
+			'meta' => self::spamMetaString($meta, array('state' => 'off')), 'score' => $content['score']);
 	}
 
 	/**
-	 * Is this sender in the recipient mailbox's address book?
-	 *
-	 * Protected so a test can substitute the lookup, the same way scanContentSpam()
-	 * substitutes the scanner transport — the elevation RULE is then testable
-	 * without a contact store, which is what keeps it a safe-tier assertion.
-	 *
-	 * A store that cannot be read answers false: an unreadable address book is not
-	 * a reason to change a verdict, so the scanner's answer stands.
-	 */
-	protected function senderIsContact($alias, string $sender): bool {
-		try {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
-			$contacts = new MailboxContacts();
-			return $contacts->aliasHasContact(intval($alias->key), $sender);
-		} catch (\Throwable $e) {
-			error_log('InboundEmailRouter: contact elevation lookup failed: ' . $e->getMessage());
-			return false;
-		}
-	}
-
-	/**
-	 * Resolve the content-spam signal for a message, per ingest path
-	 * (specs/mailbox_spam_filtering_simplification.md). Returns
-	 * ['signal' => 'spam'|'ham'|'none', 'score' => ?float].
-	 *
-	 * A verdict another system already computed is always read — reading a header
-	 * costs nothing and needs no scanner here, and on a box with no scanner of its
-	 * own the upstream's X-Spam is the only content signal there is. Whether the
-	 * signal changes any disposition is the filing switch's call, enforced
-	 * separately in classifySpam.
+	 * The scanner signal that arrived WITH the message
+	 * (spam_learning_in_core.md): a webhook provider's own flag, or the
+	 * X-Spam header a relay or this box's milter stamped. Never computes
+	 * anything, and never asks a scanner: rspamd stamps headers on the way in and
+	 * the app reads them. Returns ['signal' => spam|ham|none, 'score' => ?float,
+	 * 'source' => ?string], where source names who produced the score — 'rspamd'
+	 * for a header, the provider key for a webhook flag — so scales never mix.
 	 *
 	 *   - Webhook providers (Mailgun/SendGrid/SES) supply their own content/reputation
 	 *     spam flag in the authenticated payload; the dispatcher hands it in as
@@ -3267,180 +3424,43 @@ class InboundEmailRouter {
 	 *     the raw, trusted on the same basis as the Authentication-Results line (the
 	 *     milter is ours; an external X-Spam is stripped by rspamd before it re-stamps).
 	 *
-	 * When the arriving verdict came from something other than this box's own
-	 * milter (a relay or a webhook provider) and a scanner is running here, the
-	 * message is re-scored locally. How much that local verdict counts is
-	 * MailboxSpamPolicy::localVerdictReplaces():
-	 *
-	 *   - learning off → OR'd into the upstream signal. Without a corpus the
-	 *     local scan is the same static ruleset the upstream ran, minus the live
-	 *     SMTP client context a milter sees, so it may add spam but must never
-	 *     overturn an upstream spam verdict.
-	 *   - learning on  → REPLACES it, so a user's "not spam" corrections can
-	 *     actually subtract. An OR could only ever add.
-	 *
-	 * A scanner that is missing, down or slow simply yields the upstream verdict:
-	 * no message is ever held, bounced or retried on the scanner's account.
-	 *
 	 * @param string     $raw_email
 	 * @param array|null $provider_spam  ['result'=>spam|ham|none,'score'=>?float,'source'=>key]
-	 * @return array{signal:string,score:?float}
+	 * @return array{signal:string,score:?float,source:?string}
 	 */
 	private function resolveContentSpam($raw_email, $provider_spam = null): array {
-		$upstream = $this->readUpstreamContentSpam($raw_email, $provider_spam);
-
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
-		if (!MailboxSpamPolicy::scanAtIngest() || (string)$raw_email === ''
-			|| !MailboxSpamPolicy::scannerAvailable()) {
-			return $upstream;
-		}
-
-		$local = $this->scanContentSpam((string)$raw_email);
-		if ($local === null) {
-			return $upstream;
-		}
-		if (MailboxSpamPolicy::localVerdictReplaces()) {
-			return $local;
-		}
-
-		// OR: the local scan can only ADD spam. An upstream 'spam' always stands,
-		// and its score is kept — it is the verdict that decided the disposition.
-		if ($upstream['signal'] === 'spam') {
-			return $upstream;
-		}
-		return ($local['signal'] === 'spam') ? $local : $upstream;
-	}
-
-	/**
-	 * The content-spam verdict that arrived WITH the message — a webhook
-	 * provider's flag, or the X-Spam header a relay or local milter stamped.
-	 * Never computes anything.
-	 *
-	 * @return array{signal:string,score:?float}
-	 */
-	private function readUpstreamContentSpam($raw_email, $provider_spam = null): array {
 		// Webhook provider signal (only honored with a non-empty source).
 		if (is_array($provider_spam) && !empty($provider_spam['source'])) {
 			$result = strtolower(trim((string)($provider_spam['result'] ?? 'none')));
 			$signal = in_array($result, array('spam', 'ham'), true) ? $result : 'none';
 			$score  = (isset($provider_spam['score']) && is_numeric($provider_spam['score']))
 				? (float)$provider_spam['score'] : null;
-			return array('signal' => $signal, 'score' => $score);
+			return array('signal' => $signal, 'score' => $score,
+				'source' => strtolower(substr((string)$provider_spam['source'], 0, 20)));
 		}
 
 		// Postfix milter / relay header path.
-		return $this->readSpamHeader($raw_email);
+		return $this->readSpamHeader((string)$raw_email);
 	}
 
 	/**
-	 * Score a message through the local rspamd controller's /checkv2 and turn the
-	 * answer into a content-spam signal.
-	 *
-	 * Unlike readSpamHeader() this asserts BOTH directions: a scan that comes
-	 * back under the threshold returns 'ham', which is what lets a locally
-	 * trained corpus rescue a message an upstream static ruleset flagged. That
-	 * is the whole point of scanning here rather than trusting the header.
-	 *
-	 * Scoring over HTTP lacks the live SMTP client context a milter has, but the
-	 * upstream Received headers ride in the raw, so header-based network rules
-	 * still fire; content rules and Bayes are unaffected.
-	 *
-	 * Protected so a test can substitute the transport; the reading of whatever
-	 * comes back is interpretScanResponse(), which is pure and tested directly.
-	 *
-	 * @return array{signal:string,score:?float}|null  null on any failure — the
-	 *         caller then keeps the upstream verdict. Never throws.
-	 */
-	protected function scanContentSpam(string $raw_email): ?array {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
-		$url = MailboxSpamPolicy::controllerUrl() . '/checkv2';
-
-		$body = null;
-		if (function_exists('curl_init')) {
-			$ch = curl_init($url);
-			curl_setopt_array($ch, array(
-				CURLOPT_POST           => true,
-				CURLOPT_POSTFIELDS     => $raw_email,
-				CURLOPT_HTTPHEADER     => array('Content-Type: text/plain'),
-				CURLOPT_RETURNTRANSFER => true,
-				CURLOPT_CONNECTTIMEOUT => self::SCAN_CONNECT_TIMEOUT,
-				CURLOPT_TIMEOUT        => self::SCAN_TIMEOUT,
-			));
-			$body = curl_exec($ch);
-			$code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-			$err  = curl_error($ch);
-			if ($body === false || $code !== 200) {
-				error_log('InboundEmailRouter: ingest spam scan failed (HTTP ' . $code . '): '
-					. ($err !== '' ? $err : substr((string)$body, 0, 200)));
-				return null;
-			}
-		} else {
-			$ctx = stream_context_create(array('http' => array(
-				'method'        => 'POST',
-				'header'        => "Content-Type: text/plain\r\n",
-				'content'       => $raw_email,
-				'timeout'       => self::SCAN_TIMEOUT,
-				'ignore_errors' => true,
-			)));
-			$body = @file_get_contents($url, false, $ctx);
-			if ($body === false) {
-				error_log('InboundEmailRouter: ingest spam scan failed (stream).');
-				return null;
-			}
-		}
-
-		return $this->interpretScanResponse((string)$body);
-	}
-
-	/**
-	 * Turn an rspamd /checkv2 response body into a content-spam signal.
-	 *
-	 * rspamd's own disposition is the primary signal; the score comparison is the
-	 * fallback for a response that omits 'action'. The provisioned actions.conf
-	 * disables reject and greylist, so in practice the spam actions are
-	 * add-header and rewrite-subject — but reject is matched too, in case an
-	 * operator re-enabled it on their own scanner.
-	 *
-	 * @return array{signal:string,score:?float}|null  null when the body cannot
-	 *         be read as a verdict at all.
-	 */
-	private function interpretScanResponse(string $body): ?array {
-		$decoded = json_decode($body, true);
-		if (!is_array($decoded) || !isset($decoded['score']) || !is_numeric($decoded['score'])) {
-			error_log('InboundEmailRouter: ingest spam scan returned an unreadable body.');
-			return null;
-		}
-
-		$action = strtolower(trim((string)($decoded['action'] ?? '')));
-		$score  = (float)$decoded['score'];
-		if ($action !== '') {
-			$is_spam = in_array($action, array('add header', 'add_header',
-				'rewrite subject', 'rewrite_subject', 'reject'), true);
-		} else {
-			$required = isset($decoded['required_score']) ? (float)$decoded['required_score'] : 6.0;
-			$is_spam = ($score >= $required);
-		}
-
-		return array('signal' => $is_spam ? 'spam' : 'ham', 'score' => $score);
-	}
-
-	/**
-	 * Parse the rspamd milter's X-Spam header off a raw message into a content-spam
-	 * signal (specs/inbound_email_content_spam_filtering.md). Mirrors readAuthResults:
-	 * it reads a verdict the milter stamped, never computing one.
+	 * Parse the rspamd milter's X-Spam headers off a raw message into a scanner
+	 * signal (specs/inbound_email_content_spam_filtering.md). Mirrors
+	 * readAuthResults: it reads a verdict the milter stamped, never computing one.
 	 *
 	 * rspamd's milter_headers 'spam' routine adds 'X-Spam: Yes' (and an
 	 * 'X-Spam-Flag: YES') only when it flags the message, so a present-and-affirmative
-	 * header is the spam signal and absence is 'none' — the header never asserts ham.
-	 * A numeric X-Spam-Score is recorded when present (display only). Only the header
-	 * block (before the first blank line) is scanned, so body text cannot spoof it.
+	 * flag is the spam signal and its absence is 'none' — the header never asserts
+	 * ham. The score is read from X-Spam-Score when present, else from the score=
+	 * field of X-Spam-Status, which rspamd stamps on every message it scans, flagged
+	 * or not: the verdict order's SCANNER_FLOOR and the scanner meta token read it.
+	 * Only the header block (before the first blank line) is scanned, so body text
+	 * cannot spoof it.
 	 *
 	 * @param string $raw_email
-	 * @return array{signal:string,score:?float}
+	 * @return array{signal:string,score:?float,source:?string}
 	 */
 	private function readSpamHeader($raw_email): array {
-		$none = array('signal' => 'none', 'score' => null);
-
 		$normalized = str_replace("\r\n", "\n", (string)$raw_email);
 		$split_pos = strpos($normalized, "\n\n");
 		$header_block = ($split_pos === false) ? $normalized : substr($normalized, 0, $split_pos);
@@ -3450,14 +3470,7 @@ class InboundEmailRouter {
 		if ($flag === null) {
 			$flag = $this->firstHeaderValue($header_block, self::SPAM_FLAG_HEADER . '-Flag');
 		}
-		if ($flag === null) {
-			return $none;
-		}
-		$flag = strtolower(trim($flag));
-		$is_spam = in_array($flag, array('yes', 'true', '1'), true);
-		if (!$is_spam) {
-			return $none;
-		}
+		$is_spam = ($flag !== null) && in_array(strtolower(trim($flag)), array('yes', 'true', '1'), true);
 
 		$score = null;
 		$score_raw = $this->firstHeaderValue($header_block, self::SPAM_SCORE_HEADER);
@@ -3471,7 +3484,12 @@ class InboundEmailRouter {
 			}
 		}
 
-		return array('signal' => 'spam', 'score' => $score);
+		$stamped = ($flag !== null || $score !== null);
+		return array(
+			'signal' => $is_spam ? 'spam' : 'none',
+			'score'  => $score,
+			'source' => $stamped ? 'rspamd' : null,
+		);
 	}
 
 	/**

@@ -38,7 +38,7 @@ chk() {
 }
 
 W=$(mktemp -d /tmp/jy_chain_gate_XXXXXX)
-trap 'rm -rf "$W"' EXIT
+trap 'rm -rf "${W:?}"' EXIT
 mkdir -p "$W/site" "$W/arts" "$W/out"
 
 # The chain data key, minted the way a real run mints it: the tool reads the
@@ -108,7 +108,7 @@ JSON
 
 # ── Restore at run 0 ────────────────────────────────────────────────────────
 echo "== Restore as at run 0 =="
-rm -rf "$W/out"; mkdir -p "$W/out"
+rm -rf "${W:?}/out"; mkdir -p "$W/out"
 bash "$RESTORE" testsite --target-dir "$W/out/site" --artifacts "$W/arts" \
     --key-file "$W/chain.key" --seq 0 --force --skip-database >/dev/null 2>&1
 GOT=$(cd "$W/out/site" 2>/dev/null && find . -type f | sort | tr '\n' ' ')
@@ -119,7 +119,7 @@ chk "run 0 restores the ORIGINAL content" \
 
 # ── Restore at run 1: the deletion must replay ──────────────────────────────
 echo "== Restore as at run 1 =="
-rm -rf "$W/out"; mkdir -p "$W/out"
+rm -rf "${W:?}/out"; mkdir -p "$W/out"
 bash "$RESTORE" testsite --target-dir "$W/out/site" --artifacts "$W/arts" \
     --key-file "$W/chain.key" --force --skip-database >/dev/null 2>&1
 GOT=$(cd "$W/out/site" 2>/dev/null && find . -type f | sort | tr '\n' ' ')
@@ -145,7 +145,7 @@ chk "the DELETED file is gone, not resurrected" \
 # restore refuses everything with "this node has no upload ledger". The
 # safety file would be missing only on the day it was needed.
 echo "== The machine's own ledger survives a chain restore =="
-rm -rf "$W/out"; mkdir -p "$W/out/site/config/backup-ledger"
+rm -rf "${W:?}/out"; mkdir -p "$W/out/site/config/backup-ledger"
 printf '{"db-0000.sql.gz.enc":{"sha256":"deadbeef","bytes":1}}'     > "$W/out/site/config/backup-ledger/manager.json"
 chmod 700 "$W/out/site/config/backup-ledger"
 chmod 600 "$W/out/site/config/backup-ledger/manager.json"
@@ -182,7 +182,7 @@ chk "an EMPTY snapshot is treated the same way, not as a valid baseline" \
 echo "== Verification refuses damaged chains =="
 cp -r "$W/arts" "$W/arts_bad"
 truncate -s -200 "$W/arts_bad/$(basename "$F1")"
-rm -rf "$W/out"; mkdir -p "$W/out/site"
+rm -rf "${W:?}/out"; mkdir -p "$W/out/site"
 echo "sentinel" > "$W/out/site/PREEXISTING.txt"
 OUT=$(bash "$RESTORE" testsite --target-dir "$W/out/site" --artifacts "$W/arts_bad" \
         --key-file "$W/chain.key" --force --skip-database 2>&1)
@@ -215,7 +215,7 @@ chk "a chain missing its full is refused" "$(echo "$OUT" | grep -ci 'missing bac
 
 # ── Dry run changes nothing ─────────────────────────────────────────────────
 echo "== Dry run =="
-rm -rf "$W/out"; mkdir -p "$W/out/site"
+rm -rf "${W:?}/out"; mkdir -p "$W/out/site"
 echo "sentinel" > "$W/out/site/PREEXISTING.txt"
 OUT=$(bash "$RESTORE" testsite --target-dir "$W/out/site" --artifacts "$W/arts" \
         --dry-run --skip-database 2>&1)
@@ -233,7 +233,7 @@ chk "and needs no key" "$(echo "$OUT" | grep -ci 'key-file is required')" "0"
 # live site, and extraction runs with tar --incremental, which DELETES files the
 # archive does not list. Observed live 2026-08-06.
 echo "== A mismatched target is refused =="
-rm -rf "$W/out"; mkdir -p "$W/out/wrongname"
+rm -rf "${W:?}/out"; mkdir -p "$W/out/wrongname"
 OUT=$(bash "$RESTORE" testsite --target-dir "$W/out/wrongname" --artifacts "$W/arts" \
         --key-file "$W/chain.key" --force --skip-database 2>&1) && RC=0 || RC=$?
 chk "a target whose last segment is not the archive's directory fails" "$RC" "1"
@@ -247,7 +247,7 @@ chk "and nothing is written to the sibling it used to pick silently" \
 # A key that cannot open the archive is caught before anything is applied,
 # rather than extracting nothing and reporting success.
 echo "== A key that does not open the chain is caught up front =="
-rm -rf "$W/out"; mkdir -p "$W/out"
+rm -rf "${W:?}/out"; mkdir -p "$W/out"
 head -c 32 /dev/urandom | base64 > "$W/badkey"
 OUT=$(bash "$RESTORE" testsite --target-dir "$W/out/site" --artifacts "$W/arts" \
         --key-file "$W/badkey" --force --skip-database 2>&1) && RC=0 || RC=$?
@@ -278,8 +278,8 @@ v2_data 0000; v2_code 0000; cp -a "$V/src/testsite" "$V/at/0"
 # and loses an upload (the data increments).
 mkdir -p "$V/stage/public_html/lib"; echo two > "$V/stage/public_html/lib/a.php"; echo new > "$V/stage/public_html/lib/b.php"
 mv "$V/src/testsite/public_html" "$V/src/testsite/public_html_last"; mv "$V/stage/public_html" "$V/src/testsite/public_html"
-rm -rf "$V/src/testsite/public_html_last"
-mkdir -p "$V/src/testsite/uploads/u2"; echo up2 > "$V/src/testsite/uploads/u2/photo.jpg"; rm -rf "$V/src/testsite/uploads/u1"
+rm -rf "${V:?}/src/testsite/public_html_last"
+mkdir -p "$V/src/testsite/uploads/u2"; echo up2 > "$V/src/testsite/uploads/u2/photo.jpg"; rm -rf "${V:?}/src/testsite/uploads/u1"
 rm -f "$V/code.snar"; v2_data 0001; v2_code 0001; cp -a "$V/src/testsite" "$V/at/1"
 # Run 2: ordinary changes to both.
 echo three > "$V/src/testsite/public_html/lib/a.php"; rm -f "$V/src/testsite/public_html/lib/b.php"; echo more > "$V/src/testsite/config/extra.conf"
@@ -314,7 +314,7 @@ chk "and BackupChain::restore_plan plans the same, in the same order" "$PHP_PLAN
     "data-0000.tar.gz.enc data-0001.tar.gz.enc data-0002.tar.gz.enc code-0001.tar.gz.enc code-0002.tar.gz.enc "
 
 for seq in 0 1 2; do
-    rm -rf "$V/out"; mkdir -p "$V/out"
+    rm -rf "${V:?}/out"; mkdir -p "$V/out"
     bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts" --key-file "$W/chain.key" \
         --seq "$seq" --force --skip-database --skip-reconcile >/dev/null 2>&1
     chk "restoring version-2 run $seq reproduces the tree exactly" \
@@ -322,7 +322,7 @@ for seq in 0 1 2; do
 done
 
 # Over a live tree that has drifted: deletions replay in both kinds.
-rm -rf "$V/out"; mkdir -p "$V/out"; cp -a "$V/at/0" "$V/out/testsite"
+rm -rf "${V:?}/out"; mkdir -p "$V/out"; cp -a "$V/at/0" "$V/out/testsite"
 echo junk > "$V/out/testsite/uploads/u1/junk.txt"; echo junk > "$V/out/testsite/public_html/junk.php"
 bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts" --key-file "$W/chain.key" \
     --force --skip-database --skip-reconcile >/dev/null 2>&1
@@ -341,7 +341,7 @@ json.dump(m, open(sys.argv[1].replace('manifest.json', 'manifest.v3.json'), 'w')
 PY
 mkdir -p "$V/arts_pg" "$V/arts_v3"; cp "$V/arts/"*.enc "$V/arts_pg/"; cp "$V/arts/"*.enc "$V/arts_v3/"
 mv "$V/arts/manifest.pg.json" "$V/arts_pg/manifest.json"; mv "$V/arts/manifest.v3.json" "$V/arts_v3/manifest.json"
-rm -rf "$V/out"; mkdir -p "$V/out/testsite"; echo sentinel > "$V/out/testsite/KEEP"
+rm -rf "${V:?}/out"; mkdir -p "$V/out/testsite"; echo sentinel > "$V/out/testsite/KEEP"
 OUT=$(bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts_pg" --key-file "$W/chain.key" --force 2>&1) && RC=0 || RC=$?
 chk "a pgdata run without --skip-database is refused" "$RC" "1"
 chk "before anything is written" "$(ls "$V/out/testsite" | tr '\n' ' ')" "KEEP "

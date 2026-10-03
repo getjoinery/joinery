@@ -45,6 +45,7 @@
  * and so is rewritten with the content. imc_level_attempt_time lets a pass go by a row that
  * just failed to convert.
  *
+ * @version 1.6 - imc_sender_fingerprint: the spam filter's contact signal, on sealed rows too
  * @version 1.5 - imc_level_attempt_time; the level-follows-the-mailbox rule stated
  * @version 1.4
  */
@@ -108,6 +109,11 @@ class MailboxContact extends SystemBase {
 		// A mailbox level change stamps a row whose conversion failed, so the
 		// next passes take the rows behind it for a while.
 		'imc_level_attempt_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		// The address's sender fingerprint (SpamSenderRecords::fingerprint), clear on
+		// every row, sealed ones included: what lets the spam filter's `contact`
+		// signal find this contact at ingest, with no window open. NULL until the
+		// backfill reaches a row written before the column existed.
+		'imc_sender_fingerprint' => array('type'=>'varchar(64)', 'is_nullable'=>true),
 		'imc_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
@@ -126,6 +132,12 @@ class MailboxContact extends SystemBase {
 	 * decryptSealedField()/decryptSealedFieldStatic() and writes go through
 	 * sealColumns() with no crypto code in this class.
 	 */
+	/** The `contact` signal's lookup at ingest: this mailbox, this sender. */
+	public static $index_specifications = array(
+		array('columns' => array('imc_iea_inbound_email_alias_id', 'imc_sender_fingerprint'),
+			'where' => 'imc_sender_fingerprint IS NOT NULL'),
+	);
+
 	public static function sealAd(int $contact_id, string $field): string {
 		return 'contact:' . $contact_id . ':' . $field;
 	}

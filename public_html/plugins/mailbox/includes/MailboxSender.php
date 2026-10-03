@@ -53,6 +53,8 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.24 - a send records its recipients in the sender records and a reply teaches its source ham
+ *   (spam_learning_in_core.md)
  * @version 1.23.1 - review of 2026-09-27: a Fortress mailbox sends only a browser-sealed or hollow
  *   draft (B2); a failed send is recorded on a Fortress draft (B10); upload_count refuses a send
  *   PHP cut short (B6)
@@ -381,12 +383,14 @@ class MailboxSender {
 			// on the draft when there was one, so the send is not a mystery later.
 			// Reporting it as a failure would invite the person to send it again.
 			$attempt(MailboxSendAttempt::OUTCOME_SENT, null, $draft_row_id, $sent_copy);
+			$this->recordForSpamFilter($alias, $mode, $to, $cc, $bcc, $source, null);
 			$ref = self::errorReference();
 			error_log('MailboxSender [' . $ref . ']: sent for alias ' . $alias_id . ', but the Sent copy could not be stored: '
 				. get_class($e) . ': ' . $e->getMessage());
 			return array('ok' => true, 'outbound_id' => 0, 'warning' => self::unsavedCopyWarning($sent_copy, $ref));
 		}
 		$attempt(MailboxSendAttempt::OUTCOME_SENT, null, intval($stored['id']), $sent_copy);
+		$this->recordForSpamFilter($alias, $mode, $to, $cc, $bcc, $source, intval($stored['id']));
 		$this->storeCopyParts($stored, $uploads, $from_address, $subject, $email);
 		if ($fortress_draft !== null) {
 			try {
@@ -409,6 +413,34 @@ class MailboxSender {
 		// effect of traffic, in either direction.
 
 		return array('ok' => true, 'outbound_id' => $stored['id']);
+	}
+
+	/**
+	 * What a send tells the spam filter (spam_learning_in_core.md): the
+	 * user writes to these addresses (their sender records count a composed
+	 * send, so their mail reads as from a correspondent), and a reply says the
+	 * message replied to is not spam. A forward says neither. Never fails the
+	 * send: the message has already left.
+	 */
+	private function recordForSpamFilter(InboundEmailAlias $alias, string $mode, array $to, array $cc, array $bcc,
+			?InboundEmailMessage $source, ?int $row_id): void {
+		try {
+			// The Sent copy is settled either way, so the backfill never counts it:
+			// a forward's recipients are not people the user writes to.
+			if ($row_id !== null && $row_id > 0) {
+				InboundEmailMessage::updateColumns($row_id, array('iem_sender_recorded' => true));
+			}
+			if ($mode === self::MODE_FORWARD) {
+				return;
+			}
+			$addresses = array_column(array_merge($to, $cc, $bcc), 'email');
+			SpamSenderRecords::recordSent(intval($alias->key), $addresses);
+			if ($source !== null && ($mode === self::MODE_REPLY || $mode === self::MODE_REPLY_ALL)) {
+				SpamLearning::recordEvidence(array(intval($source->key)), InboundEmailMessage::SPAM_VERDICT_HAM);
+			}
+		} catch (Throwable $e) {
+			error_log('MailboxSender: recording the send for the spam filter failed: ' . $e->getMessage());
+		}
 	}
 
 	/**

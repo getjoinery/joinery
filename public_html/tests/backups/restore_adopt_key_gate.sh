@@ -34,7 +34,7 @@ if [ "$(id -u)" = "0" ]; then
 fi
 
 W="$(mktemp -d /tmp/jy_adopt_gate_XXXXXX)"
-trap 'rm -rf "$W"' EXIT
+trap 'rm -rf "${W:?}"' EXIT
 
 php "$ENVTOOL" mint --artifact chain --key-out "$W/chain.key" --sidecar-out "$W/envelope.json" >/dev/null 2>&1
 [ -s "$W/chain.key" ] || { fail "could not mint a chain key"; echo "RESULT: FAIL $passed $failed"; exit 1; }
@@ -77,7 +77,7 @@ JSON
 # target KEY [closing]: this machine's own site at $W/out/site, with its own
 # config (KEY "-": none), its own backup_site_key and a file of its own.
 target() {
-    rm -rf "$W/out"; mkdir -p "$W/out/site/config"
+    rm -rf "${W:?}/out"; mkdir -p "$W/out/site/config"
     [ "$1" != "-" ] && { config "$W/out/site/config/Globalvars_site.php" "target-db-password" "$1" "${2:-}"; chmod 640 "$W/out/site/config/Globalvars_site.php"; }
     echo "target site key" > "$W/out/site/config/backup_site_key"
     echo "only on the target" > "$W/out/site/target_only.txt"

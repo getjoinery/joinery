@@ -127,7 +127,7 @@ cleanup_and_rollback() {
                     verbose_echo "Failed deployment moved to $failed_dir"
                 else
                     echo "Warning: Could not move failed deployment (will remove instead)"
-                    rm -rf "$public_html_dir"
+                    rm -rf "${public_html_dir:?}"
                 fi
             fi
 
@@ -279,7 +279,7 @@ update_installed_themes_plugins() {
 
                     if [[ "$receives_upgrades" == "true" ]]; then
                         verbose_echo "  Updating theme: $theme_name"
-                        rm -rf "$theme_dir"
+                        rm -rf "${theme_dir:?}"
                         cp -r "$staged_theme" "$public_html_dir/theme/"
                         ((themes_updated++))
                     else
@@ -313,7 +313,7 @@ update_installed_themes_plugins() {
 
                     if [[ "$receives_upgrades" == "true" ]]; then
                         verbose_echo "  Updating plugin: $plugin_name"
-                        rm -rf "$plugin_dir"
+                        rm -rf "${plugin_dir:?}"
                         cp -r "$staged_plugin" "$public_html_dir/plugins/"
                         ((plugins_updated++))
                     else
@@ -345,7 +345,7 @@ deploy_maintenance_scripts() {
     # DEPLOY MAINTENANCE_SCRIPTS to /var/www/html/sitename/maintenance_scripts
     verbose_echo "Setting up maintenance_scripts deployment to $site_root/maintenance_scripts..."
     local maintenance_stage_dir="$site_root/maintenance_scripts_stage"
-    rm -rf "$maintenance_stage_dir"
+    rm -rf "${maintenance_stage_dir:?}"
     mkdir -p "$maintenance_stage_dir"
 
     # Clone repo for maintenance_scripts
@@ -372,7 +372,7 @@ deploy_maintenance_scripts() {
         verbose_echo "Deploying maintenance scripts..."
 
         # Remove old maintenance_scripts if exists
-        rm -rf "$site_root/maintenance_scripts"
+        rm -rf "${site_root:?}/maintenance_scripts"
 
         # Move to site root
         mv "$maintenance_stage_dir/maintenance_scripts" "$site_root/maintenance_scripts" || {
@@ -391,7 +391,7 @@ deploy_maintenance_scripts() {
 
     # Cleanup staging directory
     verbose_echo "Cleaning up maintenance staging directory..."
-    rm -rf "$maintenance_stage_dir"
+    rm -rf "${maintenance_stage_dir:?}"
 
     echo "Maintenance scripts download from joinery repository complete."
     return 0
@@ -742,23 +742,23 @@ DEPLOYMENT_STARTED=true
 # Remove old theme/plugin directories if they exist
 if [[ -d "/var/www/html/$TARGET_SITE/theme" ]]; then
     echo "Removing old theme directory: /var/www/html/$TARGET_SITE/theme"
-    rm -rf "/var/www/html/$TARGET_SITE/theme"
+    rm -rf "/var/www/html/${TARGET_SITE:?}/theme"
 fi
 if [[ -d "/var/www/html/$TARGET_SITE/plugins" ]]; then
     echo "Removing old plugins directory: /var/www/html/$TARGET_SITE/plugins"
-    rm -rf "/var/www/html/$TARGET_SITE/plugins"
+    rm -rf "/var/www/html/${TARGET_SITE:?}/plugins"
 fi
 if [[ -d "/var/www/html/$TARGET_SITE/theme_stage" ]]; then
     echo "Removing old theme_stage directory: /var/www/html/$TARGET_SITE/theme_stage"
-    rm -rf "/var/www/html/$TARGET_SITE/theme_stage"
+    rm -rf "/var/www/html/${TARGET_SITE:?}/theme_stage"
 fi
 if [[ -d "/var/www/html/$TARGET_SITE/plugins_stage" ]]; then
     echo "Removing old plugins_stage directory: /var/www/html/$TARGET_SITE/plugins_stage"
-    rm -rf "/var/www/html/$TARGET_SITE/plugins_stage"
+    rm -rf "/var/www/html/${TARGET_SITE:?}/plugins_stage"
 fi
 
 # CLEAR THE STAGING FOLDER AND RECREATE
-rm -rf /var/www/html/$TARGET_SITE/public_html_stage
+rm -rf "/var/www/html/${TARGET_SITE:?}/public_html_stage"
 mkdir /var/www/html/$TARGET_SITE/public_html_stage
 
 # CLONE THE REPO DIRECTLY INTO staging directory
@@ -811,7 +811,7 @@ if [[ -d "/var/www/html/$TARGET_SITE/public_html/cache" ]]; then
             exit 1
         fi
         # Remove the old cache from public_html
-        if ! rm -rf /var/www/html/$TARGET_SITE/public_html/cache; then
+        if ! rm -rf "/var/www/html/${TARGET_SITE:?}/public_html/cache"; then
             echo "ERROR: Failed to remove cache directory from public_html after merge."
             echo "Permissions issue - deployment aborted."
             exit 1
@@ -835,7 +835,7 @@ fi
 
 # BACKUP CURRENT DEPLOYMENT TO LAST (ATOMIC OPERATION)
 verbose_echo "Creating atomic backup of current deployment..."
-rm -rf /var/www/html/$TARGET_SITE/public_html_last
+rm -rf "/var/www/html/${TARGET_SITE:?}/public_html_last"
 mkdir -p /var/www/html/$TARGET_SITE/public_html_last
 
 if [[ -d /var/www/html/$TARGET_SITE/public_html ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html 2>/dev/null)" ]]; then
@@ -857,14 +857,14 @@ if [[ -d /var/www/html/$TARGET_SITE/public_html ]] && [[ "$(ls -A /var/www/html/
 
     # Now safe to clear public_html for new deployment
     verbose_echo "Clearing public_html for new deployment..."
-    if ! rm -rf /var/www/html/$TARGET_SITE/public_html/*; then
+    if ! rm -rf "/var/www/html/${TARGET_SITE:?}/public_html/"*; then
         echo "ERROR: Failed to clear public_html. Aborting."
         echo "Backup preserved at public_html_last"
         exit 1
     fi
 
     # Also remove hidden files
-    if ! rm -rf /var/www/html/$TARGET_SITE/public_html/.[!.]* 2>/dev/null; then
+    if ! rm -rf "/var/www/html/${TARGET_SITE:?}/public_html/".[!.]* 2>/dev/null; then
         # This may fail if no hidden files exist - that's ok
         verbose_echo "No hidden files to remove (or permission denied)"
     fi
@@ -1278,12 +1278,12 @@ fi  # End of FAST_MODE check for model tests
 
 # CLEANUP: Remove staging directory after successful deployment ONLY
 verbose_echo "Cleaning up staging directory..."
-rm -rf /var/www/html/$TARGET_SITE/public_html_stage
+rm -rf "/var/www/html/${TARGET_SITE:?}/public_html_stage"
 
 # CLEANUP: Remove backup directory after successful deployment
 verbose_echo "Cleaning up backup directory..."
 if [[ -d "/var/www/html/$TARGET_SITE/public_html_last" ]]; then
-    rm -rf /var/www/html/$TARGET_SITE/public_html_last
+    rm -rf "/var/www/html/${TARGET_SITE:?}/public_html_last"
     verbose_echo "Removed backup directory: public_html_last"
 else
     verbose_echo "No backup directory to clean up"
@@ -1295,7 +1295,7 @@ failed_dirs_count=0
 for failed_dir in /var/www/html/$TARGET_SITE/public_html_failed_*; do
     if [[ -d "$failed_dir" ]]; then
         verbose_echo "Removing old failed deployment: $(basename "$failed_dir")"
-        rm -rf "$failed_dir"
+        rm -rf "${failed_dir:?}"
         ((failed_dirs_count++))
     fi
 done

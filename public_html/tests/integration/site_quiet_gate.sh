@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TOOLS="$ROOT/maintenance_scripts/install_tools"
 SYSTOOLS="$ROOT/maintenance_scripts/sysadmin_tools"
 T=$(mktemp -d)
-trap 'rm -rf "$T"' EXIT
+trap 'rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 chk() {
     if [ "$2" = "$3" ]; then echo "  PASS: $1"; passed=$((passed+1))
@@ -178,7 +178,7 @@ chk "read as switchover" "$(site_state_read 2>/dev/null)" "switchover"
 echo 417 > "$SD/copy_of"
 chk "unless a copy_of record is beside it: then a copy" "$(site_state_read 2>/dev/null)" "copy"
 chk "and a bare off does not clear it" "$(bash "$Q" off >/dev/null 2>&1; echo $?):$([ -e "$SD/state" ] && echo kept)" "2:kept"
-rm -rf "$SD"
+rm -rf "${SD:?}"
 
 echo "=== The converger's gate: a quiet site runs no installer ==="
 # The real runner against a temp tree (as host_converger_gate.sh does): the

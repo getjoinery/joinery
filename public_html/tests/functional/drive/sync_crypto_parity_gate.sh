@@ -39,7 +39,7 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "${WORK:?}"' EXIT
 
 echo "building jd-crypto-parity (release)..."
 nice -n 19 cargo build --release -p jd-crypto --manifest-path "$SYNC_DIR/Cargo.toml" --quiet

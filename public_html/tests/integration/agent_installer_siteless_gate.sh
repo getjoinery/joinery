@@ -49,7 +49,7 @@ INSTALLER="${SITE}/maintenance_scripts/install_tools/install_agent.sh"
 MANIFEST="${ROOT}/agent_dist/manifest.json"
 
 T=$(mktemp -d)
-trap 'rm -rf "$T"' EXIT
+trap 'rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 
 chk() {

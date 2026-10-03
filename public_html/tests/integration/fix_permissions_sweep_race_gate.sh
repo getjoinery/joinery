@@ -21,7 +21,7 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SCRIPT="${FIX_PERMISSIONS_SCRIPT:-$ROOT/maintenance_scripts/install_tools/fix_permissions.sh}"
 T=$(mktemp -d)
-trap 'chmod -R u+rwx "$T" 2>/dev/null; rm -rf "$T"' EXIT
+trap 'chmod -R u+rwx "$T" 2>/dev/null; rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 
 chk() {
@@ -38,12 +38,12 @@ chk "the script defines sweep_find" "$(grep -c '^sweep_find() {$' "$T/sweep_find
 . "$T/sweep_find.sh"
 
 tree() {
-    rm -rf "$T/site"
+    rm -rf "${T:?}/site"
     for i in $(seq 1 20); do mkdir -p "$T/site/zz/d$i/inner"; touch "$T/site/zz/d$i/f"; done
 }
 # On the first file inside zz/dN, remove every other zz/d* directory: they were
 # listed with zz and are gone before find opens them.
-VANISH='case "$1" in */zz/d*/f) for x in '"$T"'/site/zz/d*; do [ "$x" = "${1%/f}" ] || rm -rf "$x"; done ;; esac'
+VANISH='case "$1" in */zz/d*/f) for x in '"${T:?}"'/site/zz/d*; do [ "$x" = "${1%/f}" ] || rm -rf "${x:?}"; done ;; esac'
 
 echo "=== What the sweep tolerates ==="
 tree

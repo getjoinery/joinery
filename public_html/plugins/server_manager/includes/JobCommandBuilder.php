@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.89 - the rspamd_classifier_bayes and rspamd_redis descriptions say what each file means now
+ *   that spam learning is in the app (an absent redis.conf is the expected answer)
  * @version 1.88 - build_copy_vouch / build_copy_take_vouch (agent 1.53.0): the switch-over's final copy is a
  *                 signed vouch for the newest manifest, no secret and no approval (site_copy.md B44)
  * @version 1.87 - Clone is retired (site_copy.md WP9): build_clone_export_arm, mint_clone_export_key and
@@ -1934,9 +1936,9 @@ class JobCommandBuilder {
 		'opendkim_conf'           => 'opendkim.conf',
 		'opendmarc_conf'          => 'opendmarc.conf',
 		'rspamd_actions'          => 'rspamd actions.conf',
-		'rspamd_classifier_bayes' => 'rspamd classifier-bayes.conf',
+		'rspamd_classifier_bayes' => 'rspamd classifier-bayes.conf (Bayes switched off; learning is in the app)',
 		'rspamd_milter_headers'   => 'rspamd milter_headers.conf',
-		'rspamd_redis'            => 'rspamd redis.conf',
+		'rspamd_redis'            => 'rspamd redis.conf (absent on an upgraded box; only a box not yet upgraded has one)',
 		'rspamd_worker_proxy'     => 'rspamd worker-proxy.inc',
 	];
 

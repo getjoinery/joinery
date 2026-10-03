@@ -302,7 +302,7 @@ fi
 cleanup() {
     if [ -d "$TEMP_DIR" ]; then
         print_info "Cleaning up temporary files..."
-        rm -rf "$TEMP_DIR"
+        rm -rf "${TEMP_DIR:?}"
     fi
 }
 
@@ -634,7 +634,7 @@ perform_restore() {
         # There is nothing in another machine's ledger this machine could use
         # either: the entries are hashes of files that machine uploaded.
         if [ -d "$backup_dir/project_files/config/backup-ledger" ]; then
-            $SUDO rm -rf "$backup_dir/project_files/config/backup-ledger"
+            $SUDO rm -rf "${backup_dir:?}/project_files/config/backup-ledger"
             print_info "Keeping this machine's own config/backup-ledger"
         fi
 

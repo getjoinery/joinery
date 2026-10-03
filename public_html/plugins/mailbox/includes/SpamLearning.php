@@ -1,82 +1,118 @@
 <?php
 /**
- * SpamLearning — teach the local rspamd Bayes corpus the spam / not-spam
- * corrections members make in the reader
- * (specs/mailbox_spam_filtering_simplification.md D3).
+ * SpamLearning — teach the deployment's spam corpus (SpamBayes) and sender
+ * records (SpamSenderRecords) what the user's own behaviour says about a
+ * message (spam_learning_in_core.md § Teaching).
  *
- * WHAT IS TAUGHT. A correction, and only a correction: a row a member marked
- * (MailboxService::setSpamVerdict stamps iem_spam_corrected_time) whose verdict
- * differs from what was last taught (iem_learned_verdict). The verdict ingest
- * wrote is the scanner's own answer; teaching it back would only confirm the
- * scanner to itself. Flip-backs fall out for free — change the verdict and the
- * row diverges again and is re-taught the new way.
+ * WHAT IS TAUGHT. A row whose iem_train_verdict differs from its
+ * iem_learned_verdict. iem_train_verdict is evidence from the user, set by
+ * recordEvidence(): Mark as spam (spam), Not spam and Always allow (ham), and a
+ * reply the user sent to the message (ham). NULL means no evidence, so a
+ * verdict ingest wrote is never taught and the classifier never trains on its
+ * own output. Deleting, reading, archiving and forwarding teach nothing.
  *
- * WHERE IT IS TAUGHT. Two passes split the rows between them by what opening a
- * row needs, so neither re-selects rows it can never finish:
+ * Only inbound mail that arrived here is taught. IMAP-polled rows never are:
+ * the remote's junk folder is their verdict and their content is the remote's
+ * mail stream. Fortress rows are never openable here; they are marked handled
+ * (learned = train) so they stop selecting.
  *
- *   keyless  — LearnSpamFeedback, every cron pass: rows stored in the clear,
- *              plus end-to-end (Fortress) rows, which no server ever opens and
- *              are marked handled.
- *   window   — the mailbox_spam_learn deferred-work consumer
- *              (includes/bootstrap.php): rows sealed to a member's vault,
- *              taught while that member's window is open.
+ * ONE TEACHING, ONE TRANSACTION. teach() first compare-and-sets the learned
+ * marker from the value it read; a row count other than 1 means another request
+ * already taught it, and nothing more is written. Then it subtracts the message
+ * from the class it was taught to before (when its tokenizer version still
+ * matches; otherwise only the totals and the sender record move), adds it to the
+ * new class, and moves the sender record's counters. A half-taught message
+ * cannot exist. No per-message token list is ever stored: unteaching
+ * retokenizes the message, which needs its plaintext.
  *
- * WHAT IS SENT. rspamd learns from an RFC822 message. A row that kept its whole
- * raw sends that. Most rows did not (the lean record keeps the header block and
- * the decoded bodies, and splits attachments into Files), so the message is
- * rebuilt from those: the stored header block with its MIME structure headers
- * replaced by a single text/plain part holding the plain body (or the readable
- * text of the HTML body). Bayes reads headers and text, which is all of it. The
- * original's multipart headers are dropped because they would describe parts
- * the rebuilt body does not have, and rspamd would find no text to learn.
+ * WHERE IT RUNS. Rows stored in the clear are taught in the request that records
+ * the action (recordEvidence). Rows sealed to a member's vault wait for that
+ * member's window: the mailbox_spam_learn deferred-work consumer drains them
+ * (drainForUser). The LearnSpamFeedback cron pass is the backstop for clear rows
+ * a request did not finish.
  *
- * Sending sealed content to the scanner is the same loopback hand-off the
- * ingest scan makes with every arriving message; nothing is written anywhere
- * but the learned marker, a closed-vocabulary word.
- *
- * OUTCOMES. taught (marker stamped); handled (nothing any server can teach —
- * Fortress, no stored text, or the scanner refused the message itself — marker
- * stamped so the row stops re-selecting); deferred (scanner down or failing,
- * or the window shut mid-pass — the row stays diverged and is retried, which is
- * what lets the corpus heal through an outage or a wipe).
- *
+ * @version 2.0 - the corpus is a Postgres table taught in the request; no
+ *   rebuilt email, no HTTP call to a scanner
  * @version 1.0
  */
 
 class SpamLearning {
 
-	/** Bound one pass; corrections are human-paced, so the set is small. */
+	/** Bound one pass; teachings are human-paced, so the set is small. */
 	const MAX_PER_PASS = 200;
 
 	const TAUGHT   = 'taught';
 	const HANDLED  = 'handled';
 	const DEFERRED = 'deferred';
 
-	/** Headers that describe the original's MIME structure, replaced on a rebuilt message. */
-	const STRUCTURE_HEADERS = array('mime-version', 'content-type', 'content-transfer-encoding', 'content-disposition');
-
-	/** A correction not yet taught. */
-	private static function correctionSql(): string {
-		return "iem_spam_corrected_time IS NOT NULL
-			AND iem_spam_verdict IS NOT NULL
-			AND iem_spam_verdict IS DISTINCT FROM iem_learned_verdict
+	/** A row with something to teach. */
+	private static function pendingSql(): string {
+		return "iem_train_verdict IS NOT NULL
+			AND iem_train_verdict IS DISTINCT FROM iem_learned_verdict
 			AND iem_pending_parse = false";
 	}
 
 	/** Sealed to a member's vault, openable in their window (not end-to-end). */
-	private static function windowSealedSql(): string {
+	public static function windowSealedSql(): string {
 		return "(iem_content_sealed = true OR iem_raw_sealed = true)
 			AND (iem_sealed_key IS NULL OR NOT " . InboundEmailMessage::mailKeySql() . ")";
 	}
 
+	/** Rows whose evidence teaches: inbound mail that arrived here, not polled from IMAP. */
+	private static function eligibleSql(): string {
+		return "iem_direction = 'inbound' AND iem_iia_inbound_imap_account_id IS NULL";
+	}
+
 	/**
-	 * Corrections the keyless pass takes: everything that needs no window.
+	 * Record what the user's action says about these messages and teach the ones
+	 * stored in the clear now. The caller has already scoped $ids to what the
+	 * user may change. Rows that are not eligible (outbound, IMAP-polled) are
+	 * left alone.
+	 *
+	 * @param int[] $ids
+	 * @return int rows whose evidence was recorded
+	 */
+	public static function recordEvidence(array $ids, string $verdict): int {
+		if (!in_array($verdict, array(InboundEmailMessage::SPAM_VERDICT_SPAM, InboundEmailMessage::SPAM_VERDICT_HAM), true)) {
+			return 0;
+		}
+		$ids = array_values(array_filter(array_map('intval', $ids), function ($i) { return $i > 0; }));
+		if (!count($ids)) {
+			return 0;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$in = implode(',', $ids);
+		$stmt = $db->prepare("UPDATE iem_inbound_email_messages SET iem_train_verdict = ?
+			WHERE iem_inbound_email_message_id IN ($in) AND " . self::eligibleSql());
+		$stmt->execute(array($verdict));
+		$recorded = $stmt->rowCount();
+
+		if ($recorded > 0 && MailboxSpamPolicy::learningEnabled()) {
+			$now = $db->query("SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+				WHERE iem_inbound_email_message_id IN ($in) AND " . self::pendingSql() . "
+				  AND NOT (" . self::windowSealedSql() . ")
+				ORDER BY iem_inbound_email_message_id ASC LIMIT " . self::MAX_PER_PASS)
+				->fetchAll(PDO::FETCH_COLUMN, 0) ?: array();
+			foreach ($now as $id) {
+				try {
+					self::teach(intval($id));
+				} catch (\Throwable $e) {
+					// The row stays diverged; the cron pass retries it.
+					error_log('SpamLearning: teaching message ' . $id . ' failed: ' . $e->getMessage());
+				}
+			}
+		}
+		return $recorded;
+	}
+
+	/**
+	 * Rows the keyless pass takes: everything that needs no window.
 	 *
 	 * @return int[]
 	 */
 	public static function keylessIds(int $limit = self::MAX_PER_PASS): array {
 		$sql = "SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
-				 WHERE " . self::correctionSql() . "
+				 WHERE " . self::pendingSql() . "
 				   AND NOT (" . self::windowSealedSql() . ")
 				 ORDER BY iem_inbound_email_message_id ASC
 				 LIMIT " . max(1, intval($limit));
@@ -85,7 +121,7 @@ class SpamLearning {
 	}
 
 	/**
-	 * Corrections sealed to $user_id's vault, for their window's pass.
+	 * Rows sealed to $user_id's vault, for their window's pass.
 	 *
 	 * @return int[]
 	 */
@@ -96,7 +132,7 @@ class SpamLearning {
 		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
 			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 			  WHERE iem_sealed_owner_user_id = ?
-			    AND " . self::correctionSql() . "
+			    AND " . self::pendingSql() . "
 			    AND " . self::windowSealedSql() . "
 			  ORDER BY iem_inbound_email_message_id ASC
 			  LIMIT " . max(1, intval($limit)));
@@ -104,39 +140,39 @@ class SpamLearning {
 		return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN, 0) ?: array());
 	}
 
-	/**
-	 * Deferred-work predicate: cheap (settings, one indexed LIMIT 1, then a
-	 * loopback connect only when there is work), no decrypt. A scanner that is
-	 * down reports no work, so the heartbeat does not keep asking for drains
-	 * that cannot finish; the rows wait, diverged, for it to come back.
-	 */
+	/** Deferred-work predicate: cheap (settings, one indexed LIMIT 1), no decrypt. */
 	public static function hasWindowWork(int $user_id): bool {
-		return MailboxSpamPolicy::learningEnabled() && count(self::windowIds($user_id, 1)) > 0
-			&& MailboxSpamPolicy::scannerAvailable();
+		return MailboxSpamPolicy::learningEnabled() && count(self::windowIds($user_id, 1)) > 0;
 	}
 
 	/**
-	 * The window's pass: teach $user_id's sealed corrections until $deadline.
-	 * The caller holds the open window (VaultDeferredWork). Returns the number
-	 * taught or handled.
+	 * The window's pass: teach $user_id's sealed rows until $deadline. The caller
+	 * holds the open window (VaultDeferredWork). Returns the number taught or
+	 * handled.
 	 */
 	public static function drainForUser(int $user_id, float $deadline): int {
-		if (!MailboxSpamPolicy::learningEnabled() || !MailboxSpamPolicy::scannerAvailable()) {
+		if (!MailboxSpamPolicy::learningEnabled()) {
 			return 0;
 		}
-		$controller = MailboxSpamPolicy::controllerUrl();
 		$done = 0;
 		foreach (self::windowIds($user_id) as $id) {
 			if (microtime(true) >= $deadline) {
 				break;
 			}
 			// One message, one unit of the hot-turn rule: nothing this row opens
-			// is in play when the next one starts.
-			$outcome = SealedEgressGuard::isolate(function () use ($id, $controller) {
-				return self::teach($id, $controller);
-			});
+			// is in play when the next one starts. A row that fails for any other
+			// reason than a shut window is logged and passed by, so it never holds
+			// back every sealed row behind it; it stays diverged and is tried again.
+			try {
+				$outcome = SealedEgressGuard::isolate(function () use ($id) {
+					return self::teach($id);
+				});
+			} catch (\Throwable $e) {
+				error_log('SpamLearning: teaching message ' . $id . ' failed: ' . $e->getMessage());
+				continue;
+			}
 			if ($outcome === self::DEFERRED) {
-				break;   // the scanner is failing, or the window shut: try again later
+				break;   // the window shut: try again later
 			}
 			$done++;
 		}
@@ -144,165 +180,109 @@ class SpamLearning {
 	}
 
 	/**
-	 * Teach one row. Re-reads it, so a row taught since it was selected (another
-	 * tab's pass) is left alone.
+	 * Teach one row. Re-reads it, and the compare-and-set makes a row another
+	 * request taught since it was read a no-op.
 	 */
-	public static function teach(int $id, string $controller): string {
+	public static function teach(int $id): string {
 		$msg = new InboundEmailMessage($id, TRUE);
 		if (!$msg->key) {
 			return self::HANDLED;
 		}
-		$verdict = (string)$msg->get('iem_spam_verdict');
-		if ($verdict === '' || $verdict === (string)$msg->get('iem_learned_verdict')) {
+		$new = (string)$msg->get('iem_train_verdict');
+		$old = (string)$msg->get('iem_learned_verdict');
+		if ($new === '' || $new === $old) {
 			return self::HANDLED;
 		}
+
+		if (InboundEmailMessage::isBrowserSealed($msg)
+				|| (string)$msg->get('iem_direction') !== 'inbound'
+				|| intval($msg->get('iem_iia_inbound_imap_account_id')) > 0) {
+			// Nothing here can or may be taught: mark it so it stops selecting.
+			self::compareAndSet($id, $old, $new, null);
+			return self::HANDLED;
+		}
+
 		try {
-			$text = self::learnText($msg);
+			$content = self::content($msg);
 		} catch (VaultLockedException $e) {
 			return self::DEFERRED;
 		}
-		if ($text === null) {
-			self::markTaught($id, $verdict);
-			return self::HANDLED;
+		$hashes = SpamBayes::hashes(SpamBayes::tokens($content));
+		$alias_id = intval($msg->get('iem_iea_inbound_email_alias_id'));
+		$fingerprint = (string)$msg->get('iem_sender_fingerprint');
+		$fill_fingerprint = ($msg->get('iem_sender_fingerprint') === null);
+		if ($fill_fingerprint) {
+			$fingerprint = SpamSenderRecords::fingerprintOfSender((string)$content['sender']);
 		}
-		$cmd = ($verdict === InboundEmailMessage::SPAM_VERDICT_SPAM) ? 'learnspam' : 'learnham';
-		$result = self::post($controller, $cmd, $text);
-		if ($result === self::DEFERRED) {
-			return self::DEFERRED;
-		}
-		self::markTaught($id, $verdict);
-		return $result;
-	}
+		$old_tokenizer = intval($msg->get('iem_learned_tokenizer'));
 
-	/**
-	 * The message rspamd learns from, or null when nothing a server can read
-	 * is stored. Throws VaultLockedException for a sealed row with no window.
-	 */
-	public static function learnText(InboundEmailMessage $msg): ?string {
-		if (InboundEmailMessage::isBrowserSealed($msg)) {
-			return null;   // end-to-end: only the owner's devices ever open it
+		$db = DbConnector::get_instance()->get_db_link();
+		$owns_tx = !$db->inTransaction();
+		if ($owns_tx) {
+			$db->beginTransaction();
 		}
-		$raw = $msg->getRawMessage();
-		if ($raw !== null && $raw !== '') {
-			return $raw;
-		}
-		$headers = (string)$msg->get('iem_raw_headers');
-		$body = (string)$msg->get('iem_body_plain');
-		if (trim($body) === '') {
-			$html = (string)$msg->get('iem_body_html');
-			$body = ($html !== '') ? MailboxHtmlSanitizer::toReadableText($html) : '';
-		}
-		if (trim($headers) === '' && trim($body) === '') {
-			return null;
-		}
-		return self::plainMessage($headers, $body);
-	}
-
-	/**
-	 * A header block and a text body as one text/plain RFC822 message: the
-	 * block's MIME structure headers (and their folded continuations) removed,
-	 * a text/plain declaration put in their place.
-	 */
-	public static function plainMessage(string $headers, string $body): string {
-		$kept = array();
-		$dropping = false;
-		foreach (preg_split('/\r\n|\n|\r/', trim($headers, "\r\n")) as $line) {
-			if ($line === '') {
-				continue;
-			}
-			if ($line[0] === ' ' || $line[0] === "\t") {
-				if (!$dropping) {
-					$kept[] = $line;
+		try {
+			if (!self::compareAndSet($id, $old, $new, SpamBayes::TOKENIZER_VERSION)) {
+				if ($owns_tx) {
+					$db->rollBack();
 				}
-				continue;
+				return self::HANDLED;   // another request taught it first
 			}
-			$name = strtolower(trim(strstr($line, ':', true) ?: ''));
-			$dropping = in_array($name, self::STRUCTURE_HEADERS, true);
-			if (!$dropping) {
-				$kept[] = $line;
+			if ($old !== '') {
+				SpamBayes::adjust($old, ($old_tokenizer === SpamBayes::TOKENIZER_VERSION) ? $hashes : null, -1);
+				SpamSenderRecords::adjustTaught($alias_id, $fingerprint, $old, -1);
 			}
+			SpamBayes::adjust($new, $hashes, 1);
+			SpamSenderRecords::adjustTaught($alias_id, $fingerprint, $new, 1);
+			if ($fill_fingerprint) {
+				$db->prepare('UPDATE iem_inbound_email_messages SET iem_sender_fingerprint = ?
+					WHERE iem_inbound_email_message_id = ? AND iem_sender_fingerprint IS NULL')
+					->execute(array($fingerprint, $id));
+			}
+			if ($owns_tx) {
+				$db->commit();
+			}
+		} catch (\Throwable $e) {
+			if ($owns_tx && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
 		}
-		$kept[] = 'MIME-Version: 1.0';
-		$kept[] = 'Content-Type: text/plain; charset=utf-8';
-		$kept[] = 'Content-Transfer-Encoding: 8bit';
-		$body = preg_replace('/\r\n|\r|\n/', "\r\n", $body);
-		return implode("\r\n", $kept) . "\r\n\r\n" . $body;
-	}
-
-	/** Stamp the learned marker with the verdict just taught (or found unteachable). */
-	private static function markTaught(int $id, string $verdict): void {
-		DbConnector::get_instance()->get_db_link()
-			->prepare('UPDATE iem_inbound_email_messages SET iem_learned_verdict = ?
-			            WHERE iem_inbound_email_message_id = ?')
-			->execute(array($verdict, $id));
+		return self::TAUGHT;
 	}
 
 	/**
-	 * POST a message to the controller's learn endpoint over loopback.
-	 * taught: learned, or already learned (the corpus reflects it). handled:
-	 * rspamd refused the message itself (a 4xx — too few tokens, unparseable),
-	 * which no retry changes. deferred: no answer, or a server-side failure.
+	 * The parts of a message the tokenizer reads, opened through the model (a
+	 * sealed row needs its owner's window and throws VaultLockedException
+	 * without it). Nothing is written anywhere.
+	 *
+	 * @return array{subject:string, body_plain:string, body_html:string, sender:string, meta:string[]}
 	 */
-	private static function post(string $controller, string $cmd, string $message): string {
-		$url = rtrim($controller, '/') . '/' . $cmd;
-		$code = 0;
-		$body = false;
+	public static function content(InboundEmailMessage $msg): array {
+		return array(
+			'subject'    => (string)$msg->get('iem_subject'),
+			'body_plain' => (string)$msg->get('iem_body_plain'),
+			'body_html'  => (string)$msg->get('iem_body_html'),
+			'sender'     => (string)$msg->get('iem_sender'),
+			'meta'       => self::metaTokens((string)$msg->get('iem_spam_meta')),
+		);
+	}
 
-		if (function_exists('curl_init')) {
-			$ch = curl_init($url);
-			curl_setopt_array($ch, array(
-				CURLOPT_POST           => true,
-				CURLOPT_POSTFIELDS     => $message,
-				CURLOPT_HTTPHEADER     => array('Content-Type: text/plain'),
-				CURLOPT_RETURNTRANSFER => true,
-				CURLOPT_CONNECTTIMEOUT => 5,
-				CURLOPT_TIMEOUT        => 15,
-			));
-			$body = curl_exec($ch);
-			$code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-			if ($body === false) {
-				error_log('SpamLearning: controller ' . $cmd . ' POST failed: ' . curl_error($ch));
-			}
-		} else {
-			$ctx = stream_context_create(array('http' => array(
-				'method'        => 'POST',
-				'header'        => "Content-Type: text/plain\r\n",
-				'content'       => $message,
-				'timeout'       => 15,
-				'ignore_errors' => true,
-			)));
-			$body = @file_get_contents($url, false, $ctx);
-			// PHP 8.5 deprecates the magic $http_response_header local; its
-			// replacement is 8.4-and-later, so both are kept while the fleet
-			// spans both. A status line need not carry text after the code.
-			$status_line = '';
-			if (function_exists('http_get_last_response_headers')) {
-				$headers = http_get_last_response_headers();
-				if (is_array($headers) && isset($headers[0])) {
-					$status_line = (string)$headers[0];
-				}
-			} else if (isset($http_response_header[0])) {
-				$status_line = (string)$http_response_header[0];
-			}
-			if ($status_line !== '' && preg_match('/\s(\d{3})(?:\s|$)/', $status_line, $m)) {
-				$code = (int)$m[1];
-			}
-			if ($body === false) {
-				error_log('SpamLearning: controller ' . $cmd . ' POST failed (stream).');
-			}
-		}
-		if ($body === false) {
-			return self::DEFERRED;
-		}
-		$body = (string)$body;
-		if (($code >= 200 && $code < 300) || stripos($body, 'already learned') !== false) {
-			return self::TAUGHT;
-		}
-		error_log('SpamLearning: controller ' . $cmd . ' returned HTTP ' . $code . ': ' . substr($body, 0, 200));
-		if ($code >= 400 && $code < 500 && $code !== 408 && $code !== 429) {
-			return self::HANDLED;
-		}
-		return self::DEFERRED;
+	/** The meta tokens stored on a row (iem_spam_meta). */
+	public static function metaTokens(string $stored): array {
+		return SpamMeta::decode($stored)['tokens'];
+	}
+
+	/**
+	 * Move the learned marker from $old to $new, only if it still reads $old.
+	 * True when this call made the move.
+	 */
+	private static function compareAndSet(int $id, string $old, string $new, ?int $tokenizer): bool {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'UPDATE iem_inbound_email_messages SET iem_learned_verdict = ?, iem_learned_tokenizer = ?
+			  WHERE iem_inbound_email_message_id = ? AND iem_learned_verdict IS NOT DISTINCT FROM ?');
+		$stmt->execute(array($new, $tokenizer, $id, ($old === '') ? null : $old));
+		return $stmt->rowCount() === 1;
 	}
 }
 ?>

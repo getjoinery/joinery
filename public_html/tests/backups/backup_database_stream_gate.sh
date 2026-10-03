@@ -54,7 +54,7 @@ W=$(mktemp -d /tmp/jy_database_stream_gate_XXXXXX)
 cleanup() {
     psql -U postgres -h localhost -c "DROP DATABASE IF EXISTS \"$SRC\"" >/dev/null 2>&1
     psql -U postgres -h localhost -c "DROP DATABASE IF EXISTS \"$DST\"" >/dev/null 2>&1
-    rm -rf "$W"
+    rm -rf "${W:?}"
 }
 trap cleanup EXIT
 mkdir -p "$W/file" "$W/stream" "$W/x"

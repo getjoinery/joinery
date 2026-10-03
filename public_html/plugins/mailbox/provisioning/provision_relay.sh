@@ -9,6 +9,11 @@
 # it to the recipient's public key at acceptance, and spools ciphertext; the
 # deployment's plane pulls its sealed blobs over HTTPS from the relay's own API.
 #
+# rspamd's local.d files come from rspamd_stateless.sh, the one configuration a
+# deployment's own scanner writes too (spam_learning_in_core.md). Only
+# comment text changed in them, no setting, so RELAY_VERSION stays 3.3 and no
+# relay needs an update; a relay picks up the text when it is next rebuilt.
+#
 # Version: 3.3 - rspamd rbl.conf: DNS lists that cannot answer off (NiX Spam timed out
 #                every lookup and held each scanned message 5-8s; SURBL/URIBL refuse
 #                shared resolvers).
@@ -624,9 +629,10 @@ sync_service opendkim restart
 sync_service opendmarc restart
 
 # --- 6b. rspamd content spam scanner (STATELESS) -------------------------------
-# The relay stamps the X-Spam header inside the sealed raw so each tenant's
-# deferred ingest can read a content-spam verdict — identical to what a
-# colocated main-box MTA stamps. add_header only; the relay NEVER rejects on
+# The relay stamps the X-Spam headers inside the sealed raw so each tenant's
+# ingest can read a scanner verdict — identical to what a deployment's own box
+# stamps, because both write the ONE configuration in rspamd_stateless.sh
+# (spam_learning_in_core.md). add_header only; the relay NEVER rejects on
 # content (the reviewable-verdict model). rspamd runs as a milter AFTER
 # opendkim(verify)+opendmarc so it can score on the auth results.
 #
@@ -634,9 +640,8 @@ sync_service opendmarc restart
 # The Bayes classifier and autolearn are OFF and no redis is configured, so no
 # statistical state persists on the relay. Learned state on a shared shard
 # would be one model trained on every tenant's mail — a cross-tenant privacy
-# leak in token form and a poisoning vector. Nothing of value is lost: the
-# relay's header was never the verdict — each tenant's own rspamd re-scores at
-# ingest with its own state. Self-hosted relays run this same configuration.
+# leak in token form and a poisoning vector. Each tenant learns in its own
+# application instead.
 CS_PACKAGES=(rspamd)
 CS_MISSING=()
 for pkg in "${CS_PACKAGES[@]}"; do
@@ -651,25 +656,13 @@ if [[ ${#CS_MISSING[@]} -gt 0 ]]; then
     apt-get install -y --no-install-recommends "${CS_MISSING[@]}"
 fi
 mkdir -p /etc/rspamd/local.d
-# The header NAMES are the contract InboundEmailRouter::readSpamHeader() parses;
-# keep them in step with that class's SPAM_*_HEADER constants.
-if write_if_changed /etc/rspamd/local.d/milter_headers.conf 644 <<'RSPAMDHDR'
-# joinery-managed - content spam header contract (InboundEmailRouter::readSpamHeader).
-extended_spam_headers = true;
-use = ["spam-header", "x-spam-status", "authentication-results"];
-RSPAMDHDR
-then
-    mark_changed rspamd
-fi
-if write_if_changed /etc/rspamd/local.d/actions.conf 644 <<'RSPAMDACT'
-# joinery-managed - header-stamping only; rejection disabled (out of scope).
-reject = null;
-greylist = null;
-add_header = 6;
-RSPAMDACT
-then
-    mark_changed rspamd
-fi
+# shellcheck source=rspamd_stateless.sh
+source "${SCRIPT_DIR}/rspamd_stateless.sh"
+for f in "${RSPAMD_STATELESS_FILES[@]}"; do
+    if rspamd_stateless_render "${f}" | write_if_changed "/etc/rspamd/local.d/${f}" 644; then
+        mark_changed rspamd
+    fi
+done
 # The digest of the two files that ARE the contract, recorded at the moment we
 # write them so joinery-ping can report drift without parsing rspamd's config
 # format (specs/mailbox_relay_scanner_health.md). World-readable: a tenant's
@@ -682,61 +675,12 @@ if write_if_changed "${RELAY_HOME}/contract.sha256" 644 <<< "${CONTRACT_DIGEST}"
 else
     echo "content-spam: header contract digest unchanged"
 fi
-if write_if_changed /etc/rspamd/local.d/classifier-bayes.conf 644 <<'RSPAMDBAYES'
-# joinery-managed - STATELESS relay: Bayes off. Learned state on a shared
-# relay is a cross-tenant privacy leak and a poisoning vector; each tenant's
-# own rspamd re-scores at ingest with its own state.
-enabled = false;
-autolearn = false;
-RSPAMDBAYES
-then
-    mark_changed rspamd
-fi
-if write_if_changed /etc/rspamd/local.d/rbl.conf 644 <<'RSPAMDRBL'
-# joinery-managed - DNS lists that cannot answer this box.
-# NiX Spam (ix.dnsbl.manitu.net) was shut down; its zone has no nameservers, so
-# every query waits out the DNS retransmits (timeout 1s x 5 = ~5s) and stalls
-# the scan, up to the 8s task timeout.
-# SURBL and URIBL refuse queries that arrive through a shared public resolver
-# (the provider's DNS this box uses): every answer is a "blocked" code, never
-# a verdict. Asking them only spends lookups.
-rbls {
-  nixspam {
-    enabled = false;
-  }
-  "SURBL_MULTI" {
-    enabled = false;
-  }
-  "SURBL_HASHBL" {
-    enabled = false;
-  }
-  "URIBL_MULTI" {
-    enabled = false;
-  }
-}
-RSPAMDRBL
-then
-    mark_changed rspamd
-fi
 # No local.d/redis.conf: without a global redis config every redis-backed
 # module (statistics, history) stays off — nothing persists.
 if [[ -f /etc/rspamd/local.d/redis.conf ]]; then
     rm -f /etc/rspamd/local.d/redis.conf
     mark_changed rspamd
     echo "content-spam: removed a redis config (the relay's rspamd is stateless)"
-fi
-if write_if_changed /etc/rspamd/local.d/worker-proxy.inc 644 <<'RSPAMDPROXY'
-# joinery-managed - Postfix milter (self-scan) on 11332.
-milter = yes;
-timeout = 120s;
-upstream "local" {
-  default = yes;
-  self_scan = yes;
-}
-bind_socket = "*:11332";
-RSPAMDPROXY
-then
-    mark_changed rspamd
 fi
 
 # Wire rspamd into the milter chain AFTER opendkim+opendmarc.

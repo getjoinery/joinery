@@ -441,7 +441,7 @@ site_state_clear() {
     fi
 
     if [[ "${rc}" == "0" ]]; then
-        rm -rf "${SS_HELD}"
+        rm -rf "${SS_HELD:?}"
         rm -f "${SS_LOOK_FILE}" "${SS_DIR}/copy_of" "${SS_DIR}/copy_of_key" "${SS_DIR}/vouched" \
               "${SS_DIR}/copy_import_issued"
         rmdir "${SS_DIR}" 2>/dev/null

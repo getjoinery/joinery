@@ -24,7 +24,7 @@ TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/maintenance_script
 RUNNER="$TOOLS/_plugin_installers_start.sh"
 INSTALLER="$TOOLS/install_host_converger.sh"
 T=$(mktemp -d)
-trap 'rm -rf "$T"' EXIT
+trap 'rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 
 chk() {
@@ -223,7 +223,9 @@ chk "a path unit watches the request queue" \
 # its own directory is missing there. It has to find the installers, the
 # secrets helper and the files it hashes through the SITE.
 echo "== the copy outside the tree still finds the site's tools =="
-COPY="$(mktemp -d)/joinery-host-converger"
+COPY_DIR="$(mktemp -d)" || exit 1
+[ -n "$COPY_DIR" ] && [ -d "$COPY_DIR" ] || exit 1
+COPY="${COPY_DIR}/joinery-host-converger"
 cp "$RUNNER" "$COPY"
 out=$(bash "$COPY" --site-root="$T" 2>&1)
 chk "core installers are found from the site, not the script's directory" \
@@ -234,7 +236,7 @@ chk "the config-secrets helper is found too" \
 out=$(bash "$COPY" 2>&1)
 chk "a stray copy with no site named refuses rather than guessing /usr" \
     "$(echo "$out" | grep -c 'does not ship inside one')" "1"
-rm -rf "$(dirname "$COPY")"
+rm -rf "${COPY_DIR:?}"
 chk "and fires the same oneshot service" \
     "$(grep -c 'Unit=\${UNIT_NAME}.service' "$INSTALLER")" "1"
 
@@ -331,7 +333,7 @@ echo "== a host installer runs only out of a package we built (specs/package_sig
 PH="$T/public_html"
 # The bundle manifest from the key-file section above would have the runner
 # rewrite the key file on every tick; this section supplies its own key.
-rm -rf "$PH/plugins/signedp" "$PH/plugins/unsignedp" "$T/config/agent_signing_key" "$PH/agent_dist"
+rm -rf "${PH:?}/plugins/signedp" "${PH:?}/plugins/unsignedp" "${T:?}/config/agent_signing_key" "${PH:?}/agent_dist"
 php -r '
     $T = $argv[1];
     require $argv[2] . "/includes/PathHelper.php";
