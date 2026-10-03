@@ -1,4 +1,5 @@
 <?php
+// @version 1.3 - the replace panel for an upload of an installed name; the Local fork badge with the shipped version; Disable upgrade / Allow upgrade (specs/package_replace_on_upload.md WP2, WP3)
 // @version 1.2 - the Uninstalled row: data removed, files being removed by the host, then Install (specs/post_release_fleet_defects.md B1)
 // @version 1.1 - the Unsigned badge, the warning block and the request panel's hand-off (specs/package_signing.md WP6)
 
@@ -31,6 +32,12 @@ $root_actor_notice = $page_vars['root_actor_notice'] ?? '';
 // Root refused an uploaded package as not ours: the warning, and Install
 // anyway (specs/package_signing.md WP6).
 $unsigned_warning = $page_vars['unsigned_warning'] ?? null;
+// An upload names an installed plugin: both copies side by side, Replace and
+// Discard (specs/package_replace_on_upload.md).
+$replace_panel = $page_vars['replace_panel'] ?? null;
+// name => version the source ships, for the Local fork badge; null when unknown.
+$fork_versions = $page_vars['fork_versions'] ?? null;
+$fork_help = 'Uploaded here. Deploys leave it alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.';
 
 // Build Options dropdown links
 $altlinks = array();
@@ -83,6 +90,9 @@ $page->begin_box(array('altlinks' => $altlinks));
         <?php echo $root_actor_notice; ?>
         <?php if ($unsigned_warning): ?>
             <?= PackageInstallPage::warning_html($unsigned_warning, '/admin/admin_plugins', $page) ?>
+        <?php endif; ?>
+        <?php if ($replace_panel): ?>
+            <?= PackageInstallPage::replace_html($replace_panel, '/admin/admin_plugins', $page) ?>
         <?php endif; ?>
         <?php if ($root_request_id): ?>
             <?php echo AdminPage::root_request_panel($root_request_id,
@@ -184,10 +194,16 @@ $page->begin_box(array('altlinks' => $altlinks));
                         . htmlspecialchars(implode(', ', $plugin['audience'])) . '">Unlisted</span>';
                 }
 
-                // Add Preserved-on-deploy badge only when receives_upgrades=false
+                // A local fork: the live manifest says receives_upgrades=false,
+                // so deploys leave it alone. The badge says the cost, and how
+                // far behind the shipped version it is when that is known.
                 if ($plugin['plugin']) {
                     if (!$plugin['plugin']->receives_upgrades()) {
-                        $status_cell .= ' <span class="badge bg-warning">Preserved on deploy</span>';
+                        $status_cell .= ' <span class="badge bg-warning" title="' . htmlspecialchars($fork_help) . '">Local fork</span>';
+                        $shipped = is_array($fork_versions) ? (string)($fork_versions[$plugin['name']] ?? '') : '';
+                        if ($shipped !== '' && $shipped !== (string)$plugin['version']) {
+                            $status_cell .= '<br><small class="text-muted">shipped version is ' . htmlspecialchars($shipped) . '</small>';
+                        }
                     }
                     // Installed on the owner's acknowledgement of the warning:
                     // not built by Joinery, its host installer never runs, and
@@ -311,6 +327,18 @@ $page->begin_box(array('altlinks' => $altlinks));
                         $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
                         if (!$is_active_theme_provider) {
                             $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', '$uninstall_warning')";
+                        }
+                    }
+
+                    // The fork mark, for any plugin with a row. Allow upgrade
+                    // ends a fork, and the next deploy replaces the files, so
+                    // it asks first; Disable upgrade starts one and asks nothing.
+                    if ($plugin['plugin'] && $plugin_status !== Plugin::STATUS_UNINSTALLED) {
+                        if ($plugin['plugin']->receives_upgrades()) {
+                            $actions['Disable upgrade'] = "javascript:submitPluginAction('mark_preserved', '$plugin_name')";
+                        } else {
+                            $allow_warning = "The next deploy will replace your copy of $plugin_name with the version Joinery ships. Your copy is not kept.";
+                            $actions['Allow upgrade'] = "javascript:confirmPluginAction('mark_upgradable', '$plugin_name', '$allow_warning')";
                         }
                     }
 

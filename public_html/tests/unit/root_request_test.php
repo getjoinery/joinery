@@ -85,7 +85,7 @@ $verify_at = strpos($installer, 'install_extension_verify($dir, $tree_rel . $sta
 $move_at   = strpos($installer, 'install_extension_copy_tree($dir, $target)');
 check($verify_at !== false && $move_at !== false && $verify_at < $move_at,
 	'the installer verifies the staged copy before it moves it');
-check(strpos($installer, "install_extension_register_as_web_user(\$type, \$name, \$staged !== '')") !== false
+check(strpos($installer, "install_extension_register_as_web_user(\$type, \$name)") !== false
 	&& strpos($installer, "runuser") !== false,
 	'an acknowledged unsigned package runs its database half as the web user, never root');
 check(strpos($installer, "refusing to run them as root") !== false,

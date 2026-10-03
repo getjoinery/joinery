@@ -37,8 +37,30 @@
  * source is a publishing defect, not a choice.
  *
  *   php utils/install_extension.php plugin|theme --staged=<dir> [--replace] [--acknowledged]
- *   php utils/install_extension.php plugin|theme <name> --register [--uploaded]   (the database half alone)
+ *   php utils/install_extension.php plugin|theme <name> --register   (the database half alone)
  *
+ * --replace sets an installed copy of the same name aside (kept beside it as
+ * <name>.replaced.<UTC time>, the newest one only) and puts the verified
+ * package in its place. The root request dispatcher passes it when the
+ * operator confirmed the replace panel; it is never implied. The copy is set
+ * aside only after the verdict and the acknowledgement, so a refused package
+ * leaves the live directory exactly as it was.
+ *
+ * AN UPLOADED PACKAGE IS A LOCAL FORK (specs/package_replace_on_upload.md):
+ * the staged form writes receives_upgrades: false into the live manifest the
+ * moment the files are in place, before the database half runs. That is the
+ * mark the deploy reads (DeploymentHelper::copyPreservedToStaging) and the
+ * sync copies onto the row, so an uploaded plugin or theme — a stranger's, or
+ * the operator's own edit of one Joinery ships — survives every deploy until
+ * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
+ * copy is ours and keeps receiving upgrades.
+ *
+ * @version 1.6 - --replace from the dispatcher; the transcript says what was
+ *                replaced and the event log has a package_replaced row; an
+ *                uploaded plugin or theme is marked a local fork in its live
+ *                manifest (the row follows), and --uploaded is retired; the
+ *                class map is flushed after a plugin's files change
+ *                (specs/package_replace_on_upload.md WP1, WP3).
  * @version 1.5 - A style theme (stylesheets, fonts and images, nothing that
  *                runs: ThemeHelper::styleThemeRefusal) installs without the
  *                warning when unsigned. Its row still records 'unsigned' and
@@ -73,7 +95,6 @@ $staged = '';
 $replace = false;
 $acknowledged = false;
 $register_only = false;
-$uploaded = false;
 $approved_by = 0;
 $approved_ip = '';
 $approved_at = 0;
@@ -86,8 +107,6 @@ foreach (array_slice($argv, 2) as $arg) {
 		$acknowledged = true;
 	} elseif ($arg === '--register') {
 		$register_only = true;
-	} elseif ($arg === '--uploaded') {
-		$uploaded = true;
 	} elseif (strpos($arg, '--approved-by=') === 0) {
 		$approved_by = (int)substr($arg, strlen('--approved-by='));
 	} elseif (strpos($arg, '--approved-ip=') === 0) {
@@ -100,7 +119,7 @@ foreach (array_slice($argv, 2) as $arg) {
 }
 
 if (!in_array($type, array('plugin', 'theme'), true) || ($name === '' && $staged === '')) {
-	fwrite(STDERR, "Usage: install_extension.php plugin|theme <name> [--register [--uploaded]]\n"
+	fwrite(STDERR, "Usage: install_extension.php plugin|theme <name> [--register]\n"
 		. "       install_extension.php plugin|theme --staged=<dir> [--replace] [--acknowledged]\n");
 	exit(2);
 }
@@ -207,14 +226,17 @@ function install_extension_prune_replaced(string $parent, string $name): void {
  * so for an unsigned package this runs as the web user (see
  * install_extension_register_as_web_user), never as root.
  */
-function install_extension_register(string $type, string $name, $manager, bool $uploaded = false): void {
+function install_extension_register(string $type, string $name, $manager): void {
+	// Nothing here decides whether the package is a local fork: that is in
+	// the live manifest already (install_extension_mark_fork), and both the
+	// plugin install and the theme sync copy the manifest's receives_upgrades
+	// onto the row. Writing the row here instead was undone by the next sync.
 	if ($type === 'plugin') {
 		// $refresh_files is always false here: the by-name form fetched and
 		// verified the files already, and a staged install's files are the ones
 		// the operator uploaded. install() would otherwise re-run
-		// refreshFromUpstream, which does NOT skip an existing directory — so
-		// uploading a local fork of a plugin that also exists in the marketplace
-		// downloaded upstream over the fork, seconds after putting it there.
+		// refreshFromUpstream, which refuses a fork — and before it did, it
+		// downloaded upstream over the fork seconds after putting it there.
 		$result = $manager->install($name, false);
 		if (is_array($result) && !empty($result['warnings'])) {
 			foreach ($result['warnings'] as $w) {
@@ -224,16 +246,45 @@ function install_extension_register(string $type, string $name, $manager, bool $
 	} else {
 		// A theme is registered by the sync that reads theme.json off disk.
 		$manager->sync();
-		// An UPLOADED theme is a local fork: the upgrade must not replace it.
-		// A theme fetched by name from the marketplace is ours and keeps
-		// receiving upgrades like any other.
-		if ($uploaded) {
-			$theme = Theme::get_by_theme_name($name);
-			if ($theme) {
-				$theme->set('thm_receives_upgrades', false);
-				$theme->save();
-			}
-		}
+	}
+}
+
+/**
+ * The fork mark: receives_upgrades: false in the live manifest of a package
+ * the operator uploaded. From here on the deploy preserves the directory
+ * whatever the incoming archive says, until Allow upgrade writes true again.
+ * Written by root, before the database half, so the register step's read of
+ * the manifest already sees it and the row never disagrees with the file.
+ */
+function install_extension_mark_fork(string $type, string $name, $manager, string $target): void {
+	if ($manager->writeManifestReceivesUpgrades($name, false) === false) {
+		fwrite(STDERR, "install_extension: could not write receives_upgrades into the $type's manifest\n");
+		exit(1);
+	}
+	install_extension_own($target);
+	echo "local fork: receives_upgrades=false written to the $type's manifest; deploys leave $name alone until Allow upgrade\n";
+}
+
+/**
+ * The record of a replacement: one event-log row saying what was replaced
+ * with what, so a replacement is as visible afterwards as an unsigned
+ * install is.
+ */
+function install_extension_record_replaced(string $type, string $name, string $old_version, string $new_version,
+		string $kept, string $trust, array $approver): void {
+	$note = "type=$type name=$name from=" . ($old_version !== '' ? $old_version : 'unknown')
+		. ' to=' . ($new_version !== '' ? $new_version : 'unknown')
+		. " kept=$kept trust=$trust by=" . $approver['who'];
+	try {
+		$log = new EventLog(NULL);
+		$log->set('evl_event', 'package_replaced');
+		$log->set('evl_usr_user_id', $approver['user_id'] > 0 ? $approver['user_id'] : null);
+		$log->set('evl_was_success', true);
+		$log->set('evl_note', $note);
+		$log->save();
+		echo "event log: package_replaced\n";
+	} catch (Throwable $e) {
+		fwrite(STDERR, 'warning: could not write the event log row: ' . $e->getMessage() . "\n");
 	}
 }
 
@@ -244,7 +295,7 @@ function install_extension_register(string $type, string $name, $manager, bool $
  * inline. Refuses rather than falling back to root when the switch cannot be
  * made: that would be the restriction quietly not applying.
  */
-function install_extension_register_as_web_user(string $type, string $name, bool $uploaded): void {
+function install_extension_register_as_web_user(string $type, string $name): void {
 	if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
 		return;                     // not root: the caller registers inline
 	}
@@ -254,7 +305,7 @@ function install_extension_register_as_web_user(string $type, string $name, bool
 		exit(1);
 	}
 	$self = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__)
-		. ' ' . $type . ' ' . escapeshellarg($name) . ' --register' . ($uploaded ? ' --uploaded' : '');
+		. ' ' . $type . ' ' . escapeshellarg($name) . ' --register';
 	$runuser = trim((string)shell_exec('command -v runuser 2>/dev/null'));
 	$su = trim((string)shell_exec('command -v su 2>/dev/null'));
 	if ($runuser !== '') {
@@ -428,7 +479,7 @@ try {
 			fwrite(STDERR, "install_extension: $type '$name' is not on disk\n");
 			exit(1);
 		}
-		install_extension_register($type, $name, $manager, $uploaded);
+		install_extension_register($type, $name, $manager);
 		echo "registered $type: $name\n";
 		exit(0);
 	}
@@ -439,6 +490,8 @@ try {
 	$trust = 'signed';
 	$verdict_line = '';
 	$kind = 'page';
+	// Set when --replace set an installed copy aside: what it was, where it is.
+	$replaced = null;
 
 	if ($staged !== '') {
 		// ---- from a directory the web side unpacked and checked ------------
@@ -544,10 +597,11 @@ try {
 
 		$target = $dest_parent . '/' . $staged_name;
 		if (is_dir($target)) {
-			// The old ZIP path refused rather than replacing, and that refusal
-			// is worth keeping: replacing an installed extension in place is a
-			// different act from installing one, and doing it by accident is
-			// how a local fork disappears.
+			// Refused rather than replaced unless the operator said so:
+			// replacing an installed extension in place is a different act
+			// from installing one, and doing it by accident is how a local
+			// fork disappears. The page offers Replace and Discard for this
+			// case, and only Replace reaches here with the flag.
 			if (!$replace) {
 				fwrite(STDERR, "install_extension: $type '$staged_name' is already installed at $target.\n"
 					. "Pass --replace to overwrite it (the current copy is kept beside it), "
@@ -555,6 +609,15 @@ try {
 				install_extension_rmtree($work);
 				exit(2);
 			}
+			// A system extension is pulled fresh by every deploy whatever its
+			// manifest says, so replacing it would last until the next one.
+			if ($manager->isSystemExtension($staged_name)) {
+				fwrite(STDERR, "install_extension: $type '$staged_name' is a system $type; every deploy replaces it with the shipped version, so it cannot be replaced or forked here.\n");
+				install_extension_rmtree($work);
+				exit(2);
+			}
+			$old_manifest = $manager->liveManifest($staged_name);
+			$old_version = is_array($old_manifest) ? (string)($old_manifest['version'] ?? '') : '';
 			$keep = $target . '.replaced.' . gmdate('YmdHis');
 			if (!@rename($target, $keep)) {
 				fwrite(STDERR, "install_extension: could not move the existing $type aside\n");
@@ -563,23 +626,52 @@ try {
 			}
 			echo "existing $type kept at " . basename($keep) . "\n";
 			install_extension_prune_replaced($dest_parent, $staged_name);
+			$replaced = array('old_version' => $old_version, 'kept' => basename($keep));
 		}
 
 		// Copy, not rename: the working directory and the code tree may be
 		// separate volumes in a container, and rename() across a mount point is
 		// EXDEV. A failure part way leaves the bytes in staging, where they can
-		// be looked at.
+		// be looked at — and puts the set-aside copy back, so a failed
+		// replacement is not a missing extension.
 		if (!install_extension_copy_tree($dir, $target)) {
 			fwrite(STDERR, "install_extension: could not copy the staged $type into place\n");
 			install_extension_rmtree($target);
+			if ($replaced !== null && @rename($dest_parent . '/' . $replaced['kept'], $target)) {
+				echo "the previous $type is back in place\n";
+			}
 			install_extension_rmtree($work);
 			exit(1);
 		}
 		install_extension_rmtree($work);
 		install_extension_rmtree($staging_dir);
+		// stage() wraps the package in <staging id>/<name>; the wrapper goes too,
+		// or every install leaves an empty directory behind in staging.
+		@rmdir(dirname($staging_dir));
 		install_extension_own($target);
 		echo "installed $type files: $staged_name\n";
 		$name = $staged_name;
+
+		// Uploaded, so a local fork: the mark goes into the live manifest
+		// before anything reads it for the row.
+		install_extension_mark_fork($type, $name, $manager, $target);
+
+		if ($type === 'plugin') {
+			// The pool's class map named files in the directory that just
+			// changed; a request holding the old map must not fail to find a
+			// class that moved. The cache file is removed here; each pool
+			// process drops its own copy on the next request.
+			ClassAutoloader::flush();
+		}
+
+		if ($replaced !== null) {
+			$new_manifest = json_decode((string)@file_get_contents($target . '/' . basename($manifest_file)), true);
+			$new_version = is_array($new_manifest) ? (string)($new_manifest['version'] ?? '') : '';
+			$replaced['new_version'] = $new_version;
+			echo "replaced $type $name " . ($replaced['old_version'] !== '' ? $replaced['old_version'] : '(version not stated)')
+				. ' with ' . ($new_version !== '' ? $new_version : '(version not stated)')
+				. '; previous copy kept at ' . $replaced['kept'] . "\n";
+		}
 
 	} else {
 		// ---- by name, from the upgrade source ------------------------------
@@ -653,20 +745,23 @@ try {
 	// part that was never the problem; for an unsigned one it is plugin code
 	// (migrations), and root does not run it.
 	if ($trust === 'unsigned') {
-		install_extension_register_as_web_user($type, $name, $staged !== '');
+		install_extension_register_as_web_user($type, $name);
 		if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
-			install_extension_register($type, $name, $manager, $staged !== '');
+			install_extension_register($type, $name, $manager);
 		}
 	} else {
-		install_extension_register($type, $name, $manager, $staged !== '');
+		install_extension_register($type, $name, $manager);
 	}
 
 	// Root's word on who built it, and the record of an unsigned install.
 	$manifest_path = $dest_parent . '/' . $name . '/' . ($type === 'theme' ? 'theme.json' : 'plugin.json');
 	$manifest = json_decode((string)@file_get_contents($manifest_path), true);
 	$version = is_array($manifest) ? (string)($manifest['version'] ?? '') : '';
-	install_extension_record_unsigned($type, $name, $version, $verdict_line,
-		install_extension_approver($approved_by, $approved_ip, $approved_at), $trust, $kind);
+	$approver = install_extension_approver($approved_by, $approved_ip, $approved_at);
+	install_extension_record_unsigned($type, $name, $version, $verdict_line, $approver, $trust, $kind);
+	if ($replaced !== null) {
+		install_extension_record_replaced($type, $name, $replaced['old_version'], $version, $replaced['kept'], $trust, $approver);
+	}
 
 	echo "installed $type: $name\n";
 	exit(0);

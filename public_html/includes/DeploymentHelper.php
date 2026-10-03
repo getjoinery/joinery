@@ -4,6 +4,10 @@
  *
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
+ *
+ * @version 1.1 - preserveReason(): a live manifest saying receives_upgrades:
+ *                false is a local fork and is preserved whatever the incoming
+ *                archive says (specs/package_replace_on_upload.md WP3)
  */
 
 class DeploymentHelper {
@@ -1185,31 +1189,8 @@ class DeploymentHelper {
 
                 if (!is_dir($live_path)) continue;
 
-                // Determine if this theme should be copied to staging
-                $should_copy = false;
-                $reason = '';
-
-                if (!is_dir($stage_path)) {
-                    // Theme not in staging (uploaded directly, not from repo)
-                    $should_copy = true;
-                    $reason = 'not in staging';
-                } else {
-                    // Theme exists in both - the staged manifest is authoritative.
-                    // Reading from live would create a bootstrapping deadlock: a theme
-                    // whose live flag is false could never self-update to true via an
-                    // upgrade package.
-                    $staged_manifest_path = $stage_path . '/theme.json';
-                    $manifest_path = file_exists($staged_manifest_path)
-                        ? $staged_manifest_path
-                        : $live_path . '/theme.json'; // fallback: corrupt/missing staged manifest
-                    if (file_exists($manifest_path)) {
-                        $manifest = json_decode(file_get_contents($manifest_path), true);
-                        if (isset($manifest['receives_upgrades']) && $manifest['receives_upgrades'] === false) {
-                            $should_copy = true;
-                            $reason = 'receives_upgrades=false';
-                        }
-                    }
-                }
+                $reason = self::preserveReason($live_path, $stage_path, 'theme.json');
+                $should_copy = ($reason !== '');
 
                 if ($should_copy) {
                     // Remove staged version if exists, then copy live version
@@ -1253,28 +1234,8 @@ class DeploymentHelper {
 
                 if (!is_dir($live_path)) continue;
 
-                // Determine if this plugin should be copied to staging
-                $should_copy = false;
-                $reason = '';
-
-                if (!is_dir($stage_path)) {
-                    // Plugin not in staging (uploaded directly, not from repo)
-                    $should_copy = true;
-                    $reason = 'not in staging';
-                } else {
-                    // Plugin exists in both - the staged manifest is authoritative.
-                    $staged_manifest_path = $stage_path . '/plugin.json';
-                    $manifest_path = file_exists($staged_manifest_path)
-                        ? $staged_manifest_path
-                        : $live_path . '/plugin.json'; // fallback: corrupt/missing staged manifest
-                    if (file_exists($manifest_path)) {
-                        $manifest = json_decode(file_get_contents($manifest_path), true);
-                        if (isset($manifest['receives_upgrades']) && $manifest['receives_upgrades'] === false) {
-                            $should_copy = true;
-                            $reason = 'receives_upgrades=false';
-                        }
-                    }
-                }
+                $reason = self::preserveReason($live_path, $stage_path, 'plugin.json');
+                $should_copy = ($reason !== '');
 
                 if ($should_copy) {
                     // Remove staged version if exists, then copy live version
@@ -1307,6 +1268,56 @@ class DeploymentHelper {
         }
 
         return $result;
+    }
+
+    /**
+     * Why a live extension is carried into staging over the incoming copy, or
+     * '' when the incoming copy is what the deploy should leave in place.
+     *
+     * Three reasons, asked in this order (specs/package_replace_on_upload.md):
+     *
+     *   1. not in staging — the archive does not carry this name (installed
+     *      here by upload, or no longer published), so nothing replaces it;
+     *   2. local fork — the LIVE manifest says receives_upgrades: false. That
+     *      is the operator's word, written by an upload or by Disable upgrade,
+     *      and the archive cannot override it. What ends it is Allow upgrade,
+     *      which writes true; the next deploy then replaces the directory.
+     *      (A live false that could never be flipped by a publish was once
+     *      treated as a deadlock to avoid; under the fork model it is the
+     *      point: nothing Joinery ships carries a false, and a site's false is
+     *      the site's to end.)
+     *   3. the incoming manifest says receives_upgrades: false — a package
+     *      published as preserved-on-deploy.
+     *
+     * A manifest that is missing or not JSON is read as saying nothing.
+     *
+     * @param string $live_path         The installed directory
+     * @param string $stage_path        Where the incoming copy is, if there is one
+     * @param string $manifest_filename 'theme.json' or 'plugin.json'
+     * @return string
+     */
+    public static function preserveReason($live_path, $stage_path, $manifest_filename) {
+        if (!is_dir($stage_path)) {
+            return 'not in staging';
+        }
+        $flag = function ($dir) use ($manifest_filename) {
+            $path = $dir . '/' . $manifest_filename;
+            if (!is_file($path)) {
+                return null;
+            }
+            $manifest = json_decode((string)@file_get_contents($path), true);
+            if (!is_array($manifest) || !array_key_exists('receives_upgrades', $manifest)) {
+                return null;
+            }
+            return $manifest['receives_upgrades'];
+        };
+        if ($flag($live_path) === false) {
+            return 'local fork (live manifest says receives_upgrades=false)';
+        }
+        if ($flag($stage_path) === false) {
+            return 'published as preserved (incoming manifest says receives_upgrades=false)';
+        }
+        return '';
     }
 
     // ============================================

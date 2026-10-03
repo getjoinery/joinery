@@ -434,7 +434,16 @@ What this rules out in practice:
   The request queue and the staging area are both web-writable, so the request
   proves nothing about who asked; the signature and the acknowledgement are what
   root trusts. The shell form, `php utils/install_extension.php plugin --staged=<dir>
-  [--acknowledged]`, is the same code for a self-hoster with a shell.
+  [--replace] [--acknowledged]`, is the same code for a self-hoster with a shell.
+  An upload whose name is already installed is held in staging and the page
+  shows the replace panel: both copies' version, author and file count, and
+  Replace or Discard. Replace queues the request with `replace: true`; the
+  installer sets the installed copy aside as `<name>.replaced.<UTC time>`
+  (only the newest kept copy remains) after the verdict and the
+  acknowledgement, never before, so a refused package leaves the live
+  directory as it was. The row, its trust, the plugin's tables and data all
+  survive; the event log has a `package_replaced` row. Every uploaded package,
+  fresh or replacing, is a [local fork](#distribution-flags).
 
 `AbstractExtensionManager::refreshFromUpstream()`, `installFromZip()` and
 `installFromTarGz()` throw from a web request, so a caller that tries finds out
@@ -1935,11 +1944,26 @@ Two boolean flags control how a theme moves between the publisher and customer
 sites, and one list controls who is shown it. The flags default to `true` if
 missing, but should be declared explicitly:
 
-- **`receives_upgrades`** — *customer-side, deploy preservation.* If `true`, the
-  on-disk copy is replaced from the upgrade payload during a deploy swap and
-  the container reconciler will re-download it on boot if it goes missing.
-  Set to `false` to keep a hand-edited copy across deploys. Mirrored to the
-  database (`thm_receives_upgrades`); the admin Themes page can toggle it.
+- **`receives_upgrades`** — *customer-side, deploy preservation: the fork
+  mark.* It means two different things in two places. In a **published
+  package** it is the publisher's default for a fresh install (`true` for
+  everything Joinery ships). In a **site's live manifest** it is the
+  operator's word: `true` means the next deploy replaces the directory from
+  the upgrade payload and the container reconciler re-downloads it on boot if
+  it goes missing; `false` means the directory is a **local fork** and every
+  deploy carries the live copy over the incoming one, whatever the incoming
+  manifest says (`DeploymentHelper::preserveReason()`). Every uploaded
+  package is written `false` when it is installed, and the Plugins and Themes
+  pages' Disable upgrade / Allow upgrade pair writes it through the
+  `set_receives_upgrades` root request. A fork shows a **Local fork** badge
+  that says the cost: no updates from Joinery, including security fixes,
+  until Allow upgrade is pressed, and how far behind the shipped version it
+  is when the catalog is known. A marketplace install of a fork's name is
+  refused with the same way out. The database column
+  (`thm_receives_upgrades` / `plg_receives_upgrades`) mirrors the live
+  manifest on every sync; the manifest is the one that counts. A system
+  extension (`is_system`) is pulled fresh by every deploy and cannot be
+  forked.
 - **`included_in_publish`** — *publisher-side, packaging filter.* If `true`,
   `publish_upgrade.php` packages this theme into the upgrade archive and the
   marketplace catalog advertises it. If `false`, it is skipped. Manifest-only
@@ -1957,9 +1981,10 @@ missing, but should be declared explicitly:
   built for one customer stops being advertised to everybody else.
 
 For a freshly authored site theme that should stay on its origin site and not
-ship downstream, set both flags to `false`. For a theme published via the
-upgrade pipeline, set both to `true`. The same pair applies to `plugin.json`,
-as does `audience`.
+ship downstream, set `included_in_publish` to `false`. For a theme published
+via the upgrade pipeline, set both flags to `true`; a site that wants to keep
+its own copy makes that choice on its own Themes page. The same pair applies
+to `plugin.json`, as does `audience`.
 
 **Choosing between `included_in_publish: false` and an `audience`:** they
 answer different questions. `included_in_publish: false` means "do not package

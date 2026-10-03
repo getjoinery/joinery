@@ -25,6 +25,10 @@
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.3 - install_package carries `replace` (the operator confirmed
+ *                replacing an installed package from the replace panel), and
+ *                set_receives_upgrades handles plugins as well as themes
+ *                (specs/package_replace_on_upload.md WP1, WP3).
  * @version 1.2 - remove_plugin: the file half of a plugin uninstall. The web
  *                side marks the row uninstalled; root checks that (and the
  *                manifest's is_system) before deleting the directory
@@ -55,13 +59,22 @@ class RootRequest {
 		'reconcile_composer',
 		'write_agent_files',
 		'save_doc',
-		'set_receives_upgrades',
+		'set_receives_upgrades',   // {type, name, value}: the fork mark in a theme's or plugin's live manifest
 		'remove_plugin',           // delete plugins/<name> once its row says uninstalled (PluginRemoval)
 	);
 
 	/**
-	 * install_package {type, staged_dir, unsigned_ack?} — install a package the
-	 * web side unpacked and checked under uploads/staging.
+	 * install_package {type, staged_dir, replace?, unsigned_ack?} — install a
+	 * package the web side unpacked and checked under uploads/staging.
+	 *
+	 * `replace: true` says the operator confirmed, on the replace panel, that
+	 * the installed copy of the same name is to be set aside for this one.
+	 * The dispatcher turns it into the installer's --replace and nothing
+	 * else. It is safe to read from the request for the same reason `type`
+	 * and `staged_dir` are: it decides what happens to the directory that is
+	 * there, never whether anything installs — that stays with the verdict
+	 * and the acknowledgement below. Without it, an upload of an installed
+	 * name is refused (exit 2) with the current copy untouched.
 	 *
 	 * WHY THIS KIND IS SAFE TO HAVE. Both this queue and uploads/staging are
 	 * www-data-writable — they have to be, the web side writes them — so a

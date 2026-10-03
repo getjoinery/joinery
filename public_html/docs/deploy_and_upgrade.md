@@ -639,11 +639,11 @@ writes into `{site}/cache/root_requests/` naming a kind from a fixed list.
 | `upgrade` | `php utils/upgrade.php --verbose` |
 | `install_plugin` `{name}` | fetch a plugin by name from the upgrade source into a working directory of root's own, verify it, and install it |
 | `install_theme` `{name}` | the same for a theme |
-| `install_package` `{type, staged_dir, unsigned_ack?}` | verify a staged upload and install it; an unverified one only with the owner's acknowledgement, under the unsigned restrictions |
+| `install_package` `{type, staged_dir, replace?, unsigned_ack?}` | verify a staged upload and install it; an unverified one only with the owner's acknowledgement, under the unsigned restrictions; with `replace`, the installed copy of the same name is set aside first (kept beside the new one) |
 | `reconcile_composer` | install a plugin's declared composer packages |
 | `write_agent_files` | write `CLAUDE.md` and its siblings from the database |
 | `save_doc` | write one file under `docs/`, in the directory the key names |
-| `set_receives_upgrades` | set the preserve-on-deploy flag in a theme's manifest |
+| `set_receives_upgrades` `{type, name, value}` | write the fork mark (`receives_upgrades`) into a theme's or plugin's live manifest: false keeps the operator's copy across deploys, true lets the next deploy replace it |
 
 A **name** crosses, never a command. The arguments stay in the file and are read
 by the PHP that acts on them, so nothing a web request wrote becomes a shell
@@ -1053,8 +1053,9 @@ The marketplace is first-party only: an archive from it that does not verify is 
 
 ### Overwrite Protection
 
-- A marketplace install of a name already on disk replaces the directory with the verified archive (`refreshFromUpstream()` sets the old copy aside as `.refresh-<name>-<pid>` until the new one is fully in place, and sweeps a stale one at its next run)
-- **Extensions with `receives_upgrades: false`** are preserved by the upgrade; an uploaded package that names an installed extension needs `--replace`, and the copy it replaces is kept beside it
+- A marketplace install of a name already on disk replaces the directory with the verified archive (`refreshFromUpstream()` sets the old copy aside as `.refresh-<name>-<pid>` until the new one is fully in place, and sweeps a stale one at its next run). It refuses when the live manifest says `receives_upgrades: false`: that directory is a local fork, and the refusal names Allow upgrade as the way to take the shipped version instead.
+- **A local fork** — a live manifest saying `receives_upgrades: false` — is carried over the incoming copy by every deploy, whatever the incoming manifest says (`DeploymentHelper::preserveReason()`). Every uploaded package is marked one when it is installed. Allow upgrade on the Plugins or Themes page writes `true`, and the next deploy replaces the directory with the shipped version; `public_html_last` is the undo.
+- An upload that names an installed extension shows the replace panel on the Plugins or Themes page (both copies' version, author and file count; Replace or Discard). Replace queues `install_package` with `replace: true`, and the installer sets the installed copy aside as `<name>.replaced.<UTC time>` (the newest kept copy only) after the verdict and the acknowledgement, never before. The event log has a `package_replaced` row. A system extension is refused: every deploy pulls it fresh.
 
 ### Catalog Endpoint Fields
 

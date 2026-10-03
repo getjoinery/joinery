@@ -19,6 +19,7 @@
  *
  * Run: php tests/unit/extension_staging_test.php
  *
+ * @version 1.3 - the fork mark is the live manifest, written by the staged form (specs/package_replace_on_upload.md)
  * @version 1.2 - only an uploaded theme is preserved on deploy (review round 2, R2)
  * @version 1.1 - pins the verification step (specs/package_signing.md WP2)
  * @version 1.0
@@ -149,17 +150,23 @@ check(strpos($installer, 'exit(EXIT_UNVERIFIED)') !== false && strpos($installer
 	'anything but `signed` exits 3, the code the page reads as "not ours"');
 check(strpos($installer, "echo 'verdict: ' . \$verdict->line()") !== false,
 	'and the verdict is one line in the transcript');
-// An uploaded theme is a local fork the upgrade must not replace; a theme
+// An uploaded package is a local fork the upgrade must not replace; one
 // fetched by name from the marketplace is ours and keeps receiving upgrades.
+// The mark is the live manifest's receives_upgrades: false, written by the
+// staged form only, after the copy and before the database half
+// (specs/package_replace_on_upload.md; package_replace_test pins the order).
+$staged_branch = substr($installer, strpos($installer, "if (\$staged !== '') {"));
+$staged_branch = substr($staged_branch, 0, strpos($staged_branch, "// ---- by name, from the upgrade source"));
+check(strpos($staged_branch, 'install_extension_mark_fork($type, $name, $manager, $target);') !== false,
+	'the staged form marks what it installs a local fork');
+$byname_branch = substr($installer, strpos($installer, "// ---- by name, from the upgrade source"));
+$byname_branch = substr($byname_branch, 0, strpos($byname_branch, '// ---- the database half'));
+check(strpos($byname_branch, 'install_extension_mark_fork(') === false,
+	'and the by-name form never does: the catalog copy is ours');
 $register_fn = substr($installer, strpos($installer, 'function install_extension_register('));
 $register_fn = substr($register_fn, 0, strpos($register_fn, "\n}\n"));
-check(strpos($register_fn, "if (\$uploaded) {") !== false
-	&& strpos($register_fn, "\$theme->set('thm_receives_upgrades', false)") !== false
-	&& strpos($register_fn, "if (\$uploaded) {") < strpos($register_fn, "thm_receives_upgrades"),
-	'only an uploaded theme is marked preserved on deploy');
-check(substr_count($installer, "install_extension_register(\$type, \$name, \$manager, \$staged !== '')") === 2
-	&& strpos($installer, "install_extension_register_as_web_user(\$type, \$name, \$staged !== '')") !== false,
-	'and "uploaded" means the staged form, nothing else');
+check(strpos($register_fn, 'receives_upgrades') === false || strpos($register_fn, "->set(") === false,
+	'the register step writes no fork flag onto the row itself: the sync carries the manifest\'s value');
 // The by-name form fetches into a working directory and verifies THERE; the
 // live plugins/<name> is replaced only by a package that said `signed`.
 check(strpos($pm, 'PackageSignature::verify($fetched)') !== false

@@ -13,6 +13,9 @@
  * /admin/admin_marketplace page and the marketplace_catalog /
  * marketplace_install API actions.
  *
+ * @version 1.3.3 - published_versions(): the remembered catalog's version for each
+ *                  name, from the same day-old copy, so a page can say how far a
+ *                  local fork is behind what is shipped (specs/package_replace_on_upload.md WP3)
  * @version 1.3.2 - published_names(): the catalog's names, remembered for a day in
  *                  cache/marketplace_<type>.json, for a page that must know whether
  *                  the source still publishes something without asking on every load
@@ -209,6 +212,30 @@ class MarketplaceClient {
 	 * @return array|null Directory names, or null when nothing is known
 	 */
 	public static function published_names($type) {
+		$remembered = self::remembered_catalog($type);
+		return $remembered === null ? null : $remembered['names'];
+	}
+
+	/**
+	 * The version the source publishes for each directory name of a type,
+	 * name => version, from the same day-old copy published_names() keeps.
+	 * null when nothing is known. A copy written before versions were kept
+	 * answers names but not versions; it is refreshed on its own schedule.
+	 *
+	 * @param string $type 'themes' or 'plugins'
+	 * @return array|null
+	 */
+	public static function published_versions($type) {
+		$remembered = self::remembered_catalog($type);
+		return $remembered === null ? null : $remembered['versions'];
+	}
+
+	/**
+	 * The remembered catalog for a type: ['names' => string[], 'versions' => string[name]].
+	 * Fresh from the copy when it is under a day old, otherwise re-fetched;
+	 * a fetch that fails leaves the copy standing. null when nothing is known.
+	 */
+	private static function remembered_catalog($type) {
 		if ($type !== 'themes' && $type !== 'plugins') {
 			throw new InvalidArgumentException("Catalog type must be 'themes' or 'plugins', got '$type'");
 		}
@@ -217,7 +244,9 @@ class MarketplaceClient {
 		if (is_file($file)) {
 			$decoded = json_decode((string)@file_get_contents($file), true);
 			if (is_array($decoded) && isset($decoded['names']) && is_array($decoded['names'])) {
-				$remembered = array_map('strval', $decoded['names']);
+				$versions = isset($decoded['versions']) && is_array($decoded['versions'])
+					? array_map('strval', $decoded['versions']) : array();
+				$remembered = array('names' => array_map('strval', $decoded['names']), 'versions' => $versions);
 				if (time() - (int)@filemtime($file) < self::PUBLISHED_NAMES_MAX_AGE) {
 					return $remembered;
 				}
@@ -228,17 +257,19 @@ class MarketplaceClient {
 			return $remembered;
 		}
 		$names = array();
+		$versions = array();
 		foreach ($catalog as $item) {
 			$name = (string)($item['directory_name'] ?? $item['name'] ?? '');
 			if ($name !== '') {
 				$names[] = $name;
+				$versions[$name] = (string)($item['version'] ?? '');
 			}
 		}
 		$dir = dirname($file);
 		if (is_dir($dir) || @mkdir($dir, 0770, true) || is_dir($dir)) {
-			@file_put_contents($file, json_encode(array('fetched' => time(), 'names' => $names)), LOCK_EX);
+			@file_put_contents($file, json_encode(array('fetched' => time(), 'names' => $names, 'versions' => $versions)), LOCK_EX);
 		}
-		return $names;
+		return array('names' => $names, 'versions' => $versions);
 	}
 
 	/**

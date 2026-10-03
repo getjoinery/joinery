@@ -4,6 +4,9 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_themes_logic — the Themes page.
  *
+ * @version 1.3 - an upload of an installed name shows the replace panel
+ *                (Replace / Discard) instead of queueing; the Local fork badge
+ *                with the shipped version beside it (specs/package_replace_on_upload.md WP2, WP3)
  * @version 1.2 - Apply and Remove for a style theme: the look slot beside the
  *                page theme (specs/style_themes.md WP4)
  * @version 1.1 - an upload is a root request that root verifies; a refused
@@ -28,6 +31,9 @@ function admin_themes_logic(array $input): LogicResult {
 	// Set when root refused an uploaded package as not ours and the operator
 	// is looking at the warning (specs/package_signing.md WP6).
 	$unsigned_warning = null;
+	// Set when an upload names an installed theme and the operator is asked
+	// to replace it or discard the upload (specs/package_replace_on_upload.md).
+	$replace_panel = null;
 
 	// Handle form submissions and GET actions
 	$action = isset($input['action']) ? $input['action'] : (isset($input['action']) ? $input['action'] : null);
@@ -101,8 +107,8 @@ function admin_themes_logic(array $input): LogicResult {
 								array('type' => 'theme', 'name' => $theme_name, 'value' => $upgradable),
 								(int)$session->get_user_id());
 							$message = $upgradable
-								? "Theme '$theme_name' will be replaced from the upgrade payload during deploy."
-								: "Theme '$theme_name' will be preserved on deploy (receives_upgrades=false).";
+								? "The next deploy will replace your copy of '$theme_name' with the version Joinery ships."
+								: "Theme '$theme_name' is a local fork: deploys leave it alone until Allow upgrade is pressed.";
 						}
 						break;
 
@@ -112,12 +118,42 @@ function admin_themes_logic(array $input): LogicResult {
 						// and root verifies it against the release key before
 						// it moves a byte (RootRequest::PACKAGE_KIND): ours
 						// installs, anything else comes back as the warning.
+						// An installed name is not queued: the replace panel
+						// asks first.
 						if (isset($_FILES['theme_zip']) && $_FILES['theme_zip']['error'] === UPLOAD_ERR_OK) {
-							$queued = PackageInstallPage::upload('theme', $_FILES['theme_zip']['tmp_name'], (int)$session->get_user_id());
-							$root_request_id = $queued['request_id'];
-							$message = "Theme '" . $queued['name'] . "' was unpacked and checked, and root is asked to verify and install it.";
+							$outcome = PackageInstallPage::upload('theme', $_FILES['theme_zip']['tmp_name'], (int)$session->get_user_id());
+							if ($outcome['outcome'] === 'pending_replace') {
+								$why = '';
+								$replace_panel = PackageInstallPage::pending('theme', $outcome['staged_dir'], $why);
+								if ($replace_panel === null) {
+									throw new Exception($why);
+								}
+							} else {
+								$root_request_id = $outcome['request_id'];
+								$message = "Theme '" . $outcome['name'] . "' was unpacked and checked, and root is asked to verify and install it.";
+							}
 						} else {
 							$error = "Upload failed. Please check the file and try again.";
+						}
+						break;
+
+					case 'replace_staged':
+					case 'discard_staged':
+						// The replace panel's two answers. Replace queues the
+						// request with replace: true; Discard removes the
+						// staged upload. Both carry the panel's token and the
+						// staged directory, checked against staging.
+						$formwriter = new FormWriterV2HTML5(PackageInstallPage::REPLACE_FORM_ID);
+						$staged_dir = (string)($input['staged_dir'] ?? '');
+						if (!$formwriter->validateCSRF($input)) {
+							throw new Exception('Invalid or expired request token. Please try again.');
+						}
+						if ($action === 'replace_staged') {
+							$root_request_id = PackageInstallPage::confirmReplace('theme', $staged_dir, (int)$session->get_user_id());
+							$message = 'Root is asked to verify the uploaded theme and replace the installed copy with it; the previous copy is kept beside it.';
+						} else {
+							$name = PackageInstallPage::discard('theme', $staged_dir);
+							$message = "The uploaded copy of '$name' is discarded. Nothing was changed.";
 						}
 						break;
 
@@ -201,10 +237,31 @@ function admin_themes_logic(array $input): LogicResult {
 	// Load current themes (filesystem + database merge)
 	$themes = Theme::get_all_themes_with_status();
 
+	// The version the source ships for each forked theme, so the Local fork
+	// badge can say how far behind the fork is. From the day-old copy, looked
+	// up only when a fork exists; null means nothing is known. The root node's
+	// catalog is its own tree, so there it would compare a fork with itself.
+	$fork_versions = null;
+	foreach ($themes as $entry) {
+		if (MarketplaceClient::is_root()) {
+			break;
+		}
+		if (!empty($entry['theme']) && $entry['directory_exists'] && !$entry['theme']->receives_upgrades()) {
+			try {
+				$fork_versions = MarketplaceClient::published_versions('themes');
+			} catch (Throwable $e) {
+				error_log('admin_themes_logic: catalog version lookup failed: ' . $e->getMessage());
+			}
+			break;
+		}
+	}
+
 	return LogicResult::render(array(
 		'message' => $message,
 		'error' => $error,
 		'themes' => $themes,
+		'replace_panel' => $replace_panel,
+		'fork_versions' => $fork_versions,
 		// The two slots: the page theme and the look (specs/style_themes.md).
 		'page_theme' => (string)Globalvars::get_instance()->get_setting('theme_template', true, true),
 		'look' => $theme_manager->activeLook(),

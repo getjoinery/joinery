@@ -1,4 +1,5 @@
 <?php
+// @version 1.3 - the replace panel for an upload of an installed name; the Local fork badge with the shipped version; Allow upgrade asks first (specs/package_replace_on_upload.md WP2, WP3)
 // @version 1.2 - the Kind column, the two slot lines, Apply and Remove for a style theme; the Unsigned badge on page themes only (specs/style_themes.md WP4)
 // @version 1.1 - the Unsigned badge, the warning block and the request panel's hand-off (specs/package_signing.md WP6)
 
@@ -30,6 +31,12 @@ $themes = $page_vars['themes'];
 $page_theme = (string)($page_vars['page_theme'] ?? '');
 $look = (string)($page_vars['look'] ?? '');
 $look_help = 'A styling theme changes colours, fonts and images on the pages you already have. Your page theme stays active.';
+// An upload names an installed theme: both copies side by side, Replace and
+// Discard (specs/package_replace_on_upload.md).
+$replace_panel = $page_vars['replace_panel'] ?? null;
+// name => version the source ships, for the Local fork badge; null when unknown.
+$fork_versions = $page_vars['fork_versions'] ?? null;
+$fork_help = 'Uploaded here. Deploys leave it alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.';
 
 $page = new AdminPage();
 
@@ -68,6 +75,9 @@ $page->begin_box(array('altlinks' => $altlinks));
             <?= $root_actor_notice ?>
             <?php if ($unsigned_warning): ?>
                 <?= PackageInstallPage::warning_html($unsigned_warning, '/admin/admin_themes', $page) ?>
+            <?php endif; ?>
+            <?php if ($replace_panel): ?>
+                <?= PackageInstallPage::replace_html($replace_panel, '/admin/admin_themes', $page) ?>
             <?php endif; ?>
             <?php if ($root_request_id): ?>
                 <?= AdminPage::root_request_panel($root_request_id,
@@ -175,8 +185,15 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 if ($is_system) {
                                     $badges[] = '<span class="badge bg-primary"><i class="fas fa-lock me-1"></i>System</span>';
                                 }
+                                // A local fork: the live manifest says receives_upgrades=false,
+                                // so deploys leave it alone. The badge says the cost, and how far
+                                // behind the shipped version it is when that is known.
                                 if (!$receives_upgrades) {
-                                    $badges[] = '<span class="badge bg-warning">Upgrades disabled</span>';
+                                    $badges[] = '<span class="badge bg-warning" title="' . htmlspecialchars($fork_help) . '">Local fork</span>';
+                                    $shipped = is_array($fork_versions) ? (string)($fork_versions[$theme_name] ?? '') : '';
+                                    if ($shipped !== '' && $shipped !== (string)$version) {
+                                        $badges[] = '<small class="text-muted">shipped version is ' . htmlspecialchars($shipped) . '</small>';
+                                    }
                                 }
                                 // Installed on the owner's acknowledgement of
                                 // the warning: not built by Joinery. Stays for
@@ -239,11 +256,19 @@ $page->begin_box(array('altlinks' => $altlinks));
 
                                 // Actions below require a DB record
                                 if ($theme) {
-                                    // System themes cannot be deleted, but receives_upgrades is independent.
-                                    if ($receives_upgrades) {
-                                        $actions['Disable upgrade'] = "javascript:submitAction('mark_preserved', '$theme_name')";
-                                    } else {
-                                        $actions['Allow upgrade'] = "javascript:submitAction('mark_upgradable', '$theme_name')";
+                                    // The fork mark. A system theme is pulled fresh by every
+                                    // deploy whatever the flag says, so it has no toggle. Allow
+                                    // upgrade ends a fork and the next deploy replaces the
+                                    // files, so it asks first.
+                                    if (!$is_system) {
+                                        if ($receives_upgrades) {
+                                            $actions['Disable upgrade'] = "javascript:submitAction('mark_preserved', '$theme_name')";
+                                        } else {
+                                            $allow_json = htmlspecialchars(json_encode('The next deploy will replace your copy of ' . $theme_name
+                                                . ' with the version Joinery ships. Your copy is not kept.'));
+                                            $name_json = htmlspecialchars(json_encode($theme_name));
+                                            $actions['Allow upgrade'] = "javascript:JoineryModal.confirm($allow_json, function(){ submitAction('mark_upgradable', $name_json); }, { confirmLabel: 'Allow upgrade' })";
+                                        }
                                     }
 
                                     // Add delete option for non-system themes with missing files or inactive themes

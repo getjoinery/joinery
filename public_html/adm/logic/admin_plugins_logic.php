@@ -4,6 +4,10 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_plugins_logic — the Plugins page.
  *
+ * @version 1.3 - an upload of an installed name shows the replace panel
+ *                (Replace / Discard) instead of queueing; Disable upgrade /
+ *                Allow upgrade for a plugin, the Local fork badge with the
+ *                shipped version beside it (specs/package_replace_on_upload.md WP2, WP3)
  * @version 1.2.1 - "still published" comes from MarketplaceClient::published_names(),
  *                  a copy kept for a day, not a catalog fetch on every page load
  * @version 1.2 - uninstall keeps the row (`uninstalled`) and queues the file
@@ -33,6 +37,9 @@ function admin_plugins_logic(array $input): LogicResult {
 	// Set when root refused an uploaded package as not ours and the operator
 	// is looking at the warning (specs/package_signing.md WP6).
 	$unsigned_warning = null;
+	// Set when an upload names an installed plugin and the operator is asked
+	// to replace it or discard the upload (specs/package_replace_on_upload.md).
+	$replace_panel = null;
 
 	// Check if plugin system is properly set up
 	$system_health = null;
@@ -74,11 +81,22 @@ function admin_plugins_logic(array $input): LogicResult {
 			// comes back as the warning below.
 			try {
 				if (isset($_FILES['plugin_zip']) && $_FILES['plugin_zip']['error'] === UPLOAD_ERR_OK) {
-					$queued = PackageInstallPage::upload('plugin', $_FILES['plugin_zip']['tmp_name'], (int)$session->get_user_id());
-					$root_request_id = $queued['request_id'];
-					$message = 'Plugin "' . htmlspecialchars($queued['name'])
-						. '" was unpacked and checked, and root is asked to verify and install it.';
-					$message_type = 'success';
+					$outcome = PackageInstallPage::upload('plugin', $_FILES['plugin_zip']['tmp_name'], (int)$session->get_user_id());
+					if ($outcome['outcome'] === 'pending_replace') {
+						// Already installed: nothing is queued until the
+						// operator says Replace on the panel below.
+						$why = '';
+						$replace_panel = PackageInstallPage::pending('plugin', $outcome['staged_dir'], $why);
+						if ($replace_panel === null) {
+							$message = htmlspecialchars($why);
+							$message_type = 'danger';
+						}
+					} else {
+						$root_request_id = $outcome['request_id'];
+						$message = 'Plugin "' . htmlspecialchars($outcome['name'])
+							. '" was unpacked and checked, and root is asked to verify and install it.';
+						$message_type = 'success';
+					}
 				} else {
 					$message = "Upload failed. Please check the file and try again.";
 					$message_type = 'danger';
@@ -106,6 +124,31 @@ function admin_plugins_logic(array $input): LogicResult {
 					$root_request_id = $outcome;
 					$message = 'Acknowledged. Root is asked to install the unsigned plugin under the unsigned restrictions.';
 					$message_type = 'warning';
+				} catch (Exception $e) {
+					$message = htmlspecialchars($e->getMessage());
+					$message_type = 'danger';
+				}
+			}
+		} elseif ($action === 'replace_staged' || $action === 'discard_staged') {
+			// The replace panel's two answers. Replace queues the request with
+			// replace: true; Discard removes the staged upload. Both carry the
+			// panel's token and the staged directory, checked against staging.
+			$formwriter = new FormWriterV2HTML5(PackageInstallPage::REPLACE_FORM_ID);
+			$staged_dir = (string)($input['staged_dir'] ?? '');
+			if (!$formwriter->validateCSRF($input)) {
+				$message = 'Invalid or expired request token. Please try again.';
+				$message_type = 'danger';
+			} else {
+				try {
+					if ($action === 'replace_staged') {
+						$root_request_id = PackageInstallPage::confirmReplace('plugin', $staged_dir, (int)$session->get_user_id());
+						$message = 'Root is asked to verify the uploaded plugin and replace the installed copy with it; the previous copy is kept beside it.';
+						$message_type = 'success';
+					} else {
+						$name = PackageInstallPage::discard('plugin', $staged_dir);
+						$message = 'The uploaded copy of "' . htmlspecialchars($name) . '" is discarded. Nothing was changed.';
+						$message_type = 'success';
+					}
 				} catch (Exception $e) {
 					$message = htmlspecialchars($e->getMessage());
 					$message_type = 'danger';
@@ -239,6 +282,28 @@ function admin_plugins_logic(array $input): LogicResult {
 						$message_type = 'danger';
 					}
 
+				} elseif ($action === 'mark_preserved' || $action === 'mark_upgradable') {
+					// The fork mark lives in the live manifest, which is the
+					// code tree, so writing it is a root request; the row is
+					// written here so the page tells the truth at once (the
+					// sync keeps it equal to the manifest from then on).
+					$upgradable = ($action === 'mark_upgradable');
+					$plugin = Plugin::get_by_plugin_name($plugin_name);
+					if (!$plugin) {
+						$message = 'Plugin record not found.';
+						$message_type = 'warning';
+					} else {
+						$plugin->set('plg_receives_upgrades', $upgradable);
+						$plugin->save();
+						$root_request_id = RootRequest::submit('set_receives_upgrades',
+							array('type' => 'plugin', 'name' => $plugin_name, 'value' => $upgradable),
+							(int)$session->get_user_id());
+						$message = $upgradable
+							? 'The next deploy will replace your copy of "' . htmlspecialchars($plugin_name) . '" with the version Joinery ships.'
+							: 'Plugin "' . htmlspecialchars($plugin_name) . '" is a local fork: deploys leave it alone until Allow upgrade is pressed.';
+						$message_type = 'success';
+					}
+
 				} elseif ($action === 'repair_plugin') {
 					// Clear the install error and reset status, then re-run install
 					$plugin = Plugin::get_by_plugin_name($plugin_name);
@@ -293,6 +358,25 @@ function admin_plugins_logic(array $input): LogicResult {
 		}
 	}
 
+	// The version the source ships for each forked plugin, so the Local fork
+	// badge can say how far behind the fork is. From the day-old copy, looked
+	// up only when a fork exists; null means nothing is known. The root node's
+	// catalog is its own tree, so there it would compare a fork with itself.
+	$fork_versions = null;
+	foreach ($plugins as $entry) {
+		if (MarketplaceClient::is_root()) {
+			break;
+		}
+		if ($entry['plugin'] && $entry['directory_exists'] && !$entry['plugin']->receives_upgrades()) {
+			try {
+				$fork_versions = MarketplaceClient::published_versions('plugins');
+			} catch (Throwable $e) {
+				error_log('admin_plugins_logic: catalog version lookup failed: ' . $e->getMessage());
+			}
+			break;
+		}
+	}
+
 	// Determine which active plugins declare provisioners. This only reads
 	// plugin.json manifests — no provisioning checks are run here; those run
 	// asynchronously via ajax/check_provisioning.php after the page renders.
@@ -314,6 +398,8 @@ function admin_plugins_logic(array $input): LogicResult {
 		'provisioning_plugins' => $provisioning_plugins,
 		'root_request_id' => $root_request_id,
 		'unsigned_warning' => $unsigned_warning,
+		'replace_panel' => $replace_panel,
+		'fork_versions' => $fork_versions,
 		'root_actor_notice' => AdminPage::root_actor_notice()
 	));
 }

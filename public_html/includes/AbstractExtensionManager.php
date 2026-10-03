@@ -14,6 +14,11 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
  * utils/install_extension.php. refreshFromUpstream(), installFromZip() and
  * installFromTarGz() refuse at the door when called under the web server.
  *
+ * @version 1.3 - the fork model (specs/package_replace_on_upload.md WP3):
+ *                isLocalFork() reads the live manifest, refreshFromUpstream()
+ *                refuses to put the catalog copy over a fork and says the way
+ *                out, and writeManifestReceivesUpgrades() is shared by both
+ *                managers so a plugin's fork mark lasts like a theme's
  * @version 1.2 - markStaleAgainstManifest() never touches an `uninstalled`
  *                row: it is a record, not an installed extension
  *                (specs/post_release_fleet_defects.md B1)
@@ -304,6 +309,13 @@ abstract class AbstractExtensionManager {
             return false;
         }
 
+        // A local fork is the operator's copy under the shipped name. The
+        // catalog copy over it would be their edits gone, so the refusal
+        // comes before a byte is fetched, and says the one way past it.
+        if ($this->isLocalFork($name)) {
+            throw new Exception($this->localForkRefusal($name));
+        }
+
         $upgrade_source = MarketplaceClient::source();
 
         if (empty($upgrade_source)) {
@@ -578,12 +590,8 @@ abstract class AbstractExtensionManager {
             // If already exists, check if safe to replace
             $target_path = $this->getExtensionPath($extension_name);
             if (is_dir($target_path)) {
-                $manifest_path = $target_path . '/' . $this->manifest_filename;
-                if (file_exists($manifest_path)) {
-                    $local_manifest = json_decode(file_get_contents($manifest_path), true);
-                    if (is_array($local_manifest) && isset($local_manifest['receives_upgrades']) && !$local_manifest['receives_upgrades']) {
-                        throw new Exception("Cannot replace {$this->extension_type} '$extension_name': it is marked receives_upgrades: false (preserved on deploy).");
-                    }
+                if ($this->isLocalFork($extension_name)) {
+                    throw new Exception($this->localForkRefusal($extension_name));
                 }
                 // receives_upgrades=true or no manifest — safe to delete and replace
                 $this->cleanup($target_path);
@@ -927,6 +935,102 @@ abstract class AbstractExtensionManager {
      */
     protected function getExtensionPath($name) {
         return PathHelper::getAbsolutePath($this->extension_dir . '/' . $name);
+    }
+
+    /**
+     * The live manifest, decoded, or null when there is none or it is not JSON.
+     *
+     * @param string $name Extension directory name
+     * @return array|null
+     */
+    public function liveManifest($name) {
+        $path = $this->getExtensionPath($name) . '/' . $this->manifest_filename;
+        if (!is_file($path)) {
+            return null;
+        }
+        $manifest = json_decode((string)@file_get_contents($path), true);
+        return is_array($manifest) ? $manifest : null;
+    }
+
+    /**
+     * Whether the installed copy is a local fork: its live manifest says
+     * receives_upgrades: false. That is the one mark the deploy reads
+     * (DeploymentHelper::copyPreservedToStaging), the one an upload writes,
+     * and the one the pages' Disable upgrade / Allow upgrade pair toggles.
+     * The row mirrors it (the sync copies the manifest's value onto the
+     * row), so the manifest is asked, not the row.
+     *
+     * @param string $name Extension directory name
+     * @return bool
+     */
+    public function isLocalFork($name) {
+        $manifest = $this->liveManifest($name);
+        return is_array($manifest)
+            && array_key_exists('receives_upgrades', $manifest)
+            && $manifest['receives_upgrades'] === false;
+    }
+
+    /**
+     * Whether the installed copy is a system extension the deploy always pulls
+     * fresh (is_system in the live manifest). It cannot be a fork: whatever its
+     * flag says, the next deploy replaces it.
+     *
+     * @param string $name Extension directory name
+     * @return bool
+     */
+    public function isSystemExtension($name) {
+        $manifest = $this->liveManifest($name);
+        return is_array($manifest) && !empty($manifest['is_system']);
+    }
+
+    /**
+     * The sentence for a caller that would put another copy over a local
+     * fork, with the one way past it.
+     *
+     * @param string $name Extension directory name
+     * @return string
+     */
+    public function localForkRefusal($name) {
+        $page = $this->extension_type === 'theme' ? 'Themes' : 'Plugins';
+        return "Cannot replace {$this->extension_type} '$name': it is a local fork "
+            . "(its manifest says receives_upgrades: false, so deploys leave it alone). "
+            . "To take the shipped version instead, press Allow upgrade on the $page page first.";
+    }
+
+    /**
+     * Write receives_upgrades into the live manifest. This is the fork mark:
+     * false means the deploy preserves this directory whatever the incoming
+     * archive says, true means the next deploy replaces it. The row follows
+     * on the next sync. The manifest is in the code tree, so from the web
+     * this is reached through the set_receives_upgrades root request; the
+     * installer calls it directly, as root, for an uploaded package.
+     *
+     * A directory with no manifest gets a stub naming itself, so an on-disk
+     * extension the operator chose to keep is kept.
+     *
+     * @param string $name Extension directory name
+     * @param bool $receives_upgrades
+     * @return int|false Bytes written, or false when the manifest cannot be read or written
+     */
+    public function writeManifestReceivesUpgrades($name, $receives_upgrades) {
+        $manifest_path = $this->getExtensionPath($name) . '/' . $this->manifest_filename;
+
+        if (!file_exists($manifest_path)) {
+            $manifest = array(
+                'name' => $name,
+                'version' => '1.0.0',
+                'receives_upgrades' => (bool)$receives_upgrades,
+                'included_in_publish' => true
+            );
+        } else {
+            $manifest = json_decode((string)file_get_contents($manifest_path), true);
+            if (!is_array($manifest)) {
+                return false;
+            }
+            $manifest['receives_upgrades'] = (bool)$receives_upgrades;
+        }
+
+        return file_put_contents($manifest_path, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
     }
 
     /**
