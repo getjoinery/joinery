@@ -16835,3 +16835,47 @@ fn a_chain_three_long_keeps_its_head() {
     assert_eq!(desktop.fs.peek("A/c.txt").as_deref(), Some(&b"a file in C"[..]));
     assert_converged(&world);
 }
+
+/// Both users rename one folder at once, and the one whose rename lands
+/// first makes the old name again with a save through it. The new folder
+/// arrives on the other device under the old name -- the path the renamed
+/// folder's own record still resolves to -- having never stood there. Its
+/// files were credited by path, so the newcomer was matched on the renamed
+/// folder's files and given its directory, though that directory is proven
+/// the folder's own by identity; the folder read as deleted, was made again
+/// empty, and every file in it was moved into the newcomer on both devices
+/// (soak run 1633). A folder is credited with the files whose parent is that
+/// folder, never with the files at the path it resolves to.
+#[test]
+fn a_folder_renamed_on_both_devices_keeps_its_files_when_its_old_name_is_made_again() {
+    let world = World::new(9_700, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    let mut committed = Committed::default();
+    a.fs.user_mkdir("P/S");
+    a.fs.user_write("P/S/f.txt", b"a filed f into S");
+    b.fs.user_write("P/S/Sub7/k.txt", b"b's subfolder of S");
+    assert!(world.settle().is_some());
+    let s = world.server.folder_id_at("P/S").expect("S is on the server");
+    a.fs.user_rename("P/S", "P/S29");
+    a.fs.user_write("P/S/Sub12/x.txt", b"a saves through the old name, which makes it again");
+    committed.note("P/S29/f.txt", b"a filed f into S");
+    committed.note("P/S29/Sub7/k.txt", b"b's subfolder of S");
+    committed.note("P/S/Sub12/x.txt", b"a saves through the old name, which makes it again");
+    for _ in 0..6 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(a);
+    }
+    let made_again = world.server.folder_id_at("P/S").expect("the premise: the old name made again is on the server");
+    assert_ne!(made_again, s);
+    b.fs.user_rename("P/S", "P/S23");
+    assert!(world.settle().is_some(), "never settled");
+
+    let f = world.server.files().into_iter().find(|f| f.name == "f.txt" && !f.trashed).expect("f is on the server");
+    assert_eq!(f.folder, Some(s), "f left the folder its user put it in: {:?}", world.server.tree());
+    assert_eq!(world.server.folder_id_at("P/S29"), Some(s), "{:?}", world.server.tree());
+    assert_eq!(b.fs.peek("P/S29/f.txt").as_deref(), Some(&b"a filed f into S"[..]));
+    jd_sim::scenario::assert_no_two_records_on_one_directory(&world);
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
