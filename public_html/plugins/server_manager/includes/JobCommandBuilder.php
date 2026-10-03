@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.91 - COPY_FROM_BACKUPS_MIN_VERSION: a copy from backups needs the release with the copy's key page
  * @version 1.90 - build_copy_look / build_copy_take_key (agent 1.54.0): a copy from backups, its key taken
  *                 with the recovery key on the copy's own page (site_copy.md WP10)
  * @version 1.89 - the rspamd_classifier_bayes and rspamd_redis descriptions say what each file means now
@@ -407,6 +408,14 @@ class JobCommandBuilder {
 	 * with all of them.
 	 */
 	const COPY_SOURCE_MIN_VERSION = '0.8.453';
+
+	/**
+	 * The oldest release a site can be copied from its backups (site_copy.md
+	 * WP10). The owner types the recovery key on the copy's own /copy-key
+	 * page, and that page is part of the release the copy installs: the
+	 * source's. 0.8.456 is the first release that carries it.
+	 */
+	const COPY_FROM_BACKUPS_MIN_VERSION = '0.8.456';
 
 	/**
 	 * Operations the agent registers as ClassDestructive.

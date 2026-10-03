@@ -31,6 +31,8 @@
  * owner's own records, changed on their press with a token they gave for it,
  * so nothing is recorded in the platform's DNS ownership table.
  *
+ * @version 1.2 - a container site moves only its own names (the domain and www.): its server's address is
+ *                 shared with other sites, whose records stay
  * @version 1.1 - prove() takes how long to keep asking, so a step that is called again can ask briefly each time, and
  *                whether to check the certificate (a copy from backups has none yet)
  * @version 1.0
@@ -152,8 +154,15 @@ class ProxiedOriginMove {
 		$records = array();
 		$why = array();
 		$site = DnsRecord::normalizeName($domain);
+		// A container site shares its server's address with the other sites
+		// there: only the site's own names are its records to move.
+		$shared = trim((string)$source->get('mgn_container_name')) !== '';
+		$own_names = array($site, DnsRecord::normalizeName('www.' . $domain));
 		foreach ($driver->listRecords($zone) as $r) {
 			if (!in_array($r->type, array(DnsRecord::TYPE_A, DnsRecord::TYPE_AAAA), true)) {
+				continue;
+			}
+			if ($shared && !in_array(DnsRecord::normalizeName($r->name), $own_names, true)) {
 				continue;
 			}
 			$family = $r->type === DnsRecord::TYPE_A ? 4 : 6;

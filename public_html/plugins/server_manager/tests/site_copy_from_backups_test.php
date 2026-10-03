@@ -17,6 +17,7 @@
  * Also the copy's page handoff (CopyKeyHandoff): the shapes it accepts, and
  * that it does nothing with no request staged.
  *
+ * @version 1.1 - a container site and a management node from backups; the backups release floor
  * @version 1.0
  */
 
@@ -76,7 +77,8 @@ $census = function (int $dead) {
 // key's fingerprint are left.
 $src = $mk_node('src', array('mgn_web_root' => '/var/www/html/scbsite/public_html', 'mgn_site_url' => 'https://scb.example.org',
 	'mgn_host' => $S4, 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.40.0', 'mgn_agent_primitives' => 'check_status',
-	'mgn_joinery_version' => '0.8.453', 'mgn_backup_recovery_fpr' => $recovery_fpr, 'mgn_agent_server_manager' => 'inactive'));
+	'mgn_joinery_version' => JobCommandBuilder::COPY_FROM_BACKUPS_MIN_VERSION, 'mgn_backup_recovery_fpr' => $recovery_fpr,
+	'mgn_agent_server_manager' => 'inactive'));
 if (!JobCommandBuilder::get_target($src)) {
 	harness_skip('a copy from backups', 'no enabled backup target on this management node');
 	harness_finish();
@@ -100,6 +102,31 @@ $live_why = SiteCopyRunner::source_refusals($src, true, SiteCopy::FROM_SOURCE);
 check((bool)$live_why, 'from the running site, the dead source is refused (its agent lacks the copy words)', implode(' ', $live_why));
 check(SiteCopyRunner::source_refusals($src, true, SiteCopy::FROM_BACKUPS) === array(),
 	'from its backups, it is not: nothing is asked of its agent');
+foreach (array(
+	'a container site'  => array('mgn_container_name', 'scbsite'),
+	'a management node' => array('mgn_agent_server_manager', 'active'),
+) as $what => $c) {
+	$n = new ManagedNode($src->key, TRUE);
+	$n->set($c[0], $c[1]);
+	check(SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_BACKUPS) === array(), $what . ' is copied from its backups',
+		implode(' | ', SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_BACKUPS)));
+	$live = implode(' | ', SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_SOURCE));
+	check(strpos($live, $c[0] === 'mgn_container_name' ? 'container site' : 'management node') !== false,
+		'but not from the running site: ' . $what, $live);
+}
+$n = new ManagedNode($src->key, TRUE);
+$n->set('mgn_site_url', rtrim((string)LibraryFunctions::get_absolute_url(), '/'));
+$why = implode(' | ', SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_BACKUPS));
+check(strpos($why, 'this management node') !== false, 'this management node itself is never copied, from backups either', $why);
+$n = new ManagedNode($src->key, TRUE);
+$n->set('mgn_joinery_version', JobCommandBuilder::COPY_SOURCE_MIN_VERSION);
+$why = implode(' | ', SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_BACKUPS));
+check(strpos($why, 'needs ' . JobCommandBuilder::COPY_FROM_BACKUPS_MIN_VERSION) !== false,
+	'a release without the copy\'s key page is refused for a copy from backups', $why);
+$n = new ManagedNode($src->key, TRUE);
+$n->set('mgn_container_name', 'scbsite');
+check(IpSwapMove::provision_of($n) === null && strpos(implode(' ', IpSwapMove::record_refusals($n, $src)), 'container') !== false,
+	'a container site\'s shared server is never powered off or swapped');
 $threw = '';
 try { SiteCopyRunner::newest_chain($src); } catch (Exception $e) { $threw = $e->getMessage(); }
 check($threw !== '', 'a live copy needs a backup under a day old; this one is eight days old');

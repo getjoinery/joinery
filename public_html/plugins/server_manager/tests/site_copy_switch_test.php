@@ -15,6 +15,7 @@
  * jobs are finished by hand, as site_copy_runner does; the proof through the
  * proxy is a stand-in that answers as the copy or as the frozen site.
  *
+ * @version 1.1 - a container site moves only its own names
  * @version 1.0
  */
 
@@ -274,6 +275,26 @@ try { ProxiedOriginMove::plan($driver(), 'scp.example.org', $src, $cnode); } cat
 check(strpos($threw, 'no IPv6 address for the copy') !== false, 'with no IPv6 address for the copy, the AAAA refuses the move', $threw);
 $ajr->set('ajr_addresses', $T4 . ',' . $T6);
 $ajr->save();
+
+// A container site shares its server's address with the other sites there.
+// Their records name the same address, proxied or not, and are not its own.
+$siblings = array_merge($site_records(), array(
+	array('type' => 'A', 'name' => 'demo.example.org', 'content' => $S4, 'proxied' => true),
+	array('type' => 'A', 'name' => 'developers.example.org', 'content' => $S4, 'proxied' => false),
+));
+$cf_reset($siblings);
+$threw = '';
+try { ProxiedOriginMove::plan($driver(), 'scp.example.org', $src, $cnode); } catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'developers.example.org') !== false, 'a bare-metal site\'s server is its own: another unproxied name '
+	. 'on its address refuses the move', $threw);
+$in_container = new ManagedNode($src->key, TRUE);
+$in_container->set('mgn_container_name', 'scpsite');
+$cf_reset($siblings);
+$plan = ProxiedOriginMove::plan($driver(), 'scp.example.org', $in_container, $cnode);
+$names = array_map(function ($r) { return $r['name']; }, $plan['records']);
+sort($names);
+check($names === array('scp.example.org', 'www.scp.example.org'), 'a container site moves only its own name and www; the '
+	. 'other sites on its shared server keep their records, proxied or not', json_encode($plan['records']));
 
 // ---------------------------------------------------------------------------
 section('The driver: a move keeps the record proxied, and a failed write is undone');
