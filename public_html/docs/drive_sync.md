@@ -667,8 +667,11 @@ withdrawn and the local edit wins. A download's byte count comes from the bytes
 that reached the spool, never from a header. It lands in the directory that
 stood at its folder's path when the spool was opened: a folder the user moved
 or replaced while the bytes were in flight is never made again at its old name
-(`VfsError::FolderMoved`). The download stands down and the next pass places it
-where the folder now is. Only a folder missing when the spool opened is made.
+(`VfsError::FolderMoved`), and a spool whose folder is not on the disk when it
+opens is refused (`VfsError::NoFolder`). No engine write makes a directory it
+was not asked to make: a move refuses a destination folder that is not there,
+and a folder create makes one level, never a missing parent. The download or
+move stands down and the next pass places it where the folder now is.
 
 The spool lives with the state store, so a sync root on another volume (an
 external disk, a second partition, a mount point inside the root) cannot take

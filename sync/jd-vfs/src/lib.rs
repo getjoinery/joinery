@@ -51,6 +51,8 @@ pub enum VfsError {
     AlreadyExists(PathBuf),
     #[error("the folder {0} was moved or replaced while a file was landing in it")]
     FolderMoved(PathBuf),
+    #[error("the folder {0} it goes into is not on this disk")]
+    NoFolder(PathBuf),
     #[error("permission denied: {0}")]
     PermissionDenied(PathBuf),
     #[error("the sync root {0} is not available")]
@@ -202,8 +204,7 @@ pub trait SpoolFile: std::io::Write {
     /// its place, the commit is refused (`FolderMoved`) rather than making the
     /// folder again: the user moved it while the bytes were in flight, and a
     /// folder made again at its old name takes the file out of the folder the
-    /// user has (soak run 1536). Only a folder missing when the spool opened
-    /// is made.
+    /// user has (soak run 1536).
     ///
     /// **A commit that fails leaves nothing behind.** It consumes the handle,
     /// so after it returns the caller has no way to clean up; a temporary file
@@ -310,7 +311,20 @@ pub trait Vfs: Send + Sync {
     }
     fn hash(&self, path: &Path) -> VfsResult<String>;
 
+    /// Make one directory, in a folder that is already on this disk. A
+    /// directory already standing at `path` is success. A missing parent is
+    /// refused (`NoFolder`), never made.
+    ///
+    /// No engine write makes a directory it was not asked to make. A folder
+    /// missing where the engine expects it is one the user moved or deleted
+    /// since the engine last looked, and a directory made again at its old
+    /// name is one no user made: the next scan reads it as theirs, and files
+    /// landed in it as their moves, and every device carries them out of the
+    /// folder they belong to (soak run 1571).
     fn create_dir(&self, path: &Path) -> VfsResult<()>;
+    /// Rename within the sync root. The folder `to` goes into must already be
+    /// on this disk; a missing one is refused (`NoFolder`), never made, for
+    /// the reason [`Vfs::create_dir`] gives.
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()>;
 
     /// Move to the OS trash. Never an unlink: a delete the engine got wrong has
@@ -322,6 +336,10 @@ pub trait Vfs: Send + Sync {
     /// so the commit is a rename rather than a copy; where it is not, the
     /// commit copies the bytes beside the target under [`land_name`] for `op`
     /// first.
+    ///
+    /// The folder `target` goes into must be on this disk when the spool
+    /// opens; a missing one is refused (`NoFolder`), never made, for the
+    /// reason [`Vfs::create_dir`] gives.
     fn spool(&self, target: &Path, op: i64) -> VfsResult<Box<dyn SpoolFile>>;
 
     /// Open a scratch file: written, read back, never visible. See

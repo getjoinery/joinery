@@ -655,16 +655,16 @@ impl Vfs for OsVfs {
     }
 
     fn create_dir(&self, path: &Path) -> VfsResult<()> {
-        match fs::create_dir_all(path) {
+        folder_on_disk(path)?;
+        match fs::create_dir(path) {
             Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => Ok(()),
             Err(e) => Err(io_err(path, e)),
         }
     }
 
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
-        if let Some(parent) = to.parent() {
-            fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
-        }
+        folder_on_disk(to)?;
         fs::rename(from, to).map_err(|e| io_err(from, e))
     }
 
@@ -687,11 +687,14 @@ impl Vfs for OsVfs {
     fn spool(&self, target: &Path, op: i64) -> VfsResult<Box<dyn SpoolFile>> {
         let name = format!(".jd-tmp-{}", (self.next_token)());
         let path = self.spool_dir.join(name);
-        let file = File::create(&path).map_err(|e| io_err(&path, e))?;
-        let folder_at_open = match target.parent() {
-            Some(folder) => directory_identity_at(folder, &self.personality)?,
-            None => None,
+        let folder = target
+            .parent()
+            .ok_or_else(|| io_err(target, std::io::Error::other("a download target with no folder")))?;
+        folder_on_disk(target)?;
+        let Some(folder_at_open) = directory_identity_at(folder, &self.personality)? else {
+            return Err(VfsError::NoFolder(folder.to_path_buf()));
         };
+        let file = File::create(&path).map_err(|e| io_err(&path, e))?;
         Ok(Box::new(OsSpoolFile {
             file: Some(file),
             path,
@@ -834,8 +837,8 @@ struct OsSpoolFile {
     #[allow(dead_code)]
     target: PathBuf,
     /// The directory standing where the target lands when the spool was
-    /// opened; `None` if there was none (see `SpoolFile::commit`).
-    folder_at_open: Option<crate::FileIdentity>,
+    /// opened (see `SpoolFile::commit`). A spool never opens without one.
+    folder_at_open: crate::FileIdentity,
     /// The download op this spool lands for; carried in a landing name.
     op: i64,
     /// `fs::rename`. A seam so a test can make the spool's rename cross a
@@ -867,6 +870,33 @@ fn trash_context() -> trash::TrashContext {
 }
 
 /// The identity of the directory at `path`, `None` where none stands there.
+/// The folder `path` goes into stands on this disk, as a directory. Asked
+/// before a write that would otherwise fail on a missing parent with an error
+/// that cannot say which side was missing: `rename(2)` answers ENOENT alike
+/// for a source that has gone and a destination folder that has.
+///
+/// A file standing where the folder, or one above it, should be is a
+/// different answer and keeps its own: `AlreadyExists` naming that file, the
+/// refusal the engine waits out until somebody moves it. A folder simply not
+/// there is `NoFolder`.
+fn folder_on_disk(path: &Path) -> VfsResult<()> {
+    let Some(folder) = path.parent() else { return Ok(()) };
+    let mut at = folder;
+    loop {
+        match at.symlink_metadata() {
+            Ok(md) if md.is_dir() && !md.file_type().is_symlink() => {
+                return if at == folder { Ok(()) } else { Err(VfsError::NoFolder(folder.to_path_buf())) };
+            }
+            Ok(_) => return Err(VfsError::AlreadyExists(at.to_path_buf())),
+            Err(e) if not_there(&e) => match at.parent() {
+                Some(up) => at = up,
+                None => return Err(VfsError::NoFolder(folder.to_path_buf())),
+            },
+            Err(e) => return Err(io_err(at, e)),
+        }
+    }
+}
+
 fn directory_identity_at(path: &Path, personality: &Personality) -> VfsResult<Option<crate::FileIdentity>> {
     match path.symlink_metadata() {
         Ok(md) if md.is_dir() && !md.file_type().is_symlink() => Ok(Some(if personality.positional_file_ids {
@@ -896,13 +926,8 @@ impl OsSpoolFile {
         self.guard_target(target, expect)?;
 
         if let Some(parent) = target.parent() {
-            match self.folder_at_open {
-                Some(was) => {
-                    if directory_identity_at(parent, &self.personality)? != Some(was) {
-                        return Err(VfsError::FolderMoved(parent.to_path_buf()));
-                    }
-                }
-                None => fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?,
+            if directory_identity_at(parent, &self.personality)? != Some(self.folder_at_open) {
+                return Err(VfsError::FolderMoved(parent.to_path_buf()));
             }
         }
         match (self.rename)(&self.path, target) {
@@ -1269,12 +1294,42 @@ mod tests {
         assert!(!root.join("P").exists(), "the folder's old name was made again");
         assert!(!root.join("P2").join("plans.txt").exists());
 
-        // A folder missing when the spool opened is made, as it always was.
-        let fresh = root.join("Q").join("notes.txt");
-        let mut spool = v.spool(&fresh, 0).unwrap();
-        spool.write_all(b"into a folder not made yet").unwrap();
-        spool.commit(&fresh, None).unwrap();
-        assert_eq!(fs::read(&fresh).unwrap(), b"into a folder not made yet");
+        // Nor one missing when the spool opens: renamed in the moment before,
+        // its old name made again would be a folder no user made (soak run
+        // 1571).
+        let err = v.spool(&target, 0).err().expect("a spool into a missing folder opened");
+        assert!(matches!(&err, VfsError::NoFolder(p) if p == &root.join("P")), "got {err:?}");
+        assert!(!root.join("P").exists(), "the folder's old name was made again");
+        assert_eq!(fs::read_dir(&v.spool_dir).unwrap().count(), 0, "a refused spool left a file behind");
+    }
+
+    #[test]
+    fn no_write_makes_a_folder_that_is_not_on_the_disk() {
+        let d = TempDir::new("nofolder");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        fs::write(root.join("a.txt"), b"a").unwrap();
+
+        // A move into a folder the user renamed away a moment ago.
+        let err = v.rename(&root.join("a.txt"), &root.join("P").join("a.txt")).unwrap_err();
+        assert!(matches!(&err, VfsError::NoFolder(p) if p == &root.join("P")), "got {err:?}");
+        assert!(!root.join("P").exists(), "a move made its destination folder");
+        assert!(root.join("a.txt").exists());
+
+        // A folder whose parent was renamed away a moment ago: no ancestor is
+        // made by its old name.
+        let err = v.create_dir(&root.join("P").join("Sub")).unwrap_err();
+        assert!(matches!(&err, VfsError::NoFolder(p) if p == &root.join("P")), "got {err:?}");
+        assert!(!root.join("P").exists(), "a folder create made its parent");
+
+        // One level, in a folder that is there; already there is success; a
+        // file in the way is not.
+        v.create_dir(&root.join("Q")).unwrap();
+        v.create_dir(&root.join("Q")).unwrap();
+        assert!(root.join("Q").is_dir());
+        assert!(matches!(v.create_dir(&root.join("a.txt")), Err(VfsError::AlreadyExists(_))));
+        v.rename(&root.join("a.txt"), &root.join("Q").join("a.txt")).unwrap();
+        assert!(root.join("Q").join("a.txt").exists());
     }
 
     #[test]
@@ -1419,7 +1474,7 @@ mod tests {
             path,
             personality: v.personality,
             target: target.to_path_buf(),
-            folder_at_open: directory_identity_at(target.parent().unwrap(), &v.personality).unwrap(),
+            folder_at_open: directory_identity_at(target.parent().unwrap(), &v.personality).unwrap().unwrap(),
             op: 7,
             rename: |_, _| Err(std::io::Error::from(std::io::ErrorKind::CrossesDevices)),
             after_copy,
@@ -1474,6 +1529,7 @@ mod tests {
         assert_eq!(fs::read(&edited).unwrap(), b"the server's newer version");
         assert_eq!(Some(fp), v.fingerprint(&edited).unwrap(), "the fingerprint is the landed file's own");
 
+        fs::create_dir(root.join("Inbox")).unwrap();
         let fresh = root.join("Inbox").join("fresh.txt");
         let mut spool = v.spool(&fresh, 8).unwrap();
         spool.write_all(b"new from the server").unwrap();
@@ -1583,16 +1639,15 @@ mod tests {
     }
 
     #[test]
-    fn committing_creates_missing_parent_directories() {
+    fn a_spool_makes_no_missing_folder_at_any_depth() {
         let d = TempDir::new("mkparent");
         let v = vfs(&d);
-        let target = v.root().unwrap().join("deep/nested/file.txt");
+        let root = v.root().unwrap();
+        let target = root.join("deep/nested/file.txt");
 
-        let mut spool = v.spool(&target, 0).unwrap();
-        spool.write_all(b"x").unwrap();
-        spool.commit(&target, None).unwrap();
-
-        assert!(target.exists());
+        let err = v.spool(&target, 0).err().expect("a spool into a missing folder opened");
+        assert!(matches!(&err, VfsError::NoFolder(p) if p == &root.join("deep/nested")), "got {err:?}");
+        assert!(!root.join("deep").exists());
     }
 
     #[test]
@@ -1619,14 +1674,20 @@ mod tests {
         // reasonably reads it as the target having changed underneath it, when
         // the target does not exist at all and never will while this stands.
         let child = occupied.join("notes.txt");
-        let mut spool = v.spool(&child, 0).unwrap();
-        spool.write_all(b"a child of the folder").unwrap();
-        let err = spool.commit(&child, None).unwrap_err();
+        let err = v.spool(&child, 0).err().expect("a spool beneath a file opened");
         assert!(
             matches!(&err, VfsError::AlreadyExists(p) if p == &occupied),
             "refused, naming the file in the way; got {err:?}"
         );
         assert!(!child.exists(), "and the child was not written anywhere");
+        // Deeper, the same file is named; so for a move and a folder create.
+        let deeper = occupied.join("Sub").join("notes.txt");
+        assert!(matches!(v.spool(&deeper, 0).err(), Some(VfsError::AlreadyExists(p)) if p == occupied));
+        fs::write(root.join("loose.txt"), b"x").unwrap();
+        let moved = v.rename(&root.join("loose.txt"), &deeper).unwrap_err();
+        assert!(matches!(&moved, VfsError::AlreadyExists(p) if p == &occupied), "got {moved:?}");
+        let made = v.create_dir(&occupied.join("Sub")).unwrap_err();
+        assert!(matches!(&made, VfsError::AlreadyExists(p) if p == &occupied), "got {made:?}");
 
         assert_eq!(
             fs::read(&occupied).unwrap(),
@@ -1792,7 +1853,7 @@ mod tests {
     }
 
     #[test]
-    fn renaming_creates_the_destination_directory() {
+    fn renaming_makes_no_destination_folder() {
         let d = TempDir::new("rename");
         let v = vfs(&d);
         let root = v.root().unwrap();
@@ -1800,7 +1861,8 @@ mod tests {
         fs::write(&from, b"x").unwrap();
         let to = root.join("new/place/here.txt");
 
-        v.rename(&from, &to).unwrap();
-        assert!(to.exists() && !from.exists());
+        let err = v.rename(&from, &to).unwrap_err();
+        assert!(matches!(&err, VfsError::NoFolder(p) if p == &root.join("new/place")), "got {err:?}");
+        assert!(from.exists() && !root.join("new").exists());
     }
 }
