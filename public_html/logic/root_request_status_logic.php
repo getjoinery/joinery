@@ -9,9 +9,13 @@
  * Read-only, and it reads only a request the caller named. The id shape is
  * fixed inside RootRequest, so nothing here builds a path out of user input.
  *
+ * @version 1.1 - takes the one merged input array every logic function takes:
+ *                ApiLogicEndpoint calls with one argument, and the two-argument
+ *                form made every request panel's poll fail with a 400 (B7,
+ *                specs/package_replace_on_upload.md)
  * @version 1.0
  */
-function root_request_status_logic($get, $post) {
+function root_request_status_logic(array $input) {
 	$session = SessionControl::get_instance();
 
 	// Everything a request does is an operator action — upgrading the site,
@@ -21,7 +25,7 @@ function root_request_status_logic($get, $post) {
 		return LogicResult::error('You do not have permission to read root requests.');
 	}
 
-	$id = (string)($get['id'] ?? $post['id'] ?? '');
+	$id = (string)($input['id'] ?? '');
 	if ($id === '') {
 		return LogicResult::error('No request was named.');
 	}

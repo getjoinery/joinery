@@ -24,6 +24,9 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.3 - install_package: --replace from the request's `replace`
+ *                argument; set_receives_upgrades for plugins as well as
+ *                themes (specs/package_replace_on_upload.md WP1, WP3).
  * @version 1.2 - remove_plugin: delete plugins/<name> after PluginRemoval's
  *                checks pass (specs/post_release_fleet_defects.md B1).
  * @version 1.1 - install_package: verify a staged upload, or install it under
@@ -148,6 +151,15 @@ switch ($kind) {
 			. escapeshellarg(PathHelper::getIncludePath('utils/install_extension.php'))
 			. ' ' . $type . ' --staged=' . escapeshellarg($staged_path);
 
+		// The operator confirmed replacing the installed copy on the replace
+		// panel. Only a literal true counts: the installer's --replace sets a
+		// live directory aside, and a string that happens to be truthy is not
+		// an answer anyone gave.
+		if (($args['replace'] ?? false) === true) {
+			echo "replace: the operator confirmed replacing the installed $type\n";
+			$cmd .= ' --replace';
+		}
+
 		if (isset($args['unsigned_ack'])) {
 			$ack = is_array($args['unsigned_ack']) ? $args['unsigned_ack'] : array();
 			$requested_by = (int)($request['requested_by'] ?? 0);
@@ -255,27 +267,35 @@ switch ($kind) {
 		exit(0);
 
 	case 'set_receives_upgrades':
-		// The Themes page's Mark Preserved / Mark Upgradable buttons. The flag
-		// lives in the on-disk manifest because that is where the upgrade reads
-		// it, which makes setting it a tree write.
+		// The Themes and Plugins pages' Disable upgrade / Allow upgrade pair.
+		// The flag lives in the on-disk manifest because that is where the
+		// upgrade reads it (DeploymentHelper::copyPreservedToStaging), which
+		// makes setting it a tree write. false is the fork mark: the deploy
+		// leaves the directory alone until this is written true again.
 		$type = (string)($args['type'] ?? 'theme');
 		$name = (string)($args['name'] ?? '');
 		$value = !empty($args['value']);
-		if ($type !== 'theme') {
-			fwrite(STDERR, "root_request: set_receives_upgrades handles themes only\n");
+		if (!in_array($type, array('plugin', 'theme'), true)) {
+			fwrite(STDERR, "root_request: set_receives_upgrades needs type (plugin|theme)\n");
 			exit(2);
 		}
-		$manager = new ThemeManager();
+		$manager = $type === 'theme' ? new ThemeManager() : new PluginManager();
 		if (!$manager->validateName($name)) {
-			fwrite(STDERR, "root_request: invalid theme name\n");
+			fwrite(STDERR, "root_request: invalid $type name\n");
 			exit(2);
+		}
+		$dir = PathHelper::getAbsolutePath(($type === 'theme' ? 'theme/' : 'plugins/') . $name);
+		if (!is_dir($dir)) {
+			fwrite(STDERR, "root_request: $type '$name' is not on disk\n");
+			exit(1);
 		}
 		if ($manager->writeManifestReceivesUpgrades($name, $value) === false) {
 			fwrite(STDERR, "root_request: could not write the manifest for $name\n");
 			exit(1);
 		}
-		root_request_own(PathHelper::getAbsolutePath('theme/' . $name));
-		echo "theme $name receives_upgrades=" . ($value ? 'true' : 'false') . "\n";
+		root_request_own($dir);
+		echo "$type $name receives_upgrades=" . ($value ? 'true' : 'false')
+			. ($value ? ' (the next deploy replaces it with the shipped version)' : ' (a local fork: deploys leave it alone)') . "\n";
 		exit(0);
 	case 'remove_plugin':
 		// The file half of a plugin uninstall. The request carries a name; the

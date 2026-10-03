@@ -34,6 +34,9 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.6 - a local fork (live manifest receives_upgrades=false) is downloaded and then preserved
+	 *               (DeploymentHelper::preserveReason), so the extension table says it will not upgrade
+	 *               (specs/package_replace_on_upload.md WP3)
 	 * @version 1.5 - in a container, a release that passes its deploy tier keeps a copy of its manifest in
 	 *               config/release_manifest/ (site_housekeeping.sh puts it back after a rebuild); the
 	 *               one-time list of two scripts retired before signed manifests existed is gone:
@@ -929,10 +932,11 @@
 		$source_published_plugins = $decode_response['published_plugins'] ?? [];
 
 		// Download all locally-installed extensions that the source has published.
-		// The receives_upgrades flag is NOT consulted here — the staged manifest
-		// decides preservation in copyPreservedToStaging(). Filtering by the live
-		// flag here would create a bootstrapping deadlock where a theme could never
-		// receive a receives_upgrades change via an upgrade package.
+		// The receives_upgrades flag is NOT consulted here: preservation is
+		// decided in copyPreservedToStaging() (DeploymentHelper::preserveReason),
+		// where a live false — a local fork — keeps the live copy and the
+		// downloaded one is discarded. Downloading it anyway is what lets Allow
+		// upgrade take effect on the very next deploy.
 		$source_published_theme_names  = array_column($source_published_themes,  'name');
 		$source_published_plugin_names = array_column($source_published_plugins, 'name');
 		$themes_to_download  = array_values(array_intersect(
@@ -1372,9 +1376,11 @@
 
 		// Copy preserved-on-deploy themes/plugins from live into staging BEFORE the mv
 		// This ensures preserved extensions are carried into staging before the swap
-		// - Themes/plugins with receives_upgrades=false are copied
 		// - Themes/plugins not in staging (uploaded directly) are copied
-		// - Themes/plugins with receives_upgrades=true are left alone (will be updated from staging)
+		// - Local forks (LIVE manifest receives_upgrades=false) are copied, whatever the archive says
+		// - Themes/plugins the archive publishes as preserved (incoming receives_upgrades=false) are copied
+		// - Everything else is left alone (will be updated from staging)
+		// See DeploymentHelper::preserveReason().
 		$result = DeploymentHelper::copyPreservedToStaging($live_directory, $stage_directory, $verbose);
 		if ($result['success']) {
 			echo "✓ Themes: {$result['themes_copied']} preserved, {$result['themes_skipped']} will update from staging<br>";
@@ -2373,10 +2379,11 @@
 	 * Get detailed info about all installed extensions of a given type.
 	 * $type is 'theme' or 'plugin'. Returns name-keyed metadata.
 	 *
-	 * `will_upgrade` is true when the source has published the extension (it will
-	 * be downloaded; the staged manifest then decides preservation). Pass
-	 * $published_names as the list from the source's published-archives manifest.
-	 * If omitted, falls back to the live receives_upgrades flag (legacy behaviour).
+	 * `will_upgrade` is true when the source has published the extension AND the
+	 * live manifest does not say receives_upgrades: false — a local fork is
+	 * downloaded but then preserved (DeploymentHelper::preserveReason), so it
+	 * does not upgrade. Pass $published_names as the list from the source's
+	 * published-archives manifest. If omitted, falls back to the live flag alone.
 	 */
 	function get_installed_extension_info($extension_dir, $type, $published_names = null) {
 		$published_set = ($published_names !== null) ? array_flip($published_names) : null;
@@ -2386,7 +2393,7 @@
 			$name = basename(dirname($json_file));
 			$receives_upgrades = $data['receives_upgrades'] ?? false;
 			$will_upgrade = ($published_set !== null)
-				? isset($published_set[$name])
+				? (isset($published_set[$name]) && $receives_upgrades !== false)
 				: ($receives_upgrades === true);
 			$info[$name] = [
 				'name' => $name,
@@ -2461,6 +2468,8 @@
 			foreach ($components as $info) {
 				if ($info['will_upgrade']) {
 					$status = '✓ Will upgrade';
+				} elseif ($info['receives_upgrades'] === false) {
+					$status = '⊘ Local fork, preserved';
 				} else {
 					$status = '⊘ Skipped';
 				}
@@ -2480,6 +2489,9 @@
 				if ($info['will_upgrade']) {
 					$row_style = 'background-color: #d4edda;';
 					$status = '<span style="color: #155724;">✓ Will upgrade</span>';
+				} elseif ($info['receives_upgrades'] === false) {
+					$row_style = 'background-color: #fff3cd;';
+					$status = '<span style="color: #856404;">⊘ Local fork, preserved</span>';
 				} else {
 					$row_style = 'background-color: #fff3cd;';
 					$status = '<span style="color: #856404;">⊘ Skipped</span>';

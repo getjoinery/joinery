@@ -6,6 +6,8 @@ require_once(PathHelper::getIncludePath('data/themes_class.php'));
 /**
  * ThemeManager - Manages theme installation, activation, and configuration
  *
+ * @version 1.2 - writeManifestReceivesUpgrades() moves to the base class so a
+ *                plugin's fork mark is written the same way (specs/package_replace_on_upload.md WP3)
  * @version 1.1 - style themes (specs/style_themes.md): the kind is recorded
  *                at registration; applyLook()/removeLook() write the look
  *                slot; activate() refuses a style theme; the sync clears a
@@ -758,37 +760,6 @@ class ThemeManager extends AbstractExtensionManager {
     public function isInstalled($theme_name) {
         $install_path = PathHelper::getAbsolutePath('theme/' . $theme_name);
         return is_dir($install_path);
-    }
-
-    /**
-     * Write the receives_upgrades value back to a theme manifest.
-     * Keeps theme.json in sync with database changes from the admin UI.
-     * @param string $theme_name Theme name
-     * @param bool $receives_upgrades True to allow upgrade replacement, false to preserve on deploy
-     * @return int|false Number of bytes written or false on failure
-     */
-    public function writeManifestReceivesUpgrades($theme_name, $receives_upgrades) {
-        $manifest_path = $this->getExtensionPath($theme_name) . '/theme.json';
-
-        if (!file_exists($manifest_path)) {
-            // Create new manifest if it doesn't exist. Auto-generated stubs
-            // default both flags true: this only triggers for an existing
-            // on-disk theme that the operator chose to keep.
-            $manifest = array(
-                'name' => $theme_name,
-                'version' => '1.0.0',
-                'receives_upgrades' => $receives_upgrades,
-                'included_in_publish' => true
-            );
-        } else {
-            $manifest = json_decode(file_get_contents($manifest_path), true);
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                return false;
-            }
-            $manifest['receives_upgrades'] = $receives_upgrades;
-        }
-
-        return file_put_contents($manifest_path, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
 
     /**
