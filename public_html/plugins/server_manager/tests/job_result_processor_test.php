@@ -708,6 +708,64 @@ $dhost6->load();
 check(empty($dhost6->get('mgn_delete_time')),
 	'a victimless verified job never finalizes a siteless (host) subject');
 
+section('moved_site_check: the host\'s answer lands on the old machine of a switch-over');
+
+/** File a moved_site_check through the real path and finish it with $data (or fail it). */
+function jrp_moved_check($host, $victim, $data, $status = 'completed', $error = '') {
+	$job = ManagementJob::createFromBuild($host->key, 'moved_site_check',
+		array('primitive' => 'moved_site_check', 'params' => array('site' => 'movedrp')),
+		array('victim_node_id' => (int)$victim->key, 'site' => 'movedrp'), 1);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
+	$job->set('mjb_status', $status);
+	$job->set('mjb_output', $data === null ? '' : json_encode(array('api_version' => 1, 'data' => $data)));
+	if ($error !== '') { $job->set('mjb_error_message', $error); }
+	$job->save();
+	JobResultProcessor::process($job);
+	$victim->load();
+	return $job;
+}
+
+$mhost = jrp_node(array());
+// Removed from the dashboard at the switch-over, as the old machine always is.
+$mvictim = jrp_node(array('mgn_container_name' => 'movedrp', 'mgn_install_state' => 'retired'));
+$mvictim->soft_delete();
+$mj = jrp_moved_check($mhost, $mvictim, array('state' => 'moved',
+	'detail' => 'moved.example.com: answered 200 from another server.', 'names' => array('moved.example.com')));
+check($mvictim->get('mgn_moved_check_state') === 'moved'
+	&& strpos((string)$mvictim->get('mgn_moved_check_detail'), 'answered 200') !== false
+	&& (string)$mvictim->get('mgn_moved_check_time') !== '',
+	'a completed check records its state, detail and time on the VICTIM, though it is removed from the dashboard',
+	json_encode(array($mvictim->get('mgn_moved_check_state'), $mvictim->get('mgn_moved_check_detail'))));
+check(empty($mhost->get('mgn_moved_check_state')), 'and never on the host that ran it');
+check((json_decode((string)$mj->get('mjb_result'), true)['names'] ?? null) === array('moved.example.com'),
+	'the job keeps the names it checked');
+
+jrp_moved_check($mhost, $mvictim, array('state' => 'here', 'detail' => 'https://moved.example.com still reaches this site.'));
+check($mvictim->get('mgn_moved_check_state') === 'here', 'a later answer replaces the earlier one');
+
+jrp_moved_check($mhost, $mvictim, array('state' => 'nonsense', 'detail' => 'x'));
+check($mvictim->get('mgn_moved_check_state') === 'failed',
+	'a state the agent does not report is not shown as an answer', (string)$mvictim->get('mgn_moved_check_state'));
+
+jrp_moved_check($mhost, $mvictim, null, 'failed', 'the vhost for movedrp: it names an unusable port');
+check($mvictim->get('mgn_moved_check_state') === 'failed'
+	&& strpos((string)$mvictim->get('mgn_moved_check_detail'), 'unusable port') !== false,
+	'a check that could not run says why, rather than leaving an older answer looking current');
+
+// Its removal, verified, records the container gone: nothing left to check.
+$mjd = ManagementJob::createFromBuild($mhost->key, 'decommission_node',
+	array('primitive' => 'decommission_moved_site', 'params' => array('site' => 'movedrp')),
+	array('victim_node_id' => (int)$mvictim->key, 'site' => 'movedrp'), 1);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $mjd->key);
+$mjd->set('mjb_status', 'completed');
+$mjd->set('mjb_output', json_encode(array('api_version' => 1, 'data' => array(
+	'output' => "REMOVE_ACCOUNT_OK movedrp\nDECOMMISSION_VERIFIED movedrp"))));
+$mjd->save();
+JobResultProcessor::process($mjd);
+$mvictim->load();
+check($mvictim->get('mgn_moved_check_state') === 'absent' && !MovedSiteCheck::is_stale($mvictim),
+	'a verified removal of the old machine records its container gone, and that is never asked again');
+
 section('A never-measured recovery-key state asks for a report, like a carried one');
 
 // The plane's own node, paired after the API/SSH path retired, had never had

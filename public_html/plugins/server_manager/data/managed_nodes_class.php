@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.37 - mgn_moved_check_*: where the old machine of a switch-over's domain goes, as its host last
+ *                 checked (moved_site_check), shown beside its site
  * @version 1.36 - removing a node, either way, cancels its unfinished jobs (withdraw_open_jobs): its agent is
  *                 refused once the node is gone, so nothing else would ever end them
  * @version 1.35 - mgn_backup_verify_recovery_fpr: the recovery key on record when this node's last verify was
@@ -134,6 +136,15 @@ class ManagedNode extends SystemBase {
 		// put there is visible rather than silently left behind.
 		'mgn_backup_recovery_fpr' => array('type'=>'varchar(64)'),
 		'mgn_backup_verify_recovery_fpr' => array('type'=>'varchar(64)'),
+
+		// The old machine of a switch-over (state retired): whether its domain
+		// still reaches its container, as its host last proved it
+		// (moved_site_check, the proof decommission_moved_site enforces).
+		// state: moved | here | unsure | absent | failed. Stored so the page
+		// shows the last answer at once and asks again only when it is stale.
+		'mgn_moved_check_state'  => array('type'=>'varchar(16)'),
+		'mgn_moved_check_detail' => array('type'=>'varchar(500)'),
+		'mgn_moved_check_time'   => array('type'=>'timestamp(6)'),
 
 		// This management node's backup policy for this node — the manager profile.
 		// A blob rather than a column each because it is read whole, written

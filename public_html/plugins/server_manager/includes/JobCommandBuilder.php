@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.93 - build_moved_site_check (agent 1.56.0): the host runs decommission_moved_site's proof and
+ *                 removes nothing, so the old machine's page can say where its domain goes
  * @version 1.92 - build_decommission_node routes the old machine of a switch-over (state retired) to
  *                 decommission_moved_site (agent 1.55.0): the host's proof that the domain left stands in
  *                 for the approval its unreachable page would ask (site_copy.md WP14)
@@ -3668,6 +3670,64 @@ class JobCommandBuilder {
 	 */
 	public static function decommission_is_moved($node) {
 		return (string)$node->get('mgn_install_state') === 'retired';
+	}
+
+	/**
+	 * Ask the host whether the old machine of a switch-over still holds its
+	 * domain: decommission_moved_site's proof, run on its own and removing
+	 * nothing (moved_site_check). Addressed to the HOST node, like the
+	 * removal; the answer is folded onto the victim's mgn_moved_check_*.
+	 *
+	 * Refuses what the removal would refuse about the victim, and refuses
+	 * while a removal is open on the host: both write the same probe file in
+	 * the container, and two at once would read each other's token.
+	 */
+	public static function build_moved_site_check($node) {
+		if (!trim((string)$node->get('mgn_container_name')) || !self::decommission_is_moved($node)) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' is not the old container of a switch-over, so there is no "
+				. "moved domain to check."
+			);
+		}
+		$site = self::decommission_site_name($node);
+		if (!preg_match('/^[a-z0-9_-]{1,50}$/', $site)) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' derives the site name '{$site}', which is not in the "
+				. "shape the host agent accepts (lowercase letters, digits, _ and -, at most 50)."
+			);
+		}
+		$host_node = self::decommission_host_node_for($node);
+		if (!self::has_primitive($host_node, 'moved_site_check')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot check where a moved site's domain goes. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['moved_site_check'])
+			);
+		}
+		$core = trim((string)$node->get('mgn_joinery_version'));
+		if ($core === '' || version_compare($core, ProvisionPendingSsl::PROBE_MIN_CORE_VERSION, '<')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' runs core " . ($core === '' ? '(unknown)' : $core)
+				. ", which has no routing-probe page, so its host cannot check where the domain goes."
+			);
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$hq = $db->prepare(
+			"SELECT COUNT(*) FROM mjb_management_jobs
+			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'decommission_node'
+			   AND mjb_status IN ('pending', 'running')");
+		$hq->execute([(int)$host_node->key]);
+		if ((int)$hq->fetchColumn() > 0) {
+			throw new Exception(
+				"The host '{$host_node->get('mgn_slug')}' has a site removal pending or running. "
+				. "Check again once it finishes."
+			);
+		}
+		return self::build_moved_site_check_primitive($host_node, ['site' => $site]);
+	}
+
+	/** The envelope, addressed to the HOST node: the site's name only. */
+	public static function build_moved_site_check_primitive($host_node, $params = []) {
+		return ['primitive' => 'moved_site_check', 'params' => ['site' => (string)($params['site'] ?? '')]];
 	}
 
 	/** The envelope, addressed to the HOST node: the site's name, as decommission_site. */

@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.54 - process_moved_site_check folds the host's answer onto the old machine of a switch-over;
+ *                 a verified decommission_node records that machine's container gone
  * @version 1.53 - a full backup's success asks the node for its recovery key, so a rotated key is on record at once
  * @version 1.52 - process_copy_look and process_copy_take_key: a copy from backups (site_copy.md WP10)
  * @version 1.51 - process_copy_vouch keeps the frozen source's vouch for its copy; vouch_of() reads it back
@@ -3417,6 +3419,12 @@ HTML;
 			}
 			if ($node_id) {
 				$node = new ManagedNode($node_id, TRUE);
+				if ($node->key && JobCommandBuilder::decommission_is_moved($node)) {
+					// The old machine of a switch-over is already removed from
+					// the dashboard; what changed is that its container is gone.
+					self::record_moved_check($node, 'absent',
+						'Its container was removed from the host (job ' . (int)$job->key . ').');
+				}
 				if ($node->key && !$node->get('mgn_delete_time')) {
 					$node->soft_delete();
 					$soft_deleted = true;
@@ -3442,6 +3450,55 @@ HTML;
 			'note' => $note,
 		]));
 		$job->save();
+	}
+
+	/** What moved_site_check may report (see moved_site.go on the agent). */
+	const MOVED_CHECK_STATES = ['moved', 'here', 'unsure', 'absent'];
+
+	/**
+	 * moved_site_check: the host's answer to "does the old machine of this
+	 * switch-over still hold its domain?", folded onto that machine's row.
+	 * A job that could not run records 'failed' with its reason, so the page
+	 * says why it does not know rather than showing an older answer as current.
+	 */
+	private static function process_moved_site_check($job) {
+		$params = $job->get('mjb_parameters');
+		if (is_string($params)) { $params = json_decode($params, true); }
+		$victim_id = (int)(is_array($params) ? ($params['victim_node_id'] ?? 0) : 0);
+
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$state = ((string)$job->get('mjb_status') === 'completed' && is_array($data)) ? (string)($data['state'] ?? '') : '';
+		if (in_array($state, self::MOVED_CHECK_STATES, true)) {
+			$detail = (string)($data['detail'] ?? '');
+			$names = array_values(array_filter((array)($data['names'] ?? []), function ($n) {
+				return is_string($n) && preg_match('/^[a-z0-9.-]{1,253}$/', $n);
+			}));
+		} else {
+			$state = 'failed';
+			$detail = trim((string)$job->get('mjb_error_message')) ?: 'The check did not finish.';
+			$names = [];
+		}
+		$detail = substr(preg_replace('/[\x00-\x1f]/', ' ', $detail), 0, 500);
+
+		if ($victim_id) {
+			try {
+				$node = new ManagedNode($victim_id, TRUE);
+				if ($node->key) {
+					self::record_moved_check($node, $state, $detail);
+				}
+			} catch (Exception $e) {
+				// The row is gone; the job keeps the answer.
+			}
+		}
+		$job->set('mjb_result', json_encode(['state' => $state, 'detail' => $detail, 'names' => $names]));
+		$job->save();
+	}
+
+	private static function record_moved_check($node, string $state, string $detail): void {
+		$node->set('mgn_moved_check_state', $state);
+		$node->set('mgn_moved_check_detail', $detail);
+		$node->set('mgn_moved_check_time', gmdate('Y-m-d H:i:s'));
+		$node->save();
 	}
 
 	/**
