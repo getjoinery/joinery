@@ -576,7 +576,7 @@ Add to `/etc/postfix/master.cf`:
 
 ```
 joinery   unix  -  n  n  -  5  pipe
-  flags=DRhu user=www-data
+  flags=DRh user=www-data
   argv=/usr/bin/php /var/www/html/SITENAME/public_html/plugins/mailbox/utils/inbound_email_handler.php ${recipient}
 ```
 
