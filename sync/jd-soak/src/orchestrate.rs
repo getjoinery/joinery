@@ -487,7 +487,7 @@ pub fn capture(fleet: &Fleet, cycle: u64, verification: &Verification) -> std::i
         std::fs::create_dir_all(&into)?;
         // The state store is the device's own account of what it agreed to, and
         // it is the first thing anybody will want to open.
-        let _ = std::fs::copy(device.state_db(), into.join("state.db"));
+        snapshot_store(&device.state_db(), &into.join("state.db"));
         let _ = std::fs::copy(device.config_file(), into.join("config.json"));
         let logs = device.home.join("logs");
         if let Ok(entries) = std::fs::read_dir(&logs) {
@@ -590,6 +590,37 @@ fn timeline(fleet: &Fleet) -> String {
     out
 }
 
+/// A consistent copy of a live state store. The daemon keeps it in WAL mode,
+/// so the newest commits live in `state.db-wal` until a checkpoint, and a copy
+/// of the main file alone can be minutes behind the store it claims to be: a
+/// bundle once showed operations queued and never tried that the live store
+/// had long since moved past (soak run 1692). `VACUUM INTO` reads through the
+/// WAL and writes one self-contained file. Should it fail, the file is copied
+/// with its WAL beside it, which an opener replays.
+pub fn snapshot_store(db: &std::path::Path, to: &std::path::Path) {
+    let _ = std::fs::remove_file(to);
+    let vacuumed = rusqlite::Connection::open_with_flags(
+        db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .and_then(|conn| {
+        // A store mid-checkpoint answers busy for a moment; waiting keeps the
+        // fallback, whose two files are copied at two instants, for real failures.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.execute("VACUUM INTO ?1", [to.to_string_lossy()])
+    });
+    if vacuumed.is_err() {
+        let _ = std::fs::remove_file(to);
+        let _ = std::fs::copy(db, to);
+        for suffix in ["-wal", "-shm"] {
+            let from = std::path::PathBuf::from(format!("{}{suffix}", db.display()));
+            if from.exists() {
+                let _ = std::fs::copy(&from, format!("{}{suffix}", to.display()));
+            }
+        }
+    }
+}
+
 fn list_tree(root: &Path) -> String {
     let mut out = String::new();
     fn walk(root: &Path, dir: &Path, out: &mut String) {
@@ -619,6 +650,32 @@ fn list_tree(root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::fleet::Device;
+
+    #[test]
+    fn a_store_snapshot_carries_what_is_still_in_the_wal() {
+        let dir = std::env::temp_dir().join(format!("jd-soak-snap-{}-{}", std::process::id(), now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.db");
+        // The daemon's way: WAL mode, and a commit not yet checkpointed.
+        let live = rusqlite::Connection::open(&db).unwrap();
+        live.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(())).unwrap();
+        live.execute_batch("PRAGMA wal_autocheckpoint = 0; CREATE TABLE ops (op_id INTEGER, state TEXT);").unwrap();
+        live.execute("INSERT INTO ops VALUES (1, 'done')", []).unwrap();
+        let rows = |path: &Path| -> i64 {
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .and_then(|c| c.query_row("SELECT COUNT(*) FROM ops", [], |r| r.get(0)))
+                .unwrap_or(-1)
+        };
+        // The premise: the main file alone does not have it.
+        let plain = dir.join("plain.db");
+        std::fs::copy(&db, &plain).unwrap();
+        assert_ne!(rows(&plain), 1, "the premise: the commit is still only in the WAL");
+        let snap = dir.join("snap.db");
+        snapshot_store(&db, &snap);
+        assert_eq!(rows(&snap), 1);
+        drop(live);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn fleet(dir: &Path) -> Fleet {
         Fleet {

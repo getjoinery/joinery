@@ -16879,3 +16879,104 @@ fn a_folder_renamed_on_both_devices_keeps_its_files_when_its_old_name_is_made_ag
     assert_converged(&world);
     assert_nothing_lost(&world, &committed);
 }
+
+/// Soak run 1650: a folder this device has just made, renamed on the server
+/// by the peer, who then saved through the old name and made it again, all
+/// before this device's next pass. The record had a path and no directory:
+/// the scan read the folder as deleted here, the newcomer took its directory
+/// by name, and the folder's file was moved into the newcomer. A folder
+/// record knows its directory from the pass that makes it.
+#[test]
+fn a_folder_just_made_here_keeps_its_files_when_its_old_name_is_made_again() {
+    let world = World::new(9_970, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    let mut committed = Committed::default();
+    b.fs.user_write("P/keep.txt", b"keep");
+    assert!(world.settle().is_some());
+    b.fs.user_write("P/S/doc-10.txt", b"b filed doc-10 into S");
+    world.clock.advance_secs(30);
+    world.pass(b);
+    world.clock.advance_secs(30);
+    world.pass(a);
+    assert!(a.fs.peek("P/S/doc-10.txt").is_some(), "the premise: a made S this pass");
+    let s = world.server.folder_id_at("P/S").expect("S is on the server");
+    b.fs.user_rename("P/S", "P/S 18");
+    b.fs.user_write("P/S/doc-20.txt", b"b saves through the old name, which makes it again");
+    committed.note("P/keep.txt", b"keep");
+    committed.note("P/S 18/doc-10.txt", b"b filed doc-10 into S");
+    committed.note("P/S/doc-20.txt", b"b saves through the old name, which makes it again");
+    for _ in 0..6 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(b);
+    }
+    let made_again = world.server.folder_id_at("P/S").expect("the premise: the old name made again is on the server");
+    assert_ne!(made_again, s);
+    assert!(world.settle().is_some(), "never settled");
+
+    let doc = world.server.files().into_iter().find(|f| f.name == "doc-10.txt" && !f.trashed).expect("doc-10 is on the server");
+    assert_eq!(doc.folder, Some(s), "doc-10 left the folder its user put it in: {:?}", world.server.tree());
+    assert_eq!(world.server.folder_id_at("P/S 18"), Some(s), "{:?}", world.server.tree());
+    assert_eq!(a.fs.peek("P/S 18/doc-10.txt").as_deref(), Some(&b"b filed doc-10 into S"[..]));
+    jd_sim::scenario::assert_no_two_records_on_one_directory(&world);
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A plain folder made under the old name of a vault this device has locked
+/// never takes the vault's directory id. The vault was open here, then locked;
+/// its holder renamed it and saved through the old name, making a plain
+/// folder there. This device's vault record keeps its directory under the old
+/// name, and the plain folder's create adopted that directory. Recording the
+/// vault's id on the plain folder as well gave one directory two owners, and
+/// the user's next save beside the vault's files reached the server as
+/// plaintext (reviewer probe on the run-1650 fix).
+#[test]
+fn a_plain_folder_made_under_a_locked_vaults_old_name_never_takes_its_directory() {
+    let vault = SimVault::new(9_981);
+    let mut world = World::new(9_981, &["h", "g"]);
+    world.give_vault("h", &vault);
+    world.give_vault("g", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let memo = b"a memo the server must never be able to read";
+    let second = b"second secret, saved while locked";
+    world.device("h").fs.user_write("Private/memo.txt", memo);
+    assert!(world.settle().is_some());
+    assert!(world.device("g").fs.exists("Private/memo.txt"), "the premise: g holds the vault open");
+    world.lock_vault("g");
+    world.device("h").fs.user_rename("Private", "Archive");
+    world.device("h").fs.user_write("Private/plain.txt", b"a new plain folder under the vault's old name");
+    for _ in 0..4 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(world.device("h"));
+    }
+    for i in 0..6 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(world.device("g"));
+        let g = world.device("g");
+        let mut carriers: std::collections::HashMap<u64, Vec<i64>> = std::collections::HashMap::new();
+        for e in g.store.every_entry().unwrap() {
+            if e.id.entity_type != jd_core::EntityType::Folder || e.remote_deleted || e.id.is_provisional() {
+                continue;
+            }
+            if let Some(id) = e.synced_fingerprint.map(|f| f.file_id).filter(|id| *id != 0) {
+                carriers.entry(id).or_default().push(e.id.server_id);
+            }
+        }
+        for (id, who) in &carriers {
+            assert!(who.len() < 2, "g pass {i}: folders {who:?} both carry directory {id}");
+        }
+        if i == 1 {
+            for dir in ["Private", "Archive"] {
+                if g.fs.exists(&format!("{dir}/memo.txt")) {
+                    g.fs.user_write(&format!("{dir}/second.txt"), second);
+                }
+            }
+        }
+    }
+    for (what, body) in [("the memo", &memo[..]), ("the second save", &second[..])] {
+        assert!(world.server.blob(&jd_sim::sha256_hex(body)).is_none(), "{what} reached the server as plaintext");
+    }
+}

@@ -1915,6 +1915,12 @@ no named flaw is a reason to name one.
   given the owner's directory, though that directory was proven the owner's
   by identity. The owner read as deleted and was made again empty. device-b
   moved its two files into the newcomer, and device-a followed. No loss.
+  Run 1639 (the same client, the last run before the fix was deployed) is
+  the same defect with the devices' roles swapped: device-a renamed
+  `Projects` (server folder 428722), device-b renamed it too and made
+  `Projects` again (428752). On device-a, 428752 took 428722's directory
+  (`MoveRaceServerWon`), 428722 was made again empty
+  (`DeleteLostToEdit`), and device-a moved its contents into 428752.
   The close: **a folder is credited with the files whose parent is that
   folder, never with the files at the path it resolves to** (`children`
   keyed by record, walking each file's parent ids). Pin
@@ -1934,6 +1940,75 @@ no named flaw is a reason to name one.
   - a directory proven one record's can still go to another across pools when
     a third folder's files were moved into it;
   - run 1619 (the old client) has a related shape that no probe reproduces yet.
+- **B-1650, fixed 2026-10-04 (soak rig run 1650, client `8cbc527f`, the
+  first custody failure on the B-1633 fix, traced from both state stores'
+  ops and issues): a folder made from the server did not know its
+  directory until the next pass.** device-b's user made `Sub 16` and moved
+  `doc-10` into it, and device-a made it. Before device-a's next scan (a
+  partition hit it in that window), device-b's user renamed `Sub 16` twice
+  and saved through the old name, making `Sub 16` again as a new server
+  folder. Only device-b renamed. `create_local_folder` had agreed the
+  folder's placement but not its directory identity, which
+  `record_directory_identities` writes only on a later scan. So the scan
+  that met the rename and the newcomer found a record with a path and no
+  directory. It read the folder as deleted here (`DeleteLostToEdit`) and
+  made it again empty. The newcomer's create adopted the old directory by
+  name, and `doc-10` was moved into the newcomer. No loss. The close: **a
+  folder record knows its directory from the pass that makes it on this
+  disk**, as one minted from a local directory (WP3 C4) and one moved by an
+  operation already did. Never an id another live folder record carries,
+  the rule `record_directory_identities` keeps (the reviewer's probe: a
+  plain folder made under a locked vault's old name otherwise took the
+  vault's id, and the next save beside the vault's files reached the
+  server in the clear). Pins
+  `a_folder_just_made_here_keeps_its_files_when_its_old_name_is_made_again`,
+  red without the change, and
+  `a_plain_folder_made_under_a_locked_vaults_old_name_never_takes_its_directory`,
+  red without the carrier rule. FAT and exFAT record no directory ids and
+  are unchanged: the run-1650 shape is green there with or without the
+  change. 420 seeds x 5 modes byte-identical. Approach agreed, BUILD NOT
+  YET once (the carrier rule), then VALID (public-html-a5, 2026-10-04).
+  Open, recorded: a device whose vault was locked after being open never
+  applies the server's rename of that vault. A peer's new plain folder
+  under the old name is then adopted into the vault's directory, read as
+  deleted, and trashed on the server with the peer's file (pre-existing,
+  no faults needed, needs its own design).
+- **C-1660, checker fixed 2026-10-04 (soak rig run 1660, client
+  `8cbc527f`): custody judged a move race on the user whose move lost.**
+  Both users moved `doc-2` 61 ms apart into different folders, neither
+  having seen the other's move. device-b's move reached the server first,
+  and device-a's engine said device-a's move lost (`MoveRaceServerWon`)
+  and followed it, as designed. The custody check took the later placer by
+  the clock as the file's owner and failed device-a. The engine was right.
+  The close: when the last placer's store holds a lost race for the file,
+  said after that placer's last placing commit, and another device's user
+  placed it before, the file is judged on that device, in a folder that
+  user put it in. A wrongly reported race hides nothing, and the loser's
+  later moves are judged on the loser. Pins
+  `run_1660_a_move_race_is_judged_on_the_user_whose_move_the_server_kept`,
+  `a_move_race_the_later_mover_won_is_judged_on_the_later_mover` and
+  `a_lost_race_excuses_only_the_move_that_lost_never_the_losers_next`.
+  Replayed over 98 frozen snapshots, only run 1660 changes verdict. BUILD NOT
+  YET once (a lost race never expired), then VALID (public-html-a5,
+  2026-10-04). Open, recorded: a lost-race issue names the provisional id
+  of the folder the losing user wanted, which is stale once that folder is
+  rekeyed.
+- **B-1692, open (soak rig run 1692, client `8cbc527f`): a save by rename
+  during a partition stalled one device past the settle.** device-b was cut
+  off, and its user saved `Report 4.docx` by renaming a temporary file over
+  it while device-a's edits reached the server. device-b read the save as a
+  delete plus a new file (`DeleteLostToEdit`), and the new file's upload
+  and the restore of the server's file waited on one name for the whole
+  900 s settle. It cleared after the device's container restarted. Nothing
+  was lost. This is the run-1531 shape, but no probe reproduces it yet (32
+  variants: atomic saves, the peer's edits, offline, a save while a
+  download lands). The evidence could not settle it: every frozen state
+  store was a copy of the main file without its WAL, minutes behind the
+  live store. Evidence now takes a consistent snapshot (`VACUUM INTO`,
+  read-only, with the WAL copied alongside if that fails), and every soak
+  script opens a live store read-only, so freezing a dead daemon's store no
+  longer checkpoints it away. Evidence change VALID (public-html-a5,
+  2026-10-04) after one round (the freeze's read-write open).
 - **B2, narrowed (re-checked 2026-10-02 on `10b2b55d`: seed green in all
   five modes; a plain file's completed move is agreed Done on its own
   identity, `completed_here`, pinned by
