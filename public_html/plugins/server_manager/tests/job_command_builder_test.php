@@ -1423,6 +1423,39 @@ try { JobCommandBuilder::build_decommission_node($decom_retired3); } catch (Exce
 check(strpos($probe_msg, 'routing-probe') !== false,
 	'an old machine below the routing-probe release refuses: its host could not prove anything', $probe_msg);
 
+// moved_site_check: the same proof, removing nothing, addressed to the host
+// like the removal. Only for the old machine of a switch-over.
+list($host_mc, $host_mc_node) = jcb_host_with_agent(array(
+	'mgn_agent_primitives' => 'check_status,decommission_site,decommission_moved_site,moved_site_check'));
+$mc_victim = jcb_decom_victim($host_mc, array('mgn_container_name' => 'decomsite14',
+	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+$mcenv = JobCommandBuilder::build_moved_site_check($mc_victim);
+check(($mcenv['primitive'] ?? '') === 'moved_site_check' && ($mcenv['params'] ?? null) === array('site' => 'decomsite14'),
+	'the old machine of a switch-over is checked as moved_site_check with only the site name', json_encode($mcenv));
+$mc_live = jcb_decom_victim($host_mc, array('mgn_container_name' => 'decomsite15'));
+$mc_msg = '';
+try { JobCommandBuilder::build_moved_site_check($mc_live); } catch (Exception $e) { $mc_msg = $e->getMessage(); }
+check(strpos($mc_msg, 'not the old container of a switch-over') !== false && !MovedSiteCheck::applies($mc_live),
+	'a live container has no moved domain to check', $mc_msg);
+$mc_msg = '';
+try { JobCommandBuilder::build_moved_site_check($decom_retired); } catch (Exception $e) { $mc_msg = $e->getMessage(); }
+check(strpos($mc_msg, 'moved_site_check') !== false,
+	'a host agent without moved_site_check refuses, naming the word', $mc_msg);
+$mc_old = jcb_decom_victim($host_mc, array('mgn_container_name' => 'decomsite16',
+	'mgn_install_state' => 'retired', 'mgn_joinery_version' => '0.8.300'));
+$mc_msg = '';
+try { JobCommandBuilder::build_moved_site_check($mc_old); } catch (Exception $e) { $mc_msg = $e->getMessage(); }
+check(strpos($mc_msg, 'routing-probe') !== false, 'an old machine below the routing-probe release cannot be checked', $mc_msg);
+// A removal open on the host writes the same probe file: no check alongside it.
+$mc_busy = ManagementJob::createFromBuild($host_mc_node->key, 'decommission_node',
+	JobCommandBuilder::build_decommission_node($mc_victim),
+	array('victim_node_id' => (int)$mc_victim->key, 'site' => 'decomsite14'), 1);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $mc_busy->key);
+$mc_msg = '';
+try { JobCommandBuilder::build_moved_site_check($mc_victim); } catch (Exception $e) { $mc_msg = $e->getMessage(); }
+check(strpos($mc_msg, 'site removal pending or running') !== false,
+	'a check refuses while a removal is open on the host', $mc_msg);
+
 // A destructive operation the node does not report is never routed at, even
 // to an agent that can ask its own operator.
 check(JobCommandBuilder::has_primitive($decom_host_node, 'no_such_destructive_op') === false,

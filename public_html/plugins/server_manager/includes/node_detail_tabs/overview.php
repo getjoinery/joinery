@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.36 - the old machine of a switch-over shows beside its site whether the domain still reaches it
+ *                 (MovedSiteCheck): the stored answer at once, asked again when stale, and Check again
  * @version 1.35 - Permanently Delete Site on the old machine of a switch-over says the host checks the domain
  *                 left instead of asking the site to approve (site_copy.md WP14)
  * @version 1.34 - the move panel asks CustomerCloudProvision::is_sold()
@@ -347,7 +349,57 @@
 
 	if ($node->get('mgn_site_url')) {
 		$head_url = htmlspecialchars((string)$node->get('mgn_site_url'));
-		$fact('Site', '<a href="' . $head_url . '" target="_blank" rel="noopener">' . htmlspecialchars((string)parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: $head_url) . ' ↗</a>');
+		$site_html = '<a href="' . $head_url . '" target="_blank" rel="noopener">' . htmlspecialchars((string)parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: $head_url) . ' ↗</a>';
+		if (MovedSiteCheck::applies($node)) {
+			// The old machine of a switch-over: does its domain still reach
+			// it? The host's proof, the one Permanently Delete Site enforces.
+			// The page asks again when the stored answer is stale.
+			$moved_checking = MovedSiteCheck::settle($node);
+			$site_html .= '<div class="small fw-normal" id="movedCheck" data-node="' . (int)$node->key . '"'
+				. ' data-ask="' . (!$moved_checking && MovedSiteCheck::is_stale($node) ? '1' : '0') . '"'
+				. ' data-checking="' . ($moved_checking ? '1' : '0') . '">'
+				. '<div id="movedCheckLabel">' . MovedSiteCheck::label_html($node, $moved_checking, $session->get_timezone()) . '</div>'
+				. '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075 mt-1" id="movedCheckAgain">Check again</button></div>';
+		}
+		$fact('Site', $site_html);
+		if (MovedSiteCheck::applies($node)) {
+			?>
+<script>
+(function () {
+	var box = document.getElementById('movedCheck');
+	var label = document.getElementById('movedCheckLabel');
+	var again = document.getElementById('movedCheckAgain');
+	var polls = 0;
+	// The host's check takes seconds; poll while it runs, for about three minutes.
+	function ask(force) {
+		again.disabled = true;
+		joineryApi.post('server_manager/moved_site_check', { node_id: parseInt(box.dataset.node, 10), force: force ? 1 : 0 })
+			.then(function (data) {
+				if (!data || !data.ok) {
+					label.insertAdjacentHTML('beforeend', '<div class="text-warning"></div>');
+					label.lastChild.textContent = (data && data.message) || 'The check could not run.';
+					again.disabled = false;
+					return;
+				}
+				label.innerHTML = data.html;
+				if (data.checking && polls++ < 60) {
+					setTimeout(function () { ask(false); }, 3000);
+				} else {
+					again.disabled = false;
+				}
+			})
+			.catch(function (err) {
+				label.insertAdjacentHTML('beforeend', '<div class="text-warning"></div>');
+				label.lastChild.textContent = (err && err.message) || 'The check could not run.';
+				again.disabled = false;
+			});
+	}
+	again.addEventListener('click', function () { polls = 0; ask(true); });
+	if (box.dataset.ask === '1' || box.dataset.checking === '1') { ask(false); }
+})();
+</script>
+			<?php
+		}
 	} elseif ($node->hosts_site()) {
 		$fact('Site', '<span class="text-muted fw-normal">no address recorded</span>');
 	} else {

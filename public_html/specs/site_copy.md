@@ -1461,6 +1461,15 @@ the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44), and Phase 2's
   - **On M:** the overview's Permanently Delete Site on a row in state `retired` builds
     `decommission_moved_site` instead of `decommission_site`; every other row keeps the approval.
     The job type stays `decommission_node`, so the result is processed as before.
+  - **Showing where the domain goes (owner, 2026-10-04).** Beside the old machine's site, the
+    overview shows the host's last answer: reaches another server, still reaches this container,
+    could not tell, or the container is gone. A DNS lookup cannot give it: a proxied domain
+    resolves to Cloudflare for old and new alike. So the answer is the same proof, run as
+    `moved_site_check` (operate, host posture, agent 1.56.0), which reports instead of refusing
+    and removes nothing. The row keeps it (`mgn_moved_check_*`); opening the page asks again when
+    it is older than ten minutes, and Check again asks at once. A check refuses while a removal is
+    open on the host, since both write the same probe file. A verified removal records the
+    container gone.
 
 ## Test plan
 
