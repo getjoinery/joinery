@@ -77,8 +77,23 @@ freeze_evidence() {
     fi
     note "freezing evidence to $dest before anything resets"
     mkdir -p "$dest"
-    cp /soak/device-a/home/state/state.db "$dest/device-a-state.db" 2>/dev/null
-    cp /soak/device-b/home/state/state.db "$dest/device-b-state.db" 2>/dev/null
+    # A consistent snapshot, WAL included: the main file alone can be minutes
+    # behind the live store (soak run 1692). Opened read-only: a read-write
+    # connection that is the store's last checkpoints it on close, rewriting
+    # the file being preserved and deleting its WAL. Copied with its WAL if
+    # the snapshot fails.
+    for d in a b; do
+        src=/soak/device-$d/home/state/state.db
+        out="$dest/device-$d-state.db"
+        rm -f "$out"
+        if ! sqlite3 -readonly "$src" "VACUUM INTO '$out'" 2>/dev/null; then
+            rm -f "$out"
+            cp "$src" "$out" 2>/dev/null
+            for suffix in -wal -shm; do
+                [ -f "$src$suffix" ] && cp "$src$suffix" "$out$suffix" 2>/dev/null
+            done
+        fi
+    done
     cp -r /soak/journal "$dest/journal" 2>/dev/null
     tar czf "$dest/trees.tar.gz" -C /soak device-a/root device-b/root 2>/dev/null
     tar czf "$dest/trashes.tar.gz" -C /var/lib \
@@ -188,7 +203,7 @@ while true; do
     sleep 45
     echo "smoke v2" > "$D/probe.txt" && chown soak-a:soak-a "$D/probe.txt"
     sleep 45
-    if ! sqlite3 /soak/device-a/home/state/state.db \
+    if ! sqlite3 -readonly /soak/device-a/home/state/state.db \
         "SELECT 1 FROM entries WHERE remote_name = 'probe.txt' AND server_id > 0 AND local_status = 'synced' LIMIT 1;" | grep -q 1; then
         note "SMOKE TEST FAILED -- not starting run $RUN"
         echo "run $RUN | $ACCOUNT | client $CLIENT | SMOKE FAILED" >> "$LEDGER"
@@ -234,9 +249,9 @@ while true; do
     # operations and passed 36 assertions.
     ASSERTIONS=$(grep -oP "Assertions passed \K[0-9]+" /soak/journal/report.txt 2>/dev/null | head -1)
     ASSERTIONS=${ASSERTIONS:-0}
-    A_STUCK=$(sqlite3 /soak/device-a/home/state/state.db "SELECT COUNT(*) FROM ops WHERE state != 'done';" 2>/dev/null)
-    B_STUCK=$(sqlite3 /soak/device-b/home/state/state.db "SELECT COUNT(*) FROM ops WHERE state != 'done';" 2>/dev/null)
-    IDEM=$(sqlite3 /soak/device-b/home/state/state.db "SELECT COUNT(*) FROM ops WHERE last_error LIKE '%Idempotency-Key%';" 2>/dev/null)
+    A_STUCK=$(sqlite3 -readonly /soak/device-a/home/state/state.db "SELECT COUNT(*) FROM ops WHERE state != 'done';" 2>/dev/null)
+    B_STUCK=$(sqlite3 -readonly /soak/device-b/home/state/state.db "SELECT COUNT(*) FROM ops WHERE state != 'done';" 2>/dev/null)
+    IDEM=$(sqlite3 -readonly /soak/device-b/home/state/state.db "SELECT COUNT(*) FROM ops WHERE last_error LIKE '%Idempotency-Key%';" 2>/dev/null)
     CPU_A=$(cpu_seconds a)
     CPU_B=$(cpu_seconds b)
 

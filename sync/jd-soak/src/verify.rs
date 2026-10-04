@@ -861,6 +861,14 @@ fn swap_workspace_histories(
 pub struct Placement {
     pub files: Vec<(String, String, u64)>,
     pub dirs: BTreeMap<u64, Option<u64>>,
+    /// The contents whose file this device's store says lost a move race,
+    /// each with when the engine said so (its latest such issue): its user
+    /// moved the file while a peer's user moved it elsewhere, the peer's
+    /// move reached the server first, and the engine told this user so
+    /// (`MoveRaceServerWon`). Read from the store, not the disk. The time is
+    /// the engine's clock and the journal's is the actor's, both this
+    /// device's host.
+    pub lost_races: BTreeMap<String, u64>,
 }
 
 impl Placement {
@@ -874,6 +882,34 @@ impl Placement {
             (Some(_), _) => true,
         }
     }
+}
+
+/// The contents of every file this device's store holds a lost move race
+/// for. A store that cannot be read gives none: the race then excuses
+/// nothing, which errs towards reporting.
+pub fn lost_move_races(db: &Path) -> BTreeMap<String, u64> {
+    let read = || -> Result<BTreeMap<String, u64>, rusqlite::Error> {
+        use rusqlite::{Connection, OpenFlags};
+        let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        let mut q = conn.prepare(
+            "SELECT e.synced_content_sha256, e.remote_content_sha256, e.last_seen_sha256, i.created_at
+             FROM issues i JOIN entries e ON e.entity_type = i.entity_type AND e.server_id = i.server_id
+             WHERE i.entity_type = 'file' AND i.detail LIKE 'MoveRaceServerWon%'",
+        )?;
+        let mut out: BTreeMap<String, u64> = BTreeMap::new();
+        let shas = |r: &rusqlite::Row| -> rusqlite::Result<([Option<String>; 3], i64)> {
+            Ok(([r.get(0)?, r.get(1)?, r.get(2)?], r.get(3)?))
+        };
+        for row in q.query_map([], shas)? {
+            let (versions, at) = row?;
+            for sha in versions.into_iter().flatten() {
+                let at = at.max(0) as u64;
+                out.entry(sha).and_modify(|t| *t = (*t).max(at)).or_insert(at);
+            }
+        }
+        Ok(out)
+    };
+    read().unwrap_or_default()
 }
 
 /// Read a device's placement off its disk.
@@ -943,14 +979,31 @@ pub fn placement_on_disk(_root: &Path, _tree: &LocalTree) -> Placement {
 /// user who placed it. A file whose first version nobody here placed (the
 /// remote actor's, a download of a server-made file) has no placer, and an
 /// edit of it is judged on the device that made the edit.
+///
+/// Two users who move one file at once, neither having seen the other's
+/// move, each place it, and the engine keeps whichever move reached the
+/// server first, telling the other user theirs lost (soak run 1660). The
+/// later placer by the clock is then not the file's owner. When the last
+/// placer's store holds that lost race for the file, said after that
+/// placer's last placing commit, and another device's user placed the file
+/// before, the file is judged on that device instead: it must stand there in
+/// a folder that user put it in. The race excuses the loser only for
+/// standing where the winner chose, checked on the winner's own disk, so a
+/// race reported wrongly hides nothing; and only for the move that lost, so
+/// the loser's later move is judged on the loser as any other. A repeat of a
+/// race the engine words identically keeps the first one's time, and is
+/// then judged on the loser. The winner is the latest other placer, which
+/// is the device the server kept when two devices place the file, as the
+/// soak's do.
 pub fn check_custody(records: &[Record], placements: &BTreeMap<String, Placement>) -> Verdict {
     // (device, directory inode, name in it) -> (content, directory birth) of
     // the placing commit standing there now.
     let mut at: BTreeMap<(String, u64, String), (String, Option<u64>)> = BTreeMap::new();
     // Content -> the first version of the file it is a version of.
     let mut file_of: BTreeMap<String, String> = BTreeMap::new();
-    // File, by its first version -> the device whose user placed it last.
-    let mut last_placed_by: BTreeMap<String, String> = BTreeMap::new();
+    // File, by its first version -> the devices whose users placed it, with
+    // when, in order; the last is the one whose user placed it last.
+    let mut placed_by: BTreeMap<String, Vec<(String, u64)>> = BTreeMap::new();
     // Actor -> the directory the content it is renaming stood in, between
     // its `rename` and `rename_into` records.
     let mut renaming_from: BTreeMap<String, u64> = BTreeMap::new();
@@ -986,7 +1039,7 @@ pub fn check_custody(records: &[Record], placements: &BTreeMap<String, Placement
                 };
                 if chooses_a_folder {
                     let file = file_of.get(sha).unwrap_or(sha);
-                    last_placed_by.insert(file.clone(), key.0.clone());
+                    placed_by.entry(file.clone()).or_default().push((key.0.clone(), record.ts_ms()));
                 }
                 at.insert(key, (sha.clone(), *parent_birth_ns));
             }
@@ -1003,6 +1056,17 @@ pub fn check_custody(records: &[Record], placements: &BTreeMap<String, Placement
             }
         }
     }
+    // File -> the one device it is judged on: its last placer, or, where that
+    // placer lost a move race over it, the device whose user placed it before.
+    let mut judged_on: BTreeMap<String, String> = BTreeMap::new();
+    for (file, devices) in &placed_by {
+        let Some((last, placed_at)) = devices.last() else { continue };
+        let lost = placements.get(last).is_some_and(|p| {
+            p.lost_races.iter().any(|(sha, said_at)| file_of.get(sha).unwrap_or(sha) == file && placed_at <= said_at)
+        });
+        let winner = devices.iter().rev().map(|(d, _)| d).find(|d| *d != last).filter(|_| lost);
+        judged_on.insert(file.clone(), winner.unwrap_or(last).clone());
+    }
     let mut wanted: BTreeMap<(String, String), BTreeSet<(u64, Option<u64>)>> = BTreeMap::new();
     for ((device, dir, _), (sha, birth)) in &at {
         wanted.entry((device.clone(), sha.clone())).or_default().insert((*dir, *birth));
@@ -1012,7 +1076,7 @@ pub fn check_custody(records: &[Record], placements: &BTreeMap<String, Placement
     for ((device, sha), dirs) in &wanted {
         let Some(placement) = placements.get(device) else { continue };
         let file = file_of.get(sha).unwrap_or(sha);
-        if last_placed_by.get(file).is_some_and(|by| by != device) {
+        if judged_on.get(file).is_some_and(|on| on != device) {
             continue;
         }
         let standing: Vec<&(String, String, u64)> = placement.files.iter().filter(|(_, s, _)| s == sha).collect();
@@ -1730,7 +1794,13 @@ pub fn settle(
     let placements: BTreeMap<String, Placement> = fleet
         .devices
         .iter()
-        .filter_map(|d| trees.get(&d.name).map(|t| (d.name.clone(), placement_on_disk(&d.root, t))))
+        .filter_map(|d| {
+            trees.get(&d.name).map(|t| {
+                let mut placement = placement_on_disk(&d.root, t);
+                placement.lost_races = lost_move_races(&d.state_db());
+                (d.name.clone(), placement)
+            })
+        })
         .collect();
     verdicts.push(check_custody(records, &placements));
     let stores: Vec<(String, std::path::PathBuf)> = fleet.devices.iter().map(|d| (d.name.clone(), d.state_db())).collect();
@@ -2461,6 +2531,7 @@ mod tests {
         Placement {
             files: files.iter().map(|(p, s, d)| (p.to_string(), s.to_string(), *d)).collect(),
             dirs: dirs.iter().map(|d| (*d, None)).collect(),
+            lost_races: BTreeMap::new(),
         }
     }
 
@@ -2705,6 +2776,102 @@ mod tests {
         let on_a = BTreeMap::from([("device-a".to_string(), disk(&[("Shared-office/V/same.txt", "cc", 41)], &[40, 41]))]);
         let verdict = check_custody(&records, &on_a);
         assert!(verdict.ok && verdict.detail.starts_with("0 content(s) judged"), "{}", verdict.detail);
+    }
+
+    /// The engine said these contents' moves lost a race, at journal time `at`.
+    fn lost_at(mut placement: Placement, shas: &[&str], at: u64) -> Placement {
+        placement.lost_races = shas.iter().map(|s| (s.to_string(), at)).collect();
+        placement
+    }
+
+    fn lost(placement: Placement, shas: &[&str]) -> Placement {
+        lost_at(placement, shas, 6)
+    }
+
+    #[test]
+    fn run_1660_a_move_race_is_judged_on_the_user_whose_move_the_server_kept() {
+        // device-b's user wrote doc-2 into 70 and moved it into Sub 6 (72);
+        // 61 ms later device-a's user, not having seen that, moved its copy
+        // into a new Sub 5 (42). b's move reached the server first; a's engine
+        // said a's move lost and put the file in its copy of Sub 6 (43).
+        let records = vec![
+            placed(1, "device-b/messy-human", "write", "Projects/doc-2.txt", Some("d2"), Some(70)),
+            placed(2, "device-b/messy-human", "rename", "Projects/doc-2.txt", None, Some(70)),
+            placed(3, "device-b/messy-human", "rename_into", "Projects/Sub 6/doc-2.txt", Some("d2"), Some(72)),
+            placed(4, "device-a/messy-human", "rename", "Projects/doc-2.txt", None, Some(40)),
+            placed(5, "device-a/messy-human", "rename_into", "Projects/Sub 5/doc-2.txt", Some("d2"), Some(42)),
+        ];
+        let on_a = disk(&[("Shared-messy-human/Projects/Sub 6/doc-2.txt", "d2", 43)], &[40, 42, 43]);
+        let on_b = |dir| disk(&[("Shared-messy-human/Projects/Sub 6/doc-2.txt", "d2", dir)], &[70, 72]);
+        let raced = BTreeMap::from([("device-a".to_string(), lost(on_a.clone(), &["d2"])), ("device-b".to_string(), on_b(72))]);
+        let verdict = check_custody(&records, &raced);
+        assert!(verdict.ok && verdict.detail.starts_with("1 content(s) judged"), "{}", verdict.detail);
+        // No lost race on a's store: a placed it last, and it is not where a put it.
+        let untold = BTreeMap::from([("device-a".to_string(), on_a.clone()), ("device-b".to_string(), on_b(72))]);
+        let verdict = check_custody(&records, &untold);
+        assert!(!verdict.ok && verdict.detail.contains("device-a"), "{}", verdict.detail);
+        // The race told, but on the winner's disk the file is not where its
+        // user put it: judged there, and it fails there.
+        let carried = BTreeMap::from([("device-a".to_string(), lost(on_a, &["d2"])), ("device-b".to_string(), on_b(70))]);
+        let verdict = check_custody(&records, &carried);
+        assert!(!verdict.ok && verdict.detail.contains("device-b"), "{}", verdict.detail);
+    }
+
+    #[test]
+    fn a_move_race_the_later_mover_won_is_judged_on_the_later_mover() {
+        // The reverse: a's later move reached the server first, so b's store
+        // holds the lost race, and a, the last placer, is judged as before.
+        let records = vec![
+            placed(1, "device-b/messy-human", "write", "Projects/doc-2.txt", Some("d2"), Some(70)),
+            placed(2, "device-b/messy-human", "rename", "Projects/doc-2.txt", None, Some(70)),
+            placed(3, "device-b/messy-human", "rename_into", "Projects/Sub 6/doc-2.txt", Some("d2"), Some(72)),
+            placed(4, "device-a/messy-human", "rename", "Projects/doc-2.txt", None, Some(40)),
+            placed(5, "device-a/messy-human", "rename_into", "Projects/Sub 5/doc-2.txt", Some("d2"), Some(42)),
+        ];
+        let on_b = lost(disk(&[("Shared-messy-human/Projects/Sub 5/doc-2.txt", "d2", 74)], &[70, 72, 74]), &["d2"]);
+        let at_a = |dir| BTreeMap::from([
+            ("device-a".to_string(), disk(&[("Shared-messy-human/Projects/Sub 5/doc-2.txt", "d2", dir)], &[40, 42, 43])),
+            ("device-b".to_string(), on_b.clone()),
+        ]);
+        let verdict = check_custody(&records, &at_a(42));
+        assert!(verdict.ok && verdict.detail.starts_with("1 content(s) judged"), "{}", verdict.detail);
+        assert!(!check_custody(&records, &at_a(43)).ok);
+    }
+
+    #[test]
+    fn a_lost_race_excuses_only_the_move_that_lost_never_the_losers_next() {
+        // 1660, settled: the engine said a's move lost at 6. Later a's user
+        // moves the file on, from its copy of Sub 6 (43) into Z (44).
+        let records = vec![
+            placed(1, "device-b/messy-human", "write", "Projects/doc-2.txt", Some("d2"), Some(70)),
+            placed(2, "device-b/messy-human", "rename", "Projects/doc-2.txt", None, Some(70)),
+            placed(3, "device-b/messy-human", "rename_into", "Projects/Sub 6/doc-2.txt", Some("d2"), Some(72)),
+            placed(4, "device-a/messy-human", "rename", "Projects/doc-2.txt", None, Some(40)),
+            placed(5, "device-a/messy-human", "rename_into", "Projects/Sub 5/doc-2.txt", Some("d2"), Some(42)),
+            placed(900, "device-a/messy-human", "rename", "Projects/Sub 6/doc-2.txt", None, Some(43)),
+            placed(901, "device-a/messy-human", "rename_into", "Projects/Z/doc-2.txt", Some("d2"), Some(44)),
+        ];
+        let m = |a: Placement, b: Placement| BTreeMap::from([("device-a".to_string(), a), ("device-b".to_string(), b)]);
+        // The engine kept a's later move: Z on both disks.
+        let right = m(
+            lost(disk(&[("S/Projects/Z/doc-2.txt", "d2", 44)], &[40, 42, 43, 44]), &["d2"]),
+            disk(&[("S/Projects/Z/doc-2.txt", "d2", 75)], &[70, 72, 75]),
+        );
+        let verdict = check_custody(&records, &right);
+        assert!(verdict.ok, "a correct engine read as wrong: {}", verdict.detail);
+        // The engine undid a's later move: back in Sub 6 on both disks.
+        let undone = m(
+            lost(disk(&[("S/Projects/Sub 6/doc-2.txt", "d2", 43)], &[40, 42, 43, 44]), &["d2"]),
+            disk(&[("S/Projects/Sub 6/doc-2.txt", "d2", 72)], &[70, 72]),
+        );
+        let verdict = check_custody(&records, &undone);
+        assert!(!verdict.ok && verdict.detail.contains("device-a"), "an undone move hidden: {}", verdict.detail);
+        // A second race the later move lost, said after it, is excused again.
+        let lost_again = m(
+            lost_at(disk(&[("S/Projects/Sub 6/doc-2.txt", "d2", 43)], &[40, 42, 43, 44]), &["d2"], 902),
+            disk(&[("S/Projects/Sub 6/doc-2.txt", "d2", 72)], &[70, 72]),
+        );
+        assert!(check_custody(&records, &lost_again).ok, "{}", check_custody(&records, &lost_again).detail);
     }
 
     #[test]
@@ -3084,6 +3251,7 @@ mod frozen {
                 out.files.push((name, sha, *inode));
             }
         }
+        out.lost_races = lost_move_races(db);
         Ok(out)
     }
 }

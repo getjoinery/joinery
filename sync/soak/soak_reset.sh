@@ -44,7 +44,7 @@ done
 # few megabytes; the tree listings are text.
 for d in a b; do
 	src="/soak/device-$d/home/state/state.db"
-	[ -f "$src" ] && sqlite3 "$src" ".backup ${archive}/device-${d}-state.db" 2>/dev/null || true
+	[ -f "$src" ] && sqlite3 -readonly "$src" ".backup ${archive}/device-${d}-state.db" 2>/dev/null || true
 	[ -d "/soak/device-$d/root" ] && \
 		find "/soak/device-$d/root" -printf "%y %s %p\n" \
 		> "${archive}/device-${d}-tree.txt" 2>/dev/null || true

@@ -3784,7 +3784,41 @@ fn create_local_folder(
     // created under the planned name. If the server has moved on, that now
     // disagrees with `remote`, and disagreeing is precisely what gets the move
     // planned on the next pass.
-    agree(&mut entry, None, None);
+    //
+    // The record knows its directory from the moment this device makes it,
+    // as a folder minted from a directory does. Left to
+    // `record_directory_identities` on the next scan, a server rename and a
+    // new folder under the old name arriving first found a record with a
+    // path and no directory: the scan read the folder as deleted here, the
+    // newcomer took its directory by name, and the folder's files went with
+    // it (soak run 1650).
+    //
+    // Never an id another live folder record already names as its own, the
+    // rule `record_directory_identities` keeps: that is one directory with two
+    // owners. A vault locked after it was open keeps its directory under the
+    // old name when a peer renames it, and the rival guard above passes over
+    // a record that holds no file here, so a plain folder made under that name
+    // adopts the vault's directory. Given the vault's id too, the next save
+    // beside the vault's files went up in the clear.
+    let mut identity = env
+        .vfs
+        .directory_identity(&path)?
+        .filter(|i| i.file_id != 0)
+        .map(|i| jd_vfs::Fingerprint::of_directory(i.file_id, i.birth_ns));
+    if let Some(fp) = identity {
+        for other in env.store.every_entry()? {
+            if other.id != entry.id
+                && other.id.entity_type == EntityType::Folder
+                && !other.remote_deleted
+                && !other.id.is_provisional()
+                && other.synced_fingerprint.map(|f| f.file_id) == Some(fp.file_id)
+            {
+                identity = None;
+                break;
+            }
+        }
+    }
+    agree(&mut entry, None, identity);
     entry.synced_placement = Some(placement);
     entry.stand_in = None;
     env.store.put_entry(&entry)?;
