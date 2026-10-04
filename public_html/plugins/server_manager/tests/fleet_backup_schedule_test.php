@@ -119,8 +119,52 @@ check($defaults['mode'] === 'chain' || $defaults['mode'] === 'full',
 	'and mode always resolves to something real', $defaults['mode']);
 check($defaults['keep_days'] >= 1, 'retention never resolves to zero days', (string)$defaults['keep_days']);
 
-check(FleetBackupPolicy::max_concurrent() >= 1,
-	'the concurrency cap is always at least one, so the fleet never deadlocks');
+// ── Who waits for whom ──────────────────────────────────────────────────────
+section('One machine takes one backup at a time; separate machines wait for nobody');
+
+/** A stand-in node with a key, for the machine and agent rules. */
+class FbsKeyedNode extends FbsHealthNode {
+	public $key;
+	public function __construct($key, array $fields) { parent::__construct($fields); $this->key = $key; }
+}
+
+$sibling_a = new FbsKeyedNode(11, array('mgn_mgh_managed_host_id' => 4));
+$sibling_b = new FbsKeyedNode(12, array('mgn_mgh_managed_host_id' => 4));
+$alone_a   = new FbsKeyedNode(13, array());
+$alone_b   = new FbsKeyedNode(14, array('mgn_mgh_managed_host_id' => 0));
+check(FleetBackupPolicy::machine_key($sibling_a) === FleetBackupPolicy::machine_key($sibling_b),
+	'two container sites on one host are one machine', FleetBackupPolicy::machine_key($sibling_a));
+check(FleetBackupPolicy::machine_key($alone_a) !== FleetBackupPolicy::machine_key($alone_b),
+	'two nodes without a host record are two machines');
+check(FleetBackupPolicy::machine_key($alone_a) !== FleetBackupPolicy::machine_key($sibling_a),
+	'a machine of its own never waits on a host\'s containers');
+check(FleetBackupPolicy::machine_key_for(12, 4) === FleetBackupPolicy::machine_key($sibling_b)
+	&& FleetBackupPolicy::machine_key_for(13, 0) === FleetBackupPolicy::machine_key($alone_a),
+	'the key read off the job table is the key read off the node');
+check(!array_key_exists('server_manager_fleet_backup_max_concurrent', array_column(
+		(array)(json_decode(file_get_contents(PathHelper::getIncludePath('plugins/server_manager/plugin.json')), true)['settings'] ?? array()),
+		'default', 'name')),
+	'no fleet-wide cap is declared: a job no agent claims can never hold the fleet back');
+
+$run_src = file_get_contents(PathHelper::getIncludePath('plugins/server_manager/tasks/FleetBackupRun.php'));
+check(preg_match('/function busy_machines\(\).*?mjb_status = \'running\'/s', $run_src) === 1,
+	'only claimed work occupies a machine: a pending job uses nothing on it');
+
+section('A node whose agent is not checking in is not sent a backup');
+
+$anow = '2026-09-13 12:00:00';
+$agent = function (array $extra) { return new FbsKeyedNode(20, array_merge(array('mgn_agent_public_key' => 'AAAA'), $extra)); };
+check(FleetBackupPolicy::agent_unheard($agent(array('mgn_agent_last_poll' => '2026-09-13 11:59:50')), $anow) === '',
+	'checked in seconds ago: sent');
+check(FleetBackupPolicy::agent_unheard($agent(array('mgn_agent_last_poll' => '2026-09-13 10:01:00')), $anow) === '',
+	'checked in just under two hours ago: sent');
+check(FleetBackupPolicy::agent_unheard($agent(array('mgn_agent_last_poll' => '2026-09-13 10:00:00')), $anow)
+		=== 'its agent has not checked in since 2026-09-13 10:00:00 UTC',
+	'two hours silent, the line the silent-agent incident opens at: skipped and named');
+check(FleetBackupPolicy::agent_unheard($agent(array()), $anow) === 'its agent has never checked in',
+	'paired but never checked in (a test fixture, a box still joining): skipped');
+check(FleetBackupPolicy::agent_unheard(new FbsKeyedNode(21, array()), $anow) === '',
+	'no agent paired: left to the builder, which names the fix');
 
 // ── Whose window decides ───────────────────────────────────────────────────
 section('The site\'s window decides, never below the minimum');

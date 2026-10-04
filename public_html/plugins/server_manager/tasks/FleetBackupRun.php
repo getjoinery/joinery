@@ -25,8 +25,18 @@
  *     forty nodes do not all start a multi-hundred-megabyte upload at 03:00;
  *   - a node whose previous run is still pending or running is skipped, so a
  *     slow node gets fewer backups rather than a queue;
- *   - no more than N run at once across the whole fleet.
+ *   - one machine runs one backup at a time. The cost of a backup lands on
+ *     the machine that takes it, so container sites on one host take turns,
+ *     and a node on a machine of its own waits for nobody. Only work a node
+ *     has claimed occupies its machine: a job no agent picks up uses nothing,
+ *     and must not hold anyone else back.
  *
+ * A node whose agent is not checking in is skipped and named: a job sent to it
+ * would wait unclaimed and run whenever the agent came back, not in its slot.
+ *
+ * @version 1.8 - one backup at a time per machine, counting only claimed work, replaces the fleet-wide cap
+ *                (a job no agent would ever claim held a fleet slot forever); a node whose agent is
+ *                not checking in is skipped and named, not sent a job
  * @version 1.6 - retention is the site's own reported window, never below the policy's keep_days; after a node reports a successful run the pass lists its
  *                backup storage once (witness_landing), so "Backups are not landing" is known within a
  *                tick instead of at the next night's dispatch
@@ -68,8 +78,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 
 	private static function pass($dry) {
 		$now = gmdate('Y-m-d H:i:s');
-		$in_flight = self::in_flight_count();
-		$max = FleetBackupPolicy::max_concurrent();
+		$busy = self::busy_machines();
 
 		$dispatched = array();
 		$skipped = array();
@@ -117,27 +126,34 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				continue;
 			}
 
+			$unheard = FleetBackupPolicy::agent_unheard($node, $now);
+			if ($unheard !== '') {
+				$skipped[] = $slug . ' (' . $unheard . ')';
+				continue;
+			}
+			$machine = FleetBackupPolicy::machine_key($node);
+
 			// A verify, when one is due, before the backup decision: it reads
 			// the plane-side stamps and the newest verify job only, and costs
 			// nothing unless it fires. It never runs beside a backup, a Prepare
-			// or another verify of the same node, and it takes a slot from the
-			// same concurrency budget.
+			// or another verify of the same node, and it takes its machine's
+			// turn the way a backup does: it downloads and reads as much.
 			$verify_job = ManagementJob::latestForNode($node->key, 'verify_backup');
 			if (FleetBackupPolicy::is_verify_due($policy, $node, $now, $verify_job)) {
 				$busy = self::active_backup_work($node->key);
 				if ($busy !== '') {
 					$verify_skipped[] = $slug . ' (' . $busy . ' still going)';
-				} elseif ($in_flight >= $max) {
-					$verify_skipped[] = $slug . ' (fleet concurrency limit)';
+				} elseif (isset($busy[$machine])) {
+					$verify_skipped[] = $slug . ' (waiting for ' . $busy[$machine] . ' on the same machine)';
 				} elseif ($dry) {
 					$verified[] = $slug;
-					$in_flight++;
+					$busy[$machine] = $slug . '\'s verification';
 					continue;   // the backup waits for the verify, as below
 				} else {
 					try {
 						self::dispatch_verify($node);
 						$verified[] = $slug;
-						$in_flight++;
+						$busy[$machine] = $slug . '\'s verification';
 						// The backup of this node waits for its next tick: the
 						// verify reads the chain the backup would extend.
 						continue;
@@ -170,14 +186,14 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				continue;
 			}
 
-			if ($in_flight >= $max) {
-				$skipped[] = $slug . ' (fleet concurrency limit)';
+			if (isset($busy[$machine])) {
+				$skipped[] = $slug . ' (waiting for ' . $busy[$machine] . ' on the same machine)';
 				continue;
 			}
 
 			if ($dry) {
 				$dispatched[] = $slug . ' at ' . FleetBackupPolicy::slot_time($policy, $slug);
-				$in_flight++;
+				$busy[$machine] = $slug . '\'s backup';
 				continue;
 			}
 
@@ -252,7 +268,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				ManagementJob::createFromBuild($node->key, 'backup_run', $built, $params, null);
 
 				$dispatched[] = $slug;
-				$in_flight++;
+				$busy[$machine] = $slug . '\'s backup';
 			} catch (Throwable $e) {
 				$problems[] = $slug . ': ' . $e->getMessage();
 			}
@@ -344,35 +360,48 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 	/** The job types that must not overlap a verify on one node. */
 	const BACKUP_WORK_TYPES = array('backup_run', 'stage_chain', 'verify_backup');
 
+	/** Each of those, named for a person. */
+	const BACKUP_WORK_NAMES = array('backup_run' => 'backup', 'stage_chain' => 'prepare', 'verify_backup' => 'verification');
+
 	/**
 	 * Which backup-related job is pending or running on this node, named for
 	 * a person ('' when none). A verify reads the chain a backup may be
 	 * writing and a Prepare may be staging, so none of the three overlaps.
 	 */
 	private static function active_backup_work($node_id) {
-		$names = array('backup_run' => 'backup', 'stage_chain' => 'prepare', 'verify_backup' => 'verification');
 		foreach (self::BACKUP_WORK_TYPES as $type) {
 			$latest = ManagementJob::latestForNode((int)$node_id, $type);
 			if ($latest && in_array($latest->get('mjb_status'), array('pending', 'running'), true)) {
-				return $names[$type];
+				return self::BACKUP_WORK_NAMES[$type];
 			}
 		}
 		return '';
 	}
 
 	/**
-	 * How many backups and verifies are already in flight across the fleet.
-	 * One budget for both: a verify downloads and reads as much as a backup
-	 * uploads, and the cap is about backup storage and the network, not the kind of
-	 * job.
+	 * The machines already taking a backup, a Prepare or a verify, each with
+	 * the work named for a person ("getjoinery's backup"). Claimed work only:
+	 * an agent claims within seconds of polling, so a job still pending is one
+	 * no agent is running (its node is busy with something else, its agent is
+	 * gone) and it uses nothing on the machine. A claim that outlives its
+	 * budget is requeued by ManagementJob::requeueStaleClaims(), so a lost one
+	 * frees its machine on its own.
 	 */
-	private static function in_flight_count() {
+	private static function busy_machines(): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT COUNT(*) FROM mjb_management_jobs
-			 WHERE mjb_job_type IN ('backup_run', 'verify_backup') AND mjb_status IN ('pending', 'running')
-			   AND mjb_delete_time IS NULL");
+			"SELECT n.mgn_managed_node_id, n.mgn_mgh_managed_host_id, n.mgn_slug, j.mjb_job_type
+			 FROM mjb_management_jobs j
+			 JOIN mgn_managed_nodes n ON n.mgn_managed_node_id = j.mjb_mgn_managed_node_id
+			 WHERE j.mjb_job_type IN ('" . implode("', '", self::BACKUP_WORK_TYPES) . "')
+			   AND j.mjb_status = 'running'
+			   AND j.mjb_delete_time IS NULL");
 		$q->execute();
-		return (int)$q->fetchColumn();
+		$busy = array();
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$key = FleetBackupPolicy::machine_key_for((int)$row['mgn_managed_node_id'], (int)$row['mgn_mgh_managed_host_id']);
+			$busy[$key] = $row['mgn_slug'] . '\'s ' . self::BACKUP_WORK_NAMES[$row['mjb_job_type']];
+		}
+		return $busy;
 	}
 }

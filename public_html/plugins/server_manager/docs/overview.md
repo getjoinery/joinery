@@ -1672,7 +1672,22 @@ Three rules keep a fleet from behaving like a thundering herd:
   multi-hundred-megabyte upload at once;
 - a node whose previous run is still pending or running is skipped, so a slow
   node gets fewer backups rather than a queue;
-- no more than `server_manager_fleet_backup_max_concurrent` run at once.
+- one machine takes one backup at a time (`FleetBackupPolicy::machine_key`).
+  A backup's cost lands on the machine that takes it — the database dump, the
+  file read, the upload — so container sites on one host (siblings share
+  `mgn_mgh_managed_host_id`) take turns, and a node on a machine of its own
+  waits for nobody. Only claimed work occupies a machine: an agent claims
+  within seconds of polling, so a job still pending is one no agent is
+  running, and it holds nobody back. A lost claim is requeued at its budget
+  (`ManagementJob::requeueStaleClaims`), which frees its machine.
+
+A node whose agent has never checked in, or not within the two hours after
+which **The agent stopped checking in** opens (`IncidentSourceAgentSilent`),
+is skipped and named in the pass message (`FleetBackupPolicy::agent_unheard`):
+a job sent to it would wait unclaimed and run whenever the agent came back,
+not in its slot. Removing a node cancels its unfinished jobs
+(`ManagedNode::withdraw_open_jobs`), since its agent is refused from then on
+and nothing else would ever end them.
 
 Due is keyed on when the last run was *started*, not on whether it succeeded.
 Retrying a failing node every fifteen minutes until its next slot would hammer a
@@ -1710,7 +1725,7 @@ in [Verifying backups](../../../docs/backups.md#verifying-backups):
   verify that fails on the node comes back as a failed job, and a failed job
   is never folded into the node's columns, so the stamp alone would read
   "never verified" and re-dispatch the whole download every tick. A verify
-  takes a slot from the same concurrency cap as a backup and is never
+  takes its machine's turn the way a backup does and is never
   dispatched beside a running backup, Prepare or verify of the same node; a
   backup due on the same tick waits for it. A failed verify is never retried
   automatically. Level 3 is never scheduled: it is a person's choice on the

@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.5",
+  "version": "1.30.6",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -343,14 +343,6 @@
       "label": "Days between backup verifications (0 = never)",
       "type": "number",
       "helptext": "How often each node's newest backup is verified restorable by opening and reading it on the node: every archive it depends on is downloaded from backup storage, decrypted with the node's own key and read to the end, then removed. Nothing on the site is touched. Each verification downloads the whole set once, so on metered storage it is that much egress per node per interval."
-    },
-    {
-      "name": "server_manager_fleet_backup_max_concurrent",
-      "default": "2",
-      "group": "backups",
-      "label": "Backups running at once across the fleet",
-      "type": "number",
-      "helptext": "A ceiling on simultaneous fleet backups. Nodes over the limit wait for the next tick rather than queueing."
     },
     {
       "name": "server_manager_namecheap_api_user",

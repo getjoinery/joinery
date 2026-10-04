@@ -21,7 +21,10 @@
  *  - another site's records are untouched, and asking again does nothing;
  *  - the domain stage parks a row whose node was removed before this existed,
  *    and the domain watch sends a removed node no notice;
- *  - sm_008 releases a provision left live by a removal before this existed.
+ *  - sm_008 releases a provision left live by a removal before this existed;
+ *  - removal cancels the node's unfinished jobs (its agent is refused from
+ *    then on, so nothing else ends them), either way it is removed, and
+ *    sm_012 cancels those a removal before this left open.
  *
  * Run: php plugins/server_manager/tests/node_removal_releases_site_records_test.php
  */
@@ -37,7 +40,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisi
 $suffix = getmypid() . '-' . random_int(1000, 9999);
 $buyer = make_user('NodeRemoval');
 
-function nr_node(string $name) {
+function nr_node(string $name, bool $register = true) {
 	$node = new ManagedNode(NULL);
 	$node->set('mgn_name', $name);
 	$node->set('mgn_slug', $name);
@@ -51,7 +54,7 @@ function nr_node(string $name) {
 	$node->prepare();
 	$node->save();
 	$node->load();
-	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
+	if ($register) { harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key); }
 	return $node;
 }
 
@@ -254,6 +257,70 @@ try {
 	check((string)nr_fresh($left)->get('cvp_delete_time') !== '' && (string)nr_fresh($left_trial)->get('htr_delete_time') !== '',
 		'the removed node\'s provision and trial are removed');
 	check((string)nr_fresh($kept)->get('cvp_delete_time') === '', 'a live node\'s provision is not');
+} finally {
+	$dblink->rollBack();
+}
+
+// ---------------------------------------------------------------------------
+section('Removing a node cancels its unfinished jobs');
+
+function nr_job($node_id, string $status, bool $register = true) {
+	$job = new ManagementJob(NULL);
+	$job->set('mjb_mgn_managed_node_id', $node_id);
+	$job->set('mjb_job_type', 'backup_run');
+	$job->set('mjb_status', $status);
+	$job->set('mjb_commands', json_encode(array('primitive' => 'backup_run', 'params' => array())));
+	$job->save();
+	$job->load();
+	if ($register) { harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key); }
+	return $job;
+}
+
+$jobs_site = nr_node('nr-jobs-' . $suffix);
+$jobs_other = nr_node('nr-jobs-other-' . $suffix);
+$j_pending = nr_job($jobs_site->key, 'pending');
+$j_running = nr_job($jobs_site->key, 'running');
+$j_done = nr_job($jobs_site->key, 'completed');
+$j_other = nr_job($jobs_other->key, 'pending');
+$jobs_site->soft_delete();
+check((string)nr_fresh($j_pending)->get('mjb_status') === 'cancelled' && (string)nr_fresh($j_running)->get('mjb_status') === 'cancelled',
+	'its pending and running jobs are cancelled: no agent will ever claim or report them');
+check(strpos((string)nr_fresh($j_pending)->get('mjb_error_message'), 'removed from the dashboard') !== false,
+	'and say why', (string)nr_fresh($j_pending)->get('mjb_error_message'));
+check((string)nr_fresh($j_done)->get('mjb_status') === 'completed', 'a finished job keeps its outcome');
+check((string)nr_fresh($j_other)->get('mjb_status') === 'pending', 'another node\'s job is untouched');
+check(in_array('2 unfinished jobs were cancelled.', $jobs_site->removal_notes(), true),
+	'the page that asked is told', json_encode($jobs_site->removal_notes()));
+
+$j_other_running = nr_job($jobs_other->key, 'running');
+$jobs_other->permanent_delete();
+check((string)nr_fresh($j_other)->get('mjb_status') === 'cancelled' && (string)nr_fresh($j_other_running)->get('mjb_status') === 'cancelled',
+	'a permanent delete cancels them too, before the deletion rule lets go of the node');
+check((int)nr_fresh($j_other)->get('mjb_mgn_managed_node_id') === 0, 'and the job no longer names the node');
+
+// ---------------------------------------------------------------------------
+section('sm_012 cancels the jobs a removal before this left open');
+
+// Rolled back, as sm_008's case is: the migration acts on every such job in
+// the database, and this suite changes only rows it made. The rows made in it
+// go with the rollback, so none is registered for teardown.
+$migration = null;
+foreach (require(PathHelper::getIncludePath('plugins/server_manager/migrations/migrations.php')) as $m) {
+	if ($m['id'] === 'sm_012_withdraw_jobs_of_removed_nodes') { $migration = $m; }
+}
+check($migration !== null, 'the migration is declared');
+$dblink = DbConnector::get_instance()->get_db_link();
+$dblink->beginTransaction();
+try {
+	$live_node = nr_node('nr-live-' . $suffix, false);
+	$gone_id = (int)$dblink->query("SELECT COALESCE(MAX(mgn_managed_node_id), 0) + 1000 FROM mgn_managed_nodes")->fetchColumn();
+	$orphan = nr_job($gone_id, 'pending', false);
+	$unnamed = nr_job(null, 'running', false);
+	$live = nr_job($live_node->key, 'pending', false);
+	$migration['up'](DbConnector::get_instance());
+	check((string)nr_fresh($orphan)->get('mjb_status') === 'cancelled', 'a job whose node no longer exists is cancelled');
+	check((string)nr_fresh($unnamed)->get('mjb_status') === 'cancelled', 'so is a job that names no node');
+	check((string)nr_fresh($live)->get('mjb_status') === 'pending', 'a live node\'s job is not');
 } finally {
 	$dblink->rollBack();
 }
