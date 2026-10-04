@@ -6,6 +6,8 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.7 - sm_011 drops the fleet-wide backup cap setting; sm_012 cancels the unfinished jobs of nodes
+ *                removed before ManagedNode 1.36
  * @version 1.6 - sm_010 ends the retired Clone's rows (site_copy.md WP9): from_backup provisions, and the
  *                cvp_clone_key_sealed and cvp_backup_source columns
  * @version 1.5 - sm_009 seeds the editable emails of a server handover to the customer's own Linode account
@@ -277,6 +279,51 @@ return [
 					$dblink->exec("ALTER TABLE cvp_customer_cloud_provisions DROP COLUMN {$col}");
 				}
 			}
+		},
+	],
+
+	[
+		// One machine takes one backup at a time (FleetBackupPolicy 1.7): the
+		// fleet-wide cap is gone from plugin.json, and its seeded row would
+		// read as an undeclared orphan. Remove it.
+		'id' => 'sm_011_drop_fleet_backup_max_concurrent_setting',
+		'version' => '1.30.6',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$stmt = $dblink->prepare("DELETE FROM stg_settings WHERE stg_name = ?");
+			$stmt->execute(['server_manager_fleet_backup_max_concurrent']);
+		},
+	],
+
+	[
+		// Removing a node cancels its unfinished jobs (ManagedNode 1.36). A
+		// node removed before that left them open for good: its agent is
+		// refused once the node is gone, so a pending job was never claimed
+		// and a running one never reported. Every job is addressed to a node
+		// and only that node's agent runs it, so the ones taken are the open
+		// jobs whose node is missing, removed, or no longer named (the
+		// deletion rule nulls it).
+		'id' => 'sm_012_withdraw_jobs_of_removed_nodes',
+		'version' => '1.30.6',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$tables = $dblink->query("SELECT to_regclass('mjb_management_jobs') IS NOT NULL
+				AND to_regclass('mgn_managed_nodes') IS NOT NULL")->fetchColumn();
+			if (!$tables) {
+				return;   // a fresh install: no job has ever outlived its node here
+			}
+			$dblink->exec("
+				UPDATE mjb_management_jobs j
+				SET mjb_status = 'cancelled',
+				    mjb_error_message = 'The node was removed from the dashboard before this job finished.',
+				    mjb_completed_time = now(),
+				    mjb_update_time = now()
+				WHERE j.mjb_status IN ('queued', 'pending', 'running')
+				  AND j.mjb_delete_time IS NULL
+				  AND NOT EXISTS (SELECT 1 FROM mgn_managed_nodes n
+				                  WHERE n.mgn_managed_node_id = j.mjb_mgn_managed_node_id
+				                    AND n.mgn_delete_time IS NULL)
+			");
 		},
 	],
 ];

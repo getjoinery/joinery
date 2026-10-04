@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.36 - removing a node, either way, cancels its unfinished jobs (withdraw_open_jobs): its agent is
+ *                 refused once the node is gone, so nothing else would ever end them
  * @version 1.34 - permanent_delete() takes the incident pass's lock, so a pass never opens an incident on
  *                 a node being deleted under it (site_copy.md B41)
  * @version 1.33 - valid_site_domain() and adopt_reported_site_domain(): a status check fills an empty
@@ -686,12 +688,42 @@ class ManagedNode extends SystemBase {
 	 */
 	function soft_delete() {
 		$this->removal_notes = $this->key ? $this->release_site_records() : [];
+		if ($this->key) {
+			$withdrawn = $this->withdraw_open_jobs();
+			if ($withdrawn > 0) {
+				$this->removal_notes[] = $withdrawn . ' unfinished job' . ($withdrawn === 1 ? ' was' : 's were') . ' cancelled.';
+			}
+		}
 		return parent::soft_delete();
 	}
 
 	/**
-	 * Permanent deletion waits for a running incident pass and keeps the next
-	 * one out until it commits. A pass lists the nodes and then opens incidents
+	 * Cancel this node's jobs that never finished. Once the node is gone its
+	 * agent is refused (AgentChannelEndpoint answers "Unknown node."), so a
+	 * pending job is never claimed and a running one never reports: left
+	 * alone they stay open forever, and anything waiting on them waits too.
+	 *
+	 * @return int how many were cancelled
+	 */
+	public function withdraw_open_jobs(): int {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"UPDATE mjb_management_jobs
+			 SET mjb_status = 'cancelled',
+			     mjb_error_message = 'The node was removed from the dashboard before this job finished.',
+			     mjb_completed_time = now(),
+			     mjb_update_time = now()
+			 WHERE mjb_mgn_managed_node_id = ?
+			   AND mjb_status IN ('queued', 'pending', 'running')
+			   AND mjb_delete_time IS NULL");
+		$q->execute([(int)$this->key]);
+		return $q->rowCount();
+	}
+
+	/**
+	 * Permanent deletion cancels the node's unfinished jobs (withdraw_open_jobs),
+	 * waits for a running incident pass and keeps the next one out until it
+	 * commits. A pass lists the nodes and then opens incidents
 	 * on them; a node deleted in between would otherwise get an incident after
 	 * its own incidents were deleted, one whose node no longer exists.
 	 */
@@ -704,6 +736,7 @@ class ManagedNode extends SystemBase {
 		try {
 			if (!$debug) {
 				$db->query('SELECT pg_advisory_xact_lock(' . IncidentReconciler::LOCK_KEY . ')');
+				$this->withdraw_open_jobs();
 			}
 			$done = parent::permanent_delete($debug);
 			if ($own) {

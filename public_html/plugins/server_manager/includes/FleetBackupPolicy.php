@@ -13,6 +13,8 @@
  * on that site's schedule, under its own key, and are not this management node's
  * to schedule, count or alarm about.
  *
+ * @version 1.7 - machine_key() and agent_unheard() replace max_concurrent(): backups are limited to one at a
+ *                time per machine, and a node whose agent is not checking in is not sent one
  * @version 1.5 - is_eligible(): the rule eligible_nodes() applies, for one node, so the backup incidents ask the same
  *                question (incident_triage.md WP3)
  * @version 1.4 - eligible_nodes() skips every node in an install state, not only one installing
@@ -192,9 +194,46 @@ class FleetBackupPolicy {
 		return max((int)$policy['keep_days'], $reported);
 	}
 
-	public static function max_concurrent(): int {
-		$value = (int)Globalvars::get_instance()->get_setting('server_manager_fleet_backup_max_concurrent', true, true);
-		return max(1, $value ?: 2);
+	/**
+	 * The machine a node's backup runs on. A backup dumps the database, reads
+	 * every file and uploads the lot, so the cost lands on that machine's disk,
+	 * CPU and uplink; two at once on one machine slow each other and the sites
+	 * it serves, and two on different machines share nothing. Container sites
+	 * share their placement record (mgn_mgh_managed_host_id, the only sibling
+	 * identity); any other node is a machine of its own.
+	 */
+	public static function machine_key($node): string {
+		return self::machine_key_for((int)$node->key, (int)$node->get('mgn_mgh_managed_host_id'));
+	}
+
+	/** machine_key() from the two ids alone, for a query that reads them off the job table. */
+	public static function machine_key_for(int $node_id, int $host_id): string {
+		return $host_id > 0 ? 'host:' . $host_id : 'node:' . $node_id;
+	}
+
+	/**
+	 * Why this node's agent cannot take a backup now, or '' when it can: it
+	 * has never checked in, or not within the window after which the plane
+	 * calls it silent (IncidentSourceAgentSilent, which is where that is
+	 * reported). A job sent to a silent agent waits unclaimed, and would run
+	 * whenever the agent came back rather than in the node's slot. A node with
+	 * no agent paired is not answered here: the builder refuses it with the
+	 * reason an operator can act on.
+	 */
+	public static function agent_unheard($node, string $now): string {
+		if (trim((string)$node->get('mgn_agent_public_key')) === '') {
+			return '';
+		}
+		$last = trim((string)$node->get('mgn_agent_last_poll'));
+		if ($last === '') {
+			return 'its agent has never checked in';
+		}
+		$last_ts = strtotime($last . ' UTC');
+		$now_ts = strtotime($now . ' UTC');
+		if ($last_ts === false || $now_ts === false || ($now_ts - $last_ts) >= IncidentSourceAgentSilent::SILENT_AFTER) {
+			return 'its agent has not checked in since ' . $last . ' UTC';
+		}
+		return '';
 	}
 
 	private static function normalize(array $p): array {
