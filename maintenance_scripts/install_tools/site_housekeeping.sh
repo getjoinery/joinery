@@ -4,6 +4,9 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.2 - A logrotate file that is the platform's own earlier rendering, which ran as group
+#                user1 (a group no new server has, so logrotate refused it and logrotate.service
+#                failed), is rewritten from the template. Any other file is still never touched.
 # Version: 1.1 - In a container, the release manifest at the site root is the
 #                one the code matches: a container recreated from its image got
 #                back the manifest the image was built with, and the agent then
@@ -21,7 +24,8 @@
 # What it leaves behind:
 #   - /etc/logrotate.d/joinery-{site}, rendered from logrotate_joinery.conf,
 #     written when ABSENT and no other file there already rotates the site's
-#     logs (logrotate refuses a log named twice);
+#     logs (logrotate refuses a log named twice), and rewritten when it is the
+#     platform's earlier rendering that ran as group user1;
 #   - /etc/cron.d/joinery-{site}, the every-minute scheduled-task runner,
 #     written when ABSENT - never inside a container, where the container's
 #     start command owns the cron entry (/etc/cron.d does not survive a
@@ -87,7 +91,18 @@ LOGROTATE="${FS_ROOT}/etc/logrotate.d/joinery-${SITENAME}"
 # platform wrote its own) keeps doing so: logrotate refuses a log named in two
 # files, and would skip both.
 OTHER_ROTATION="$(grep -lF "${SITE_ROOT}/logs/" "$(dirname "${LOGROTATE}")"/* 2>/dev/null | grep -vxF "${LOGROTATE}" | head -1)"
-if [[ -e "${LOGROTATE}" ]]; then
+# The earlier rendering: the template's directives with the group user1,
+# comments and blank lines aside. Nobody chose that file, so it is not an
+# owner's edit, and on a machine with no user1 group it fails every night.
+directives() { grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$@"; }
+if [[ -f "${LOGROTATE}" && -f "${TEMPLATE}" ]] \
+    && [[ "$(directives "${LOGROTATE}")" == "$(sed -e "s|{{SITE_ROOT}}|${SITE_ROOT}|g" \
+            -e 's|^\([[:space:]]*su www-data\) www-data$|\1 user1|' "${TEMPLATE}" | directives)" ]] \
+    && ! grep -q '^[[:space:]]*su www-data user1$' "${TEMPLATE}"; then
+    sed "s|{{SITE_ROOT}}|${SITE_ROOT}|g" "${TEMPLATE}" > "${LOGROTATE}" && chmod 644 "${LOGROTATE}" \
+        && say "rewrote ${LOGROTATE}: it was the earlier rendering, which ran as group user1" \
+        || { warn "could not rewrite ${LOGROTATE}"; FAILED=1; }
+elif [[ -e "${LOGROTATE}" ]]; then
     :
 elif [[ -n "${OTHER_ROTATION}" ]]; then
     say "this site's logs are already rotated by ${OTHER_ROTATION} - not writing ${LOGROTATE}"

@@ -9,7 +9,9 @@
 #
 # site_housekeeping.sh writes the site's logrotate file and, on bare metal, its
 # cron entry - each only when ABSENT, so an owner's edit survives every
-# converge and moving a file aside is the reset
+# converge and moving a file aside is the reset. The one exception is the
+# platform's own earlier logrotate rendering, which ran as group user1 (a group
+# no new server has): it is rewritten from the template
 # (specs/agent_recipes_and_vocabulary.md, Host files). In a container it keeps
 # the release manifest at the site root the one the code matches, with a copy on
 # the config volume (B21). Driven unprivileged against a fixture /etc through
@@ -45,6 +47,65 @@ echo "# mine too" > "$R/etc/cron.d/joinery-mysite"
 JOINERY_SITE_HOUSEKEEPING_ROOT="$R" bash "$SCRIPT" mysite "$SITE" >/dev/null 2>&1
 chk "an owner's logrotate file survives" "$(cat "$R/etc/logrotate.d/joinery-mysite")" "# mine"
 chk "an owner's cron file survives" "$(cat "$R/etc/cron.d/joinery-mysite")" "# mine too"
+
+echo "=== The earlier rendering (group user1) is rewritten; nothing else is ==="
+# The file every server installed from 09-23 has, byte for byte.
+old_rendering() {
+    cat <<OLD
+# Joinery log rotation configuration
+# Installed by site_housekeeping.sh — rotates Apache error logs weekly
+# The $1 placeholder is replaced during installation
+
+$1/logs/error.log {
+    su www-data user1
+    weekly
+    rotate 2
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 20M
+}
+
+$1/logs/cron_scheduled_tasks.log {
+    su www-data user1
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 10M
+}
+
+$1/logs/host_converger.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 5M
+}
+OLD
+}
+R7="$T/fs7"; mkdir -p "$R7/etc/logrotate.d" "$R7/etc/cron.d"
+old_rendering "$SITE" > "$R7/etc/logrotate.d/joinery-mysite"
+out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$R7" bash "$SCRIPT" mysite "$SITE" 2>&1)"; rc=$?
+chk "it is rewritten from the template, saying so" "$rc:$(printf '%s' "$out" | grep -c 'earlier rendering')" "0:1"
+chk "and runs as www-data's own group" "$(grep -c 'su www-data www-data' "$R7/etc/logrotate.d/joinery-mysite")/$(grep -c 'user1' "$R7/etc/logrotate.d/joinery-mysite")" "2/0"
+out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$R7" bash "$SCRIPT" mysite "$SITE" 2>&1)"
+chk "the next converge leaves it alone" "$(printf '%s' "$out" | grep -c 'rewrote')" "0"
+old_rendering "$SITE" | sed 's/rotate 2$/rotate 9/' > "$R7/etc/logrotate.d/joinery-mysite"
+JOINERY_SITE_HOUSEKEEPING_ROOT="$R7" bash "$SCRIPT" mysite "$SITE" >/dev/null 2>&1
+chk "one directive changed by an owner: the file is theirs and survives" "$(grep -c 'rotate 9' "$R7/etc/logrotate.d/joinery-mysite")/$(grep -c 'user1' "$R7/etc/logrotate.d/joinery-mysite")" "1/2"
+old_rendering "$T/html/othersite" > "$R7/etc/logrotate.d/joinery-mysite"
+JOINERY_SITE_HOUSEKEEPING_ROOT="$R7" bash "$SCRIPT" mysite "$SITE" >/dev/null 2>&1
+chk "the earlier rendering for another site's root is not this site's, and survives" "$(grep -c 'othersite' "$R7/etc/logrotate.d/joinery-mysite")" "4"
+chk "the template runs as www-data's own group, never user1" "$(grep -c '^[[:space:]]*su www-data www-data$' "$ROOT/maintenance_scripts/install_tools/logrotate_joinery.conf")/$(grep -c 'user1' "$ROOT/maintenance_scripts/install_tools/logrotate_joinery.conf")" "2/0"
 
 echo "=== Another file already rotating the site's logs is left to do so ==="
 R4="$T/fs4"; mkdir -p "$R4/etc/logrotate.d" "$R4/etc/cron.d"
