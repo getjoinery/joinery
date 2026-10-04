@@ -1446,4 +1446,22 @@ $sc_cmd = JobCommandBuilder::build_site_census(jrp_node(array('mgn_agent_public_
 check($sc_cmd === array('primitive' => 'site_census', 'params' => array()), 'the job names the word and nothing else',
 	var_export($sc_cmd, true));
 
+// ---------------------------------------------------------------------------
+section('A full backup asks the node which recovery key it holds');
+
+$rk_node = jrp_node(array('mgn_agent_public_key' => base64_encode(random_bytes(32))));
+$rk_count = function () use ($rk_node) {
+	return (new MultiManagementJob(array('node_id' => $rk_node->key, 'job_type' => 'recovery_key_report', 'deleted' => false)))->count();
+};
+$rk_out = "manager success: Incremental backup in chain-x\nBACKUP_RESULT=success\nBACKUP_TIME=2026-10-03 18:00:00\nBACKUP_LEVEL=1\n";
+JobResultProcessor::process(jrp_job($rk_node, 'backup_run', $rk_out));
+check($rk_count() === 0, 'an incremental asks nothing: its chain, and so its key, did not change');
+JobResultProcessor::process(jrp_job($rk_node, 'backup_run', str_replace('BACKUP_LEVEL=1', 'BACKUP_LEVEL=0', $rk_out)));
+check($rk_count() === 1, 'a full backup starts a chain (as every changed key does): the node is asked for its key');
+JobResultProcessor::process(jrp_job($rk_node, 'backup_run', str_replace('BACKUP_LEVEL=1', 'BACKUP_LEVEL=0', $rk_out)));
+check($rk_count() === 1, 'a second within minutes does not ask again');
+foreach (new MultiManagementJob(array('node_id' => $rk_node->key, 'job_type' => 'recovery_key_report', 'deleted' => false)) as $rk_job) {
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $rk_job->key);
+}
+
 harness_finish();

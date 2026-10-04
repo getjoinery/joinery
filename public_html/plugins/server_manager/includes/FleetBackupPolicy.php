@@ -15,6 +15,7 @@
  *
  * @version 1.7 - machine_key() and agent_unheard() replace max_concurrent(): backups are limited to one at a
  *                time per machine, and a node whose agent is not checking in is not sent one
+ * @version 1.6 - a verify is due at once after the first backup under a changed recovery key (note_verify_sent)
  * @version 1.5 - is_eligible(): the rule eligible_nodes() applies, for one node, so the backup incidents ask the same
  *                question (incident_triage.md WP3)
  * @version 1.4 - eligible_nodes() skips every node in an install state, not only one installing
@@ -368,7 +369,23 @@ class FleetBackupPolicy {
 		if ($backup_ts <= $verify_ts) {
 			return false;   // nothing newer than what was last verified
 		}
+		// The recovery key changed since the last verify was sent: the backups
+		// after it seal to a new key, so the first of them is proved at once.
+		$at_verify = trim((string)$node->get('mgn_backup_verify_recovery_fpr'));
+		$now_fpr = trim((string)$node->get('mgn_backup_recovery_fpr'));
+		if ($at_verify !== '' && $now_fpr !== '' && !hash_equals($at_verify, $now_fpr)) {
+			return true;
+		}
 		return ($now_ts - $verify_ts) >= ($every * 86400);
+	}
+
+	/**
+	 * Record, as a verify of this node is sent, the recovery key it is sent
+	 * under: is_verify_due() verifies the first backup after that key changes.
+	 */
+	public static function note_verify_sent($node): void {
+		$node->set('mgn_backup_verify_recovery_fpr', trim((string)$node->get('mgn_backup_recovery_fpr')) ?: null);
+		$node->save();
 	}
 
 	/**

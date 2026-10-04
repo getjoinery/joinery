@@ -1395,6 +1395,34 @@ try { JobCommandBuilder::build_decommission_node($decom_v2); } catch (Exception 
 check(strpos($inflight_msg, 'already has a site removal') !== false,
 	'a host with a removal pending refuses a second dispatch', $inflight_msg);
 
+// The old machine of a switch-over (state retired): its own Backups page is
+// unreachable once the domain points at the new server, so the host's proof
+// that the domain left stands in for the approval (site_copy.md WP14). Every
+// other row on the same host keeps the approval.
+list($host_m) = jcb_host_with_agent(array(
+	'mgn_agent_primitives' => 'check_status,decommission_site,decommission_moved_site'));
+$decom_retired = jcb_decom_victim($host_m, array('mgn_container_name' => 'decomsite10',
+	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+$menv = JobCommandBuilder::build_decommission_node($decom_retired);
+check(($menv['primitive'] ?? '') === 'decommission_moved_site' && ($menv['params'] ?? null) === array('site' => 'decomsite10'),
+	'a retired container routes as decommission_moved_site with only the site name', json_encode($menv));
+$decom_live = jcb_decom_victim($host_m, array('mgn_container_name' => 'decomsite11'));
+check((JobCommandBuilder::build_decommission_node($decom_live)['primitive'] ?? '') === 'decommission_site',
+	'a live container on the same host still asks for its own approval');
+list($host_nm) = jcb_host_with_agent();
+$decom_retired2 = jcb_decom_victim($host_nm, array('mgn_container_name' => 'decomsite12',
+	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+$nm_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_retired2); } catch (Exception $e) { $nm_msg = $e->getMessage(); }
+check(strpos($nm_msg, 'decommission_moved_site') !== false,
+	'a host agent without decommission_moved_site refuses the old machine, never falls back to the approval', $nm_msg);
+$decom_retired3 = jcb_decom_victim($host_m, array('mgn_container_name' => 'decomsite13',
+	'mgn_install_state' => 'retired', 'mgn_joinery_version' => '0.8.300'));
+$probe_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_retired3); } catch (Exception $e) { $probe_msg = $e->getMessage(); }
+check(strpos($probe_msg, 'routing-probe') !== false,
+	'an old machine below the routing-probe release refuses: its host could not prove anything', $probe_msg);
+
 // A destructive operation the node does not report is never routed at, even
 // to an agent that can ask its own operator.
 check(JobCommandBuilder::has_primitive($decom_host_node, 'no_such_destructive_op') === false,

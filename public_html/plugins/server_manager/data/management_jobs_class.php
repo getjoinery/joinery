@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.31 - decommission_moved_site's claim budget: the teardown and the host's proof, no approval wait
+ *                 (site_copy.md WP14)
  * @version 1.30 - copy_take_key's claim budget: the owner's hour at the copy's own page inside it
  *                 (site_copy.md WP10)
  * @version 1.29 - copy_export's claim budget (its owner's approval window inside it) and copy_stage's; copy_stage
@@ -313,6 +315,10 @@ class ManagementJob extends SystemBase {
 		// the victim's approval window is the hour. Sized above the agent's
 		// declared 15m + ApprovalWindow.
 		'decommission_site'     => 5400,  // 15m + 60m approval + slack
+		// The old machine of a switch-over: the same teardown, gated by the
+		// host's proof that the domain left instead of an approval wait.
+		// Sized above the agent's declared 20m.
+		'decommission_moved_site' => 1500, // 20m + slack
 	];
 
 	/** The shortest budget in play — the SQL prefilter cannot use less. */

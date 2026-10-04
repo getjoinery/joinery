@@ -19,6 +19,10 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.41 - decommission_node on the old machine of a switch-over says the host proves the domain left
+ *                 instead of asking for the site's approval (site_copy.md WP14)
+ * @version 1.40 - a switch-over that is ready at once moves the proxied address in the same request: the
+ *                 Cloudflare token is typed once
  * @version 1.39 - a copy from backups starts with no tick: nothing it does before the switch-over touches the site,
  *                 and the switch-over asks that the old server is off
  * @version 1.38 - the switch-over's method (proxied origin, IP swap, the owner's own DNS change) and a copy from
@@ -749,8 +753,17 @@ class NodeDetailActions {
 						return $copy_url;
 					}
 					$method = (string)($_POST['copy_method'] ?? '');
-					SiteCopyRunner::begin_switch($site_copy, $method,
-						$method === SiteCopyRunner::METHOD_PROXIED ? self::copy_dns_driver($node, true) : null, $uid);
+					$driver = $method === SiteCopyRunner::METHOD_PROXIED ? self::copy_dns_driver($node, true) : null;
+					SiteCopyRunner::begin_switch($site_copy, $method, $driver, $uid);
+					// A copy ready at once (from backups, nothing to power off)
+					// moves its address in this same request, with the token
+					// already typed: nothing waits between the check and the move.
+					$site_copy->load();
+					if ($driver !== null && $site_copy->status() === SiteCopy::STATUS_READY) {
+						SiteCopyRunner::move_address($site_copy, $driver, $uid);
+						self::ok($session, $page_regex, 'The address points at the copy, and the proxy reaches it. The copy is taking over as the site.');
+						return $copy_url;
+					}
 					self::ok($session, $page_regex, $site_copy->from_backups()
 						? 'The switch-over has begun. Move the address once the copy is ready.'
 						: 'The site is frozen: visitors see the maintenance page while the final copy runs. Move the address once it matches.');
@@ -940,8 +953,11 @@ class NodeDetailActions {
 				$node->set('mgn_agent_quiet_time', gmdate('Y-m-d H:i:s'));
 				$node->save();
 				$session->save_message(new DisplayMessage(
-					'Permanent deletion started. The site must approve its own removal on its Backups page; '
-					. 'the record is removed once the host verifies the site gone.', 'Success',
+					JobCommandBuilder::decommission_is_moved($node)
+						? 'Permanent deletion started. The host first checks that the domain reaches another server, '
+							. 'and removes nothing if it still reaches this site or cannot be reached.'
+						: 'Permanent deletion started. The site must approve its own removal on its Backups page; '
+							. 'the record is removed once the host verifies the site gone.', 'Success',
 					$page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return self::jobUrl($job);

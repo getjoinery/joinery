@@ -27,6 +27,7 @@
  * A swap made anywhere else would leave the copy signing as itself against a
  * row that no longer holds its key.
  *
+ * @version 1.1 - the container name and Docker host move with the machine: a container source's copy is bare metal
  * @version 1.0
  */
 class SiteCopySwap {
@@ -37,6 +38,9 @@ class SiteCopySwap {
 	 */
 	const MACHINE_COLUMNS = array(
 		'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path', 'mgn_ssh_port',
+		// A container source's machine is its container on a Docker host;
+		// the copy is bare metal, so the site's row leaves both behind.
+		'mgn_container_name', 'mgn_mgh_managed_host_id',
 		'mgn_last_host_report', 'mgn_last_host_report_time',
 		'mgn_agent_public_key', 'mgn_agent_paired_time', 'mgn_agent_quiet_time', 'mgn_agent_last_poll',
 		'mgn_agent_version', 'mgn_agent_primitives', 'mgn_agent_recipes', 'mgn_agent_bundle_version',

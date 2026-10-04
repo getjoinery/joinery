@@ -18,6 +18,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.8 - a kept switch-over from a container points at Permanently Delete Site on the old row instead of
+ *                 naming a server to delete (B58, site_copy.md WP14); the old row names the site by its name
+ * @version 1.7 - the key step is two links at the copy's own address, opening in a new window: no hosts-file line
  * @version 1.6 - the size is a choice of plans with the source's own size chosen
  * @version 1.5 - cloud accounts named as the provider names them; an expired connection is not offered (B47)
  * @version 1.4 - the start box says what each way of copying needs in one line each; a copy from backups is not
@@ -67,7 +70,14 @@ if (in_array(trim((string)$node->get('mgn_install_state')), array('copy', 'retir
 	echo '<p>' . (trim((string)$node->get('mgn_install_state')) === 'retired'
 		? 'This is the old server of a site that switched over to a new one. The switch-over is kept or undone from the Copy tab of the site: '
 		: 'This server is a dormant copy. It is made, refreshed and discarded from the Copy tab of the site it copies: ');
-	echo '<a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . $src_id . '&tab=copy">node #' . $src_id . '</a>.</p>';
+	$src_name = '';
+	try { $src_name = (string)(new ManagedNode($src_id, TRUE))->get('mgn_name'); } catch (Exception $e) { }
+	echo '<a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . $src_id . '&tab=copy">'
+		. $copy_h($src_name !== '' ? $src_name : 'the site') . '</a>.</p>';
+	if (trim((string)$node->get('mgn_install_state')) === 'retired' && trim((string)$node->get('mgn_container_name')) !== '') {
+		echo '<p>Once the switch-over is kept, remove this old container with <strong>Permanently Delete Site</strong> in '
+			. 'the Actions menu. Its host checks first that the domain reaches the new server, and removes nothing if it does not.</p>';
+	}
 	$page->end_box();
 	return;
 }
@@ -79,6 +89,14 @@ if (!$site_copy) {
 	// ── No copy: the preflight, and the two ways to start ──
 	$ended_copy = SiteCopy::recently_ended_for_source((int)$node->key);
 	$ended_server = $ended_copy ? SiteCopyRunner::server_to_delete($ended_copy) : '';
+	$ended_container = $ended_copy ? SiteCopyRunner::old_container($ended_copy) : null;
+	if ($ended_container) {
+		echo '<div class="alert alert-light border">The last copy of this site ended ('
+			. $copy_h(strtolower($ended_copy->status_label())) . ', ' . $copy_h($ended_copy->get_local('scp_update_time', 'M j, g:i A'))
+			. '). If you have not yet, remove the old container: open <a href="/admin/server_manager/node_detail?mgn_managed_node_id='
+			. (int)$ended_container->key . '">' . $copy_h($ended_container->get('mgn_name')) . '</a> and choose '
+			. '<strong>Permanently Delete Site</strong>. Its host checks first that the domain reaches this server.</div>';
+	}
 	if ($ended_server !== '') {
 		echo '<div class="alert alert-light border">The last copy of this site ended ('
 			. $copy_h(strtolower($ended_copy->status_label())) . ', ' . $copy_h($ended_copy->get_local('scp_update_time', 'M j, g:i A'))
@@ -301,12 +319,19 @@ if ($copy_steps) {
 		echo '<td>' . $copy_h($s['reason'] ?? '') . '</td></tr>';
 		if ($s['op'] === 'copy_take_key' && $s['verdict'] === 'running' && $copy_node) {
 			$domain = SiteCopyRunner::site_domain($node);
-			echo '<tr><td colspan="4" class="table-info">Waiting for you to open the backup on the copy\'s own page. Point your computer at '
-				. 'the copy with one hosts-file line, <code>' . $copy_h($copy_node->get('mgn_host') . ' ' . $domain) . '</code>, open '
-				. '<code>https://' . $copy_h($domain . $site_copy->get('scp_look_path')) . '</code> (it lets you past the copy\'s quiet state), '
-				. 'then <code>https://' . $copy_h($domain) . '/copy-key</code>. Paste the site\'s backup recovery key there: it is used in '
-				. 'your browser and never reaches this management node. The page names the backup and the key\'s fingerprint; check '
-				. 'both. Remove the hosts-file line afterwards.</td></tr>';
+			// The key page needs no hosts-file line: it answers at the copy's
+			// own address, the look link's cookie included (the certificate
+			// warning is the copy's placeholder, accepted once).
+			$copy_ip = (string)$copy_node->get('mgn_host');
+			$copy_ip_host = filter_var($copy_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? '[' . $copy_ip . ']' : $copy_ip;
+			$look_url = 'https://' . $copy_ip_host . $site_copy->get('scp_look_path');
+			$key_url = 'https://' . $copy_ip_host . '/copy-key';
+			echo '<tr><td colspan="4" class="table-info"><strong>Waiting for the backup\'s recovery key.</strong><ol class="mb-1">'
+				. '<li><a href="' . $copy_h($look_url) . '" target="_blank" rel="noopener">Open the copy</a> and accept the certificate '
+				. 'warning (the copy has no certificate of its own yet).</li>'
+				. '<li><a href="' . $copy_h($key_url) . '" target="_blank" rel="noopener">Open its key page</a>, check the backup and the '
+				. 'key\'s fingerprint it names, and paste the recovery key. It stays in your browser; this management node never sees it.</li>'
+				. '</ol></td></tr>';
 		}
 		if ($s['op'] === 'copy_export' && $s['verdict'] === 'running') {
 			$approve_url = rtrim((string)$node->get('mgn_site_url'), '/') . '/admin/admin_backups';
@@ -342,8 +367,9 @@ if ($census) {
 if ($site_copy->get('scp_look_path') && $copy_node && in_array($copy_status, array(SiteCopy::STATUS_DORMANT, SiteCopy::STATUS_HALTED), true)) {
 	$domain = SiteCopyRunner::site_domain($node);
 	echo '<div class="alert alert-light border"><strong>Look at the copy.</strong> Point your computer at it with one hosts-file line, '
-		. '<code>' . $copy_h($copy_node->get('mgn_host') . ' ' . $domain) . '</code>, then open '
-		. '<code>https://' . $copy_h($domain . $site_copy->get('scp_look_path')) . '</code>. Everyone else gets a 503 from the copy. '
+		. '<code>' . $copy_h($copy_node->get('mgn_host') . ' ' . $domain) . '</code>, then '
+		. '<a href="' . $copy_h('https://' . $domain . $site_copy->get('scp_look_path')) . '" target="_blank" rel="noopener">open the copy</a>. '
+		. 'Everyone else gets a 503 from the copy. '
 		. 'Anything you change there is undone at the next copy run. A browser that already has a connection open to this site '
 		. 'keeps using it: close the browser, or flush its sockets (chrome://net-internals/#sockets), after editing the hosts file.</div>';
 }
@@ -548,8 +574,12 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 		echo '<p><strong>Switched over</strong> at ' . $copy_h($copy_switch['switched_time'] ?? '') . ' UTC. This node is the new '
 			. 'server now' . ($copy_backups ? '.' : '; the old one is frozen, kept for the way back.') . '</p>';
 		$copy_plain_form('copy_finish', 'Keep the switch-over', 'btn-success');
+		$copy_old_row = SiteCopyRunner::copy_row($site_copy, false);
+		$copy_old_is_container = $copy_old_row && trim((string)$copy_old_row->get('mgn_container_name')) !== '';
 		echo '<p class="small text-muted mt-2">Keeping it ' . ($copy_backups ? '' : 'closes the way back and ') . 'removes the old server\'s '
-			. 'record. The old server itself is yours to delete at its provider.</p>';
+			. 'record. ' . ($copy_old_is_container
+				? 'The old container is then removed from its host with Permanently Delete Site on the old record, linked here.'
+				: 'The old server itself is yours to delete at its provider.') . '</p>';
 	}
 	if ($copy_status === SiteCopy::STATUS_HALTED && $phase === 'start' && $copy_address_at_copy) {
 		$copy_plain_form('copy_retry_start', 'Try starting the copy again', 'btn-primary');

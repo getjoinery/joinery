@@ -4,6 +4,8 @@
  *
  * @version 1.36 - removing a node, either way, cancels its unfinished jobs (withdraw_open_jobs): its agent is
  *                 refused once the node is gone, so nothing else would ever end them
+ * @version 1.35 - mgn_backup_verify_recovery_fpr: the recovery key on record when this node's last verify was
+ *                 sent, so the first backup under a rotated key is verified without waiting for the interval
  * @version 1.34 - permanent_delete() takes the incident pass's lock, so a pass never opens an incident on
  *                 a node being deleted under it (site_copy.md B41)
  * @version 1.33 - valid_site_domain() and adopt_reported_site_domain(): a status check fills an empty
@@ -131,6 +133,7 @@ class ManagedNode extends SystemBase {
 		// on page load — and so a node holding a key the management node did not
 		// put there is visible rather than silently left behind.
 		'mgn_backup_recovery_fpr' => array('type'=>'varchar(64)'),
+		'mgn_backup_verify_recovery_fpr' => array('type'=>'varchar(64)'),
 
 		// This management node's backup policy for this node — the manager profile.
 		// A blob rather than a column each because it is read whole, written

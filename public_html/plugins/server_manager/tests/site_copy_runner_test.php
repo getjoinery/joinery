@@ -153,6 +153,9 @@ foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => 
 $sw_prov->save();
 harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $sw_prov->key);
 
+// The source runs in a container: its container is part of the old machine.
+$sw_src->set('mgn_container_name', 'scpswapsite');
+$sw_src->save();
 $tjob = ManagementJob::createFromBuild($sw_copy->key, 'take_node_id', $built, null, null);
 harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $tjob->key);
 $tjob->set('mjb_status', 'completed');
@@ -176,6 +179,8 @@ check((string)$sw_copy->get('mgn_agent_public_key') === $source_key && (string)$
 	&& $sw_copy->get('mgn_install_state') === 'retired',
 	'the copy\'s row takes the old machine and its key, retired, for the way back');
 check((int)$sw_prov->get('cvp_mgn_managed_node_id') === (int)$sw_src->key, 'the provision follows its machine to the node');
+check((string)$sw_src->get('mgn_container_name') === '' && (string)$sw_copy->get('mgn_container_name') === 'scpswapsite',
+	'a container source\'s container stays with the old machine: the node is bare metal now');
 check(JobResultProcessor::complete_take_node_id($tjob) === 0, 'a result answered once is never swapped again');
 
 SiteCopySwap::go_back($sw_src, $sw_copy);
@@ -184,6 +189,9 @@ check((string)$sw_src->get('mgn_agent_public_key') === $source_key && $sw_src->g
 	&& (string)$sw_copy->get('mgn_agent_public_key') === $copy_key && $sw_copy->get('mgn_install_state') === 'copy'
 	&& (int)$sw_prov->get('cvp_mgn_managed_node_id') === (int)$sw_copy->key,
 	'the way back puts both machines back, the node frozen for its owner to unfreeze');
+check((string)$sw_src->get('mgn_container_name') === 'scpswapsite', 'and the container comes back with its machine');
+$sw_src->set('mgn_container_name', null);
+$sw_src->save();
 
 $sw_src->set('mgn_install_state', null);
 $sw_src->save();
@@ -418,6 +426,7 @@ $cnode->set('mgn_last_host_report', json_encode(array('memory' => array('total_b
 	'disk' => array('avail_bytes' => 1000000))));
 $cnode->save();
 SiteCopyRunner::copy_again($copy, null); $copy->load();
+check(!empty($copy->steps()[0]['job_id']), 'Copy again queues the run\'s first step at once, not at the next task tick');
 SiteCopyRunner::advance($copy); $copy->load();
 $finish($step_job($copy, 0), 'completed', array('reported' => true));
 SiteCopyRunner::advance($copy); $copy->load();
@@ -474,6 +483,39 @@ check((string)$export->get('mjb_status') === 'cancelled' && $asked !== null && $
 check($copy->status() === SiteCopy::STATUS_DISCARDED && $cnode->get('mgn_delete_time') && strpos($server, '192.0.2.70') !== false,
 	'Discard ends the copy and removes its row, and names the server for its owner to delete at the provider', $server);
 check(SiteCopy::live_for_source((int)$src->key) === null, 'and the site can be copied again');
+
+// ---------------------------------------------------------------------------
+section('After a kept switch-over, the server to delete is the old machine, never the live one (B58)');
+
+// The copy's provision follows the NEW server, which is now the live site. A
+// copy row holding the old machine must never fall back to it.
+$live_prov = new CustomerCloudProvision(NULL);
+foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => 'scplive.example.org',
+	'cvp_slug' => 'harnessscr-live-' . bin2hex(random_bytes(3)), 'cvp_status' => 'done', 'cvp_docker_mode' => 'bare-metal',
+	'cvp_provider' => 'linode', 'cvp_instance_id' => '99887766', 'cvp_instance_ip' => '192.0.2.99',
+	'cvp_mgn_managed_node_id' => (int)$src->key) as $k => $v) {
+	$live_prov->set($k, $v);
+}
+$live_prov->save();
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $live_prov->key);
+$copy->set('scp_cvp_customer_cloud_provision_id', (int)$live_prov->key);
+
+$old_box = $mk_node('oldbox', array('mgn_install_state' => 'retired', 'mgn_host' => '192.0.2.61'));
+$copy->set('scp_copy_node_id', (int)$old_box->key);
+$copy->save();
+$named = SiteCopyRunner::server_to_delete($copy);
+check(strpos($named, '192.0.2.61') !== false && strpos($named, '99887766') === false,
+	'an old bare machine with no provision of its own is named by its address, not by the live server\'s provision', $named);
+check(SiteCopyRunner::old_container($copy) === null, 'and it is not a container to remove from a host');
+
+$old_ctr = $mk_node('oldctr', array('mgn_install_state' => 'retired', 'mgn_container_name' => 'scpoldctr'));
+$copy->set('scp_copy_node_id', (int)$old_ctr->key);
+$copy->save();
+check(SiteCopyRunner::server_to_delete($copy) === '',
+	'an old container names no server to delete at a provider: its host is shared', SiteCopyRunner::server_to_delete($copy));
+$found = SiteCopyRunner::old_container($copy);
+check($found && (int)$found->key === (int)$old_ctr->key,
+	'and old_container() names its row, for Permanently Delete Site');
 
 SiteCopyRunner::$chain_lister = null;
 SiteCopyRunner::$stage_builder = null;

@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.35 - Permanently Delete Site on the old machine of a switch-over says the host checks the domain
+ *                 left instead of asking the site to approve (site_copy.md WP14)
  * @version 1.34 - the move panel asks CustomerCloudProvision::is_sold()
  * @version 1.33 - the Move to customer's Linode panel on a Managed site's node: the transfer check, run when the
  *                 tab opens, with Re-check and Start, and the transfer's state linked to its queue row
@@ -302,7 +304,7 @@
 						<input type="hidden" name="action" value="decommission_node">
 						<input type="hidden" name="confirm_site_name" value="<?php echo htmlspecialchars($decommission_site); ?>">
 						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($is_removed ? 'Permanently delete the site on the host? If it is still running there, this destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : 'Permanently delete this site? This destroys the container, its database, and every uploaded file on the host. Offsite backups are kept. This cannot be undone.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($decommission_site), ENT_QUOTES); ?>, function(){ document.getElementById('decommission_node_form').submit(); })">Permanently Delete Site&hellip;</button>
+						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode(JobCommandBuilder::decommission_is_moved($node) ? 'Permanently delete the old machine\'s site on its host? The host first checks that the domain reaches another server, and removes nothing if it does not. Then it destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : ($is_removed ? 'Permanently delete the site on the host? If it is still running there, this destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : 'Permanently delete this site? This destroys the container, its database, and every uploaded file on the host. Offsite backups are kept. This cannot be undone.')), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($decommission_site), ENT_QUOTES); ?>, function(){ document.getElementById('decommission_node_form').submit(); })">Permanently Delete Site&hellip;</button>
 					</form>
 				</li>
 			<?php elseif ($decommission_site !== null && $is_removed): ?>

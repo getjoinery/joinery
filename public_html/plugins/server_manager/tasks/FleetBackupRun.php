@@ -37,6 +37,7 @@
  * @version 1.8 - one backup at a time per machine, counting only claimed work, replaces the fleet-wide cap
  *                (a job no agent would ever claim held a fleet slot forever); a node whose agent is
  *                not checking in is skipped and named, not sent a job
+ * @version 1.7 - a verify it sends records the recovery key it is sent under
  * @version 1.6 - retention is the site's own reported window, never below the policy's keep_days; after a node reports a successful run the pass lists its
  *                backup storage once (witness_landing), so "Backups are not landing" is known within a
  *                tick instead of at the next night's dispatch
@@ -326,6 +327,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 		);
 		$built = JobCommandBuilder::build_verify_backup($node, $params);
 		ManagementJob::createFromBuild($node->key, 'verify_backup', $built, $params, null);
+		FleetBackupPolicy::note_verify_sent($node);
 	}
 
 	/**

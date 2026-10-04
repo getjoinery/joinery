@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.92 - build_decommission_node routes the old machine of a switch-over (state retired) to
+ *                 decommission_moved_site (agent 1.55.0): the host's proof that the domain left stands in
+ *                 for the approval its unreachable page would ask (site_copy.md WP14)
  * @version 1.91 - COPY_FROM_BACKUPS_MIN_VERSION: a copy from backups needs the release with the copy's key page
  * @version 1.90 - build_copy_look / build_copy_take_key (agent 1.54.0): a copy from backups, its key taken
  *                 with the recovery key on the copy's own page (site_copy.md WP10)
@@ -428,7 +431,7 @@ class JobCommandBuilder {
 	 * this list decides what the plane will not ask for, and the agent decides
 	 * what it will not do.
 	 */
-	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain', 'decommission_site', 'copy_export'];
+	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain', 'decommission_site', 'copy_export', 'decommission_moved_site'];
 
 	/**
 	 * May this node be sent a destructive primitive job?
@@ -3559,6 +3562,15 @@ class JobCommandBuilder {
 	 * - a victim below the release that carries the approval panel: upgrade it
 	 *   first, or it cannot render the consent it would be asked for;
 	 * - a victim with pending or running jobs: finish or cancel them first.
+	 *
+	 * THE OLD MACHINE OF A SWITCH-OVER (state retired) takes
+	 * decommission_moved_site instead (site_copy.md WP14). Its domain points at
+	 * the new server, so its own Backups page, where the approval is answered,
+	 * cannot be reached. The HOST proves the domain left — a one-time token in
+	 * the container that no name in the host's vhost brings back — and that
+	 * proof stands in for the approval. This plane only chooses the word; it
+	 * cannot make the proof pass. The victim needs the routing-probe route
+	 * (ProvisionPendingSsl::PROBE_MIN_CORE_VERSION) rather than the panel.
 	 */
 	public static function build_decommission_node($node, $params = []) {
 		if ($node->get('mgn_is_relay')) {
@@ -3586,17 +3598,29 @@ class JobCommandBuilder {
 		}
 
 		$host_node = self::decommission_host_node_for($node);
-		if (!self::has_primitive($host_node, 'decommission_site')) {
+		$moved = self::decommission_is_moved($node);
+		$word = $moved ? 'decommission_moved_site' : 'decommission_site';
+		if (!self::has_primitive($host_node, $word)) {
 			throw new Exception(
-				"The host agent '{$host_node->get('mgn_slug')}' cannot remove a site. "
-				. AgentVocabulary::needs_newer_agent_text($host_node, ['decommission_site'])
+				"The host agent '{$host_node->get('mgn_slug')}' cannot remove "
+				. ($moved ? "the old machine of a switch-over. " : "a site. ")
+				. AgentVocabulary::needs_newer_agent_text($host_node, [$word])
 			);
 		}
 
-		// The victim renders its own consent, so the release carrying the
-		// approval panel must be ON the victim before the host can stage one.
 		$core = trim((string)$node->get('mgn_joinery_version'));
-		if ($core === '' || version_compare($core, self::DECOMMISSION_PANEL_MIN_CORE_VERSION, '<')) {
+		if ($moved) {
+			// The host's proof asks the container for a token through the
+			// site's own routing-probe view.
+			if ($core === '' || version_compare($core, ProvisionPendingSsl::PROBE_MIN_CORE_VERSION, '<')) {
+				throw new Exception(
+					"Node '{$node->get('mgn_slug')}' runs core " . ($core === '' ? '(unknown)' : $core)
+					. ", which has no routing-probe page, so its host cannot prove the domain left it."
+				);
+			}
+		} elseif ($core === '' || version_compare($core, self::DECOMMISSION_PANEL_MIN_CORE_VERSION, '<')) {
+			// The victim renders its own consent, so the release carrying the
+			// approval panel must be ON the victim before the host can stage one.
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' runs core " . ($core === '' ? '(unknown)' : $core)
 				. ", which cannot render the removal approval. Upgrade it to "
@@ -3632,7 +3656,23 @@ class JobCommandBuilder {
 			);
 		}
 
-		return self::build_decommission_site_primitive($host_node, ['site' => $site]);
+		return $moved
+			? self::build_decommission_moved_site_primitive($host_node, ['site' => $site])
+			: self::build_decommission_site_primitive($host_node, ['site' => $site]);
+	}
+
+	/**
+	 * Whether a removal takes the host's proof instead of the site's approval:
+	 * only the old machine of a switch-over, whose domain has gone to the new
+	 * server (site_copy.md WP14). Every other site approves its own removal.
+	 */
+	public static function decommission_is_moved($node) {
+		return (string)$node->get('mgn_install_state') === 'retired';
+	}
+
+	/** The envelope, addressed to the HOST node: the site's name, as decommission_site. */
+	public static function build_decommission_moved_site_primitive($host_node, $params = []) {
+		return ['primitive' => 'decommission_moved_site', 'params' => ['site' => (string)($params['site'] ?? '')]];
 	}
 
 	/**
