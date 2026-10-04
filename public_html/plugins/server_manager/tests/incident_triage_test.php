@@ -21,6 +21,8 @@
  *   - what is refused: a "do" value nobody offered, an empty note, an id that
  *     is no incident, and the API action below the superadmin floor;
  *   - Resolve all cleared resolves only what cleared and still needs you;
+ *   - a note given with a triage (what fixed it) lands on each incident the
+ *     triage reached, after its triage event, and a blank one adds nothing;
  *   - the header line's count and colour for each mix, and the menu count's
  *     registry (zeros and a failing counter show nothing);
  *   - the carry-over maps read and unread cases exactly.
@@ -205,11 +207,37 @@ section('Resolve all cleared');
 
 if ($f2b !== null && $disk !== null && $svc !== null) {
 	IncidentTriage::set($svc, IncidentRecord::TRIAGE_NEW, $uid);
-	IncidentTriage::resolve_all_cleared($uid, ['node_id' => $node_id]);
+	$svc_events = count(IncidentEvent::for_incident((int)$svc->key));
+	IncidentTriage::resolve_all_cleared($uid, ['node_id' => $node_id], 'Fixed by the cleared fix');
 	$f2b->load(); $disk->load(); $svc->load();
 	check($f2b->triage() === IncidentRecord::TRIAGE_RESOLVED && $disk->triage() === IncidentRecord::TRIAGE_RESOLVED,
 		'Both cleared incidents that needed a look are resolved');
 	check($svc->triage() === IncidentRecord::TRIAGE_NEW, 'An incident still happening is left as it was');
+	$ev = IncidentEvent::for_incident((int)$f2b->key);
+	$last = end($ev);
+	check((string)$last->get('ine_kind') === 'note' && (string)$last->get('ine_text') === 'Fixed by the cleared fix',
+		'Resolve all cleared puts its note on each one it resolved');
+	check(count(IncidentEvent::for_incident((int)$svc->key)) === $svc_events, 'and nothing on the one it left alone');
+}
+
+// ---------------------------------------------------------------------------
+section('A note with a triage');
+
+if ($svc !== null && $disk !== null) {
+	$before = count(IncidentEvent::for_incident((int)$svc->key));
+	IncidentTriage::apply([(int)$svc->key, (int)$disk->key], 'resolved', $uid, "  Fixed in 0.8.456  ");
+	$ev = array_slice(IncidentEvent::for_incident((int)$svc->key), $before);
+	check(count($ev) === 2 && (string)$ev[0]->get('ine_kind') === 'triage' && (string)$ev[1]->get('ine_kind') === 'note'
+		&& (string)$ev[1]->get('ine_text') === 'Fixed in 0.8.456',
+		'Resolving with a note records the triage, then the note, trimmed');
+	$ev = IncidentEvent::for_incident((int)$disk->key);
+	$last = end($ev);
+	check((string)$last->get('ine_text') === 'Fixed in 0.8.456',
+		'An incident already resolved in the selection still gets the note');
+	$before = count(IncidentEvent::for_incident((int)$svc->key));
+	IncidentTriage::apply([(int)$svc->key], 'new', $uid, " \n ");
+	check(count(IncidentEvent::for_incident((int)$svc->key)) === $before + 1, 'A blank note adds nothing beyond the triage');
+	IncidentTriage::set($svc, IncidentRecord::TRIAGE_NEW, $uid);
 }
 
 // ---------------------------------------------------------------------------

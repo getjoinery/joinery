@@ -11,6 +11,7 @@
  * Superadmin only. Every write is a POST carrying the admin CSRF token, and
  * goes through IncidentTriage.
  *
+ * @version 1.1 - Resolve and Resolve all cleared ask what fixed it in a modal; the answer is a note on each
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -63,13 +64,16 @@ if ($_POST) {
 			if (count($ids) === 0) {
 				$flash('Select one or more incidents first.', false);
 			} else {
-				$r = IncidentTriage::apply($ids, (string)($_POST['do'] ?? ''), $uid);
+				$note = (string)($_POST['note'] ?? '');
+				$r = IncidentTriage::apply($ids, (string)($_POST['do'] ?? ''), $uid, $note);
 				$flash($r['changed'] . ' incident' . ($r['changed'] === 1 ? '' : 's') . ' changed'
-					. ($r['missing'] > 0 ? '; ' . $r['missing'] . ' no longer exist' . ($r['missing'] === 1 ? 's' : '') : '') . '.', true);
+					. ($r['missing'] > 0 ? '; ' . $r['missing'] . ' no longer exist' . ($r['missing'] === 1 ? 's' : '') : '') . '.'
+					. (trim($note) !== '' ? ' Note added.' : ''), true);
 			}
 		} elseif ($action === 'resolve_all_cleared') {
 			// Within the filters the person was looking at, as the button's count is.
-			$n = IncidentTriage::resolve_all_cleared($uid, array('node_id' => (int)($_POST['node'] ?? 0), 'source' => (string)($_POST['source'] ?? '')));
+			$n = IncidentTriage::resolve_all_cleared($uid, array('node_id' => (int)($_POST['node'] ?? 0), 'source' => (string)($_POST['source'] ?? '')),
+				(string)($_POST['note'] ?? ''));
 			$flash($n . ' cleared incident' . ($n === 1 ? '' : 's') . ' resolved.', true);
 		}
 	} catch (IncidentTriageException $e) {
@@ -178,10 +182,12 @@ if (count($rows) === 0) {
 			. '<input type="hidden" name="node" value="' . (int)$f_node . '">'
 			. '<input type="hidden" name="source" value="' . $e($f_source) . '">'
 			. '<input type="hidden" name="back" value="' . $e($here) . '">'
+			. IncidentViews::resolve_note_field((int)$counts['cleared_needing'])
 			. '<button type="submit" class="btn btn-sm btn-outline-success">Resolve all cleared (' . (int)$counts['cleared_needing'] . ')</button></form>';
 	}
 	echo '</div>';
 	echo IncidentViews::table($rows, ['show_node' => true, 'select' => 'incident_bulk']);
+	echo IncidentViews::resolve_note_script();
 	if (count($rows) >= $shown_max) {
 		echo '<p class="small text-muted mt-2 mb-0">Showing the newest ' . $shown_max . '. Filter by node or type to see older ones.</p>';
 	}
