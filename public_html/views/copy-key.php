@@ -7,6 +7,8 @@
  * never part of anything posted; assets/js/copy-key.js works out the one value
  * that opens this backup's sealed key and puts that in the form.
  *
+ * @version 1.1 - after an answer, a page with no request left says the key opened the backup, not "not waiting"; the
+ *               intro no longer says the source cannot be reached
  * @version 1.0
  */
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -33,7 +35,10 @@
 <?php if (!empty($page_vars['error'])): ?>
 		<div class="alert alert-danger"><?php echo $h($page_vars['error']); ?></div>
 <?php endif; ?>
-<?php if (!$pending): ?>
+<?php if (!$pending && !empty($_GET['sent'])): ?>
+		<div class="alert alert-success">The key opened the backup. This server is now restoring it; follow the rest on the
+			management node's Copy tab. You can close this page.</div>
+<?php elseif (!$pending): ?>
 		<p class="text-muted">This server is not waiting for a backup's key. When a copy is made from a site's backups, its
 			management node's Copy tab says when to open this page.</p>
 <?php else:
@@ -44,8 +49,8 @@
 		$age = $hours >= 48 ? floor($hours / 24) . ' days ago' : $hours . ' hours ago';
 	}
 ?>
-		<p>This server is becoming a copy of <strong><?php echo $h($pending['site']); ?></strong> from its backups, because its
-			own server cannot be reached. Its newest backup is locked with the site's backup recovery key. Paste that key here:
+		<p>This server is becoming a copy of <strong><?php echo $h($pending['site']); ?></strong>, made from its backups. Its
+			newest backup is locked with the site's backup recovery key. Paste that key here:
 			your browser uses it to unlock this one backup, and the key itself never leaves this page.</p>
 		<table class="table table-sm">
 			<tr><th>Backup</th><td><code><?php echo $h($pending['chain_id']); ?></code></td></tr>
@@ -59,7 +64,7 @@
 <?php endif; ?>
 <?php if ($pending['answered']): ?>
 		<p>Your answer is with this machine's agent. This page reloads in a few seconds.</p>
-		<script>setTimeout(function () { window.location.href = '/copy-key'; }, 5000);</script>
+		<script>setTimeout(function () { window.location.href = '/copy-key?sent=1'; }, 5000);</script>
 <?php else: ?>
 		<label for="copy_key_secret" class="form-label">Recovery key (private half)</label>
 		<input type="password" id="copy_key_secret" class="form-control" autocomplete="off" spellcheck="false">

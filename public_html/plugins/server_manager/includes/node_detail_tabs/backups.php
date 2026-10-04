@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.16 - each run shows its newest verify (passed or failed, when, how deep), from the verify jobs sent
  * @version 1.15 - the Verify room is worked out from a listing that carries the manifest version and each
  *                artifact's level, so a version-2 chain is planned per kind as the node plans it
  * @version 1.14 - retention: the site's own window, at least policy_keep_days; the tab says which applies
@@ -538,8 +539,23 @@
 			}
 			echo '</tbody></table>';
 
+			// Each run's newest verify, from the verify jobs this plane sent:
+			// their results name the run as "<chain>/<seq>".
+			$verified_runs = array();
+			foreach (new MultiManagementJob(['node_id' => $node->key, 'job_type' => 'verify_backup', 'deleted' => false],
+					['mjb_management_job_id' => 'DESC'], 50) as $vjob) {
+				$vres = json_decode((string)$vjob->get('mjb_result'), true);
+				$vrun = is_array($vres) ? (string)($vres['run'] ?? '') : '';
+				if ($vrun === '' || isset($verified_runs[$vrun]) || !in_array($vres['verify_status'] ?? '', array('pass', 'fail'), true)) {
+					continue;
+				}
+				$verified_runs[$vrun] = array('pass' => $vres['verify_status'] === 'pass',
+					'when' => substr((string)$vjob->get('mjb_completed_time'), 0, 16),
+					'level' => BackupVerifier::level_name((int)($vres['level'] ?? 0)));
+			}
+
 			echo '<table class="table table-striped table-sm">';
-			echo '<thead><tr><th>When</th><th>Backup</th><th>Taken by</th><th>Size</th><th>Actions</th></tr></thead><tbody>';
+			echo '<thead><tr><th>When</th><th>Backup</th><th>Taken by</th><th>Size</th><th>Verified</th><th>Actions</th></tr></thead><tbody>';
 			foreach ($shelf_runs as $entry) {
 				$c = $entry['chain']; $r = $entry['run'];
 				echo '<tr>';
@@ -547,6 +563,11 @@
 				echo '<td>' . ($r['level'] === 0 ? 'Full' : 'Incremental') . '</td>';
 				echo '<td><small>' . htmlspecialchars($profile_labels[$c['profile']] ?? $c['profile']) . '</small></td>';
 				echo '<td>' . htmlspecialchars(BackupChainListHelper::format_size($r['bytes'])) . '</td>';
+				$v = $verified_runs[$c['chain_id'] . '/' . (int)$r['seq']] ?? null;
+				echo '<td>' . ($v === null ? '<span class="text-muted small">not yet</span>'
+					: '<span class="badge bg-' . ($v['pass'] ? 'success' : 'danger') . '">' . ($v['pass'] ? 'verified' : 'failed') . '</span>'
+					  . ' <span class="text-muted small">' . htmlspecialchars($v['when']) . ' UTC'
+					  . ($v['level'] !== '' ? ' &middot; ' . htmlspecialchars($v['level']) : '') . '</span>') . '</td>';
 				echo '<td>';
 				$ca = htmlspecialchars(json_encode($c['chain_id'])) . ', '
 				    . htmlspecialchars(json_encode($c['profile'])) . ', '

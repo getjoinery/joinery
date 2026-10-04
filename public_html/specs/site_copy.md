@@ -1436,6 +1436,31 @@ the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44), and Phase 2's
 - **WP10 — Phase 2. Built 2026-10-03; see the status above.** The recovery-key ceremony on T's own
   page, T opening the chain's data key from the browser's one-box value, and the owner's statement
   standing in for `copy_export`'s signed list.
+- **WP14 — Remove a container source after a kept switch-over (owner, 2026-10-04).** Found moving
+  Joinerydemo: once the address points at the copy, the old container's own Backups page, where an
+  ordinary removal is approved, can only be reached with a hosts-file line. The proof that the
+  domain has left stands in for that approval, and only for the old machine of a switch-over.
+  - **Who proves it: the Docker host, never M.** The approval exists so that M alone cannot destroy
+    a site. M saying the domain moved would give that back; the host checking it does not. (The SSL
+    probe runs the other way, on M, because there the party it distrusts is the node.)
+  - **The proof, `decommission_moved_site` (destructive, host posture, agent 1.55.0).** One
+    parameter, the site's name, as `decommission_site`. The names come from the host's own vhost:
+    the `ServerName` and any `ServerAlias` of the blocks that proxy to the container.
+    1. The host writes a one-time token to the container's `public_html/sm-ssl-probe.txt` with
+       `docker cp`, which runs nothing inside the container (older containers keep their code in
+       the container's own layer, not a volume).
+    2. **Control:** the container answers the token on its own port. If it does not, the test
+       cannot tell anything, and the job refuses.
+    3. **Each name over https, certificate checked, no redirect followed, a fresh query string so
+       no cache answers.** The token coming back refuses: the domain still reaches this site. No
+       answer, a certificate error or a 5xx refuses: unreachable is not moved. Any other answer
+       means another server holds the name. An alias that does not resolve at all reaches nothing
+       and passes; the `ServerName` must answer.
+    4. The token is emptied (the view serves an empty file as a 404). Then `remove_account.sh`
+       runs as for an ordinary removal and carries its own verdict.
+  - **On M:** the overview's Permanently Delete Site on a row in state `retired` builds
+    `decommission_moved_site` instead of `decommission_site`; every other row keeps the approval.
+    The job type stays `decommission_node`, so the result is processed as before.
 
 ## Test plan
 

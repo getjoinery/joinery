@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.53 - a full backup's success asks the node for its recovery key, so a rotated key is on record at once
  * @version 1.52 - process_copy_look and process_copy_take_key: a copy from backups (site_copy.md WP10)
  * @version 1.51 - process_copy_vouch keeps the frozen source's vouch for its copy; vouch_of() reads it back
  *                 (site_copy.md B44)
@@ -1013,6 +1014,17 @@ class JobResultProcessor {
 					$node->set('mgn_backup_keep_days', $verdict['keep_days']);
 				}
 				$node->save();
+				// A full backup starts a chain, and a changed recovery key always
+				// starts one: ask which key the node holds now, so the new key is
+				// on record (and its first backup verified) without waiting for
+				// the six-hourly report.
+				if ($status === 'success' && isset($verdict['level']) && (int)$verdict['level'] === 0
+						&& JobCommandBuilder::has_primitive($node, 'recovery_key_report')
+						&& !ManagementJob::activeOrRecentForNode($node->key, 'recovery_key_report',
+							self::RECOVERY_REPORT_PENDING_SECONDS)) {
+					ManagementJob::createFromBuild($node->key, 'recovery_key_report',
+						JobCommandBuilder::build_recovery_key_report($node), null, $job->get('mjb_created_by'));
+				}
 			} catch (Exception $e) {
 				error_log('JobResultProcessor: could not stamp the backup outcome for node '
 					. $node_id . ': ' . $e->getMessage());

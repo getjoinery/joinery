@@ -96,6 +96,10 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.9 - server_to_delete never names the copy's provision for a row that has a machine of its own: after a
+ *                 kept switch-over from a container that provision is the live site's (B58); old_container() names a
+ *                 container source's old row, removed from its host (site_copy.md WP14)
+ * @version 1.8 - Copy again queues the run's first step at once (B52)
  * @version 1.7 - the new server is the source's size: its own plan when this management node created it, else
  *                 the smallest plan with its memory and the copy's disk (same_size_type); a container site's
  *                 copy is not held to its shared server's memory
@@ -692,6 +696,8 @@ class SiteCopyRunner {
 				throw new SiteCopyException('This copy has no server yet. Discard it and start again.');
 			}
 			self::begin_run($copy);
+			// Its first step goes now, not at the next task tick (B52).
+			self::advance_locked($copy);
 		} finally {
 			self::unlock();
 		}
@@ -749,12 +755,35 @@ class SiteCopyRunner {
 		// The provision follows its machine through a swap, so the copy row's
 		// is the server on that row; one never joined has only the copy's own.
 		$node = self::copy_row($copy, false);
-		$provision = ($node ? CustomerCloudProvision::latest_for_node((int)$node->key) : null) ?: self::provision($copy);
+		// A container is removed from its shared host (old_container), never
+		// deleted at a provider.
+		if ($node && trim((string)$node->get('mgn_container_name')) !== '') {
+			return '';
+		}
+		// Only a row never joined falls back to the copy's own provision. A row
+		// with a machine names that machine's provision or its address: after a
+		// switch-over the copy's provision belongs to the live site (B58).
+		$provision = $node ? CustomerCloudProvision::latest_for_node((int)$node->key) : self::provision($copy);
 		if ($provision && trim((string)$provision->get('cvp_instance_id')) !== '') {
 			return ucfirst((string)$provision->get('cvp_provider')) . ' instance ' . $provision->get('cvp_instance_id')
 				. ' (' . $provision->get('cvp_instance_ip') . ')';
 		}
 		return $node ? 'the server at ' . $node->get('mgn_host') : '';
+	}
+
+	/**
+	 * The old machine of a kept switch-over when it is a container: removed
+	 * from its host with Permanently Delete Site on its own row, where the
+	 * host's proof that the domain left stands in for the site's approval
+	 * (site_copy.md WP14). Null for anything else.
+	 */
+	public static function old_container(SiteCopy $copy): ?ManagedNode {
+		$node = self::copy_row($copy, false);
+		if (!$node || trim((string)$node->get('mgn_container_name')) === ''
+				|| !JobCommandBuilder::decommission_is_moved($node)) {
+			return null;
+		}
+		return $node;
 	}
 
 	/** Move every live copy along. What the scheduled task calls. */

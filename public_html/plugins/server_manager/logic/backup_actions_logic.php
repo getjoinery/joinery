@@ -10,6 +10,7 @@
  * list_status). Everything but list_status creates a job; list_status returns
  * the cached backup list. Superadmin only (floor 10).
  *
+ * @version 1.7.0 - verify_backup records the recovery key it is sent under (FleetBackupPolicy::note_verify_sent)
  * @version 1.6.0 - restore_objects: Bring them back — the node's offloaded files the file store has lost,
  *                  brought home from backup storage by pages of signed links (FleetObjectRestore::start, the
  *                  survey job; the pages follow from its result)
@@ -306,6 +307,7 @@ function backup_actions_logic(array $input): LogicResult {
 		}
 
 		$job = ManagementJob::createFromBuild($node->key, 'verify_backup', $built, $params, $session->get_user_id());
+		FleetBackupPolicy::note_verify_sent($node);
 		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
 	}
 

@@ -465,6 +465,19 @@ check(FleetBackupPolicy::last_verify_attempt($vnode(array('mgn_backup_verify_tim
 	'a stamp newer than the job (the job completed and was folded) is the last attempt');
 check(FleetBackupPolicy::last_verify_attempt($vnode(array()), null) === false, 'neither: never attempted');
 
+// A rotated recovery key: the first backup under it is verified at once.
+$rotated = array('mgn_backup_verify_time' => '2026-09-12 12:00:00', 'mgn_backup_verify_recovery_fpr' => str_repeat('a', 64));
+check(FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array_merge($rotated, array('mgn_backup_recovery_fpr' => str_repeat('b', 64)))), $vnow),
+	'verified yesterday, then the key changed and a backup ran: due now, not in 30 days');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array_merge($rotated, array('mgn_backup_recovery_fpr' => str_repeat('a', 64)))), $vnow),
+	'the same key: the interval rules');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array_merge($rotated, array('mgn_backup_recovery_fpr' => str_repeat('b', 64),
+		'mgn_last_backup_time' => '2026-09-12 04:45:00'))), $vnow),
+	'the key changed but no backup since the last verify: nothing new to prove');
+check(!FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array('mgn_backup_verify_time' => '2026-09-12 12:00:00',
+		'mgn_backup_recovery_fpr' => str_repeat('b', 64))), $vnow),
+	'no key recorded at the last verify (sent before this was recorded): the interval rules');
+
 $vform = FleetBackupPolicy::from_form(array('policy_schedule' => 'daily', 'policy_verify_every_days' => '14'));
 check($vform['verify_every_days'] === 14, 'the policy editor\'s field is read', (string)$vform['verify_every_days']);
 $vform = FleetBackupPolicy::from_form(array('policy_schedule' => 'daily', 'policy_verify_every_days' => '-3'));

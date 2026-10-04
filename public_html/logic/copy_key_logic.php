@@ -12,6 +12,7 @@
  * Not an API action: the page has no session to act for, and an answer is
  * useful only to this machine's own agent, which judges it.
  *
+ * @version 1.1 - the decline is checked against its own form's token; it always read as expired
  * @version 1.0
  */
 
@@ -21,7 +22,9 @@ function copy_key_logic(array $input): LogicResult {
 
 	// A POST only: a page view never writes.
 	if (!empty($_POST) && !empty($input['copy_key_action'])) {
-		$formwriter = new FormWriterV2HTML5('copy_key_form');
+		// Each form's token is held under its own name: the decline form's
+		// under copy_key_decline, the answer's under copy_key_form.
+		$formwriter = new FormWriterV2HTML5($input['copy_key_action'] === 'decline' ? 'copy_key_decline' : 'copy_key_form');
 		if (!$formwriter->validateCSRF($input)) {
 			return LogicResult::error('The form expired. Reload the page and try again.');
 		}
