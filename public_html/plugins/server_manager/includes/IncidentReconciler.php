@@ -11,7 +11,10 @@
  *     they changed, with no event and no notice;
  *   - it is gone and one is active: clear it, with an event.
  * An active incident whose node is no longer watched (removed, disabled, or
- * in an install state such as a dormant copy) is cleared, saying so. An
+ * in an install state such as a dormant copy) is cleared, saying so. On a
+ * node removed from the dashboard that holds for every source, an agent's
+ * case too: its agent is refused once the node is gone, so nothing would ever
+ * report the case closed (clear_removed). An
  * incident whose node row is gone altogether is deleted with its timeline: a
  * node deleted outside its model (raw SQL, as some test fixtures do) skips the
  * deletion rules, and nothing would ever close or show that incident.
@@ -31,6 +34,7 @@
  * each addressed to every superadmin. Notify gives each the bell, and email
  * by the signal's default (critical: on) or their own preference.
  *
+ * @version 1.3 - each full pass clears every active incident, of any source, on a removed node (clear_removed)
  * @version 1.2 - each full pass deletes incidents whose node row is gone (removed); ManagedNode's
  *                permanent_delete() takes LOCK_KEY (site_copy.md B41)
  * @version 1.1 - a disabled node is not watched; close_for_node() closes a node's open incidents with a reason
@@ -70,6 +74,7 @@ class IncidentReconciler {
 		try {
 			if ($node_ids === null) {
 				$counts['removed'] = self::remove_nodeless();
+				$counts['cleared'] += self::clear_removed();
 			}
 			$sources = $sources ?? IncidentSources::all();
 			if (count($sources) === 0) {
@@ -118,6 +123,30 @@ class IncidentReconciler {
 			$db->query('SELECT pg_advisory_unlock(' . self::LOCK_KEY . ')');
 		}
 		return $counts;
+	}
+
+	/**
+	 * Clear every active incident, whatever its source, on a node removed from
+	 * the dashboard (soft-deleted). $node_ids narrows it (tests). Returns how
+	 * many.
+	 */
+	public static function clear_removed(?array $node_ids = null): int {
+		$ids = DbConnector::get_instance()->get_db_link()->query(
+			"SELECT inc_incident_record_id, inc_mgn_managed_node_id FROM inc_incident_records
+			 JOIN mgn_managed_nodes ON mgn_managed_node_id = inc_mgn_managed_node_id
+			 WHERE mgn_delete_time IS NOT NULL AND inc_status = 'open' AND inc_delete_time IS NULL")->fetchAll(PDO::FETCH_ASSOC);
+		$cleared = 0;
+		foreach ($ids as $row) {
+			if ($node_ids !== null && !in_array((int)$row['inc_mgn_managed_node_id'], $node_ids, true)) {
+				continue;
+			}
+			$inc = new IncidentRecord((int)$row['inc_incident_record_id'], TRUE);
+			if ($inc->key) {
+				self::clear($inc, 'The node was removed from the dashboard, so nothing reports on it any more.');
+				$cleared++;
+			}
+		}
+		return $cleared;
 	}
 
 	/**

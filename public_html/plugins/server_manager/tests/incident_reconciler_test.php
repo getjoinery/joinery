@@ -25,12 +25,15 @@
  *     incident.opened_critical;
  *   - a source that throws leaves its incident as it was;
  *   - a second pass while one holds the lock does nothing;
+ *   - a node removed from the dashboard has every active incident cleared,
+ *     an agent's case too, saying so; a live node's are left alone;
  *   - a node that goes takes its incidents and their timelines with it, by
  *     its model or (at the next pass) by raw SQL, and its deletion waits for
  *     a running pass.
  *
  * Run: php plugins/server_manager/tests/incident_reconciler_test.php
  *
+ * @version 1.2 - a removed node's incidents, of any source, are cleared
  * @version 1.1 - a node's deletion and its incidents (site_copy.md B41)
  * @version 1.0
  */
@@ -289,6 +292,35 @@ $left = function (int $inc_id) use ($main): array {
 	$e->execute(array($inc_id));
 	return array((int)$i->fetchColumn(), (int)$e->fetchColumn());
 };
+
+// An agent's case on a node removed from the dashboard: the agent is refused
+// from then on, so only the plane can close it.
+$agent_case = function (ManagedNode $n): IncidentRecord {
+	$inc = new IncidentRecord(NULL);
+	$inc->set('inc_mgn_managed_node_id', (int)$n->key);
+	$inc->set('inc_source', 'recipe:harness_case');
+	$inc->set('inc_node_case_id', 1);
+	$inc->set('inc_title', 'A harness agent case');
+	$inc->save();
+	$inc->load();
+	harness_register_row('inc_incident_records', 'inc_incident_record_id', $inc->key);
+	return $inc;
+};
+list($removed_node, $removed_site) = $down_node('removed');
+$removed_case = $agent_case($removed_node);
+$live_case = $agent_case($node);
+$removed_node->soft_delete();
+$n = IncidentReconciler::clear_removed(array((int)$removed_node->key, $node_id));
+$removed_case->load();
+$live_case->load();
+$ev = IncidentEvent::for_incident((int)$removed_case->key);
+check($n === ($removed_site ? 2 : 1) && !$removed_case->is_open()
+	&& strpos((string)$removed_case->get('inc_close_reason'), 'removed from the dashboard') !== false
+	&& (string)end($ev)->get('ine_kind') === 'cleared',
+	'A removed node: its agent case and its plane incident are cleared, saying so', 'cleared ' . $n);
+check($live_case->is_open(), 'An agent case on a node still listed is left alone');
+check(IncidentReconciler::clear_removed(array((int)$removed_node->key)) === 0, 'A second pass finds nothing more to clear');
+$live_case->permanent_delete();
 
 list($gone, $gone_inc) = $down_node('model');
 check($gone_inc !== null && $left((int)$gone_inc->key) === array(1, 1), 'Setup: a down node has an incident with its opened event');
