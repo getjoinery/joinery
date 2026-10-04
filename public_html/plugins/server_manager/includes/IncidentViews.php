@@ -13,6 +13,7 @@
  * nothing a node or a note said becomes a link. The only links here are the
  * plane's own pages by id.
  *
+ * @version 1.1 - Resolve asks what fixed it in a modal (resolve_note_field, resolve_note_script)
  * @version 1.0
  */
 class IncidentViews {
@@ -381,6 +382,7 @@ class IncidentViews {
 				. '<input type="hidden" name="action" value="triage">'
 				. '<input type="hidden" name="id" value="' . (int)$inc->key . '">'
 				. '<input type="hidden" name="do" value="' . self::e($state) . '">'
+				. ($state === IncidentRecord::TRIAGE_RESOLVED ? self::resolve_note_field(1) : '')
 				. '<button type="submit" class="btn btn-sm ' . $cls . '">' . self::e(IncidentTriage::VERBS[$state]) . '</button>'
 				. '</form>';
 		}
@@ -406,6 +408,9 @@ class IncidentViews {
 		foreach ($hidden as $k => $v) {
 			$fw->hiddeninput($k, '', array('value' => (string)$v));
 		}
+		if (!$snooze_only) {
+			echo self::resolve_note_field(0);
+		}
 		$fw->dropinput('do', $snooze_only ? 'Snooze for' : 'With the selected', array(
 			'options' => $options,
 			'value' => $snooze_only ? 'snooze_24' : IncidentRecord::TRIAGE_RESOLVED,
@@ -413,6 +418,61 @@ class IncidentViews {
 		$fw->submitbutton('btn_' . $form_id, $button, array('class' => 'btn btn-sm btn-outline-primary'));
 		$fw->end_form();
 		return ob_get_clean();
+	}
+
+	/**
+	 * The empty note a resolve form carries. resolve_note_script() fills it
+	 * from a modal when the form is about to resolve. $count is how many
+	 * incidents it resolves; 0 means "the rows ticked for this form".
+	 */
+	public static function resolve_note_field(int $count): string {
+		return '<input type="hidden" name="note" value="" data-resolve-note="' . $count . '">';
+	}
+
+	/**
+	 * Once per page: before any form with a resolve_note_field() resolves,
+	 * a modal asks what fixed it. Optional; what is written goes into the
+	 * form's note and lands as a note on each incident's timeline. A form
+	 * whose "do" is set to something else submits untouched.
+	 */
+	public static function resolve_note_script(): string {
+		return <<<'JS'
+<script>
+(function () {
+	document.addEventListener('submit', function (ev) {
+		var form = ev.target;
+		var note = form.querySelector('input[data-resolve-note]');
+		if (!note || form.dataset.resolveNoteAsked === '1' || ev.defaultPrevented) { return; }
+		var pick = form.querySelector('[name="do"]');
+		if (pick && pick.value !== 'resolved') { return; }
+		var count = parseInt(note.getAttribute('data-resolve-note'), 10) || 0;
+		if (count === 0 && form.id) {
+			count = document.querySelectorAll('input[form="' + form.id + '"][name="ids[]"]:checked').length;
+			// Nothing ticked: let the page say so.
+			if (count === 0) { return; }
+		}
+		ev.preventDefault();
+		var submitter = ev.submitter || null;
+		var box = document.createElement('div');
+		box.innerHTML = '<label class="form-label" for="incident_resolve_note">What fixed it? <span class="text-muted">(optional)</span></label>'
+			+ '<textarea id="incident_resolve_note" class="form-control" rows="4" maxlength="4000"'
+			+ ' placeholder="What was wrong and what fixed it. A commit or release number helps."></textarea>'
+			+ '<p class="small text-muted mt-2 mb-0">It goes on the timeline of '
+			+ (count === 1 ? 'this incident' : 'each of the ' + count + ' incidents') + ' as a note.</p>';
+		var text = box.querySelector('textarea');
+		JoineryModal.open(box, {buttons: [
+			{label: 'Cancel', style: 'secondary'},
+			{label: count === 1 ? 'Resolve' : 'Resolve ' + count, style: 'success', onClick: function () {
+				note.value = text.value;
+				form.dataset.resolveNoteAsked = '1';
+				form.requestSubmit(submitter);
+			}}
+		]});
+		text.focus();
+	});
+})();
+</script>
+JS;
 	}
 }
 ?>
