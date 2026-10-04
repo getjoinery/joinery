@@ -1,6 +1,10 @@
 # Subdomain Sandbox — Kick-the-Tires Trial on a Name We Own
 
-**Status:** Spec (unbuilt).
+**Status:** **Superseded 2026-10-04 — do not build.** Owner decision: no free
+accounts. Free hosting with a domain, mail and file storage attracts abuse,
+and the reports land on the account that holds every node. The paid starter
+tier (`starter_tier`) takes its place as the way to try the
+product. This spec is kept for reference only.
 **Relationship to managed domains:** none, deliberately. This tier solves no
 DNS or email problem for a paying buyer and is not part of the managed-domain
 pipeline (`specs/managed_domain_registration.md`). A sandbox is a place to try

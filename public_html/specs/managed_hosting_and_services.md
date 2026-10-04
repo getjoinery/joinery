@@ -102,7 +102,8 @@ further; the second door renders only when the product fields are present.
 Still separate and referenced: `managed_customer_departure.md`,
 `managed_backup_recovery.md`, `hosted_bounce_handling.md`,
 `getjoinery_hosted_tier_copy.md`, `getjoinery_purchase_path_verification.md`,
-`subdomain_sandbox_tier.md`, `keyless_provisioning.md`.
+`keyless_provisioning.md`. (`subdomain_sandbox_tier.md` was superseded on
+2026-10-04 by `starter_tier.md`: no free accounts.)
 
 ## Owner operations
 

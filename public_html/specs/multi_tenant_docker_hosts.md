@@ -1,0 +1,493 @@
+# Multi-tenant Docker hosts: limits and isolation for many sites on one box
+
+**Status:** Draft, 2026-10-04. Nothing here is built. Split out of the starter
+tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
+are folded in.
+
+## What this does
+
+Docker mode puts several sites on one machine, which is the cheapest way to
+run small sites. This spec gives every site on such a machine limits and
+isolation, so that one site cannot use up the machine or reach into another
+site:
+
+| Limit | What the site gets | What happens at the edge |
+|---|---|---|
+| Memory | a fixed budget (256 MB to start) | that site's processes are killed and brought back up; neighbours are untouched |
+| CPU | at most one core, and an equal share when the box is busy | the site runs slower; neighbours keep their share |
+| Disk | a fixed allowance (about 3.5 GB of its own data at 12 sites a box; WP4 sets the figure) | uploads and stored mail are refused in plain words; the database keeps running; neighbours keep writing |
+| Isolation | its own private network, root in it is not root on the host | it cannot connect to another site at all |
+
+A Docker host built this way is a **multi-tenant host**. The starter tier
+(`starter_tier`) is its first user, and the reason strangers can share a box
+at all. docker-prod, our own Docker host, stays an ordinary Docker host, but
+WP0–WP3 help it straight away. Existing hosts stay as they are unless
+rebuilt.
+
+## Where the caps live
+
+**The caps belong to the box, not the site.** Every site placed on a box
+gets the same limits. The starter tier spec adds `mgh_tier`, so picking a box
+is picking a tier.
+
+New columns on `mgh_managed_hosts`, set on the host's edit page
+(`host_add.php`):
+
+| Column | Meaning | Empty means |
+|---|---|---|
+
+| `mgh_site_memory_mb` | each site's memory budget | no limit (Docker's default, which is what docker-prod has today) |
+| `mgh_site_cpus` | each site's CPU ceiling, in cores (e.g. `1.0`) | no ceiling |
+| `mgh_site_disk_gb` | each site's disk allowance | no allowance; refused on a box built without a disk pool (WP4) |
+
+The edit page checks the arithmetic when a host is saved and says so in plain
+words when it does not fit. `max_sites × memory` must fit within the box's
+memory minus a host reserve of 900 MB. The disk pool must hold WP4's
+per-site formula for every site. The box's memory and pool size come from
+its host report, which it already sends.
+
+**`max_sites` counts sites only (S10).** `pick_for_provisioning` counts every
+node linked to the host, including the host's own agent node
+(`managed_hosts_class.php` placement query), so `max_sites = 12` places 11.
+It counts site nodes only.
+
+Existing hosts and existing sites are untouched. docker-prod carries our own
+sites and stays unlimited.
+
+## Work packages, and what depends on what
+
+WP0 comes first, because every other limit is a `docker run` flag. WP4's disk
+limit only holds once WP5.3 is in place (S5). Everything else can ship on its
+own.
+
+### WP0 — One recorded run spec per site
+
+**A container's caps vanish when it is recreated, and that is a live bug for
+`--memory` today (S9).** `rebase_site_container.sh` (`save_run_args`) and
+`migrate_site_to_code_volumes.sh` rebuild a container's run arguments from
+its name, hostname, restart policy, ports, environment and volumes, and
+nothing else. A site installed with `--memory` loses it at its next rebase.
+Every flag this spec adds (`--cpus`, `--pids-limit`, `--storage-opt`, the
+network, the security options) would be lost the same way.
+
+Root fix: **the host records one run spec per site**, a file under the
+host's site state that holds every `docker run` argument. **One function
+builds the run arguments from it.** Install, rebase, migrate and
+`site-limits` (WP6) all read and write that spec, and nothing reconstructs
+arguments from `docker inspect`. A gate test rebases a site with caps, then
+checks that every cap is still in force.
+
+### WP1 — See each site's usage
+
+The host report (`sysadmin_tools/host_report.sh`, `emit_containers`) already
+lists each container's state. Add, per container:
+
+- memory in use, its limit, and the number of times it has been killed for
+  running out (cgroup `memory.current`, `memory.max`, `memory.events` →
+  `oom_kill`)
+- CPU used since the last report (cgroup `cpu.stat` → `usage_usec`, turned
+  into an average share of a core between reports)
+- disk in use and its allowance (WP4's quota report; volume sizes until then)
+- outbound network traffic since the last report, so a site scanning the
+  internet shows up (`hosted_abuse_response`)
+
+The figures are read from the cgroup files, not from `docker stats`, which is
+slow and takes a second sample per container.
+
+**The site's own status check reports the host, not the site (S15).** Inside
+a container, the status check's memory figure reads `/proc/meminfo`, which is
+the host's. Read the cgroup limit and use instead, as `tune_postgres_memory.sh`
+already does. The disk figure stats the web root, which is the code volume,
+so after WP4 it reports the site's allowance.
+
+The node page's overview shows each site's line on its host, and an OOM kill
+count above zero shows in amber.
+
+**This WP is also the measurement.** Run it on docker-prod for a week and set
+the starting caps from what it shows: peak memory during an upgrade, a backup
+and `update_database`, CPU at rest and at peak, the disk a fresh site uses
+before any content, and what the `backups` volume holds between runs (WP4).
+
+### WP2 — Memory
+
+`--memory` exists (install.sh, with swap pinned to the same figure), and
+PostgreSQL already sizes itself from it (`tune_postgres_memory.sh`). Three
+gaps remain:
+
+1. **PHP-FPM is not sized.** The container keeps the packaged pool (up to 5
+   children). Five PHP workers at full size can use the whole 256 MB budget
+   on their own. Add a matching tuner, run at container start the same way
+   the PostgreSQL one is, that sets `pm.max_children` from the budget: budget
+   minus PostgreSQL's share minus Apache, divided by a measured worker size,
+   with a floor of 2. Set PostgreSQL's `max_connections` to match. It is
+   unset everywhere today, so a small site keeps the packaged 100.
+2. **Nothing brings a killed main process back (S29).** When memory runs out,
+   the kernel kills the biggest process in the container. A killed worker is
+   restarted by its parent. A killed PostgreSQL postmaster, PHP-FPM master or
+   cron is restarted by nothing, because the container's first process is a
+   shell chain that ends in Apache. A dead cron is the worst case: the site
+   still answers, so nothing notices that scheduled tasks and the site
+   agent's supervisor have stopped. The container gets a small supervisor
+   that restarts any of the four that dies and logs it, and the container
+   health check counts a missing one as a failure.
+3. **The budget must be proven, not assumed.** On a 256 MB container, run an
+   in-place upgrade, `update_database`, a full backup, and a large photo
+   upload with resize. Each must finish without an OOM kill. Where one does
+   not, either the job gets smaller or the budget gets bigger. The number
+   that comes out is what the starter tier uses.
+
+### WP3 — CPU and processes
+
+- `--cpus=N` on `docker run`: a hard ceiling. At `1.0`, one site can use at
+  most half of a 2-CPU box. Fair sharing under load is already Docker's
+  default: every container has equal weight, so a busy box divides CPU
+  evenly between the sites that want it.
+- `--pids-limit=512`: a fork bomb stops at 512 processes instead of filling
+  the host's process table. 512 is far above what Apache, PHP-FPM,
+  PostgreSQL and cron need, and WP1 confirms that.
+- `tune_postgres_memory.sh` already reads the cgroup v2 `cpu.max` quota for
+  its parallel-worker setting, so PostgreSQL follows the ceiling with no
+  change.
+
+### WP4 — Disk
+
+Docker on a stock Linode disk (ext4) cannot cap one container's disk use.
+Per-container limits need **XFS with project quotas** under `/var/lib/docker`.
+**WP4 depends on WP5.3 (S5).** Without user-namespace remapping, the owner of
+a file can change its XFS project ID (`chattr -p`), and `www-data` owns its
+uploads. A site could then move its own bytes out of its allowance. With
+remapping, the container's users are not in the host's user namespace, and
+the kernel refuses the change.
+
+**The pool.** `install.sh docker --disk-pool=SIZE` runs before Docker is
+installed on a fresh host. It does the following:
+
+1. Allocates a file of that size on the root disk (`fallocate`, fully
+   allocated, so the pool can never promise space the disk does not have).
+2. Formats it XFS and mounts it at `/var/lib/docker` with `loop,prjquota`
+   through `/etc/fstab`, so it comes back after a reboot. The loop device
+   uses direct I/O, so the box does not cache every page twice (S16).
+3. Makes Docker and containerd wait for it (`RequiresMountsFor=/var/lib/docker`
+   in a drop-in for each unit). If the pool fails to mount, Docker must not
+   start. Otherwise it would build an empty `/var/lib/docker` with no disk limits on the
+   root disk, and every site would look gone (S16).
+
+A loop file rather than a second cloud disk works the same on any provider
+(see the Linode exit principle). On an 80 GB box the pool is about 68 GB. The
+rest is the OS, logs and headroom.
+
+**The allowance.** All of a site's data lives in its named volumes
+(`ALL_SITE_VOLUMES` in install.sh, all named `SITENAME_*`). `install.sh site
+--disk=SIZE` does the following:
+
+1. Gives all of that site's volume directories except `backups` **one shared
+   XFS project ID**, so the allowance covers the site's whole footprint, not
+   each volume separately. The ID and paths are recorded in `/etc/projects`
+   and `/etc/projid`, so they survive a reboot.
+2. Takes site project IDs from a range Docker never reaches. Docker hands out
+   its own project IDs for `--storage-opt size`, counting up from the data
+   root's ID. A collision would silently pool a container's layer with a
+   site's volumes (S14).
+3. Sets that project's hard limit to the allowance **plus 10% headroom**
+   (see "At the limit").
+4. Caps the container's writable layer separately with `--storage-opt
+   size=1G`.
+5. Under user-namespace remapping, Docker's data root moves to
+   `/var/lib/docker/<uid>.<gid>/`, and the project paths follow. The
+   host-side `cp -a` and numeric `chown` steps in `rebase_site_container.sh`
+   must write remapped IDs (S14).
+
+`install.sh site --disk` on a box without a pool **refuses with a message**
+and does not ignore the flag. A cap that silently does nothing is worse than
+no cap.
+
+**The `backups` volume is ours, not the customer's (S20).** Fleet backups
+stage their archive there (`BackupRunner`). It gets its own project, outside
+the allowance. Backups run one per machine at a time, so if WP1 shows the
+volume holds only the run in flight, one reserve the size of the largest
+site's backup covers the whole box. If it keeps local copies between runs,
+each site needs its own reserve.
+
+**The writable layer holds more than it looks (S11).** An upgrade keeps the
+previous code in `public_html_last`, which is not on a volume, so about
+150 MB lands in the layer on every upgrade. A failed deploy leaves
+`public_html_failed_<timestamp>`. PHP extensions installed by plugins, the
+Postfix queue, `/tmp` and rspamd's files all live there too. Under a 1 GB cap
+an upgrade could fail halfway through swapping the code. Upgrade staging and
+the kept previous code move to a volume of their own, a `deploy` volume, in a
+project of its own outside the allowance. The 1 GB layer cap then holds
+packages and temporary files only.
+
+**A nearly full site can still be upgraded (S12).** `upgrade.php` refuses to
+run with less than 500 MB free under `uploads/`, which is inside the
+allowance. A site above about 87% full would be stuck on old code, and on a
+shared box those are exactly the customers at their limit. The free-space
+check reads the `deploy` volume, where the upgrade actually writes.
+
+**The pool formula.** The pool must hold, for every site, the allowance plus
+10% headroom, plus the 1 GB layer and the `deploy` volume (about 0.5 GB),
+plus the backup reserve. At 12 sites on a 68 GB pool, with one shared backup
+reserve of about 4 GB, that leaves an allowance of about **3.5 GB per site**.
+WP1's figures set the final number.
+
+**What the site sees (S15, partly confirmed by reading).** XFS reports a
+project's limit as the size of the filesystem to a directory that carries the
+project, so `df` on any of the site's volumes shows its own allowance. The
+status check stats the web root, which is on the code volume, so the hosted
+banner's Disk line (`HostedPlanNotice`, "Disk — the node's own status check")
+reads the site's own figure with no new plumbing. `df /` inside the container
+shows the 1 GB layer instead. Verify this on the first test box.
+
+**At the limit (S13).** At the XFS hard limit, writes fail. PostgreSQL stops
+when it cannot write its log. With the database down nobody can sign in to
+delete anything, and the banner cannot render. So the site must never reach
+that wall:
+
+- **At 100% of the allowance, the app refuses new uploads and stored mail**,
+  in plain words, naming the way out: delete something, or, on the starter tier, Move to
+  your own server. Inbound mail is refused as temporary, so senders retry.
+- **The XFS hard limit sits 10% above the allowance.** Only the database,
+  logs and system writes can use that headroom. It is there so PostgreSQL
+  never hits the wall first.
+- The banner warns at 80% and urges at 95%.
+
+### WP5 — Walling sites off from each other
+
+**This is a prerequisite for selling the tier to strangers, not an extra.**
+Today's Docker mode is explicitly not a security boundary
+(installation guide § What Docker mode is). Sites share one network, and
+containers run with Docker's default privileges. On a box sold to strangers the site
+admin is a stranger who is permission 10 on their own site. Permission 10 can
+upload a plugin ZIP (`admin_plugins` → `PackageInstallPage::upload`), which is
+running their own PHP in the container as `www-data`. An uploaded, unsigned
+plugin never has its host installer run as root
+(`_plugin_installers_start.sh`, `plugin_package_verified`). So the threat to
+design against is `www-data`, and root in the container if `www-data` can
+escalate. Every limit has to hold against that.
+
+On a multi-tenant host:
+
+1. **One private network per site, on a pinned subnet (S8).** Each site gets
+   `docker network create SITENAME_net` with a subnet the host assigns and
+   records in the site's run spec (WP0). The container is attached only to
+   that network, so a site cannot open a connection to another site's web
+   server or PostgreSQL. The proxy reaches each site through its published
+   loopback port, as now. **Three things assume the default bridge
+   (`172.17.0.0/16`) and must read the pinned subnet instead:**
+   - `RemoteIPInternalProxy` in the image (`Dockerfile.template`). Left as it
+     is, `X-Forwarded-For` from the proxy is not trusted, and every visitor
+     shows up as the gateway address. Rate limits, login IP rules and
+     analytics would then all see one address.
+   - PostgreSQL's "Docker host" line in `pg_hba`.
+   - The gateway lookup in `rebase_site_container.sh`.
+2. **Capabilities: keep what the image needs, drop the rest (S7).**
+   `--security-opt no-new-privileges` is **not** used. The parser jail
+   (`/usr/local/sbin/joinery-jail`) is setuid root, run by `www-data`, and it
+   unshares a network namespace before dropping to its own user.
+   `no-new-privileges` turns setuid off outright, so the jail would stop
+   jailing, which is worse than either choice. Other things need
+   capabilities too:
+   - `su postgres` (Dockerfile, `tune_postgres_memory.sh`)
+   - cron running jobs as `www-data` (SETUID, SETGID)
+   - the ownership fixes at container start (CHOWN, FOWNER, DAC_OVERRIDE)
+   - `nft` in `_site_state.sh` (NET_ADMIN)
+
+   Start from `--cap-drop=ALL`, add back exactly what a test shows each of
+   these needs, and prove the jail still jails in the gate. **First check
+   whether the jail works in today's containers at all.** Docker's default
+   seccomp profile refuses `unshare` without SYS_ADMIN, so it may already be
+   failing, or failing open, on every container site. User-namespace
+   remapping (item 3) is what makes the remaining capabilities harmless to
+   the host.
+3. **Root in the container is not root on the host.** Docker's
+   user-namespace remapping (`userns-remap` in `daemon.json`) is on for
+   multi-tenant hosts. It is a daemon-wide switch, so
+   `install.sh docker --multi-tenant` sets it on a fresh box, and it is never
+   turned on under existing sites. Volume ownership changes under it. The
+   volume-seeding steps in install.sh (`docker run ... tar -x -p`) and the
+   rebase script's host-side copies (WP4 item 5) must be proven to still
+   produce a working site. WP4's disk limit depends on this item (S5).
+4. **The host's own services are out of reach (S6).** Traffic from a
+   container to the host's own addresses (the bridge gateway, the public IP,
+   other networks' gateways) passes through the host's **INPUT** chain, not
+   `DOCKER-USER`, which handles only traffic passing through the host. Rules
+   on the INPUT chain, for every site network's interface, allow replies to
+   the proxy and the host's public web ports (80 and 443). Everything else is
+   dropped. Without the 80/443 exception, two sites on the same box could not
+   reach each other's public pages, or send each other Joinery Direct
+   deliveries, which are HTTPS to the receiving site's domain. Confirm that
+   nothing else on the host (the host agent, Apache's status page) is
+   reachable from a site afterwards.
+5. **Outbound blocks.** In `DOCKER-USER`, which is the right chain for
+   traffic leaving the box:
+   - port 25 to anywhere (`own_mail_server_sending` § 4: machines we create
+     never send mail themselves)
+   - the cloud metadata address, `169.254.169.254` and Linode's IPv6
+     equivalent (S28). We pass no user-data to these boxes today, but nothing
+     on a site should be able to ask.
+   
+   The host's own outbound 25 is blocked in OUTPUT.
+6. **IPv4 and IPv6 alike.** No firewall script in `maintenance_scripts` calls
+   `ip6tables` today, and Docker's IPv6 is off. Containers on a multi-tenant host get **no
+   IPv6 address**. Their outbound traffic leaves over IPv4 through the host,
+   and the host's proxy serves visitors on both. Every rule above is written
+   for both `iptables` and `ip6tables` on the host, so turning IPv6 on later
+   does not open a hole.
+7. **Kernel fixes take effect promptly.** A kernel update does nothing until
+   the machine reboots, and the shared kernel is the one wall left once 1–6
+   are in place. A multi-tenant host reboots itself after a kernel update
+   (unattended-upgrades `Automatic-Reboot`) in a nightly window. The window
+   stays clear of the fleet backup window, 03:00 UTC plus two hours (S30).
+   Containers come back on their own (`--restart unless-stopped`), and a
+   site held stopped stays stopped (WP7). The host report's existing
+   `reboot_required` turns amber when a box has gone more than a day without
+   taking a pending reboot.
+
+What this still leaves open is one shared kernel. A kernel exploit escapes any
+container. For sites on a multi-tenant host that is the accepted trade, and it is the same
+one every low-cost container host makes. Sites that cannot accept it buy their
+own machine, which the hosted tier already sells. The starter tier spec
+states what that trade means for each kind of customer data.
+
+### Many sites on one address (S23)
+
+These are not leaks, but each must be dealt with:
+
+- The agent channel's rate limit (6,000 an hour) is keyed by the connecting
+  address, so a box's 13 agents (12 sites and the host) would share one
+  bucket. Key it by the agent's identity.
+- Joinery Direct's peer-lookup cap (60 a minute per connecting peer) is
+  shared by a box's sites. Raise it or key it by the sending site.
+- If one site's scanning gets the address blocklisted, all its neighbours
+  are blocklisted with it. `hosted_abuse_response` is the defence.
+- DNS publishes one record per node, A or AAAA by the address's type
+  (`NodeDnsPlan`). A site's domain on a multi-tenant host needs both, pointing at the box's IPv4
+  and IPv6, under the IPv4-and-IPv6 rule.
+
+
+### WP6 — Changing a site's caps later
+
+A site may need a bigger allowance, or an abuser needs a smaller one, without
+a rebuild:
+
+- memory and CPU: `docker update --memory --memory-swap --cpus` changes them
+  live. PostgreSQL and PHP-FPM pick up the new memory at the next restart,
+  which the step does.
+- disk: `xfs_quota` changes the project limit live.
+
+`install.sh site-limits SITENAME [--memory] [--cpus] [--disk]` does both and
+writes the run spec (WP0). It is reached from the plane through a new
+host-agent word, and offered on the node page as **Change limits** for a site
+on a multi-tenant host.
+
+### WP7 — Stop and start that stay stopped (S1)
+
+The host agent's `container_health` recipe restarts any container that is not
+running (`recipes/service_health.go`), and raises an incident about it. The
+only per-container word today is `restart_container`, which runs
+`docker restart`. So anything that stops a site on purpose, such as the end
+of an unpaid grace period or a suspension, would be undone within a tick.
+
+- New host words: stop and start one container.
+- A host-side "held stopped" record per site, with who held it and why. The
+  host report emits it, `container_health` skips a held site, and it survives
+  a reboot (`--restart unless-stopped` already keeps a stopped container
+  down).
+
+### WP8 — A catch-all default site on every multi-tenant host (S24)
+
+A request whose name the box does not serve falls to the first HTTPS site on
+the box, so it shows another customer's site and certificate. A multi-tenant host
+gets a default site that answers every unknown name with a plain page. The
+same slot serves a "This site is suspended" page for a domain that has been
+switched to it (`hosted_abuse_response`).
+
+The proxy template has no error page, and a Docker host's sites are never
+re-rendered after install. So this needs a template change, and a host word
+that switches one domain's proxy site to the suspended page and back.
+
+## Host-agent words this needs
+
+- stop and start one container, with the held-stopped record (WP7)
+- `site-limits` (WP6)
+- switch a domain's proxy site to the suspended page and back (WP8)
+
+## Testing
+
+A gate on a scratch box, with three small sites on a multi-tenant host:
+
+| Check | Pass |
+|---|---|
+| a site allocates past its memory budget | only that site's process is killed; the supervisor brings it back; the others answer throughout |
+| PostgreSQL's postmaster, PHP-FPM's master or cron is killed | the supervisor restarts it, and the health check notices |
+| a site spins every core | it stays at its ceiling; a neighbour's page time stays within 2× its idle figure |
+| a fork bomb in a site | stops at the pids limit; the host stays responsive |
+| a site fills its allowance | uploads and stored mail are refused in plain words; the database keeps running; a neighbour can still write; `df` inside shows the allowance |
+| a site changes the XFS project of its own file | refused |
+| a site at 95% of its allowance is upgraded | the upgrade succeeds |
+| a site is rebased with caps | every cap is still in force afterwards |
+| site A connects to site B's 5432 and 80 | refused |
+| site A connects to the host's address | refused, apart from the proxy's reply path and the public 80/443; checked over IPv4 and IPv6 |
+| site A asks the cloud metadata address | refused |
+| a visitor loads a page | the site logs the visitor's real address, not the gateway |
+| the parser jail runs a parse | it runs inside its own network namespace |
+| the host reboots | pool mounted, every allowance enforced, every site back up, a site held stopped still stopped |
+| the pool fails to mount at boot | Docker does not start |
+| a site sends mail to an outside mail server on port 25 | dropped at the box; mail through SMTP2GO still works |
+| a site sends a Joinery Direct delivery to a neighbour on the same box, and to a site elsewhere | both arrive |
+| a request for a name the box does not serve | the catch-all page, never another customer's site |
+| `site-limits` raises a disk allowance | the full site can write again with no restart |
+| the 256 MB site runs upgrade, `update_database`, backup and photo upload | no OOM kill |
+| a site is held stopped, then two health-check ticks pass | it stays stopped; no incident is raised |
+
+## Deferred: a separate kernel per site (gVisor)
+
+Reference only. The owner deferred this on 2026-10-04.
+
+gVisor (`runsc`) is a Docker runtime that gives each container a kernel of
+its own, running in user space. A neighbour would then need a gVisor bug on
+top of a Linux kernel bug, which brings the wall between sites much closer to
+a dedicated machine's. It needs no nested virtualization, so it runs on an
+ordinary cloud instance. Firecracker or Kata, by contrast, need nested
+virtualization, which ordinary Linode instances don't offer.
+
+What it would cost, all unmeasured:
+
+- **Speed.** System calls are slower, and PostgreSQL and file uploads use a
+  lot of them. Expect something like 10–30% on disk-heavy work.
+- **Memory.** Each site's sandbox has some overhead, which could cost a site
+  or two per box.
+- **Compatibility.** Apache, PHP-FPM, PostgreSQL, cron, the parser jail and
+  the site agent all have to be proven under it. So do the disk quotas in
+  WP4, since gVisor has its own filesystem layer.
+
+To pick it up: run WP1's measurements on one multi-tenant host with
+`--runtime=runsc`, and compare sites per box and page times against the same
+box without it.
+
+## Not covered
+
+- **Disk speed.** One site doing heavy reads and writes slows the others.
+  There is no per-site I/O limit here. Cgroup I/O weights need a scheduler the
+  loop device does not use. If WP1 shows this matters, it gets its own spec.
+- **Network bandwidth.** It stays on the account-wide pool, as the hosted tier
+  documents.
+
+## Docs to update when this lands
+
+- `docs/installation.md` § Docker Deployment: the multi-tenant host, its flags
+  (`--disk-pool`, `--multi-tenant`, `--cpus`, `--disk`) and its limits and isolation. The
+  isolation bullets describe both kinds of box.
+- `plugins/server_manager/docs/overview.md`: the host's cap fields, **Change
+  limits**, and holding a site stopped.
+
+## Found by the review, outside this spec's scope
+
+- **The fleet backup pass loses its per-machine rule when a verification is
+  due (S22).** In `FleetBackupRun::pass()`, `$busy` holds the map of busy
+  machines (line 82), and line 144 reuses the name for a string. From then
+  on the one-backup-per-machine rule stops applying for the rest of that
+  pass, and `$busy[$machine] = …` throws a TypeError after the job has
+  already been created. This is committed code (49fbf0f6 and earlier). It
+  matters most on a box with 12 sites. Fix: a separate variable name, and a
+  test with a verification due and two sites on one host.
