@@ -5,6 +5,10 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.2 - performRollback() sets the restored tree's permissions through fix_permissions.sh.
+ *                It ran chown -R www-data:user1 and chmod -R 775 over public_html: the pool
+ *                owned every file it executes where user1 exists, and the chown failed
+ *                outright on every server built without a user1 group.
  * @version 1.1 - preserveReason(): a live manifest saying receives_upgrades:
  *                false is a local fork and is preserved whatever the incoming
  *                archive says (specs/package_replace_on_upload.md WP3)
@@ -938,7 +942,7 @@ class DeploymentHelper {
         }
 
         // Fix permissions
-        $perm_result = self::fixPermissions($public_html);
+        $perm_result = self::fixPermissions($target_site);
         $result['permissions_fixed'] = $perm_result['success'];
 
         if ($verbose) {
@@ -1085,53 +1089,42 @@ class DeploymentHelper {
     }
 
     /**
-     * Fix permissions after deployment (private helper)
-     * @param string $path Directory or file path
-     * @param string $owner Owner username
-     * @param string $group Group name
-     * @param string $mode Octal permissions as string
+     * Give a restored tree its ownership and modes (private helper).
+     *
+     * fix_permissions.sh is the one place that knows the code the PHP pool runs
+     * (tree owner, read-only to the pool) from the data it writes
+     * (specs/read_only_tree.md), and the site's config/tree_owner record says
+     * whose tree it is, so --production here never hands a developer's checkout
+     * to root. The script is the site root's: public_html_last restores only
+     * public_html.
+     * @param string $target_site Site name
      * @return array ['success' => bool, 'warnings' => array]
      */
-    private static function fixPermissions($path, $owner = 'www-data', $group = 'user1', $mode = '775') {
+    private static function fixPermissions($target_site) {
         $result = [
             'success' => true,
             'warnings' => []
         ];
 
-        // chown (and chmod of files owned by others) requires root. In docker
-        // this process is root; on bare metal it is the agent user, so prefix
-        // sudo -n (passwordless, non-interactive — fails cleanly into the
-        // existing warnings if sudo is unavailable).
+        $script = "/var/www/html/$target_site/maintenance_scripts/install_tools/fix_permissions.sh";
+        if (!file_exists($script)) {
+            $result['warnings'][] = "fix_permissions.sh is not present at $script";
+            $result['success'] = false;
+            return $result;
+        }
+
+        // Setting ownership requires root. In docker this process is root; on
+        // bare metal it is the agent user, so prefix sudo -n (passwordless,
+        // non-interactive — fails cleanly into the warnings if unavailable).
         $is_root = function_exists('posix_geteuid') ? (posix_geteuid() === 0) : (trim((string)shell_exec('id -u')) === '0');
         $root_prefix = $is_root ? '' : 'sudo -n ';
 
-        // Change ownership
-        $chown_result = 0;
-        exec($root_prefix . "chown -R $owner:$group " . escapeshellarg($path) . " 2>&1", $output, $chown_result);
-
-        if ($chown_result !== 0) {
-            $result['warnings'][] = "chown failed: " . implode(' ', $output);
+        $output = [];
+        $exit = 0;
+        exec($root_prefix . escapeshellarg($script) . ' ' . escapeshellarg($target_site) . ' --production 2>&1', $output, $exit);
+        if ($exit !== 0) {
+            $result['warnings'][] = 'fix_permissions.sh did not complete: ' . implode(' ', array_slice($output, -2));
             $result['success'] = false;
-        }
-
-        // Change permissions
-        $chmod_result = 0;
-        exec($root_prefix . "chmod -R $mode " . escapeshellarg($path) . " 2>&1", $output, $chmod_result);
-
-        if ($chmod_result !== 0) {
-            $result['warnings'][] = "chmod failed: " . implode(' ', $output);
-            $result['success'] = false;
-        }
-
-        // Special handling for uploads directory (needs 777)
-        $uploads_dir = $path . '/uploads';
-        if (is_dir($uploads_dir)) {
-            $chmod_uploads = 0;
-            exec($root_prefix . "chmod -R 777 " . escapeshellarg($uploads_dir) . " 2>&1", $output, $chmod_uploads);
-
-            if ($chmod_uploads !== 0) {
-                $result['warnings'][] = "chmod 777 on uploads failed: " . implode(' ', $output);
-            }
         }
 
         return $result;

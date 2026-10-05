@@ -28,6 +28,11 @@
 # drop-in while the box carries them, no other outside repository ever is, and
 # the drop-in goes when both do. Where apt-config is installed, apt itself reads
 # the drop-in's origins onto its allowed list.
+#
+# Postfix's queue: where Postfix is configured and its queue was never made (a
+# container whose Postfix never started), the run creates it, so sendmail
+# accepts mail instead of waiting forever; with the queue in place, or no
+# Postfix configuration, it says nothing.
 
 set -u
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -400,6 +405,19 @@ AC="$T/apt-ctr"; mkdir -p "$AC/etc/apt/apt.conf.d" "$AC/etc/apt/sources.list.d";
 printf 'deb https://apt.postgresql.org/pub/repos/apt noble-pgdg main\n' > "$AC/etc/apt/sources.list.d/pgdg.list"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$AC" bash "$SCRIPT" x "$T/apt-ctr-site" 2>&1)"
 chk "a container is left alone: its image is rebuilt, not updated" "$([ -e "$AC/etc/apt/apt.conf.d/51joinery-platform-repos" ] && echo written || echo none)" "none"
+
+# Postfix's queue: a container whose Postfix never started has none, and
+# sendmail waits on it forever.
+PQ="$T/postfix-ctr"; mkdir -p "$PQ/etc/postfix" "$PQ/usr/sbin" "$PQ/var/spool/postfix/dev"; touch "$PQ/.dockerenv" "$PQ/etc/postfix/main.cf"
+printf '#!/bin/sh\n' > "$PQ/usr/sbin/postdrop"; chmod 755 "$PQ/usr/sbin/postdrop"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PQ" bash "$SCRIPT" x "$T/postfix-site" 2>&1)"
+chk "Postfix installed with no queue: the run names it" "$(printf '%s\n' "$out" | grep -c "Postfix's queue is missing")" "1"
+mkdir -p "$PQ/var/spool/postfix/maildrop"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PQ" bash "$SCRIPT" x "$T/postfix-site" 2>&1)"
+chk "a queue in place: nothing said" "$(printf '%s\n' "$out" | grep -c "Postfix's queue")" "0"
+rm -rf "$PQ/var/spool/postfix/maildrop" "$PQ/etc/postfix/main.cf"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PQ" bash "$SCRIPT" x "$T/postfix-site" 2>&1)"
+chk "no Postfix configuration: nothing to create" "$(printf '%s\n' "$out" | grep -c "Postfix's queue")" "0"
 
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"

@@ -4,6 +4,10 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.12 - Postfix's queue exists wherever Postfix is installed. A container's Postfix
+#                never started, so it had none, and every sendmail call (cron mailing a
+#                job's output) waited forever: one stuck cron, sendmail and postdrop per
+#                container per day on docker-prod.
 # Version: 1.11 - Automatic updates reach the ondrej PHP and apt.postgresql.org repositories
 #                when the box carries them: a drop-in names their origins beside Ubuntu's
 #                own (specs/standalone_boxes_ubuntu_2604.md B1).
@@ -771,6 +775,31 @@ if [[ "${IN_CONTAINER}" == 0 && -d "${APT_CONF_DIR}" ]]; then
     elif [[ -e "${PLATFORM_REPOS_CONF}" ]]; then
         rm -f "${PLATFORM_REPOS_CONF}"
         say "removed ${PLATFORM_REPOS_CONF}: this box carries neither outside repository"
+    fi
+fi
+
+# --- 7. Mail handed to sendmail is accepted, never waited on --------------------
+# Every machine carries Postfix (install.sh), and Postfix makes its queue
+# directories the first time it starts. A container's Postfix starts only when
+# the Inbound Email plugin is active, so elsewhere the queue never exists, and
+# sendmail's postdrop retries creating its file every 10 seconds, forever. cron
+# hands sendmail any output a job prints: docker-prod's containers each held a
+# stuck cron, sendmail and postdrop for every day they had run. With the queue
+# in place postdrop drops the message and exits; a waiting one is released.
+POSTFIX_CF="${FS_ROOT}/etc/postfix/main.cf"
+if [[ -f "${POSTFIX_CF}" && -x "${FS_ROOT}/usr/sbin/postdrop" ]]; then
+    QUEUE_DIR="/var/spool/postfix"
+    if [[ "${RUN_SYSTEM}" == 1 ]]; then
+        QUEUE_DIR="$(postconf -h queue_directory 2>/dev/null || echo "${QUEUE_DIR}")"
+    fi
+    if [[ ! -d "${FS_ROOT}${QUEUE_DIR}/maildrop" ]]; then
+        if [[ "${RUN_SYSTEM}" == 0 ]]; then
+            say "Postfix's queue is missing - a root run creates it (postfix post-install create-missing)"
+        elif postfix post-install create-missing >/dev/null 2>&1 && [[ -d "${QUEUE_DIR}/maildrop" ]]; then
+            say "created Postfix's queue in ${QUEUE_DIR}: mail handed to sendmail is accepted"
+        else
+            warn "Postfix's queue in ${QUEUE_DIR} is missing and could not be created - anything that sends through sendmail waits forever"
+        fi
     fi
 fi
 

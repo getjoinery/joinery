@@ -1637,6 +1637,18 @@ check(strpos($fix_perms_src_s10, "-not -perm 777") === false,
 check(strpos($fix_perms_src_s10, '-not -path "*/.git"') !== false,
     "a developer checkout's object store is not re-owned");
 
+// A rollback restores the tree that failed to deploy's predecessor, and gives it
+// its permissions the same way a deploy does. It used to chown www-data:user1
+// and chmod -R 775 by hand: the pool owned the code it runs wherever user1
+// existed, and the chown failed outright everywhere else.
+$deploy_helper_src = file_get_contents(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
+check(preg_match('/function fixPermissions\(\$target_site\).*?fix_permissions\.sh.*?--production/s', $deploy_helper_src) === 1
+    && strpos($deploy_helper_src, 'self::fixPermissions($target_site)') !== false,
+    'a rollback sets the restored tree\'s permissions through fix_permissions.sh');
+check(preg_match('/^[^*\n]*(chown -R|chmod -R|user1)/m', $deploy_helper_src) === 0,
+    'and DeploymentHelper sets no owner or mode by hand, and names no user1',
+    'comments and the version note excepted');
+
 // --- the recorded tree owner --------------------------------------------
 // The converger asserts ownership at a moment when public_html is owned by the
 // pool — which is exactly when "who owns public_html" is the wrong question. So
