@@ -3803,7 +3803,7 @@ $base_wp6    = (string)file_get_contents($site_root . '/maintenance_scripts/inst
 $tpl_wp6     = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
 preg_match('/^BASE_IMAGE_VERSION="([0-9.]+)"$/m', $install_wp6, $vi_wp6);
 preg_match('/^ARG BASE_IMAGE_VERSION=([0-9.]+)$/m', $tpl_wp6, $vt_wp6);
-check(($vi_wp6[1] ?? '') === '2.0', 'install.sh builds sites on joinery-base 2.0');
+check(version_compare($vi_wp6[1] ?? '0', '2.0', '>='), 'install.sh builds sites on joinery-base 2.0 or later (26.04)', $vi_wp6[1] ?? '');
 check(($vi_wp6[1] ?? 'a') === ($vt_wp6[1] ?? 'b'), 'Dockerfile.template\'s default base version is install.sh\'s',
 	'the default exists for BuildKit\'s static check; a stale one names an image the host may not have');
 check((bool)preg_match('/^FROM ubuntu:26\.04$/m', $base_wp6), 'the base image is built FROM ubuntu:26.04');

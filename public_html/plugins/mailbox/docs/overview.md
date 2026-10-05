@@ -52,27 +52,18 @@ straight to this server, or does a relay front it so the server's address stays
 hidden?
 
 **It is a setting, not a gate.** An undecided deployment receives directly and
-works; the choice lives in the Setup tab's Advanced section and can be changed at
-any time. A relay is only load-bearing under the **Seal at the relay** add-on, so
-the answer is asked for where it becomes true — switching that add-on on — rather
-than in front of every mailbox page before any domain has a level.
-
-The control is a brief pros/cons comparison (setup effort, whether the server's
-address is public or hidden, and that a relay is what makes **Seal at the relay**
-available) with one choose button per column. The choice belongs to
-the admin: a relay provisioned as part of setup does not decide it.
+works. The relay itself decides it: **Enable relay** in the Setup tab's Relay
+section sets `relay`, **Disable relay** sets `direct`, and either can be changed
+at any time. A relay provisioned as part of setup does not decide it on its own.
 
 `mailbox_receive_mode()` (`includes/receive_mode.php`) resolves the mode:
 
-1. The stored choice (`mailbox_receive_mode` setting) → its value. Choosing
-   **relay** redirects to the Setup tab's Relay section; choosing **direct** redirects to
-   Accounts to add the first domain (with a pointer to remove any provisioned
-   relay).
-2. Live domains with no stored choice → the mode reports what the deployment is
+1. A site container has no mail server of its own
+   (`mailbox_site_has_mail_server()`), so it is always `relay`.
+2. The stored choice (`mailbox_receive_mode` setting) → its value.
+3. Live domains with no stored choice → the mode reports what the deployment is
    actually doing (live relay row → `relay`, else `direct`).
-3. Otherwise `''` — undecided, which every consumer treats as direct.
-
-The choice is deployment-wide and reversible.
+4. Otherwise `''` — undecided, which every consumer treats as direct.
 
 ### Setup & verification (mailbox-first)
 
@@ -321,8 +312,11 @@ step says plainly that the feed is a one-way import that never changes the origi
 
 ## Server Setup
 
-On apt-based systems, run `provisioning/install_email.sh` as root, once per
-deployment. It installs Postfix, `postfix-pgsql` and rspamd and
+On an apt-based server with its own mail stack, run
+`provisioning/install_email.sh` as root, once per deployment. (A site container
+has none and receives through a relay: see
+[A site container has no mail server](#a-site-container-has-no-mail-server).)
+It installs Postfix, `postfix-pgsql` and rspamd and
 applies the **fixed** base configuration, idempotently:
 
 - the `joinery` pipe transport in `master.cf`;
@@ -732,38 +726,50 @@ relay, the row states plainly that sends carry no DKIM signature.
 
 ### Firewall
 
-`install_email.sh` runs `ufw allow 25/tcp` when ufw is active. Bare metal or a
-container, the site's Postfix owns port 25 on its host.
+On a server with its own mail stack, `install_email.sh` runs `ufw allow 25/tcp`
+when ufw is active, and that server's Postfix owns port 25.
 
-### Container persistence
+### A site container has no mail server
+
+A site in a Docker container carries no Postfix and no rspamd. The base image
+is built without them, and `install_email.sh`, which the container's start
+command runs for every active plugin through `_plugin_installers_start.sh`,
+installs and starts nothing there: it says the site receives mail through a
+relay and exits 0. Where the site runs comes from `deployment_environment` in
+the site config, which the installer writes.
+
+So mail that arrives by SMTP reaches a container site only through a relay
+(`mailbox_needs_relay()`). The relay takes the mail in, checks it (SPF, DKIM,
+DMARC and spam), and the site collects it from the relay's spool. A webhook
+provider (Mailgun, SES, SendGrid) and an IMAP feed need no mail server, and
+work in a container as anywhere else. Sent mail leaves through the configured
+provider, which signs it.
+
+**A container's relay hides nothing.** The box's address is shared with its
+neighbours and published in their DNS, so the hidden-origin rules of a
+relay-fronted server do not apply: SPF names the sending providers (never the
+box), and needs nothing at all when they send with their own return-path domain
+(SMTP2GO, Joinery services); no provider is refused for compose; Joinery Direct
+is served from the site's own web host; and `checkOriginHidden` does not run.
+
+On the Setup tab, for a container whose mail arrives by SMTP:
+
+- the receive mode is relay whenever it would otherwise be direct;
+- the host layer is one row, **How mail reaches this site**: red with no relay
+  while a domain receives here, red with the relay disabled, green behind an
+  enabled one. There are no Postfix, port 25, rspamd or HELO-name rows, and no
+  **This server's mail identity** box;
+- a sending setting aimed at this box's own mail server (an SMTP provider or
+  forwarding SMTP host on localhost, or no provider at all) gets a red row,
+  **Where sent mail goes**, since that mail never leaves;
+- with no relay, each domain's MX row says a relay is needed, and the DNS plan
+  prescribes no MX and no A record for the box. A managed domain's mail step
+  publishes the rest and stays open until a plan carries an MX;
+- the Local mail listener box never shows, and its actions are refused;
+- the provisioning check asks for an enabled relay instead of port 25.
 
 On a **systemd host**, `install_email.sh` runs `systemctl enable`, so Postfix
-and rspamd restart on boot automatically — nothing else is needed.
-
-A **Docker container** has no systemd; its `CMD` is the init. The Joinery site
-image handles the mail stack the same way it handles PostgreSQL and cron — by
-(re)starting it on every container start. The plugin declares
-`install_email.sh` as its `host_installer` in `plugin.json`, and the `CMD`
-runs `_plugin_installers_start.sh`, which executes every active plugin's
-declared host installer — for Mailbox that re-applies the Postfix / rspamd
-configuration and starts both daemons (via the idempotent
-`install_email.sh`). Postfix itself is baked into the base
-image. So in a container the mail stack survives a `docker stop`/`start` and
-an image rebuild with no manual step.
-
-This applies to images built from base image version 1.1 or later. An older
-container keeps relying on a manual `install_email.sh` run until it is rebuilt
-and redeployed — base-image changes do not travel through the code-upgrade
-pipeline. See the `mail_stack_container_persistence` spec.
-
-### Advanced: multi-site host relay (manual, not installed)
-
-A more complex topology — several sites behind one IP, with a host front-relay
-demultiplexing inbound mail to per-container Postfix instances by domain — is
-possible but is **manual, operator-level configuration**. `install_email.sh`
-assumes one site per host and does not set this up. If you run it, the host
-relay (`relay_domains`, `transport_maps`) and per-container port mapping are
-yours to maintain; RBL checks would happen on the host relay only.
+and rspamd restart on boot.
 
 ## Settings
 
@@ -2799,7 +2805,8 @@ an SMTP provider carries hidden-origin sends only once the origin-leak probe
 has round-tripped clean within its window (`InboundEmailHealth::hiddenOriginSendAllowed`),
 and is refused otherwise with the probe named as the remedy — an operator
 running their own Postfix strips the submission `Received:` line, runs the
-probe, and sends. DKIM signing stays in-app: a protected domain signs with its
+probe, and sends. None of this applies to a site container, whose relay hides
+nothing (see [A site container has no mail server](#a-site-container-has-no-mail-server)). DKIM signing stays in-app: a protected domain signs with its
 vault-sealed key, a standard domain with the filesystem key rspamd signs with
 on a colocated deployment, and the envelope (MAIL FROM) routes through the forwarding subdomain so the
 protected domain's own `v=spf1 -all` never touches the envelope. Generated

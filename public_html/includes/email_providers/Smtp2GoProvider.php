@@ -27,6 +27,8 @@
  * envelope sender and no chosen envelope recipients, so it cannot express what
  * inbound forwarding needs. Forwarding keeps using the SMTP relay.
  *
+ * @version 1.4 - with no API key, getSendingDomainState answers '' and says why without asking the
+ *                API or logging a failure for every domain a Setup run checks
  * @version 1.3 - a domain the account does not hold is 'not_registered', not '':
  *                SMTP2GO answers that filter with a 400 "…or it doesn't exist",
  *                which the reader took for an outage, so a fresh domain was
@@ -425,6 +427,13 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
             $entry = null;
             $state = '';
             $error = '';
+            if (trim((string)Globalvars::get_instance()->get_setting('smtp2go_api_key')) === '') {
+                // Not a failure to log: nothing has been set up to ask.
+                self::$domain_entry[$domain] = null;
+                self::$domain_state[$domain] = '';
+                self::$domain_error[$domain] = 'No SMTP2GO API key is configured.';
+                return '';
+            }
             try {
                 $entry = self::entryFor(self::post('domain/view', array('domain' => $domain)), $domain);
                 $state = self::stateOf($entry);

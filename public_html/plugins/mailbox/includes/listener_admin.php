@@ -12,6 +12,8 @@
  * the mailbox_local_listener setting ('active' | 'decommissioned') so the
  * setup and health checks can compare expectation with reality.
  *
+ * @version 1.4 - a site container has no listener: both actions are refused there; the outbound
+ *                check (mailbox_outbound_local_label) also covers a forwarding SMTP host on this box
  * @version 1.3 - the listener is Postfix alone; rspamd is left running
  * @version 1.2
  */
@@ -98,22 +100,43 @@ function mailbox_listener_guardrail_facts(): array {
 		}
 	}
 
-	// The outbound path must not lean on the local Postfix: no resolvable
-	// provider means PHP mail()/local sendmail, and an SMTP provider aimed at
-	// localhost submits through the very listener being removed.
-	$provider = EmailSender::getActiveProvider();
-	if ($provider === null) {
+	// The outbound path must not lean on the local Postfix.
+	$local = mailbox_outbound_local_label();
+	if ($local !== '') {
 		$facts['outbound_local'] = true;
-		$facts['outbound_label'] = 'local sendmail (no outbound provider configured)';
-	} elseif ($provider instanceof SmtpProvider) {
-		$host = strtolower(trim((string)Globalvars::get_instance()->get_setting('smtp_host')));
-		if ($host === '' || $host === 'localhost' || $host === '127.0.0.1' || $host === '::1') {
-			$facts['outbound_local'] = true;
-			$facts['outbound_label'] = 'SMTP via this box\'s own Postfix';
-		}
+		$facts['outbound_label'] = $local;
 	}
 
 	return $facts;
+}
+
+/**
+ * What sends mail through this box's own mail server, in words, or '' when
+ * nothing does: no resolvable provider means PHP mail()/local sendmail, and an
+ * SMTP provider or forwarding SMTP host aimed at this box submits to its own
+ * Postfix. Read by the decommission guardrails, and by the Setup tab of a site
+ * container, which has no mail server to submit to.
+ */
+function mailbox_outbound_local_label(): string {
+	require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+	$is_local = function (string $host): bool {
+		$host = strtolower(trim($host));
+		return in_array($host, array('localhost', '127.0.0.1', '::1'), true);
+	};
+	$settings = Globalvars::get_instance();
+	$provider = EmailSender::getActiveProvider();
+	if ($provider === null) {
+		return 'local sendmail (no outbound provider configured)';
+	}
+	$smtp_host = (string)$settings->get_setting('smtp_host');
+	if ($provider instanceof SmtpProvider && (trim($smtp_host) === '' || $is_local($smtp_host))) {
+		return 'SMTP via this box\'s own Postfix';
+	}
+	if ($is_local((string)$settings->get_setting('mailbox_forwarding_smtp_host'))) {
+		return 'forwarding by SMTP via this box\'s own Postfix';
+	}
+	return '';
 }
 
 /**
@@ -183,6 +206,14 @@ function mailbox_listener_actions(array $input, $session, string $self_url): ?Lo
 	}
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_admin.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+
+	if (!mailbox_site_has_mail_server()) {
+		admin_mailbox_relay_flash($session,
+			'This site runs in a container and has no mail server of its own to uninstall or reinstall. '
+			. 'It receives mail through its relay.', 'Nothing to change');
+		return LogicResult::redirect($self_url);
+	}
 
 	if ($action === 'listener_decommission') {
 		$failures = mailbox_listener_guardrail_failures(mailbox_listener_guardrail_facts());

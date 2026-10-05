@@ -25,6 +25,10 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.58 - a site container has no mail server (specs/multi_tenant_docker_hosts.md WP9): one
+ *   whose mail arrives by SMTP and has no relay is 'relay_needed' (no MX, no box records); its host
+ *   layer is one row (host.mail_server); a container's SPF is its providers' and never the box's, and
+ *   its relay hides nothing (originHidden)
  * @version 1.57 - behind a relay, the relay's own Spamhaus answer is a row (host.relay_spamhaus)
  * @version 1.56 - rspamd is the one program that checks and signs mail: the host.checker row
  *   reports it, and inbound verification is judged from rspamd and Postfix's
@@ -169,8 +173,15 @@ class InboundEmailSetupCheck {
 	 * cutover already switches every prescription to relay targets; only
 	 * deleting/releasing the relay returns colocated guidance.
 	 *
+	 * A site container has no mail server of its own (receive_mode.php,
+	 * mailbox_site_has_mail_server). When its mail arrives by SMTP and no relay
+	 * row exists it is 'relay_needed': fronted, since a relay is the only way
+	 * that mail can arrive, but with nothing yet to point the MX at. A webhook
+	 * provider's container stays 'colocated' for routing, as on bare metal, and
+	 * boxIsMailServer() keeps the box out of its records.
+	 *
 	 * @return array{mode:string,relay:?MailboxRelay,mx_hostname:string,public_ip:string,enabled:bool}
-	 *         mode is 'colocated' | 'self_hosted' | 'fleet'.
+	 *         mode is 'colocated' | 'self_hosted' | 'fleet' | 'relay_needed'.
 	 */
 	public function topology(): array {
 		if ($this->topology !== null) {
@@ -195,7 +206,42 @@ class InboundEmailSetupCheck {
 		} catch (\Throwable $e) {
 			// Relay table absent (before update_database) — colocated.
 		}
+		if ($this->topology['mode'] === 'colocated') {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+			if (mailbox_needs_relay()) {
+				$this->topology['mode'] = 'relay_needed';
+			}
+		}
 		return $this->topology;
+	}
+
+	/** A site container whose mail arrives by SMTP, with no relay yet: no such mail can reach it. */
+	private function relayNeeded(): bool {
+		return $this->topology()['mode'] === 'relay_needed';
+	}
+
+	/** Whether this site has a mail server of its own (a site container has none). */
+	private function hasMailServer(): bool {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+		return mailbox_site_has_mail_server();
+	}
+
+	/**
+	 * Whether this box is itself the mail server the world talks to: it takes
+	 * the domain's mail and its address belongs in SPF. Never a site container.
+	 */
+	private function boxIsMailServer(): bool {
+		return !$this->fronted() && $this->hasMailServer();
+	}
+
+	/**
+	 * Whether a relay is hiding this box's address. A site container's relay
+	 * hides nothing: the box's address is shared with its neighbours and
+	 * published in their DNS, so for a container the relay is only how mail
+	 * arrives.
+	 */
+	private function originHidden(): bool {
+		return $this->fronted() && $this->hasMailServer();
 	}
 
 	/** Whether a relay or fleet slot fronts this deployment. */
@@ -496,7 +542,7 @@ class InboundEmailSetupCheck {
 		// inside this domain's zone — a relay's A record belongs to whoever runs
 		// the relay, and a plan that reached across zones would ask a credential
 		// to write somewhere it has no business.
-		if (!$fronted && $this->mailHostname !== '' && $this->inZone($this->mailHostname, $domain)) {
+		if ($this->boxIsMailServer() && $this->mailHostname !== '' && $this->inZone($this->mailHostname, $domain)) {
 			$this->planAdd($plan, 'A', $this->mailHostname, $this->publicIp, null,
 				'Points the mail hostname at this server.');
 		}
@@ -672,7 +718,8 @@ class InboundEmailSetupCheck {
 	 * not, and a sender verifying TLS would refuse it.
 	 */
 	private function directTarget(bool $fronted, string $mx_target): string {
-		if ($fronted) {
+		// A site container's relay hides nothing, so its own web host serves Direct.
+		if ($fronted && $this->originHidden()) {
 			return $mx_target;
 		}
 		return strtolower(trim((string)$this->settings->get_setting('webDir')));
@@ -950,6 +997,42 @@ class InboundEmailSetupCheck {
 	private function checkHost() {
 		$out = array();
 
+		// A site container has no mail server to check: one row says where its
+		// mail comes from instead.
+		if (!$this->hasMailServer()) {
+			$label = 'How mail reaches this site';
+			$why = 'This site runs in a container and has no mail server of its own. It receives mail only '
+				. 'through a relay, which takes the mail in and checks it before this site collects it.';
+			$t = $this->topology();
+			if ($this->fronted() && !$this->relayNeeded() && !$t['enabled']) {
+				$out[] = $this->r('host.mail_server', '', 'host', $label, self::REQUIRED, self::FAIL,
+					'The relay is disabled, so no new mail reaches this site.', $why,
+					array('text' => 'Enable the relay in the Relay section below.'));
+			} elseif (!$this->relayNeeded()) {
+				$out[] = $this->r('host.mail_server', '', 'host', $label, self::REQUIRED, self::PASS,
+					'Mail reaches this site through its relay.', $why);
+			} elseif (mailbox_receiving_domain_exists()) {
+				$out[] = $this->r('host.mail_server', '', 'host', $label, self::REQUIRED, self::FAIL,
+					'No relay is set up, so no mail can reach this site.', $why,
+					array('text' => 'Set up a relay in the Relay section below.'));
+			} else {
+				$out[] = $this->r('host.mail_server', '', 'host', $label, self::RECOMMENDED, self::INFO,
+					'No domain receives mail here yet. One that does will need a relay.', $why);
+			}
+
+			// Nor can it send through a mail server of its own.
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/listener_admin.php'));
+			$local = mailbox_outbound_local_label();
+			if ($local !== '') {
+				$out[] = $this->r('host.outbound_local', '', 'host', 'Where sent mail goes', self::REQUIRED, self::FAIL,
+					'Sent mail is set to go through ' . $local . ', and this site has none.',
+					'This site runs in a container and has no mail server of its own, so mail sent that way '
+					. 'never leaves.',
+					array('text' => 'Choose an email provider, or an outside SMTP server, in the email settings.'));
+			}
+			return $out;
+		}
+
 		// The recorded listener state (specs/mailbox_listener_decommission.md):
 		// once decommissioned, the expectation for the local Postfix stack and
 		// port 25 inverts — gone is healthy, present is a mismatch.
@@ -1160,6 +1243,12 @@ class InboundEmailSetupCheck {
 		// reaches this box's milters — it is pulled off the relay spool — so their
 		// state here says nothing, and probing them would prescribe an installer run
 		// that cannot change the answer.
+		if ($this->relayNeeded()) {
+			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::INFO,
+				'Nothing to verify yet: no relay is set up, so no mail reaches this site.',
+				'The relay checks SPF, DKIM and DMARC on every message and passes its verdicts on.',
+				null, true);
+		}
 		if ($this->fronted()) {
 			return $this->checkRelayInboundVerification($label);
 		}
@@ -1536,6 +1625,12 @@ class InboundEmailSetupCheck {
 	private function checkMailHost() {
 		$out = array();
 
+		// A site container has no Postfix and so no HELO name. Its public mail
+		// host is the relay's, once it has one.
+		if (!$this->hasMailServer()) {
+			return $this->fronted() && !$this->relayNeeded() ? $this->frontedMailHostResults() : $out;
+		}
+
 		$hn = array();
 		exec('postconf -h myhostname 2>/dev/null', $hn);
 		$myhostname = strtolower(trim(implode('', $hn)));
@@ -1777,7 +1872,12 @@ class InboundEmailSetupCheck {
 		$fronted = $this->fronted();
 		$mx_prescribed = $fronted ? $this->topology()['mx_hostname'] : $canonical;
 		list($mx, $mxOk) = $this->dns(function () use ($domain) { return DnsResolver::getMx($domain); });
-		if ($fronted && $mx_prescribed === '') {
+		if ($this->relayNeeded()) {
+			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
+				'No relay is set up, so there is nothing for ' . $domain . '\'s MX record to point at.',
+				'This site runs in a container and receives mail only through a relay.',
+				array('text' => 'Set up a relay in the Relay section. The MX record to publish then shows here.'));
+		} elseif ($fronted && $mx_prescribed === '') {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
 				'The relay\'s MX hostname is not recorded yet, so there is no target to verify against.',
 				'Reload the Setup tab once — its Relay section records the hostname from the relay\'s provisioning job — then re-check.');
@@ -1844,6 +1944,9 @@ class InboundEmailSetupCheck {
 					'Under a relay, outbound mail must ride a provider with its own sending range.',
 					array('text' => 'Switch the outbound email provider on the Settings page to an API provider '
 						. 'with its own sending range (e.g. Mailgun or SES), then re-check.'));
+			} elseif ($plan['prescribe'] === 'none' && $spf === '') {
+				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::RECOMMENDED, self::INFO,
+					'Nothing is needed in ' . $domain . '\'s SPF for this site: ' . $plan['note']);
 			} elseif ($plan['prescribe'] === 'unknown') {
 				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
 					'Could not determine ' . $plan['label'] . '\'s SPF mechanism for ' . $domain
@@ -2587,7 +2690,7 @@ class InboundEmailSetupCheck {
 		// Cutover progress: relays are born enabled, so this row reports how
 		// far the DNS move has come (and flags the one bad state — cutover
 		// complete while the relay sits emergency-disabled).
-		if ($this->fronted()) {
+		if ($this->fronted() && !$this->relayNeeded()) {
 			$out[] = $this->relayEnableResult();
 		}
 
@@ -3128,6 +3231,29 @@ class InboundEmailSetupCheck {
 	 */
 	private function spfResult($domain, $spf, array $plan) {
 		$fix = $this->dnsFix('TXT', $domain, $plan['value']);
+
+		// A site container sends nothing itself: SPF needs its providers, and
+		// naming the box only lets the sites that share its address pass as this
+		// domain.
+		if (!$this->hasMailServer()) {
+			if ($plan['value'] === '') {
+				$fix = array('text' => 'Remove this server\'s address from ' . $domain . '\'s SPF record.');
+			}
+			if ($this->publicIp !== '' && $this->spfAuthorizes($spf, $domain) === 'pass') {
+				return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
+					'SPF authorizes this server (' . $this->publicIp . '), which sends no mail itself.',
+					'This site runs in a container, and other sites may share this address. Record: ' . $spf, $fix);
+			}
+			if ($plan['mechanism'] !== '' && !$this->spfCoversMechanism($spf, $plan['mechanism'])) {
+				return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
+					'SPF does not authorize the outbound path (' . $plan['label'] . ') — sent mail will fail SPF.',
+					'Record: ' . $spf, $fix);
+			}
+			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::PASS,
+				$plan['mechanism'] !== ''
+					? 'SPF authorizes the outbound path (' . $plan['label'] . ').'
+					: 'SPF does not name this server; ' . ($plan['note'] ?? ''));
+		}
 
 		if ($this->fronted()) {
 			if ($this->publicIp !== '') {
@@ -4092,8 +4218,9 @@ class InboundEmailSetupCheck {
 	 * The SPF this deployment prescribes for a sending domain, by topology
 	 * (specs/mailbox_setup_topology_aware.md Decision 5). Returns:
 	 *   'prescribe' — 'record' (value is copy-ready), 'switch_provider' (no
-	 *                 record can both work and hide the origin), or 'unknown'
-	 *                 (the provider's API did not answer).
+	 *                 record can both work and hide the origin), 'none' (a site
+	 *                 container whose providers need nothing in SPF), or
+	 *                 'unknown' (the provider's API did not answer).
 	 *   'value'     — the copy-ready record ('' unless prescribe = record).
 	 *   'mechanism' — the outbound mechanism(s) a published record must cover.
 	 *   'label'     — what carries the mail, for row text.
@@ -4103,8 +4230,14 @@ class InboundEmailSetupCheck {
 	 * box IP is exactly what the relay hides, and the relay itself sends nothing.
 	 */
 	private function spfPlan(string $domain): array {
-		if (!$this->fronted()) {
-			$terms = array('v=spf1', 'ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
+		// The colocated shape, and a site container's: the box's own address
+		// only when the box is the mail server; a container's relay hides
+		// nothing, so the hidden-origin rule below is not its rule.
+		if (!$this->originHidden()) {
+			$terms = array('v=spf1');
+			if ($this->boxIsMailServer()) {
+				$terms[] = 'ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP');
+			}
 			$mechanisms = array();
 			$relay = $this->relayInfo();
 			$label = $relay['label'];
@@ -4113,6 +4246,18 @@ class InboundEmailSetupCheck {
 				foreach ($mech === '' ? array() : preg_split('/\s+/', $mech) as $term) {
 					if (!in_array($term, $mechanisms, true)) { $mechanisms[] = $term; }
 				}
+			}
+			if (count($terms) === 1 && empty($mechanisms)) {
+				// A site container whose providers send with their own
+				// return-path domain (SMTP2GO, Joinery services): the domain's
+				// SPF needs nothing from it.
+				$class = $this->activeProviderClass();
+				$label = ($class !== null) ? $class::getLabel() : $label;
+				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/listener_admin.php'));
+				return array('prescribe' => 'none', 'value' => '', 'mechanism' => '', 'label' => $label,
+					'note' => (mailbox_outbound_local_label() !== '')
+						? 'this site has no working way to send mail yet (see "Where sent mail goes").'
+						: $label . ' sends with its own return-path domain.');
 			}
 			$value = implode(' ', array_merge($terms, $mechanisms, array('-all')));
 			return array('prescribe' => 'record', 'value' => $value,
@@ -4154,7 +4299,7 @@ class InboundEmailSetupCheck {
 		$source = ($class !== null)
 			&& in_array('DkimRecordSource', class_implements($class) ?: array(), true);
 
-		if (!$this->fronted()) {
+		if ($this->boxIsMailServer()) {
 			return array('local' => true,
 				'provider' => $source, 'class' => $source ? $class : null, 'label' => $label);
 		}
