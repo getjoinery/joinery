@@ -22,6 +22,7 @@
  *     restart the node did not accept, or an installer that never reached its
  *     ok line, into a failed job.
  *
+ * @version 1.1 - file_head cases read rspamd's worker-proxy.inc and dkim_signing.conf (agent 1.57.0)
  * @version 1.0
  */
 
@@ -201,23 +202,23 @@ $rr = json_decode((string)$rc_job->get('mjb_result'), true);
 check($rc_job->get('mjb_status') === 'completed' && $rr['name'] === 'host_housekeeping.sh' && $rr['ran'] === true && count($rr['reclaim']) === 2,
 	'a reset is judged by its owner\'s ok line and keeps the node\'s own account of what moved', var_export($rr, true));
 
-$fh_job = avw_job($node, 'file_head', array('file' => 'rspamd_redis', 'path' => '/etc/rspamd/local.d/redis.conf', 'present' => true,
+$fh_job = avw_job($node, 'file_head', array('file' => 'rspamd_worker_proxy', 'path' => '/etc/rspamd/local.d/worker-proxy.inc', 'present' => true,
 	'size_bytes' => 40, 'modified_time' => '2026-09-23T10:00:00Z', 'lines_returned' => 2, 'truncated' => false,
-	'text' => "servers = \"127.0.0.1:6379\";\npassword\n"));
+	'text' => "upstream \"local\" {\npassword\n"));
 JobResultProcessor::process($fh_job);
 $f = json_decode((string)$fh_job->get('mjb_result'), true);
-check($f['read'] === true && $f['file'] === 'rspamd_redis' && $f['path'] === '/etc/rspamd/local.d/redis.conf' && $f['lines_returned'] === 2,
+check($f['read'] === true && $f['file'] === 'rspamd_worker_proxy' && $f['path'] === '/etc/rspamd/local.d/worker-proxy.inc' && $f['lines_returned'] === 2,
 	'a file_head result keeps the name, the path and the lines', var_export($f, true));
 check(in_array('file_head', ManagementJob::LOG_EXCERPT_TYPES, true), 'and its text ages out on the log-excerpt window');
-// A box whose scanner is stateless has no redis.conf: the word still reads, and
-// the answer is an absent file, not a failure.
-$fh_absent = avw_job($node, 'file_head', array('file' => 'rspamd_redis', 'path' => '/etc/rspamd/local.d/redis.conf', 'present' => false,
+// A relay signs nothing and has no dkim_signing.conf: the word still reads,
+// and the answer is an absent file, not a failure.
+$fh_absent = avw_job($node, 'file_head', array('file' => 'rspamd_dkim_signing', 'path' => '/etc/rspamd/local.d/dkim_signing.conf', 'present' => false,
 	'size_bytes' => 0, 'modified_time' => '', 'lines_returned' => 0, 'truncated' => false, 'text' => ''));
 JobResultProcessor::process($fh_absent);
 $fa = json_decode((string)$fh_absent->get('mjb_result'), true);
-check($fa['read'] === true && $fa['present'] === false && $fa['file'] === 'rspamd_redis',
-	'an absent redis.conf is read as absent, the expected answer on an upgraded box', var_export($fa, true));
-check(strpos(JobCommandBuilder::FILE_HEAD_FILES['rspamd_redis'], 'absent on an upgraded box') !== false
+check($fa['read'] === true && $fa['present'] === false && $fa['file'] === 'rspamd_dkim_signing',
+	'an absent dkim_signing.conf is read as absent, the expected answer on a relay', var_export($fa, true));
+check(strpos(JobCommandBuilder::FILE_HEAD_FILES['rspamd_dkim_signing'], 'signing') !== false
 	&& strpos(JobCommandBuilder::FILE_HEAD_FILES['rspamd_classifier_bayes'], 'switched off') !== false,
 	'the rspamd words describe the stateless scanner');
 
