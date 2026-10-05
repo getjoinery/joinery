@@ -20,7 +20,9 @@
  *     and sits in Needs you, not Snoozed;
  *   - what is refused: a "do" value nobody offered, an empty note, an id that
  *     is no incident, and the API action below the superadmin floor;
- *   - Resolve all cleared resolves only what cleared and still needs you;
+ *   - a node's cases that closed while new are resolved by the reconciler,
+ *     by no person, saying they cleared before anyone looked; one still
+ *     happening is left alone;
  *   - resolved while still happening is a fix awaiting its proof: its own
  *     label and view, off the list; once cleared it is plain Resolved;
  *   - a note given with a triage (what fixed it) lands on each incident the
@@ -35,6 +37,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_triage_test.php
  *
+ * @version 1.2 - cleared cases are settled by the reconciler (Resolve all cleared is gone)
  * @version 1.1 - Looking is gone; a fix awaiting its proof; the carry-over maps read and active to new
  * @version 1.0
  */
@@ -211,21 +214,25 @@ $res = incident_triage_logic(['id' => $svc ? (int)$svc->key : 0, 'do' => 'resolv
 check((string)$res->error !== '', 'The API action refuses a GET', (string)$res->error);
 
 // ---------------------------------------------------------------------------
-section('Resolve all cleared');
+section('A case the node closed before anyone looked is settled');
 
 if ($f2b !== null && $disk !== null && $svc !== null) {
 	IncidentTriage::set($svc, IncidentRecord::TRIAGE_NEW, $uid);
+	IncidentTriage::set($disk, IncidentRecord::TRIAGE_SNOOZED, $uid, 24);
 	$svc_events = count(IncidentEvent::for_incident((int)$svc->key));
-	IncidentTriage::resolve_all_cleared($uid, ['node_id' => $node_id], 'Fixed by the cleared fix');
+	$n = IncidentReconciler::settle_cleared([$node_id]);
 	$f2b->load(); $disk->load(); $svc->load();
-	check($f2b->triage() === IncidentRecord::TRIAGE_RESOLVED && $disk->triage() === IncidentRecord::TRIAGE_RESOLVED,
-		'Both cleared incidents that needed a look are resolved');
-	check($svc->triage() === IncidentRecord::TRIAGE_NEW, 'An incident still happening is left as it was');
+	check($n === 2 && $f2b->triage() === IncidentRecord::TRIAGE_RESOLVED && $disk->triage() === IncidentRecord::TRIAGE_RESOLVED
+		&& (int)$f2b->get('inc_triage_usr_user_id') === 0 && trim((string)$disk->get('inc_snooze_until')) === '',
+		'Both cleared cases, new and snoozed, are resolved by nobody', 'settled ' . $n);
 	$ev = IncidentEvent::for_incident((int)$f2b->key);
 	$last = end($ev);
-	check((string)$last->get('ine_kind') === 'note' && (string)$last->get('ine_text') === 'Fixed by the cleared fix',
-		'Resolve all cleared puts its note on each one it resolved');
-	check(count(IncidentEvent::for_incident((int)$svc->key)) === $svc_events, 'and nothing on the one it left alone');
+	check((string)$last->get('ine_kind') === 'triage' && (string)$last->get('ine_text') === IncidentReconciler::SETTLED_TEXT
+		&& !empty($last->data()['settled']), 'Its timeline says it cleared before anyone looked', json_encode($last->data()));
+	check(strpos(IncidentViews::timeline(array($last)), '<strong>Resolved.</strong>') !== false, 'and shows it as Resolved');
+	check($svc->triage() === IncidentRecord::TRIAGE_NEW && count(IncidentEvent::for_incident((int)$svc->key)) === $svc_events,
+		'An incident still happening is left as it was');
+	check(IncidentReconciler::settle_cleared([$node_id]) === 0, 'A second pass settles nothing more');
 }
 
 // ---------------------------------------------------------------------------

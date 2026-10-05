@@ -11,6 +11,7 @@
  * Superadmin only. Every write is a POST carrying the admin CSRF token, and
  * goes through IncidentTriage.
  *
+ * @version 1.3 - Resolve all cleared is gone: the reconciler resolves what clears before anyone looks
  * @version 1.2 - Waiting for proof (resolved, still happening) beside Resolved (resolved, cleared); Looking is gone
  * @version 1.1 - Resolve and Resolve all cleared ask what fixed it in a modal; the answer is a note on each
  * @version 1.0
@@ -71,11 +72,6 @@ if ($_POST) {
 					. ($r['missing'] > 0 ? '; ' . $r['missing'] . ' no longer exist' . ($r['missing'] === 1 ? 's' : '') : '') . '.'
 					. (trim($note) !== '' ? ' Note added.' : ''), true);
 			}
-		} elseif ($action === 'resolve_all_cleared') {
-			// Within the filters the person was looking at, as the button's count is.
-			$n = IncidentTriage::resolve_all_cleared($uid, array('node_id' => (int)($_POST['node'] ?? 0), 'source' => (string)($_POST['source'] ?? '')),
-				(string)($_POST['note'] ?? ''));
-			$flash($n . ' cleared incident' . ($n === 1 ? '' : 's') . ' resolved.', true);
 		}
 	} catch (IncidentTriageException $e) {
 		$flash($e->getMessage(), false);
@@ -132,8 +128,7 @@ $q = $db->prepare("SELECT
 		count(*) FILTER (WHERE inc_triage = 'resolved' AND inc_status = 'open') AS waiting,
 		count(*) FILTER (WHERE inc_triage = 'resolved' AND inc_status = 'closed') AS resolved,
 		count(*) FILTER (WHERE inc_triage = 'ignored') AS ignored,
-		count(*) AS every,
-		count(*) FILTER (WHERE inc_status = 'closed' AND " . IncidentRecord::NEEDS_YOU_SQL . ") AS cleared_needing
+		count(*) AS every
 	FROM inc_incident_records WHERE $where");
 $q->execute($bind);
 $counts = $q->fetch(PDO::FETCH_ASSOC) ?: array();
@@ -179,17 +174,8 @@ if (count($rows) === 0) {
 		? 'Nothing needs you. Every incident is resolved, ignored or snoozed.'
 		: 'No incidents here.') . '</p>';
 } else {
-	echo '<div class="d-flex flex-wrap align-items-end justify-content-between gap-3 mb-3">';
+	echo '<div class="mb-3">';
 	echo IncidentViews::do_form('incident_bulk', $self_url, $csrf, array('back' => $here), false, 'Apply');
-	if ((int)($counts['cleared_needing'] ?? 0) > 0) {
-		echo '<form method="post" action="' . $e($self_url) . '">' . SmAdminCsrf::field()
-			. '<input type="hidden" name="action" value="resolve_all_cleared">'
-			. '<input type="hidden" name="node" value="' . (int)$f_node . '">'
-			. '<input type="hidden" name="source" value="' . $e($f_source) . '">'
-			. '<input type="hidden" name="back" value="' . $e($here) . '">'
-			. IncidentViews::resolve_note_field((int)$counts['cleared_needing'])
-			. '<button type="submit" class="btn btn-sm btn-outline-success">Resolve all cleared (' . (int)$counts['cleared_needing'] . ')</button></form>';
-	}
 	echo '</div>';
 	echo IncidentViews::table($rows, ['show_node' => true, 'select' => 'incident_bulk']);
 	echo IncidentViews::resolve_note_script();
@@ -200,7 +186,7 @@ if (count($rows) === 0) {
 $page->end_box();
 
 echo '<p class="small text-muted">An incident is one condition on one node, from when it starts until it is over. Its source says whether it is '
-	. 'still happening; you say what is being done about it. Something that clears on its own before anyone looks still waits in Needs you, '
-	. 'shown as cleared: Resolve all cleared puts those away in one step.</p>';
+	. 'still happening; you say what is being done about it. Something that clears before anyone looks is resolved on its own, '
+	. 'saying so on its timeline; you were told when it started.</p>';
 
 $page->admin_footer();

@@ -14,7 +14,8 @@
  *     stored 'down', with what the check saw as evidence, and tells the
  *     superadmins once: never per tick;
  *   - a changed detail refreshes the incident with no event and no signal;
- *   - the site answering again clears it, with an event;
+ *   - the site answering again clears it, with an event, and as nobody had
+ *     looked it is resolved on the same pass, saying so;
  *   - down again within the hour reopens the same incident as new and tells
  *     them again; an ignored one reopens still ignored and silent;
  *   - resolved while still happening and still happening a day later goes
@@ -36,6 +37,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_reconciler_test.php
  *
+ * @version 1.4 - a cleared incident nobody had settled is resolved (settle_cleared)
  * @version 1.3 - an unproven fix goes back to new after a day (return_unproven); Looking is gone
  * @version 1.2 - a removed node's incidents, of any source, are cleared
  * @version 1.1 - a node's deletion and its incidents (site_copy.md B41)
@@ -145,9 +147,12 @@ $c = $pass();
 if ($inc !== null) {
 	$inc->load();
 	$ev = IncidentEvent::for_incident((int)$inc->key);
-	check($c['cleared'] === 1 && !$inc->is_open() && $kinds((int)$inc->key) === array('opened', 'cleared')
-		&& (string)end($ev)->get('ine_text') === 'The site answers again.' && $inc->needs_you(),
-		'Cleared with an event; still needs a look', json_encode($c));
+	check($c['cleared'] === 1 && !$inc->is_open() && $kinds((int)$inc->key) === array('opened', 'cleared', 'triage')
+		&& (string)$ev[1]->get('ine_text') === 'The site answers again.',
+		'Cleared with an event', json_encode($c));
+	check($c['settled'] === 1 && $inc->triage() === IncidentRecord::TRIAGE_RESOLVED && !$inc->needs_you()
+		&& (int)$inc->get('inc_triage_usr_user_id') === 0 && (string)end($ev)->get('ine_text') === IncidentReconciler::SETTLED_TEXT,
+		'Cleared before anyone looked, it is resolved on the same pass, by nobody, saying so', json_encode($c));
 }
 
 // ---------------------------------------------------------------------------
@@ -250,13 +255,21 @@ $second = $rows[1] ?? null;
 // ---------------------------------------------------------------------------
 section('Monitoring off, and a node no longer watched');
 
+// What the newest cleared event said (a settle line may follow it).
+$cleared_text = function (array $ev): string {
+	foreach (array_reverse($ev) as $e) {
+		if ((string)$e->get('ine_kind') === 'cleared') { return (string)$e->get('ine_text'); }
+	}
+	return '';
+};
+
 $set(array('mgn_uptime_enabled' => false));
 $c = $pass();
 if ($second !== null) {
 	$second->load();
 	$ev = IncidentEvent::for_incident((int)$second->key);
-	check($c['cleared'] === 1 && !$second->is_open() && strpos((string)end($ev)->get('ine_text'), 'turned off') !== false,
-		'Monitoring switched off clears it, saying so', (string)end($ev)->get('ine_text'));
+	check($c['cleared'] === 1 && !$second->is_open() && strpos($cleared_text($ev), 'turned off') !== false,
+		'Monitoring switched off clears it, saying so', $cleared_text($ev));
 }
 $set(array('mgn_uptime_enabled' => true));
 $pass();
@@ -266,7 +279,7 @@ $set(array('mgn_install_state' => 'copy'));
 $c = $pass();
 $open_now = array_values(array_filter($incidents(), function ($r) { return $r->is_open(); }));
 $ev = isset($rows) && count($incidents()) ? IncidentEvent::for_incident((int)end($incidents())->key) : array();
-check($c['cleared'] === 1 && count($open_now) === 0 && strpos((string)end($ev)->get('ine_text'), 'no longer watched') !== false,
+check($c['cleared'] === 1 && count($open_now) === 0 && strpos($cleared_text($ev), 'no longer watched') !== false,
 	'A node in an install state: its active incident is cleared, saying so', json_encode($c));
 $before = count($incidents());
 $c = $pass();

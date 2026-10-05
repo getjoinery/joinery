@@ -12,6 +12,7 @@
  * the incident_triage API action. Each checks the superadmin floor itself
  * before calling; this class trusts the user id it is handed.
  *
+ * @version 1.3 - resolve_all_cleared() removed: IncidentReconciler settles what clears before anyone looks
  * @version 1.2 - Looking is gone; New's button is Reopen; label() names a fix awaiting its proof
  * @version 1.1 - a triage can carry a note (what fixed it), written on each incident it reaches
  * @version 1.0
@@ -169,30 +170,6 @@ class IncidentTriage {
 			$text = mb_substr($text, 0, self::NOTE_MAX);
 		}
 		IncidentEvent::record((int)$inc->key, IncidentEvent::KIND_NOTE, gmdate('Y-m-d H:i:s'), $user_id, $text);
-	}
-
-	/**
-	 * Resolve every incident whose condition has cleared and that still needs
-	 * a person, within the list's filters (node_id, source). Returns how many
-	 * changed. A non-empty note is added to each one it resolved.
-	 */
-	public static function resolve_all_cleared(int $user_id, array $filters = array(), string $note = ''): int {
-		$options = array('status' => IncidentRecord::STATUS_CLOSED, 'view' => 'needs_you', 'deleted' => false);
-		foreach (array('node_id', 'source') as $k) {
-			if (!empty($filters[$k])) {
-				$options[$k] = $filters[$k];
-			}
-		}
-		$n = 0;
-		foreach (new MultiIncidentRecord($options) as $inc) {
-			if (self::set($inc, IncidentRecord::TRIAGE_RESOLVED, $user_id)) {
-				$n++;
-				if (trim($note) !== '') {
-					self::note($inc, $note, $user_id);
-				}
-			}
-		}
-		return $n;
 	}
 
 	/** One incident by id, or null when there is no such live incident. */
