@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.95 - --cpus and --pids-limit for a site container (specs/multi_tenant_docker_hosts.md
+#               WP3), recorded in the run spec like --memory. A new site gets a ceiling of 512
+#               processes; a rebuild keeps the spec's. A ceiling above the CPUs Docker counts is
+#               refused before anything stops, and a bad value is named as the option's or the run
+#               spec's. A limit given for a bare-metal site is refused, not ignored.
 #VERSION 2.94 - A site container is run from its run spec, /etc/joinery/sites/{site}/run_spec on the
 #               host (_site_run_spec.sh; specs/multi_tenant_docker_hosts.md WP0). A rebuild keeps
 #               the memory budget the spec records unless --memory says otherwise; a container
@@ -603,6 +608,26 @@ SSH_REACHABLE_ACCOUNT="" # Set by derive_ssh_access: the account that keeps acce
 # (_site_run_spec.sh); --memory=none lifts it.
 CONTAINER_MEMORY=""
 CONTAINER_MEMORY_GIVEN=0
+
+# --cpus=N: a hard ceiling in cores (1.0 is at most one core). Empty means
+# none. Sharing under load needs no flag: Docker gives every container equal
+# weight, so a busy host divides its CPU between the sites that want it.
+# PostgreSQL's parallel workers follow the ceiling (tune_postgres_memory.sh
+# reads cpu.max).
+CONTAINER_CPUS=""
+CONTAINER_CPUS_GIVEN=0
+
+# --pids-limit=N: a ceiling on the container's processes and threads, so a
+# fork bomb stops there instead of filling the host's process table. A new
+# site gets 512: an idle site runs 54 to 75 processes and threads (docker-prod
+# and a fresh site, 2026-10-05), and Apache, PHP-FPM and PostgreSQL at their
+# packaged maximums stay under it.
+# Below the floor a site could not start at all. Both, like --memory, are
+# recorded in the run spec, so a rebuild keeps them; none lifts either.
+CONTAINER_PIDS=""
+CONTAINER_PIDS_GIVEN=0
+CONTAINER_PIDS_DEFAULT=512
+CONTAINER_PIDS_FLOOR=128
 
 # Global flags are honoured wherever they appear: `install.sh docker -y` and
 # `install.sh -y docker` mean the same thing. Subcommands route stray
@@ -3460,6 +3485,22 @@ do_site_create() {
                 CONTAINER_MEMORY="$2"; CONTAINER_MEMORY_GIVEN=1
                 shift 2
                 ;;
+            --cpus=*)
+                CONTAINER_CPUS="${1#*=}"; CONTAINER_CPUS_GIVEN=1
+                shift
+                ;;
+            --cpus)
+                CONTAINER_CPUS="$2"; CONTAINER_CPUS_GIVEN=1
+                shift 2
+                ;;
+            --pids-limit=*)
+                CONTAINER_PIDS="${1#*=}"; CONTAINER_PIDS_GIVEN=1
+                shift
+                ;;
+            --pids-limit)
+                CONTAINER_PIDS="$2"; CONTAINER_PIDS_GIVEN=1
+                shift 2
+                ;;
             --allow-downgrade)
                 ALLOW_DOWNGRADE=1
                 shift
@@ -3588,6 +3629,11 @@ do_site_create() {
                 echo "                         more than one site: PostgreSQL sizes its memory"
                 echo "                         from this, and skips sizing without it. A rebuild"
                 echo "                         keeps the budget it had; --memory=none lifts it."
+                echo "  --cpus=N               CPU ceiling for the container, in cores (1.0, 0.5)."
+                echo "                         None by default. A rebuild keeps it; none lifts it."
+                echo "  --pids-limit=N         Ceiling on the container's processes and threads."
+                echo "                         512 for a new site, at least 128. A rebuild keeps"
+                echo "                         it; none lifts it."
                 echo ""
                 echo "Automation:"
                 echo "  -y / --yes     Auto-accept: remove existing container, keep volumes"
@@ -3769,6 +3815,13 @@ do_site_create() {
             exit 1
         fi
         MODE="bare-metal"
+    fi
+
+    # A limit bounds a container. A bare-metal site has none to bound, and a
+    # limit asked for and silently not applied is worse than being told.
+    if [ "$MODE" = "bare-metal" ] && [ $((CONTAINER_MEMORY_GIVEN + CONTAINER_CPUS_GIVEN + CONTAINER_PIDS_GIVEN)) -gt 0 ]; then
+        print_error "--memory, --cpus and --pids-limit limit a site container; a bare-metal site has none. Leave them out, or install the site in Docker"
+        exit 1
     fi
 
     # Resolve a password nobody supplied, now that the mode is known.
@@ -4194,28 +4247,54 @@ do_site_docker() {
         run_spec_adopt "$SITENAME" || { print_error "Could not record how ${SITENAME}'s container is run; nothing was changed"; exit 1; }
         print_info "Recorded ${SITENAME}'s run spec from its container: $(run_spec_path "$SITENAME")"
     fi
-    local SPEC_CPUS="" SPEC_PIDS="" SPEC_FOREIGN=""
+    # A limit given on the command line wins; one not given is the spec's, and
+    # a new site (no spec) gets the default process ceiling.
+    local SPEC_FOREIGN=""
     if run_spec_exists "$SITENAME"; then
         docker inspect "$SITENAME" > /dev/null 2>&1 \
             || print_info "${SITENAME} has a run spec but no container; its limits apply: $(run_spec_path "$SITENAME")"
-        if [ "$CONTAINER_MEMORY_GIVEN" -eq 0 ]; then
-            CONTAINER_MEMORY="$(run_spec_get "$SITENAME" memory)"
-        fi
-        SPEC_CPUS="$(run_spec_get "$SITENAME" cpus)"
-        SPEC_PIDS="$(run_spec_get "$SITENAME" pids_limit)"
+        [ "$CONTAINER_MEMORY_GIVEN" -eq 1 ] || CONTAINER_MEMORY="$(run_spec_get "$SITENAME" memory)"
+        [ "$CONTAINER_CPUS_GIVEN" -eq 1 ] || CONTAINER_CPUS="$(run_spec_get "$SITENAME" cpus)"
+        [ "$CONTAINER_PIDS_GIVEN" -eq 1 ] || CONTAINER_PIDS="$(run_spec_get "$SITENAME" pids_limit)"
         SPEC_FOREIGN="$(run_spec_foreign_lines "$SITENAME")"
+    elif [ "$CONTAINER_PIDS_GIVEN" -eq 0 ]; then
+        CONTAINER_PIDS="$CONTAINER_PIDS_DEFAULT"
     fi
-    # Every value is checked here, before anything is stopped: a budget the
-    # spec would refuse later would leave the site removed and not rebuilt.
-    local MEMORY_IN="$CONTAINER_MEMORY"
-    if [ "$CONTAINER_MEMORY_GIVEN" -eq 1 ] && [ -z "$MEMORY_IN" ]; then
-        print_error "--memory was given with no size. Give one (512m, 1G), or none to lift the budget. Nothing was changed"
+    # Every value is checked here, before anything is stopped: a limit Docker
+    # would refuse later would leave the site removed and not rebuilt.
+    local MEMORY_IN="$CONTAINER_MEMORY" CPUS_IN="$CONTAINER_CPUS" PIDS_IN="$CONTAINER_PIDS" EMPTY_FLAG=""
+    [ "$CONTAINER_MEMORY_GIVEN" -eq 1 ] && [ -z "$MEMORY_IN" ] && EMPTY_FLAG="--memory"
+    [ "$CONTAINER_CPUS_GIVEN" -eq 1 ] && [ -z "$CPUS_IN" ] && EMPTY_FLAG="--cpus"
+    [ "$CONTAINER_PIDS_GIVEN" -eq 1 ] && [ -z "$PIDS_IN" ] && EMPTY_FLAG="--pids-limit"
+    if [ -n "$EMPTY_FLAG" ]; then
+        print_error "${EMPTY_FLAG} was given with no value. Give one, or none to lift the limit. Nothing was changed"
         exit 1
     fi
+    # A bad value is named where it came from: the option, or the run spec when
+    # no option was given.
+    refuse_limit() {  # GIVEN OPTION KEY VALUE WHAT
+        if [ "$1" -eq 1 ]; then
+            print_error "--$2=$4 is $5. Nothing was changed"
+        else
+            print_error "${SITENAME}'s run spec has $3=$4, which is $5. Run again with --$2 set to one that is not, or --$2=none. Nothing was changed"
+        fi
+        exit 1
+    }
     CONTAINER_MEMORY="$(run_spec_norm_memory "$MEMORY_IN")" \
-        || { print_error "--memory=${MEMORY_IN} is not a memory size Docker takes (512m, 1G, 1.5g; at least 6m; none for no limit). Nothing was changed"; exit 1; }
-    run_spec_check_line "cpus=${SPEC_CPUS}" && run_spec_check_line "pids_limit=${SPEC_PIDS}" \
-        || { print_error "${SITENAME}'s run spec holds a CPU or process limit that is not one (cpus=${SPEC_CPUS}, pids_limit=${SPEC_PIDS}). Nothing was changed"; exit 1; }
+        || refuse_limit "$CONTAINER_MEMORY_GIVEN" memory memory "$MEMORY_IN" "not a memory size Docker takes (512m, 1G, 1.5g; at least 6m; none for no limit)"
+    CONTAINER_CPUS="$(run_spec_norm_cpus "$CPUS_IN")" \
+        || refuse_limit "$CONTAINER_CPUS_GIVEN" cpus cpus "$CPUS_IN" "not a CPU ceiling Docker takes (1.0, 0.5; at least 0.01; none for no ceiling)"
+    if ! run_spec_cpus_fit "$CONTAINER_CPUS"; then
+        run_spec_host_cpus > /dev/null \
+            || { print_error "Docker did not say how many CPUs this host has, so the CPU ceiling ${CONTAINER_CPUS} cannot be checked. Nothing was changed"; exit 1; }
+        refuse_limit "$CONTAINER_CPUS_GIVEN" cpus cpus "$CONTAINER_CPUS" "more than this host has (CPUs: $(run_spec_host_cpus)), and Docker refuses that"
+    fi
+    CONTAINER_PIDS="$(run_spec_norm_pids "$PIDS_IN")" \
+        || refuse_limit "$CONTAINER_PIDS_GIVEN" pids-limit pids_limit "$PIDS_IN" "not a number of processes (512; none for no ceiling)"
+    if [ "$CONTAINER_PIDS_GIVEN" -eq 1 ] && [ -n "$CONTAINER_PIDS" ] && [ "$CONTAINER_PIDS" -lt "$CONTAINER_PIDS_FLOOR" ]; then
+        refuse_limit 1 pids-limit pids_limit "$CONTAINER_PIDS" "below ${CONTAINER_PIDS_FLOOR}: an idle site already runs 54 to 75 processes and threads, so it would not start"
+    fi
+    # (end of the limits check)
 
     # Preflight: if a container with this SITENAME is already running, stop it
     # BEFORE the port check. Otherwise is_port_in_use sees the target's own
@@ -4545,6 +4624,8 @@ EOF
     if [ -n "$CONTAINER_MEMORY" ]; then
         print_info "Container memory budget: ${CONTAINER_MEMORY}"
     fi
+    [ -z "$CONTAINER_CPUS" ] || print_info "Container CPU ceiling: ${CONTAINER_CPUS} cores"
+    [ -z "$CONTAINER_PIDS" ] || print_info "Container process ceiling: ${CONTAINER_PIDS}"
 
     # The database password reaches the container here, at run time, and only
     # here — not through --build-arg, which would bake it into the image where
@@ -4579,7 +4660,7 @@ EOF
     # What install.sh does not own (another published port, a volume at a
     # destination of its own) is the site's, and the rebuild keeps it.
     local RENDERED OLD_LINE
-    RENDERED="$(run_spec_render "$SITENAME" "${WEB_PUBLISH%:}" "$PORT" "$DB_PORT" "$CONTAINER_MEMORY" "$SPEC_CPUS" "$SPEC_PIDS")"
+    RENDERED="$(run_spec_render "$SITENAME" "${WEB_PUBLISH%:}" "$PORT" "$DB_PORT" "$CONTAINER_MEMORY" "$CONTAINER_CPUS" "$CONTAINER_PIDS")"
     if [ -n "$SPEC_FOREIGN" ]; then
         printf '%s\n' "$SPEC_FOREIGN" | while IFS= read -r l; do print_info "Kept from the run spec: ${l}"; done
     fi

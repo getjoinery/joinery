@@ -4,11 +4,13 @@
 (host_report.sh 1.7, JobResultProcessor 1.55, node overview 1.37,
 stats_handler 1.4); docker-prod has reported per-site figures since, so the
 week of measurement ends about 2026-10-12. The agent half (check_status
-memory inside a container) ships with agent 1.57.0. WP0 built 2026-10-06
+memory inside a container) ships with agent 1.57.0. WP0 built 2026-10-05
 (_site_run_spec.sh 1.0, install.sh 2.94, rebase_site_container.sh 1.8,
 migrate_site_to_code_volumes.sh 1.1, remove_account.sh 2.3; gate site_run_spec);
-its rebase-with-caps check on a real Docker host is still to run. Nothing else
-is built. Split out of the starter
+WP3 built 2026-10-05 (install.sh 2.95, _site_run_spec.sh 1.1,
+rebase_site_container.sh 1.9, migrate_site_to_code_volumes.sh 1.2). Both run on a
+scratch Nanode the same day; the rebase-with-caps check is still to run. Nothing
+else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -65,8 +67,9 @@ sites and stays unlimited.
 ## Work packages, and what depends on what
 
 WP0 comes first, because every other limit is a `docker run` flag. WP4's disk
-limit only holds once WP5.3 is in place (S5). Everything else can ship on its
-own.
+limit only holds once WP5.3 is in place (S5). WP2's budget is measured after
+WP9, since a container's mail stack alone costs about 200 MB. Everything else
+can ship on its own.
 
 ### WP0 — One recorded run spec per site
 
@@ -85,7 +88,7 @@ builds the run arguments from it.** Install, rebase, migrate and
 arguments from `docker inspect`. A gate test rebases a site with caps, then
 checks that every cap is still in force.
 
-**Built 2026-10-06.** The spec is `/etc/joinery/sites/{site}/run_spec` on the
+**Built 2026-10-05.** The spec is `/etc/joinery/sites/{site}/run_spec` on the
 host, one `key=value` per line (hostname, restart, memory, cpus, pids_limit,
 one `publish=` and one `volume=` line each), every line checked on write and
 on read. It holds no secret: the environment stays the container's own and is
@@ -100,10 +103,16 @@ it does not own (other ports, other volumes); `--memory=none` lifts a budget.
 Adopt refuses, by name, anything a spec cannot carry. Rebase keeps a copy of
 the spec at `prepare` and again before `swap` stops anything, and rollback
 checks it (or converts a 1.7 `run_args`) before it removes anything. Reviewed
-by reviewer2 2026-10-06 (B1-B8, all fixed). `--cpus` and `--pids-limit` flags
+by reviewer2 2026-10-05 (B1-B8, all fixed). `--cpus` and `--pids-limit` flags
 come with WP3; the spec and builder already carry both. The `site_run_spec` gate covers the helper and the scripts against a
-stubbed Docker. The real-Docker rebase-with-caps check waits for a Docker
-host to run it on (live verification queue).
+stubbed Docker. **On a real Docker host (2026-10-05):** a fresh site with all
+three caps, a rebuild that changed one and kept the others, and a rebuild with
+the spec deleted (read back from the container, identical) all held. The first
+read-back failed: Docker refuses `len` of a list a container never set, and a
+real container has no `CapAdd`, so adopt read empty fields and refused a
+healthy container. Each `len` is now guarded, any failed read stops adopt, and
+the gate's stub refuses an unguarded `len` as Docker does. The rebase-with-caps
+check needs a site on an older PostgreSQL (live verification queue).
 
 ### WP1 — See each site's usage
 
@@ -171,6 +180,23 @@ gaps remain:
    not, either the job gets smaller or the budget gets bigger. The number
    that comes out is what the starter tier uses.
 
+**Found on the first test box (2026-10-05, Nanode, 0.8.459 plus WP0/WP3).** A
+fresh site has the mailbox plugin active, so its installer runs rspamd in the
+container. rspamd costs about 200 MB once settled (controller, normal, proxy
+and hs_helper at about 50 MB each), and more while it compiles its patterns at
+start. At a 384 MB budget it never settled: the kernel killed it five times in
+a minute, each restart compiled again, memory and CPU pressure sat above 90%,
+and the site stopped answering (a 30-second timeout where it had answered in
+0.04 s). Each kill also left an orphaned `hs_helper` (144 MB) behind, owned by
+PID 1, which nothing reaps or supervises (item 2). A 256 MB site cannot hold a
+per-container rspamd at all. The owner's answer (2026-10-05) is WP9: no site
+container carries a mail stack. The orphaned process is item 2's to fix
+either way. docker-prod's sites are on 0.8.459 but have run since
+2026-09-28, at 117-206 MB and about 54 processes each, so rspamd is not running
+in them today. Plugin installers run at every container start, so any of them
+with the mailbox plugin active gains about 200 MB at its next restart; which
+ones have it active is still to check.
+
 ### WP3 — CPU and processes
 
 - `--cpus=N` on `docker run`: a hard ceiling. At `1.0`, one site can use at
@@ -183,6 +209,28 @@ gaps remain:
 - `tune_postgres_memory.sh` already reads the cgroup v2 `cpu.max` quota for
   its parallel-worker setting, so PostgreSQL follows the ceiling with no
   change.
+
+**Built 2026-10-05.** `install.sh site --cpus=N --pids-limit=N`, each recorded
+in the run spec like `--memory`: a rebuild keeps the spec's value, the option
+records a new one, and `none` lifts it. A new site gets `pids_limit=512`
+whatever the box; a site that already has a spec keeps what it records (an
+adopted docker-prod container records none). A value below 128 is refused, since an idle site runs 54 to 75 processes and
+threads (the limit counts both). Every limit is checked before anything stops,
+including a recorded CPU ceiling above the CPUs Docker counts (`docker info`,
+not `nproc`), which Docker would refuse after the old container was gone. The
+rebase and code-volume scripts run the same check (`run_spec_fits_host`) before
+they stop anything, and so does every builder of run arguments. Reviewed by
+reviewer2 2026-10-05: B1-B5 fixed, VALID. The options are refused for a
+bare-metal site instead of being ignored. The box's caps reach `install.sh`
+through the starter tier's "install a site container" word, which reads
+`mgh_site_cpus` and `mgh_site_memory_mb`; neither column exists yet. The gate
+`site_run_spec` covers the options against a stubbed Docker. On the Nanode
+(1 CPU): two busy loops under `--cpus=0.5` used 0.52 of a core and were
+throttled; a fork bomb as `www-data` under `--pids-limit=400` stopped at 400
+with 2,481 forks refused, the host answered commands in 7 ms and a new SSH login
+took 2.6 s against 1.4 s idle, and a `docker restart` brought the site back in
+45 s. A ceiling above the host's CPUs and one below 128 were refused with the
+container still up.
 
 ### WP4 — Disk
 
@@ -441,6 +489,48 @@ The proxy template has no error page, and a Docker host's sites are never
 re-rendered after install. So this needs a template change, and a host word
 that switches one domain's proxy site to the suspended page and back.
 
+### WP9 — No mail stack in a site container
+
+**Owner decision, 2026-10-05:** a Docker site's mail arrives through a relay,
+and no site container carries Postfix or rspamd. This holds on every Docker
+host, docker-prod included. A shared rspamd on the host was considered and
+dropped: it would need a hole in WP5's wall to the host, every site's DKIM keys
+in one store, and per-site verdict names, all to check mail that never reaches
+the box.
+
+Why the container's mail stack has nothing to do:
+
+- **Inbound.** One box has one port 25, so on a box of several sites at most
+  one of them could ever receive directly. Through a relay, the relay's rspamd
+  checks the message and stamps the verdict before the site pulls it
+  (`RelaySpoolConsumer` trusts that stamp), so the site's own rspamd never sees
+  it.
+- **Outbound.** Every sending provider is an API or an outside SMTP server
+  (`includes/email_providers`). `PostfixProvider` is inbound only, so nothing
+  sends through the container's Postfix.
+
+What changes:
+
+1. **The base image.** `install.sh server` installs Postfix when it builds the
+   Docker base image. The image build skips it, and `BASE_IMAGE_VERSION` moves
+   on, so every host builds a base without it.
+2. **The mailbox host installer.** In a container, `install_email.sh` installs
+   and starts nothing, says that mail arrives through a relay, and exits 0 so
+   the start chain continues. A container built on an older base still has
+   the packages in its image, but nothing starts them after its next restart,
+   and its next rebuild drops them.
+3. **Receive mode.** A container site is offered the relay only. Its receive
+   mode resolves to relay, and its Setup page shows no listener, Postfix or
+   port 25 rows.
+4. **A relay a Docker site can use.** This is the hosted relay fleet (the
+   starter tier, WP1 S17) or the deployment's own relay.
+5. **docker-prod before the release.** Any site there receiving mail on its
+   own port 25 (receive mode `direct`, a container publishing 25) moves to a
+   relay first, or its inbound mail stops at the release.
+6. **Gate.** A container start with the mailbox plugin active runs no Postfix
+   and no rspamd. The base image has neither package. A container site's
+   Setup page has no listener row.
+
 ## Host-agent words this needs
 
 - stop and start one container, with the held-stopped record (WP7)
@@ -515,6 +605,9 @@ box without it.
   isolation bullets describe both kinds of box.
 - `plugins/server_manager/docs/overview.md`: the host's cap fields, **Change
   limits**, and holding a site stopped.
+- `plugins/mailbox/docs/overview.md` (WP9): § Firewall and § Container
+  persistence say a container has no mail stack and receives through a relay;
+  § Advanced: multi-site host relay is removed.
 
 ## Found by the review, outside this spec's scope
 

@@ -163,9 +163,11 @@ authenticate by signature; nothing compares an address or an instance ID.
    chosen on the admin page. The container install sets it to the relay
    slot.
 
-On a starter box, the site's own Postfix never binds port 25, and the
-box's firewall drops inbound port 25 outright. A site that turns its own
-listener back on reaches nothing.
+On a starter box, the box's firewall drops inbound port 25 outright, and the
+site has no Postfix or rspamd at all: no Docker site container carries a mail
+stack (`multi_tenant_docker_hosts` WP9, owner 2026-10-05). The relay's rspamd
+checks the mail before the site pulls it. A per-container rspamd needed about
+200 MB, which a 256 MB site cannot hold.
 
 **Outbound mail goes through SMTP2GO**, using the hosted tier's mail leg: a
 subaccount per customer and one SMTP user (hosted tier § Outbound mail). The
