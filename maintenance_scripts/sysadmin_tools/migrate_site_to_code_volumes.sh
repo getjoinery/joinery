@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # migrate_site_to_code_volumes.sh — move a site's code onto named volumes.
 #
+# Version: 1.1 - The container is recreated from its run spec (_site_run_spec.sh; specs/
+#                multi_tenant_docker_hosts.md WP0), with the new volumes added to it, so its
+#                limits survive. prepare records the spec from the container if it has none.
+# Version: 1.0
+#
 # A site installed before the code volumes existed keeps public_html, vendor and
 # maintenance_scripts in its container's writable layer, where `docker rm`
 # destroys them. This moves them onto volumes, so an in-place upgrade survives
@@ -17,9 +22,9 @@
 # and verifies the copy. It never touches the container. If any check fails it
 # stops there, leaving the site running and the volumes available to inspect.
 #
-# swap re-verifies, then rebuilds the container's own `docker run` from
-# `docker inspect` — same ports, environment, restart policy and existing
-# volumes, plus the new mounts — so nothing about the container changes except
+# swap re-verifies, adds the new mounts to the site's run spec, and recreates
+# the container from it with its own environment — same ports, limits, restart
+# policy and existing volumes — so nothing about the container changes except
 # where its code lives.
 set -euo pipefail
 
@@ -32,6 +37,9 @@ if [ -z "$SITE" ] || { [ "$STAGE" != "prepare" ] && [ "$STAGE" != "swap" ]; }; t
 fi
 
 WORK_DIR=/root/code-migration
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../install_tools/_site_run_spec.sh
+. "${TOOLS_DIR}/../install_tools/_site_run_spec.sh"
 STATE_FILE="${WORK_DIR}/${SITE}.state"
 SITE_ROOT="/var/www/html/${SITE}"
 
@@ -122,6 +130,11 @@ if [ "$STAGE" = "prepare" ]; then
     for spec in $(migration_trees); do TREE_NAMES+=("${spec##*:}"); done
     docker exec "$SITE" tar czf - -C "$SITE_ROOT" "${TREE_NAMES[@]}" > "$TARBALL"
     say "Backup size: $(du -sh "$TARBALL" | cut -f1)"
+
+    if ! run_spec_exists "$SITE"; then
+        run_spec_adopt "$SITE" || die "could not record ${SITE}'s run spec from its container"
+        say "Recorded ${SITE}'s run spec from its container: $(run_spec_path "$SITE")"
+    fi
 
     : > "$STATE_FILE"
     echo "version=${VERSION}" >> "$STATE_FILE"
@@ -228,55 +241,28 @@ done
 say "Volumes re-verified"
 
 IMAGE=$(docker inspect -f '{{.Config.Image}}' "$SITE")
-RESTART=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$SITE")
+run_spec_exists "$SITE" || die "${SITE} has no run spec; run prepare again"
 
-RUN_ARGS=(--name "$SITE")
-[ -n "$RESTART" ] && [ "$RESTART" != "no" ] && RUN_ARGS+=(--restart "$RESTART")
+# The environment is the container's own, carried as an env file (mode 600: it
+# holds the database password), never as arguments.
+ENV_FILE="${WORK_DIR}/${SITE}.env"
+run_spec_save_env "$SITE" "$ENV_FILE" || die "could not keep ${SITE}'s environment"
 
-# Ports, exactly as bound now.
-while IFS='|' read -r hip hport cport; do
-    [ -z "$cport" ] && continue
-    cport="${cport%%/*}"
-    if [ -n "$hip" ]; then
-        RUN_ARGS+=(-p "${hip}:${hport}:${cport}")
-    else
-        RUN_ARGS+=(-p "${hport}:${cport}")
-    fi
-done < <(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$SITE")
-
-# Environment, minus what the image sets for itself. Values are never printed.
-while IFS= read -r e; do
-    [ -z "$e" ] && continue
-    case "$e" in
-        PATH=*|DEBIAN_FRONTEND=*) continue ;;
-    esac
-    RUN_ARGS+=(-e "$e")
-done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE")
-
-# Existing volumes, unchanged.
-while read -r name dest; do
-    [ -z "$name" ] && continue
-    RUN_ARGS+=(-v "${name}:${dest}")
-done < <(docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{.Destination}}{{println}}{{end}}{{end}}' "$SITE")
-
-# The new ones.
+# The new mounts join the run spec, so every later rebuild has them too.
 for spec in $(migration_trees); do
     suffix="${spec%%:*}"
     tree="${spec##*:}"
-    RUN_ARGS+=(-v "${SITE}_${suffix}:${SITE_ROOT}/${tree}")
+    run_spec_add_volume "$SITE" "${SITE}_${suffix}" "${SITE_ROOT}/${tree}" || die "could not add ${SITE}_${suffix} to the run spec"
 done
+mapfile -d '' RUN_ARGS < <(run_spec_args "$SITE")
+[ "${#RUN_ARGS[@]}" -gt 0 ] || die "${SITE}'s run spec gave no arguments"
 
-# Record what is about to run, with environment values masked.
+# Record what is about to run. The environment is in the env file, not here.
 PLAN="${WORK_DIR}/${SITE}.run-plan"
 {
     printf 'docker run -d'
-    for a in "${RUN_ARGS[@]}"; do
-        case "$a" in
-            *=*) printf ' %s=***' "${a%%=*}" ;;
-            *)   printf ' %s' "$a" ;;
-        esac
-    done
-    printf ' %s\n' "$IMAGE"
+    printf ' %s' "${RUN_ARGS[@]}"
+    printf ' --env-file %s %s\n' "$ENV_FILE" "$IMAGE"
 } > "$PLAN"
 say "Run plan written to ${PLAN}"
 
@@ -285,7 +271,8 @@ docker stop "$SITE" > /dev/null
 say "Removing container (volumes are untouched)"
 docker rm "$SITE" > /dev/null
 say "Recreating"
-docker run -d "${RUN_ARGS[@]}" "$IMAGE" > /dev/null
+docker run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "$IMAGE" > /dev/null
+rm -f "$ENV_FILE"
 
 sleep 5
 STATUS=$(docker inspect -f '{{.State.Status}}' "$SITE")

@@ -4,7 +4,11 @@
 (host_report.sh 1.7, JobResultProcessor 1.55, node overview 1.37,
 stats_handler 1.4); docker-prod has reported per-site figures since, so the
 week of measurement ends about 2026-10-12. The agent half (check_status
-memory inside a container) ships with agent 1.57.0. Nothing else is built. Split out of the starter
+memory inside a container) ships with agent 1.57.0. WP0 built 2026-10-06
+(_site_run_spec.sh 1.0, install.sh 2.94, rebase_site_container.sh 1.8,
+migrate_site_to_code_volumes.sh 1.1, remove_account.sh 2.3; gate site_run_spec);
+its rebase-with-caps check on a real Docker host is still to run. Nothing else
+is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -80,6 +84,26 @@ builds the run arguments from it.** Install, rebase, migrate and
 `site-limits` (WP6) all read and write that spec, and nothing reconstructs
 arguments from `docker inspect`. A gate test rebases a site with caps, then
 checks that every cap is still in force.
+
+**Built 2026-10-06.** The spec is `/etc/joinery/sites/{site}/run_spec` on the
+host, one `key=value` per line (hostname, restart, memory, cpus, pids_limit,
+one `publish=` and one `volume=` line each), every line checked on write and
+on read. It holds no secret: the environment stays the container's own and is
+passed as an `--env-file` by whoever recreates it. `run_spec_args` is the one
+builder; `run_spec_render` writes a new site's spec, `run_spec_set` and
+`run_spec_add_volume` change one, and `run_spec_adopt` reads a container made
+before specs existed, once, while it still exists (install.sh, rebase
+`prepare` and migrate `prepare` each do this when the spec is missing).
+install.sh takes the spec's memory when `--memory` is not given, accepts any
+size Docker takes, checks it before anything stops, and keeps the spec's lines
+it does not own (other ports, other volumes); `--memory=none` lifts a budget.
+Adopt refuses, by name, anything a spec cannot carry. Rebase keeps a copy of
+the spec at `prepare` and again before `swap` stops anything, and rollback
+checks it (or converts a 1.7 `run_args`) before it removes anything. Reviewed
+by reviewer2 2026-10-06 (B1-B8, all fixed). `--cpus` and `--pids-limit` flags
+come with WP3; the spec and builder already carry both. The `site_run_spec` gate covers the helper and the scripts against a
+stubbed Docker. The real-Docker rebase-with-caps check waits for a Docker
+host to run it on (live verification queue).
 
 ### WP1 — See each site's usage
 
