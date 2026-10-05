@@ -1,6 +1,16 @@
 # Mail checking in rspamd alone
 
-**Status: DRAFT (2026-10-05) — not built. No open questions.**
+**Status: IMPLEMENTED 2026-10-05. Reviewed by public-html-41; every finding
+fixed. Live on dev (the dev box converged to it). Verified there: the
+filtered Spamhaus rule; one checker in Postfix's lists, listening on the
+loopback only; both old programs purged and the keys moved; a forged "passed"
+line recorded as fail; a real provider-sent message recorded pass/pass/pass;
+a locally sent message signed with selector `mail` and the signature valid
+against published DNS; mail claiming a private address neither signed nor
+trusted; no headers added to our own outgoing mail. Not yet run: a relay on
+the new version, a stopped rspamd, a production box converging, a fresh
+install, a site copy. Those are in the live verification queue under this
+spec's name.**
 
 ## The idea in one paragraph
 
@@ -85,26 +95,40 @@ documentation, not reproduced.* Fixed by WP0.
 - rspamd signs outgoing mail for ordinary domains on a site box
   (`non_smtpd_milters = inet:localhost:11332`). Keys keep the selector
   `mail`, so **no DNS record changes**. They move from `/etc/opendkim/keys/`
-  to rspamd's own key directory. Protected domains are untouched: the app
-  still signs those.
+  to `/etc/rspamd/dkim/<domain>/`, the same layout. (Not `/var/lib/rspamd`:
+  the web server reads the key too, where a relay fronts the deployment, and
+  that directory is closed to it.) A domain signs exactly while its key is
+  there; rspamd reads the list of such domains from `signing.map`, written
+  from the directory. Protected domains are untouched: the app still signs
+  those.
 - Still true: rspamd never refuses or delays mail, has no memory, and the
   app makes the final decision. A stopped rspamd lets mail through unchecked
   (`milter_default_action = accept`) and the health check reports it.
 
-Configuration sketch, to be checked against rspamd 3.8.1 while building:
+Configuration as built (rendered by `rspamd_stateless.sh`, proven on a
+private rspamd 3.8.1 before it reached dev):
 
 ```
 # milter_headers.conf — unchanged, plus the removal made explicit
 routines { authentication-results { remove = 0; } }   # 0 = strip every arriving line
 
-# dkim_signing.conf — new
+# dkim_signing.conf — new, on a site box only (a relay sends nothing)
 selector = "mail";
-path = "/var/lib/rspamd/dkim/$domain.$selector.key";
-sign_local = true;
+path_map = "/etc/rspamd/dkim/signing.map";   # "<domain> <key path>" per keyed domain
+try_fallback = false;        # a domain not in the list -> no signature
+use_domain = "header";       # key chosen by the From domain, exactly
+use_esld = false;
+allow_hdrfrom_mismatch = true;
+allow_hdrfrom_mismatch_local = true;
 allow_username_mismatch = true;
-try_fallback = false;        # no key for the domain -> no signature
-use_redis = false;
+sign_local = true;
 ```
+
+Two things differ from the first sketch. A path template with
+`try_fallback = true` works but logs an error for every outgoing message
+whose domain has no key, so the list is used instead; rspamd re-reads it
+within seconds, so a new key needs no restart. And `use_esld` must be off, or
+`dev.example.com` is signed with `example.com`'s key.
 
 ## Decided
 
@@ -149,6 +173,8 @@ program present when the connection opens.
     row is green.
   - *Versions.* Installer, relay and mailbox plugin versions move (the
     plugin version is what makes site boxes converge promptly).
+  - *Built.* As above. The relay reports `spamhaus` as `answering`,
+    `refused` or `no_answer`; the setup-check row is `host.spamhaus`.
 - **WP1. Confirm F1.** Done, see F1.
 - **WP2. rspamd writes the verdict on purpose.** Make the removal explicit
   in `rspamd_stateless.sh`, so it no longer rests on a default. The parser
@@ -174,8 +200,40 @@ program present when the connection opens.
 - **WP6. Release.** New relay version; relays re-provision. Site boxes
   converge on their own.
 
-**Sequencing:** both installers carry other sessions' uncommitted work
-(relay 3.5 and 3.6). Build this after those are committed.
+**Sequencing:** WP0 first, on its own. WP2 to WP6 ship as one release:
+removing the two programs is only safe once rspamd signs. The relay version
+this adds comes after 3.7.
+
+**Built beyond the list above**
+
+- The old keys are *copied* to the new directory, and the old copy deleted
+  only after Postfix is switched and only when identical, so signing never
+  has a gap and a key is never destroyed unread.
+- A relay's `--authserv-id` must equal its mail hostname (rspamd stamps under
+  the name Postfix gives it); a different one is refused at provisioning.
+- `install.sh` (the base server installer) no longer installs opendkim.
+- The management agent's site copy carries keys from `/etc/rspamd/dkim`
+  (and still reads `/etc/opendkim/keys` on a source not yet upgraded). This
+  is in the agent's own repository and needs an agent release.
+- The agent's readable-file list still names `opendkim.conf` and
+  `opendmarc.conf`; the site labels them "absent once rspamd checks mail
+  alone". Dropping them, and adding `dkim_signing.conf`, is an agent change
+  left for the next agent release.
+- **From the code review (public-html-41, 2026-10-05), all fixed and
+  re-checked on dev:** rspamd's milter listened on every interface, and
+  rspamd counted every private address range as local, so mail reaching
+  Postfix from another container or a tunnel would have been signed and kept
+  a forged verdict line. The milter now listens on the loopback only and
+  "local" is the loopback only (`override.d/options.inc`). Also: the old
+  programs are removed only once rspamd is answering and Postfix names it
+  alone; a key is adopted by file through a temporary name; removing a key
+  also removes its old copy; the relay's Spamhaus answer is a row on the site
+  (`host.relay_spamhaus`); the key-moving functions are executed by the gate.
+- rspamd no longer refuses a message carrying the GTUBE test string
+  (`gtube_patterns = "disable"`), so "never refuses" holds without exception.
+- The app reads a key from the old directory when the new one does not hold
+  it yet (`MailboxDkimSigner::localKeyFile`), so a relay-fronted send is not
+  left unsigned between a deploy and the installer's run.
 
 ## Tests
 
@@ -203,9 +261,13 @@ program present when the connection opens.
 - **An rspamd upgrade changes its header wording.** The parser test pins
   3.8.1's lines, so a change shows up as a red test, not a silent
   `unverified`.
-- **Outgoing mail now passes through rspamd.** It never refuses. Whether it
-  also stamps spam headers on our own outgoing mail is unchecked; if it does,
-  switch that off for local mail. Confirm on dev before release.
+- **Outgoing mail now passes through rspamd.** Checked on dev: rspamd adds no
+  spam or verdict headers to mail this box sends (its header module skips
+  local mail by default), only the signature.
+- **A key on disk signs.** opendkim signed only domains in its signing table;
+  rspamd signs every domain whose key is in the directory. The platform
+  always wrote both together, so nothing changes on a box it provisioned. Dev
+  had two hand-made keys with no table entry; those domains now sign.
 
 ## Related
 

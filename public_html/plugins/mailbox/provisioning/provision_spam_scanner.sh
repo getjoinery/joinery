@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 #
-# provision_spam_scanner.sh - install, remove or inspect this box's own spam
-# scanner (spam_learning_in_core.md § One rspamd configuration).
+# provision_spam_scanner.sh - install, remove or inspect this box's own rspamd:
+# the one program that checks arriving mail and signs outgoing mail
+# (spam_learning_in_core.md § One rspamd configuration,
+# mail_checking_in_rspamd.md).
 #
+# Version: 2.3 - Writes the override.d file that makes "local" mean this box alone, and
+#                restarts rspamd when its milter's listening address changed (a reload
+#                keeps the old socket open). Postfix is told rspamd is its only milter
+#                only once rspamd is answering on the new configuration.
+# Version: 2.2 - rspamd is the only milter. install writes the signing
+#                configuration and the list of domains that have a key, and sets
+#                both of Postfix's milter lists to rspamd alone (smtpd_milters for
+#                arriving mail, non_smtpd_milters for what this box sends).
 # Version: 2.1 - rspamd is reloaded, not restarted, when it is running (the milter on
 #                11332 stays up, so Postfix never tempfails mail mid-converge), and
 #                redis is purged only once rspamd is confirmed on the new configuration.
@@ -32,16 +42,18 @@
 #   - Installs rspamd (without its recommended redis-server).
 #   - Writes the joinery-managed /etc/rspamd/local.d files from
 #     rspamd_stateless.sh: the X-Spam header contract
-#     InboundEmailRouter::readSpamHeader() parses, add_header-only actions
-#     (NEVER reject - the reviewable-verdict model), dead DNS lists off, Bayes
-#     off, and the milter worker on 11332.
+#     InboundEmailRouter::readSpamHeader() parses, the Authentication-Results
+#     line AuthenticationResults reads, add_header-only actions (NEVER reject -
+#     the reviewable-verdict model), dead DNS lists off, Bayes off, the milter
+#     worker on 11332, and outgoing signing for domains that have a key.
+#   - Creates the key directory and writes the list of domains with a key.
 #   - Deletes the files an earlier version wrote for learning (redis.conf,
 #     worker-controller.inc), then stops and purges redis-server. On a
 #     joinery-provisioned box redis existed only for this scanner's Bayes
 #     corpus; the corpus now lives in the application's database.
-#   - Wires the milter into Postfix ONLY when Postfix is present. On a
-#     relay-fronted or webhook box there is no local Postfix to wire and the
-#     milter worker idles.
+#   - Makes rspamd Postfix's only milter, for arriving and outgoing mail,
+#     ONLY when Postfix is present. On a relay-fronted or webhook box there is
+#     no local Postfix to wire and the milter worker idles.
 #   - Fully idempotent: safe to re-run any time, including on a box whose
 #     redis is already gone, and re-running is the repair for drift.
 #
@@ -49,7 +61,8 @@
 #   Operator escape hatch only — the platform never runs or surfaces it.
 #   Purges rspamd, and redis-server for a box that never ran this version,
 #   deletes the joinery-managed local.d files, and strips the milter entry from
-#   smtpd_milters when Postfix is present.
+#   both of Postfix's milter lists when Postfix is present. Signing keys are
+#   left where they are.
 #
 # WHAT status DOES
 #   Prints machine-readable key=value markers (packages, services, milter
@@ -67,6 +80,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RSPAMD_LOCAL_D="${RSPAMD_LOCAL_D:-/etc/rspamd/local.d}"
+RSPAMD_OVERRIDE_D="${RSPAMD_OVERRIDE_D:-$(dirname "${RSPAMD_LOCAL_D}")/override.d}"
 MILTER_ENTRY="inet:localhost:11332"
 
 # The one configuration: RSPAMD_STATELESS_FILES and rspamd_stateless_render.
@@ -75,7 +89,7 @@ source "${SCRIPT_DIR}/rspamd_stateless.sh"
 
 # The local.d files this script owns. remove deletes exactly these and nothing
 # else, so a hand-written override elsewhere in local.d survives.
-MANAGED_CONFIGS=("${RSPAMD_STATELESS_FILES[@]}")
+MANAGED_CONFIGS=("${RSPAMD_STATELESS_FILES[@]}" "${RSPAMD_SIGNING_FILES[@]}")
 
 # Files an earlier version wrote for the learning loop (the redis backend and
 # the controller the app used to post learn requests to). install deletes them.
@@ -200,12 +214,21 @@ do_install() {
         apt-get install -y --no-install-recommends rspamd
     fi
 
-    mkdir -p "${RSPAMD_LOCAL_D}"
+    mkdir -p "${RSPAMD_LOCAL_D}" "${RSPAMD_OVERRIDE_D}"
 
-    local changed=0 f
+    # rebind: the milter's listening address changed. rspamd opens the new
+    # socket on a reload but keeps the old one, so that change needs a restart.
+    local changed=0 rebind=0 f
     for f in "${MANAGED_CONFIGS[@]}"; do
         if rspamd_stateless_render "${f}" | write_if_changed "${RSPAMD_LOCAL_D}/${f}"; then
             echo "wrote ${RSPAMD_LOCAL_D}/${f}"
+            changed=1
+            [[ "${f}" == "worker-proxy.inc" ]] && rebind=1
+        fi
+    done
+    for f in "${RSPAMD_STATELESS_OVERRIDE_FILES[@]}"; do
+        if rspamd_stateless_render "${f}" | write_if_changed "${RSPAMD_OVERRIDE_D}/${f}"; then
+            echo "wrote ${RSPAMD_OVERRIDE_D}/${f}"
             changed=1
         fi
     done
@@ -220,36 +243,29 @@ do_install() {
         echo "spam-scanner: the ${#MANAGED_CONFIGS[@]} joinery-managed config files are current"
     fi
 
-    # Wire rspamd into Postfix AFTER opendkim+opendmarc so it scores on auth
-    # results. Only meaningful where Postfix actually receives mail.
-    if postfix_present; then
-        local current
-        current="$(postconf -h smtpd_milters 2>/dev/null || true)"
-        if [[ "${current}" == *"${MILTER_ENTRY}"* ]]; then
-            echo "main.cf: rspamd milter already wired (${MILTER_ENTRY})"
-        elif [[ -z "${current}" ]]; then
-            postconf -e "smtpd_milters = ${MILTER_ENTRY}"
-            echo "main.cf: rspamd milter set (${MILTER_ENTRY})"
-        else
-            postconf -e "smtpd_milters = ${current}, ${MILTER_ENTRY}"
-            echo "main.cf: rspamd milter appended (${MILTER_ENTRY}, after ${current})"
-        fi
-        if command -v systemctl >/dev/null 2>&1 && systemctl reload postfix 2>/dev/null; then
-            echo "postfix: reloaded (systemd)."
-        elif command -v postfix >/dev/null 2>&1; then
-            postfix reload >/dev/null 2>&1 || true
-            echo "postfix: reloaded."
-        fi
-    else
-        echo "spam-scanner: no local Postfix - the milter worker idles."
+    # The signing keys (copied here from opendkim on a box that had it), who may
+    # read them, and which domains have one. Written before rspamd is reloaded
+    # so the signing configuration never names a missing map.
+    rspamd_dkim_adopt_old_keys
+    rspamd_dkim_secure_keys
+    if rspamd_dkim_render_map | write_if_changed "${RSPAMD_DKIM_MAP}"; then
+        echo "wrote ${RSPAMD_DKIM_MAP} ($(wc -l < "${RSPAMD_DKIM_MAP}") domain(s) sign)"
     fi
 
     # rspamd first, so it is running on the new configuration (and no longer
-    # reaching for redis) before redis goes. If it could not be reloaded or
-    # started (no init in a container), redis stays until a run that can: an
-    # rspamd still holding the old configuration would lose its backend.
+    # reaching for redis) before redis goes, and before Postfix is told it is
+    # the only milter. If it could not be reloaded or started (no init in a
+    # container), redis stays until a run that can: an rspamd still holding the
+    # old configuration would lose its backend.
     local rspamd_current=1
-    if [[ "${changed}" -eq 1 ]] || ! service_running rspamd; then
+    # A configuration rspamd cannot load must not be handed to it: a reload
+    # would leave it running on the old one, looking healthy.
+    if command -v rspamadm >/dev/null 2>&1 && ! rspamadm configtest >/dev/null 2>&1; then
+        echo "ERROR: rspamd does not accept the configuration just written (rspamadm configtest) - rspamd left as it is." >&2
+        rspamd_current=0
+    elif [[ "${rebind}" -eq 1 ]]; then
+        restart_service rspamd || rspamd_current=0
+    elif [[ "${changed}" -eq 1 ]] || ! service_running rspamd; then
         reload_or_start_rspamd || rspamd_current=0
     else
         echo "rspamd: configuration unchanged and running - left alone."
@@ -260,7 +276,36 @@ do_install() {
         echo "spam-scanner: rspamd is not on the new configuration yet - redis-server left in place; re-run install once rspamd can start." >&2
     fi
 
-    echo "spam-scanner: rspamd milter on 11332, stateless (no Bayes, no redis, no controller)."
+    # rspamd is Postfix's only milter: it checks what arrives (smtpd_milters)
+    # and signs what this box sends (non_smtpd_milters). Both lists are set
+    # whole, so an entry for a program that is no longer here cannot survive.
+    # Only meaningful where Postfix actually receives mail, and only once
+    # rspamd is answering on the configuration just written: until then Postfix
+    # keeps whatever it had, so nothing that still works is taken away.
+    if ! postfix_present; then
+        echo "spam-scanner: no local Postfix - the milter worker idles."
+    elif [[ "${rspamd_current}" -ne 1 ]] || ! rspamd_milter_answers; then
+        echo "WARNING: rspamd is not answering on the new configuration - Postfix's milter lists are left as they are; re-run install once rspamd is up." >&2
+    else
+        local list wired=0
+        for list in smtpd_milters non_smtpd_milters; do
+            if [[ "$(postconf -h "${list}" 2>/dev/null || true)" != "${MILTER_ENTRY}" ]]; then
+                postconf -e "${list} = ${MILTER_ENTRY}"
+                echo "main.cf: ${list} = ${MILTER_ENTRY}"
+                wired=1
+            fi
+        done
+        if [[ "${wired}" -eq 0 ]]; then
+            echo "main.cf: rspamd is already the only milter (${MILTER_ENTRY})"
+        elif command -v systemctl >/dev/null 2>&1 && systemctl reload postfix 2>/dev/null; then
+            echo "postfix: reloaded (systemd)."
+        elif command -v postfix >/dev/null 2>&1; then
+            postfix reload >/dev/null 2>&1 || true
+            echo "postfix: reloaded."
+        fi
+    fi
+
+    echo "spam-scanner: rspamd milter on 11332, stateless (no Bayes, no redis, no controller); it signs for the domains in ${RSPAMD_DKIM_MAP}."
     echo "  NOTE: rspamd queries DNS RBLs while scanning - ensure outbound DNS egress or scoring degrades."
 }
 
@@ -271,9 +316,10 @@ do_remove() {
 
     # Unwire first, so Postfix never points at a milter that is going away.
     if postfix_present; then
-        local current stripped
-        current="$(postconf -h smtpd_milters 2>/dev/null || true)"
-        if [[ "${current}" == *"${MILTER_ENTRY}"* ]]; then
+        local list current stripped unwired=0
+        for list in smtpd_milters non_smtpd_milters; do
+            current="$(postconf -h "${list}" 2>/dev/null || true)"
+            [[ "${current}" == *"${MILTER_ENTRY}"* ]] || continue
             # Drop our entry and tidy the separators left behind.
             stripped="$(echo "${current}" \
                 | sed "s#${MILTER_ENTRY}##g" \
@@ -281,16 +327,17 @@ do_remove() {
                 | sed 's/^[[:space:]]*,[[:space:]]*//' \
                 | sed 's/[[:space:]]*,[[:space:]]*$//' \
                 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-            postconf -e "smtpd_milters = ${stripped}"
-            echo "main.cf: rspamd milter removed (smtpd_milters = ${stripped:-<empty>})"
-            if command -v systemctl >/dev/null 2>&1 && systemctl reload postfix 2>/dev/null; then
-                echo "postfix: reloaded (systemd)."
-            elif command -v postfix >/dev/null 2>&1; then
-                postfix reload >/dev/null 2>&1 || true
-                echo "postfix: reloaded."
-            fi
-        else
+            postconf -e "${list} = ${stripped}"
+            echo "main.cf: rspamd milter removed (${list} = ${stripped:-<empty>})"
+            unwired=1
+        done
+        if [[ "${unwired}" -eq 0 ]]; then
             echo "main.cf: rspamd milter not wired - nothing to strip."
+        elif command -v systemctl >/dev/null 2>&1 && systemctl reload postfix 2>/dev/null; then
+            echo "postfix: reloaded (systemd)."
+        elif command -v postfix >/dev/null 2>&1; then
+            postfix reload >/dev/null 2>&1 || true
+            echo "postfix: reloaded."
         fi
     fi
 
@@ -299,6 +346,12 @@ do_remove() {
         if [[ -f "${RSPAMD_LOCAL_D}/${f}" ]]; then
             rm -f "${RSPAMD_LOCAL_D:?}/${f:?}"
             echo "removed ${RSPAMD_LOCAL_D}/${f}"
+        fi
+    done
+    for f in "${RSPAMD_STATELESS_OVERRIDE_FILES[@]}"; do
+        if [[ -f "${RSPAMD_OVERRIDE_D}/${f}" ]]; then
+            rm -f "${RSPAMD_OVERRIDE_D:?}/${f:?}"
+            echo "removed ${RSPAMD_OVERRIDE_D}/${f}"
         fi
     done
 
@@ -354,8 +407,19 @@ do_status() {
         else
             echo "milter_wired=no"
         fi
+        if postconf -h non_smtpd_milters 2>/dev/null | grep -q "${MILTER_ENTRY}"; then
+            echo "signing_wired=yes"
+        else
+            echo "signing_wired=no"
+        fi
     else
         echo "milter_wired=n/a"
+        echo "signing_wired=n/a"
+    fi
+    if [[ -f "${RSPAMD_DKIM_MAP}" ]]; then
+        echo "signing_domains=$(wc -l < "${RSPAMD_DKIM_MAP}")"
+    else
+        echo "signing_domains=0"
     fi
 
     # The milter is the scanner's only interface: Postfix hands it each message

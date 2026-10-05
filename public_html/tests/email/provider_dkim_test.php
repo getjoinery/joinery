@@ -63,9 +63,9 @@ try {
 	check(in_array('DkimRecordSource', class_implements('SesProvider') ?: array(), true),
 		'SES reports its DKIM records');
 	check(!in_array('DkimRecordSource', class_implements('SmtpProvider') ?: array(), true),
-		'SMTP does not claim provider DKIM (local submission — opendkim signs)');
+		'SMTP does not claim provider DKIM (local submission — this server signs)');
 	check(!in_array('DkimRecordSource', class_implements('PostfixProvider') ?: array(), true),
-		'Postfix does not claim provider DKIM (local submission — opendkim signs)');
+		'Postfix does not claim provider DKIM (local submission — this server signs)');
 
 	check(in_array('DkimRecordSource', class_implements('Smtp2GoProvider') ?: array(), true),
 		'SMTP2GO reports its DKIM records');

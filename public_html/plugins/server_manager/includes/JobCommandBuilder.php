@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.94 - FILE_HEAD_FILES labels opendkim.conf and opendmarc.conf as absent on a box where rspamd
+ *                 checks mail alone
  * @version 1.93 - build_moved_site_check (agent 1.56.0): the host runs decommission_moved_site's proof and
  *                 removes nothing, so the old machine's page can say where its domain goes
  * @version 1.92 - build_decommission_node routes the old machine of a switch-over (state retired) to
@@ -1949,8 +1951,8 @@ class JobCommandBuilder {
 		'sysctl_security'         => 'sysctl 99-security.conf',
 		'postfix_main'            => 'Postfix main.cf',
 		'postfix_master'          => 'Postfix master.cf',
-		'opendkim_conf'           => 'opendkim.conf',
-		'opendmarc_conf'          => 'opendmarc.conf',
+		'opendkim_conf'           => 'opendkim.conf (absent once rspamd checks mail alone; only a box not yet upgraded has one)',
+		'opendmarc_conf'          => 'opendmarc.conf (absent once rspamd checks mail alone; only a box not yet upgraded has one)',
 		'rspamd_actions'          => 'rspamd actions.conf',
 		'rspamd_classifier_bayes' => 'rspamd classifier-bayes.conf (Bayes switched off; learning is in the app)',
 		'rspamd_milter_headers'   => 'rspamd milter_headers.conf',

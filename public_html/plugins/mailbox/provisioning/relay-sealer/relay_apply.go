@@ -22,12 +22,14 @@ package main
 // measures itself. Root reacts to a timer, never to a request.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -575,6 +577,7 @@ type privilegedStatus struct {
 	ContractOK     bool                     `json:"contract_ok"`
 	RebootRequired bool                     `json:"reboot_required"`
 	Timesync       timesyncStatus           `json:"timesync"`
+	Spamhaus       string                   `json:"spamhaus,omitempty"`
 	Postfix        postfixStatus            `json:"postfix"`
 	TenantCount    int                      `json:"tenant_count"`
 }
@@ -607,7 +610,7 @@ type postfixStatus struct {
 // is reacting to files and timers at all.
 var relayUnits = []string{
 	"postfix", "joinery-relay-serve", "joinery-relay-apply.path", "joinery-relay-collect.timer",
-	"rspamd", "opendkim", "opendmarc",
+	"rspamd",
 }
 
 // Journals in the ping's log excerpt. Postfix is excluded on purpose: its log
@@ -633,14 +636,15 @@ func runCollectStatus() int {
 	if oneTenant {
 		st.Log = journalTail(relayLogUnits, 50)
 	}
+	// rspamd is the relay's only milter: it checks SPF, DKIM and DMARC and
+	// scores content, and writes every verdict a tenant reads.
 	milters := commandOutput("postconf", "-h", "smtpd_milters")
-	st.Milters["opendkim"] = strings.Contains(milters, ":8891")
-	st.Milters["opendmarc"] = strings.Contains(milters, ":8893")
 	st.Milters["rspamd"] = strings.Contains(milters, ":11332")
 	st.ContractOK = contractIntact(p.home)
 	_, err := os.Stat("/var/run/reboot-required")
 	st.RebootRequired = err == nil
 	st.Timesync = timesync()
+	st.Spamhaus = spamhausAnswer()
 	st.Postfix = postfixCounts(oneTenant, postfixDir)
 
 	// A tenant over its spool quota is refused at RCPT with a 4xx until it
@@ -666,6 +670,43 @@ func runCollectStatus() int {
 	chownToGroup(path, envOr("JOINERY_RELAY_USER", "joinery-relay"))
 	chownToGroup(p.statusDir(), envOr("JOINERY_RELAY_USER", "joinery-relay"))
 	return 0
+}
+
+// Spamhaus keeps a permanent test entry that is always listed. Postfix refuses
+// a sender only on a real "listed" answer (provision_relay.sh), so a resolver
+// Spamhaus will not serve refuses nobody and nothing in the mail path says so.
+// Asking for the test entry is how the relay finds out.
+const spamhausTestName = "2.0.0.127.zen.spamhaus.org"
+
+const (
+	spamhausAnswering = "answering"
+	spamhausRefused   = "refused"
+	spamhausNoAnswer  = "no_answer"
+)
+
+// spamhausAnswer asks through the system resolver, the one Postfix uses.
+func spamhausAnswer() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	addrs, _ := net.DefaultResolver.LookupHost(ctx, spamhausTestName)
+	return spamhausVerdict(addrs)
+}
+
+// spamhausVerdict reads the test entry's answer. 127.0.0.2 is the listing the
+// entry exists to return. 127.255.255.x is Spamhaus declining the resolver the
+// question came through (a public resolver, or one over its quota). Anything
+// else, or nothing, is no answer.
+func spamhausVerdict(addrs []string) string {
+	verdict := spamhausNoAnswer
+	for _, a := range addrs {
+		if a == "127.0.0.2" {
+			return spamhausAnswering
+		}
+		if strings.HasPrefix(a, "127.255.255.") {
+			verdict = spamhausRefused
+		}
+	}
+	return verdict
 }
 
 // systemdUnitStatus reads one unit's state with fixed arguments — nothing a

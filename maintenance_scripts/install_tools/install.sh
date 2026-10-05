@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.93 - The server step installs Postfix without opendkim: rspamd is the one program that
+#               checks and signs mail, and the mailbox installer brings it (specs/mail_checking_in_rspamd.md)
 #VERSION 2.92 - The Clone path is gone: no --clone-from, --clone-key or JOINERY_CLONE_KEY; a site
 #               moves to a new server by a site copy (specs/site_copy.md WP9)
 #VERSION 2.91 - The closing site check reads the Location header as sent: a front page that sends a
@@ -2901,17 +2903,15 @@ EOF
     print_step "Installing PostgreSQL server..."
     apt install -y postgresql postgresql-contrib
 
-    # Install the inbound mail stack (Postfix + opendkim). Baked into the base
-    # image so it survives container rebuilds; the Inbound Email plugin's
-    # install_email.sh only configures it. The global DEBIAN_FRONTEND export
-    # keeps postfix's debconf prompt from blocking a bare-metal run. See spec
-    # mail_stack_container_persistence.
-    print_step "Installing mail stack (Postfix, opendkim)..."
+    # Install the inbound mail stack (Postfix). Baked into the base
+    # image so it survives container rebuilds; the Mailbox plugin's
+    # install_email.sh configures it and adds rspamd, the mail checker. The
+    # global DEBIAN_FRONTEND export keeps postfix's debconf prompt from blocking
+    # a bare-metal run. See spec mail_stack_container_persistence.
+    print_step "Installing mail stack (Postfix)..."
     apt install -y \
         postfix \
-        postfix-pgsql \
-        opendkim \
-        opendkim-tools
+        postfix-pgsql
 
     # Start and enable PostgreSQL
     service_start postgresql

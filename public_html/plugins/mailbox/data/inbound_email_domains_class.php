@@ -11,7 +11,7 @@
  * (specs/mailbox_outbound_send_protection.md): while no unlock window is open,
  * the box holds no credential that can produce a DMARC-passing message From this
  * domain. Its DKIM private key is sealed to ied_owner_usr_user_id's vault public
- * key (ied_dkim_sealed_key), never given to opendkim, and unwrapped in-window at
+ * key (ied_dkim_sealed_key), never given to rspamd, and unwrapped in-window at
  * compose time only. ied_dkim_public_dns holds the cleartext DKIM DNS value so
  * the Setup tab can verify the published record while the vault is locked.
  *

@@ -32,6 +32,7 @@
  *
  * Usage: php plugins/mailbox/utils/managed_domain_prepare.php <domain>
  *
+ * @version 1.2 - the signing key is looked for where rspamd signs from
  * @version 1.1 - reached as an agent primitive; the domain is its whole vocabulary
  * @version 1.0
  */
@@ -68,7 +69,7 @@ try {
 	// ---- 2. A signing key, so outbound mail from this domain can be trusted.
 	// provision_dkim.sh is idempotent and never regenerates an existing key —
 	// regenerating would invalidate a DNS record already published.
-	$key_file = '/etc/opendkim/keys/' . $domain . '/mail.txt';
+	$key_file = InboundEmailSetupCheck::localSigningKeyPath($domain);
 	if (!is_readable($key_file)) {
 		$script = PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_dkim.sh');
 		if (is_file($script)) {

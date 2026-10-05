@@ -4,7 +4,7 @@
  * identity (specs/mailbox_outbound_send_protection.md, closure 1).
  *
  * A protected domain's DKIM private key is never on disk and never given to
- * opendkim: it is sealed to the domain owner's vault public key and lives at
+ * rspamd: it is sealed to the domain owner's vault public key and lives at
  * rest as ciphertext (ied_dkim_sealed_key). This class unwraps it in-window,
  * for one send, and hands the plaintext PEM back as an in-memory string for
  * PHPMailer's DKIM_private_string. The key never touches disk.
@@ -12,6 +12,8 @@
  * Registered into the core MailIdentityGuard at plugin bootstrap so core send
  * code (SmtpProvider, EmailSender) never names a mailbox symbol.
  *
+ * @version 1.3 - an ordinary domain's key lives under /etc/rspamd/dkim (localKeyFile);
+ *   rspamd signs with it on a colocated deployment
  * @version 1.2 - relay-fronted in-app signing skips IMAP-source domains, ending
  *   the permanent UNSIGNED false alarm for connected-account sends
  * @version 1.1
@@ -56,7 +58,7 @@ class MailboxDkimSigner {
 	/**
 	 * Resolve the in-app DKIM signer for $from_domain.
 	 *
-	 *   - Non-protected domain → null (opendkim signs it, or it is unsigned).
+	 *   - Non-protected domain → null (rspamd signs it, or it is unsigned).
 	 *   - Protected domain, no open unlock window for its owner → throws
 	 *     VaultLockedException so the compose path prompts a one-tap unlock
 	 *     rather than silently sending unsigned.
@@ -69,10 +71,10 @@ class MailboxDkimSigner {
 		$domain = self::loadDomain($from_domain);
 		if ($domain === null || !$domain->is_protected_identity()) {
 			// Non-protected (standard) hosted domain. On a COLOCATED deployment the
-			// main-box opendkim milter signs it (or it is unsigned), so return null
-			// to avoid a double signature. On a RELAY-FRONTED deployment that milter
-			// is decommissioned, so sign in-app here with the same filesystem DKIM
-			// key opendkim would have used — otherwise standard hosted sends leave
+			// main box's rspamd signs it as Postfix sends it (or it is unsigned), so
+			// return null to avoid a double signature. On a RELAY-FRONTED deployment
+			// mail does not leave through that Postfix, so sign in-app here with the
+			// same filesystem DKIM key rspamd would have used — otherwise standard hosted sends leave
 			// unsigned and get spam-foldered (specs/mailbox_relay_fix_pack.md § Fix 4).
 			// An IMAP-source anchor (gmail.com) is skipped outright: this
 			// deployment never signs for a domain it merely mirrors, and looking
@@ -111,6 +113,32 @@ class MailboxDkimSigner {
 	/** Default DKIM selector provision_dkim.sh generates for a standard domain. */
 	const STANDARD_SELECTOR = 'mail';
 
+	/**
+	 * Where an ordinary domain's signing key lives on this server, one directory
+	 * per domain (provision_dkim.sh). rspamd signs with it, and so does this
+	 * class where a relay fronts the deployment.
+	 */
+	const LOCAL_KEY_ROOT = '/etc/rspamd/dkim';
+
+	/**
+	 * Where opendkim kept the same keys. The host installer copies them to
+	 * LOCAL_KEY_ROOT and deletes this; until it has run on a box, the key is
+	 * still read from here so a send is never left unsigned in between.
+	 */
+	const FORMER_KEY_ROOT = '/etc/opendkim/keys';
+
+	/**
+	 * One file of an ordinary domain's signing key: '<selector>.private' or
+	 * '<selector>.txt' (the DNS record). The one place that knows the path.
+	 */
+	public static function localKeyFile(string $domain, string $file): string {
+		$relative = '/' . strtolower(trim($domain)) . '/' . $file;
+		if (!file_exists(self::LOCAL_KEY_ROOT . $relative) && is_readable(self::FORMER_KEY_ROOT . $relative)) {
+			return self::FORMER_KEY_ROOT . $relative;
+		}
+		return self::LOCAL_KEY_ROOT . $relative;
+	}
+
 	/** True on a relay-fronted deployment (an active MailboxRelay row exists). */
 	private static function relayActive(): bool {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
@@ -123,9 +151,9 @@ class MailboxDkimSigner {
 
 	/**
 	 * The in-app signer for a STANDARD (non-protected) hosted domain, reading the
-	 * same filesystem DKIM key opendkim signs with on a colocated deployment
-	 * (/etc/opendkim/keys/<domain>/<selector>.private, selector from the domain row
-	 * or the provision_dkim.sh default "mail"). Returns null when no readable key is
+	 * same filesystem DKIM key rspamd signs with on a colocated deployment
+	 * (localKeyFile(), selector from the domain row or the provision_dkim.sh
+	 * default "mail"). Returns null when no readable key is
 	 * provisioned — the send then goes unsigned, exactly as a colocated standard
 	 * domain with no DKIM key does. The private key is read into memory only; the
 	 * caller zeroes it after signing.
@@ -138,7 +166,7 @@ class MailboxDkimSigner {
 		if ($selector === '') {
 			$selector = self::STANDARD_SELECTOR;
 		}
-		$key_path = '/etc/opendkim/keys/' . $domain_name . '/' . $selector . '.private';
+		$key_path = self::localKeyFile($domain_name, $selector . '.private');
 		if (!is_readable($key_path)) {
 			// An unsigned relay-fronted send must never be silent: a key that
 			// exists but is unreadable means provisioning perms are wrong (the

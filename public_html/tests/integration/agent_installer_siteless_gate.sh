@@ -11,8 +11,7 @@
 # wrong in ways that fail silently, and this gate covers each.
 #
 #   1. A MACHINE WITH NO SITE HAS NO PHP. provision_relay.sh installs postfix,
-#      opendkim, opendmarc, wireguard, ufw, rspamd and golang-go; PHP is not
-#      among them. The installer's own `command -v php || exit 0` guard would
+#      rspamd and ufw; PHP is not among them. The installer's own `command -v php || exit 0` guard would
 #      therefore have made every siteless install exit 0 having done nothing,
 #      reporting success — a check that passes by not running. So the manifest
 #      reader has a PHP-free path, and it must agree with the PHP one exactly.

@@ -25,6 +25,11 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.57 - behind a relay, the relay's own Spamhaus answer is a row (host.relay_spamhaus)
+ * @version 1.56 - rspamd is the one program that checks and signs mail: the host.checker row
+ *   reports it, and inbound verification is judged from rspamd and Postfix's
+ *   milter list; an ordinary signing key lives where MailboxDkimSigner::localKeyFile() says
+ * @version 1.55 - a server that takes its own mail says whether Spamhaus answers it (host.spamhaus)
  * @version 1.54 - relayScannerResult reports a relay not delivering verdicts on its own (no ingest re-scan covers it)
  * @version 1.53 - run() tags every per-domain row with the domain it ran for (for_domain)
  * @version 1.52 - a Fortress mailbox with a device AI recipe shows an INFO row (address.device_ai)
@@ -336,6 +341,11 @@ class InboundEmailSetupCheck {
 		if ($scanner !== null) {
 			$results[] = $scanner;
 		}
+		// Behind a relay, the relay is the one asking Spamhaus.
+		$relay_spamhaus = $this->checkRelaySpamhaus();
+		if ($relay_spamhaus !== null) {
+			$results[] = $relay_spamhaus;
+		}
 
 		if ($address) {
 			foreach ($this->checkAddress($address) as $r) { $results[] = $r; }
@@ -444,7 +454,7 @@ class InboundEmailSetupCheck {
 
 		$dkim = $this->dkimPlan();
 		if (!empty($dkim['local'])) {
-			$local = $this->readDkimKey('/etc/opendkim/keys/' . $domain . '/mail.txt');
+			$local = $this->readDkimKey(self::localSigningKeyPath($domain));
 			if ($local !== '') {
 				$this->planAdd($plan, 'TXT', 'mail._domainkey.' . $domain, $local, null,
 					'DKIM — matches the signing key on this server.');
@@ -985,26 +995,12 @@ class InboundEmailSetupCheck {
 				'virtual_mailbox_domains is not wired to the database map.',
 				'Found: ' . ($vmdLine !== '' ? $vmdLine : '(empty)'), $this->installerFix());
 
-		exec('which opendkim 2>/dev/null', $o3, $e3);
-		$dkInstalled = ($e3 === 0);
-		exec('pgrep -x opendkim 2>/dev/null', $o4, $e4);
-		$dkRunning = ($e4 === 0);
-		if ($decommissioned) {
-			$out[] = $dkRunning
-				? $this->r('host.opendkim', '', 'host', 'opendkim (DKIM signing)', self::RECOMMENDED, self::WARN,
-					'The local listener is recorded as decommissioned, but opendkim is running.',
-					'Decommission again from the Relay section, or Restore to make the record honest.')
-				: $this->r('host.opendkim', '', 'host', 'opendkim (DKIM signing)', self::RECOMMENDED, self::PASS,
-					'opendkim is stopped — decommissioned with the listener; sent mail is signed on its own outbound path.');
-		} else {
-		$out[] = ($dkInstalled && $dkRunning)
-			? $this->r('host.opendkim', '', 'host', 'opendkim (DKIM signing)', self::RECOMMENDED, self::PASS,
-				'opendkim is installed and running.')
-			: $this->r('host.opendkim', '', 'host', 'opendkim (DKIM signing)', self::RECOMMENDED, self::WARN,
-				$dkInstalled ? 'opendkim is installed but not running.'
-				             : 'opendkim is not installed — outbound DKIM signing is disabled.',
-				'Forwarding still works without it; only outbound DKIM signing is affected.',
-				$this->installerFix());
+		$out[] = $this->checkerResult($decommissioned);
+
+		// Only a box whose own Postfix takes mail from the internet asks Spamhaus.
+		if (!$decommissioned && !$this->fronted()) {
+			list($listed, $asked) = $this->dns(function () { return DnsResolver::getA(self::SPAMHAUS_TEST_NAME); });
+			$out[] = self::spamhausResult($asked ? $listed : null);
 		}
 
 		$p = @stream_socket_client('tcp://127.0.0.1:25', $en, $es, 2);
@@ -1038,6 +1034,99 @@ class InboundEmailSetupCheck {
 		}
 
 		return $out;
+	}
+
+	/** Postfix's name for rspamd's milter, on both of its milter lists. */
+	const CHECKER_MILTER = 'inet:localhost:11332';
+
+	/**
+	 * rspamd, the one program that checks arriving mail (SPF, DKIM, DMARC, spam
+	 * score) and signs what this server sends for a domain that has a key.
+	 *
+	 * RECOMMENDED: a stopped rspamd never blocks mail. What it costs is named in
+	 * the row, because both halves are silent otherwise — arriving mail reads
+	 * "unverified" and outgoing mail leaves unsigned.
+	 */
+	private function checkerResult(bool $decommissioned): array {
+		$label = 'rspamd (mail checking and signing)';
+		exec('which rspamd 2>/dev/null', $o1, $e1);
+		$installed = ($e1 === 0);
+		exec('pgrep -x rspamd 2>/dev/null', $o2, $e2);
+		$running = ($e2 === 0);
+		if (!$installed || !$running) {
+			return $this->r('host.checker', '', 'host', $label, self::RECOMMENDED, self::WARN,
+				$installed ? 'rspamd is installed but not running.' : 'rspamd is not installed.',
+				'Mail still arrives and is still sent. Until rspamd runs, arriving mail is recorded as '
+				. '"unverified" with no spam score, and mail this server sends itself leaves without a DKIM signature.',
+				$this->installerFix());
+		}
+		if ($decommissioned) {
+			return $this->r('host.checker', '', 'host', $label, self::RECOMMENDED, self::PASS,
+				'rspamd is running. The local listener is decommissioned, so no mail passes through it; '
+				. 'sent mail is signed on its own outbound path.');
+		}
+		$unwired = array();
+		foreach (array('smtpd_milters' => 'arriving mail', 'non_smtpd_milters' => 'mail this server sends') as $list => $what) {
+			$line = array();
+			exec('postconf -h ' . $list . ' 2>/dev/null', $line);
+			if (trim(implode(' ', $line)) !== self::CHECKER_MILTER) {
+				$unwired[] = $what . ' (' . $list . ' is "' . trim(implode(' ', $line)) . '")';
+			}
+		}
+		if (!empty($unwired)) {
+			return $this->r('host.checker', '', 'host', $label, self::RECOMMENDED, self::WARN,
+				'rspamd is running, but Postfix does not hand it everything it should.',
+				'Not wired to rspamd alone: ' . implode('; ', $unwired) . '. Arriving mail that skips it is '
+				. 'recorded as "unverified"; sent mail that skips it leaves without a DKIM signature.',
+				$this->installerFix());
+		}
+		return $this->r('host.checker', '', 'host', $label, self::RECOMMENDED, self::PASS,
+			'rspamd is running and Postfix hands it all mail, arriving and outgoing.');
+	}
+
+	/** Spamhaus's permanent test entry: always listed, so it always answers 127.0.0.2. */
+	const SPAMHAUS_TEST_NAME = '2.0.0.127.zen.spamhaus.org';
+
+	/**
+	 * Does Spamhaus answer this server?
+	 *
+	 * Postfix refuses a sender only on a real "listed" answer, so a server
+	 * Spamhaus will not answer refuses nobody and nothing in the mail path says
+	 * so. Spamhaus declines a resolver it considers public, or over its quota,
+	 * by answering every question 127.255.255.x. A warning, never a failure:
+	 * mail still arrives and is still scored.
+	 *
+	 * Public and static so the three answers can be tested without DNS.
+	 *
+	 * @param string[]|null $ips the test entry's A records, or null when the lookup itself failed
+	 */
+	public static function spamhausResult(?array $ips): array {
+		$row = function ($status, $summary, $detail = '') {
+			return array(
+				'id' => 'host.spamhaus', 'scope' => '', 'layer' => 'host',
+				'label' => 'Spamhaus blocklist answering', 'severity' => self::RECOMMENDED,
+				'status' => $status, 'summary' => $summary, 'detail' => $detail,
+				'fix' => null, 'recheckable' => true,
+			);
+		};
+		if ($ips !== null && in_array('127.0.0.2', $ips, true)) {
+			return $row(self::PASS, 'Spamhaus answers this server, so senders on its blocklist are refused.');
+		}
+		$refused = false;
+		foreach ((array)$ips as $ip) {
+			if (strpos((string)$ip, '127.255.255.') === 0) { $refused = true; }
+		}
+		if ($refused) {
+			return $row(self::WARN, 'Spamhaus is not answering this box.',
+				'It declined the DNS resolver this server asks through (answer ' . implode(', ', $ips) . '), which it does '
+				. 'for a public resolver or one over its free quota. Mail still arrives and is still scored for spam, '
+				. 'but senders on the blocklist are no longer refused. Point this server at its own resolver, or '
+				. 'register for a Spamhaus data query key.');
+		}
+		return $row(self::WARN, 'Spamhaus is not answering this box.',
+			'The lookup of its test entry ' . ($ips === null ? 'failed' : 'came back empty') . '. Mail still arrives and is '
+			. 'still scored for spam, but senders on the blocklist are not refused while this lasts. '
+			. 'Check that this server can make DNS lookups.');
 	}
 
 	// ===================================================================
@@ -1112,43 +1201,38 @@ class InboundEmailSetupCheck {
 				. 'SPF/DKIM/DMARC results.', '', null, true);
 		}
 
-		// No milter mail seen — enrich the reason from the host config if we can
-		// read it. Unreadable host config is NOT a failure (the web user may lack
-		// access to /etc); fall back to a neutral "can't confirm".
-		$confReadable = is_readable('/etc/opendkim.conf');
-		if (!$confReadable) {
-			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::INFO,
-				'Can\'t confirm inbound verification from here yet.',
-				'No recently-received mail carries a milter verdict, and this server\'s mail config '
-				. 'isn\'t readable by the web user — so we can\'t tell whether verification is wired. '
-				. 'Send a test message and re-check, or run the installer on the host.',
-				$fix, true);
-		}
-
-		// Config readable — assess drift. Any of these unmet means verification is broken.
+		// No stamped mail seen — say what on this server would explain it. Any
+		// of these unmet means verification is broken.
 		$issues = array();
 
-		exec('which opendmarc 2>/dev/null', $o1, $e1);
-		if ($e1 !== 0) { $issues[] = 'opendmarc is not installed'; }
+		exec('which rspamd 2>/dev/null', $o1, $e1);
+		if ($e1 !== 0) { $issues[] = 'rspamd is not installed'; }
 		else {
-			exec('pgrep -x opendmarc 2>/dev/null', $o2, $e2);
-			if ($e2 !== 0) { $issues[] = 'opendmarc is not running'; }
+			exec('pgrep -x rspamd 2>/dev/null', $o2, $e2);
+			if ($e2 !== 0) { $issues[] = 'rspamd is not running'; }
 		}
 
 		$milters = array();
 		exec('postconf -h smtpd_milters 2>/dev/null', $milters);
-		$miltersLine = trim(implode(' ', $milters));
-		if (strpos($miltersLine, '8891') === false) { $issues[] = 'opendkim milter (port 8891) not in smtpd_milters'; }
-		if (strpos($miltersLine, '8893') === false) { $issues[] = 'opendmarc milter (port 8893) not in smtpd_milters'; }
+		if (strpos(trim(implode(' ', $milters)), '11332') === false) {
+			$issues[] = 'rspamd\'s milter (port 11332) is not in smtpd_milters';
+		}
 
-		// opendkim must actually be reachable on the port Postfix dials — this is
-		// the exact wired-but-unreachable drift we found.
-		$sock = @stream_socket_client('tcp://127.0.0.1:8891', $en, $es, 1);
-		if ($sock) { @fclose($sock); } else { $issues[] = 'nothing is listening on opendkim milter port 8891'; }
+		// rspamd must actually be reachable on the port Postfix dials: a milter
+		// can be wired and still unreachable.
+		$sock = @stream_socket_client('tcp://127.0.0.1:11332', $en, $es, 1);
+		if ($sock) { @fclose($sock); } else { $issues[] = 'nothing is listening on rspamd\'s milter port 11332'; }
 
-		$conf = (string)@file_get_contents('/etc/opendkim.conf');
-		if (!preg_match('/^\s*Mode\s+\S*v/mi', $conf)) { $issues[] = 'opendkim Mode does not include verify (v)'; }
-		if (!preg_match('/^\s*AuthservID\s+\S+/mi', $conf)) { $issues[] = 'opendkim AuthservID is not set'; }
+		// rspamd stamps its verdicts under Postfix's myhostname, and only lines
+		// under the configured mail hostname are trusted.
+		$myhostname = array();
+		exec('postconf -h myhostname 2>/dev/null', $myhostname);
+		$myhostname = strtolower(trim(implode('', $myhostname)));
+		$mail_hostname = strtolower(trim((string)$this->mailHostname));
+		if ($myhostname !== '' && $mail_hostname !== '' && $myhostname !== $mail_hostname) {
+			$issues[] = 'Postfix calls itself ' . $myhostname . ' but the mail hostname is ' . $mail_hostname
+				. ', so the verdicts it stamps are not trusted';
+		}
 
 		if (!empty($issues)) {
 			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::WARN,
@@ -1161,7 +1245,7 @@ class InboundEmailSetupCheck {
 		// Config looks correct but no milter mail has arrived yet to prove it.
 		return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::INFO,
 			'Verification is configured; no recently-received mail yet to confirm it.',
-			'The opendkim/opendmarc milters look correctly wired, but no message in the last 30 days carries '
+			'rspamd looks correctly wired, but no message in the last 30 days carries '
 			. 'a milter verdict. Send a test message and re-check to confirm end-to-end.',
 			null, true);
 	}
@@ -1258,7 +1342,7 @@ class InboundEmailSetupCheck {
 				$any_seen . ' message(s) stored in the last 30 days, none stamped by the relay. The relay only '
 				. 'signs Authentication-Results under its own mail hostname (' . $relay_host . '), and this box '
 				. 'accepts a stamp only under that name. A relay provisioned with a different hostname, or with '
-				. 'its opendkim/opendmarc milters stopped, produces exactly this. Re-run the relay provisioner '
+				. 'its rspamd stopped, produces exactly this. Re-run the relay provisioner '
 				. 'on the relay host and send a test message.',
 				null, true);
 		}
@@ -1307,6 +1391,53 @@ class InboundEmailSetupCheck {
 		}
 
 		return self::relayScannerResult($health, $name, self::healthAge($health));
+	}
+
+	/**
+	 * Does Spamhaus answer the relay? Read from the relay's last status answer.
+	 * No row when nothing fronts this deployment, when the relay has not been
+	 * asked yet, or when it is too old to say.
+	 */
+	private function checkRelaySpamhaus() {
+		if (!$this->fronted()) {
+			return null;
+		}
+		$topo = $this->topology();
+		$relay = $topo['relay'];
+		$health = ($relay === null) ? null : $relay->lastHealth();
+		if ($health === null) {
+			return null;
+		}
+		$name = trim((string)$relay->get('mrl_name')) ?: ($topo['mx_hostname'] !== '' ? $topo['mx_hostname'] : 'the relay');
+		return self::relaySpamhausResult((string)($health['ping']['spamhaus'] ?? ''), $name, self::healthAge($health));
+	}
+
+	/**
+	 * The relay's own word on Spamhaus ('answering', 'refused', 'no_answer'),
+	 * as a check row; null for a relay that does not report it. Public and
+	 * static so the answers can be tested without a relay.
+	 */
+	public static function relaySpamhausResult(string $answer, string $name, string $age_note = ''): ?array {
+		if ($answer === '') {
+			return null;
+		}
+		$row = function ($status, $summary, $detail) {
+			return array(
+				'id' => 'host.relay_spamhaus', 'scope' => '', 'layer' => 'host',
+				'label' => 'Spamhaus blocklist answering', 'severity' => self::RECOMMENDED,
+				'status' => $status, 'summary' => $summary, 'detail' => $detail,
+				'fix' => null, 'recheckable' => true,
+			);
+		};
+		if ($answer === 'answering') {
+			return $row(self::PASS, 'Spamhaus answers ' . $name . ', so senders on its blocklist are refused.', trim($age_note));
+		}
+		return $row(self::WARN, 'Spamhaus is not answering ' . $name . '.',
+			($answer === 'refused'
+				? 'It declined the DNS resolver the relay asks through, which it does for a public resolver or one over its free quota.'
+				: 'The relay\'s lookup of its test entry got no answer.')
+			. ' Mail still arrives and is still scored for spam, but senders on the blocklist are not refused '
+			. 'while this lasts.' . $age_note);
 	}
 
 	/** ' Last checked 3 minutes ago.' — or '' when the answer carries no timestamp. */
@@ -1674,7 +1805,7 @@ class InboundEmailSetupCheck {
 		// A protected sending identity (specs/mailbox_outbound_send_protection.md)
 		// inverts the correct DNS shape: SPF must NOT authorize the box, DMARC
 		// must be strict (p=reject; aspf=s; adkim=s), the DKIM record must match
-		// the in-app sealed key's public half (not opendkim's on-disk key), the
+		// the in-app sealed key's public half (not the on-disk key rspamd signs with), the
 		// forwarding subdomain's SPF must authorize the box, and the domain must
 		// not be relay-provider-verified. Domains without send protection keep
 		// the ambient shape below — see protectedShapeApplies() for why the
@@ -1691,7 +1822,7 @@ class InboundEmailSetupCheck {
 			}
 			// The last step of the ceremony, and the only one that used to leave no
 			// trace: send protection means only the sealed key can send as this
-			// domain, but an ordinary opendkim key left on the box can still sign
+			// domain, but an ordinary signing key left on the box can still sign
 			// for it. Nothing destroys that key on its own, so nothing but this row
 			// ever says it is there.
 			$out[] = $this->localSigningKeyResult($domain);
@@ -1725,23 +1856,22 @@ class InboundEmailSetupCheck {
 			}
 
 			// DKIM — rows per signing path this domain's mail actually rides
-			// (specs/mailbox_provider_dkim.md): local opendkim when mail leaves
+			// (specs/mailbox_provider_dkim.md): this server's rspamd when mail leaves
 			// through local Postfix, the outbound provider's own records when
 			// composed mail rides its API. A locally generated key is never
 			// prescribed for a path it doesn't sign.
 			$dkim_plan = $this->dkimPlan();
 			if ($dkim_plan['local']) {
-				// Local opendkim signs what this box submits itself. One check
+				// This server's rspamd signs what this box submits itself. One check
 				// covering both that a signing key exists on this server and
 				// that the matching record is published in DNS; the first unmet
 				// condition wins.
-				$keyFile = '/etc/opendkim/keys/' . $domain . '/mail.txt';
-				$localKey = $this->readDkimKey($keyFile);
+				$localKey = $this->readDkimKey(self::localSigningKeyPath($domain));
 				if ($localKey === '') {
 					$out[] = $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
 						'No DKIM key has been generated for ' . $domain . ' on this server.',
 						'Forwarding works without DKIM; generating a key improves outbound deliverability. '
-						. 'The command below generates the key, wires opendkim, and prints the DNS record to publish.',
+						. 'The command below generates the key, has this server sign with it, and prints the DNS record to publish.',
 						$this->dkimFix($domain));
 				} else {
 					$out[] = $this->dkimResult($domain, $localKey);
@@ -3188,9 +3318,9 @@ class InboundEmailSetupCheck {
 			. 'anything else.');
 	}
 
-	/** Where opendkim keeps a domain's ordinary on-disk signing key. */
+	/** The DNS record file of a domain's ordinary on-disk signing key. */
 	public static function localSigningKeyPath(string $domain): string {
-		return '/etc/opendkim/keys/' . strtolower(trim($domain)) . '/mail.txt';
+		return MailboxDkimSigner::localKeyFile($domain, MailboxDkimSigner::STANDARD_SELECTOR . '.txt');
 	}
 
 	/** The root helper that destroys one, when this box has been provisioned with it. */
@@ -3734,7 +3864,7 @@ class InboundEmailSetupCheck {
 
 	/**
 	 * DKIM for a protected domain: the published selector record must match the
-	 * in-app sealed key's public half (ied_dkim_public_dns), NOT opendkim's
+	 * in-app sealed key's public half (ied_dkim_public_dns), NOT rspamd's
 	 * on-disk key (which is removed at cutover). REQUIRED — the signature is the
 	 * only path to DMARC acceptance for a protected identity.
 	 */
@@ -4009,7 +4139,7 @@ class InboundEmailSetupCheck {
 	/**
 	 * Which DKIM signing paths carry a domain's mail, by topology
 	 * (specs/mailbox_provider_dkim.md). Returns:
-	 *   'local'     — local opendkim signs what this box submits itself
+	 *   'local'     — this server's rspamd signs what this box submits itself
 	 *                 (colocated only; a fronted deployment's compose never
 	 *                 rides local Postfix).
 	 *   'provider'  — composed mail rides the outbound provider's API, so the
@@ -4036,7 +4166,7 @@ class InboundEmailSetupCheck {
 	 * The DKIM rows for a domain whose mail is provider-signed: one row per
 	 * record the provider requires, each verified against live DNS. A provider
 	 * without the DkimRecordSource capability ($class null) gets one generic
-	 * row naming it — never a prescription for a local opendkim key.
+	 * row naming it — never a prescription for a local signing key.
 	 */
 	private function providerDkimRows(?string $class, string $label, string $domain, string $id_base): array {
 		if ($class === null) {
@@ -4220,7 +4350,7 @@ class InboundEmailSetupCheck {
 		);
 	}
 
-	/** Read an opendkim mail.txt key file and return the assembled record value, or '' . */
+	/** Read a signing key's mail.txt record file and return the assembled record value, or '' . */
 	private function readDkimKey($file) {
 		if (!is_readable($file)) { return ''; }
 		$raw = @file_get_contents($file);

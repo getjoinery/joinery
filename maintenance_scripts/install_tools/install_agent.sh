@@ -205,8 +205,7 @@ if [ "$SITELESS" != "1" ]; then
     # Only the site path needs PHP: it reads the switch out of the site
     # database through PDO. A siteless machine reads no database and parses its
     # manifest without PHP, because a mail relay has none — provision_relay.sh
-    # installs postfix, opendkim, opendmarc, wireguard, ufw, rspamd and
-    # golang-go, and PHP is not among them. Requiring it here would have made
+    # installs postfix, rspamd and ufw, and PHP is not among them. Requiring it here would have made
     # every siteless install exit 0 having done nothing, which reads as success.
     command -v php >/dev/null 2>&1 || { say "php-cli not available - skipping"; exit 0; }
 fi

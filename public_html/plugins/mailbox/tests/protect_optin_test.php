@@ -478,8 +478,20 @@ class ProtectOptinTest {
 		section('The old on-disk signing key has a state');
 
 		check(InboundEmailSetupCheck::localSigningKeyPath('Example.COM')
-				=== '/etc/opendkim/keys/example.com/mail.txt',
+				=== MailboxDkimSigner::LOCAL_KEY_ROOT . '/example.com/mail.txt',
 			'the key path is derived from the domain, lowercased');
+		check(MailboxDkimSigner::LOCAL_KEY_ROOT === '/etc/rspamd/dkim'
+				&& MailboxDkimSigner::localKeyFile('Example.COM', 'mail.private') === '/etc/rspamd/dkim/example.com/mail.private',
+			'the private key sits beside it, in the directory rspamd signs from');
+		// One directory, named in three places that cannot include each other:
+		// the app, the shell that writes keys, and the installed root helper.
+		$prov = PathHelper::getIncludePath('plugins/mailbox/provisioning/');
+		check(strpos((string)file_get_contents($prov . 'rspamd_stateless.sh'),
+				'RSPAMD_DKIM_DIR="${RSPAMD_DKIM_DIR:-' . MailboxDkimSigner::LOCAL_KEY_ROOT . '}"') !== false,
+			'the provisioning scripts write keys to the directory the app reads');
+		check(strpos((string)file_get_contents($prov . 'provision_relay_main.sh'),
+				'KEY_ROOT="' . MailboxDkimSigner::LOCAL_KEY_ROOT . '"') !== false,
+			'the removal helper deletes from that same directory');
 		check(InboundEmailSetupCheck::localSigningKeyHelper() === '/usr/local/sbin/joinery-dkim-remove',
 			'the removal helper has one fixed, allowlisted path');
 

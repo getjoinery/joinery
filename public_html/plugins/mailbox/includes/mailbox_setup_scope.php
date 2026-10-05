@@ -14,6 +14,7 @@
  * expected to cache (see the reader's setup_status action); this file always
  * answers live.
  *
+ * @version 1.8 - the signing program's row is host.checker (rspamd)
  * @version 1.7 - a mailbox needs the relay when its domain has the Seal at the
  *   relay add-on on
  * @version 1.6 - an IMAP-pull mailbox gets a Sending row of its own — the
@@ -199,7 +200,7 @@ function mailbox_setup_verdict(?array $scoped): array {
  * checks that matter when a mailbox forwards mail back out.
  */
 function _setup_is_forwarding_row(array $r): bool {
-	return in_array($r['id'], array('plugin.srs_secret', 'plugin.relay', 'domain.dkim', 'host.opendkim'), true);
+	return in_array($r['id'], array('plugin.srs_secret', 'plugin.relay', 'domain.dkim', 'host.checker'), true);
 }
 
 /**
@@ -214,7 +215,7 @@ function _setup_is_sending_row(array $r): bool {
 	if (strpos((string)$r['id'], 'domain.machine_sender') === 0) {
 		return true;
 	}
-	return in_array($r['id'], array('plugin.relay', 'domain.dkim', 'host.opendkim'), true);
+	return in_array($r['id'], array('plugin.relay', 'domain.dkim', 'host.checker'), true);
 }
 
 /**

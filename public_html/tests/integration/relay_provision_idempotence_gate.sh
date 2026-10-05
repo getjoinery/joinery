@@ -162,9 +162,9 @@ chk "a reload-capable unit is reloaded, not restarted" \
 chk "  and is not also restarted" \
     "$(grep -c 'systemctl restart rspamd' "$T/log")" "0"
 
-# The whole point: six services, nothing changed, nothing touched.
+# The whole point: five services, nothing changed, nothing touched.
 : > "$T/log"
-for u in postfix opendkim opendmarc rspamd joinery-relay-serve joinery-relay-apply.path joinery-relay-collect.timer; do
+for u in postfix rspamd joinery-relay-serve joinery-relay-apply.path joinery-relay-collect.timer; do
     STUB_LOG="$T/log" UNITS_TO_MARK="" FAKE_ACTIVE=active \
         PATH="$T/bin:$PATH" bash "$T/svc.sh" "$u" restart >/dev/null 2>&1
 done

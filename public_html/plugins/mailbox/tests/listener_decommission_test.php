@@ -250,7 +250,7 @@ check(preg_match('/LISTENER_DECOMMISSIONED=1/', $src) === 1,
 // controls. Arming through arm_service() uses "${svc}" and so never matches;
 // what this catches is a bare `systemctl enable|start|restart postfix` written
 // back in somewhere the flag does not reach — the defect itself.
-preg_match_all('/^[^#\n]*systemctl\s+(?:enable|start|restart)\s+(?:postfix|opendkim|opendmarc)\b/m',
+preg_match_all('/^[^#\n]*systemctl\s+(?:enable|start|restart)\s+(?:postfix)\b/m',
 	$src, $bare, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
 $unguarded = array();
 foreach ($bare as $m) {
@@ -269,14 +269,21 @@ check(count($bare) > 0, 'the arming-site scan actually found arming sites to che
 check(strpos($src, 'ufw allow 25/tcp') !== false && strpos($src, 'ufw deny 25/tcp') !== false,
 	'install_email.sh can both open and re-close port 25 at the firewall');
 
-// The two root helpers must not start a unit the decommission disabled: a
-// `systemctl restart` starts a disabled unit just as readily as an enabled one.
-foreach (array('provision_dkim.sh', 'provision_relay_main.sh') as $script) {
-	$path = PathHelper::getIncludePath('plugins/mailbox/provisioning/' . $script);
-	$body = (string)@file_get_contents($path);
-	check($body !== '' && strpos($body, "is-enabled opendkim") !== false,
-		$script . ' checks is-enabled before restarting opendkim', $path);
-}
+// Adding or removing a signing key must not start anything on a decommissioned
+// box: `systemctl restart` starts a disabled unit just as readily as an enabled
+// one. rspamd re-reads its list of signing domains on its own, so neither
+// script has a reason to touch a service at all.
+$dkim_path = PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_dkim.sh');
+$dkim_body = (string)@file_get_contents($dkim_path);
+check($dkim_body !== '' && preg_match('/^[^#\n]*\b(?:systemctl|service)\b/m', $dkim_body) === 0,
+	'provision_dkim.sh starts, restarts and reloads nothing', $dkim_path);
+$main_path = PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_relay_main.sh');
+$main_body = (string)@file_get_contents($main_path);
+$helper = preg_match('/<<\'DKIMREMOVEHELPER\'\n(.*?)\nDKIMREMOVEHELPER/s', $main_body, $hm) === 1 ? $hm[1] : '';
+check($helper !== '' && preg_match('/^[^#\n]*\b(?:systemctl|service)\b/m', $helper) === 0,
+	'joinery-dkim-remove starts, restarts and reloads nothing', $main_path);
+check(preg_match('/^UNITS="postfix"$/m', $main_body) === 1,
+	'joinery-mail-listener switches Postfix and nothing else: rspamd stays up for outgoing signing');
 
 section('helper runner');
 

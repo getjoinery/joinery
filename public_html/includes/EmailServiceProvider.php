@@ -143,11 +143,11 @@ interface ApiSubmissionRelay extends RawMessageRelay {
  *
  * The mailbox Setup tab uses this to drive the domain DKIM row: when the
  * outbound path for a domain's mail is an API provider, the correct DKIM record
- * is the one the PROVIDER issues for that domain — a locally generated opendkim
+ * is the one the PROVIDER issues for that domain — a locally generated signing
  * key signs nothing on that path. A provider opts in by adding this interface
  * to its `implements` list; providers without it get generic naming-the-provider
  * guidance instead. Local-submission providers (Postfix, SMTP) never implement
- * it — opendkim owns their signing.
+ * it — the server's own mail checker (rspamd) signs for them.
  *
  * Providers that implement it: Mailgun (sending DNS records from the domains
  * API), SES (Easy DKIM CNAME tokens from GetEmailIdentity), SMTP2GO (the

@@ -5,10 +5,10 @@
  *
  * A protected domain's DKIM private key is generated and sealed to the owner's
  * vault public key — the plaintext never touches disk and is never given to
- * opendkim. The arc:
+ * rspamd. The arc:
  *
  *   key sealed → publish DNS → verify (protected shape) → activate (flip the
- *   flag) → remove opendkim signing.
+ *   flag) → remove rspamd signing.
  *
  * This is the "Only send while I'm signed in" add-on on a Private domain
  * (specs/protection_levels_platform.md § Add-ons). Switching it on in the
