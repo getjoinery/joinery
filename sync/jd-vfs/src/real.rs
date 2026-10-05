@@ -103,15 +103,11 @@ impl OsVfs {
     }
 }
 
-/// A fingerprint as the engine is shown it: on a volume whose ids are only
-/// positions, with no id and no birth, so nothing reads one
-/// (`Personality::positional_file_ids`).
+/// A fingerprint as the engine is shown it (`Personality::seen`): on a
+/// volume whose ids are only positions, with no id and no birth, so nothing
+/// reads one; on one whose births are names, with the index alone.
 fn as_seen(fp: Fingerprint, personality: &Personality) -> Fingerprint {
-    if personality.positional_file_ids {
-        Fingerprint { file_id: 0, birth_ns: 0, ..fp }
-    } else {
-        fp
-    }
+    personality.seen(fp)
 }
 
 fn list_dir(
@@ -178,11 +174,9 @@ include_internal: bool,
             tie_break_id,
             fingerprint: match kind {
                 EntryKind::File => Some(as_seen(fingerprint_of(&entry.path(), &md), personality)),
-                EntryKind::Directory => Some(if personality.positional_file_ids {
-                    Fingerprint::of_directory(0, 0)
-                } else {
-                    Fingerprint::of_directory(directory_id_of(&entry.path(), &md), birth_of(&md))
-                }),
+                EntryKind::Directory => {
+                    Some(personality.seen(Fingerprint::of_directory(directory_id_of(&entry.path(), &md), birth_of(&md))))
+                }
                 _ => None,
             },
         });
@@ -267,13 +261,52 @@ pub(crate) fn identity_at(path: &Path) -> Option<crate::FileIdentity> {
     Some(fingerprint_of(path, &md).identity())
 }
 
-/// Is this a volume whose 64-bit file index is documented as not unique?
-/// ReFS (and so a Windows 11 Dev Drive) numbers files with 128 bits, and the
-/// index `file_index` reads is not guaranteed to tell two of them apart.
+/// Is this a volume whose 64-bit file index cannot be trusted to name one
+/// file? ReFS (and so a Windows 11 Dev Drive) numbers files with 128 bits, and
+/// the index `file_index` reads is not guaranteed to tell two of them apart.
+/// And any remote volume: a share reports whatever filesystem name its server
+/// chooses (Samba answers "NTFS" by default) and hands Windows whatever its
+/// server numbers files by -- an inode that a deleted file frees for the next
+/// one -- while a Windows server's share tunnels its births like local NTFS.
+/// Neither the number nor the birth can be asked about from here, so a share
+/// is weak (`specs/drive_file_identity.md` lists network shares among the
+/// weak volumes).
 #[cfg(windows)]
 pub(crate) fn ids_not_unique_on_this_volume(dir: &Path) -> bool {
     // Unanswered is not an answer that trusts the ids.
-    volume_filesystem_name(dir).is_none_or(|n| n.eq_ignore_ascii_case("ReFS"))
+    volume_is_remote(dir) || volume_filesystem_name(dir).is_none_or(|n| n.eq_ignore_ascii_case("ReFS"))
+}
+
+/// Is the volume holding `dir` anything but a local disk? Only a positive
+/// local answer from `GetDriveTypeW` counts as local: fixed, removable or a
+/// RAM disk. A share (`DRIVE_REMOTE`, for a mapped drive and a UNC path
+/// alike), a CD, a root the call cannot name, or no answer at all reads as
+/// remote, so a spelling the API cannot answer is weak rather than strong.
+#[cfg(windows)]
+fn volume_is_remote(dir: &Path) -> bool {
+    // GetDriveTypeW's answers (Win32::System::WindowsProgramming, a feature
+    // this crate does not otherwise need).
+    const DRIVE_REMOVABLE: u32 = 2;
+    const DRIVE_FIXED: u32 = 3;
+    const DRIVE_RAMDISK: u32 = 6;
+    !drive_type_of(dir).is_some_and(|t| matches!(t, DRIVE_REMOVABLE | DRIVE_FIXED | DRIVE_RAMDISK))
+}
+
+/// `GetDriveTypeW`'s raw answer for the volume holding `dir`, found with
+/// `GetVolumePathNameW`; `None` when the volume path cannot be found.
+#[cfg(windows)]
+pub(crate) fn drive_type_of(dir: &Path) -> Option<u32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumePathNameW};
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut root = [0u16; 1024];
+    // SAFETY: both buffers are NUL-terminated or sized as passed.
+    let ok = unsafe { GetVolumePathNameW(wide.as_ptr(), root.as_mut_ptr(), root.len() as u32) };
+    if ok == 0 {
+        return None;
+    }
+    // SAFETY: `root` holds the NUL-terminated volume path just written.
+    Some(unsafe { GetDriveTypeW(root.as_ptr()) })
 }
 
 /// Is this a FAT or exFAT volume, whose file ids say where a file sits rather
@@ -405,6 +438,23 @@ fn volume_filesystem_name(dir: &Path) -> Option<String> {
     }
     let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
     Some(String::from_utf16_lossy(&name[..end]))
+}
+
+/// Is a creation time on this volume a property of the name
+/// (`Personality::births_are_names`)? NTFS under Windows tunnels it; named by
+/// the filesystem's name. Unanswered reads as yes: the index alone is the
+/// reading that a tunnelled birth cannot mislead (and an unanswered volume's
+/// ids are not trusted anyway, `ids_not_unique_on_this_volume`).
+#[cfg(windows)]
+pub(crate) fn births_are_names_on_this_volume(dir: &Path) -> bool {
+    volume_filesystem_name(dir).is_none_or(|n| n.eq_ignore_ascii_case("NTFS"))
+}
+
+/// Tunnelling is done by the Windows kernel, not stored on the disk: an NTFS
+/// volume mounted elsewhere keeps births with their files.
+#[cfg(not(windows))]
+pub(crate) fn births_are_names_on_this_volume(_dir: &Path) -> bool {
+    false
 }
 
 /// Unix volumes number files with an inode, unique on the volume.
@@ -901,11 +951,9 @@ fn folder_on_disk(path: &Path) -> VfsResult<()> {
 
 fn directory_identity_at(path: &Path, personality: &Personality) -> VfsResult<Option<crate::FileIdentity>> {
     match path.symlink_metadata() {
-        Ok(md) if md.is_dir() && !md.file_type().is_symlink() => Ok(Some(if personality.positional_file_ids {
-            crate::FileIdentity { file_id: 0, birth_ns: 0 }
-        } else {
-            crate::FileIdentity { file_id: directory_id_of(path, &md), birth_ns: birth_of(&md) }
-        })),
+        Ok(md) if md.is_dir() && !md.file_type().is_symlink() => Ok(Some(
+            personality.seen_identity(crate::FileIdentity { file_id: directory_id_of(path, &md), birth_ns: birth_of(&md) }),
+        )),
         Ok(_) => Ok(None),
         Err(e) if not_there(&e) => Ok(None),
         Err(e) => Err(io_err(path, e)),
@@ -1677,6 +1725,70 @@ mod tests {
         // The probe trusts this volume exactly when it reports a birth and
         // keeps the id across a rename, which the lines above just did.
         assert_eq!(Personality::probe(d.path()).stable_file_identity, first.is_strong());
+    }
+
+    /// NTFS, on a real Windows volume: tunnelling gives a file arriving at a
+    /// name another file left within 15 seconds that file's creation time,
+    /// so in a trade the births swap with the names. The probe still reads
+    /// the volume strong (it renames to a name nothing left, and reads raw
+    /// births), names it a volume whose births are names, and the engine is
+    /// shown each file's index alone -- the same identity before and after
+    /// a trade.
+    #[cfg(windows)]
+    #[test]
+    fn on_ntfs_a_trade_keeps_each_files_identity_as_the_engine_sees_it() {
+        let d = TempDir::new("ntfs-trade");
+        if volume_filesystem_name(d.path()).is_none_or(|n| !n.eq_ignore_ascii_case("NTFS")) {
+            return;
+        }
+        let p = Personality::probe(d.path());
+        assert!(p.stable_file_identity && p.births_are_names, "{p:?}");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let (x, y, t) = (root.join("x.txt"), root.join("y.txt"), root.join("t.tmp"));
+        fs::write(&x, b"x").unwrap();
+        // Two births inside one tick of the system clock are equal, and a
+        // tunnel that swaps equal births changes nothing anyone could see.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(&y, b"y").unwrap();
+        assert_ne!(identity_at(&x).unwrap().birth_ns, identity_at(&y).unwrap().birth_ns, "two files, two births");
+        let (fx, fy) = (v.fingerprint(&x).unwrap().unwrap(), v.fingerprint(&y).unwrap().unwrap());
+        assert_eq!(fx.birth_ns, crate::INDEX_ONLY_BIRTH);
+        let raw_x = identity_at(&x).unwrap();
+        fs::rename(&x, &t).unwrap();
+        fs::rename(&y, &x).unwrap();
+        fs::rename(&t, &y).unwrap();
+        // What the disk did: x's file, now at y.txt, wears y's old birth.
+        assert_ne!(identity_at(&y).unwrap(), raw_x, "this volume did not tunnel");
+        assert_eq!(v.fingerprint(&y).unwrap().unwrap().identity(), fx.identity());
+        assert_eq!(v.fingerprint(&x).unwrap().unwrap().identity(), fy.identity());
+    }
+
+    /// A network share is weak whatever filesystem it names: the same local
+    /// NTFS folder, reached through this machine's own administrative share,
+    /// is a remote volume, and its numbers and births are the server's to give
+    /// (a Samba share answers "NTFS" and numbers files by inodes that recycle).
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_a_share_is_weak_even_when_it_says_ntfs() {
+        let d = TempDir::new("share");
+        let local = d.path().to_string_lossy().to_string();
+        let Some(rest) = local.strip_prefix("C:\\") else { return };
+        let unc = std::path::PathBuf::from(format!("\\\\localhost\\C$\\{rest}"));
+        if fs::metadata(&unc).is_err() {
+            eprintln!("no administrative share reachable here; not judged");
+            return;
+        }
+        // The spelling the shipped client probes is the canonical one
+        // (`OsVfs::new`): \\?\C:\... locally, \\?\UNC\localhost\C$\... for the share.
+        let (canon_local, canon_unc) = (crate::paths::canonical_root(d.path()), crate::paths::canonical_root(&unc));
+        for p in [d.path(), unc.as_path(), canon_local.as_path(), canon_unc.as_path()] {
+            eprintln!("drive type {:?} for {}", drive_type_of(p), p.display());
+        }
+        assert!(Personality::probe(&canon_local).stable_file_identity, "local NTFS, canonical, reads strong");
+        assert!(!Personality::probe(&canon_unc).stable_file_identity, "the share, canonical, reads weak");
+        assert!(Personality::probe(d.path()).stable_file_identity, "local NTFS reads strong");
+        assert!(!Personality::probe(&unc).stable_file_identity, "the same folder as a share reads weak");
     }
 
     #[test]

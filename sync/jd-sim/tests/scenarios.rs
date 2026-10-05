@@ -18095,3 +18095,114 @@ fn a_download_while_its_move_waits_does_not_undo_the_move() {
     }
     assert!(bad.is_empty(), "{} bad:\n{}", bad.len(), bad.join("\n"));
 }
+
+// ---- B-RETRYWAIT: an op waiting for its folder is not a failure -------------
+
+/// b makes Projects and saves doc-1 in it; b's first pass cannot create the
+/// folder (the request is refused before it reaches the server), so doc-1's
+/// upload has a folder with no server id. Returns the world and b's upload op.
+fn a_file_whose_folder_is_still_being_made(seed: u64) -> World {
+    let world = World::of(seed, &[("a", jd_sim::scenario::Platform::Linux), ("b", jd_sim::scenario::Platform::Linux)]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    assert!(world.settle().is_some());
+    a.fs.user_mkdir("Projects");
+    b.fs.user_mkdir("Projects");
+    b.fs.user_write("Projects/doc-1.txt", b"b's doc");
+    b.net.set_faults(NetFaults { refuse_before: Some("drive_folder_create".into()), ..NetFaults::none() });
+    world
+}
+
+fn upload_of(device: &jd_sim::Device, name: &str) -> Option<jd_core::store::Op> {
+    device.store.queued_ops().unwrap().into_iter().find(|o| o.kind == "upload_new" && o.params.contains(name))
+}
+
+/// Mac soak run 38's neighbour: the upload waited out a timed backoff for a
+/// folder that had arrived, while a file saved there later went up at once.
+/// It waits without counting an attempt, says what it waits for, keeps the
+/// device from reading quiet, and goes up in the first pass after the folder
+/// lands -- with no clock advance.
+#[test]
+fn a_file_waiting_for_its_folder_goes_up_in_the_pass_the_folder_lands() {
+    for seed in 0..10 {
+        let world = a_file_whose_folder_is_still_being_made(9_970 + seed);
+        let (a, b) = (world.device("a"), world.device("b"));
+        let first = world.pass(b);
+        b.net.set_faults(NetFaults::none());
+        assert_eq!(first.exec.waiting, 1, "seed {seed}: {:?}", first.exec);
+        assert!(!first.quiet(), "a device with work waiting is not quiet");
+        let op = upload_of(b, "doc-1.txt").expect("the upload is still queued");
+        assert_eq!((op.attempts, op.next_retry_time), (0, None), "seed {seed}: a wait is not an attempt");
+        assert!(op.last_error.as_deref().is_some_and(|e| e.contains("not on the server yet")), "{op:?}");
+        assert!(b.store.interrupted_ops().unwrap().is_empty(), "a waiting op never went in flight");
+
+        world.pass(a);
+        world.pass(b);
+        assert!(
+            world.server.files().iter().any(|f| f.name == "doc-1.txt" && !f.trashed),
+            "seed {seed}: the folder landed and the file waited on"
+        );
+    }
+}
+
+/// The plain path: the folder's create fails once on the way, succeeds when
+/// its backoff is up, and the file inside goes up in that same run.
+#[test]
+fn a_file_goes_up_in_the_run_its_folder_is_created() {
+    let world = World::of(9_980, &[("b", jd_sim::scenario::Platform::Linux)]);
+    let b = world.device("b");
+    assert!(world.settle().is_some());
+    b.fs.user_mkdir("Projects");
+    b.fs.user_write("Projects/doc-1.txt", b"b's doc");
+    b.net.set_faults(NetFaults { refuse_before: Some("drive_folder_create".into()), ..NetFaults::none() });
+    let first = world.pass(b);
+    b.net.set_faults(NetFaults::none());
+    assert_eq!((first.exec.retrying, first.exec.waiting), (1, 1), "{:?}", first.exec);
+    world.clock.advance_secs(60);
+    let second = world.pass(b);
+    assert!(world.server.files().iter().any(|f| f.name == "doc-1.txt"), "{:?}", second.exec);
+    assert!(upload_of(b, "doc-1.txt").is_none());
+}
+
+/// No wait for ever: when the folder will never be created -- parked as a
+/// name this device cannot send, its create dropped -- the op waiting on it
+/// stands down instead of waiting; the next round decides afresh. (A
+/// withdrawn create alone is not that: the folder stays pending and the next
+/// round plans it again, so the wait is for work still to come.)
+#[test]
+fn a_file_whose_folder_is_parked_stands_down() {
+    let world = a_file_whose_folder_is_still_being_made(9_990);
+    let b = world.device("b");
+    world.pass(b);
+    b.net.set_faults(NetFaults::none());
+    let create = b.store.queued_ops().unwrap().into_iter().find(|o| o.kind == "create_remote_folder").unwrap();
+    b.store.drop_op(create.op_id).unwrap();
+    let mut folder = b.store.get_entry(create.entity).unwrap().unwrap();
+    folder.status = jd_core::model::LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::NameTooLong { bytes: 300, limit: 255 });
+    b.store.put_entry(&folder).unwrap();
+    let op = upload_of(b, "doc-1.txt").unwrap();
+    let now = b.now();
+    let env = jd_sim::engine::env(b, &now);
+    let outcome = jd_core::execute::run_one(&env, &op).unwrap();
+    assert!(matches!(outcome, jd_core::execute::OpOutcome::Overtaken(_)), "{outcome:?}");
+    assert!(upload_of(b, "doc-1.txt").is_none(), "the op stood down");
+    assert!(b.store.interrupted_ops().unwrap().is_empty());
+}
+
+/// A kill after a pass in which an op waited finds nothing interrupted and
+/// counts nothing: the op never left, and the next run carries it out.
+#[test]
+fn a_kill_after_an_op_waited_finds_it_untouched() {
+    let world = a_file_whose_folder_is_still_being_made(9_995);
+    let (a, b) = (world.device("a"), world.device("b"));
+    world.pass(b);
+    b.net.set_faults(NetFaults::none());
+    // Back on: recovery finds nothing in flight to re-ask about.
+    let now = b.now();
+    let e = jd_sim::engine::env(b, &now);
+    assert_eq!(jd_core::execute::recover(&e).unwrap().retrying, 0);
+    let op = upload_of(b, "doc-1.txt").expect("still queued after the restart");
+    assert_eq!(op.attempts, 0, "{op:?}");
+    world.pass(a);
+    world.pass(b);
+    assert!(world.server.files().iter().any(|f| f.name == "doc-1.txt" && !f.trashed));
+}

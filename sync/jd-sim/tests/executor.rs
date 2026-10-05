@@ -595,7 +595,7 @@ fn a_move_into_a_folder_the_server_has_never_heard_of_waits_instead_of_asking() 
     );
 
     assert_eq!(report.done, 0, "there is nowhere on the server to move it to");
-    assert_eq!(report.retrying, 1, "the folder is coming; this waits for it");
+    assert_eq!((report.waiting, report.retrying), (1, 0), "the folder is coming; this waits for it, and a wait is not a failure");
 
     let queued = device.store.queued_ops().unwrap();
     assert_eq!(queued.len(), 1);
@@ -608,6 +608,37 @@ fn a_move_into_a_folder_the_server_has_never_heard_of_waits_instead_of_asking() 
         err.contains("not on the server yet"),
         "it should be waiting on the folder, not on something else: {err}"
     );
+}
+
+#[test]
+fn a_park_in_a_folder_the_server_has_never_heard_of_asks_the_server_nothing() {
+    // A park moves a record to a new name within the folder it stands in now,
+    // read from the record. With that folder still waiting to be made, the
+    // park waits for it; with the folder gone, it stands down. Either way the
+    // local placeholder id is never sent as a real one.
+    for folder_still_coming in [true, false] {
+        let (_clock, server, device) = world();
+        let file_id = server.seed_file(None, "doc-9.txt", b"the one being parked");
+        let id = EntityId::file(file_id);
+        let folder = EntityId::folder(device.store.next_provisional_id().unwrap());
+        device.store.put_entry(&fresh(id, Some(folder.server_id), "doc-9.txt", LocalStatus::Synced)).unwrap();
+        if folder_still_coming {
+            device.store.put_entry(&fresh(folder, None, "Projects (2)", LocalStatus::PendingUpload)).unwrap();
+        }
+        device
+            .store
+            .queue_op("park_remote", id, &serde_json::json!({ "name": "doc-9 (parked).txt" }).to_string(), "key-park")
+            .unwrap();
+        let calls = device.net.stats().calls;
+        let now = device.now();
+        let report = run_queued(&env(&device, &now)).unwrap();
+        assert_eq!(device.net.stats().calls, calls, "coming={folder_still_coming}: it asked the server: {report:?}");
+        if folder_still_coming {
+            assert_eq!((report.waiting, report.overtaken), (1, 0), "{report:?}");
+        } else {
+            assert_eq!((report.waiting, report.overtaken), (0, 1), "{report:?}");
+        }
+    }
 }
 
 #[test]

@@ -64,7 +64,7 @@ impl PassOutcome {
     /// nothing while four uploads sit in the journal waiting to be retried is
     /// telling the user their files are safely synced when they are not.
     pub fn quiet(&self) -> bool {
-        self.round.plan.is_empty() && self.exec.attempted() == 0 && self.exec.deferred == 0
+        self.round.plan.is_empty() && self.exec.attempted() == 0 && self.exec.deferred == 0 && self.exec.waiting == 0
     }
 }
 
@@ -85,6 +85,16 @@ pub fn run_pass(
         return Ok(out);
     }
 
+    // ---- what this volume says a file's identity is -------------------------
+    //
+    // Before anything reads a stored birth. On a volume whose births are
+    // names (NTFS) the volume shows every file with the same marker birth,
+    // and a stored real birth would match no file: a trade would read as two
+    // records whose own files stand nowhere, and the scan would hand each
+    // the other's file as its edit (B-NTFSTUNNEL).
+    if env.vfs.personality().births_are_names {
+        env.store.read_births_as_names()?;
+    }
 
     // ---- anything a kill left half-done -------------------------------------
     //

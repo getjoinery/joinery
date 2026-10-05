@@ -573,10 +573,13 @@ pub fn check_no_loss(
     standing: &BTreeSet<String>,
     personality: &Personality,
 ) -> (Verdict, Losses, Coverage) {
-    let latest = journal::last_committed(records);
+    // Keyed as the volume compares names: two spellings it holds as one name
+    // are one file, and a write under either replaces the other's claim.
+    let latest = journal::last_committed_on(records, personality);
     let mut lost_live: Vec<String> = Vec::new();
     let mut at_dead_paths: Vec<String> = Vec::new();
-    for (path, claim) in &latest {
+    for claim in latest.values() {
+        let path = &claim.path;
         if recoverable.find(&claim.sha256).is_some() {
             continue;
         }
@@ -1965,6 +1968,30 @@ mod tests {
         let verdict = check_settle_holds(&converged, &gone);
         assert!(!verdict.ok, "{}", verdict.detail);
         assert!(verdict.detail.contains("stopped answering"), "{}", verdict.detail);
+    }
+
+    #[test]
+    fn on_a_mac_a_save_under_another_case_is_the_files_next_version_not_a_loss() {
+        // Mac soak run 38: the first content never reached the server before
+        // the user saved over it under another spelling of its name. On APFS
+        // that is one file, standing with the new content.
+        let records = vec![
+            commit("Copy of plans.txt", "first", "write"),
+            commit("Copy of PLANS.TXT", "second", "write"),
+        ];
+        let mac = Personality::macos();
+        let standing: BTreeSet<String> = [tree::key_for("Shared-office/Copy of plans.txt", &mac)].into_iter().collect();
+        let (verdict, _losses, _coverage) =
+            check_no_loss(&records, &recoverable(&["second"], &["second"], &[]), &BTreeSet::new(), &standing, &mac);
+        assert!(verdict.ok, "{}", verdict.detail);
+        // On a volume that tells the two apart, the first is still a file of
+        // its own, and its content is gone.
+        let linux = Personality::linux();
+        let both: BTreeSet<String> =
+            ["Copy of plans.txt", "Copy of PLANS.TXT"].iter().map(|p| tree::key_for(&format!("Shared-office/{p}"), &linux)).collect();
+        let (verdict, _losses, _coverage) =
+            check_no_loss(&records, &recoverable(&["second"], &["second"], &[]), &BTreeSet::new(), &both, &linux);
+        assert!(!verdict.ok);
     }
 
     #[test]

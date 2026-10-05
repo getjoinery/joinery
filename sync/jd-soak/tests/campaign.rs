@@ -208,7 +208,7 @@ fn a_campaign_storms_settles_and_leaves_a_full_timeline_behind() {
     let reach = Unreachable::default();
     let stop = AtomicBool::new(false);
 
-    let outcome = orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop).unwrap();
+    let outcome = orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop, &orchestrate::probe_fleet(&rig.fleet).unwrap()).unwrap();
     assert_eq!(outcome.cycles, 1);
 
     let records = journal::read_dir(&rig.fleet.journal_dir).unwrap();
@@ -268,7 +268,7 @@ fn a_world_with_no_client_in_it_fails_rather_than_passing() {
     let reach = Unreachable::default();
     let stop = AtomicBool::new(false);
 
-    let outcome = orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop).unwrap();
+    let outcome = orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop, &orchestrate::probe_fleet(&rig.fleet).unwrap()).unwrap();
     assert!(!outcome.clean(), "a world with no client in it passed");
 
     let joined = outcome.violations.join(" | ");
@@ -295,7 +295,7 @@ fn a_violation_freezes_the_world_into_a_bundle_that_names_the_file() {
     let reach = Unreachable::default();
     let stop = AtomicBool::new(false);
 
-    let outcome = orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop).unwrap();
+    let outcome = orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop, &orchestrate::probe_fleet(&rig.fleet).unwrap()).unwrap();
     let bundle = outcome
         .bundles
         .first()
@@ -329,7 +329,7 @@ fn faults_that_could_not_be_injected_are_journaled_and_the_report_says_so() {
     let reach = Unreachable::default();
     let stop = AtomicBool::new(false);
 
-    orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop).unwrap();
+    orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop, &orchestrate::probe_fleet(&rig.fleet).unwrap()).unwrap();
 
     assert!(
         !reach.attempts.lock().unwrap().is_empty(),
@@ -353,7 +353,7 @@ fn the_rolling_report_is_written_where_a_person_will_look_for_it() {
     let reach = Unreachable::default();
     let stop = AtomicBool::new(false);
 
-    orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop).unwrap();
+    orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop, &orchestrate::probe_fleet(&rig.fleet).unwrap()).unwrap();
 
     let text = std::fs::read_to_string(rig.fleet.journal_dir.join("report.txt")).unwrap();
     assert!(text.contains("INVARIANT VIOLATIONS:"), "{text}");
@@ -371,7 +371,7 @@ fn stopping_a_campaign_ends_it_without_finishing_the_storm() {
     let stop = AtomicBool::new(true);
 
     let started = std::time::Instant::now();
-    let outcome = orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop).unwrap();
+    let outcome = orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop, &orchestrate::probe_fleet(&rig.fleet).unwrap()).unwrap();
     assert_eq!(outcome.cycles, 0);
     assert!(started.elapsed() < Duration::from_secs(2));
 }
@@ -386,7 +386,7 @@ fn the_actors_never_write_outside_the_sync_roots() {
     let reach = Unreachable::default();
     let stop = AtomicBool::new(false);
 
-    orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop).unwrap();
+    orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop, &orchestrate::probe_fleet(&rig.fleet).unwrap()).unwrap();
 
     let mut stray = Vec::new();
     for entry in std::fs::read_dir(&rig.dir).unwrap().flatten() {

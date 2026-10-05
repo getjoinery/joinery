@@ -37,7 +37,7 @@ pub use names::{
     land_name, landing_op, LAND_PREFIX,
 };
 pub use paths::{canonical_root, is_inside, is_verbatim, strip_verbatim};
-pub use personality::{IdTieBreak, Personality};
+pub use personality::{birth_as_seen, IdTieBreak, Personality, INDEX_ONLY_BIRTH};
 pub use real::OsVfs;
 pub use watch::{watch_root, Watcher};
 

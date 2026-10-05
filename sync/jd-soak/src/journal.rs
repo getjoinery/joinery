@@ -333,6 +333,23 @@ pub fn read_file(path: &Path) -> Result<Vec<Record>> {
 /// cost a session. Keying claims by content lineage rather than path is the
 /// real answer if this keeps costing.
 pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, Committed> {
+    last_committed_on(records, &jd_vfs::Personality::linux())
+}
+
+/// `last_committed`, with two spellings the volume holds as one name filed
+/// as one claim: keyed by the comparison form (`tree::key_for`), each claim
+/// keeping the spelling it was last written under.
+///
+/// On a case-insensitive volume `plans.txt` and `PLANS.TXT` are one file, so a
+/// write under either is the next version of the file under both. Keyed by
+/// the string, the first claim was left demanding the content its own author
+/// had replaced -- reported as a loss although the file stood, with its new
+/// content, on every disk and on the server (Mac soak run 38).
+pub fn last_committed_on(
+    records: &[Record],
+    personality: &jd_vfs::Personality,
+) -> std::collections::BTreeMap<String, Committed> {
+    let key = |p: &str| crate::tree::key_for(p, personality);
     let mut out: std::collections::BTreeMap<String, Committed> = std::collections::BTreeMap::new();
     // A rename journals its source and then its destination, in that order —
     // but only within one actor's own stream. These records are every actor on
@@ -367,9 +384,10 @@ pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, 
                 // directory that means everything inside it, which went too.
                 "remove" | "remove_dir" | "trash" => {
                     renamed_from.remove(actor);
-                    out.remove(path);
-                    for key in under(&out, path) {
-                        out.remove(&key);
+                    let gone = key(path);
+                    out.remove(&gone);
+                    for inside in under(&out, &gone) {
+                        out.remove(&inside);
                     }
                 }
                 // The source of a rename holds nothing any more. What was
@@ -377,28 +395,33 @@ pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, 
                 // which arrives in this actor's next record, though not
                 // necessarily in the next record overall.
                 "rename" => {
-                    out.remove(path);
-                    renamed_from.insert(actor.clone(), path.clone());
+                    out.remove(&key(path));
+                    renamed_from.insert(actor.clone(), key(path));
                 }
                 "rename_into" => {
+                    let to = key(path);
                     if let Some(from) = renamed_from.remove(actor) {
-                        aliases.union(&from, path);
-                        for key in under(&out, &from) {
-                            let Some(mut claim) = out.remove(&key) else {
+                        aliases.union(&from, &to);
+                        let depth = from.split('/').count();
+                        for inside in under(&out, &from) {
+                            let Some(mut claim) = out.remove(&inside) else {
                                 continue;
                             };
-                            let moved = format!("{path}/{}", &key[from.len() + 1..]);
-                            claim.path = moved.clone();
-                            out.insert(moved, claim);
+                            // The same components below the folder, in the
+                            // spelling the claim was written under.
+                            let rest = claim.path.splitn(depth + 1, '/').nth(depth).unwrap_or_default().to_string();
+                            claim.path = format!("{path}/{rest}");
+                            out.insert(format!("{to}/{}", &inside[from.len() + 1..]), claim);
                         }
                     }
-                    supersede_aliases(&mut out, &aliases, path);
-                    insert_claim(&mut out, path, sha256, *size, actor, persona, *ts_ms);
+                    supersede_aliases(&mut out, &aliases, &to);
+                    insert_claim(&mut out, &to, path, sha256, *size, actor, persona, *ts_ms);
                 }
                 _ => {
                     renamed_from.remove(actor);
-                    supersede_aliases(&mut out, &aliases, path);
-                    insert_claim(&mut out, path, sha256, *size, actor, persona, *ts_ms);
+                    let at = key(path);
+                    supersede_aliases(&mut out, &aliases, &at);
+                    insert_claim(&mut out, &at, path, sha256, *size, actor, persona, *ts_ms);
                 }
             }
         }
@@ -517,6 +540,7 @@ fn under(out: &std::collections::BTreeMap<String, Committed>, dir: &str) -> Vec<
 #[allow(clippy::too_many_arguments)]
 fn insert_claim(
     out: &mut std::collections::BTreeMap<String, Committed>,
+    key: &str,
     path: &str,
     sha256: &Option<String>,
     size: u64,
@@ -530,7 +554,7 @@ fn insert_claim(
         return;
     };
     out.insert(
-        path.to_string(),
+        key.to_string(),
         Committed {
             path: path.to_string(),
             sha256: sha.clone(),
@@ -833,6 +857,37 @@ mod tests {
         let oracle = last_committed(&records);
         assert!(oracle.contains_key("real.docx"));
         assert!(!oracle.contains_key("never.docx"));
+    }
+
+    #[test]
+    fn on_a_case_insensitive_volume_a_write_under_another_case_replaces_the_claim() {
+        // Mac soak run 38: `Copy of plans.txt` written, its folder renamed, then
+        // the user saved `Copy of PLANS.TXT` over it -- one file on APFS. Keyed
+        // by the string, the first claim demanded the content its own author
+        // had replaced.
+        let records = vec![
+            commit(1, "write", "Projects/Copy of plans.txt", Some("first"), 10),
+            commit(2, "rename", "Projects", None, 20),
+            commit(3, "rename_into", "Projects (10)", None, 21),
+            commit(4, "write", "Projects (10)/Copy of PLANS.TXT", Some("second"), 30),
+        ];
+        let mac = last_committed_on(&records, &jd_vfs::Personality::macos());
+        assert_eq!(mac.len(), 1, "{mac:?}");
+        let claim = mac.values().next().unwrap();
+        assert_eq!((claim.sha256.as_str(), claim.path.as_str()), ("second", "Projects (10)/Copy of PLANS.TXT"));
+        // Where the volume tells the spellings apart they are two files.
+        assert_eq!(last_committed(&records).len(), 2);
+    }
+
+    #[test]
+    fn a_renamed_folder_keeps_each_claims_own_spelling() {
+        let records = vec![
+            commit(1, "write", "Docs/Plans.TXT", Some("x"), 10),
+            commit(2, "rename", "docs", None, 20),
+            commit(3, "rename_into", "Archive", None, 21),
+        ];
+        let mac = last_committed_on(&records, &jd_vfs::Personality::macos());
+        assert_eq!(mac.values().map(|c| c.path.as_str()).collect::<Vec<_>>(), vec!["Archive/Plans.TXT"]);
     }
 
     #[test]

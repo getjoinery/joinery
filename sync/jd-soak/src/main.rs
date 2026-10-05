@@ -390,10 +390,12 @@ fn cmd_orchestrate(rest: &[String]) -> Result<bool, String> {
         Err(e) => println!("note: could not establish whether the server identifies versions: {e}"),
     }
 
+    let personality = orchestrate::probe_fleet(&fleet)?;
+
     let reach = RealReach;
     let stop = AtomicBool::new(false);
-    let outcome =
-        orchestrate::run(&fleet, &campaign, &api, &reach, &stop).map_err(|e| e.to_string())?;
+    let outcome = orchestrate::run(&fleet, &campaign, &api, &reach, &stop, &personality)
+        .map_err(|e| e.to_string())?;
 
     println!("\n{} cycle(s) run", outcome.cycles);
     // One fixed line, for the ledger to read: how much of the last no-loss

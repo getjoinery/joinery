@@ -2188,6 +2188,78 @@ no named flaw is a reason to name one.
   change. 420 seeds x 5 modes byte-identical. VALID (public-html-41,
   2026-10-05). To confirm on the rig: a device never restarted keeps a flat
   spool count across settles.
+- **B-NTFSTUNNEL, fixed 2026-10-05 (found tracing soak rig run 1756):
+  on Windows a trade of two names gave each file the other's history.**
+  Measured on real NTFS: a name taken again within 15 seconds gives the
+  newcomer the creation time of the file that left it (tunnelling), so in
+  a trade the two births swap with the names; directory births do not
+  tunnel; a file index never repeats (a reused MFT record comes back with
+  its sequence number raised). The Windows identity was index plus
+  creation time, so after a trade neither file matched any record, and the
+  scan handed each record the other file as its edit: Defect AI for
+  long-settled files, no race needed. The rename probe cannot see it (it
+  renames to a name nothing left), and the simulator's NTFS did not tunnel.
+  The close: a volume whose births are names (`births_are_names`, local NTFS
+  named by filesystem name) reports every birth as one marker, so identity
+  there is the index alone, decided in one function that the disk layer and
+  the simulator both call; stored births are rewritten to the marker at the
+  start of every pass, before anything reads one. Every remote volume on
+  Windows reads weak beside ReFS: a share reports the filesystem name its
+  server chooses (Samba answers NTFS) and numbers files as its server does,
+  and only a positive local drive type counts as local (`\\?\C:\` answers
+  fixed, `\\?\UNC\...` remote, measured). The simulator's NTFS tunnels and
+  gives a freed number back raised, as local NTFS does; a modelled share
+  recycles it and reads weak. Costs stated: a vault on a Windows share is
+  refused, and a root synced on a share reads weak after the upgrade.
+  Pins: the trade-history pin on Windows and
+  `on_windows_an_upgrade_keeps_a_file_moved_while_the_client_was_off`, red
+  without the change; `on_windows_a_new_file_on_a_freed_number_is_a_new_file`,
+  red under either half; on the Windows VM,
+  `on_ntfs_a_trade_keeps_each_files_identity_as_the_engine_sees_it` and
+  `on_windows_a_share_is_weak_even_when_it_says_ntfs`. 420 seeds x 5 modes
+  byte-identical. VALID (public-html-41, 2026-10-05).
+- **Soak no-loss false positive, fixed 2026-10-05 (Mac soak run 38, client
+  `b8d59a32`).** The user saved `Copy of 2-📁 PLANS.TXT` over
+  `Copy of 2-📁 plans.txt`, one file on APFS; it stood with the new content
+  on both disks and the server. The oracle filed claims by the path string,
+  so the earlier claim stayed, demanding the content its own author had
+  replaced. Claims are now filed by the volume's comparison form
+  (`last_committed_on`), each keeping the spelling it was written under;
+  and a campaign refuses to start when its devices' disks disagree on how
+  names compare, since one rule judges every claim. Replaying run 38's
+  journal leaves only the new content. Pin
+  `on_a_mac_a_save_under_another_case_is_the_files_next_version_not_a_loss`,
+  red without the change with run 38's message. VALID (public-html-41,
+  2026-10-05). Open from the same run: device-b planned nothing inside the
+  folder for about two minutes after adopting it (B-HOLD38, untraced).
+- **B-RETRYWAIT, fixed 2026-10-05 (found probing Mac soak run 38): an op
+  waiting for its folder waited out a timer after the folder arrived.** An
+  upload into a folder with no server id yet failed as a retry and took a
+  backoff that doubles to fifteen minutes; when the folder then landed (its
+  create, or its record folded into the server's same-named folder) the
+  upload sat out the timer while a file saved there later went up at once.
+  Not ready is not failed: an op whose folder is still coming now waits
+  (`OpOutcome::Waits`), decided before it is in flight (`readiness`), with
+  no attempt counted, no timer, what it waits for kept on the op, and its
+  own count in the pass report; a device with one waiting is not quiet,
+  exactly as with one deferred. Coming means the folder's record exists and
+  its create is queued or the folder is pending (the next round plans the
+  create; a withdrawn create leaves it so, and its issue is what a person
+  sees). Not coming -- parked, out of scope, or the record gone -- stands the
+  op down and the next round decides afresh. A park reads its folder from
+  the record like an upload; every call that sends a folder to the server
+  stands down on a provisional id whatever asked it, so a local placeholder
+  is never sent as a real one. A wait writes its row once. The other waits
+  still on a timer (vault keys, feed details, other ops' moves) are decided
+  one by one, each needing its own rule for when a wait ends (B-EVENTWAIT).
+  Pins `a_file_waiting_for_its_folder_goes_up_in_the_pass_the_folder_lands`,
+  `a_file_goes_up_in_the_run_its_folder_is_created`,
+  `a_file_whose_folder_is_parked_stands_down`,
+  `a_kill_after_an_op_waited_finds_it_untouched`,
+  `a_park_in_a_folder_the_server_has_never_heard_of_asks_the_server_nothing`,
+  `a_wait_is_written_once_and_not_again_while_nothing_changes`, each red
+  without its part. 420 seeds x 5 modes byte-identical. VALID
+  (public-html-41, 2026-10-05).
 - **B2, narrowed (re-checked 2026-10-02 on `10b2b55d`: seed green in all
   five modes; a plain file's completed move is agreed Done on its own
   identity, `completed_here`, pinned by
