@@ -139,7 +139,7 @@ class DeviceEnrollment(
     }
 
     suspend fun poll(ticket: Ticket): Poll = try {
-        val envelope = client.request("GET", "/api/v1/auth/device_link/${ticket.pollToken}", authenticated = false)
+        val envelope = client.request("POST", "/api/v1/auth/device_link/${ticket.pollToken}", authenticated = false)
         Poll.from(envelope["data"])
     } catch (e: JoineryApiError.Authentication) {
         // 404 expired or unknown, 409 already claimed.

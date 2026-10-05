@@ -151,12 +151,15 @@ check($dev && $dev->get('sde_platform') === 'ios' && $dev->vault_scopes() === ar
 section('the poll hands over the sealed keys once, and no credential');
 
 $r = api_request('GET', '/api/v1/auth/device_link/' . $enroll['poll_token']);
+check($r['status'] === 405, 'a GET poll is refused, since collecting writes', 'status ' . $r['status']);
+
+$r = api_request('POST', '/api/v1/auth/device_link/' . $enroll['poll_token']);
 $claim = $r['json']['data'] ?? array();
 check($r['status'] === 200 && ($claim['status'] ?? '') === 'approved', 'the poll reports approval', substr($r['raw'], 0, 300));
 check(($claim['sealed_vault_keys'] ?? null) === array('mail' => 'mail-sealed-blob'), 'with the sealed mail key');
 check(!array_key_exists('secret_key', $claim) && !array_key_exists('public_key', $claim), 'and no credential');
 check((int)($claim['device_id'] ?? 0) === (int)$dev->key, 'naming the device row');
-$r = api_request('GET', '/api/v1/auth/device_link/' . $enroll['poll_token']);
+$r = api_request('POST', '/api/v1/auth/device_link/' . $enroll['poll_token']);
 check($r['status'] === 409, 'a second poll finds it claimed', 'status ' . $r['status']);
 
 // ---------------------------------------------------------------------------

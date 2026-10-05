@@ -532,7 +532,7 @@ piling up: later ticks skip it rather than stack behind it.
 
 The runner is driven by exactly one cron entry per site: `/etc/cron.d/joinery-{sitename}`, firing every minute.
 
-- **Bare metal** — `_site_init.sh` writes the file at install time.
+- **Bare metal** — `site_housekeeping.sh` writes the file when it is absent, at install and on every converge. A file that is exactly the platform's earlier rendering of the same line every 15 or every 5 minutes is rewritten to every minute; any other file is an owner's and is left alone.
 - **Docker** — the container start command (in `Dockerfile.template`) writes the file and starts the cron daemon on every container start, so it survives container rebuilds.
 
 The entry:

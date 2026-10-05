@@ -379,7 +379,7 @@ impl Client {
         )
     }
 
-    /// `GET /auth/device_link/{poll_token}` — wait for the user to approve.
+    /// `POST /auth/device_link/{poll_token}` — wait for the user to approve.
     ///
     /// The credential is delivered on the **first successful poll after
     /// approval and never again** — the server scrubs it immediately. So a
@@ -388,7 +388,7 @@ impl Client {
     /// again.
     pub fn device_link_poll(&self, poll_token: &str) -> Result<Value> {
         Self::envelope(
-            self.request("GET", &format!("auth/device_link/{poll_token}"), false)?
+            self.request("POST", &format!("auth/device_link/{poll_token}"), false)?
                 .call(),
         )
     }

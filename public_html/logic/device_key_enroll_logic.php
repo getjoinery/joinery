@@ -13,7 +13,7 @@
  * So this opens a ceremony **bound** to the caller: the link row carries the
  * caller's user and key from the start, approval on /profile/devices/link mints
  * nothing and records the handed vaults on the SyncDevice row for this key, and
- * the poll (GET /api/v1/auth/device_link/{poll_token}) hands over the sealed
+ * the poll (POST /api/v1/auth/device_link/{poll_token}) hands over the sealed
  * keys alone. Re-running after a rotation or a recovery-code use re-asserts the
  * same device key.
  *

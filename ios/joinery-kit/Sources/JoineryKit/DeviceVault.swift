@@ -247,7 +247,7 @@ public final class DeviceVault: ObservableObject {
     public func poll(_ ticket: Ticket) async throws -> PollOutcome {
         let envelope: JSONValue
         do {
-            envelope = try await client.request("GET", "/api/v1/auth/device_link/\(ticket.pollToken)",
+            envelope = try await client.request("POST", "/api/v1/auth/device_link/\(ticket.pollToken)",
                                                 authenticated: false)
         } catch JoineryAPIError.authentication(_, let status) where status == 404 || status == 409 {
             return .expired

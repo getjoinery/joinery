@@ -304,7 +304,7 @@ Opens a device-link ceremony: how a desktop sync client acquires a credential wi
 
 The client shows `link_code` and opens `verify_url`. The user approves in a browser, where they are already signed in and where a step-up can be demanded. `device_pubkey` is the target for the encrypted-folder key handoff — omit it and the device simply never receives one. Ceremonies last 10 minutes.
 
-### `GET /api/v1/auth/device_link/{poll_token}` — unauthenticated
+### `POST /api/v1/auth/device_link/{poll_token}` — unauthenticated
 
 Collects the outcome. `{"status": "pending", "poll_after": 3}` until the user acts; `{"status": "denied"}` if refused. On approval the **first** successful poll — and only the first — returns the credential:
 
