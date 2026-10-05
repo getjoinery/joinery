@@ -106,6 +106,7 @@ impl NamingOutcome {
 fn duplicate_losers(
     pairs: &[(Entry, jd_vfs::Resolved)],
     personality: &Personality,
+    gone: &Gone,
 ) -> HashMap<EntityId, String> {
     // Only files, and only encrypted ones. A plaintext duplicate cannot happen
     // -- the server refuses it -- so renaming on the strength of one would mean
@@ -115,7 +116,7 @@ fn duplicate_losers(
         if !entry.is_encrypted || entry.id.entity_type != EntityType::File {
             continue;
         }
-        let name = &competing_placement(entry).name;
+        let name = &competing_placement(entry, gone).name;
         groups
             .entry(jd_vfs::comparison_key(name, personality))
             .or_default()
@@ -128,7 +129,7 @@ fn duplicate_losers(
     // and compete for the same slots.
     let taken: Vec<String> = pairs
         .iter()
-        .map(|(e, _)| jd_vfs::comparison_key(&competing_placement(e).name, personality))
+        .map(|(e, _)| jd_vfs::comparison_key(&competing_placement(e, gone).name, personality))
         .collect();
 
     let mut out = HashMap::new();
@@ -142,7 +143,7 @@ fn duplicate_losers(
         group.sort_by_key(|e| (e.id.is_provisional(), e.id.server_id));
         let mut assigned: Vec<String> = Vec::new();
         for loser in group.into_iter().skip(1) {
-            let name = competing_placement(loser).name;
+            let name = competing_placement(loser, gone).name;
             // From 2, the way a person counts copies. Bounded for the same
             // reason the conflict-copy search is: a folder that defeats this
             // has something else wrong with it.
@@ -179,14 +180,16 @@ fn duplicate_losers(
 /// name taken at the old location — but a vault makes it likelier, because the
 /// server cannot refuse the duplicate name that starts it.
 ///
-/// An entry waiting for a key is the same bargain and the harm runs the other
-/// way: it holds nothing in its old folder either, and leaving it there lets it
-/// park a REAL file that wants that name — freezing a file this device could
-/// otherwise sync perfectly well, over a rival that is not there.
+/// An entry waiting for a key that holds nothing here -- never placed, or its
+/// file removed by the user -- is the same bargain and the harm runs the other
+/// way: left in its old folder it would park a REAL file that wants that name,
+/// freezing a file this device could otherwise sync perfectly well, over a
+/// rival that is not there. One that does hold something here (a vault locked
+/// after it was open, a stand-in) competes where it stands, like any file.
 ///
 /// `PendingDownload` deliberately still counts as holding its old spot: those
 /// bytes are on their way to that path.
-fn competing_placement(entry: &Entry) -> crate::model::Placement {
+fn competing_placement(entry: &Entry, gone: &Gone) -> crate::model::Placement {
     // Parked locally under a scratch name: it holds that name and no other.
     // Judged by its agreement it would still claim the slot it stepped out
     // of -- the slot it stepped out of FOR something else.
@@ -200,11 +203,32 @@ fn competing_placement(entry: &Entry) -> crate::model::Placement {
             name: scratch.to_string(),
         };
     }
-    if entry.holds_a_local_file() {
+    if holds(gone, entry) {
         entry.local_placement().clone()
     } else {
         entry.remote.clone()
     }
+}
+
+/// Records with no key, or out of scope, that are tied here and whose
+/// directory or file no longer stands: they hold nothing on this disk
+/// (`pass::holds_here`). Gathered once a pass, because naming asks about
+/// every entry many times and the disk once is enough.
+type Gone = std::collections::HashSet<EntityId>;
+
+fn gone_from_this_disk(env: &ExecEnv, all: &[Entry]) -> Result<Gone, ExecError> {
+    let mut gone = Gone::new();
+    for e in all {
+        if e.holds_a_local_file() && !crate::pass::holds_here(env, e)? {
+            gone.insert(e.id);
+        }
+    }
+    Ok(gone)
+}
+
+/// Whether an entry holds something on this disk, as naming reads it.
+fn holds(gone: &Gone, entry: &Entry) -> bool {
+    entry.holds_a_local_file() && !gone.contains(&entry.id)
 }
 
 /// Is this entry standing aside under a local scratch name, mid-operation?
@@ -269,6 +293,7 @@ pub fn apply_naming(
     // no agreement here. A file saved at one of them and never sent waits
     // for that download (`specs/drive_file_ownership.md`, design 1b).
     let all = crate::pass::all_entries(env)?;
+    let gone = gone_from_this_disk(env, &all)?;
     let unarrived: std::collections::HashSet<(Option<i64>, String)> = all
         .iter()
         .filter(|e| {
@@ -277,7 +302,7 @@ pub fn apply_naming(
                 && !e.remote_deleted
                 && e.synced_placement.is_none()
         })
-        .map(|e| (e.remote.parent, jd_vfs::comparison_key(&competing_placement(e).name, personality)))
+        .map(|e| (e.remote.parent, jd_vfs::comparison_key(&competing_placement(e, &gone).name, personality)))
         .collect();
     // A source whose file a claimant has taken into a vault holds no file on
     // this disk: it waits on the server for the claimant's upload to replace
@@ -305,10 +330,15 @@ pub fn apply_naming(
         if waiting.contains(&entry.id) {
             continue;
         }
-        // Out of scope is a deliberate absence, and something the server has
-        // already deleted is on its way out. Neither should hold a slot against
-        // a sibling that wants to exist.
-        if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
+        // Something the server has already deleted is on its way out, and
+        // holds no slot against a sibling that wants to exist. Out of scope
+        // is a deliberate absence only where nothing of it stands here: a
+        // subtree taken out of scope keeps the user's copies where they are,
+        // and a vault parked on a weak drive keeps its directory. Those hold
+        // their names (`Entry::is_tied_here`), and a folder the server makes
+        // under one is that name's duplicate here, never let into the
+        // directory. They are never judged themselves (below).
+        if entry.remote_deleted || (entry.status == LocalStatus::OutOfScope && !holds(&gone, &entry)) {
             continue;
         }
         // Nor is anything under a vault parked on a weak volume judged: it
@@ -364,13 +394,13 @@ pub fn apply_naming(
             && entry.synced_placement.is_none()
             && unarrived.contains(&(
                 entry.remote.parent,
-                jd_vfs::comparison_key(&competing_placement(&entry).name, personality),
+                jd_vfs::comparison_key(&competing_placement(&entry, &gone).name, personality),
             ))
         {
             continue;
         }
         by_parent
-            .entry(competing_placement(&entry).parent)
+            .entry(competing_placement(&entry, &gone).parent)
             .or_default()
             .push(entry);
     }
@@ -391,7 +421,7 @@ pub fn apply_naming(
         siblings.sort_by_key(resolution_order);
         let names: Vec<String> = siblings
             .iter()
-            .map(|e| competing_placement(e).name.clone())
+            .map(|e| competing_placement(e, &gone).name.clone())
             .collect();
         let resolved = jd_vfs::resolve_siblings(&names, personality);
         let pairs: Vec<(Entry, jd_vfs::Resolved)> =
@@ -414,22 +444,52 @@ pub fn apply_naming(
             if crate::pass::held_outside_its_vault(env, e)? {
                 held_here.insert(e.id);
             }
+            // A placeholder waiting for its new parent to stand here is not
+            // leaving its name either (`pass::placeholder_waits_for_its_parent`):
+            // read as leaving, the newcomer under its old name was let in,
+            // landed in the placeholder's directory, and was parked again
+            // next pass, for ever.
+            if crate::pass::placeholder_waits_for_its_parent(env, e)? {
+                held_here.insert(e.id);
+            }
+            // Nor anything out of scope: the round never moves it, so the name
+            // it holds here is not freed by any move this pass.
+            if e.status == LocalStatus::OutOfScope {
+                held_here.insert(e.id);
+            }
         }
+        // Names held in this folder by something out of scope, and by nothing
+        // else. Such a holder never moves, and it binds only an entry the
+        // server has merely named: that one must not be let into its
+        // directory, and waits as a duplicate. An entry tied here keeps the
+        // ordinary rules -- its move makes room at that name, the parked
+        // directory steps aside under a conflict name and is followed there.
+        let held_out_of_scope: std::collections::HashSet<String> = {
+            let key = |e: &Entry| jd_vfs::comparison_key(&competing_placement(e, &gone).name, personality);
+            let others: std::collections::HashSet<String> =
+                pairs.iter().filter(|(e, _)| e.status != LocalStatus::OutOfScope).map(|(e, _)| key(e)).collect();
+            pairs
+                .iter()
+                .filter(|(e, _)| e.status == LocalStatus::OutOfScope)
+                .map(|(e, _)| key(e))
+                .filter(|k| !others.contains(k))
+                .collect()
+        };
         let leaving: std::collections::HashSet<String> = pairs
             .iter()
-            .filter(|(e, _)| e.holds_a_local_file())
+            .filter(|(e, _)| holds(&gone, &e))
             .filter(|(e, _)| !held_here.contains(&e.id))
             .filter(|(e, _)| {
-                let competing = competing_placement(e);
+                let competing = competing_placement(e, &gone);
                 e.remote.parent != competing.parent
                     || jd_vfs::comparison_key(&e.remote.name, personality)
                         != jd_vfs::comparison_key(&competing.name, personality)
             })
-            .map(|(e, _)| jd_vfs::comparison_key(&competing_placement(e).name, personality))
+            .map(|(e, _)| jd_vfs::comparison_key(&competing_placement(e, &gone).name, personality))
             .collect();
         // Decided over the whole folder, before any single entry is judged: who
         // keeps a duplicated name depends on who else is holding it.
-        let renamed = duplicate_losers(&pairs, personality);
+        let renamed = duplicate_losers(&pairs, personality, &gone);
 
         let parent_len = parent
             .and_then(|id| folder_paths.get(&id).copied())
@@ -437,6 +497,12 @@ pub fn apply_naming(
             .unwrap_or(0);
 
         for (entry, r) in pairs {
+            // Out of scope and holding its name: it competes, and is not
+            // judged -- no verdict, no status of naming's, on something the
+            // user or the drive has deliberately set apart.
+            if entry.status == LocalStatus::OutOfScope {
+                continue;
+            }
             // Only while the operation that parked it is still open. A park
             // nobody is coming back for -- a kill dropped its finisher -- is
             // judged, parked for its reserved prefix, swept, and the entry
@@ -476,7 +542,7 @@ pub fn apply_naming(
                     });
                     let mapped = match kept {
                         Some(kept) => Some(kept.to_string()),
-                        None => (name != competing_placement(&entry).name).then_some(name),
+                        None => (name != competing_placement(&entry, &gone).name).then_some(name),
                     };
                     (mapped, None)
                 }
@@ -502,8 +568,14 @@ pub fn apply_naming(
                 // folder still holds -- the create waits, nothing is taken
                 // over, and the park is undone next pass.
                 LocalName::Unsyncable(UnsyncableReason::DuplicateName { with })
-                    if !entry.holds_a_local_file()
+                    if !holds(&gone, &entry)
                         && leaving.contains(&jd_vfs::comparison_key(&with, personality)) =>
+                {
+                    (entry.local_name.clone(), None)
+                }
+                LocalName::Unsyncable(UnsyncableReason::DuplicateName { with })
+                    if entry.is_tied_here()
+                        && held_out_of_scope.contains(&jd_vfs::comparison_key(&with, personality)) =>
                 {
                     (entry.local_name.clone(), None)
                 }
@@ -558,7 +630,7 @@ pub fn apply_naming(
             let verdict = verdict.or_else(|| {
                 let name_len = local_name
                     .as_deref()
-                    .unwrap_or(&competing_placement(&entry).name)
+                    .unwrap_or(&competing_placement(&entry, &gone).name)
                     .len();
                 let total = parent_len + name_len;
                 (!jd_vfs::path_fits(total, root_prefix_bytes, personality)).then(|| {
@@ -600,7 +672,7 @@ pub fn apply_naming(
                 // before the next, so it is never open when naming looks.
                 Some(reason)
                     if (busy.contains(&entry.id) || jd_vfs::is_internal(&entry.remote.name))
-                        && entry.holds_a_local_file()
+                        && holds(&gone, &entry)
                         && matches!(
                             reason,
                             UnsyncableReason::CaseClash { .. }
@@ -614,7 +686,7 @@ pub fn apply_naming(
                     // and a filesystem step, which is what the park OPERATION
                     // is for. The op flips the status itself, once the copy is
                     // really gone, so the record and the disk change together.
-                    if entry.holds_a_local_file() && entry.synced_placement.is_some() {
+                    if holds(&gone, &entry) && entry.synced_placement.is_some() {
                         releasing = true;
                         out.give_up_local_copy.push((entry.id, reason));
                     } else {
@@ -668,7 +740,8 @@ pub fn apply_naming(
                 // the park read as ending free, letting an arrival take the
                 // parker's slot while the parker was still coming back for it
                 // (the peer-put-back kill sweep, die_after=3).
-                if updated.holds_a_local_file()
+                if holds(&gone, &updated)
+                    && updated.remote != *updated.agreed_placement()
                     && updated.remote != *updated.local_placement()
                     && !held_here.contains(&updated.id)
                     && !busy.contains(&updated.id)
@@ -680,7 +753,7 @@ pub fn apply_naming(
                 settled
                     .entry(parent)
                     .or_default()
-                    .push((updated.id, competing_placement(&updated).name.clone()));
+                    .push((updated.id, competing_placement(&updated, &gone).name.clone()));
             }
 
             if updated != entry {
@@ -689,7 +762,7 @@ pub fn apply_naming(
         }
     }
 
-    judge_destinations(env, personality, &settled, &leaving_this_pass, &busy, &mut out)?;
+    judge_destinations(env, personality, &settled, &leaving_this_pass, &busy, &gone, &mut out)?;
 
     Ok(out)
 }
@@ -720,6 +793,7 @@ fn judge_destinations(
     settled: &HashMap<Option<i64>, Vec<(EntityId, String)>>,
     leaving_this_pass: &std::collections::HashSet<EntityId>,
     busy: &std::collections::HashSet<EntityId>,
+    gone: &Gone,
     out: &mut NamingOutcome,
 ) -> Result<(), ExecError> {
     // At most one park per entity per batch.
@@ -743,7 +817,15 @@ fn judge_destinations(
         if entry.local_placement().parent.is_some_and(|p| parked.contains(&p)) {
             continue;
         }
-        if !entry.holds_a_local_file() || already.contains(&entry.id) {
+        if !holds(gone, &entry) || already.contains(&entry.id) {
+            continue;
+        }
+        // No key, so no name verdict, as in the main loop: what such an entry
+        // holds here -- a placeholder's directory, a vault locked after it
+        // was open -- is never given up over a name. Judged here, a waiting
+        // placeholder lost its destination to the folder still leaving it,
+        // and its directory went to the trash with the user's files inside.
+        if no_key_for(env, &entry).is_some() {
             continue;
         }
         // Mid-operation, as the main loop reads it: a verdict against the
@@ -767,7 +849,11 @@ fn judge_destinations(
         // Placement inequality, not parent inequality. A server rename inside
         // one folder reaches the same clash with nothing reparented, and a
         // trigger watching only the parent would sail straight past it.
-        if entry.remote == *entry.local_placement() {
+        //
+        // Against the agreement, and where it stands: a folder the user has
+        // moved here and not agreed is not arriving anywhere -- its move goes
+        // up -- and one standing where the server now puts it has arrived.
+        if entry.remote == *entry.agreed_placement() || entry.remote == *entry.local_placement() {
             continue;
         }
         // Not moving there at all (see `held_here` above). Judged there, a
@@ -1094,6 +1180,7 @@ mod tests {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: None,
             last_seen_sha: None,
         }
@@ -1945,7 +2032,7 @@ mod tests {
         let resolved = jd_vfs::resolve_siblings(&names, &p);
         let pairs: Vec<(Entry, jd_vfs::Resolved)> =
             entries.iter().cloned().zip(resolved).collect();
-        let mut out: Vec<(i64, String)> = duplicate_losers(&pairs, &p)
+        let mut out: Vec<(i64, String)> = duplicate_losers(&pairs, &p, &Gone::new())
             .into_iter()
             .map(|(id, name)| (id.server_id, name))
             .collect();

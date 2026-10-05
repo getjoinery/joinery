@@ -97,6 +97,7 @@ fn fresh(id: EntityId, parent: Option<i64>, name: &str, status: LocalStatus) -> 
         wrapped_file_key: None,
         replaces: None,
         stand_in: None,
+        stands_at: None,
         own_file: None,
         last_seen_sha: None,
     }
@@ -3177,6 +3178,276 @@ fn a_folder_trash_mints_no_record_for_another_records_copy() {
         .map(|e| e.id)
         .collect();
     assert_eq!(files, vec![EntityId::file(copy)], "c.txt has one record");
+}
+
+/// A park never reads the file at its path as another record's by an id that
+/// carries no birth: an id alone may be a recycled inode. A record never sent
+/// whose own file is known only by id X, and the file standing at the park's
+/// path carrying id X, say nothing about whose file it is -- that file is the
+/// parked record's unsent edit, and the park stands down rather than disown
+/// it. Read by the id alone, the edit was given up as the stranger's.
+#[test]
+fn a_park_never_reads_a_file_as_anothers_by_an_id_without_a_birth() {
+    let (_clock, _server, device) = world();
+    device.fs.user_write("x.txt", b"an edit nobody has sent");
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let here = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("x.txt")).unwrap().expect("the file");
+    assert!(here.identity().is_strong(), "construction: a volume with births");
+    let id = EntityId::file(701);
+    let mut entry = fresh(id, None, "x.txt", LocalStatus::Synced);
+    entry.synced_placement = Some(entry.remote.clone());
+    entry.synced_content = Some(ContentId { sha256: sha256_hex(b"what both sides last agreed"), size: 27 });
+    device.store.put_entry(&entry).unwrap();
+    let stranger = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut never_sent = fresh(stranger, None, "x.txt", LocalStatus::PendingUpload);
+    never_sent.own_file = Some(jd_vfs::FileIdentity { file_id: here.file_id, birth_ns: 0 });
+    never_sent.last_seen_sha = Some(sha256_hex(b"some other bytes"));
+    device.store.put_entry(&never_sent).unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::DuplicateName { with: "x.txt".into() } },
+    );
+    assert_eq!(report.done, 0, "{report:?}");
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert!(!matches!(after.status, LocalStatus::Unsyncable(_)), "the unsent edit was disowned: {:?}", after.status);
+    assert!(after.synced_placement.is_some(), "the record still holds its file");
+    assert_eq!(device.fs.peek("x.txt").as_deref(), Some(&b"an edit nobody has sent"[..]));
+}
+
+/// A new file whose upload meets, under a conflict name, a holder with the
+/// same bytes that this device already has -- its own file standing where it
+/// lives -- is a second copy of that file, not a lost record of it, and it
+/// lands beside as a file of its own. Folded into the holder, the copy kept no
+/// record, was found again as new, walked the same conflict names to the same
+/// holder and was folded in again, every pass (plat3 75417). RED without the
+/// holder's own copy excluding the adoption.
+#[test]
+fn a_second_copy_of_a_file_this_device_has_is_never_folded_into_it() {
+    let (_clock, server, device) = world();
+    let copy = b"the same bytes, standing twice";
+    server.seed_file(None, "c.txt", b"the server's c, another file");
+    let holder_name = "c (conflicted copy 2026-07-31 from laptop).txt";
+    let holder = EntityId::file(server.seed_file(None, holder_name, copy));
+    device.fs.user_write(holder_name, copy);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let held = jd_vfs::Vfs::fingerprint(&device.fs, &root.join(holder_name)).unwrap().expect("the holder's file");
+    let mut h = fresh(holder, None, holder_name, LocalStatus::Synced);
+    h.synced_placement = Some(h.remote.clone());
+    h.synced_content = Some(ContentId { sha256: sha256_hex(copy), size: copy.len() as u64 });
+    h.synced_fingerprint = Some(held);
+    h.own_file = Some(held.identity());
+    h.last_seen_sha = Some(sha256_hex(copy));
+    device.store.put_entry(&h).unwrap();
+
+    device.fs.user_write("c.txt", copy);
+    let mine = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("c.txt")).unwrap().expect("the new file");
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut p = fresh(id, None, "c.txt", LocalStatus::PendingUpload);
+    p.own_file = Some(mine.identity());
+    p.last_seen_sha = Some(sha256_hex(copy));
+    device.store.put_entry(&p).unwrap();
+
+    let report = do_one(&device, id, Action::UploadAsNew { placement: Placement { parent: None, name: "c.txt".into() } });
+    assert_eq!(report.done, 1, "{report:?}");
+    let still = device.store.get_entry(holder).unwrap().unwrap();
+    assert_eq!(still.own_file, Some(held.identity()), "the holder keeps its own file");
+    let owners: Vec<_> = device
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.own_file == Some(mine.identity()))
+        .collect();
+    assert_eq!(owners.len(), 1, "the new file has no record of its own: {owners:?}");
+    assert_ne!(owners[0].id, holder, "the new file was folded into the holder");
+    assert!(!owners[0].id.is_provisional(), "the new file did not go up: {:?}", owners[0]);
+    assert_eq!(server.tree().len(), 3, "the copy did not land beside: {:?}", server.tree());
+}
+
+/// The same on a disk whose ids are not identity (FAT and exFAT: ids 0 or a
+/// position), where no record has an own file to ask: the holder's own file
+/// stands here when the file at its path holds the bytes it last saw there,
+/// as the scan reads it. Asked by identity alone, the holder read as having
+/// nothing here, the copy was folded into it, and the new file kept no record.
+/// RED without the bytes reading in `takes_the_uploaded_file`.
+#[test]
+fn a_second_copy_on_a_disk_without_file_identity_is_never_folded_into_its_holder() {
+    for model in [jd_sim::FileIds::DirectorySlot, jd_sim::FileIds::DataCluster, jd_sim::FileIds::MountSession] {
+        let (_clock, server, device) = world();
+        device.fs.file_ids(model);
+        let copy = b"the same bytes, standing twice";
+        server.seed_file(None, "c.txt", b"the server's c, another file");
+        let holder_name = "c (conflicted copy 2026-07-31 from laptop).txt";
+        let holder = EntityId::file(server.seed_file(None, holder_name, copy));
+        device.fs.user_write(holder_name, copy);
+        let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+        let held = jd_vfs::Vfs::fingerprint(&device.fs, &root.join(holder_name)).unwrap().expect("the holder's file");
+        let mut h = fresh(holder, None, holder_name, LocalStatus::Synced);
+        h.synced_placement = Some(h.remote.clone());
+        h.synced_content = Some(ContentId { sha256: sha256_hex(copy), size: copy.len() as u64 });
+        h.synced_fingerprint = Some(held);
+        h.own_file = Some(held.identity()).filter(|i| i.file_id != 0);
+        h.last_seen_sha = Some(sha256_hex(copy));
+        device.store.put_entry(&h).unwrap();
+        device.fs.user_write("c.txt", copy);
+        let id = EntityId::file(device.store.next_provisional_id().unwrap());
+        let mut p = fresh(id, None, "c.txt", LocalStatus::PendingUpload);
+        p.last_seen_sha = Some(sha256_hex(copy));
+        device.store.put_entry(&p).unwrap();
+
+        let report = do_one(&device, id, Action::UploadAsNew { placement: Placement { parent: None, name: "c.txt".into() } });
+        assert_eq!(report.done, 1, "{model:?}: {report:?}");
+        let files: Vec<Entry> = device
+            .store
+            .every_entry()
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.id.entity_type == jd_core::model::EntityType::File)
+            .collect();
+        assert_eq!(files.len(), 2, "{model:?}: the new file was folded into the holder: {files:?}");
+        assert!(files.iter().all(|e| !e.id.is_provisional()), "{model:?}: the new file did not go up: {files:?}");
+        assert_eq!(server.tree().len(), 3, "{model:?}: the copy did not land beside: {:?}", server.tree());
+        assert_eq!(device.store.get_entry(holder).unwrap().unwrap().remote.name, holder_name, "{model:?}");
+    }
+}
+
+/// A holder that is HELD -- its own file waits elsewhere on purpose, here for
+/// a claimant waiting for a vault key -- cannot take an uploaded copy of its
+/// bytes either (`pass::may_take_a_merged_file`), so an upload meeting it under
+/// a conflict name lands beside: folded into it, the uploaded file could not
+/// be handed over and was left with no record. The holder's own file is not
+/// standing here, so only the hold says no. RED without the hold counting in
+/// `holds_its_own_copy_here`.
+#[test]
+fn an_upload_meeting_a_held_holder_of_its_bytes_lands_beside() {
+    let (_clock, server, device) = world();
+    let copy = b"the same bytes, held for a vault";
+    server.seed_file(None, "c.txt", b"the server's c, another file");
+    let holder_name = "c (conflicted copy 2026-07-31 from laptop).txt";
+    let holder = EntityId::file(server.seed_file(None, holder_name, copy));
+    let mut h = fresh(holder, None, holder_name, LocalStatus::Synced);
+    h.synced_placement = Some(h.remote.clone());
+    h.synced_content = Some(ContentId { sha256: sha256_hex(copy), size: copy.len() as u64 });
+    h.last_seen_sha = Some(sha256_hex(copy));
+    device.store.put_entry(&h).unwrap();
+    let claimant = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut waiting = fresh(claimant, None, "sealed.txt", LocalStatus::PendingKey);
+    waiting.is_encrypted = true;
+    waiting.replaces = Some(holder);
+    device.store.put_entry(&waiting).unwrap();
+    assert!(device.store.is_held_by_a_provisional(holder).unwrap(), "construction: the holder is held");
+
+    device.fs.user_write("c.txt", copy);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let mine = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("c.txt")).unwrap().expect("the new file");
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut p = fresh(id, None, "c.txt", LocalStatus::PendingUpload);
+    p.own_file = Some(mine.identity());
+    p.last_seen_sha = Some(sha256_hex(copy));
+    device.store.put_entry(&p).unwrap();
+
+    let report = do_one(&device, id, Action::UploadAsNew { placement: Placement { parent: None, name: "c.txt".into() } });
+    assert_eq!(report.done, 1, "{report:?}");
+    let owner = device.store.every_entry().unwrap().into_iter().find(|e| e.own_file == Some(mine.identity()));
+    let owner = owner.expect("the new file has no record of its own");
+    assert_ne!(owner.id, holder, "the new file was folded into the held holder");
+    assert!(!owner.id.is_provisional(), "the new file did not go up: {owner:?}");
+    assert_eq!(server.tree().len(), 3, "the copy did not land beside: {:?}", server.tree());
+}
+
+/// One file standing at a parked holder's own path, its bytes already on the
+/// server under that holder, goes up as ONE file: the bytes going up are read
+/// from the holder's own path, so they are its file, not a second copy, on any
+/// volume. A parked holder does not veto the upload, so the adoption meets it
+/// at the upload's own path; read by bytes alone on a volume without identity,
+/// the upload's own file matched the holder's last-seen bytes and one local
+/// file became a second server file (reviewer probe rev7). RED without the
+/// upload's path in `takes_the_uploaded_file`.
+#[test]
+fn one_file_at_a_parked_holders_own_path_goes_up_as_one_file() {
+    let models: [(&str, Option<jd_sim::FileIds>); 4] = [
+        ("strong", None),
+        ("win", Some(jd_sim::FileIds::DirectorySlot)),
+        ("mac", Some(jd_sim::FileIds::DataCluster)),
+        ("linux", Some(jd_sim::FileIds::MountSession)),
+    ];
+    for (label, model) in models {
+        for placed in [false, true] {
+            let (_clock, server, device) = world();
+            if let Some(m) = model {
+                device.fs.file_ids(m);
+            }
+            let copy = b"one file, two records";
+            let real = EntityId::file(server.seed_file(None, "c.txt", copy));
+            device.fs.user_write("c.txt", copy);
+            let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+            let mine = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("c.txt")).unwrap().expect("the file");
+            let mut r = fresh(real, None, "c.txt", LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::DuplicateName { with: "c.txt".into() }));
+            if placed {
+                r.synced_placement = Some(r.remote.clone());
+            }
+            r.synced_content = Some(ContentId { sha256: sha256_hex(copy), size: copy.len() as u64 });
+            r.last_seen_sha = Some(sha256_hex(copy));
+            device.store.put_entry(&r).unwrap();
+            let id = EntityId::file(device.store.next_provisional_id().unwrap());
+            let mut p = fresh(id, None, "c.txt", LocalStatus::PendingUpload);
+            p.own_file = Some(mine.identity()).filter(|i| i.file_id != 0);
+            p.last_seen_sha = Some(sha256_hex(copy));
+            device.store.put_entry(&p).unwrap();
+
+            let report = do_one(&device, id, Action::UploadAsNew { placement: Placement { parent: None, name: "c.txt".into() } });
+            assert_eq!(report.done, 1, "{label} placed={placed}: {report:?}");
+            let files: Vec<EntityId> = device
+                .store
+                .every_entry()
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.id.entity_type == jd_core::model::EntityType::File)
+                .map(|e| e.id)
+                .collect();
+            assert_eq!(files, vec![real], "{label} placed={placed}: one file, one record");
+            assert_eq!(server.tree().len(), 1, "{label} placed={placed}: one file went up as two: {:?}", server.tree());
+        }
+    }
+}
+
+/// A HELD holder at the upload's own path: its own file waits elsewhere on
+/// purpose (here for a claimant waiting for a vault key), so the file standing
+/// at its path is another file, and the upload lands beside as a file of its
+/// own. The hold is asked before the path.
+#[test]
+fn a_held_holder_at_the_uploads_own_path_is_still_another_file() {
+    let (_clock, server, device) = world();
+    let copy = b"the same bytes, held for a vault";
+    let holder = EntityId::file(server.seed_file(None, "c.txt", copy));
+    let mut h = fresh(holder, None, "c.txt", LocalStatus::Synced);
+    h.synced_placement = Some(h.remote.clone());
+    h.synced_content = Some(ContentId { sha256: sha256_hex(copy), size: copy.len() as u64 });
+    h.last_seen_sha = Some(sha256_hex(copy));
+    device.store.put_entry(&h).unwrap();
+    let claimant = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut waiting = fresh(claimant, None, "sealed.txt", LocalStatus::PendingKey);
+    waiting.is_encrypted = true;
+    waiting.replaces = Some(holder);
+    device.store.put_entry(&waiting).unwrap();
+    device.fs.user_write("c.txt", copy);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let mine = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("c.txt")).unwrap().expect("the new file");
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut p = fresh(id, None, "c.txt", LocalStatus::PendingUpload);
+    p.own_file = Some(mine.identity());
+    p.last_seen_sha = Some(sha256_hex(copy));
+    device.store.put_entry(&p).unwrap();
+
+    let report = do_one(&device, id, Action::UploadAsNew { placement: Placement { parent: None, name: "c.txt".into() } });
+    assert_eq!(report.done, 1, "{report:?}");
+    let owner = device.store.every_entry().unwrap().into_iter().find(|e| e.own_file == Some(mine.identity()));
+    let owner = owner.expect("the new file has no record of its own");
+    assert_ne!(owner.id, holder, "the new file was folded into the held holder");
+    assert!(!owner.id.is_provisional(), "the new file did not go up: {owner:?}");
+    assert_eq!(server.tree().len(), 2, "the file did not land beside: {:?}", server.tree());
 }
 
 /// A folder parked off a contested name while its own directory stands at

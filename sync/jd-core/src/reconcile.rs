@@ -548,6 +548,7 @@ mod tests {
             content_id: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: None,
             last_seen_sha: None,
             synced_remote_content: None,

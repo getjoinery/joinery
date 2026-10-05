@@ -1483,12 +1483,11 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
                 Side::Sealed if !known_bodies.contains_key(&w.sha256) => never_known += 1,
                 Side::Sealed => {
                     sealed_bodies.entry(w.sha256).or_insert(w.path.clone());
-                    // Only a name the user chose: a save over a file already
-                    // there gives it no name, and an engine-made name (a
-                    // conflict copy) can come up again for a plain file
-                    // elsewhere without anything sealed reaching the server
-                    // (plat3 75429).
-                    if w.created && known_names.contains(&leaf(&w.path)) {
+                    // Only a name the user chose (`UserWrite::named`): an
+                    // engine-made name (a conflict copy) can come up again for
+                    // a plain file elsewhere without anything sealed reaching
+                    // the server (plat3 75429, 75442).
+                    if w.named && known_names.contains(&leaf(&w.path)) {
                         sealed_names.insert(leaf(&w.path));
                     }
                 }
@@ -4994,6 +4993,72 @@ fn the_sealed_name_check_counts_only_names_the_user_chose() {
     assert_sealed_content_never_reached_the_clear(&world, seed);
 }
 
+/// Neither does a save at the name the engine is landing a download on, a
+/// safe save renamed over a file already there, a move that keeps a file's
+/// name, or a folder carrying it: the engine-made conflict name inside the
+/// vault stays the engine's, and the plain file at the top bearing it is not
+/// a sealed name reaching the server (plat3 75442, 75443). A name the user
+/// does give a sealed file is still counted: the same name then standing in
+/// the clear on the server is reported.
+#[test]
+fn the_sealed_name_check_counts_no_name_the_engine_gave() {
+    for case in ["landing save", "safe save", "moved", "folder carried", "named by the user"] {
+        let seed = 9_995;
+        let vault = jd_sim::SimVault::new(seed);
+        let mut world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+        world.give_vault("laptop", &vault);
+        world.give_vault("desktop", &vault);
+        world.server.set_vault_public_key(1, &vault.public_key_b64);
+        world.server.seed_encrypted_folder(None, "Private");
+        assert!(world.settle().is_some());
+        for (d, n) in [("laptop", 1), ("desktop", 2)] {
+            world.device(d).fs.user_write("c.txt", format!("top, from {d}").as_bytes());
+            world.device(d).fs.user_write("Private/c.txt", format!("sealed, from {d} {n}").as_bytes());
+        }
+        assert!(world.settle().is_some());
+        let laptop = world.device("laptop");
+        let copies: Vec<String> = jd_sim::scenario::disk_tree(laptop)
+            .into_keys()
+            .filter(|p| p.starts_with("Private/c (conflicted copy"))
+            .collect();
+        assert_eq!(copies.len(), 1, "{case}: construction: one conflict copy in the vault");
+        let copy = copies[0].clone();
+        let name = copy.trim_start_matches("Private/").to_string();
+        assert!(jd_sim::scenario::disk_tree(laptop).contains_key(&name), "{case}: construction: the same engine-made name at the top");
+        match case {
+            "landing save" => {
+                laptop.fs.user_remove(&copy);
+                laptop.fs.user_write_at_the_engines_name(&copy, b"saved where a download landed");
+            }
+            "safe save" => {
+                laptop.fs.user_write("Private/c.tmp", b"saved through a temporary");
+                laptop.fs.user_rename("Private/c.tmp", &copy);
+            }
+            "moved" => {
+                laptop.fs.user_mkdir("Private/sub");
+                laptop.fs.user_rename(&copy, &format!("Private/sub/{name}"));
+            }
+            "folder carried" => {
+                laptop.fs.user_mkdir("Private/sub");
+                laptop.fs.user_rename(&copy, &format!("Private/sub/{name}"));
+                assert!(world.settle().is_some());
+                laptop.fs.user_rename("Private/sub", "Private/sub2");
+            }
+            _ => {
+                laptop.fs.user_rename(&copy, "Private/my own name.txt");
+                world.pass(laptop);
+                world.server.seed_file(None, "my own name.txt", b"the name, in the clear");
+            }
+        }
+        assert!(world.settle().is_some(), "{case}: never settled");
+        let fired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_sealed_content_never_reached_the_clear(&world, seed)
+        }))
+        .is_err();
+        assert_eq!(fired, case == "named by the user", "{case}: the sealed-name check fired = {fired}");
+    }
+}
+
 /// A file saved in a vault and moved out before the engine ever looked is a
 /// plain file to every engine: nothing on any device saw it sealed or held a
 /// record placing it in the vault. It goes up plain, as the user's last act
@@ -6014,3 +6079,46 @@ fn frozen_a_wait_ends_when_its_directory_is_home_again_seed() {
         std::panic::resume_unwind(e);
     }
 }
+
+/// plat3 75417 on a strong disk: a record's park gives up its name to a new
+/// file the volume proves is another record's; that file's upload lands beside
+/// under a conflict name with its answer lost, the device downloads its own
+/// upload as a stranger, and the retry meets that copy under the conflict
+/// name. Folded into the copy's record, the user's file kept no record, was
+/// found again as new and folded in again, every pass, and the parked record
+/// never came back: the fleet never settled.
+#[test]
+fn frozen_a_second_copy_of_a_known_file_is_not_folded_into_it_every_pass_seed() {
+    workload_core_with(75_417, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+}
+
+/// plain2 75217 and hidden plain2 75283: a folder renamed whose rename is not
+/// yet agreed, its old name made again by a save through the old path. The
+/// rebuilt directory's record, not yet sent, stood at the renamed folder's
+/// agreed path; the folder map dropped it for the agreed record, the scan
+/// found that record moved and the path holding nobody, and minted the
+/// directory again -- two folders on the server, the one left without it
+/// trashed with a peer's unsent file in it. Every oracle quiet is asserted.
+#[test]
+fn frozen_a_rebuilt_old_name_is_minted_once_seeds() {
+    workload_core_with(75_217, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::None, false, Names::Ordinary, Swaps::On);
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_283, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::None, false, Names::Ordinary, Swaps::On);
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// kill2 75102 with the swap verb off: two folders the user swapped, the swap
+/// detected in halves, so the two renames were queued in different passes
+/// and never parked as a cycle; the first rename's first try was rate-limited,
+/// and then each was refused onto the other's name and waited for the other
+/// to leave, for ever. Settling, with every oracle quiet, is asserted.
+#[test]
+fn frozen_two_renames_onto_each_others_names_seed() {
+    workload_core_with(75_102, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::Off);
+}
+

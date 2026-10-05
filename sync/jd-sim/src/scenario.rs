@@ -580,7 +580,7 @@ impl World {
                     format!("saved while a download was landing, {round} on {name}").into_bytes();
                 landed.lock().unwrap().insert(crate::sha256_hex(&saved));
                 *seen.lock().unwrap() += 1;
-                disk.user_write(&rel, &saved);
+                disk.user_write_at_the_engines_name(&rel, &saved);
             });
         }
     }
@@ -2147,6 +2147,22 @@ pub fn assert_records_agree_with_the_server(world: &World) {
                     ));
                 }
             }
+            // At rest, a folder stands where it is agreed: a directory still
+            // noted away from its agreement is a move nobody finished. Except
+            // a vault's folder carried out into a plain one: it is held there,
+            // keeping its record and its directory, by design (B-CARRY).
+            let sealed = |parent: Option<i64>| {
+                parent.is_some_and(|p| {
+                    device.store.get_entry(jd_core::model::EntityId::folder(p)).unwrap().is_some_and(|f| f.is_encrypted)
+                })
+            };
+            let held_out = |a: &jd_core::model::StandsAt| e.is_encrypted && sealed(a.agreed.parent) && !sealed(a.here.parent);
+            if let Some(away) = e.standing_away().filter(|a| !held_out(a)) {
+                stale.push(format!(
+                    "{:?} {} stands at {:?}/{:?}, not at its agreed {:?}/{:?}",
+                    e.id.entity_type, e.id.server_id, away.here.parent, away.here.name, away.agreed.parent, away.agreed.name
+                ));
+            }
         }
         assert!(
             stale.is_empty(),
@@ -2303,10 +2319,9 @@ pub fn assert_no_live_orphan_on_the_server(world: &World) {
 /// removes it; the next thing that wants that name writes straight over bytes
 /// the user can still see in their folder.
 ///
-/// Only a park releases a claim. `PendingKey` and `OutOfScope` also answer no
-/// to `holds_a_local_file` and both legitimately leave the user's bytes where
-/// they are, so both go on claiming their path here -- see that method for why
-/// the three are not one rule.
+/// Only a park releases a claim. `PendingKey` and `OutOfScope` legitimately
+/// leave the user's bytes where they are, so both go on claiming their path
+/// here -- see `holds_a_local_file` for why the three are not one rule.
 pub fn assert_no_disk_file_is_unclaimed(world: &World) {
     for device in &world.devices {
         let entries = device.store.every_entry().unwrap();
@@ -2339,11 +2354,11 @@ pub fn assert_no_disk_file_is_unclaimed(world: &World) {
         };
         // Every entry names its path, EXCEPT one parked `Unsyncable`: that is
         // the one status that means the local copy was deliberately given up.
-        // `PendingKey` and `OutOfScope` also answer no to `holds_a_local_file`,
-        // and for both the file legitimately stays where it is -- a keyless
-        // device keeps the local-only files it made under a vault folder it
-        // cannot read, and taking a subtree out of scope leaves the user's
-        // copies alone. Those two are still claims; only a park is a release.
+        // For `PendingKey` and `OutOfScope` the file legitimately stays where
+        // it is -- a keyless device keeps the local-only files it made under a
+        // vault folder it cannot read, and taking a subtree out of scope
+        // leaves the user's copies alone. Those two are still claims; only a
+        // park is a release.
         let claimed: std::collections::HashSet<String> = entries
             .iter()
             .filter(|e| !matches!(e.status, jd_core::model::LocalStatus::Unsyncable(_)))

@@ -685,7 +685,9 @@ impl Vfs for OsVfs {
     }
 
     fn spool(&self, target: &Path, op: i64) -> VfsResult<Box<dyn SpoolFile>> {
-        let name = format!(".jd-tmp-{}", (self.next_token)());
+        // The op in the name ties a spool a crash left behind to the download
+        // that opened it.
+        let name = format!(".jd-tmp-op{op}-{}", (self.next_token)());
         let path = self.spool_dir.join(name);
         let folder = target
             .parent()
@@ -964,7 +966,12 @@ impl OsSpoolFile {
         let token = self
             .path
             .file_name()
-            .map(|n| n.to_string_lossy().trim_start_matches(".jd-tmp-").to_string())
+            .map(|n| {
+                // The spool name already carries the op (`.jd-tmp-op<op>-<token>`);
+                // the landing name says it once, so only the token goes on.
+                let rest = n.to_string_lossy().trim_start_matches(".jd-tmp-").to_string();
+                rest.strip_prefix(&format!("op{}-", self.op)).map(str::to_string).unwrap_or(rest)
+            })
             .unwrap_or_default();
         let land = dir.join(crate::names::land_name(self.op, &token));
 
@@ -1108,7 +1115,21 @@ impl SpoolFile for OsSpoolFile {
         result
     }
 
-    fn discard(mut self: Box<Self>) {
+    fn discard(self: Box<Self>) {
+        // Dropping the handle removes the file (`Drop`).
+    }
+}
+
+/// The handle owns its file. Every way out of a download that does not
+/// commit -- a stand-down when the user saved over the target meanwhile, an
+/// error in making room, a link the server no longer serves -- drops the
+/// handle, and the file goes with it. Left to each caller to discard, the
+/// exits that forgot left one file behind per stand-down, reclaimed only by
+/// the sweep at the next start (soak run 1721: eleven on a device never
+/// restarted). After a commit the file has been renamed onto its target, so
+/// there is nothing here to remove.
+impl Drop for OsSpoolFile {
+    fn drop(&mut self) {
         self.file.take();
         let _ = fs::remove_file(&self.path);
     }
@@ -1463,6 +1484,26 @@ mod tests {
         spool.commit(&target, Some(seen)).unwrap();
 
         assert_eq!(fs::read(&target).unwrap(), b"new content");
+    }
+
+    #[test]
+    fn a_spool_dropped_without_a_commit_leaves_nothing_behind() {
+        let dir = TempDir::new("spool-drop");
+        let v = OsVfs::new(dir.0.join("root"), dir.0.join("spool")).unwrap();
+        fs::create_dir_all(dir.0.join("root")).unwrap();
+        let target = dir.0.join("root").join("f.txt");
+        let mut spool = v.spool(&target, 41).unwrap();
+        spool.write_all(b"half a download").unwrap();
+        let named: Vec<String> = fs::read_dir(&v.spool_dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert!(named.len() == 1 && named[0].starts_with(".jd-tmp-op41-"), "the spool names its op: {named:?}");
+        drop(spool);
+        assert_eq!(fs::read_dir(&v.spool_dir).unwrap().count(), 0, "a dropped spool left its file");
+        assert!(!target.exists());
+        let mut spool = v.spool(&target, 42).unwrap();
+        spool.write_all(b"whole").unwrap();
+        spool.commit(&target, None).unwrap();
+        assert_eq!(fs::read_dir(&v.spool_dir).unwrap().count(), 0, "a committed spool left its file");
+        assert_eq!(fs::read(&target).unwrap(), b"whole");
     }
 
     /// A spool whose rename onto the root always crosses a volume, as it does
@@ -1846,7 +1887,9 @@ mod tests {
         let v = vfs(&d);
         let mut spool = v.spool(&v.root().unwrap().join("t.txt"), 0).unwrap();
         spool.write_all(b"interrupted").unwrap();
-        drop(spool); // process died here — the spool file is orphaned
+        // The process died here: no destructor runs, so the spool file is
+        // orphaned. (A dropped handle in a live process removes its own file.)
+        std::mem::forget(spool);
 
         assert_eq!(v.sweep_spool().unwrap(), 1);
         assert_eq!(fs::read_dir(d.path().join("spool")).unwrap().count(), 0);

@@ -206,6 +206,7 @@ mod tests {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: None,
             last_seen_sha: None,
         }

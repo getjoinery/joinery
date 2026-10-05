@@ -235,10 +235,12 @@ pub struct UserWrite {
     pub sha256: String,
     /// Under a directory marked sealed at the moment of the write.
     pub in_sealed_dir: bool,
-    /// The write made a new file at this path. Saving over a file that is
-    /// there already chooses no name: the name was given when that file was
-    /// made, by the user or by the engine.
-    pub created: bool,
+    /// The write gave the file its name: a new file, at a name the user
+    /// chose. Saving over a file that is there already chooses no name -- it
+    /// was given when that file was made, by the user or by the engine -- and
+    /// neither does saving at the name the engine is landing a download on
+    /// (`user_write_at_the_engines_name`).
+    pub named: bool,
     /// The birth of the directory the file was written into, read when it
     /// was written: the folder the user put it in, whatever that directory
     /// is called by the time anyone asks.
@@ -550,6 +552,19 @@ impl MemFs {
     /// Write a file the way a *user* would: no engine involved, no atomic
     /// spool. This is how a scenario says "someone saved a document".
     pub fn user_write(&self, path: &str, bytes: &[u8]) {
+        self.write_as_the_user(path, bytes, true)
+    }
+
+    /// A user saving at a name the engine chose: the path a download is
+    /// landing on, whose name -- a conflict copy's, say -- the engine gave.
+    /// The save is the user's; the name is not (plat3 75442: an engine-made
+    /// conflict name saved over inside a vault read as a sealed name the user
+    /// chose, and the same engine name on a plain file as that name leaking).
+    pub fn user_write_at_the_engines_name(&self, path: &str, bytes: &[u8]) {
+        self.write_as_the_user(path, bytes, false)
+    }
+
+    fn write_as_the_user(&self, path: &str, bytes: &[u8], names_it: bool) {
         let key = self.store_path(path);
         let mut st = self.state.lock().unwrap();
         let mtime = self.truncated_now(&st);
@@ -584,7 +599,7 @@ impl MemFs {
             path: key.clone(),
             sha256: crate::sha256_hex(bytes),
             in_sealed_dir,
-            created,
+            named: created && names_it,
             parent_birth,
         });
         st.nodes.insert(
@@ -721,22 +736,28 @@ impl MemFs {
     }
 
     /// A user moving something.
+    ///
+    /// A name is recorded only when the user gives one: a file renamed onto a
+    /// free name, at its new path. A file moved under the name it had, one
+    /// renamed over a file already there (a safe save, which keeps that
+    /// file's name), or anything a moved folder carries, keeps a name given
+    /// before -- by the user, and recorded then, or by the engine. Recorded, an engine-made conflict name the
+    /// user carried into a vault read as a sealed name the user chose, and
+    /// the same engine name on a plain file elsewhere read as that sealed
+    /// name leaking (plat3 75442, 75443).
     pub fn user_rename(&self, from: &str, to: &str) {
         let f = self.store_path(from);
         let t = self.store_path(to);
         let mut st = self.state.lock().unwrap();
         Self::refuse_impossible(&st, &t, "move something");
         Self::ensure_parents(&mut st, &t);
+        let replaced = st.nodes.contains_key(&t);
         Self::move_subtree(&mut st, &f, &t, self.clock.now_ns());
-        let placed: Vec<(String, bool)> = st
-            .nodes
-            .iter()
-            .filter(|(k, n)| {
-                matches!(n, Node::File { .. }) && (**k == t || k.starts_with(&format!("{t}/")))
-            })
-            .map(|(k, _)| (k.clone(), Self::under_a_sealed_dir(&st, k)))
-            .collect();
-        st.user_renames.extend(placed);
+        let leaf = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
+        if matches!(st.nodes.get(&t), Some(Node::File { .. })) && !replaced && leaf(&f) != leaf(&t) {
+            let sealed = Self::under_a_sealed_dir(&st, &t);
+            st.user_renames.push((t, sealed));
+        }
     }
 
     /// Two files trade names through a parked name, the way an application
@@ -1721,6 +1742,18 @@ struct MemSpool {
     folder_at_open: jd_vfs::FileIdentity,
 }
 
+/// The handle owns its spool, as `OsSpoolFile` does: a download that stands
+/// down without committing drops it, and the spool goes with it.
+impl Drop for MemSpool {
+    fn drop(&mut self) {
+        // Never a second panic while unwinding from a first: a poisoned lock
+        // here would abort the test binary instead of failing one test.
+        if let Ok(mut st) = self.fs.state.lock() {
+            st.spools.remove(&self.name);
+        }
+    }
+}
+
 impl Write for MemSpool {
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
         self.buf.extend_from_slice(data);
@@ -1733,7 +1766,7 @@ impl Write for MemSpool {
 
 impl SpoolFile for MemSpool {
     fn commit(
-        self: Box<Self>,
+        mut self: Box<Self>,
         target: &Path,
         expect: Option<Fingerprint>,
     ) -> VfsResult<Fingerprint> {
@@ -1861,7 +1894,7 @@ impl SpoolFile for MemSpool {
         st.nodes.insert(
             key,
             Node::File {
-                bytes: self.buf,
+                bytes: std::mem::take(&mut self.buf),
                 mtime_ns: mtime,
             },
         );
