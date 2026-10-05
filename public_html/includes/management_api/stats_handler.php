@@ -7,6 +7,8 @@
  * from SSH output, so the two transports populate mgn_last_status_data
  * identically.
  *
+ * @version 1.4 - memory inside a container is the site's own cgroup's (in use out of its limit),
+ *                not the shared server's /proc/meminfo (specs/multi_tenant_docker_hosts.md S15)
  * @version 1.3 - site_domain: the site's own domain (webDir), the key the agent's check_status reports
  * @version 1.2 - plugin_checks: the recorded result of every plugin check declared fleet_report,
  *                the same record the agent's check_status reads
@@ -53,6 +55,19 @@ function stats_handler($request) {
 			if ($mem_total_kb > 0) {
 				$total_mb = intval(round($mem_total_kb / 1024));
 				$free_mb  = intval(round($mem_avail_kb / 1024));
+				// Inside a container /proc/meminfo is the shared server's. The
+				// site's own memory is its cgroup's, read the way the agent's
+				// check_status and host_report.sh read it: everything the group
+				// holds but the inactive file cache, out of its limit, or out of
+				// the whole server where it has none.
+				$container = _mgmt_stats_container_memory();
+				if ($container !== null) {
+					list($used_bytes, $limit_bytes) = $container;
+					$total_bytes = $mem_total_kb * 1024;
+					if ($limit_bytes > 0 && $limit_bytes < $total_bytes) { $total_bytes = $limit_bytes; }
+					$total_mb = intval(round($total_bytes / 1048576));
+					$free_mb  = max(0, $total_mb - intval(round($used_bytes / 1048576)));
+				}
 				$result['memory_total_mb'] = $total_mb;
 				$result['memory_used_mb']  = max(0, $total_mb - $free_mb);
 				$result['memory_free_mb']  = $free_mb;
@@ -288,5 +303,21 @@ function _mgmt_stats_format_uptime($secs) {
 		return "{$days} day" . ($days === 1 ? '' : 's') . ", {$hours}:" . sprintf('%02d', $minutes);
 	}
 	return "{$hours}:" . sprintf('%02d', $minutes);
+}
+
+/**
+ * The site's own memory when this runs in a container: [bytes in use, limit in
+ * bytes or 0 for none], or null outside a container or where the cgroup files
+ * cannot be read.
+ */
+function _mgmt_stats_container_memory() {
+	if (!@file_exists('/.dockerenv')) { return null; }
+	$current = @file_get_contents('/sys/fs/cgroup/memory.current');
+	if ($current === false || !ctype_digit(trim($current))) { return null; }
+	$inactive = 0;
+	$stat = @file_get_contents('/sys/fs/cgroup/memory.stat');
+	if ($stat !== false && preg_match('/^inactive_file (\d+)$/m', $stat, $m)) { $inactive = (int)$m[1]; }
+	$max = trim((string)@file_get_contents('/sys/fs/cgroup/memory.max'));
+	return [max(0, (int)trim($current) - $inactive), ctype_digit($max) ? (int)$max : 0];
 }
 ?>

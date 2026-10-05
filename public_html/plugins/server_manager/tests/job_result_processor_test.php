@@ -489,6 +489,44 @@ check(JobResultProcessor::sanitise_host_report(array())['os'] === 'unknown',
 	'a node too old to report its operating system says unknown for the whole object');
 check(json_encode($capped) !== false, 'the capped object encodes');
 
+// A site container's own figures (host_report 1.7, multi_tenant_docker_hosts WP1).
+$fig = function ($usec, $tx, $started = 1000) {
+	return array('name' => 'site1', 'state' => 'running', 'health' => 'none', 'answers' => 'yes',
+		'started_at' => $started,
+		'memory' => array('used_bytes' => 200, 'peak_bytes' => 500, 'limit_bytes' => 'none', 'oom_kills' => 2),
+		'cpu' => array('usage_usec' => $usec, 'limit_millicores' => 1500),
+		'pids' => array('current' => 70, 'limit' => '<b>'),
+		'net_tx_bytes' => $tx, 'disk_bytes' => -5, 'extra' => 'dropped',
+		'since_last' => array('seconds' => 1, 'cpu_millicores' => 999999, 'net_tx_bytes' => 1));
+};
+$figs = JobResultProcessor::sanitise_host_report(array('containers' => array($fig(1000000, 5000))))['containers'][0];
+check($figs['memory'] === array('used_bytes' => 200, 'peak_bytes' => 500, 'limit_bytes' => 'none', 'oom_kills' => 2)
+	&& $figs['cpu'] === array('usage_usec' => 1000000, 'limit_millicores' => 1500)
+	&& $figs['pids'] === array('current' => 70, 'limit' => 'unknown')
+	&& $figs['started_at'] === 1000 && $figs['net_tx_bytes'] === 5000 && $figs['disk_bytes'] === 'unknown'
+	&& !isset($figs['extra']),
+	'a container\'s figures are kept as counts, none or unknown; anything else is dropped', var_export($figs, true));
+$old_node = JobResultProcessor::sanitise_host_report(array('containers' => array(array('name' => 'site1', 'state' => 'running'))))['containers'][0];
+check(!array_key_exists('memory', $old_node) && !array_key_exists('since_last', $old_node),
+	'an older node\'s container carries no figures, rather than unknown ones');
+
+$prev = JobResultProcessor::sanitise_host_report(array('generated_at' => 10000, 'containers' => array($fig(1000000, 5000))));
+$next = JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'containers' => array($fig(1000000 + 3600 * 250000, 5000 + 7200))));
+$rated = JobResultProcessor::host_report_container_rates($prev, $next)['containers'][0];
+check(($rated['since_last'] ?? null) === array('seconds' => 3600, 'cpu_millicores' => 250, 'net_tx_bytes' => 7200),
+	'two reports an hour apart: a quarter of a core on average, and the bytes sent between them', var_export($rated['since_last'] ?? null, true));
+check(json_decode(json_encode($rated), true) === JobResultProcessor::sanitise_host_report(array('containers' => array($rated)))['containers'][0],
+	'the computed figure survives the sanitiser when the stored report is read back');
+$first = JobResultProcessor::host_report_container_rates(null, $next)['containers'][0];
+check(!isset($first['since_last']), 'the first report has nothing to compare with, and a figure the node sent is not kept');
+$restarted = JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'containers' => array($fig(600 * 100000, 900, 13000))));
+$rs = JobResultProcessor::host_report_container_rates($prev, $restarted)['containers'][0];
+check(($rs['since_last'] ?? null) === array('seconds' => 600, 'cpu_millicores' => 100, 'net_tx_bytes' => 900),
+	'a container restarted between reports: its counters since the restart are the interval', var_export($rs['since_last'] ?? null, true));
+$backwards = JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'containers' => array($fig(10, 5000))));
+check(!isset(JobResultProcessor::host_report_container_rates($prev, $backwards)['containers'][0]['since_last']),
+	'a counter that went backwards with no restart gives no figure');
+
 // An answer that is not the object: the columns are left alone.
 $before = $hr_node->get('mgn_last_host_report_time');
 $hr_bad = jrp_job($hr_node, 'host_report', "=== [Step 1/1] host_report ===\n" . json_encode(array('api_version' => '1.0', 'data' => array('output' => "bash: host_report.sh: No such file\n"))));

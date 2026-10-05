@@ -5,6 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.55 - host reports keep each site container's figures (host_report 1.7: memory, peak,
+ *                 limit, out-of-memory kills, CPU, processes, bytes sent, disk), and
+ *                 host_report_container_rates() turns two reports into each container's CPU and
+ *                 traffic since the last one (specs/multi_tenant_docker_hosts.md WP1)
  * @version 1.54 - process_moved_site_check folds the host's answer onto the old machine of a switch-over;
  *                 a verified decommission_node records that machine's container gone
  * @version 1.53 - a full backup's success asks the node for its recovery key, so a rotated key is on record at once
@@ -3043,6 +3047,9 @@ HTML;
 		if ($node_id) {
 			try {
 				$node = new ManagedNode($node_id, TRUE);
+				// Rates need the report this one replaces, so they are worked out here.
+				$report = self::host_report_container_rates(
+					json_decode((string)$node->get('mgn_last_host_report'), true), $report);
 				$node->set('mgn_last_host_report', json_encode($report));
 				$node->set('mgn_last_host_report_time', $read_at);
 				$node->save();
@@ -3215,14 +3222,117 @@ HTML;
 			$name = self::host_report_name($c['name'] ?? '');
 			if ($name === '') { continue; }
 			$answers = (isset($c['answers']) && in_array($c['answers'], ['yes', 'no', 'unknown'], true)) ? $c['answers'] : 'unknown';
-			$out[] = [
+			$entry = [
 				'name'    => $name,
 				'state'   => self::unit_journal_word($c['state'] ?? ''),
 				'health'  => self::unit_journal_word($c['health'] ?? ''),
 				'answers' => $answers,
 			];
+			// The site's own figures (host_report 1.7). Absent from an older
+			// node's report: kept absent, which the card reads as "not
+			// reported", never as a value.
+			if (array_key_exists('memory', $c)) {
+				$m   = is_array($c['memory']) ? $c['memory'] : [];
+				$cpu = (isset($c['cpu']) && is_array($c['cpu'])) ? $c['cpu'] : [];
+				$pid = (isset($c['pids']) && is_array($c['pids'])) ? $c['pids'] : [];
+				$entry += [
+					'started_at'   => self::host_report_count($c['started_at'] ?? null),
+					'memory'       => [
+						'used_bytes'  => self::host_report_count($m['used_bytes'] ?? null),
+						'peak_bytes'  => self::host_report_count($m['peak_bytes'] ?? null),
+						'limit_bytes' => self::host_report_limit($m['limit_bytes'] ?? null),
+						'oom_kills'   => self::host_report_count($m['oom_kills'] ?? null),
+					],
+					'cpu'          => [
+						'usage_usec'       => self::host_report_count($cpu['usage_usec'] ?? null),
+						'limit_millicores' => self::host_report_limit($cpu['limit_millicores'] ?? null),
+					],
+					'pids'         => [
+						'current' => self::host_report_count($pid['current'] ?? null),
+						'limit'   => self::host_report_limit($pid['limit'] ?? null),
+					],
+					'net_tx_bytes' => self::host_report_count($c['net_tx_bytes'] ?? null),
+					'disk_bytes'   => self::host_report_count($c['disk_bytes'] ?? null),
+				];
+				// The plane's own figure (host_report_container_rates), kept
+				// when a stored report is read back: three counts or nothing.
+				$since = (isset($c['since_last']) && is_array($c['since_last'])) ? $c['since_last'] : [];
+				$since = [
+					'seconds'        => self::host_report_count($since['seconds'] ?? null),
+					'cpu_millicores' => self::host_report_count($since['cpu_millicores'] ?? null),
+					'net_tx_bytes'   => self::host_report_count($since['net_tx_bytes'] ?? null),
+				];
+				if (count(array_filter($since, 'is_int')) === 3) {
+					$entry['since_last'] = $since;
+				}
+			}
+			$out[] = $entry;
 		}
 		return $out;
+	}
+
+	/** A ceiling: a count, the string none (no ceiling set), or unknown. */
+	private static function host_report_limit($v) {
+		return ($v === 'none') ? 'none' : self::host_report_count($v);
+	}
+
+	/**
+	 * Each site container's CPU and outbound traffic between two host reports.
+	 * Pure; the fold test drives it.
+	 *
+	 * The node reports counters that run from the container's start
+	 * (started_at), so one report says nothing about now. Two do: the
+	 * difference over the seconds between them. A container that restarted
+	 * since the previous report has counters covering only the time since it
+	 * started, which is then the interval. Where neither report can say (the
+	 * first report, an older node, a counter that went backwards) the
+	 * container gets no since_last at all, which the card shows as not yet
+	 * measured.
+	 *
+	 * since_last: seconds, cpu_millicores (thousandths of a core, averaged),
+	 * net_tx_bytes (sent in the interval).
+	 */
+	public static function host_report_container_rates($previous, array $report): array {
+		if (!is_array($report['containers'] ?? null) || !is_int($report['generated_at'] ?? null)) {
+			return $report;
+		}
+		$now = $report['generated_at'];
+		$prev_at = (is_array($previous) && is_int($previous['generated_at'] ?? null)) ? $previous['generated_at'] : null;
+		$before = [];
+		if ($prev_at !== null && is_array($previous['containers'] ?? null)) {
+			foreach ($previous['containers'] as $pc) {
+				if (is_array($pc) && isset($pc['name'])) { $before[$pc['name']] = $pc; }
+			}
+		}
+		foreach ($report['containers'] as $i => $c) {
+			// Only the plane says how much happened between two reports.
+			unset($report['containers'][$i]['since_last']);
+			$started = $c['started_at'] ?? null;
+			$usec = $c['cpu']['usage_usec'] ?? null;
+			$tx = $c['net_tx_bytes'] ?? null;
+			if (!is_int($started) || !is_int($usec) || !is_int($tx)) { continue; }
+			$p = $before[$c['name']] ?? null;
+			if ($p !== null && ($p['started_at'] ?? null) === $started && $prev_at < $now
+					&& is_int($p['cpu']['usage_usec'] ?? null) && is_int($p['net_tx_bytes'] ?? null)) {
+				$seconds = $now - $prev_at;
+				$d_usec = $usec - $p['cpu']['usage_usec'];
+				$d_tx = $tx - $p['net_tx_bytes'];
+			} elseif ($prev_at !== null && $started > $prev_at && $started < $now) {
+				// Restarted between the two reports: its counters are the interval.
+				$seconds = $now - $started;
+				$d_usec = $usec;
+				$d_tx = $tx;
+			} else {
+				continue;
+			}
+			if ($seconds <= 0 || $d_usec < 0 || $d_tx < 0) { continue; }
+			$report['containers'][$i]['since_last'] = [
+				'seconds'        => $seconds,
+				'cpu_millicores' => (int)round($d_usec / $seconds / 1000),
+				'net_tx_bytes'   => $d_tx,
+			];
+		}
+		return $report;
 	}
 
 	/**

@@ -17,7 +17,9 @@
 # address from the journal ever reaches the object; a stub that hangs costs
 # its key and not the report; an argument and stdin change nothing; the
 # script never runs a write; and the exit code is 0 whenever the object
-# printed.
+# printed. A site container's figures (memory, peak, limit, kills, CPU,
+# processes, bytes sent, disk) come from its cgroup, its network namespace and
+# one bounded du; inside a container, memory is the site's own group.
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -233,12 +235,19 @@ case "$1 $2" in
             *Config.Env*) case "$4" in siteone) echo SITENAME=siteone ;; sitetwo) echo SITENAME=sitetwo ;; impostor) echo SITENAME=siteone ;; *) echo PATH=/bin ;; esac ;;
             *State.Status*) case "$4" in siteone) echo running ;; *) echo running ;; esac ;;
             *State.Health*) echo none ;;
+            # siteone's process is the gate's own, so its cgroup and network
+            # namespace are real files to read; sitetwo has no process.
+            *State.Pid*) case "$4" in siteone) echo "$GATE_PID 2026-09-28T18:01:15.123456789Z" ;; *) echo "0 0001-01-01T00:00:00Z" ;; esac ;;
+            *Mounts*) case "$4" in siteone) printf '%s\n%s\n' "$GATE_VOL/one_data" "$GATE_VOL/one_uploads" ;; esac ;;
         esac ;;
     "port siteone") echo "0.0.0.0:8081" ;;
     "port sitetwo") echo "0.0.0.0:8082" ;;
 esac
 STUB
 chmod 755 "$T/bin"/*
+mkdir -p "$T/vol/one_data" "$T/vol/one_uploads"
+head -c 100000 /dev/zero > "$T/vol/one_data/db"; head -c 300000 /dev/zero > "$T/vol/one_uploads/photo"
+export GATE_PID=$$ GATE_VOL="$T/vol"
 PATH="$T/bin:$PATH" bash "$SCRIPT" > "$T/root.json" 2> "$T/root.err"; rc=$?
 chk "stubbed run: exit 0" "$rc" "0"
 chk "stubbed run: a JSON object" "$(jv "$T/root.json" "" type)" "object"
@@ -270,6 +279,20 @@ site_is_quiet() { return 0; }
 loopback_headers() { printf 'HTTP/1.1 503 Service Unavailable\r\n\r\n'; }
 got="$(emit_answers | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["apache2"] . "/" . $o["php-fpm"];')"
 chk "a quiet site's 503 says Apache answers and php-fpm is quiet, never no" "$got" "yes/quiet"
+# Inside a container, memory is the site's own group out of its limit.
+CG="$T/cg"; mkdir -p "$CG"
+printf '300000000\n' > "$CG/memory.current"; printf 'anon 5\ninactive_file 100000000\n' > "$CG/memory.stat"
+printf '268435456\n' > "$CG/memory.max"; printf '150000 100000\n' > "$CG/cpu.max"
+eval "$(sed -n -e '/^json_num_or_unknown() {/,/^}/p' -e '/^meminfo_kb() {/,/^}/p' "$SCRIPT")"
+eval "$(sed -n '/^cg_num() {/,/^emit_swap() {/p' "$SCRIPT" | sed '$d')"
+in_container() { return 0; }
+own_cgroup_dir() { printf '%s' "$CG"; }
+chk "in a container: in use is the group's, less inactive cache, out of its limit" "$(emit_memory)" '{"used_bytes":200000000,"total_bytes":268435456}'
+printf 'max\n' > "$CG/memory.max"
+chk "in a container with no limit: out of the whole server" "$(emit_memory | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["used_bytes"], "/", $o["total_bytes"] === (int)trim(shell_exec("awk \x27/^MemTotal:/ {print \$2*1024}\x27 /proc/meminfo")) ? "server" : $o["total_bytes"];')" "200000000/server"
+in_container() { return 1; }
+chk "outside a container: the machine's figures, unchanged" "$(emit_memory | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["used_bytes"] === 200000000 ? "group" : "machine";')" "machine"
+chk "a CPU ceiling is thousandths of a core; max is none" "$(cg_cpu_limit "$CG/cpu.max")/$(printf 'max 100000\n' > "$CG/cpu.max"; cg_cpu_limit "$CG/cpu.max")" "1500/none"
 sc_ok=0; sc_n="$(jv "$T/root.json" served_certificates count)"
 for i in $(seq 0 $(( ${sc_n:-0} - 1 ))); do
     d="$(jv "$T/root.json" served_certificates.$i.domain)"; l="$(jv "$T/root.json" served_certificates.$i.days_left)"
@@ -279,6 +302,18 @@ chk "served certificates: whole days left per name, a failed handshake left out"
 chk "containers: only the two whose name is their SITENAME" "$(jv "$T/root.json" containers count)/$(jv "$T/root.json" containers.0.name)/$(jv "$T/root.json" containers.1.name)" "2/siteone/sitetwo"
 chk "containers: one answering through PHP, one not" "$(jv "$T/root.json" containers.0.answers)/$(jv "$T/root.json" containers.1.answers)" "yes/no"
 chk "containers: state and health" "$(jv "$T/root.json" containers.0.state)/$(jv "$T/root.json" containers.0.health)" "running/none"
+# A site's figures (multi_tenant_docker_hosts WP1), read from the cgroup and
+# network namespace of the process docker names - here the gate's own.
+int_or_none() { case "$1" in none|[0-9]*) echo ok ;; *) echo "$1" ;; esac; }
+chk "a site carries every figure key" "$(jv "$T/root.json" containers.0 keys)" "name,state,health,answers,started_at,memory,cpu,pids,net_tx_bytes,disk_bytes"
+chk "started_at is the container's start, as a Unix time" "$(jv "$T/root.json" containers.0.started_at)" "$(date -u -d 2026-09-28T18:01:15Z +%s)"
+chk "memory in use, its peak and its kill count are numbers" "$(jv "$T/root.json" containers.0.memory.used_bytes type)/$(jv "$T/root.json" containers.0.memory.peak_bytes type)/$(jv "$T/root.json" containers.0.memory.oom_kills type)" "integer/integer/integer"
+chk "the memory and process ceilings are a number or none" "$(int_or_none "$(jv "$T/root.json" containers.0.memory.limit_bytes)")/$(int_or_none "$(jv "$T/root.json" containers.0.pids.limit)")" "ok/ok"
+chk "CPU used and processes running are numbers" "$(jv "$T/root.json" containers.0.cpu.usage_usec type)/$(jv "$T/root.json" containers.0.pids.current type)" "integer/integer"
+chk "bytes sent is a number" "$(jv "$T/root.json" containers.0.net_tx_bytes type)" "integer"
+chk "disk is the sum of the site's volumes, measured" "$(jv "$T/root.json" containers.0.disk_bytes)" "$(( $(du -s -B1 "$T/vol/one_data" | cut -f1) + $(du -s -B1 "$T/vol/one_uploads" | cut -f1) ))"
+chk "a site with no process says unknown for every figure" "$(jv "$T/root.json" containers.1.started_at)/$(jv "$T/root.json" containers.1.memory.used_bytes)/$(jv "$T/root.json" containers.1.cpu.usage_usec)/$(jv "$T/root.json" containers.1.net_tx_bytes)" "unknown/unknown/unknown/unknown"
+chk "a site with no volumes has no disk figure" "$(jv "$T/root.json" containers.1.disk_bytes)" "unknown"
 chk "sshd carries the compiled keys, in order" "$(jv "$T/root.json" sshd keys)" "password_authentication,permit_root_login,pubkey_authentication,kbd_interactive_authentication,max_auth_tries,ports,allow_users,allow_groups"
 chk "sshd auth methods and tries" "$(jv "$T/root.json" sshd.pubkey_authentication)/$(jv "$T/root.json" sshd.kbd_interactive_authentication)/$(jv "$T/root.json" sshd.max_auth_tries)" "yes/no/6"
 chk "sshd ports are every port line" "$(jv "$T/root.json" sshd.ports)" '["22","2222"]'
@@ -352,6 +387,8 @@ chk "the name cap is 64" "$(grep -c '^MAX_NAME=64' "$SCRIPT")" "1"
 chk "sshd is invoked once, read-only (-T)" "$(grep -o 'run sshd[^)]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run sshd -T "
 chk "openssl only reads: s_client and x509 -noout" "$(grep -o 'run openssl [a-z_0-9]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run openssl s_client run openssl x509 "
 chk "no docker verb but ps, inspect and port" "$(grep -o 'run docker [a-z]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run docker inspect run docker port run docker ps "
+chk "du runs once, summarising (-s), under the command timeout" "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c '\bdu ')/$(grep -c 'run du -s -B1 -- ' "$SCRIPT")" "1/1"
+chk "a container's figures come from its cgroup, never from docker stats or exec" "$(grep -c -E 'docker (stats|exec)' "$SCRIPT")" "0"
 chk "curl is only ever asked for headers, body discarded" "$(grep -c 'run curl' "$SCRIPT")/$(grep 'run curl' "$SCRIPT" | grep -c -- '-o /dev/null -D -')" "3/3"
 chk "no systemctl verb but show and list" "$(grep -o 'systemctl [a-z-]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "systemctl list-unit-files systemctl list-units systemctl show "
 chk "no fail2ban-client verb but status" "$(grep -o 'fail2ban-client [a-z]\+' "$SCRIPT" | sort -u | tr '\n' ' ')" "fail2ban-client status "

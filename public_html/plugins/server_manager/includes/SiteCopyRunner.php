@@ -1203,8 +1203,9 @@ class SiteCopyRunner {
 			return 'the copy\'s server did not report its disk';
 		}
 		$t_mem = (int)($t['memory']['total_bytes'] ?? 0);
-		// A container reports its whole shared server's memory, not the
-		// site's, so a container site may be copied onto a smaller server.
+		// A container reports its share of a shared server (its limit, or the
+		// whole server where it has none), so a container site may be copied
+		// onto a smaller server.
 		$s_mem = (is_array($s) && trim((string)$source->get('mgn_container_name')) === '') ? (int)($s['memory']['total_bytes'] ?? 0) : 0;
 		if ($s_mem > 0 && $t_mem > 0 && $t_mem < $s_mem * 0.9) {
 			return 'the copy\'s server has ' . BackupRunner::human($t_mem) . ' of memory and the source has '

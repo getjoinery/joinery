@@ -1,6 +1,9 @@
 # Multi-tenant Docker hosts: limits and isolation for many sites on one box
 
-**Status:** Draft, 2026-10-04. Nothing here is built. Split out of the starter
+**Status:** Draft, 2026-10-04. WP1 built 2026-10-05 (uncommitted; host_report.sh
+1.7, JobResultProcessor 1.55, node overview 1.37, stats_handler 1.4, agent
+check_status); its week of measurement starts once it is released to
+docker-prod and the agent is released. Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -102,6 +105,13 @@ so after WP4 it reports the site's allowance.
 
 The node page's overview shows each site's line on its host, and an OOM kill
 count above zero shows in amber.
+
+**Built 2026-10-05.** Disk is one `du -s` over every site's named volumes per
+report (0.8 s for 8 sites on docker-prod), until WP4's quota report replaces it.
+Each container also reports its processes against their ceiling, which WP3's
+pids limit is set from. A one-off read of docker-prod on 2026-10-05 (8 idle
+sites, up 6 days, no limits): 111-208 MB in use, peaks 474-973 MB since start,
+75 processes each, about 3% of a core each on average.
 
 **This WP is also the measurement.** Run it on docker-prod for a week and set
 the starting caps from what it shows: peak memory during an upgrade, a backup

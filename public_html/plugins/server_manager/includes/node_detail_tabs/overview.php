@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.37 - each site container shows its own figures (memory, peak, CPU, traffic, disk,
+ *                 processes, an amber count of out-of-memory kills) on its server's page, and a
+ *                 container site's page shows its own line from its server's report
  * @version 1.36 - the old machine of a switch-over shows beside its site whether the domain still reaches it
  *                 (MovedSiteCheck): the stored answer at once, asked again when stale, and Check again
  * @version 1.35 - Permanently Delete Site on the old machine of a switch-over says the host checks the domain
@@ -712,6 +715,42 @@
 	};
 	$size = function ($bytes) { return htmlspecialchars(JobResultProcessor::format_size((int)$bytes)); };
 	$have = function ($g) { return is_array($g) && is_int($g['used_bytes'] ?? null) && is_int($g['total_bytes'] ?? null); };
+	// A site container's own figures from its server's host report (host_report
+	// 1.7): memory in use against its limit and its peak since it started, CPU
+	// and bytes sent since the report before, the disk its volumes hold, and how
+	// many times the kernel killed a process in it for memory, amber above zero.
+	$site_figures = function ($c) use ($size, $hr_when) {
+		if (!is_array($c) || !isset($c['memory'])) { return ''; }
+		$m = $c['memory'];
+		$parts = [];
+		if (is_int($m['used_bytes'])) {
+			$limit = $m['limit_bytes'] === 'none' ? 'no limit' : (is_int($m['limit_bytes']) ? $size($m['limit_bytes']) . ' limit' : 'limit unknown');
+			$parts[] = 'Memory ' . $size($m['used_bytes']) . ' (' . $limit . ')';
+		}
+		if (is_int($m['peak_bytes'])) {
+			$parts[] = 'peak ' . $size($m['peak_bytes']) . (is_int($c['started_at']) ? ' since it started ' . htmlspecialchars($hr_when($c['started_at'])) : '');
+		}
+		$since = $c['since_last'] ?? null;
+		if (is_array($since)) {
+			$mins = max(1, (int)round($since['seconds'] / 60));
+			$parts[] = 'CPU ' . round($since['cpu_millicores'] / 10, 1) . '% of a core and ' . $size($since['net_tx_bytes'])
+				. ' sent over the last ' . ($mins >= 120 ? round($mins / 60) . ' hours' : $mins . ' min');
+		} else {
+			$parts[] = 'CPU and traffic arrive with the next report';
+		}
+		if (is_int($c['disk_bytes'])) {
+			$parts[] = 'Disk ' . $size($c['disk_bytes']);
+		}
+		if (is_int($c['pids']['current'] ?? null)) {
+			$parts[] = (int)$c['pids']['current'] . ' processes' . (is_int($c['pids']['limit']) ? ' of ' . (int)$c['pids']['limit'] : '');
+		}
+		$html = '<div class="small text-muted">' . implode(' · ', $parts) . '</div>';
+		if (is_int($m['oom_kills']) && $m['oom_kills'] > 0) {
+			$html .= '<div class="mt-1"><span class="badge bg-warning" title="Times the kernel killed a process in this site for running out of memory, since it started">'
+				. (int)$m['oom_kills'] . ' killed for memory</span></div>';
+		}
+		return $html;
+	};
 
 	if ($status_data || $hr) {
 		$page->begin_box(['title' => 'Health']);
@@ -780,6 +819,34 @@
 				$gauge('Load', null, '', htmlspecialchars((string)$status_data['load_1m']), $loads
 					. '<br>Its processor count arrives with the node\'s next release, and with it a bar.');
 			}
+		}
+		// A site on a shared server: its own line from the server's host report,
+		// since a container's own figures cannot see its limit's kills or its disk.
+		$cname = trim((string)$node->get('mgn_container_name'));
+		$on_host = null;
+		$host_node = null;
+		if ($cname !== '' && (int)$node->get('mgn_mgh_managed_host_id')) {
+			try {
+				$host_node = (new ManagedHost((int)$node->get('mgn_mgh_managed_host_id'), TRUE))->host_node();
+			} catch (Exception $e) {
+				$host_node = null;
+			}
+			if ($host_node && (int)$host_node->key !== (int)$node->key) {
+				$host_hr = json_decode((string)$host_node->get('mgn_last_host_report'), true);
+				$host_hr = is_array($host_hr) ? JobResultProcessor::sanitise_host_report($host_hr) : null;
+				foreach ((is_array($host_hr['containers'] ?? null) ? $host_hr['containers'] : []) as $c) {
+					if ($c['name'] === $cname) { $on_host = $c; break; }
+				}
+			}
+		}
+		if ($on_host && isset($on_host['memory'])) {
+			$m = $on_host['memory'];
+			$pct = (is_int($m['used_bytes']) && is_int($m['limit_bytes']) && $m['limit_bytes'] > 0)
+				? (int)round($m['used_bytes'] * 100 / $m['limit_bytes']) : null;
+			$big = is_int($m['used_bytes']) ? $size($m['used_bytes']) : 'unknown';
+			$gauge('On its server', $pct, $pct === null ? '' : $gauge_class($pct), $big, $site_figures($on_host)
+				. '<div class="small text-muted mt-1">From <a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$host_node->key . '">'
+				. htmlspecialchars((string)$host_node->get('mgn_name')) . '</a>\'s report.</div>');
 		}
 		echo '</div>';
 
@@ -905,7 +972,7 @@
 					} else {
 						$ctext = 'Running'; $ccls = 'success';
 					}
-					echo '<tr><td>' . $hr_str($c['name']) . '</td><td><span class="badge bg-' . $ccls . '">' . $hr_str($ctext) . '</span></td><td class="text-end">';
+					echo '<tr><td>' . $hr_str($c['name']) . $site_figures($c) . '</td><td><span class="badge bg-' . $ccls . '">' . $hr_str($ctext) . '</span></td><td class="text-end">';
 					if ($can_restart_c) {
 						$form_id = 'nodeActionRestartContainer_' . $c['name'];
 						$confirm = 'Restart the container ' . $c['name'] . '? The site is down while it restarts; its data and volumes are kept.';
