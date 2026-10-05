@@ -3,6 +3,12 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.1 - --cpus and --pids-limit (WP3): run_spec_norm_pids, and a CPU ceiling
+#                is checked against the CPUs Docker counts, since it refuses one above them,
+#                by every builder of run arguments (run_spec_args) and by run_spec_fits_host,
+#                which the rebase and move scripts run before they stop anything.
+#                Adopt guards each len against Docker's nil lists (a real container has
+#                no CapAdd) and stops when any read of the container fails.
 # Version: 1.0
 #
 # A container's limits live in its `docker run` arguments and nowhere else, so
@@ -22,7 +28,7 @@
 #   restart=unless-stopped
 #   memory=256m          empty: no limit
 #   cpus=1.0             empty: no ceiling
-#   pids_limit=512       empty: Docker's default
+#   pids_limit=512       empty: no ceiling
 #   publish=127.0.0.1:8087:80       one line per published port; [v6]:h:c and /udp allowed
 #   volume=mysite_code:/var/www/html/mysite/public_html    one line per volume, :ro allowed
 #
@@ -109,12 +115,54 @@ run_spec_norm_memory() {  # VALUE
 }
 
 # A CPU ceiling in cores (1, 1.0, .5, 1.50) as a plain decimal; none or 0 is
-# no ceiling, printed as nothing.
+# no ceiling, printed as nothing. Returns 1 for what Docker would refuse
+# anywhere, which is anything under 0.01.
 run_spec_norm_cpus() {  # VALUE
     local v="$1"
     case "$v" in ''|none|0) return 0 ;; esac
     [[ "$v" =~ ^([0-9]+(\.[0-9]*)?|\.[0-9]+)$ ]] || return 1
-    awk -v n="$v" 'BEGIN { if (n <= 0) exit 1; s = sprintf("%.3f", n); sub(/0+$/, "", s); sub(/\.$/, ".0", s); print s }'
+    awk -v n="$v" 'BEGIN { if (n < 0.01) exit 1; s = sprintf("%.3f", n); sub(/0+$/, "", s); sub(/\.$/, ".0", s); print s }'
+}
+
+# The number of CPUs Docker counts on this host, which is what it compares a
+# CPU ceiling with (nproc can be told otherwise, by OMP_NUM_THREADS for one).
+run_spec_host_cpus() {
+    local n
+    n="$(docker info -f '{{.NCPU}}' 2>/dev/null)"
+    [[ "$n" =~ ^[1-9][0-9]*$ ]] || return 1
+    echo "$n"
+}
+
+# Whether this host can give a CPU ceiling: Docker refuses --cpus above the
+# number of CPUs it counts, so a ceiling recorded on a bigger machine, or before
+# this one was resized down, would leave a rebuilt site removed and not run.
+# Fails closed when Docker's count cannot be read.
+run_spec_cpus_fit() {  # CPUS (normalised; empty fits)
+    local h
+    [[ -z "$1" ]] && return 0
+    h="$(run_spec_host_cpus)" || return 1
+    awk -v n="$1" -v h="$h" 'BEGIN { exit !(n <= h) }'
+}
+
+# A spec file this host can run, said in plain words when it cannot: every
+# caller about to stop a container to recreate it from the spec asks first.
+# The way out for a site's own spec is install.sh; a caller holding a kept copy
+# names its own.
+run_spec_fits_host() {  # PATH [WAY_OUT]
+    local cpus
+    cpus="$(sed -n 's/^cpus=//p' "$1" | tail -1)"
+    run_spec_cpus_fit "$cpus" && return 0
+    echo "run spec: ${1} sets a CPU ceiling of ${cpus}, more than this host has (CPUs: $(run_spec_host_cpus || echo unknown)), so Docker would refuse to run it. ${2:-Rebuild the site with install.sh site --cpus set to one that fits, or --cpus=none}, then run this again" >&2
+    return 1
+}
+
+# A process ceiling (a whole number of processes and threads, which is what
+# the cgroup counts); none or 0 is no ceiling, printed as nothing.
+run_spec_norm_pids() {  # VALUE
+    local v="$1"
+    case "$v" in ''|none|0) return 0 ;; esac
+    [[ "$v" =~ ^[0-9]{1,9}$ ]] || return 1
+    printf '%d' "$((10#$v))"
 }
 
 # A spec's lines, checked one by one: a value that would not be one docker
@@ -126,7 +174,7 @@ run_spec_check_line() {  # LINE
         hostname)     [[ "$v" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,62}$ ]] ;;
         restart)      [[ "$v" =~ ^(no|always|unless-stopped|on-failure)$ ]] ;;
         memory)       [[ -z "$v" || "$v" =~ ^[0-9]+[bkmg]?$ ]] ;;
-        cpus)         [[ -z "$v" || "$v" =~ ^[0-9]*\.?[0-9]+$ ]] ;;
+        cpus)         [[ -z "$v" ]] || { [[ "$v" =~ ^([0-9]+(\.[0-9]*)?|\.[0-9]+)$ ]] && awk -v n="$v" 'BEGIN { exit !(n >= 0.01) }'; } ;;
         pids_limit)   [[ -z "$v" || "$v" =~ ^[1-9][0-9]*$ ]] ;;
         publish)      [[ "$v" =~ ^((([0-9]{1,3}\.){3}[0-9]{1,3}|\[[0-9A-Fa-f:.]+\]):)?[0-9]{1,5}:[0-9]{1,5}(/(tcp|udp))?$ ]] ;;
         volume)       [[ "$v" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*:/[A-Za-z0-9_./-]+(:(ro|rw))?$ ]] ;;
@@ -223,6 +271,7 @@ run_spec_args() {  # SITE
     local site="$1" p v
     p="$(run_spec_path "$site")" || return 1
     run_spec_check_file "$p" || return 1
+    run_spec_fits_host "$p" || return 1
     printf '%s\0' --name "$site" --hostname "$(run_spec_get "$site" hostname)"
     v="$(run_spec_get "$site" restart)"
     [[ -n "$v" && "$v" != "no" ]] && printf '%s\0' --restart "$v"
@@ -270,15 +319,22 @@ run_spec_remove() {  # SITE
 # the spec is permanent, so a silent loss here would be a loss for good.
 run_spec_adopt() {  # SITE
     local site="$1" mem swap cpus nano pids restart retries hip hport cport proto type name dest rw
-    local priv netmode ncap nhosts ndev quota cpuset problems=""
+    local priv netmode ncap nhosts ndev quota cpuset problems="" host_config ports mounts hostname
     run_spec_exists "$site" && return 0
     docker inspect "$site" > /dev/null 2>&1 || { echo "run spec: no container ${site} to adopt" >&2; return 1; }
-    IFS='|' read -r priv netmode ncap nhosts ndev quota cpuset retries swap < <(docker inspect -f \
-        '{{.HostConfig.Privileged}}|{{.HostConfig.NetworkMode}}|{{len .HostConfig.CapAdd}}|{{len .HostConfig.ExtraHosts}}|{{len .HostConfig.Devices}}|{{.HostConfig.CpuQuota}}|{{.HostConfig.CpusetCpus}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}|{{.HostConfig.MemorySwap}}' "$site")
-    mem="$(docker inspect -f '{{.HostConfig.Memory}}' "$site")"
-    nano="$(docker inspect -f '{{.HostConfig.NanoCpus}}' "$site")"
-    pids="$(docker inspect -f '{{if .HostConfig.PidsLimit}}{{.HostConfig.PidsLimit}}{{end}}' "$site")"
-    restart="$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$site")"
+    # Every read must succeed: a template Docker cannot execute prints nothing,
+    # and empty fields would read as no limit. A list Docker leaves unset is
+    # nil, which len refuses, so each len is guarded.
+    host_config="$(docker inspect -f '{{.HostConfig.Privileged}}|{{.HostConfig.NetworkMode}}|{{if .HostConfig.CapAdd}}{{len .HostConfig.CapAdd}}{{else}}0{{end}}|{{if .HostConfig.ExtraHosts}}{{len .HostConfig.ExtraHosts}}{{else}}0{{end}}|{{if .HostConfig.Devices}}{{len .HostConfig.Devices}}{{else}}0{{end}}|{{.HostConfig.CpuQuota}}|{{.HostConfig.CpusetCpus}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}|{{.HostConfig.MemorySwap}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{if .HostConfig.PidsLimit}}{{.HostConfig.PidsLimit}}{{end}}|{{.HostConfig.RestartPolicy.Name}}|{{.Config.Hostname}}' "$site")" \
+        && ports="$(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$site")" \
+        && mounts="$(docker inspect -f '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$site")" \
+        || { echo "run spec: could not read ${site}'s settings from Docker; nothing was changed" >&2; return 1; }
+    IFS='|' read -r priv netmode ncap nhosts ndev quota cpuset retries swap mem nano pids restart hostname <<< "$host_config"
+    if [[ ! "$priv" =~ ^(true|false)$ || -z "$hostname" || ! "$mem" =~ ^[0-9]+$ || ! "$nano" =~ ^[0-9]+$ \
+          || ! "$quota" =~ ^-?[0-9]+$ || ! "$retries" =~ ^[0-9]+$ ]]; then
+        echo "run spec: Docker's account of ${site} was not in the expected form ('${host_config:0:120}'); nothing was changed" >&2
+        return 1
+    fi
     [[ "$priv" == "true" ]] && problems="${problems}; privileged"
     case "$netmode" in ''|default|bridge) ;; *) problems="${problems}; network ${netmode}" ;; esac
     [[ "${ncap:-0}" == 0 ]] || problems="${problems}; added capabilities"
@@ -297,14 +353,14 @@ run_spec_adopt() {  # SITE
     while IFS='|' read -r type name dest rw; do
         [[ -z "$type" ]] && continue
         [[ "$type" == "volume" ]] || problems="${problems}; a ${type} mount at ${dest}"
-    done < <(docker inspect -f '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$site")
+    done <<< "$mounts"
     if [[ -n "$problems" ]]; then
         echo "run spec: ${site}'s container has what a run spec cannot carry: ${problems#; }. Recreating it would lose that; nothing was changed. Remove what is named from the container (or recreate it without it), then run this again" >&2
         return 1
     fi
     {
         printf 'spec_version=%s\n' "$RUN_SPEC_VERSION"
-        printf 'hostname=%s\n' "$(docker inspect -f '{{.Config.Hostname}}' "$site")"
+        printf 'hostname=%s\n' "$hostname"
         printf 'restart=%s\n' "${restart:-no}"
         printf 'memory=%s\ncpus=%s\npids_limit=%s\n' "$mem" "$cpus" "$pids"
         while IFS='|' read -r hip hport cport; do
@@ -312,11 +368,11 @@ run_spec_adopt() {  # SITE
             proto="${cport#*/}"; [[ "$proto" == "$cport" ]] && proto="tcp"
             [[ "$hip" == *:* ]] && hip="[${hip}]"
             printf 'publish=%s%s:%s%s\n' "${hip:+${hip}:}" "$hport" "${cport%%/*}" "$([[ "$proto" == tcp ]] || echo "/${proto}")"
-        done < <(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$site")
+        done <<< "$ports"
         while IFS='|' read -r type name dest rw; do
             [[ "$type" == "volume" && -n "$name" ]] || continue
             printf 'volume=%s:%s%s\n' "$name" "$dest" "$([[ "$rw" == false ]] && echo ':ro')"
-        done < <(docker inspect -f '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$site")
+        done <<< "$mounts"
     } | run_spec_write "$site"
 }
 

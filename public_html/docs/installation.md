@@ -225,6 +225,18 @@ Each site needs unique ports. The installer detects conflicts and suggests the n
 | site2  | 8081     | 9081    |
 | site3  | 8082     | 9082    |
 
+### Limits
+
+Each site container can be given limits, so one site cannot use up the machine:
+
+| Option | Limits | Default |
+|---|---|---|
+| `--memory=SIZE` | memory, in Docker's syntax (`512m`, `1G`); swap is held to the same figure | none |
+| `--cpus=N` | CPU, in cores (`1.0` is at most one core) | none |
+| `--pids-limit=N` | processes and threads together; at least 128 | 512 for a new site |
+
+Under load, sites already share the CPU evenly, whatever their ceilings. The limits are recorded in the site's run spec, so a rebuild keeps them; give an option again to change one, or `none` to lift it. A limit is refused before anything stops if Docker would refuse it, such as a CPU ceiling above the machine's CPUs. A bare-metal site has no container, so the options are refused there. See [Deploy and Upgrade](deploy_and_upgrade.md) for the run spec and how PostgreSQL sizes itself from the memory budget.
+
 ### Volume mounts
 
 | Volume                 | Container path                | Purpose                |

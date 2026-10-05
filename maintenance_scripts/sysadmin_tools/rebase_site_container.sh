@@ -2,6 +2,10 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.9 - prepare, swap and rollback check the run spec against the CPUs Docker counts
+#                before anything stops (run_spec_fits_host). swap removed the container and
+#                the database volume before install.sh refused the ceiling, and rollback's
+#                docker run was refused the same way. The plan says none for no process limit.
 # Version: 1.8 - The container is rebuilt from its run spec (_site_run_spec.sh; specs/
 #                multi_tenant_docker_hosts.md WP0), so its limits survive the move: install.sh
 #                reads the spec, and rollback recreates the old container from the copy kept at
@@ -185,6 +189,7 @@ save_run_spec() {
     tmp="$(mktemp "${WORK}/.run_spec.XXXXXX")" || return 1
     if ! cp "$(run_spec_path "$SITE")" "$tmp"; then rm -f "$tmp"; return 1; fi
     if ! run_spec_check_file "$tmp"; then rm -f "$tmp"; return 1; fi
+    if ! run_spec_fits_host "$tmp"; then rm -f "$tmp"; return 1; fi
     chmod 600 "$tmp" || { rm -f "$tmp"; return 1; }
     mv -f "$tmp" "${WORK}/run_spec" || return 1
     run_spec_save_env "$SITE" "${WORK}/env"
@@ -545,7 +550,7 @@ if [ "$STAGE" = "prepare" ]; then
     if [ -n "$EXTRA_PORTS" ]; then
         echo "  also publishes${EXTRA_PORTS}: the run spec carries it, so the rebuild keeps it"
     fi
-    echo "  limits (from the run spec, kept by the rebuild): memory $(run_spec_get "$SITE" memory | sed 's/^$/none/'), cpus $(run_spec_get "$SITE" cpus | sed 's/^$/none/'), processes $(run_spec_get "$SITE" pids_limit | sed 's/^$/default/')"
+    echo "  limits (from the run spec, kept by the rebuild): memory $(run_spec_get "$SITE" memory | sed 's/^$/none/'), cpus $(run_spec_get "$SITE" cpus | sed 's/^$/none/'), processes $(run_spec_get "$SITE" pids_limit | sed 's/^$/none/')"
     echo "  $(wc -l < "${WORK}/counts.prepare.tsv") tables; trial dump $(awk -v b="$DUMP_BYTES" 'BEGIN { printf "%.1f", b / 1000000 }') MB in $((T1 - T0)) s"
     echo "  roles beyond postgres: $(grep -c '^CREATE ROLE' "${WORK}/roles.sql" || true)"
     if [ -n "$DROPPED_DB" ]; then
@@ -697,6 +702,7 @@ if [ "$STAGE" = "rollback" ]; then
     fi
     [ -f "${WORK}/env" ] || die "no kept environment for ${SITE} in ${WORK}; nothing was changed"
     run_spec_check_file "${WORK}/run_spec" || die "no usable kept run spec for ${SITE} in ${WORK}; nothing was changed"
+    run_spec_fits_host "${WORK}/run_spec" "Lower or remove the cpus= line in that kept copy" || die "this host cannot run ${SITE}'s kept run spec as it is; nothing was changed"
     say "Removing the rebuilt container and its database volume"
     docker stop "$SITE" > /dev/null 2>&1 || true
     docker rm "$SITE" > /dev/null 2>&1 || true

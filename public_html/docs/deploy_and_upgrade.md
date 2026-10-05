@@ -926,6 +926,21 @@ that was fitting fine, so it is a decision for whoever knows how many sites shar
 On any host running more than one site it is worth setting — it is the only thing that tells
 each container what share of the host is its own.
 
+**CPU and process ceilings.** `install.sh site --cpus=N` caps the container at N cores
+(`1.0`, `0.5`; at least `0.01`), and PostgreSQL's parallel workers follow it
+(`tune_postgres_memory.sh` reads `cpu.max`). Without a ceiling, sites on a busy host still share
+the CPU evenly, because Docker gives every container the same weight. `--pids-limit=N` caps the
+container's processes and threads together, so a fork bomb stops there. A new site gets 512;
+an idle site runs 54 to 75 processes and threads, so a value below 128 is refused because the
+site would not start. Both are recorded in the run spec like the memory budget: a rebuild keeps
+them, a rebuild given the option records the new value, and `none` lifts either. A bad value is
+refused before anything is stopped, and the message says whether it came from the option or the
+run spec. A CPU ceiling above the CPUs Docker counts on the host (`docker info`'s `NCPU`) is
+refused the same way, since Docker would refuse it only after the old container was gone; the
+rebase and code-volume scripts check the spec for this before they stop anything too.
+`docker update --cpus=N NAME` changes a running container until its next rebuild. On a
+bare-metal site all three options are refused.
+
 **The run spec.** A Docker host keeps one file per site, `/etc/joinery/sites/{site}/run_spec`,
 that records how its container is run: hostname, restart policy, memory, CPU and process
 limits, published ports and volumes. It holds no secret; the environment travels as an env

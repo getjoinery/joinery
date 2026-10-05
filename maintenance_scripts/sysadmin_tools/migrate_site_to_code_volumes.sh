@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # migrate_site_to_code_volumes.sh — move a site's code onto named volumes.
 #
+# Version: 1.2 - The run spec is checked against the CPUs Docker counts before anything stops
+#                (run_spec_fits_host): a CPU ceiling above them was refused by Docker only
+#                after the old container was removed.
 # Version: 1.1 - The container is recreated from its run spec (_site_run_spec.sh; specs/
 #                multi_tenant_docker_hosts.md WP0), with the new volumes added to it, so its
 #                limits survive. prepare records the spec from the container if it has none.
@@ -135,6 +138,7 @@ if [ "$STAGE" = "prepare" ]; then
         run_spec_adopt "$SITE" || die "could not record ${SITE}'s run spec from its container"
         say "Recorded ${SITE}'s run spec from its container: $(run_spec_path "$SITE")"
     fi
+    run_spec_fits_host "$(run_spec_path "$SITE")" || die "this host cannot run ${SITE}'s run spec as it is"
 
     : > "$STATE_FILE"
     echo "version=${VERSION}" >> "$STATE_FILE"
@@ -242,6 +246,9 @@ say "Volumes re-verified"
 
 IMAGE=$(docker inspect -f '{{.Config.Image}}' "$SITE")
 run_spec_exists "$SITE" || die "${SITE} has no run spec; run prepare again"
+# Checked before the spec or the container is touched: Docker would refuse the
+# new container only after the old one was removed.
+run_spec_fits_host "$(run_spec_path "$SITE")" || die "this host cannot run ${SITE}'s run spec as it is; nothing was changed"
 
 # The environment is the container's own, carried as an env file (mode 600: it
 # holds the database password), never as arguments.
