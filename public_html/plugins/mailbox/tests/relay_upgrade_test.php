@@ -29,8 +29,12 @@
  *   - Queue depth is emitted at one tenant and withheld at two — on a shard the
  *     Postfix queue is shared, so its depth reads out other tenants' volume.
  *
+ *   - A relay that answers /health is watched there, never by dialling port 25:
+ *     no machine of ours dials 25, so a plane that did would call every relay down.
+ *
  * Run: php plugins/mailbox/tests/relay_upgrade_test.php
  *
+ * @version 1.1 - how the plane watches a relay (uptimeCheckFor, ANSWERS_HEALTH)
  * @version 1.0
  */
 
@@ -52,6 +56,9 @@ class RelayUpgradeTest {
 
 		section('Which control is offered');
 		$this->assertOffers();
+
+		section('How the plane watches a relay');
+		$this->assertUptimeCheck();
 
 		section('Queue depth is gated on a fleet-of-one');
 		$this->assertQueueGate();
@@ -140,6 +147,44 @@ class RelayUpgradeTest {
 		// label; the honest reading is that the DEPLOYMENT is behind.
 		check(!RelayVersion::offersUpgrade(RelayVersion::AHEAD),
 			'ahead offers nothing — the site is the thing that is behind');
+	}
+
+	/**
+	 * A relay from 3.7 dials its own Postfix and answers GET /health; the plane
+	 * asks there over HTTPS. Only a relay too old to answer keeps the port 25
+	 * check, until its update re-attaches it.
+	 */
+	private function assertUptimeCheck() {
+		$new = RelayCloudProvisioner::uptimeCheckFor('mx.example.test', '3.7');
+		$this->eq('http_status', $new['mgn_uptime_check_type'] ?? null, 'a 3.7 relay is checked over HTTP');
+		$this->eq('https://mx.example.test/health', $new['mgn_health_check_url'] ?? null,
+			'at /health under its mail hostname');
+		check(array_key_exists('mgn_uptime_tcp_port', $new) && $new['mgn_uptime_tcp_port'] === null,
+			'and its port 25 setting is cleared');
+
+		$this->eq('http_status', RelayCloudProvisioner::uptimeCheckFor('mx.example.test', '3.10')['mgn_uptime_check_type'],
+			'3.10 answers /health too (version_compare, not text)');
+
+		$old = RelayCloudProvisioner::uptimeCheckFor('mx.example.test', '3.6');
+		$this->eq('tcp_port', $old['mgn_uptime_check_type'], 'a 3.6 relay has no /health, so it keeps the TCP check');
+		$this->eq(25, $old['mgn_uptime_tcp_port'], 'on port 25');
+		check(array_key_exists('mgn_health_check_url', $old) && $old['mgn_health_check_url'] === null,
+			'with no health URL left over');
+
+		$this->eq('tcp_port', RelayCloudProvisioner::uptimeCheckFor('mx.example.test', '')['mgn_uptime_check_type'],
+			'an unknown version is not assumed to answer /health');
+		$this->eq('tcp_port', RelayCloudProvisioner::uptimeCheckFor('', '3.7')['mgn_uptime_check_type'],
+			'no mail hostname leaves nothing to ask over HTTPS');
+
+		check(RelayVersion::answersHealth(RelayVersion::shipped()),
+			'the relay this release builds answers /health, so none is born watched on port 25');
+
+		// The attach path takes its columns from uptimeCheckFor and nowhere else.
+		$source = (string)file_get_contents(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
+		check(strpos($source, 'self::uptimeCheckFor($hostname, $d[\'relay_version\'])') !== false,
+			'attachNode sets the check from uptimeCheckFor');
+		check(preg_match('/->set\(\s*\'mgn_uptime_tcp_port\'/', $source) === 0,
+			'nothing in the provisioner sets port 25 directly');
 	}
 
 	// ------------------------------------------------------------- queue depth

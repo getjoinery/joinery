@@ -14,6 +14,9 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.7 - GET /health on the 443 listener, open to all: the relay dials its own Postfix
+#                over the loopback and answers 200 or 503 with disk and memory, so the
+#                management node watches it without dialling port 25 (relay_health.go)
 # Version: 3.6 - a message may be 25 MiB, the size the sealer seals (Postfix's own default
 #                refused anything over 10 MB), and a bare line feed can no longer end a
 #                message (smtpd_forbid_bare_newline, the SMTP smuggling guard).
@@ -79,7 +82,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.6"
+RELAY_VERSION="3.7"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"

@@ -799,7 +799,10 @@ func postfixCounts(oneTenant bool, postfixDir string) postfixStatus {
 	for _, line := range strings.Split(out, "\n") {
 		switch {
 		case strings.Contains(line, "postfix/smtpd") && strings.Contains(line, ": connect from "):
-			ps.Connections1h++
+			// The /health self-test connects over the loopback; it is not mail.
+			if !isLoopbackConnect(line) {
+				ps.Connections1h++
+			}
 		case strings.Contains(line, "postfix/smtpd") && strings.Contains(line, ": client="):
 			accepted++
 			if f := strings.Fields(line); len(f) > 0 {
@@ -820,6 +823,12 @@ func postfixCounts(oneTenant bool, postfixDir string) postfixStatus {
 		}
 	}
 	return ps
+}
+
+// isLoopbackConnect: a Postfix "connect from" line whose client is this
+// machine, such as localhost[127.0.0.1] or localhost[::1].
+func isLoopbackConnect(line string) bool {
+	return strings.Contains(line, "[127.") || strings.Contains(line, "[::1]")
 }
 
 func postfixQueueDepth() (int, bool) {

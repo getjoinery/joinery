@@ -285,11 +285,10 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 
 	/**
 	 * tcp_port check: open a TCP connection to the node's host on the
-	 * configured port. For services with no web endpoint — an inbound mail
-	 * relay is proven alive by accepting connections on 25, which is exactly
-	 * what it exists to do. A refused or timed-out connection is down. The one
-	 * inconclusive case is a host given as a name that this machine cannot
-	 * resolve — nothing was ever dialled, so there is no result to report.
+	 * configured port, for a service with no health document. A refused or
+	 * timed-out connection is down. The one inconclusive case is a host given
+	 * as a name that this machine cannot resolve — nothing was ever dialled,
+	 * so there is no result to report.
 	 */
 	private function check_tcp_port($node): array {
 		return $this->from_probe($node, NodeHealthProbe::tcp($node, self::TIMEOUT_SECONDS));

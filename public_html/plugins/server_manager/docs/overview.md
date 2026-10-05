@@ -400,6 +400,8 @@ Scope is the core release. A plugin or theme carries its own manifest, and a nod
 
 **The state is visible without opening a job.** A node reports `script_trust` on every poll, and a refusal that carries either wording is classified and stamped on the node as it arrives (`mgn_script_trust`, with when it was first seen, the reason verbatim, and the job type that refused). The dashboard names such nodes above the backup alarm, because failing backups there are a symptom. A node's own report wins over a stale refusal in both directions for the manifest. The report says nothing about individual files, so a file that does not match its release stays flagged until the job type that refused completes; an absent report — an older agent, a machine with no site whose bundle has not landed yet — is left alone and never reads as healthy. A machine with no site reports on the support bundle, the tree it actually runs scripts from, so it sets and clears the state the way a site node does.
 
+**The publishing site's own commits are not tampering.** The site that signs releases runs from the tree it signs, and its live manifest is rewritten only when it publishes, so a script committed in between is refused until the next publish. When a file refusal arrives for this management node's own record, this site re-signs its own tree on publish (`TreeManifestPublisher::signsItsOwnTree()`), and the refused file is tracked and identical to its last git commit, the state is `unpublished_file` instead (`NodeMonitorHealth::committed_after_publish()`). It shows on the node page as a warning, is not listed with the nodes that can no longer be managed and raises no incident, and clears the same way when the job type completes after the publish. An uncommitted edit, a file git does not track, any other node, or a site that cannot sign its own tree keeps `untrusted_file`.
+
 The support bundle closes that. A publish builds `public_html/agent_dist/support_bundle.tar.gz`: a small tree carrying the scripts those machines' primitives invoke, at site-root-relative paths, with its own `RELEASE_MANIFEST` and `.sig` signed by the release key. A siteless machine fetches it over the same artifact endpoint, verifies the signature against its baked-in key, checks every listed file's hash **and** that the tree holds nothing the manifest does not list, then unpacks it root-owned to `/opt/joinery-agent/tree`. Script primitives resolve against that tree when there is no site root; a machine with a site root uses the site root, and a machine with neither refuses as it always has.
 
 The bundle carries the host installers and nothing that reads a site, so a site question never goes to a machine in machine posture: the status processor asks a node for its recovery key only where `ManagedNode::hosts_site()` says there is a site to ask about, the same test the recovery-key page applies before calling a node not applicable. A site primitive that reaches such a machine anyway is refused as a posture, in words the trust classifier leaves alone ("this machine has no site, and its support bundle does not carry ..."), never as a file that fails its release.
@@ -1904,8 +1906,10 @@ the machine publishes about itself over HTTP, or establishes that it answers on
 its port, then folds the figures onto the node and writes the row in a terminal
 state. This is how a machine that carries no agent and hosts no site is asked
 about itself: the ScrollDaddy DNS servers report their own disk and memory in
-their `/health` document, and the mail relay proves it is alive by accepting
-connections on port 25, which is what it exists to do.
+their `/health` document, and so does the mail relay: it dials its own Postfix
+over the loopback and answers 200 or 503, with its disk and memory. No machine
+of ours dials port 25, so this plane never connects to a relay's port 25; a relay
+too old to answer `/health` keeps a TCP check on 25 until its update.
 
 `ManagementJob::createFromBuild()` reads which shape a builder returned and
 stores it correctly, so a caller dispatches an operation and never chooses a

@@ -13,6 +13,8 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.21 - unpublished_file: on this management node, a refused file that is exactly its
+ *                last commit was committed after the last publish, which re-signs it; not an alarm
  * @version 1.20 - note_reported_script_trust(): a poll's "ok" clears only an unusable manifest, never a
  *                file that does not match its release, which the poll does not check
  * @version 1.19 - fleet_backup_health() results carry a kind (failed, stopped, unverified, ok): which backup
@@ -466,6 +468,65 @@ class NodeMonitorHealth {
 	}
 
 	/**
+	 * Is this refusal the publishing site's own tree being ahead of its last
+	 * publish, rather than a file nobody published?
+	 *
+	 * The site that signs releases runs from the tree it signs, and its live
+	 * manifest is rewritten only when it publishes. A script committed in
+	 * between fails its hash (or, new, is not listed) until the next publish.
+	 * That is the cost of signing ahead of time and not tampering, but it
+	 * produces the same refusal tampering does.
+	 *
+	 * So the evidence is checked, never assumed: the node must be this plane's
+	 * own, this site must re-sign its own tree when it publishes, and the
+	 * refused file must be exactly what its last commit holds. A file that
+	 * differs from the commit (an uncommitted edit, or a change nobody made on
+	 * purpose) is not this case and keeps the alarm. Without git, or anything
+	 * that cannot be read, the answer is no.
+	 *
+	 * $site_dir is for the tests; the default is this site's own root.
+	 */
+	public static function committed_after_publish($node, string $reason, ?string $site_dir = null): bool {
+		if (!$node || !$node->is_self()) { return false; }
+		$rel = self::refused_path($reason);
+		if ($rel === '') { return false; }
+		if ($site_dir === null) {
+			$settings = Globalvars::get_instance();
+			$site_dir = (string)$settings->get_setting('baseDir') . (string)$settings->get_setting('site_template');
+		}
+		if ($site_dir === '' || !TreeManifestPublisher::signsItsOwnTree($site_dir)) { return false; }
+		return self::matches_last_commit($site_dir, $rel);
+	}
+
+	/**
+	 * The tree-relative path a file refusal names, or '' when it names none
+	 * this code will hand to git: a relative path of ordinary characters, with
+	 * no '..' segment.
+	 */
+	public static function refused_path(string $reason): string {
+		if (!preg_match('/(?:has been modified since release|is not in the signed release manifest):\s*(\S+)/', $reason, $m)) {
+			return '';
+		}
+		$rel = $m[1];
+		if (!preg_match('#^[A-Za-z0-9._/-]+$#', $rel) || $rel[0] === '/'
+			|| in_array('..', explode('/', $rel), true)) {
+			return '';
+		}
+		return $rel;
+	}
+
+	/** Is $rel tracked in the git checkout at $dir, and identical to its last commit? */
+	public static function matches_last_commit(string $dir, string $rel): bool {
+		if (!is_dir($dir . '/.git') || !is_file($dir . '/' . $rel)) { return false; }
+		// The checkout belongs to whoever deployed it; the web pool may not.
+		$git = 'git -c safe.directory=' . escapeshellarg($dir) . ' -C ' . escapeshellarg($dir);
+		exec($git . ' ls-files --error-unmatch -- ' . escapeshellarg($rel) . ' 2>/dev/null', $out, $tracked);
+		if ($tracked !== 0) { return false; }
+		exec($git . ' diff --quiet HEAD -- ' . escapeshellarg($rel) . ' 2>/dev/null', $out, $differs);
+		return $differs === 0;
+	}
+
+	/**
 	 * Record what a finished job says about this node's ability to run scripts.
 	 *
 	 * Called on every terminal agent result, so the state is current the moment a
@@ -486,6 +547,10 @@ class NodeMonitorHealth {
 		if ($outcome === 'refused') {
 			$state = self::classify_script_trust((string)$job->get('mjb_error_message'));
 			if ($state === null) { return; }
+			if ($state === 'untrusted_file'
+				&& self::committed_after_publish($node, (string)$job->get('mjb_error_message'))) {
+				$state = 'unpublished_file';
+			}
 			// Keep the first sighting: how long a node has been unmanageable is
 			// the number that makes it urgent, and re-stamping it on every
 			// nightly refusal would report every such node as new today.
@@ -610,7 +675,7 @@ class NodeMonitorHealth {
 	/** Where one node's script trust stands, phrased for someone who has to act. */
 	public static function script_trust_health($node): array {
 		$state = (string)$node->get('mgn_script_trust');
-		if ($state !== 'untrusted_manifest' && $state !== 'untrusted_file') {
+		if ($state !== 'untrusted_manifest' && $state !== 'untrusted_file' && $state !== 'unpublished_file') {
 			return self::result('ok', 'Scripts verify', '', false);
 		}
 
@@ -623,6 +688,15 @@ class NodeMonitorHealth {
 
 		$reason = trim((string)$node->get('mgn_script_trust_reason'));
 		$type   = (string)$node->get('mgn_script_trust_job_type');
+
+		if ($state === 'unpublished_file') {
+			return self::result('unpublished', 'A script was committed after the last publish' . $for,
+				'This site signs its own tree when it publishes, and the refused file is exactly what '
+				. 'its last commit holds, so nothing has tampered with it. The agent will not run it as '
+				. 'root until the next publish re-signs the tree.'
+				. ($type !== '' ? ' First seen refusing: ' . $type . '.' : '')
+				. ($reason !== '' ? ' The node said: ' . $reason : ''), false);
+		}
 
 		if ($state === 'untrusted_file') {
 			return self::result('script_trust', 'A file on this node does not match the release' . $for,

@@ -11,14 +11,16 @@
  * they already publish. The DNS boxes run a Go service of ours that answers
  * /health; that service reports the machine's own disk and memory alongside its
  * service facts (see internal/machine/facts.go in the scrolldaddy-dns repo), so
- * a plain HTTP GET answers everything the SSH steps used to. The relay answers
- * on tcp/25, which for a mail relay is the whole health question.
+ * a plain HTTP GET answers everything the SSH steps used to. The mail relay
+ * publishes the same document: it dials its own Postfix and answers 200 or 503.
  *
  * Two callers, one implementation, deliberately: the uptime task decides up or
  * down from a probe, and check_status folds the same probe's figures onto the
  * node. They used to be separate code and could disagree about whether a
  * machine was reachable.
  *
+ * @version 1.4 - comments: a relay answers /health (relay 3.7); tcp_port is for a service with no
+ *                 health document
  * @version 1.3 - SERVICE_KEYS no longer carries db_connected: every DNS server reads its sites over
  *                 HTTPS and reports source_ok (specs/dns_resolvers_read_over_https.md WP7)
  * @version 1.2 - SERVICE_KEYS carries source_ok (a 2.0 DNS server's snapshot sources)
@@ -109,9 +111,9 @@ class NodeHealthProbe {
 	}
 
 	/**
-	 * TCP reachability. For a service with no web endpoint — an inbound mail
-	 * relay is proven alive by accepting connections on 25, which is exactly
-	 * what it exists to do.
+	 * TCP reachability, for a service with no health document. A relay older
+	 * than 3.7 is watched this way on 25 until its update; a newer one answers
+	 * /health instead, because no machine of ours dials port 25.
 	 *
 	 * A refused or timed-out connection is down. The one inconclusive case is a
 	 * host given as a name this machine cannot resolve: nothing was ever

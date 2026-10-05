@@ -2602,6 +2602,18 @@ relay has exactly one tenant. A root timer on the relay collects the
 privileged facts every thirty seconds; the listener, which never gains root,
 merges them with what it measures itself.
 
+**`GET /health` says whether the relay is receiving mail, to anyone.** It needs
+no signature. The listener connects to its own Postfix over the loopback, reads
+the greeting and says QUIT; a 220 answers 200 `{"status":"ok"}`, anything else
+503 `{"status":"degraded"}` with the reason in `smtp`. Disk and memory ride along
+under the names Server Manager folds (`NodeHealthProbe::MACHINE_KEYS`). The
+answer is cached for thirty seconds, and the self-test's loopback connections
+are left out of the ping's connection count. It tells a stranger nothing port 25
+does not. It cannot see a provider firewall dropping inbound 25, because the
+loopback never crosses one. Server Manager watches a relay here
+(`RelayCloudProvisioner::uptimeCheckFor`, from `RelayVersion::ANSWERS_HEALTH`,
+3.7), because no machine of ours dials port 25.
+
 Once a relay fronts a deployment it is the MX for **all** that deployment's
 hosted domains (a mixed MX would leak the origin). The security level controls
 where mail is *sealed*, never where it is *routed*.
@@ -2969,7 +2981,8 @@ does until mail already looks wrong.
   `mrl_identity_fingerprint`), pushes the address list as the gate, attempts
   reverse DNS through the provider API (refused until the hostname's A record
   resolves; the PTR check carries it from there) and, with Server Manager
-  active, attaches a `ManagedNode` in the disposable posture. A relay silent
+  active, attaches a `ManagedNode` in the disposable posture, its uptime checked
+  at `https://<mail hostname>/health`. A relay silent
   past the birth timeout is failed and its instance destroyed within the grant.
   **Grant-per-act custody**: the provider token, the run token and the bundle
   copy live on the run row and are erased at every terminal state.

@@ -49,6 +49,7 @@
  * here is that rule. vendor/ is excluded at the site root only: a plugin's
  * Composer tree ships with the plugin and is listed (specs/package_signing.md WP0).
  *
+ * @version 1.4 - signsItsOwnTree(): authority()'s answer without minting a key, for a reader
  * @version 1.3 - republish_artifact(): a site that republishes what it received stages each artifact from
  *                exactly the files its received manifest lists, each hash-checked as it is copied
  * @version 1.2 - the exclusion rule is PackageSignature's; vendor/ inside an
@@ -89,6 +90,21 @@ class TreeManifestPublisher {
 			'bundle_key_b64' => $bundle_key,
 			'reason'         => $verdict['reason'],
 		);
+	}
+
+	/**
+	 * Does a publish from this site re-sign its own live tree? authority()'s
+	 * answer for a reader that must not mint a signing key by asking: a site
+	 * with no key yet reads its own public half as '', which only a site that
+	 * builds the agent here can sign with (its first publish mints the key).
+	 */
+	public static function signsItsOwnTree($full_site_dir): bool {
+		$public = @file_get_contents(rtrim($full_site_dir, '/') . '/config/agent_signing_key.pub');
+		$src = AgentDistPublisher::sourcePath();
+		$verdict = self::maySign(AgentDistPublisher::bundleSigningKey($full_site_dir),
+			$public === false ? '' : trim($public),
+			is_dir($src) && file_exists($src . '/main.go'));
+		return $verdict['may_sign'];
 	}
 
 	/** The rule behind authority(), pure so it can be asserted directly. */

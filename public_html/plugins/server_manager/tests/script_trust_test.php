@@ -249,6 +249,97 @@ check((string)$untouched->get('mgn_script_trust') === '',
 	'an answer outside the closed set moves nothing');
 
 // ---------------------------------------------------------------------------
+section('This site\'s own commit, not yet published');
+
+// The site that signs releases runs from the tree it signs, and its live
+// manifest is rewritten only when it publishes. A script committed in between
+// fails its hash until then. That is not tampering, and the evidence for it is
+// checked: this plane's own node, a site that re-signs its own tree, and a file
+// identical to its last commit. Anything else keeps the alarm.
+$MODIFIED_PREFIX = 'Refused by the node: primitive "host_report" refused: file does not match its signed hash — it has been modified since release: ';
+$UNLISTED_PREFIX = 'Refused by the node: primitive "x" refused: file is not in the signed release manifest: ';
+
+check(NodeMonitorHealth::refused_path($MODIFIED_PREFIX . 'maintenance_scripts/a.sh') === 'maintenance_scripts/a.sh',
+	'the refused path is read from a modified-file refusal');
+check(NodeMonitorHealth::refused_path($UNLISTED_PREFIX . 'public_html/utils/b.php') === 'public_html/utils/b.php',
+	'and from an unlisted-file refusal');
+check(NodeMonitorHealth::refused_path($MODIFIED_PREFIX . '../etc/passwd') === '',
+	'a path climbing out of the tree is never handed to git');
+check(NodeMonitorHealth::refused_path($MODIFIED_PREFIX . '/etc/passwd') === '',
+	'nor an absolute one');
+check(NodeMonitorHealth::refused_path($MANIFEST_BAD_KEY) === '',
+	'a manifest refusal names no file');
+
+$repo = sys_get_temp_dir() . '/st_repo_' . bin2hex(random_bytes(4));
+mkdir($repo . '/scripts', 0755, true);
+file_put_contents($repo . '/scripts/committed.sh', "echo one\n");
+file_put_contents($repo . '/scripts/edited.sh', "echo two\n");
+$git = 'git -C ' . escapeshellarg($repo);
+exec($git . ' init -q && ' . $git . ' add scripts && ' . $git
+	. ' -c user.email=t@example.test -c user.name=t commit -qm init 2>&1', $git_out, $git_rc);
+file_put_contents($repo . '/scripts/edited.sh', "echo changed\n");
+file_put_contents($repo . '/scripts/untracked.sh', "echo three\n");
+check($git_rc === 0, 'a scratch checkout is made', implode(' ', $git_out));
+
+check(NodeMonitorHealth::matches_last_commit($repo, 'scripts/committed.sh'),
+	'a file identical to its last commit matches');
+check(!NodeMonitorHealth::matches_last_commit($repo, 'scripts/edited.sh'),
+	'an edit not committed does not');
+check(!NodeMonitorHealth::matches_last_commit($repo, 'scripts/untracked.sh'),
+	'nor does a file git does not track');
+check(!NodeMonitorHealth::matches_last_commit($repo, 'scripts/absent.sh'),
+	'nor one that is not there');
+
+// is_self() is the only thing read off the node; a stand-in avoids pointing a
+// real row at this site's own URL, which self_node() would then find.
+$self = new class { public function is_self() { return true; } };
+$stranger = st_node();
+check(TreeManifestPublisher::signsItsOwnTree($repo),
+	'this dev box builds the agent, so a site here re-signs its own tree');
+check(NodeMonitorHealth::committed_after_publish($self, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
+	'this plane\'s own committed file is its unpublished commit');
+check(NodeMonitorHealth::committed_after_publish($self, $UNLISTED_PREFIX . 'scripts/committed.sh', $repo),
+	'and so is a committed file too new to be listed');
+check(!NodeMonitorHealth::committed_after_publish($self, $MODIFIED_PREFIX . 'scripts/edited.sh', $repo),
+	'an uncommitted edit on this plane keeps the alarm');
+check(!NodeMonitorHealth::committed_after_publish($stranger, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
+	'another node never gets this reading, whatever this checkout holds');
+
+// A site that ships an agent built with another site's key cannot re-sign its
+// own tree; a publish would not clear the refusal, so it stays an alarm.
+mkdir($repo . '/public_html/agent_dist', 0755, true);
+file_put_contents($repo . '/public_html/agent_dist/manifest.json', json_encode(['signing_public_key' => 'c29tZW9uZSBlbHNl']));
+check(!TreeManifestPublisher::signsItsOwnTree($repo), 'a site shipping another key does not sign its own tree');
+check(!NodeMonitorHealth::committed_after_publish($self, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
+	'so its committed file keeps the alarm');
+exec('rm -rf -- ' . escapeshellarg($repo));
+
+// Recorded, shown and cleared as its own state.
+$pub = st_node();
+st_job($pub, 'host_report', 'refused', $MODIFIED_PREFIX . 'scripts/committed.sh');
+$pub->set('mgn_script_trust', 'unpublished_file');
+$pub->set('mgn_script_trust_since', gmdate('Y-m-d H:i:s'));
+$pub->set('mgn_script_trust_reason', $MODIFIED_PREFIX . 'scripts/committed.sh');
+$pub->set('mgn_script_trust_job_type', 'host_report');
+$pub->save();
+$pub->load();
+$health = NodeMonitorHealth::script_trust_health($pub);
+check($health['is_problem'] === false, 'an unpublished commit is not a problem');
+check(stripos($health['label'], 'committed after the last publish') !== false,
+	'and says what it is', $health['label']);
+check(!in_array((int)$pub->key, array_map(function ($p) { return (int)$p['id']; }, NodeMonitorHealth::script_trust_problems()), true),
+	'it is not listed as a node that can no longer be managed');
+check((new IncidentSourceUnmanageable())->evaluate($pub) === null, 'and raises no incident');
+check(stripos((new IncidentSourceUnmanageable())->cleared_text($pub), 'next publish') !== false,
+	'an open incident closes saying the next publish re-signs it');
+check(strpos((string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php')),
+	"self::committed_after_publish(\$node, (string)\$job->get('mjb_error_message'))") !== false,
+	'a refusal is checked for this case as it is recorded');
+NodeMonitorHealth::note_script_trust($pub, st_job($pub, 'host_report', 'completed', ''));
+$pub->load();
+check($pub->get('mgn_script_trust') === 'ok', 'the job type completing after the publish clears it');
+
+// ---------------------------------------------------------------------------
 section('What the dashboard is told');
 
 $bad = st_node();
