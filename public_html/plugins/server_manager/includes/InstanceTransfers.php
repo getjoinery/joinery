@@ -29,6 +29,7 @@
  * row at once. Both take the row's lock (SELECT … FOR UPDATE) and re-read it
  * before they decide, so neither saves over the other's state.
  *
+ * @version 1.2 - the open-incidents check counts every still-happening incident not ignored (a fix awaiting its proof too)
  * @version 1.1 - poll and cancel act on the row under its lock; a code that cannot be read is said for
  *                accepted as well as code_issued; an expired code Linode no longer knows is treated as stale
  * @version 1.0
@@ -244,8 +245,8 @@ class InstanceTransfers {
 		$open_incidents = array();
 		foreach (new MultiIncidentRecord(array('node_id' => (int)$node->key, 'status' => IncidentRecord::STATUS_OPEN,
 				'deleted' => false)) as $inc) {
-			if (in_array($inc->triage(), array(IncidentRecord::TRIAGE_NEW, IncidentRecord::TRIAGE_LOOKING,
-					IncidentRecord::TRIAGE_SNOOZED), true)) {
+			// Still happening and not accepted: new, snoozed, or a fix awaiting its proof.
+			if ($inc->triage() !== IncidentRecord::TRIAGE_IGNORED) {
 				$open_incidents[] = $inc->title();
 			}
 		}

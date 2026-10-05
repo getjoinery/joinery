@@ -10,6 +10,11 @@
  *   - it holds and one is active: refresh its title, severity and detail when
  *     they changed, with no event and no notice;
  *   - it is gone and one is active: clear it, with an event.
+ * Then a fix awaiting its proof (resolved, still active) that has waited
+ * PROOF_WINDOW since it was resolved goes back to new and tells the
+ * superadmins again: someone said it was fixed and the source still sees it
+ * (return_unproven). Without this, resolving a condition that never clears
+ * would hide it for good.
  * An active incident whose node is no longer watched (removed, disabled, or
  * in an install state such as a dormant copy) is cleared, saying so. On a
  * node removed from the dashboard that holds for every source, an agent's
@@ -29,11 +34,12 @@
  * Only a scheduled task runs this (ReconcileIncidents): a page view never
  * writes. One advisory lock, so two overlapping ticks never open twice.
  *
- * Notification: one signal per open and per reopen, never per tick:
+ * Notification: one signal per open, per reopen and per unproven fix sent back, never per tick:
  * incident.opened for a warning, incident.opened_critical for a critical one,
  * each addressed to every superadmin. Notify gives each the bell, and email
  * by the signal's default (critical: on) or their own preference.
  *
+ * @version 1.4 - return_unproven(): resolved and still active a day later goes back to new and notifies
  * @version 1.3 - each full pass clears every active incident, of any source, on a removed node (clear_removed)
  * @version 1.2 - each full pass deletes incidents whose node row is gone (removed); ManagedNode's
  *                permanent_delete() takes LOCK_KEY (site_copy.md B41)
@@ -46,6 +52,12 @@ class IncidentReconciler {
 
 	/** A condition that returns this soon after clearing reopens the same incident. */
 	const REOPEN_WINDOW = 3600;
+
+	/** How long a fix waits for its condition to clear before it is news again. A day covers nightly jobs. */
+	const PROOF_WINDOW = 86400;
+
+	/** The timeline's words when an unproven fix goes back to new. */
+	const UNPROVEN_TEXT = 'Still happening 24 hours after it was resolved.';
 
 	const SIGNAL_WARNING  = 'incident.opened';
 	const SIGNAL_CRITICAL = 'incident.opened_critical';
@@ -65,7 +77,7 @@ class IncidentReconciler {
 	 * pass holds the lock.
 	 */
 	public static function run(?array $sources = null, ?array $node_ids = null): array {
-		$counts = array('opened' => 0, 'reopened' => 0, 'refreshed' => 0, 'cleared' => 0, 'removed' => 0, 'busy' => false);
+		$counts = array('opened' => 0, 'reopened' => 0, 'refreshed' => 0, 'cleared' => 0, 'removed' => 0, 'unproven' => 0, 'busy' => false);
 		$db = DbConnector::get_instance()->get_db_link();
 		if (!(bool)$db->query('SELECT pg_try_advisory_lock(' . self::LOCK_KEY . ')')->fetchColumn()) {
 			$counts['busy'] = true;
@@ -119,6 +131,8 @@ class IncidentReconciler {
 				self::clear($inc, 'This node is no longer watched: it was removed or disabled, or it is being installed or is a copy.');
 				$counts['cleared']++;
 			}
+			// Last, so a condition that cleared on this pass is never sent back.
+			$counts['unproven'] = self::return_unproven($node_ids);
 		} finally {
 			$db->query('SELECT pg_advisory_unlock(' . self::LOCK_KEY . ')');
 		}
@@ -169,6 +183,41 @@ class IncidentReconciler {
 		return $removed;
 	}
 
+	/**
+	 * Put back to new every fix awaiting its proof (resolved, still active)
+	 * resolved at least PROOF_WINDOW ago, with a timeline line and a notice.
+	 * Any source, agent cases too: the node's own check is what clears those.
+	 * $node_ids narrows it (tests). Returns how many.
+	 */
+	public static function return_unproven(?array $node_ids = null): int {
+		$cutoff = time() - self::PROOF_WINDOW;
+		$returned = 0;
+		foreach (new MultiIncidentRecord(array('view' => 'waiting', 'deleted' => false)) as $inc) {
+			$node_id = (int)$inc->get('inc_mgn_managed_node_id');
+			if ($node_ids !== null && !in_array($node_id, $node_ids, true)) {
+				continue;
+			}
+			$resolved = strtotime((string)$inc->get('inc_triage_time') . ' UTC');
+			if ($resolved === false || $resolved > $cutoff) {
+				continue;
+			}
+			$now = gmdate('Y-m-d H:i:s');
+			$inc->set('inc_triage', IncidentRecord::TRIAGE_NEW);
+			$inc->set('inc_triage_time', $now);
+			$inc->set('inc_triage_usr_user_id', null);
+			$inc->set('inc_snooze_until', null);
+			$inc->save();
+			IncidentEvent::record((int)$inc->key, IncidentEvent::KIND_TRIAGE, $now, null, self::UNPROVEN_TEXT,
+				array('from' => IncidentRecord::TRIAGE_RESOLVED, 'to' => IncidentRecord::TRIAGE_NEW, 'unproven' => true));
+			$node = new ManagedNode($node_id, TRUE);
+			if ($node->key) {
+				self::notify($inc, $node, self::UNPROVEN_TEXT . ' On ' . self::node_label($node) . '.');
+			}
+			$returned++;
+		}
+		return $returned;
+	}
+
 	/** Open a new incident, or reopen one that cleared within the window. Returns 'opened' or 'reopened'. */
 	private static function open_or_reopen(ManagedNode $node, string $source, array $verdict): string {
 		$now = gmdate('Y-m-d H:i:s');
@@ -195,7 +244,7 @@ class IncidentReconciler {
 			IncidentEvent::record((int)$recent->key, IncidentEvent::KIND_REOPENED, $now, null,
 				'It came back within an hour of clearing.', array('triage_was' => $was));
 			if ($was !== IncidentRecord::TRIAGE_IGNORED) {
-				self::notify($recent, $node, true);
+				self::notify($recent, $node, 'It came back on ' . self::node_label($node) . ' at ' . gmdate('H:i') . ' UTC.');
 			}
 			return 'reopened';
 		}
@@ -215,7 +264,7 @@ class IncidentReconciler {
 		self::apply_verdict($inc, $verdict);
 		$inc->save();
 		IncidentEvent::record((int)$inc->key, IncidentEvent::KIND_OPENED, $now);
-		self::notify($inc, $node, false);
+		self::notify($inc, $node, 'It started on ' . self::node_label($node) . ' at ' . gmdate('H:i') . ' UTC.');
 		return 'opened';
 	}
 
@@ -293,8 +342,12 @@ class IncidentReconciler {
 		return $out;
 	}
 
-	/** Tell every superadmin: the bell, and email by the signal's default or their choice. */
-	private static function notify(IncidentRecord $inc, ManagedNode $node, bool $reopened): void {
+	private static function node_label(ManagedNode $node): string {
+		return '#' . (int)$node->key . ' ' . (string)$node->get('mgn_name');
+	}
+
+	/** Tell every superadmin: the bell, and email by the signal's default or their choice. $summary says what happened. */
+	private static function notify(IncidentRecord $inc, ManagedNode $node, string $summary): void {
 		$recipients = array();
 		foreach (new MultiUser(array('permission_range' => array(10, 10), 'deleted' => false, 'not_system_users' => true)) as $u) {
 			$recipients[] = (int)$u->key;
@@ -302,14 +355,13 @@ class IncidentReconciler {
 		if (count($recipients) === 0) {
 			return;
 		}
-		$node_label = '#' . (int)$node->key . ' ' . (string)$node->get('mgn_name');
 		$payload = array(
 			'incident_id' => (int)$inc->key,
 			'node_id'     => (int)$node->key,
-			'node_name'   => $node_label,
+			'node_name'   => self::node_label($node),
 			'title'       => $inc->title(),
 			'severity'    => (string)$inc->get('inc_severity'),
-			'summary'     => ($reopened ? 'It came back on ' : 'It started on ') . $node_label . ' at ' . gmdate('H:i') . ' UTC.',
+			'summary'     => $summary,
 			'link'        => IncidentViews::url((int)$inc->key),
 			'recipients'  => $recipients,
 		);

@@ -11,6 +11,7 @@
  * Superadmin only. Every write is a POST carrying the admin CSRF token, and
  * goes through IncidentTriage.
  *
+ * @version 1.2 - Waiting for proof (resolved, still happening) beside Resolved (resolved, cleared); Looking is gone
  * @version 1.1 - Resolve and Resolve all cleared ask what fixed it in a modal; the answer is a note on each
  * @version 1.0
  */
@@ -26,8 +27,8 @@ $self_url = IncidentViews::LIST_URL;
 $views = array(
 	'needs_you' => 'Needs you',
 	'new'       => 'New',
-	'looking'   => 'Looking',
 	'snoozed'   => 'Snoozed',
+	'waiting'   => 'Waiting for proof',
 	'resolved'  => 'Resolved',
 	'ignored'   => 'Ignored',
 	'all'       => 'All',
@@ -127,9 +128,9 @@ $snooze_over = "inc_triage = 'snoozed' AND inc_snooze_until <= now() AT TIME ZON
 $q = $db->prepare("SELECT
 		count(*) FILTER (WHERE " . IncidentRecord::NEEDS_YOU_SQL . ") AS needs_you,
 		count(*) FILTER (WHERE inc_triage = 'new' OR ($snooze_over)) AS new,
-		count(*) FILTER (WHERE inc_triage = 'looking') AS looking,
 		count(*) FILTER (WHERE inc_triage = 'snoozed' AND NOT ($snooze_over)) AS snoozed,
-		count(*) FILTER (WHERE inc_triage = 'resolved') AS resolved,
+		count(*) FILTER (WHERE inc_triage = 'resolved' AND inc_status = 'open') AS waiting,
+		count(*) FILTER (WHERE inc_triage = 'resolved' AND inc_status = 'closed') AS resolved,
 		count(*) FILTER (WHERE inc_triage = 'ignored') AS ignored,
 		count(*) AS every,
 		count(*) FILTER (WHERE inc_status = 'closed' AND " . IncidentRecord::NEEDS_YOU_SQL . ") AS cleared_needing
@@ -169,6 +170,10 @@ $fw->end_form();
 
 // ── The list ──
 $page->begin_box(['title' => $views[$view]]);
+if ($view === 'waiting') {
+	echo '<p class="small text-muted">Resolved while still happening. Each one becomes Resolved when the problem clears, '
+		. 'or goes back to New if it is still happening 24 hours after it was resolved.</p>';
+}
 if (count($rows) === 0) {
 	echo '<p class="text-muted mb-0">' . ($view === 'needs_you'
 		? 'Nothing needs you. Every incident is resolved, ignored or snoozed.'

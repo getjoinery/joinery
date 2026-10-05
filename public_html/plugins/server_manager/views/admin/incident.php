@@ -13,6 +13,7 @@
  * goes through IncidentTriage, or IncidentAnalyst for Analyze (shown only
  * where the Joinery AI plugin is active).
  *
+ * @version 1.3 - the triage reads as a fix waiting for its proof when resolved and still happening; help names Reopen
  * @version 1.2 - Resolve asks what fixed it in a modal; the answer is a note on the timeline
  * @version 1.1 - Analyze: a model reads the incident and says what it thinks (IncidentAnalyst; WP4)
  * @version 1.0
@@ -47,7 +48,7 @@ if ($_POST) {
 			$note = (string)($_POST['note'] ?? '');
 			$r = IncidentTriage::apply(array($id), (string)($_POST['do'] ?? ''), (int)$session->get_user_id(), $note);
 			$inc->load();
-			$flash(($r['changed'] > 0 ? 'Set to ' . (IncidentTriage::LABELS[$inc->triage()] ?? $inc->triage()) . '.' : 'It already read that way.')
+			$flash(($r['changed'] > 0 ? 'Set to ' . IncidentTriage::label($inc) . '.' : 'It already read that way.')
 				. (trim($note) !== '' ? ' Note added.' : ''), true);
 		} elseif ($action === 'analyze') {
 			IncidentAnalyst::request($inc, (int)$session->get_user_id());
@@ -110,14 +111,15 @@ $facts['Now'] = $inc->is_open()
 	: 'Cleared ' . $e(IncidentViews::when($inc->get('inc_closed_time'))) . '.';
 $by = IncidentViews::person((int)$inc->get('inc_triage_usr_user_id'));
 if ($by !== '') {
-	$facts['Triage'] = $e(IncidentTriage::LABELS[$inc->triage()] ?? '') . ', set by ' . $e($by) . ' ' . $e(IncidentViews::when($inc->get('inc_triage_time')));
+	$facts['Triage'] = $e(IncidentTriage::label($inc)) . ', set by ' . $e($by) . ' ' . $e(IncidentViews::when($inc->get('inc_triage_time')));
 }
 echo '<div class="mb-3">' . IncidentViews::facts($facts) . '</div>';
 echo IncidentViews::triage_buttons($self_url, $inc, $csrf);
 echo IncidentViews::resolve_note_script();
 echo '<div class="mt-2">' . IncidentViews::do_form('incident_snooze', $self_url, $csrf, array('id' => $id), true, 'Snooze') . '</div>';
-echo '<p class="small text-muted mt-2 mb-0">Resolve when it is dealt with, or when it cleared and needs nothing more. Ignore when it needs nothing '
-	. 'from anyone; the next time it happens is news again. A snooze puts it back in Needs you when it ends.</p>';
+echo '<p class="small text-muted mt-2 mb-0">Resolve when it is dealt with, or when it cleared and needs nothing more. Resolved while it is '
+	. 'still happening waits for proof: it comes back as New if it has not cleared 24 hours later. Ignore when it needs nothing '
+	. 'from anyone; the next time it happens is news again. A snooze puts it back in Needs you when it ends. Reopen puts it back now.</p>';
 $page->end_box();
 
 // ── What a model thinks (needs the Joinery AI plugin) ──

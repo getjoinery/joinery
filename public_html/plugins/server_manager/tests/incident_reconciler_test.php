@@ -17,6 +17,9 @@
  *   - the site answering again clears it, with an event;
  *   - down again within the hour reopens the same incident as new and tells
  *     them again; an ignored one reopens still ignored and silent;
+ *   - resolved while still happening and still happening a day later goes
+ *     back to new, says so on its timeline and tells them; younger, ignored
+ *     or cleared ones are left alone;
  *   - after the hour it is a new incident with the next id;
  *   - monitoring switched off clears it, saying so;
  *   - a node in an install state is not watched: nothing opens on it, and an
@@ -33,6 +36,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_reconciler_test.php
  *
+ * @version 1.3 - an unproven fix goes back to new after a day (return_unproven); Looking is gone
  * @version 1.2 - a removed node's incidents, of any source, are cleared
  * @version 1.1 - a node's deletion and its incidents (site_copy.md B41)
  * @version 1.0
@@ -150,7 +154,7 @@ if ($inc !== null) {
 section('Back within the hour reopens the same incident');
 
 if ($inc !== null) {
-	IncidentTriage::set($inc, IncidentRecord::TRIAGE_LOOKING, (int)make_user('rec_' . bin2hex(random_bytes(3)), 10)->key);
+	IncidentTriage::set($inc, IncidentRecord::TRIAGE_RESOLVED, (int)make_user('rec_' . bin2hex(random_bytes(3)), 10)->key);
 }
 $set(array('mgn_uptime_last_status' => 'down', 'mgn_uptime_down_since' => gmdate('Y-m-d H:i:s')));
 $c = $pass();
@@ -173,6 +177,58 @@ if ($inc !== null) {
 	check($c['reopened'] === 1 && $inc->is_open() && $inc->triage() === IncidentRecord::TRIAGE_IGNORED && count($signals) === 0,
 		'An ignored incident reopens still ignored, and nobody is told', json_encode($c));
 }
+
+// ---------------------------------------------------------------------------
+section('A fix that is still happening a day later is news again');
+
+if ($inc !== null) {
+	$resolver = (int)make_user('rec3_' . bin2hex(random_bytes(3)), 10)->key;
+	$resolved_ago = function (int $seconds) use ($inc) {
+		$inc->load();
+		$inc->set('inc_triage_time', gmdate('Y-m-d H:i:s', time() - $seconds));
+		$inc->save();
+	};
+	IncidentTriage::set($inc, IncidentRecord::TRIAGE_RESOLVED, $resolver);
+	$resolved_ago(IncidentReconciler::PROOF_WINDOW - 3600);
+	$c = $pass();
+	$inc->load();
+	check($c['unproven'] === 0 && $inc->awaiting_proof() && count($signals) === 0,
+		'Resolved 23 hours ago and still happening: still waiting', json_encode($c));
+
+	$resolved_ago(IncidentReconciler::PROOF_WINDOW + 60);
+	$c = $pass();
+	$inc->load();
+	$ev = IncidentEvent::for_incident((int)$inc->key);
+	$last = end($ev);
+	check($c['unproven'] === 1 && $inc->is_open() && $inc->triage() === IncidentRecord::TRIAGE_NEW && $inc->needs_you()
+		&& (int)$inc->get('inc_triage_usr_user_id') === 0,
+		'A day later it is new again, set by nobody', json_encode($c));
+	check((string)$last->get('ine_kind') === 'triage' && (string)$last->get('ine_text') === IncidentReconciler::UNPROVEN_TEXT
+		&& !empty($last->data()['unproven']) && ($last->data()['from'] ?? '') === 'resolved',
+		'Its timeline says it was still happening a day after it was resolved', json_encode($last->data()));
+	check(strpos(IncidentViews::timeline(array($last)), 'Back to New.') !== false, 'and the timeline shows it as Back to New');
+	check(count($signals) === 1 && $signals[0][0] === IncidentReconciler::SIGNAL_CRITICAL
+		&& strpos((string)$signals[0][1]['summary'], IncidentReconciler::UNPROVEN_TEXT) === 0,
+		'They are told once, saying why', json_encode($signals[0][1]['summary'] ?? null));
+	$c = $pass();
+	check($c['unproven'] === 0 && count($signals) === 1, 'The next pass sends nothing more');
+
+	IncidentTriage::set($inc, IncidentRecord::TRIAGE_IGNORED, $resolver);
+	$resolved_ago(IncidentReconciler::PROOF_WINDOW + 60);
+	$c = $pass();
+	$inc->load();
+	check($c['unproven'] === 0 && $inc->triage() === IncidentRecord::TRIAGE_IGNORED, 'Ignored stays ignored, however long it happens');
+
+	IncidentTriage::set($inc, IncidentRecord::TRIAGE_RESOLVED, $resolver);
+	$resolved_ago(IncidentReconciler::PROOF_WINDOW + 60);
+	$set(array('mgn_uptime_last_status' => 'up'));
+	$c = $pass();
+	$inc->load();
+	check($c['cleared'] === 1 && $c['unproven'] === 0 && !$inc->is_open() && $inc->triage() === IncidentRecord::TRIAGE_RESOLVED,
+		'A fix whose condition cleared on the same pass is proven, never sent back', json_encode($c));
+	$set(array('mgn_uptime_last_status' => 'down'));
+}
+$signals = array();
 
 // ---------------------------------------------------------------------------
 section('After the hour it is a new incident');

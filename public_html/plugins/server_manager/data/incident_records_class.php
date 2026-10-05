@@ -6,8 +6,10 @@
  * Two questions are kept apart on every row. Whether the condition is still
  * there (inc_status: open is active, closed is cleared) belongs to its source,
  * and nothing a person does here changes it. What is being done about it
- * (inc_triage) belongs to a person: new, looking, snoozed until a time,
- * resolved or ignored. What happened, in order, is in IncidentEvent.
+ * (inc_triage) belongs to a person: new, snoozed until a time, resolved or
+ * ignored. Resolved while the condition is still there is a fix awaiting its
+ * proof (awaiting_proof()); the reconciler puts it back to new when the proof
+ * does not come. What happened, in order, is in IncidentEvent.
  *
  * The first source is the agent's case:
  * The case store of specs/agent_tier1_recipes.md (settled Q3: the case IS
@@ -27,6 +29,8 @@
  * escaped again wherever it is shown. Nothing stored here is ever a shell
  * argument, a template, a link or a mail subject.
  *
+ * @version 1.3 - Looking is gone (one person triages; it read the same as New); awaiting_proof(), and
+ *                the waiting view beside resolved, so each incident is in exactly one view
  * @version 1.2 - deleting a node permanently deletes its incidents through the model, so each one's
  *                timeline goes with it (a cascade is one level; site_copy.md B41)
  * @version 1.1 - an incident: title, severity, triage (new, looking, snoozed, resolved, ignored) and a
@@ -50,23 +54,21 @@ class IncidentRecord extends SystemBase {
 
 	/** What a person is doing about it. Set only by a person. */
 	const TRIAGE_NEW      = 'new';
-	const TRIAGE_LOOKING  = 'looking';
 	const TRIAGE_SNOOZED  = 'snoozed';
 	const TRIAGE_RESOLVED = 'resolved';
 	const TRIAGE_IGNORED  = 'ignored';
-	const TRIAGE_STATES = array(self::TRIAGE_NEW, self::TRIAGE_LOOKING, self::TRIAGE_SNOOZED,
-		self::TRIAGE_RESOLVED, self::TRIAGE_IGNORED);
+	const TRIAGE_STATES = array(self::TRIAGE_NEW, self::TRIAGE_SNOOZED, self::TRIAGE_RESOLVED, self::TRIAGE_IGNORED);
 
 	/** Critical: visitors or data are at risk now. Warning: everything else. */
 	const SEVERITY_CRITICAL = 'critical';
 	const SEVERITY_WARNING  = 'warning';
 
 	/**
-	 * What needs a person, as SQL over inc_incident_records: new or looking,
-	 * or snoozed whose time has come. One definition, read by the header line,
+	 * What needs a person, as SQL over inc_incident_records: new, or snoozed
+	 * whose time has come. One definition, read by the header line,
 	 * the menu count, the node page and the list's default view.
 	 */
-	const NEEDS_YOU_SQL = "(inc_triage IN ('new', 'looking') OR (inc_triage = 'snoozed' AND inc_snooze_until <= now() AT TIME ZONE 'UTC'))";
+	const NEEDS_YOU_SQL = "(inc_triage = 'new' OR (inc_triage = 'snoozed' AND inc_snooze_until <= now() AT TIME ZONE 'UTC'))";
 
 	public static $field_specifications = array(
 		'inc_incident_record_id'             => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
@@ -148,9 +150,18 @@ class IncidentRecord extends SystemBase {
 		return in_array($t, self::TRIAGE_STATES, true) ? $t : self::TRIAGE_NEW;
 	}
 
-	/** New or looking: a person still owes it something. */
+	/** New: a person still owes it something. */
 	public function needs_you(): bool {
-		return in_array($this->triage(), array(self::TRIAGE_NEW, self::TRIAGE_LOOKING), true);
+		return $this->triage() === self::TRIAGE_NEW;
+	}
+
+	/**
+	 * Resolved while the condition is still there: someone says it is fixed,
+	 * and the source has not yet seen it clear. Off the list while it waits;
+	 * IncidentReconciler::return_unproven() puts it back if the proof never comes.
+	 */
+	public function awaiting_proof(): bool {
+		return $this->triage() === self::TRIAGE_RESOLVED && $this->is_open();
 	}
 
 	public function is_critical(): bool {
@@ -243,13 +254,15 @@ class MultiIncidentRecord extends SystemMultiBase {
 		if (isset($this->options['severity'])) {
 			$filters['inc_severity'] = [$this->options['severity'], PDO::PARAM_STR];
 		}
-		// A triage view. 'needs_you' is new, looking, or a snooze whose time
-		// has come; 'new' includes those ended snoozes, and 'snoozed' only the
-		// ones still running, so every incident is in exactly one view.
+		// A triage view. 'needs_you' is new or a snooze whose time has come;
+		// 'new' includes those ended snoozes, and 'snoozed' only the ones still
+		// running. 'waiting' is resolved and still happening, 'resolved' is
+		// resolved and cleared. So every incident is in exactly one of new,
+		// snoozed, waiting, resolved and ignored.
 		if (isset($this->options['view'])) {
 			switch ($this->options['view']) {
 				case 'needs_you':
-					$filters['(inc_triage'] = "IN ('new', 'looking') OR (inc_triage = 'snoozed' AND inc_snooze_until <= now() AT TIME ZONE 'UTC'))";
+					$filters['(inc_triage'] = "= 'new' OR (inc_triage = 'snoozed' AND inc_snooze_until <= now() AT TIME ZONE 'UTC'))";
 					break;
 				case 'new':
 					$filters['(inc_triage'] = "= 'new' OR (inc_triage = 'snoozed' AND inc_snooze_until <= now() AT TIME ZONE 'UTC'))";
@@ -257,8 +270,12 @@ class MultiIncidentRecord extends SystemMultiBase {
 				case 'snoozed':
 					$filters['(inc_triage'] = "= 'snoozed' AND inc_snooze_until > now() AT TIME ZONE 'UTC')";
 					break;
-				case 'looking':
+				case 'waiting':
+					$filters['(inc_triage'] = "= 'resolved' AND inc_status = 'open')";
+					break;
 				case 'resolved':
+					$filters['(inc_triage'] = "= 'resolved' AND inc_status = 'closed')";
+					break;
 				case 'ignored':
 					$filters['inc_triage'] = [$this->options['view'], PDO::PARAM_STR];
 					break;

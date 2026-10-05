@@ -3,12 +3,13 @@
  * server_manager/incident_triage — a person's answer to "what are we doing
  * about it" for one incident, and notes (incident_triage.md WP1).
  *
- * Input: id, and do (looking, resolved, ignored, new, snooze_4, snooze_24,
+ * Input: id, and do (resolved, ignored, new, snooze_4, snooze_24,
  * snooze_72, snooze_168) and/or note. The same writes the incident pages make,
  * through IncidentTriage; nothing here changes whether the condition is still
  * there. Superadmin only (floor 10). Not callable by the AI agent: an analysis
  * recommends, and a person acts.
  *
+ * @version 1.1.0 - looking is no longer a triage
  * @version 1.0.0
  */
 
@@ -52,7 +53,7 @@ function incident_triage_logic(array $input): LogicResult {
 
 function incident_triage_logic_descriptor(): array {
 	return [
-		'description' => 'Set an incident\'s triage (looking, resolved, ignored, new, or a snooze) and/or add a note.',
+		'description' => 'Set an incident\'s triage (resolved, ignored, new to reopen it, or a snooze) and/or add a note.',
 		'mutates'     => true,
 		'requires_session' => true,
 		'auth'        => ['min_user_permission' => 10],
