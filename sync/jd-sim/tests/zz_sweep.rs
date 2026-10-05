@@ -1792,8 +1792,16 @@ fn a_body_the_walk_saw_in_a_vault_and_sent_plain_in_that_pass_fires() {
 /// with its own file and no new version is written at all.
 #[test]
 fn two_files_trading_names_keep_two_separate_histories() {
+    for platform in [Platform::Linux, Platform::Windows] {
+        two_files_trading_names_on(platform);
+    }
+}
+
+/// On Windows the trade's renames land within NTFS's 15-second tunnelling
+/// window, so each file arrives wearing the other's creation time.
+fn two_files_trading_names_on(platform: Platform) {
     let seed = 9_950;
-    let world = World::of(seed, &[("laptop", Platform::Linux)]);
+    let world = World::of(seed, &[("laptop", platform)]);
     let laptop = world.device("laptop");
     let a = b"the content that belongs to A";
     let b = b"the content that belongs to B";
@@ -1817,6 +1825,128 @@ fn two_files_trading_names_keep_two_separate_histories() {
     let tree = world.server.tree();
     assert_eq!(tree.get("a.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b)), "{tree:?}");
     assert_eq!(tree.get("b.txt").cloned().flatten(), Some(jd_sim::sha256_hex(a)), "{tree:?}");
+}
+
+/// B-NTFSTUNNEL, the upgrade. A client from before NTFS was read as a volume
+/// whose births are names stored each file's real creation time; the shipped
+/// client is shown the marker for every file. A trade, and a file renamed and
+/// edited, made while the client was off must still read as two moves and one
+/// move-and-edit when the new client first runs: the stored births say what
+/// the volume now reports before the scan reads them
+/// (`Store::read_births_as_names`). Without that, the renamed-and-edited file
+/// matches no record and goes up as a new file, its history left behind.
+#[test]
+fn on_windows_an_upgrade_keeps_a_file_moved_while_the_client_was_off() {
+    let seed = 9_951;
+    let world = World::of(seed, &[("pc", Platform::Windows)]);
+    let pc = world.device("pc");
+    pc.fs.show_births_as_names(false);
+    pc.fs.user_mkdir("Docs");
+    let (x, y) = (b"x, older than the upgrade".as_slice(), b"y, older than the upgrade".as_slice());
+    pc.fs.user_write("Docs/x.txt", x);
+    pc.fs.user_write("Docs/y.txt", y);
+    pc.fs.user_write("Docs/draft.txt", b"a draft older than the upgrade");
+    assert!(world.settle().is_some());
+    let real_births = |d: &jd_sim::engine::Device| {
+        d.store.every_entry().unwrap().iter().filter(|e| {
+            e.own_file.is_some_and(|o| o.birth_ns > jd_vfs::INDEX_ONLY_BIRTH)
+                || e.synced_fingerprint.is_some_and(|f| f.birth_ns > jd_vfs::INDEX_ONLY_BIRTH)
+        }).count()
+    };
+    assert!(real_births(pc) > 0, "the older client stores real births");
+    let draft = world.server.files().into_iter().find(|f| f.name == "draft.txt").unwrap();
+
+    // While the client is off: a trade (each file arrives wearing the
+    // other's creation time) and a file renamed and edited, which only its
+    // identity can follow.
+    world.record_swap_pair(x, y, "slots", false);
+    pc.fs.user_rename("Docs/x.txt", "Docs/.swap.tmp");
+    pc.fs.user_rename("Docs/y.txt", "Docs/x.txt");
+    pc.fs.user_rename("Docs/.swap.tmp", "Docs/y.txt");
+    pc.fs.user_rename("Docs/draft.txt", "Docs/final.txt");
+    pc.fs.user_write("Docs/final.txt", b"the draft, finished");
+    pc.fs.show_births_as_names(true);
+    assert!(world.settle().is_some());
+
+    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    let now = world.server.files().into_iter().find(|f| f.id == draft.id).unwrap();
+    assert!(!now.trashed && now.name == "final.txt", "the draft lost its history: {now:?}");
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Docs/x.txt").cloned().flatten(), Some(jd_sim::sha256_hex(y)), "{tree:?}");
+    assert_eq!(tree.get("Docs/y.txt").cloned().flatten(), Some(jd_sim::sha256_hex(x)), "{tree:?}");
+    assert_eq!(real_births(pc), 0, "every stored birth reads as the volume now reports it");
+}
+
+/// B-NTFSTUNNEL, what the upgrade costs: nothing read again. The unchanged
+/// check compares size, index and time, never the birth, so a settled tree
+/// whose stored births become the marker is not hashed again.
+#[test]
+fn on_windows_an_upgrade_over_a_settled_tree_reads_no_file() {
+    let world = World::of(9_952, &[("pc", Platform::Windows)]);
+    let pc = world.device("pc");
+    pc.fs.show_births_as_names(false);
+    pc.fs.user_mkdir("Docs");
+    for n in 0..5 {
+        pc.fs.user_write(&format!("Docs/f{n}.txt"), format!("file {n}").as_bytes());
+    }
+    assert!(world.settle().is_some());
+    world.pass(pc);
+    let before = pc.fs.reads();
+    pc.fs.show_births_as_names(true);
+    world.pass(pc);
+    assert_eq!(pc.fs.reads(), before, "the upgrade read files again");
+}
+
+/// A deleted file's number taken by an unrelated new file, on Windows. Local
+/// NTFS never gives a number out twice (a freed MFT record comes back with its
+/// sequence raised); a network share hands out its server's inode, which
+/// recycles, and is read weak. Either way the deleted file stays deleted and
+/// the new one is new: read by its number alone on a share, the deleted file's
+/// record took the new file as its next version (the review's F1).
+#[test]
+fn on_windows_a_new_file_on_a_freed_number_is_a_new_file() {
+    for share in [false, true] {
+        let world = World::of(9_960, &[("pc", Platform::Windows)]);
+        let pc = world.device("pc");
+        pc.fs.reuse_file_ids(true);
+        pc.fs.network_share(share);
+        pc.fs.user_write("a.txt", b"the content of a, a file later deleted");
+        assert!(world.settle().is_some());
+        let a = world.server.files().into_iter().find(|f| f.name == "a.txt").unwrap();
+        pc.fs.user_remove("a.txt");
+        pc.fs.user_write("b.txt", b"an unrelated new file");
+        assert!(world.settle().is_some());
+        let now = world.server.files().into_iter().find(|f| f.id == a.id).unwrap();
+        assert!(now.trashed, "share={share}: the deleted file came back as {now:?}");
+        assert_eq!(world.server.all_versions().iter().filter(|v| v.file_id == a.id).count(), 1, "share={share}");
+    }
+}
+
+/// Two folders trading names on Windows. Directory births do not tunnel
+/// (measured), and a folder's identity there is its index alone like a
+/// file's: each folder keeps its record and its files.
+#[test]
+fn on_windows_two_folders_trading_names_keep_their_files() {
+    let world = World::of(9_953, &[("pc", Platform::Windows)]);
+    let pc = world.device("pc");
+    pc.fs.user_mkdir("A");
+    pc.fs.user_mkdir("B");
+    pc.fs.user_write("A/a.txt", b"a file in A");
+    pc.fs.user_write("B/b.txt", b"a file in B");
+    assert!(world.settle().is_some());
+    let versions = world.server.all_versions().len();
+    let files = world.server.files();
+    pc.fs.user_rename("A", ".swap.tmp");
+    pc.fs.user_rename("B", "A");
+    pc.fs.user_rename(".swap.tmp", "B");
+    assert!(world.settle().is_some());
+    let tree = world.server.tree();
+    assert_eq!(tree.get("B/a.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"a file in A")), "{tree:?}");
+    assert_eq!(tree.get("A/b.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"a file in B")), "{tree:?}");
+    assert_eq!(world.server.all_versions().len(), versions, "a trade wrote versions");
+    for f in files {
+        assert!(world.server.files().iter().any(|g| g.id == f.id && !g.trashed), "{} lost its record", f.name);
+    }
 }
 
 /// No live disk identity is agreed by two live file records on any device --

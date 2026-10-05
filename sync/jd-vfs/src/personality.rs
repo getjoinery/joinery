@@ -84,6 +84,45 @@ pub struct Personality {
     /// tie-break, carried beside a file as its tie-break id, never in its
     /// fingerprint (`specs/drive_weak_volume_identity.md`, the classes).
     pub id_tie_break: IdTieBreak,
+    /// Is a creation time a property of the NAME rather than of the file?
+    /// True on NTFS under Windows, named by the volume's filesystem name:
+    /// Windows gives a file arriving at a name another file left within the
+    /// last 15 seconds that file's creation time (tunnelling), so in a trade
+    /// of two names the two births swap with the names, while each file
+    /// keeps its index. Measured on a local NTFS volume: file births tunnel,
+    /// directory births do not; the index never repeats (a reused MFT record
+    /// comes back with its sequence number raised). That last is a property
+    /// of local NTFS only: a share calling itself NTFS may number files by an
+    /// inode that recycles, which is why every remote volume is read weak
+    /// (`stable_file_identity` false) and the marker decides nothing there. Where it is true the volume
+    /// reports every nonzero birth as [`INDEX_ONLY_BIRTH`], so a file's
+    /// identity is its index alone, for files and directories alike
+    /// (`birth_as_seen`). The rename probe cannot see tunnelling -- it
+    /// renames to a name nothing left -- so this is named, never probed.
+    pub births_are_names: bool,
+}
+
+/// The birth every file and directory reports on a volume whose births are
+/// names (`Personality::births_are_names`). Nonzero, so an identity read
+/// there is still whole (`FileIdentity::is_strong`); the same for every
+/// file, so two identities there are equal exactly when the indexes are.
+/// What it costs, stated: an older client reading a store written this way
+/// finds no record's own file (every stored birth is the marker), and step
+/// 3 of the scan takes each file standing at its record's path back by
+/// path; a file moved while that older client ran reads as deleted plus
+/// created. And an index recycles only after 65,536 reuses of one MFT
+/// record (its 16-bit sequence number wraps).
+pub const INDEX_ONLY_BIRTH: u64 = 1;
+
+/// A birth as the engine is shown it: the marker on a volume whose births
+/// are names, zero (no birth) left as zero, every other birth as read. The
+/// one place that decides it; the real volume and the simulator both call it.
+pub fn birth_as_seen(birth_ns: u64, births_are_names: bool) -> u64 {
+    if births_are_names && birth_ns != 0 {
+        INDEX_ONLY_BIRTH
+    } else {
+        birth_ns
+    }
 }
 
 /// How far a FAT or exFAT volume's ids hold still, from the traced facts (F1).
@@ -124,6 +163,7 @@ impl Personality {
             stable_file_identity: true,
             positional_file_ids: false,
             id_tie_break: IdTieBreak::None,
+            births_are_names: false,
         }
     }
 
@@ -157,6 +197,7 @@ impl Personality {
             stable_file_identity: true,
             positional_file_ids: false,
             id_tie_break: IdTieBreak::None,
+            births_are_names: false,
         }
     }
 
@@ -195,6 +236,7 @@ impl Personality {
             stable_file_identity: true,
             positional_file_ids: false,
             id_tie_break: IdTieBreak::None,
+            births_are_names: true,
         }
     }
 
@@ -205,6 +247,7 @@ impl Personality {
             mtime_granularity_ns: 2_000_000_000,
             stable_file_identity: false,
             positional_file_ids: true,
+            births_are_names: false,
             ..Personality::windows()
         }
     }
@@ -245,6 +288,7 @@ impl Personality {
             p.stable_file_identity = false;
             p.positional_file_ids = crate::real::ids_are_positions_on_this_volume(dir);
             p.id_tie_break = crate::real::id_tie_break_on_this_volume(dir);
+            p.births_are_names = crate::real::births_are_names_on_this_volume(dir);
             return p;
         }
 
@@ -283,7 +327,10 @@ impl Personality {
         // FAT that moves the directory entry, which is what its "id" is), and
         // read them again. Weak if the id moved, if either half is missing, or
         // if the birth is not the moment the file was made: a constant or an
-        // epoch birth would make the pair a bare file id again.
+        // epoch birth would make the pair a bare file id again. Read raw
+        // (`identity_at`), before any marker: on a volume whose births are
+        // names the engine is shown INDEX_ONLY_BIRTH, which is a statement
+        // that the index alone is the identity there, not a missing birth.
         let renamed = dir.join(format!(
             "{base}-renamed-under-a-much-longer-name-so-its-entry-has-to-move"
         ));
@@ -317,8 +364,32 @@ impl Personality {
             p.id_tie_break = crate::real::id_tie_break_on_this_volume(dir);
         }
 
+        // Named, never probed: the rename above lands on a name nothing left,
+        // so it cannot see tunnelling (`births_are_names`).
+        p.births_are_names = crate::real::births_are_names_on_this_volume(dir);
+
         let _ = std::fs::remove_file(&path);
         p
+    }
+
+    /// A fingerprint as the engine is shown it on this volume: no id and no
+    /// birth where ids are only positions, the index alone where births are
+    /// names.
+    pub fn seen(&self, fp: crate::Fingerprint) -> crate::Fingerprint {
+        if self.positional_file_ids {
+            crate::Fingerprint { file_id: 0, birth_ns: 0, ..fp }
+        } else {
+            crate::Fingerprint { birth_ns: birth_as_seen(fp.birth_ns, self.births_are_names), ..fp }
+        }
+    }
+
+    /// An identity as the engine is shown it on this volume (`seen`).
+    pub fn seen_identity(&self, id: crate::FileIdentity) -> crate::FileIdentity {
+        if self.positional_file_ids {
+            crate::FileIdentity { file_id: 0, birth_ns: 0 }
+        } else {
+            crate::FileIdentity { birth_ns: birth_as_seen(id.birth_ns, self.births_are_names), ..id }
+        }
     }
 
     /// The personality of the machine this build is running on.

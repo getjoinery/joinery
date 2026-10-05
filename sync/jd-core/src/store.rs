@@ -1185,6 +1185,33 @@ impl Store {
         Ok(())
     }
 
+    /// An op that is not ready yet: it waits for another entity's work still to
+    /// come (`OpOutcome::Waits`). Nothing was attempted, so nothing is counted
+    /// and no backoff is set; what it waits for is kept where a failure's reason
+    /// would be, so it stays visible.
+    /// Writes only when the row would change, and says whether it did: a
+    /// waiting op is asked on every run (every half second while a device has
+    /// work pending), and after its first wait nothing about it changes.
+    pub fn record_op_wait(&self, op_id: i64, waiting_for: &str) -> StoreResult<bool> {
+        let changed = self.conn.execute(
+            "UPDATE ops
+                SET last_error = ?2,
+                    next_retry_time = NULL,
+                    state = 'queued'
+              WHERE op_id = ?1
+                AND (last_error IS NOT ?2 OR next_retry_time IS NOT NULL OR state != 'queued')",
+            params![op_id, waiting_for],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Does this entity have a queued op of this kind? Loads every queued op;
+    /// `readiness` reaches it only for a folder that is not PendingUpload, which
+    /// is rare, so that cost is not worth an index.
+    pub fn has_queued_op(&self, entity: EntityId, kind: &str) -> StoreResult<bool> {
+        Ok(self.queued_ops()?.iter().any(|o| o.entity == entity && o.kind == kind))
+    }
+
     /// Put an interrupted op back on the queue, counting the attempt nobody was
     /// left to count.
     ///
@@ -1691,6 +1718,26 @@ impl Store {
         )?;
         let rows = stmt.query_map(params![entity_type.to_string(), file_id as i64], row_to_entry)?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// On a volume whose births are names (`Personality::births_are_names`),
+    /// every stored birth says what the volume now reports: the marker
+    /// (`jd_vfs::INDEX_ONLY_BIRTH`), so a record's identity is its index
+    /// alone. Zero stays zero -- no identity stays no identity. A statement
+    /// made true every time it runs, in one statement, so a store from before
+    /// the volume was read this way, one restored from a backup, or a root
+    /// moved onto such a volume all heal the same way, and a crash leaves it
+    /// either done or not begun. Both columns, files and directories alike.
+    /// Returns the rows it changed.
+    pub fn read_births_as_names(&self) -> StoreResult<usize> {
+        let marker = jd_vfs::INDEX_ONLY_BIRTH as i64;
+        Ok(self.conn.execute(
+            "UPDATE entries SET
+                own_file_birth_ns = CASE WHEN own_file_birth_ns NOT IN (0, ?1) THEN ?1 ELSE own_file_birth_ns END,
+                synced_fp_birth_ns = CASE WHEN synced_fp_birth_ns NOT IN (0, ?1) THEN ?1 ELSE synced_fp_birth_ns END
+              WHERE own_file_birth_ns NOT IN (0, ?1) OR synced_fp_birth_ns NOT IN (0, ?1)",
+            params![marker],
+        )?)
     }
 
     /// Write a record's new agreed placement together with the server move it
@@ -2422,6 +2469,23 @@ mod tests {
         // Failures are never silent — the reason is what the issues panel shows.
         assert_eq!(queued[0].last_error.as_deref(), Some("quota exceeded"));
         assert_eq!(queued[0].next_retry_time, Some(1_700_000_000));
+    }
+
+    #[test]
+    fn a_wait_is_written_once_and_not_again_while_nothing_changes() {
+        // A waiting op is asked every run, every half second while a device has
+        // work pending. The first wait writes what it waits for; the next ones
+        // find the row already so and write nothing.
+        let s = Store::open_in_memory().unwrap();
+        let op = s.queue_op("upload_new", EntityId::file(-2), "{}", "k").unwrap();
+        s.record_op_failure(op, "connection reset", 1_700_000_000).unwrap();
+        assert!(s.record_op_wait(op, "the folder is not on the server yet").unwrap());
+        assert!(!s.record_op_wait(op, "the folder is not on the server yet").unwrap());
+        let row = s.queued_ops().unwrap().remove(0);
+        assert_eq!((row.attempts, row.next_retry_time), (1, None));
+        assert_eq!(row.last_error.as_deref(), Some("the folder is not on the server yet"));
+        // Something else written to the row since is written over again.
+        assert!(s.record_op_wait(op, "waiting for something else").unwrap());
     }
 
     #[test]

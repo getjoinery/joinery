@@ -93,6 +93,38 @@ impl Outcome {
     }
 }
 
+/// How the fleet's disks compare names, asked of every device's root: the rule
+/// the oracle judges every claim by. A fleet whose disks disagree (one
+/// case-insensitive, one not) cannot be judged by one rule -- two spellings
+/// one disk holds as one file are two files on the other -- so it is refused
+/// rather than judged by the first device's rules, which would report the
+/// other's files lost or hide its losses.
+pub fn fleet_personality(devices: &[Personality], names: &[&str]) -> Result<Personality, String> {
+    let compares = |p: &Personality| (p.case_insensitive, p.normalization_insensitive, p.decomposes_unicode);
+    let Some(first) = devices.first() else {
+        return Err("the fleet has no devices".into());
+    };
+    if devices.iter().all(|p| compares(p) == compares(first)) {
+        return Ok(*first);
+    }
+    Err(format!(
+        "the devices' disks disagree on how names compare, so no one rule can judge them: {}",
+        devices
+            .iter()
+            .zip(names)
+            .map(|(p, n)| format!("{n} case-insensitive={} normalization-insensitive={} decomposes={}", p.case_insensitive, p.normalization_insensitive, p.decomposes_unicode))
+            .collect::<Vec<_>>()
+            .join("; ")
+    ))
+}
+
+/// `fleet_personality` over every device's root, probed now.
+pub fn probe_fleet(fleet: &Fleet) -> Result<Personality, String> {
+    let probed: Vec<Personality> = fleet.devices.iter().map(|d| Personality::probe(&d.root)).collect();
+    let names: Vec<&str> = fleet.devices.iter().map(|d| d.name.as_str()).collect();
+    fleet_personality(&probed, &names)
+}
+
 /// Run a campaign.
 ///
 /// `api` is the server as the remote actor and the verifier reach it; `reach` is
@@ -104,10 +136,11 @@ pub fn run(
     api: &dyn DriveApi,
     reach: &dyn Reach,
     stop: &AtomicBool,
+    personality: &Personality,
 ) -> Result<Outcome, crate::journal::JournalError> {
+    let personality = *personality;
     let mut conductor = Journal::open(&fleet.journal_dir, "orchestrator")?;
     let mut chaos = Chaos::new(reach, &server_host(&fleet.server), &fleet.journal_dir)?;
-    let personality = Personality::probe(&fleet.devices[0].root);
     let excluded = excluded_per_device(fleet);
 
     let mut outcome = Outcome::default();
@@ -650,6 +683,17 @@ fn list_tree(root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::fleet::Device;
+
+    #[test]
+    fn a_fleet_whose_disks_compare_names_differently_is_refused() {
+        // One rule judges every claim. A Mac and a Linux box together would
+        // have the Mac's two spellings of one file judged as two, or the
+        // Linux box's two files judged as one.
+        let mixed = fleet_personality(&[Personality::linux(), Personality::macos()], &["device-a", "device-b"]);
+        let why = mixed.unwrap_err();
+        assert!(why.contains("device-a case-insensitive=false") && why.contains("device-b case-insensitive=true"), "{why}");
+        assert_eq!(fleet_personality(&[Personality::macos(), Personality::macos()], &["a", "b"]), Ok(Personality::macos()));
+    }
 
     #[test]
     fn a_store_snapshot_carries_what_is_still_in_the_wal() {

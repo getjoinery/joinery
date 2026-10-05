@@ -112,6 +112,17 @@ pub enum OpOutcome {
     /// and spent two thousand attempts doing it. Stand down with `Overtaken`
     /// instead and let the next round decide afresh.
     Retry(String),
+    /// Not ready: it waits for another entity's work that is still to come --
+    /// the folder it places something in has no server id yet, and that
+    /// folder's own create is queued. Decided before the op is in flight
+    /// (`readiness`), so nothing was attempted: no attempt is counted, no
+    /// backoff is set, and it runs on the first run after the folder lands.
+    ///
+    /// A timer stood in for this, and outlived it: an upload that asked
+    /// while its folder was still being made waited out its backoff (up to
+    /// fifteen minutes) after the folder had arrived, while a file saved in
+    /// the same folder a moment later went up at once (B-RETRYWAIT).
+    Waits(String),
 }
 
 /// What one pass over the journal did.
@@ -126,6 +137,10 @@ pub struct ExecReport {
     pub retrying: usize,
     /// Ops left alone because their backoff has not elapsed.
     pub deferred: usize,
+    /// Ops not ready yet, waiting for another entity's work still to come
+    /// (`OpOutcome::Waits`). Pending, like `deferred`, and counted apart from
+    /// it and from `retrying`: a wait is not a failure.
+    pub waiting: usize,
 }
 
 impl ExecReport {
@@ -309,6 +324,7 @@ pub fn run_queued(env: &ExecEnv) -> Result<ExecReport, ExecError> {
             OpOutcome::Withdrawn(_) => report.withdrawn += 1,
             OpOutcome::Overtaken(_) => report.overtaken += 1,
             OpOutcome::Retry(_) => report.retrying += 1,
+            OpOutcome::Waits(_) => report.waiting += 1,
         }
     }
     Ok(report)
@@ -316,15 +332,22 @@ pub fn run_queued(env: &ExecEnv) -> Result<ExecReport, ExecError> {
 
 /// Run one op, marking the crash window around it and recording how it ended.
 pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
-    // In flight from here. If the process dies now, recovery finds this row and
-    // asks the server what actually happened rather than assuming either way.
-    env.store.set_op_state(op.op_id, OpState::InFlight)?;
-
-    let outcome = match perform(env, op) {
-        Ok(o) => o,
-        Err(e) => {
-            note_the_parent_is_in_the_trash(env, &e)?;
-            classify(&e)
+    let outcome = match readiness(env, op)? {
+        // Decided before anything is in flight: an op that never left needs
+        // no recovery and has nothing to ask the server about.
+        Some(not_now) => not_now,
+        None => {
+            // In flight from here. If the process dies now, recovery finds this
+            // row and asks the server what actually happened rather than
+            // assuming either way.
+            env.store.set_op_state(op.op_id, OpState::InFlight)?;
+            match perform(env, op) {
+                Ok(o) => o,
+                Err(e) => {
+                    note_the_parent_is_in_the_trash(env, &e)?;
+                    classify(&e)
+                }
+            }
         }
     };
 
@@ -359,8 +382,80 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             env.store
                 .record_op_failure(op.op_id, why, (env.now_ms)() as i64 + delay)?;
         }
+        OpOutcome::Waits(why) => {
+            // Written once: asked again every run, the row is already what a
+            // second wait would make it.
+            env.store.record_op_wait(op.op_id, why)?;
+        }
     }
     Ok(outcome)
+}
+
+/// A folder with no server id at a call that would send it. `readiness`
+/// answers every kind that sends a folder before it is in flight; this is the
+/// floor under that, so a kind it does not name stands down (and the next
+/// round decides afresh) rather than sending a local placeholder as a real id.
+fn sends_a_provisional_folder(parent: Option<i64>) -> Option<OpOutcome> {
+    parent.filter(|p| *p < 0).map(|_| {
+        OpOutcome::Overtaken("its folder has no server id yet, and nothing answered for it before it was sent".into())
+    })
+}
+
+/// Can this op be carried out now? `None` when it can. An op that places
+/// something in a folder with no server id yet cannot: a provisional id names
+/// nothing the server can look up. It waits while that folder is still to be
+/// created -- its create queued, or the folder pending and planned again by
+/// the next round -- and stands down when it is not: parked as a name this
+/// device cannot send, out of scope, folded into another folder or forgotten,
+/// where a wait would be a wait for ever. The next round decides afresh from
+/// where things stand.
+///
+/// The folder is the one the op itself will use: an upload's planned folder
+/// where the plan named a real one, else the record's own folder as it stands
+/// now (a provisional plan is re-read from the record, which learns the real
+/// id when the folder gets one); a folder create's record's own folder; a
+/// move's destination, which lives in the op.
+fn readiness(env: &ExecEnv, op: &Op) -> Result<Option<OpOutcome>, ExecError> {
+    let params: Value = serde_json::from_str(&op.params).unwrap_or_else(|_| json!({}));
+    let planned = params.get("parent").and_then(Value::as_i64);
+    let current = || -> Result<Option<i64>, ExecError> {
+        Ok(env.store.get_entry(op.entity)?.and_then(|e| e.remote.parent))
+    };
+    let parent = match op.kind.as_str() {
+        "upload_new" => match planned {
+            Some(p) if p < 0 => current()?,
+            other => other,
+        },
+        // A park moves the record within the folder it stands in now.
+        "upload_version" | "create_remote_folder" | "park_remote" => current()?,
+        "move_remote" => planned,
+        // No other kind sends a folder to the server. A kind that comes to is
+        // named here, and the send sites stand down on a provisional folder
+        // regardless (`sends_a_provisional_folder`).
+        _ => None,
+    };
+    let Some(folder) = parent.filter(|p| *p < 0).map(EntityId::folder) else {
+        return Ok(None);
+    };
+    // Coming: its create is queued, or the folder still waits to be sent and
+    // the next round plans the create. A withdrawn create leaves the folder
+    // pending and planned again, so a child waits for work that is coming, and
+    // what a person sees is the folder's own issue. That PendingUpload counts
+    // as coming holds only while the round plans every pending provisional
+    // folder; a rule that skipped one would leave this child waiting with
+    // nothing counting, and a device that never reads quiet is the alarm.
+    // Not coming: parked as unsyncable or out of scope, or its record gone --
+    // folded into a real folder or forgotten.
+    let coming = match env.store.get_entry(folder)? {
+        Some(f) => f.status == LocalStatus::PendingUpload || env.store.has_queued_op(folder, "create_remote_folder")?,
+        None => false,
+    };
+    if coming {
+        return Ok(Some(OpOutcome::Waits("the folder it belongs in is not on the server yet".into())));
+    }
+    Ok(Some(OpOutcome::Overtaken(
+        "the folder it was going into is no longer waiting to be created; deciding again from where things stand".into(),
+    )))
 }
 
 /// Which failures are worth another go.
@@ -2427,10 +2522,10 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             .unwrap_or_else(|| entry.remote.name.clone()),
         parent: planned_parent.unwrap_or(entry.remote.parent),
     };
-    if placement.parent.map(|p| p < 0).unwrap_or(false) {
-        return Ok(OpOutcome::Retry(
-            "the folder it belongs in is not on the server yet".into(),
-        ));
+    // A folder with no server id yet was answered before this op was in
+    // flight (`readiness`).
+    if let Some(not_sent) = sends_a_provisional_folder(placement.parent) {
+        return Ok(not_sent);
     }
     // A new entry, or a new version of the one we already have. The old id is
     // only usable when the server still has it — which is exactly what
@@ -3440,14 +3535,14 @@ fn create_remote_folder(
             ))
         }
     };
+    // A parent with no server id yet was answered before this op was in
+    // flight (`readiness`).
     let placement = Placement {
         name: planned.name,
         parent,
     };
-    if placement.parent.map(|p| p < 0).unwrap_or(false) {
-        return Ok(OpOutcome::Retry(
-            "the folder it belongs in is not on the server yet".into(),
-        ));
+    if let Some(not_sent) = sends_a_provisional_folder(placement.parent) {
+        return Ok(not_sent);
     }
     // The name the plan chose may already be spoken for, by a folder belonging
     // to a device this one has never met -- so nothing in this store can see
@@ -4102,27 +4197,11 @@ fn move_remote(
     // old neighbours are still using — which comes back `name_taken`, the one
     // refusal this client waits on forever. The soak rig had it on sixteen
     // attempts with the destination folder still uncreated.
-    if let Some(p) = to.parent.filter(|p| *p < 0) {
-        // Still waiting to be created: this is the ordinary case, and waiting
-        // is right.
-        if require_entry(env, EntityId::folder(p))?.is_some() {
-            return Ok(OpOutcome::Retry(
-                "the folder it belongs in is not on the server yet".into(),
-            ));
-        }
-        // The entry is gone, so the folder took a real id or was folded into
-        // one that already had it. A provisional id is local and is never
-        // reissued, which means nothing will ever answer to this one and
-        // waiting for it is waiting forever. Uploads sidestep this by reading
-        // the parent as it stands now rather than as it was planned; a move
-        // cannot, because its destination lives in the op rather than on the
-        // entry. So the plan is stale and the next scan re-derives it from
-        // what is actually on the disk and the server. The soak rig had five
-        // of these between two devices, at up to nineteen attempts, every one
-        // pointed at a provisional id with no entry left behind it.
-        return Ok(OpOutcome::Overtaken(
-            "the folder it was going into has changed since this was planned".into(),
-        ));
+    // A destination with no server id yet was answered before this op was in
+    // flight (`readiness`): waited for while the folder is coming, stood down
+    // when nothing will ever answer to the provisional id.
+    if let Some(not_sent) = sends_a_provisional_folder(to.parent) {
+        return Ok(not_sent);
     }
     // On a volume that cannot say which file is which, a move is only this
     // record's if the file where it went is not identifiably another's: a

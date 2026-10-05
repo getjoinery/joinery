@@ -157,9 +157,24 @@ struct MemFsState {
     /// Under `DirectorySlot`: the entry slots freed in each directory, by
     /// the directory's key, taken again lowest first.
     free_slots: BTreeMap<String, BTreeSet<u64>>,
-    /// Under `DirectorySlot`: each name a file left, with that file's birth
-    /// and when it left, for tunnelling.
+    /// Each name a file left, with that file's birth and when it left, for
+    /// tunnelling (`DirectorySlot`, and NTFS: `births_are_names`).
     vacated: BTreeMap<String, (u64, u64)>,
+    /// NTFS (`Personality::births_are_names`): a name taken again within 15
+    /// seconds gives the newcomer the creation time of the file that left
+    /// it, as Windows FAT does. Measured on real NTFS: in a name trade the
+    /// two births swap with the names; directories' births do not tunnel.
+    /// The engine is shown such a volume's births through
+    /// `jd_vfs::birth_as_seen`, the function the real volume calls.
+    births_are_names: bool,
+    /// Whether the engine is shown this disk's births as names: true from
+    /// the disk's personality, off only to play a client from before the
+    /// volume was read that way (`MemFs::show_births_as_names`).
+    births_shown_as_names: bool,
+    /// Every time the engine read a file's bytes (`hash`, `open_file`).
+    reads: u64,
+    /// A Windows network share (`MemFs::network_share`).
+    network_share: bool,
     /// Under `DataCluster`: the next temporary id for an empty file, counted
     /// down from the top as macOS does.
     next_temp_id: u64,
@@ -312,6 +327,10 @@ impl MemFs {
                 file_id_model: FileIds::Stable,
                 free_slots: BTreeMap::new(),
                 vacated: BTreeMap::new(),
+                births_are_names: personality.births_are_names,
+                births_shown_as_names: personality.births_are_names,
+                reads: 0,
+                network_share: false,
                 next_temp_id: u64::MAX,
                 touched: BTreeSet::new(),
                 watch_lost: false,
@@ -420,6 +439,26 @@ impl MemFs {
     }
 
     // ---- controls the scenario drives ------------------------------------
+
+    /// Show the engine this disk's real births, as a client from before the
+    /// volume was read as one whose births are names did, or (true) the
+    /// marker, as the shipped client does. The disk tunnels either way.
+    pub fn show_births_as_names(&self, on: bool) {
+        self.state.lock().unwrap().births_shown_as_names = on;
+    }
+
+    /// A Windows network share rather than a local NTFS volume: it calls
+    /// itself NTFS, numbers files by its server's inodes (which a deleted file
+    /// frees for the next, with `reuse_file_ids`), and the engine reads it weak,
+    /// as `OsVfs` reads every remote volume (`ids_not_unique_on_this_volume`).
+    pub fn network_share(&self, on: bool) {
+        self.state.lock().unwrap().network_share = on;
+    }
+
+    /// How many times the engine has read a file's bytes.
+    pub fn reads(&self) -> u64 {
+        self.state.lock().unwrap().reads
+    }
 
     /// Hand out deleted file ids again. Off by default because it is unusual;
     /// on when the scenario wants to prove the engine does not identify a file
@@ -1001,6 +1040,13 @@ impl MemFs {
     fn alloc_id(st: &mut MemFsState) -> u64 {
         if st.reuse_file_ids {
             if let Some(id) = st.freed_ids.pop() {
+                // Local NTFS takes a freed MFT record again with its sequence
+                // number raised (the index's top 16 bits), so the number is
+                // never the same twice; measured on the VM. A share hands out
+                // its server's inode as it is.
+                if st.births_are_names && !st.network_share {
+                    return id + (1 << 48);
+                }
                 return id;
             }
         }
@@ -1059,9 +1105,9 @@ impl MemFs {
         }
     }
 
-    /// A file leaving the name `key` (`DirectorySlot` only: tunnelling).
+    /// A file leaving the name `key`, on a disk that tunnels.
     fn vacate(st: &mut MemFsState, key: &str, now: u64) {
-        if st.file_id_model != FileIds::DirectorySlot {
+        if st.file_id_model != FileIds::DirectorySlot && !st.births_are_names {
             return;
         }
         if let Some(birth) = st.file_births.get(key).copied() {
@@ -1072,7 +1118,7 @@ impl MemFs {
     /// A file arriving at the name `key`: within 15 seconds of another file
     /// leaving it, Windows gives it that file's creation time.
     fn tunnel(st: &mut MemFsState, key: &str, now: u64) {
-        if st.file_id_model != FileIds::DirectorySlot {
+        if st.file_id_model != FileIds::DirectorySlot && !st.births_are_names {
             return;
         }
         if let Some((birth, left)) = st.vacated.remove(key) {
@@ -1287,7 +1333,7 @@ impl MemFs {
         if st.births_hidden || Self::directory_id_of(st, key) == 0 {
             return 0;
         }
-        st.births.get(key).copied().unwrap_or(0)
+        jd_vfs::birth_as_seen(st.births.get(key).copied().unwrap_or(0), st.births_shown_as_names)
     }
 
     /// The identity of the directory at this key as the engine is shown it,
@@ -1315,7 +1361,7 @@ impl MemFs {
                 birth_ns: if st.births_hidden || positional {
                     0
                 } else {
-                    st.file_births.get(key).copied().unwrap_or(0)
+                    jd_vfs::birth_as_seen(st.file_births.get(key).copied().unwrap_or(0), st.births_shown_as_names)
                 },
             }),
             _ => None,
@@ -1397,7 +1443,8 @@ impl Vfs for MemFs {
         // a real one says so through its probe.
         let mut p = self.personality;
         let st = self.state.lock().unwrap();
-        if st.births_hidden {
+        p.births_are_names = st.births_shown_as_names;
+        if st.births_hidden || st.network_share {
             p.stable_file_identity = false;
         }
         // Every FAT and exFAT model is named by its filesystem type, whatever
@@ -1467,7 +1514,8 @@ impl Vfs for MemFs {
     fn hash(&self, path: &Path) -> VfsResult<String> {
         let key = self.key_for(path)?;
         self.check_failure(FsOp::Hash, &key, path)?;
-        let st = self.state.lock().unwrap();
+        let mut st = self.state.lock().unwrap();
+        st.reads += 1;
         match st.nodes.get(&key) {
             Some(Node::File { bytes, .. }) => {
                 let mut h = Sha256::new();
@@ -1665,7 +1713,10 @@ impl Vfs for MemFs {
         self.check_failure(FsOp::OpenRead, &key, path)?;
         // One look at the node: the bytes the handle reads and the
         // fingerprint of the file they are, as a descriptor holds its file.
-        let st = self.state.lock().unwrap();
+        let mut st = self.state.lock().unwrap();
+        if matches!(st.nodes.get(&key), Some(Node::File { .. })) {
+            st.reads += 1;
+        }
         match st.nodes.get(&key) {
             Some(Node::File { bytes, .. }) => {
                 let fingerprint = MemFs::fingerprint_of(&st, &key).expect("a file node has a fingerprint");
@@ -1888,7 +1939,11 @@ impl SpoolFile for MemSpool {
             MemFs::tunnel(&mut st, &key, now);
         }
         let positional = st.file_id_model != FileIds::Stable;
-        let birth_ns = if st.births_hidden || positional { 0 } else { st.file_births[&key] };
+        let birth_ns = if st.births_hidden || positional {
+            0
+        } else {
+            jd_vfs::birth_as_seen(st.file_births[&key], st.births_shown_as_names)
+        };
         let id = if positional { 0 } else { id };
         let size = self.buf.len() as u64;
         st.nodes.insert(
