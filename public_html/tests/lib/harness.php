@@ -194,7 +194,8 @@ function harness_boot(array $overrides = array()) {
 	// roughly twenty per run piling into the production unmatched box.
 	//
 	// SMTP rather than dry-run on purpose: the send path stays exercised end to
-	// end, it just terminates at the local relay instead of a paid service that
+	// end, it just terminates at the local relay (port 25, pinned below)
+	// instead of a paid service that
 	// delivers to the internet. Set in memory for this process only, so nothing
 	// about the site's real configuration changes.
 	//
@@ -222,6 +223,16 @@ function harness_boot(array $overrides = array()) {
 	if (($h['meta']['env'] ?? '') !== 'prod-verify') {
 		harness_set_setting_mem('email_service', 'smtp');
 		harness_set_setting_mem('email_fallback_service', 'smtp');
+		// The local relay is named here, not taken from the site's smtp_*
+		// settings: dev's point at the provider's SMTP endpoint (port 465), which
+		// the host firewall drops, so every send hung about two minutes on the
+		// connect and suites that mail were killed mid-run, leaving fixtures.
+		// 'localhost', not 127.0.0.1: the local Postfix offers STARTTLS on 25
+		// with the host's certificate for localhost, and the mailer verifies the
+		// name it connected to.
+		harness_set_setting_mem('smtp_host', 'localhost');
+		harness_set_setting_mem('smtp_port', '25');
+		harness_set_setting_mem('smtp_auth', '0');
 		harness_set_setting_mem('email_test_mode', '1');
 		harness_set_setting_mem('email_test_recipient', 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN);
 		$h['test_recipient'] = 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN;
