@@ -34,6 +34,7 @@
  *
  * Run: php plugins/mailbox/tests/relay_upgrade_test.php
  *
+ * @version 1.2 - every column uptimeCheckFor sets takes its value: no null into a NOT NULL column
  * @version 1.1 - how the plane watches a relay (uptimeCheckFor, ANSWERS_HEALTH)
  * @version 1.0
  */
@@ -159,8 +160,8 @@ class RelayUpgradeTest {
 		$this->eq('http_status', $new['mgn_uptime_check_type'] ?? null, 'a 3.7 relay is checked over HTTP');
 		$this->eq('https://mx.example.test/health', $new['mgn_health_check_url'] ?? null,
 			'at /health under its mail hostname');
-		check(array_key_exists('mgn_uptime_tcp_port', $new) && $new['mgn_uptime_tcp_port'] === null,
-			'and its port 25 setting is cleared');
+		check(array_key_exists('mgn_uptime_tcp_port', $new) && $new['mgn_uptime_tcp_port'] === 0,
+			'and its port 25 setting is cleared to 0, no port');
 
 		$this->eq('http_status', RelayCloudProvisioner::uptimeCheckFor('mx.example.test', '3.10')['mgn_uptime_check_type'],
 			'3.10 answers /health too (version_compare, not text)');
@@ -175,6 +176,19 @@ class RelayUpgradeTest {
 			'an unknown version is not assumed to answer /health');
 		$this->eq('tcp_port', RelayCloudProvisioner::uptimeCheckFor('', '3.7')['mgn_uptime_check_type'],
 			'no mail hostname leaves nothing to ask over HTTPS');
+
+		// A null into a NOT NULL column fails the node save, which attachNode
+		// catches and logs: the relay would stay on the old check, silently.
+		// ManagedNode is server_manager's, which a site without it does not load.
+		$specs = class_exists('ManagedNode') ? ManagedNode::$field_specifications : array();
+		foreach ($specs ? array($new, $old) : array() as $columns) {
+			foreach ($columns as $column => $value) {
+				check(isset($specs[$column]), $column . ' is a ManagedNode column');
+				check($value !== null || ($specs[$column]['is_nullable'] ?? true) !== false,
+					$column . ' is never set to null when the column refuses null',
+					'set to null on a ' . $columns['mgn_uptime_check_type'] . ' check');
+			}
+		}
 
 		check(RelayVersion::answersHealth(RelayVersion::shipped()),
 			'the relay this release builds answers /health, so none is born watched on port 25');

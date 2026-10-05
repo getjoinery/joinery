@@ -23,6 +23,8 @@
  *
  * Test seam: $driver_factory.
  *
+ * @version 2.7 - uptimeCheckFor() clears the port with 0, not null: the column is NOT NULL, so null
+ *                failed the node save and left an updated relay on the port 25 check
  * @version 2.6 - a relay that answers GET /health (3.7) is watched there over HTTPS, not by dialling
  *                port 25, which no machine of ours does (uptimeCheckFor)
  * @version 2.5 - RelayFirstBoot lives in this file; a relay and a shard attach their
@@ -747,7 +749,7 @@ class RelayCloudProvisioner {
 	 * (specs/relay_receive_only_forwarding.md), so a plane that connected to the
 	 * relay's port 25 would report every relay down. An older relay has nothing
 	 * else to ask, so it keeps the port 25 check until its update re-attaches
-	 * it here.
+	 * it here. A port of 0 is no port: the column's own default, and NOT NULL.
 	 *
 	 * @return array<string, mixed>
 	 */
@@ -757,7 +759,7 @@ class RelayCloudProvisioner {
 			return array(
 				'mgn_uptime_check_type' => 'http_status',
 				'mgn_health_check_url'  => 'https://' . $hostname . '/health',
-				'mgn_uptime_tcp_port'   => null,
+				'mgn_uptime_tcp_port'   => 0,
 			);
 		}
 		return array(
