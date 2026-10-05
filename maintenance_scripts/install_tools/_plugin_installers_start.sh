@@ -3,6 +3,10 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.24 - A plugin's host installer runs when the plugin is switched on (plg_active = 1).
+#                It read plg_status = 'active', and a running plugin whose status said
+#                'stale' (absent from the upgrade source's manifest) never had its installer
+#                converged: dev's Postfix missed every install_email.sh change.
 # Version: 2.23 - The quiet gate fails closed: a quiet site whose tree lacks _site_state.sh runs
 #                 nothing (review R1)
 # Version: 2.22 - The quiet gate (specs/site_copy.md WP5): right after the lock, a quiet site's
@@ -753,8 +757,9 @@ read_active_plugins() {
         try {
             $pdo = new PDO("pgsql:host={$host};dbname={$name}", $user, $pass,
                 [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 10]);
-            $q = $pdo->prepare("SELECT plg_name FROM plg_plugins WHERE plg_status = ?");
-            $q->execute(["active"]);
+            // plg_active is the switch every loader reads; plg_status is a
+            // lifecycle note that can say "stale" while the plugin runs.
+            $q = $pdo->query("SELECT plg_name FROM plg_plugins WHERE plg_active = 1 ORDER BY plg_name");
             foreach ($q->fetchAll(PDO::FETCH_NUM) as $row) {
                 echo $row[0] . "\n";
             }

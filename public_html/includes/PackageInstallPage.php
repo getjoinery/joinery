@@ -37,6 +37,7 @@
  * the URL, which carries only a request id or a staged directory name that
  * is checked against staging.
  *
+ * @version 1.2 - "This plugin is active" reads plg_active (Plugin::is_active()), not plg_status
  * @version 1.1 - the replace panel: upload() returns a pending outcome for an
  *                installed name, pending()/replace_html()/confirmReplace()/
  *                discard(), the acknowledgement carries `replace` through,
@@ -148,7 +149,7 @@ class PackageInstallPage {
 			}
 		} else {
 			$row = Plugin::get_by_plugin_name($name);
-			if ($row && (string)$row->get('plg_status') === 'active') {
+			if ($row && $row->is_active()) {
 				$in_use = 'This plugin is active.';
 			}
 		}

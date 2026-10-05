@@ -13,6 +13,8 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.7 - a dependency or conflict is judged active by plg_active (Plugin::is_active()),
+ *                never plg_status, which can read 'stale' while the plugin runs
  * @version 1.6 - uninstall() prunes the deletion rules that named the tables it
  *                dropped; a rule about a table that is gone refuses every delete
  *                of its source (a file, a user) until the registry is rebuilt
@@ -586,7 +588,7 @@ class PluginManager extends AbstractExtensionManager {
                     continue;
                 }
                 
-                if ($dep_plugin->get('plg_status') !== 'active') {
+                if (!$dep_plugin->is_active()) {
                     $results['valid'] = false;
                     $results['errors'][] = "Required plugin not active: " . $dep_name;
                 }
@@ -613,7 +615,7 @@ class PluginManager extends AbstractExtensionManager {
             foreach ($manifest['conflicts'] as $conflict_name) {
                 $conflict_plugin = Plugin::get_by_plugin_name($conflict_name);
                 
-                if ($conflict_plugin && $conflict_plugin->get('plg_status') === 'active') {
+                if ($conflict_plugin && $conflict_plugin->is_active()) {
                     $results['valid'] = false;
                     $results['errors'][] = "Conflicting plugin is active: " . $conflict_name;
                 }

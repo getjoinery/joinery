@@ -1,4 +1,6 @@
 <?php
+// @version 1.4 - Deactivate / Activate and the active count read plg_active (is_active()), never
+//                plg_status: a running plugin whose status says 'stale' was offered Activate and Uninstall
 // @version 1.3 - the replace panel for an upload of an installed name; the Local fork badge with the shipped version; Disable upgrade / Allow upgrade (specs/package_replace_on_upload.md WP2, WP3)
 // @version 1.2 - the Uninstalled row: data removed, files being removed by the host, then Install (specs/post_release_fleet_defects.md B1)
 // @version 1.1 - the Unsigned badge, the warning block and the request panel's hand-off (specs/package_signing.md WP6)
@@ -316,17 +318,22 @@ $page->begin_box(array('altlinks' => $altlinks));
                         // Not installed (no database record) — files on disk, awaiting install.
                         // Post-uninstall lands here too, since uninstall removes the row.
                         $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
-                    } elseif ($plugin_status === 'active') {
-                        $actions['Deactivate'] = "javascript:submitPluginAction('deactivate', '$plugin_name')";
-                    } elseif ($plugin_status === 'inactive' || $plugin_status === 'installed' || $plugin_status === 'stale') {
-                        $actions['Activate'] = "javascript:submitPluginAction('activate', '$plugin_name')";
-                        if (!$is_active_theme_provider) {
-                            $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', '$uninstall_warning')";
+                    } else {
+                        // On or off is plg_active (is_active()). plg_status is a
+                        // lifecycle note: 'stale' or 'error' can sit on a plugin
+                        // that is switched on and running.
+                        if ($plugin_status === 'error') {
+                            $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
                         }
-                    } elseif ($plugin_status === 'error') {
-                        $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
-                        if (!$is_active_theme_provider) {
-                            $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', '$uninstall_warning')";
+                        if ($plugin['plugin']->is_active()) {
+                            $actions['Deactivate'] = "javascript:submitPluginAction('deactivate', '$plugin_name')";
+                        } else {
+                            if ($plugin_status !== 'error') {
+                                $actions['Activate'] = "javascript:submitPluginAction('activate', '$plugin_name')";
+                            }
+                            if (!$is_active_theme_provider) {
+                                $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', '$uninstall_warning')";
+                            }
                         }
                     }
 
@@ -352,7 +359,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                             $action_cell .= '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';
                         }
                         // Add disabled uninstall option with explanation for active theme providers
-                        if ($is_active_theme_provider && ($plugin_status === 'inactive' || $plugin_status === 'installed' || $plugin_status === 'error')) {
+                        if ($is_active_theme_provider && $plugin['plugin'] && !$plugin['plugin']->is_active()) {
                             $action_cell .= '<a href="#" class="dropdown-item disabled" onclick="return false;" title="Cannot uninstall active theme provider">';
                             $action_cell .= '<span class="text-muted">Uninstall (Active Theme)</span>';
                             $action_cell .= '</a>';
@@ -410,12 +417,10 @@ $page->begin_box(array('altlinks' => $altlinks));
                 } else {
                     if ($plugin['plugin']) {
                         $installed_count++;
-                        $status = $plugin['plugin']->get('plg_status');
-
                         // Check for install errors regardless of status
                         if ($plugin['plugin']->get('plg_install_error')) {
                             $error_count++;
-                        } elseif ($status === 'active') {
+                        } elseif ($plugin['plugin']->is_active()) {
                             $active_count++;
                         } else {
                             $inactive_count++;

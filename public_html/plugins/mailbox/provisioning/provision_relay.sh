@@ -11,9 +11,14 @@
 #
 # rspamd's local.d files come from rspamd_stateless.sh, the one configuration a
 # deployment's own scanner writes too (spam_learning_in_core.md). Only
-# comment text changed in them, no setting, so RELAY_VERSION stays 3.3 and no
-# relay needs an update; a relay picks up the text when it is next rebuilt.
+# comment text changed in them, no setting, so they moved no RELAY_VERSION; a
+# relay picks up the text when it is next rebuilt.
 #
+# Version: 3.4 - postmaster is accepted on a domain that refuses unmatched mail (RFC 5321;
+#                the DMARC rua points at it): the merged access map lists
+#                postmaster@<domain> OK, and the sealer stores it under the tenant's
+#                transport key instead of refusing it after acceptance (a bounce). The
+#                site files a report and drops anything else.
 # Version: 3.3 - rspamd rbl.conf: DNS lists that cannot answer off (NiX Spam timed out
 #                every lookup and held each scanned message 5-8s; SURBL/URIBL refuse
 #                shared resolvers).
@@ -64,7 +69,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.3"
+RELAY_VERSION="3.4"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"

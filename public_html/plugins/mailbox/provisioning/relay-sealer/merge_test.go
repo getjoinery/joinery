@@ -105,7 +105,9 @@ func simpleFragment(slug, domain string) mapFragment {
 		Version:         1,
 		SRSSecret:       "sekrit-" + slug,
 		ForwardFromName: "Site " + slug,
-		ForwardShowVia:  true,
+		// Every real fragment carries one (RelayMapExporter).
+		TransportPublicKey: testPubKeyB64,
+		ForwardShowVia:     true,
 		Recipients: map[string]routingEntry{
 			"info@" + domain: {Mode: modeStore, PublicKey: testPubKeyB64, KeyKind: keyKindTransport},
 		},
@@ -157,6 +159,16 @@ func TestMergeTwoTenantsIsolatedAndDerived(t *testing.T) {
 	ra := f.postfixMap(t, "joinery-recipients")
 	if !strings.Contains(ra, "info@alpha.test\tOK") || !strings.Contains(ra, "alpha.test\tREJECT") {
 		t.Fatalf("recipient access wrong:\n%s", ra)
+	}
+	if !strings.Contains(ra, "postmaster@alpha.test\tOK") {
+		t.Fatalf("a refusing domain must still accept postmaster (RFC 5321, the DMARC rua):\n%s", ra)
+	}
+	if entry, ok := m.postmasterFallback("postmaster@alpha.test"); !ok || entry.Mode != modeStore ||
+		entry.KeyKind != keyKindTransport || entry.Tenant != "alpha" || entry.PublicKey != m.Tenants["alpha"].TransportPublicKey {
+		t.Fatalf("postmaster on a refusing domain should store under alpha's transport key, got %+v ok=%v", entry, ok)
+	}
+	if _, ok := m.resolve("nobody@alpha.test"); ok {
+		t.Fatal("an unknown address on a refusing domain must still not resolve")
 	}
 	srs := f.postfixMap(t, "joinery-srs")
 	if !strings.Contains(srs, `/^SRS0=[^@]*@fwd\.beta\.test$/ OK`) {

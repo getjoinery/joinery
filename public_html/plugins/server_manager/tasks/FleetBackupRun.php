@@ -34,6 +34,8 @@
  * A node whose agent is not checking in is skipped and named: a job sent to it
  * would wait unclaimed and run whenever the agent came back, not in its slot.
  *
+ * @version 1.9 - a verify that is due checks its own node's work under its own name, so it no longer replaces the
+ *                pass's map of busy machines (the next sibling started beside the verify, or the pass died)
  * @version 1.8 - one backup at a time per machine, counting only claimed work, replaces the fleet-wide cap
  *                (a job no agent would ever claim held a fleet slot forever); a node whose agent is
  *                not checking in is skipped and named, not sent a job
@@ -141,9 +143,9 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 			// turn the way a backup does: it downloads and reads as much.
 			$verify_job = ManagementJob::latestForNode($node->key, 'verify_backup');
 			if (FleetBackupPolicy::is_verify_due($policy, $node, $now, $verify_job)) {
-				$busy = self::active_backup_work($node->key);
-				if ($busy !== '') {
-					$verify_skipped[] = $slug . ' (' . $busy . ' still going)';
+				$own_work = self::active_backup_work($node->key);
+				if ($own_work !== '') {
+					$verify_skipped[] = $slug . ' (' . $own_work . ' still going)';
 				} elseif (isset($busy[$machine])) {
 					$verify_skipped[] = $slug . ' (waiting for ' . $busy[$machine] . ' on the same machine)';
 				} elseif ($dry) {

@@ -7,6 +7,8 @@
  *
  * Format: SRS0=HASH=TIMESTAMP=originaldomain=localpart@forwardingdomain
  *
+ * @version 1.1 - an SRS address is recognised whatever the case of its SRS0= prefix, as the relay
+ *                and the SMTP-time recipient lookup recognise it
  * @version 1.0
  */
 
@@ -29,7 +31,7 @@ class SRSRewriter {
 	 */
 	static function isSRSAddress($address) {
 		$local = explode('@', $address, 2)[0];
-		return (strpos($local, 'SRS0=') === 0);
+		return (stripos($local, 'SRS0=') === 0);
 	}
 
 	/**

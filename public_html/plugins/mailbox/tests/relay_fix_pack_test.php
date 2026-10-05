@@ -13,9 +13,9 @@
  *         explicit PDO types — a live-driver test with boolean false (the
  *         untyped bind pdo_pgsql rejects with 22P02).
  *   R2-3  SRS bounce addresses survive only with their case intact: rewrite →
- *         detect → validate round-trips on the raw address and fails on a
- *         lowercased copy (why the pipes use flags=DRh and processEmail runs
- *         the SRS check before lowercasing).
+ *         detect → validate round-trips on the raw address, and a lowercased
+ *         copy is recognised but fails validation (why the pipes use flags=DRh
+ *         and processEmail runs the SRS check before lowercasing).
  *   R2-8  RelayMapSync::contentHash() is the single map-hash formula: it is
  *         deterministic and covers every artifact (including srs_access, the
  *         one the freshness check used to drop).
@@ -25,6 +25,7 @@
  * The R2-1 test creates one scratch message row and deletes it; it is skipped
  * when no inbound domain exists to attach it to.
  *
+ * @version 1.1 - a lowercased SRS address is recognised (and still fails validation)
  * @version 1.0
  */
 
@@ -74,7 +75,10 @@ class RelayFixPackTest {
 		$this->ok($srs->validate($addr), 'rewritten address validates');
 
 		$lower = strtolower($addr);
-		$this->ok(!SRSRewriter::isSRSAddress($lower), 'lowercased copy is NOT detected (SRS0= prefix)');
+		// Recognised in any case, as the relay and the SMTP-time recipient lookup
+		// recognise it, so it reaches the SRS handling and is dropped there, never
+		// routed as an unknown address and bounced.
+		$this->ok(SRSRewriter::isSRSAddress($lower), 'lowercased copy is still recognised as an SRS address');
 		$this->ok(!$srs->validate($lower), 'lowercased copy does NOT validate (hash is case-sensitive)');
 	}
 

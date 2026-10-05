@@ -28,6 +28,7 @@
  * Exit codes: 0 success, 1 usage/parse error, 2 --active-only without a
  * reachable database.
  *
+ * @version 1.1 - --active-only means plg_active = 1; plg_status can read 'stale' while a plugin runs
  * @version 1.0
  */
 
@@ -104,7 +105,7 @@ function ld_filter_active($public_html, $manifests) {
 		require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 		require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 		$dblink = DbConnector::get_instance()->get_db_link();
-		$stmt = $dblink->prepare("SELECT plg_name FROM plg_plugins WHERE plg_status = 'active'");
+		$stmt = $dblink->prepare("SELECT plg_name FROM plg_plugins WHERE plg_active = 1");
 		$stmt->execute();
 		$active = $stmt->fetchAll(PDO::FETCH_COLUMN);
 	} catch (Throwable $e) {

@@ -112,11 +112,12 @@ func TestKeylessRealRecipientAcceptsWithoutADecoyKey(t *testing.T) {
 		DirectMaxParts: 8, DirectMaxPartBytes: 1000, DirectMaxTotalBytes: 5000,
 		DirectPreflightLimit: 100, DirectPreflightWindow: 120,
 		DirectSessionTTLSeconds: 900, DirectKinds: []string{"mail"}, SpoolDir: dir,
+		TransportPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
 	}
 	m := &routingMap{
 		Version:    1,
 		Tenants:    map[string]tenantConfig{"main": tc},
-		Domains:    map[string]domainEntry{"served.example": {Tenant: "main"}},
+		Domains:    map[string]domainEntry{"served.example": {Tenant: "main", CatchAllMode: "none", RejectUnmatched: true}},
 		Recipients: map[string]routingEntry{"group@served.example": {Tenant: "main"}}, // real, NO public key
 	}
 	data, _ := json.Marshal(m)
@@ -169,6 +170,17 @@ func TestKeylessRealRecipientAcceptsWithoutADecoyKey(t *testing.T) {
 	absent := accept("nobody@served.example", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	if _, hasKey := absent["key"]; !hasKey {
 		t.Fatalf("a nonexistent address should still receive a decoy key, got %v", absent)
+	}
+
+	// postmaster with no alias on a refusing domain: SMTP delivery carries it
+	// to the site, but to Direct it is no recipient, as the site's own resolver
+	// says. It gets a decoy, never the tenant's transport key.
+	pm := accept("postmaster@served.example", "cccccccccccccccccccccccccccccccc")
+	if pm["key"] == tc.TransportPublicKey {
+		t.Fatalf("an alias-less postmaster must not be handed the transport key over Direct, got %v", pm)
+	}
+	if pm["key"] != decoyPublicKey("a-decoy-seed", "postmaster@served.example") {
+		t.Fatalf("an alias-less postmaster should get its decoy key, got %v", pm)
 	}
 }
 
