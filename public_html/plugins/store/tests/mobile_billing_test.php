@@ -15,6 +15,9 @@
  * traffic. Billing sections drive MobileBilling with verified-payload arrays,
  * the exact shape the webhooks/claim actions hand it.
  *
+ * @version 1.1.0 - every store product id, transaction id and purchase token is unique per run, so
+ *   rows a killed run left behind can never answer for this one; no pro_price (price lives on
+ *   the product version)
  * @version 1.0.0
  */
 
@@ -29,6 +32,12 @@ require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.ph
 require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+
+// Every id the stores hand out is unique to this run. A run killed before its
+// cleanup leaves its mappings and order items behind, and a fixed id would make
+// the next run find them (another run's mapping, a purchase that "belongs to a
+// different account").
+$mbt_run = getmypid() . '-' . bin2hex(random_bytes(3));
 
 // ---------------------------------------------------------------------------
 // Local crypto fixtures
@@ -164,7 +173,6 @@ check($tier->key > 0, 'tier fixture created');
 $product = new Product(NULL);
 $product->set('pro_name', 'MBT Premium Plan');
 $product->set('pro_link', 'mbt-premium-plan-' . time());
-$product->set('pro_price', '9.99');
 $product->set('pro_is_active', true);
 $product->set('pro_sbt_subscription_tier_id', $tier->key);
 $product->save();
@@ -174,7 +182,7 @@ check($product->key > 0, 'product fixture created');
 
 $apple_mapping = new MobileStoreProduct(NULL);
 $apple_mapping->set('msp_store', 'app_store');
-$apple_mapping->set('msp_store_product_id', 'test.mbt.premium.monthly');
+$apple_mapping->set('msp_store_product_id', 'test.mbt.premium.monthly-' . $mbt_run);
 $apple_mapping->set('msp_pro_product_id', $product->key);
 $apple_mapping->set('msp_is_active', true);
 $apple_mapping->save();
@@ -183,14 +191,14 @@ harness_register_row('msp_mobile_store_products', 'msp_mobile_store_product_id',
 
 $play_mapping = new MobileStoreProduct(NULL);
 $play_mapping->set('msp_store', 'play_store');
-$play_mapping->set('msp_store_product_id', 'mbt_premium_monthly');
+$play_mapping->set('msp_store_product_id', 'mbt_premium_monthly-' . $mbt_run);
 $play_mapping->set('msp_pro_product_id', $product->key);
 $play_mapping->set('msp_is_active', true);
 $play_mapping->save();
 $play_mapping->load();
 harness_register_row('msp_mobile_store_products', 'msp_mobile_store_product_id', $play_mapping->key);
 
-$found = MobileStoreProduct::GetByStoreProductId('app_store', 'test.mbt.premium.monthly');
+$found = MobileStoreProduct::GetByStoreProductId('app_store', 'test.mbt.premium.monthly-' . $mbt_run);
 check($found !== NULL && (int)$found->key === (int)$apple_mapping->key, 'mapping lookup by store product ID works');
 
 $user1 = make_user('MbtApple');
@@ -218,9 +226,9 @@ section('App Store claim');
 
 $apple_txn = array(
 	'bundleId'              => 'com.test.mbt',
-	'productId'             => 'test.mbt.premium.monthly',
-	'originalTransactionId' => 'mbt-original-1',
-	'transactionId'         => 'mbt-txn-1',
+	'productId'             => 'test.mbt.premium.monthly-' . $mbt_run,
+	'originalTransactionId' => 'mbt-original-1-' . $mbt_run,
+	'transactionId'         => 'mbt-txn-1-' . $mbt_run,
 	'environment'           => 'Production',
 	'type'                  => 'Auto-Renewable Subscription',
 	'expiresDate'           => (time() + 30 * 86400) * 1000,
@@ -237,7 +245,7 @@ check($summary['payment_source'] === 'app_store', 'claim records app_store payme
 check($summary['tier'] !== null && (int)$summary['tier']['tier_id'] === (int)$tier->key, 'claim reports the mapped tier');
 $user1_tier = SubscriptionTier::GetUserTier($user1->key);
 check($user1_tier !== null && (int)$user1_tier->key === (int)$tier->key, 'tier granted through TierBilling on claim');
-check($apple_item->get('odi_app_store_original_transaction_id') === 'mbt-original-1', 'order item stores the original transaction ID');
+check($apple_item->get('odi_app_store_original_transaction_id') === 'mbt-original-1-' . $mbt_run, 'order item stores the original transaction ID');
 check((float)$apple_item->get('odi_price') === 9.99, 'store-reported price recorded (milliunits converted)');
 
 $again = MobileBilling::claimAppStoreTransaction($user1->key, $apple_txn);
@@ -249,13 +257,13 @@ check($threw, 'claiming another user\'s transaction is rejected');
 
 $threw = false;
 try {
-	MobileBilling::claimAppStoreTransaction($user1->key, array_merge($apple_txn, array('originalTransactionId' => 'mbt-x', 'bundleId' => 'com.evil.app')));
+	MobileBilling::claimAppStoreTransaction($user1->key, array_merge($apple_txn, array('originalTransactionId' => 'mbt-x-' . $mbt_run, 'bundleId' => 'com.evil.app')));
 } catch (MobileBillingException $e) { $threw = true; }
 check($threw, 'unknown bundle ID is rejected');
 
 $threw = false;
 try {
-	MobileBilling::claimAppStoreTransaction($user1->key, array_merge($apple_txn, array('originalTransactionId' => 'mbt-y', 'expiresDate' => (time() - 60) * 1000)));
+	MobileBilling::claimAppStoreTransaction($user1->key, array_merge($apple_txn, array('originalTransactionId' => 'mbt-y-' . $mbt_run, 'expiresDate' => (time() - 60) * 1000)));
 } catch (MobileBillingException $e) { $threw = true; }
 check($threw, 'expired transaction cannot be claimed');
 
@@ -278,10 +286,10 @@ check(TierBilling::sourceConflict($user1->key, 'app_store') === null, 'same-sour
 $play_purchase_u1 = array(
 	'subscriptionState'    => 'SUBSCRIPTION_STATE_ACTIVE',
 	'acknowledgementState' => 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
-	'lineItems'            => array(array('productId' => 'mbt_premium_monthly', 'expiryTime' => gmdate('Y-m-d\TH:i:s\Z', time() + 30 * 86400))),
+	'lineItems'            => array(array('productId' => 'mbt_premium_monthly-' . $mbt_run, 'expiryTime' => gmdate('Y-m-d\TH:i:s\Z', time() + 30 * 86400))),
 );
 $threw = false; $conflict_message = '';
-try { MobileBilling::claimPlayPurchase($user1->key, 'com.test.mbt.android', 'mbt-token-conflict', $play_purchase_u1); }
+try { MobileBilling::claimPlayPurchase($user1->key, 'com.test.mbt.android', 'mbt-token-conflict-' . $mbt_run, $play_purchase_u1); }
 catch (MobileBillingException $e) { $threw = true; $conflict_message = $e->getMessage(); }
 check($threw && strpos($conflict_message, 'App Store') !== false, 'cross-store claim is blocked by exclusivity', $conflict_message);
 
@@ -313,7 +321,7 @@ check(SubscriptionTier::GetUserTier($user1->key) === null, 'EXPIRED revokes the 
 check(MobileBilling::userIdFromAppAccountToken(MobileBilling::appAccountTokenForUser($user2->key)) === (int)$user2->key, 'app account token round-trips the user id');
 
 $token_txn = array_merge($apple_txn, array(
-	'originalTransactionId' => 'mbt-original-2',
+	'originalTransactionId' => 'mbt-original-2-' . $mbt_run,
 	'appAccountToken'       => MobileBilling::appAccountTokenForUser($user2->key),
 	'expiresDate'           => (time() + 30 * 86400) * 1000,
 ));
@@ -321,7 +329,7 @@ $result = MobileBilling::applyAppStoreEvent('SUBSCRIBED', 'INITIAL_BUY', $token_
 check($result['processed'], 'SUBSCRIBED with no prior claim creates the subscription via token linkage');
 $user2_tier = SubscriptionTier::GetUserTier($user2->key);
 check($user2_tier !== null && (int)$user2_tier->key === (int)$tier->key, 'token-linked subscription granted the tier');
-$user2_items = new MultiOrderItem(array('odi_app_store_original_transaction_id' => 'mbt-original-2'));
+$user2_items = new MultiOrderItem(array('odi_app_store_original_transaction_id' => 'mbt-original-2-' . $mbt_run));
 $user2_items->load();
 foreach ($user2_items as $item) { $mbt_register_order_rows($item->key); }
 
@@ -329,7 +337,7 @@ foreach ($user2_items as $item) { $mbt_register_order_rows($item->key); }
 $result = MobileBilling::applyAppStoreEvent('REFUND', null, array_merge($token_txn, array('revocationDate' => time() * 1000)), null);
 check($result['processed'], 'REFUND event processes');
 check(SubscriptionTier::GetUserTier($user2->key) === null, 'refund revokes tier benefits (net-new refund-driven revocation)');
-$user2_items = new MultiOrderItem(array('odi_app_store_original_transaction_id' => 'mbt-original-2'));
+$user2_items = new MultiOrderItem(array('odi_app_store_original_transaction_id' => 'mbt-original-2-' . $mbt_run));
 $user2_items->load();
 foreach ($user2_items as $item) {
 	check($item->get('odi_refund_time') !== null, 'refund timestamp recorded on the order item');
@@ -345,40 +353,40 @@ harness_defer(function () { GooglePlayHelper::$api_response_override = null; });
 $play_purchase = array(
 	'subscriptionState'          => 'SUBSCRIPTION_STATE_ACTIVE',
 	'acknowledgementState'       => 'ACKNOWLEDGEMENT_STATE_PENDING',
-	'lineItems'                  => array(array('productId' => 'mbt_premium_monthly', 'expiryTime' => gmdate('Y-m-d\TH:i:s\Z', time() + 30 * 86400))),
+	'lineItems'                  => array(array('productId' => 'mbt_premium_monthly-' . $mbt_run, 'expiryTime' => gmdate('Y-m-d\TH:i:s\Z', time() + 30 * 86400))),
 	'externalAccountIdentifiers' => array('obfuscatedExternalAccountId' => MobileBilling::appAccountTokenForUser($user3->key)),
 );
 
-$summary = MobileBilling::claimPlayPurchase($user3->key, 'com.test.mbt.android', 'mbt-play-token-1', $play_purchase);
+$summary = MobileBilling::claimPlayPurchase($user3->key, 'com.test.mbt.android', 'mbt-play-token-1-' . $mbt_run, $play_purchase);
 $play_item = $mbt_register_order_rows($summary['order_item_id']);
 
 check($summary['payment_source'] === 'play_store', 'Play claim records play_store payment source');
 $user3_tier = SubscriptionTier::GetUserTier($user3->key);
 check($user3_tier !== null && (int)$user3_tier->key === (int)$tier->key, 'Play claim grants the tier');
-check($play_item->get('odi_play_purchase_token') === 'mbt-play-token-1', 'order item stores the purchase token');
+check($play_item->get('odi_play_purchase_token') === 'mbt-play-token-1-' . $mbt_run, 'order item stores the purchase token');
 
 $threw = false;
-try { MobileBilling::claimPlayPurchase($user3->key, 'com.evil.android', 'mbt-play-x', $play_purchase); }
+try { MobileBilling::claimPlayPurchase($user3->key, 'com.evil.android', 'mbt-play-x-' . $mbt_run, $play_purchase); }
 catch (MobileBillingException $e) { $threw = true; }
 check($threw, 'unknown package name is rejected');
 
 harness_set_setting_mem('debug', '0');
 $threw = false;
-try { MobileBilling::claimPlayPurchase($user3->key, 'com.test.mbt.android', 'mbt-play-y', array_merge($play_purchase, array('testPurchase' => new stdClass()))); }
+try { MobileBilling::claimPlayPurchase($user3->key, 'com.test.mbt.android', 'mbt-play-y-' . $mbt_run, array_merge($play_purchase, array('testPurchase' => new stdClass()))); }
 catch (MobileBillingException $e) { $threw = true; }
 check($threw, 'license-tester purchase rejected when debug is off');
 harness_set_setting_mem('debug', '1');
 
 // Cancellation (auto-renew off, still entitled)
 $cancelled_purchase = array_merge($play_purchase, array('subscriptionState' => 'SUBSCRIPTION_STATE_CANCELED', 'acknowledgementState' => 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'));
-$result = MobileBilling::applyPlayEvent(3, 'com.test.mbt.android', 'mbt-play-token-1', $cancelled_purchase);
+$result = MobileBilling::applyPlayEvent(3, 'com.test.mbt.android', 'mbt-play-token-1-' . $mbt_run, $cancelled_purchase);
 $play_item->load();
 check($result['processed'] && $play_item->get('odi_subscription_cancel_at_period_end'), 'RTDN CANCELED sets cancel-at-period-end, still entitled');
 check($play_item->check_subscription_status(), 'cancelled-but-not-expired Play subscription stays entitled');
 
 // Expiry revokes
 $expired_purchase = array_merge($play_purchase, array('subscriptionState' => 'SUBSCRIPTION_STATE_EXPIRED', 'acknowledgementState' => 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'));
-$result = MobileBilling::applyPlayEvent(13, 'com.test.mbt.android', 'mbt-play-token-1', $expired_purchase);
+$result = MobileBilling::applyPlayEvent(13, 'com.test.mbt.android', 'mbt-play-token-1-' . $mbt_run, $expired_purchase);
 $play_item->load();
 check($result['processed'] && $play_item->get('odi_subscription_cancelled_time') !== null, 'RTDN EXPIRED cancels the order item');
 check(SubscriptionTier::GetUserTier($user3->key) === null, 'RTDN EXPIRED revokes the tier');
