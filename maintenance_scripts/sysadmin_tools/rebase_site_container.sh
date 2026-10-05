@@ -2,6 +2,15 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.8 - The container is rebuilt from its run spec (_site_run_spec.sh; specs/
+#                multi_tenant_docker_hosts.md WP0), so its limits survive the move: install.sh
+#                reads the spec, and rollback recreates the old container from the copy kept at
+#                prepare. A container made before specs existed has its spec recorded at
+#                prepare. The old container's environment is kept as an env file, not as run
+#                arguments. swap and rollback check what they need before they change anything;
+#                a move swapped by 1.7 rolls back from its run_args list. A port install.sh does
+#                not publish itself no longer refuses prepare when the run spec carries it; one the
+#                spec does not carry still does.
 # Version: 1.7 - No database access can be declared (specs/dns_resolvers_read_over_https.md WP7):
 #                config/postgres_access.conf is not read. prepare refuses any pg_hba line
 #                admitting a network address other than the Docker host. A database port
@@ -86,8 +95,8 @@
 # the database's name, encoding and locale (refused when the new image lacks
 # the locale), every table's row count, the roles the container carries beyond
 # its image, pg_hba lines admitting another machine (none may; a rebuild
-# drops them), the old container's exact run arguments
-# (for rollback), the name the host's vhost serves the site under (install.sh
+# drops them), the site's run spec (recorded from the container if it has none
+# yet; kept for rollback), the name the host's vhost serves the site under (install.sh
 # rewrites that vhost for the name it is given), that every file matches the
 # site's signed release manifest, and a trial dump's size against the disk
 # free here.
@@ -123,6 +132,8 @@ WORK="/root/rebase/${SITE}"
 STATE="${WORK}/state"
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_SH="$(cd "${TOOLS_DIR}/../install_tools" 2>/dev/null && pwd)/install.sh"
+# shellcheck source=../install_tools/_site_run_spec.sh
+. "${TOOLS_DIR}/../install_tools/_site_run_spec.sh"
 
 say() { echo "[$(date -u +%H:%M:%S)] $*"; }
 die() { echo "FATAL: $*" >&2; exit 1; }
@@ -163,30 +174,20 @@ target_base() {
 }
 norm_locale() { echo "$1" | tr 'A-Z' 'a-z' | tr -d '-'; }
 
-# The old container's run arguments, exactly as it runs now, one per line
-# (NUL-separated: values may hold spaces). Written 0600: the environment
-# carries the database password.
-save_run_args() {
-    local out="$1" hip hport cport e name dest restart
-    : > "$out"; chmod 600 "$out"
-    restart="$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$SITE")"
-    { printf '%s\0' --name "$SITE" --hostname "$(docker inspect -f '{{.Config.Hostname}}' "$SITE")"
-      [ -n "$restart" ] && [ "$restart" != "no" ] && printf '%s\0' --restart "$restart"
-      while IFS='|' read -r hip hport cport; do
-          [ -z "$cport" ] && continue
-          cport="${cport%%/*}"
-          if [ -n "$hip" ]; then printf '%s\0' -p "${hip}:${hport}:${cport}"; else printf '%s\0' -p "${hport}:${cport}"; fi
-      done < <(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$SITE")
-      while IFS= read -r e; do
-          [ -z "$e" ] && continue
-          case "$e" in PATH=*|DEBIAN_FRONTEND=*) continue ;; esac
-          printf '%s\0' -e "$e"
-      done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE")
-      while read -r name dest; do
-          [ -z "$name" ] && continue
-          printf '%s\0' -v "${name}:${dest}"
-      done < <(docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{.Destination}}{{println}}{{end}}{{end}}' "$SITE")
-    } >> "$out"
+# What rollback needs to recreate the old container: a copy of its run spec
+# (install.sh rewrites the live one) and its environment as an env file, mode
+# 600, since it carries the database password.
+# Each step stands alone so a failure stops the run: in an && list bash
+# exempts every command but the last from set -e and the ERR trap. A failed
+# re-save leaves the copy already kept as it was.
+save_run_spec() {
+    local tmp
+    tmp="$(mktemp "${WORK}/.run_spec.XXXXXX")" || return 1
+    if ! cp "$(run_spec_path "$SITE")" "$tmp"; then rm -f "$tmp"; return 1; fi
+    if ! run_spec_check_file "$tmp"; then rm -f "$tmp"; return 1; fi
+    chmod 600 "$tmp" || { rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "${WORK}/run_spec" || return 1
+    run_spec_save_env "$SITE" "${WORK}/env"
 }
 
 # The container's pg_hba lines admitting a network address other than the
@@ -462,6 +463,7 @@ if [ "$STAGE" = "prepare" ]; then
     # nothing can use it. Anything else was added by hand for something outside
     # this machine, and the rebuild would silently drop it.
     EXTRA_PORTS=""
+    EXTRA_SPEC=""
     DROPPED_DB=""
     while IFS='|' read -r hip hport cport; do
         [ -z "$cport" ] && continue
@@ -469,17 +471,37 @@ if [ "$STAGE" = "prepare" ]; then
             "80::${PORT}"|"80:0.0.0.0:${PORT}"|"80:127.0.0.1:${PORT}") ;;
             "5432:127.0.0.1:$((PORT + 1000))") ;;
             "5432:"*":$((PORT + 1000))") DROPPED_DB="${DROPPED_DB:+${DROPPED_DB} }${hip:-0.0.0.0}:${hport}" ;;
-            *) EXTRA_PORTS="${EXTRA_PORTS} ${hip:-0.0.0.0}:${hport}->${cport}" ;;
+            *) EXTRA_PORTS="${EXTRA_PORTS} ${hip:-0.0.0.0}:${hport}->${cport}"
+               ehip="$hip"; [[ "$ehip" == *:* ]] && ehip="[${ehip}]"
+               eproto="${cport#*/}"
+               if [ "$eproto" = "$cport" ] || [ "$eproto" = tcp ]; then eproto=""; else eproto="/${eproto}"; fi
+               EXTRA_SPEC="${EXTRA_SPEC}publish=${ehip:+${ehip}:}${hport}:${cport%%/*}${eproto}"$'\n' ;;
         esac
     done < <(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$SITE")
     NETWORK_HBA="$(hba_network "$HAVE")"
     [ -z "$NETWORK_HBA" ] || die "${SITE}'s pg_hba admits from the network: $(printf '%s\n' "$NETWORK_HBA" | paste -sd ';' - | sed 's/;/; /g'). A Joinery database answers only its own machine and the rebuild drops these; find what uses them and remove them first. Nothing was changed."
-    [ -z "$EXTRA_PORTS" ] || die "${SITE} publishes${EXTRA_PORTS}, which install.sh does not recreate — the rebuild would drop it and whatever depends on it. Nothing was changed."
     EXTRA_ENV="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE" | cut -d= -f1 \
         | grep -vxE 'PATH|DEBIAN_FRONTEND|SITENAME|DOMAIN_NAME|POSTGRES_PASSWORD|UPGRADE_SERVER|CLONE_FROM|CLONE_KEY|JOINERY_[A-Z_]+|BASE_IMAGE_VERSION|LANG|LC_ALL|TZ' || true)"
     # By id: install.sh rebuilds under the same name, so the name stops meaning
     # this image the moment the swap rebuilds.
     OLD_IMAGE="$(docker inspect -f '{{.Image}}' "$SITE")"
+
+    # The rebuild runs from the run spec, so a binding install.sh does not make
+    # survives exactly when the spec carries it as the site's own. One the
+    # spec does not carry (the container was recreated by hand since the spec
+    # was written, or it is a second binding of the web port) would be dropped.
+    if ! run_spec_exists "$SITE"; then
+        run_spec_adopt "$SITE" || die "could not record ${SITE}'s run spec from its container; nothing was changed"
+        say "Recorded ${SITE}'s run spec from its container: $(run_spec_path "$SITE")"
+    fi
+    FOREIGN="$(run_spec_foreign_lines "$SITE")"
+    NOT_CARRIED=""
+    while IFS= read -r l; do
+        [ -z "$l" ] && continue
+        printf '%s\n' "$FOREIGN" | grep -qxF -- "$l" || NOT_CARRIED="${NOT_CARRIED} ${l#publish=}"
+    done <<< "$EXTRA_SPEC"
+    [ -z "$NOT_CARRIED" ] || die "${SITE} publishes${NOT_CARRIED}, which its run spec does not carry — the rebuild would drop it and whatever depends on it. Nothing was changed."
+    save_run_spec || die "could not keep ${SITE}'s run spec and environment in ${WORK}; nothing was changed"
 
     : > "$STATE"; chmod 600 "$STATE"
     state_set stage prepared
@@ -488,7 +510,6 @@ if [ "$STAGE" = "prepare" ]; then
     state_set domain "$DOMAIN"; state_set port "$PORT"; state_set old_image "$OLD_IMAGE"
     state_set other_vhosts "$OTHER_VHOSTS"
 
-    save_run_args "${WORK}/run_args"
     docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
         | grep -vE '^(CREATE|ALTER) ROLE postgres[ ;]' > "${WORK}/roles.sql"; chmod 600 "${WORK}/roles.sql"
     docker diff "$SITE" 2>/dev/null | grep -E ' /etc/(postgresql|cron\.d)|/var/spool/cron' > "${WORK}/layer_changes.txt" || true
@@ -521,6 +542,10 @@ if [ "$STAGE" = "prepare" ]; then
         echo "  also serving port ${PORT}: ${OTHER_VHOSTS}. swap disables them once install.sh has written ${SITE}.conf; rollback enables them again"
     fi
     echo "  every file matches the signed release manifest"
+    if [ -n "$EXTRA_PORTS" ]; then
+        echo "  also publishes${EXTRA_PORTS}: the run spec carries it, so the rebuild keeps it"
+    fi
+    echo "  limits (from the run spec, kept by the rebuild): memory $(run_spec_get "$SITE" memory | sed 's/^$/none/'), cpus $(run_spec_get "$SITE" cpus | sed 's/^$/none/'), processes $(run_spec_get "$SITE" pids_limit | sed 's/^$/default/')"
     echo "  $(wc -l < "${WORK}/counts.prepare.tsv") tables; trial dump $(awk -v b="$DUMP_BYTES" 'BEGIN { printf "%.1f", b / 1000000 }') MB in $((T1 - T0)) s"
     echo "  roles beyond postgres: $(grep -c '^CREATE ROLE' "${WORK}/roles.sql" || true)"
     if [ -n "$DROPPED_DB" ]; then
@@ -558,6 +583,13 @@ if [ "$STAGE" = "swap" ]; then
     ! docker volume inspect "$BACKUP_VOL" > /dev/null 2>&1 || die "${BACKUP_VOL} already exists — a previous swap was not finished or rolled back"
     MF_FAILED="$(manifest_failures)"
     [ "$MF_FAILED" = "0" ] || die "${SITE}'s files do not match its signed release manifest (${MF_FAILED}); apply its update, then prepare again. Nothing was changed"
+    # A move prepared before run specs has none yet; the container is still
+    # untouched, so it is read now.
+    if ! run_spec_exists "$SITE"; then
+        run_spec_adopt "$SITE" || die "could not record ${SITE}'s run spec from its container; nothing was changed"
+        say "Recorded ${SITE}'s run spec from its container: $(run_spec_path "$SITE")"
+    fi
+    save_run_spec || die "could not keep ${SITE}'s run spec and environment in ${WORK}; nothing was changed"
 
     say "Stopping the site's writes (PHP-FPM, cron, the agent, Postfix)"
     stop_site_writes || die "the site's writes could not be stopped; nothing was moved. Restart it with: docker restart ${SITE}"
@@ -568,7 +600,6 @@ if [ "$STAGE" = "swap" ]; then
     [ -s "${WORK}/${DB}.dump" ] || die "the dump is empty; the site's writes are stopped — restart it with: docker restart ${SITE}"
     docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
         | grep -vE '^(CREATE|ALTER) ROLE postgres[ ;]' > "${WORK}/roles.sql"
-    save_run_args "${WORK}/run_args"
     for f in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
         docker cp "${SITE}:/var/www/html/${SITE}/${f}" "${WORK}/${f}" \
             || die "could not keep ${SITE}'s ${f}; nothing was moved. Restart it with: docker restart ${SITE}"
@@ -598,7 +629,7 @@ if [ "$STAGE" = "swap" ]; then
 
     say "Rebuilding ${SITE} with install.sh on $(state_get base)"
     PWFILE="$(mktemp "${WORK}/.pw.XXXXXX")"; chmod 600 "$PWFILE"
-    tr '\0' '\n' < "${WORK}/run_args" | sed -n 's/^POSTGRES_PASSWORD=//p' | head -1 > "$PWFILE"
+    sed -n 's/^POSTGRES_PASSWORD=//p' "${WORK}/env" | head -1 > "$PWFILE"
     [ -s "$PWFILE" ] || die "no POSTGRES_PASSWORD in the old container's environment. Roll back with: $0 ${SITE} rollback"
     ( cd "$(dirname "$INSTALL_SH")" && bash "$INSTALL_SH" -y site --docker --password-file="$PWFILE" \
         ${INSTALL_FLAGS[@]+"${INSTALL_FLAGS[@]}"} "$SITE" "$(state_get domain)" "$(state_get port)" ) \
@@ -657,20 +688,34 @@ if [ "$STAGE" = "rollback" ]; then
     case "$(state_get stage)" in swapping|swapped) ;; *) die "${SITE} is at stage '$(state_get stage)'; nothing to roll back" ;; esac
     docker volume inspect "$BACKUP_VOL" > /dev/null 2>&1 || die "no ${BACKUP_VOL} to roll back to"
     docker image inspect "$KEEP_IMAGE" > /dev/null 2>&1 || die "no ${KEEP_IMAGE} to roll back to"
+    # What the old container is recreated from, checked before anything is
+    # removed. A move begun before run specs kept a run_args list instead.
+    if [ -f "${WORK}/run_args" ] && { [ ! -f "${WORK}/run_spec" ] || [ ! -f "${WORK}/env" ]; }; then
+        run_spec_from_run_args "${WORK}/run_args" "${WORK}/run_spec" "${WORK}/env" \
+            || die "could not read the old container's arguments from ${WORK}/run_args; nothing was changed"
+        say "Read the old container's arguments from ${WORK}/run_args"
+    fi
+    [ -f "${WORK}/env" ] || die "no kept environment for ${SITE} in ${WORK}; nothing was changed"
+    run_spec_check_file "${WORK}/run_spec" || die "no usable kept run spec for ${SITE} in ${WORK}; nothing was changed"
     say "Removing the rebuilt container and its database volume"
     docker stop "$SITE" > /dev/null 2>&1 || true
     docker rm "$SITE" > /dev/null 2>&1 || true
     docker volume rm "${SITE}_postgres" > /dev/null 2>&1 || true
     docker volume create "${SITE}_postgres" > /dev/null
     cp -a "$(vol_mp "$BACKUP_VOL")/." "$(vol_mp "${SITE}_postgres")/"
-    mapfile -d '' ARGS < "${WORK}/run_args"
-    if docker volume inspect "${SITE}_agent" > /dev/null 2>&1 && ! printf '%s\n' "${ARGS[@]}" | grep -q ':/etc/joinery-agent$'; then
-        ARGS+=(-v "${SITE}_agent:/etc/joinery-agent")
+    # The old container comes back from the spec it ran under, kept at prepare:
+    # install.sh rewrote the live one for the rebuilt container.
+    run_spec_write "$SITE" < <(grep -v '^#' "${WORK}/run_spec") \
+        || die "could not put the old container's run spec back; the copy is still in ${BACKUP_VOL}, the spec in ${WORK}/run_spec"
+    if docker volume inspect "${SITE}_agent" > /dev/null 2>&1; then
+        run_spec_add_volume "$SITE" "${SITE}_agent" /etc/joinery-agent || die "could not add ${SITE}_agent to ${SITE}'s run spec"
     fi
+    mapfile -d '' ARGS < <(run_spec_args "$SITE")
+    [ "${#ARGS[@]}" -gt 0 ] || die "${SITE}'s run spec gave no arguments; the copy is still in ${BACKUP_VOL}"
     # The new image's start command handed PostgreSQL's log directory to its own
     # postgres user; the old image's has other ids and predates that handoff, so
     # its server could not write its log and would not start. Hand it back.
-    LOG_VOL="$(tr '\0' '\n' < "${WORK}/run_args" | sed -n 's#^\([^:]*\):/var/log/postgresql$#\1#p' | head -1)"
+    LOG_VOL="$(run_spec_list "$SITE" volume | sed -n 's#^\([^:]*\):/var/log/postgresql$#\1#p' | head -1)"
     if [ -n "$LOG_VOL" ]; then
         OLD_UID="$(docker run --rm --entrypoint id "$KEEP_IMAGE" -u postgres)"
         OLD_GID="$(docker run --rm --entrypoint id "$KEEP_IMAGE" -g postgres)"
@@ -678,7 +723,7 @@ if [ "$STAGE" = "rollback" ]; then
         find "$(vol_mp "$LOG_VOL")" -maxdepth 1 -type f -name '*.log' -exec chown "${OLD_UID}:4" {} +
     fi
     say "Recreating ${SITE} on ${KEEP_IMAGE} with its old arguments"
-    docker run -d "${ARGS[@]}" "$KEEP_IMAGE" > /dev/null
+    docker run -d "${ARGS[@]}" --env-file "${WORK}/env" "$KEEP_IMAGE" > /dev/null
     wait_for_postgres || die "PostgreSQL did not start on the old image; the copy is still in ${BACKUP_VOL}"
     [ "$(db_major)" = "$FROM" ] || die "the rolled-back container does not see PostgreSQL ${FROM}; the copy is still in ${BACKUP_VOL}"
     # The old image's own layer carries the manifest it was built with, not the
@@ -706,7 +751,7 @@ if [ "$STAGE" = "finish" ]; then
     [ "$(state_get stage)" = "swapped" ] || die "${SITE} is at stage '$(state_get stage)', not swapped"
     docker volume rm "$BACKUP_VOL" > /dev/null
     docker rmi "$KEEP_IMAGE" > /dev/null 2>&1 || true
-    rm -f "${WORK}/${DB}.dump" "${WORK}/run_args" "${WORK}/roles.sql" "${WORK}/RELEASE_MANIFEST" "${WORK}/RELEASE_MANIFEST.sig"
+    rm -f "${WORK}/${DB}.dump" "${WORK}/run_spec" "${WORK}/env" "${WORK}/run_args" "${WORK}/roles.sql" "${WORK}/RELEASE_MANIFEST" "${WORK}/RELEASE_MANIFEST.sig"
     rm -rf "${WORK:?}/host_vhosts"
     state_set stage finished
     say "Finished: ${BACKUP_VOL}, ${KEEP_IMAGE} and the dump are gone. ${SITE} runs PostgreSQL ${TO}."

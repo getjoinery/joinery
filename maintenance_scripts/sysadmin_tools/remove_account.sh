@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.3 - The site's run spec on the Docker host goes with its container (specs/
+#              multi_tenant_docker_hosts.md WP0)
 #VERSION 2.2 - Self-verifying: after removal the script re-probes (container, volumes, vhost,
 #              web root) and emits DECOMMISSION_VERIFIED or DECOMMISSION_FAILED_VERIFY (exit 1),
 #              so one run carries its own verdict instead of needing a separate verify step.
@@ -185,6 +187,11 @@ if [ "$IS_DOCKER" = true ]; then
     else
         echo "Image joinery-${SITE_NAME}:latest does not exist or already removed"
     fi
+
+    # How the container was run (_site_run_spec.sh's run_spec_path; spelled
+    # here because this script ships alone and sources nothing). The rest of
+    # the site's state directory is not this branch's to remove.
+    rm -f "/etc/joinery/sites/${SITE_NAME}/run_spec"
 
     # Clean up build directory if exists
     BUILD_DIR="/root/${SITE_NAME}-build"

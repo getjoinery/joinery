@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 2.94 - A site container is run from its run spec, /etc/joinery/sites/{site}/run_spec on the
+#               host (_site_run_spec.sh; specs/multi_tenant_docker_hosts.md WP0). A rebuild keeps
+#               the memory budget the spec records unless --memory says otherwise; a container
+#               created before specs existed has its spec read from it once, before it is removed.
+#               --memory takes any size Docker takes, checked before anything stops, and none lifts
+#               the budget. Ports and volumes install.sh does not publish itself are kept.
 #VERSION 2.93 - The server step installs Postfix without opendkim: rspamd is the one program that
 #               checks and signs mail, and the mailbox installer brings it (specs/mail_checking_in_rspamd.md)
 #VERSION 2.92 - The Clone path is gone: no --clone-from, --clone-key or JOINERY_CLONE_KEY; a site
@@ -593,7 +599,10 @@ SSH_REACHABLE_ACCOUNT="" # Set by derive_ssh_access: the account that keeps acce
 # host is actually its own, and PostgreSQL's memory is sized from it at start
 # (Dockerfile.template CMD -> sysadmin_tools/tune_postgres_memory.sh). Without
 # it that sizing is skipped and PostgreSQL keeps its packaged settings.
+# A rebuild without the flag keeps the budget the site's run spec records
+# (_site_run_spec.sh); --memory=none lifts it.
 CONTAINER_MEMORY=""
+CONTAINER_MEMORY_GIVEN=0
 
 # Global flags are honoured wherever they appear: `install.sh docker -y` and
 # `install.sh -y docker` mean the same thing. Subcommands route stray
@@ -3444,11 +3453,11 @@ do_site_create() {
                 shift
                 ;;
             --memory=*)
-                CONTAINER_MEMORY="${1#*=}"
+                CONTAINER_MEMORY="${1#*=}"; CONTAINER_MEMORY_GIVEN=1
                 shift
                 ;;
             --memory)
-                CONTAINER_MEMORY="$2"
+                CONTAINER_MEMORY="$2"; CONTAINER_MEMORY_GIVEN=1
                 shift 2
                 ;;
             --allow-downgrade)
@@ -3577,7 +3586,8 @@ do_site_create() {
                 echo "  --memory=SIZE          Memory budget for the container (512m, 2g)."
                 echo "                         Unlimited by default. Set it on any host running"
                 echo "                         more than one site: PostgreSQL sizes its memory"
-                echo "                         from this, and skips sizing without it."
+                echo "                         from this, and skips sizing without it. A rebuild"
+                echo "                         keeps the budget it had; --memory=none lifts it."
                 echo ""
                 echo "Automation:"
                 echo "  -y / --yes     Auto-accept: remove existing container, keep volumes"
@@ -4175,6 +4185,38 @@ do_site_docker() {
     # site running exactly as it was.
     assert_rebuild_moves_code_forward "$SITENAME" "$ARCHIVE_ROOT" docker
 
+    # How the container is run is recorded once, on this host, and every
+    # rebuild reads it, so a rebuild keeps the site's limits. A container made
+    # before the record existed has it read from Docker now, while it still
+    # exists; nothing reads Docker's record of it again.
+    . "$SCRIPT_DIR/_site_run_spec.sh"
+    if ! run_spec_exists "$SITENAME" && docker inspect "$SITENAME" > /dev/null 2>&1; then
+        run_spec_adopt "$SITENAME" || { print_error "Could not record how ${SITENAME}'s container is run; nothing was changed"; exit 1; }
+        print_info "Recorded ${SITENAME}'s run spec from its container: $(run_spec_path "$SITENAME")"
+    fi
+    local SPEC_CPUS="" SPEC_PIDS="" SPEC_FOREIGN=""
+    if run_spec_exists "$SITENAME"; then
+        docker inspect "$SITENAME" > /dev/null 2>&1 \
+            || print_info "${SITENAME} has a run spec but no container; its limits apply: $(run_spec_path "$SITENAME")"
+        if [ "$CONTAINER_MEMORY_GIVEN" -eq 0 ]; then
+            CONTAINER_MEMORY="$(run_spec_get "$SITENAME" memory)"
+        fi
+        SPEC_CPUS="$(run_spec_get "$SITENAME" cpus)"
+        SPEC_PIDS="$(run_spec_get "$SITENAME" pids_limit)"
+        SPEC_FOREIGN="$(run_spec_foreign_lines "$SITENAME")"
+    fi
+    # Every value is checked here, before anything is stopped: a budget the
+    # spec would refuse later would leave the site removed and not rebuilt.
+    local MEMORY_IN="$CONTAINER_MEMORY"
+    if [ "$CONTAINER_MEMORY_GIVEN" -eq 1 ] && [ -z "$MEMORY_IN" ]; then
+        print_error "--memory was given with no size. Give one (512m, 1G), or none to lift the budget. Nothing was changed"
+        exit 1
+    fi
+    CONTAINER_MEMORY="$(run_spec_norm_memory "$MEMORY_IN")" \
+        || { print_error "--memory=${MEMORY_IN} is not a memory size Docker takes (512m, 1G, 1.5g; at least 6m; none for no limit). Nothing was changed"; exit 1; }
+    run_spec_check_line "cpus=${SPEC_CPUS}" && run_spec_check_line "pids_limit=${SPEC_PIDS}" \
+        || { print_error "${SITENAME}'s run spec holds a CPU or process limit that is not one (cpus=${SPEC_CPUS}, pids_limit=${SPEC_PIDS}). Nothing was changed"; exit 1; }
+
     # Preflight: if a container with this SITENAME is already running, stop it
     # BEFORE the port check. Otherwise is_port_in_use sees the target's own
     # docker-proxy listener and treats $PORT as "taken by something else,"
@@ -4498,13 +4540,9 @@ EOF
     # can learn what share of a shared host is its own: with a limit set, the
     # cgroup reports it and tune_postgres_memory.sh sizes PostgreSQL from that
     # at every start. Unset means unlimited (Docker's default), and then that
-    # sizing is skipped rather than computed from the host's RAM. --memory-swap
-    # is pinned to the same figure so the limit is real: left alone Docker
-    # allows swap equal to the limit again, and a container that should be
-    # capped at 512m quietly uses 1g of the host's swap instead.
-    MEMORY_OPTS=""
+    # sizing is skipped rather than computed from the host's RAM. The run spec
+    # pins swap to the same figure (run_spec_args).
     if [ -n "$CONTAINER_MEMORY" ]; then
-        MEMORY_OPTS="--memory=${CONTAINER_MEMORY} --memory-swap=${CONTAINER_MEMORY}"
         print_info "Container memory budget: ${CONTAINER_MEMORY}"
     fi
 
@@ -4536,56 +4574,35 @@ EOF
     fi
     trap 'rm -f "$ENV_FILE"' RETURN
 
+    # The container is run from its spec and only from it: the same arguments
+    # every later rebuild, rebase or move reads back.
+    # What install.sh does not own (another published port, a volume at a
+    # destination of its own) is the site's, and the rebuild keeps it.
+    local RENDERED OLD_LINE
+    RENDERED="$(run_spec_render "$SITENAME" "${WEB_PUBLISH%:}" "$PORT" "$DB_PORT" "$CONTAINER_MEMORY" "$SPEC_CPUS" "$SPEC_PIDS")"
+    if [ -n "$SPEC_FOREIGN" ]; then
+        printf '%s\n' "$SPEC_FOREIGN" | while IFS= read -r l; do print_info "Kept from the run spec: ${l}"; done
+    fi
+    # Anything else the old spec published or mounted is replaced by what
+    # install.sh writes; say so, line by line.
+    if run_spec_exists "$SITENAME"; then
+        while IFS= read -r OLD_LINE; do
+            case "$OLD_LINE" in publish=*|volume=*) ;; *) continue ;; esac
+            printf '%s\n' "$RENDERED" "$SPEC_FOREIGN" | grep -qxF -- "$OLD_LINE" \
+                || print_warning "Not kept from the run spec: ${OLD_LINE}"
+        done < "$(run_spec_path "$SITENAME")"
+    fi
+    { printf '%s\n' "$RENDERED"; [ -z "$SPEC_FOREIGN" ] || printf '%s\n' "$SPEC_FOREIGN"; } \
+        | run_spec_write "$SITENAME" \
+        || { print_error "Could not write ${SITENAME}'s run spec"; exit 1; }
+    local RUN_ARGS=()
+    mapfile -d '' RUN_ARGS < <(run_spec_args "$SITENAME")
+    [ "${#RUN_ARGS[@]}" -gt 0 ] || { print_error "${SITENAME}'s run spec gave no arguments"; exit 1; }
+
     if [ "$QUIET_MODE" -eq 1 ]; then
-        docker run -d \
-            --name "$SITENAME" \
-            --hostname "$SITENAME" \
-            --restart unless-stopped \
-            --env-file "$ENV_FILE" \
-            $MEMORY_OPTS \
-            -p "${WEB_PUBLISH}${PORT}":80 \
-            -p "127.0.0.1:${DB_PORT}":5432 \
-            -v "${SITENAME}_code":/var/www/html/"${SITENAME}"/public_html \
-            -v "${SITENAME}_vendor":/var/www/html/"${SITENAME}"/vendor \
-            -v "${SITENAME}_scripts":/var/www/html/"${SITENAME}"/maintenance_scripts \
-            -v "${SITENAME}_postgres":/var/lib/postgresql \
-            -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
-            -v "${SITENAME}_storage":/var/www/html/"${SITENAME}"/storage \
-            -v "${SITENAME}_config":/var/www/html/"${SITENAME}"/config \
-            -v "${SITENAME}_backups":/var/www/html/"${SITENAME}"/backups \
-            -v "${SITENAME}_static":/var/www/html/"${SITENAME}"/static_files \
-            -v "${SITENAME}_logs":/var/www/html/"${SITENAME}"/logs \
-            -v "${SITENAME}_cache":/var/www/html/"${SITENAME}"/cache \
-            -v "${SITENAME}_sessions":/var/lib/php/sessions \
-            -v "${SITENAME}_apache_logs":/var/log/apache2 \
-            -v "${SITENAME}_pg_logs":/var/log/postgresql \
-            -v "${SITENAME}_agent":/etc/joinery-agent \
-            "joinery-$SITENAME" > /dev/null
+        docker run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null
     else
-        docker run -d \
-            --name "$SITENAME" \
-            --hostname "$SITENAME" \
-            --restart unless-stopped \
-            --env-file "$ENV_FILE" \
-            $MEMORY_OPTS \
-            -p "${WEB_PUBLISH}${PORT}":80 \
-            -p "127.0.0.1:${DB_PORT}":5432 \
-            -v "${SITENAME}_code":/var/www/html/"${SITENAME}"/public_html \
-            -v "${SITENAME}_vendor":/var/www/html/"${SITENAME}"/vendor \
-            -v "${SITENAME}_scripts":/var/www/html/"${SITENAME}"/maintenance_scripts \
-            -v "${SITENAME}_postgres":/var/lib/postgresql \
-            -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
-            -v "${SITENAME}_storage":/var/www/html/"${SITENAME}"/storage \
-            -v "${SITENAME}_config":/var/www/html/"${SITENAME}"/config \
-            -v "${SITENAME}_backups":/var/www/html/"${SITENAME}"/backups \
-            -v "${SITENAME}_static":/var/www/html/"${SITENAME}"/static_files \
-            -v "${SITENAME}_logs":/var/www/html/"${SITENAME}"/logs \
-            -v "${SITENAME}_cache":/var/www/html/"${SITENAME}"/cache \
-            -v "${SITENAME}_sessions":/var/lib/php/sessions \
-            -v "${SITENAME}_apache_logs":/var/log/apache2 \
-            -v "${SITENAME}_pg_logs":/var/log/postgresql \
-            -v "${SITENAME}_agent":/etc/joinery-agent \
-            "joinery-$SITENAME"
+        docker run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME"
     fi
 
     if [ $? -eq 0 ]; then

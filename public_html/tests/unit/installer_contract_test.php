@@ -1069,17 +1069,27 @@ check($dockerfile_src !== '', 'Dockerfile.template is readable', $dockerfile);
 
 // Everything utils/upgrade.php writes has to be on a volume, or a rebuild
 // discards it. These three cover public_html, vendor and maintenance_scripts.
-// Two occurrences each: install.sh has a quiet and a verbose docker run.
+// The container is run from its run spec (_site_run_spec.sh), so the spec
+// install.sh renders is what is read here.
+$spec_helper = $site_root . '/maintenance_scripts/install_tools/_site_run_spec.sh';
+$rendered_spec = (string)shell_exec('bash -c ' . escapeshellarg('. "$1" && run_spec_render mysite 127.0.0.1 8087 9087 "" "" ""') . ' _ ' . escapeshellarg($spec_helper) . ' 2>&1');
 foreach (['code' => 'public_html', 'vendor' => 'vendor', 'scripts' => 'maintenance_scripts'] as $vol => $path) {
-    check(substr_count($install_src,
-        '-v "${SITENAME}_' . $vol . '":/var/www/html/"${SITENAME}"/' . $path) === 2,
-        "the {$vol} volume is mounted at {$path} in both docker run blocks");
+    check(strpos($rendered_spec, "volume=mysite_{$vol}:/var/www/html/mysite/{$path}\n") !== false,
+        "the {$vol} volume is mounted at {$path} in the run spec install.sh writes", $rendered_spec);
 }
+// The names install.sh wipes and the names the spec mounts are one set.
+preg_match('/ALL_SITE_VOLUMES=\(([^)]*)\)/s', $install_src, $avm);
+$wiped = preg_split('/\s+/', trim($avm[1] ?? ''));
+preg_match_all('/^volume=mysite_([a-z_]+):/m', $rendered_spec, $mvm);
+sort($wiped); $mounted = $mvm[1]; sort($mounted);
+check($wiped !== array('') && $wiped === $mounted,
+    'every volume the run spec mounts is one --wipe-data removes, and none other',
+    'wiped: ' . implode(',', $wiped) . ' / mounted: ' . implode(',', $mounted));
 
 // Mounting one volume inside another works but is hard to reason about, and
 // the data volumes are all siblings of public_html already. Nothing should
 // claim the site root itself.
-check(preg_match('/-v "\$\{SITENAME\}_[a-z_]+":\/var\/www\/html\/"\$\{SITENAME\}" /', $install_src) === 0,
+check(preg_match('#^volume=[^:]+:/var/www/html/mysite/?$#m', $rendered_spec) === 0,
     'no volume is mounted at the site root, so none nests inside another');
 
 // A wipe that leaves the code volume behind would reinstall onto old code.
@@ -3443,8 +3453,9 @@ section('A rebuilt container keeps its agent and never starts PostgreSQL on the 
 
 $install_b56 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
 $template_b56 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
-check(substr_count($install_b56, '-v "${SITENAME}_agent":/etc/joinery-agent') === 2,
-    'both docker run forms mount the agent\'s identity on the _agent volume',
+check(strpos((string)shell_exec('bash -c ' . escapeshellarg('. "$1" && run_spec_render mysite "" 8087 9087 "" "" ""') . ' _ '
+        . escapeshellarg($site_root . '/maintenance_scripts/install_tools/_site_run_spec.sh')), "volume=mysite_agent:/etc/joinery-agent\n") !== false,
+    'the run spec mounts the agent\'s identity on the _agent volume',
     'the credential lives in /etc/joinery-agent; in the writable layer every rebuild unpairs the agent');
 check((bool)preg_match('/ALL_SITE_VOLUMES=\([^)]*\bagent\b[^)]*\)/s', $install_b56),
     'the _agent volume is in the one list --wipe-data removes');
@@ -3494,13 +3505,14 @@ section('A proxied site\'s web port and every database port answer only on this 
 
 $install_b10 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
 $rebase_b10  = (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/rebase_site_container.sh');
-check(substr_count($install_b10, '-p "${WEB_PUBLISH}${PORT}":80') === 2 && strpos($install_b10, '-p "$PORT":80') === false,
-	'both docker run forms publish the web port through WEB_PUBLISH',
+check(strpos($install_b10, 'run_spec_render "$SITENAME" "${WEB_PUBLISH%:}" "$PORT" "$DB_PORT"') !== false && strpos($install_b10, '-p "$PORT":80') === false,
+	'the run spec publishes the web port through WEB_PUBLISH (specs/multi_tenant_docker_hosts.md WP0)',
 	'-p "$PORT":80 publishes on every interface, a plain-HTTP way in around the host proxy');
 check((bool)preg_match('/if should_setup_ssl "\$DOMAIN_NAME" "\$NO_SSL"; then\s+WEB_PUBLISH="127\.0\.0\.1:"/', $install_b10),
 	'a site the host proxy fronts publishes its web port on 127.0.0.1 only');
-check(substr_count($install_b10, '-p "127.0.0.1:${DB_PORT}":5432') === 2,
-	'both docker run forms publish the database port on 127.0.0.1');
+$spec_helper_b10 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_run_spec.sh');
+check(strpos($spec_helper_b10, "printf 'publish=127.0.0.1:%s:5432\\n' \"\$db_port\"") !== false,
+	'the run spec publishes the database port on 127.0.0.1');
 // No machine reads a Joinery database over the network: scrolldaddy's DNS
 // resolvers read the site over HTTPS with a scoped key, and the declared
 // exception they needed is gone with every piece of it.
@@ -3526,7 +3538,7 @@ check(strpos($rebase_code_b10, 'postgres_access') === false && strpos($rebase_co
 $bind_dir = sys_get_temp_dir() . '/joinery_bind_' . getmypid();
 @mkdir($bind_dir, 0700, true);
 $bind_loop = '';
-if (preg_match('/^    EXTRA_PORTS=""\n    DROPPED_DB=""\n.*?^    done < <\(docker inspect[^\n]*\n/ms', $rebase_b10, $m)) { $bind_loop = $m[0]; }
+if (preg_match('/^    EXTRA_PORTS=""\n    EXTRA_SPEC=""\n    DROPPED_DB=""\n.*?^    done < <\(docker inspect[^\n]*\n/ms', $rebase_b10, $m)) { $bind_loop = $m[0]; }
 check($bind_loop !== '', 'the rebase\'s binding loop is findable');
 $bindings = function (string $lines) use ($bind_dir, $bind_loop): string {
 	file_put_contents($bind_dir . '/bindings', $lines);
@@ -3541,7 +3553,7 @@ check($bindings("127.0.0.1|8087|80/tcp\n127.0.0.1|9087|5432/tcp\n") === 'dropped
 check($bindings("|8087|80/tcp\n192.168.206.198|9087|5432/tcp\n") === 'dropped=[192.168.206.198:9087] extra=[]',
 	'the database port on a private address is named as dropped, not refused');
 check($bindings("127.0.0.1|8087|80/tcp\n127.0.0.1|9087|5432/tcp\n0.0.0.0|2525|25/tcp\n") === 'dropped=[] extra=[ 0.0.0.0:2525->25/tcp]',
-	'any other hand-made binding is still refused');
+	'any other hand-made binding is named, for the check that it is in the run spec (site_run_spec gate)');
 exec('rm -rf ' . escapeshellarg($bind_dir));
 
 // The rebase names every pg_hba line admitting another machine: the Docker
@@ -3572,7 +3584,10 @@ section('The base image build carries every file install.sh loads (specs/fleet_u
 
 $install_b13 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
 $base_b13    = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.base');
-preg_match_all('#^\s*\.\s+"\$SCRIPT_DIR/([A-Za-z0-9_.-]+)"#m', $install_b13, $m_b13);
+// do_site_docker never runs inside the base build, so what it loads
+// (_site_run_spec.sh) is not the base image's to carry.
+$server_b13 = preg_replace('/^do_site_docker\(\) \{.*?^\}$/ms', '', $install_b13);
+preg_match_all('#^\s*\.\s+"\$SCRIPT_DIR/([A-Za-z0-9_.-]+)"#m', $server_b13, $m_b13);
 $loaded_b13 = array_values(array_unique($m_b13[1]));
 check(in_array('_host_files.sh', $loaded_b13, true), 'install.sh loads _host_files.sh (so the check below has something to hold)');
 $build_fn_b13 = '';

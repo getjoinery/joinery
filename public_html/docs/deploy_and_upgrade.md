@@ -914,14 +914,37 @@ figure computed there would be the build host's RAM, frozen into the image and s
 every container on every host — and deliberately not in `_site_init.sh`, which runs only on
 first boot while `/etc/postgresql` is reset by a container rebuild.
 
-**Giving a container a budget.** `install.sh site --memory=SIZE` (Docker's syntax: `512m`,
-`2g`) sets the limit at creation, and `--memory-swap` is pinned to the same figure so the cap
-is not doubled by swap. An already running container takes one with
-`docker update --memory=512m --memory-swap=512m NAME`, and picks up the sizing at its next
-start. Containers are unlimited by default: a limit that arrives uninvited OOM-kills a site
+**Giving a container a budget.** `install.sh site --memory=SIZE` (any size Docker takes:
+`512m`, `1G`, `1.5g`; at least `6m`) sets the limit, and `--memory-swap` is pinned to the same
+figure so the cap is not doubled by swap. The size is checked before anything is stopped. The
+limit is recorded in the site's run spec (below), so every later rebuild keeps it; a rebuild
+given another `--memory` records that one instead, and `--memory=none` lifts it.
+`docker update --memory=512m --memory-swap=512m NAME` changes a running container's budget
+until its next rebuild, which reads the run spec again. The container picks up the sizing at
+its next start. Containers are unlimited by default: a limit that arrives uninvited OOM-kills a site
 that was fitting fine, so it is a decision for whoever knows how many sites share the host.
 On any host running more than one site it is worth setting — it is the only thing that tells
 each container what share of the host is its own.
+
+**The run spec.** A Docker host keeps one file per site, `/etc/joinery/sites/{site}/run_spec`,
+that records how its container is run: hostname, restart policy, memory, CPU and process
+limits, published ports and volumes. It holds no secret; the environment travels as an env
+file. Everything that creates a site container builds its `docker run` arguments from it
+(`_site_run_spec.sh`'s `run_spec_args`): `install.sh site`, `rebase_site_container.sh` (whose
+rollback recreates the old container from the copy it kept, checked before anything is
+removed) and `migrate_site_to_code_volumes.sh` (which adds its new volumes to the spec).
+Nothing rebuilds a container's arguments from `docker inspect`, which would drop its limits.
+`install.sh` writes the web and database ports and the standard volumes; any other published
+port or volume in the spec is the site's own, and a rebuild keeps it.
+
+A container made before the file existed has it read from Docker once, by whichever of those
+runs first, while the container still exists. Anything a spec cannot carry (a bind mount,
+added capabilities, privileged mode, another network, extra hosts, devices, a CPU quota or
+set, restart retries, swap set apart from memory) stops that read with the thing named, and
+nothing is changed: recreating the container would lose it. Each line is checked when written
+and when read: a value that would not be exactly one argument, or a newer format than the
+script reads, is refused. A rebase swapped before run specs existed rolls back from the
+argument list it kept then. `remove_account.sh` removes the file with the site.
 
 ### The deploy tier
 
