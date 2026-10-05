@@ -13,6 +13,7 @@
  * nothing a node or a note said becomes a link. The only links here are the
  * plane's own pages by id.
  *
+ * @version 1.3 - the timeline shows a cleared incident the reconciler resolved
  * @version 1.2 - the triage badge names a fix awaiting its proof; Looking is gone; the timeline shows the
  *                reconciler putting an unproven fix back to new
  * @version 1.1 - Resolve asks what fixed it in a modal (resolve_note_field, resolve_note_script)
@@ -219,9 +220,14 @@ class IncidentViews {
 					break;
 				case IncidentEvent::KIND_TRIAGE:
 					$to = (string)($data['to'] ?? '');
-					// A triage with no person is the reconciler's: a fix whose proof never came.
+					// A triage with no person is the reconciler's: a fix whose proof
+					// never came, or a cleared incident nobody had settled.
 					if (!empty($data['unproven'])) {
 						$line = '<strong>Back to New.</strong>' . ($text !== '' ? ' ' . self::e($text) : '');
+						break;
+					}
+					if (!empty($data['settled'])) {
+						$line = '<strong>Resolved.</strong>' . ($text !== '' ? ' ' . self::e($text) : '');
 						break;
 					}
 					// A state no longer offered (Looking) still reads as its word.

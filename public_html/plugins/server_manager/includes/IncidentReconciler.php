@@ -10,7 +10,11 @@
  *   - it holds and one is active: refresh its title, severity and detail when
  *     they changed, with no event and no notice;
  *   - it is gone and one is active: clear it, with an event.
- * Then a fix awaiting its proof (resolved, still active) that has waited
+ * Then a cleared incident nobody had settled (new, or snoozed) is resolved,
+ * saying it cleared before anyone looked: needs-you holds only what is still
+ * happening, and the open signal already told the superadmins (settle_cleared).
+ * This covers every way an incident clears, the agent's own case close too.
+ * And a fix awaiting its proof (resolved, still active) that has waited
  * PROOF_WINDOW since it was resolved goes back to new and tells the
  * superadmins again: someone said it was fixed and the source still sees it
  * (return_unproven). Without this, resolving a condition that never clears
@@ -39,6 +43,7 @@
  * each addressed to every superadmin. Notify gives each the bell, and email
  * by the signal's default (critical: on) or their own preference.
  *
+ * @version 1.5 - settle_cleared(): a cleared incident still new or snoozed is resolved, by nobody, saying so
  * @version 1.4 - return_unproven(): resolved and still active a day later goes back to new and notifies
  * @version 1.3 - each full pass clears every active incident, of any source, on a removed node (clear_removed)
  * @version 1.2 - each full pass deletes incidents whose node row is gone (removed); ManagedNode's
@@ -55,6 +60,9 @@ class IncidentReconciler {
 
 	/** How long a fix waits for its condition to clear before it is news again. A day covers nightly jobs. */
 	const PROOF_WINDOW = 86400;
+
+	/** The timeline's words when a cleared incident nobody had settled is resolved. */
+	const SETTLED_TEXT = 'It cleared before anyone looked, so nothing needs doing.';
 
 	/** The timeline's words when an unproven fix goes back to new. */
 	const UNPROVEN_TEXT = 'Still happening 24 hours after it was resolved.';
@@ -77,7 +85,7 @@ class IncidentReconciler {
 	 * pass holds the lock.
 	 */
 	public static function run(?array $sources = null, ?array $node_ids = null): array {
-		$counts = array('opened' => 0, 'reopened' => 0, 'refreshed' => 0, 'cleared' => 0, 'removed' => 0, 'unproven' => 0, 'busy' => false);
+		$counts = array('opened' => 0, 'reopened' => 0, 'refreshed' => 0, 'cleared' => 0, 'removed' => 0, 'settled' => 0, 'unproven' => 0, 'busy' => false);
 		$db = DbConnector::get_instance()->get_db_link();
 		if (!(bool)$db->query('SELECT pg_try_advisory_lock(' . self::LOCK_KEY . ')')->fetchColumn()) {
 			$counts['busy'] = true;
@@ -131,7 +139,9 @@ class IncidentReconciler {
 				self::clear($inc, 'This node is no longer watched: it was removed or disabled, or it is being installed or is a copy.');
 				$counts['cleared']++;
 			}
-			// Last, so a condition that cleared on this pass is never sent back.
+			// Last, so a condition that cleared on this pass is settled now and
+			// never sent back.
+			$counts['settled'] = self::settle_cleared($node_ids);
 			$counts['unproven'] = self::return_unproven($node_ids);
 		} finally {
 			$db->query('SELECT pg_advisory_unlock(' . self::LOCK_KEY . ')');
@@ -181,6 +191,38 @@ class IncidentReconciler {
 			}
 		}
 		return $removed;
+	}
+
+	/**
+	 * Resolve every cleared incident still new or snoozed, with no person and a
+	 * timeline line. Reopening within the hour still makes it new again.
+	 * $node_ids narrows it (tests). Returns how many.
+	 */
+	public static function settle_cleared(?array $node_ids = null): int {
+		$ids = DbConnector::get_instance()->get_db_link()->query(
+			"SELECT inc_incident_record_id, inc_mgn_managed_node_id FROM inc_incident_records
+			 WHERE inc_status = 'closed' AND inc_triage IN ('new', 'snoozed') AND inc_delete_time IS NULL")->fetchAll(PDO::FETCH_ASSOC);
+		$settled = 0;
+		foreach ($ids as $row) {
+			if ($node_ids !== null && !in_array((int)$row['inc_mgn_managed_node_id'], $node_ids, true)) {
+				continue;
+			}
+			$inc = new IncidentRecord((int)$row['inc_incident_record_id'], TRUE);
+			if (!$inc->key) {
+				continue;
+			}
+			$from = (string)$inc->get('inc_triage');
+			$now = gmdate('Y-m-d H:i:s');
+			$inc->set('inc_triage', IncidentRecord::TRIAGE_RESOLVED);
+			$inc->set('inc_triage_time', $now);
+			$inc->set('inc_triage_usr_user_id', null);
+			$inc->set('inc_snooze_until', null);
+			$inc->save();
+			IncidentEvent::record((int)$inc->key, IncidentEvent::KIND_TRIAGE, $now, null, self::SETTLED_TEXT,
+				array('from' => $from, 'to' => IncidentRecord::TRIAGE_RESOLVED, 'settled' => true));
+			$settled++;
+		}
+		return $settled;
 	}
 
 	/**
