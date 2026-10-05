@@ -178,7 +178,9 @@ func run() int {
 	if stores {
 		// Per-tenant spool quota (shard policy from the root-owned limits, never
 		// tenant-pushed): a tenant that stops pulling must not fill the shard's
-		// disk for everyone. Over quota = temp-fail; the sender's MTA queues.
+		// disk for everyone. Such a tenant is refused at RCPT with a 4xx once
+		// collect-status notices (relay_outbound.go), so its mail queues at the
+		// sender; this temp-fail covers the seconds before that.
 		if over, why := spoolQuotaExceeded(spoolDir, tc); over {
 			fmt.Fprintf(os.Stderr, "relay-sealer: tenant %s over spool quota (%s), deferring\n", entry.Tenant, why)
 			return exitTempFail
@@ -188,6 +190,11 @@ func run() int {
 		}
 	}
 
+	// Forwarding happens here only for a tenant whose site predates the
+	// receive-only release (specs/relay_receive_only_forwarding.md): a current
+	// site sends every recipient as store and forwards at pull through its own
+	// email service. Outbound port 25 is open only while such a tenant exists
+	// (relay_outbound.go).
 	if forwards {
 		if len(entry.Destinations) == 0 {
 			fmt.Fprintln(os.Stderr, "relay-sealer: forward mode with no destinations")

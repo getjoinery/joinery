@@ -14,6 +14,16 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.6 - a message may be 25 MiB, the size the sealer seals (Postfix's own default
+#                refused anything over 10 MB), and a bare line feed can no longer end a
+#                message (smtpd_forbid_bare_newline, the SMTP smuggling guard).
+# Version: 3.5 - the relay only receives (specs/relay_receive_only_forwarding.md): outbound
+#                port 25 is dropped by the firewall and Postfix's default transport is an
+#                error, set by the merge while no tenant still sends forward instructions
+#                (a site older than the receive-only release keeps it open until it
+#                upgrades). A tenant over its spool quota is refused at RCPT with a 4xx
+#                (joinery-deferred, rewritten by collect-status) so its mail queues at the
+#                sender, never in this relay's queue to bounce at expiry.
 # Version: 3.4 - postmaster is accepted on a domain that refuses unmatched mail (RFC 5321;
 #                the DMARC rua points at it): the merged access map lists
 #                postmaster@<domain> OK, and the sealer stores it under the tenant's
@@ -69,7 +79,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.4"
+RELAY_VERSION="3.6"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -87,6 +97,7 @@ MAP_DOMAINS="/etc/postfix/joinery-relay-domains"
 MAP_RECIPIENTS="/etc/postfix/joinery-recipients"
 MAP_TRANSPORT="/etc/postfix/joinery-transport"
 MAP_SRS="/etc/postfix/joinery-srs"
+MAP_DEFERRED="/etc/postfix/joinery-deferred"
 ROUTING_JSON="${RELAY_HOME}/routing.json"
 # The hour unattended-upgrades may reboot for a kernel update. Nobody can ask a
 # relay to reboot, so it must be allowed to do it itself; senders retry across
@@ -216,7 +227,8 @@ ufw_allow_once() {
 }
 
 # Converge the intended rule set instead of 'ufw --force reset', rule by rule:
-# 25 and 443, and nothing else. 22 is admitted only by --keep-sshd, and an
+# 25 and 443 inbound, and nothing else. The outbound port-25 rule is the
+# merge's to set (relay-sealer relay_outbound.go); this leaves it alone. 22 is admitted only by --keep-sshd, and an
 # existing 22 rule is REMOVED otherwise, so a box that arrived with SSH open
 # does not stay that way once it is a relay.
 converge_firewall() {
@@ -464,7 +476,7 @@ if [[ -n "${OPERATOR_PUBLIC_KEY}" ]]; then
 fi
 
 # --- 3. placeholder synced maps (Postfix must start before the first merge) ---
-for f in "${MAP_DOMAINS}" "${MAP_RECIPIENTS}" "${MAP_TRANSPORT}"; do
+for f in "${MAP_DOMAINS}" "${MAP_RECIPIENTS}" "${MAP_TRANSPORT}" "${MAP_DEFERRED}"; do
     [[ -f "${f}" ]] || : > "${f}"
     if [[ ! -f "${f}.db" || "${f}" -nt "${f}.db" ]]; then
         postmap "${f}"
@@ -509,7 +521,11 @@ postconf_set "myhostname" "${MAIL_HOSTNAME}"
 postconf_set "inet_interfaces" "all"
 postconf_set "mydestination" "localhost, localhost.localdomain"
 
-# Prefer IPv4 for outbound (forward + SRS bounce legs). A fresh VPS gets an IPv6
+# The relay sends nothing once every site on it forwards at pull: the merge sets
+# default_transport to an error and drops outbound 25 at the firewall
+# (relay-sealer relay_outbound.go). It leaves it open only while a site older
+# than the receive-only release still sends forward instructions, and for those
+# forwards: prefer IPv4 for outbound. A fresh VPS gets an IPv6
 # address whose PTR is almost never set, and big receivers (Gmail) hard-reject
 # IPv6 mail without a matching PTR + authentication (550 IPv6AuthError). The
 # IPv4 PTR is what the provisioning DNS sets, so send from IPv4.
@@ -520,6 +536,21 @@ postconf_set "smtp_address_preference" "ipv4"
 # these anvil limits bound what any single CLIENT can push at the shard.
 postconf_set "smtpd_client_connection_rate_limit" "120"
 postconf_set "smtpd_client_message_rate_limit" "300"
+
+# A message may be as large as the sealer seals (25 MiB). Postfix counts its own
+# envelope records in the limit, so what it lets through is always under the
+# sealer's cap and an oversized message is refused during the SMTP conversation.
+postconf_set "message_size_limit" "26214400"
+
+# SMTP smuggling (CVE-2023-51764): a line ending in a bare line feed must never
+# end a message, or one message can carry a second with a forged sender. "yes"
+# is "normalize" on every Postfix that has it. A Postfix too old to know the
+# parameter is left alone.
+if [[ -n "$(postconf -dh smtpd_forbid_bare_newline 2>/dev/null)" ]]; then
+    postconf_set "smtpd_forbid_bare_newline" "yes"
+else
+    echo "WARNING: this Postfix has no smtpd_forbid_bare_newline; upgrade Postfix to close SMTP smuggling." >&2
+fi
 
 # Loopback only. There is no tunnel and no smarthost: the relay accepts mail
 # for its hosted domains from the world and submits nothing for anyone.
@@ -533,7 +564,9 @@ postconf_set "transport_maps" "hash:${MAP_TRANSPORT}"
 
 # RBL block — verbatim from install_email.sh — plus SMTP-time recipient
 # validation against the merged access map (preserving reject_unmatched: listed
-# aliases OK, unmatched under a reject domain REJECTed, no backscatter).
+# aliases OK, unmatched under a reject domain REJECTed, no backscatter). Before
+# it, the deferral map: a tenant over its spool quota answers 452 until it
+# drains, so its mail waits on the sending server.
 #
 # Only Spamhaus rejects. Zen and DBL are built to be rejected on: low false
 # positive, and Zen deliberately excludes the shared outbound ranges every ESP
@@ -542,7 +575,7 @@ postconf_set "transport_maps" "hash:${MAP_TRANSPORT}"
 # from Mailgun, SendGrid or Google at random — permanently, since a 5xx stops
 # the sender retrying. SpamCop says as much itself: use it to score, not to
 # refuse. Content scoring is where a weaker signal belongs.
-postconf_set "smtpd_recipient_restrictions" "reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
+postconf_set "smtpd_recipient_restrictions" "reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access hash:${MAP_DEFERRED}, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
 echo "main.cf: relay_domains, transport, recipient validation, RBL, anvil limits set"
 
 

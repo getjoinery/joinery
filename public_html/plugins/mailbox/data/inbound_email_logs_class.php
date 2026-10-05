@@ -3,6 +3,8 @@
  * InboundEmailLog - Records all inbound email transactions.
  * Also used for rate limiting by counting recent entries.
  *
+ * @version 1.9 - STATUS_UNCONFIRMED; iel_relay_spool_id marks the relay spool entry a line
+ *   came from, so a re-pulled entry is not routed twice
  * @version 1.8 - index on iel_create_time (rate limits, the spam filter's burst token)
  * @version 1.7 - iel_iem_inbound_email_message_id links a transaction to the message row it
  *   stored, so the message timeline can show how it was routed
@@ -50,6 +52,9 @@ class InboundEmailLog extends SystemBase {
 	// being delivered (specs/deliverability_report_ingest.md § D3). The kind,
 	// reporter and outcome are recorded in iel_destinations.
 	const STATUS_REPORT_FILED = 'report_filed';
+	// A forward was not sent to a destination whose owner has not confirmed it
+	// (specs/relay_receive_only_forwarding.md, rule 4). iel_destinations names them.
+	const STATUS_UNCONFIRMED = 'unconfirmed';
 
 	protected static $foreign_key_actions = [
 		'iel_iea_inbound_email_alias_id'  => ['action' => 'null'],
@@ -72,6 +77,9 @@ class InboundEmailLog extends SystemBase {
 		'iel_destinations'     => array('type'=>'text'),
 		'iel_status'           => array('type'=>'varchar(50)', 'is_nullable'=>false),
 		'iel_error_message'    => array('type'=>'text'),
+		// The relay spool entry this line routed (RelaySpoolConsumer). A re-pull
+		// of an entry whose ack was lost finds it here and is not routed twice.
+		'iel_relay_spool_id'   => array('type'=>'varchar(255)', 'index'=>true),
 		'iel_create_time'      => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'iel_delete_time'      => array('type'=>'timestamp(6)'),
 	);

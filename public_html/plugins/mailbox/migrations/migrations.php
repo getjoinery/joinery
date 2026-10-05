@@ -11,6 +11,8 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
+ * @version 1.33.0 - ifd_001_confirm_existing_destinations: every destination that forwards today is
+ *                   recorded confirmed, so forwarding confirmation asks only new ones
  * @version 1.32.0 - ied_003_private_with_addons: mail's top level becomes Private plus the
  *                   relay-sealing and sending-lock add-ons
  * @version 1.31.1 - imi_002 logs one line on every node it runs on, including one where it
@@ -1271,6 +1273,106 @@ return [
 			$db->exec("DELETE FROM stg_settings WHERE stg_name = 'mailbox_rspamd_controller_url'");
 			echo "iem_019: " . (int)$evidence . " correction(s) recorded as evidence; " . (int)$cleared
 				. " learned marker(s) cleared for re-teaching into the in-core corpus.\n";
+			return true;
+		},
+	],
+	[
+		// Forwarding confirmation (specs/relay_receive_only_forwarding.md, rule 4)
+		// asks every NEW destination before anything is forwarded to it.
+		// Destinations already forwarding keep working with no message: each is
+		// recorded confirmed under the row its forwards ask — the mailbox's own,
+		// the catch-all's (no mailbox), and for a filter's "Forward to" the
+		// mailbox it belongs to, or every mailbox on the domain plus the
+		// catch-all for a domain-wide filter.
+		'id' => 'ifd_001_confirm_existing_destinations',
+		'version' => '1.129.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$q = $db->prepare(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'ifd_inbound_forward_destinations'
+				   AND column_name IN ('ifd_ied_inbound_email_domain_id', 'ifd_iea_inbound_email_alias_id',
+				                       'ifd_destination', 'ifd_status', 'ifd_confirmed_time')");
+			$q->execute();
+			if ((int)$q->fetchColumn() < 5) {
+				echo "ifd_001: ifd_inbound_forward_destinations is not created yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+			$tables = $db->prepare("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'
+				AND table_name IN ('iea_inbound_email_aliases', 'ied_inbound_email_domains', 'ief_inbound_email_filters')");
+			$tables->execute();
+			if ((int)$tables->fetchColumn() < 3) {
+				echo "ifd_001: the mailbox tables are absent - nothing forwards here.\n";
+				return true;
+			}
+
+			$split = function ($list) {
+				$out = array();
+				foreach (preg_split('/[\s,]+/', strtolower(trim((string)$list))) as $d) {
+					if ($d !== '' && filter_var($d, FILTER_VALIDATE_EMAIL)) {
+						$out[] = $d;
+					}
+				}
+				return array_unique($out);
+			};
+			$exists = $db->prepare('SELECT 1 FROM ifd_inbound_forward_destinations
+				WHERE ifd_ied_inbound_email_domain_id = ? AND ifd_destination = ?
+				  AND ifd_iea_inbound_email_alias_id IS NOT DISTINCT FROM ?::int8 AND ifd_delete_time IS NULL');
+			$insert = $db->prepare("INSERT INTO ifd_inbound_forward_destinations
+				(ifd_ied_inbound_email_domain_id, ifd_iea_inbound_email_alias_id, ifd_destination, ifd_status,
+				 ifd_confirmed_time, ifd_request_count, ifd_create_time, ifd_update_time)
+				VALUES (?, ?, ?, 'confirmed', now() AT TIME ZONE 'UTC', 0, now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC')");
+			$added = 0;
+			$confirm = function ($domain_id, $alias_id, $dest) use ($exists, $insert, &$added) {
+				$exists->execute(array($domain_id, $dest, $alias_id));
+				if ($exists->fetchColumn()) {
+					return;
+				}
+				$insert->execute(array($domain_id, $alias_id, $dest));
+				$added++;
+			};
+
+			$aliases = $db->query("SELECT iea_inbound_email_alias_id, iea_ied_inbound_email_domain_id, iea_destinations
+				FROM iea_inbound_email_aliases WHERE iea_delete_time IS NULL
+				  AND iea_delivery_mode IN ('forward', 'forward_and_store')");
+			foreach ($aliases->fetchAll(PDO::FETCH_ASSOC) as $a) {
+				foreach ($split($a['iea_destinations']) as $d) {
+					$confirm((int)$a['iea_ied_inbound_email_domain_id'], (int)$a['iea_inbound_email_alias_id'], $d);
+				}
+			}
+
+			$domains = $db->query("SELECT ied_inbound_email_domain_id, ied_catch_all_address FROM ied_inbound_email_domains
+				WHERE ied_delete_time IS NULL AND COALESCE(ied_catch_all_mode, 'forward') = 'forward'
+				  AND COALESCE(ied_catch_all_address, '') <> ''");
+			foreach ($domains->fetchAll(PDO::FETCH_ASSOC) as $d) {
+				foreach ($split($d['ied_catch_all_address']) as $dest) {
+					$confirm((int)$d['ied_inbound_email_domain_id'], null, $dest);
+				}
+			}
+
+			$mailboxes_of = $db->prepare('SELECT iea_inbound_email_alias_id FROM iea_inbound_email_aliases
+				WHERE iea_ied_inbound_email_domain_id = ? AND iea_delete_time IS NULL');
+			$filters = $db->query("SELECT ief_ied_inbound_email_domain_id, ief_iea_inbound_email_alias_id, ief_action_forward_to
+				FROM ief_inbound_email_filters WHERE ief_delete_time IS NULL AND COALESCE(ief_action_forward_to, '') <> ''");
+			foreach ($filters->fetchAll(PDO::FETCH_ASSOC) as $f) {
+				$domain_id = (int)$f['ief_ied_inbound_email_domain_id'];
+				$targets = array();
+				if ($f['ief_iea_inbound_email_alias_id'] !== null) {
+					$targets[] = (int)$f['ief_iea_inbound_email_alias_id'];
+				} else {
+					$targets[] = null;
+					$mailboxes_of->execute(array($domain_id));
+					foreach ($mailboxes_of->fetchAll(PDO::FETCH_COLUMN) as $aid) {
+						$targets[] = (int)$aid;
+					}
+				}
+				foreach ($split($f['ief_action_forward_to']) as $dest) {
+					foreach ($targets as $alias_id) {
+						$confirm($domain_id, $alias_id, $dest);
+					}
+				}
+			}
+			echo "ifd_001: " . $added . " existing forwarding destination(s) recorded confirmed.\n";
 			return true;
 		},
 	],

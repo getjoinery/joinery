@@ -1,4 +1,9 @@
 <?php
+/**
+ * @version 1.1 - forwarding is refused where the mailbox's level does not offer it; a saved
+ *   forwarding destination is asked to confirm, and the editor can resend the request
+ *   (specs/relay_receive_only_forwarding.md)
+ */
 function admin_mailbox_alias_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -28,6 +33,17 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
 	} else {
 		$alias = new InboundEmailAlias(NULL);
+	}
+
+	// Resend a forwarding confirmation request (a single-button form under the
+	// editor). Handled before the save path, and returns from it.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/forward_confirmation_panel.php'));
+	if ($alias->key && ($input['action'] ?? '') === 'resend_forward_confirmation') {
+		$msg = mailbox_forward_confirmation_resend($input, intval($alias->get('iea_ied_inbound_email_domain_id')),
+			intval($alias->key), $alias->get_destinations_array());
+		$session->save_message(new DisplayMessage($msg, 'Forwarding', '~/plugins/mailbox/admin/~',
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_alias?iea_inbound_email_alias_id=' . intval($alias->key));
 	}
 
 	// Process form submission
@@ -111,10 +127,31 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 			}
 		}
 
+		// A mailbox sealed to a key this server does not hold (Fortress, or Seal
+		// at the relay) is store-only: a forward would hand the recipient's
+		// provider a readable copy.
+		if ($alias->mode_forwards() && !$alias->forwarding_offered()) {
+			return LogicResult::render(array(
+				'alias' => $alias,
+				'error' => 'This mailbox cannot forward. Its mail is sealed to a key this server does not hold '
+					. '(Fortress, or Seal at the relay), and a forward would hand the receiving provider a readable copy. '
+					. 'Choose "Store locally".',
+				'session' => $session,
+				'settings' => $settings,
+				'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
+				'user_options' => $user_options,
+				'granted_user_ids' => $submitted_grant_users,
+			));
+		}
+
 		try {
 			$alias->prepare();
 			$alias->save();
 			$alias->load();
+
+			// Every new forwarding destination is asked to confirm before
+			// anything is forwarded to it.
+			ForwardConfirmation::requestMissingForAlias($alias);
 
 			// Sync the mailbox's access list to exactly the submitted set.
 			InboundEmailMailboxGrant::sync_for_alias($alias->key, $submitted_grant_users);

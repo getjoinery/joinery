@@ -2,6 +2,8 @@
 /**
  * Inbound Email - Create/Edit Alias
  *
+ * @version 1.12 - store-only where the mailbox's level does not offer forwarding; each
+ *   forwarding destination's confirmation state with Resend (specs/relay_receive_only_forwarding.md)
  * @version 1.11 - the protection level shows as its cards, open; another card links to where it is chosen;
  *   the help text's example address uses the mailbox's own domain
  * @version 1.10 - the protection badge carries the domain's add-ons in force
@@ -116,16 +118,27 @@ $formwriter->textinput('iea_alias', 'Mailbox', [
 	'helptext' => 'The name before the @ — for example, "info" creates the mailbox info@' . $example_domain . '.',
 ]);
 
-$formwriter->dropinput('iea_delivery_mode', 'Delivery Mode', [
+// A mailbox sealed to a key this server does not hold is store-only, and says why.
+$forwarding_offered = !$alias->get('iea_ied_inbound_email_domain_id') || $alias->forwarding_offered();
+$mode_options = [
 	// Store is listed first so it is what a new mailbox gets: a dropdown with no
 	// matching value selects its first option, and a new alias carries none.
-	'options' => [
-		'store'             => 'Store locally (no forwarding)',
-		'forward'           => 'Forward to destination address(es)',
-		'forward_and_store' => 'Forward and store a copy',
-	],
-	'helptext' => 'Store mode keeps messages in the local mailbox (visible on the Mailbox tab) '
-		. 'and does not forward. Forward mode requires at least one destination.',
+	'store'             => 'Store locally (no forwarding)',
+	'forward'           => 'Forward to destination address(es)',
+	'forward_and_store' => 'Forward and store a copy',
+];
+if (!$forwarding_offered) {
+	$mode_options = ['store' => 'Store locally (no forwarding)'];
+}
+$formwriter->dropinput('iea_delivery_mode', 'Delivery Mode', [
+	'options' => $mode_options,
+	'helptext' => $forwarding_offered
+		? 'Store mode keeps messages in the local mailbox (visible on the Mailbox tab) '
+			. 'and does not forward. Forward mode requires at least one destination. '
+			. 'Nothing is forwarded to an address until the person at it confirms.'
+		: 'This mailbox keeps its mail here and cannot forward: its mail is sealed to a key this server '
+			. 'does not hold (Fortress, or Seal at the relay), and a forward would hand the receiving '
+			. 'provider a readable copy.',
 	'visibility_rules' => [
 		'store'             => ['show' => [], 'hide' => ['iea_destinations']],
 		'forward'           => ['show' => ['iea_destinations'], 'hide' => []],
@@ -165,6 +178,14 @@ if (!empty($user_options)) {
 $formwriter->submitbutton('btn_submit', 'Save Alias');
 
 echo $formwriter->end_form();
+
+// Each forwarding destination's confirmation state, outside the form: every
+// Resend is a form of its own.
+if ($is_edit && $forwarding_offered && $alias->mode_forwards()) {
+	echo mailbox_forward_confirmation_panel(intval($alias->get('iea_ied_inbound_email_domain_id')), intval($alias->key),
+		$alias->get_destinations_array(), '/plugins/mailbox/admin/admin_mailbox_alias',
+		array('iea_inbound_email_alias_id' => intval($alias->key)));
+}
 
 $page->end_box();
 $page->admin_footer();

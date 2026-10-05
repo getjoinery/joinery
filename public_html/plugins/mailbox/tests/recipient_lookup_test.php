@@ -34,6 +34,8 @@
  *
  * Run: php tests/run.php --only=plugins/mailbox/tests/recipient_lookup_test.php
  *
+ * @version 1.1 - the pull routes transport mail through the router: a dropped postmaster
+ *   message is 'routed', its drop in the routing log
  * @version 1.0
  */
 
@@ -196,7 +198,7 @@ $pull = function (string $to) use ($box, $kp, $raw, $stage, $ingest, $consumer):
 	return (string)$ingest->invoke($consumer, $stage . '/' . $spool_id . '.seal', $stage . '/' . $spool_id . '.meta', $spool_id);
 };
 $pm = 'postmaster@' . $reject;
-check($pull($pm) === 'discarded', 'postmaster with no alias, not a report: dropped and acked');
+check($pull($pm) === 'routed', 'postmaster with no alias, not a report: routed (the router drops it) and acked');
 $stored = $db->prepare("SELECT COUNT(*) FROM iem_inbound_email_messages WHERE iem_recipient = ?");
 $stored->execute(array($pm));
 check((int)$stored->fetchColumn() === 0, 'and nothing was stored as mail');

@@ -38,6 +38,8 @@ import (
 //  4. Installs atomically, runs postmap + postfix reload only when the merged
 //     output actually changed, and writes a per-tenant verdict the tenant
 //     shell returns in-band.
+//  5. Opens outbound port 25 while some tenant still sends forward
+//     instructions, and closes it once none does (relay_outbound.go).
 //
 // Shard-side limits (tenants/<slug>/limits.json, root-owned) are stamped into
 // the merged tenant block here — the pushed fragment can never set its own
@@ -250,6 +252,15 @@ func runMerge() int {
 					installed = false
 				}
 			}
+		}
+	}
+
+	// Outbound port 25 is open only while some tenant's fragment still asks the
+	// relay to forward (a site older than the receive-only release); see
+	// relay_outbound.go. Set on every merge, so drift is repaired too.
+	if installed && !noReload {
+		if err := applyOutboundPosture(merged.carriesForwarding()); err != nil {
+			fmt.Fprintf(os.Stderr, "merge-maps: outbound posture: %v\n", err)
 		}
 	}
 

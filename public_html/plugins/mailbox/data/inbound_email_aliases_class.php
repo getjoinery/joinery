@@ -18,6 +18,8 @@
  * decision asks the alias; domain identity (DKIM, protected identity, DNS shape,
  * relay export) keeps asking the domain.
  *
+ * @version 1.9 - forwarding_offered(): a Fortress mailbox, or one on a domain sealed at the
+ *   relay, is store-only
  * @version 1.8 - effectiveLevelSql() reads a legacy unconverted Fortress domain as
  *   Private, as InboundEmailDomain::security_level() does
  * @version 1.7 - Fortress: an own 'fortress' reads as Fortress, seals_content() covers
@@ -228,6 +230,32 @@ class InboundEmailAlias extends SystemBase {
 	function is_fortress() {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 		return $this->security_level() === InboundEmailDomain::LEVEL_FORTRESS;
+	}
+
+	/**
+	 * May this mailbox forward? Not at Fortress, and not on a domain with Seal
+	 * at the relay: its mail is sealed to a key the server does not hold, and a
+	 * forward hands the recipient's provider a readable copy, which is what
+	 * those levels exist to prevent. Such a mailbox is store-only; one saved
+	 * with a forwarding mode before the level was raised stores instead.
+	 */
+	function forwarding_offered(): bool {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+		if ($this->is_fortress()) {
+			return false;
+		}
+		$domain_id = intval($this->get('iea_ied_inbound_email_domain_id'));
+		if ($domain_id <= 0) {
+			return true;
+		}
+		$domain = new InboundEmailDomain($domain_id, TRUE);
+		return !$domain->key || !$domain->relay_seals_to_owner();
+	}
+
+	/** True when this mailbox's delivery mode forwards (forward or forward_and_store). */
+	function mode_forwards(): bool {
+		$mode = (string)$this->get('iea_delivery_mode') ?: self::MODE_FORWARD;
+		return $mode === self::MODE_FORWARD || $mode === self::MODE_FORWARD_AND_STORE;
 	}
 
 	/** True when this mailbox carries a level of its own rather than inheriting. */

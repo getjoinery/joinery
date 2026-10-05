@@ -1,4 +1,6 @@
 <?php
+// @version 1.7 - a catch-all forwarding address is asked to confirm, and the editor can resend
+//   the request (specs/relay_receive_only_forwarding.md)
 // @version 1.6 - a level change runs through ProtectionLevelChange (MailboxDomainLevel); levels are ProtectionLevel's
 // @version 1.5 - the relay-or-direct choice card is gone (Enable/Disable relay decide it), so no gate to handle
 // @version 1.4 - the Fortress receipt counts relay-sealed mail still waiting to be opened (B46)
@@ -153,6 +155,21 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	// --- Protection ceremony inline fixes (specs/mailbox_protection_ceremony.md) ---
 	// Both act on a domain being edited and land back on its editor so the
 	// checklist re-evaluates immediately.
+	// Resend the catch-all address's forwarding confirmation request (a
+	// single-button form under the editor).
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'resend_forward_confirmation') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/forward_confirmation_panel.php'));
+		$resend_domain = new InboundEmailDomain(intval($input['ied_inbound_email_domain_id'] ?? 0), TRUE);
+		if ($resend_domain->key) {
+			$msg = mailbox_forward_confirmation_resend($input, intval($resend_domain->key), null,
+				array((string)$resend_domain->get('ied_catch_all_address')));
+			$session->save_message(new DisplayMessage($msg, 'Forwarding', '~/plugins/mailbox/admin/~',
+				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . intval($resend_domain->key));
+		}
+		return LogicResult::redirect($accounts_url);
+	}
+
 	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'ceremony_remove_grant') {
 		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
 		$alias = new InboundEmailAlias(intval($input['alias_id'] ?? 0), TRUE);
@@ -480,6 +497,11 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 				$domain->prepare();
 				$domain->save();
 			}
+
+			// A new catch-all forwarding address is asked to confirm before
+			// anything is forwarded to it.
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ForwardConfirmation.php'));
+			ForwardConfirmation::requestMissingForCatchAll($domain);
 
 			// A fleet-fronted deployment files a new hosted domain's ownership
 			// challenge at registration, so the Setup tab's ownership row

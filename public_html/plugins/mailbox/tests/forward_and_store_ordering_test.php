@@ -19,6 +19,7 @@
  *
  * Run: php plugins/mailbox/tests/forward_and_store_ordering_test.php  (schema synced).
  *
+ * @version 1.3 - the destination is confirmed, as forwarding requires
  * @version 1.2 - the persistRawAndManifest() override follows its signature (Fortress flag, manifest return)
  * @version 1.1 - teardown goes through mailbox_purge_domains(), which also removes the
  *   send attempts a forward records; the hand-rolled copy left one per alias behind
@@ -105,6 +106,8 @@ class ForwardAndStoreOrderingTest {
 		$a->set('iea_destinations', 'dest@example.test');
 		$a->set('iea_is_enabled', true);
 		$a->prepare(); $a->save();
+		// Forwarding reaches only a destination its owner confirmed.
+		mailbox_confirm_alias_destinations($a);
 		return $a;
 	}
 

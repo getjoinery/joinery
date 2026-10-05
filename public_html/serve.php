@@ -1,6 +1,8 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.10.0 — /mail/forward-confirm: the mailbox plugin's forwarding confirmation page
+// (specs/relay_receive_only_forwarding.md).
 // @version 1.9.0 — /uploads/* never redirects to a bucket: a cloud file is a
 // private file, gate-streamed through this server (specs/implemented/cloud_storage_private_only.md).
 // @version 1.8.0 — /services/authorize is the server_manager plugin's Connect
@@ -128,6 +130,7 @@ $routes = [
         '/video/{slug}'        => ['view' => 'views/video', 'check_setting' => 'videos_active'],
         '/book/{slug}'         => ['view' => 'plugins/bookings/views/book', 'check_setting' => 'bookings_active'],
         '/booking/manage'      => ['view' => 'plugins/bookings/views/booking_manage', 'check_setting' => 'bookings_active'],
+        '/mail/forward-confirm' => ['view' => 'views/forward_confirm', 'plugin' => 'mailbox'],
 
         // ---- store: view routes (files live in plugins/store/views) ----
         '/products'    => ['view' => 'views/products',    'plugin' => 'store', 'check_setting' => 'products_list_items_active'],

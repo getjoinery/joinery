@@ -31,6 +31,7 @@
  *
  * Run: php tests/run.php db --filter=forward_loop_guard
  *
+ * @version 1.2 - the destinations are confirmed, as forwarding requires
  * @version 1.1 - teardown goes through mailbox_purge_domains(), which also removes the
  *   send attempts a forward records; the hand-rolled copy left one per alias behind
  * @version 1.0
@@ -116,6 +117,10 @@ $alias_for = function (string $local, string $mode) use ($domain_id) {
 	}
 	$a->set('iea_is_enabled', true);
 	$a->prepare(); $a->save();
+	// Forwarding reaches only a destination its owner confirmed, and the
+	// filter path below forwards this mailbox's mail to elsewhere@.
+	mailbox_confirm_alias_destinations($a);
+	mailbox_confirm_forward_destination($domain_id, (int)$a->key, 'elsewhere@example.test');
 	return $a;
 };
 $recipient = function (string $local) use ($suffix) { return $local . '@flg-test-' . $suffix . '.example'; };
