@@ -356,7 +356,7 @@ echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Ru
                   + 'The SPF/DKIM/DMARC <em>verdicts</em> read <strong>unverified</strong>: nothing checked this message '
                   + 'on the way in, so there is no result to report. Whatever receives your mail is what performs those '
                   + 'checks and records the answer in an <code>Authentication-Results</code> header — on a server that '
-                  + 'hosts its own mail that is the <code>opendkim</code> + <code>opendmarc</code> pair, which you can '
+                  + 'hosts its own mail that is <code>rspamd</code>, which you can '
                   + 'install or repair from Inbound Email &rarr; Setup. Alternatively use <strong>External</strong> mode '
                   + 'and read the receiving provider\'s own verdict under "Show original".</p>';
         }

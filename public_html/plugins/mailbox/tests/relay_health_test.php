@@ -48,8 +48,8 @@ class RelayHealthTest {
 	private function ping(array $overrides = array()): string {
 		$payload = array(
 			'status'   => 'ok',
-			'services' => array('rspamd' => 'active', 'opendkim' => 'active', 'opendmarc' => 'active'),
-			'milters'  => array('opendkim' => true, 'opendmarc' => true, 'rspamd' => true),
+			'services' => array('rspamd' => 'active'),
+			'milters'  => array('rspamd' => true),
 			'contract' => true,
 			'provisioned' => '2.2',
 			'slug'     => 'example',
@@ -235,9 +235,13 @@ class RelayHealthTest {
 				check(array_key_exists($key, $decoded), 'the answer carries ' . $key);
 			}
 			$this->eq('example', (string)($decoded['slug'] ?? ''), 'the answer names the tenant it answered for');
-			foreach (array('rspamd', 'opendkim', 'opendmarc') as $svc) {
-				check(array_key_exists($svc, (array)$decoded['services']), 'services report ' . $svc);
-				check(array_key_exists($svc, (array)$decoded['milters']), 'milters report ' . $svc);
+			check(array_key_exists('rspamd', (array)$decoded['services']), 'services report rspamd');
+			check(array_key_exists('rspamd', (array)$decoded['milters']), 'milters report rspamd');
+			// rspamd is the relay's only checker: a relay that named another
+			// would be one built before it checked alone.
+			foreach (array('opendkim', 'opendmarc') as $gone) {
+				check(!array_key_exists($gone, (array)$decoded['services'])
+					&& !array_key_exists($gone, (array)$decoded['milters']), 'the answer names no ' . $gone);
 			}
 			check(is_bool($decoded['contract']), 'the contract check is a boolean, so PHP never parses rspamd config');
 			// Before root's collector has run once, the relay must not look

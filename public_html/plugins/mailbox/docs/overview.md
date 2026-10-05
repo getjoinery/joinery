@@ -12,7 +12,7 @@ alias and relays it through the selected outbound provider (see
 [Forwarding relay](#forwarding-relay)).
 
 **Self-hosting here means inbound.** The plugin owns receiving — MX, Postfix,
-the pipe handler, verification milters. Everything it sends (forwards, replies,
+the pipe handler, the mail checker (rspamd). Everything it sends (forwards, replies,
 composed mail) leaves through the platform's configured outbound provider, the
 assumed path for all outbound mail (see the outbound doctrine in
 [Email System](/docs/email_system.md)). Delivering directly from this box's own
@@ -20,7 +20,7 @@ port 25 to recipient mail servers is an advanced setup a deployment must
 deliberately pursue (cloud egress unblock, PTR, IP reputation) — never a
 required step of mailbox setup.
 
-**Features:** multiple domains, multiple destinations per alias, catch-all addresses, SRS for SPF compatibility, inbound authentication results (SPF/DKIM/DMARC) read from the verifying MTA / provider, outbound DKIM signing (opendkim), per-alias and per-domain rate limiting, RBL spam filtering, inbound email logs with admin viewer, live DNS validation.
+**Features:** multiple domains, multiple destinations per alias, catch-all addresses, SRS for SPF compatibility, inbound authentication results (SPF/DKIM/DMARC) read from the verifying MTA / provider, outbound DKIM signing (rspamd), per-alias and per-domain rate limiting, RBL spam filtering, inbound email logs with admin viewer, live DNS validation.
 
 > **Putting a domain on hosted mail:** the sender-identity layout, the record
 > set, the cutover order, and the provider and DNS behaviours that produce a
@@ -31,7 +31,7 @@ required step of mailbox setup.
 
 ### Prerequisites
 
-Postfix (with the `postfix-pgsql` map driver), opendkim and opendmarc are
+Postfix (with the `postfix-pgsql` map driver) and rspamd are
 installed and configured by `provisioning/install_email.sh` — run it once per
 deployment (see Server Setup below). It assumes one Joinery site per host; that
 host may be a Docker container or bare metal.
@@ -83,7 +83,7 @@ scope to that mailbox and split into two groups:
 - **Receiving** (always): the mailbox's domain DNS verified for *correctness*,
   not just presence (MX target actually resolves to this server, SPF authorizes
   the IP, DMARC published), that the domain is registered, that inbound mail is
-  being authentication-verified (opendkim-verify + opendmarc), that the alias
+  being authentication-verified (by rspamd), that the alias
   resolves, and an **end-to-end** proof — send a real message and watch it land
   in the logs. For an **IMAP-source** mailbox there is no MX/host stack, so this
   group instead reports the feed's connection state and last fetch.
@@ -196,7 +196,7 @@ behind the **Advanced server setup** disclosure: the inbound **provider** picker
 (`mailbox_provider`), this server's **mail identity** — the FQDN
 (`mailbox_mail_hostname`, used as the MX target, HELO name, and PTR name)
 and public IP — the provider's DNS records to publish, and the **full inbound
-health run** (every layer: Postfix/pipe transport/domain map/opendkim/port 25,
+health run** (every layer: Postfix/pipe transport/domain map/rspamd/Spamhaus/port 25,
 mail identity, domain DNS, plugin config, and end-to-end). Set the mail hostname
 here once; everything else is autodetected.
 
@@ -322,7 +322,7 @@ step says plainly that the feed is a one-way import that never changes the origi
 ## Server Setup
 
 On apt-based systems, run `provisioning/install_email.sh` as root, once per
-deployment. It installs Postfix, `postfix-pgsql`, opendkim and opendmarc and
+deployment. It installs Postfix, `postfix-pgsql` and rspamd and
 applies the **fixed** base configuration, idempotently:
 
 - the `joinery` pipe transport in `master.cf`;
@@ -332,16 +332,18 @@ applies the **fixed** base configuration, idempotently:
   during the SMTP conversation** below);
 - `virtual_mailbox_domains` wired to a PostgreSQL map (see below) so Postfix
   reads the live inbound-domain list straight from the database;
-- opendkim config — inet socket on `localhost:8891`, `Mode sv` (sign **and
-  verify**), empty key/signing tables, and an `AuthservID` matching the
-  configured mail hostname;
-- opendmarc config — inet socket on `localhost:8893`, `SPFSelfValidate true`,
-  `RejectFailures false` (stamp-only, never reject);
-- both Postfix milters, in order: `smtpd_milters = inet:localhost:8891,
-  inet:localhost:8893` (opendkim first so opendmarc can consume its DKIM
-  result), with `milter_default_action = accept` so a down/keyless milter never
-  blocks mail. Received mail is thereby stamped with an `Authentication-Results`
-  header the app reads for SPF/DKIM/DMARC (see **Inbound authentication** below).
+- rspamd, the one program that checks mail — a milter on `localhost:11332`
+  that strips every `Authentication-Results` line a message arrives with,
+  stamps its own SPF/DKIM/DMARC verdicts and the `X-Spam` headers, and signs
+  what this server sends for a domain that has a key. It never refuses or
+  delays mail (see **Content spam filtering** and **DKIM signing** below);
+- Postfix's two milter lists, each naming rspamd alone: `smtpd_milters =
+  inet:localhost:11332` for arriving mail and `non_smtpd_milters =
+  inet:localhost:11332` for what this server sends, with
+  `milter_default_action = accept` so a stopped rspamd never blocks mail;
+- `myhostname` held equal to the configured mail hostname. rspamd stamps its
+  verdicts under the name Postfix gives it, and that is the name the app
+  trusts (see **Inbound authentication** below).
 
 The only genuinely per-deployment work left is DNS, and per-domain DKIM keys.
 Adding or removing an inbound domain needs **no host action** — see below.
@@ -362,14 +364,13 @@ precedence order:
    from `handleInbound()` as an `auth` array. The webhook dispatcher threads
    that into `processEmail()`, and the router records it with
    `iem_auth_source =` the provider key (`mailgun` / `sendgrid` / `ses`).
-2. **Authentication-Results header.** For the self-hosted Postfix path, the
-   verifying milters — `opendkim` in verify mode and `opendmarc`
-   (`SPFSelfValidate`) — evaluate SPF/DKIM/DMARC on receipt and stamp an
-   `Authentication-Results` header with our `AuthservID`. `AuthenticationResults`
-   (in `includes/`) parses that header and the router records
-   `iem_auth_source = 'milter'`.
+2. **Authentication-Results header.** For the self-hosted Postfix path, rspamd
+   evaluates SPF/DKIM/DMARC on receipt, as Postfix's milter, and stamps one
+   `Authentication-Results` header under the mail hostname.
+   `AuthenticationResults` (in `includes/`) parses that header and the router
+   records `iem_auth_source = 'milter'`.
 3. **Relay stamps.** Under a fronted topology the relay is the verifying MTA: its
-   own milters evaluate the message on receipt, and the sealer carries every
+   own rspamd evaluates the message on receipt, and the sealer carries every
    `Authentication-Results` line into the `.meta` sidecar.
    `InboundEmailRouter::authFromRelayMeta()` reads them when the message is
    pulled and records `iem_auth_source = 'relay'`.
@@ -395,24 +396,25 @@ upstream hops, so the parser honors **only** a line whose authserv-id is the one
 belonging to the MTA that actually verified this message. Lines stamped by
 anyone else are discarded, and the trusted name differs by path:
 
-- **Colocated:** the local milters' `AuthservID`, which `install_email.sh`
-  converges on `mailbox_mail_hostname`. They must match or verdicts are ignored.
+- **Colocated:** Postfix's `myhostname`, which rspamd stamps under and which
+  `install_email.sh` converges on `mailbox_mail_hostname`. They must match or
+  verdicts are ignored.
 - **Relay (self-hosted or fleet slot):** the relay's own mail hostname, resolved
   by `MailboxRelay::authservId()` and passed in by `RelaySpoolConsumer`. That is
   `mrl_authserv_id` when recorded, falling back to `mrl_mx_hostname`. The two
   differ on a hosted fleet slot, where the MX hostname is a per-tenant record
   (`<slug>.<zone>`) and the shard stamps under its own hostname — so the slot
   carries the shard's name in `authserv_id` from the fleet coordinates. On a
-  self-hosted relay they are the same host. This pairs with the relay's
-  `RemoveARFrom <relay hostname>`, which strips
-  sender-supplied lines bearing that name before its milters stamp — so the one
+  self-hosted relay they are the same host. This pairs with the relay's rspamd
+  stripping every `Authentication-Results` line a message arrives with before
+  it stamps its own — so the one
   authserv-id accepted here is the one name a sender cannot smuggle in. The
   deployment's own `mailbox_mail_hostname` is **not** trusted on a pulled
   message; nothing on the relay strips lines carrying it.
 
 **The `unverified` state is normal, not a failure.** When neither a provider
-verdict nor a trusted `Authentication-Results` header is present — no verifying
-milter installed, or mail that arrived some other way — the verdicts read
+verdict nor a trusted `Authentication-Results` header is present — rspamd
+stopped or not installed, or mail that arrived some other way — the verdicts read
 **`unverified`** and `iem_auth_source = 'none'`. A hand-rolled `fail` is
 **never** emitted; an honest `unverified` is safer than a confident-but-wrong
 verdict. Misreading a provider field is fail-safe the same way: an unrecognized
@@ -450,24 +452,24 @@ verifier surfaces as an explained warning rather than a silent `unverified`:
 
 The check reads the topology first, because which verifier to interrogate
 follows from it. Under a fronted topology inbound mail never reaches this box's
-milters, so their state is not evidence of anything and is not probed — the
+rspamd, so its state is not evidence of anything and is not probed — the
 question is whether the relay's stamps are arriving.
 
 - **WARN** — the selected provider has no inbound verification path at all,
-  **or** the provider is Postfix but verification is broken (milter unreachable,
-  opendmarc missing, config drift). Fix: run `install_email.sh`, then send a test
+  **or** the provider is Postfix but verification is broken (rspamd stopped,
+  not in `smtpd_milters`, unreachable on its port, or Postfix naming itself
+  something other than the mail hostname). Fix: run `install_email.sh`, then send a test
   message to confirm an `Authentication-Results` header appears.
 - **WARN (fronted)** — mail is arriving from the relay but none of it carries a
   verdict. The relay is delivering while its stamps are being refused, which is
   what an authserv-id that is not the relay's mail hostname looks like, or a
-  relay whose own milters are stopped. Fix: re-run the relay provisioner on the
+  relay whose own rspamd is stopped. Fix: re-run the relay provisioner on the
   relay host, then send a test message. This case is called out separately
   because the alternative — reporting it as *nothing has arrived yet* — hides a
   live defect behind a to-do.
 - **INFO** (neutral) — the verifier is in place, but no verdict-carrying mail has
-  arrived **yet** to confirm it. For Postfix this also covers a host whose config
-  isn't readable by the web user; for a webhook provider (Mailgun/SendGrid/SES)
-  or a relay it simply means no message stamped with that `iem_auth_source` has
+  arrived **yet** to confirm it. For Postfix, a webhook provider
+  (Mailgun/SendGrid/SES) or a relay it simply means no message stamped with that `iem_auth_source` has
   been received yet. We legitimately can't tell yet — not an alarm.
 - **PASS** — recent mail carries verdicts (`iem_auth_source` = `milter` for
   Postfix, `relay` under a fronted topology, or `mailgun` / `sendgrid` / `ses`
@@ -604,16 +606,16 @@ virtual_mailbox_domains = pgsql:/etc/postfix/joinery-domains.cf
 inet_interfaces = all
 mydestination = localhost, localhost.localdomain
 
-# opendkim (verify) then opendmarc — order matters; accept on milter failure.
+# rspamd is the only milter; a stopped rspamd never blocks mail.
 milter_default_action = accept
-smtpd_milters = inet:localhost:8891, inet:localhost:8893
-non_smtpd_milters = inet:localhost:8891
+smtpd_milters = inet:localhost:11332
+non_smtpd_milters = inet:localhost:11332
 
 smtpd_recipient_restrictions =
     permit_mynetworks, reject_unauth_destination,
-    reject_rbl_client zen.spamhaus.org,
-    reject_rhsbl_helo dbl.spamhaus.org,
-    reject_rhsbl_sender dbl.spamhaus.org,
+    reject_rbl_client zen.spamhaus.org=127.0.0.[2..11],
+    reject_rhsbl_helo dbl.spamhaus.org=127.0.1.[2..99],
+    reject_rhsbl_sender dbl.spamhaus.org=127.0.1.[2..99],
     check_recipient_access proxy:pgsql:/etc/postfix/joinery-recipient-access.cf,
     permit
 ```
@@ -626,10 +628,23 @@ ordinary mail from Mailgun, SendGrid or Google at random, and permanently: a
 5xx tells the sender never to retry. A weaker signal belongs in content
 scoring, not at RCPT time.
 
-opendkim must run `Mode sv` with an `AuthservID` equal to your mail hostname
-(== `mailbox_mail_hostname`), and opendmarc with `SPFSelfValidate true`
-and `RejectFailures false`. See `provisioning/install_email.sh` for the exact
-managed config both daemons use.
+Each list name is followed by the answers that mean "listed" (zen
+`127.0.0.2`–`127.0.0.11`, dbl `127.0.1.2`–`127.0.1.99`). A bare list name
+refuses a sender on **any** answer, and Spamhaus answers `127.255.255.x` to a
+DNS resolver it will not serve (a public resolver, or one over its free quota)
+— every sender would be refused. With the filter such an answer refuses
+nobody, and the Setup tab's **Spamhaus blocklist answering** row
+(`host.spamhaus`) warns "Spamhaus is not answering this box": it asks
+Spamhaus's permanent test entry, `2.0.0.127.zen.spamhaus.org`, which always
+answers `127.0.0.2`. A relay reports the same thing as `spamhaus` in its
+status (`answering`, `refused` or `no_answer`), and a deployment behind one
+shows it as its own row (`host.relay_spamhaus`). It is a warning only; mail
+still arrives and is still scored.
+
+`myhostname` must equal your mail hostname (== `mailbox_mail_hostname`):
+rspamd stamps its verdicts under that name. rspamd's own configuration is the
+set of `local.d` files `provisioning/rspamd_stateless.sh` renders; see
+**Content spam filtering** below.
 
 `/etc/postfix/joinery-domains.cf` (the pgsql map). `install_email.sh` creates
 the dedicated role and writes this file automatically; on a non-apt system,
@@ -659,22 +674,28 @@ joinery   unix  -  n  n  -  5  pipe
 (Use the PHP CLI path for your system — `install_email.sh` resolves it
 automatically; the official `php` Docker images ship it at `/usr/local/bin/php`.)
 
-### opendkim (DKIM signing + inbound verify)
+### DKIM signing
 
-`install_email.sh` installs opendkim's **static** config (the inet socket,
-`Mode sv`, `AuthservID`, empty `key.table` / `signing.table` / `trusted.hosts`,
-and the Postfix milter). `Mode sv` means it **signs** outbound *and* **verifies**
-inbound (stamping the DKIM result into `Authentication-Results` — see **Inbound
-authentication** above, where opendmarc adds SPF/DMARC). opendkim runs from
-first install — keyless for *signing* until a per-domain key is added, but
-*verifying* inbound DKIM immediately — and `milter_default_action = accept`
-guarantees a keyless or down opendkim never blocks or defers mail.
+rspamd signs what this server itself sends. Postfix hands it every outgoing
+message (`non_smtpd_milters`, and `smtpd_milters` for mail submitted from
+localhost), and it adds a DKIM signature when the domain in the `From` header
+has a key, with selector `mail`. A domain with no key is sent unsigned; mail
+arriving from outside is never signed. rspamd adds no spam or
+`Authentication-Results` headers to mail this server sends.
 
-> The opendkim.conf the installer writes is keyed on a managed marker. Re-running
-> `install_email.sh` re-asserts the managed config — the `inet:8891` socket,
-> `Mode sv`, and the `AuthservID` — and realigns Postfix's milter wiring to match,
-> so a host whose opendkim config has drifted is brought back into line on the
-> next run.
+A domain's key is a directory, `/etc/rspamd/dkim/<domain>/`, holding
+`mail.private` (readable by rspamd and the web server's group, nobody else)
+and `mail.txt` (the DNS record). **The directory is the truth:** a domain
+signs exactly while its key is there. `/etc/rspamd/dkim/signing.map` lists the
+domains for rspamd, one `<domain> <key path>` line each, and is always written
+from the directory. rspamd re-reads it on its own within seconds, so adding or
+removing a key restarts nothing. `MailboxDkimSigner::localKeyFile()` is the
+one place the app knows the path.
+
+`milter_default_action = accept` guarantees a stopped rspamd never blocks or
+defers mail; while it is stopped, mail this server sends leaves unsigned, and
+the Setup tab's **rspamd (mail checking and signing)** row (`host.checker`)
+says so.
 
 Generating a key is a **per-domain** step (a key file on disk plus a DNS record
 cannot be a database lookup). `provisioning/provision_dkim.sh` does the whole
@@ -684,8 +705,8 @@ host side in one idempotent command:
 sudo bash plugins/mailbox/provisioning/provision_dkim.sh example.com
 ```
 
-It runs `opendkim-genkey`, appends the `key.table` / `signing.table` lines
-(only if absent), restarts opendkim, and prints the DNS TXT record to publish
+It generates the key with `rspamadm dkim_keygen`, rewrites `signing.map` from
+the key directory, and prints the DNS TXT record to publish
 at `mail._domainkey.example.com`. Re-running for a domain that already has a
 key is a no-op that just reprints the record. The Setup tab's "DKIM signing
 key" check offers this exact command as its fix, and the following "DKIM record
@@ -694,7 +715,7 @@ published" check then hands you the TXT record as a copy-paste DNS fix.
 Forwarding works without a DKIM key; only outbound DKIM signing is affected.
 
 **The Setup tab's DKIM rows follow the signing path** (specs/mailbox_provider_dkim.md):
-the local opendkim key above is prescribed only when the domain's mail actually
+the local signing key above is prescribed only when the domain's mail actually
 leaves through local Postfix (colocated deployments). When composed mail rides
 an API provider — always the case on a relay-fronted deployment with provider
 outbound, and additionally on colocated deployments whose active provider is
@@ -717,16 +738,16 @@ container, the site's Postfix owns port 25 on its host.
 ### Container persistence
 
 On a **systemd host**, `install_email.sh` runs `systemctl enable`, so Postfix
-and opendkim restart on boot automatically — nothing else is needed.
+and rspamd restart on boot automatically — nothing else is needed.
 
 A **Docker container** has no systemd; its `CMD` is the init. The Joinery site
 image handles the mail stack the same way it handles PostgreSQL and cron — by
 (re)starting it on every container start. The plugin declares
 `install_email.sh` as its `host_installer` in `plugin.json`, and the `CMD`
 runs `_plugin_installers_start.sh`, which executes every active plugin's
-declared host installer — for Mailbox that re-applies the Postfix / opendkim
+declared host installer — for Mailbox that re-applies the Postfix / rspamd
 configuration and starts both daemons (via the idempotent
-`install_email.sh`). The mail packages themselves are baked into the base
+`install_email.sh`). Postfix itself is baked into the base
 image. So in a container the mail stack survives a `docker stop`/`start` and
 an image rebuild with no manual step.
 
@@ -1035,7 +1056,7 @@ echo $?   # 0 = success, 67 = unknown alias, 75 = temp failure
 
 **"User unknown in local recipient table":** The domain is in Postfix's `mydestination` setting, which takes priority over `virtual_mailbox_domains`. The admin domain edit page detects this conflict and shows a red "Conflict" badge. Run `install_email.sh` to fix — it sets `mydestination = localhost, localhost.localdomain`.
 
-**Landing in spam:** Enable SRS, verify opendkim running and a DKIM key generated and its DNS record published, check SPF includes server IP, verify rDNS/PTR record, check IP at mxtoolbox.com.
+**Landing in spam:** Enable SRS, verify rspamd running and a DKIM key generated and its DNS record published, check SPF includes server IP, verify rDNS/PTR record, check IP at mxtoolbox.com.
 
 ## Delivery Modes
 
@@ -2332,7 +2353,7 @@ compromised (even root) box does not control.
 - **Sealed DKIM key, signed in-app.** The domain's DKIM private key is generated
   in-session, sealed to the owner's vault public key (`ied_dkim_sealed_key`, a
   `crypto_box_seal` envelope — the same one message DEKs use), and stored in the
-  database. The plaintext never touches disk and is never given to opendkim. At
+  database. The plaintext never touches disk and is never given to rspamd. At
   compose time, inside an unlock window, `MailboxDkimSigner::resolveFor()` unwraps
   it and PHPMailer signs with it as an in-memory string (`DKIM_private_string`),
   zeroized (`sodium_memzero`) as soon as the send returns. Core send code names
@@ -2368,11 +2389,11 @@ compromised (even root) box does not control.
   session-gated mailbox compose path (which injects a transport) may send as the
   identity.
 
-**opendkim keeps verify duty, not signing.** `provision_dkim.sh --remove
-<domain>` strips the domain's `signing.table` / `key.table` lines and destroys
-its on-disk key (a resting key is a resting send capability), leaving the in-app
-per-send signer as the sole signer. `Mode sv` is untouched, so inbound
-verification is unaffected.
+**rspamd keeps checking arriving mail, and stops signing for the domain.**
+`provision_dkim.sh --remove <domain>` destroys the domain's on-disk key (a
+resting key is a resting send capability) and takes it off rspamd's list of
+signing domains, leaving the in-app per-send signer as the sole signer.
+Inbound verification is unaffected.
 
 **Setup verification inverts for a protected domain.** The Setup tab checks that
 SPF *excludes* the box, DMARC is strict, the published DKIM record matches the
@@ -2459,7 +2480,7 @@ can send as the domain again.
 
 **The old on-disk signing key is a checked state, not a remembered command.**
 Send protection means only the domain's sealed key should be able to sign as it —
-but an ordinary opendkim key at `/etc/opendkim/keys/<domain>/mail.txt` can still
+but an ordinary signing key at `/etc/rspamd/dkim/<domain>/` can still
 sign for that domain with no vault and no unlock involved. Nothing destroys it on
 its own. So for a domain with send protection on, `domain.local_signing_key`
 (RECOMMENDED/WARN) reports that the key is still there and says what it means, and
@@ -2779,8 +2800,8 @@ has round-tripped clean within its window (`InboundEmailHealth::hiddenOriginSend
 and is refused otherwise with the probe named as the remedy — an operator
 running their own Postfix strips the submission `Received:` line, runs the
 probe, and sends. DKIM signing stays in-app: a protected domain signs with its
-vault-sealed key, a standard domain with the filesystem key opendkim would have
-used, and the envelope (MAIL FROM) routes through the forwarding subdomain so the
+vault-sealed key, a standard domain with the filesystem key rspamd signs with
+on a colocated deployment, and the envelope (MAIL FROM) routes through the forwarding subdomain so the
 protected domain's own `v=spf1 -all` never touches the envelope. Generated
 headers (`Message-ID`, etc.) derive from the mail hostname — which points at the
 relay — never `gethostname()` or the box IP.
@@ -2814,9 +2835,9 @@ window (`ORIGIN_PROBE_FRESH_DAYS`) is what clears an SMTP path.
 itself at first boot: idempotent, zero prompts, root on a fresh minimal
 Debian/Ubuntu image, driven by the first-boot user-data
 (`provisioning/relay_first_boot.sh`, rendered by the plane). It installs the
-prebuilt sealer from the bundle beside it, wires Postfix + opendkim (verify,
-`RemoveARFrom` stripping forged Authentication-Results) + opendmarc (stamp) +
-rspamd, creates the relay's identity, registers tenant `main` from the client
+prebuilt sealer from the bundle beside it, wires Postfix + rspamd (which strips
+forged Authentication-Results lines, stamps the SPF/DKIM/DMARC verdicts and
+scores content), creates the relay's identity, registers tenant `main` from the client
 public key in the user-data (or nothing, `--skeleton-only`, for a fleet shard
 with the operator's key), writes the three `systemd` units (`joinery-relay-serve`,
 the `joinery-relay-apply` path unit, the `joinery-relay-collect` timer),
@@ -2862,13 +2883,12 @@ asked in the same modal, so neither starts without it.
 
 #### Is the relay still scanning?
 
-Everything else the relay does leaves evidence in the tenant's database.
-opendkim and opendmarc stamp a verdict onto every message, so a broken verifier
-shows up as unverified mail. rspamd does not: it stamps a header only when it
+Everything else the relay does leaves evidence in the tenant's database. Its
+scanner does not, reliably: rspamd stamps a spam header only when it
 **flags** something, and `milter_default_action = accept` means a dead scanner
-lets mail through rather than deferring it. A relay that scanned and found
-nothing and a relay whose scanner is dead therefore send identical evidence —
-none — and no amount of reading stored mail can separate them. Warning on "no
+lets mail through rather than deferring it. Mail from a dead scanner reads
+"unverified", but so does mail from a sender with nothing to verify, so stored
+mail cannot say for certain which relay it came through. Warning on "no
 message carried a content verdict in N days" reports every quiet mailbox behind
 a healthy relay as broken.
 
@@ -2877,10 +2897,10 @@ object whose first keys are the scanner verdict:
 
 ```json
 {"status":"ok",
- "services":{"rspamd":"active","opendkim":"active","opendmarc":"active","postfix":"active",
+ "services":{"rspamd":"active","postfix":"active",
              "joinery-relay-serve":"active","joinery-relay-apply.path":"active","joinery-relay-collect.timer":"active"},
- "milters":{"opendkim":true,"opendmarc":true,"rspamd":true},
- "contract":true,"provisioned":"3.0","slug":"main","sole":true,"queue":0,
+ "milters":{"rspamd":true},
+ "contract":true,"spamhaus":"answering","provisioned":"3.8","slug":"main","sole":true,"queue":0,
  "build":{}, "identity":{}, "service_detail":{}, "listeners":{}, "tls":{}, "clock":{},
  "machine":{}, "firewall":[], "postfix":{}, "spool":{}, "direct":{}, "auth":{}, "log":[]}
 ```
@@ -3106,7 +3126,7 @@ nothing re-images one: a new shard is born and tenants move to it.
 ### The shrunken main box
 
 With every domain fronted, the relay is the sole mail listener: the main box's
-Postfix/opendkim/opendmarc are decommissioned and port 25 closed — the box holding
+Postfix is decommissioned and port 25 closed — the box holding
 the data no longer exposes a mail listener. **rspamd stays installed**: the
 decommission leaves it alone, so restoring the listener puts the milter straight
 back in the mail path. Learning is unaffected either way — the corpus is in the
@@ -3126,7 +3146,7 @@ any guardrail fails, nothing renders at all (the Setup rows already walk the
 missing pieces), and the server-side re-check on POST remains the
 enforcement. The button runs `/usr/local/sbin/joinery-mail-listener off` — a
 narrow root helper installed by `provision_relay_main.sh` — which stops and
-disables Postfix/opendkim/opendmarc and
+disables Postfix and
 closes 25/tcp at the firewall. After an uninstall the block goes quiet while a
 relay is still receiving mail — reinstalling would reopen attack surface no
 mail would use — and returns only once no enabled relay remains, as an amber
@@ -3141,7 +3161,7 @@ cutover-completion row), the spool pull is healthy
 (no provider, or SMTP aimed at localhost). The outcome is **recorded, not
 inferred**: the `mailbox_local_listener` setting (`active` |
 `decommissioned`) is written only on a successful helper run, and the
-`host.port25` / `host.postfix` / `host.opendkim` setup rows and
+`host.port25` / `host.postfix` / `host.checker` setup rows and
 `InboundEmailHealth::checkInboundMailServer()` compare it with reality — under
 `decommissioned`, an answering port 25 is the failure, and silence is the
 healthy state. The helper runs on the deployment's own box via a sudoers rule,
@@ -4232,17 +4252,29 @@ are never taught. See [Sealed Vault § Derived content](../../../docs/sealed_vau
 
 ### Content scanner (rspamd)
 
-rspamd is a header-stamping milter with **one stateless configuration**, written from
+rspamd is the one program that checks mail. It is a header-stamping milter with **one
+stateless scanning configuration**, written from
 `provisioning/rspamd_stateless.sh` on a deployment's own box and on relays alike:
 static rules (phishing, malformed MIME, fingerprints, URL lists, auth-aware scoring),
+the SPF/DKIM/DMARC verdicts in one `Authentication-Results` line (every such line a
+message arrives with is stripped first: `routines { authentication-results { remove = 0; } }`),
 `add_header` only (**never** rejects), dead DNS lists off, Bayes and autolearn off, no
-redis, and the milter worker on `11332`. `classifier-bayes.conf` stays (with
+redis, and the milter worker on `11332`, **on the loopback only** (a milter client states
+the connecting address itself, so a milter reachable from another machine could be told a
+local one). One file goes in `override.d` rather than `local.d`, because a `local.d` list
+is added to rspamd's own and never replaces it: `options.inc` sets
+`local_addrs = ["127.0.0.0/8", "::1"]`, so "local" means this box and no private range,
+and `gtube_patterns = "disable"`, so the GTUBE test string refuses nothing. rspamd signs
+local mail and leaves its `Authentication-Results` lines alone, which is why "local" has
+to be that narrow. A deployment's own box adds one more file,
+`dkim_signing.conf`, so rspamd signs what the box sends (see **DKIM signing**); a relay
+sends nothing and gets none. `classifier-bayes.conf` stays (with
 `enabled = false`) because rspamd's stock `statistic.conf` still declares a
 redis-backed classifier. The app never talks to rspamd; it reads what rspamd stamped.
 
 The scanner signal is read per ingest path (`InboundEmailRouter::resolveContentSpam()`):
 
-- **Postfix / relay.** rspamd runs after opendkim + opendmarc and stamps `X-Spam: Yes`
+- **Postfix / relay.** rspamd, Postfix's only milter, stamps `X-Spam: Yes`
   on a spam verdict and `X-Spam-Status: Yes|No, score=…` on every scan;
   `readSpamHeader()` reads the flag and the score, trusting them on the same basis as
   the `Authentication-Results` line. Source `rspamd`.
@@ -4264,13 +4296,16 @@ only for an rspamd score at the floor and for the scanner meta token.
 the scanner. `install_email.sh` calls `install` unconditionally, and the host converger
 re-runs `install_email.sh` when the deployed release changes, so a box picks up a new
 configuration with no hand step. `install` installs `rspamd` without its recommended
-`redis-server`, writes the five managed `local.d` files, deletes `redis.conf` and
-`worker-controller.inc` when present, stops and purges `redis-server`, wires
-the milter on `inet:localhost:11332` after opendkim/opendmarc **only when Postfix is
-present**, and reloads rspamd when anything changed (a reload keeps the milter
+`redis-server`, writes the six managed `local.d` files (the five scanning files and
+`dkim_signing.conf`), writes the list of signing domains from the key directory, deletes
+`redis.conf` and `worker-controller.inc` when present, stops and purges `redis-server`,
+and reloads rspamd, then sets both of Postfix's milter lists to
+`inet:localhost:11332` alone — **only when Postfix is present and rspamd is answering on
+the configuration just written** (a configuration `rspamadm configtest` rejects is never
+handed to it). It reloads rspamd when anything changed (a reload keeps the milter
 listening; rspamd is started only when it is not running). `redis-server` is purged only
 once rspamd is confirmed on the new configuration. It is idempotent, and re-running it is
-the repair for drift. `tests/spam_scanner_gate.sh` pins the five files' settings by hash:
+the repair for drift. `tests/spam_scanner_gate.sh` pins the five scanning files' settings by hash:
 relays are only rebuilt, never updated in place, so a settings change needs a
 `RELAY_VERSION` bump. `remove` (an operator escape hatch the platform never runs)
 unwires the milter, deletes the managed files and purges rspamd and any

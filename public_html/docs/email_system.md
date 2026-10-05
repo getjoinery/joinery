@@ -972,7 +972,7 @@ SMTP transaction lives in one place shared with all other SMTP relaying.
 > against a record, and must never be repurposed for inbound verdicts. The app
 > does **not** compute inbound SPF/DKIM/DMARC at all. Per-inbound-message
 > verdicts come from the message's `Authentication-Results` header, stamped by
-> the verifying MTA (opendkim-verify + opendmarc) and read by the mailbox
+> the verifying MTA (rspamd, as Postfix's milter) and read by the mailbox
 > plugin's `AuthenticationResults`/`InboundEmailRouter` — never from
 > `DnsAuthChecker`. See `plugins/mailbox/docs/overview.md` →
 > *Inbound authentication*.
@@ -1168,9 +1168,9 @@ Implementers: **Mailgun** (sending DNS records from the domains API — the
 `_domainkey` TXT rows) and **SES** (Easy DKIM CNAME tokens from
 `GetEmailIdentity`; a BYODKIM identity has no tokens and reports `ok` with no
 records). Local-submission providers (`postfix`, `smtp`) never implement it —
-opendkim owns their signing. The mailbox Setup tab consumes this to drive its
+the server's own rspamd signs for them. The mailbox Setup tab consumes this to drive its
 per-domain DKIM rows; see
-[Mailbox — opendkim](../plugins/mailbox/docs/overview.md#opendkim-dkim-signing--inbound-verify).
+[Mailbox — DKIM signing](../plugins/mailbox/docs/overview.md#dkim-signing).
 
 Protected-domain `From` addresses remain usable only via the session-gated
 mailbox compose path (the injected transport), never by transactional senders —

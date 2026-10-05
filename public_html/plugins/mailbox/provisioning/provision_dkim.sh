@@ -2,6 +2,12 @@
 #
 # provision_dkim.sh - generate and wire one domain's DKIM signing key.
 #
+# Version: 2.1 - --remove also deletes the copy opendkim signed with, where one is still
+#                on the box; a failed key generation cleans up after itself.
+# Version: 2.0 - rspamd signs (mail_checking_in_rspamd.md). The key lives at
+#                /etc/rspamd/dkim/<domain>/mail.{private,txt}, made by rspamadm, and
+#                the list of domains rspamd signs for is written from that directory.
+#                rspamd re-reads the list itself, so nothing is restarted.
 # Version: 1.5 - The key path is built with ${KEY_ROOT:?}/${DOMAIN:?}, so --remove can never
 #                name the whole key root.
 # Version: 1.4 - Never START a stopped opendkim: both the add and remove paths
@@ -34,12 +40,15 @@
 #                into a single idempotent command the Setup tab hands the
 #                operator.
 #
-# install_email.sh installs opendkim with empty key/signing tables and runs it
-# keyless. This script adds ONE domain's signing key on top of that base:
-#   - generates a 2048-bit key at /etc/opendkim/keys/<domain>/mail.{private,txt}
-#   - appends the key.table / signing.table lines (only if absent)
-#   - restarts opendkim so it picks the new key up
+# install_email.sh installs rspamd, which signs what this box sends for every
+# domain that has a key and nothing else. This script gives ONE domain a key:
+#   - generates a 2048-bit key at /etc/rspamd/dkim/<domain>/mail.{private,txt}
+#   - rewrites the list of signing domains from the key directory
 #   - prints the DNS TXT record to publish at mail._domainkey.<domain>
+#
+# rspamd re-reads the list on its own within seconds; nothing is restarted, so
+# running this on a box whose local mail listener is decommissioned starts
+# nothing.
 #
 # Idempotent: re-running for a domain that already has a key changes nothing
 # and just reprints the DNS record. An existing key is never regenerated -
@@ -50,11 +59,9 @@
 #
 set -euo pipefail
 
-SELECTOR="mail"
-
 # --- preconditions -----------------------------------------------------------
 if [[ "${EUID}" -ne 0 ]]; then
-    echo "This script must run as root (writes /etc/opendkim, restarts opendkim)." >&2
+    echo "This script must run as root (writes /etc/rspamd/dkim)." >&2
     echo "Re-run with: sudo bash $0 $*" >&2
     exit 1
 fi
@@ -73,7 +80,7 @@ if [[ -z "${DOMAIN}" ]]; then
     echo "       sudo bash $0 --remove <domain>" >&2
     exit 1
 fi
-# This value lands in file paths and opendkim config - accept only a plain,
+# This value lands in file paths and the signing list - accept only a plain,
 # dotted DNS domain so nothing shell-special or path-traversing slips through.
 if [[ ! "${DOMAIN}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ || "${DOMAIN}" != *.* ]]; then
     echo "ERROR: '${DOMAIN}' is not a valid domain name." >&2
@@ -81,94 +88,53 @@ if [[ ! "${DOMAIN}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ || "${DOMAIN}" 
 fi
 DOMAIN="$(printf '%s' "${DOMAIN}" | tr 'A-Z' 'a-z')"
 
-KEY_ROOT="/etc/opendkim/keys"
+# Where keys live, the list rspamd reads, and the helpers that write it.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=rspamd_stateless.sh
+source "${SCRIPT_DIR}/rspamd_stateless.sh"
+
+SELECTOR="${RSPAMD_DKIM_SELECTOR}"
+KEY_ROOT="${RSPAMD_DKIM_DIR}"
 KEY_DIR="${KEY_ROOT:?}/${DOMAIN:?}"
 PRIVATE_KEY="${KEY_DIR}/${SELECTOR}.private"
 TXT_FILE="${KEY_DIR}/${SELECTOR}.txt"
-KEY_TABLE="/etc/opendkim/key.table"
-SIGNING_TABLE="/etc/opendkim/signing.table"
 KEY_NAME="${SELECTOR}._domainkey.${DOMAIN}"
-# The web server's group — in-app DKIM signing (relay-fronted deployments)
-# reads the private key from the PHP process.
-WEB_GROUP="www-data"
-if ! getent group "${WEB_GROUP}" >/dev/null 2>&1; then
-    WEB_GROUP="apache"
-fi
 
-# Make opendkim pick the table/key change up - but only on a box that still
-# runs it. A decommissioned local listener leaves opendkim stopped AND disabled
-# (joinery-mail-listener off), and `systemctl restart` starts a disabled unit
-# just as readily as an enabled one: resurrecting it there would contradict the
-# recorded state and put a live daemon back on a box that reported it gone.
-# Only "disabled" is treated as decommissioned - a merely crashed opendkim on a
-# live box is still enabled, and is restarted as before.
-restart_opendkim() {
-    if command -v systemctl >/dev/null 2>&1 \
-            && systemctl is-enabled opendkim 2>/dev/null | grep -qx 'disabled'; then
-        echo "opendkim: disabled on this box (local mail listener decommissioned) - left stopped."
-        echo "          The key is on disk; in-app signing and the relay read it directly."
-        return 0
-    fi
-    if command -v systemctl >/dev/null 2>&1 && systemctl restart opendkim 2>/dev/null; then
-        echo "opendkim: restarted (systemd)."
-    elif command -v service >/dev/null 2>&1 && service opendkim restart >/dev/null 2>&1; then
-        echo "opendkim: restarted (service)."
-    else
-        echo "WARNING: could not restart opendkim automatically - restart it manually." >&2
-    fi
+# The list of signing domains is whatever has a key in the directory. Written
+# through a temporary file and renamed, so rspamd never reads half a list.
+write_signing_map() {
+    local tmp
+    mkdir -p "${KEY_ROOT}"
+    tmp="$(mktemp "${RSPAMD_DKIM_MAP}.joinery-XXXXXX")"
+    rspamd_dkim_render_map > "${tmp}"
+    chmod 644 "${tmp}"
+    mv -f "${tmp}" "${RSPAMD_DKIM_MAP}"
 }
 
 # --- removal mode ------------------------------------------------------------
-# Stop opendkim signing this domain: drop its signing.table + key.table lines
-# and destroy the on-disk key. opendkim keeps VERIFY duty for inbound (Mode sv
-# in opendkim.conf is untouched); only this domain's SIGNING entry is removed.
+# Stop rspamd signing this domain: destroy the on-disk key and take the domain
+# off the list. Checking arriving mail is unaffected.
 if [[ "${MODE}" == "remove" ]]; then
-    # Escape dots so the domain matches literally in the ERE below.
-    DOMAIN_RE="${DOMAIN//./\\.}"
-    removed_any=0
-
-    # signing.table line shape: `*@<domain> <selector>._domainkey.<domain>`.
-    # Anchor on `@<domain>` followed by whitespace so `example.com` never also
-    # strips `mail.example.com`.
-    if [[ -f "${SIGNING_TABLE}" ]] && grep -qE "@${DOMAIN_RE}[[:space:]]" "${SIGNING_TABLE}"; then
-        # In-place delete: exits 0 even when every line matches, unlike a
-        # grep -v pipeline, which exits 1 and dies under set -e when the domain
-        # is the table's only entry.
-        sed -E -i "/@${DOMAIN_RE}[[:space:]]/d" "${SIGNING_TABLE}"
-        echo "signing.table: removed *@${DOMAIN}"
-        removed_any=1
-    else
-        echo "signing.table: no entry for ${DOMAIN} (already absent)."
-    fi
-
-    # key.table line shape: `<selector>._domainkey.<domain> <domain>:<sel>:<path>`.
-    if [[ -f "${KEY_TABLE}" ]] && grep -qE "\._domainkey\.${DOMAIN_RE}[[:space:]]" "${KEY_TABLE}"; then
-        sed -E -i "/\._domainkey\.${DOMAIN_RE}[[:space:]]/d" "${KEY_TABLE}"
-        echo "key.table: removed ${DOMAIN} entry."
-        removed_any=1
-    else
-        echo "key.table: no entry for ${DOMAIN} (already absent)."
-    fi
-
-    # Destroy the on-disk key - a resting private key is a resting send
-    # capability. Confined to a path under KEY_ROOT built from the validated
-    # domain, so no traversal is possible.
+    # A resting private key is a resting send capability. Confined to a path
+    # under KEY_ROOT built from the validated domain, so no traversal is
+    # possible.
     if [[ -d "${KEY_DIR}" && "${KEY_DIR}" == "${KEY_ROOT}/"* ]]; then
         rm -rf "${KEY_DIR}"
-        echo "opendkim: destroyed on-disk key at ${KEY_DIR}."
-        removed_any=1
+        echo "dkim: destroyed on-disk key at ${KEY_DIR}."
+    else
+        echo "dkim: no key for ${DOMAIN} (already absent)."
     fi
-
-    if [[ "${removed_any}" -eq 1 ]]; then
-        restart_opendkim
-    fi
-    echo "opendkim no longer signs ${DOMAIN}; inbound verify is unaffected."
+    # And the copy opendkim signed with, on a box that still has it: left
+    # there, the app would read it and the next installer run copy it back.
+    rspamd_dkim_forget_old_key "${DOMAIN}"
+    write_signing_map
+    echo "rspamd no longer signs ${DOMAIN}; checking of arriving mail is unaffected."
     exit 0
 fi
 
 # --- add mode ----------------------------------------------------------------
-if ! command -v opendkim-genkey >/dev/null 2>&1; then
-    echo "ERROR: opendkim-genkey not found - run install_email.sh first." >&2
+if ! command -v rspamadm >/dev/null 2>&1 || ! id _rspamd >/dev/null 2>&1; then
+    echo "ERROR: rspamd is not installed - run install_email.sh first." >&2
     exit 1
 fi
 
@@ -177,51 +143,36 @@ if [[ -f "${PRIVATE_KEY}" ]]; then
     echo "DKIM key already exists for ${DOMAIN} - leaving it (reprinting DNS record)."
 else
     mkdir -p "${KEY_DIR}"
-    # opendkim-genkey writes <selector>.private and <selector>.txt into -D.
-    opendkim-genkey -b 2048 -s "${SELECTOR}" -d "${DOMAIN}" -D "${KEY_DIR}"
-    chown -R opendkim:opendkim "${KEY_DIR}"
-    # opendkim must read the private key; www-data (the Setup tab) must be able
-    # to traverse in and read the public mail.txt. The private key is group-
-    # readable by the web server: on a relay-fronted deployment the opendkim
-    # milter is decommissioned and the app signs in-app with this same key
-    # (MailboxDkimSigner::standardFilesystemSigner) — 600 would leave those
-    # sends silently unsigned.
-    chmod 755 "${KEY_ROOT}" "${KEY_DIR}"
-    chown "opendkim:${WEB_GROUP}" "${PRIVATE_KEY}"
-    chmod 640 "${PRIVATE_KEY}"
-    chmod 644 "${TXT_FILE}"
-    echo "opendkim: generated 2048-bit key at ${PRIVATE_KEY}"
+    # rspamadm writes the private key to -k and prints the DNS record. Both go
+    # to temporary names first: a key that exists is a key that signs, so it
+    # must not appear before its record does.
+    if ! rspamadm dkim_keygen -b 2048 -s "${SELECTOR}" -d "${DOMAIN}" \
+            -k "${PRIVATE_KEY}.new" > "${TXT_FILE}.new" 2>/dev/null \
+       || [[ ! -s "${PRIVATE_KEY}.new" ]] || ! grep -q 'p=' "${TXT_FILE}.new"; then
+        rm -f "${PRIVATE_KEY}.new" "${TXT_FILE}.new"
+        echo "ERROR: rspamadm did not produce a key for ${DOMAIN}." >&2
+        exit 1
+    fi
+    chmod 600 "${PRIVATE_KEY}.new"
+    mv -f "${TXT_FILE}.new" "${TXT_FILE}"
+    mv -f "${PRIVATE_KEY}.new" "${PRIVATE_KEY}"
+    echo "dkim: generated 2048-bit key at ${PRIVATE_KEY}"
 fi
 
-# In-app signing needs group read even on keys generated before this script
-# set it (re-runs are idempotent).
-if [[ -f "${PRIVATE_KEY}" ]]; then
-    chown "opendkim:${WEB_GROUP}" "${PRIVATE_KEY}"
-    chmod 640 "${PRIVATE_KEY}"
-fi
+# rspamd must read the private key; www-data (the Setup tab) must be able to
+# traverse in and read the public mail.txt. The private key is group-readable
+# by the web server: on a relay-fronted deployment the app signs in-app with
+# this same key (MailboxDkimSigner::standardFilesystemSigner) — 600 would leave
+# those sends silently unsigned. Asserted on every run, so a key generated
+# under older permissions is corrected by re-running.
+rspamd_dkim_secure_keys
 
-# --- 2. wire key.table / signing.table (append once) -------------------------
-KEY_LINE="${KEY_NAME} ${DOMAIN}:${SELECTOR}:${PRIVATE_KEY}"
-if grep -qF "${KEY_LINE}" "${KEY_TABLE}" 2>/dev/null; then
-    echo "key.table: entry for ${DOMAIN} already present."
-else
-    echo "${KEY_LINE}" >> "${KEY_TABLE}"
-    echo "key.table: added ${KEY_NAME}"
-fi
+# --- 2. put the domain on the list rspamd signs for ---------------------------
+write_signing_map
+echo "rspamd: signs for ${DOMAIN} (${RSPAMD_DKIM_MAP})"
 
-SIGNING_LINE="*@${DOMAIN} ${KEY_NAME}"
-if grep -qF "${SIGNING_LINE}" "${SIGNING_TABLE}" 2>/dev/null; then
-    echo "signing.table: entry for ${DOMAIN} already present."
-else
-    echo "${SIGNING_LINE}" >> "${SIGNING_TABLE}"
-    echo "signing.table: added *@${DOMAIN}"
-fi
-
-# --- 3. restart opendkim so it loads the new key -----------------------------
-restart_opendkim
-
-# --- 4. assemble + print the DNS record --------------------------------------
-# opendkim-genkey writes mail.txt as a BIND fragment: the key is split across
+# --- 3. assemble + print the DNS record --------------------------------------
+# rspamadm writes mail.txt as a BIND fragment: the key is split across
 # several double-quoted strings over multiple lines, wrapped in parentheses,
 # with a trailing comment. A DNS provider wants the value as ONE unbroken
 # string, so concatenate every quoted segment with the quotes and newlines

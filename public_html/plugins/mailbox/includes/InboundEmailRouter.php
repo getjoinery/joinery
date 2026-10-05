@@ -1509,10 +1509,10 @@ class InboundEmailRouter {
 	 * stamped nothing trustworthy.
 	 *
 	 * $authserv_id is the name whose stamps to trust, and it is the RELAY's mail
-	 * hostname — the relay's milters verified this message, so the relay is the
+	 * hostname — the relay's rspamd verified this message, so the relay is the
 	 * authserv-id on the line worth trusting. It pairs exactly with the relay's
-	 * opendkim `RemoveARFrom <relay hostname>` (provision_relay.sh), which strips
-	 * sender-supplied lines bearing that same name before the milters stamp: the
+	 * rspamd stripping every Authentication-Results line a message arrives with
+	 * (rspamd_stateless.sh, milter_headers.conf) before it stamps its own: the
 	 * one name a forger cannot smuggle in is the one name accepted here.
 	 *
 	 * Omitting it falls back to this deployment's own mail hostname, which is
@@ -3170,7 +3170,7 @@ class InboundEmailRouter {
 	 *      trusted; see each provider's handleInbound and the spec's Security
 	 *      section). iem_auth_source becomes the provider key (mailgun/sendgrid/ses).
 	 *   2. The message's Authentication-Results header, stamped by our verifying
-	 *      MTA milters (opendkim verify mode + opendmarc) and trusted only on a
+	 *      MTA's milter (rspamd) and trusted only on a
 	 *      line carrying our own authserv-id (== the configured mail hostname).
 	 *      iem_auth_source = 'milter'.
 	 *   3. Neither present → 'unverified' (never a hand-rolled 'fail').

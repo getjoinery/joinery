@@ -4,7 +4,7 @@
 #
 # Sibling of install_email.sh (colocated mode). This builds the minimal, hardened,
 # disposable VPS that fronts the public MX for a relay-fronted deployment: Postfix
-# + verify milters + the Go sealing binary, and NOTHING else - no PHP, no
+# + rspamd + the Go sealing binary, and NOTHING else - no PHP, no
 # database, no web, no application, no shell. It accepts mail, verifies it, seals
 # it to the recipient's public key at acceptance, and spools ciphertext; the
 # deployment's plane pulls its sealed blobs over HTTPS from the relay's own API.
@@ -14,6 +14,16 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.8 - rspamd is the only program that checks mail (mail_checking_in_rspamd.md):
+#                opendkim and opendmarc are not installed, and a relay that has them
+#                loses them once Postfix names rspamd alone. rspamd stamps its verdicts
+#                under the mail hostname, so --authserv-id must equal it. Its milter
+#                listens on the loopback only, "local" means the relay itself, and
+#                the GTUBE test string no longer makes it refuse a message.
+#                A sender is refused only on Spamhaus's real "listed" answers; the bare
+#                list names refused on any answer, including the error code Spamhaus
+#                gives a resolver it will not serve. The status report says whether
+#                Spamhaus answers this relay (relay_status.go).
 # Version: 3.7 - GET /health on the 443 listener, open to all: the relay dials its own Postfix
 #                over the loopback and answers 200 or 503 with disk and memory, so the
 #                management node watches it without dialling port 25 (relay_health.go)
@@ -82,7 +92,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.7"
+RELAY_VERSION="3.8"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -167,25 +177,6 @@ postconf_set() {
         postconf -e "${key} = ${val}"
         mark_changed postfix
     fi
-    return 0
-}
-
-# converge_socket_default <file> <socket> - /etc/default/{opendkim,opendmarc}.
-# The old edit rewrote the file on every run, and APPENDED a SOCKET= line when
-# the packaged one was commented out, so nothing downstream could tell a run
-# that changed the socket from a run that changed nothing. Returns 0 on a write.
-converge_socket_default() {
-    local file="$1" socket="$2" desired
-    [[ -f "${file}" ]] || return 1
-    if grep -qE '^[[:space:]]*SOCKET=' "${file}"; then
-        desired="$(sed "s#^[[:space:]]*SOCKET=.*#SOCKET=\"${socket}\"#" "${file}")"
-    else
-        desired="$(cat "${file}"; printf 'SOCKET="%s"' "${socket}")"
-    fi
-    if printf '%s\n' "${desired}" | cmp -s - "${file}"; then
-        return 1
-    fi
-    printf '%s\n' "${desired}" > "${file}"
     return 0
 }
 
@@ -320,6 +311,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ -n "${AUTHSERV_ID}" ]] || AUTHSERV_ID="${MAIL_HOSTNAME}"
+# rspamd stamps its verdicts under the name Postfix gives it, which is the mail
+# hostname (myhostname). A different authserv-id cannot be honoured: the plane
+# would trust a name no verdict is ever stamped under.
+if [[ "${AUTHSERV_ID,,}" != "${MAIL_HOSTNAME,,}" ]]; then
+    echo "ERROR: --authserv-id '${AUTHSERV_ID}' is not the mail hostname '${MAIL_HOSTNAME}'." >&2
+    echo "       Verdicts are stamped under the mail hostname; the two must be the same." >&2
+    exit 1
+fi
 
 # A relay with no tenant key and no skeleton flag is a relay nothing could ever
 # talk to. Refuse here, loudly, rather than build a box nobody can reach. This
@@ -390,7 +389,7 @@ export DEBIAN_FRONTEND=noninteractive
 # stateless), NO compiler (the sealer arrives prebuilt), NO wireguard and NO
 # rsync (the plane pulls over the relay's own HTTPS API). curl is for the
 # birth report's transport check only; ca-certificates for ACME and the plane.
-PACKAGES=(postfix opendkim opendkim-tools opendmarc ufw ca-certificates curl systemd-timesyncd)
+PACKAGES=(postfix ufw ca-certificates curl systemd-timesyncd)
 MISSING=()
 for pkg in "${PACKAGES[@]}"; do
     if dpkg -s "${pkg}" >/dev/null 2>&1; then
@@ -578,104 +577,27 @@ postconf_set "transport_maps" "hash:${MAP_TRANSPORT}"
 # from Mailgun, SendGrid or Google at random — permanently, since a 5xx stops
 # the sender retrying. SpamCop says as much itself: use it to score, not to
 # refuse. Content scoring is where a weaker signal belongs.
-postconf_set "smtpd_recipient_restrictions" "reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access hash:${MAP_DEFERRED}, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
+#
+# Each list is followed by the answers that mean "listed" (zen 127.0.0.2-11,
+# dbl 127.0.1.2-99). A bare list name refuses on ANY answer, and Spamhaus
+# answers 127.255.255.x to a resolver it will not serve (a public resolver, or
+# one over its quota): every sender would then be refused. With the filter such
+# an answer refuses nobody, and the status report says Spamhaus is not
+# answering this relay (relay_status.go).
+postconf_set "smtpd_recipient_restrictions" "reject_unauth_destination, reject_rbl_client zen.spamhaus.org=127.0.0.[2..11], reject_rhsbl_helo dbl.spamhaus.org=127.0.1.[2..99], reject_rhsbl_sender dbl.spamhaus.org=127.0.1.[2..99], check_recipient_access hash:${MAP_DEFERRED}, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
 echo "main.cf: relay_domains, transport, recipient validation, RBL, anvil limits set"
 
 
-# --- 6. opendkim + opendmarc (verify-mode, verbatim from install_email.sh) ----
-# AUTHSERV_ID came from the arguments (default: the mail hostname); it is what
-# the relay stamps and what the plane's RemoveARFrom strips.
-mkdir -p /run/opendkim
-chown opendkim:opendkim /run/opendkim 2>/dev/null || true
-mkdir -p /etc/opendkim
-[[ -f /etc/opendkim/key.table ]]     || : > /etc/opendkim/key.table
-[[ -f /etc/opendkim/signing.table ]] || : > /etc/opendkim/signing.table
-[[ -f /etc/opendkim/trusted.hosts ]] || printf '127.0.0.1\n::1\nlocalhost\n' > /etc/opendkim/trusted.hosts
-
-OPENDKIM_MARKER='joinery-managed opendkim.conf'
-if [[ -f /etc/opendkim.conf && ! -f /etc/opendkim.conf.pre-joinery ]] \
-   && ! grep -qF "${OPENDKIM_MARKER}" /etc/opendkim.conf 2>/dev/null; then
-    cp /etc/opendkim.conf /etc/opendkim.conf.pre-joinery
-fi
-if write_if_changed /etc/opendkim.conf 644 <<OPENDKIMCONF
-# ${OPENDKIM_MARKER} — managed by mailbox/provisioning/provision_relay.sh.
-# Mode v = VERIFY inbound only (the relay does not sign; DKIM signing stays in-app
-# on each tenant's main box).
-# RemoveARAll + RemoveARFrom strip any inbound Authentication-Results header that
-# forges OUR authserv-id BEFORE opendkim stamps its own, so a sender cannot smuggle
-# a fake "spf=pass dkim=pass" verdict a tenant box would trust.
-Syslog                  yes
-SyslogSuccess           yes
-UMask                   007
-Mode                    v
-Canonicalization        relaxed/simple
-Socket                  inet:8891@localhost
-PidFile                 /run/opendkim/opendkim.pid
-UserID                  opendkim
-AuthservID              ${AUTHSERV_ID}
-RemoveARAll             yes
-RemoveARFrom            ${AUTHSERV_ID}
-KeyTable                /etc/opendkim/key.table
-SigningTable            refile:/etc/opendkim/signing.table
-ExternalIgnoreList      /etc/opendkim/trusted.hosts
-InternalHosts           /etc/opendkim/trusted.hosts
-OPENDKIMCONF
-then
-    mark_changed opendkim
-    echo "opendkim: wrote /etc/opendkim.conf (verify, AuthservID ${AUTHSERV_ID})"
-else
-    echo "opendkim: /etc/opendkim.conf already correct."
-fi
-if converge_socket_default /etc/default/opendkim "inet:8891@localhost"; then
-    mark_changed opendkim
-    echo "opendkim: /etc/default/opendkim SOCKET set"
-fi
-
-mkdir -p /run/opendmarc
-chown opendmarc:opendmarc /run/opendmarc 2>/dev/null || true
-OPENDMARC_MARKER='joinery-managed opendmarc.conf'
-if [[ -f /etc/opendmarc.conf && ! -f /etc/opendmarc.conf.pre-joinery ]] \
-   && ! grep -qF "${OPENDMARC_MARKER}" /etc/opendmarc.conf 2>/dev/null; then
-    cp /etc/opendmarc.conf /etc/opendmarc.conf.pre-joinery
-fi
-if write_if_changed /etc/opendmarc.conf 644 <<OPENDMARCCONF
-# ${OPENDMARC_MARKER} — managed by mailbox/provisioning/provision_relay.sh.
-# Stamps SPF + DMARC into Authentication-Results; never rejects (stamp-only).
-AuthservID              ${AUTHSERV_ID}
-Socket                  inet:8893@localhost
-PidFile                 /run/opendmarc/opendmarc.pid
-UserID                  opendmarc
-UMask                   0002
-Syslog                  true
-SoftwareHeader          true
-SPFSelfValidate         true
-RejectFailures          false
-OPENDMARCCONF
-then
-    mark_changed opendmarc
-    echo "opendmarc: wrote /etc/opendmarc.conf (AuthservID ${AUTHSERV_ID})"
-else
-    echo "opendmarc: /etc/opendmarc.conf already correct."
-fi
-if converge_socket_default /etc/default/opendmarc "inet:8893@localhost"; then
-    mark_changed opendmarc
-    echo "opendmarc: /etc/default/opendmarc SOCKET set"
-fi
-
-systemctl enable opendkim opendmarc >/dev/null 2>&1 || true
-# Neither daemon re-reads its configuration on a signal, so a genuine change
-# means a restart — but ONLY a genuine change. These two are inline in the milter
-# chain: restarting them for nothing stalls acceptance on every converge.
-sync_service opendkim restart
-sync_service opendmarc restart
-
-# --- 6b. rspamd content spam scanner (STATELESS) -------------------------------
-# The relay stamps the X-Spam headers inside the sealed raw so each tenant's
-# ingest can read a scanner verdict — identical to what a deployment's own box
-# stamps, because both write the ONE configuration in rspamd_stateless.sh
-# (spam_learning_in_core.md). add_header only; the relay NEVER rejects on
-# content (the reviewable-verdict model). rspamd runs as a milter AFTER
-# opendkim(verify)+opendmarc so it can score on the auth results.
+# --- 6. rspamd: the one program that checks mail (STATELESS) -------------------
+# rspamd strips every Authentication-Results line a message arrives with, so a
+# sender cannot smuggle a fake "spf=pass dkim=pass" verdict a tenant box would
+# trust, then writes its own SPF, DKIM and DMARC verdicts under the mail
+# hostname (AUTHSERV_ID, checked equal to it above) and stamps the X-Spam
+# headers. All of it lands inside the sealed raw so each tenant's ingest reads
+# it — identical to what a deployment's own box stamps, because both write the
+# ONE configuration in rspamd_stateless.sh (spam_learning_in_core.md).
+# add_header only; the relay NEVER rejects on content (the reviewable-verdict
+# model). The relay sends nothing, so it gets no signing configuration.
 #
 # STATELESS BY DESIGN (specs/mailbox_relay_shared_fleet.md): static rules only.
 # The Bayes classifier and autolearn are OFF and no redis is configured, so no
@@ -699,8 +621,19 @@ fi
 mkdir -p /etc/rspamd/local.d
 # shellcheck source=rspamd_stateless.sh
 source "${SCRIPT_DIR}/rspamd_stateless.sh"
+RSPAMD_REBIND=0
 for f in "${RSPAMD_STATELESS_FILES[@]}"; do
     if rspamd_stateless_render "${f}" | write_if_changed "/etc/rspamd/local.d/${f}" 644; then
+        mark_changed rspamd
+        # The milter's listening address: rspamd keeps the old socket open
+        # across a reload, so this one change needs a restart.
+        [[ "${f}" == "worker-proxy.inc" ]] && RSPAMD_REBIND=1
+    fi
+done
+# override.d, not local.d: these replace rspamd's own values (what counts as a
+# local address) where a local.d file would only add to them.
+for f in "${RSPAMD_STATELESS_OVERRIDE_FILES[@]}"; do
+    if rspamd_stateless_render "${f}" | write_if_changed "/etc/rspamd/override.d/${f}" 644; then
         mark_changed rspamd
     fi
 done
@@ -724,17 +657,33 @@ if [[ -f /etc/rspamd/local.d/redis.conf ]]; then
     echo "content-spam: removed a redis config (the relay's rspamd is stateless)"
 fi
 
-# Wire rspamd into the milter chain AFTER opendkim+opendmarc.
-postconf_set "milter_default_action" "accept"
-postconf_set "smtpd_milters" "inet:localhost:8891, inet:localhost:8893, inet:localhost:11332"
-postconf_set "non_smtpd_milters" ""
-echo "main.cf: milters wired (opendkim:8891, opendmarc:8893, rspamd:11332)"
-
 systemctl enable rspamd >/dev/null 2>&1 || true
 # rspamd re-reads its configuration on reload, so a converge that changed a
-# local.d file costs no scanning downtime at all.
-sync_service rspamd reload
+# local.d file costs no scanning downtime at all. A changed listening address
+# is the exception.
+if [[ "${RSPAMD_REBIND}" -eq 1 ]]; then
+    sync_service rspamd restart
+else
+    sync_service rspamd reload
+fi
 echo "content-spam: rspamd milter on 11332 (add-header only, STATELESS - no Bayes/redis)."
+
+# rspamd is Postfix's only milter. A stopped rspamd lets mail through unchecked
+# (default action accept) and the status report says so.
+postconf_set "milter_default_action" "accept"
+postconf_set "smtpd_milters" "inet:localhost:11332"
+postconf_set "non_smtpd_milters" ""
+echo "main.cf: rspamd is the only milter (11332)"
+
+# A relay built before rspamd checked alone still has opendkim and opendmarc.
+# Postfix is told first, while they are still running, so no message is ever
+# handed to a program that has gone; the final restart-or-reload of Postfix
+# below is too late for that.
+if changed postfix && systemctl is-active --quiet postfix 2>/dev/null; then
+    systemctl reload postfix >/dev/null 2>&1 || true
+fi
+# Does nothing while rspamd is not answering: the old programs stay until it is.
+mail_checkers_retire_old
 
 # --- 7. relay identity ---------------------------------------------------------
 # An Ed25519 key and a self-signed certificate for it, generated once. The plane

@@ -61,7 +61,7 @@ func (s *relayServer) buildPing(tenant string) map[string]any {
 	// The milter keys are always present: before the collector's first pass
 	// they read false, which the plane grades as "not wired" — a relay that
 	// cannot yet vouch for its scanner must not look like one that can.
-	milters := map[string]bool{"opendkim": false, "opendmarc": false, "rspamd": false}
+	milters := map[string]bool{"rspamd": false}
 	for k, v := range priv.Milters {
 		milters[k] = v
 	}
@@ -70,6 +70,11 @@ func (s *relayServer) buildPing(tenant string) map[string]any {
 	ping["service_detail"] = detail
 	ping["milters"] = milters
 	ping["contract"] = priv.ContractOK
+	// Whether Spamhaus answers this relay's resolver. Absent until the
+	// collector has asked.
+	if priv.Spamhaus != "" {
+		ping["spamhaus"] = priv.Spamhaus
+	}
 	ping["provisioned"] = readTrimmed(filepath.Join(s.paths.home, "version"))
 	ping["slug"] = tenant
 	ping["sole"] = oneTenant

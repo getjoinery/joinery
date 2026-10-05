@@ -11,7 +11,7 @@
  * message's Authentication-Results header.
  *
  * Pure parser, no DB. Covers: single multi-method line, oversigned/multi-dkim
- * (a pass wins), two lines merged (opendkim + opendmarc), authserv-id trust
+ * (a pass wins), two lines merged, lines exactly as rspamd stamps them, authserv-id trust
  * (a forged upstream line is ignored), header folding, and the
  * no-trusted-line / empty-authserv-id => null cases.
  *
@@ -49,6 +49,7 @@ class AuthenticationResultsTest {
 			$this->testSingleLineAllMethods();
 			$this->testOversignedMultiDkim();
 			$this->testTwoLinesMerged();
+			$this->testRspamdLines();
 			$this->testForgedUpstreamIgnored();
 			$this->testNoArLineIsNull();
 			$this->testEmptyAuthservIsNull();
@@ -91,7 +92,7 @@ class AuthenticationResultsTest {
 	}
 
 	private function testTwoLinesMerged() {
-		$this->out('-- two AR lines (opendkim + opendmarc), same authserv-id, merged --');
+		$this->out('-- two AR lines, same authserv-id, merged --');
 		$raw = $this->msg([
 			'Authentication-Results: ' . self::AUTHSERV . ';',
 			"\tdkim=pass header.d=example.com",
@@ -104,6 +105,72 @@ class AuthenticationResultsTest {
 		$this->eq('pass', $ar->dkim(),  'dkim from line 1');
 		$this->eq('pass', $ar->spf(),   'spf from line 2');
 		$this->eq('pass', $ar->dmarc(), 'dmarc from line 2');
+	}
+
+	/**
+	 * Lines exactly as rspamd 3.8.1 stamped them on mail stored on dev: one
+	 * line carrying all three verdicts, a comment after spf and after dmarc, a
+	 * quoted envelope sender with '+' and '=' in it, and reason="..." on a
+	 * failure. A change in rspamd's wording shows up here, not as silently
+	 * "unverified" mail.
+	 */
+	private function testRspamdLines() {
+		$this->out('-- rspamd: everything passes, quoted envelope sender, bracketed comments --');
+		$raw = $this->msg([
+			'Authentication-Results: devmail.getjoinery.com;',
+			"\tdkim=pass header.d=mg.dev.getjoinery.com header.s=mx header.b=pgxrQGaj;",
+			"\tspf=pass (devmail.getjoinery.com: domain of \"bounce+50a713.b8f8c1a-chat=dev.getjoinery.com@mg.dev.getjoinery.com\" designates 204.220.184.30 as permitted sender) smtp.mailfrom=\"bounce+50a713.b8f8c1a-chat=dev.getjoinery.com@mg.dev.getjoinery.com\";",
+			"\tdmarc=pass (policy=none) header.from=dev.getjoinery.com",
+			'From: Chat <chat@dev.getjoinery.com>',
+		]);
+		$ar = AuthenticationResults::fromMessage($raw, 'devmail.getjoinery.com');
+		$this->ok($ar !== null, 'rspamd pass line is read');
+		$this->eq('pass', $ar->dkim(), 'rspamd dkim=pass');
+		$this->eq('pass', $ar->spf(), 'rspamd spf=pass, comment before the property');
+		$this->eq('pass', $ar->dmarc(), 'rspamd dmarc=pass, comment before the property');
+		$this->eq('mg.dev.getjoinery.com', $ar->dkimDomain(), 'rspamd dkim header.d');
+
+		$this->out('-- rspamd: nothing signed, SPF fails, DMARC fails with a reason --');
+		$raw = $this->msg([
+			'Authentication-Results: devmail.getjoinery.com;',
+			"\tdkim=none;",
+			"\tspf=fail (devmail.getjoinery.com: domain of probe@getjoinery.com does not designate 69.164.209.253 as permitted sender) smtp.mailfrom=probe@getjoinery.com;",
+			"\tdmarc=fail reason=\"No valid SPF, No valid DKIM\" header.from=getjoinery.com (policy=quarantine)",
+			'From: Probe <probe@getjoinery.com>',
+		]);
+		$ar = AuthenticationResults::fromMessage($raw, 'devmail.getjoinery.com');
+		$this->ok($ar !== null, 'rspamd fail line is read');
+		$this->eq('none', $ar->dkim(), 'rspamd dkim=none');
+		$this->eq('fail', $ar->spf(), 'rspamd spf=fail');
+		$this->eq('fail', $ar->dmarc(), 'rspamd dmarc=fail with reason="..." and a trailing comment');
+		$this->eq('probe@getjoinery.com', $ar->spfDomain(), 'rspamd spf smtp.mailfrom');
+
+		$this->out('-- rspamd: two signatures on one line, one passes --');
+		$raw = $this->msg([
+			'Authentication-Results: devmail.getjoinery.com;',
+			"\tdkim=fail (\"body hash did not verify\") header.d=list.example.com header.s=s1 header.b=AAAAAAAA;",
+			"\tdkim=pass header.d=example.com header.s=mail header.b=BBBBBBBB;",
+			"\tspf=pass (devmail.getjoinery.com: domain of bounce@list.example.com designates 203.0.113.9 as permitted sender) smtp.mailfrom=bounce@list.example.com;",
+			"\tdmarc=pass (policy=reject) header.from=example.com",
+		]);
+		$ar = AuthenticationResults::fromMessage($raw, 'devmail.getjoinery.com');
+		$this->eq('pass', $ar->dkim(), 'rspamd: a passing signature wins over a failing one');
+		$this->eq('example.com', $ar->dkimDomain(), 'rspamd: the domain is the passing signature\'s');
+
+		$this->out('-- a line in our name that rspamd left in place still cannot outvote its own --');
+		// rspamd strips every arriving line before stamping (milter_headers.conf,
+		// remove = 0), so one message never carries both. If one ever did, the
+		// forged pass must not turn rspamd's fail into a pass for SPF or DMARC.
+		$raw = $this->msg([
+			'Authentication-Results: devmail.getjoinery.com;',
+			"\tdkim=none;",
+			"\tspf=fail (devmail.getjoinery.com: domain of x@example.com does not designate 203.0.113.9 as permitted sender) smtp.mailfrom=x@example.com;",
+			"\tdmarc=fail reason=\"No valid SPF, No valid DKIM\" header.from=example.com (policy=reject)",
+			'Authentication-Results: other-host.example.net; spf=pass smtp.mailfrom=x@example.com; dmarc=pass header.from=example.com',
+		]);
+		$ar = AuthenticationResults::fromMessage($raw, 'devmail.getjoinery.com');
+		$this->eq('fail', $ar->spf(), 'a line under another name does not change spf');
+		$this->eq('fail', $ar->dmarc(), 'a line under another name does not change dmarc');
 	}
 
 	private function testForgedUpstreamIgnored() {

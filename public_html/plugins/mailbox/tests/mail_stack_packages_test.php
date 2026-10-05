@@ -7,66 +7,71 @@
  * needs: []
  */
 /**
- * The mail stack's package list has to resolve honestly on a PostgreSQL box.
+ * What the mail stack installs.
  *
- * opendmarc depends on `dbconfig-mysql | dbconfig-no-thanks`. An unresolved
- * alternative is satisfied by the first option, so apt quietly installs a MySQL
- * client stack onto a platform that has never used MySQL, and dbconfig-common
- * then fails provisioning a database against a server that is not there:
- *
- *   ERROR 2002 (HY000): Can't connect to local MySQL server through socket ...
- *   dbconfig-common: opendmarc configure: noninteractive fail.
- *
- * Nothing breaks — that database feeds opendmarc-import and opendmarc-reports,
- * which nothing here runs — but a deployment log whose contract is that errors
- * mean something ends every successful run with two of them. Naming the other
- * alternative resolves the dependency the way this platform actually wants.
- *
- * Found on the first StackScript box to install the default bundle: the mailbox
- * host installer had never run unattended before, so nothing had ever seen it.
+ * One program checks mail: rspamd. It writes the SPF, DKIM and DMARC verdicts
+ * the router reads, scores content, and signs what the box sends
+ * (mail_checking_in_rspamd.md). opendkim and opendmarc did the first and last
+ * of those and are not installed. Their package names coming back into either
+ * installer would put two verdicts on every message again, and with opendmarc
+ * comes its dependency on `dbconfig-mysql | dbconfig-no-thanks`, which apt
+ * resolves by installing a MySQL client stack onto a PostgreSQL platform.
  *
  * Run:  php plugins/mailbox/tests/mail_stack_packages_test.php
  *
- * @version 1.0
+ * @version 2.0
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 
 harness_boot();
 
-$installer = __DIR__ . '/../provisioning/install_email.sh';
-$src = is_file($installer) ? file_get_contents($installer) : '';
+$dir = __DIR__ . '/../provisioning/';
+$installers = array(
+	'a site box' => array('install_email.sh', '/^\s*postconf -e "\$\{list\} = \$\{MILTER_ENTRY\}"/m', 'provision_spam_scanner.sh'),
+	'a relay'    => array('provision_relay.sh', '/^postconf_set "smtpd_milters" "inet:localhost:11332"$/m', 'provision_relay.sh'),
+);
 
-section('The mail stack does not drag MySQL onto a PostgreSQL box');
+foreach ($installers as $who => $spec) {
+	list($file, $wire_pattern, $wire_file) = $spec;
+	$src = (string)@file_get_contents($dir . $file);
 
-check($src !== '', 'the host installer exists', $installer);
+	section('What ' . $who . ' installs');
 
-// The package list is one array; both names have to be in it, and the
-// alternative has to be named or apt picks MySQL for us.
-$has_list = preg_match('/^PACKAGES=\(([^)]*)\)/m', $src, $m) === 1;
-check($has_list, 'the installer declares its package list');
+	check($src !== '', $file . ' exists');
 
-$packages = $has_list ? preg_split('/\s+/', trim($m[1])) : [];
-check(in_array('opendmarc', $packages, true),
-    'opendmarc is still installed',
-    'it stamps the Authentication-Results the router reads');
-check(in_array('dbconfig-no-thanks', $packages, true),
-    'and dbconfig-no-thanks is named alongside it',
-    'otherwise apt satisfies the alternative with dbconfig-mysql');
+	$has_list = preg_match('/^PACKAGES=\(([^)]*)\)/m', $src, $m) === 1;
+	check($has_list, $who . ' declares its package list');
+	$packages = $has_list ? preg_split('/\s+/', trim($m[1])) : array();
 
-// Order is not what decides it — apt resolves the whole transaction — but a
-// reader should see the reason sitting next to the thing it explains.
-check(strpos($src, 'dbconfig-mysql | dbconfig-no-thanks') !== false,
-    'and the dependency it resolves is written down',
-    'a bare package name in a list explains nothing');
+	check(in_array('postfix', $packages, true), $who . ' installs Postfix');
+	foreach (array('opendkim', 'opendkim-tools', 'opendmarc', 'dbconfig-no-thanks') as $gone) {
+		check(!in_array($gone, $packages, true), $who . ' does not install ' . $gone);
+	}
+	$mysql_named = array_filter($packages, function ($p) { return stripos($p, 'mysql') !== false; });
+	check(empty($mysql_named), $who . ' requests no MySQL package by name',
+		empty($mysql_named) ? 'none' : implode(', ', $mysql_named));
 
-// The platform is PostgreSQL. A MySQL client package appearing in a list here
-// would mean somebody solved this the other way round.
-$mysql_named = array_filter($packages, function ($p) {
-    return stripos($p, 'mysql') !== false && $p !== 'dbconfig-no-thanks';
-});
-check(empty($mysql_named),
-    'no MySQL package is requested by name',
-    empty($mysql_named) ? 'none' : implode(', ', $mysql_named));
+	// Nothing outside a comment may install, configure or wire either program.
+	// The one function that removes them from a box that has them lives in
+	// rspamd_stateless.sh, so the installers themselves name neither.
+	$code = preg_replace('/^\s*#.*$/m', '', $src);
+	check(preg_match('/opendkim|opendmarc|8891|8893/', $code) === 0,
+		$who . ' names neither program outside its comments');
+	check(preg_match('/^\s*mail_checkers_retire_old$/m', $src) === 1,
+		$who . ' removes both from a box that still has them');
+
+	// rspamd is Postfix's only milter.
+	check(preg_match($wire_pattern, (string)@file_get_contents($dir . $wire_file)) === 1,
+		$who . ' makes rspamd the only program Postfix hands arriving mail to');
+}
+
+section('rspamd arrives without redis');
+
+$scanner = (string)@file_get_contents($dir . 'provision_spam_scanner.sh');
+check(strpos($scanner, 'apt-get install -y --no-install-recommends rspamd') !== false,
+	'a site box installs rspamd without its recommended redis-server');
+check(preg_match('/^CS_PACKAGES=\(rspamd\)$/m', (string)@file_get_contents($dir . 'provision_relay.sh')) === 1,
+	'a relay installs rspamd');
 
 harness_finish();

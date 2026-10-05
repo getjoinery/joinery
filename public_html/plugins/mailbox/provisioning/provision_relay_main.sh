@@ -16,6 +16,10 @@
 #     ordinary on-disk signing key once its sending is locked to a vault-sealed
 #     key (specs/mailbox_relay_surface_simplification.md)
 #
+# Version: 3.3 - rspamd is the only mail checker (mail_checking_in_rspamd.md):
+#                joinery-mail-listener switches postfix alone, and joinery-dkim-remove
+#                deletes the key under /etc/rspamd/dkim and rewrites rspamd's list of
+#                signing domains. It also deletes the copy opendkim signed with.
 # Version: 3.2 - joinery-dkim-remove builds its key path with ${DOMAIN:?}, so an empty
 #                domain can never name the whole key directory.
 # Version: 3.1 - joinery-dkim-remove no longer starts a stopped opendkim: its
@@ -51,13 +55,13 @@ LISTENER_HELPER="/usr/local/sbin/joinery-mail-listener"
 cat > "${LISTENER_HELPER}" <<'LISTENERHELPER'
 #!/usr/bin/env bash
 # joinery-mail-listener off|on|status
-# off:    stop+disable postfix/opendkim/opendmarc, close 25/tcp at the firewall -> LISTENER_OFF
-# on:     enable+start them, reopen 25/tcp                                     -> LISTENER_ON
-# status: report unit + firewall + port state                                  -> LISTENER_STATUS ...
-# rspamd is deliberately untouched (deferred ingest still scores pulled mail).
+# off:    stop+disable postfix, close 25/tcp at the firewall -> LISTENER_OFF
+# on:     enable+start it, reopen 25/tcp                     -> LISTENER_ON
+# status: report unit + firewall + port state                -> LISTENER_STATUS ...
+# rspamd is deliberately untouched: with Postfix stopped nothing hands it mail.
 # Installed by provision_relay_main.sh; invoked via sudo by the web user.
 set -euo pipefail
-UNITS="postfix opendkim opendmarc"
+UNITS="postfix"
 VERB="${1:-}"
 
 unit_known() {
@@ -139,48 +143,48 @@ DKIM_REMOVE_HELPER="/usr/local/sbin/joinery-dkim-remove"
 cat > "${DKIM_REMOVE_HELPER}" <<'DKIMREMOVEHELPER'
 #!/usr/bin/env bash
 # joinery-dkim-remove <domain>
-# Strips <domain> from opendkim's signing and key tables and deletes its key
-# directory, then reloads opendkim if this box still runs it.
+# Deletes <domain>'s signing key directory and rewrites the list of domains
+# rspamd signs for, which is whatever still has a key (the same list
+# provision_dkim.sh writes). rspamd re-reads it on its own; nothing is restarted.
 #                                              -> DKIM_REMOVED <domain>
 # Installed by provision_relay_main.sh; invoked via sudo by the web user, which
 # validates the domain against the registered set before calling.
 set -euo pipefail
 DOMAIN="${1:-}"
 
-# The argument reaches a path and a regex, so it is checked here too rather than
-# trusted from the caller: letters, digits, dots and hyphens, no leading dot.
+# The argument reaches a path, so it is checked here too rather than trusted
+# from the caller: letters, digits, dots and hyphens, no leading dot.
 if [[ ! "${DOMAIN}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
     echo "joinery-dkim-remove: refusing malformed domain" >&2
     exit 2
 fi
 DOMAIN="$(echo "${DOMAIN}" | tr '[:upper:]' '[:lower:]')"
 
-SIGNING_TABLE="/etc/opendkim/signing.table"
-KEY_TABLE="/etc/opendkim/key.table"
-KEY_DIR="/etc/opendkim/keys/${DOMAIN:?}"
+KEY_ROOT="/etc/rspamd/dkim"
+KEY_DIR="${KEY_ROOT:?}/${DOMAIN:?}"
+SIGNING_MAP="${KEY_ROOT}/signing.map"
 
-if [[ -f "${SIGNING_TABLE}" ]]; then
-    sed -i "\#^\*@${DOMAIN}[[:space:]]#d" "${SIGNING_TABLE}"
-fi
-if [[ -f "${KEY_TABLE}" ]]; then
-    sed -i "\#^${DOMAIN}[[:space:]]#d" "${KEY_TABLE}"
-fi
 if [[ -d "${KEY_DIR}" ]]; then
     rm -rf "${KEY_DIR}"
+fi
+# The copy opendkim signed with, on a box that still has it: left there, the
+# app would read it and the next installer run copy it back.
+OLD_KEY_ROOT="/etc/opendkim/keys"
+if [[ -d "${OLD_KEY_ROOT}/${DOMAIN}" ]]; then
+    rm -rf "${OLD_KEY_ROOT:?}/${DOMAIN:?}"
 fi
 if [[ -d "${KEY_DIR}" ]]; then
     echo "joinery-dkim-remove: ${KEY_DIR} still present" >&2
     exit 4
 fi
-# Only nudge an opendkim this box still runs. Where the local mail listener is
-# decommissioned opendkim is stopped and disabled on purpose, and `systemctl
-# restart` would start it again regardless - putting a live daemon back on a box
-# that reports it gone. Nothing is lost by skipping: a stopped opendkim signs
-# nothing, so the entry is already unused the moment the table line is deleted.
-if systemctl is-enabled opendkim 2>/dev/null | grep -qx 'disabled'; then
-    echo "opendkim is disabled here (listener decommissioned) - left stopped"
-else
-    systemctl reload opendkim >/dev/null 2>&1 || systemctl restart opendkim >/dev/null 2>&1 || true
+if [[ -d "${KEY_ROOT}" ]]; then
+    MAP_TMP="$(mktemp "${SIGNING_MAP}.joinery-XXXXXX")"
+    for key in "${KEY_ROOT}"/*/mail.private; do
+        [[ -f "${key}" ]] || continue
+        printf '%s %s\n' "$(basename "$(dirname "${key}")")" "${key}"
+    done | LC_ALL=C sort > "${MAP_TMP}"
+    chmod 644 "${MAP_TMP}"
+    mv -f "${MAP_TMP}" "${SIGNING_MAP}"
 fi
 echo "DKIM_REMOVED ${DOMAIN}"
 DKIMREMOVEHELPER

@@ -2,6 +2,17 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.26 - The two old programs are removed only once Postfix names rspamd alone and
+#                rspamd is answering; rspamd's milter listens on the loopback only.
+# Version: 2.25 - rspamd is the only program that checks mail (mail_checking_in_rspamd.md):
+#                it writes the SPF, DKIM and DMARC verdicts the app reads and signs
+#                outgoing mail for a domain that has a key. opendkim and opendmarc are
+#                no longer installed; a box that has them gets its signing keys copied
+#                to /etc/rspamd/dkim and both programs removed, after Postfix has been
+#                told rspamd is its only milter.
+# Version: 2.24 - A sender is refused only on Spamhaus's real "listed" answers. The bare list
+#                names refused on any answer, including the error code Spamhaus gives a
+#                resolver it will not serve, which would have refused all mail.
 # Version: 2.23 - A message may be 25 MiB, the size the router stores (Postfix's own default
 #                refused anything over 10 MB), and a bare line feed can no longer end a
 #                message (smtpd_forbid_bare_newline, the SMTP smuggling guard).
@@ -113,11 +124,11 @@
 #                milter became part of this fixed base install.
 #
 # Installs the mail software the plugin needs and applies the FIXED Postfix and
-# opendkim configuration so inbound mail is piped to the handler. Fully
-# idempotent: re-running adds nothing twice and is safe.
+# rspamd configuration so inbound mail is checked and piped to the handler.
+# Fully idempotent: re-running adds nothing twice and is safe.
 #
 # What it configures (fixed, deployment-independent):
-#   - Installs postfix, postfix-pgsql, opendkim, opendkim-tools.
+#   - Installs postfix, postfix-pgsql and rspamd.
 #   - master.cf : the `joinery` pipe transport (appended once).
 #   - main.cf   : virtual_transport = joinery
 #   - main.cf   : inet_interfaces = all - with one site per host, this site's
@@ -145,21 +156,18 @@
 #                 superuser, holding at most 10 connections. Its password
 #                 lives only in the map files and is kept while they are
 #                 intact; delete them and re-run this script to rotate it.
-#   - opendkim  : inet socket localhost:8891, Mode sv (sign + VERIFY), empty
-#                 key/signing tables, and an AuthservID matching the configured
-#                 mail hostname so stamped Authentication-Results lines are
-#                 attributable to us.
-#   - opendmarc : inet socket localhost:8893, SPFSelfValidate (computes SPF from
-#                 the connecting IP it sees at the milter stage — the IP the PHP
-#                 pipe never gets), RejectFailures false (stamp only, never
-#                 block; enforcement is out of scope).
-#   - main.cf   : smtpd_milters = inet:localhost:8891, inet:localhost:8893,
-#                 inet:localhost:11332 (opendkim first so opendmarc can consume
-#                 its DKIM result; rspamd last so it scores on both),
-#                 milter_default_action = accept (a down/keyless milter must
-#                 never block or defer mail). Received mail is thereby stamped
-#                 with an Authentication-Results header the app reads for its
-#                 SPF/DKIM/DMARC verdicts (it never computes them itself).
+#   - rspamd    : the one checker (provision_spam_scanner.sh). As a milter on
+#                 localhost:11332 it stamps the Authentication-Results line the
+#                 app reads for its SPF/DKIM/DMARC verdicts (the app never
+#                 computes them itself) and the X-Spam headers, and it signs
+#                 what this box sends for a domain that has a key. It never
+#                 refuses or delays mail.
+#   - main.cf   : smtpd_milters = non_smtpd_milters = inet:localhost:11332,
+#                 milter_default_action = accept (a stopped rspamd must never
+#                 block or defer mail), and myhostname held equal to the
+#                 configured mail hostname: rspamd stamps its verdicts under
+#                 the name Postfix gives it, and that is the name the app
+#                 trusts.
 #   - Opens port 25 if ufw is active.
 #
 # What it does NOT do (genuinely per-deployment - handled elsewhere):
@@ -167,9 +175,9 @@
 #     from the database (see above). Manage domains under
 #     Admin > Emails > Incoming > Domains.
 #   - DNS records (MX, SPF, DKIM).
-#   - Per-domain opendkim DKIM keys and their DNS TXT record. opendkim runs
-#     keyless (signing nothing) until a key is added; run provision_dkim.sh
-#     <domain> for each domain. See plugins/mailbox/docs/overview.md.
+#   - Per-domain DKIM signing keys and their DNS TXT record. rspamd signs
+#     nothing for a domain until it has a key; run provision_dkim.sh <domain>
+#     for each domain. See plugins/mailbox/docs/overview.md.
 #
 # Docker: run this INSIDE the same container as the app - Postfix must be
 # co-located with the PHP handler it pipes to, and reads the app's own
@@ -189,7 +197,7 @@ fi
 
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "This installer supports apt-based systems (Debian/Ubuntu) only." >&2
-    echo "Install postfix, postfix-pgsql and opendkim with your platform's package manager instead." >&2
+    echo "Install postfix, postfix-pgsql and rspamd with your platform's package manager instead." >&2
     exit 1
 fi
 
@@ -277,21 +285,9 @@ if [[ -z "${PHP_VERSION}" ]]; then
     echo "ERROR: could not read a version from ${PHP_BIN}; cannot name the sqlite3 package." >&2
     exit 1
 fi
-# dbconfig-no-thanks is listed ahead of opendmarc on purpose. opendmarc depends
-# on `dbconfig-mysql | dbconfig-no-thanks`, and an unresolved alternative is
-# satisfied by the first option — so apt installs MySQL client packages onto a
-# PostgreSQL-only box, then dbconfig-common tries to provision a database
-# against a MySQL server that is not there and fails:
-#
-#   ERROR 2002 (HY000): Can't connect to local MySQL server through socket ...
-#   dbconfig-common: opendmarc configure: noninteractive fail.
-#
-# Nothing breaks — that database only feeds opendmarc-import/opendmarc-reports,
-# which nothing here runs, and the milter stamps Authentication-Results without
-# it — but every install ends up with two ERROR lines in a log whose whole
-# contract is that errors mean something, plus a MySQL client stack it will
-# never use. Naming the other alternative resolves the dependency honestly.
-PACKAGES=(postfix postfix-pgsql dbconfig-no-thanks opendkim opendkim-tools opendmarc "php${PHP_VERSION}-sqlite3")
+# rspamd is not in this list: provision_spam_scanner.sh installs it (section 5),
+# without the redis-server apt would otherwise bring along.
+PACKAGES=(postfix postfix-pgsql "php${PHP_VERSION}-sqlite3")
 MISSING=()
 for pkg in "${PACKAGES[@]}"; do
     if dpkg -s "${pkg}" >/dev/null 2>&1; then
@@ -451,14 +447,14 @@ fi
 # --- the decommission guard --------------------------------------------------
 # A relay-fronted box can have its own mail listener deliberately removed from
 # the Setup tab (specs/mailbox_listener_decommission.md), which stops and
-# disables postfix/opendkim/opendmarc and shuts port 25. This script is the
+# disables postfix and shuts port 25. This script is the
 # mailbox plugin's declared host_installer, so it RUNS ON EVERY DEPLOY - and
-# without this guard each deploy silently re-enabled and restarted all three and
+# without this guard each deploy silently re-enabled and restarted it and
 # reopened the firewall, undoing the decommission and leaving the setup check
 # reporting "recorded as decommissioned, but ... is running".
 #
 # Configuration is still written on a decommissioned box: main.cf, master.cf,
-# the maps, the milter config and the DKIM tables must stay converged so Restore
+# the maps and the rspamd configuration must stay converged so Restore
 # brings back a correct listener rather than a stale one. Only the ARMING -
 # enable, start, restart, and the port-25 firewall rule - is skipped.
 #
@@ -476,7 +472,7 @@ fi
 # is the factory state, 'active'.
 LISTENER_RECORDED="$(db_psql -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'mailbox_local_listener'" 2>&1)" || {
     echo "ERROR: could not read the recorded mail listener state from '${DBNAME}': ${LISTENER_RECORDED}" >&2
-    echo "       Refusing to continue: this script arms postfix, opendkim and opendmarc, and" >&2
+    echo "       Refusing to continue: this script arms postfix, and" >&2
     echo "       without that setting it cannot tell whether this box's listener was" >&2
     echo "       deliberately decommissioned. Fix database access and re-run." >&2
     exit 1
@@ -486,35 +482,13 @@ if [[ "${LISTENER_RECORDED,,}" == "decommissioned" ]]; then
     LISTENER_DECOMMISSIONED=1
     echo
     echo "listener: recorded as DECOMMISSIONED - configuration will be converged, but"
-    echo "          postfix, opendkim and opendmarc will NOT be enabled or started and"
+    echo "          postfix will NOT be enabled or started and"
     echo "          port 25 will NOT be reopened. Restore from the Setup tab's Relay"
     echo "          section to put local mail back."
     echo
 else
     LISTENER_DECOMMISSIONED=0
 fi
-
-# Arm one mail-stack service, unless the listener is decommissioned.
-# Returns 0 either way: a deliberate skip is not a failure.
-arm_service() {
-    local svc="$1"
-    if [[ "${LISTENER_DECOMMISSIONED}" -eq 1 ]]; then
-        # Re-ASSERT the decommission rather than merely declining to undo it, so
-        # a deploy heals a box where something else started the service. This is
-        # the same verb the Setup tab's Decommission runs.
-        systemctl disable --now "${svc}" >/dev/null 2>&1 || true
-        echo "${svc}: stopped and disabled (listener decommissioned)."
-        return 0
-    fi
-    systemctl enable "${svc}" >/dev/null 2>&1 || true
-    if command -v systemctl >/dev/null 2>&1 && systemctl restart "${svc}" 2>/dev/null; then
-        echo "${svc}: restarted (systemd)."
-    elif command -v service >/dev/null 2>&1 && service "${svc}" restart >/dev/null 2>&1; then
-        echo "${svc}: restarted (service)."
-    else
-        echo "WARNING: could not restart ${svc} automatically - restart it manually." >&2
-    fi
-}
 
 # Role name carries the database name so multiple sites on one PostgreSQL
 # cluster never collide on a shared role.
@@ -646,6 +620,13 @@ fi
 # the sender retrying. SpamCop says as much itself: use it to score, not to
 # refuse. Content scoring is where a weaker signal belongs.
 #
+# Each list is followed by the answers that mean "listed" (zen 127.0.0.2-11,
+# dbl 127.0.1.2-99). A bare list name refuses on ANY answer, and Spamhaus
+# answers 127.255.255.x to a resolver it will not serve (a public resolver, or
+# one over its quota): every sender would then be refused. With the filter such
+# an answer refuses nobody, and the Setup tab reports that Spamhaus is not
+# answering this box.
+#
 # The recipient lookup comes last, after the RBL checks, so a listed sender is
 # refused on the list and never costs a database query. Every smtpd process
 # asks it, so it is always read through proxymap (proxy:), chrooted or not:
@@ -660,26 +641,31 @@ if [[ "${PROXY_READ_MAPS}" != *'$smtpd_recipient_restrictions'* && "${PROXY_READ
     echo "main.cf: proxy_read_maps += ${RCPT_MAP}"
 fi
 if [[ "${RCPT_WIRE}" -eq 1 ]]; then
-    postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access ${RCPT_MAP}, permit"
+    postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org=127.0.0.[2..11], reject_rhsbl_helo dbl.spamhaus.org=127.0.1.[2..99], reject_rhsbl_sender dbl.spamhaus.org=127.0.1.[2..99], check_recipient_access ${RCPT_MAP}, permit"
     echo "main.cf: smtpd_recipient_restrictions set (RBL clients, recipient lookup ${RCPT_MAP})"
 else
     echo "main.cf: smtpd_recipient_restrictions left as they are (recipient lookup not re-asked)"
 fi
 
-# --- 5. opendkim + opendmarc: verify-mode config + Postfix milters -----------
-# opendkim signs outbound AND verifies inbound (Mode sv); opendmarc adds SPF +
-# DMARC verdicts. Both stamp an Authentication-Results header the app reads.
-# The static parts are deployment-independent and installed once here.
+# --- 5. rspamd: the one program that checks mail -------------------------------
+# rspamd is Postfix's only milter (mail_checking_in_rspamd.md). On arriving
+# mail it strips every Authentication-Results line the sender supplied, writes
+# its own SPF, DKIM and DMARC verdicts and stamps the X-Spam headers; on what
+# this box sends it adds the DKIM signature for a domain that has a key. It
+# never refuses or delays mail, has no memory, and the app makes the final
+# decision: there is no redis, no ingest re-scan and no learning loop in rspamd
+# (spam_learning_in_core.md).
 
-# AuthservID must equal mailbox_mail_hostname — the value the app's
-# AuthenticationResults parser trusts. If they disagree the stamped AR lines are
-# ignored and every message reads "unverified". Read it from the DB (the Setup
-# tab writes it); fall back to myhostname with a loud warning.
+# rspamd stamps its verdicts under the name Postfix gives it, which is
+# myhostname, and the app's AuthenticationResults parser trusts only lines
+# under mailbox_mail_hostname. So the two are held equal here: if they
+# disagree every message reads "unverified". Read the setting from the DB (the
+# Setup tab writes it); with none set, whatever myhostname already is stands.
 AUTHSERV_ID="$(db_psql -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'mailbox_mail_hostname'" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
 if [[ -z "${AUTHSERV_ID}" ]]; then
     AUTHSERV_ID="$(postconf -h myhostname 2>/dev/null | tr -d '[:space:]' || true)"
-    echo "opendkim/opendmarc: mailbox_mail_hostname is unset — using myhostname '${AUTHSERV_ID}' as AuthservID." >&2
-    echo "                    Set the mail hostname on the Mailbox Setup tab to match, or verdicts are ignored." >&2
+    echo "rspamd: mailbox_mail_hostname is unset — verdicts are stamped under myhostname '${AUTHSERV_ID}'." >&2
+    echo "        Set the mail hostname on the Mailbox Setup tab to match, or verdicts are ignored." >&2
 else
     # The configured mail hostname IS this box's mail identity — align Postfix
     # myhostname (the HELO name) with it. The earlier myhostname block only
@@ -691,167 +677,38 @@ else
         echo "main.cf: myhostname = ${AUTHSERV_ID} (was '${ALIGN_CURRENT:-unset}'; aligned to mailbox_mail_hostname)"
     fi
 fi
-echo "opendkim/opendmarc: AuthservID = ${AUTHSERV_ID}"
+echo "rspamd: verdicts are stamped under ${AUTHSERV_ID}"
 
-mkdir -p /run/opendkim
-chown opendkim:opendkim /run/opendkim 2>/dev/null || true
-
-# key.table / signing.table / trusted.hosts: create only if absent — a re-run
-# must never wipe per-domain key entries an operator has since added. The
-# package ships only /etc/opendkim.conf, so the directory itself must be
-# created on a fresh box.
-mkdir -p /etc/opendkim
-chown opendkim:opendkim /etc/opendkim 2>/dev/null || true
-if [[ ! -f /etc/opendkim/key.table ]]; then
-    : > /etc/opendkim/key.table
-    echo "opendkim: created empty /etc/opendkim/key.table"
-fi
-if [[ ! -f /etc/opendkim/signing.table ]]; then
-    : > /etc/opendkim/signing.table
-    echo "opendkim: created empty /etc/opendkim/signing.table"
-fi
-if [[ ! -f /etc/opendkim/trusted.hosts ]]; then
-    printf '127.0.0.1\n::1\nlocalhost\n' > /etc/opendkim/trusted.hosts
-    echo "opendkim: created /etc/opendkim/trusted.hosts"
-fi
-
-# opendkim.conf: write our managed config only if our managed marker is absent.
-# Keying on the marker (not the socket) means an already-wired host running the
-# OLD managed conf — which lacked AuthservID — is upgraded in place, while an
-# operator who kept our marker and edited around it is left alone. The live box
-# was found running Debian-stock opendkim.conf (no Mode/AuthservID/tables),
-# which this rewrite corrects, restoring both inbound verify and outbound sign.
-OPENDKIM_MARKER='joinery-managed opendkim.conf'
-if ! grep -qF "${OPENDKIM_MARKER}" /etc/opendkim.conf 2>/dev/null; then
-    [[ -f /etc/opendkim.conf && ! -f /etc/opendkim.conf.pre-joinery ]] && \
-        cp /etc/opendkim.conf /etc/opendkim.conf.pre-joinery
-    cat > /etc/opendkim.conf <<OPENDKIMCONF
-# ${OPENDKIM_MARKER} — managed by mailbox/provisioning/install_email.sh.
-# Mode sv = sign outbound + VERIFY inbound. Per-domain keys live in the tables
-# below (added by provision_dkim.sh). AuthservID attributes the stamped
-# Authentication-Results line to us so the app trusts only our own verdicts.
-Syslog                  yes
-SyslogSuccess           yes
-UMask                   007
-Mode                    sv
-Canonicalization        relaxed/simple
-Socket                  inet:8891@localhost
-PidFile                 /run/opendkim/opendkim.pid
-OversignHeaders         From
-UserID                  opendkim
-AuthservID              ${AUTHSERV_ID}
-KeyTable                /etc/opendkim/key.table
-SigningTable            refile:/etc/opendkim/signing.table
-ExternalIgnoreList      /etc/opendkim/trusted.hosts
-InternalHosts           /etc/opendkim/trusted.hosts
-OPENDKIMCONF
-    echo "opendkim: wrote /etc/opendkim.conf (inet socket localhost:8891, Mode sv, AuthservID ${AUTHSERV_ID})"
-else
-    # Managed conf stays in place, but AuthservID must converge — the operator
-    # may have set or changed the mail hostname since the conf was written.
-    CUR_DKIM_AUTHSERV="$(awk '/^AuthservID/{print $2; exit}' /etc/opendkim.conf 2>/dev/null || true)"
-    if [[ "${CUR_DKIM_AUTHSERV}" != "${AUTHSERV_ID}" ]]; then
-        sed -i "s|^AuthservID.*|AuthservID              ${AUTHSERV_ID}|" /etc/opendkim.conf
-        echo "opendkim: AuthservID converged to ${AUTHSERV_ID} (was '${CUR_DKIM_AUTHSERV:-unset}')"
-    else
-        echo "opendkim: /etc/opendkim.conf already managed by us - leaving it."
-    fi
-fi
-
-# Debian's opendkim systemd integration can override the socket from
-# /etc/default/opendkim — keep it in step with opendkim.conf.
-if [[ -f /etc/default/opendkim ]]; then
-    if grep -qE '^[[:space:]]*SOCKET=' /etc/default/opendkim; then
-        sed -i 's#^[[:space:]]*SOCKET=.*#SOCKET="inet:8891@localhost"#' /etc/default/opendkim
-    else
-        echo 'SOCKET="inet:8891@localhost"' >> /etc/default/opendkim
-    fi
-fi
-
-# opendmarc.conf: SPFSelfValidate makes opendmarc compute SPF itself from the
-# envelope + connecting IP it sees at the milter stage (the IP the PHP pipe
-# never receives), so no separate policyd-spf milter is needed. RejectFailures
-# false / SoftwareHeader true = stamp results only, never reject (enforcement is
-# out of scope; a DMARC failure still delivers and is recorded as a verdict).
-mkdir -p /run/opendmarc
-chown opendmarc:opendmarc /run/opendmarc 2>/dev/null || true
-
-OPENDMARC_MARKER='joinery-managed opendmarc.conf'
-if ! grep -qF "${OPENDMARC_MARKER}" /etc/opendmarc.conf 2>/dev/null; then
-    [[ -f /etc/opendmarc.conf && ! -f /etc/opendmarc.conf.pre-joinery ]] && \
-        cp /etc/opendmarc.conf /etc/opendmarc.conf.pre-joinery
-    cat > /etc/opendmarc.conf <<OPENDMARCCONF
-# ${OPENDMARC_MARKER} — managed by mailbox/provisioning/install_email.sh.
-# Stamps SPF + DMARC into Authentication-Results; never rejects (stamp-only).
-AuthservID              ${AUTHSERV_ID}
-Socket                  inet:8893@localhost
-PidFile                 /run/opendmarc/opendmarc.pid
-UserID                  opendmarc
-UMask                   0002
-Syslog                  true
-SoftwareHeader          true
-SPFSelfValidate         true
-RejectFailures          false
-OPENDMARCCONF
-    echo "opendmarc: wrote /etc/opendmarc.conf (inet socket localhost:8893, AuthservID ${AUTHSERV_ID})"
-else
-    # Same converge as opendkim: AuthservID must track the configured hostname.
-    CUR_DMARC_AUTHSERV="$(awk '/^AuthservID/{print $2; exit}' /etc/opendmarc.conf 2>/dev/null || true)"
-    if [[ "${CUR_DMARC_AUTHSERV}" != "${AUTHSERV_ID}" ]]; then
-        sed -i "s|^AuthservID.*|AuthservID              ${AUTHSERV_ID}|" /etc/opendmarc.conf
-        echo "opendmarc: AuthservID converged to ${AUTHSERV_ID} (was '${CUR_DMARC_AUTHSERV:-unset}')"
-    else
-        echo "opendmarc: /etc/opendmarc.conf already managed by us - leaving it."
-    fi
-fi
-
-# Keep /etc/default/opendmarc SOCKET in step with the conf (mirrors opendkim).
-if [[ -f /etc/default/opendmarc ]]; then
-    if grep -qE '^[[:space:]]*SOCKET=' /etc/default/opendmarc; then
-        sed -i 's#^[[:space:]]*SOCKET=.*#SOCKET="inet:8893@localhost"#' /etc/default/opendmarc
-    else
-        echo 'SOCKET="inet:8893@localhost"' >> /etc/default/opendmarc
-    fi
-fi
-
-# Postfix milter wiring. Order matters: opendkim FIRST so opendmarc can consume
-# its DKIM result (plus opendmarc's own SPF) to reach a DMARC verdict.
-# milter_default_action = accept guarantees a down/keyless milter never blocks
-# or defers mail. non_smtpd_milters keeps only opendkim (it signs locally
-# submitted outbound; opendmarc applies to inbound, not local submission).
-# rspamd (section 5b) closes the list whenever its provisioner is here: the
-# whole list is written once, so a re-run never leaves Postfix taking mail
-# without the scanner's headers. Until rspamd listens on a first install,
-# default action accept passes it over.
-SMTPD_MILTERS="inet:localhost:8891, inet:localhost:8893"
-if [[ -f "${SCRIPT_DIR}/provision_spam_scanner.sh" && -f "${SCRIPT_DIR}/rspamd_stateless.sh" ]]; then
-    SMTPD_MILTERS="${SMTPD_MILTERS}, inet:localhost:11332"
-fi
+# A stopped rspamd must never block or defer mail: it arrives unchecked, and
+# the health check reports the scanner down.
 postconf -e "milter_default_action = accept"
-postconf -e "smtpd_milters = ${SMTPD_MILTERS}"
-postconf -e "non_smtpd_milters = inet:localhost:8891"
-echo "main.cf: milters wired (${SMTPD_MILTERS}; default action accept)"
 
-arm_service opendkim
-arm_service opendmarc
-
-# --- 5b. local spam scanner (ships with the mail stack) -----------------------
-# The scanner is part of the mail stack, unconditionally: every box this script
-# provisions gets rspamd as a stateless milter that stamps X-Spam headers the
-# app reads (spam_learning_in_core.md). There is no redis, no ingest
-# re-scan and no learning loop in rspamd: spam learning lives in the
-# application. The install itself lives in provision_spam_scanner.sh, which
-# writes the one configuration a relay writes too (rspamd_stateless.sh) and,
-# on a box provisioned before, removes redis. It is idempotent and also the
-# repair for config or milter-wiring drift. The platform never removes the
-# scanner - `provision_spam_scanner.sh remove` exists for operators reclaiming
-# a box by hand.
+# The install itself lives in provision_spam_scanner.sh, which writes the one
+# scanning configuration a relay writes too (rspamd_stateless.sh) plus the
+# signing configuration, copies any key opendkim signed with into rspamd's key
+# directory, and sets both of Postfix's milter lists to rspamd alone. It is
+# idempotent and also the repair for config or milter-wiring drift. The
+# platform never removes rspamd - `provision_spam_scanner.sh remove` exists
+# for operators reclaiming a box by hand.
 SPAM_SCANNER_SCRIPT="${SCRIPT_DIR}/provision_spam_scanner.sh"
 if [[ ! -f "${SPAM_SCANNER_SCRIPT}" || ! -f "${SCRIPT_DIR}/rspamd_stateless.sh" ]]; then
-    echo "WARNING: spam scanner provisioner or its rspamd_stateless.sh missing - skipping (expected both in ${SCRIPT_DIR})." >&2
+    echo "ERROR: provision_spam_scanner.sh or rspamd_stateless.sh is missing from ${SCRIPT_DIR}." >&2
+    echo "       rspamd is the only program that checks mail; refusing to leave Postfix without it." >&2
+    exit 1
+fi
+echo "rspamd: installing (ships with the mail stack)"
+bash "${SPAM_SCANNER_SCRIPT}" install
+
+# Postfix now names rspamd alone and has been told so, which is what makes it
+# safe to remove the two programs rspamd replaced from a box that has them. If
+# the scanner could not get there (rspamd would not start), they stay, and the
+# next run tries again.
+# shellcheck source=rspamd_stateless.sh
+source "${SCRIPT_DIR}/rspamd_stateless.sh"
+if [[ "$(postconf -h smtpd_milters 2>/dev/null || true)" == "inet:localhost:11332" ]]; then
+    mail_checkers_retire_old
 else
-    echo "spam-scanner: installing (ships with the mail stack)"
-    bash "${SPAM_SCANNER_SCRIPT}" install
+    echo "WARNING: Postfix does not name rspamd as its only milter yet - the programs it replaces are left as they are." >&2
 fi
 
 # --- 6. firewall -------------------------------------------------------------
@@ -878,7 +735,7 @@ if [[ -f "${STALE_SCRIPT}" ]]; then
 fi
 
 # --- 8. validate + restart ---------------------------------------------------
-# inet_interfaces and milter changes need a full restart, not a reload. Prefer
+# inet_interfaces changes need a full restart, not a reload. Prefer
 # systemd when present; fall back to the `postfix` command for containers.
 if postfix check; then
     if [[ "${LISTENER_DECOMMISSIONED}" -eq 1 ]]; then
@@ -932,9 +789,9 @@ echo "  - Publish DNS per domain: MX -> this server, plus SPF and DKIM TXT recor
 echo "  - For outbound DKIM signing, generate a per-domain key with:"
 echo "    sudo bash plugins/mailbox/provisioning/provision_dkim.sh <domain>"
 echo "    then publish the DKIM TXT record it prints. See the Setup tab."
-echo "  - Inbound authentication: opendkim (verify) + opendmarc now stamp an"
-echo "    Authentication-Results header the app reads for SPF/DKIM/DMARC."
+echo "  - Inbound authentication: rspamd stamps an Authentication-Results"
+echo "    header the app reads for SPF/DKIM/DMARC."
 echo "    CONFIRM IT WORKS: send a test message and check the stored copy carries"
 echo "    'Authentication-Results: ${AUTHSERV_ID}; dkim=... spf=... dmarc=...'."
 echo "    Config edits alone don't prove it — the Setup tab's 'Inbound"
-echo "    authentication verified' check goes PASS once milter-stamped mail arrives."
+echo "    authentication verified' check goes PASS once stamped mail arrives."

@@ -230,7 +230,7 @@ check($asked_at !== false && $installed_at !== false && $asked_at < $installed_a
 	'the freshly rendered copy is asked before it replaces the installed lookup Postfix may already read');
 check(strpos($installer, 'too many connections for role') !== false && strpos($installer, 'RCPT_WIRE=0') !== false,
 	'a probe refused by the role\'s connection limit leaves the proven lookup in place instead of failing the run');
-check(preg_match('/smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, (reject_r[a-z_]+ [a-z.]+, )+check_recipient_access \$\{RCPT_MAP\}, permit"/', $installer) === 1,
+check(preg_match('/smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, (reject_r[a-z_]+ [a-z.]+=[0-9.\[\]]+, )+check_recipient_access \$\{RCPT_MAP\}, permit"/', $installer) === 1,
 	'it comes after the domain check and the block lists, just before the final permit');
 check(substr_count($installer, 'postconf -e "smtpd_recipient_restrictions') === 1,
 	'the restrictions are written in one place');

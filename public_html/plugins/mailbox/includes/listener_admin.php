@@ -3,7 +3,7 @@
  * Mailbox - local mail listener decommission (specs/mailbox_listener_decommission.md).
  *
  * Once a relay fronts the deployment, the box's own mail listener (Postfix,
- * opendkim, opendmarc, port 25) is dead weight with live attack surface. This
+ * port 25) is dead weight with live attack surface. This
  * file is the whole platform action that removes it — and restores it: the
  * guardrail evaluation, the narrow sudo-helper runner
  * (/usr/local/sbin/joinery-mail-listener, installed by
@@ -12,6 +12,7 @@
  * the mailbox_local_listener setting ('active' | 'decommissioned') so the
  * setup and health checks can compare expectation with reality.
  *
+ * @version 1.3 - the listener is Postfix alone; rspamd is left running
  * @version 1.2
  */
 
@@ -197,7 +198,7 @@ function mailbox_listener_actions(array $input, $session, string $self_url): ?Lo
 		}
 		admin_mailbox_relay_write_setting('mailbox_local_listener', 'decommissioned');
 		admin_mailbox_relay_flash($session,
-			'Local mail is uninstalled: Postfix, opendkim and opendmarc are stopped and disabled, and port 25 is '
+			'Local mail is uninstalled: Postfix is stopped and disabled, and port 25 is '
 			. 'closed at the firewall. Mail reaches this server only through your relay.',
 			'Local mail uninstalled');
 		return LogicResult::redirect($self_url);
@@ -210,7 +211,7 @@ function mailbox_listener_actions(array $input, $session, string $self_url): ?Lo
 	}
 	admin_mailbox_relay_write_setting('mailbox_local_listener', 'active');
 	admin_mailbox_relay_flash($session,
-		'Local mail is reinstalled: Postfix, opendkim and opendmarc are running and port 25 is open again.',
+		'Local mail is reinstalled: Postfix is running and port 25 is open again.',
 		'Local mail reinstalled');
 	return LogicResult::redirect($self_url);
 }
@@ -232,7 +233,7 @@ function mailbox_listener_box_render($page, array $state): void {
 				. 'it came back outside this page.</p>'
 				. PublicPageBase::action_button('Uninstall local mail', '', array(
 					'hidden'  => array('action' => 'listener_decommission'),
-					'confirm' => 'Uninstall local mail (Postfix, opendkim, opendmarc)? Mail keeps arriving through your relay.',
+					'confirm' => 'Uninstall local mail (Postfix)? Mail keeps arriving through your relay.',
 					'class'   => 'btn btn-danger btn-sm',
 				))
 				. '</div>';
@@ -250,7 +251,7 @@ function mailbox_listener_box_render($page, array $state): void {
 			. 'deliver mail here. Set up a relay above, or put mail back on this server directly.</p>'
 			. PublicPageBase::action_button('Reinstall local mail', '', array(
 				'hidden'  => array('action' => 'listener_restore'),
-				'confirm' => 'Reinstall local mail? Postfix, opendkim and opendmarc start again and port 25 reopens.',
+				'confirm' => 'Reinstall local mail? Postfix starts again and port 25 reopens.',
 				'class'   => 'btn btn-warning btn-sm',
 			))
 			. '</div>';
@@ -265,10 +266,10 @@ function mailbox_listener_box_render($page, array $state): void {
 
 	echo '<div class="alert alert-warning" style="margin-top:1rem;">'
 		. '<p>Since your mail now comes through a relay, this server\'s own mail software '
-		. '(Postfix, opendkim, opendmarc) is unnecessary and a potential security risk.</p>'
+		. '(Postfix) is unnecessary and a potential security risk.</p>'
 		. PublicPageBase::action_button('Uninstall local mail', '', array(
 			'hidden'  => array('action' => 'listener_decommission'),
-			'confirm' => 'Uninstall local mail (Postfix, opendkim, opendmarc)? Mail keeps arriving through your relay. '
+			'confirm' => 'Uninstall local mail (Postfix)? Mail keeps arriving through your relay. '
 				. 'You can reinstall it later.',
 			'class'   => 'btn btn-warning btn-sm',
 		))

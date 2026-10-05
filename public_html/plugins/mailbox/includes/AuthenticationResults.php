@@ -3,24 +3,24 @@
  * AuthenticationResults - read SPF/DKIM/DMARC verdicts from a message's
  * Authentication-Results header (RFC 8601).
  *
- * The application NEVER computes these verdicts. The receiving MTA's milters
- * (opendkim in verify mode + opendmarc) evaluate SPF/DKIM/DMARC at SMTP time —
- * when the connecting client IP is still available — and stamp the result in an
- * Authentication-Results header. This class turns that header into structured
+ * The application NEVER computes these verdicts. The receiving MTA's milter
+ * (rspamd) evaluates SPF/DKIM/DMARC at SMTP time — when the connecting client
+ * IP is still available — and stamps the result in an Authentication-Results
+ * header. This class turns that header into structured
  * verdicts the router stores and the UI shows.
  *
  * Trust model: a message can arrive carrying attacker-supplied
  * Authentication-Results lines from upstream hops. We ONLY honor lines whose
- * authserv-id matches our own mail host (the AuthservID configured on the
- * milters, == mailbox_mail_hostname). Lines stamped by anyone else are
+ * authserv-id matches our own mail host (Postfix's myhostname, which rspamd
+ * stamps under, == mailbox_mail_hostname). Lines stamped by anyone else are
  * ignored. When no line matches our authserv-id, fromMessage() returns null and
  * the router records 'unverified' — never a verdict, never a hand-rolled 'fail'.
  *
- * opendkim and opendmarc each stamp their own Authentication-Results line with
- * the same authserv-id, so we MERGE every matching line: the dkim verdict comes
- * from opendkim's line, the spf/dmarc verdicts from opendmarc's. Multiple dkim=
- * entries (oversigning, multiple signatures) resolve to the strongest result
- * (a pass wins over a fail).
+ * rspamd strips every line a message arrives with and stamps one of its own
+ * carrying all three verdicts. Every line under our authserv-id is still
+ * MERGED, so a verifier that stamps one line per check reads the same.
+ * Multiple dkim= entries (oversigning, multiple signatures) resolve to the
+ * strongest result (a pass wins over a fail).
  *
  * This class is single-purpose: the standard Authentication-Results header
  * only. Webhook providers (Mailgun/SendGrid/SES) report their own SPF/DKIM/DMARC

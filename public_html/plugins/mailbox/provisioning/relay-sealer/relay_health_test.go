@@ -160,3 +160,21 @@ func TestLoopbackConnectsAreNotCountedAsMail(t *testing.T) {
 		}
 	}
 }
+
+func TestSpamhausVerdictReadsTheTestEntry(t *testing.T) {
+	for _, c := range []struct {
+		addrs []string
+		want  string
+	}{
+		{[]string{"127.0.0.2"}, spamhausAnswering},
+		{[]string{"127.0.0.10", "127.0.0.4", "127.0.0.2"}, spamhausAnswering},
+		{[]string{"127.255.255.254"}, spamhausRefused},
+		{[]string{"127.255.255.255"}, spamhausRefused},
+		{nil, spamhausNoAnswer},
+		{[]string{"192.0.2.1"}, spamhausNoAnswer},
+	} {
+		if got := spamhausVerdict(c.addrs); got != c.want {
+			t.Errorf("spamhausVerdict(%v) = %q, want %q", c.addrs, got, c.want)
+		}
+	}
+}

@@ -70,7 +70,7 @@ class MailIdentityGuard {
 
 	/**
 	 * The in-app DKIM signer for $domain, or null when the domain is not a
-	 * protected identity (opendkim signs those, or they are unsigned). Throws
+	 * protected identity (rspamd signs those, or they are unsigned). Throws
 	 * VaultLockedException when the domain is protected but no unlock window is
 	 * open — the compose path turns that into the locked-state unlock prompt.
 	 *

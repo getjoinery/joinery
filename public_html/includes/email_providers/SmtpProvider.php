@@ -155,7 +155,7 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay, SendReceipt
         // Core names no mailbox symbol: it asks MailIdentityGuard, into which the
         // plugin registered a resolver, for a signer keyed on the From-domain. A
         // protected domain returns its in-app signer (unwrapped in-window); a
-        // non-protected domain returns null (opendkim signs it, or it is unsigned);
+        // non-protected domain returns null (rspamd signs it, or it is unsigned);
         // a protected domain with no open window throws VaultLockedException, which
         // propagates so the compose path prompts an unlock rather than sending
         // unsigned. The raw-relay path (relayRawMessage) is untouched — it carries

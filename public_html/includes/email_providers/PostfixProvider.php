@@ -8,6 +8,7 @@
  * envelope recipient. Setup checks and DNS records are sourced from the
  * existing InboundEmailSetupCheck engine.
  *
+ * @version 1.1 - the DKIM record is read from the directory rspamd signs from
  * @version 1.0
  */
 
@@ -73,8 +74,8 @@ class PostfixProvider implements InboundEmailProvider {
             ],
         ];
 
-        // DKIM record from local opendkim key, if present.
-        $keyfile = '/etc/opendkim/keys/' . $domain . '/mail.txt';
+        // DKIM record from the local signing key, if present.
+        $keyfile = InboundEmailSetupCheck::localSigningKeyPath($domain);
         if (is_readable($keyfile)) {
             $raw = @file_get_contents($keyfile);
             if ($raw !== false) {

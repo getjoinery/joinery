@@ -241,11 +241,10 @@ class MailboxRelay extends SystemBase {
 	// --- Scanner health (specs/mailbox_relay_scanner_health.md) ----------------
 	//
 	// The relay's content scanner is the one part of it a tenant cannot verify from
-	// stored mail. opendkim/opendmarc write their verdicts into every message, so a
-	// dead one shows up as unverified mail; rspamd writes a header ONLY when it
-	// flags something, and milter_default_action is accept — so a relay that scans
-	// and finds nothing and a relay whose rspamd is dead send identical evidence,
-	// which is none. The relay has to be asked.
+	// stored mail with certainty. A dead rspamd shows up as unverified mail, but
+	// so does a sender with nothing to verify, and milter_default_action is
+	// accept — so the stored mail of a relay whose rspamd is dead reads much
+	// like any other. The relay has to be asked.
 
 	const HEALTH_OK             = 'ok';            // scanning, wired, contract intact
 	const HEALTH_NOT_DELIVERING = 'not_delivering';// alive-but-useless or dead — see reason

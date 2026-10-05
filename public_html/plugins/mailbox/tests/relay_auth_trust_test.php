@@ -11,9 +11,9 @@
  * stamps a pulled relay message is allowed to be trusted for.
  *
  * The trusted name is the RELAY's mail hostname, not this deployment's. The relay
- * runs the verifying milters and stamps under its own name, and its opendkim
- * strips sender-supplied lines carrying that name (provision_relay.sh
- * RemoveARFrom), so it is the one authserv-id on a pulled message that a sender
+ * runs the verifying milter (rspamd) and stamps under its own name, and that
+ * same rspamd strips every Authentication-Results line a message arrives with
+ * (rspamd_stateless.sh), so it is the one authserv-id on a pulled message that a sender
  * cannot have written. Matching against the deployment's own mail hostname
  * instead silently records every relayed message as 'unverified' whenever the
  * relay is not colocated — which is every fronted topology.

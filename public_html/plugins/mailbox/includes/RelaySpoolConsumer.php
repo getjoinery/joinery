@@ -529,10 +529,10 @@ class RelaySpoolConsumer {
 	/**
 	 * The authserv-id whose Authentication-Results stamps we trust on a pulled
 	 * message: the relay's own mail hostname (MailboxRelay::authservId). The
-	 * relay's milters did the verification and stamp under this name, and its
-	 * opendkim strips sender-supplied lines carrying it (provision_relay.sh
-	 * RemoveARFrom), so it is the one name on the message a sender cannot have
-	 * written.
+	 * relay's rspamd did the verification and stamps under this name, and
+	 * strips every Authentication-Results line a message arrives with
+	 * (rspamd_stateless.sh), so it is the one name on the message a sender
+	 * cannot have written.
 	 *
 	 * Empty when the relay row records no hostname at all, which lets the router
 	 * fall back to this deployment's own mail hostname — right for a colocated

@@ -27,7 +27,7 @@
  *  - Relay mail-host identity rows (A + PTR) with the operator/tenant split.
  *  - plugin.relay_enable renders INFO while DNS is still moving.
  *  - Provider getSpfMechanism shapes (static includes, local '' cases).
- *  - DKIM plan branching (specs/mailbox_provider_dkim.md): local opendkim only
+ *  - DKIM plan branching (specs/mailbox_provider_dkim.md): the local signer only
  *    when mail rides local Postfix, provider-driven rows under provider
  *    outbound — and provider DKIM row rendering
  *    (records verified against DNS, not_registered / unreachable verdicts)
@@ -266,13 +266,13 @@ try {
 
 	$c = topo_checker(topo('colocated'));
 	$plan = call_private($c, 'dkimPlan');
-	check($plan['local'] === true, 'colocated: local opendkim signs what the box submits');
+	check($plan['local'] === true, 'colocated: this server signs what the box submits');
 	check($plan['provider'] === true && $plan['class'] === 'MailgunProvider',
 		'colocated + API provider: provider records verified too');
 
 	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
 	$plan = call_private($c, 'dkimPlan');
-	check($plan['local'] === false, 'fronted: a local opendkim key is never prescribed');
+	check($plan['local'] === false, 'fronted: a local signing key is never prescribed');
 	check($plan['provider'] === true && $plan['class'] === 'MailgunProvider',
 		'fronted provider outbound: the provider is the signer');
 	check(!array_key_exists('smarthost', $plan), 'fronted: the relay sends nothing, so there is no smarthost gap to state');
@@ -281,11 +281,11 @@ try {
 	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
 	$plan = call_private($c, 'dkimPlan');
 	check($plan['provider'] === true && $plan['class'] === null,
-		'provider without the capability: generic guidance (class null), still never opendkim');
+		'provider without the capability: generic guidance (class null), still never the local signer');
 	$c = topo_checker(topo('colocated'));
 	$plan = call_private($c, 'dkimPlan');
 	check($plan['local'] === true && $plan['provider'] === false,
-		'colocated + local-submission provider: opendkim row only');
+		'colocated + local-submission provider: local signer row only');
 
 	harness_set_setting_mem('email_service', 'mailgun');
 
@@ -348,7 +348,7 @@ try {
 
 	$rows = call_private($c, 'providerDkimRows', null, 'SomeMail', 'generic.example', 'domain.dkim');
 	check($rows[0]['status'] === 'warn' && strpos($rows[0]['summary'], 'SomeMail') !== false,
-		'capability-less provider gets a generic row naming it — never an opendkim prescription');
+		'capability-less provider gets a generic row naming it — never a local signing key prescription');
 
 } catch (\Throwable $e) {
 	check(false, 'uncaught ' . get_class($e), $e->getMessage());

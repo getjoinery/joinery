@@ -223,7 +223,7 @@ class RelayUpgradeTest {
 		$probe->writePrivileged(array(
 			'collected_utc' => gmdate('c'),
 			'services' => array('rspamd' => array('active' => 'active')),
-			'milters' => array('rspamd' => true, 'opendkim' => true, 'opendmarc' => true),
+			'milters' => array('rspamd' => true),
 			'contract_ok' => true,
 			'postfix' => array('connections_1h' => 0, 'queue_depth' => 3, 'accepted' => 1, 'rejected' => 0, 'deferred' => 0, 'bounced' => 0),
 			'tenant_count' => 1,
