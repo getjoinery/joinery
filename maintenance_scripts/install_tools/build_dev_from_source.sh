@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#version 3.15 - The permissions-fix banner and the cache-move hints describe what fix_permissions.sh
+#               sets; they named group user1 and 770, which no install has used since the read-only tree
 #version 3.14 - Validators no longer narrate; dropped the ignored verbose argument
 # MODIFIED v3.12: Changed from "add new themes" to "update installed themes only" model
 # MODIFIED v3.12: Now uses sparse checkout to only fetch themes already in public_html
@@ -28,7 +30,7 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.14"
+DEPLOY_VERSION="3.15"
 
 # Capture script directory at startup (before any cd commands change working directory)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -528,7 +530,7 @@ if [ "$IS_FIX_PERMISSIONS_ONLY" = true ]; then
     echo "Target site: $TARGET_SITE"
     echo "========================================="
     echo "This will fix permissions for: /var/www/html/$TARGET_SITE"
-    echo "Owner: www-data, Group: user1, Permissions: 770 (777 for uploads)"
+    echo "Code: the tree owner, 755/644. Data (uploads, cache, logs): www-data:www-data 770 (fix_permissions.sh)"
     echo "========================================="
     read -p "Continue with permission fix? (y/N): " -n 1 -r
     echo
@@ -806,7 +808,7 @@ if [[ -d "/var/www/html/$TARGET_SITE/public_html/cache" ]]; then
         # Merge the two cache directories (public_html cache takes precedence)
         if ! cp -a /var/www/html/$TARGET_SITE/public_html/cache/. /var/www/html/$TARGET_SITE/cache/; then
             echo "ERROR: Failed to merge cache directories. This is likely a permissions issue."
-            echo "Try running: sudo chown -R www-data:user1 /var/www/html/$TARGET_SITE/public_html/cache"
+            echo "Try running: sudo chown -R www-data:www-data /var/www/html/$TARGET_SITE/public_html/cache"
             echo "Then run deployment again."
             exit 1
         fi
@@ -823,7 +825,7 @@ if [[ -d "/var/www/html/$TARGET_SITE/public_html/cache" ]]; then
         if ! mv /var/www/html/$TARGET_SITE/public_html/cache /var/www/html/$TARGET_SITE/cache; then
             echo "ERROR: Failed to move cache directory from public_html to site root."
             echo "This is likely a permissions issue."
-            echo "Try running: sudo chown -R www-data:user1 /var/www/html/$TARGET_SITE/public_html/cache"
+            echo "Try running: sudo chown -R www-data:www-data /var/www/html/$TARGET_SITE/public_html/cache"
             echo "Then run deployment again."
             exit 1
         fi
