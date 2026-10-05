@@ -22,7 +22,9 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
- * @version 1.5.0
+ * @version 1.6.0
+ * @changelog 1.6.0 - the device-link poll is a POST: the approved answer hands over a
+ *   one-time secret and scrubs it, which is a write, and a GET never writes
  * @changelog 1.5.0 - a bound device link (opened by a signed-in app, device_key_enroll)
  *   claims its sealed keys alone: no credential was minted, none is handed over
  * @changelog 1.4.0 - a device-link claim carries sealed_vault_keys ({scope: blob}) beside sealed_vault_key
@@ -240,7 +242,7 @@ class ApiAuthEndpoint {
 	}
 
 	/**
-	 * GET /api/v1/auth/device_link/{poll_token} — collect the outcome.
+	 * POST /api/v1/auth/device_link/{poll_token} — collect the outcome.
 	 *
 	 * While the user has not acted this says `pending` and nothing else. On the
 	 * first successful poll after approval it hands over the credential — and
@@ -248,11 +250,14 @@ class ApiAuthEndpoint {
 	 * ceremony as already claimed. A secret delivered twice is a secret that can
 	 * be stolen by whoever polls second.
 	 *
+	 * POST because collecting is a write: the scrub is what makes the secret
+	 * one-time, and a GET never writes.
+	 *
 	 * Always exits.
 	 */
 	protected static function handle_device_link_poll($poll_token) {
-		if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-			api_error('Device link polling must use GET method', 'ActionError', 405);
+		if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+			api_error('Device link polling must use POST method', 'ActionError', 405);
 		}
 
 		$settings = Globalvars::get_instance();

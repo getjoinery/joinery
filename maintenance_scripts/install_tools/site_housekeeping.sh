@@ -4,6 +4,9 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.3 - A cron entry that is the platform's own earlier rendering, every 15 or every 5
+#                minutes, is rewritten to every minute: a slow task held every other task up
+#                until the next tick, a quarter of an hour later. Any other file is still never touched.
 # Version: 1.2 - A logrotate file that is the platform's own earlier rendering, which ran as group
 #                user1 (a group no new server has, so logrotate refused it and logrotate.service
 #                failed), is rewritten from the template. Any other file is still never touched.
@@ -27,7 +30,8 @@
 #     logs (logrotate refuses a log named twice), and rewritten when it is the
 #     platform's earlier rendering that ran as group user1;
 #   - /etc/cron.d/joinery-{site}, the every-minute scheduled-task runner,
-#     written when ABSENT - never inside a container, where the container's
+#     written when ABSENT, and rewritten when it is the platform's earlier
+#     rendering that ran every 15 or every 5 minutes - never inside a container, where the container's
 #     start command owns the cron entry (/etc/cron.d does not survive a
 #     rebuild), and never with --no-cron.
 #   - in a container, {site}/RELEASE_MANIFEST(.sig) and its kept copy in
@@ -121,12 +125,22 @@ fi
 # Every minute: the tick is the floor on latency for every every_run task, and
 # the runner holds a per-task lock, so a slow task is skipped, not doubled.
 CRON="${FS_ROOT}/etc/cron.d/joinery-${SITENAME}"
+CRON_LINE="* * * * * www-data php ${SITE_ROOT}/public_html/utils/process_scheduled_tasks.php >> ${SITE_ROOT}/logs/cron_scheduled_tasks.log 2>&1"
+# The earlier renderings: the same line every 15 or every 5 minutes, comments
+# and blank lines aside. Nobody chose those intervals, so they are not an
+# owner's edit, and a slow task held every other task up until the next tick.
+CRON_EVERY="${CRON_LINE#\* }"
 if [[ "${NO_CRON}" == 1 || -f "${FS_ROOT}/.dockerenv" ]]; then
     : # the container's start command owns the cron entry
+elif [[ -f "${CRON}" ]] && { [[ "$(directives "${CRON}")" == "*/15 ${CRON_EVERY}" ]] \
+        || [[ "$(directives "${CRON}")" == "*/5 ${CRON_EVERY}" ]]; }; then
+    printf '%s\n' "${CRON_LINE}" > "${CRON}" && chmod 644 "${CRON}" \
+        && say "rewrote ${CRON}: it was the earlier rendering, which ran less often than every minute" \
+        || { warn "could not rewrite ${CRON}"; FAILED=1; }
 elif [[ -e "${CRON}" ]]; then
     :
 elif [[ -d "$(dirname "${CRON}")" ]]; then
-    printf '%s\n' "* * * * * www-data php ${SITE_ROOT}/public_html/utils/process_scheduled_tasks.php >> ${SITE_ROOT}/logs/cron_scheduled_tasks.log 2>&1" > "${CRON}" \
+    printf '%s\n' "${CRON_LINE}" > "${CRON}" \
         && chmod 644 "${CRON}" && say "wrote ${CRON} (it was absent)" \
         || { warn "could not write ${CRON}"; FAILED=1; }
 else

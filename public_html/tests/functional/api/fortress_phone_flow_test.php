@@ -114,7 +114,7 @@ $approved = drive_device_link_approve_logic(array('code' => $enroll['link_code']
 $session->clear_api_user();
 check(!$approved->error, 'the owner approves', (string)$approved->error);
 
-$r = api_request('GET', '/api/v1/auth/device_link/' . ($enroll['poll_token'] ?? ''));
+$r = api_request('POST', '/api/v1/auth/device_link/' . ($enroll['poll_token'] ?? ''));
 $blob = (string)($r['json']['data']['sealed_vault_keys']['mail'] ?? '');
 $opened = $blob !== '' ? $fx['box']->openEdge($blob, SealedBox::b64url($device_secret), $device_pub) : '';
 check($opened === $pkcs8, 'the poll\'s sealed key opens with the device secret to the vault\'s PKCS#8');

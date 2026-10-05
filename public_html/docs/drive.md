@@ -676,7 +676,7 @@ user approves in the browser they are already signed into.
    `sealed_vault_keys`), which mints the session `ApiKey`, creates the
    `SyncDevice` with the scopes it was handed (`sde_vault_scopes`), and parks
    the sealed keys and the encrypted one-time secret on the ceremony row.
-3. The client polls `GET /api/v1/auth/device_link/{poll_token}` and collects the
+3. The client polls `POST /api/v1/auth/device_link/{poll_token}` and collects the
    credential exactly once — with `sealed_vault_key` and `sealed_vault_keys`
    when it was given vaults; the row is scrubbed immediately after.
 

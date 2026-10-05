@@ -9,9 +9,10 @@
 #
 # site_housekeeping.sh writes the site's logrotate file and, on bare metal, its
 # cron entry - each only when ABSENT, so an owner's edit survives every
-# converge and moving a file aside is the reset. The one exception is the
-# platform's own earlier logrotate rendering, which ran as group user1 (a group
-# no new server has): it is rewritten from the template
+# converge and moving a file aside is the reset. The exceptions are the
+# platform's own earlier renderings: the logrotate file that ran as group user1
+# (a group no new server has) is rewritten from the template, and the cron entry
+# that ran every 15 or every 5 minutes is rewritten to every minute
 # (specs/agent_recipes_and_vocabulary.md, Host files). In a container it keeps
 # the release manifest at the site root the one the code matches, with a copy on
 # the config volume (B21). Driven unprivileged against a fixture /etc through
@@ -47,6 +48,30 @@ echo "# mine too" > "$R/etc/cron.d/joinery-mysite"
 JOINERY_SITE_HOUSEKEEPING_ROOT="$R" bash "$SCRIPT" mysite "$SITE" >/dev/null 2>&1
 chk "an owner's logrotate file survives" "$(cat "$R/etc/logrotate.d/joinery-mysite")" "# mine"
 chk "an owner's cron file survives" "$(cat "$R/etc/cron.d/joinery-mysite")" "# mine too"
+
+echo "=== The earlier cron renderings (every 15 or 5 minutes) are rewritten; nothing else is ==="
+EVERY="* * * * www-data php ${SITE}/public_html/utils/process_scheduled_tasks.php >> ${SITE}/logs/cron_scheduled_tasks.log 2>&1"
+for every in '*/15' '*/5'; do
+    RC="$T/fsc${every#*/}"; mkdir -p "$RC/etc/logrotate.d" "$RC/etc/cron.d"
+    printf '%s\n' "${every} ${EVERY}" > "$RC/etc/cron.d/joinery-mysite"
+    out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$RC" bash "$SCRIPT" mysite "$SITE" 2>&1)"; rc=$?
+    chk "${every}: exit 0" "$rc" "0"
+    chk "${every}: rewritten to every minute" "$(cat "$RC/etc/cron.d/joinery-mysite")" "* ${EVERY}"
+    chk "${every}: it says so" "$(grep -c 'rewrote .*joinery-mysite: it was the earlier rendering' <<<"$out")" "1"
+done
+RC="$T/fscx"; mkdir -p "$RC/etc/logrotate.d" "$RC/etc/cron.d"
+printf '%s\n' "*/15 * * * * www-data php ${SITE}/public_html/utils/process_scheduled_tasks.php --quiet" > "$RC/etc/cron.d/joinery-mysite"
+JOINERY_SITE_HOUSEKEEPING_ROOT="$RC" bash "$SCRIPT" mysite "$SITE" >/dev/null 2>&1
+chk "an owner's own every-15-minutes line survives" "$(cat "$RC/etc/cron.d/joinery-mysite")" "*/15 * * * * www-data php ${SITE}/public_html/utils/process_scheduled_tasks.php --quiet"
+RC="$T/fscd"; mkdir -p "$RC/etc/logrotate.d" "$RC/etc/cron.d"; touch "$RC/.dockerenv"
+printf '%s\n' "*/15 ${EVERY}" > "$RC/etc/cron.d/joinery-mysite"
+JOINERY_SITE_HOUSEKEEPING_ROOT="$RC" bash "$SCRIPT" mysite "$SITE" >/dev/null 2>&1
+chk "in a container the earlier rendering is the start command's, left alone" "$(cat "$RC/etc/cron.d/joinery-mysite")" "*/15 ${EVERY}"
+RC="$T/fscn"; mkdir -p "$RC/etc/logrotate.d" "$RC/etc/cron.d"
+printf '%s\n' "*/15 ${EVERY}" > "$RC/etc/cron.d/joinery-mysite"
+out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$RC" bash "$SCRIPT" mysite "$SITE" 2>&1)"
+out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$RC" bash "$SCRIPT" mysite "$SITE" 2>&1)"
+chk "a second run leaves the rewritten line alone" "$(grep -c 'joinery-mysite' <<<"$out")/$(cat "$RC/etc/cron.d/joinery-mysite")" "0/* ${EVERY}"
 
 echo "=== The earlier rendering (group user1) is rewritten; nothing else is ==="
 # The file every server installed from 09-23 has, byte for byte.
