@@ -173,15 +173,13 @@ checks the mail before the site pulls it. A per-container rspamd needed about
 subaccount per customer and one SMTP user (hosted tier § Outbound mail). The
 provider counts the monthly send allowance. Nothing on the box can raise it.
 
-**As built, every starter site would show a red setup check (S18).** The mail
-leg configures SMTP2GO as a generic SMTP service. On a relay-fronted site the
-SPF plan fails as a required check for any service that is not an API relay
-(`InboundEmailSetupCheck` `spfPlan`, "switch provider"). Compose is also
-refused until the origin-leak probe passes (`OutboundTransport`). The hosted
-mail leg switches to SMTP2GO's API (`Smtp2GoProvider`), so it relays raw
-messages over HTTPS the way Mailgun and SES do. Check that the provider
-implements the raw-relay capability. If it does not, that is part of this
-work.
+**A starter site's relay hides nothing (S18, settled by `multi_tenant_docker_hosts`
+WP9).** The box's address is shared with its neighbours, so the hidden-origin rules
+of a bare-metal relay do not apply in a container (owner decision, 2026-10-05). The
+mail leg's SMTP2GO, as an API provider or as plain SMTP, gets an SPF row that names
+the provider and never the box (nothing at all when SMTP2GO sends with its own
+return-path domain), and compose is never held for the origin-leak probe. No
+provider change is needed for this.
 
 **The privacy promise gets stronger here, not weaker.** Mail sealed at the
 relay is ciphertext before it ever reaches the shared box, so a neighbour who

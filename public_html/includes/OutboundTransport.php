@@ -22,6 +22,8 @@
  * `filesSent` is the PRESETS smtp_files_sent capability: true when the provider's
  * SMTP saves the sent copy itself; false when two-way sync must APPEND it.
  *
+ * @version 1.7 - a site container's relay hides nothing (its address is shared and public), so its
+ *                compose sends take the ordinary path (specs/multi_tenant_docker_hosts.md WP9)
  * @version 1.6 - the relay is inbound only: a hidden-origin send is allowed through an API
  *                provider by construction or through SMTP once the origin-leak probe has
  *                cleared it (InboundEmailHealth::hiddenOriginSendAllowed); the smarthost
@@ -113,10 +115,14 @@ class OutboundTransport {
         // relay row's mere existence: relays are born enabled and run through
         // the DNS move, during which sends must keep working the legacy way
         // (the origin is still public until the MX flips, so nothing leaks).
+        // A site container has no mail server and its relay hides nothing: the
+        // box's address is shared with its neighbours and published in their
+        // DNS. Its compose sends take the ordinary path below.
         $relay = self::activeRelay();
         $cutover_complete = ((string)Globalvars::get_instance()
             ->get_setting('mailbox_relay_cutover_complete') === '1');
-        if ($relay !== null && $cutover_complete) {
+        require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+        if ($relay !== null && $cutover_complete && mailbox_site_has_mail_server()) {
             require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
             $verdict = InboundEmailHealth::hiddenOriginSendAllowed();
             if (!$verdict['allowed']) {

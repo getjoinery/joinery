@@ -1141,7 +1141,9 @@ raw-MIME relay. A provider without the capability is detected via
 (compose); forwarding falls back to an SMTP relay, and the compose path allows
 a non-API provider only once the origin-leak probe has round-tripped clean
 within its window (`InboundEmailHealth::hiddenOriginSendAllowed`), refusing it
-otherwise with a message naming the probe. See
+otherwise with a message naming the probe. A site container's relay hides
+nothing (the box's address is shared with its neighbours and published in
+their DNS), so its compose sends take the ordinary path. See
 [Mailbox — Forwarding relay](../plugins/mailbox/docs/overview.md#forwarding-relay)
 and [Mailbox — Outbound sending](../plugins/mailbox/docs/overview.md#outbound-sending)
 for how the mailbox plugin resolves each path.

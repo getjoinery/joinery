@@ -21,6 +21,14 @@
  *      actually doing (relay row => 'relay', else 'direct').
  *   3. Otherwise '' — undecided, which every consumer treats as direct.
  *
+ * A SITE CONTAINER HAS NO MAIL SERVER (specs/multi_tenant_docker_hosts.md WP9):
+ * no Postfix and no rspamd. Mail that arrives by SMTP can then reach it only
+ * through a relay, so it never receives directly, whatever the setting says. A
+ * webhook provider (Mailgun, SES, SendGrid) and an IMAP feed need no mail
+ * server, and work in a container as anywhere else.
+ *
+ * @version 1.9 - a site container whose mail arrives by SMTP receives through a relay only
+ *                (mailbox_site_has_mail_server, mailbox_needs_relay)
  * @version 1.8 - no choice card: the receive mode follows the relay's Enable / Disable
  *                (relay_admin.php); the comparison and its handler are gone
  * @version 1.7 - the settled-state sentence moves into the Relay section (relay_section.php)
@@ -36,14 +44,18 @@
  *
  * @return string 'relay' | 'direct' | '' (undecided)
  */
-function mailbox_receive_mode_resolve(bool $has_relay, string $setting, bool $has_domains): string {
+function mailbox_receive_mode_resolve(bool $has_relay, string $setting, bool $has_domains,
+		bool $relay_only = false): string {
 	if ($setting === 'direct' || $setting === 'relay') {
-		return $setting;
+		$mode = $setting;
+	} elseif ($has_domains) {
+		$mode = $has_relay ? 'relay' : 'direct';
+	} else {
+		$mode = '';
 	}
-	if ($has_domains) {
-		return $has_relay ? 'relay' : 'direct';
-	}
-	return '';
+	// A site that cannot receive directly (mailbox_needs_relay) is never
+	// direct: what would have been direct is a relay it does not have yet.
+	return ($relay_only && $mode === 'direct') ? 'relay' : $mode;
 }
 
 /**
@@ -73,17 +85,50 @@ function mailbox_receive_mode(): string {
 	// topology. An IMAP-source anchor (gmail.com behind a connected account)
 	// receives at its provider, so an IMAP-only deployment stays undecided
 	// (specs/imap_source_domain_boundaries.md § 3).
-	$domains = new MultiInboundEmailDomain(array('deleted' => false));
-	$domains->load();
-	$has_receiving_domain = false;
-	foreach ($domains as $d) {
-		if (!$d->is_imap_source()) {
-			$has_receiving_domain = true;
-			break;
-		}
-	}
 	$setting = (string)Globalvars::get_instance()->get_setting('mailbox_receive_mode');
 
-	return mailbox_receive_mode_resolve(mailbox_receive_relay_exists(), $setting, $has_receiving_domain);
+	return mailbox_receive_mode_resolve(mailbox_receive_relay_exists(), $setting,
+		mailbox_receiving_domain_exists(), mailbox_needs_relay());
+}
+
+/** Whether any live domain receives mail here (an IMAP-source anchor does not). */
+function mailbox_receiving_domain_exists(): bool {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
+	$domains = new MultiInboundEmailDomain(array('deleted' => false));
+	foreach ($domains as $d) {
+		if (!$d->is_imap_source()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Whether this site has a mail server of its own (Postfix, rspamd, port 25).
+ * A bare-metal server does; a site container does not: its mail arrives
+ * through a relay, which checks it, and every sending provider is an API or
+ * an outside server. Read from the installer's record of where the site runs
+ * (deployment_environment), the one place that says so.
+ */
+function mailbox_site_has_mail_server(): bool {
+	return Globalvars::get_instance()->get_setting('deployment_environment', true, true) !== 'docker';
+}
+
+/**
+ * Whether this site's mail arrives by SMTP (the Postfix provider) rather than
+ * through a provider's webhook.
+ */
+function mailbox_receives_by_smtp(): bool {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
+	$provider = InboundProviderRegistry::active();
+	return !$provider::isWebhook();
+}
+
+/**
+ * Whether only a relay can take this site's mail in: a site container (no mail
+ * server of its own) whose mail arrives by SMTP.
+ */
+function mailbox_needs_relay(): bool {
+	return !mailbox_site_has_mail_server() && mailbox_receives_by_smtp();
 }
 ?>

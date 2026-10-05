@@ -38,6 +38,8 @@
  * has four states rather than one call: waiting for an answer is a state the
  * phase already knew how to be in, because an unstamped step is simply retried.
  *
+ * @version 1.7 - a mail record set with no MX for the domain is published but not stamped, so the
+ *                step comes back for it (a site container prescribes none until it has a relay)
  * @version 1.6 - the PTR step closes when the customer's cloud grant is dead instead of retrying
  *                forever, which kept the domain from ever reaching active (and so from the
  *                expiry countdown); set_reverse_dns() is a protected seam for tests
@@ -546,6 +548,24 @@ class ProvisionManagedDomains {
 		if (!$this->publish($row, $plan, 'mail records')) {
 			// Deliberately NOT consumed — see the docblock. The box's answer is
 			// still good; it is the zone that refused.
+			return 0;
+		}
+
+		// A record set with no MX has nowhere for mail to
+		// arrive. A site container prescribes none until a relay fronts it
+		// (multi_tenant_docker_hosts WP9). Stamping it would mean the MX is never
+		// published once the relay exists, so publish what there is and come back.
+		$has_mx = false;
+		foreach ($plan->toArray()['records'] as $record) {
+			if (strtoupper((string)($record['type'] ?? '')) === 'MX' && empty($record['absent'])) {
+				$has_mx = true;
+			}
+		}
+		if (!$has_mx) {
+			$this->mark_prepare_consumed($job);
+			$this->errors[] = 'Mail records for ' . $domain
+				. ' published without an MX record; the site has nowhere to receive mail yet'
+				. ' (a site in a container needs a relay; any other needs its mail hostname set).';
 			return 0;
 		}
 

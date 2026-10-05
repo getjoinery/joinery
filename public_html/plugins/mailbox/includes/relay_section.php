@@ -11,6 +11,7 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.13 - a site container (no mail server of its own) is never told to receive directly
  * @version 2.12 - the relay region defaults to us-east
  * @version 2.11 - a lasting "Last tested" line: the relay's answer and the leak test's result
  * @version 2.10 - while an update re-images the relay, the health line says so instead of failing
@@ -280,6 +281,13 @@ function mailbox_relay_health_html(array $battery, $relay): string {
 /** What deleting a (disabled) relay does, said before it happens. */
 function mailbox_relay_delete_message($relay): string {
 	$machine = (string)$relay->get('mrl_public_ip') ?: ((string)$relay->get('mrl_name') ?: (string)$relay->get('mrl_mx_hostname'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	if (mailbox_needs_relay()) {
+		return 'Remove the relay at ' . $machine . '? This site has no mail server of its own, so it receives no '
+			. 'mail until you create a new relay and point your domains\' MX records at it.'
+			. (((string)$relay->get('mrl_cloud_instance_id') !== '')
+				? ' The server itself keeps running, and billing, at your cloud provider until you delete it there.' : '');
+	}
 	return ((string)$relay->get('mrl_cloud_instance_id') !== '')
 		? 'Remove the relay at ' . $machine . ' from your mail setup? The server itself keeps running, and billing, '
 			. 'at your cloud provider until you delete it there. If your domains\' MX records still point at it, '
@@ -291,6 +299,12 @@ function mailbox_relay_delete_message($relay): string {
 /** What disabling the relay does, said before it happens. */
 function mailbox_relay_disable_message($relay): string {
 	$name = (string)$relay->get('mrl_name') ?: (string)$relay->get('mrl_mx_hostname');
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	if (mailbox_needs_relay()) {
+		return 'Stop using the relay ' . $name . '? This site has no mail server of its own, so it stops receiving '
+			. 'mail: new mail waits on the relay until you enable it again. The relay keeps running, and billing, '
+			. 'at your cloud provider.';
+	}
 	return 'Stop using the relay ' . $name . '? This server stops collecting mail from it and receives mail '
 		. 'directly instead. Your domains\' MX records still point at the relay, so until you point them at this '
 		. 'server (the DNS checks will show what to change) and turn this server\'s mail listener back on, new mail '
@@ -374,14 +388,21 @@ function mailbox_relay_section_render($page, array $v): void {
 			// the world sends mail - so both are offered, in one place.
 			echo '<p class="text-danger"><strong>Mail is addressed to a relay this deployment no longer has.</strong> '
 				. 'The cutover is recorded complete, so your domains\' MX records point at a relay, and no relay is '
-				. 'enabled here. Two ways out: create a relay below (its address becomes the new MX target), or '
-				. 'repoint every hosted domain\'s MX at this server and turn its mail listener back on in the '
-				. 'Local mail listener box.</p>';
+				. 'enabled here. '
+				. (mailbox_site_has_mail_server()
+					? 'Two ways out: create a relay below (its address becomes the new MX target), or '
+						. 'repoint every hosted domain\'s MX at this server and turn its mail listener back on in the '
+						. 'Local mail listener box.'
+					: 'Create a relay below; its address becomes the new MX target.')
+				. '</p>';
 		}
-		echo '<p>' . htmlspecialchars(mailbox_receive_mode() === 'relay'
+		echo '<p>' . htmlspecialchars(mailbox_needs_relay()
+			? 'This site runs in a container and has no mail server of its own, so it receives mail only through a '
+				. 'relay. None is set up yet; until one is, mail cannot reach it.'
+			: (mailbox_receive_mode() === 'relay'
 			? 'This server is set up to receive through a relay, but none is set up yet. Until one is, mail cannot reach it.'
 			: 'No relay: mail comes straight to this server. A relay would take mail in first and keep this server\'s '
-				. 'address out of public DNS.') . '</p>';
+				. 'address out of public DNS.')) . '</p>';
 	} else {
 		foreach ($v['relays'] as $row) {
 			$relay = $row['model'];

@@ -1,4 +1,5 @@
 # Joinery Docker Template
+# VERSION 5.9 - BASE_IMAGE_VERSION's default follows install.sh to 2.1 (a base with no mail stack).
 # VERSION 5.8 - No clone options: CLONE_FROM and JOINERY_CLONE_KEY are not read (site_copy.md WP9).
 # VERSION 5.7 - The vhost render substitutes no address: the template has had no {{SERVER_IP}} since
 #               default_virtualhost.conf 2.08 (specs/site_copy.md B25)
@@ -141,7 +142,7 @@
 #
 # Usage:
 #   docker build \
-#     --build-arg BASE_IMAGE_VERSION=2.0 \
+#     --build-arg BASE_IMAGE_VERSION=2.1 \
 #     --build-arg SITENAME=clientsite \
 #     --build-arg DOMAIN_NAME=client.example.com \
 #     -t joinery-clientsite .
@@ -171,7 +172,7 @@
 # BASE_IMAGE_VERSION must be declared before FROM so it can be used in FROM.
 # Default matches the version install.sh always passes via --build-arg; the
 # default only exists to satisfy BuildKit's static-evaluation check.
-ARG BASE_IMAGE_VERSION=2.0
+ARG BASE_IMAGE_VERSION=2.1
 FROM joinery-base:${BASE_IMAGE_VERSION}
 
 # Build arguments (customizable per deployment)

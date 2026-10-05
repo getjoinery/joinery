@@ -8,6 +8,7 @@
  * identity and the health run: Setup is where you check whether things work.
  * One POST saves the whole form; values are read back fresh on the redirect.
  *
+ * @version 1.8 - a site container with no relay yet says it receives through one
  * @version 1.7 - learning is offered everywhere filing is on (no scanner-presence clamp); the
  *   learning progress line (spam_learning_in_core.md)
  * @version 1.6 - the relay secret is forwarded only when posted: a locked stored secret is absent, which keeps it
@@ -146,7 +147,10 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 				$scanner_state = 'Your email provider scans mail before it reaches this server.';
 				break;
 			case 'relay':
-				$scanner_state = 'Your relay scans mail before it reaches this server.';
+				$scanner_state = (mailbox_needs_relay() && !mailbox_receive_relay_exists())
+					? 'This site receives mail through a relay, which scans it before it reaches this site. '
+						. 'None is set up yet.'
+					: 'Your relay scans mail before it reaches this server.';
 				break;
 			default:
 				$scanner_state = 'This server receives mail directly, and its own scanner checks it on the way in.';

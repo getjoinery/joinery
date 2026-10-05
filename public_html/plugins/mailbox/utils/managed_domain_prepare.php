@@ -32,6 +32,8 @@
  *
  * Usage: php plugins/mailbox/utils/managed_domain_prepare.php <domain>
  *
+ * @version 1.3 - a site container makes no local key (it has no rspamd; its provider signs), and a
+ *   provider's DKIM record counts as ready whether it is a TXT or a CNAME
  * @version 1.2 - the signing key is looked for where rspamd signs from
  * @version 1.1 - reached as an agent primitive; the domain is its whole vocabulary
  * @version 1.0
@@ -68,9 +70,12 @@ try {
 
 	// ---- 2. A signing key, so outbound mail from this domain can be trusted.
 	// provision_dkim.sh is idempotent and never regenerates an existing key —
-	// regenerating would invalidate a DNS record already published.
+	// regenerating would invalidate a DNS record already published. A site
+	// container has no rspamd to make one with: its mail is signed by the
+	// sending provider, whose records the plan below carries.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
 	$key_file = InboundEmailSetupCheck::localSigningKeyPath($domain);
-	if (!is_readable($key_file)) {
+	if (mailbox_site_has_mail_server() && !is_readable($key_file)) {
 		$script = PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_dkim.sh');
 		if (is_file($script)) {
 			$cmd = (posix_geteuid() === 0 ? '' : 'sudo -n ')
@@ -97,7 +102,9 @@ try {
 		if (!empty($record['absent'])) {
 			continue;
 		}
-		if (strtoupper((string)($record['type'] ?? '')) === 'TXT'
+		// A local key is a TXT record; a provider may issue its key as a CNAME
+		// to a record it publishes itself (SMTP2GO does).
+		if (in_array(strtoupper((string)($record['type'] ?? '')), array('TXT', 'CNAME'), true)
 				&& strpos((string)($record['name'] ?? ''), '._domainkey.') !== false) {
 			$dkim_ready = true;
 		}

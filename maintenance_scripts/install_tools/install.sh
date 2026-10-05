@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 2.96 - The base image carries no Postfix (BASE_IMAGE_VERSION 2.1): a site container receives
+#               mail through a relay, and nothing in it sends through a local mail server
+#               (specs/multi_tenant_docker_hosts.md WP9). A bare-metal server keeps Postfix.
 #VERSION 2.95 - --cpus and --pids-limit for a site container (specs/multi_tenant_docker_hosts.md
 #               WP3), recorded in the run spec like --memory. A new site gets a ceiling of 512
 #               processes; a rebuild keeps the spec's. A ceiling above the CPUs Docker counts is
@@ -548,7 +551,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # joinery-base image tag. Bump when Dockerfile.base or do_server_setup changes
 # (Ubuntu version, PHP version, new apt packages, new system config, etc.).
 # After bumping: run './install.sh build-base' on each host, then rebuild sites.
-BASE_IMAGE_VERSION="2.0"
+BASE_IMAGE_VERSION="2.1"
 
 # Where `install.sh server` records the postgres role password it generated, and
 # where `install.sh site` looks for it on bare metal. One constant, because the
@@ -2937,15 +2940,22 @@ EOF
     print_step "Installing PostgreSQL server..."
     apt install -y postgresql postgresql-contrib
 
-    # Install the inbound mail stack (Postfix). Baked into the base
-    # image so it survives container rebuilds; the Mailbox plugin's
-    # install_email.sh configures it and adds rspamd, the mail checker. The
-    # global DEBIAN_FRONTEND export keeps postfix's debconf prompt from blocking
-    # a bare-metal run. See spec mail_stack_container_persistence.
-    print_step "Installing mail stack (Postfix)..."
-    apt install -y \
-        postfix \
-        postfix-pgsql
+    # Install the inbound mail stack (Postfix) on a bare-metal server. The
+    # Mailbox plugin's install_email.sh configures it and adds rspamd, the mail
+    # checker. The global DEBIAN_FRONTEND export keeps postfix's debconf prompt
+    # from blocking the run.
+    #
+    # The base image has none: a site container's mail arrives through a relay,
+    # which checks it, and every sending provider is an API or an outside server
+    # (specs/multi_tenant_docker_hosts.md WP9).
+    if is_docker; then
+        print_info "Container image: no mail stack (a container site receives mail through a relay)"
+    else
+        print_step "Installing mail stack (Postfix)..."
+        apt install -y \
+            postfix \
+            postfix-pgsql
+    fi
 
     # Start and enable PostgreSQL
     service_start postgresql

@@ -26,6 +26,7 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.18 - a site container has no mail identity box (it has no mail server)
  * @version 3.17 - the full health run groups Domain DNS by domain; a domain with nothing to
  *                act on folds to one line
  * @version 3.16 - Advanced: one Relay section (the "How mail reaches this server" box folds into
@@ -825,6 +826,9 @@ if (!$advanced) {
 	// Two values that are set once: shown as values, with an Edit link to the
 	// form. The form opens by itself when auto-detection found a private
 	// address, which is the one case that needs a value typed in.
+	// A site container has no mail server, so it has no mail identity to show
+	// or set: its mail arrives through a relay (multi_tenant_docker_hosts WP9).
+	if (mailbox_site_has_mail_server()) {
 	$identity_edit = !empty($_GET['edit_identity']) || $public_ip_private || $mail_hostname === '';
 	echo '<div id="mail-identity">';
 	$page->begin_box(array('title' => "This server's mail identity"));
@@ -860,6 +864,7 @@ if (!$advanced) {
 	$page->end_box();
 	echo '</div>';
 	}
+	} // mail identity: a server with its own mail stack
 
 	// --- DNS publish box, once there is nothing left to fix ---
 	// Above the copy-paste table, which is the manual version of the same thing.

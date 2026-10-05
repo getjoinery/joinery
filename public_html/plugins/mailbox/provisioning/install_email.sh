@@ -2,6 +2,9 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.27 - In a site container this installs and starts nothing: a container has no mail
+#                server of its own and receives mail through a relay
+#                (specs/multi_tenant_docker_hosts.md WP9). It says so and exits 0.
 # Version: 2.26 - The two old programs are removed only once Postfix names rspamd alone and
 #                rspamd is answering; rspamd's milter listens on the loopback only.
 # Version: 2.25 - rspamd is the only program that checks mail (mail_checking_in_rspamd.md):
@@ -179,10 +182,9 @@
 #     nothing for a domain until it has a key; run provision_dkim.sh <domain>
 #     for each domain. See plugins/mailbox/docs/overview.md.
 #
-# Docker: run this INSIDE the same container as the app - Postfix must be
-# co-located with the PHP handler it pipes to, and reads the app's own
-# database. The container also has to publish port 25 (e.g. docker run -p 25:25)
-# and (re)start Postfix on boot, since a container usually has no systemd.
+# A site container has no mail server: this script installs and starts
+# nothing there and exits 0. Its mail arrives through a relay, which checks it,
+# and every sending provider is an API or an outside server.
 #
 # Usage:  sudo bash install_email.sh
 #
@@ -253,6 +255,15 @@ read_site_setting() {
         echo preg_match("/settings\[.".$argv[2].".\]\s*=\s*.([^\x27\"]*)/", $config, $m) ? $m[1] : "";
     ' "${CONFIG_FILE}" "$1"
 }
+
+# A site container has no mail server of its own (the installer records where
+# the site runs as deployment_environment). Exit 0: this runs at every container
+# start, and the start continues.
+if [[ "$(read_site_setting deployment_environment)" == "docker" ]]; then
+    echo "This site runs in a container: it has no mail server of its own and receives mail"
+    echo "through a relay, which checks it. Nothing to install or start here."
+    exit 0
+fi
 
 DBNAME="$(read_site_setting dbname)"
 if [[ -z "${DBNAME}" ]]; then

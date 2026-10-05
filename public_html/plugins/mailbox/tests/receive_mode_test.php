@@ -13,7 +13,7 @@
  *
  * Run: php tests/run.php safe --filter=mailbox_receive_mode
  *
- * @version 1.1
+ * @version 1.2 - a site container resolves to relay
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -39,6 +39,20 @@ check(mailbox_receive_mode_resolve(false, 'bogus', true) === 'direct', 'garbage 
 check(mailbox_receive_mode_resolve(false, '', false) === '', 'blank deployment is undecided');
 check(mailbox_receive_mode_resolve(true, '', false) === '', 'a provisioned relay does not decide for the admin');
 check(mailbox_receive_mode_resolve(false, 'bogus', false) === '', 'garbage setting alone stays undecided');
+
+// 4. A site container whose mail arrives by SMTP has no mail server to receive
+// it directly (specs/multi_tenant_docker_hosts.md WP9): what would have been
+// direct is a relay it does not have yet. Undecided stays undecided.
+foreach (array(array(false, 'direct', true), array(true, 'direct', true), array(false, '', true),
+		array(false, 'bogus', true), array(false, 'direct', false)) as $c) {
+	check(mailbox_receive_mode_resolve($c[0], $c[1], $c[2], true) === 'relay',
+		'relay-only: never direct (relay row ' . ($c[0] ? 'yes' : 'no')
+		. ', setting \'' . $c[1] . '\', domains ' . ($c[2] ? 'yes' : 'no') . ')');
+}
+check(mailbox_receive_mode_resolve(false, '', false, true) === '', 'relay-only and undecided stays undecided');
+check(mailbox_receive_mode_resolve(true, 'relay', true, true) === 'relay', 'relay-only behind a relay is relay');
+check(mailbox_receive_mode_resolve(false, 'direct', true, false) === 'direct',
+	'a site that can receive directly keeps its chosen direct');
 
 section('live resolver');
 

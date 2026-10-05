@@ -20,6 +20,8 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.26 - a site container has no mail server: checkInboundMailServer asks for an enabled
+ *   relay when its mail arrives by SMTP and a domain receives here; checkOriginHidden does not apply
  * @version 1.25 - checkContentSpamScanner checks the milter (wired, answering on 11332) on a
  *   deployment with no relay or webhook provider; the controller probe is gone
  * @version 1.24 - IPv4 and IPv6: the origin is this server's IPv4 and its public IPv6
@@ -82,6 +84,18 @@ class InboundEmailHealth {
         // decommissioned, an ANSWERING port 25 is the failure — the attack surface
         // the decommission removed has come back.
         $settings = Globalvars::get_instance();
+        // A site container has no mail server of its own: mail that arrives by
+        // SMTP reaches it only through a relay (specs/multi_tenant_docker_hosts.md
+        // WP9). A webhook provider needs none, and goes on below.
+        require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+        if (mailbox_needs_relay()) {
+            if (self::activeRelay() === null && mailbox_receiving_domain_exists()) {
+                throw new ProvisioningCheckFailed(
+                    'No relay is enabled, so no mail reaches this site: it runs in a container and has no '
+                    . 'mail server of its own. Set up or enable a relay on the Setup tab.');
+            }
+            return;
+        }
         if (self::activeRelay() === null
                 && (string)$settings->get_setting('mailbox_relay_cutover_complete') === '1') {
             // The world still sends this deployment's mail to a relay it no longer
@@ -667,6 +681,12 @@ class InboundEmailHealth {
     public static function checkOriginHidden() {
         $relay = self::activeRelay();
         if ($relay === null) {
+            return;
+        }
+        // A site container's relay hides nothing: the box's address is shared
+        // with its neighbours and published in their DNS.
+        require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+        if (!mailbox_site_has_mail_server()) {
             return;
         }
         // Before the DNS cutover completes, the box's address is expected in

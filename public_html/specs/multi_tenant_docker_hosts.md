@@ -9,8 +9,10 @@ memory inside a container) ships with agent 1.57.0. WP0 built 2026-10-05
 migrate_site_to_code_volumes.sh 1.1, remove_account.sh 2.3; gate site_run_spec);
 WP3 built 2026-10-05 (install.sh 2.95, _site_run_spec.sh 1.1,
 rebase_site_container.sh 1.9, migrate_site_to_code_volumes.sh 1.2). Both run on a
-scratch Nanode the same day; the rebase-with-caps check is still to run. Nothing
-else is built. Split out of the starter
+scratch Nanode the same day; the rebase-with-caps check is still to run. WP9
+built 2026-10-05 (install.sh 2.96, joinery-base 2.1, install_email.sh 2.27,
+mailbox plugin 1.134.0; test mailbox_container_mail, gate container_mail_stack).
+Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -531,6 +533,67 @@ What changes:
    and no rspamd. The base image has neither package. A container site's
    Setup page has no listener row.
 
+**Built 2026-10-05.** A site knows it is a container from the installer's
+`deployment_environment` record in its config, read by one helper,
+`mailbox_site_has_mail_server()` (`receive_mode.php`); `install_email.sh` reads
+the same record and exits 0 before touching anything. `install.sh server`
+skips Postfix when `is_docker` (an image build), and the base is
+`joinery-base` 2.1. With no relay row, a container's Setup topology is
+`relay_needed` rather than colocated: fronted (provider SPF and DKIM, never the
+box's address), with no MX or A record prescribed and each domain's MX row
+saying a relay is needed. Its host layer is one row, **How mail reaches this
+site**, red with no relay and green behind one; the HELO-name rows, the
+Postfix, port 25 and rspamd rows, the Local mail listener box and its actions,
+and the "receive directly" wording on relay Disable and Delete are gone for a
+container. The provisioning check asks for an enabled relay. Found while
+building it: `managed_domain_prepare` ran `provision_dkim.sh` (which needs
+rspamd) in a container, and counted DKIM ready only for a TXT record, so a
+provider that issues its key as a CNAME (SMTP2GO) would have kept the domain
+waiting for a key forever; it now skips the local key in a container and
+counts either record type. **Review (reviewer2, 2026-10-05, B1-B4 fixed):**
+"no mail server" is not "needs a relay": mail that arrives by SMTP needs one
+(`mailbox_needs_relay()`), while a webhook provider and an IMAP feed work in a
+container unchanged, and a container with no receiving domain is only told it
+will need a relay. **A container's relay hides nothing (owner decision,
+2026-10-05, option A of three):** the address belongs to the whole box, and one
+neighbour publishing it exposes every site on it (on docker-prod,
+`developers.getjoinery.com` points at the box while `getjoinery.com` sits behind
+Cloudflare). A site that needs a hidden address runs on its own server. So the
+hidden-origin rules are a bare-metal relay's only (`originHidden()`). Rejected:
+the bare-metal rules in a container (they would hold SMTP2GO, Joinery services
+and plain SMTP back from compose for a guarantee a shared box cannot give), and
+a per-host "this host hides its address" switch (nothing keeps a later site on
+the host from publishing the address; it can be added on top of this later): a container's SPF names its
+providers and never the box, and needs nothing when they send with their own
+return-path domain (SMTP2GO, Joinery services); compose is never held for the
+origin-leak probe (`OutboundTransport` 1.7); Direct is served from the site's
+web host; `checkOriginHidden` does not run. A disabled relay turns the host row
+red. A managed domain's mail step publishes a plan with no MX but leaves the
+step open (`ProvisionManagedDomains` 1.7), so the MX goes out once a relay
+exists. Also from the review: a sending setting aimed at the box's own mail
+server gets its own red row in a container (the decommission guardrail reads
+the same check, now covering a forwarding SMTP host too), and the mail
+identity box and the relay card's tunnel wording are gone for a container. All
+eight docker-prod configs record `deployment_environment = docker`.
+**docker-prod (read 2026-10-05):** the mailbox
+plugin is active on none of its eight sites (getjoinery has the files,
+inactive), no container publishes port 25 and none runs Postfix or rspamd, so
+nothing moves before the release; every image there still carries the Postfix
+package until its next rebuild. **On the scratch Nanode:** base 2.0 has
+`postfix` and `postfix-pgsql`; base 2.1 has neither, and no rspamd or
+`/etc/postfix/main.cf`. In a site rebuilt on 2.1 with the new plugin,
+`install_email.sh` printed that the site receives through a relay, exited 0 and
+started nothing; the Setup checks read no mail server, receive mode relay,
+topology `relay_needed` and the one red row; after a restart no Postfix or
+rspamd process ran and the site used 90 MB. A rebuild does not refresh the code
+volume, so a site rebuilt onto 2.1 before its code upgrade still runs the old
+installer, which apt-installs Postfix and rspamd into the container at every
+start until the upgrade lands. No site in the fleet has the mailbox plugin
+active in a container, so no release ordering is needed today. The full chain
+(a signed release's installer run by the container start) is in the live
+verification queue: a hand-copied plugin fails the release manifest check, so
+the start skipped it on the box.
+
 ## Host-agent words this needs
 
 - stop and start one container, with the held-stopped record (WP7)
@@ -605,9 +668,13 @@ box without it.
   isolation bullets describe both kinds of box.
 - `plugins/server_manager/docs/overview.md`: the host's cap fields, **Change
   limits**, and holding a site stopped.
-- `plugins/mailbox/docs/overview.md` (WP9): § Firewall and § Container
-  persistence say a container has no mail stack and receives through a relay;
-  § Advanced: multi-site host relay is removed.
+- `plugins/mailbox/docs/overview.md` (WP9, done 2026-10-05): § A site
+  container has no mail server replaces § Container persistence and
+  § Advanced: multi-site host relay; § Firewall and § Server Setup name the
+  server with its own mail stack; § The receive-mode choice matches the code
+  (it still described the removed choice card).
+- `docs/deploy_and_upgrade.md` (WP9, done): `joinery-base:2.1` carries no mail
+  server.
 
 ## Found by the review, outside this spec's scope
 

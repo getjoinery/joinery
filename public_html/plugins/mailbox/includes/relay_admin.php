@@ -13,6 +13,9 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.10 - in a site container (no mail server of its own) disabling the relay says mail
+ *   stops until it is enabled again, the Local mail listener box never shows, and the relay card
+ *   says a container with no enabled relay receives nothing (it no longer mentions a tunnel)
  * @version 2.9 - the operator fleet console's functions live in admin_mailbox_fleet_logic.php;
  *   admin_mailbox_relay_health() runs once per request (B3); the unposted
  *   relay_cloud_connect action is gone (the grant modal's grant=oauth begins the consent)
@@ -107,10 +110,16 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		$relay->save();
 		// Enabling or disabling the relay is also how this server's receive mode
 		// is chosen: the domain DNS checks prescribe from it (receive_mode.php).
-		Setting::put('mailbox_receive_mode', $action === 'enable' ? 'relay' : 'direct');
+		// A site container whose mail arrives by SMTP cannot receive directly,
+		// so its mode stays relay either way.
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+		$needs_relay = mailbox_needs_relay();
+		Setting::put('mailbox_receive_mode', ($action === 'enable' || $needs_relay) ? 'relay' : 'direct');
 		admin_mailbox_relay_flash($session, $action === 'enable'
 			? 'Relay enabled — it now fronts every hosted domain.'
-			: 'Relay disabled — this server receives mail directly. Point your domains\' MX records here; the checks show what to change.');
+			: (!$needs_relay
+				? 'Relay disabled — this server receives mail directly. Point your domains\' MX records here; the checks show what to change.'
+				: 'Relay disabled — this site has no mail server of its own, so no new mail reaches it until the relay is enabled again.'));
 		return LogicResult::redirect($back);
 	}
 
@@ -518,7 +527,10 @@ function admin_mailbox_relay_tenant_vars(): array {
 	// Local mail listener state + guardrail verdict (listener_admin.php) — the
 	// box renders whenever a live relay row exists or a decommission is recorded.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/listener_admin.php'));
-	$listener = (count($relays) > 0 || mailbox_listener_setting() === 'decommissioned')
+	// A site container has no listener to show.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	$listener = (mailbox_site_has_mail_server()
+			&& (count($relays) > 0 || mailbox_listener_setting() === 'decommissioned'))
 		? mailbox_listener_state() : null;
 
 	return array(
@@ -651,10 +663,19 @@ function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
 	}
 
 	if ($active === null) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+		if (mailbox_needs_relay()) {
+			return array(
+				'receiving' => $row('relay.receiving', 'Relay', InboundEmailSetupCheck::FAIL,
+					'No relay is enabled, so no mail reaches this site.',
+					'This site runs in a container and has no mail server of its own. A relay takes its mail '
+					. 'in on a separate server and checks it, and this site collects it from there.', $setup_link),
+			);
+		}
 		return array(
 			'receiving' => $row('relay.receiving', 'Relay', InboundEmailSetupCheck::OPTIONAL,
 				'No relay — mail is delivered straight to this server.',
-				'A relay receives your mail on a separate server and hands it here over a private tunnel, '
+				'A relay receives your mail on a separate server, and this server collects it from there, '
 				. 'so this server\'s address never appears in public DNS.', $setup_link),
 		);
 	}

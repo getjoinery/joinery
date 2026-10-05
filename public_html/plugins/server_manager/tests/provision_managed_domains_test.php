@@ -500,6 +500,32 @@ check(pmd_tick($phase, $nodkim) === 1, 'and once the key exists, the step comple
 $nodkim->load();
 check(trim((string)$nodkim->get('rdm_dns_mail_time')) !== '', 'the mail step is stamped at last');
 
+section('Records with no MX leave the step open, and come back once there is one');
+
+// A site container prescribes no MX until a relay fronts it
+// (multi_tenant_docker_hosts WP9). Its SPF and DKIM are still worth publishing,
+// but stamping the step would mean the MX is never published once the relay exists.
+$reconciler = new PmdFakeReconciler();
+$phase = new PmdPhase(new PmdFakeRegistrar(), $reconciler);
+$nomx = pmd_row($buyer, $node, 'pmd-nomx-' . $suffix . '.com');
+pmd_tick($phase, $nomx);                      // register
+pmd_tick($phase, $nomx);                      // web
+pmd_tick($phase, $nomx);                      // asks the node
+$nomx_jobs = pmd_prepare_jobs($node, $nomx->get('rdm_domain'));
+pmd_answer($nomx_jobs[0], array('ok' => true, 'dkim_ready' => true, 'records' => array(
+	array('type' => 'TXT', 'name' => 'z', 'value' => 'v=spf1 include:example.net -all', 'priority' => null),
+	array('type' => 'CNAME', 'name' => 's1._domainkey.z', 'value' => 'dkim.example.net', 'priority' => null),
+)));
+$published_before = count($reconciler->published);
+check(pmd_tick($phase, $nomx) === 0, 'a record set with no MX is not progress');
+check(count($reconciler->published) > $published_before, 'its SPF and DKIM are published anyway');
+check(trim((string)$nomx->get('rdm_dns_mail_time')) === '', 'and the step stays open');
+pmd_tick($phase, $nomx);                      // asks again
+$nomx_jobs = pmd_prepare_jobs($node, $nomx->get('rdm_domain'));
+check(count($nomx_jobs) === 2, 'the node is asked again', 'jobs: ' . count($nomx_jobs));
+pmd_answer($nomx_jobs[1], $good_payload);
+check(pmd_tick($phase, $nomx) === 1, 'and once the plan carries an MX, the step completes');
+
 section('A node that refuses parks the row without failing it');
 
 $phase = new PmdPhase(new PmdFakeRegistrar(), new PmdFakeReconciler());
