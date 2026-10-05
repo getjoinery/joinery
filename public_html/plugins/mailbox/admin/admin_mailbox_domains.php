@@ -12,6 +12,7 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.9 - Reject Unmatched says what it does: refused during the SMTP conversation, or accepted and dropped
  * @version 4.8 - the Fortress card: mail rules run on the device under Seal at the relay; the phone note
  * @version 4.7 - Save works on a domain whose checklist offers a fix (no form inside the form); Fortress
  *   shows its checklist; the step-up waits for the vault to open; a vault that fails to open says so
@@ -364,7 +365,11 @@ if ($show_form) {
 
 	$formwriter->textinput('ied_catch_all_address', 'Catch-All Address', []);
 
-	$formwriter->checkboxinput('ied_reject_unmatched', 'Reject Unmatched', []);
+	$formwriter->checkboxinput('ied_reject_unmatched', 'Reject Unmatched', [
+		'helptext' => 'When there is no catch-all address: mail to an address this domain does not have is refused '
+			. 'while the sending server is still connected, so the sender\'s own mail system tells them. '
+			. 'Unticked, it is accepted and dropped.',
+	]);
 
 	// Protection ceremony (specs/mailbox_protection_ceremony.md): choosing
 	// Private above the current level, or switching an add-on on, reveals the

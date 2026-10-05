@@ -151,6 +151,9 @@ func run() int {
 
 	entry, matched := m.resolve(recipient)
 	if !matched {
+		entry, matched = m.postmasterFallback(recipient)
+	}
+	if !matched {
 		if m.rejectUnmatched(recipient) {
 			return exitUnknown
 		}

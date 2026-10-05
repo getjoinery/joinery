@@ -186,6 +186,44 @@ func TestResolveCatchAllStore(t *testing.T) {
 	}
 }
 
+// A refusing domain's access map accepts postmaster (RFC 5321 §4.5.1, and the
+// DMARC rua points at it), so with no alias and no catch-all SMTP delivery
+// must carry it to the site, never refuse it after acceptance (a bounce). It
+// seals to the tenant's transport key, which the site always holds. resolve()
+// itself still answers no such recipient (Direct, seal target). An alias for
+// postmaster, or a catch-all, still decides as before.
+func TestResolvePostmasterOnARefusingDomain(t *testing.T) {
+	m := &routingMap{
+		Version:    1,
+		Recipients: map[string]routingEntry{},
+		Tenants:    map[string]tenantConfig{"main": {TransportPublicKey: "tpk"}},
+		Domains: map[string]domainEntry{
+			"refuse.example": {CatchAllMode: "none", RejectUnmatched: true, PublicKey: "dpk", KeyKind: "client", Tenant: "main"},
+			"fwd.example":    {CatchAllMode: modeForward, CatchAllAddress: "boss@elsewhere.example", RejectUnmatched: true, Tenant: "main"},
+		},
+	}
+	if _, ok := m.resolve("postmaster@refuse.example"); ok {
+		t.Fatal("resolve() must still answer no such recipient: Direct and the seal target read it")
+	}
+	entry, ok := m.postmasterFallback("PostMaster@refuse.example")
+	if !ok || entry.Mode != modeStore || entry.KeyKind != keyKindTransport || entry.PublicKey != "tpk" || entry.Tenant != "main" {
+		t.Fatalf("postmaster delivery should store under the transport key, got %+v ok=%v", entry, ok)
+	}
+	if _, ok := m.postmasterFallback("nobody@refuse.example"); ok {
+		t.Fatal("the fallback is for postmaster only")
+	}
+	if _, ok := m.postmasterFallback("postmaster@nosuch.example"); ok {
+		t.Fatal("the fallback is for our domains only")
+	}
+	if entry, ok := m.resolve("postmaster@fwd.example"); !ok || entry.Mode != modeForward {
+		t.Fatalf("a catch-all forward still takes postmaster, got %+v ok=%v", entry, ok)
+	}
+	m.Recipients["postmaster@refuse.example"] = routingEntry{Mode: modeStore, PublicKey: "alias-pk", KeyKind: "user", Tenant: "main"}
+	if entry, ok := m.resolve("postmaster@refuse.example"); !ok || entry.PublicKey != "alias-pk" {
+		t.Fatalf("a postmaster alias still wins, got %+v ok=%v", entry, ok)
+	}
+}
+
 // TestResolveSRSBounce guards Fix 6: an SRS bounce returning to a forwarding
 // domain must resolve to a transport-sealed store even when it matches no alias
 // and its domain is a reject_unmatched forwarding subdomain. The map here is a

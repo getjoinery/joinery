@@ -298,6 +298,40 @@ func (m *routingMap) resolve(recipient string) (routingEntry, bool) {
 	}
 }
 
+// postmasterFallback is where SMTP delivery takes postmaster when resolve()
+// finds no alias and no catch-all for it. Every mail domain accepts postmaster
+// (RFC 5321 §4.5.1), and the DMARC rua the site prescribes points at it, so the
+// access map lets it in and the sealer must not refuse it (a refusal after
+// acceptance is a bounce). It is stored, sealed to the tenant's transport key
+// so the site can always open it: the site files a report and drops the rest.
+//
+// SMTP delivery only. resolve() still answers "no such recipient" for it, so a
+// Joinery Direct preflight gets a decoy and the seal-target statement signs
+// nothing, exactly as the site's own resolver answers for an address with no
+// alias.
+func (m *routingMap) postmasterFallback(recipient string) (routingEntry, bool) {
+	recipient = strings.ToLower(strings.TrimSpace(recipient))
+	if localPartOf(recipient) != "postmaster" {
+		return routingEntry{}, false
+	}
+	dom := domainOf(recipient)
+	de, ok := m.Domains[dom]
+	if !ok {
+		return routingEntry{}, false
+	}
+	tc, ok := m.Tenants[de.Tenant]
+	if !ok || tc.TransportPublicKey == "" {
+		return routingEntry{}, false
+	}
+	return routingEntry{
+		PublicKey:        tc.TransportPublicKey,
+		KeyKind:          keyKindTransport,
+		Mode:             modeStore,
+		ForwardingDomain: fallbackDomain(de.ForwardingDomain, dom),
+		Tenant:           de.Tenant,
+	}, true
+}
+
 // rejectUnmatched reports whether the recipient's domain bounces unmatched mail
 // (drives the exit code when resolve() finds nothing).
 func (m *routingMap) rejectUnmatched(recipient string) bool {
@@ -331,6 +365,14 @@ func (m *routingMap) tenantOfForwardingDomain(dom string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func localPartOf(address string) string {
+	at := strings.LastIndex(address, "@")
+	if at < 0 {
+		return strings.ToLower(address)
+	}
+	return strings.ToLower(address[:at])
 }
 
 func domainOf(address string) string {

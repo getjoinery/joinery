@@ -327,7 +327,9 @@ applies the **fixed** base configuration, idempotently:
 
 - the `joinery` pipe transport in `master.cf`;
 - `virtual_transport = joinery`, `inet_interfaces = all`, a safe
-  `mydestination`, and RBL `smtpd_recipient_restrictions`;
+  `mydestination`, and `smtpd_recipient_restrictions`: the Spamhaus block
+  lists, then the recipient lookup (see **Unknown recipients are refused
+  during the SMTP conversation** below);
 - `virtual_mailbox_domains` wired to a PostgreSQL map (see below) so Postfix
   reads the live inbound-domain list straight from the database;
 - opendkim config — inet socket on `localhost:8891`, `Mode sv` (sign **and
@@ -502,14 +504,86 @@ For every inbound recipient, Postfix asks the database whether that domain is
 an active inbound domain. Adding, removing, enabling, or disabling a domain
 in the admin UI is therefore effective immediately — no SSH, no root, no
 re-run, and no drift. `install_email.sh` creates a dedicated least-privilege
-PostgreSQL role for the map — it can `SELECT` the inbound-domain list and
-nothing else, never the application's superuser — and writes the map. The
-role's password lives only in the map file; re-running `install_email.sh`
-rotates it.
+PostgreSQL role for its maps — it can `SELECT` the inbound-domain list and the
+four alias columns the recipient lookup reads, and nothing else, never the
+application's superuser — and writes the maps. The role may hold at most 10
+connections, so a flood of lookups answers "try again later" rather than
+exhausting the site's database. Its password lives only in the map files and is
+kept while they are intact; delete them and re-run `install_email.sh` to rotate
+it.
 
 If Postfix's `smtpd` / `trivial-rewrite` services run chrooted, `install_email.sh`
 wires the map as `proxy:pgsql:...` instead (proxymap runs un-chrooted). Modern
 Debian/Ubuntu ship these services un-chrooted, so the bare `pgsql:` map is used.
+
+### Unknown recipients are refused during the SMTP conversation
+
+Mail for an address the site does not have is refused while the sending server
+is still connected (`550 5.1.1`), so the real sender's own mail system tells
+them and this box sends nothing. A refusal after acceptance would make Postfix
+mail a bounce to the message's sender, which on spam is a forged stranger
+(backscatter) and a fast way onto a block list. The hardened ingest relay
+answers the same way from its merged access map (see **Map sync** below). It
+accepts `postmaster` on a refusing domain too; with no alias for it, the sealer
+stores it under the tenant's transport key, and the site's pull consumer files
+a report and drops anything else, as the router does.
+
+`install_email.sh` writes a second map, `/etc/postfix/joinery-recipient-access.cf`,
+and ends `smtpd_recipient_restrictions` with
+`check_recipient_access proxy:pgsql:/etc/postfix/joinery-recipient-access.cf`.
+Every smtpd process asks it, so it is always read through proxymap, which
+shares a few connections between them. It reads the rows
+`InboundEmailRouter::processEmail()` reads and answers as the router would decide:
+
+| Recipient | Answer |
+|---|---|
+| an `SRS0=` bounce address on one of our domains or forwarding subdomains | accepted (the router's SRS handling owns it) |
+| an enabled alias | accepted |
+| any address on a domain whose catch-all stores, or forwards to an address | accepted |
+| `postmaster` (every mail domain must accept it; the DMARC `rua` we prescribe points at it) | accepted |
+| anything else on a domain with `ied_reject_unmatched` on | refused, `550 5.1.1` |
+| anything but an SRS bounce on a forwarding subdomain | refused, `550 5.1.1` |
+| anything else | no answer: the router decides (a domain that discards unmatched mail) |
+
+A connected Gmail/Outlook feed's anchor domain (`gmail.com`, `ied_is_imap_source`)
+is in neither map: this box does not receive that domain's mail, so Postfix
+refuses it as a relay attempt, and the router does not route it
+(`InboundEmailDomain::is_authoritative()`).
+
+The query is in `render_pgsql_map.php` (`recipient_access_query()`), and the
+role is granted exactly the columns it reads. `install_email.sh` runs the
+freshly rendered lookup once as that role before it replaces the installed one
+or points Postfix at it, and stops without changing either if it cannot. A
+probe refused only because the role is at its connection limit (Postfix is
+holding them all) leaves the installed lookup as it is and lets the run carry
+on. A lookup that cannot complete when mail
+arrives (the database is down, a grant is missing) is a
+`451 4.3.5 Server configuration error`, and the sender retries. Postfix then
+leaves the database alone for its pgsql `retry_interval` (60 seconds), so
+answers come back within a minute of the database returning.
+
+After acceptance nothing bounces:
+
+- The router's own refusals (exit 67) stay as a backstop. With the lookup in
+  front none should happen; the pipe handler logs each one as a mismatch
+  between the lookup and the router.
+- `postmaster` with no alias on a refusing domain, and an SRS bounce address
+  while SRS is off, are accepted by the lookup, so the router drops them (a
+  deliverability report to `postmaster` is filed first) instead of refusing.
+- Content, the store cap and filters store, drop or defer (exit 75). A
+  deferral still standing when Postfix's `maximal_queue_lifetime` ends would
+  be bounced, so the pipe passes `${queue_id}` and the handler, on the
+  message's last retries (the final two `maximal_backoff_time` of its queue
+  lifetime, or its second half when the lifetime is shorter than that, timed
+  from the `Received` header naming that queue id, else the topmost `Received`
+  header), drops it and logs it to the domain's routing log instead of
+  deferring (`InboundDeferralExpiry`).
+- The handler never exits with a status Postfix would bounce: everything that
+  can fail, the database included, runs inside its `try`, and a fatal error PHP
+  cannot catch (out of memory) is turned into the same deferral by a shutdown
+  guard. What it cannot reach is Postfix killing it at `command_time_limit`:
+  Postfix defers that itself, and a message that times out on every retry is
+  bounced at the end of its queue lifetime.
 
 ### DNS (per domain)
 
@@ -539,7 +613,9 @@ smtpd_recipient_restrictions =
     permit_mynetworks, reject_unauth_destination,
     reject_rbl_client zen.spamhaus.org,
     reject_rhsbl_helo dbl.spamhaus.org,
-    reject_rhsbl_sender dbl.spamhaus.org, permit
+    reject_rhsbl_sender dbl.spamhaus.org,
+    check_recipient_access proxy:pgsql:/etc/postfix/joinery-recipient-access.cf,
+    permit
 ```
 
 Spamhaus is the only list rejected on. Zen and DBL are built for it — low
@@ -558,18 +634,18 @@ managed config both daemons use.
 `/etc/postfix/joinery-domains.cf` (the pgsql map). `install_email.sh` creates
 the dedicated role and writes this file automatically; on a non-apt system,
 create the role by hand — `CREATE ROLE "iemap_<dbname>" LOGIN PASSWORD '...';`
-then `GRANT SELECT ON ied_inbound_email_domains` to it — and write the map as
-that role:
+then `GRANT SELECT ON ied_inbound_email_domains` and
+`GRANT SELECT (iea_ied_inbound_email_domain_id, iea_alias, iea_is_enabled, iea_delete_time) ON iea_inbound_email_aliases`
+to it — and write both maps as that role, printing them with
+`IEMAP_PASSWORD=... php provisioning/render_pgsql_map.php iemap_<dbname> /path/to/Globalvars_site.php domains`
+(and `recipient_access` for `/etc/postfix/joinery-recipient-access.cf`). Each is:
 
 ```
 hosts    = localhost
 user     = iemap_<dbname>
 password = <the role's password — lives only in this file>
 dbname   = <db name>
-query    = SELECT ied_domain FROM ied_inbound_email_domains
-           WHERE lower(ied_domain) = '%s'
-             AND ied_is_enabled = true
-             AND ied_delete_time IS NULL
+query    = <the query the renderer prints>
 ```
 
 Add to `/etc/postfix/master.cf`:
@@ -577,7 +653,7 @@ Add to `/etc/postfix/master.cf`:
 ```
 joinery   unix  -  n  n  -  5  pipe
   flags=DRh user=www-data
-  argv=/usr/bin/php /var/www/html/SITENAME/public_html/plugins/mailbox/utils/inbound_email_handler.php ${recipient}
+  argv=/usr/bin/php /var/www/html/SITENAME/public_html/plugins/mailbox/utils/inbound_email_handler.php ${recipient} ${queue_id}
 ```
 
 (Use the PHP CLI path for your system — `install_email.sh` resolves it
@@ -939,7 +1015,7 @@ Each alias has a **delivery mode** (`iea_delivery_mode`):
 
 Each domain also has a **catch-all mode** (`ied_catch_all_mode`):
 
-- **`forward`** — send unmatched recipients to `ied_catch_all_address` (or reject/discard, per `ied_reject_unmatched`).
+- **`forward`** — send unmatched recipients to `ied_catch_all_address`. With no catch-all address, `ied_reject_unmatched` decides: on, they are refused during the SMTP conversation (see **Unknown recipients are refused during the SMTP conversation**); off, they are accepted and dropped.
 - **`store`** — persist every unmatched recipient on the domain to the local mailbox. This is the equivalent of a Mailgun wildcard `forward()` route. `ied_reject_unmatched` is ignored when catch-all mode is `store`.
 
 ## Local Mailbox
@@ -2557,8 +2633,8 @@ violating either is rejected whole — nothing from it is installed, and the
 tenant's **last accepted** fragment keeps serving so a bad push never erases
 working routing. From the validated fragments the merge derives all the Postfix
 artifacts — `relay_domains`, `check_recipient_access` (preserving
-`reject_unmatched`: listed aliases match before a domain REJECT, so no
-backscatter), `transport_maps`, the SRS-bounce accept `regexp` map — plus the
+`reject_unmatched`: listed aliases, and `postmaster@` on every refusing domain,
+match before a domain REJECT, so no backscatter), `transport_maps`, the SRS-bounce accept `regexp` map — plus the
 merged `routing.json`, installs atomically, and runs `postmap` + `postfix
 reload` only when the output changed. Shard-policy limits
 (`tenants/<slug>/limits.json`) are stamped into the merged tenant block here,

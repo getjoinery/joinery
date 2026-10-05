@@ -27,6 +27,8 @@
  * pinned to the relay's identity, and the relay scopes every path to this
  * tenant's own spool: ids only, no paths, no root.
  *
+ * @version 1.16 - postmaster mail the relay carried in for a domain with no postmaster alias is
+ *                filed if it is a report and dropped (logged) otherwise, as the colocated router does
  * @version 1.15 - a pull that drains the listing stamps mrl_last_pull_drained_time (B41); an
  *                unopenable client entry is stored marked, not held (B40); the key's
  *                own vault is used only while its owner still holds the mailbox (B42)
@@ -225,6 +227,7 @@ class RelaySpoolConsumer {
 	/**
 	 * Store one spool entry. Returns one of:
 	 *   'stored' | 'pending' | 'dedup' | 'bounce'  — durable (or handled) → ack;
+	 *   'discarded'  — postmaster mail with no alias that was not a report → ack-drop, logged;
 	 *   'unroutable' — genuinely undeliverable (no/malformed recipient) → ack-drop
 	 *                  with a loud log;
 	 *   'hold'       — recoverable mail whose domain is disabled/unconfigured or
@@ -377,6 +380,18 @@ class RelaySpoolConsumer {
 		// report is filed, never stored as mail; ack the spool entry.
 		if (DeliverabilityReportIngest::intercept($this->router, $raw, $parsed, $domain, $recipient) !== null) {
 			return 'stored';
+		}
+
+		// postmaster with no alias, on a domain whose catch-all does not store:
+		// the relay accepts it on every domain (RFC 5321; the DMARC rua points at
+		// it) and carries it here for the report check above. Anything else is
+		// dropped, as the colocated router drops it — never stored as mail
+		// nobody asked to receive.
+		if ($alias === null && $local === 'postmaster'
+				&& (string)$domain->get('ied_catch_all_mode') !== InboundEmailDomain::CATCHALL_STORE) {
+			$this->router->logTransaction($parsed, null, InboundEmailLog::STATUS_DISCARDED, $recipient, null,
+				null, $domain->key);
+			return 'discarded';
 		}
 
 		$auth = $this->router->authFromRelayMeta($meta, $this->relayAuthservId());

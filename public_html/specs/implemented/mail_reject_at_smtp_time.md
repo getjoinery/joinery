@@ -1,6 +1,12 @@
 # Refuse unknown recipients during the SMTP conversation
 
-**Status:** Draft, 2026-10-04. Nothing here is built. Split out of
+**Status:** Implemented 2026-10-05 (install_email.sh 2.22, render_pgsql_map.php 1.5, relay 3.4).
+Verified live on dev: unknown address refused at RCPT with 550 5.1.1; alias, catch-all, postmaster
+and SRS accepted and routed; queue empty (no bounce); a lookup that cannot read the database
+answers 451 4.3.5; an IMAP feed's anchor domain is refused as a relay attempt. Reviewed by
+public-html-0f (B1-B10 fixed, re-verified). The testing still to run (a forced deferral to queue
+expiry, fleet nodes and relays after the release, the plugins page in a browser) is in the live
+verification queue memory, under this spec's name. Split out of
 `own_mail_server_sending` (review finding M3, public-html-d7) because it fixes
 a live problem on its own and depends on nothing. It ships first.
 

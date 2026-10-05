@@ -2,6 +2,23 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.22 - The recipient lookup is asked from the freshly rendered copy before it replaces
+#                the installed one, so a query that cannot run never reaches a Postfix
+#                already pointed at the map. A probe refused by the map role's connection
+#                limit (Postfix holds them all) leaves the proven lookup in place and
+#                carries on, instead of failing the whole run.
+# Version: 2.21 - The recipient lookup is always read through proxymap (proxy:pgsql:), so every
+#                smtpd process shares proxymap's connections instead of opening its own,
+#                and proxy_read_maps is asserted to allow it; the map role may hold at
+#                most 10 connections, so a flood answers "try again later" instead of
+#                exhausting the site's database.
+# Version: 2.20 - Unknown recipients are refused during the SMTP conversation: section 4
+#                renders a second pgsql map (joinery-recipient-access.cf) that answers
+#                each recipient the way InboundEmailRouter would, grants the map role the
+#                four alias columns it reads, proves the lookup as that role, and only
+#                then adds check_recipient_access to smtpd_recipient_restrictions. The
+#                pipe passes the queue id, so the handler can drop a deferral that would
+#                otherwise expire into a bounce.
 # Version: 2.19 - Section 5's milter list ends with rspamd (11332) whenever the scanner
 #                provisioner is here, so a re-run no longer drops the scanner from
 #                Postfix until section 5b appends it again.
@@ -105,16 +122,23 @@
 #   - main.cf   : mydestination = localhost, localhost.localdomain
 #                 (inbound domains must NOT appear here, or Postfix rejects
 #                  them with "User unknown in local recipient table").
-#   - main.cf   : smtpd_recipient_restrictions with RBL clients.
+#   - main.cf   : smtpd_recipient_restrictions with RBL clients and a
+#                 check_recipient_access lookup against
+#                 /etc/postfix/joinery-recipient-access.cf, so an address the
+#                 site does not have is refused while the sender is still
+#                 connected (5.1.1), never bounced afterwards to a sender
+#                 address spam has forged.
 #   - main.cf   : virtual_mailbox_domains = pgsql:/etc/postfix/joinery-domains.cf
 #                 Postfix asks the database whether a recipient domain is an
 #                 active inbound domain, so adding or removing a domain in
 #                 the admin UI takes effect immediately - no host action, no
 #                 drift. /etc/postfix/joinery-domains.cf is the pgsql map.
-#   - postgres  : a dedicated least-privilege role the pgsql map authenticates
-#                 as - SELECT on the inbound-domains table only, never the
-#                 application's superuser. Its password lives only in the map
-#                 file; re-running this script rotates it.
+#   - postgres  : a dedicated least-privilege role the pgsql maps authenticate
+#                 as - SELECT on the inbound-domains table and on the four alias
+#                 columns the recipient lookup reads, never the application's
+#                 superuser, holding at most 10 connections. Its password
+#                 lives only in the map files and is kept while they are
+#                 intact; delete them and re-run this script to rotate it.
 #   - opendkim  : inet socket localhost:8891, Mode sv (sign + VERIFY), empty
 #                 key/signing tables, and an AuthservID matching the configured
 #                 mail hostname so stamped Authentication-Results lines are
@@ -168,6 +192,7 @@ PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PIPE_SCRIPT="${PLUGIN_DIR}/utils/inbound_email_handler.php"
 RENDER_SCRIPT="${SCRIPT_DIR}/render_pgsql_map.php"
 MAP_FILE="/etc/postfix/joinery-domains.cf"
+RCPT_MAP_FILE="/etc/postfix/joinery-recipient-access.cf"
 
 if [[ ! -f "${PIPE_SCRIPT}" ]]; then
     echo "ERROR: inbound email handler not found at ${PIPE_SCRIPT}" >&2
@@ -296,7 +321,10 @@ fi
 # addresses carry a case-sensitive hash in the local part; folding it would make
 # SRSRewriter::validate() reject every bounce. Alias lookup lowercases
 # internally, so normal recipients are unaffected.
-JOINERY_ARGV="argv=${PHP_BIN} ${PIPE_SCRIPT} \${recipient}"
+# \${queue_id} lets the handler find when this box accepted the message, so a
+# deferral about to outlive the queue is dropped and logged instead of expiring
+# into a bounce to the sender.
+JOINERY_ARGV="argv=${PHP_BIN} ${PIPE_SCRIPT} \${recipient} \${queue_id}"
 JOINERY_DEF="joinery unix - n n - 5 pipe flags=DRh user=www-data ${JOINERY_ARGV}"
 existing_joinery="$(postconf -M joinery/unix 2>/dev/null | tr -s ' \t' ' ' | tr -d '\n' || true)"
 if [[ -z "${existing_joinery}" ]]; then
@@ -328,17 +356,8 @@ else
     echo "main.cf: mydestination = ${SAFE_MYDEST}"
 fi
 
-# RBL spam filtering at RCPT time (fixed config).
-#
-# Only Spamhaus rejects. Zen and DBL are built to be rejected on: low false
-# positive, and Zen deliberately excludes the shared outbound ranges every ESP
-# sends from. SpamCop and Barracuda list those shared IPs on brief automated
-# triggers and de-list hours later, so rejecting on them bounces ordinary mail
-# from Mailgun, SendGrid or Google at random — permanently, since a 5xx stops
-# the sender retrying. SpamCop says as much itself: use it to score, not to
-# refuse. Content scoring is where a weaker signal belongs.
-postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, permit"
-echo "main.cf: smtpd_recipient_restrictions set (RBL clients)"
+# smtpd_recipient_restrictions is set in section 4, once the recipient lookup
+# it ends with exists and has answered.
 
 # myhostname: a mail server needs a fully-qualified HELO name. If Postfix has
 # only a bare or localhost name, fall back to the system FQDN as a sane
@@ -392,8 +411,14 @@ TABLE_CHECK="$(db_psql -c "SELECT to_regclass('public.ied_inbound_email_domains'
     echo "ERROR: could not query PostgreSQL database '${DBNAME}' as '${DBUSER}': ${TABLE_CHECK}" >&2
     exit 1
 }
+if [[ "${TABLE_CHECK}" == "t" ]]; then
+    TABLE_CHECK="$(db_psql -c "SELECT to_regclass('public.iea_inbound_email_aliases') IS NOT NULL" 2>&1)" || {
+        echo "ERROR: could not query PostgreSQL database '${DBNAME}' as '${DBUSER}': ${TABLE_CHECK}" >&2
+        exit 1
+    }
+fi
 if [[ "${TABLE_CHECK}" != "t" ]]; then
-    echo "ERROR: table ied_inbound_email_domains does not exist in database '${DBNAME}'." >&2
+    echo "ERROR: the mailbox tables (ied_inbound_email_domains, iea_inbound_email_aliases) do not exist in database '${DBNAME}'." >&2
     echo "       Activate the Mailbox plugin and run update_database, then re-run this script." >&2
     exit 1
 fi
@@ -491,25 +516,28 @@ else
 fi
 
 # Create the role once; (re)assert its attributes, password and grants every
-# run, so a re-run is a clean rotation.
+# run. CONNECTION LIMIT bounds what Postfix can take from the site's database:
+# past it a lookup fails, and Postfix answers "try again later".
+
 if [[ "$(db_psql -c "SELECT 1 FROM pg_roles WHERE rolname = '${DB_ROLE}'")" != "1" ]]; then
     db_psql -c "CREATE ROLE \"${DB_ROLE}\" LOGIN"
     echo "postgres: created role ${DB_ROLE}"
 fi
 # The password is set over stdin, never argv, so it stays out of the process list.
 db_psql <<SQL
-ALTER ROLE "${DB_ROLE}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD '${ROLE_PW}';
+ALTER ROLE "${DB_ROLE}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT CONNECTION LIMIT 10 PASSWORD '${ROLE_PW}';
 GRANT CONNECT ON DATABASE "${DBNAME}" TO "${DB_ROLE}";
 GRANT USAGE ON SCHEMA public TO "${DB_ROLE}";
 GRANT SELECT ON ied_inbound_email_domains TO "${DB_ROLE}";
+GRANT SELECT (iea_ied_inbound_email_domain_id, iea_alias, iea_is_enabled, iea_delete_time) ON iea_inbound_email_aliases TO "${DB_ROLE}";
 SQL
-echo "postgres: role ${DB_ROLE} configured (SELECT on ied_inbound_email_domains only)"
+echo "postgres: role ${DB_ROLE} configured (SELECT on ied_inbound_email_domains, and on the alias columns the recipient lookup reads)"
 
 # Render the map and install it locked down. The password reaches the renderer
 # through the environment, never argv or the terminal.
 MAP_TMP="$(mktemp)"
 trap 'rm -f "${MAP_TMP}"' EXIT
-if IEMAP_PASSWORD="${ROLE_PW}" "${PHP_BIN}" "${RENDER_SCRIPT}" "${DB_ROLE}" "${CONFIG_FILE}" > "${MAP_TMP}"; then
+if IEMAP_PASSWORD="${ROLE_PW}" "${PHP_BIN}" "${RENDER_SCRIPT}" "${DB_ROLE}" "${CONFIG_FILE}" domains > "${MAP_TMP}"; then
     install -m 640 -o root -g postfix "${MAP_TMP}" "${MAP_FILE}"
     echo "postfix: wrote pgsql domain map ${MAP_FILE} (640 root:postfix)"
 else
@@ -539,6 +567,79 @@ else
 fi
 postconf -e "virtual_mailbox_domains = ${VMD_MAP}"
 echo "main.cf: virtual_mailbox_domains = ${VMD_MAP}"
+
+# The recipient lookup: the same role, the same tables the router reads, asked
+# during the SMTP conversation. See render_pgsql_map.php recipient_access_query()
+# for what it answers.
+if ! IEMAP_PASSWORD="${ROLE_PW}" "${PHP_BIN}" "${RENDER_SCRIPT}" "${DB_ROLE}" "${CONFIG_FILE}" recipient_access > "${MAP_TMP}"; then
+    echo "ERROR: failed to render the pgsql recipient lookup; smtpd_recipient_restrictions NOT changed." >&2
+    exit 1
+fi
+
+# Ask it once, as the map role, before Postfix reads it. A lookup that cannot
+# run (a missing grant, a query the database refuses) would answer every
+# recipient with "try again later" - no mail lost, but none arriving either.
+# The freshly rendered copy is asked, not the installed file: an earlier run
+# may already have pointed Postfix at the installed one, so a new query
+# replaces it only once it has answered here. The probe domain is reserved
+# (.invalid), so the answer itself is empty; what is proved is that it ran.
+#
+# The probe logs in as the map role, so it counts against the role's
+# connection limit. When Postfix already holds them all (a flood), the probe
+# cannot be asked: the installed lookup, proven on an earlier run, is left in
+# place, and the rest of this script carries on.
+RCPT_QUERY="$(grep -oP '^query = \K.*' "${MAP_TMP}" | head -1)"
+RCPT_PROBE="${RCPT_QUERY//%u/postmaster}"
+RCPT_PROBE="${RCPT_PROBE//%d/probe.invalid}"
+RCPT_PROBE="${RCPT_PROBE//%%/%}"
+RCPT_PSQL_ARGS=(-h localhost -U "${DB_ROLE}" -d "${DBNAME}" -v ON_ERROR_STOP=1 -tAq)
+RCPT_WIRE=1
+if ! RCPT_PROBE_OUT="$(PGPASSWORD="${ROLE_PW}" psql "${RCPT_PSQL_ARGS[@]}" <<<"${RCPT_PROBE};" 2>&1)"; then
+    if [[ "${RCPT_PROBE_OUT}" == *"too many connections for role"* ]]; then
+        echo "WARNING: the recipient lookup could not be asked: ${DB_ROLE} is at its connection limit (Postfix is busy)." >&2
+        echo "         The lookup Postfix already reads is left as it is; re-run this script to update it." >&2
+        RCPT_WIRE=0
+    else
+        echo "ERROR: the recipient lookup did not run as ${DB_ROLE}: ${RCPT_PROBE_OUT}" >&2
+        echo "       smtpd_recipient_restrictions NOT changed." >&2
+        exit 1
+    fi
+fi
+if [[ "${RCPT_WIRE}" -eq 1 ]]; then
+    install -m 640 -o root -g postfix "${MAP_TMP}" "${RCPT_MAP_FILE}"
+    echo "postfix: wrote pgsql recipient lookup ${RCPT_MAP_FILE} (640 root:postfix)"
+    echo "postfix: recipient lookup answers as ${DB_ROLE}"
+fi
+
+# RBL spam filtering at RCPT time (fixed config).
+#
+# Only Spamhaus rejects. Zen and DBL are built to be rejected on: low false
+# positive, and Zen deliberately excludes the shared outbound ranges every ESP
+# sends from. SpamCop and Barracuda list those shared IPs on brief automated
+# triggers and de-list hours later, so rejecting on them bounces ordinary mail
+# from Mailgun, SendGrid or Google at random — permanently, since a 5xx stops
+# the sender retrying. SpamCop says as much itself: use it to score, not to
+# refuse. Content scoring is where a weaker signal belongs.
+#
+# The recipient lookup comes last, after the RBL checks, so a listed sender is
+# refused on the list and never costs a database query. Every smtpd process
+# asks it, so it is always read through proxymap (proxy:), chrooted or not:
+# the smtpd processes share proxymap's few connections instead of each opening
+# one. proxymap reads only maps proxy_read_maps names; its default covers
+# $smtpd_recipient_restrictions, and a box whose setting does not gets the map
+# added rather than a lookup that fails on every recipient.
+RCPT_MAP="proxy:pgsql:${RCPT_MAP_FILE}"
+PROXY_READ_MAPS="$(postconf -h proxy_read_maps 2>/dev/null || true)"
+if [[ "${PROXY_READ_MAPS}" != *'$smtpd_recipient_restrictions'* && "${PROXY_READ_MAPS}" != *"${RCPT_MAP}"* ]]; then
+    postconf -e "proxy_read_maps = ${PROXY_READ_MAPS} ${RCPT_MAP}"
+    echo "main.cf: proxy_read_maps += ${RCPT_MAP}"
+fi
+if [[ "${RCPT_WIRE}" -eq 1 ]]; then
+    postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access ${RCPT_MAP}, permit"
+    echo "main.cf: smtpd_recipient_restrictions set (RBL clients, recipient lookup ${RCPT_MAP})"
+else
+    echo "main.cf: smtpd_recipient_restrictions left as they are (recipient lookup not re-asked)"
+fi
 
 # --- 5. opendkim + opendmarc: verify-mode config + Postfix milters -----------
 # opendkim signs outbound AND verifies inbound (Mode sv); opendmarc adds SPF +

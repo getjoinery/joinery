@@ -11,6 +11,8 @@
  * utils/list_dependencies.php --orphans can report packages no plugin
  * declares anymore.
  *
+ * @version 1.4 - the active plugins are the ones with plg_active = 1; plg_status can read 'stale'
+ *                while a plugin runs, and its packages were left out
  * @version 1.3 - Presence is not enough: an installed package whose version
  *                differs from composer.lock is reported and is install-fixable.
  *                The truth source for what IS installed stays
@@ -293,7 +295,7 @@ class ComposerValidator {
         $names = is_array($include_plugins) ? $include_plugins : [];
         try {
             $dblink = DbConnector::get_instance()->get_db_link();
-            $stmt = $dblink->prepare("SELECT plg_name FROM plg_plugins WHERE plg_status = 'active'");
+            $stmt = $dblink->prepare("SELECT plg_name FROM plg_plugins WHERE plg_active = 1");
             $stmt->execute();
             $names = array_merge($names, $stmt->fetchAll(PDO::FETCH_COLUMN));
         } catch (Throwable $e) {

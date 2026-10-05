@@ -37,6 +37,7 @@
  * Validate with `php -l` only — never the file validator, which executes the
  * file it is checking.
  *
+ * @version 1.2 - a plugin already switched on (plg_active) is reported active, whatever its status says
  * @version 1.1
  */
 
@@ -288,17 +289,18 @@ foreach ($wanted as $name) {
         }
 
         // A row already exists, so this is not the fresh install this tool is
-        // built for. Only the plainly-safe transition is taken: inactive means
-        // installed and switched off, which is what activating is for. Any
-        // other status — active, stale, failed — is a state somebody or
+        // built for. Switched on (plg_active, whatever the status says) is
+        // left as it is. Otherwise only the plainly-safe transition is taken:
+        // inactive means installed and switched off, which is what activating
+        // is for. Any other status — stale, failed — is a state somebody or
         // something else established, and a bundle install has no business
         // overriding it silently.
         $status = (string)$existing->get('plg_status');
-        if ($status === 'inactive') {
+        if ($existing->is_active()) {
+            fwrite(STDOUT, "  {$name}: already active\n");
+        } else if ($status === 'inactive') {
             $manager->activate($name);
             fwrite(STDOUT, "  {$name}: activated\n");
-        } else if ($status === 'active') {
-            fwrite(STDOUT, "  {$name}: already active\n");
         } else {
             fwrite(STDOUT, "  {$name}: left alone (status '{$status}') — review it at /admin/admin_plugins\n");
         }

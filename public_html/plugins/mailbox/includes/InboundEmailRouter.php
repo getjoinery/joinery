@@ -137,6 +137,12 @@
  *   carries the subject (plaintext mailboxes only); a forward records a send
  *   attempt on the stored message it relayed, so the message timeline can show
  *   how it was routed and where it went (specs/mailbox_message_timeline.md A1/A2)
+ * @version 1.37
+ * @changelog 1.37 - a domain is routed only when is_authoritative() (never an IMAP-feed anchor such as
+ *   gmail.com); an SRS bounce address with SRS off is dropped and logged, as the relay pull
+ *   consumer drops it, and postmaster on a domain that refuses unmatched mail is accepted and
+ *   (unless it carried a report, filed before this) dropped: the SMTP-time recipient lookup
+ *   accepts both, so neither may be refused after acceptance, which would bounce
  * @version 1.36
  * @changelog 1.36 - every raw MIME parse goes through MimeParse (a message
  *   quoting its own boundary mid-line hangs Horde's parser; observed pinning
@@ -267,6 +273,15 @@ class InboundEmailRouter {
 		if ($srs_result !== null) {
 			return $srs_result;
 		}
+		if (SRSRewriter::isSRSAddress($envelope_recipient)) {
+			// SRS is off, so nothing can decode this: a bounce in flight from
+			// before the setting changed, or a forgery. Dropped, never refused —
+			// the address was accepted while the sender was connected, and a
+			// refusal now would be bounced to whoever the message claims sent it.
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_DISCARDED, $envelope_recipient, null,
+				'SRS bounce address while SRS is off');
+			return 0;
+		}
 		$envelope_recipient = strtolower($envelope_recipient);
 
 		// 2. Look up alias
@@ -278,8 +293,10 @@ class InboundEmailRouter {
 		$domain_name = $parts[1];
 
 		// Look up domain
+		// Only a domain this deployment receives for: never the anchor row of a
+		// connected Gmail/Outlook feed (is_authoritative()).
 		$domain = InboundEmailDomain::GetByDomain($domain_name);
-		if (!$domain || !$domain->get('ied_is_enabled')) {
+		if (!$domain || !$domain->is_authoritative()) {
 			return 67;
 		}
 
@@ -301,10 +318,12 @@ class InboundEmailRouter {
 		$content_spam = $this->resolveContentSpam($raw_email, $provider_spam);
 
 		// Deliverability report? (specs/deliverability_report_ingest.md) Runs
-		// BEFORE the alias branch so a report to an address with no alias — a
-		// misaddressed rua, or a domain that rejects unmatched mail — is still
-		// caught (D1). A recognised report is filed as source rows, never
-		// delivered (D3); anything not recognised falls through untouched.
+		// BEFORE the alias branch so a report to an address with no alias is
+		// still caught (D1): postmaster@, where the rua we prescribe points and
+		// which the SMTP-time recipient lookup accepts on every domain. (Any
+		// other unknown address on a domain that refuses unmatched mail is
+		// refused before it gets here.) A recognised report is filed as source
+		// rows, never delivered (D3); anything not recognised falls through.
 		if (DeliverabilityReportIngest::intercept($this, $raw_email, $parsed, $domain, $envelope_recipient) !== null) {
 			return 0;
 		}
@@ -325,8 +344,10 @@ class InboundEmailRouter {
 				return $this->forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all);
 			}
 
-			// No match
-			if ($domain->get('ied_reject_unmatched')) {
+			// No match. postmaster is accepted on every domain (RFC 5321 §4.5.1,
+			// and our DMARC rua) by the SMTP-time recipient lookup too; a report
+			// to it was filed above, and anything else to it is dropped here.
+			if ($domain->get('ied_reject_unmatched') && $local_part !== 'postmaster') {
 				$this->logTransaction($parsed, null, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'No matching alias', $domain->key);
 				return 67; // Reject
 			} else {

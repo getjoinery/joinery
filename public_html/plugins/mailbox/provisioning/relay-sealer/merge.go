@@ -433,6 +433,10 @@ func derivePostfixMaps(m *routingMap) (relayDomains, recipients, transport, srs 
 			raLines = append(raLines, dom+"\tOK")
 		} else {
 			raLines = append(raLines, dom+"\tREJECT")
+			// postmaster is accepted on every domain (RFC 5321 §4.5.1; the
+			// DMARC rua points at it). The address key is looked up before the
+			// domain key, so it wins over the REJECT above; resolve() stores it.
+			raLines = append(raLines, "postmaster@"+dom+"\tOK")
 		}
 	}
 	for addr := range m.Recipients {
