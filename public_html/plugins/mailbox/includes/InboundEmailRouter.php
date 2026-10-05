@@ -83,6 +83,10 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.48 - forwards reach only destinations whose owner confirmed them (ForwardConfirmation);
+ *   a mailbox or catch-all whose level does not offer forwarding stores instead; the catch-all
+ *   forward is held as spam like the alias forward; logTransaction() keeps the ids it wrote for
+ *   the relay pull's dedup (specs/relay_receive_only_forwarding.md)
  * @version 1.47 - the verdict order of spam_learning_in_core.md: classifySpam() decides from
  *   facts spamDecision() gathers (relationships, sender record, the Bayes corpus); the
  *   ingest re-scan through the rspamd controller and the contact elevation are gone
@@ -236,7 +240,14 @@ class InboundEmailRouter {
 	const BURST_ALIASES = 5;
 	const BURST_WINDOW_MINUTES = 10;
 
+	// The note a stored message's log line carries when its mailbox or catch-all
+	// forwards but its level does not offer forwarding.
+	const FORWARD_NOT_OFFERED = 'kept here, not forwarded: forwarding is not offered at this protection level';
+
 	private $settings;
+
+	/** @var int[] routing-log ids written since the last takeLoggedIds() */
+	private $logged_ids = array();
 
 	function __construct() {
 		$this->settings = Globalvars::get_instance();
@@ -341,7 +352,14 @@ class InboundEmailRouter {
 
 			$catch_all = $domain->get('ied_catch_all_address');
 			if ($catch_all) {
-				return $this->forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all);
+				if (!$domain->forwarding_offered()) {
+					// Sealed to a key the server does not hold (Fortress, or Seal at
+					// the relay): a forward would hand out a readable copy, so the
+					// mail is kept here instead.
+					return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, null, $auth, $content_spam,
+						self::FORWARD_NOT_OFFERED);
+				}
+				return $this->forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all, $auth, $content_spam);
 			}
 
 			// No match. postmaster is accepted on every domain (RFC 5321 §4.5.1,
@@ -367,6 +385,16 @@ class InboundEmailRouter {
 		$forwards = ($mode === InboundEmailAlias::MODE_FORWARD || $mode === InboundEmailAlias::MODE_FORWARD_AND_STORE);
 		$stores = ($mode === InboundEmailAlias::MODE_STORE || $mode === InboundEmailAlias::MODE_FORWARD_AND_STORE);
 
+		// A mailbox whose level does not offer forwarding (Fortress, or Seal at the
+		// relay) and still carries a forwarding mode from before the level was
+		// raised stores instead: nothing leaves, nothing is lost, and the log says why.
+		$store_note = null;
+		if ($forwards && !$alias->forwarding_offered()) {
+			$forwards = false;
+			$stores = true;
+			$store_note = self::FORWARD_NOT_OFFERED;
+		}
+
 		// A mailbox that only forwards stores no row, so its sender record counts
 		// the arrival here; otherwise every message to it would read as a first
 		// contact, a token whose weight the corpus learned from stored mail.
@@ -377,7 +405,7 @@ class InboundEmailRouter {
 		// Pure-store mode skips forwarding-side gates (rate limit, From-header check)
 		// because they only apply to relay attempts.
 		if (!$forwards) {
-			return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth, $content_spam);
+			return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth, $content_spam, $store_note);
 		}
 
 		// 4b. Spam disposition (specs/inbound_email_spam_filtering.md): a judged-spam
@@ -460,7 +488,19 @@ class InboundEmailRouter {
 			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Forward loop guard: ' . $loop, $domain->key, $stored_id);
 			return 0;
 		}
-		$destinations = $alias->get_destinations_array();
+		// Only to destinations whose owner agreed (rule 4 of
+		// specs/relay_receive_only_forwarding.md). The rest are logged and skipped;
+		// a destination never asked is asked now.
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ForwardConfirmation.php'));
+		$split = ForwardConfirmation::partition(intval($domain->key), intval($alias->key), $alias->get_destinations_array());
+		if ($split['unconfirmed']) {
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_UNCONFIRMED, $envelope_recipient,
+				implode(',', $split['unconfirmed']), null, $domain->key, $stored_id);
+		}
+		$destinations = $split['confirmed'];
+		if (!$destinations) {
+			return 0;
+		}
 		$results = $this->forwardEmail($raw_email, $parsed, $alias, $domain, $destinations);
 
 		$all_success = !in_array(false, $results, true);
@@ -545,7 +585,7 @@ class InboundEmailRouter {
 	 * retries (the cap defers, it never drops). The dedup mechanism is the
 	 * UNIQUE constraint on (iem_message_id_header, iem_recipient).
 	 */
-	private function handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth = null, $content_spam = null) {
+	private function handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth = null, $content_spam = null, ?string $note = null) {
 		if ($auth === null) {
 			$auth = $this->readAuthResults($raw_email);
 		}
@@ -577,7 +617,7 @@ class InboundEmailRouter {
 				$alias,
 				InboundEmailLog::STATUS_STORED,
 				$envelope_recipient,
-				$saved['dedup'] ? 'duplicate (Message-ID already stored)' : null,
+				$saved['dedup'] ? 'duplicate (Message-ID already stored)' : $note,
 				null,
 				$domain->key,
 				$saved['message'] ? intval($saved['message']->key) : null
@@ -2582,6 +2622,19 @@ class InboundEmailRouter {
 		if (!$domain->key) {
 			return array();
 		}
+		// Only to destinations whose owner agreed, under the same row the
+		// mailbox's own forward asks (specs/relay_receive_only_forwarding.md, rule 4).
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ForwardConfirmation.php'));
+		$msg_alias_id = intval($msg->get('iem_iea_inbound_email_alias_id'));
+		$split = ForwardConfirmation::partition(intval($domain->key), $msg_alias_id > 0 ? $msg_alias_id : null, $destinations);
+		if ($split['unconfirmed']) {
+			error_log('InboundEmailRouter::forwardStoredMessage: not forwarding message ' . $msg->key
+				. ' to ' . implode(', ', $split['unconfirmed']) . ' — destination not confirmed yet');
+		}
+		$destinations = $split['confirmed'];
+		if (!$destinations) {
+			return array();
+		}
 		// Reading the raw message above opens it, so this process is now hot.
 		// Relaying is the one send that is allowed to carry the content itself,
 		// and only because someone acknowledged in writing that it would — the
@@ -2997,15 +3050,29 @@ class InboundEmailRouter {
 	 * the alias forward), so attachments and MIME structure are preserved — the
 	 * earlier rebuild-from-parsed-parts approach was lossy.
 	 */
-	private function forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all_address) {
+	private function forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all_address, array $auth, array $content_spam) {
+		// Never relay spam, as the alias forward does not: a catch-all forwards
+		// whatever is addressed to anything at the domain, which is most of the spam.
+		$decision = $this->spamDecision(null, $auth, $content_spam, $parsed, $this->extractBodies($raw_email, $parsed));
+		if ($decision['verdict'] === InboundEmailMessage::SPAM_VERDICT_SPAM) {
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_SPAM_HELD, $envelope_recipient, null, null, $domain->key);
+			return 0;
+		}
 		$loop = self::forwardLoopRefusal($parsed);
 		if ($loop !== null) {
 			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Forward loop guard: ' . $loop, $domain->key);
 			return 0;
 		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ForwardConfirmation.php'));
+		$split = ForwardConfirmation::partition(intval($domain->key), null, array($catch_all_address));
+		if (!$split['confirmed']) {
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_UNCONFIRMED, $envelope_recipient,
+				implode(',', $split['unconfirmed']), null, $domain->key);
+			return 0;
+		}
 		list($raw_mime, $envelope_sender) = $this->buildForwardMessage($raw_email, $parsed, $domain, $envelope_recipient);
 
-		$results = $this->relay($raw_mime, $envelope_sender, array($catch_all_address));
+		$results = $this->relay($raw_mime, $envelope_sender, $split['confirmed']);
 		$success = !in_array(false, $results, true);
 		$status = $success ? InboundEmailLog::STATUS_FORWARDED : InboundEmailLog::STATUS_ERROR;
 		$this->logTransaction($parsed, null, $status, $envelope_recipient, $catch_all_address, $success ? null : 'Catch-all delivery failed', $domain->key);
@@ -3584,7 +3651,7 @@ class InboundEmailRouter {
 	 * alone (logFromFor()).
 	 */
 	public function logTransaction($parsed, $alias, $status, $to_address, $destinations = null, $error = null, $domain_id = null, $message_id = null) {
-		InboundEmailLog::CreateEntry(
+		$entry = InboundEmailLog::CreateEntry(
 			$this->logFromFor($parsed, $alias, $domain_id),
 			$to_address,
 			$this->logSubjectFor($parsed, $alias),
@@ -3595,6 +3662,25 @@ class InboundEmailRouter {
 			$domain_id,
 			$message_id
 		);
+		$this->logged_ids[] = intval($entry->key);
+		if (count($this->logged_ids) > 512) {
+			// A long-running caller that never takes them (a mail import) keeps
+			// only the recent ones; the relay pull takes them after every entry.
+			$this->logged_ids = array_slice($this->logged_ids, -256);
+		}
+	}
+
+	/**
+	 * The routing-log ids written since the last call, and forget them. The relay
+	 * pull stamps its spool id on the lines one entry produced, which is how a
+	 * re-pulled entry (its ack lost) is recognised and not routed twice.
+	 *
+	 * @return int[]
+	 */
+	public function takeLoggedIds(): array {
+		$ids = $this->logged_ids;
+		$this->logged_ids = array();
+		return $ids;
 	}
 
 	/**

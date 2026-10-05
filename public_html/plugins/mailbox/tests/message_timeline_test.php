@@ -24,6 +24,7 @@
  *
  * Run: php tests/run.php test-db --filter=message_timeline
  *
+ * @version 1.1 - the destinations are confirmed, as forwarding requires
  * @version 1.0
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -75,6 +76,7 @@ $make_alias = function (string $local, string $mode, string $destinations = '') 
 	if ($destinations !== '') { $a->set('iea_destinations', $destinations); }
 	$a->set('iea_is_enabled', true);
 	$a->prepare(); $a->save();
+	mailbox_confirm_alias_destinations($a); // forwarding reaches only confirmed destinations
 	return $a;
 };
 

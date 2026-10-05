@@ -43,6 +43,7 @@
  * Either one hardens its holders (userHasHardenedDomain): short unlock-window
  * caps.
  *
+ * @version 1.14 - forwarding_offered(): no forward off a Fortress domain or one sealed at the relay
  * @version 1.13 - Fortress is settable: ied_level_set_time marks a level set
  *   through set_security_level(), which is what tells a Fortress domain from a
  *   legacy unconverted row; seals_content() covers Private and Fortress;
@@ -505,6 +506,17 @@ class InboundEmailDomain extends SystemBase {
 	/** True when this domain's mail seals end-to-end, to the owner's `mail` vault. */
 	function is_fortress() {
 		return $this->security_level() === self::LEVEL_FORTRESS;
+	}
+
+	/**
+	 * May mail for this domain's catch-all be forwarded at all? Not when it is
+	 * sealed to a key the server does not hold: at Fortress, or with Seal at
+	 * the relay. A forward hands the recipient's provider a readable copy,
+	 * which is what those levels exist to prevent. A mailbox asks
+	 * InboundEmailAlias::forwarding_offered(), which can differ by level.
+	 */
+	function forwarding_offered(): bool {
+		return !$this->is_fortress() && !$this->relay_seals_to_owner();
 	}
 
 	/**

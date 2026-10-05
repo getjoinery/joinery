@@ -643,6 +643,13 @@ func runCollectStatus() int {
 	st.Timesync = timesync()
 	st.Postfix = postfixCounts(oneTenant, postfixDir)
 
+	// A tenant over its spool quota is refused at RCPT with a 4xx until it
+	// drains, so its mail queues on the sending server rather than in this
+	// relay's queue (relay_outbound.go).
+	if err := refreshDeferredMap(postfixDir, filepath.Join(p.home, "routing.json"), envOr("JOINERY_RELAY_SPOOL", "/var/spool/joinery-relay")); err != nil {
+		fmt.Fprintf(os.Stderr, "collect-status: deferred map: %v\n", err)
+	}
+
 	if err := os.MkdirAll(p.statusDir(), 0o750); err != nil {
 		fmt.Fprintf(os.Stderr, "collect-status: %v\n", err)
 		return 1

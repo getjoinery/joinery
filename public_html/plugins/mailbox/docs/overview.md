@@ -806,6 +806,38 @@ This approach is required because SMTP services (Mailgun, SendGrid, etc.) requir
 
 ## Forwarding relay
 
+**The site forwards; no machine of ours sends on port 25.** On a colocated
+install the pipe hands the message to `InboundEmailRouter`; behind a relay the
+relay spools it sealed to the transport key and the pull
+(`RelaySpoolConsumer`, every scheduled-task pass) opens it and hands it to the
+same router, so a relay-fronted forward leaves minutes after arrival rather
+than seconds. Either way the copy goes out through the site's email service and
+counts against its sending allowance. An entry the pull routed is marked on its
+log lines (`iel_relay_spool_id`), so a re-pull after a lost ack forwards
+nothing twice.
+
+**A destination must confirm.** Nothing is forwarded to an address until the
+person at it agrees. A new destination — a mailbox's, the catch-all address, or
+a filter's "Forward to" — receives one message naming the address whose mail
+would be forwarded, with a link to `/mail/forward-confirm`, a page that confirms
+only when its button is pressed (a mail scanner following the link confirms
+nothing). The mailbox and domain editors send it on save, list each
+destination's state under the form, and offer Resend (at most once an hour); a
+destination that reaches a forward path some other way is asked by the first
+message. Until it confirms, forwards skip it and log `unconfirmed`. One
+confirmation covers every way one mailbox's mail reaches that address
+(`InboundForwardDestination`, keyed by domain, mailbox — none for the
+catch-all — and address; `ForwardConfirmation`).
+
+**Not offered where the server cannot read the mail.** At Fortress, or on a
+domain with Seal at the relay, a forward would hand the receiving provider a
+readable copy, which is what those levels exist to prevent. Such a mailbox is
+store-only and the editor says why
+(`InboundEmailAlias::forwarding_offered()`, `InboundEmailDomain::forwarding_offered()`);
+one saved with a forwarding mode before the level was raised stores its mail
+instead, and the log line says so. A catch-all address on such a domain is
+treated the same way.
+
 Forwarding relays the message through the **selected outbound provider**
 (`email_service`, the same provider ordinary outbound mail uses) when that
 provider can relay raw MIME with a chosen envelope sender — reusing the one
@@ -1009,13 +1041,13 @@ echo $?   # 0 = success, 67 = unknown alias, 75 = temp failure
 
 Each alias has a **delivery mode** (`iea_delivery_mode`):
 
-- **`forward`** (default) — relay to one or more destination addresses; no copy is kept locally.
+- **`forward`** (default) — relay to one or more destination addresses; no copy is kept locally. Each destination receives forwards only once the person at it confirms (see **Forwarding relay**), and a mailbox at Fortress or under Seal at the relay cannot forward at all.
 - **`store`** — persist the message to `iem_inbound_email_messages` for inspection in the admin Mailbox tab. Nothing is relayed. Destinations are not required.
 - **`forward_and_store`** — relay AND keep a faithful copy of the original message.
 
 Each domain also has a **catch-all mode** (`ied_catch_all_mode`):
 
-- **`forward`** — send unmatched recipients to `ied_catch_all_address`. With no catch-all address, `ied_reject_unmatched` decides: on, they are refused during the SMTP conversation (see **Unknown recipients are refused during the SMTP conversation**); off, they are accepted and dropped.
+- **`forward`** — send unmatched recipients to `ied_catch_all_address`, once the person at it confirms. With no catch-all address, `ied_reject_unmatched` decides: on, they are refused during the SMTP conversation (see **Unknown recipients are refused during the SMTP conversation**); off, they are accepted and dropped.
 - **`store`** — persist every unmatched recipient on the domain to the local mailbox. This is the equivalent of a Mailgun wildcard `forward()` route. `ied_reject_unmatched` is ignored when catch-all mode is `store`.
 
 ## Local Mailbox
@@ -2589,23 +2621,33 @@ For each accepted message it:
 
 - Looks up the recipient's public key + routing in the merged `routing.json` (no
   database). Every entry names its owning tenant; the tenant's block carries the
-  spool directory, SRS secret, forward From identity, transport key, and the
-  shard-policy limits (per-tenant forward rate limit and spool quota — over
-  quota temp-fails, so senders queue instead of one tenant filling the disk).
+  spool directory, transport key, and the shard-policy limits (the spool
+  quota). A tenant over its quota is refused at RCPT with `452 4.2.2` until it
+  drains: `collect-status` rewrites the `joinery-deferred` access map every
+  thirty seconds, so the mail waits on the sending server, which tells its own
+  sender if it gives up, rather than in the relay's queue.
 - Seals the **entire raw message** with `crypto_box_seal` (libsodium wire format,
   `SealedBox::openDek`-compatible) to that public key — recipients on a domain with
   Seal at the relay to the owner's vault key, Standard/Private to the ambient transport key Joinery holds.
 - Writes `<spoolid>.seal` (ciphertext) + `<spoolid>.meta` (cleartext operational
   metadata only — recipient, Message-ID, thread inputs, size, the milter-stamped
   Authentication-Results; never subject or body) via write-tempfile → fsync →
-  atomic rename, returning the Postfix exit code only after the fsync. Plaintext
-  is never written to the relay's disk.
-- Executes forward-mode aliases relay-side, applying the identical header
-  treatment `InboundEmailRouter::buildForwardMessage` applies (a byte-for-byte Go
-  port with a parity test): rewrite From to the site's verified address so the
-  original sender domain's DMARC never judges us, preserve the original sender as
-  Reply-To, stamp the `X-Forwarded-*` headers, and SRS-rewrite the envelope sender
-  (byte-compatible with `SRSRewriter`, so bounces decode on the main box).
+  atomic rename, returning the Postfix exit code only after the fsync. The
+  sealer itself writes no plaintext. Postfix does: it saves each accepted
+  message to its queue on the relay's disk before it starts the sealer, and
+  removes it when the sealer returns, so readable mail sits on the relay's disk
+  for the length of that handoff (longer while a delivery is being retried).
+- **Forwards nothing.** Every recipient a site names is spooled, a forwarding
+  mailbox and a forwarding catch-all included; the site forwards at pull through
+  its own email service (see [Forwarding relay](#forwarding-relay)). A fragment
+  that still carries forward instructions (from a site on an older release) has
+  them carried out here, with the header treatment
+  `InboundEmailRouter::buildForwardMessage` applies, until that site upgrades.
+- **Sends nothing.** While no tenant's fragment carries a forward instruction,
+  the merge drops outbound port 25 at the firewall and sets Postfix's
+  `default_transport` to an error, which also turns any bounce Postfix would
+  generate into a double bounce for the local postmaster (`relay_outbound.go`).
+  A fragment with forward instructions opens both again until it is gone.
 - Stores SRS bounces: a delivery-failure notice returning to `SRS0=…@forwardingdomain`
   is accepted (a Postfix regexp map), transport-sealed, and spooled; the pull
   consumer routes it through the same `handleSRSBounce` path colocated ingest uses,
@@ -2614,14 +2656,16 @@ For each accepted message it:
 ### Map sync: fragment push + shard-side merge
 
 The relay holds no database, so `RelayMapExporter` compiles this tenant's
-routing — its domains, recipients, forwarding domains, and per-tenant identity
-(SRS secret, forward From identity, transport key) — into **one JSON fragment**,
+routing — its domains, recipients, forwarding domains, and its transport key —
+into **one JSON fragment**,
 and `RelayMapSync` pushes it to the relay as a signed `PUT /relay/fragment`,
 where a root path unit performs the merge, and reads the validation verdict
 in-band. Never root, never `/etc/postfix`. IMAP-source domains are excluded — their mail arrives by IMAP
 poll, not MX, and listing them would make the relay wrongly authoritative for
-e.g. `gmail.com`, looping forwards to addresses there back into the sealer
-instead of out over SMTP.
+e.g. `gmail.com`. The fragment carries no forward instructions: every recipient
+is `store`, a forwarding catch-all is a `store` catch-all, and there are no
+destinations, no forward From identity and no SRS secret. The forwarding
+domains stay, because the bounces of forwards the site sends return to them.
 
 The relay-side merge (`relay-sealer merge-maps`, root, triggered by the path
 unit — never a resident daemon) is **where the domain-claim boundary is mechanically
@@ -2709,8 +2753,8 @@ Neither loses mail.
 
 ### Outbound sending
 
-The relay is **inbound-only by default**: it accepts, verifies, seals, spools,
-and forwards inbound mail, and carries no compose sends. Compose sends leave
+The relay is **inbound-only**: it accepts, verifies, seals and spools inbound
+mail, and sends none — no forwards and no compose sends. Compose sends leave
 through the deployment's configured outbound provider over an HTTP-API raw-message
 path. SMTP submission would stamp the main box IP into the sent message's first
 `Received:` header; an API submission's `Received:` chain begins inside the
@@ -4037,8 +4081,9 @@ one line in the Spam view saying which step decided.
 
 **Forward suppression.** A judged-`spam` message is **never relayed** — forwarding
 spam burns the platform's sending reputation and can relay abuse. The forward is
-suppressed and logged with status `spam_held`. A `forward_and_store` alias still
-stores the message (with its `spam` verdict) so it stays reviewable.
+suppressed and logged with status `spam_held`, for a mailbox's forward and the
+catch-all forward alike. A `forward_and_store` alias still stores the message
+(with its `spam` verdict) so it stays reviewable.
 
 **IMAP-polled mail** is neither classified nor taught: the source's Junk folder is its
 verdict. A message ingested into a folder whose `iif_role` is `junk` is marked `spam`,

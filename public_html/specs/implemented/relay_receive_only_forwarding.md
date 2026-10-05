@@ -1,9 +1,14 @@
 # Relays only receive; sites do the forwarding
 
-**Status:** Draft, 2026-10-04. Nothing here is built. Split out of
-`own_mail_server_sending` (its section 6, from review finding M4,
-public-html-d7). Depends on nothing. `own_mail_server_sending` relies on it
-for "no machine of ours sends on port 25".
+**Status:** Implemented 2026-10-05. Verified: the receive_only_forwarding
+suite (forward at pull, the dedup on a lost ack, confirmation, store-only
+levels, the catch-all spam hold, the store-only map, migration ifd_001) and
+the relay's Go tests (outbound posture, the 452 deferral map); the
+confirmation page renders on dev; ifd_001 ran on dev. A live forward, the
+editor panel in a browser, and a relay-fronted site on relay 3.5 are in the
+live verification queue. Split out of `own_mail_server_sending` (its section
+6, from review finding M4, public-html-d7). `own_mail_server_sending` relies
+on it for "no machine of ours sends on port 25".
 
 ## What this does for the user
 
@@ -98,18 +103,40 @@ Once it forwards nothing, a relay sends nothing:
 - Its firewall drops outbound port 25.
 - Its Postfix gets an `error:` default and relay transport. That backstops
   anything injected locally.
-- `provision_relay.sh` loses the forward and SRS-bounce outbound legs, and
-  `smtp_address_preference`, which existed only for them.
-- The sealer's forward code (`forward.go`) and the per-tenant forward
-  throttle are removed.
+- The sealer's forward code (`forward.go`), the per-tenant forward throttle
+  and `smtp_address_preference` stay only for a tenant whose site is still on
+  an older release (see Rollout order). They are deleted in a later release,
+  once no relay reports such a tenant.
 - Self-hosted relay deployments follow the same rules: their relay stops
   forwarding too, and their site forwards through its own email service.
 
 **Rollout order matters.** A tenant's site must be on the version that
 forwards at pull before its relay stops forwarding. Otherwise forwards stop
-in between. The plane pushes the new routing (no forward instructions) per
-tenant only once that tenant's site reports the new version. The relay drops
-outbound 25 once no tenant on it still has forward instructions.
+in between. The site builds its own fragment, so a site on the new version
+sends no forward instructions, and a site still on an older one keeps
+sending them. The relay's merge opens outbound 25 while any tenant's fragment
+carries a forward and closes it (firewall drop, Postfix `default_transport`
+an error) once none does.
+
+**A tenant that stops pulling (B8).** A tenant over its spool quota is refused
+at RCPT with `452 4.2.2` until it drains, so its mail waits on the sending
+server, never in the relay's queue to bounce at expiry. `collect-status`
+rewrites the `joinery-deferred` access map every thirty seconds.
+
+## Notes from the build
+
+- A destination never asked that reaches a forward path some other way than
+  an editor (an alias made through the API, a filter) is asked by the first
+  message, through the email queue (`SendQueuedEmails`), so delivery never
+  waits on a send. The editors send their request immediately.
+- One confirmation covers a mailbox and an address: the alias forward and a
+  filter's forward on that mailbox share it. The catch-all has its own (no
+  mailbox).
+- A mailbox at Fortress or under Seal at the relay that still has a
+  forwarding mode stores its mail instead, logged. A catch-all address on such
+  a domain does the same.
+- The catch-all forward ran no spam check. It does now, like the alias
+  forward (found during the build).
 
 ## Testing
 

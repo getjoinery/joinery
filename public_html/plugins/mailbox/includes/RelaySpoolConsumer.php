@@ -11,8 +11,10 @@
  *   2. Stores each durably with an idempotent store keyed on the spool id (a
  *      re-pull of an un-acked-but-stored item is a no-op = dedup):
  *        - key_kind=transport (Standard/Private): open the blob with the ambient
- *          transport secret and run today's store ingest (no re-forwarding — the
- *          relay already forwarded forward-mode aliases).
+ *          transport secret and route it exactly as a colocated box routes an
+ *          arrival (InboundEmailRouter::processEmail): store, forward through
+ *          this site's email service, or both. The relay forwards nothing
+ *          (specs/relay_receive_only_forwarding.md).
  *        - key_kind=user (Seal at the relay): store a pending-parse row with the sealed
  *          blob; DeferredIngest parses it at the next unlock.
  *   3. Acks the entries it durably stored (POST /relay/spool/ack) — the
@@ -27,6 +29,10 @@
  * pinned to the relay's identity, and the relay scopes every path to this
  * tenant's own spool: ids only, no paths, no root.
  *
+ * @version 1.17 - transport-sealed mail is routed by processEmail, forwards included: the relay
+ *                only receives (specs/relay_receive_only_forwarding.md). An entry whose routing
+ *                logged lines is marked on them (iel_relay_spool_id), so a lost ack never routes
+ *                it twice; a deferral (75) leaves it on the relay for the next pull
  * @version 1.16 - postmaster mail the relay carried in for a domain with no postmaster alias is
  *                filed if it is a report and dropped (logged) otherwise, as the colocated router does
  * @version 1.15 - a pull that drains the listing stamps mrl_last_pull_drained_time (B41); an
@@ -168,7 +174,7 @@ class RelaySpoolConsumer {
 					$outcome = $is_direct
 						? $this->ingestDirect($seal_path, $meta_path, $spool_id)
 						: $this->ingestOne($seal_path, $meta_path, $spool_id);
-					if ($outcome === 'stored')  { $stored++; }
+					if ($outcome === 'stored' || $outcome === 'routed') { $stored++; }
 					if ($outcome === 'pending') { $pending++; }
 					// 'hold' is recoverable mail we deliberately leave on the relay
 					// (domain disabled/unconfigured, or relay-sealed mail's owner not yet
@@ -226,8 +232,9 @@ class RelaySpoolConsumer {
 
 	/**
 	 * Store one spool entry. Returns one of:
-	 *   'stored' | 'pending' | 'dedup' | 'bounce'  — durable (or handled) → ack;
-	 *   'discarded'  — postmaster mail with no alias that was not a report → ack-drop, logged;
+	 *   'stored' | 'pending' | 'dedup'  — durable (or handled) → ack;
+	 *   'routed'     — transport-sealed mail the router stored, forwarded, filed or
+	 *                  dropped with a log line, as it would on a colocated box → ack;
 	 *   'unroutable' — genuinely undeliverable (no/malformed recipient) → ack-drop
 	 *                  with a loud log;
 	 *   'hold'       — recoverable mail whose domain is disabled/unconfigured or
@@ -276,7 +283,7 @@ class RelaySpoolConsumer {
 		// already stored, the prior pull just failed to ack — nothing to do but ack
 		// it now. Checking after the .meta gate left a stored entry whose sidecar a
 		// half-completed ack had already deleted throwing "missing .meta" forever.
-		if ($this->alreadyStored($spool_id)) {
+		if ($this->alreadyStored($spool_id) || $this->alreadyRouted($spool_id)) {
 			return 'dedup';
 		}
 
@@ -310,21 +317,12 @@ class RelaySpoolConsumer {
 		$key_kind = (string)($meta['key_kind'] ?? 'transport');
 
 		// SRS bounce: a delivery-failure notice returning to a forwarded message's
-		// SRS-rewritten sender. These are always transport-sealed. Decode and deliver
-		// the NDR via the same handler colocated ingest uses — never store it as a
-		// normal message (specs/mailbox_relay_fix_pack.md § Fix 6).
-		if ($key_kind !== 'user' && SRSRewriter::isSRSAddress($recipient_raw)) {
-			$raw = (new SealedBox())->openDek($sealed_raw, $this->transportSecret());
-			$parsed = $this->router->parseEmail($raw);
-			$handled = $this->router->handleSrsBounceIfApplicable($parsed, $raw, $recipient_raw);
-			if ($handled === null) {
-				// SRS is disabled, so nothing can decode this — an in-flight bounce
-				// from before the setting flip (the map no longer accepts new ones).
-				// The discard must never be silent.
-				error_log('RelaySpoolConsumer: discarding SRS bounce ' . $spool_id
-					. ' for ' . $recipient_raw . ' — mailbox_srs_enabled is off');
-			}
-			return 'bounce';
+		// SRS-rewritten sender, on a forwarding subdomain that is not a mail domain
+		// here. Always transport-sealed; the router decodes it and notifies the
+		// original sender, exactly as a colocated box does
+		// (specs/mailbox_relay_fix_pack.md § Fix 6).
+		if ($key_kind !== 'user' && $key_kind !== 'client' && SRSRewriter::isSRSAddress($recipient_raw)) {
+			return $this->routeTransport($sealed_raw, $recipient_raw, $meta, $spool_id);
 		}
 
 		list($local, $domain_name) = explode('@', $recipient, 2);
@@ -370,56 +368,71 @@ class RelaySpoolConsumer {
 			return $result['dedup'] ? 'dedup' : 'pending';
 		}
 
-		// Transport: open now with the ambient secret and run the store ingest.
+		// Transport: open now with the ambient secret and route it.
+		return $this->routeTransport($sealed_raw, $recipient_raw, $meta, $spool_id);
+	}
+
+	/**
+	 * Route one transport-sealed arrival exactly as a colocated box routes it
+	 * (InboundEmailRouter::processEmail): deliverability reports filed, the
+	 * mailbox's mode applied (store, forward through this site's email service,
+	 * or both), spam never forwarded, unconfirmed destinations skipped, a
+	 * postmaster message with nowhere to go dropped. The relay receives and
+	 * seals; every decision about the mail is made here.
+	 *
+	 * The router's 75 means "try again later" (a sealing mailbox with no key, a
+	 * store cap, a database blip): the entry stays on the relay, unacked, with
+	 * no age-out, because the relay told the sender 250. Anything else is final,
+	 * and the log lines it wrote are marked with the spool id so a re-pull after
+	 * a lost ack finds them and routes nothing twice.
+	 */
+	private function routeTransport(string $sealed_raw, string $recipient_raw, array $meta, string $spool_id): string {
 		$raw = (new SealedBox())->openDek($sealed_raw, $this->transportSecret());
-		$parsed = $this->router->parseEmail($raw);
-
-		// Deliverability report? (specs/deliverability_report_ingest.md) The
-		// relay pull path reaches storeMessage without passing processEmail,
-		// so the detector runs here — the same plaintext moment. A recognised
-		// report is filed, never stored as mail; ack the spool entry.
-		if (DeliverabilityReportIngest::intercept($this->router, $raw, $parsed, $domain, $recipient) !== null) {
-			return 'stored';
-		}
-
-		// postmaster with no alias, on a domain whose catch-all does not store:
-		// the relay accepts it on every domain (RFC 5321; the DMARC rua points at
-		// it) and carries it here for the report check above. Anything else is
-		// dropped, as the colocated router drops it — never stored as mail
-		// nobody asked to receive.
-		if ($alias === null && $local === 'postmaster'
-				&& (string)$domain->get('ied_catch_all_mode') !== InboundEmailDomain::CATCHALL_STORE) {
-			$this->router->logTransaction($parsed, null, InboundEmailLog::STATUS_DISCARDED, $recipient, null,
-				null, $domain->key);
-			return 'discarded';
-		}
-
 		$auth = $this->router->authFromRelayMeta($meta, $this->relayAuthservId());
-		try {
-			$result = $this->router->storeMessage($raw, $parsed, $alias, $domain, $recipient, $auth);
-		} catch (MailboxSealTargetMissing $e) {
-			// A protected mailbox with nobody to seal to. Storing it in plaintext
-			// would defeat the level silently, so hold the blob on the relay — it
-			// is still sealed there — and let a later pull store it once the
-			// mailbox has one member with a vault. NO age-out on this hold: the
-			// relay told the sender 250, so dropping the blob later would be
-			// silent loss of accepted mail. Declining means "try again later"
-			// for as long as it takes (specs/mailbox_connect_flow.md § E); the
-			// Setup tab's sealing row is what keeps the wait short, and holds are
-			// logged in aggregate by the caller, never per pass.
+
+		$this->router->takeLoggedIds();
+		$code = $this->router->processEmail($raw, $recipient_raw, $auth);
+		$log_ids = $this->router->takeLoggedIds();
+
+		if ($code === 75) {
 			return 'hold';
 		}
-		if (!$result['dedup'] && isset($result['message']) && $result['message'] !== null) {
-			// Stamp the spool id so a re-pull dedups on it directly. TARGETED UPDATE
-			// — storeMessage seals the content columns behind the model's back, so a
-			// full save() here would blank them (specs/mailbox_relay_fix_pack.md § Fix 1).
-			InboundEmailMessage::updateColumns(
-				intval($result['message']->key),
-				array('iem_relay_spool_id' => substr($spool_id, 0, 255))
-			);
-			return 'stored';
+		$this->markRouted($spool_id, $log_ids);
+		if ($code === 67) {
+			// Nothing here receives for it, though the relay accepted it: the
+			// relay's map and this site disagree. Dropped, never bounced.
+			error_log('RelaySpoolConsumer: UNROUTABLE blob ' . $spool_id . ' — the router has no mailbox or domain for '
+				. $recipient_raw . ' (the relay map and this site disagree); dropping.');
+			return 'unroutable';
 		}
-		return $result['dedup'] ? 'dedup' : 'stored';
+		return 'routed';
+	}
+
+	/**
+	 * Mark what routing an entry produced with its spool id: the log lines (the
+	 * dedup key for an entry that stored nothing, such as a pure forward) and the
+	 * message row it stored, if any.
+	 */
+	private function markRouted(string $spool_id, array $log_ids): void {
+		$log_ids = array_values(array_filter(array_map('intval', $log_ids)));
+		if (!$log_ids) {
+			return;
+		}
+		$spool_id = substr($spool_id, 0, 255);
+		$db = DbConnector::get_instance()->get_db_link();
+		$in = implode(',', array_fill(0, count($log_ids), '?'));
+		$db->prepare('UPDATE iel_inbound_email_logs SET iel_relay_spool_id = ? WHERE iel_inbound_email_log_id IN (' . $in . ')')
+			->execute(array_merge(array($spool_id), $log_ids));
+
+		$q = $db->prepare('SELECT DISTINCT iel_iem_inbound_email_message_id FROM iel_inbound_email_logs
+			WHERE iel_inbound_email_log_id IN (' . $in . ') AND iel_iem_inbound_email_message_id IS NOT NULL');
+		$q->execute($log_ids);
+		$message_id = intval($q->fetchColumn());
+		if ($message_id > 0 && !$this->alreadyStored($spool_id)) {
+			// TARGETED UPDATE — storeMessage seals the content columns behind the
+			// model's back, so a full save() here would blank them.
+			InboundEmailMessage::updateColumns($message_id, array('iem_relay_spool_id' => $spool_id));
+		}
 	}
 
 	/**
@@ -576,6 +589,14 @@ class RelaySpoolConsumer {
 			return 'aged_out';
 		}
 		return 'hold';
+	}
+
+	/** True if routing this spool id already wrote its log lines (a forward stores no row). */
+	private function alreadyRouted(string $spool_id): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare("SELECT 1 FROM iel_inbound_email_logs WHERE iel_relay_spool_id = ? LIMIT 1");
+		$stmt->execute(array(substr($spool_id, 0, 255)));
+		return (bool)$stmt->fetchColumn();
 	}
 
 	/** True if a message row already carries this spool id (durable). */

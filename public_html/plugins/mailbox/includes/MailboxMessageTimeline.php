@@ -21,6 +21,7 @@
  * recipients (sealed with the mailbox), and a closed window drops exactly
  * those lines and sets locked:true beside the rest.
  *
+ * @version 1.5 - an unconfirmed forwarding destination shows as not forwarded
  * @version 1.4 - a correction on fetched mail says whether it reached the source's Junk folder
  * @version 1.3 - the spam line says which step decided (InboundEmailMessage::spamReasonText)
  * @version 1.2 - "You marked this" comes from the correction time, and says whether the filter learned it
@@ -278,6 +279,10 @@ class MailboxMessageTimeline {
 			case InboundEmailLog::STATUS_SPAM_HELD:
 				$title = 'Held as spam — not forwarded';
 				$detail = null;
+				break;
+			case InboundEmailLog::STATUS_UNCONFIRMED:
+				$title = 'Not forwarded — destination not confirmed yet';
+				$detail = $dest !== '' ? 'to ' . str_replace(',', ', ', $dest) : null;
 				break;
 			case InboundEmailLog::STATUS_FILTERED:
 				$title = 'Filters applied';

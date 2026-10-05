@@ -75,6 +75,11 @@ function mailbox_purge_domains(string $domain_like, ?string $user_email_like = n
 				$db->exec("DELETE FROM mst_mailbox_send_attempts WHERE mst_iea_inbound_email_alias_id IN ($ain)");
 			}
 
+			try {
+				$db->exec("DELETE FROM ifd_inbound_forward_destinations WHERE ifd_ied_inbound_email_domain_id IN ($in)");
+			} catch (\Throwable $e) {
+				// a test database copied before the table existed
+			}
 			$db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id IN ($in)");
 			$db->exec("DELETE FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id IN ($in)");
 			$db->exec("DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id IN ($in)");
@@ -86,5 +91,33 @@ function mailbox_purge_domains(string $domain_like, ?string $user_email_like = n
 		}
 	} catch (\Throwable $e) {
 		// preClean is best-effort — never let orphan-sweeping fail a test.
+	}
+}
+
+/**
+ * Record a forwarding destination as confirmed, as the person at it would by
+ * following the confirmation link (specs/relay_receive_only_forwarding.md,
+ * rule 4). Forwarding tests call it for the destinations they forward to;
+ * an unconfirmed destination receives nothing.
+ *
+ * @param int|null $alias_id null = the domain's catch-all
+ */
+function mailbox_confirm_forward_destination(int $domain_id, ?int $alias_id, string $destination): void {
+	$row = InboundForwardDestination::find($domain_id, $alias_id, $destination);
+	if (!$row) {
+		$row = new InboundForwardDestination(NULL);
+		$row->set('ifd_ied_inbound_email_domain_id', $domain_id);
+		$row->set('ifd_iea_inbound_email_alias_id', $alias_id);
+		$row->set('ifd_destination', $destination);
+	}
+	$row->set('ifd_status', InboundForwardDestination::STATUS_CONFIRMED);
+	$row->set('ifd_confirmed_time', gmdate('Y-m-d H:i:s'));
+	$row->save();
+}
+
+/** Confirm every destination of a forwarding mailbox. */
+function mailbox_confirm_alias_destinations(InboundEmailAlias $alias): void {
+	foreach ($alias->get_destinations_array() as $dest) {
+		mailbox_confirm_forward_destination(intval($alias->get('iea_ied_inbound_email_domain_id')), intval($alias->key), $dest);
 	}
 }

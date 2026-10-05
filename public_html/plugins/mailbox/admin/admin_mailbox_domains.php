@@ -12,6 +12,8 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.10 - the catch-all address says it must confirm (and that a sealed level keeps the mail
+ *   instead), with its confirmation state and Resend under the form
  * @version 4.9 - Reject Unmatched says what it does: refused during the SMTP conversation, or accepted and dropped
  * @version 4.8 - the Fortress card: mail rules run on the device under Seal at the relay; the phone note
  * @version 4.7 - Save works on a domain whose checklist offers a fix (no form inside the form); Fortress
@@ -363,7 +365,11 @@ if ($show_form) {
 		],
 	]);
 
-	$formwriter->textinput('ied_catch_all_address', 'Catch-All Address', []);
+	$formwriter->textinput('ied_catch_all_address', 'Catch-All Address', [
+		'helptext' => 'Mail to an address this domain does not have is forwarded here, once the person at it '
+			. 'confirms; until then it is not forwarded. At Fortress, or with Seal at the relay, nothing is '
+			. 'forwarded: that mail is kept here instead.',
+	]);
 
 	$formwriter->checkboxinput('ied_reject_unmatched', 'Reject Unmatched', [
 		'helptext' => 'When there is no catch-all address: mail to an address this domain does not have is refused '
@@ -400,6 +406,17 @@ if ($show_form) {
 	echo $formwriter->end_form();
 	if ($ceremony !== null) {
 		echo mailbox_protection_fix_form($formwriter->getCSRFToken());
+	}
+
+	// The catch-all address's confirmation state, outside the form: Resend is
+	// a form of its own.
+	if ($edit_domain && $form_domain->key && !$form_domain->is_imap_source() && $form_domain->forwarding_offered()
+			&& (string)$form_domain->get('ied_catch_all_mode') !== InboundEmailDomain::CATCHALL_STORE
+			&& trim((string)$form_domain->get('ied_catch_all_address')) !== '') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/forward_confirmation_panel.php'));
+		echo mailbox_forward_confirmation_panel(intval($form_domain->key), null,
+			array((string)$form_domain->get('ied_catch_all_address')), '/plugins/mailbox/admin/admin_mailbox_domains',
+			array('ied_inbound_email_domain_id' => intval($form_domain->key)));
 	}
 
 	$page->end_box();

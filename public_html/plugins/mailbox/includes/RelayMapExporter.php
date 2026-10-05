@@ -3,12 +3,12 @@
  * RelayMapExporter - build this deployment's MAP FRAGMENT for the relay.
  *
  * The relay holds no database connection, so everything it needs to validate
- * recipients at SMTP time, seal to the right key, and forward is compiled here
+ * recipients at SMTP time and seal to the right key is compiled here
  * from the enabled InboundEmailDomain + InboundEmailAlias rows and pushed over
  * the tunnel as ONE JSON fragment (specs/mailbox_relay_shared_fleet.md § Map
  * sync: fragment push and shard-side merge). The fragment carries ONLY this
- * tenant's routing data — its domains, recipients, forwarding domains, and
- * per-tenant identity (SRS secret, forward From identity, transport key). The
+ * tenant's routing data — its domains, recipients, forwarding domains, and its
+ * transport key. The
  * relay's merge unit validates it against the tenant's root-owned domain
  * allowlist and derives all Postfix map lines shard-side; nothing this side
  * emits can bypass that validation.
@@ -22,6 +22,15 @@
  * browser-held mail key (key_kind=client, key_scope=mail) when the relay can
  * write the browser's format; otherwise it takes the transport key.
  *
+ * The relay only receives (specs/relay_receive_only_forwarding.md): every
+ * recipient it is told about is spooled, a forwarding mailbox included, and
+ * this site forwards it at pull through its own email service. So the fragment
+ * carries no forward instructions — no destinations, no forward From identity,
+ * no SRS secret. The forwarding domains stay: bounces of the forwards this site
+ * sends return to them, and the relay spools those too.
+ *
+ * @version 2.5 - no forward instructions: every recipient and a forwarding catch-all are
+ *                spooled, and the site forwards at pull (specs/relay_receive_only_forwarding.md)
  * @version 2.4 - a Fortress mailbox under the Seal at the relay add-on seals to the owner's
  *                mail key (key_kind=client) on a relay that reports it can (RelayVersion::sealsForBrowsers,
  *                specs/client_custody_mail.md WP7, B35)
@@ -68,20 +77,10 @@ class RelayMapExporter {
 		$domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false));
 		$domains->load();
 
-		// Forward From-rewrite identity, mirroring InboundEmailRouter::buildForwardMessage /
-		// forwardedFromDisplay so relay-side forwards align DMARC exactly as colocated
-		// forwards do (specs/mailbox_relay_fix_pack.md § Fix 5).
-		$forward_from = (string)$this->settings->get_setting('defaultemail');
-		$forward_from_name = (string)($this->settings->get_setting('defaultemailname') ?: 'Inbound Email');
-		$forward_show_via = ((string)$this->settings->get_setting('mailbox_from_show_via') !== '0');
-
 		$fragment = array(
 			'fragment_format'      => 1,
 			'tenant'               => $this->relay->tenantSlug(),
 			'version'              => 0,
-			'srs_secret'           => $this->srsSecret(),
-			'forward_from_name'    => $forward_from_name,
-			'forward_show_via'     => $forward_show_via,
 			'transport_public_key' => $this->transport_public_key,
 			'forwarding_domains'   => array(),
 			'recipients'           => array(),
@@ -98,8 +97,8 @@ class RelayMapExporter {
 		$fragment = array_merge($fragment, $this->directFragment());
 
 		// SRS-bounce accept (specs/mailbox_relay_fix_pack.md § Fix 6): bounces to
-		// forwarded mail return to SRS0=...@forwardingdomain, which is not in the
-		// alias list. The relay must accept these (the merge derives a regexp
+		// mail this site forwarded return to SRS0=...@forwardingdomain, whose MX is
+		// the relay, and which is not in the alias list. The relay must accept these (the merge derives a regexp
 		// check_recipient_access entry per forwarding domain) and the sealer must
 		// store them (transport key) so the pull consumer can decode the NDR.
 		// Gated on the SRS setting: with SRS off no forward generates an SRS
@@ -129,22 +128,21 @@ class RelayMapExporter {
 				$forwarding_domains[$forwarding_domain] = true;
 			}
 
-			// Map the domain catch-all onto the sealer's store|forward|none.
+			// The catch-all as the relay sees it: anything it must accept is
+			// spooled (a forwarding catch-all too; this site forwards it), else
+			// none, where reject_unmatched decides.
 			$map_catch_mode = 'none';
-			if ($catch_all_mode === InboundEmailDomain::CATCHALL_STORE) {
+			if ($catch_all_mode === InboundEmailDomain::CATCHALL_STORE
+					|| ($catch_all_mode === InboundEmailDomain::CATCHALL_FORWARD && $catch_all_address !== '')) {
 				$map_catch_mode = 'store';
-			} elseif ($catch_all_mode === InboundEmailDomain::CATCHALL_FORWARD && $catch_all_address !== '') {
-				$map_catch_mode = 'forward';
 			}
 
 			$fragment['domains'][$domain_name] = array(
 				'catch_all_mode'    => $map_catch_mode,
-				'catch_all_address' => $catch_all_address,
 				'reject_unmatched'  => $reject_unmatched,
 				'public_key'        => $this->transport_public_key,
 				'key_kind'          => 'transport',
 				'forwarding_domain' => $forwarding_domain,
-				'forward_from'      => $forward_from,
 			);
 
 			$aliases = new MultiInboundEmailAlias(array(
@@ -175,10 +173,10 @@ class RelayMapExporter {
 					// sealed part can be tagged with the key it was sealed to and
 					// an unopenable message told apart from a corrupt one.
 					'key_generation'    => $generation,
-					'mode'              => (string)$alias->get('iea_delivery_mode'),
-					'destinations'      => array_values($alias->get_destinations_array()),
+					// Spooled whatever the mailbox's mode: a forward is sent
+					// from here at pull, never by the relay.
+					'mode'              => 'store',
 					'forwarding_domain' => $forwarding_domain,
-					'forward_from'      => $forward_from,
 				);
 				if ($key_kind === 'client') {
 					$fragment['recipients'][$address]['key_scope'] = InboundEmailMessage::SEAL_SCOPE_FORTRESS;
@@ -330,13 +328,5 @@ class RelayMapExporter {
 		$pk = $vault !== null ? (string)$vault->get('uev_public_key') : null;
 		$this->vault_cache[$owner_id] = $pk;
 		return $pk;
-	}
-
-	/** The SRS secret the relay uses for forward-mode envelope rewriting, or ''. */
-	private function srsSecret(): string {
-		if (!$this->settings->get_setting('mailbox_srs_enabled')) {
-			return '';
-		}
-		return (string)$this->settings->get_setting('mailbox_srs_secret');
 	}
 }
