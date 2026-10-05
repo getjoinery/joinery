@@ -13,6 +13,8 @@
  * nothing a node or a note said becomes a link. The only links here are the
  * plane's own pages by id.
  *
+ * @version 1.2 - the triage badge names a fix awaiting its proof; Looking is gone; the timeline shows the
+ *                reconciler putting an unproven fix back to new
  * @version 1.1 - Resolve asks what fixed it in a modal (resolve_note_field, resolve_note_script)
  * @version 1.0
  */
@@ -57,12 +59,11 @@ class IncidentViews {
 		$t = $inc->triage();
 		$cls = array(
 			IncidentRecord::TRIAGE_NEW      => 'bg-primary',
-			IncidentRecord::TRIAGE_LOOKING  => 'bg-info',
 			IncidentRecord::TRIAGE_SNOOZED  => 'bg-secondary',
-			IncidentRecord::TRIAGE_RESOLVED => 'bg-success',
+			IncidentRecord::TRIAGE_RESOLVED => $inc->awaiting_proof() ? 'bg-info' : 'bg-success',
 			IncidentRecord::TRIAGE_IGNORED  => 'bg-light text-dark',
 		);
-		$label = IncidentTriage::LABELS[$t] ?? $t;
+		$label = IncidentTriage::label($inc);
 		if ($t === IncidentRecord::TRIAGE_SNOOZED) {
 			$label .= ' until ' . LibraryFunctions::convert_time((string)$inc->get('inc_snooze_until'), 'UTC',
 				SessionControl::get_instance()->get_timezone(), 'M j, g:i A');
@@ -218,7 +219,13 @@ class IncidentViews {
 					break;
 				case IncidentEvent::KIND_TRIAGE:
 					$to = (string)($data['to'] ?? '');
-					$line = self::e($who !== '' ? $who : 'Someone') . ' set it to <strong>' . self::e(IncidentTriage::LABELS[$to] ?? $to) . '</strong>';
+					// A triage with no person is the reconciler's: a fix whose proof never came.
+					if (!empty($data['unproven'])) {
+						$line = '<strong>Back to New.</strong>' . ($text !== '' ? ' ' . self::e($text) : '');
+						break;
+					}
+					// A state no longer offered (Looking) still reads as its word.
+					$line = self::e($who !== '' ? $who : 'Someone') . ' set it to <strong>' . self::e(IncidentTriage::LABELS[$to] ?? ucfirst($to)) . '</strong>';
 					if ($to === IncidentRecord::TRIAGE_SNOOZED && !empty($data['until'])) {
 						$line .= ' until ' . self::e(LibraryFunctions::convert_time((string)$data['until'], 'UTC',
 							SessionControl::get_instance()->get_timezone(), 'M j, g:i A'));
@@ -374,7 +381,7 @@ class IncidentViews {
 	public static function triage_buttons(string $action, IncidentRecord $inc, string $csrf): string {
 		$current = $inc->triage();
 		$html = '<div class="d-flex flex-wrap align-items-center gap-2">';
-		foreach (array(IncidentRecord::TRIAGE_LOOKING, IncidentRecord::TRIAGE_RESOLVED, IncidentRecord::TRIAGE_IGNORED, IncidentRecord::TRIAGE_NEW) as $state) {
+		foreach (array(IncidentRecord::TRIAGE_RESOLVED, IncidentRecord::TRIAGE_IGNORED, IncidentRecord::TRIAGE_NEW) as $state) {
 			if ($state === $current) { continue; }
 			$cls = $state === IncidentRecord::TRIAGE_RESOLVED ? 'btn-success' : 'btn-outline-secondary';
 			$html .= '<form method="post" action="' . self::e($action) . '" class="d-inline">'

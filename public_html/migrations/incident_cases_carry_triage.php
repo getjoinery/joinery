@@ -4,8 +4,8 @@
  *
  * Each case a node's agent opened gets what an incident has: its plain title,
  * a triage, and a timeline. The read stamp becomes triage (read and cleared is
- * resolved, read and still active is looking, unread is new) and a human's
- * note becomes a note event. The old columns (inc_human_note, inc_read_time,
+ * resolved; still active, read or not, is new, since a read is not a fix) and
+ * a human's note becomes a note event. The old columns (inc_human_note, inc_read_time,
  * inc_read_by) are no longer declared, so they are read here only while they
  * are still there.
  *
@@ -80,8 +80,8 @@ function incident_cases_carry_triage() {
         }
         $triage = 'new';
         $triage_time = null;
-        if ($r['read_time'] !== null) {
-            $triage = $closed ? 'resolved' : 'looking';
+        if ($r['read_time'] !== null && $closed) {
+            $triage = 'resolved';
             $triage_time = $r['read_time'];
             $event->execute(array($r['id'], $r['read_time'], 'triage', $reader, null,
                 json_encode(array('from' => 'new', 'to' => $triage, 'carried' => 'marked read'))));
@@ -90,7 +90,7 @@ function incident_cases_carry_triage() {
         if ($title === '') {
             $title = class_exists('IncidentTitles') ? IncidentTitles::for_source((string)$r['source']) : (string)$r['source'];
         }
-        $update->execute(array($title, $triage, $triage_time, $reader, $r['id']));
+        $update->execute(array($title, $triage, $triage_time, $triage === 'resolved' ? $reader : null, $r['id']));
         $carried++;
     }
     echo "  incident carry-over: $carried case(s) given a title, a triage and a timeline\n";

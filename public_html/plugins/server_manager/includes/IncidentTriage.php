@@ -12,6 +12,7 @@
  * the incident_triage API action. Each checks the superadmin floor itself
  * before calling; this class trusts the user id it is handed.
  *
+ * @version 1.2 - Looking is gone; New's button is Reopen; label() names a fix awaiting its proof
  * @version 1.1 - a triage can carry a note (what fixed it), written on each incident it reaches
  * @version 1.0
  */
@@ -31,18 +32,28 @@ class IncidentTriage {
 	/** The words each triage state shows, and the button that sets it. */
 	const LABELS = array(
 		IncidentRecord::TRIAGE_NEW      => 'New',
-		IncidentRecord::TRIAGE_LOOKING  => 'Looking',
 		IncidentRecord::TRIAGE_SNOOZED  => 'Snoozed',
 		IncidentRecord::TRIAGE_RESOLVED => 'Resolved',
 		IncidentRecord::TRIAGE_IGNORED  => 'Ignored',
 	);
 	const VERBS = array(
-		IncidentRecord::TRIAGE_NEW      => 'Mark new',
-		IncidentRecord::TRIAGE_LOOKING  => 'I\'m looking',
+		IncidentRecord::TRIAGE_NEW      => 'Reopen',
 		IncidentRecord::TRIAGE_SNOOZED  => 'Snooze',
 		IncidentRecord::TRIAGE_RESOLVED => 'Resolve',
 		IncidentRecord::TRIAGE_IGNORED  => 'Ignore',
 	);
+
+	/** What a resolved incident still happening reads as: a fix waiting for its proof. */
+	const LABEL_AWAITING_PROOF = 'Resolved, waiting for it to clear';
+
+	/** The triage as a person reads it on this incident. */
+	public static function label(IncidentRecord $inc): string {
+		if ($inc->awaiting_proof()) {
+			return self::LABEL_AWAITING_PROOF;
+		}
+		$t = $inc->triage();
+		return self::LABELS[$t] ?? $t;
+	}
 
 	/**
 	 * What a person can choose to do, as one value each: a state, or a snooze
@@ -50,7 +61,6 @@ class IncidentTriage {
 	 */
 	public static function do_options(): array {
 		$out = array(
-			IncidentRecord::TRIAGE_LOOKING  => self::VERBS[IncidentRecord::TRIAGE_LOOKING],
 			IncidentRecord::TRIAGE_RESOLVED => self::VERBS[IncidentRecord::TRIAGE_RESOLVED],
 			IncidentRecord::TRIAGE_IGNORED  => self::VERBS[IncidentRecord::TRIAGE_IGNORED],
 			IncidentRecord::TRIAGE_NEW      => self::VERBS[IncidentRecord::TRIAGE_NEW],

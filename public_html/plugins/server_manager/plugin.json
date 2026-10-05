@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.6",
+  "version": "1.30.8",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -650,7 +650,7 @@
     },
     "incident.opened": {
       "label": "An incident opened on a node",
-      "description": "A condition on a node needs a person: a warning, such as a recipe on the node that gave up. Opens once, and once more if it comes back; never per check.",
+      "description": "A condition on a node needs a person: a warning, such as a recipe on the node that gave up. Opens once, again if it comes back or is still happening a day after it was resolved; never per check.",
       "category": "Server Manager",
       "payload": {
         "incident_id": "Incident id",
@@ -658,7 +658,7 @@
         "node_name": "The node's number and name",
         "title": "What the incident is, in plain words",
         "severity": "warning",
-        "summary": "When and where it started or came back",
+        "summary": "When and where it started or came back, or that it is still happening a day after it was resolved",
         "link": "The incident's page"
       },
       "notify": {
@@ -672,7 +672,7 @@
     },
     "incident.opened_critical": {
       "label": "A critical incident opened on a node",
-      "description": "Visitors or data are at risk now on a node: a site that does not answer, and the like. Opens once, and once more if it comes back; never per check.",
+      "description": "Visitors or data are at risk now on a node: a site that does not answer, and the like. Opens once, again if it comes back or is still happening a day after it was resolved; never per check.",
       "category": "Server Manager",
       "payload": {
         "incident_id": "Incident id",
@@ -680,7 +680,7 @@
         "node_name": "The node's number and name",
         "title": "What the incident is, in plain words",
         "severity": "critical",
-        "summary": "When and where it started or came back",
+        "summary": "When and where it started or came back, or that it is still happening a day after it was resolved",
         "link": "The incident's page"
       },
       "notify": {

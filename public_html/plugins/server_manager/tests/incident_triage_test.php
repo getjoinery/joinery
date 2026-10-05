@@ -21,17 +21,21 @@
  *   - what is refused: a "do" value nobody offered, an empty note, an id that
  *     is no incident, and the API action below the superadmin floor;
  *   - Resolve all cleared resolves only what cleared and still needs you;
+ *   - resolved while still happening is a fix awaiting its proof: its own
+ *     label and view, off the list; once cleared it is plain Resolved;
  *   - a note given with a triage (what fixed it) lands on each incident the
  *     triage reached, after its triage event, and a blank one adds nothing;
  *   - the header line's count and colour for each mix, and the menu count's
  *     registry (zeros and a failing counter show nothing);
- *   - the carry-over maps read and unread cases exactly.
+ *   - the carry-over maps read and unread cases exactly (read and still
+ *     active is new: a read is not a fix).
  *
  * Throwaway node, user and incident rows are removed in cleanup (incidents
  * and their events cascade from the node).
  *
  * Run: php plugins/server_manager/tests/incident_triage_test.php
  *
+ * @version 1.1 - Looking is gone; a fix awaiting its proof; the carry-over maps read and active to new
  * @version 1.0
  */
 
@@ -121,18 +125,18 @@ $svc = inc_for($node_id, 'recipe:service_health');
 check($svc !== null && $svc->is_open(), 'Setup: an open incident');
 if ($svc !== null) {
 	$id = (int)$svc->key;
-	check(IncidentTriage::set($svc, IncidentRecord::TRIAGE_LOOKING, $uid) === true, 'Setting Looking changes it');
+	check(IncidentTriage::set($svc, IncidentRecord::TRIAGE_IGNORED, $uid) === true, 'Setting Ignored changes it');
 	$svc->load();
 	$ev = IncidentEvent::for_incident($id);
 	$last = end($ev);
-	check($svc->triage() === IncidentRecord::TRIAGE_LOOKING && (int)$svc->get('inc_triage_usr_user_id') === $uid
+	check($svc->triage() === IncidentRecord::TRIAGE_IGNORED && (int)$svc->get('inc_triage_usr_user_id') === $uid
 		&& (string)$last->get('ine_kind') === 'triage' && (int)$last->get('ine_usr_user_id') === $uid
-		&& $last->data() == ['from' => 'new', 'to' => 'looking'],
-		'It records who, and one triage event from new to looking', json_encode($last->data()));
+		&& $last->data() == ['from' => 'new', 'to' => 'ignored'],
+		'It records who, and one triage event from new to ignored', json_encode($last->data()));
 	$before = count(IncidentEvent::for_incident($id));
-	check(IncidentTriage::set($svc, IncidentRecord::TRIAGE_LOOKING, $uid) === false && count(IncidentEvent::for_incident($id)) === $before,
+	check(IncidentTriage::set($svc, IncidentRecord::TRIAGE_IGNORED, $uid) === false && count(IncidentEvent::for_incident($id)) === $before,
 		'Setting the same triage again records nothing');
-	foreach ([IncidentRecord::TRIAGE_RESOLVED, IncidentRecord::TRIAGE_IGNORED, IncidentRecord::TRIAGE_NEW, IncidentRecord::TRIAGE_LOOKING] as $state) {
+	foreach ([IncidentRecord::TRIAGE_RESOLVED, IncidentRecord::TRIAGE_NEW, IncidentRecord::TRIAGE_IGNORED] as $state) {
 		IncidentTriage::set($svc, $state, $uid);
 		$svc->load();
 		check($svc->triage() === $state && $svc->is_open(), 'To ' . $state . ': the triage changes and the condition stays the source\'s');
@@ -175,6 +179,10 @@ check($bad === 'refused', 'A bare snoozed (no length) is not a "do" value');
 $bad = '';
 try { IncidentTriage::parse_do('delete'); } catch (IncidentTriageException $e) { $bad = 'refused'; }
 check($bad === 'refused', 'An unknown "do" value is refused');
+$bad = '';
+try { IncidentTriage::parse_do('looking'); } catch (IncidentTriageException $e) { $bad = 'refused'; }
+check($bad === 'refused', 'Looking is not a "do" value');
+check(IncidentTriage::VERBS[IncidentRecord::TRIAGE_NEW] === 'Reopen', 'Setting an incident back to new is Reopen');
 check(IncidentTriage::parse_do('snooze_168') === [IncidentRecord::TRIAGE_SNOOZED, 168] && IncidentTriage::parse_do('resolved') === [IncidentRecord::TRIAGE_RESOLVED, 0],
 	'The offered values parse');
 $r = IncidentTriage::apply([0, -3, 999999999], 'resolved', $uid);
@@ -237,6 +245,31 @@ if ($svc !== null && $disk !== null) {
 	$before = count(IncidentEvent::for_incident((int)$svc->key));
 	IncidentTriage::apply([(int)$svc->key], 'new', $uid, " \n ");
 	check(count(IncidentEvent::for_incident((int)$svc->key)) === $before + 1, 'A blank note adds nothing beyond the triage');
+	IncidentTriage::set($svc, IncidentRecord::TRIAGE_NEW, $uid);
+}
+
+// ---------------------------------------------------------------------------
+section('A fix awaiting its proof');
+
+if ($svc !== null && $f2b !== null) {
+	$in = function (string $view, int $id) use ($node_id): bool {
+		foreach (new MultiIncidentRecord(['node_id' => $node_id, 'view' => $view]) as $r) {
+			if ((int)$r->key === $id) { return true; }
+		}
+		return false;
+	};
+	IncidentTriage::set($svc, IncidentRecord::TRIAGE_RESOLVED, $uid);
+	$svc->load();
+	check($svc->is_open() && $svc->awaiting_proof() && !$svc->needs_you()
+		&& IncidentTriage::label($svc) === IncidentTriage::LABEL_AWAITING_PROOF,
+		'Resolved while still happening waits for proof, off the list', IncidentTriage::label($svc));
+	check($in('waiting', (int)$svc->key) && !$in('resolved', (int)$svc->key) && !$in('needs_you', (int)$svc->key),
+		'It is in Waiting for proof only');
+	check(strpos(IncidentViews::triage_badge($svc), 'waiting for it to clear') !== false, 'Its badge says it is waiting');
+	$f2b->load();
+	check(!$f2b->is_open() && !$f2b->awaiting_proof() && IncidentTriage::label($f2b) === 'Resolved'
+		&& $in('resolved', (int)$f2b->key) && !$in('waiting', (int)$f2b->key),
+		'Resolved and cleared is plain Resolved, in Resolved only');
 	IncidentTriage::set($svc, IncidentRecord::TRIAGE_NEW, $uid);
 }
 
@@ -305,9 +338,9 @@ if ((int)$q->fetchColumn() !== 3) {
 	$load = function (int $id) { return new IncidentRecord($id, TRUE); };
 	check($load($read_closed)->triage() === 'resolved' && kinds($read_closed) === ['opened', 'cleared', 'note', 'triage'],
 		'Read and cleared is resolved, with its note and the read as events', json_encode(kinds($read_closed)));
-	check($load($read_open)->triage() === 'looking' && kinds($read_open) === ['opened', 'triage']
-		&& (int)$load($read_open)->get('inc_triage_usr_user_id') === $uid,
-		'Read and still active is looking, by the person who read it', json_encode(kinds($read_open)));
+	check($load($read_open)->triage() === 'new' && kinds($read_open) === ['opened']
+		&& (int)$load($read_open)->get('inc_triage_usr_user_id') === 0,
+		'Read and still active is new: a read is not a fix', json_encode(kinds($read_open)));
 	check($load($unread)->triage() === 'new' && kinds($unread) === ['opened', 'cleared'],
 		'Unread is new', json_encode(kinds($unread)));
 	check($load($unread)->title() === 'The agent\'s carry check keeps failing', 'A carried case gets the plane\'s title');

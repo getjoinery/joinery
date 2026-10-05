@@ -6,6 +6,7 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.8 - sm_013 moves incidents marked Looking to New (Looking is no longer a triage)
  * @version 1.7 - sm_011 drops the fleet-wide backup cap setting; sm_012 cancels the unfinished jobs of nodes
  *                removed before ManagedNode 1.36
  * @version 1.6 - sm_010 ends the retired Clone's rows (site_copy.md WP9): from_backup provisions, and the
@@ -324,6 +325,23 @@ return [
 				                  WHERE n.mgn_managed_node_id = j.mjb_mgn_managed_node_id
 				                    AND n.mgn_delete_time IS NULL)
 			");
+		},
+	],
+	[
+		// Looking read the same as New (both need a person) and is no longer
+		// offered, so an incident marked Looking becomes New. The triage
+		// event that set it stays on its timeline.
+		'id' => 'sm_013_looking_incidents_to_new',
+		'version' => '1.30.8',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$ready = $dblink->query("SELECT to_regclass('inc_incident_records') IS NOT NULL
+				AND EXISTS (SELECT 1 FROM information_schema.columns
+				            WHERE table_name = 'inc_incident_records' AND column_name = 'inc_triage')")->fetchColumn();
+			if (!$ready) {
+				return;   // no incident table, or one from before triage: nothing is marked Looking
+			}
+			$dblink->exec("UPDATE inc_incident_records SET inc_triage = 'new' WHERE inc_triage = 'looking'");
 		},
 	],
 ];
