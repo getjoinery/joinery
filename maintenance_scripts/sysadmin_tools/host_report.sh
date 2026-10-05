@@ -4,9 +4,17 @@
 # failed units, the expected units and their state, fail2ban's jails and how
 # many addresses each has banned, how many SSH logins failed in the last day,
 # sshd's password and root-login posture, disk, memory, swap, whether a reboot
-# is pending, when unattended-upgrades last ran, and the operating system with
-# the release upgrade Ubuntu last said it offers.
+# is pending, when unattended-upgrades last ran, the operating system with
+# the release upgrade Ubuntu last said it offers, and on a Docker host each
+# site container's state and figures.
 #
+# Version: 1.7 - Each site container carries its own figures (specs/multi_tenant_docker_hosts.md
+#                WP1): memory in use, its peak, its limit and how many times the kernel
+#                killed a process in it for memory; CPU used and its ceiling; processes
+#                and their ceiling; bytes sent; and the disk its volumes hold, from one
+#                bounded du. Counters are cumulative since started_at; the plane turns
+#                two reports into a rate. Inside a container, memory is the site's own
+#                group out of its limit, not the shared server's /proc/meminfo.
 # Version: 1.6 - cpus: how many processors the machine has (nproc), so a load
 #                average can be read against it.
 #                answers: on a quiet site (/etc/joinery/sites/<site>/state, a
@@ -298,9 +306,86 @@ meminfo_kb() { awk -v k="$1" '$1==k":" {print $2; exit}' /proc/meminfo 2>/dev/nu
 kb_to_bytes_or_unknown() {
     if [[ "${1:-}" =~ ^[0-9]+$ ]]; then printf '%s' $(( $1 * 1024 )); else printf '"unknown"'; fi
 }
+# ---------------------------------------------------------------------------
+# cgroup v2 figures. Every reader is a file read under /sys/fs/cgroup or /proc
+# (they cannot stall), and each prints nothing when the file says nothing
+# usable, which the caller turns into "unknown".
+# ---------------------------------------------------------------------------
+# A file's first word when it is all digits.
+cg_num() {
+    local v
+    v="$(head -c 32 "$1" 2>/dev/null)"; v="${v%%[[:space:]]*}"
+    [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v"
+}
+# A ceiling: its number, or none where the file says max.
+cg_limit() {
+    local v
+    v="$(head -c 32 "$1" 2>/dev/null)"; v="${v%%[[:space:]]*}"
+    if [[ "$v" == "max" ]]; then printf 'none'; elif [[ "$v" =~ ^[0-9]+$ ]]; then printf '%s' "$v"; fi
+}
+# One figure out of a flat-keyed file (memory.stat, memory.events, cpu.stat).
+cg_key() {
+    local v
+    v="$(awk -v k="$2" '$1==k {print $2; exit}' "$1" 2>/dev/null)"
+    [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v"
+}
+# Memory in use the way MemAvailable counts it: everything the group holds but
+# the inactive file cache, which the kernel takes back before it kills anything.
+# memory.current alone counts that cache, and overstates an idle site by half.
+cg_mem_used() {
+    local cur inactive
+    cur="$(cg_num "$1/memory.current")"
+    [[ -n "$cur" ]] || return 0
+    inactive="$(cg_key "$1/memory.stat" inactive_file)"
+    inactive="${inactive:-0}"
+    printf '%s' $(( cur > inactive ? cur - inactive : 0 ))
+}
+# A CPU ceiling in thousandths of a core: cpu.max is "QUOTA PERIOD", or
+# "max PERIOD" for none.
+cg_cpu_limit() {
+    local quota period
+    [[ -r "$1" ]] || return 0
+    read -r quota period < "$1" || return 0
+    if [[ "$quota" == "max" ]]; then
+        printf 'none'
+    elif [[ "$quota" =~ ^[0-9]+$ && "$period" =~ ^[1-9][0-9]*$ ]]; then
+        printf '%s' $(( quota * 1000 / period ))
+    fi
+}
+# A number, the string none, or unknown.
+json_limit() {
+    if [[ "${1:-}" == "none" ]]; then printf '"none"'; else json_num_or_unknown "${1:-}"; fi
+}
+
+# Inside a container /sys/fs/cgroup is the container's own group, and
+# /proc/meminfo is the shared server's. Both are functions so the gate can
+# point them at a fixture.
+in_container() { [[ -f /.dockerenv ]]; }
+own_cgroup_dir() { printf '/sys/fs/cgroup'; }
+
+# The machine's memory. In a container it is the site's own: what its group
+# holds, out of its limit (or out of the whole server, where it has none, since
+# that is then what it may use). A figure read from /proc/meminfo there is the
+# server's, and said nothing about the site.
 emit_memory() {
-    local total avail used=""
+    local total avail used="" cg limit
     total="$(meminfo_kb MemTotal)"; avail="$(meminfo_kb MemAvailable)"
+    if in_container; then
+        cg="$(own_cgroup_dir)"
+        used="$(cg_mem_used "$cg")"
+        if [[ -n "$used" ]]; then
+            limit="$(cg_limit "$cg/memory.max")"
+            if [[ "$total" =~ ^[0-9]+$ ]]; then
+                total=$(( total * 1024 ))
+                [[ "$limit" =~ ^[0-9]+$ ]] && (( limit < total )) && total="$limit"
+            elif [[ "$limit" =~ ^[0-9]+$ ]]; then
+                total="$limit"
+            fi
+            printf '{"used_bytes":%s,"total_bytes":%s}' "$(json_num_or_unknown "$used")" "$(json_num_or_unknown "$total")"
+            return
+        fi
+        used=""
+    fi
     [[ "$total" =~ ^[0-9]+$ && "$avail" =~ ^[0-9]+$ ]] && used=$(( total - avail ))
     printf '{"used_bytes":%s,"total_bytes":%s}' "$(kb_to_bytes_or_unknown "$used")" "$(kb_to_bytes_or_unknown "$total")"
 }
@@ -579,11 +664,51 @@ emit_served_certificates() {
 # answer (not root). Names are site slugs, the same list restart_container
 # accepts.
 # ---------------------------------------------------------------------------
+# One site container's figures, read from its cgroup and its network
+# namespace through the PID docker names. Each counter is cumulative since the
+# container started (started_at), so the plane turns two reports into a rate.
+# A container that is not running has none of them: every key says unknown.
+container_figures() {
+    local c="$1" state="$2" pid="" started="" started_at="" cgpath="" cg="" tx=""
+    local used="" peak="" mlimit="" ooms="" usec="" climit="" pcur="" plimit=""
+    if [[ "$state" == "running" ]]; then
+        read -r pid started <<< "$(run docker inspect -f '{{.State.Pid}} {{.State.StartedAt}}' "$c")"
+        [[ "$pid" =~ ^[1-9][0-9]*$ ]] || pid=""
+        if [[ "$started" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9:]+)$ ]]; then
+            started_at="$(run date -u -d "$started" +%s)"
+        fi
+        if [[ -n "$pid" ]]; then
+            cgpath="$(awk -F: '$1=="0" {print $3; exit}' "/proc/$pid/cgroup" 2>/dev/null)"
+            [[ "$cgpath" =~ ^/[A-Za-z0-9._@:/-]+$ && "$cgpath" != *..* ]] && cg="/sys/fs/cgroup$cgpath"
+            # Bytes sent on every interface but loopback: column 9 after the name.
+            tx="$(awk 'NR > 2 { split($0, a, ":"); if (a[1] ~ /^ *lo$/) next; split(a[2], f, " "); s += f[9]; seen = 1 }
+                       END { if (seen) printf "%.0f", s }' "/proc/$pid/net/dev" 2>/dev/null)"
+        fi
+        if [[ -n "$cg" && -d "$cg" ]]; then
+            used="$(cg_mem_used "$cg")"
+            peak="$(cg_num "$cg/memory.peak")"
+            mlimit="$(cg_limit "$cg/memory.max")"
+            ooms="$(cg_key "$cg/memory.events" oom_kill)"
+            usec="$(cg_key "$cg/cpu.stat" usage_usec)"
+            climit="$(cg_cpu_limit "$cg/cpu.max")"
+            pcur="$(cg_num "$cg/pids.current")"
+            plimit="$(cg_limit "$cg/pids.max")"
+        fi
+    fi
+    printf '"started_at":%s,"memory":{"used_bytes":%s,"peak_bytes":%s,"limit_bytes":%s,"oom_kills":%s},' \
+        "$(json_num_or_unknown "$started_at")" "$(json_num_or_unknown "$used")" "$(json_num_or_unknown "$peak")" \
+        "$(json_limit "$mlimit")" "$(json_num_or_unknown "$ooms")"
+    printf '"cpu":{"usage_usec":%s,"limit_millicores":%s},"pids":{"current":%s,"limit":%s},"net_tx_bytes":%s' \
+        "$(json_num_or_unknown "$usec")" "$(json_limit "$climit")" \
+        "$(json_num_or_unknown "$pcur")" "$(json_limit "$plimit")" "$(json_num_or_unknown "$tx")"
+}
+
 emit_containers() {
-    local names c site state health port headers answers n=0 first=1
+    local names c site state health port headers answers n=0 i src sum bytes path
+    local -a sites=() states=() healths=() answered=() figures=() srcs=()
+    local -A src_site=() disk=() missing=()
     command -v docker >/dev/null 2>&1 || { printf '"none"'; return; }
     names="$(run docker ps -a --format '{{.Names}}')" || { printf '"unknown"'; return; }
-    printf '['
     for c in $names; do
         (( n < MAX_LIST )) || break
         [[ "$c" =~ ^[a-z0-9_-]{1,50}$ ]] || continue
@@ -599,11 +724,39 @@ emit_containers() {
             headers="$(run curl -s --max-time 8 -o /dev/null -D - "http://127.0.0.1:${port}/")"
             if printf '%s\n' "$headers" | grep -q -i '^x-joinery-version:'; then answers=yes; else answers=no; fi
         fi
-        (( first )) || printf ','
-        first=0
-        printf '{"name":%s,"state":%s,"health":%s,"answers":"%s"}' \
-            "$(json_str "$c")" "$(json_str "${state:-unknown}")" "$(json_str "${health:-unknown}")" "$answers"
+        sites+=("$c"); states+=("${state:-unknown}"); healths+=("${health:-unknown}"); answered+=("$answers")
+        figures+=("$(container_figures "$c" "${state:-unknown}")")
+        # The site's data is its named volumes; a bind mount can name any
+        # path on the server, and is never walked.
+        missing[$c]=0
+        while IFS= read -r src; do
+            [[ "$src" =~ ^/[A-Za-z0-9._/-]+$ && "$src" != *..* ]] || continue
+            srcs+=("$src"); src_site[$src]="$c"; missing[$c]=$(( ${missing[$c]} + 1 ))
+        done <<< "$(run docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Source}}{{println}}{{end}}{{end}}' "$c")"
         n=$((n+1))
+    done
+
+    # Disk: ONE du over every site's volumes, under the one command timeout, so
+    # a large upload tree costs the disk figures and never the minute the
+    # agent gives this report. A site gets a figure only when every one of its
+    # volumes was measured.
+    if (( ${#srcs[@]} > 0 )); then
+        while IFS=$'\t' read -r bytes path; do
+            [[ "$bytes" =~ ^[0-9]+$ && -n "${src_site[$path]:-}" ]] || continue
+            site="${src_site[$path]}"
+            disk[$site]=$(( ${disk[$site]:-0} + bytes )); missing[$site]=$(( ${missing[$site]} - 1 ))
+        done <<< "$(run du -s -B1 -- "${srcs[@]}")"
+    fi
+
+    printf '['
+    for i in "${!sites[@]}"; do
+        c="${sites[$i]}"
+        sum=""
+        (( ${missing[$c]:-1} == 0 )) && sum="${disk[$c]:-}"
+        (( i == 0 )) || printf ','
+        printf '{"name":%s,"state":%s,"health":%s,"answers":"%s",%s,"disk_bytes":%s}' \
+            "$(json_str "$c")" "$(json_str "${states[$i]}")" "$(json_str "${healths[$i]}")" "${answered[$i]}" \
+            "${figures[$i]}" "$(json_num_or_unknown "$sum")"
     done
     printf ']'
 }

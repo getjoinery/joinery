@@ -1155,7 +1155,7 @@ All under `/api/v1/management/`, all `GET`, all return the standard success enve
 | Endpoint | Description |
 |----------|-------------|
 | `health` | Liveness probe: `{ok: true, version: "…"}` — used by `JobCommandBuilder::probe_api_health()` |
-| `stats` | Disk, memory, load, uptime, PostgreSQL liveness, Joinery version, DB list, cron health, and a `backups` block reporting each backup profile (`site`, `manager`) — whether it is scheduled, its last run and outcome, whether that run reached the bucket, and the fingerprint of the recovery key it sealed to |
+| `stats` | Disk, memory (inside a container, the site's own cgroup out of its limit), load, uptime, PostgreSQL liveness, Joinery version, DB list, cron health, and a `backups` block reporting each backup profile (`site`, `manager`) — whether it is scheduled, its last run and outcome, whether that run reached the bucket, and the fingerprint of the recovery key it sealed to |
 | `version` | System version, schema version, per-plugin versions |
 | `databases` | List of PostgreSQL databases accessible to the site |
 | `errors/recent` | Last N error.log lines matching Fatal/Exception/Error (default 20, cap 200) |
