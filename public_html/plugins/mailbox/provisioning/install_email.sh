@@ -2,6 +2,9 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.23 - A message may be 25 MiB, the size the router stores (Postfix's own default
+#                refused anything over 10 MB), and a bare line feed can no longer end a
+#                message (smtpd_forbid_bare_newline, the SMTP smuggling guard).
 # Version: 2.22 - The recipient lookup is asked from the freshly rendered copy before it replaces
 #                the installed one, so a query that cannot run never reaches a Postfix
 #                already pointed at the map. A probe refused by the map role's connection
@@ -122,6 +125,9 @@
 #   - main.cf   : mydestination = localhost, localhost.localdomain
 #                 (inbound domains must NOT appear here, or Postfix rejects
 #                  them with "User unknown in local recipient table").
+#   - main.cf   : message_size_limit = 26214400 (the 25 MiB the router stores)
+#                 and smtpd_forbid_bare_newline = yes (a bare line feed cannot
+#                 end a message: the SMTP smuggling guard).
 #   - main.cf   : smtpd_recipient_restrictions with RBL clients and a
 #                 check_recipient_access lookup against
 #                 /etc/postfix/joinery-recipient-access.cf, so an address the
@@ -354,6 +360,25 @@ else
     echo "main.cf: mydestination was '${CURRENT_MYDEST}'"
     postconf -e "mydestination = ${SAFE_MYDEST}"
     echo "main.cf: mydestination = ${SAFE_MYDEST}"
+fi
+
+# A message may be as large as InboundEmailRouter stores (25 MiB). Postfix counts
+# its own envelope records in the limit, so a message it lets through is always
+# under the router's cap and an oversized one is refused during the SMTP
+# conversation, never accepted and then bounced.
+postconf -e "message_size_limit = 26214400"
+echo "main.cf: message_size_limit = 26214400"
+
+# SMTP smuggling (CVE-2023-51764): a line ending in a bare line feed must never
+# end a message, or one message can carry a second with a forged sender. "yes"
+# is "normalize" on every Postfix that has it and the stricter refusal on the
+# first releases that carried the parameter. A Postfix too old to know the
+# parameter is left alone, since an unknown parameter is only noise there.
+if [[ -n "$(postconf -dh smtpd_forbid_bare_newline 2>/dev/null)" ]]; then
+    postconf -e "smtpd_forbid_bare_newline = yes"
+    echo "main.cf: smtpd_forbid_bare_newline = yes"
+else
+    echo "WARNING: this Postfix has no smtpd_forbid_bare_newline; upgrade Postfix to close SMTP smuggling." >&2
 fi
 
 # smtpd_recipient_restrictions is set in section 4, once the recipient lookup
