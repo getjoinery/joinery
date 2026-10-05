@@ -293,8 +293,8 @@ matches whatever an operator drops beside our files.
 | `/etc/apt/apt.conf.d/20auto-upgrades`, `/etc/apt/apt.conf.d/50unattended-upgrades` | patching state |
 | `/etc/docker/daemon.json` | container hosts |
 | `/etc/sysctl.d/99-security.conf` | hardening state |
-| `/etc/postfix/main.cf`, `/etc/postfix/master.cf`, `/etc/opendkim.conf`, `/etc/opendmarc.conf` | mail not flowing; settings only |
-| `/etc/rspamd/local.d/actions.conf`, `classifier-bayes.conf`, `milter_headers.conf`, `redis.conf`, `worker-proxy.inc` | spam filtering; the five files `install_email.sh` writes |
+| `/etc/postfix/main.cf`, `/etc/postfix/master.cf` | mail not flowing; settings only |
+| `/etc/rspamd/local.d/actions.conf`, `classifier-bayes.conf`, `dkim_signing.conf`, `milter_headers.conf`, `rbl.conf`, `worker-proxy.inc`, `/etc/rspamd/override.d/options.inc` | mail checking, spam filtering and signing; the files `install_email.sh` writes |
 
 **sshd is not read as a file.** Ubuntu's cloud images set
 `PasswordAuthentication` in `/etc/ssh/sshd_config.d/`, so `sshd_config`
@@ -308,8 +308,8 @@ material can travel. **BUILT** (host_report.sh 1.5).
 
 - Secrets: every map `main.cf` points at, starting with
   `/etc/postfix/joinery-domains.cf` (a pgsql map holding a database role's
-  password); `/etc/opendkim/keys/*`, `/etc/opendkim/key.table`,
-  `/etc/opendkim/signing.table`, `/etc/letsencrypt/live/*`,
+  password); `/etc/rspamd/dkim/*` (the signing keys and their map),
+  `/etc/letsencrypt/live/*`,
   `/etc/joinery-agent/joinery-agent.env`, `config/Globalvars_site.php`.
 - Access and identity: `/etc/sudoers.d/*`, `/etc/crypttab`, `/etc/passwd`,
   `/etc/shadow`, `/etc/ssh/*` beyond the `sshd -T` settings above.

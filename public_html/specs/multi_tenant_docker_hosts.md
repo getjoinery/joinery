@@ -1,9 +1,10 @@
 # Multi-tenant Docker hosts: limits and isolation for many sites on one box
 
-**Status:** Draft, 2026-10-04. WP1 built 2026-10-05 (uncommitted; host_report.sh
-1.7, JobResultProcessor 1.55, node overview 1.37, stats_handler 1.4, agent
-check_status); its week of measurement starts once it is released to
-docker-prod and the agent is released. Nothing else is built. Split out of the starter
+**Status:** Draft, 2026-10-04. WP1 built 2026-10-05 and released in 0.8.459
+(host_report.sh 1.7, JobResultProcessor 1.55, node overview 1.37,
+stats_handler 1.4); docker-prod has reported per-site figures since, so the
+week of measurement ends about 2026-10-12. The agent half (check_status
+memory inside a container) ships with agent 1.57.0. Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 

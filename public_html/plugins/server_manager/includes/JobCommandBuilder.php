@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.95 - FILE_HEAD_FILES (agent 1.57.0) reads rspamd's signing, rbl and options files; opendkim.conf,
+ *                 opendmarc.conf and redis.conf no longer exist on any box
  * @version 1.94 - FILE_HEAD_FILES labels opendkim.conf and opendmarc.conf as absent on a box where rspamd
  *                 checks mail alone
  * @version 1.93 - build_moved_site_check (agent 1.56.0): the host runs decommission_moved_site's proof and
@@ -1951,12 +1953,12 @@ class JobCommandBuilder {
 		'sysctl_security'         => 'sysctl 99-security.conf',
 		'postfix_main'            => 'Postfix main.cf',
 		'postfix_master'          => 'Postfix master.cf',
-		'opendkim_conf'           => 'opendkim.conf (absent once rspamd checks mail alone; only a box not yet upgraded has one)',
-		'opendmarc_conf'          => 'opendmarc.conf (absent once rspamd checks mail alone; only a box not yet upgraded has one)',
 		'rspamd_actions'          => 'rspamd actions.conf',
 		'rspamd_classifier_bayes' => 'rspamd classifier-bayes.conf (Bayes switched off; learning is in the app)',
+		'rspamd_dkim_signing'     => 'rspamd dkim_signing.conf (signing of outgoing mail)',
 		'rspamd_milter_headers'   => 'rspamd milter_headers.conf',
-		'rspamd_redis'            => 'rspamd redis.conf (absent on an upgraded box; only a box not yet upgraded has one)',
+		'rspamd_options'          => 'rspamd override.d options.inc',
+		'rspamd_rbl'              => 'rspamd rbl.conf (Spamhaus lookups)',
 		'rspamd_worker_proxy'     => 'rspamd worker-proxy.inc',
 	];
 
