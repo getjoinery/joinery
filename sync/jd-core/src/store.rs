@@ -36,7 +36,11 @@ use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placemen
 /// 7: a record's own file (`own_file_id`, `own_file_birth_ns`) and the agreed
 /// fingerprint's birth. An older engine writing an entry would leave the own
 /// file standing after it had given the file up.
-pub const SCHEMA_VERSION: i64 = 7;
+///
+/// 8: where a folder's directory stands while its move is not agreed
+/// (`Entry::stands_at`). An older engine writing an entry would drop it, and
+/// the folder's files would be placed through its old name again.
+pub const SCHEMA_VERSION: i64 = 8;
 
 /// What makes a written-off note apply *right now*, as one SQL predicate over
 /// `entries e` joined to `unreadable u`.
@@ -198,6 +202,11 @@ impl Store {
                 own_file_birth_ns      INTEGER,
                 -- the hash of the file as the last scan saw it
                 last_seen_sha256       TEXT,
+                -- where a folder's directory stands, and the agreement then
+                stands_at_parent_id        INTEGER,
+                stands_at_name             TEXT,
+                stands_at_agreed_parent_id INTEGER,
+                stands_at_agreed_name      TEXT,
                 PRIMARY KEY (entity_type, server_id)
             );
             CREATE INDEX IF NOT EXISTS entries_parent ON entries (parent_folder_id);
@@ -339,6 +348,10 @@ impl Store {
             ("own_file_id", "INTEGER"),
             ("own_file_birth_ns", "INTEGER"),
             ("last_seen_sha256", "TEXT"),
+            ("stands_at_parent_id", "INTEGER"),
+            ("stands_at_name", "TEXT"),
+            ("stands_at_agreed_parent_id", "INTEGER"),
+            ("stands_at_agreed_name", "TEXT"),
         ] {
             store.add_column_if_missing("entries", column, ddl)?;
         }
@@ -467,8 +480,9 @@ impl Store {
                 local_status, unsyncable_reason, wrapped_file_key,
                 content_id, synced_remote_sha256, synced_remote_size,
                 replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)
+                synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
+                stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36)
              ON CONFLICT(entity_type, server_id) DO UPDATE SET
                 parent_folder_id = excluded.parent_folder_id,
                 remote_name = excluded.remote_name,
@@ -499,7 +513,11 @@ impl Store {
                 synced_fp_birth_ns = excluded.synced_fp_birth_ns,
                 own_file_id = excluded.own_file_id,
                 own_file_birth_ns = excluded.own_file_birth_ns,
-                last_seen_sha256 = excluded.last_seen_sha256",
+                last_seen_sha256 = excluded.last_seen_sha256,
+                stands_at_parent_id = excluded.stands_at_parent_id,
+                stands_at_name = excluded.stands_at_name,
+                stands_at_agreed_parent_id = excluded.stands_at_agreed_parent_id,
+                stands_at_agreed_name = excluded.stands_at_agreed_name",
         )?.execute(
             params![
                 e.id.entity_type.to_string(),
@@ -534,6 +552,10 @@ impl Store {
                 e.own_file.map(|o| o.file_id as i64),
                 e.own_file.map(|o| o.birth_ns as i64),
                 e.last_seen_sha,
+                e.stands_at.as_ref().and_then(|s| s.here.parent),
+                e.stands_at.as_ref().map(|s| s.here.name.clone()),
+                e.stands_at.as_ref().and_then(|s| s.agreed.parent),
+                e.stands_at.as_ref().map(|s| s.agreed.name.clone()),
             ],
         )?;
         Ok(())
@@ -553,7 +575,8 @@ impl Store {
                         local_status, unsyncable_reason, wrapped_file_key,
                         content_id, synced_remote_sha256, synced_remote_size,
                         replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name
                    FROM entries WHERE entity_type = ?1 AND server_id = ?2",
             )?
             .query_row(params![id.entity_type.to_string(), id.server_id], row_to_entry)
@@ -604,6 +627,14 @@ impl Store {
             )?;
             self.conn.execute(
                 "UPDATE entries SET synced_parent_id = ?2 WHERE synced_parent_id = ?1",
+                params![from.server_id, to.server_id],
+            )?;
+            self.conn.execute(
+                "UPDATE entries SET stands_at_parent_id = ?2 WHERE stands_at_parent_id = ?1",
+                params![from.server_id, to.server_id],
+            )?;
+            self.conn.execute(
+                "UPDATE entries SET stands_at_agreed_parent_id = ?2 WHERE stands_at_agreed_parent_id = ?1",
                 params![from.server_id, to.server_id],
             )?;
             self.conn.execute(
@@ -915,7 +946,8 @@ impl Store {
                           local_status, unsyncable_reason, wrapped_file_key,
                           content_id, synced_remote_sha256, synced_remote_size,
                           replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name
                      FROM entries
                     ORDER BY entity_type, server_id";
         let mut stmt = self.conn.prepare_cached(sql)?;
@@ -936,7 +968,8 @@ impl Store {
                           local_status, unsyncable_reason, wrapped_file_key,
                           content_id, synced_remote_sha256, synced_remote_size,
                           replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name
                      FROM entries
                     WHERE parent_folder_id IS ?1
                     ORDER BY entity_type, server_id";
@@ -991,6 +1024,14 @@ impl Store {
                 // which may be brand new. It follows the folder to its id.
                 self.conn.execute(
                     "UPDATE entries SET synced_parent_id = ?2 WHERE synced_parent_id = ?1",
+                    params![from.server_id, to.server_id],
+                )?;
+                self.conn.execute(
+                    "UPDATE entries SET stands_at_parent_id = ?2 WHERE stands_at_parent_id = ?1",
+                    params![from.server_id, to.server_id],
+                )?;
+                self.conn.execute(
+                    "UPDATE entries SET stands_at_agreed_parent_id = ?2 WHERE stands_at_agreed_parent_id = ?1",
                     params![from.server_id, to.server_id],
                 )?;
             }
@@ -1592,7 +1633,8 @@ impl Store {
                     local_status, unsyncable_reason, wrapped_file_key,
                     content_id, synced_remote_sha256, synced_remote_size,
                     replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name
                FROM entries
               WHERE entity_type = ?1 AND synced_fp_file_id = ?2",
         )?;
@@ -1616,7 +1658,8 @@ impl Store {
                     local_status, unsyncable_reason, wrapped_file_key,
                     content_id, synced_remote_sha256, synced_remote_size,
                     replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name
                FROM entries
               WHERE entity_type = 'file'
                 AND (own_file_id = ?1 OR (own_file_id IS NULL AND synced_fp_file_id = ?1))",
@@ -1641,7 +1684,8 @@ impl Store {
                     local_status, unsyncable_reason, wrapped_file_key,
                     content_id, synced_remote_sha256, synced_remote_size,
                     replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
-                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256
+                        synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name
                FROM entries
               WHERE entity_type = ?1 AND synced_fp_file_id = ?2 AND remote_deleted = 0",
         )?;
@@ -2007,6 +2051,13 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
     let own_file_id: Option<i64> = r.get(29)?;
     let own_file_birth: Option<i64> = r.get(30)?;
     let last_seen_sha: Option<String> = r.get(31)?;
+    let stands_at = match (r.get::<_, Option<String>>(33)?, r.get::<_, Option<String>>(35)?) {
+        (Some(name), Some(agreed_name)) => Some(crate::model::StandsAt {
+            here: Placement { parent: r.get::<_, Option<i64>>(32)?, name },
+            agreed: Placement { parent: r.get::<_, Option<i64>>(34)?, name: agreed_name },
+        }),
+        _ => None,
+    };
 
     Ok(Entry {
         id: EntityId {
@@ -2075,6 +2126,7 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
         },
         // The parent is `None` at the root, so the name alone says whether a
         // stand-in is recorded.
+        stands_at,
         stand_in: r
             .get::<_, Option<String>>(27)?
             .map(|name| Placement {
@@ -2201,6 +2253,7 @@ mod tests {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: Some(jd_vfs::FileIdentity { file_id: 99, birth_ns: 5678 }),
             last_seen_sha: None,
         }

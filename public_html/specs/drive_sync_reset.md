@@ -1993,8 +1993,9 @@ no named flaw is a reason to name one.
   2026-10-04). Open, recorded: a lost-race issue names the provisional id
   of the folder the losing user wanted, which is stale once that folder is
   rekeyed.
-- **B-1692, open (soak rig run 1692, client `8cbc527f`): a save by rename
-  during a partition stalled one device past the settle.** device-b was cut
+- **B-1692, livelock fixed 2026-10-05, producer open (soak rig run 1692,
+  client `8cbc527f`): a save by rename during a partition stalled one device
+  past the settle.** device-b was cut
   off, and its user saved `Report 4.docx` by renaming a temporary file over
   it while device-a's edits reached the server. device-b read the save as a
   delete plus a new file (`DeleteLostToEdit`), and the new file's upload
@@ -2009,6 +2010,184 @@ no named flaw is a reason to name one.
   script opens a live store read-only, so freezing a dead daemon's store no
   longer checkpoints it away. Evidence change VALID (public-html-a5,
   2026-10-04) after one round (the freeze's read-write open).
+  The stall itself was a livelock, not a wait: the op-id counter reached
+  4219 against 227 rows, about 3990 ops planned and dropped in one settle.
+  Three ops stood down on each other every pass: the park of the server's
+  record (its file-ownership test accepted only matching agreed content, or
+  last-seen bytes on a weak disk, so a never-sent record whose own file
+  stands there by identity did not count), the new file's upload (the name
+  still held), and the restore (a stranger's file at its path). The close:
+  **the park asks whose file it is the way the scan does: by identity where
+  identity holds, by the bytes last seen at the path where it does not**
+  (`owner_of`). The upload veto and the download gate are left as they are:
+  they ask who holds the name and whether the plan is still current, not
+  whose file it is. Pin
+  `a_save_owned_by_a_new_record_at_a_name_whose_record_lost_its_file_settles`,
+  on a constructed state: what let the never-sent record reach the name
+  without being superseded is still unknown. Its sweep regression led to a
+  second, older defect: an upload whose answer was lost, retried after the
+  device had downloaded the server's copy as a stranger, folded that second
+  copy into the record ('a holder with our exact bytes is our own lost
+  upload') and left the device's file with no record, every pass. The
+  close: **an upload is folded into a record only when the bytes going up
+  are not a second file**: the record's own file does not stand here, read
+  by identity or by last-seen bytes, and a record at the upload's own path
+  holds the upload itself. Pins
+  `a_second_copy_of_a_file_this_device_has_is_never_folded_into_it`, its
+  weak twin, `one_file_at_a_parked_holders_own_path_goes_up_as_one_file`
+  and `an_upload_meeting_a_held_holder_of_its_bytes_lands_beside`. VALID
+  (public-html-a5, 2026-10-05) after four rounds (one predicate for every
+  reader withdrawn, an unearned weak id match, the weak reading's
+  same-path case). Open, recorded: an out-of-scope holder at the upload's
+  own path; a case-only path difference on a folding disk; a retried
+  upload gets a new idempotency key and cannot recover its lost answer.
+- **B-TIE, fixed 2026-10-05: a record the server only named contested a
+  directory tied to another record.** Four defects, one false statement.
+  (1) A vault locked after it was open never followed the server, and its
+  status read as holding nothing here: a peer renamed it and saved under
+  the old name, and the locked device gave the peer's new plain folder the
+  vault's directory, read it as deleted and trashed it with the peer's
+  file (loss, no faults needed). (2) After a restore gave every directory
+  a fresh id, a peer's rename plus a save through the old name moved the
+  folder's files into the newcomer (run 1650 again). (3) A placeholder
+  waiting for a parent it cannot make took a peer's new plain folder of
+  its name into its directory, and the key carried that file into the
+  vault. (4) On a Windows-named FAT disk, a folder stored as `a%3Ab` lost
+  its directory to a peer's folder literally named `a%3Ab`. Each time,
+  arrival order or status decided between a record tied to the directory
+  and one the server had only named. The close: **a directory tied to a
+  record, by its agreement or a stand-in, is that record's while what it
+  is tied to still stands here; a record the server has only named never
+  contests it, in any reader** (the folder scan's tie-break, the path map,
+  naming's competing placement, the adoption by path,
+  `holds_a_local_file`, the create guard). A server-deleted record holds
+  no tie against the server's live folder (without this the reviewer's
+  must-pass arm leaked two sealed files). A locked vault's folder is
+  reconciled in the round like any folder: it follows a peer's rename or
+  move while locked, and its user's own rename or move goes up while
+  locked; only its sealed files wait for the key. A parked vault on a weak
+  disk that the scan finds neither present nor moved releases its local
+  claim. A user's delete of a locked vault stays whole at unlock. A
+  placeholder follows only to a parent that stands here, and waits
+  otherwise. Pins: the locked-vault rename and cross-parent move, the
+  out-of-scope twin, the restore in three arrival orders, the waiting
+  placeholder (strong and three weak models, four kinds), the escaped-name
+  shapes, the placeholder waiting for a new parent, the locked vault the
+  user renamed (sent while locked) and removed (deleted whole), and the
+  path map's preference. 420 seeds x 5 modes byte-identical. VALID
+  (public-html-a5, 2026-10-05) after four rounds (a lapse that pre-empted
+  the scan and reverted a user's rename, a delete applied by halves, the
+  outbound half of the follow). Open, recorded: a sealed file the server
+  moved while its vault was locked lands under its `enc-` placeholder name
+  after unlock and never converges; two established records at one path,
+  both ids stale, still fall to the later one; whether a lock-time delete
+  of a vault should beat a peer's rename of it (today the rename wins,
+  locked or not).
+- **Old-client failures classified 2026-10-05.** The 23 old-client runs
+  that still fail custody under the current checker: 15 are the
+  rename-then-remake shape fixed by B-1650 (run 1619 among them: the stray
+  directory was the user's own save through a stale path), 6 the
+  same-folder race fixed by F2, and the rest checker artifacts of journals
+  older than the actor's rename source and overwrite records. Replays of
+  the current checker on pre-1633 journals are unreliable for those two
+  shapes.
+- **Open, found 2026-10-05 beyond the standard sweep (plat3 seeds
+  75430-75459):** a folder move the server refuses without a reason is
+  withdrawn for good when the name is held by a folder that can only be
+  made inside the mover (livelock, 75448 swap off, 75456 shown on); the
+  hidden-births swap-separation arm (75456 hidden) untraced. 75436 hidden
+  went green under the change below untraced and is not counted as fixed.
+- **Where a folder's directory stands, fixed 2026-10-05 (plat3 75455 and
+  75424, found beyond and inside the standard sweep).** One false
+  statement, read in three places: a folder's agreed path is where its
+  directory stands. It is not, between the user moving a folder's
+  directory and that move being agreed with the server. The gone check
+  looked for a file just saved in a vault whose directory was mid-rotation
+  under the vault's agreed name, forgot its record in the pass that minted
+  it, and the file later went up in the clear (75455). The executor placed
+  a peer's move into a folder the user had just swapped with the vault
+  through the folder's agreed name, into the vault's directory, and the
+  plain file went up sealed into the vault (75424, B-ARRIVE). An upload from
+  a vault subfolder the user had carried out read the file at the agreed
+  path and stood down for ever (B-CARRY). The close: **a folder record holds
+  where its directory stands** (`Entry::stands_at`), read by pass, planner
+  and executor alike. It is learned each pass from the scan's own folder
+  map, and holds only while the agreement is the one it was measured
+  against, so every agreement written since retires it. Readers that ask
+  what was agreed (the folder scan, the reconcile base, what is told to the
+  server) read the agreement (`agreed_placement`, `agreed_path`); readers
+  that ask about the disk read where it stands. A plain folder carried into
+  a vault is not noted (it converts and a new record takes the directory);
+  a vault's folder carried out is (it is held). Volumes that keep no
+  directory ids never get a note, and behave as before. An op placing
+  something into a folder checks at act time that the directory there is
+  the folder's own, as a download already did. Store schema 8. The two
+  narrower hand-overs of the found path to the gone check are removed: this
+  answers both. Pins `something_saved_in_a_vault_mid_rotation_keeps_its_record`,
+  `an_arrival_lands_in_its_folders_own_directory_mid_move`,
+  `a_vault_subfolder_carried_mid_rotation_still_sends_its_file_sealed`, all
+  red with the note switched off. Found by its own sweeps and fixed with it,
+  each pre-existing and reached by trajectories the change shifted:
+  - a folder renamed, its rename not yet agreed, its old name rebuilt by a
+    save through the old path: the rebuilt directory's record was dropped
+    from the folder map for the renamed one and the directory minted twice,
+    one copy trashed with a peer's unsent file (plain2 75217, 75283). A
+    record minted from a directory keeps its path when the directory's id
+    says it is its own. Frozen pin `frozen_a_rebuilt_old_name_is_minted_once_seeds`.
+  - two renames owed to the server, each onto the other's name and queued in
+    different passes, each waiting for the other to leave, for ever (kill2
+    75102). A wait that leads back to the asker is a cycle and does not
+    wait; the rename lands beside under a conflict name. Pins
+    `two_owed_renames_onto_each_others_names_do_not_wait_for_each_other`,
+    `frozen_two_renames_onto_each_others_names_seed`.
+  - soak rig run 1746 (custody, client `60e9da25`): a download running while
+    its remote move waited for a folder this disk could not make yet wrote
+    the bytes where the file stood and agreed the server's placement; the
+    next scan read the file back home as the user moving it, and the peer's
+    move was undone on every device. A download agrees on where it wrote.
+    Pin `a_download_while_its_move_waits_does_not_undo_the_move`, red 10/10
+    on the base.
+  420 seeds x 5 modes: no verdict changed. VALID (public-html-41,
+  2026-10-05). Open from the review: whether other agreement writes can name
+  a placement the thing does not stand at (uploads first); the
+  merged-move window that only the act-time check covers today; a folder
+  split in two on weak volumes when a peer's move and a local rename meet.
+- **Sweep oracle false positive, fixed 2026-10-05 (plat3 75442 shown on,
+  75443 shown on and off).** The sealed-name check counts a name as sealed
+  only when the user chose it, and the simulator recorded names the engine
+  gave as chosen: the files a folder rename carried, a file moved under the
+  name it had, a safe save renamed over an existing file, and the save the
+  landing knob makes at the path a download is landing on. The engine's
+  conflict names are deterministic, so the same name stood on a plain file
+  elsewhere and read as a sealed name leaking. The simulator now records a
+  name only when the user gives one (`UserWrite::named`,
+  `user_write_at_the_engines_name`, `user_rename` naming only a file renamed
+  onto a free name). Pin `the_sealed_name_check_counts_no_name_the_engine_gave`,
+  red without the change in four cases, its control firing either way.
+  Three arms red to green; 420 seeds x 5 modes byte-identical. VALID
+  (public-html-41, 2026-10-05).
+- **B-1721, fixed 2026-10-05 (soak rig run 1721, client `60e9da25`): a
+  download that stood down left its spool file behind.** The leak watch
+  failed on device-b: spool files rose at every settle, 1 to 11, with
+  nothing pending. A download stages its bytes in a spool file that was
+  removed only by a commit or by an explicit discard, and several exits of
+  the download returned without the discard. The routine one is the last
+  gate, which stands down when the user saved over the file while its
+  download was in flight. The only reclaim was the sweep at daemon start;
+  injected kills restart daemons, which hid the leak until a run in which
+  device-b was never killed. Traced from the run: 7 of the 11 leftovers are
+  byte-exact whole files device-a saved, on paths device-b's user was
+  saving at the time (`Report 1.docx` three times, `shot-001.psd` twice,
+  `notes-2.txt`); the other four fall in a window that bytes alone cannot
+  attribute. The close: **the spool handle owns its file**: dropped without
+  a commit, it removes it, in the disk layer and the simulator alike, as
+  the encrypted-upload scratch handles already did. The spool name carries
+  the download's op, so a file a crash leaves behind names its operation.
+  Pins `a_spool_dropped_without_a_commit_leaves_nothing_behind` and
+  `a_download_that_stands_down_leaves_no_spool_behind`, red without the
+  change. 420 seeds x 5 modes byte-identical. VALID (public-html-41,
+  2026-10-05). To confirm on the rig: a device never restarted keeps a flat
+  spool count across settles.
 - **B2, narrowed (re-checked 2026-10-02 on `10b2b55d`: seed green in all
   five modes; a plain file's completed move is agreed Done on its own
   identity, `completed_here`, pinned by

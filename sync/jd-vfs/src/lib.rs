@@ -216,7 +216,9 @@ pub trait SpoolFile: std::io::Write {
         expect: Option<Fingerprint>,
     ) -> VfsResult<Fingerprint>;
 
-    /// Abandon the spool file and remove it.
+    /// Abandon the spool file and remove it. A handle dropped without a
+    /// commit does the same: the handle owns its spool file, so no way out of
+    /// a download can leave one behind (soak run 1721).
     fn discard(self: Box<Self>);
 }
 

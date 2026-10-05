@@ -504,6 +504,7 @@ fn a_folder_that_lost_a_creation_race_still_converges() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: None,
             last_seen_sha: None,
         })
@@ -594,6 +595,7 @@ fn a_file_that_lost_a_naming_race_still_converges() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: None,
             last_seen_sha: None,
         })
@@ -913,6 +915,7 @@ fn a_rescue_does_not_claim_a_name_the_server_has_already_given_away() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: None,
             last_seen_sha: None,
         })
@@ -5763,6 +5766,7 @@ fn a_file_deleted_before_this_device_ever_fetched_it_stops_being_tracked() {
         wrapped_file_key: None,
         replaces: None,
         stand_in: None,
+        stands_at: None,
         own_file: None,
         last_seen_sha: None,
     };
@@ -6216,6 +6220,7 @@ fn a_download_for_a_file_the_server_has_lost_stops_being_planned() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: None,
             last_seen_sha: None,
         })
@@ -6275,6 +6280,7 @@ fn bytes_on_this_disk_survive_the_server_losing_the_file_they_belonged_to() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: None,
             last_seen_sha: None,
         })
@@ -9891,6 +9897,7 @@ fn scratch_asymmetric_land_beside() {
             wrapped_file_key: None,
             replaces: None,
             stand_in: None,
+            stands_at: None,
             own_file: None,
             last_seen_sha: None,
         })
@@ -12863,13 +12870,72 @@ fn no_put_back_is_queued_into_a_folder_that_is_itself_in_the_trash() {
 }
 
 /// The ordinary shape of the local trash guard, with no scratch name in it:
-/// this device's vault is locked, so every encrypted entry waits for the key
-/// and no local move is applied. A peer moves a subfolder out of a vault
-/// folder and trashes that folder. The folder's local trash waits, says so,
-/// and the unlock finishes the move; before the guard the subfolder went to
-/// the local trash with its parent and its server copy followed on unlock.
+/// this device's vault is locked, so every sealed FILE waits for the key and
+/// no move of one is applied. A peer moves a file out of a vault folder and
+/// trashes that folder. The folder's local trash waits, says so, and the
+/// unlock finishes the move; before the guard the file went to the local
+/// trash with its parent and its server copy followed on unlock.
 #[test]
 fn a_locked_vaults_folder_trash_waits_for_a_child_the_server_moved_out() {
+    let vault = SimVault::new(9_279);
+    let mut world = World::new(9_279, &["holder"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    let body = b"moved while the vault was locked";
+    holder.fs.user_mkdir("Private/A");
+    holder.fs.user_mkdir("Private/B");
+    holder.fs.user_write("Private/A/note.txt", body);
+    assert!(world.settle().is_some());
+    let id_of = |kind: jd_core::EntityType, name: &str| -> i64 {
+        holder
+            .store
+            .every_entry()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id.entity_type == kind && e.remote.name == name)
+            .map(|e| e.id.server_id)
+            .unwrap_or_else(|| panic!("{name} on the server"))
+    };
+    let a = id_of(jd_core::EntityType::Folder, "A");
+    let b = id_of(jd_core::EntityType::Folder, "B");
+    let note = id_of(jd_core::EntityType::File, "note.txt");
+
+    world.lock_vault("holder");
+    let act = |name: &str, body: serde_json::Value| world.server.action(name, &body).unwrap();
+    act("drive_move", serde_json::json!({ "entity_type": "file", "entity_id": note, "parent_id": b }));
+    act("drive_trash", serde_json::json!({ "entity_type": "folder", "entity_id": a }));
+    let holder = world.device("holder");
+    for _ in 0..3 {
+        world.pass(holder);
+    }
+    let disk = disk_tree(holder);
+    assert!(disk.contains_key("Private/A/note.txt"), "trashed with its parent: {disk:?}");
+    let issues = holder.store.open_issues().unwrap();
+    assert!(issues.iter().any(|i| i.kind == "trash_waits"), "the wait was silent: {issues:?}");
+
+    world.give_vault("holder", &vault);
+    let holder = world.device("holder");
+    assert!(world.settle().is_some());
+    let disk = disk_tree(holder);
+    let sha = jd_sim::sha256_hex(body);
+    assert!(
+        disk.iter().any(|(p, s)| p.starts_with("Private/B/") && s.as_deref() == Some(sha.as_str())),
+        "the file did not reach the folder it was moved to: {disk:?}"
+    );
+    assert!(!disk.keys().any(|p| p.starts_with("Private/A")), "the trashed folder stood on: {disk:?}");
+    assert!(!holder.store.open_issues().unwrap().iter().any(|i| i.kind == "trash_waits"));
+}
+
+/// A subfolder of a locked vault follows the server out of a folder the server
+/// then trashes, while the vault is still locked: a folder's placement needs
+/// no key, so its directory moves with what it holds, and the trash of the
+/// folder it left has nothing of it to take. The user's file under it is never
+/// in the local trash.
+#[test]
+fn a_locked_vaults_subfolder_follows_the_server_out_of_a_folder_it_trashes() {
     let vault = SimVault::new(9_279);
     let mut world = World::new(9_279, &["holder"]);
     world.give_vault("holder", &vault);
@@ -12907,18 +12973,14 @@ fn a_locked_vaults_folder_trash_waits_for_a_child_the_server_moved_out() {
         world.pass(holder);
     }
     let disk = disk_tree(holder);
-    assert!(disk.contains_key("Private/A/Sub/note.txt"), "trashed with its parent: {disk:?}");
-    let issues = holder.store.open_issues().unwrap();
-    assert!(issues.iter().any(|i| i.kind == "trash_waits"), "the wait was silent: {issues:?}");
+    assert!(disk.contains_key("Private/B/Sub/note.txt"), "the subfolder did not follow while locked: {disk:?}");
+    assert!(!disk.keys().any(|p| p.starts_with("Private/A")), "the trashed folder stood on: {disk:?}");
 
     world.give_vault("holder", &vault);
     let holder = world.device("holder");
     assert!(world.settle().is_some());
     assert_eq!(folder_name_of(&world, sub), (false, "Sub".into()));
-    let disk = disk_tree(holder);
-    assert!(disk.contains_key("Private/B/Sub/note.txt"), "{disk:?}");
-    assert!(!disk.keys().any(|p| p.starts_with("Private/A")), "the trashed folder stood on: {disk:?}");
-    assert!(!holder.store.open_issues().unwrap().iter().any(|i| i.kind == "trash_waits"));
+    assert!(disk_tree(holder).contains_key("Private/B/Sub/note.txt"));
     committed.note("Private/B/Sub/note.txt", body);
     assert_converged(&world);
     assert_nothing_lost(&world, &committed);
@@ -16979,4 +17041,1057 @@ fn a_plain_folder_made_under_a_locked_vaults_old_name_never_takes_its_directory(
     for (what, body) in [("the memo", &memo[..]), ("the second save", &second[..])] {
         assert!(world.server.blob(&jd_sim::sha256_hex(body)).is_none(), "{what} reached the server as plaintext");
     }
+}
+
+// ---------------------------------------------------------------------------
+// The tie: a directory tied to a folder record, by its agreement or by a
+// stand-in, is that record's while the tie stands; a record the server has
+// only named never contests it (B-LV, B-RESTORE, the waiting placeholder,
+// B-228W).
+// ---------------------------------------------------------------------------
+
+fn tie_carriers(world: &World) -> Vec<String> {
+    let mut out = vec![];
+    for d in &world.devices {
+        let mut seen: std::collections::HashMap<u64, Vec<i64>> = Default::default();
+        for e in d.store.every_entry().unwrap() {
+            if e.id.entity_type != jd_core::EntityType::Folder || e.remote_deleted || e.id.is_provisional() { continue; }
+            if let Some(id) = e.synced_fingerprint.map(|f| f.file_id).filter(|i| *i != 0) { seen.entry(id).or_default().push(e.id.server_id); }
+        }
+        for (id, who) in seen { if who.len() > 1 { out.push(format!("{} dir {id}: {who:?}", d.name)); } }
+    }
+    out
+}
+
+/// B-LV. cross: the holder moves the vault into another vault V instead of renaming it.
+fn tie_blv(seed: u64, variant: u8, cross: bool) -> Result<(), String> {
+    let vault = SimVault::new(seed);
+    let mut world = World::new(seed, &["h", "g"]);
+    world.give_vault("h", &vault);
+    world.give_vault("g", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    if cross { world.server.seed_encrypted_folder(None, "V"); }
+    if world.settle().is_none() { return Err("first settle".into()); }
+    let memo = b"a memo the server must never be able to read";
+    world.device("h").fs.user_write("Private/memo.txt", memo);
+    if world.settle().is_none() { return Err("second settle".into()); }
+    if !world.device("g").fs.exists("Private/memo.txt") { return Err("premise: g holds the vault open".into()); }
+    world.lock_vault("g");
+    if variant & 1 == 1 { world.clock.advance_secs(60); world.pass(world.device("g")); }
+    let h = world.device("h");
+    let dest = if cross { "V/Private" } else { "Archive" };
+    h.fs.user_rename("Private", dest);
+    if variant & 2 == 2 { world.clock.advance_secs(60); world.pass(h); }
+    h.fs.user_write("Private/plain.txt", b"a new plain folder under the vault's old name");
+    for _ in 0..4 { world.clock.advance_secs(20 * 60); world.pass(world.device("h")); }
+    let mut dups = vec![];
+    for i in 0..6 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(world.device("g"));
+        dups.extend(tie_carriers(&world));
+        if i == 1 && variant & 4 == 4 {
+            let g = world.device("g");
+            for dir in ["Private", dest] {
+                if g.fs.exists(&format!("{dir}/memo.txt")) { g.fs.user_write(&format!("{dir}/second.txt"), b"second secret, saved while locked"); }
+            }
+        }
+    }
+    let settled = world.settle().is_some();
+    dups.extend(tie_carriers(&world));
+    let leaked = world.server.blob(&jd_sim::sha256_hex(memo)).is_some()
+        || world.server.blob(&jd_sim::sha256_hex(b"second secret, saved while locked")).is_some();
+    let plain_live = world.server.files().into_iter().any(|f| f.name == "plain.txt" && !f.trashed);
+    let h_plain = world.device("h").fs.exists("Private/plain.txt");
+    let g = world.device("g");
+    let g_disk = disk_tree(g);
+    let apart = g.fs.exists("Private/plain.txt") && g.fs.exists(&format!("{dest}/memo.txt")) && !g.fs.exists("Private/memo.txt");
+    if !dups.is_empty() || leaked || !plain_live || !h_plain || !settled || !apart {
+        return Err(format!("dups={dups:?} leaked={leaked} plain_live={plain_live} h_plain={h_plain} settled={settled} apart={apart} g={:?}", g_disk.keys().collect::<Vec<_>>()));
+    }
+    Ok(())
+}
+
+/// B-RESTORE. order 0: rename and remake seen in one pass; 1: rename seen first, the remake a pass later.
+fn tie_restore(seed: u64, order: u8) -> Result<(), String> {
+    let world = World::new(seed, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    b.fs.user_write("P/keep.txt", b"keep");
+    b.fs.user_write("P/S/doc-10.txt", b"ten");
+    if world.settle().is_none() { return Err("first settle".into()); }
+    let s = world.server.folder_id_at("P/S").ok_or("S")?;
+    a.fs.renumber_every_id();
+    b.fs.user_rename("P/S", "P/S 18");
+    if order == 1 {
+        for _ in 0..3 { world.clock.advance_secs(60); world.pass(b); }
+        world.clock.advance_secs(60); world.pass(a);
+    }
+    b.fs.user_write("P/S/doc-20.txt", b"twenty");
+    for _ in 0..6 { world.clock.advance_secs(20 * 60); world.pass(b); }
+    // The restored device's user saves a new file in the folder before its next pass.
+    if order == 2 { a.fs.user_write("P/S/mine.txt", b"saved in S after the restore"); }
+    let g = world.server.folder_id_at("P/S").ok_or("premise: G")?;
+    if g == s { return Err("premise: G is S".into()); }
+    if world.settle().is_none() { return Err("never settled".into()); }
+    let f = world.server.files().into_iter().find(|f| f.name == "doc-10.txt" && !f.trashed).ok_or("doc-10 gone")?;
+    if f.folder != Some(s) { return Err(format!("doc-10 left S: {:?}", world.server.tree())); }
+    if world.server.folder_id_at("P/S 18") != Some(s) { return Err(format!("S moved: {:?}", world.server.tree())); }
+    if order == 2 {
+        let mine = world.server.files().into_iter().find(|f| f.name == "mine.txt" && !f.trashed).ok_or("mine.txt never reached the server")?;
+        if mine.folder != Some(s) { return Err(format!("mine.txt went into the newcomer: {:?}", world.server.tree())); }
+    }
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jd_sim::scenario::assert_no_two_records_on_one_directory(&world))).map_err(|_| "two records on one directory".to_string())?;
+    Ok(())
+}
+
+/// Item 4: a peer's new folder under a waiting placeholder's old name.
+/// kind 0 plain namesake (wait for a parent the guest cannot make), 1 the
+/// namesake is a vault, 2 the guest's user deletes the placeholder while it
+/// waits, 3 the placeholder waits behind a tracked folder holding its new name.
+fn tie_namesake(seed: u64, kind: u8, model: Option<jd_sim::FileIds>) -> Result<(), String> {
+    let vault = SimVault::new(seed);
+    let mut world = World::new(seed, &["holder", "guest"]);
+    if let Some(m) = model { world.device("guest").fs.file_ids(m); }
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "A");
+    world.server.seed_encrypted_folder(None, "B");
+    let c = if kind == 3 { Some(world.server.seed_folder(None, "C")) } else { None };
+    if let Some(c) = c { world.server.seed_file(Some(c), "c.txt", b"inside plain C"); }
+    if world.settle().is_none() { return Err("settle 1".into()); }
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("A");
+    guest.fs.user_mkdir("B");
+    guest.fs.user_write("A/a.txt", b"held under the placeholder");
+    if world.settle().is_none() { return Err("settle 2".into()); }
+    let holder = world.device("holder");
+    let dest = if kind == 3 {
+        holder.fs.user_rename("C", "D");
+        holder.fs.user_rename("A", "C");
+        "C"
+    } else {
+        holder.fs.user_mkdir("B/N");
+        holder.fs.user_rename("A", "B/N/A");
+        "B/N/A"
+    };
+    for _ in 0..3 { world.clock.advance_secs(30); world.pass(holder); }
+    if kind == 3 {
+        // Before the guest applies C's move, so the placeholder waits behind C.
+        let plain = world.server.seed_folder(None, "A");
+        world.server.seed_file(Some(plain), "peer.txt", b"the peer's plain file");
+    } else {
+        if world.settle().is_none() { return Err("settle after move".into()); }
+        if kind == 2 { world.device("guest").fs.user_remove("A"); }
+        if kind == 1 {
+            world.server.seed_encrypted_folder(None, "A");
+        } else {
+            let plain = world.server.seed_folder(None, "A");
+            world.server.seed_file(Some(plain), "peer.txt", b"the peer's plain file");
+        }
+    }
+    if world.settle().is_none() { return Err(format!("kind {kind}: never settled with the namesake")); }
+    let gdisk = disk_tree(world.device("guest"));
+    if kind != 2 && kind != 3 {
+        if !gdisk.contains_key("A/a.txt") { return Err(format!("kind {kind}: the placeholder lost its file while waiting: {gdisk:?}")); }
+        if gdisk.contains_key("A/peer.txt") { return Err(format!("kind {kind}: the namesake took the placeholder's directory: {gdisk:?}")); }
+    }
+    world.give_vault("guest", &vault);
+    if world.settle().is_none() { return Err(format!("kind {kind}: never settled after the key")); }
+    let gdisk = disk_tree(world.device("guest"));
+    let hdisk = disk_tree(world.device("holder"));
+    // On a weak drive the vault stays parked where its directory stands, key or no key.
+    let a_at = gdisk.keys().find(|k| k.ends_with("/a.txt")).cloned();
+    if kind != 2 {
+        match (&a_at, model.is_some()) {
+            (None, _) => return Err(format!("kind {kind}: a.txt gone from the guest: {gdisk:?}")),
+            (Some(p), false) if *p != format!("{dest}/a.txt") => return Err(format!("kind {kind}: a.txt not in the vault at {dest}: {gdisk:?}")),
+            _ => {}
+        }
+        let dir = a_at.as_ref().unwrap().trim_end_matches("/a.txt");
+        if gdisk.contains_key(&format!("{dir}/peer.txt")) { return Err(format!("kind {kind}: the peer's plain file landed in the vault's directory: {gdisk:?}")); }
+    }
+    if kind != 1 {
+        let plain_ok = world.server.files().into_iter().any(|f| f.name == "peer.txt" && !f.trashed && world.server.folder_id_at("A") == f.folder);
+        if !plain_ok { return Err(format!("kind {kind}: the peer's plain folder lost peer.txt: server {:?}", world.server.tree())); }
+        if !hdisk.contains_key("A/peer.txt") { return Err(format!("kind {kind}: A/peer.txt missing on the holder: {hdisk:?}")); }
+        // On a weak drive the plain folder may wait, parked as a duplicate of the parked vault's name.
+        if model.is_none() && !gdisk.contains_key("A/peer.txt") { return Err(format!("kind {kind}: A/peer.txt missing on the guest: {gdisk:?}")); }
+    }
+    if kind == 3 && !(gdisk.contains_key("D/c.txt") && hdisk.contains_key("D/c.txt")) { return Err(format!("kind 3: plain C's file not at D: {gdisk:?}")); }
+    if world.server.blob(&jd_sim::sha256_hex(b"held under the placeholder")).is_some() { return Err("a.txt reached the server in the clear".into()); }
+    if !world.server.plaintext_inside_a_vault().is_empty() { return Err(format!("plaintext inside a vault: {:?}", world.server.plaintext_inside_a_vault())); }
+    Ok(())
+}
+
+/// a5's twin of B-LV: a vault parked out of scope on a weak drive, renamed on
+/// the server, and a plain folder made under its old name.
+fn tie_out_of_scope_twin(seed: u64, model: jd_sim::FileIds, cross: bool) -> Result<(), String> {
+    let vault = SimVault::new(seed);
+    let mut world = World::new(seed, &["h", "g"]);
+    world.device("g").fs.file_ids(model);
+    world.give_vault("h", &vault);
+    world.give_vault("g", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    if cross { world.server.seed_encrypted_folder(None, "V"); }
+    if world.settle().is_none() { return Err("settle 1".into()); }
+    world.device("h").fs.user_write("Private/memo.txt", b"sealed memo");
+    world.device("g").fs.user_mkdir("Private");
+    world.device("g").fs.user_write("Private/mine.txt", b"saved under the parked vault");
+    if world.settle().is_none() { return Err("settle 2".into()); }
+    let st = world.device("g").store.every_entry().unwrap().into_iter().find(|e| e.remote.name == "Private").map(|e| e.status);
+    if st != Some(jd_core::model::LocalStatus::OutOfScope) { return Err(format!("premise: g's vault is parked out of scope, got {st:?}")); }
+    let h = world.device("h");
+    h.fs.user_rename("Private", if cross { "V/Private" } else { "Archive" });
+    h.fs.user_write("Private/plain.txt", b"a new plain folder under the vault's old name");
+    for _ in 0..4 { world.clock.advance_secs(20 * 60); world.pass(world.device("h")); }
+    if world.settle().is_none() { return Err("never settled".into()); }
+    let gdisk = disk_tree(world.device("g"));
+    let plain_live = world.server.files().into_iter().any(|f| f.name == "plain.txt" && !f.trashed);
+    let mine_at = gdisk.keys().find(|k| k.ends_with("/mine.txt")).cloned();
+    let leaked = world.server.blob(&jd_sim::sha256_hex(b"saved under the parked vault")).is_some() || world.server.blob(&jd_sim::sha256_hex(b"sealed memo")).is_some();
+    let merged = mine_at.as_ref().is_some_and(|m| gdisk.contains_key(&format!("{}/plain.txt", m.trim_end_matches("/mine.txt"))));
+    if !plain_live || mine_at.is_none() || leaked || merged || !world.device("h").fs.exists("Private/plain.txt") {
+        return Err(format!("plain_live={plain_live} mine_at={mine_at:?} leaked={leaked} merged={merged} g={:?} server={:?}", gdisk.keys().collect::<Vec<_>>(), world.server.tree().keys().collect::<Vec<_>>()));
+    }
+    Ok(())
+}
+
+/// a5's item 5: a server folder 'a:b' settles on a Windows-named disk as
+/// 'a%3Ab'; a peer creates, or renames another folder to, the literal name
+/// 'a%3Ab'. The first folder must stay live with its file under it.
+fn tie_escape_shape(model: Option<jd_sim::FileIds>, shape: &str) -> Result<(), String> {
+    let world = World::of(5_500, &[("pc", jd_sim::scenario::Platform::Windows)]);
+    let pc = world.device("pc");
+    if let Some(m) = model { pc.fs.file_ids(m); }
+    let first = world.server.seed_folder(None, "a:b");
+    world.server.seed_file(Some(first), "in.txt", b"inside the first folder");
+    let other = world.server.seed_folder(None, "Other");
+    world.server.seed_file(Some(other), "o.txt", b"inside the other folder");
+    if world.settle().is_none() { return Err("settle 1".into()); }
+    let local_first = disk_tree(pc).keys().find(|k| k.ends_with("/in.txt")).unwrap().trim_end_matches("/in.txt").to_string();
+    pc.fs.user_write(&format!("{local_first}/unsent.txt"), b"saved here and not sent yet");
+    match shape {
+        "rename_onto" => { world.server.action("drive_rename", &serde_json::json!({"entity_type": "folder", "entity_id": other, "name": local_first})).unwrap(); }
+        _ => { let n = world.server.seed_folder(None, &local_first); world.server.seed_file(Some(n), "n.txt", b"the newcomer's file"); }
+    }
+    let settled = world.settle().is_some();
+    let in_ok = world.server.files().into_iter().any(|f| f.name == "in.txt" && !f.trashed && f.folder == Some(first));
+    let first_live = world.server.folders().into_iter().any(|f| f.id == first && !f.trashed);
+    let unsent_ok = world.server.files().into_iter().any(|f| f.name == "unsent.txt" && !f.trashed && f.folder == Some(first));
+    if !settled || !in_ok || !first_live || !unsent_ok {
+        return Err(format!("settled={settled} first_live={first_live} in_ok={in_ok} unsent_ok={unsent_ok} server={:?}", world.server.tree().keys().collect::<Vec<_>>()));
+    }
+    Ok(())
+}
+
+/// A locked vault whose directory, memo and all, the user removed while
+/// locked. Its delete waits for the key and goes through whole at unlock:
+/// the vault and its file trashed on the server, gone from both disks. With
+/// `namesake`, the holder renamed the vault and made a plain folder under its
+/// old name meanwhile: that folder is created here (the vault holds nothing
+/// at that name) and survives. The holder's rename makes the vault's unlock a
+/// delete against a move, which reconcile settles by making the folder again
+/// (`a_deleted_folder_the_server_renamed_is_made_again_not_downloaded`), so
+/// the whole-delete half is asserted without a namesake only.
+fn tie_removed_locked_vault(seed: u64, namesake: bool) -> Result<(), String> {
+    let vault = SimVault::new(seed);
+    let mut world = World::new(seed, &["h", "g"]);
+    world.give_vault("h", &vault);
+    world.give_vault("g", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let v = world.server.seed_encrypted_folder(None, "Private");
+    if world.settle().is_none() { return Err("settle 1".into()); }
+    world.device("h").fs.user_write("Private/memo.txt", b"memo");
+    if world.settle().is_none() { return Err("settle 2".into()); }
+    world.lock_vault("g");
+    for _ in 0..2 { world.clock.advance_secs(60); world.pass(world.device("g")); }
+    world.device("g").fs.user_remove("Private");
+    for _ in 0..2 { world.clock.advance_secs(60); world.pass(world.device("g")); }
+    if namesake {
+        let h = world.device("h");
+        h.fs.user_rename("Private", "Archive");
+        h.fs.user_write("Private/plain.txt", b"plain");
+        for _ in 0..4 { world.clock.advance_secs(20 * 60); world.pass(world.device("h")); }
+    }
+    if world.settle().is_none() { return Err("never settled while locked".into()); }
+    let vault_live = world.server.folders().into_iter().any(|f| f.id == v && !f.trashed);
+    if !vault_live { return Err("the vault was trashed before the key came back".into()); }
+    if namesake && !disk_tree(world.device("g")).contains_key("Private/plain.txt") {
+        return Err(format!("the plain namesake was kept off this disk: {:?}", disk_tree(world.device("g"))));
+    }
+    world.give_vault("g", &vault);
+    if world.settle().is_none() { return Err("never settled after the key".into()); }
+    if namesake {
+        let g = disk_tree(world.device("g"));
+        let h = disk_tree(world.device("h"));
+        let plain_live = world.server.files().into_iter().any(|f| f.name == "plain.txt" && !f.trashed);
+        if !plain_live || !g.contains_key("Private/plain.txt") || !h.contains_key("Private/plain.txt") {
+            return Err(format!("the plain namesake did not survive: g={g:?} h={h:?}"));
+        }
+        if world.server.blob(&jd_sim::sha256_hex(b"memo")).is_some() { return Err("the memo reached the server in the clear".into()); }
+        return Ok(());
+    }
+    let vault_trashed = world.server.folders().into_iter().any(|f| f.id == v && f.trashed);
+    let memo_live = world.server.files().into_iter().any(|f| f.folder == Some(v) && !f.trashed);
+    let g = disk_tree(world.device("g"));
+    let h = disk_tree(world.device("h"));
+    if !vault_trashed || memo_live || g.contains_key("Private") || h.contains_key("Private") {
+        return Err(format!("the delete was not kept whole: vault_trashed={vault_trashed} memo_live={memo_live} g={g:?} h={h:?}"));
+    }
+    if world.server.blob(&jd_sim::sha256_hex(b"memo")).is_some() { return Err("the memo reached the server in the clear".into()); }
+    Ok(())
+}
+
+fn tie_ok(r: std::thread::Result<Result<(), String>>) -> Result<(), String> {
+    r.unwrap_or_else(|p| Err(format!("panicked: {:?}", p.downcast_ref::<String>().cloned().or(p.downcast_ref::<&str>().map(|s| s.to_string())))))
+}
+
+/// B-LV. A device holding a vault it opened and then locked keeps the vault's
+/// directory, and the vault follows a peer's rename like any folder: names are
+/// plaintext on the server and need no key. A plain folder the peer makes
+/// under the old name is its own folder on this device, never the vault's
+/// directory. Answered from the status, the locked vault held "nothing" at its
+/// name: the plain folder took its directory, read as deleted, and was trashed
+/// on the server with the peer's file. Every variant: the device passes once
+/// locked before the rename or not, the holder passes between rename and save
+/// or not, the locked user saves beside the memo or not.
+#[test]
+fn a_locked_vault_follows_a_peers_rename_and_a_plain_folder_under_its_old_name_survives() {
+    for variant in 0..8u8 {
+        let r = tie_ok(std::panic::catch_unwind(|| tie_blv(9_981, variant, false)));
+        assert!(r.is_ok(), "variant {variant}: {}", r.unwrap_err());
+    }
+}
+
+/// The same, with the vault moved into another vault rather than renamed: a
+/// move across parents is a placement like a rename, and the locked vault
+/// follows it.
+#[test]
+fn a_locked_vault_follows_a_peers_move_into_another_vault() {
+    for variant in 0..8u8 {
+        let r = tie_ok(std::panic::catch_unwind(|| tie_blv(9_982, variant, true)));
+        assert!(r.is_ok(), "variant {variant}: {}", r.unwrap_err());
+    }
+}
+
+/// A lock delays what the user did; it does not change it. A locked vault the
+/// user removed, memo and all, keeps its agreement and is trashed whole -- the
+/// vault and its file -- once the key is back. Meanwhile it holds nothing at
+/// its name: a plain folder the holder makes there after renaming the vault
+/// is created here, and survives.
+#[test]
+fn a_locked_vault_the_user_removed_is_deleted_whole_at_unlock() {
+    for namesake in [false, true] {
+        let r = tie_ok(std::panic::catch_unwind(|| tie_removed_locked_vault(9_989, namesake)));
+        assert!(r.is_ok(), "namesake={namesake}: {}", r.unwrap_err());
+    }
+}
+
+/// A locked vault the user renamed keeps the user's name, never renamed back:
+/// found where it went by its directory's id, or, where no id can say -- after
+/// a restore, or with no id recorded -- by what is in it. The rename is a
+/// placement, plaintext on the server, so it goes up while the vault is still
+/// locked and the peer follows it then; what the user saved inside waits for
+/// the key, and goes up sealed once it is back.
+fn tie_renamed_locked_vault(seed: u64, variant: u8, parked_first: bool) -> Result<(), String> {
+    let vault = SimVault::new(seed);
+    let mut world = World::new(seed, &["h", "g"]);
+    world.give_vault("h", &vault);
+    world.give_vault("g", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let v = world.server.seed_encrypted_folder(None, "Private");
+    if world.settle().is_none() { return Err("settle 1".into()); }
+    world.device("h").fs.user_write("Private/memo.txt", b"a memo the server must never be able to read");
+    if world.settle().is_none() { return Err("settle 2".into()); }
+    world.lock_vault("g");
+    if parked_first { world.clock.advance_secs(60); world.pass(world.device("g")); }
+    let g = world.device("g");
+    if variant == 1 { g.fs.renumber_every_id(); }
+    if variant == 2 {
+        for mut e in g.store.every_entry().unwrap() {
+            if e.id.entity_type == jd_core::EntityType::Folder && e.id.server_id == v {
+                e.synced_fingerprint = None;
+                g.store.put_entry(&e).unwrap();
+            }
+        }
+    }
+    g.fs.user_rename("Private", "Mine");
+    g.fs.user_write("Mine/new.txt", b"saved beside the memo while locked");
+    for _ in 0..5 { world.clock.advance_secs(20 * 60); world.pass(world.device("g")); }
+    if world.settle().is_none() { return Err("never settled while locked".into()); }
+    let gl = disk_tree(world.device("g"));
+    if !gl.contains_key("Mine/memo.txt") || !gl.contains_key("Mine/new.txt") || gl.contains_key("Private") {
+        return Err(format!("the user's rename was undone while locked: {gl:?}"));
+    }
+    // Its name is plaintext and the rename needs no key: it goes up now, and
+    // the peer follows, before this device has the key back.
+    let locked_name = world.server.folders().into_iter().find(|f| f.id == v && !f.trashed).map(|f| f.name);
+    let hl = disk_tree(world.device("h"));
+    if locked_name.as_deref() != Some("Mine") || !hl.contains_key("Mine/memo.txt") || hl.contains_key("Private") {
+        return Err(format!("the user's rename did not go up while locked: server name {locked_name:?} h={hl:?}"));
+    }
+    world.give_vault("g", &vault);
+    if world.settle().is_none() { return Err("never settled after the key".into()); }
+    let name = world.server.folders().into_iter().find(|f| f.id == v && !f.trashed).map(|f| f.name);
+    let g = disk_tree(world.device("g"));
+    let h = disk_tree(world.device("h"));
+    if name.as_deref() != Some("Mine") || !g.contains_key("Mine/new.txt") || !h.contains_key("Mine/new.txt") || !h.contains_key("Mine/memo.txt") {
+        return Err(format!("the vault did not take the user's name at unlock: server name {name:?} g={g:?} h={h:?}"));
+    }
+    if world.server.blob(&jd_sim::sha256_hex(b"saved beside the memo while locked")).is_some() || !world.server.plaintext_inside_a_vault().is_empty() {
+        return Err("plaintext reached the server".into());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_locked_vault_the_user_renamed_keeps_the_name_and_sends_it_while_locked() {
+    // 0: ids hold. 1: a restore first (every id fresh). 2: no id recorded.
+    for variant in [0u8, 1, 2] {
+        for parked_first in [false, true] {
+            let r = tie_ok(std::panic::catch_unwind(|| tie_renamed_locked_vault(9_701 + variant as u64, variant, parked_first)));
+            assert!(r.is_ok(), "variant {variant} parked_first={parked_first}: {}", r.unwrap_err());
+        }
+    }
+}
+
+/// B-LV's twin out of scope: a vault parked on a weak drive keeps its
+/// directory and the user's file under it when a peer renames the vault (or
+/// moves it into another vault) and makes a plain folder under its old name.
+/// Asked of the status, it held nothing: the two merged into one directory,
+/// and the moved case trashed the peer's plain folder on the server.
+#[test]
+fn a_vault_parked_on_a_weak_drive_keeps_its_directory_when_a_plain_folder_takes_its_old_name() {
+    for (label, model) in [("win", jd_sim::FileIds::DirectorySlot), ("mac", jd_sim::FileIds::DataCluster), ("linux", jd_sim::FileIds::MountSession)] {
+        for cross in [false, true] {
+            let r = tie_ok(std::panic::catch_unwind(|| tie_out_of_scope_twin(9_986, model, cross)));
+            assert!(r.is_ok(), "{label} cross={cross}: {}", r.unwrap_err());
+        }
+    }
+}
+
+/// B-RESTORE. A device restored from a backup -- every directory id fresh, so
+/// identity says nothing -- meets a peer's rename of a folder and a save
+/// through its old name. The folder keeps its own directory and its file: the
+/// record tied there keeps the path against the newcomer the server has only
+/// named, in either order the two changes arrive. Later-takes-the-path gave the
+/// newcomer the directory and moved the file into it (the run-1650 failure
+/// after a restore).
+#[test]
+fn a_restored_folder_keeps_its_directory_when_its_old_name_is_made_again() {
+    for order in 0..3u8 {
+        let r = tie_ok(std::panic::catch_unwind(|| tie_restore(11_200, order)));
+        assert!(r.is_ok(), "order {order}: {}", r.unwrap_err());
+    }
+}
+
+/// A keyless placeholder waiting for its vault's new parent keeps its
+/// directory while a peer's folder takes the vault's old name: a plain folder,
+/// a vault, after the user removed the placeholder, and while the placeholder
+/// waits behind a tracked folder holding its new name. On every disk model.
+/// Before: a plain namesake landed in the placeholder's directory, and when
+/// the key arrived the directory moved into the vault carrying the peer's
+/// file; with the placeholder waiting behind a folder, the peer's folder was
+/// trashed on the server.
+#[test]
+fn a_waiting_placeholder_keeps_its_directory_from_a_folder_made_under_its_old_name() {
+    for (label, model) in [("strong", None), ("win", Some(jd_sim::FileIds::DirectorySlot)), ("mac", Some(jd_sim::FileIds::DataCluster)), ("linux", Some(jd_sim::FileIds::MountSession))] {
+        for kind in 0..4u8 {
+            let r = tie_ok(std::panic::catch_unwind(|| tie_namesake(9_944, kind, model)));
+            assert!(r.is_ok(), "{label} kind {kind}: {}", r.unwrap_err());
+        }
+    }
+}
+
+/// B-228W's natural shape (a5): a server folder 'a:b' settles on a
+/// Windows-named disk as 'a%3Ab', and a peer makes, or renames a folder to,
+/// that literal name. With no directory ids the path claim decided, the
+/// newcomer evicted the folder agreed there, and the folder was trashed with
+/// its directory standing and its files sent up under the stranger.
+#[test]
+fn a_folder_whose_escaped_name_a_peer_takes_literally_stays_live_with_its_files() {
+    for (label, model) in [("strong", None), ("win", Some(jd_sim::FileIds::DirectorySlot)), ("mac", Some(jd_sim::FileIds::DataCluster)), ("linux", Some(jd_sim::FileIds::MountSession))] {
+        for shape in ["rename_onto", "newcomer"] {
+            let r = tie_ok(std::panic::catch_unwind(|| tie_escape_shape(model, shape)));
+            assert!(r.is_ok(), "{label} {shape}: {}", r.unwrap_err());
+        }
+    }
+}
+
+/// A keyless guest's placeholder waits for a parent it cannot make. The holder
+/// moved vault A into vault B, under a folder N made inside B: the server takes
+/// that (a vault may sit inside another vault). The guest holds placeholders
+/// for A and B, but N is in a vault it cannot open, and no engine write makes
+/// a folder (soak run 1571), so B/N is not on its disk. Following the server
+/// failed the rename, and with it every pass, for ever. The placeholder waits
+/// until N's directory stands -- the guest's user makes it, or the key arrives
+/// -- and nothing held under it is lost.
+#[test]
+fn a_placeholder_waits_for_a_new_parent_inside_a_vault_it_cannot_open() {
+    for user_makes_the_parent in [false, true] {
+        let vault = SimVault::new(9_943);
+        let mut world = World::new(9_943, &["holder", "guest"]);
+        world.give_vault("holder", &vault);
+        world.server.set_vault_public_key(1, &vault.public_key_b64);
+        let mut committed = Committed::default();
+        world.server.seed_encrypted_folder(None, "A");
+        world.server.seed_encrypted_folder(None, "B");
+        assert!(world.settle().is_some());
+        let guest = world.device("guest");
+        guest.fs.user_mkdir("A");
+        guest.fs.user_mkdir("B");
+        guest.fs.user_write("A/a.txt", b"held under the placeholder");
+        assert!(world.settle().is_some());
+
+        let holder = world.device("holder");
+        holder.fs.user_mkdir("B/N");
+        holder.fs.user_rename("A", "B/N/A");
+        for _ in 0..3 {
+            world.clock.advance_secs(30);
+            world.pass(holder);
+        }
+        assert!(world.server.folder_id_at("B/N/A").is_some(), "the premise: the server took the move");
+        assert!(world.settle().is_some(), "the guest must go quiet while its placeholder waits");
+        assert_eq!(
+            disk_tree(guest).get("A/a.txt").cloned().flatten(),
+            Some(jd_sim::sha256_hex(b"held under the placeholder")),
+            "the file held under the placeholder"
+        );
+
+        if user_makes_the_parent {
+            guest.fs.user_mkdir("B/N");
+            assert!(world.settle().is_some());
+            let disk = disk_tree(guest);
+            assert!(disk.contains_key("B/N/A/a.txt"), "the placeholder did not follow into the folder the user made: {disk:?}");
+        }
+        committed.note("B/N/A/a.txt", b"held under the placeholder");
+        world.give_vault("guest", &vault);
+        assert!(world.settle().is_some());
+        let disk = disk_tree(world.device("guest"));
+        assert!(disk.contains_key("B/N/A/a.txt"), "user_makes_the_parent={user_makes_the_parent}: {disk:?}");
+        assert!(!disk.contains_key("A"), "{disk:?}");
+        assert_converged(&world);
+        assert_nothing_lost(&world, &committed);
+    }
+}
+
+/// A vault parked on a weak drive, followed by its sealed files into the
+/// directory of a folder this device holds, is placed under that folder --
+/// never under a namesake the server has only named. 'a:b' wears 'a%3Ab' on a
+/// Windows-named disk, a peer makes a folder literally named 'a%3Ab', and the
+/// two derive one path. The path map kept the later record, the parked-vault
+/// follow read it before the folder scan had set it right, and the vault's
+/// record named as its folder one that never stood here -- still naming it
+/// after the server trashed it.
+#[test]
+fn a_parked_vault_followed_into_a_folder_is_placed_under_that_folder_not_a_namesake_only_named_here() {
+    for (label, model) in [("win", jd_sim::FileIds::DirectorySlot), ("mac", jd_sim::FileIds::DataCluster), ("linux", jd_sim::FileIds::MountSession)] {
+        let vault = SimVault::new(9_994);
+        let mut world = World::of(9_994, &[("h", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);
+        world.give_vault("h", &vault);
+        world.give_vault("pc", &vault);
+        world.server.set_vault_public_key(1, &vault.public_key_b64);
+        let v = world.server.seed_encrypted_folder(None, "V");
+        let first = world.server.seed_folder(None, "a:b");
+        world.server.seed_file(Some(first), "in.txt", b"inside a:b");
+        assert!(world.settle().is_some());
+        world.device("h").fs.user_write("V/s.txt", b"sealed in the vault");
+        assert!(world.settle().is_some());
+        let pc = world.device("pc");
+        assert!(pc.fs.exists("V/s.txt"), "{label}: the premise, pc holds the sealed file");
+        pc.fs.file_ids(model);
+        for _ in 0..2 {
+            world.clock.advance_secs(60);
+            world.pass(pc);
+        }
+        let local_first = disk_tree(pc).keys().find(|k| k.ends_with("/in.txt")).unwrap().trim_end_matches("/in.txt").to_string();
+        let twin = world.server.seed_folder(None, &local_first);
+        world.server.seed_file(Some(twin), "t.txt", b"the literal twin");
+        assert!(world.settle().is_some());
+        pc.fs.user_rename("V", &format!("{local_first}/V"));
+        assert!(world.settle().is_some());
+        let placed = |what: &str| {
+            let rec = pc.store.get_entry(jd_core::model::EntityId::folder(v)).unwrap().unwrap();
+            assert_eq!(rec.synced_placement.map(|p| p.parent), Some(Some(first)), "{label} {what}: the parked vault names a folder that never stood here");
+        };
+        placed("followed");
+        world.server.action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": twin })).unwrap();
+        assert!(world.settle().is_some());
+        placed("after the namesake is trashed");
+        assert!(disk_tree(pc).contains_key(&format!("{local_first}/V/s.txt")));
+        assert!(world.server.blob(&jd_sim::sha256_hex(b"sealed in the vault")).is_none());
+    }
+}
+
+/// Soak run 1692: a device's record lost its own file (the user saved over
+/// it by renaming a temporary into place), while a never-sent record owns
+/// the user's save standing at that name and the server holds a peer's newer
+/// edit. The park, the upload and the restore each asked a different question
+/// about whose file stood there, each stood down on the others, and the device
+/// re-planned the same three for ever. Asked once, as the scan answers it, the
+/// file is the save's: the server's edit keeps the name and the save goes up
+/// beside it.
+///
+/// A CONSTRUCTED state, built as the rig's store showed it: a pass mints a
+/// record for the temporary, the temporary is renamed over the original, and
+/// that record is given the original's name by hand. What let a record follow
+/// its file onto that name in the run is not known, so this pins that the
+/// readers agree on the state, and run 1692 stays open until its producer is
+/// found.
+#[test]
+fn a_save_owned_by_a_new_record_at_a_name_whose_record_lost_its_file_settles() {
+    for seed in 0..4u64 {
+        let world = World::new(11_100 + seed, &["a", "b"]);
+        let a = world.device("a");
+        let b = world.device("b");
+        a.fs.user_write("Shared-office/Report 4.docx", b"v0");
+        assert!(world.settle().is_some());
+        b.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+        b.fs.user_write("Shared-office/tmp0001.tmp", b"b-save");
+        world.clock.advance_secs(20);
+        world.pass(b);
+        b.fs.user_rename("Shared-office/tmp0001.tmp", "Shared-office/Report 4.docx");
+        let mut saved = b.store.every_entry().unwrap().into_iter()
+            .find(|e| e.id.is_provisional() && e.remote.name == "tmp0001.tmp")
+            .expect("the premise: a record for the temporary");
+        saved.remote.name = "Report 4.docx".into();
+        b.store.put_entry(&saved).unwrap();
+        for op in b.store.queued_ops().unwrap() {
+            if op.entity == saved.id {
+                b.store.drop_op(op.op_id).unwrap();
+            }
+        }
+        b.net.set_faults(NetFaults::none());
+        a.fs.user_write("Shared-office/Report 4.docx", b"a-newer");
+        world.clock.advance_secs(20);
+        world.pass(a);
+
+        assert!(world.settle().is_some(), "seed {seed}: never settled");
+        for d in ["a", "b"] {
+            assert_eq!(
+                world.device(d).fs.peek("Shared-office/Report 4.docx").as_deref(),
+                Some(&b"a-newer"[..]),
+                "seed {seed}: {d} does not hold the server's newer edit at the name"
+            );
+        }
+        let save = jd_sim::sha256_hex(b"b-save");
+        assert!(world.server.blob(&save).is_some(), "seed {seed}: the save never reached the server");
+        assert!(
+            jd_sim::scenario::disk_tree(b).values().any(|h| h.as_deref() == Some(save.as_str())),
+            "seed {seed}: the save is gone from b's disk"
+        );
+        assert_converged(&world);
+    }
+}
+
+/// The run-1692 state with no edit on the server: the user's save, renamed
+/// over the original, is minted as a new record that owns it, while the
+/// original's record has lost its file. Semantically the save is the
+/// original's next version; the disk says a record lost its file and a new
+/// file stands at its name, and the engine acts on that.
+///
+/// What the user sees, deliberately (the same on 910c0185 and with the park
+/// asking whose file this is): on every device 'Report 4.docx' holds the
+/// SAVE, as a new file with a history of its own. The original record read as
+/// deleted here with nothing changed on the server, so the delete went up: the
+/// original's bytes (v0) and their history are in the server's trash,
+/// recoverable, not at any path. Nothing is lost, and nothing is folded into a
+/// history the save may not belong to. A CONSTRUCTED state, like the pin above.
+#[test]
+fn a_save_owned_by_a_new_record_with_no_server_edit_keeps_both_byte_sets() {
+    for seed in 0..4u64 {
+        let world = World::new(11_200 + seed, &["a", "b"]);
+        let a = world.device("a");
+        let b = world.device("b");
+        a.fs.user_write("Shared-office/Report 4.docx", b"v0");
+        assert!(world.settle().is_some());
+        let original = world.server.files().into_iter().find(|f| f.name == "Report 4.docx").unwrap().id;
+        b.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+        b.fs.user_write("Shared-office/tmp0001.tmp", b"b-save");
+        world.clock.advance_secs(20);
+        world.pass(b);
+        b.fs.user_rename("Shared-office/tmp0001.tmp", "Shared-office/Report 4.docx");
+        let mut saved = b.store.every_entry().unwrap().into_iter()
+            .find(|e| e.id.is_provisional() && e.remote.name == "tmp0001.tmp")
+            .expect("the premise: a record for the temporary");
+        saved.remote.name = "Report 4.docx".into();
+        b.store.put_entry(&saved).unwrap();
+        for op in b.store.queued_ops().unwrap() {
+            if op.entity == saved.id {
+                b.store.drop_op(op.op_id).unwrap();
+            }
+        }
+        b.net.set_faults(NetFaults::none());
+
+        assert!(world.settle().is_some(), "seed {seed}: never settled");
+        let (v0, save) = (jd_sim::sha256_hex(b"v0"), jd_sim::sha256_hex(b"b-save"));
+        for d in ["a", "b"] {
+            assert_eq!(
+                world.device(d).fs.peek("Shared-office/Report 4.docx").as_deref(),
+                Some(&b"b-save"[..]),
+                "seed {seed}: {d} does not hold the save at the name"
+            );
+        }
+        let files = world.server.files();
+        let first = files.iter().find(|f| f.id == original).expect("the original is gone from the server");
+        assert!(first.trashed && first.sha256 == v0, "seed {seed}: the original is not kept, in the trash: {first:?}");
+        assert!(
+            files.iter().any(|f| f.id != original && !f.trashed && f.name == "Report 4.docx" && f.sha256 == save),
+            "seed {seed}: the save is not a file of its own at the name"
+        );
+        assert_converged(&world);
+    }
+}
+
+/// Soak run 1721: a download that stands down leaves no spool behind. Here
+/// the user saves over the file at the moment its download's spool opens, so
+/// the download meets a file it was not decided against and stands down,
+/// once per round. Every such stand-down used to leave its spool file until
+/// the next daemon start; a device never restarted gathered eleven.
+#[test]
+fn a_download_that_stands_down_leaves_no_spool_behind() {
+    for seed in 0..3u64 {
+        let world = World::new(9_990 + seed, &["a", "b"]);
+        let a = world.device("a");
+        let b = world.device("b");
+        b.fs.user_write("P/f.txt", b"v0");
+        assert!(world.settle().is_some());
+        let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let disk = a.fs.clone();
+        let fire = armed.clone();
+        let saves = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let counter = saves.clone();
+        a.fs.while_a_spool_opens(move |target| {
+            if target.ends_with("P/f.txt") && fire.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                disk.user_write("P/f.txt", format!("a's save {n}").as_bytes());
+            }
+        });
+        for round in 0..5 {
+            b.fs.user_write("P/f.txt", format!("b's edit {round}").as_bytes());
+            armed.store(true, std::sync::atomic::Ordering::SeqCst);
+            assert!(world.settle().is_some(), "seed {seed} round {round}: never settled");
+            assert_eq!(a.fs.spool_count(), 0, "seed {seed} round {round}: a stood-down download left its spool");
+        }
+        assert!(saves.load(std::sync::atomic::Ordering::SeqCst) > 0, "the premise: a's user saved while a download opened");
+        assert_converged(&world);
+    }
+}
+
+/// A file or folder saved into a vault's directory while the user rotates the
+/// folders' names, before the round has written the new names into the
+/// records (plat3 75455).
+///
+/// The laptop rotates three rings so the vault's directory wears `ring-3`
+/// and saves a new file in it -- or a new folder holding one -- then, after
+/// one pass, carries it into the plain folder now wearing `ring-1`. The pass
+/// minted a record for the new thing under the vault, by the scan's map of
+/// where each directory stands now; its gone check then looked for it at the
+/// path the vault's record still named, `ring-1/...`, found nothing and
+/// forgot it. Carried out, the file was met as a stranger in a plain folder
+/// and went up in the clear. One outcome: the new bytes never reach the
+/// server in the clear; the server keeps the file sealed in the vault.
+#[test]
+fn something_saved_in_a_vault_mid_rotation_keeps_its_record() {
+    for (saved, carried_from, carried_to, file) in [
+        ("ring-3/new.txt", "ring-3/new.txt", "ring-1/new.txt", "new.txt"),
+        ("ring-3/sub/new.txt", "ring-3/sub", "ring-1/sub", "sub/new.txt"),
+    ] {
+        for seed in 0..10u64 {
+            let vault = SimVault::new(9_000 + seed);
+            let mut world = World::new(9_000 + seed, &["laptop", "desktop"]);
+            world.give_vault("laptop", &vault);
+            world.give_vault("desktop", &vault);
+            world.server.set_vault_public_key(1, &vault.public_key_b64);
+            let v = world.server.seed_encrypted_folder(None, "ring-1");
+            let p = world.server.seed_folder(None, "ring-2");
+            let q = world.server.seed_folder(None, "ring-3");
+            world.server.seed_vault_file(Some(v), "sealed.txt", b"sealed", &vault.public_key_b64);
+            world.server.seed_file(Some(p), "p.txt", b"plain p");
+            world.server.seed_file(Some(q), "q.txt", b"plain q");
+            assert!(world.settle().is_some());
+            let laptop = world.device("laptop");
+            laptop.fs.user_rename("ring-1", ".swap.tmp");
+            laptop.fs.user_rename("ring-2", "ring-1");
+            laptop.fs.user_rename("ring-3", "ring-2");
+            laptop.fs.user_rename(".swap.tmp", "ring-3");
+            let secret = format!("saved in the vault mid-rotation {seed}");
+            laptop.fs.user_write(saved, secret.as_bytes());
+            world.pass(laptop);
+            laptop.fs.user_rename(carried_from, carried_to);
+            assert!(world.settle().is_some(), "{saved} seed {seed}: never settled");
+            assert!(
+                world.server.blob(&jd_sim::sha256_hex(secret.as_bytes())).is_none(),
+                "{saved} seed {seed}: the new bytes reached the server in the clear: {:?}",
+                world.server.tree()
+            );
+            let vault_name = world.server.folders().into_iter().find(|f| f.id == v).unwrap().name;
+            let view = jd_sim::scenario::owner_view_of_the_server(&world);
+            assert_eq!(
+                view.get(&format!("{vault_name}/{file}")),
+                Some(&Some(jd_sim::sha256_hex(secret.as_bytes()))),
+                "{saved} seed {seed}: the server does not keep the file sealed in the vault: {:?}",
+                view.keys().collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+/// What arrives in a folder lands in that folder's own directory, wherever
+/// the user has just carried it, while the user's move of it is not yet
+/// agreed with the server (plat3 75424; B-ARRIVE).
+///
+/// mac swaps the vault's directory (`ring-1`) with plain `ring-2`'s on disk.
+/// Before that swap is agreed, the server moves a file into one of the two:
+/// a peer carries a plain file into `ring-2`, or a sealed file within the
+/// vault. The arrival was placed by the folder's AGREED name, which on mac's
+/// disk is the other folder's directory: the plain file landed in the vault's
+/// directory and went up sealed into the vault, the folder the user never put
+/// it in. Cases: the swap agreed in the same pass; the swap refused for three
+/// passes, the arrival in the second; the arrival queued and the device
+/// killed before it ran. One outcome: after mac's pass the arrival stands in
+/// its folder's own directory; at settle the server keeps it in that folder,
+/// a sealed body is nowhere in the clear, and both folders keep their ids
+/// and protection.
+#[test]
+fn an_arrival_lands_in_its_folders_own_directory_mid_move() {
+    let mut bad = Vec::new();
+    for case in ["plain, same pass", "plain, swap refused", "plain, queued across a kill", "sealed, same pass"] {
+        for seed in 0..10u64 {
+            let vault = SimVault::new(9_100 + seed);
+            let mut world = World::new(9_100 + seed, &["mac", "pc"]);
+            world.give_vault("mac", &vault);
+            world.give_vault("pc", &vault);
+            world.server.set_vault_public_key(1, &vault.public_key_b64);
+            let v = world.server.seed_encrypted_folder(None, "ring-1");
+            let p = world.server.seed_folder(None, "ring-2");
+            let q = world.server.seed_folder(None, "ring-3");
+            world.server.seed_vault_file(Some(v), "sealed.txt", b"sealed, staying put", &vault.public_key_b64);
+            world.server.seed_file(Some(p), "p.txt", b"plain p");
+            world.server.seed_file(Some(q), "q.txt", b"plain q");
+            let sealed_case = case.starts_with("sealed");
+            let body = format!("arriving {seed} {case}");
+            if sealed_case {
+                world.server.seed_vault_file(Some(v), "moving.txt", body.as_bytes(), &vault.public_key_b64);
+            } else {
+                world.server.seed_file(Some(q), "moving.txt", body.as_bytes());
+            }
+            assert!(world.settle().is_some());
+            let mac = world.device("mac");
+            let pc = world.device("pc");
+            let dir_of = |path: &str| jd_vfs::Vfs::directory_id(&mac.fs, std::path::Path::new(&format!("/sync/{path}"))).unwrap();
+            let (home_folder, home_dir) = if sealed_case { (v, dir_of("ring-1").unwrap()) } else { (p, dir_of("ring-2").unwrap()) };
+            let arrive = || {
+                if sealed_case {
+                    pc.fs.user_mkdir("ring-1/inner");
+                    pc.fs.user_rename("ring-1/moving.txt", "ring-1/inner/moving.txt");
+                } else {
+                    pc.fs.user_rename("ring-3/moving.txt", "ring-2/moving.txt");
+                }
+                world.pass(pc);
+            };
+            mac.fs.user_rename("ring-1", ".swap.tmp");
+            mac.fs.user_rename("ring-2", "ring-1");
+            mac.fs.user_rename(".swap.tmp", "ring-2");
+            match case {
+                "plain, swap refused" => {
+                    for round in 0..3 {
+                        if round == 1 {
+                            arrive();
+                        }
+                        mac.net.set_faults(NetFaults { refuse_before: Some("drive_move".into()), ..NetFaults::none() });
+                        world.pass(mac);
+                    }
+                    mac.net.set_faults(NetFaults::none());
+                }
+                "plain, queued across a kill" => {
+                    arrive();
+                    mac.net.arm_death(1);
+                    world.pass(mac);
+                    world.power_cycle(mac);
+                    world.pass(mac);
+                }
+                _ => {
+                    arrive();
+                    world.pass(mac);
+                }
+            }
+            let at: Vec<String> = disk_tree(mac).keys().filter(|k| k.ends_with("/moving.txt")).cloned().collect();
+            let in_home = at.iter().any(|k| {
+                let mut dir = k.rsplit_once('/').unwrap().0;
+                if sealed_case {
+                    dir = dir.rsplit_once('/').map(|(d, _)| d).unwrap_or(dir);
+                }
+                dir_of(dir) == Some(home_dir)
+            });
+            let in_a_wrong_directory = !at.is_empty() && !in_home;
+            let settled = world.settle().is_some();
+            let sha = jd_sim::sha256_hex(body.as_bytes());
+            let folders = world.server.folders();
+            let home_name = folders.iter().find(|f| f.id == home_folder).unwrap().name.clone();
+            let view = jd_sim::scenario::owner_view_of_the_server(&world);
+            let want = if sealed_case { format!("{home_name}/inner/moving.txt") } else { format!("{home_name}/moving.txt") };
+            let home = view.get(&want) == Some(&Some(sha.clone()));
+            let clear = sealed_case && world.server.blob(&sha).is_some();
+            let protection = folders.iter().find(|f| f.id == v).is_some_and(|f| f.encrypted && !f.trashed)
+                && folders.iter().find(|f| f.id == p).is_some_and(|f| !f.encrypted && !f.trashed);
+            if in_a_wrong_directory || !settled || !home || clear || !protection {
+                bad.push(format!(
+                    "{case} seed {seed}: after mac's pass at {at:?} (wrong directory: {in_a_wrong_directory}); settled={settled} home={home} in_the_clear={clear} protection={protection} view={:?}",
+                    view.keys().filter(|k| k.contains("moving")).collect::<Vec<_>>()
+                ));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{} bad:\n{}", bad.len(), bad.join("\n"));
+}
+
+/// A never-sent sealed file in a vault subfolder whose directory the user
+/// carries, mid-rotation, into a plain folder's directory (B-CARRY, found by
+/// public-html-41's probe of the rotation pin). The subfolder is agreed on
+/// the server; its file waits to go up. The upload read the file through the
+/// subfolder's agreed path, which no longer held it, and stood down as
+/// overtaken on every pass for ever. One outcome, with the laptop's passes
+/// failing for one to three passes after the save: settled, the new bytes
+/// never in the clear, and the file either kept sealed in the vault by the
+/// server -- sent before the carry -- or, never sent, held on the laptop with
+/// the user told (`held_outside_the_vault`).
+#[test]
+fn a_vault_subfolder_carried_mid_rotation_still_sends_its_file_sealed() {
+    let mut bad = Vec::new();
+    for (saved, carried_from, carried_to, file) in [
+        ("ring-3/new.txt", "ring-3/new.txt", "ring-1/new.txt", "new.txt"),
+        ("ring-3/sub/new.txt", "ring-3/sub", "ring-1/sub", "sub/new.txt"),
+    ] {
+        for failing in [1usize, 2, 3] {
+            for seed in 0..10u64 {
+                let vault = SimVault::new(9_000 + seed);
+                let mut world = World::new(9_000 + seed, &["laptop", "desktop"]);
+                world.give_vault("laptop", &vault);
+                world.give_vault("desktop", &vault);
+                world.server.set_vault_public_key(1, &vault.public_key_b64);
+                let v = world.server.seed_encrypted_folder(None, "ring-1");
+                let p = world.server.seed_folder(None, "ring-2");
+                let q = world.server.seed_folder(None, "ring-3");
+                world.server.seed_vault_file(Some(v), "sealed.txt", b"sealed", &vault.public_key_b64);
+                world.server.seed_file(Some(p), "p.txt", b"plain p");
+                world.server.seed_file(Some(q), "q.txt", b"plain q");
+                assert!(world.settle().is_some());
+                let laptop = world.device("laptop");
+                laptop.fs.user_rename("ring-1", ".swap.tmp");
+                laptop.fs.user_rename("ring-2", "ring-1");
+                laptop.fs.user_rename("ring-3", "ring-2");
+                laptop.fs.user_rename(".swap.tmp", "ring-3");
+                let secret = format!("saved in the vault mid-rotation {seed}");
+                laptop.fs.user_write(saved, secret.as_bytes());
+                for _ in 0..failing {
+                    let drop_before = match failing { 1 => 1000, 2 => 500, _ => 250 };
+                    laptop.net.set_faults(NetFaults { drop_before, ..NetFaults::none() });
+                    world.pass(laptop);
+                }
+                laptop.net.set_faults(NetFaults::none());
+                laptop.fs.user_rename(carried_from, carried_to);
+                let settled = world.settle().is_some();
+                let clear = world.server.blob(&jd_sim::sha256_hex(secret.as_bytes())).is_some();
+                let vault_name = world.server.folders().into_iter().find(|f| f.id == v).unwrap().name;
+                let view = jd_sim::scenario::owner_view_of_the_server(&world);
+                let home = view.get(&format!("{vault_name}/{file}")) == Some(&Some(jd_sim::sha256_hex(secret.as_bytes())));
+                // A pass that failed before the scan never saw the file in the
+                // vault: carried out unseen, it is a plain file to every
+                // engine (owner decision Q4) and is not asked to stay sealed.
+                let ever_seen = laptop.fs.sealed_known().0.contains_key(&jd_sim::sha256_hex(secret.as_bytes()));
+                let held_and_told = disk_tree(laptop).contains_key(&format!("ring-1/{file}"))
+                    && laptop
+                        .store
+                        .open_issues()
+                        .unwrap()
+                        .iter()
+                        .any(|i| i.kind == "held_outside_the_vault" && i.detail.starts_with("new.txt"));
+                if !settled || (ever_seen && (clear || !(home || held_and_told))) {
+                    bad.push(format!("{saved} failing={failing} seed {seed}: settled={settled} seen={ever_seen} in_the_clear={clear} home={home} held_and_told={held_and_told}"));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{} bad:\n{}", bad.len(), bad.join("\n"));
+}
+
+
+/// Two renames this device owes the server, each onto the name the other
+/// holds there, queued in different passes so the round never saw the cycle
+/// to park it (kill2 75102: a swap detected in halves, the first rename's
+/// first try rate-limited). Each was refused onto the other's name and waited
+/// for the other to leave, for ever: a wait that cannot end. One outcome:
+/// settled; both folders live with their own files; the server holds both.
+#[test]
+fn two_owed_renames_onto_each_others_names_do_not_wait_for_each_other() {
+    let world = World::new(9_310, &["mac", "pc"]);
+    let a = world.server.seed_folder(None, "ring-a");
+    let b = world.server.seed_folder(None, "ring-b");
+    world.server.seed_file(Some(a), "a.txt", b"in a");
+    world.server.seed_file(Some(b), "b.txt", b"in b");
+    assert!(world.settle().is_some());
+    let mac = world.device("mac");
+    mac.fs.user_rename("ring-a", ".swap.tmp");
+    mac.fs.user_rename("ring-b", "ring-a");
+    mac.fs.user_rename(".swap.tmp", "ring-b");
+    for (id, from, to, key) in [(a, "ring-a", "ring-b", "owed-a"), (b, "ring-b", "ring-a", "owed-b")] {
+        mac.store
+            .queue_op(
+                "move_remote",
+                jd_core::model::EntityId::folder(id),
+                &serde_json::json!({ "from": { "parent": null, "name": from }, "parent": null, "name": to }).to_string(),
+                key,
+            )
+            .unwrap();
+    }
+    assert!(world.settle().is_some(), "the two renames waited on each other: {:?}", mac.store.queued_ops().unwrap().iter().map(|o| (o.entity.server_id, o.attempts, o.last_error.clone())).collect::<Vec<_>>());
+    let folders = world.server.folders();
+    assert!(folders.iter().filter(|f| !f.trashed).count() == 2, "{folders:?}");
+    let view = jd_sim::scenario::server_tree(&world.server);
+    let in_a = view.keys().find(|k| k.ends_with("/a.txt")).unwrap().rsplit_once('/').unwrap().0.to_string();
+    let in_b = view.keys().find(|k| k.ends_with("/b.txt")).unwrap().rsplit_once('/').unwrap().0.to_string();
+    assert_eq!(world.server.folder_id_at(&in_a), Some(a), "a.txt left its folder: {view:?}");
+    assert_eq!(world.server.folder_id_at(&in_b), Some(b), "b.txt left its folder: {view:?}");
+    assert_converged(&world);
+}
+
+/// A peer moves a file into a folder it has just made and edits it after.
+/// This device cannot make the new folder this pass (one failed create), so
+/// the move of the file into it waits; the download of the new bytes runs
+/// anyway, into the file where it stands (soak rig run 1746). The download
+/// then agreed the SERVER's placement while the file stood at its old one:
+/// the next scan read that as the user moving the file back, pushed it, and
+/// the peer's move was undone on every device. One outcome: settled; the
+/// server keeps the file in the new folder with the edited bytes; the old
+/// folder holds no copy of it.
+#[test]
+fn a_download_while_its_move_waits_does_not_undo_the_move() {
+    let mut bad = Vec::new();
+    for seed in 0..10u64 {
+        let world = World::new(9_330 + seed, &["a", "b"]);
+        let f1 = world.server.seed_folder(None, "F1");
+        world.server.seed_file(Some(f1), "f.txt", b"first");
+        assert!(world.settle().is_some());
+        let a = world.device("a");
+        let b = world.device("b");
+        b.fs.user_mkdir("F2");
+        b.fs.user_rename("F1/f.txt", "F2/f.txt");
+        world.pass(b);
+        let edit = format!("edited after the move {seed}");
+        b.fs.user_write("F2/f.txt", edit.as_bytes());
+        world.pass(b);
+        a.fs.fail_next(FsOp::CreateDir, Some("F2"), FailureKind::Io, 1);
+        world.pass(a);
+        let settled = world.settle().is_some();
+        let view = jd_sim::scenario::server_tree(&world.server);
+        let home = view.get("F2/f.txt") == Some(&Some(jd_sim::sha256_hex(edit.as_bytes())));
+        let left_behind = view.contains_key("F1/f.txt");
+        if !settled || !home || left_behind {
+            bad.push(format!("seed {seed}: settled={settled} home={home} left in F1={left_behind} server={:?}", view.keys().collect::<Vec<_>>()));
+        }
+    }
+    assert!(bad.is_empty(), "{} bad:\n{}", bad.len(), bad.join("\n"));
 }

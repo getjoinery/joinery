@@ -107,6 +107,17 @@ pub enum LocalStatus {
     OutOfScope,
 }
 
+/// Where a folder's directory stands on this disk, and the agreement that
+/// was in force when it was found there. See `Entry::stands_at`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StandsAt {
+    /// The parent folder whose directory holds it, and the name it wears on
+    /// this disk (a local name, already as this volume writes it).
+    pub here: Placement,
+    /// The agreed placement it was measured against.
+    pub agreed: Placement,
+}
+
 /// One row of the state store: everything known about one entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
@@ -207,6 +218,28 @@ pub struct Entry {
     /// and the tie lapses with nothing said to anyone. Cleared the moment the
     /// folder is materialized for real, when the agreement takes over.
     pub stand_in: Option<Placement>,
+    /// Where this folder's directory stands on this disk while that is not
+    /// where its agreement puts it: the user has moved it here and the move
+    /// is not agreed yet.
+    ///
+    /// The agreement is what both sides last settled on, and every decision
+    /// about what to tell the server is read against it. It is not where the
+    /// directory is. Read as if it were, every path built through a folder
+    /// the user had just moved named its old place: a file a peer moved into
+    /// it landed in whatever directory now wore the old name -- the vault's,
+    /// after a swap -- and went up sealed into the wrong folder (plat3 75424);
+    /// a file saved in it was looked for at the old place and forgotten in
+    /// the pass that minted it, then sent in the clear (plat3 75455); an
+    /// upload from it stood down as overtaken for ever (B-CARRY).
+    ///
+    /// Learned each pass from the directory's identity, after the scan has
+    /// matched directories to folders (`note_where_folders_stand`), so a
+    /// volume that keeps no directory identities never has one and behaves
+    /// as before. It holds only while the agreement is the one it was
+    /// measured against: an agreement written since -- the move agreed, the
+    /// folder parked, re-agreed anywhere -- retires it without anyone having
+    /// to remember to (`StandsAt::agreed`).
+    pub stands_at: Option<StandsAt>,
     /// Which file on this disk is this record's own (a file record only).
     ///
     /// Not the agreement: `synced_fingerprint` is what both sides last agreed
@@ -242,18 +275,55 @@ impl Entry {
     /// directory is standing in for a vault folder this device cannot open
     /// (see `stand_in`), and to the remote placement only when there is
     /// neither, where it is not a second opinion but the only one.
+    ///
+    /// For a folder the user has moved here and not yet agreed, where its
+    /// directory stands (`stands_at`). Every question about the disk asks
+    /// this; every question about what was agreed asks `agreed_placement`.
     pub fn local_placement(&self) -> &Placement {
+        match self.standing_away() {
+            Some(s) => &s.here,
+            None => self.agreed_placement(),
+        }
+    }
+
+    /// The last agreed placement, or the stand-in, or the remote placement:
+    /// the base every decision about what to tell the server is read
+    /// against. Not where a folder the user has just moved stands.
+    pub fn agreed_placement(&self) -> &Placement {
         self.synced_placement
             .as_ref()
             .or(self.stand_in.as_ref())
             .unwrap_or(&self.remote)
     }
 
+    /// `stands_at`, while the agreement is still the one it was measured
+    /// against.
+    pub fn standing_away(&self) -> Option<&StandsAt> {
+        self.stands_at
+            .as_ref()
+            .filter(|s| self.synced_placement.as_ref() == Some(&s.agreed))
+    }
+
     /// The name this entry is materialized under locally.
+    ///
+    /// A scratch name the engine parked the directory under is where it is:
+    /// the park renamed it in place, in the folder it stood in, after the
+    /// scan noted where that was. Read from the note instead, a folder parked
+    /// mid-swap was looked for under the name it had worn before the park,
+    /// which a peer's rotation had since given to another folder.
     pub fn effective_local_name(&self) -> &str {
+        match (self.local_name.as_deref(), self.standing_away()) {
+            (Some(scratch), _) if jd_vfs::is_internal(scratch) => scratch,
+            (_, Some(s)) => &s.here.name,
+            _ => self.agreed_local_name(),
+        }
+    }
+
+    /// The name the agreement gives it on this disk.
+    pub fn agreed_local_name(&self) -> &str {
         self.local_name
             .as_deref()
-            .unwrap_or(&self.local_placement().name)
+            .unwrap_or(&self.agreed_placement().name)
     }
 
     /// Wearing a scratch name on the server, with no agreed placement here to
@@ -272,27 +342,6 @@ impl Entry {
             && !self.remote_deleted
     }
 
-    /// Is this entry holding a file on this computer, or is it only recording
-    /// where one would go?
-    ///
-    /// The three statuses that answer no are the ones where the device has
-    /// already told the user, by name, that it will not be materializing this
-    /// here: a name the filesystem cannot hold, an encrypted file whose key has
-    /// not arrived, and a subtree the user took out of scope. Such an entry
-    /// still records a placement -- that is how it says what it is waiting for.
-    ///
-    /// What that means about the disk differs by status, and the difference is
-    /// load-bearing. `Unsyncable` is a release: the park operation gives up the
-    /// local copy, so nothing of this entry is at that path. `PendingKey` and
-    /// `OutOfScope` are not. Both say only that the ENGINE will neither put
-    /// anything there nor touch what is; a keyless device keeps the local-only
-    /// files the user saved under a vault folder it cannot read, and taking a
-    /// subtree out of scope leaves the user's copies exactly where they are.
-    ///
-    /// The distinction matters wherever one entry asks whether a path belongs
-    /// to another. `PendingDownload` deliberately answers yes: those bytes are
-    /// on their way to that path, and letting something else take it in the
-    /// meantime is how two files end up fighting over one slot.
     /// The file id of this record's own file on this disk: its own file, or,
     /// for a record that has none yet, the file its agreement names. Files
     /// only -- a folder's directory id is its agreement's fingerprint. `None`
@@ -317,11 +366,53 @@ impl Entry {
         }
     }
 
+    /// Is this entry holding a file on this computer, or is it only recording
+    /// where one would go? Asked of the record alone; `pass::holds_here` adds
+    /// what only the disk can say.
+    ///
+    /// Three statuses say the device will not be materializing anything new
+    /// here: a name the filesystem cannot hold, an encrypted entry whose key
+    /// is not here, and a subtree out of scope. What each means about the disk
+    /// differs, and the difference is load-bearing. `Unsyncable` is a release:
+    /// the park operation gives up the local copy, so nothing of this entry is
+    /// at that path. `PendingKey` and `OutOfScope` are not: both say only that
+    /// the ENGINE will neither put anything there nor touch what is, so they
+    /// hold exactly what they are tied to (`is_tied_here`). Never placed here,
+    /// they hold nothing; established here -- a vault opened and then locked,
+    /// a vault parked on a weak drive, a stand-in directory -- they hold their
+    /// directory or file. Answered from the status alone, a vault locked after
+    /// it was open held "nothing" at its own name, and a peer's new folder
+    /// under that name took its directory (B-LV).
+    ///
+    /// The distinction matters wherever one entry asks whether a path belongs
+    /// to another. `PendingDownload` deliberately answers yes: those bytes are
+    /// on their way to that path, and letting something else take it in the
+    /// meantime is how two files end up fighting over one slot.
     pub fn holds_a_local_file(&self) -> bool {
-        !matches!(
-            self.status,
-            LocalStatus::Unsyncable(_) | LocalStatus::PendingKey | LocalStatus::OutOfScope
-        )
+        match self.status {
+            LocalStatus::Unsyncable(_) => false,
+            LocalStatus::PendingKey | LocalStatus::OutOfScope => self.is_tied_here(),
+            _ => true,
+        }
+    }
+
+    /// Tied to something on this disk: the placement both sides agreed on,
+    /// or the directory standing in for a vault this device cannot open.
+    /// A record with neither has only been NAMED by the server -- it has
+    /// never stood anywhere here -- and contests no directory a tied record
+    /// holds, in any reader: the folder scan, the path maps, naming, the
+    /// create.
+    pub fn is_tied_here(&self) -> bool {
+        self.synced_placement.is_some() || self.stand_in.is_some()
+    }
+
+    /// Tied here, and the tie still decides: not a record the server has
+    /// deleted. A deleted record is on its way out, and a folder the server
+    /// has since made under its name is the live one there; outranking it,
+    /// the deleted record kept its directory while its trash went through and
+    /// the server's folder was made again empty beside it.
+    pub fn holds_its_tie(&self) -> bool {
+        self.is_tied_here() && !self.remote_deleted
     }
 
     /// Has this entry ever completed a sync? A `None` last-agreed state means
