@@ -23,6 +23,8 @@
  *
  * Test seam: $driver_factory.
  *
+ * @version 2.6 - a relay that answers GET /health (3.7) is watched there over HTTPS, not by dialling
+ *                port 25, which no machine of ours does (uptimeCheckFor)
  * @version 2.5 - RelayFirstBoot lives in this file; a relay and a shard attach their
  *   ManagedNode through one attachNode()
  * @version 2.4 - the run records the instance's IPv6 beside its IPv4 (create, rebuild, boot poll)
@@ -605,9 +607,9 @@ class RelayCloudProvisioner {
 		}
 
 		// Server Manager shows the relay when it is active: a ManagedNode in the
-		// DISPOSABLE posture - no agent, no key path, no SSH fields - monitored
-		// by the plane-side tcp/25 probe, with Update and Delete as its only acts.
-		$this->attachManagedNode($relay);
+		// DISPOSABLE posture - no agent, no key path, no SSH fields - watched by
+		// the plane's uptime check, with Update and Delete as its only acts.
+		$this->attachManagedNode($relay, (string)($report['relay_version'] ?? ''));
 
 		$run->spendRunToken();
 		$run->set('rcl_mrl_mailbox_relay_id', intval($relay->key));
@@ -620,13 +622,18 @@ class RelayCloudProvisioner {
 
 	/**
 	 * The relay as a ManagedNode, when server_manager is active. Disposable:
-	 * mgn_is_relay, no agent, no key path, tcp/25 uptime probe, app health
-	 * checks skipped. Reuses the node the row already names; otherwise a fresh
-	 * one under the mail hostname. Never a reason to refuse a birth: a failure
-	 * here is logged and the relay is complete without its dashboard card.
+	 * mgn_is_relay, no agent, no key path, app health checks skipped, uptime
+	 * checked as uptimeCheckFor() says. Reuses the node the row already names;
+	 * otherwise a fresh one under the mail hostname. Never a reason to refuse a
+	 * birth: a failure here is logged and the relay is complete without its
+	 * dashboard card.
+	 *
+	 * $relay_version is what the birth report said; '' falls back to the
+	 * relay's last health answer.
 	 */
-	public function attachManagedNode(MailboxRelay $relay): void {
+	public function attachManagedNode(MailboxRelay $relay, string $relay_version = ''): void {
 		$this->attachNode($relay, array(
+			'relay_version' => $relay_version !== '' ? $relay_version : $relay->provisionedVersion(),
 			'node_column' => 'mrl_mgn_managed_node_id',
 			'hostname'    => (string)$relay->get('mrl_mx_hostname') ?: (string)$relay->get('mrl_name'),
 			'host'        => (string)$relay->get('mrl_public_ip'),
@@ -670,8 +677,9 @@ class RelayCloudProvisioner {
 			$node->set('mgn_enabled', true);
 			$node->set('mgn_ssh_key_path', null);
 			$node->set('mgn_uptime_enabled', true);
-			$node->set('mgn_uptime_check_type', 'tcp_port');
-			$node->set('mgn_uptime_tcp_port', 25);
+			foreach (self::uptimeCheckFor($hostname, $d['relay_version']) as $column => $value) {
+				$node->set($column, $value);
+			}
 			$node->set('mgn_notes', $d['notes']);
 			$node->save();
 			$row->set($d['node_column'], intval($node->key));
@@ -730,9 +738,39 @@ class RelayCloudProvisioner {
 		return $answer;
 	}
 
+	/**
+	 * How the plane watches a relay, as the node columns to set.
+	 *
+	 * A relay that answers GET /health (RelayVersion::ANSWERS_HEALTH) is asked
+	 * there, over HTTPS under its mail hostname: it dials its own Postfix and
+	 * says 200 or 503. No machine of ours dials port 25
+	 * (specs/relay_receive_only_forwarding.md), so a plane that connected to the
+	 * relay's port 25 would report every relay down. An older relay has nothing
+	 * else to ask, so it keeps the port 25 check until its update re-attaches
+	 * it here.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function uptimeCheckFor(string $hostname, string $relay_version): array {
+		$hostname = trim($hostname);
+		if ($hostname !== '' && RelayVersion::answersHealth($relay_version)) {
+			return array(
+				'mgn_uptime_check_type' => 'http_status',
+				'mgn_health_check_url'  => 'https://' . $hostname . '/health',
+				'mgn_uptime_tcp_port'   => null,
+			);
+		}
+		return array(
+			'mgn_uptime_check_type' => 'tcp_port',
+			'mgn_uptime_tcp_port'   => 25,
+			'mgn_health_check_url'  => null,
+		);
+	}
+
 	/** A shard as a ManagedNode in the disposable posture, when server_manager is active. */
 	private function attachShardNode(MailboxFleetShard $shard): void {
 		$this->attachNode($shard, array(
+			'relay_version' => (string)$shard->get('mfs_provisioned_version'),
 			'node_column' => 'mfs_mgn_managed_node_id',
 			'hostname'    => (string)$shard->get('mfs_hostname'),
 			'host'        => (string)$shard->get('mfs_public_ip'),

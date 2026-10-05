@@ -72,6 +72,12 @@ type relayServer struct {
 	lastDirectErrorAt time.Time
 	lastACMEError     string
 	lastACMEAttempt   time.Time
+
+	// The /health self-test (relay_health.go): where Postfix is dialled (a
+	// field so the tests can point it at a fake) and the cached answer.
+	smtpProbeAddr string
+	smtpCheckedAt time.Time
+	smtpErr       error
 }
 
 func runRelayServe() int {
@@ -243,8 +249,8 @@ func (s *relayServer) sweepCounters() {
 	s.mu.Unlock()
 }
 
-// ServeHTTP is the whole listener: Direct's path untouched, egress signed, and
-// the /relay/ routes.
+// ServeHTTP is the whole listener: Direct's path untouched, egress signed, the
+// open /health, and the /relay/ routes.
 func (s *relayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == directEndpointPath:
@@ -253,6 +259,8 @@ func (s *relayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.noteDirect(r, rec.status)
 	case r.URL.Path == egressPath:
 		s.serveEgress(w, r)
+	case r.URL.Path == healthPath:
+		s.serveHealth(w, r)
 	case strings.HasPrefix(r.URL.Path, relayRoutePrefix):
 		s.serveRelay(w, r)
 	default:

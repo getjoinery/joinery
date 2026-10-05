@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.38 - mgn_script_trust may read unpublished_file (this management node's own commit, not yet published)
  * @version 1.37 - mgn_moved_check_*: where the old machine of a switch-over's domain goes, as its host last
  *                 checked (moved_site_check), shown beside its site
  * @version 1.36 - removing a node, either way, cancels its unfinished jobs (withdraw_open_jobs): its agent is
@@ -181,7 +182,10 @@ class ManagedNode extends SystemBase {
 		//                       problem and NOT recoverable by re-delivering a
 		//                       manifest; it means the file on disk is not the file
 		//                       that was published.
-		// The two are kept apart because the remedies are opposites — see
+		// 'unpublished_file'  - only on this management node: the refused file is
+		//                       exactly its last commit, made after the last
+		//                       publish, which re-signs it. Not an alarm.
+		// The first two are kept apart because the remedies are opposites — see
 		// specs/agent_manifest_trust_recovery.md.
 		'mgn_script_trust'        => array('type'=>'varchar(24)'),
 		'mgn_script_trust_since'  => array('type'=>'timestamp(6)'),

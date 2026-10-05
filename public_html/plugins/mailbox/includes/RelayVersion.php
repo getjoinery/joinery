@@ -13,6 +13,7 @@
  * already the source of truth. Parsing it here rather than duplicating it means a
  * version bump has exactly one place to happen.
  *
+ * @version 1.3 - ANSWERS_HEALTH 3.7: the relay that answers GET /health, so the plane watches it over HTTPS
  * @version 1.2 - SEALS_FOR_BROWSERS 3.2: the relay that also answers the seal-target statement
  * @version 1.1 - sealsForBrowsers(): the relay version that writes the browser's format
  * @version 1.0
@@ -103,6 +104,19 @@ class RelayVersion {
 		$running = trim($relay->provisionedVersion());
 		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
 			&& version_compare($running, self::SEALS_FOR_BROWSERS, '>=');
+	}
+
+	/**
+	 * The first relay version that answers GET /health on its 443 listener: it
+	 * dials its own Postfix over the loopback and answers 200 or 503.
+	 */
+	const ANSWERS_HEALTH = '3.7';
+
+	/** Does a relay running $running answer GET /health? Unknown reads as no. */
+	public static function answersHealth(string $running): bool {
+		$running = trim($running);
+		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
+			&& version_compare($running, self::ANSWERS_HEALTH, '>=');
 	}
 
 	/**

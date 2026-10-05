@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.38 - a script committed after the last publish (unpublished_file) shows as a warning, not a refusal
  * @version 1.37 - each site container shows its own figures (memory, peak, CPU, traffic, disk,
  *                 processes, an amber count of out-of-memory kills) on its server's page, and a
  *                 container site's page shows its own line from its server's report
@@ -1306,7 +1307,13 @@
 		}
 		echo '</div>';
 		$trust = (string)$node->get('mgn_script_trust');
-		if ($trust !== '' && $trust !== 'ok') {
+		if ($trust === 'unpublished_file') {
+			echo '<div class="mt-2"><span class="badge bg-warning">A script was committed after the last publish</span></div>';
+			echo '<div class="small text-muted mt-1">The agent will not run it as root until the next publish re-signs this site\'s tree.</div>';
+			if ($node->get('mgn_script_trust_reason')) {
+				echo '<div class="small text-muted mt-1">' . htmlspecialchars((string)$node->get('mgn_script_trust_reason')) . '</div>';
+			}
+		} elseif ($trust !== '' && $trust !== 'ok') {
 			echo '<div class="mt-2"><span class="badge bg-danger">' . ($trust === 'untrusted_file' ? 'A script on the node does not match its release' : 'Cannot verify its scripts') . '</span></div>';
 			if ($node->get('mgn_script_trust_reason')) {
 				echo '<div class="small text-muted mt-1">' . htmlspecialchars((string)$node->get('mgn_script_trust_reason')) . '</div>';
