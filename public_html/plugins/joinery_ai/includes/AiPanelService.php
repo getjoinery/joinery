@@ -27,6 +27,7 @@ class AiPanelConfirmRequired extends Exception {}
  * arrives after one toggle, with no dashboard visit. Turning OFF only unbinds:
  * the recipe may still cover other mailboxes.
  *
+ * @version 1.7 - each in-flight job names its recipe_id, so its progress shows on that recipe's row
  * @version 1.6 - a device recipe's card says when it last judged on the owner's device, and its
  *   queue joins the Working now list and the job count
  * @version 1.5 - a device job on a Fortress mailbox says it runs on the owner's device
@@ -373,7 +374,10 @@ class AiPanelService {
      * Ownership IS the scoping, as everywhere else in this service: runs of
      * recipes belonging to $user_id, nobody else's.
      *
-     * @return array{count:int, jobs:array<int, array{name:string, state:string, label:string}>}
+     * Each job carries its recipe_id, so the panel can show the progress on
+     * that recipe's own row.
+     *
+     * @return array{count:int, jobs:array<int, array{recipe_id:int, name:string, state:string, label:string, progress:string}>}
      */
     public static function jobs(int $user_id, int $limit = 8): array {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
@@ -407,6 +411,7 @@ class AiPanelService {
                     : 'Queued';
             }
             $jobs[] = [
+                'recipe_id' => (int)$row['rcp_recipe_id'],
                 'name'     => (string)$row['rcp_name'],
                 'state'    => $state,
                 'label'    => $label,
@@ -422,6 +427,7 @@ class AiPanelService {
                 $count++;
                 if (count($jobs) >= $limit) continue;
                 $jobs[] = [
+                    'recipe_id' => (int)$q['recipe_id'],
                     'name'     => $q['name'],
                     'state'    => 'waiting',
                     'label'    => 'Judged on your device while the mailbox is open',

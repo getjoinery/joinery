@@ -27,8 +27,12 @@
  *  - Import (vCard + Google CSV): counts, junk-row skip, and a later hand-add re-stamps
  *    an imported row rather than duplicating it.
  *  - lookup(): reports how the row got there; an unknown address returns null.
+ *  - Edit (updateContact): a new name keeps the row; a new address replaces the row,
+ *    joining a contact that already holds it; owner-scoped; a bad address is refused.
+ *  - A hand add can carry its name apart from the address, taken as typed.
  *  - Delete is owner-scoped.
  *
+ * @version 2.2 - updateContact(); manualAdd() with a separate name
  * @version 2.1 - sealing follows the domain's posture, not vault possession alone
  * @version 2.0
  */
@@ -104,14 +108,16 @@ foreach ((new ReflectionClass('MailboxContacts'))->getMethods(ReflectionMethod::
 }
 sort($public);
 // addressHash, aliasHasContact, listForMailbox, listForUser and lookup are
-// READERS; the only writers are manualAdd() and import(). aliasHasContact answers
+// READERS; the only writers that can bring an address in are manualAdd() and
+// import(), and updateContact() changes a row the person already made (a new
+// address replaces theirs, from their own edit). aliasHasContact answers
 // the Direct contact gate for a shared mailbox and writes nothing. listForUser
 // spans every mailbox the user holds, for surfaces that are not scoped to one
 // (the Messenger people picker) — a SELECT and per-row decryption, nothing more.
 $expected = array('addressHash', 'aliasHasContact', 'deleteContact', 'import', 'listForMailbox',
-	'listForUser', 'lookup', 'manualAdd');
+	'listForUser', 'lookup', 'manualAdd', 'updateContact');
 check($public === $expected,
-	'the only public writers are manualAdd() and import() — no traffic-driven entry point',
+	'the only public writers are manualAdd(), import() and updateContact() — no traffic-driven entry point',
 	implode(',', $public));
 
 check(!defined('MailboxContact::SOURCE_SENT') && !defined('MailboxContact::SOURCE_RECEIVED'),
@@ -320,6 +326,39 @@ $dana_after = $svc->lookup($iuid, 'dana@vcard.example', $work_alias);
 check($dana_after && $dana_after['source'] === 'manual', 'a hand-add re-stamps an imported contact', $dana_after ? $dana_after['source'] : '');
 check(intval($db->query("SELECT COUNT(*) FROM imc_mailbox_contacts WHERE imc_usr_user_id = $iuid AND imc_address='dana@vcard.example'")->fetchColumn()) === 1,
 	'and does not duplicate the row');
+
+// ── Edit ─────────────────────────────────────────────────────────────────────
+section('Edit');
+$eu = make_user('ContactEdit', 5);
+$euid = (int)$eu->key;
+check($svc->manualAdd($euid, 'frank@edit.example', $work_alias, 'Frank "The Tank" <O\'Neil>') === true,
+	'a hand add with a separate name succeeds');
+$frank = $db->query("SELECT * FROM imc_mailbox_contacts WHERE imc_usr_user_id = $euid AND imc_address = 'frank@edit.example'")->fetch(PDO::FETCH_ASSOC);
+check($frank && $frank['imc_display_name'] === 'Frank "The Tank" <O\'Neil>', 'the separate name is kept as typed', $frank ? $frank['imc_display_name'] : '');
+$fid = intval($frank['imc_mailbox_contact_id']);
+
+check($svc->updateContact($euid, $fid, 'frank@edit.example', 'Frank Edited') === 'saved', 'a new name saves');
+check($db->query("SELECT imc_display_name FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = $fid")->fetchColumn() === 'Frank Edited',
+	'and keeps the same row');
+
+check($svc->updateContact($euid, $fid, 'not-an-address', 'X') === 'invalid', 'a bad address is refused');
+$other_editor = (int)make_user('ContactEditOther', 5)->key;
+check($svc->updateContact($other_editor, $fid, 'x@edit.example', 'X') === 'missing',
+	'another user\'s contact is not theirs to change');
+
+check($svc->updateContact($euid, $fid, 'Frank.New@Edit.example', 'Frank New') === 'saved', 'a new address saves');
+$moved = $svc->lookup($euid, 'frank.new@edit.example', $work_alias);
+check($moved && $moved['name'] === 'Frank New' && $moved['source'] === 'manual', 'the new address holds the name', json_encode($moved));
+check($svc->lookup($euid, 'frank@edit.example', $work_alias) === null, 'the old address is gone');
+check(intval($db->query("SELECT COUNT(*) FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = $fid")->fetchColumn()) === 0, 'its row went with it');
+
+// Moving onto an address the mailbox already holds joins that contact.
+$svc->manualAdd($euid, 'gina@edit.example', $work_alias, 'Gina');
+$hid = intval($db->query("SELECT imc_mailbox_contact_id FROM imc_mailbox_contacts WHERE imc_usr_user_id = $euid AND imc_address = 'frank.new@edit.example'")->fetchColumn());
+check($svc->updateContact($euid, $hid, 'gina@edit.example', 'Gina Joined') === 'saved', 'an edit onto a kept address saves');
+$left = $svc->listForMailbox($euid, $work_alias)['contacts'];
+check(count($left) === 1 && $left[0]['address'] === 'gina@edit.example' && $left[0]['name'] === 'Gina Joined',
+	'the two are one contact, named as edited', json_encode($left));
 
 // ── Delete (owner-scoped) ────────────────────────────────────────────────────
 section('Delete');

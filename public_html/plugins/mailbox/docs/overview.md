@@ -2185,14 +2185,13 @@ names the joinery_ai local provider (`joinery_ai_local_base_url`, the first of
 `joinery_ai_local_model`) when a browser could call it: the host is a private
 or tailnet IP literal — never loopback, which is the server's own machine —
 and no `joinery_ai_local_api_key` is set, since the platform's keys never
-reach a browser. Both pages hand it to the scripts as `site_model` ({origin,
-path, model, host, operator}). The settings page shows *Use this site's
-model* whenever the registered origin is not already the site's; the panel
-section shows it while no origin is registered, and starts the path and
-model fields filled when the site's origin is registered and no model is
-saved in this browser. The click registers the origin like any other
-(`MailboxDeviceAi.registerOrigin()`, shared by both pages: the step-up, the
-CSP pin) and saves the path and model in this browser. The offer tells a
+reach a browser. The settings page hands it to the script as `site_model`
+({origin, path, model, host, operator}), shows *Use this site's model*
+whenever the registered origin is not already the site's, and starts the
+form filled with it when the site's origin is registered and no model is
+saved in this browser (`siteOffer()`). The click registers the origin like
+any other (`MailboxDeviceAi.registerOrigin()`: the step-up, the CSP pin) and
+saves the path and model in this browser. The offer tells a
 member (`operator` false) that the operator runs that machine and could see
 mail sent to it; the Fortress promise is not loosened by the platform, only
 by a choice the person makes with that said.
@@ -2202,38 +2201,40 @@ by a choice the person makes with that said.
 against the registered one. The platform's own provider keys never reach a
 browser.
 
-**The panel section.** `mailbox_device_ai.js` builds "Your AI, your model" and
-the mail page docks it in the AI panel as its `hostSection`. It is hidden
-unless the open mailbox is Fortress; it links to the settings page while no
-origin is registered; with a model saved in this browser it is one line
-naming the model and host, an automatic check (`probeOnce()`: GET
-`{base}/models` with the key, once per page load, before the drain; it is
-where the browser asks to reach the person's network) whose outcome is the
-status line, and *Change* / *Test again* links, the fields and buttons
-behind *Change*; once the check says reachable the section is compact —
-that one line, warnings, and the drain's line only while it has something
-to say, the title and custody sentence behind *Change* too; otherwise the
-path, key and model fields with **Save in this browser** and **Test**. Test
-posts
+**Test, in Email settings.** The settings page names the registered origin
+in its CSP like the mail page, and *Test* (beside the registered address) sends the model saved in
+this browser what a real judgement sends: it posts
 `mailbox/device_ai_test_prompt {mailbox}` (the caller's scan recipe's system
 blocks, else the default, plus a made-up 4096-character digest — never real
 mail) to `{origin}{path}/chat/completions` and names the gate that stopped a
 call: the browser's Local Network Access permission (`prompt` or `denied`), a
 CORS refusal (Ollama's origins line), a bad key (a "no such model" answer is
 checked against `GET {base}/models`: 401/403 there means the key), a missing
-model, or a context overflow shown verbatim. `gradeModel()` grades the model
-name as `AiEndpointRegistry` does (the reference list's globs, else the size
-its tag announces) and warns when it is below a bound recipe's `min_tier`.
-The recipe cards on a Fortress mailbox carry the device's own history in
-place of a server run's: "Last judged on your device N minutes ago"
-(`MailboxDeviceAi::lastJudgedOnDevice()`, the newest device log row, the
-ones with no run id), or "Runs on your device while this mailbox is open;
-nothing judged yet" (`AiPanelService`, `runsOnDeviceFor()`). The queue
-itself is a job in flight: `deviceQueues()` counts each enabled device
-recipe's unjudged messages (`pendingCount()`, the same WHERE the drain
-pages) and `AiPanelService::jobs()` lists each as a *Working now* entry,
-"Judged on your device while the mailbox is open · N to go", counted in the
-panel's job number, once a model is registered.
+model, or a context overflow shown verbatim. Saving a new key or model for
+the origin already registered changes only this browser and asks for no
+step-up; a new origin does. With an origin registered and no model saved in
+this browser, the form opens on its own.
+
+**The panel section.** `mailbox_device_ai.js` builds "Your AI, your model" and
+the mail page docks it in the AI panel as its `hostSection`. It is hidden
+unless the open mailbox is Fortress, and empty while all is well. It speaks
+only when the person has something to do, one line each with the fix: a
+device recipe on for the mailbox and no model in this browser (a link to
+Email settings); the drain stopped by the model or a failed pass, with
+*Check again*, which lets the drain start over (an unreachable model is named
+by the same gates Test names, the browser's Local Network Access permission
+first); a consent refusal; or a model graded below a bound
+recipe's `min_tier` (`gradeModel()` grades the name as `AiEndpointRegistry`
+does: the reference list's globs, else the size its tag announces). The
+queue itself is a job in flight: `deviceQueues()` counts each enabled device
+recipe's unjudged messages (`pendingCount()`, the same WHERE the drain pages)
+and `AiPanelService::jobs()` lists each, with its `recipe_id`, so the
+recipe's row in the panel shows "N to go" under it, counted in the panel's
+job number, once a model is registered. The API's recipe cards still carry
+the device's own history as `last_run` — "Last judged on your device N
+minutes ago" (`MailboxDeviceAi::lastJudgedOnDevice()`, the newest device log
+row, the ones with no run id), or "Runs on your device while this mailbox is
+open; nothing judged yet" (`runsOnDeviceFor()`).
 
 **Consent.** `MailboxDeviceAi::originTrust()` classes the registered origin as
 `local` (a private host, or a `.ts.net` name over https), `trusted` (the host of `joinery_ai_fireworks_base_url`)
@@ -3893,9 +3894,10 @@ The reader's own panel in that column is where contacts live — the left rail l
 mail lives**, and a contact store belongs to a mailbox rather than sitting beside one. The
 panel has two states over the same element:
 
-- **On the list view** — the selected mailbox's contact manager (add, delete, and import a
-  vCard / Google CSV via `mailbox/contacts_import`, all landing in that mailbox).
-  **Collapsed by default**, since it is reference material rather than the task at hand;
+- **On the list view** — the selected mailbox's contacts, each with a pencil that opens it
+  on the [Contacts page](#contacts-page), and a pencil in the header that opens that page
+  for the mailbox. A sealed store with the window shut shows a quiet note and an Unlock
+  button. **Collapsed by default**, since it is reference material rather than the task at hand;
   the open/closed choice is remembered across visits. A view with no one
   mailbox behind it (All mail, or an unmatched box) has no single store to show, so the
   panel steps aside entirely.
@@ -3929,7 +3931,7 @@ Cc, and a Sent copy's Bcc — has a small add-to-contacts icon beside it that po
 (with its display name) to `mailbox/contacts_import` for the mailbox the message belongs to.
 An icon starts hidden and shows only once that mailbox's `mailbox/contacts` list says the
 address is not in it; the reader keeps that list per mailbox for the session and re-reads it
-after any add, delete or import made in the reader. A locked store answers for no one, so its
+after any add made in the reader. A locked store answers for no one, so its
 icons stay hidden. The viewer's own mailbox addresses never get an icon, and neither does mail
 belonging to no mailbox. An add from an icon or from the panel refreshes both, along with
 compose autocomplete.
@@ -3942,6 +3944,26 @@ each present only when its plugin/feature is active. For a non-admin the server 
 returns `account_visible:false`, and the client omits the whole section — so an absent
 section reads as "not disclosed to you", never as "no account". The panel is lazy,
 session-cached, collapsible, and hidden below a width breakpoint.
+
+### Contacts page
+
+`/profile/mailbox/contacts` (`views/profile/contacts.php`, `mailbox_contacts_page_logic`,
+`assets/mailbox_contacts.js`) is where contacts are managed, one mailbox at a time: the
+mailboxes the member holds a grant for, plus the one named in `?mailbox=` when they may open
+it (an all-access reader arriving from that mailbox's pane manages their own contacts for it,
+as the pane shows). It offers **Add a contact** (name and email, `mailbox/contacts_import`
+with `name`), **Import** (.vcf / .csv), and the list, sorted by name, each row with a pencil
+that opens an edit dialog: **Save** (`mailbox/contact_save`) and **Delete**
+(`mailbox/contact_delete`, after a confirm). `?edit=ID` opens that contact's dialog on
+arrival, which is what the pane's pencil beside a contact links to. Every change reloads the
+page, so the list is always what is stored.
+
+A changed name keeps the row, re-sealed under its own DEK when sealed. A changed address is a
+new blind-index entry on the same mailbox, so `MailboxContacts::updateContact()` stores it
+the way a hand add does — joining a contact that already holds that address — with the given
+name, and deletes the old row. A sealed store with the vault window shut lists nothing and
+the page offers Unlock (`JoineryVaultLock.unlock()`), then reloads. Linked from the mail
+page's gear menu and from Email settings.
 
 ### The message timeline
 
@@ -4020,7 +4042,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `draft_save` / `draft_get` / `draft_delete` | Create/update, reopen, and discard a compose draft (multipart attachments + `inline_manifest` on save; save returns the persisted `attachments`/`inline` lists) |
 | `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |
 | `signature_save` | Save the caller's compose signature for one of their mailboxes |
-| `contacts` / `contact_delete` / `contacts_import` | List (decrypted, ranked) / delete / import-or-add the caller's contacts for ONE mailbox — `contacts` and `contacts_import` both require `alias_id`, since a contact belongs to a mailbox |
+| `contacts` / `contact_delete` / `contacts_import` / `contact_save` | List (decrypted, ranked) / delete / import-or-add / change the caller's contacts for ONE mailbox — `contacts` and `contacts_import` both require `alias_id`, since a contact belongs to a mailbox; `contacts_import` takes an optional `name` apart from the address; `contact_save` takes `contact_id`, `address`, `name` |
 | `sender_context` | Resolve a thread counterparty (by message id) to the caller's contact-store entry, list everyone else on the message with theirs, plus (admins only) the counterparty's member record, orders and registrations |
 
 Each action is a `logic/{action}_logic.php` with a `_logic_descriptor()` opt-in that

@@ -6,10 +6,12 @@
  * (contacts belong to a mailbox — an import lands in the one you are looking at), plus
  * either:
  *   - a multipart `file` upload (.vcf vCard or Google-contacts CSV) → bulk import, or
- *   - an `address` param ("Name <email>" or bare) → a single manual add.
+ *   - an `address` param ("Name <email>" or bare) → a single manual add; an optional
+ *     `name` param names it apart from the address, taken as typed.
  * Both upsert through the same contact-store path (source 'import' / 'manual'). A file
  * import returns {imported, skipped}; a manual add returns {added: bool}.
  *
+ * @version 1.2.0 - optional name, apart from the address
  * @version 1.1.2 - a valid address that fails to save says so, instead of calling the address invalid
  */
 
@@ -45,7 +47,8 @@ function contacts_import_logic(array $input): LogicResult {
 		}
 		// A valid address that still did not land: a sealed store with the vault
 		// window closed has nowhere to put it, or the write failed.
-		if (!$contacts->manualAdd(intval($uid), $address, $alias_id)) {
+		$name = array_key_exists('name', $input) ? (string)$input['name'] : null;
+		if (!$contacts->manualAdd(intval($uid), $address, $alias_id, $name)) {
 			return LogicResult::error('The contact could not be saved. If your vault is locked, unlock it and try again.');
 		}
 		return LogicResult::render(array('added' => true));
@@ -83,6 +86,7 @@ function contacts_import_logic_descriptor() {
 		'input' => [
 			'alias_id' => ['type' => 'int', 'required' => true, 'label' => 'Mailbox alias ID'],
 			'address' => ['type' => 'string', 'required' => false, 'label' => 'One address to add by hand (or upload a file)'],
+			'name' => ['type' => 'string', 'required' => false, 'label' => 'Its name, apart from the address'],
 		],
 	);
 }

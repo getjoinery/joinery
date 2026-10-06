@@ -1,7 +1,7 @@
 <?php
 /**
  * MailboxContacts — the contact store service (specs/mailbox_compose_maturity.md § Phase 4):
- * add, import, list (for autocomplete + management), look up, delete.
+ * add, import, list (for autocomplete + management), look up, edit, delete.
  *
  * A CONTACT IS A DELIBERATE ACT. The only two ways in are manualAdd() and import(); mail
  * traffic writes nothing here. Filing correspondents automatically would mean anyone who can
@@ -35,6 +35,8 @@
  * sealed to their vault (MailboxContactIndexKey) and opened in-window like any row DEK, so
  * a vault rotation moves its wrapping and every hash survives.
  *
+ * @version 2.7 - updateContact(): change a contact's name or address; manualAdd() takes the name
+ *   apart from the address
  * @version 2.6 - every add writes imc_sender_fingerprint, the spam filter's contact signal
  * @version 2.5 - forgetPosture(): a level flip in the same request drops the memoized posture
  * @version 2.4.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
@@ -489,20 +491,83 @@ class MailboxContacts {
 	}
 
 	/**
-	 * Add one address by hand (the contacts panel's "add" form, the reader's Add button
+	 * Add one address by hand (the contacts page's add form, the reader's Add button
 	 * beside a sender). Returns false when the address is unusable, no mailbox was named,
 	 * or the row could not be written — a sealed store with a closed vault window has
 	 * nowhere to put it, and the caller must say so rather than appear to have saved it.
 	 */
-	public function manualAdd(int $user_id, string $raw, int $alias_id): bool {
+	public function manualAdd(int $user_id, string $raw, int $alias_id, ?string $name = null): bool {
 		$parsed = self::parseAddress($raw);
 		if ($parsed === null || $alias_id <= 0) {
 			return false;
 		}
-		$this->upsertBatch($user_id, array($raw), MailboxContact::SOURCE_MANUAL, $alias_id);
+		// A name given on its own (the contacts page's two fields) is taken as
+		// typed, whatever characters it holds, rather than parsed out of the
+		// "Name <email>" form.
+		$name = $name === null ? $parsed[1] : trim($name);
+		$this->upsertBatch($user_id, array($parsed[0]), MailboxContact::SOURCE_MANUAL, $alias_id);
 		// An address already held as an import keeps its row; the add re-stamps it manual
 		// and fills a display name the import never carried.
-		return $this->markSaved($user_id, $parsed[0], $parsed[1], $alias_id);
+		return $this->markSaved($user_id, $parsed[0], $name, $alias_id);
+	}
+
+	// ── edit ─────────────────────────────────────────────────────────────────
+
+	/**
+	 * Change one of the user's contacts: its display name, its address, or both.
+	 *
+	 * The same address keeps its row, with the name rewritten (re-sealed under the
+	 * row's own DEK when sealed). A new address is a different blind-index entry on
+	 * the same mailbox, so it is stored the way a hand add stores one — joining a
+	 * row that already holds that address — given this name, and the old row goes.
+	 *
+	 * Returns 'saved', 'invalid' (no usable address), 'missing' (no such contact of
+	 * this user's) or 'locked' (a sealed store with the vault window closed: nothing
+	 * can be read or written, and nothing was).
+	 */
+	public function updateContact(int $user_id, int $contact_id, string $address, string $name): string {
+		$parsed = self::parseAddress($address);
+		if ($parsed === null) {
+			return 'invalid';
+		}
+		$name = trim($name);
+		$stmt = $this->db()->prepare('SELECT * FROM imc_mailbox_contacts
+			WHERE imc_mailbox_contact_id = ? AND imc_usr_user_id = ?');
+		$stmt->execute(array($contact_id, $user_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			return 'missing';
+		}
+		$alias_id = intval($row['imc_iea_inbound_email_alias_id']);
+		$keys = $this->indexKey($user_id, $this->sealingVault($user_id, $alias_id));
+		if ($keys === false) {
+			return 'locked';
+		}
+		try {
+			$old = strtolower(trim((string)MailboxContact::decryptSealedFieldStatic('imc_address', $row['imc_address'], $row)));
+		} catch (VaultLockedException $e) {
+			return 'locked';
+		}
+
+		if ($old === $parsed[0]) {
+			$this->setDisplayName($row, $name, $keys['key']);
+			return 'saved';
+		}
+
+		$this->upsertBatch($user_id, array($parsed[0]), MailboxContact::SOURCE_MANUAL, $alias_id);
+		$new = $this->findRow($user_id, $parsed[0], $keys['index_key'], $alias_id);
+		if ($new === null) {
+			// The window closed between the read and the write.
+			return 'locked';
+		}
+		$mark = $this->db()->prepare('UPDATE imc_mailbox_contacts SET imc_source = ?
+			WHERE imc_mailbox_contact_id = ? AND imc_usr_user_id = ?');
+		$mark->execute(array(MailboxContact::SOURCE_MANUAL, intval($new['imc_mailbox_contact_id']), $user_id));
+		$this->setDisplayName($new, $name, $keys['key']);
+		if (intval($new['imc_mailbox_contact_id']) !== $contact_id) {
+			$this->deleteContact($user_id, $contact_id);
+		}
+		return 'saved';
 	}
 
 	/**

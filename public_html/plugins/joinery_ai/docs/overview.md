@@ -490,9 +490,8 @@ collapsing never brings the button back.
 **The host's own section.** `mount()` takes an optional `hostSection`, an
 element the host builds and keeps current itself, docked in the panel body.
 The mail reader docks "Your AI, your model" there for a Fortress mailbox (the
-person's own model: `plugins/mailbox/assets/mailbox_device_ai.js`). A recipe
-row on such a mailbox says "Runs on your device while this mailbox is open"
-in place of a last run (`runsOnDeviceFor()`).
+person's own model: `plugins/mailbox/assets/mailbox_device_ai.js`), which is
+empty while all is well and one line when the model needs the person.
 
 **The component.** `plugins/joinery_ai/assets/ai_panel.js` + `ai_panel.css` —
 vanilla JS/CSS, jy-ui styling. Host contract:
@@ -551,12 +550,12 @@ the authorization, there is no permission gate):
   write as the binding, so a seeded recipe runs as mail arrives after one
   toggle; a recipe already on a clock keeps its clock. A card reads **On**
   only when the open mailbox is bound AND the recipe runs automatically — a
-  bound-but-manual recipe reads Off, with "Set to run manually only" on it,
-  and Turn on is what starts it. Turning OFF only unbinds; the schedule is
+  bound-but-manual recipe reads Off (`paused` true), and switching it on is
+  what starts it. Turning OFF only unbinds; the schedule is
   left alone because other mailboxes may still be bound.
 - **`joinery_ai/ai_status`** (read) — both halves of the panel header in one
-  call: the caller's recipe runs in flight (`AiPanelService::jobs()`, each line
-  saying whether it is running, queued for a worker, or waiting for the owner's
+  call: the caller's recipe runs in flight (`AiPanelService::jobs()`, each
+  naming its `recipe_id` and saying whether it is running, queued for a worker, or waiting for the owner's
   own unlocked session, which is the one wait a worker can never end) and their
   pending queued actions as the same cards `ai_actions_list` renders, and
   `has_past` — whether any action has been resolved. Each run
@@ -586,23 +585,27 @@ panel when the joinery_ai plugin is active. The admin oversight reader does
 not — its all-access view spans mailboxes the viewer holds no grant on, and
 admins manage recipes on the dashboard.
 
-**The order on the panel** is the order the work reaches the person: **Working
-now** (the runs in flight), then **Waiting for you** — the pending queued
-actions ([Proposed actions](#proposed-actions)) with approve/decline on each —
-then the recipes, then the composer slot. Once anything has been resolved,
+**The order on the panel**: the recipes, then **Waiting for you** — the
+pending queued actions ([Proposed actions](#proposed-actions)) with
+approve/decline on each — then the composer slot. Once anything has been resolved,
 Waiting for you carries a **Current / Past** switch: Past lists resolved
 actions, most recent first, each with its outcome and when, and offers
 *Approve now* on a declined one and *Try again* on a failed one while it has
-not expired. Progress first, then what is stopped
-until they answer, then the settings behind both.
+not expired.
 
-The recipes are a flat, unlabelled list, one row each: name and **On**/**Off**
-for the open context, what the job does, when it last ran, and the links that
-act on it — *Turn on* / *Turn off* (the `ai_panel_toggle` call, confirm dialog
-and all) and, for a viewer who has the recipes dashboard, *Edit*. No card, no
-switch, no heading and no section to open first: each row says what it is and
-whether it is on, and a panel sharing a column with the host's own panels cannot
-afford a level of nesting that carries nothing.
+The recipes are a flat, unlabelled list, one line each: the name, a switch
+that shows whether it is on for the open context and turns it on or off there
+(the `ai_panel_toggle` call, confirm dialog and all; disabled where turning
+it on would be refused, the reason on the switch and once under the list), and, for a
+viewer who has the recipes dashboard, a pencil to its edit page. While a
+recipe has work in flight, its progress sits under its name — *2 to go*,
+*4 done, 11 to go* — green while running, blue while it waits on the person,
+the state itself on hover; the panel matches the runs from `ai_status` to the
+rows by `recipe_id` and redraws on each heartbeat. A run of a recipe that is
+not one of the open context's still gets a line, name and progress, so the
+job count in the header always has rows to match. No card, no heading and no
+section to open first: a panel sharing a column with the host's own panels
+cannot afford a level of nesting that carries nothing.
 
 ## Proposed actions
 

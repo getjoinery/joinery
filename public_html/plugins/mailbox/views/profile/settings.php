@@ -17,8 +17,12 @@
  * A member with an end-to-end encrypted (Fortress) mailbox also sets where
  * their own AI model answers ("Your AI model"), through the
  * mailbox/device_ai_host API action, which asks for a second-factor
- * confirmation.
+ * confirmation. The key and model name are kept in the browser, and Test
+ * sends the model a real-sized judgement from here.
  *
+ * @version 2.6 - More links Contacts
+ * @version 2.5 - "Your AI model" tests the model saved in this browser, and the page may
+ *   reach the registered model's origin (CSP) to do it
  * @version 2.4 - "Your AI model": the site's model is the primary choice; the form takes the
  *   address, key and model name together and opens on request
  * @version 2.3 - "Your AI model" offers the site's own model with one click
@@ -34,6 +38,11 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/logic/mailbox_settings_
 $page_vars = process_logic(mailbox_settings_page_logic(array_merge($_GET, $_POST, $params ?? array())));
 
 $page = new PublicPage();
+// Test calls the member's own model from this page: the one origin they
+// registered under a second-factor confirmation, and no other.
+if (!empty($page_vars['has_fortress']) && !empty($page_vars['device_ai_origin'])) {
+	$page->allow_connect_origin($page_vars['device_ai_origin']);
+}
 $page->public_header(array('title' => 'Email'));
 
 $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signature.js');
@@ -103,7 +112,9 @@ $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signatur
 				?>
 				<?php if ($current !== ''): ?>
 					<p>Your mail may be sent to <code><?php echo htmlspecialchars($current); ?></code>.
+						<button type="button" class="btn btn-secondary" data-device-ai-test>Test</button>
 						<button type="button" class="btn btn-secondary" data-device-ai-remove>Remove</button></p>
+					<p class="mbx-sig-note" role="status" data-device-ai-test-note hidden></p>
 				<?php endif; ?>
 				<?php if ($site_offered): ?>
 					<p class="jy-muted">This site runs its own model, <code><?php echo htmlspecialchars($site['model']); ?></code>
@@ -117,8 +128,7 @@ $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signatur
 				<?php endif; ?>
 				<div data-device-ai-form<?php echo ($site_offered || $current !== '') ? ' hidden' : ''; ?>>
 					<p class="jy-muted">Choosing where your mail is sent asks you to confirm it is you. The key and the
-						model name stay in this browser; on another computer, enter them again in the AI panel on
-						your mail. Test the model from that panel once it is saved.</p>
+						model name stay in this browser; on another computer, enter them again here.</p>
 					<?php
 					$formwriter = $page->getFormWriter('device-ai-host-form', array('action' => '/profile/mailbox/settings'));
 					echo $formwriter->begin_form();
@@ -148,6 +158,11 @@ $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signatur
 			<div class="jy-panel jy-form-actions">
 				<h2>More</h2>
 				<ul class="mbx-settings-links">
+					<li>
+						<a href="/profile/mailbox/contacts">Contacts</a>
+						<span class="jy-muted">The people you keep for each mailbox — add, import, change or
+							remove them.</span>
+					</li>
 					<li>
 						<a href="/profile/mailbox/filters">Filters</a>
 						<span class="jy-muted">Rules that act on mail as it arrives — label it, archive it,

@@ -1,6 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.91 — the Spam view says which step filed a message (spam_reason_text)
+ * No framework. @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
+ * header) to the Contacts page; its add/import form and delete button moved there; a quieter locked note
+ * @version 2.91 — the Spam view says which step filed a message (spam_reason_text)
  * @version 2.90 — "Load more" no longer repeats the notes above the list
  * (Trash retention, unlock-to-search, search scope, still indexing)
  * @version 2.89 — Trash rows show the received date, like every other list
@@ -3948,14 +3950,17 @@
 		input.addEventListener('blur', function () { setTimeout(hide, 150); });
 	}
 
-	// ---- contacts panel (list / add / delete / import) ----
+	// ---- contacts panel (list, with pencils to the Contacts page) ----
 	//
 	// Contacts live in the right-hand aside, not the left rail: the rail lists where
 	// mail LIVES, and a contact store belongs to a mailbox rather than sitting beside
 	// one. The aside has two states over the same element:
 	//
-	//   list view    → the selected mailbox's contact manager, COLLAPSED to a spine by
-	//                  default (it is reference material, not the task at hand)
+	//   list view    → the selected mailbox's contacts, COLLAPSED to a spine by
+	//                  default (it is reference material, not the task at hand). Each
+	//                  carries a pencil that opens it on the Contacts page, and the
+	//                  header's pencil opens that page for the mailbox: adding,
+	//                  importing, editing and deleting all happen there.
 	//   open message → the counterparty card, expanded (renderSenderContext)
 	//
 	// The collapsed/expanded choice is remembered, because whether contacts are
@@ -4009,6 +4014,7 @@
 		});
 		head.appendChild(toggle);
 		head.appendChild(el('span', 'mbx-context-title', 'Contacts'));
+		if (open) head.appendChild(contactsPencil(contactsPageHref(aliasId), 'Manage contacts'));
 		panel.appendChild(head);
 		syncContextColumn();
 		if (!open) return;
@@ -4023,9 +4029,11 @@
 			body.innerHTML = '';
 
 			if (data.locked) {
-				var lb = el('div', 'mbx-unlock-banner');
-				lb.appendChild(el('span', 'mbx-unlock-text', 'Unlock to view your contacts.'));
-				var ub = el('button', 'mbx-unlock-btn', 'Unlock'); ub.type = 'button';
+				// Sealed to the vault, and the window is shut: a quiet note in the
+				// column's own voice, not an alarm — nothing is wrong.
+				var lb = el('div', 'mbx-contacts-locked');
+				lb.appendChild(el('p', 'mbx-contacts-locked-text', 'Your contacts are locked with your vault.'));
+				var ub = el('button', 'mbx-contacts-locked-btn', 'Unlock'); ub.type = 'button';
 				ub.addEventListener('click', async function () { if (await unlockVault()) renderContactsPanel(); });
 				lb.appendChild(ub);
 				body.appendChild(lb);
@@ -4033,58 +4041,9 @@
 			}
 			state.contacts = data.contacts || [];
 
-			// Add + import, both landing in the mailbox currently selected.
-			var tools = el('div', 'mbx-contacts-tools');
-			var addInput = document.createElement('input');
-			addInput.type = 'text';
-			addInput.className = 'mbx-contacts-add';
-			addInput.placeholder = 'Add a contact (Name <email>)';
-			var addBtn = el('button', 'mbx-action mbx-primary', 'Add'); addBtn.type = 'button';
-			var doAdd = function () {
-				var v = addInput.value.trim();
-				if (!v) return;
-				addBtn.disabled = true;
-				joineryApi.post(CFG.contactsImportUrl, { address: v, alias_id: String(aliasId) })
-					.then(function () {
-						addInput.value = ''; addBtn.disabled = false;
-						forgetContactList(aliasId);
-						renderContactsPanel();
-					})
-					.catch(function (err) {
-						addBtn.disabled = false;
-						alert((err && err.message) || 'The contact could not be added.');
-					});
-			};
-			addBtn.addEventListener('click', doAdd);
-			addInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
-			tools.appendChild(addInput);
-			tools.appendChild(addBtn);
-
-			var importLabel = el('label', 'mbx-action mbx-contacts-import', 'Import .vcf / .csv');
-			var importInput = document.createElement('input');
-			importInput.type = 'file';
-			importInput.accept = '.vcf,.csv,text/vcard,text/csv';
-			importInput.style.display = 'none';
-			importInput.addEventListener('change', function () {
-				if (!importInput.files || !importInput.files.length) return;
-				var fd = new FormData();
-				fd.append('file', importInput.files[0], importInput.files[0].name);
-				fd.append('alias_id', String(aliasId));
-				window.joineryApi.postForm(CFG.contactsImportUrl, fd).then(function (d) {
-					d = d || {};
-					alert('Imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0) + '.');
-					forgetContactList(aliasId);
-					renderContactsPanel();
-				}, function (err) { alert('Import failed' + (err && err.message ? ': ' + err.message : '.')); });
-			});
-			importLabel.appendChild(importInput);
-			tools.appendChild(importLabel);
-			body.appendChild(tools);
-
 			var list = el('div', 'mbx-contacts-list');
 			if (!state.contacts.length) {
-				list.appendChild(el('div', 'mbx-loading',
-					'No contacts in this mailbox yet. They fill in as you send and read mail.'));
+				list.appendChild(el('div', 'mbx-contacts-empty', 'No contacts in this mailbox yet.'));
 			}
 			state.contacts.forEach(function (c) {
 				var rowEl = el('div', 'mbx-contact-row');
@@ -4092,13 +4051,7 @@
 				info.appendChild(el('span', 'mbx-contact-name', c.name || c.address));
 				if (c.name) info.appendChild(el('span', 'mbx-contact-addr', c.address));
 				rowEl.appendChild(info);
-				var del = el('button', 'mbx-contact-del', '×'); del.type = 'button'; del.title = 'Delete';
-				del.addEventListener('click', function () {
-					joineryApi.post(CFG.contactDeleteUrl, { contact_id: String(c.id) })
-						.then(function () { rowEl.parentNode.removeChild(rowEl); forgetContactList(aliasId); })
-						.catch(function () {});
-				});
-				rowEl.appendChild(del);
+				rowEl.appendChild(contactsPencil(contactsPageHref(aliasId, c.id), 'Edit ' + (c.name || c.address)));
 				list.appendChild(rowEl);
 			});
 			body.appendChild(list);
@@ -4106,6 +4059,23 @@
 			if (String(state.aliasId) !== String(aliasId)) { return; }
 			body.innerHTML = '<div class="mbx-loading">Contacts could not be loaded.</div>';
 		});
+	}
+
+	// The Contacts page for a mailbox, opened on one contact when given.
+	function contactsPageHref(aliasId, contactId) {
+		return (CFG.contactsPageUrl || '/profile/mailbox/contacts') + '?mailbox=' + encodeURIComponent(aliasId)
+			+ (contactId ? '&edit=' + encodeURIComponent(contactId) : '');
+	}
+
+	function contactsPencil(href, label) {
+		var a = el('a', 'mbx-contact-edit');
+		a.href = href;
+		a.title = label;
+		a.setAttribute('aria-label', label);
+		a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+			+ ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+			+ '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+		return a;
 	}
 
 	// ---- compose (reply / reply all / forward) ----
