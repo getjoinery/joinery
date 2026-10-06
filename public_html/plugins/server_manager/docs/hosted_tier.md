@@ -319,9 +319,18 @@ state, code expiry, what Linode last said and when, the last email, the last
 check, and any to-do, with Re-check, Start, Issue code now, Resend email,
 Cancel and To-do done.
 
-**The operator token** needs `linodes:read_write`, `account:read_write` (to
-create and cancel a transfer), `firewall:read_only` and `volumes:read_only` (the
-check). A site copy's switch-over by IP swap also needs `ips:read_write`.
+**The operator token** needs `linodes:read_write`, `account:read_write` (the
+transfer-allowance alert reads the account's pool; a handover creates and
+cancels a transfer), `firewall:read_only` and `volumes:read_only` (the check).
+A site copy's switch-over by IP swap also needs `ips:read_write`. Saving the
+hosted card asks Linode which scopes the token holds (the `X-OAuth-Scopes`
+header on a read of the token's own profile) and records them with a short
+fingerprint of the token (`server_manager_operator_cloud_token_scopes`). The
+card then names each missing scope and what it is needed for; a token
+replaced since reads as not checked until the card is saved again. The list
+is `ProvisioningSetup::OPERATOR_TOKEN_SCOPES`. A token missing
+`linodes:read_write` cannot fulfil a hosted order; one missing another scope
+is kept, and only what needs that scope is refused.
 
 ## Setting it up
 

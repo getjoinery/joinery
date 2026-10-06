@@ -6,6 +6,7 @@
  * POST actions delegate to ProvisioningSetup and redirect back with a
  * session message; GET renders the live status of every checklist item.
  *
+ * @version 1.7 - saving the hosted card records the operator token's scopes and names any it lacks
  * @version 1.6 - saving the hosted card reads the operator token's account name (server_manager_operator_cloud_account)
  * @version 1.5 - credentials go through FormWriterV2Base::process_secretinput(); the promotion code's
  *   remove box is gone (Reset and save blank removes it)
@@ -114,6 +115,22 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 					}
 				}
 				ProvisioningSetup::writeSetting('server_manager_operator_cloud_account', $account_name);
+				// What the token may do, so a missing scope is named now and not
+				// at the first job it is refused for.
+				try {
+					$missing = ProvisioningSetup::recordOperatorTokenScopes();
+					if ($missing && !$error) {
+						$lines = array();
+						foreach ($missing as $scope => $purpose) {
+							$lines[] = $scope . ' (' . $purpose . ')';
+						}
+						$error = 'Hosted tier settings saved, but the operator token lacks '
+							. implode('; ', $lines) . '. Make a Linode token with these scopes added and enter it here.';
+					}
+				} catch (Exception $e) {
+					$error = $error ?: 'Hosted tier settings saved, but the operator token\'s scopes could not be read: '
+						. $e->getMessage();
+				}
 				$save_secret('hosted_smtp2go_master_key', 'server_manager_smtp2go_api_key');
 				$save_secret('smtp2go_webhook_secret', 'server_manager_smtp2go_webhook_secret');
 				$message = $error ? null : 'Hosted tier settings saved.';

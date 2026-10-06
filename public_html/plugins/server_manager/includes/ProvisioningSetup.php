@@ -15,6 +15,8 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.6 - the operator token's scopes: recordOperatorTokenScopes() reads them from the provider when the
+ *                hosted card is saved, hostedStatus() names each scope it lacks and what that scope is for
  * @version 1.5 - the service account is found by its id (server_manager_provisioning_service_user_id),
  *                never by address: whoever registered provisioning@<host> first owned the pipeline key.
  *                A new account gets a random address; an existing one is adopted once, only when it
@@ -41,6 +43,21 @@ class ProvisioningSetup {
 	/** The managed setting holding the service account's user id. */
 	const SERVICE_USER_SETTING = 'server_manager_provisioning_service_user_id';
 	const SERVICE_KEY_NAME = 'Provisioning pipeline';
+
+	/**
+	 * Every scope the operator cloud token is used with, and what for. A
+	 * token short of one is accepted (the rest of the hosted tier works), and
+	 * the setup page names what will be refused.
+	 */
+	const OPERATOR_TOKEN_SCOPES = array(
+		'linodes:read_write' => 'creating, powering and rebuilding hosted servers',
+		'account:read_write' => 'the alert when the account\'s transfer allowance is nearly spent, and handing a server to its customer\'s own account',
+		'firewall:read_only' => 'the check before a handover',
+		'volumes:read_only'  => 'the check before a handover',
+		'ips:read_write'     => 'a site copy\'s switch-over by swapping two servers\' addresses',
+	);
+	/** The managed setting holding the scopes the provider last reported for the operator token. */
+	const OPERATOR_TOKEN_SCOPES_SETTING = 'server_manager_operator_cloud_token_scopes';
 	/**
 	 * The pipeline reads other buyers' order items/requirements and posts
 	 * queued emails; the API's model authorization grants cross-user read
@@ -506,8 +523,11 @@ class ProvisioningSetup {
 	public static function hostedStatus(): array {
 		$token   = trim(self::readSecret('server_manager_operator_cloud_token')) !== '';
 		$smtp2go = trim(self::readSecret('server_manager_smtp2go_api_key')) !== '';
+		$missing = $token ? self::operatorTokenMissingScopes() : null;
 		return array(
 			'token_present'         => $token,
+			// null: not checked since the token was saved; otherwise scope => what it is for.
+			'token_missing_scopes'  => $missing,
 			'smtp2go_present'       => $smtp2go,
 			'smtp2go_sandbox_users' => in_array(trim(self::readSetting('server_manager_smtp2go_sandbox_users')), array('', '0'), true) === false,
 			'webhook_present'       => trim(self::readSecret('server_manager_smtp2go_webhook_secret')) !== '',
@@ -519,8 +539,51 @@ class ProvisioningSetup {
 			'manage_url'            => self::readSetting('server_manager_hosted_manage_url'),
 			'smtp2go_referral_url'  => self::readSetting('server_manager_smtp2go_referral_url'),
 			'storage_referral_url'  => self::readSetting('server_manager_storage_referral_url'),
-			'ready'                 => $token && $smtp2go,
+			'ready'                 => $token && $smtp2go && !isset($missing['linodes:read_write']),
 		);
+	}
+
+	/**
+	 * Ask the provider which scopes the operator token holds and record them,
+	 * or clear the record when there is no token. Returns the scopes it lacks,
+	 * as scope => what it is for. Throws when the provider cannot be asked;
+	 * the record is then cleared, so the page says "not checked" rather than
+	 * repeating an old answer about another token.
+	 */
+	public static function recordOperatorTokenScopes(): array {
+		$token = trim(self::readSecret('server_manager_operator_cloud_token'));
+		self::writeSetting(self::OPERATOR_TOKEN_SCOPES_SETTING, '');
+		if ($token === '') {
+			return array();
+		}
+		$granted = (new LinodeComputeDriver($token))->tokenScopes();
+		self::writeSetting(self::OPERATOR_TOKEN_SCOPES_SETTING, json_encode(array(
+			'token'  => self::tokenFingerprint($token),
+			'scopes' => $granted,
+		)));
+		return self::operatorTokenMissingScopes() ?? array();
+	}
+
+	/**
+	 * The scopes the recorded grant lacks, as scope => what it is for, or
+	 * null when the token now set has not been checked. The record carries a
+	 * short fingerprint of the token it describes, so a token replaced by any
+	 * path reads as unchecked, never as the old token's answer.
+	 */
+	public static function operatorTokenMissingScopes(): ?array {
+		$record = json_decode(trim(self::readSetting(self::OPERATOR_TOKEN_SCOPES_SETTING)), true);
+		$token = trim(self::readSecret('server_manager_operator_cloud_token'));
+		if (!is_array($record) || !is_array($record['scopes'] ?? null) || $token === ''
+			|| !hash_equals(self::tokenFingerprint($token), (string)($record['token'] ?? ''))) {
+			return null;
+		}
+		$missing = LinodeComputeDriver::missingScopes($record['scopes'], array_keys(self::OPERATOR_TOKEN_SCOPES));
+		return array_intersect_key(self::OPERATOR_TOKEN_SCOPES, array_flip($missing));
+	}
+
+	/** 16 hex characters of the token's SHA-256: enough to tell tokens apart, nothing to use. */
+	private static function tokenFingerprint(string $token): string {
+		return substr(hash('sha256', $token), 0, 16);
 	}
 
 	/**

@@ -1,6 +1,8 @@
 # Outbound limits and transfer on every node
 
-**Status:** Draft, 2026-10-05. Nothing here is built. Split out of
+**Status:** Draft, 2026-10-05. Nothing here is built. Every mechanism it
+relies on was tried by hand on two scratch Nanodes on 2026-10-06; the results
+are in § Measured on scratch boxes and the work packages below. Split out of
 `site_outbound_limits`, which keeps what only a multi-tenant host needs (a
 lane and a monthly share per site among many). This spec covers what every
 install needs, whoever hosts it: managed by us, or self-hosted on the owner's
@@ -85,6 +87,17 @@ adds to the pool, and its overage (`GET linode/instances/{id}/transfer`).
 `CloudComputeProvider` gains `getInstanceTransfer($instance_id)` beside
 `getTransfer()`, and `LinodeComputeDriver` implements it.
 
+What Linode's figure holds (measured 2026-10-06): `used` is in bytes,
+`quota` in whole GB (prorated for a machine created mid-month), and
+`GET linode/instances/{id}/transfer/{year}/{month}` splits it into
+`bytes_in` and `bytes_out`. **Traffic to another machine in the same data
+center over IPv6 is in neither direction**: 5 GB from the host and 3.5 GB
+from a container (through Docker's IPv6 translation) left the machine
+without moving its figure, while the same traffic over IPv4 was counted. The
+figure caught up with traffic within five to ten minutes. The endpoint needs
+only `linodes:read_only`; the account pool needs account access (see B1 in
+§ Measured on scratch boxes).
+
 Once a day the plane reads it for every machine it runs on a provider
 account: managed customers' machines, multi-tenant boxes, relays, our own
 nodes. It alerts an operator, naming the node:
@@ -149,20 +162,40 @@ is its own Linux bridge on the host, which tells one site's traffic from
 everything else. On a multi-tenant host it is also what walls sites off from
 each other (`multi_tenant_docker_hosts` WP5 item 1).
 
-**Three things assume the default network (`172.17.0.0/16`) and read the
-site's subnet from its run spec instead:**
+**One thing assumes the default network (`172.17.0.0/16`):**
+`RemoteIPInternalProxy`, written in two places, the image
+(`Dockerfile.template`) and `host_housekeeping.sh`'s
+`joinery-remoteip.conf`. On any other network the host proxy's requests
+arrive from that network's gateway, `X-Forwarded-For` is not trusted, and
+every visitor is logged as the gateway (seen on the scratch box: the log
+named `10.251.1.1` for a request carrying a visitor's address). fail2ban
+would then ban the gateway, which is every visitor at once. Rate limits,
+login IP rules and analytics would all see one address. The fix:
+`host_housekeeping.sh` names the container's own gateway, IPv4 and IPv6,
+read from its routes the way its PostgreSQL step already does, and the
+image's line goes.
 
-- `RemoteIPInternalProxy` in the image (`Dockerfile.template`). Left as it
-  is, `X-Forwarded-For` from the proxy is not trusted, and every visitor
-  shows up as the gateway address. Rate limits, login IP rules and analytics
-  would then all see one address.
-- PostgreSQL's "Docker host" line in `pg_hba`.
-- The gateway lookup in `rebase_site_container.sh`.
+Two things looked like assumptions and are not:
+
+- PostgreSQL's "Docker host" line in `pg_hba` is rebuilt from the
+  container's default route at every housekeeping run, so it follows the
+  network.
+- `rebase_site_container.sh` reads the gateway from `docker inspect`, which
+  is right for a container on one network.
+
+The run spec gains a `network=` line (today it refuses any network but the
+default), and `install.sh site` creates the network before the container.
 
 **Existing sites** move at their next rebuild from the run spec. A site not
-rebuilt by the time this ships moves in a one-time pass that attaches it to
-its new network and detaches it from the default one, proven on a scratch
-box first to keep the site answering throughout.
+rebuilt by the time this ships moves in a one-time pass, per site: create its
+network, `docker network connect`, `docker network disconnect bridge`, then
+run `host_housekeeping.sh` inside the container. Tried on the scratch box
+with requests every quarter second from another machine over IPv4 and IPv6:
+all 120 answered while the site moved. Published ports followed the
+container to its new network. Between the disconnect and the housekeeping
+run (0.3 s), the host's logins to the site's database were refused; the
+converger's next housekeeping run would mend that on its own, the pass just
+does not wait for it.
 
 **What follows from IPv6:**
 
@@ -204,9 +237,26 @@ Docker's rules, not inside them: a packet either table drops is dropped.
 Per site, for traffic leaving the machine:
 
 - a rate on new connections (`ct state new`, TCP and UDP), about 20 a
-  second, bursts to 100. Over the limit, drop.
-- a cap on connections open at once from the site (`ct count`).
+  second, bursts to 100. Over the limit, drop. A dropped opening is sent
+  again by the site's own TCP a second later, so a short burst over the rate
+  is slowed, not refused; only a sustained one fails.
+- a cap of **256** connections open at once from the site (`ct count`). A
+  connection the site has closed and the far end has not counts for up to
+  a minute more (the connection tracker's close-wait timeout), so the cap
+  needs room above real use. Real use is small: on the dev server, sampled
+  every 2 seconds for half an hour (939 samples), the web user never held
+  more than 2 outbound connections. The platform makes its outbound calls one at a time
+  per PHP worker (the only fan-outs are a file's variants pushed to the
+  bucket together and the DNS-filter scan in batches of 5), so the most a
+  site can hold is about its PHP worker count (at most 80) plus its
+  scheduled tasks. 256 is three times that.
 - a counter of drops, read by the host report.
+
+Matching, as measured: a container site by `iifname` its bridge on a
+`forward` hook at priority -10 in the table's own chain, which runs beside
+Docker's chains; a bare-metal site by `meta skuid www-data` on the `output`
+hook with `oifname "lo"` accepted first, so its lookups to the local resolver
+and its own database are never touched.
 
 Traffic between a site and the host's own proxy (the reply path) is not
 counted. A site reaching another site's public pages, or sending a Joinery
@@ -265,7 +315,18 @@ site opens itself both pass through it, over both families.
 
 For a bare-metal site, the web server sends visitors' downloads itself. The
 host marks packets from the web server's user on the output path and shapes
-the mark on the public interface.
+the mark on the public interface (an HTB root on it, the mark to the site's
+class by an `fw` filter, everything else to an unshaped default class).
+Apache's replies to visitors carry the web server's user too: a connection
+Apache accepts belongs to the worker that took it, and only the opening
+handshake goes out as root (measured: 9,190 packets of a download as
+`www-data`, 2 as root).
+
+The host's own reads of a container site's database through its
+loopback-published port also cross the bridge and are shaped. They are an
+operator's tunnel and nothing else (backups run inside the container), so
+they are left in. A filter that let them through by source port 5432 was
+tried and works, but a hacked site could send anything from port 5432.
 
 - The ceiling is **200 Mbit/s**. A multi-tenant box's sites get the box's
   lower figure (`site_outbound_limits`). A site's admin can lower it from the
@@ -291,7 +352,7 @@ counts when it is lower.
 
 - **The machine's defaults,** in a host file (`/etc/joinery/outbound_limits.json`).
   With no file, the unit's built-in defaults apply: 200 Mbit/s, 20 new
-  connections a second with bursts to 100, and the open-connection cap.
+  connections a second with bursts to 100, and 256 open at once.
 - **A site's own figures,** where its other caps are kept: a container
   site's run spec, beside `--memory`, `--cpus` and `--pids-limit`, so a
   rebuild, rebase or move keeps them; a bare-metal site's entry in the host
@@ -306,7 +367,7 @@ the host file) and `install.sh site` (that site's own figures):
 | `--outbound-ceiling=MBIT` or `=off` | the speed ceiling (WP4) | 200 |
 | `--outbound-conn-rate=N` | new connections a second (WP3) | 20 |
 | `--outbound-conn-burst=N` | the burst above it | 100 |
-| `--outbound-open-conns=N` | connections open at once | from WP3's measurements |
+| `--outbound-open-conns=N` | connections open at once | 256 |
 | `--no-outbound-limits` | every limit off, UDP drop included | — |
 
 `install.sh site` also takes `--outbound-notice-gb=N`, which seeds the site's
@@ -373,6 +434,46 @@ rule from a removed site behind. None of the table, the `tc` classes or the
 `ifb` devices survives a reboot, so the unit is what puts them back.
 `install.sh` installs it on every install, server or Docker.
 
+## Measured on scratch boxes, 2026-10-06
+
+Two Nanodes in `us-east` (Ubuntu 24.04, Docker 29.8.2): A ran
+`install.sh docker` and one container site from release 0.8.460 with a host
+proxy in front of it; B stood in for a bare-metal site (Apache and PHP-FPM as
+`www-data`) and for the outside world. Rules and `tc` were written by hand,
+as the unit will write them.
+
+| What | Result |
+|---|---|
+| Linode's figure, same-data-center IPv6 | not counted, in or out: 5 GB host-to-host and 3.5 GB from a container left the figure unchanged |
+| Linode's figure, same-data-center IPv4 | counted |
+| Linode's figure against the interface counter | 1 GB of payload sent over IPv4 moved the figure by 1.002 GB and `/proc/net/dev` by 1.077 GB: Linode counts about the payload, the interface counter adds the packet headers (about 7% on a bulk transfer). Two such sends moved the receiving machine's `bytes_in` by 2.004 GB |
+| Moving a running site to its own IPv4+IPv6 network | 120 of 120 requests answered over both families during the move; published ports followed; the database login from the host came back when housekeeping ran (0.3 s) |
+| The proxy's requests after the move, before the remote-IP fix | logged as the gateway, not the visitor (WP2) |
+| Speed ceiling, container, set to 20 Mbit/s on the bridge's `ifb` | the site's own uploads 19.4 (IPv4) and 19.2 (IPv6); visitor downloads through the host proxy 19.0 and 19.0; straight to the published port 19.0 and 18.7 |
+| The same, the machine's own upload | 1,209 Mbit/s, untouched |
+| Pages from the site during its own saturating download | 24–34 ms, as at idle (`fq_codel` under the HTB class) |
+| Speed ceiling, bare metal, 20 Mbit/s on the `www-data` mark | visitor downloads 19.1 over each family |
+| Connection rate, both kinds | 150 connections in 3 s all made (the burst plus retried openings); a sustained 300 lost 36 |
+| Open-connection cap, both kinds, set to 200 | 200 of 260 held open over IPv6; the rest timed out |
+| UDP drop, both kinds | a DNS query to 8.8.8.8 and to Google's IPv6 resolver answered before the rule and timed out after; the site's own name lookups worked throughout |
+| Docker's chains and ours together | no interference: Docker's rules still published and forwarded, ours still dropped |
+
+**B1, found on the way (fixed 2026-10-06, as below: saving the hosted card
+reads the token's scopes from Linode's `X-OAuth-Scopes` header and the card
+names each one missing).** The dev plane's operator token is refused on
+`account/transfer` ("Your OAuth token is not authorized to use this
+endpoint"), so `HostedTrialWatch::watch_transfer_pool()` would fail on dev
+the first time it ran (it has not: dev has no sold sites, and the watch
+returns before reaching it). `hosted_tier.md` says the operator token needs
+`account:read_write`, which this one lacks. Saving the token on the setup
+page reads its account's name and quietly accepts a token with no account
+access (`LinodeComputeDriver::accountName()` falls back to the user's name),
+so nothing says a scope is missing. The fix belongs with that page: when a
+token is entered, try a read of each endpoint the plane uses it for
+(`account/transfer` among them) and name, in the page's message, any the
+token is refused. Whether the production plane's token has the scope is not
+known from here.
+
 ## Why not a Linode product
 
 - **Cloud Firewall** filters per machine by address, port and protocol. It
@@ -412,9 +513,9 @@ data" promise is).
 | `--outbound-ceiling=fast` or `--outbound-conn-rate=-1` | refused in plain words; nothing installed |
 | `install.sh site c --outbound-notice-gb=500` | the site's notice setting is 500 |
 | `sudo joinery-limits show` on each of the above | prints each site's figures and where each came from |
-| a container site connects out over IPv6 | it leaves from the machine's IPv6 address |
-| a container site uploads to its region's Object Storage bucket | it goes over IPv6; Linode's figure for the machine does not grow by the upload |
-| an existing site on the default network is moved by the one-time pass | it answers throughout, and visitors' addresses still reach it through the proxy |
+| a container site connects out over IPv6 | it leaves from the machine's IPv6 address (seen by hand on the scratch box) |
+| a container site uploads to its region's Object Storage bucket | it goes over IPv6; Linode's figure for the machine does not grow by the upload (same-data-center IPv6 to another machine was seen not to count; the bucket is the case left to see) |
+| an existing site on the default network is moved by the one-time pass | it answers throughout (seen by hand), and visitors' addresses still reach it through the proxy (needs the remote-IP fix) |
 | a site opens 1,000 connections a second to outside addresses, container and bare-metal | it gets about the rate limit; the rest are dropped and counted |
 | the same site opens connections over IPv4 and IPv6 at once | together they get the one rate limit, not twice it |
 | a site holds connections open past the cap | new ones are refused; its pages still answer visitors |
