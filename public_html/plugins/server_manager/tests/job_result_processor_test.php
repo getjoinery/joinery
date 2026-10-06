@@ -362,6 +362,7 @@ $hr_object = array(
 	'memory' => array('used_bytes' => 2000, 'total_bytes' => 8000),
 	'swap' => array('used_bytes' => 0, 'total_bytes' => 1024),
 	'reboot_required' => true,
+	'reboot_required_since' => 1789280500,
 	'unattended_upgrades_last_run' => 1789281613,
 	'os' => array('id' => 'ubuntu', 'version' => '24.04.4', 'codename' => 'noble',
 		'release_upgrade' => array('offered' => '26.04.1', 'checked_at' => 1789280000)),
@@ -387,6 +388,8 @@ check(is_array($stored) && $stored['fail2ban_jails'][0] === array('name' => 'ssh
 check(is_array($stored) && $stored['ssh_auth_failures_24h'] === 41 && $stored['reboot_required'] === true
 	&& $stored['sshd']['permit_root_login'] === 'prohibit-password',
 	'the count, the reboot flag and the sshd posture survive');
+check(is_array($stored) && ($stored['reboot_required_since'] ?? null) === 1789280500,
+	'and when the reboot was first asked for');
 check(is_array($stored) && $stored['os'] === $hr_object['os'],
 	'the operating system and the upgrade it is offered survive as sent', var_export($stored['os'] ?? null, true));
 check(!empty($hr_node->get('mgn_last_host_report_time')),
@@ -479,6 +482,11 @@ check($capped['memory'] === array('used_bytes' => 'unknown', 'total_bytes' => 'u
 	'a gauge that is not an object, or is missing, is unknown in both figures');
 check($capped['reboot_required'] === 'unknown' && $capped['unattended_upgrades_last_run'] === 'unknown' && $capped['generated_at'] === 'unknown',
 	'a string "true", a negative time and a fractional time are all unknown');
+$rb = JobResultProcessor::sanitise_host_report(array('reboot_required' => true, 'reboot_required_since' => 'Tuesday'));
+$rb_none = JobResultProcessor::sanitise_host_report(array('reboot_required' => false, 'reboot_required_since' => 1789280500));
+$rb_old = JobResultProcessor::sanitise_host_report(array('reboot_required' => true));
+check($rb['reboot_required_since'] === 'unknown' && $rb_none['reboot_required_since'] === null && $rb_old['reboot_required_since'] === 'unknown',
+	'a pending reboot\'s time is a time or unknown (an older node sends none); with none pending it is null, whatever was sent');
 check($capped['os'] === array('id' => 'ubuntub', 'version' => 'unknown', 'codename' => 'unknown',
 		'release_upgrade' => array('offered' => 'unknown', 'checked_at' => 'unknown')),
 	'os words are lowercased and bounded, versions must be dotted digits, and text is never kept as a version', var_export($capped['os'], true));

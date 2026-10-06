@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.58 - host reports keep reboot_required_since (host_report 1.8): when a pending reboot was
+ *                 first asked for, a time only while one is pending (specs/multi_tenant_docker_hosts.md
+ *                 WP5 item 7)
  * @version 1.57 - process_remove_site_certificate: what the host removed of a left-over certificate, then a
  *                 status check so its certificate list is current
  * @version 1.56 - process_moved_site_reach: the probe on a switch-over's new server, fetched over the domain
@@ -3221,6 +3224,8 @@ HTML;
 			// Processors, for reading the load average against (host_report 1.6).
 			'cpus'                         => self::host_report_count($in['cpus'] ?? null),
 			'reboot_required'              => $reboot,
+			// When it was first asked for; a time only while one is pending.
+			'reboot_required_since'        => ($reboot === true) ? self::host_report_count($in['reboot_required_since'] ?? null) : null,
 			'unattended_upgrades_last_run' => self::host_report_count($in['unattended_upgrades_last_run'] ?? null),
 			'os'                           => self::host_report_os($in['os'] ?? null),
 			'answers'                      => array_key_exists('answers', $in) ? self::host_report_answers($in['answers']) : null,

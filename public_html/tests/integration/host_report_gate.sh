@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,memory,swap,cpus,reboot_required,unattended_upgrades_last_run,os,answers,served_certificates,containers,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -82,6 +82,8 @@ chk "kernel events are three counts or unknown" "$( t=$(jv "$T/real.json" kernel
 chk "memory figures are integers" "$(jv "$T/real.json" memory.used_bytes type)/$(jv "$T/real.json" memory.total_bytes type)" "integer/integer"
 chk "swap figures are integers" "$(jv "$T/real.json" swap.used_bytes type)/$(jv "$T/real.json" swap.total_bytes type)" "integer/integer"
 chk "reboot_required is a boolean" "$(jv "$T/real.json" reboot_required type)" "boolean"
+chk "reboot_required_since is a time when one is pending, null when none is" \
+    "$( r=$(jv "$T/real.json" reboot_required); t=$(jv "$T/real.json" reboot_required_since type); { [ "$r" = true ] && [ "$t" = integer ]; } || { [ "$r" = false ] && [ "$t" = NULL ]; }; echo $? )" "0"
 chk "os names its four parts" "$(jv "$T/real.json" os keys)" "id,version,codename,release_upgrade"
 chk "os version is dotted digits or unknown" "$( v=$(jv "$T/real.json" os.version); [ "$v" = unknown ] || [[ "$v" =~ ^[0-9]+(\.[0-9]+)*$ ]]; echo $? )" "0"
 chk "the offered upgrade is a version, none or unknown" "$( v=$(jv "$T/real.json" os.release_upgrade.offered); [ "$v" = none ] || [ "$v" = unknown ] || [[ "$v" =~ ^[0-9]+(\.[0-9]+)*$ ]]; echo $? )" "0"
@@ -106,6 +108,24 @@ chk "a blank-line cache offers none" "$(printf '\n\n' | release_offered_from)" "
 chk "a new LTS names its version" "$(printf "New release '26.04.1 LTS' available.\nRun 'do-release-upgrade' to upgrade to it.\n" | release_offered_from)" "26.04.1"
 chk "text it does not recognise is unknown, never quoted" "$(printf 'Neue Version verfügbar; $(reboot)\n' | release_offered_from)" "unknown"
 chk "a hostile version keeps only its leading digits" "$(printf "New release '26.04;rm -rf /' available.\n" | release_offered_from)" "26.04"
+
+echo "=== Since when a reboot is pending ==="
+# The emitter alone, pointed at a scratch file: the path is fixed in the script.
+eval "$(sed -n '/^emit_reboot_required_since() {/,/^}/p' "$SCRIPT" | sed "s#/var/run/reboot-required#$T/reboot-required#")"
+CMD_TIMEOUT=5; run() { timeout "$CMD_TIMEOUT" "$@" 2>/dev/null; }
+json_num_or_unknown() { if [[ "$1" =~ ^[0-9]+$ ]]; then printf '%s' "$1"; else printf '"unknown"'; fi; }
+rm -f "$T/reboot-required"
+chk "none pending: null" "$(emit_reboot_required_since)" "null"
+echo "*** System restart required ***" > "$T/reboot-required"
+first="$(emit_reboot_required_since)"
+chk "pending: a time, and it is now" "$( n=$(date +%s); [[ "$first" =~ ^[0-9]+$ ]] && [ "$first" -le "$n" ] && [ "$first" -ge $((n-60)) ]; echo $? )" "0"
+if [ "$(stat -c %W "$T/reboot-required")" != "0" ]; then
+    sleep 1.2
+    echo "*** System restart required ***" > "$T/reboot-required"
+    chk "a later update rewriting it in place keeps the first request's time" "$(emit_reboot_required_since)" "$first"
+else
+    echo "  SKIP: this filesystem keeps no birth time"
+fi
 
 echo "=== An argument and stdin change nothing ==="
 echo "some stdin the script must ignore" | bash "$SCRIPT" /etc/passwd --lines=5000 > "$T/arg.json" 2>/dev/null

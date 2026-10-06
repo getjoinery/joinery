@@ -19,7 +19,11 @@ tune_php_fpm, site_supervisor) and proven on the scratch Nanode; item 3 is
 measured, and the owner set the starter budget at 256 MB (2026-10-06). WP5
 items 2 and 3 built 2026-10-06 (_site_run_spec.sh 1.2, install.sh 2.98,
 rebase_site_container.sh 1.11, migrate_site_to_code_volumes.sh 1.3, agent
-1.58.1; gates site_run_spec, docker_multi_tenant) and run on scratch Linodes. Nothing else is built. Split out of the starter
+1.58.1; gates site_run_spec, docker_multi_tenant) and run on scratch Linodes. WP5 items
+4, 5 and 7, with the walls of items 1 and 6, built 2026-10-06 (multi_tenant_host.sh 1.0,
+host_report.sh 1.8, JobResultProcessor 1.58, node overview 1.42; gate multi_tenant_host)
+and proven on the scratch Linode, reboot included. They are not yet called from install.sh
+(waits on node_outbound_and_transfer WP2). Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -638,6 +642,96 @@ On a multi-tenant host:
    site held stopped stays stopped (WP7). The host report's existing
    `reboot_required` turns amber when a box has gone more than a day without
    taking a pending reboot.
+
+**Items 4, 5 and 7, and the walls of 1 and 6: built 2026-10-06, not yet wired
+into `install.sh`.** All of it is one file, `multi_tenant_host.sh`
+(install_tools, 1.0). `install` puts a root-owned copy at
+`/usr/local/sbin/joinery-site-walls` and starts `joinery-site-walls.service`,
+which loads the walls at every boot, before Docker. It also writes the reboot
+policy. The ruleset is checked by `nft -c` before anything is written.
+`install.sh docker --multi-tenant` gets one call to it once
+`node_outbound_and_transfer` WP2 lands. Until then that session holds
+`install.sh` and `host_housekeeping.sh`, and the installation guide is updated
+with the call.
+
+- **The walls are rules on the site bridges, not one rule per site.** They
+  match `docker0` (a site not yet moved to a network of its own) and
+  `jsnet*` (WP2's site networks, which pin their bridge names). So they hold
+  for every site there is or will be, with nothing to rewrite when a site is
+  added. `br-*` is not matched, since Docker's other networks are not sites.
+- **They sit in two tables beside Docker's own.** `inet joinery_site_walls`
+  covers IPv4 and IPv6 with one rule each, which is item 6. `bridge
+  joinery_site_walls` is the second.
+  - A packet that any table drops is dropped, so nothing depends on Docker's
+    chains or their order. `DOCKER-USER` is not used.
+  - WP3's per-site limits (`node_outbound_and_transfer`) will be a third
+    table, `inet joinery_limits`, rewritten whole on each run. The walls are
+    fixed policy (agreed with that session).
+- **Input: a site's packets to the host.**
+  - Replies pass: the proxy's requests to the site, and the host's reads
+    through a published port.
+  - IPv6 neighbour discovery passes, and so do ports 80 and 443.
+  - Everything else is counted and dropped.
+- **Forward: a site's packets through the host.**
+  - Counted and dropped: traffic to another site's bridge, port 25 anywhere,
+    `169.254.169.254`, and `fd00:a9fe:a9fe::1`.
+- **Bridge forward: frames between two ports of one site bridge.**
+  - Counted and dropped.
+  - This is the wall between two sites on `docker0`. Docker 29 does not
+    load `br_netfilter` (checked on the scratch box), so traffic between two
+    containers on one bridge never reaches the inet family. Only the bridge
+    family sees it.
+  - So item 1's wall holds now, before WP2 gives each site its own network.
+    WP2 adds the network itself, which WP3 and WP4 of that spec need.
+- **Output: the host's own port 25.** Dropped, loopback apart.
+- **Item 7.** `apt-daily-upgrade.timer` runs at 05:30 UTC (up to 30 minutes
+  later, at random), after the backup window. Unattended-upgrades reboots at
+  once when an update asks for it (`Automatic-Reboot-Time "now"`, with users
+  logged in too). The `52joinery-multi-tenant-reboot` drop-in sorts after
+  Ubuntu's own file.
+  - `host_report` 1.8 adds `reboot_required_since`: the birth time of
+    `/var/run/reboot-required`. `/run` is a tmpfs emptied at boot, and each
+    later update rewrites the file in place, so the birth time is the first
+    request.
+  - The plane keeps it (JobResultProcessor 1.58), and the node page (overview
+    1.42) shows when the reboot was asked for. The badge is grey for the first
+    day and amber after.
+  - A report without the time (an older node) reads as overdue, as before.
+- **Gates.**
+  - `multi_tenant_host` (46 checks) pins the ruleset rule by rule, the unit,
+    the reboot policy and its window against the backup window, a refused
+    ruleset installing nothing, and `check`. Eight mutations were caught.
+  - `host_report` (124 checks) pins the new key and the birth time: a
+    mutation reading the change time was caught.
+  - `job_result_processor` (273 checks) pins intake.
+- **On the scratch box (2 GB, remapping, `sitea` and `siteb` on `docker0`),
+  2026-10-06.**
+  - Before the walls: `sitea` reached the host's SSH on its gateway and on
+    the public address, and `siteb`'s web server and PostgreSQL port.
+  - After `multi_tenant_host.sh install`, all of those were blocked.
+  - Still passing: 80 and 443 to the host (refused there, since the box runs
+    no proxy, so the packets got through), the host's page requests to each
+    site, the host's database tunnel, and outbound HTTPS and DNS.
+  - Port 25 and `169.254.169.254` were dropped and counted.
+  - A container on a test network built as WP2 builds them (`jsnet9`,
+    `10.250.9.0/24` and `fd00:250:9::/64`):
+    - it reached the internet over IPv4 and IPv6, and its DNS worked;
+    - it was blocked from the host's IPv4 and IPv6 addresses (gateway and
+      public) except 80 and 443;
+    - it was blocked from `fd00:a9fe:a9fe::1`, from port 25 over IPv6, and
+      from the `docker0` site, in both directions.
+  - Docker's own isolation chains also drop traffic between bridges (ours
+    counted none there), so that rule is a second wall, not the only one.
+  - Port 25 out is also closed by Linode on this account, so the counters, not
+    the timeouts, show our rule at work.
+  - After a reboot: the walls were loaded 12 s into boot, Docker started at
+    25 s, both sites were healthy, and the same probe gave the same result.
+    With the bridge walls loaded before the containers, the two `docker0`
+    sites cannot even resolve each other's hardware address ("no route to
+    host").
+  - Still to run (live verification queue): the `install.sh` call on a fresh
+    box, a real unattended reboot after a kernel update, and the node page's
+    badge.
 
 What this still leaves open is one shared kernel. A kernel exploit escapes any
 container. For sites on a multi-tenant host that is the accepted trade, and it is the same
