@@ -158,7 +158,10 @@ chk "a fresh host is walled before its agent joins" \
 WALLS_FN="$(awk '/^multi_tenant_host_install\(\) \{$/,/^}$/' "$INSTALL")"
 chk "the helper runs multi_tenant_host.sh install beside install.sh" \
     "$(printf '%s\n' "$WALLS_FN" | grep -c 'bash "$SCRIPT_DIR/multi_tenant_host.sh" install')" "1"
-chk "and refuses the host when it fails" "$(printf '%s\n' "$WALLS_FN" | grep -c 'return 1')" "1"
+chk "the helper runs proxy_default_site.sh install beside install.sh, after the walls" \
+    "$(printf '%s\n' "$WALLS_FN" | grep -n -e 'multi_tenant_host.sh" install' -e 'proxy_default_site.sh" install' | cut -d: -f2- | sed -E 's/.*SCRIPT_DIR\/([a-z_]+\.sh).*/\1/' | tr '\n' ' ')" \
+    "multi_tenant_host.sh proxy_default_site.sh "
+chk "and refuses the host when either fails" "$(printf '%s\n' "$WALLS_FN" | grep -c 'return 1')" "2"
 chk "--multi-tenant is an option of install.sh docker" "$(printf '%s\n' "$DOCKER_FN" | grep -c -- '--multi-tenant) MULTI_TENANT=1 ;;')" "1"
 
 echo "=== Nothing writes container ids into a volume from the host ==="

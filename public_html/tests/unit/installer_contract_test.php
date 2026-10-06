@@ -544,7 +544,7 @@ check(is_file($history_dir . '/default_virtualhost-2.05.conf'), 'vhost_history c
 // address — on a shared host, another site's certificate and content. So www
 // has its own :443 host under the same guard, on the same certificate,
 // answering only with a 308 to the apex.
-foreach (array('default_virtualhost.conf' => '2.08', 'default_proxy_vhost.conf' => '1.04') as $tpl => $ver) {
+foreach (array('default_virtualhost.conf' => '2.08', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
     $t = (string)file_get_contents($tools_dir . '/' . $tpl);
     check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
     preg_match_all('/<VirtualHost [^>]*:443>(.*?)<\/VirtualHost>/s', $t, $hosts);
@@ -3333,6 +3333,8 @@ check(substr_count($proxy_tpl, 'RequestHeader append X-Forwarded-For %{REMOTE_AD
 check(strpos($proxy_tpl, 'RequestHeader set X-Forwarded-For') === false, 'and neither sets it');
 check(is_file($history_dir . '/default_proxy_vhost-1.03.conf'),
 	'vhost_history carries proxy 1.03 so a Docker host\'s vhosts adopt before 1.04 is applied');
+check(is_file($history_dir . '/default_proxy_vhost-1.04.conf'),
+	'vhost_history carries proxy 1.04 so a Docker host\'s vhosts adopt before 1.05 is applied');
 
 // The gate exists and is declared, so the runner runs it.
 $hk_gate = PathHelper::getIncludePath('tests/integration/host_housekeeping_gate.sh');

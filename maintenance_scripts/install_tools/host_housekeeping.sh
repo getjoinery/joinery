@@ -4,6 +4,10 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.14 - On a host whose proxy has the default site (proxy_default_site.sh), every run
+#                installs it again, so it stays the default for a name no site claims: Ubuntu's
+#                000-default turned back on is turned off, and a site that loads ahead of it
+#                fails the run (specs/multi_tenant_docker_hosts.md WP8).
 # Version: 1.13 - In a container, the internal proxy Apache trusts is the container's own
 #                gateway, IPv4 and IPv6, read from its routes: a site on a network of its own
 #                (specs/node_outbound_and_transfer.md WP2) is reached from that network's
@@ -860,6 +864,24 @@ if [[ "${IN_CONTAINER}" == 1 ]]; then
         say "wrote ${GAI_CONF}: IPv6 first where a destination has it"
     fi
     rm -f "${CANDIDATE}"
+fi
+
+# --- 9. A shared host's proxy answers an unknown name with its default site ---
+# install.sh docker --multi-tenant gives the host's proxy a default site, so a
+# name no site claims never reaches another customer's site
+# (proxy_default_site.sh, specs/multi_tenant_docker_hosts.md WP8). It stays the
+# default only while it loads first and Ubuntu's 000-default stays off, and a
+# package upgrade or a site added later could change either. So on a host that
+# has it, the install runs again on every run: it rewrites only what differs,
+# reloads Apache only then, and fails when Apache would hand an unknown name to
+# a site.
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${APACHE_DIR}/sites-available/000-joinery-no-site.conf" ]]; then
+    if PDS_OUT="$(bash "${SCRIPT_DIR}/proxy_default_site.sh" install 2>&1)"; then
+        printf '%s\n' "${PDS_OUT}" | grep -v -e '^default site: unchanged' -e ': answers$' | sed 's/^/housekeeping: /'
+    else
+        warn "the proxy's default site: $(printf '%s' "${PDS_OUT}" | tail -3 | tr '\n' ' ')"
+        FAILED=1
+    fi
 fi
 
 if [[ "${FAILED}" == 1 ]]; then

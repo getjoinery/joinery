@@ -1528,6 +1528,25 @@ foreach (array('', 'Gone.example.com', '../x', 'gone.example.com/x', '*.example.
 	check($c_msg !== '', "the envelope refuses '{$bad}'");
 }
 
+// suspended_page: a site's suspended page on its host's proxy, addressed to
+// the host's own agent, and only by a site name and show or clear.
+list($host_sus, $host_sus_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,hold_container,suspended_page'));
+foreach (array('show', 'clear') as $act) {
+	$senv = JobCommandBuilder::build_suspended_page($host_sus_node, 'starter7', $act);
+	check(($senv['primitive'] ?? '') === 'suspended_page' && ($senv['params'] ?? null) === array('action' => $act, 'name' => 'starter7'),
+		"suspended_page {$act} routes with only the action and the site name", json_encode($senv));
+}
+list($host_nosus, $host_nosus_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,hold_container'));
+$s_msg = '';
+try { JobCommandBuilder::build_suspended_page($host_nosus_node, 'starter7', 'show'); } catch (Exception $e) { $s_msg = $e->getMessage(); }
+check(strpos($s_msg, 'suspended_page') !== false, 'a host agent without suspended_page refuses, naming it', $s_msg);
+foreach (array(array('', 'show'), array('Starter7', 'show'), array('../x', 'show'), array('a;reboot', 'show'),
+		array('starter7', 'hide'), array('starter7', ''), array('starter7', 'suspend')) as $bad) {
+	$s_msg = '';
+	try { JobCommandBuilder::build_suspended_page_primitive($bad[0], $bad[1]); } catch (Exception $e) { $s_msg = $e->getMessage(); }
+	check($s_msg !== '', "the envelope refuses '{$bad[0]}' '{$bad[1]}'");
+}
+
 // moved_site_check: the same proof, removing nothing, addressed to the host
 // like the removal. Only for the old machine of a switch-over.
 list($host_mc, $host_mc_node) = jcb_host_with_agent(array(

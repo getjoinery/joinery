@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.99 - build_suspended_page: a site's suspended page on its host's proxy (agent 1.61.0,
+ *                 multi_tenant_docker_hosts WP8)
  * @version 1.98 - install_state_color: a site held stopped is grey (multi_tenant_docker_hosts WP7)
  * @version 1.97 - COPY_KEY_LOOK_MIN_VERSION: the first release whose copy answers the key look path;
  *                 build_hold_container: a switch-over's old container stopped and kept stopped on its host
@@ -1879,6 +1881,31 @@ class JobCommandBuilder {
 			throw new Exception("A container is held with stop or start, not '" . $action . "'.");
 		}
 		return ['primitive' => 'hold_container', 'params' => ['action' => $action, 'name' => $name]];
+	}
+
+	/**
+	 * Show the plain suspended page for one of a host's sites in place of the
+	 * site, or take it down again (multi_tenant_docker_hosts WP8). Addressed to
+	 * the HOST's own agent: the proxy in front of the site is the host's.
+	 */
+	public static function build_suspended_page($host_node, $name, $action) {
+		if (!self::has_primitive($host_node, 'suspended_page')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot show a site's suspended page. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['suspended_page']));
+		}
+		return self::build_suspended_page_primitive($name, $action);
+	}
+
+	public static function build_suspended_page_primitive($name, $action) {
+		$name = (string)$name;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a site name the host will accept.");
+		}
+		if (!in_array($action, ['show', 'clear'], true)) {
+			throw new Exception("A suspended page is shown or cleared, not '" . $action . "'.");
+		}
+		return ['primitive' => 'suspended_page', 'params' => ['action' => $action, 'name' => $name]];
 	}
 
 	/**

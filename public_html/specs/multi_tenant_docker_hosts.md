@@ -26,7 +26,11 @@ and proven on the scratch Linode, including a reboot by hand (an unattended one 
 check); multi_tenant_host.sh 1.1 has reviewer2's fixes; install.sh 3.00 runs them on every
 `docker --multi-tenant` install (gate docker_multi_tenant). WP7 built 2026-10-06 (the plane half: the
 Held stopped install state, ManagedNode 1.42, JobResultProcessor 1.62, node page Hold stopped and Start;
-test hold_stopped_site; reviewer2's B1 and B2 fixed, N1 open: the host report lists 20 sites); its host half shipped with the site copy spec. Nothing else is built. Split out of the starter
+test hold_stopped_site; reviewer2's B1 and B2 fixed, N1 open: the host report lists 20 sites); its host half shipped with the site copy spec. WP8
+built 2026-10-06 (proxy_default_site.sh 1.0, default_proxy_vhost.conf 1.05, suspended_page.sh 1.0,
+install.sh 3.02, remove_account.sh 2.9, host_housekeeping.sh 1.14, agent 1.61.0 suspended_page,
+JobCommandBuilder 1.99; gate proxy_default_site) and proven on the scratch Linode; reviewer2 VALID, N2 open
+(existing proxy vhosts are never rendered again). Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -907,6 +911,96 @@ The proxy template has no error page, and a Docker host's sites are never
 re-rendered after install. So this needs a template change, and a host word
 that switches one domain's proxy site to the suspended page and back.
 
+**Built 2026-10-06.**
+
+- **The default site.** `install_tools/proxy_default_site.sh install` runs on
+  every `install.sh docker --multi-tenant` (install.sh 3.02), after the walls
+  and before the agent joins. A host that cannot take it is refused, like one
+  that cannot be walled.
+  - It installs Apache if missing (a multi-tenant host gets it before its first
+    site) and turns off Ubuntu's `000-default`, which serves `/var/www/html`.
+  - It writes `000-joinery-no-site.conf`, which sorts ahead of every site name.
+    It answers 404 "There is no site at this address" on 80 and 443, with a
+    self-signed certificate for `no-site.invalid`.
+  - A configuration Apache refuses is taken back out, with no reload.
+  - The install fails unless `apache2ctl -S` names the default site as the
+    default on both ports.
+  - It stays the default after the host is installed. host_housekeeping 1.14
+    runs the install again on every run on a host that has it, which turns a
+    returned `000-default` back off and fails the run if a site loads ahead.
+    `install.sh site` refuses a Docker site whose name would load ahead of it
+    or take its file name (0, 0-x, 00-a, 000-a, 000-joinery-no-site). The
+    support bundle carries `proxy_default_site.sh` and `_placeholder_cert.sh`
+    for that run.
+- **The suspended page.** It lives in the site's own vhost, not in the default
+  site. `default_proxy_vhost.conf` 1.05 carries an `<IfFile>` on the mark
+  `/etc/joinery/sites/<site>/suspended` in both the :80 and :443 hosts.
+  - Inside it, every request gets a 503 with a plain "This site is suspended"
+    page (an inline `ErrorDocument`), ahead of the https redirect, and nothing
+    reaches the container.
+  - The page is only set while the mark exists. Without the mark, a stopped
+    container still gets Apache's own 503, so a site held stopped (WP7) is not
+    mistaken for a suspended one.
+  - certbot's challenge rule is included at the top of the vhost
+    (`add_dir_beginning`), so renewals still complete.
+  - Proxy 1.04 is kept in `vhost_history/`.
+- **The word.** Agent 1.61.0 adds `suspended_page` (operate, machine,
+  `action` show|clear, `name` a site slug). It runs
+  `sysadmin_tools/suspended_page.sh`, which ships in the support bundle
+  (SupportBundlePublisher 1.13).
+  - It refuses a site with no enabled proxy vhost, or one whose vhost has no
+    switch. A site rendered before 1.05 has none, and nothing re-renders a
+    Docker host's proxy vhosts, so such a site needs its vhost written again
+    first.
+  - It places or removes the mark, tests the configuration (a refusal puts the
+    mark back), reloads Apache gracefully, and asks the proxy what it answers
+    for the site's name.
+  - It reports `done`, `suspended`, `page` (suspended|site|none) and `reason`.
+    A second show keeps the mark's date and reloads nothing.
+  - `remove_account.sh` 2.9 removes the mark with the site.
+  - The plane builds the job (`JobCommandBuilder::build_suspended_page`).
+    Nothing dispatches it yet: the Suspend action is `hosted_abuse_response`'s,
+    and records who, when and why on the plane.
+- **Tests.**
+  - Gate `proxy_default_site`, 90 checks. It runs a real Apache on spare
+    ports, with two sites rendered from the template in front of two small
+    web servers. Seven mutations are caught: no switch on :443, no mark revert,
+    000-default left on, the default check always passing, no switch check, no
+    reload, and no configuration test. Two more catch the name refusal and the
+    housekeeping failure.
+  - `docker_multi_tenant` pins the call and its refusal.
+  - `installer_contract` pins template 1.05 and history 1.04.
+  - `job_command_builder` pins the envelope, plus the agent's own word test
+    and vocabulary pins.
+- **On the scratch Linode** (Ubuntu 26.04, no Apache before):
+  - The install added Apache and the default site, and `-S` named it the
+    default on both ports.
+  - Two sites were then rendered as install.sh writes them. From dev, over
+    IPv4 and IPv6, the bare address, an unknown name and an unknown TLS name
+    all got the plain page and the `no-site.invalid` certificate. The two
+    sites answered as themselves, sitea.test with its own certificate.
+  - From inside sitea, through the walls, an unknown name through the host got
+    the plain page, and siteb.test answered.
+  - `show sitea` put the 503 page on http, https and IPv6, with siteb
+    untouched. It stayed through `systemctl restart apache2` and through
+    `hold_container stop sitea`.
+  - `clear` while held gave Apache's own 503. `start` brought the site back.
+  - The default site and a site with no vhost were refused.
+  - With Ubuntu's `000-default` turned back on, an unknown name got its "It
+    works" page. One more install turned it off and the plain page was back;
+    the run after that changed nothing.
+  - The plane-to-agent run waits for agent 1.61.0 on a joined host, and is in
+    the live verification queue.
+- **Reviewed by reviewer2, 2026-10-06: VALID**, with no B findings.
+  - N1 fixed: the default-site check ran only at host install. It is now
+    held by housekeeping and by `install.sh site`'s name refusal, as above.
+  - N2 open: nothing renders an existing proxy vhost again. A site rendered
+    before 1.05 has no switch, and a later template change reaches only new
+    sites. No production multi-tenant host exists yet, so every starter site
+    is born on 1.05.
+  - N4 fixed: the script's header named the wrong gate, and a docs sentence
+    narrated history.
+
 ### WP9 — No mail stack in a site container
 
 **Owner decision, 2026-10-05:** a Docker site's mail arrives through a relay,
@@ -1014,7 +1108,7 @@ the start skipped it on the box.
 
 - stop and start one container, with the held-stopped record (WP7)
 - `site-limits` (WP6)
-- switch a domain's proxy site to the suspended page and back (WP8)
+- switch a domain's proxy site to the suspended page and back (WP8; built, `suspended_page`, agent 1.61.0)
 
 ## Testing
 
