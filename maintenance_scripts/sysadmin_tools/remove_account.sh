@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 2.9 - A site's suspended page mark (suspended_page.sh) goes with it
 #VERSION 2.8 - The host's outbound limits stop naming the removed site (joinery-limits unit,
 #              specs/node_outbound_and_transfer.md WP3)
 #VERSION 2.7 - A switch-over's old container held stopped (hold_container.sh) loses its hold mark
@@ -234,8 +235,9 @@ if [ "$IS_DOCKER" = true ]; then
     fi
 
     # hold_container.sh's mark, when the old container of a switch-over was
-    # held stopped until this removal.
-    rm -f "/etc/joinery/sites/${SITE_NAME}/held"
+    # held stopped until this removal; and suspended_page.sh's, so a new site
+    # given this name does not come up suspended.
+    rm -f "/etc/joinery/sites/${SITE_NAME}/held" "/etc/joinery/sites/${SITE_NAME}/suspended"
 
     # How the container was run (_site_run_spec.sh's run_spec_path; spelled
     # here because this script ships alone and sources nothing). The rest of

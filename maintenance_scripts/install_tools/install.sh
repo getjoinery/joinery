@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 3.02 - install.sh docker --multi-tenant installs Apache and the proxy's default site,
+#               which answers a name no site on the host claims with a plain page and a
+#               certificate of its own (proxy_default_site.sh; specs/multi_tenant_docker_hosts.md
+#               WP8). A site's proxy vhost (default_proxy_vhost.conf 1.05) shows a suspended
+#               page while its mark exists (the suspended_page word). On a host with the default
+#               site, a site whose name would take its place is refused.
 #VERSION 3.01 - Every install carries outbound connection limits (outbound_limits.sh, the host's
 #               joinery-limits unit; specs/node_outbound_and_transfer.md WP3): install.sh docker
 #               limits each site on its own network, install.sh server the web server's user,
@@ -2291,10 +2297,11 @@ docker_multi_tenant_existing() {
 }
 
 # The walls between each site and the host, between sites, and to port 25 and
-# the cloud's metadata address; and a reboot after a kernel update
-# (multi_tenant_host.sh; specs/multi_tenant_docker_hosts.md WP5). Run on every
-# --multi-tenant install, so a host set up before the walls existed gains them;
-# a host that cannot be walled is refused before its agent joins.
+# the cloud's metadata address; a reboot after a kernel update
+# (multi_tenant_host.sh; specs/multi_tenant_docker_hosts.md WP5); and the
+# proxy's default site for a name no site claims (proxy_default_site.sh, WP8).
+# Run on every --multi-tenant install, so a host set up before either existed
+# gains it; a host without them is refused before its agent joins.
 multi_tenant_host_install() {
     print_step "Walling sites off from the host and from each other..."
     if ! bash "$SCRIPT_DIR/multi_tenant_host.sh" install; then
@@ -2302,6 +2309,14 @@ multi_tenant_host_install() {
         return 1
     fi
     print_success "Site walls loaded, and kept at every boot; kernel updates reboot the host"
+    # A name no site here claims would otherwise reach whichever site Apache
+    # loads first, with that site's certificate (proxy_default_site.sh, WP8).
+    print_step "Answering names no site here serves with a plain page..."
+    if ! bash "$SCRIPT_DIR/proxy_default_site.sh" install; then
+        print_error "The proxy's default site could not be installed; this host must not take sites until it is, or an unknown name shows another site. Run this again once the error above is fixed."
+        return 1
+    fi
+    print_success "Unknown names get a plain page, never another site"
 }
 
 do_docker_install() {
@@ -4423,6 +4438,16 @@ assert_rebuild_moves_code_forward() {
 # Site creation: Docker mode
 #------------------------------------------------------------------------------
 
+# Would a site of this name displace the proxy's default site? Apache loads
+# sites-enabled in byte order, and the first site on a port answers every name
+# no site claims, so a site named 0, 0-x or 000-a would become that site; one
+# named 000-joinery-no-site would overwrite it (proxy_default_site.sh,
+# specs/multi_tenant_docker_hosts.md WP8).
+site_displaces_default_site() {
+    [ "${1}.conf" = 000-joinery-no-site.conf ] \
+        || [ "$(printf '%s\n' "${1}.conf" 000-joinery-no-site.conf | LC_ALL=C sort | head -1)" != 000-joinery-no-site.conf ]
+}
+
 do_site_docker() {
     local SITENAME="$1"
     local POSTGRES_PASSWORD="$2"
@@ -4431,6 +4456,11 @@ do_site_docker() {
     local ACTIVATE_THEME="${5:-}"
     local NO_SSL="${6:-false}"
     local DB_PORT=$((PORT + 1000))
+
+    if [ -f /etc/apache2/sites-available/000-joinery-no-site.conf ] && site_displaces_default_site "$SITENAME"; then
+        print_error "A site named ${SITENAME} would take the place of this host's default site and answer every name no site here claims. Choose a name that sorts after 000-joinery-no-site: most do, but 0, 00-a and 000-a do not. Nothing was changed."
+        exit 1
+    fi
 
     # Auto-detect server IP if domain is localhost
     if [ "$DOMAIN_NAME" = "localhost" ]; then

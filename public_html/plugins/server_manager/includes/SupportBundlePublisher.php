@@ -40,6 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.13 - carries suspended_page.sh: the suspended_page word, which shows a site's suspended page on
+ *                 its host's proxy; and proxy_default_site.sh with _placeholder_cert.sh, which
+ *                 host_housekeeping.sh runs on a host whose proxy has the default site
  * @version 1.12 - carries hold_container.sh: the hold_container word, which keeps a switch-over's old container
  *                 stopped
  * @version 1.11 - carries remove_site_certificate.sh: the remove_site_certificate word, and remove_account.sh
@@ -147,6 +150,9 @@ class SupportBundlePublisher {
 		'maintenance_scripts/sysadmin_tools/restart_unit.sh',
 		'maintenance_scripts/sysadmin_tools/restart_container.sh',
 		'maintenance_scripts/sysadmin_tools/hold_container.sh',
+		// suspended_page: a site's suspended page on the host's proxy. Sources
+		// nothing.
+		'maintenance_scripts/sysadmin_tools/suspended_page.sh',
 		// reclaim_managed_file on a host: moves a host file aside and runs the
 		// bundled runner --machine --only=host_housekeeping.sh, which reads
 		// _host_files.sh for the files it writes when absent.
@@ -165,6 +171,11 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/host_housekeeping.sh',
 		'maintenance_scripts/install_tools/install_host_converger.sh',
 		'public_html/includes/cloudflare_ip_ranges.txt',
+		// host_housekeeping.sh runs proxy_default_site.sh install on a
+		// multi-tenant host whose proxy has the default site, and that sources
+		// _placeholder_cert.sh for the default site's certificate.
+		'maintenance_scripts/install_tools/proxy_default_site.sh',
+		'maintenance_scripts/install_tools/_placeholder_cert.sh',
 		// The relay build, and the sealer it installs - one binary per
 		// `uname -m` name, which is how provision_relay.sh finds its own.
 		'public_html/plugins/mailbox/provisioning/provision_relay.sh',

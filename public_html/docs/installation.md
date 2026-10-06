@@ -212,6 +212,23 @@ For a host that will carry sites belonging to different people. Docker remaps us
 
 Running `install.sh docker --multi-tenant` again rewrites only what differs, and reloads the walls only when they changed or are missing, so their drop counts are kept. If the walls cannot be installed (nft refuses the rules, say), nothing is written and the install stops.
 
+It then runs `install_tools/proxy_default_site.sh install`, which gives the host's proxy a **default site**. Apache picks a site by the name a request asks for, and a name no site claims goes to the first site loaded for that port. On a shared host, that would be another customer's site and certificate: for a domain pointed at the host by mistake, a site whose certificate has not been issued yet, or the host's bare address. The default site answers every such request on 80 and 443 with a plain "There is no site at this address" page (404). Over TLS it uses a self-signed certificate for `no-site.invalid`, which names no customer.
+
+- The script installs Apache if it is missing and turns off Ubuntu's `000-default`, which would serve `/var/www/html`.
+- It writes `/etc/apache2/sites-available/000-joinery-no-site.conf`, which Apache loads first. Its certificate is at `/etc/ssl/joinery/no-site.invalid`.
+- `install.sh site` refuses a Docker site whose name would load ahead of it or take its file name (`0`, `0-x`, `00-a`, `000-a`, `000-joinery-no-site`).
+- Host housekeeping runs the install again on every run on a host that has the default site. It rewrites only what differs, turns a returned `000-default` back off, and fails the run if a site loads ahead.
+- If Apache refuses the configuration, the script takes it back out and does not reload.
+- It fails unless `apache2ctl -S` names the default site as the default on both ports, and the install stops with it.
+- `proxy_default_site.sh check` says the same and exits 1 if not.
+
+**A suspended site.** Every container site's proxy vhost (`default_proxy_vhost.conf`) carries a switch. While the mark `/etc/joinery/sites/<site>/suspended` exists, the site's name answers on both ports with a plain "This site is suspended" page (503), and nothing reaches the container. The switch is read when Apache loads its configuration. The host agent's `suspended_page` word (`sysadmin_tools/suspended_page.sh show|clear <site>`) places or removes the mark, tests the configuration, reloads Apache, and then asks the proxy what it answers for the site's name.
+
+- A site whose proxy vhost carries no switch is refused.
+- If Apache refuses the configuration, the mark goes back as it was.
+- certbot's challenge rule loads ahead of the switch, so a suspended site's certificate still renews.
+- Removing the site removes its mark.
+
 ### Create a site
 
 ```bash
