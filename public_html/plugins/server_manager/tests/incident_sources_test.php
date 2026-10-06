@@ -19,6 +19,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
+ * @version 1.1 - plane:machine_transfer is registered (its conditions: machine_transfer_test)
  * @version 1.0
  */
 
@@ -60,7 +61,7 @@ section('Every source is registered');
 
 $names = array_keys(IncidentSources::all());
 foreach (array('plane:site_down', 'plane:backup_failed', 'plane:backups_stopped', 'plane:backup_unverified', 'plane:failed_units',
-	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken') as $want) {
+	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer') as $want) {
 	check(in_array($want, $names, true), $want . ' is registered');
 }
 

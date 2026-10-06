@@ -1,0 +1,8 @@
+{
+  "name": "Watch Machine Transfer",
+  "description": "Once a day, reads from the cloud provider how much each machine this management node's nodes run on has sent this month, through every account it holds a credential for (the operator token and each connected customer account), and records it against the machine's allowance. A machine sending far more than its share becomes an incident on the node that speaks for it (Reconcile Incidents opens it and tells the superadmins): a day at more than three times its daily share, a month on pace past its allowance, or the allowance passed. The account's pool alert cannot see one machine running ahead while the others are quiet; this can. Each node's Overview shows its machine's month.",
+  "activate_on_install": true,
+  "default_frequency": "daily",
+  "default_time": "06:00:00",
+  "config_fields": {}
+}

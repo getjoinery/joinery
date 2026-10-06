@@ -1,8 +1,10 @@
 # Outbound limits and transfer on every node
 
-**Status:** Draft, 2026-10-05. Nothing here is built. Every mechanism it
-relies on was tried by hand on two scratch Nanodes on 2026-10-06; the results
-are in § Measured on scratch boxes and the work packages below. Split out of
+**Status:** Draft, 2026-10-05. WP1 built 2026-10-06 (tests
+`machine_transfer`, `outbound_transfer_meter`; running on dev). WP2–WP5 not
+built. Every mechanism they rely on was tried by hand on two scratch Nanodes
+on 2026-10-06; the results are in § Measured on scratch boxes and the work
+packages below. Split out of
 `site_outbound_limits`, which keeps what only a multi-tenant host needs (a
 lane and a monthly share per site among many). This spec covers what every
 install needs, whoever hosts it: managed by us, or self-hosted on the owner's
@@ -82,10 +84,12 @@ A multi-tenant box's sites get their own, lower figures from
 
 Two sources, by who holds the provider account.
 
-**Where we hold it,** from Linode. Linode reports each machine's transfer used this month, the allowance it
-adds to the pool, and its overage (`GET linode/instances/{id}/transfer`).
-`CloudComputeProvider` gains `getInstanceTransfer($instance_id)` beside
-`getTransfer()`, and `LinodeComputeDriver` implements it.
+**Where we hold it,** from the provider. An optional provider capability,
+`CloudMachineTransfer` (beside `CloudInstanceTransfers` and
+`CloudAddressSwap`, so a driver that cannot answers by not implementing it),
+lists an account's machines (`listInstances()`) and reads one machine's month
+(`getInstanceTransfer($instance_id)`). `LinodeComputeDriver` implements it
+with `GET linode/instances` and `GET linode/instances/{id}/transfer`.
 
 What Linode's figure holds (measured 2026-10-06): `used` is in bytes,
 `quota` in whole GB (prorated for a machine created mid-month), and
@@ -98,41 +102,76 @@ figure caught up with traffic within five to ten minutes. The endpoint needs
 only `linodes:read_only`; the account pool needs account access (see B1 in
 § Measured on scratch boxes).
 
-Once a day the plane reads it for every machine it runs on a provider
-account: managed customers' machines, multi-tenant boxes, relays, our own
-nodes. It alerts an operator, naming the node:
+Once a day (**Watch Machine Transfer**, `MachineTransferWatch`) the plane
+reads every account it holds a credential for: the operator token and each
+connected customer account. It matches each account's machines to its nodes
+by address: the node's host (resolved when it is a name), its server's host
+for a site on a shared one, and the addresses the machine reported when its
+agent last joined (a name behind Cloudflare resolves to Cloudflare; on dev
+that is how `dev.getjoinery.com` finds its machine; joins before about
+2026-10-01 carry no reported addresses). A node is on one machine: a match by
+host beats a match by a join, and of equals the newest machine wins, so a site
+that moved is not also matched to the machine it left. A connected account
+whose token cannot be refreshed is a problem in the run's report; this read
+never marks it for re-granting. On a month's first two days a figure no lower
+than last month's is taken as not yet started again and held, so last
+month's total never raises "allowance passed" on the 1st. Each machine a node runs on gets
+one `MachineTransfer` row (`mtr_machine_transfers`) with the month's figure,
+the allowance and the read before; every node on it points at the row. A
+machine no node runs on is not read.
 
-- when a machine has used more than three times its daily allowance since
-  the last read (100 GB for a Nanode);
-- when it has used more than its allowance in proportion to the days gone
-  (more than half by day 10, for instance);
-- again past its full allowance.
+Its conditions are an incident, `plane:machine_transfer`, so they reach an
+operator the way every other condition does (Reconcile Incidents opens it,
+tells the superadmins, clears it when the condition is gone):
+
+- **the allowance passed**: critical;
+- **a day far above its share**: over a window of at least 20 hours, more
+  than three times the machine's daily share (the allowance over the month's
+  days, or the days since it was created; 32 GB a day for a Nanode, so about
+  100 GB) and at least 1 GB;
+- **on pace**: at least three days in, the month projected from the figure
+  so far is past one and a half times the allowance (half the allowance by
+  day 10 is about that).
+
+One node speaks for each machine, the server's own node where it has one,
+else its lowest-numbered site, and the incident names the others: a server of
+twelve sites raises one. A reading more than three days old raises nothing.
 
 This catches the one runaway machine that the account pool alert hides: the
 pool is the sum of every machine's allowance, so one machine can run far past
 its own share before the pool reaches 80%.
 
-The node page shows the machine's month so far against its allowance.
+The node page's Health shows the machine's month against its allowance, with
+when it was read and any read error.
 
 Linode's own transfer alert (a percentage per machine, set through the API)
 emails the account holder and uses a format Linode is retiring. Reading the
 figure directly gives the plane the same fact without parsing email.
 
-**Where we do not,** the site counts what it sends itself. A scheduled task
-reads the site's own byte counter: in a container, its own network
-interfaces (`/proc/net/dev`, which inside a container is the container's);
-on bare metal, the machine's public interfaces. It adds the difference since
-its last run to the month's total, treating a counter that went down as one
-that started again (a restart or a reboot). On a single-site machine the
-site is nearly all of what the machine sends, so this is close to the
-provider's figure.
+**Where we do not,** the site counts what it sends itself
+(`OutboundTransferMeter`, the **Outbound Transfer Count** task on every run).
+It reads the bytes sent on the interfaces that carry the machine's default
+routes, IPv4 and IPv6 (`/proc/net/dev`): inside a container its own
+interface, which carries its replies to the host's proxy; on bare metal the
+public interface, not loopback, a Docker bridge or a tunnel. It adds the
+difference since its last reading to the month's total. A counter that went
+down, or a reading under a different boot or network namespace (a reboot, a
+new container), counts what is on the counter as new. An interface first
+seen under the same boot is a baseline, never a delta: it only just took a
+default route (a DHCP renew, a tunnel briefly taking `::/0`), and its counter
+holds everything since boot. The first reading ever only sets the baseline. On a single-site machine the site is nearly all of
+what the machine sends, so this is close to the provider's figure; it runs a
+few percent above it, because packet headers are in it.
 
-Past a monthly figure the site's admin sets, the admin dashboard shows a
-notice and the site emails its admins once a month, in plain words: how much
-the site has sent, that most providers charge past an allowance, and where
-to check their own provider's. The figure defaults to **1 TB**, the smallest
-allowance among common providers' small plans. The settings page shows the
-month so far beside it.
+Past a monthly figure the site's superadmin sets (`outbound_monthly_notice_gb`,
+Settings → Outbound transfer), the admin header says so to superadmins and one
+email goes to them that month (`site.outbound_transfer_high`), in plain words:
+how much the server has sent, that most providers charge past an allowance,
+and to check their own provider's. The figure defaults to **1 TB**, the
+smallest allowance among common providers' small plans; 0 turns it off. The
+settings page shows the month so far beside it. A site the operator hosts on
+its own account (`hosted_plan_state` trial, subscribed, grace or shutdown)
+stays silent: the plane watches that machine.
 
 ### WP2 — IPv6 for containers, on every Docker host
 
@@ -500,9 +539,9 @@ data" promise is).
 
 | Check | Pass |
 |---|---|
-| a machine uses three times its daily allowance in a day (driver mocked) | the operator alert names the node |
-| a machine passes its proportional allowance, then its full one (driver mocked) | one alert at each |
-| a self-hosted site sends past its monthly notice figure, across a container restart | the month's total survives the restart; the dashboard notice shows and one email goes to its admins |
+| a machine uses three times its daily allowance in a day (driver mocked) | the incident opens on the node that speaks for the machine and names the others (`machine_transfer`) |
+| a machine passes its proportional allowance, then its full one (driver mocked) | on pace, then the allowance passed, critical (`machine_transfer`) |
+| a self-hosted site sends past its monthly notice figure, across a container restart | the month's total survives the restart; the dashboard notice shows and one email goes to its admins (`outbound_transfer_meter`, fake counters; a real restart is in the live verification queue) |
 | a self-hosted admin sets the ceiling to 50 | within five minutes the ceiling is 50 Mbit/s |
 | the site's code writes 0, then 10000, then text, into its ceiling setting | the ceiling stays at the host's 200 Mbit/s each time |
 | the owner runs `sudo joinery-limits ceiling 500`, then `off` | the ceiling is 500 Mbit/s at once, then gone; the settings page shows each |

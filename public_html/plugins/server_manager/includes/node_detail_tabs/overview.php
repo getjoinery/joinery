@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.39 - Health shows the machine's outbound transfer this month against its allowance
+ *                (specs/node_outbound_and_transfer.md WP1)
  * @version 1.38 - a script committed after the last publish (unpublished_file) shows as a warning, not a refusal
  * @version 1.37 - each site container shows its own figures (memory, peak, CPU, traffic, disk,
  *                 processes, an amber count of out-of-memory kills) on its server's page, and a
@@ -848,6 +850,28 @@
 			$gauge('On its server', $pct, $pct === null ? '' : $gauge_class($pct), $big, $site_figures($on_host)
 				. '<div class="small text-muted mt-1">From <a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$host_node->key . '">'
 				. htmlspecialchars((string)$host_node->get('mgn_name')) . '</a>\'s report.</div>');
+		}
+		// The machine's outbound transfer this month, as its provider counts it
+		// (MachineTransferWatch, once a day). Shared by every site on the server.
+		$mtr = (int)$node->get('mgn_mtr_machine_transfer_id') ? new MachineTransfer((int)$node->get('mgn_mtr_machine_transfer_id'), TRUE) : null;
+		if ($mtr && $mtr->key) {
+			$quota = (float)$mtr->get('mtr_quota_gb');
+			$current = (string)$mtr->get('mtr_period') === gmdate('Y-m');
+			$used_gb = $current ? $mtr->used_gb() : 0.0;
+			$pct = ($current && $quota > 0) ? (int)round($used_gb * 100 / $quota) : null;
+			$sharing = (int)(new MultiManagedNode(array('mgn_mtr_machine_transfer_id' => (int)$mtr->key, 'deleted' => false)))->count_all();
+			$line = $current
+				? 'of ' . number_format($quota) . ' GB this month, as ' . htmlspecialchars(ucfirst((string)$mtr->get('mtr_provider')))
+					. ' counts it, on <span title="' . htmlspecialchars($mtr->get('mtr_provider') . ' ' . $mtr->get('mtr_instance_id')) . '">'
+					. htmlspecialchars((string)$mtr->get('mtr_label')) . '</span>'
+					. ($sharing > 1 ? ', shared by the ' . $sharing . ' nodes on it' : '')
+				: 'Not read yet this month.';
+			$line .= '<br>Read ' . htmlspecialchars(LibraryFunctions::time_ago((string)$mtr->get('mtr_read_time'), $session->get_timezone()))
+				. '. Same-data-center IPv6 is free and not counted.';
+			$extra = trim((string)$mtr->get('mtr_error')) !== ''
+				? '<div class="small text-danger mt-1">The last read failed: ' . htmlspecialchars((string)$mtr->get('mtr_error')) . '</div>' : '';
+			$big = $current ? htmlspecialchars(number_format($used_gb, $used_gb >= 100 ? 0 : 1)) . ' GB' : '—';
+			$gauge('Transfer', $pct, $pct === null ? '' : $gauge_class($pct), $big, $line, $extra);
 		}
 		echo '</div>';
 

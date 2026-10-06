@@ -194,6 +194,24 @@ deployment that did not buy a domain this way has. Declaring them `managed`
 is what keeps a local admin from editing a value only the management node can
 know. See [Server Manager § Managed Domain Registration](../plugins/server_manager/docs/overview.md).
 
+The outbound transfer count is one too. `outbound_transfer_month` holds what
+this server has sent this month, as `OutboundTransferMeter` adds it up every
+run of **Outbound Transfer Count** from the machine's own counters: the bytes
+sent on the interfaces carrying the default routes, IPv4 and IPv6, from
+`/proc/net/dev` (in a container, its own interface, which carries visitors'
+downloads through the host's proxy; on bare metal, the machine's public
+interface, so every site on it counts the machine). The reading is keyed by
+the boot and the network namespace, so a reboot or a new container, which
+start the counters again, count what is on them as new; an interface first
+seen under the same boot is a baseline, since its counter holds everything
+since boot. The first reading only sets the baseline. Past `outbound_monthly_notice_gb` (Admin → Settings →
+Outbound transfer, 1000 by default, 0 for never) the admin header says so to
+superadmins (`OutboundTransferNotice`) and one `site.outbound_transfer_high`
+signal a month goes to them, with email on. The settings page shows the month
+so far beside the figure. A site the operator hosts on its own account
+(`hosted_plan_state` trial, subscribed, grace or shutdown) stays silent: the
+management node watches that machine from the provider's figure.
+
 ### Settings a management node writes
 
 A deployment somebody else looks after carries settings its own admins do not

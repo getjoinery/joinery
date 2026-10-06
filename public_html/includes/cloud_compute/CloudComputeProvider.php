@@ -14,6 +14,8 @@
  *   ip     string  first public IPv4, '' until assigned
  *   label  string  provider-side label
  *
+ * @version 1.6 - CloudMachineTransfer: an account's instances and each one's transfer this month
+ *                (specs/node_outbound_and_transfer.md WP1)
  * @version 1.5 - CloudAccountIdentity: the provider's own name for the account a token reaches
  * @version 1.4 - CloudAddressSwap: the optional capability to swap two instances' IPv4 addresses
  *                (specs/site_copy.md WP12)
@@ -235,6 +237,37 @@ interface CloudAddressSwap {
 }
 
 class CloudComputeException extends Exception {}
+
+/**
+ * Optional capability: each machine's outbound transfer this billing month
+ * (specs/node_outbound_and_transfer.md WP1). An account's allowance is pooled,
+ * so the pool alone hides one machine running far past its own share; this
+ * reads the share. The caller asks `instanceof CloudMachineTransfer`.
+ */
+interface CloudMachineTransfer {
+
+	/**
+	 * Every instance on the account, for matching the plane's nodes to them:
+	 *   id, status, label, region   as the normalized instance array
+	 *   ipv4_public  string[]  every public IPv4
+	 *   ipv6         string    the instance's own IPv6, or ''
+	 *   created      string    UTC 'Y-m-d H:i:s'
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function listInstances(): array;
+
+	/**
+	 * The instance's transfer this billing month:
+	 *   used_bytes   int    counted this month (the provider's figure, not the interface's)
+	 *   quota_gb     float  the allowance it adds to the pool this month (prorated
+	 *                       for an instance created during the month)
+	 *   billable_gb  float  past the allowance
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function getInstanceTransfer(string $instance_id): array;
+}
 
 /**
  * Optional capability: the provider's own name for the account a token

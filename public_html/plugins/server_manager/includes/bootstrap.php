@@ -13,6 +13,7 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.7 - plane:machine_transfer (specs/node_outbound_and_transfer.md WP1)
  * @version 1.6 - incident analysis registers its token spend with joinery_ai's CostGuard
  * @version 1.5 - every plane source (backups three ways, failed units, certificates, agent silent,
  *                unmanageable, monitoring broken); the fleet_failed_units, fleet_failing_recipes and
@@ -28,7 +29,7 @@ AdminNotices::register('fleet_incidents', array('IncidentNotice', 'render'));
 AdminMenuCounts::register('server-manager-incidents', array('IncidentNotice', 'menu_count'));
 foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'IncidentSourceBackupsStopped', 'IncidentSourceBackupUnverified',
 	'IncidentSourceFailedUnits', 'IncidentSourceCertificate', 'IncidentSourceAgentSilent', 'IncidentSourceUnmanageable',
-	'IncidentSourceMonitoringBroken') as $incident_source) {
+	'IncidentSourceMonitoringBroken', 'IncidentSourceMachineTransfer') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
 // Incident analysis spends model tokens through joinery_ai; they count toward

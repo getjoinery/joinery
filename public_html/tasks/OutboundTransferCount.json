@@ -1,0 +1,6 @@
+{
+    "name": "Outbound Transfer Count",
+    "description": "Adds up what this server sends each month from the machine's own counters (the interfaces carrying its default routes; a container's own interface, which carries visitors' downloads through the host's proxy). Past the figure set under Outbound transfer in Settings, the admin pages say so and the superadmins get one email that month, because most providers bill outbound transfer past an allowance. Runs often so a restart or reboot, which starts the counters again, loses at most a few minutes of counting.",
+    "activate_on_install": true,
+    "default_frequency": "every_run"
+}

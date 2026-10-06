@@ -6,6 +6,8 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.13 - CloudMachineTransfer: listInstances() (every page) and getInstanceTransfer(); Linode's
+ *                figure leaves out same-data-center IPv6 in both directions (measured 2026-10-06)
  * @version 1.12 - tokenScopes() (the scopes Linode reports for the token, from X-OAuth-Scopes) and
  *                missingScopes(): a token short of a scope is named when it is saved, not at its first refusal
  * @version 1.11 - instanceTypes(): the shared-CPU plans with their memory and disk
@@ -42,7 +44,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
-class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity {
+class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer {
 
 	const API_BASE = 'https://api.linode.com/v4/';
 
@@ -217,6 +219,45 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 		$t = $this->request('GET', 'account/transfer');
 		return array(
 			'used_gb'     => (float)($t['used'] ?? 0),
+			'quota_gb'    => (float)($t['quota'] ?? 0),
+			'billable_gb' => (float)($t['billable'] ?? 0),
+		);
+	}
+
+	// ── Each machine's transfer (CloudMachineTransfer) ───────────────────────
+
+	public function listInstances(): array {
+		$out = array();
+		$page = 1;
+		do {
+			$result = $this->request('GET', 'linode/instances?page_size=500&page=' . $page);
+			foreach ((array)($result['data'] ?? array()) as $instance) {
+				$row = $this->normalize($instance);
+				$row['ipv4_public'] = array();
+				foreach ((array)($instance['ipv4'] ?? array()) as $candidate) {
+					if (!preg_match('/^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/', (string)$candidate)) {
+						$row['ipv4_public'][] = (string)$candidate;
+					}
+				}
+				$row['created'] = self::utc((string)($instance['created'] ?? ''));
+				unset($row['ip']);
+				$out[] = $row;
+			}
+			$pages = (int)($result['pages'] ?? 1);
+			$page++;
+		} while ($page <= $pages);
+		return $out;
+	}
+
+	/**
+	 * Linode's own figure: `used` in bytes, `quota` and `billable` in GB.
+	 * Traffic to another machine in the same data center over IPv6 is not in
+	 * it, either way.
+	 */
+	public function getInstanceTransfer(string $instance_id): array {
+		$t = $this->request('GET', 'linode/instances/' . rawurlencode($instance_id) . '/transfer');
+		return array(
+			'used_bytes'  => (int)($t['used'] ?? 0),
 			'quota_gb'    => (float)($t['quota'] ?? 0),
 			'billable_gb' => (float)($t['billable'] ?? 0),
 		);

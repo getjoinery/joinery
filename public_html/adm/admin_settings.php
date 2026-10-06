@@ -394,6 +394,16 @@
 			'mobile_apps',
 		), array('heading_level' => 'h5'));
 
+		// The figure sits beside what this server has sent so far.
+		$outbound_month = OutboundTransferMeter::month();
+		SettingsFieldRenderer::renderGroups($formwriter, array('outbound'), array(
+			'heading_level' => 'h5',
+			'field_options' => array(OutboundTransferMeter::NOTICE_SETTING => array(
+				'helptext_append' => ' So far this month: ' . OutboundTransferMeter::gb($outbound_month['sent_bytes'])
+					. ' since ' . gmdate('F j', $outbound_month['since']) . '.',
+			)),
+		));
+
 		// A bucket is set up where it is proved before it is stored: the cloud
 		// storage page tests the bucket and key and settles what the provider
 		// decides, and the Backups page does the same for a backup target. A
