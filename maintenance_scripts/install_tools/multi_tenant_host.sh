@@ -6,20 +6,25 @@
 # reboot that follows a kernel update
 # (multi_tenant_docker_hosts WP5 items 1, 4, 5, 6 and 7).
 #
-# Version: 1.0
+# Version: 1.1
 #
 #   multi_tenant_host.sh install   Root. Copies this script to
 #                                  /usr/local/sbin/joinery-site-walls, writes and
 #                                  starts joinery-site-walls.service (loads the
-#                                  walls at every boot, before Docker), and writes
+#                                  walls at every boot, before Docker), makes
+#                                  Docker refuse to start without them, and writes
 #                                  the reboot policy. Run again, it rewrites only
-#                                  what differs.
+#                                  what differs, and reloads the walls only when
+#                                  they changed or are missing, so their drop
+#                                  counts are kept.
 #   multi_tenant_host.sh walls     Root. Loads the walls (the unit's start
 #                                  command). Each table is replaced whole, in one
 #                                  transaction, so a run never leaves half a wall.
+#   multi_tenant_host.sh assert    Exit 1 unless both tables are loaded (Docker's
+#                                  ExecStartPre).
 #   multi_tenant_host.sh ruleset   Prints the walls as nft reads them.
-#   multi_tenant_host.sh check     Says whether the walls are loaded and the
-#                                  reboot policy is in place; exit 1 if not.
+#   multi_tenant_host.sh check     Says whether the walls are loaded and kept, and
+#                                  the reboot policy is in force; exit 1 if not.
 #
 # THE WALLS. A site's container is on a bridge on the host: docker0 for a site
 # on Docker's default network, jsnet<N> for a site on a network of its own
@@ -40,7 +45,8 @@
 #   Through the host (forward). From a site's bridge to another site's bridge;
 #   to port 25 anywhere (machines we create send no mail themselves,
 #   own_mail_server_sending § 4); to the cloud's metadata service
-#   (169.254.169.254, and fd00:a9fe:a9fe::1 on Linode).
+#   (169.254.169.254 everywhere; over IPv6, fd00:a9fe:a9fe::1 on Linode and
+#   fd00:ec2::254 on AWS; another provider's IPv6 address goes in the same set).
 #   Across one bridge (bridge forward). Two containers on one bridge talk to
 #   each other without the host routing anything, so the inet family never
 #   sees it; the bridge family does. Every frame from one port of a site bridge
@@ -50,12 +56,23 @@
 #
 # Each drop counts, in the ruleset (`nft list table inet joinery_site_walls`).
 #
+# NEVER UNWALLED. The unit loads the walls before Docker at boot, and Docker's
+# own start checks they are loaded (a drop-in ExecStartPre running `assert`),
+# so if the walls fail to load, Docker and every site stay down rather than run
+# without them; docker.service shows as failed in the host report. Not
+# Requires=: a required unit's restart restarts its dependents, and install
+# restarts the walls. nftables.service starts with `flush ruleset`, which takes
+# the walls too, so a drop-in loads them again straight after it.
+#
 # THE REBOOT. A kernel update does nothing until the machine reboots, and the
 # shared kernel is the last wall between sites. Automatic updates run at 05:30
 # UTC (up to 30 minutes later, at random), after the fleet backup window
-# (03:00 UTC plus two hours), and reboot at once when an update needs it.
-# Containers come back on their own (--restart unless-stopped), a container
-# stopped by hand stays stopped, and the walls are back before Docker starts.
+# (03:00 UTC plus two hours), and reboot at once when an update needs it. A
+# night missed (the host was off) is not made up at boot: a catch-up run would
+# reboot the host in the day, or in the middle of its own install on a cloud
+# image whose timer stamp is old. Containers come back on their own (--restart
+# unless-stopped), a container stopped by hand stays stopped, and the walls are
+# back before Docker starts.
 
 set -euo pipefail
 
@@ -67,6 +84,8 @@ ROOT="${JOINERY_MT_ROOT:-}"
 UNIT_PATH="${ROOT}/etc/systemd/system/${UNIT_NAME}"
 REBOOT_CONF="${ROOT}/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot"
 TIMER_DROPIN="${ROOT}/etc/systemd/system/apt-daily-upgrade.timer.d/joinery-multi-tenant.conf"
+DOCKER_DROPIN="${ROOT}/etc/systemd/system/docker.service.d/joinery-site-walls.conf"
+NFTABLES_DROPIN="${ROOT}/etc/systemd/system/nftables.service.d/joinery-site-walls.conf"
 INSTALLED="${ROOT}${SELF_INSTALLED}"
 
 say() { printf '%s\n' "$*"; }
@@ -98,7 +117,7 @@ table inet joinery_site_walls {
 		oifname "jsnet*" counter drop
 		tcp dport 25 counter drop
 		ip daddr 169.254.169.254 counter drop
-		ip6 daddr fd00:a9fe:a9fe::1 counter drop
+		ip6 daddr { fd00:a9fe:a9fe::1, fd00:ec2::254 } counter drop
 	}
 	chain output {
 		type filter hook output priority filter; policy accept;
@@ -137,11 +156,35 @@ WantedBy=multi-user.target
 EOF
 }
 
+docker_dropin_text() {
+    cat <<EOF
+# Written by multi_tenant_host.sh: Docker does not start unless the site walls
+# are loaded, so no site ever runs without them.
+[Service]
+ExecStartPre=${SELF_INSTALLED} assert
+EOF
+}
+
+nftables_dropin_text() {
+    cat <<EOF
+# Written by multi_tenant_host.sh: nftables.service flushes the whole ruleset
+# when it starts, reloads (its stock /etc/nftables.conf) and stops, the site
+# walls with it; they are loaded again straight after each.
+[Service]
+ExecStartPost=${SELF_INSTALLED} walls
+ExecReload=${SELF_INSTALLED} walls
+ExecStopPost=${SELF_INSTALLED} walls
+EOF
+}
+
 reboot_conf_text() {
     cat <<'EOF'
-// Written by multi_tenant_host.sh: a multi-tenant host reboots as soon as an
-// update needs it, so a kernel fix takes effect the night it arrives. The run
-// itself is timed by apt-daily-upgrade.timer (05:30 UTC, after the backup window).
+// Written by multi_tenant_host.sh: a multi-tenant host updates every night and
+// reboots as soon as an update needs it, so a kernel fix takes effect the night
+// it arrives. The run itself is timed by apt-daily-upgrade.timer (05:30 UTC,
+// after the backup window). Sorts after 20auto-upgrades, so these win.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
 Unattended-Upgrade::Automatic-Reboot "true";
 Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
 Unattended-Upgrade::Automatic-Reboot-Time "now";
@@ -151,11 +194,13 @@ EOF
 timer_dropin_text() {
     cat <<'EOF'
 # Written by multi_tenant_host.sh: automatic updates, and the reboot that may
-# follow, run after the fleet backup window (03:00 UTC plus two hours).
+# follow, run after the fleet backup window (03:00 UTC plus two hours), and
+# only then: a missed night is not run at the next boot.
 [Timer]
 OnCalendar=
 OnCalendar=*-*-* 05:30 UTC
 RandomizedDelaySec=30m
+Persistent=false
 EOF
 }
 
@@ -174,10 +219,26 @@ write_if_differs() {
     echo changed
 }
 
+walls_loaded() {
+    nft list table inet joinery_site_walls >/dev/null 2>&1 \
+        && nft list table bridge joinery_site_walls >/dev/null 2>&1
+}
+
 do_walls() {
     command -v nft >/dev/null 2>&1 || die "nft is not installed; the walls are not loaded"
     walls_ruleset | nft -f - || die "nft refused the walls; nothing was changed"
     say "site walls loaded"
+}
+
+do_assert() {
+    walls_loaded || die "the site walls are not loaded, so Docker does not start: see systemctl status ${UNIT_NAME}"
+}
+
+# What apt itself will do, after every file in apt.conf.d is read.
+updates_reboot() {
+    local UU="" AR=""
+    eval "$(apt-config shell UU APT::Periodic::Unattended-Upgrade AR Unattended-Upgrade::Automatic-Reboot 2>/dev/null)"
+    [[ "$UU" == "1" && "$AR" == "true" ]]
 }
 
 do_install() {
@@ -185,44 +246,54 @@ do_install() {
     if ! command -v nft >/dev/null 2>&1; then
         apt-get install -y nftables >/dev/null || die "could not install nftables"
     fi
+    if ! command -v unattended-upgrade >/dev/null 2>&1; then
+        apt-get install -y unattended-upgrades >/dev/null || die "could not install unattended-upgrades"
+    fi
     # The ruleset is checked before anything is written: a host never gets a
     # unit whose start would fail.
     walls_ruleset | nft -c -f - || die "nft refused the walls; nothing was changed"
 
-    local changed=""
-    changed+="$(write_if_differs "$INSTALLED" 0755 < "${BASH_SOURCE[0]}")"
-    changed+="$(unit_text | write_if_differs "$UNIT_PATH" 0644)"
-    local timer_changed
+    # The copy carries the ruleset, so a changed ruleset is a changed copy.
+    local walls_changed="" other_changed="" timer_changed
+    walls_changed+="$(write_if_differs "$INSTALLED" 0755 < "${BASH_SOURCE[0]}")"
+    walls_changed+="$(unit_text | write_if_differs "$UNIT_PATH" 0644)"
+    other_changed+="$(docker_dropin_text | write_if_differs "$DOCKER_DROPIN" 0644)"
+    other_changed+="$(nftables_dropin_text | write_if_differs "$NFTABLES_DROPIN" 0644)"
     timer_changed="$(timer_dropin_text | write_if_differs "$TIMER_DROPIN" 0644)"
     reboot_conf_text | write_if_differs "$REBOOT_CONF" 0644 >/dev/null
 
-    if [[ -n "$changed" || -n "$timer_changed" ]]; then
+    if [[ -n "$walls_changed$other_changed$timer_changed" ]]; then
         systemctl daemon-reload
     fi
     systemctl enable "$UNIT_NAME" >/dev/null 2>&1 || die "could not enable ${UNIT_NAME}"
-    # restart, not start: a new ruleset takes effect now, not at the next boot.
-    systemctl restart "$UNIT_NAME" || die "${UNIT_NAME} did not start: see journalctl -u ${UNIT_NAME}"
+    # A reload replaces the tables and zeroes their drop counts, so it happens
+    # only when the walls changed or are not there.
+    if [[ -n "$walls_changed" ]] || ! walls_loaded; then
+        systemctl restart "$UNIT_NAME" || die "${UNIT_NAME} did not start: see journalctl -u ${UNIT_NAME}"
+        say "site walls: loaded now and at every boot (${UNIT_NAME})"
+    else
+        say "site walls: unchanged and loaded (${UNIT_NAME})"
+    fi
     if [[ -n "$timer_changed" ]]; then
         systemctl restart apt-daily-upgrade.timer || die "apt-daily-upgrade.timer did not restart"
     fi
-    say "site walls: loaded now and at every boot (${UNIT_NAME})"
+    updates_reboot || die "apt does not run unattended upgrades with a reboot here, though ${REBOOT_CONF} asks for both: see apt-config dump"
     say "kernel updates: reboot at 05:30-06:00 UTC when an update needs it"
 }
 
 do_check() {
     local bad=0
-    if nft list table inet joinery_site_walls >/dev/null 2>&1 \
-            && nft list table bridge joinery_site_walls >/dev/null 2>&1; then
+    if walls_loaded; then
         say "walls: loaded"
     else
         say "walls: NOT loaded"; bad=1
     fi
-    if systemctl is-enabled "$UNIT_NAME" >/dev/null 2>&1; then
-        say "walls at boot: ${UNIT_NAME} enabled"
+    if systemctl is-enabled "$UNIT_NAME" >/dev/null 2>&1 && [[ -f "$DOCKER_DROPIN" ]]; then
+        say "walls at boot: ${UNIT_NAME} enabled, Docker waits for them"
     else
-        say "walls at boot: ${UNIT_NAME} NOT enabled"; bad=1
+        say "walls at boot: NOT kept (${UNIT_NAME} not enabled, or Docker would start without them)"; bad=1
     fi
-    if [[ -f "$REBOOT_CONF" && -f "$TIMER_DROPIN" ]]; then
+    if [[ -f "$TIMER_DROPIN" ]] && updates_reboot; then
         say "reboot after updates: on"
     else
         say "reboot after updates: NOT set"; bad=1
@@ -233,7 +304,8 @@ do_check() {
 case "${1:-}" in
     install) do_install ;;
     walls)   do_walls ;;
+    assert)  do_assert ;;
     ruleset) walls_ruleset ;;
     check)   do_check ;;
-    *) die "usage: multi_tenant_host.sh install|walls|ruleset|check" ;;
+    *) die "usage: multi_tenant_host.sh install|walls|assert|ruleset|check" ;;
 esac

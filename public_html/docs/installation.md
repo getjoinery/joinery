@@ -196,7 +196,20 @@ Checks for Docker, installs Docker CE if missing, starts the daemon, verifies it
 sudo ./install.sh docker --multi-tenant
 ```
 
-For a host that will carry sites belonging to different people. Docker remaps user ids (`userns-remap`), so root inside a site container is an unprivileged user on the host (uid 100000 and up), and the files in every site's volumes are owned by those ids. It is set before Docker first starts. On a host that already has Docker it is turned on only when Docker holds no container and no volume, since remapping moves Docker's data under `/var/lib/docker/100000.100000` and would leave existing sites behind. A host that already remaps is left as it is. Every site on the host shares the one range, so this protects the host from a site, not one site from another.
+For a host that will carry sites belonging to different people. Docker remaps user ids (`userns-remap`), so root inside a site container is an unprivileged user on the host (uid 100000 and up), and the files in every site's volumes are owned by those ids. It is set before Docker first starts. On a host that already has Docker it is turned on only when Docker holds no container and no volume, since remapping moves Docker's data under `/var/lib/docker/100000.100000` and would leave existing sites behind. A host that already remaps is left as it is. Every site on the host shares the one range, so remapping protects the host from a site, not one site from another. The walls below do that.
+
+`--multi-tenant` then runs `install_tools/multi_tenant_host.sh install`, which adds two things. They are added on a new host and on one that already remaps, and the agent does not join until they are in place.
+
+- **Walls.** Firewall tables named `joinery_site_walls` (nftables, `inet` for IPv4 and IPv6 alike, plus `bridge`) apply to every site's bridge: `docker0`, and each site's own `jsnetN`. Docker's other networks are not walled.
+  - To the host itself, a site reaches only ports 80 and 443. That is enough to load another site's pages through the proxy. Replies pass: the proxy's requests to the site, and the host's reads of the site's database through its published port. The host agent, the host's own database and anything else that listens there are out of reach.
+  - Nothing passes from one site to another, across networks or on the same bridge.
+  - Nothing from a site reaches port 25 anywhere, or the cloud's metadata address (`169.254.169.254`; over IPv6, `fd00:a9fe:a9fe::1` on Linode and `fd00:ec2::254` on AWS).
+  - The host's own outbound port 25 is dropped too.
+
+  `joinery-site-walls.service` loads the walls at every boot, before Docker starts. It runs a root-owned copy of the script at `/usr/local/sbin/joinery-site-walls`. Each load replaces each table whole, in one transaction. Docker itself will not start unless both tables are loaded (a drop-in, `docker.service.d/joinery-site-walls.conf`, runs `joinery-site-walls assert` first). So if the walls fail to load, the sites stay down rather than run without them, and the host report lists `docker.service` as failed. `nftables.service` flushes the whole ruleset when it starts, reloads or stops; a drop-in loads the walls again after each. `multi_tenant_host.sh check` says whether the walls are loaded, whether Docker waits for them, and whether apt will update and reboot, and exits 1 if not. `multi_tenant_host.sh ruleset` prints the rules.
+- **Reboot after kernel updates.** Automatic updates run at 05:30 UTC (spread over 30 minutes), after the backup window. When an update needs a reboot, the host reboots at once, even with someone logged in. A night the host was off is not made up at the next boot, so an update never reboots it in the day or in the middle of its own install. The settings are `/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot` (which also turns on the nightly run) and a drop-in for `apt-daily-upgrade.timer`. The node page shows how long a reboot has been pending: grey for the first day, amber after.
+
+Running `install.sh docker --multi-tenant` again rewrites only what differs, and reloads the walls only when they changed or are missing, so their drop counts are kept. If the walls cannot be installed (nft refuses the rules, say), nothing is written and the install stops.
 
 ### Create a site
 

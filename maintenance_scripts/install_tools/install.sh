@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 3.00 - install.sh docker --multi-tenant walls sites off from the host and from each other
+#               and sets the host to reboot after a kernel update (multi_tenant_host.sh;
+#               specs/multi_tenant_docker_hosts.md WP5), on a fresh host and an existing one.
+#               A host whose walls cannot be installed is refused before its agent joins.
 #VERSION 2.99 - A container site runs on a network of its own, an IPv4 subnet and a private IPv6
 #               /64 (specs/node_outbound_and_transfer.md WP2): recorded in its run spec, created
 #               before anything is stopped, kept by every rebuild. install.sh docker blocks the
@@ -2280,6 +2284,20 @@ docker_multi_tenant_existing() {
     docker_assert_remaps_ids
 }
 
+# The walls between each site and the host, between sites, and to port 25 and
+# the cloud's metadata address; and a reboot after a kernel update
+# (multi_tenant_host.sh; specs/multi_tenant_docker_hosts.md WP5). Run on every
+# --multi-tenant install, so a host set up before the walls existed gains them;
+# a host that cannot be walled is refused before its agent joins.
+multi_tenant_host_install() {
+    print_step "Walling sites off from the host and from each other..."
+    if ! bash "$SCRIPT_DIR/multi_tenant_host.sh" install; then
+        print_error "The site walls could not be installed; this host must not take sites until they are. Run this again once the error above is fixed."
+        return 1
+    fi
+    print_success "Site walls loaded, and kept at every boot; kernel updates reboot the host"
+}
+
 do_docker_install() {
     local MGMT_NODE_URL=""
     local NODE_NAME=""
@@ -2323,6 +2341,7 @@ do_docker_install() {
         fi
         if [ "$MULTI_TENANT" -eq 1 ]; then
             docker_multi_tenant_existing || exit 1
+            multi_tenant_host_install || exit 1
         fi
         # Do NOT exit here: an existing Docker host still needs its
         # housekeeping and its host agent installed and (if a URL was given)
@@ -2402,6 +2421,7 @@ do_docker_install() {
         fi
         if [ "$MULTI_TENANT" -eq 1 ]; then
             docker_assert_remaps_ids || exit 1
+            multi_tenant_host_install || exit 1
         fi
     else
         print_error "Docker installation failed"

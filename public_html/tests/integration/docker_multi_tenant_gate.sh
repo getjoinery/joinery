@@ -147,6 +147,18 @@ existing_at="$(line_of 'docker_multi_tenant_existing || exit 1')"
 hk_at="$(line_of '^        host_housekeeping$')"
 chk "an existing host is checked before its housekeeping and agent" \
     "$([ -n "$existing_at" ] && [ -n "$hk_at" ] && [ "$existing_at" -lt "$hk_at" ] && echo yes)" "yes"
+walls_calls="$(printf '%s\n' "$DOCKER_FN" | grep -n 'multi_tenant_host_install || exit 1' | cut -d: -f1 | tr '\n' ' ')"
+chk "both paths install the site walls, each right after its remap check" \
+    "$walls_calls" "$((existing_at + 1)) $(( $(line_of 'docker_assert_remaps_ids || exit 1') + 1 )) "
+chk "an existing host is walled before its housekeeping and agent" \
+    "$([ "${walls_calls%% *}" -lt "$hk_at" ] && echo yes)" "yes"
+agent_at="$(printf '%s\n' "$DOCKER_FN" | grep -n 'install_docker_host_agent' | tail -1 | cut -d: -f1)"
+chk "a fresh host is walled before its agent joins" \
+    "$([ "$(echo $walls_calls | cut -d' ' -f2)" -lt "$agent_at" ] && echo yes)" "yes"
+WALLS_FN="$(awk '/^multi_tenant_host_install\(\) \{$/,/^}$/' "$INSTALL")"
+chk "the helper runs multi_tenant_host.sh install beside install.sh" \
+    "$(printf '%s\n' "$WALLS_FN" | grep -c 'bash "$SCRIPT_DIR/multi_tenant_host.sh" install')" "1"
+chk "and refuses the host when it fails" "$(printf '%s\n' "$WALLS_FN" | grep -c 'return 1')" "1"
 chk "--multi-tenant is an option of install.sh docker" "$(printf '%s\n' "$DOCKER_FN" | grep -c -- '--multi-tenant) MULTI_TENANT=1 ;;')" "1"
 
 echo "=== Nothing writes container ids into a volume from the host ==="
