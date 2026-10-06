@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.8 - The host's outbound limits stop naming the removed site (joinery-limits unit,
+#              specs/node_outbound_and_transfer.md WP3)
 #VERSION 2.7 - A switch-over's old container held stopped (hold_container.sh) loses its hold mark
 #              with its run spec
 #VERSION 2.5 - The site's own network goes with its container, and a network left alone counts as
@@ -239,6 +241,13 @@ if [ "$IS_DOCKER" = true ]; then
     # here because this script ships alone and sources nothing). The rest of
     # the site's state directory is not this branch's to remove.
     rm -f "/etc/joinery/sites/${SITE_NAME}/run_spec"
+
+    # The host's outbound limits stop naming the site (outbound_limits.sh;
+    # the unit is spelled here for the same reason).
+    if [ -f /etc/systemd/system/joinery-limits.service ]; then
+        systemctl start joinery-limits.service > /dev/null 2>&1 \
+            || echo "WARNING: the outbound limits did not follow the removal; their timer tries again within five minutes"
+    fi
 
     # Clean up build directory if exists
     BUILD_DIR="/root/${SITE_NAME}-build"

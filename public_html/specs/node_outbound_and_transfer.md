@@ -3,7 +3,8 @@
 **Status:** Draft, 2026-10-05. WP1 built 2026-10-06 (tests
 `machine_transfer`, `outbound_transfer_meter`; running on dev). WP2 built
 2026-10-06 (gates `site_run_spec`, `host_housekeeping`; proven live on a
-scratch Linode). WP3–WP5 not built. Every mechanism they rely on was tried by hand on two scratch Nanodes
+scratch Linode). WP3 built 2026-10-06 (gates `outbound_limits`, `host_report`,
+`job_result_processor`; proven live on two scratch Linodes). WP4–WP5 not built. Every mechanism they rely on was tried by hand on two scratch Nanodes
 on 2026-10-06; the results are in § Measured on scratch boxes and the work
 packages below. Split out of
 `site_outbound_limits`, which keeps what only a multi-tenant host needs (a
@@ -322,6 +323,9 @@ stack, which already has IPv6.
 
 ### WP3 — New connections and UDP
 
+**Built 2026-10-06** (gates `outbound_limits` 71, `host_report` 147,
+`job_result_processor` 287; proven live on two scratch Linodes, below).
+
 On every install. These have no setting a site's admin can change: real use
 never meets them, and they stop a hacked plugin turning the server into a
 scanner.
@@ -362,9 +366,10 @@ hook with `oifname "lo"` accepted first, so its lookups to the local resolver
 and its own database are never touched.
 
 Traffic between a site and the host's own proxy (the reply path) is not
-counted. A site reaching another site's public pages, or sending a Joinery
-Direct delivery, goes out through the public address and is counted like any
-other outbound connection.
+counted. A container site reaching the host itself (another site on the same
+host, through the host's proxy) arrives on the host's input path and is not
+counted. A site reaching another machine, or sending a Joinery Direct
+delivery to one, is counted like any other outbound connection.
 
 **All outbound UDP from a site is dropped, over IPv4 and IPv6.** A site's
 only use of UDP is name lookups, and those never leave its network as
@@ -401,6 +406,130 @@ The host report adds each site's drops since the last report. On intake the
 plane flags a site with drops, and `hosted_abuse_response`'s outlier alert
 reads it. Many dropped connections is a stronger signal of scanning than
 bytes sent.
+
+**As built:**
+
+- `install_tools/outbound_limits.sh` 1.0, installed as
+  `/usr/local/sbin/joinery-limits`. `joinery-limits.service` (oneshot, after
+  Docker and the resolver, at boot) and `joinery-limits.timer` (every five
+  minutes) run `apply`. WP5 adds the figures and the site setting to the
+  same unit.
+- The table, `inet joinery_limits`:
+  - a `forward` chain at priority -10 jumps, per site, from `iifname
+    "jsnetN"` to that site's chain;
+  - with `--web-user`, an `output` chain at priority -10 accepts `oifname
+    "lo"`, then jumps from `meta skuid "www-data"`;
+  - each sender's chain drops, in order: UDP; a new connection over 256 open
+    (`ct count`); a new connection over 20 a second, bursts to 100;
+  - every drop counts in a named counter, `drops_site_SITE` or
+    `drops_web_user`.
+- **A site still on Docker's default network is not limited.** It shares
+  `docker0` with every other such site, so nothing per site can name it. Its
+  lookups also leave as its own UDP there: on the default network Docker
+  copies the host's upstream resolvers into the container. `status` and
+  `apply` name each such site and the move script that fixes it;
+  `install.sh site` already gives every new or rebuilt site its own network
+  (WP2).
+- Which sites, and which machine kind:
+  - the sites are read from the run specs: a `bridge=` line is limited, a
+    spec without one is not covered;
+  - a bare-metal machine is recorded in the unit (`apply --web-user`,
+    written by `install.sh server`);
+  - `install` keeps `--web-user` once given.
+- **Kept across runs.**
+  - A run whose table would be unchanged replaces nothing, so the rate's
+    tokens and `ct count`'s connection list are not reset every five minutes.
+  - A run that changes it (a site added, moved or removed) replaces it in
+    one transaction and writes each drop counter's value into the new
+    declaration.
+  - `/run/joinery/outbound_limits.status` holds `since`, when the counters
+    began. It is reset at boot with the table.
+  - A change nft refuses leaves the table before it in force. The status
+    keeps that table's sites and `since`, with `reason=nft_refused`, so its
+    drops are neither hidden nor counted twice. The unit fails, and the next
+    run tries again. `status`, the host report (`reason` beside `on`) and the
+    node page (an amber line under the badge) each say the last change was
+    refused.
+  - `bridge=docker0` in a hand-edited spec is not one site's, and is passed
+    over.
+- **The off switch** exists from WP3, since no limit should arrive on a
+  machine with no way to turn it off:
+  - `--no-outbound-limits` on `install.sh docker` and `install.sh server`;
+  - `joinery-limits on|off`, writing `"enabled"` in the host file
+    (`/etc/joinery/outbound_limits.json`) and keeping its other keys for
+    WP5.
+  - A host file that does not parse leaves the limits on.
+  - `install.sh server`'s part runs in a new `do_server` around
+    `do_server_setup`: the base image build runs and hashes that function, and
+    an image has no host to limit.
+- **The resolver check.** Every `nameserver` in `/etc/resolv.conf` must be in
+  `127.0.0.0/8` or `::1`. Otherwise the run:
+  - removes the table;
+  - writes `state=refused` and `reason=resolver_not_loopback`;
+  - says why and how to fix it;
+  - exits 1, so the unit shows as failed in the host report as well.
+- **Callers.** Each of these starts the unit, never runs the script: one run
+  at a time, and the unit's own flags.
+  - `install.sh site`, once the container starts (`run_spec_limits_refresh`,
+    `_site_run_spec.sh` 1.4);
+  - `move_site_to_own_network.sh` 1.1, after the moves;
+  - `remove_account.sh` 2.8, after the run spec goes.
+
+  A rebase keeps the site's network, so it changes nothing here.
+- **Host report 1.9:**
+  - `outbound_limits` carries `state` (`on`, `off`, `refused` with a
+    `reason` code, `absent`, `none` in a container, `unknown`), `since`, and
+    `web_user_dropped`;
+  - each container carries `outbound_dropped` (packets, or `none` when not
+    limited);
+  - the counters are read with `nft list counters` alone.
+- **Plane** (JobResultProcessor 1.61):
+  - keeps both;
+  - `host_report_container_rates()` stores `since_last.outbound_dropped`
+    (and `outbound_limits.dropped_since_last`): the difference while `since`
+    holds, the count itself when the counters began between the two reports,
+    nothing otherwise. A container restart does not reset them.
+- **Node page** (overview 1.45):
+  - a site with drops since the last report gets an amber count;
+  - a running site the limits do not cover says so;
+  - the Machine tile says whether the limits are on, off, absent, or not in
+    force and why.
+- The alert that reads the drops belongs to `hosted_abuse_response`, not yet
+  built.
+
+**Live, 2026-10-06.** Two Linodes in `us-east` ran 0.8.462 with this work laid
+over it:
+- A, 2 GB: `install.sh docker`, sites s1 and s2;
+- B, a Nanode: `install.sh server`.
+
+Each box was the other's outside world. The connections went to a listener
+that closes at once, as a real server does. A listener that holds every
+connection open fills the 256 cap by itself, because a connection the site
+has closed stays half-open at that far end, and counts.
+
+| What | Result |
+|---|---|
+| Install | `install.sh docker` and `install.sh server` put the limits in force; on A the table named s1 and s2 by `jsnet1` and `jsnet2`; on B, `www-data` (`meta skuid 33`) |
+| Rate, container, one family for 15 s | 389 connections, over IPv4 and over IPv6 alike: the burst of 100 plus 20 a second |
+| Rate, both families at once | 195 + 194 = 389: one limit, not two |
+| A short burst of 150 | all 150 made, in 3.1 s (dropped openings retried) |
+| Rate, bare metal (`www-data`) | 389 and 388 per family; 190 + 198 at once |
+| The host's own connections, and root on bare metal | 500 in 0.2–0.3 s, untouched |
+| `www-data` over loopback (its database, Apache over `::1`) | 500 and 500, no drop |
+| Cap | s1 held exactly 256 open over IPv6; the rest dropped and counted; its pages answered over both families throughout; s2 meanwhile made its own connections, untouched |
+| UDP | DNS to 8.8.8.8 and to Google's IPv6 resolver unanswered from s1 and from `www-data` (refused at once on bare metal: `Operation not permitted`), counted; the sites' own lookups answered; the host's own UDP answered |
+| Visitors to the bare-metal site | 200 of 200 page loads answered; its drop count unchanged |
+| Outside resolver in `/etc/resolv.conf` | the unit failed, the table was removed, the host report said `refused` / `resolver_not_loopback` and named the failed unit, sites read `none`; s1's lookups kept working; the resolver put back, the limits came back with counters from zero |
+| `install.sh docker --no-outbound-limits` on the existing host | the host file says `enabled: false`, the table gone, s1's UDP answered; `joinery-limits on` dropped it again |
+| A site still on Docker's default network | named by `status` with the move command |
+| `remove_account.sh s2` | `DECOMMISSION_VERIFIED`; s2's chain and counter gone |
+| Host report | `outbound_limits` on with its since; each site's `outbound_dropped` (s1 241, s2 12 at that point) |
+| Reboot, both boxes | the limits back at boot, the timer active, counters from zero with a new since; UDP dropped again on both |
+
+Found and fixed on the way: `install.sh` run again without the flag, on a
+machine whose limits were off, kept them off but printed "in force". It now
+reports what the unit did (the `state=` it wrote).
+
 
 ### WP4 — A speed ceiling per site
 
@@ -443,6 +572,15 @@ The ceiling does not keep a machine inside its allowance; WP1 does that by
 telling someone. The ceiling bounds what a runaway costs while they look.
 
 ### WP5 — Where the figures live, and surviving reboots
+
+Already built with WP3:
+- the unit, its timer and the boot run;
+- the host file with its `enabled` key;
+- `--no-outbound-limits` and `joinery-limits on|off|status`;
+- the run from `install.sh site`, the move script and `remove_account.sh`.
+
+WP5 adds the figures, the per-site lines in the run spec, the rest of the
+flags and commands, and the site setting.
 
 **A site can tighten its limits, never loosen them.** Anything the site's
 settings page can write, the site's own code can write too: a plugin running
@@ -620,11 +758,13 @@ data" promise is).
 | a container site uploads to its region's Object Storage bucket | it goes over IPv6 (the bucket was reached at a same-data-center IPv6 address, WP2); Linode's figure for the machine does not grow by the upload (same-data-center IPv6 to another machine was seen not to count; the bucket's own figure is left to see) |
 | an existing site on the default network is moved by `move_site_to_own_network.sh` | it answers throughout over both families, and visitors' addresses still reach it through the proxy (seen live, WP2; `site_run_spec`) |
 | a site's network is missing, different, or its slot is taken by a route | made again as the spec says, refused while a container uses it, passed over (`site_run_spec`) |
-| a site opens 1,000 connections a second to outside addresses, container and bare-metal | it gets about the rate limit; the rest are dropped and counted |
-| the same site opens connections over IPv4 and IPv6 at once | together they get the one rate limit, not twice it |
-| a site holds connections open past the cap | new ones are refused; its pages still answer visitors |
-| a site sends UDP to an outside address, and DNS straight to an outside resolver, over each family | all dropped and counted; its own name lookups still work |
-| the host's `/etc/resolv.conf` is pointed at an outside resolver | the unit refuses to write the rules and says why in the host report |
+| the table for a machine's sites (WP3) | each site on its own network by its bridge, none on `docker0`; the web server's user only on bare metal, loopback first; UDP, then the cap, then the rate; an unchanged run replaces nothing; a replace keeps the counts; an outside resolver refuses and removes the table; the host file turns it off and on (`outbound_limits`) |
+| the host report and the plane read the drops (WP3) | each site's count, none where not limited, unknown without root; the drops between two reports, through a container restart, from zero after a reboot (`host_report`, `job_result_processor`) |
+| a site opens 1,000 connections a second to outside addresses, container and bare-metal | it gets about the rate limit; the rest are dropped and counted (seen live, WP3) |
+| the same site opens connections over IPv4 and IPv6 at once | together they get the one rate limit, not twice it (seen live, WP3) |
+| a site holds connections open past the cap | new ones are refused; its pages still answer visitors (seen live, WP3) |
+| a site sends UDP to an outside address, and DNS straight to an outside resolver, over each family | all dropped and counted; its own name lookups still work (seen live, WP3) |
+| the host's `/etc/resolv.conf` is pointed at an outside resolver | the unit refuses to write the rules and says why in the host report (seen live, WP3) |
 | a visitor downloads a large file from a managed site | it arrives at about 200 Mbit/s |
 | a site's visitor download and its own upload at once | together they stay at the ceiling |
 | a site takes a full backup to B2 | it finishes with no drops |

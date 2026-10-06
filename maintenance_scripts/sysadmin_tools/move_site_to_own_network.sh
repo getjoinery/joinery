@@ -3,6 +3,7 @@
 # default network onto a network of their own, without stopping them
 # (specs/node_outbound_and_transfer.md WP2).
 #
+# Version: 1.1 - The host's outbound limits follow the moved sites (joinery-limits unit, WP3).
 # Version: 1.0
 #
 # Usage:  move_site_to_own_network.sh SITE [SITE...]
@@ -24,6 +25,9 @@
 # A site whose code predates the gateway fix (host_housekeeping.sh 1.13) is
 # refused by name, before anything changes: on the new network it would log
 # every visitor as the gateway. Apply the site's update first.
+#
+# The host's outbound limits (outbound_limits.sh, WP3) take in the moved sites
+# once every move is done.
 #
 # Exit status: 0 when every named site is on its own network, 1 otherwise.
 
@@ -162,4 +166,6 @@ status=0
 for s in "${SITES[@]}"; do
     move_one "$s" || status=1
 done
+# A site on its own network is one the outbound limits can name (WP3).
+run_spec_limits_refresh
 exit "$status"

@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.61 - host reports keep outbound_limits and each container's outbound_dropped (host_report
+ *                 1.11, specs/node_outbound_and_transfer.md WP3); host_report_container_rates() adds the
+ *                 packets each site's outbound limits dropped between two reports
  * @version 1.60 - process_hold_container: what became of a switch-over's old container; host reports keep a
  *                 container's held mark (host_report 1.10)
  * @version 1.58 - host reports keep reboot_required_since (host_report 1.8): when a pending reboot was
@@ -3256,6 +3259,8 @@ HTML;
 			'answers'                      => array_key_exists('answers', $in) ? self::host_report_answers($in['answers']) : null,
 			'served_certificates'          => array_key_exists('served_certificates', $in) ? self::host_report_certificates($in['served_certificates']) : null,
 			'containers'                   => array_key_exists('containers', $in) ? self::host_report_containers($in['containers']) : null,
+			// The machine's outbound connection limits (host_report 1.11).
+			'outbound_limits'              => array_key_exists('outbound_limits', $in) ? self::host_report_outbound_limits($in['outbound_limits']) : null,
 			'generated_at'                 => self::host_report_count($in['generated_at'] ?? null),
 		];
 	}
@@ -3343,6 +3348,12 @@ HTML;
 					'net_tx_bytes' => self::host_report_count($c['net_tx_bytes'] ?? null),
 					'disk_bytes'   => self::host_report_count($c['disk_bytes'] ?? null),
 				];
+				// Packets its outbound limits dropped since they began, or none
+				// where it is not limited (host_report 1.11). Absent from an
+				// older node's report: kept absent.
+				if (array_key_exists('outbound_dropped', $c)) {
+					$entry['outbound_dropped'] = self::host_report_limit($c['outbound_dropped']);
+				}
 				// The plane's own figure (host_report_container_rates), kept
 				// when a stored report is read back: three counts or nothing.
 				$since = (isset($c['since_last']) && is_array($c['since_last'])) ? $c['since_last'] : [];
@@ -3352,10 +3363,43 @@ HTML;
 					'net_tx_bytes'   => self::host_report_count($since['net_tx_bytes'] ?? null),
 				];
 				if (count(array_filter($since, 'is_int')) === 3) {
+					$dropped = $c['since_last']['outbound_dropped'] ?? null;
+					if (is_int($dropped) && $dropped >= 0) { $since['outbound_dropped'] = $dropped; }
 					$entry['since_last'] = $since;
 				}
 			}
 			$out[] = $entry;
+		}
+		return $out;
+	}
+
+	/** The outbound limits a node reports, or unknown. */
+	const HOST_REPORT_LIMITS_STATES = ['on', 'off', 'refused', 'absent', 'none', 'unknown'];
+
+	/**
+	 * The machine's outbound connection limits (host_report 1.11): their state,
+	 * the reason code where they were refused, since when their counters run,
+	 * and the web server's user's drops on a bare-metal machine. The plane's
+	 * own figure, dropped_since_last, is kept when a stored report is read back.
+	 */
+	private static function host_report_outbound_limits($v) {
+		if (!is_array($v)) { return 'unknown'; }
+		$state = (isset($v['state']) && in_array($v['state'], self::HOST_REPORT_LIMITS_STATES, true)) ? $v['state'] : 'unknown';
+		// A reason says why they are not in force (refused), or, beside on, that
+		// the last change was refused and the table before it still holds.
+		$reason = null;
+		if ($state === 'refused' || $state === 'on') {
+			$reason = self::host_report_name(($v['reason'] ?? '') === 'none' ? '' : ($v['reason'] ?? ''));
+			$reason = ($reason !== '') ? $reason : (($state === 'refused') ? 'unknown' : null);
+		}
+		$out = [
+			'state'            => $state,
+			'reason'           => $reason,
+			'since'            => ($state === 'on') ? self::host_report_count($v['since'] ?? null) : null,
+			'web_user_dropped' => self::host_report_limit($v['web_user_dropped'] ?? null),
+		];
+		if (is_int($v['dropped_since_last'] ?? null) && $v['dropped_since_last'] >= 0) {
+			$out['dropped_since_last'] = $v['dropped_since_last'];
 		}
 		return $out;
 	}
@@ -3379,14 +3423,49 @@ HTML;
 	 * measured.
 	 *
 	 * since_last: seconds, cpu_millicores (thousandths of a core, averaged),
-	 * net_tx_bytes (sent in the interval).
+	 * net_tx_bytes (sent in the interval), and outbound_dropped (packets the
+	 * site's outbound limits dropped in it) where that can be said.
+	 *
+	 * The drop counters belong to the machine's limits, not to the container:
+	 * they run from outbound_limits.since, through container restarts, and
+	 * start again from zero when the machine reboots. The same since in both
+	 * reports: the difference. A since between the two: the count is the
+	 * interval. Otherwise nothing. The bare-metal web server's user's drops
+	 * land in outbound_limits.dropped_since_last by the same rule.
 	 */
 	public static function host_report_container_rates($previous, array $report): array {
-		if (!is_array($report['containers'] ?? null) || !is_int($report['generated_at'] ?? null)) {
+		if (!is_int($report['generated_at'] ?? null)) {
 			return $report;
 		}
 		$now = $report['generated_at'];
 		$prev_at = (is_array($previous) && is_int($previous['generated_at'] ?? null)) ? $previous['generated_at'] : null;
+
+		$drops_run = null;
+		$limits_now = is_array($report['outbound_limits'] ?? null) ? $report['outbound_limits'] : null;
+		$limits_prev = (is_array($previous) && is_array($previous['outbound_limits'] ?? null)) ? $previous['outbound_limits'] : null;
+		$since_now = $limits_now['since'] ?? null;
+		if (is_int($since_now) && $prev_at !== null && $prev_at < $now) {
+			if (($limits_prev['since'] ?? null) === $since_now) {
+				$drops_run = 'same';
+			} elseif ($since_now > $prev_at && $since_now <= $now) {
+				$drops_run = 'new';
+			}
+		}
+		$dropped = function ($cur, $was) use ($drops_run) {
+			if (!is_int($cur)) { return null; }
+			if ($drops_run === 'new') { return $cur; }
+			if ($drops_run === 'same' && is_int($was) && $cur >= $was) { return $cur - $was; }
+			return null;
+		};
+		if ($limits_now !== null) {
+			unset($report['outbound_limits']['dropped_since_last']);
+			$d = $dropped($limits_now['web_user_dropped'] ?? null, $limits_prev['web_user_dropped'] ?? null);
+			if ($d !== null) { $report['outbound_limits']['dropped_since_last'] = $d; }
+		}
+
+		if (!is_array($report['containers'] ?? null)) {
+			return $report;
+		}
 		$before = [];
 		if ($prev_at !== null && is_array($previous['containers'] ?? null)) {
 			foreach ($previous['containers'] as $pc) {
@@ -3420,6 +3499,8 @@ HTML;
 				'cpu_millicores' => (int)round($d_usec / $seconds / 1000),
 				'net_tx_bytes'   => $d_tx,
 			];
+			$d = $dropped($c['outbound_dropped'] ?? null, $p['outbound_dropped'] ?? null);
+			if ($d !== null) { $report['containers'][$i]['since_last']['outbound_dropped'] = $d; }
 		}
 		return $report;
 	}

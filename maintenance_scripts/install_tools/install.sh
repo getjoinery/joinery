@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 3.01 - Every install carries outbound connection limits (outbound_limits.sh, the host's
+#               joinery-limits unit; specs/node_outbound_and_transfer.md WP3): install.sh docker
+#               limits each site on its own network, install.sh server the web server's user,
+#               and install.sh site and the move script bring a new site under them.
+#               --no-outbound-limits on docker and server turns them off.
 #VERSION 3.00 - install.sh docker --multi-tenant walls sites off from the host and from each other
 #               and sets the host to reboot after a kernel update (multi_tenant_host.sh;
 #               specs/multi_tenant_docker_hosts.md WP5), on a fresh host and an existing one.
@@ -496,10 +501,11 @@
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
-#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
+#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--no-outbound-limits]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
 #                       --multi-tenant: root in a container is not root on the host (userns-remap); a fresh host only
+#                       --no-outbound-limits: no connection limits and no UDP drop for this host's sites
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
-#   ./install.sh server [--allow-unsupported-os]     # One-time: set up bare-metal server
+#   ./install.sh server [--allow-unsupported-os] [--no-outbound-limits]  # One-time: set up bare-metal server
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
 #   ./install.sh list                                # List existing sites
 #
@@ -2303,11 +2309,13 @@ do_docker_install() {
     local NODE_NAME=""
     local MULTI_TENANT=0
     local arg
+    local NO_OUTBOUND_LIMITS=0
     for arg in "$@"; do
         case "$arg" in
             --management-node=*) MGMT_NODE_URL="${arg#--management-node=}" ;;
             --node-name=*) NODE_NAME="${arg#--node-name=}" ;;
             --multi-tenant) MULTI_TENANT=1 ;;
+            --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
         esac
     done
@@ -2346,6 +2354,7 @@ do_docker_install() {
         # Do NOT exit here: an existing Docker host still needs its
         # housekeeping and its host agent installed and (if a URL was given)
         # joined — the whole point on a keyless machine.
+        outbound_limits_install 0 "$NO_OUTBOUND_LIMITS"
         host_housekeeping
         install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"
         if [ "$QUIET_MODE" -eq 1 ]; then
@@ -2465,6 +2474,7 @@ do_docker_install() {
         print_success "Postgres ports 9080-9099 blocked over IPv6 on $PUBLIC_IFACE6"
     fi
 
+    outbound_limits_install 0 "$NO_OUTBOUND_LIMITS"
     host_housekeeping
     install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"
 
@@ -2473,6 +2483,48 @@ do_docker_install() {
     else
         print_success "Docker installation complete!"
     fi
+}
+
+#==============================================================================
+# OUTBOUND LIMITS - every docker and server install (outbound_limits.sh)
+#==============================================================================
+
+# What each site may open toward the outside: a rate on new connections, a cap
+# on those open at once, and no UDP (specs/node_outbound_and_transfer.md WP3).
+# A machine nobody configured carries them; --no-outbound-limits turns them
+# off. A machine where they cannot be put in force still installs: the unit
+# says why in the host report, and its timer tries again.
+outbound_limits_install() {  # WEB_USER(0|1) OFF(0|1)
+    local args=()
+    [ "$1" -eq 1 ] && args+=(--web-user)
+    [ "$2" -eq 1 ] && args+=(--off)
+    print_step "Setting outbound connection limits..."
+    if bash "$SCRIPT_DIR/outbound_limits.sh" install "${args[@]}"; then
+        # What the unit did, not what was asked: an owner's earlier off stands.
+        if grep -qx 'state=off' /run/joinery/outbound_limits.status 2>/dev/null; then
+            print_success "Outbound limits: off on this machine (sudo joinery-limits on turns them on)"
+        else
+            print_success "Outbound limits: in force, and kept at every boot (sudo joinery-limits status)"
+        fi
+    else
+        print_warning "The outbound limits are not in force - see the lines above (sudo joinery-limits status)"
+    fi
+}
+
+# install.sh server: the bare-metal setup, then the limits on the web server's
+# user. Kept out of do_server_setup, which the joinery-base image build runs
+# and hashes; an image has no host of its own to limit.
+do_server() {
+    local NO_OUTBOUND_LIMITS=0 arg
+    local rest=()
+    for arg in "$@"; do
+        case "$arg" in
+            --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
+            *) rest+=("$arg") ;;
+        esac
+    done
+    do_server_setup "${rest[@]+"${rest[@]}"}"
+    is_docker || outbound_limits_install 1 "$NO_OUTBOUND_LIMITS"
 }
 
 #==============================================================================
@@ -4859,6 +4911,8 @@ EOF
         print_error "Failed to start container"
         exit 1
     fi
+    # The host's outbound limits take in the site's network (WP3).
+    run_spec_limits_refresh
 
     # Create host-side logs directory for reverse proxy (used by manage_domain.sh)
     # Container has its own /var/www/html/{site}/ but host needs logs dir for proxy
@@ -5363,6 +5417,10 @@ show_help() {
     echo "                         (else POSTGRES_PASSWORD=, else auto-generated"
     echo "                         into /root/.joinery_postgres_password)"
     echo ""
+    echo "Docker and Server Command Options:"
+    echo "  --no-outbound-limits   No limits on the connections sites open, and no"
+    echo "                         UDP drop (sudo joinery-limits on turns them on)"
+    echo ""
     echo "Site Command Options:"
     echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
     echo "  Environment (optional): JOINERY_ADMIN_PASSWORD, JOINERY_INSTALL_BUNDLE,"
@@ -5455,7 +5513,7 @@ case "${1:-}" in
         ;;
     server)
         shift
-        do_server_setup "$@"
+        do_server "$@"
         ;;
     site)
         shift
