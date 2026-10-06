@@ -7,17 +7,25 @@
 # timeout: 120
 # covers: [maintenance_scripts/install_tools/outbound_limits.sh, maintenance_scripts/install_tools/_site_run_spec.sh]
 #
-# outbound_limits.sh (node_outbound_and_transfer WP3) writes one nftables table
-# limiting what each site opens toward the outside. Driven unprivileged against
-# a scratch root (JOINERY_LIMITS_ROOT) with nft and systemctl stubbed on PATH:
+# outbound_limits.sh (node_outbound_and_transfer WP3, WP4) writes one nftables
+# table limiting what each site opens toward the outside, and a speed ceiling.
+# Driven unprivileged against a scratch root (JOINERY_LIMITS_ROOT) with nft,
+# systemctl, ip and tc stubbed on PATH:
 # the table names each site on its own network by its bridge and passes over
-# one still on Docker's default network; the web server's user is limited only
+# one without one (Docker's default network, or a bridge that is not a
+# jsnetN); the web server's user is limited only
 # where the machine serves its sites itself, loopback apart; UDP goes first,
 # then the open cap, then the rate; a run that would change nothing replaces
 # nothing, and a replace carries the drop counters over; an outside resolver
 # refuses the limits and removes the table; the host file turns them off and
 # keeps what else it holds; install writes the unit and the timer once, keeps
-# --web-user once given, and starts them. The callers (install.sh docker and
+# --web-user once given, and starts them. The speed ceiling: each site's
+# bridge redirects to an ifb of its own at 200 Mbit/s, and with --web-user each
+# public interface redirects the web server's marked packets to one; a run
+# with it in force changes nothing, one after a rebuilt bridge puts its part
+# back, a site gone takes its filter out before its ifb, tc refusing says so
+# and leaves the connection limits on, and off or an outside resolver takes it
+# all out. The callers (install.sh docker and
 # server, install.sh site, the move script, remove_account.sh) are pinned by
 # reading them.
 
@@ -66,7 +74,53 @@ if [ "\$1" = start ] && [ "\$2" = joinery-limits.service ]; then
 fi
 exit 0
 STUB
-chmod +x "$T/bin/nft" "$T/bin/systemctl"
+# ip and tc: devices are files in $T/links (the sites' bridges and eth0 to
+# begin with), each device's qdiscs lines in $T/tcq/DEV and its filter at our
+# preference in $T/tcf/DEV.DIR, as the real commands print them; every call is
+# logged. A device ip makes carries a generation, which a filter records, so a
+# filter whose device was made again shows it as *, as the kernel's does.
+# STUB_TC_RC fails the class's rate, STUB_TC_DEL_RC a filter's removal, and
+# STUB_NO_ROUTE takes the default routes away.
+mkdir -p "$T/links" "$T/tcq" "$T/tcf"
+for d in jsnet1 jsnet2 jsnet3 jsnet4 eth0; do touch "$T/links/$d"; done
+cat > "$T/bin/ip" <<STUB
+#!/bin/bash
+echo "ip \$*" | tee -a "$T/all_calls" >> "$T/ip_calls"
+case "\$*" in
+    "-4 route show default") [ -n "\${STUB_NO_ROUTE:-}" ] || echo "default via 192.0.2.1 dev eth0 proto static" ;;
+    "-6 route show default") [ -n "\${STUB_NO_ROUTE:-}" ] || echo "default via fe80::1 dev eth0 proto ra metric 1024 pref medium" ;;
+    "link show dev "*) [ -e "$T/links/\$4" ] ;;
+    "link add "*" type ifb") echo "\$RANDOM\$RANDOM" > "$T/links/\$3" ;;
+    "link set dev "*" up") [ -e "$T/links/\$4" ] ;;
+    "link del dev "*) rm -f "$T/links/\$4" "$T/tcq/\$4" "$T/tcf/\$4".* ;;
+    *) exit 2 ;;
+esac
+STUB
+cat > "$T/bin/tc" <<STUB
+#!/bin/bash
+echo "tc \$*" | tee -a "$T/all_calls" >> "$T/tc_calls"
+case "\$1 \$2" in
+    "qdisc show") cat "$T/tcq/\$4" 2>/dev/null ;;
+    "qdisc replace")
+        case "\$*" in
+            *"root handle 1: htb default 10") echo "qdisc htb 1: root refcnt 2 r2q 10 default 0x10" >> "$T/tcq/\$4" ;;
+            *"parent 1:10 handle 10: fq_codel") echo "qdisc fq_codel 10: parent 1:10 limit 10240p" >> "$T/tcq/\$4" ;;
+            *) exit 2 ;;
+        esac ;;
+    "qdisc add") [ -e "$T/links/\$4" ] && [ "\$5" = clsact ] && echo "qdisc clsact ffff: parent ffff:fff1" >> "$T/tcq/\$4" ;;
+    "qdisc del") [ "\$5" = clsact ] && sed -i '/^qdisc clsact /d' "$T/tcq/\$4" 2>/dev/null ;;
+    "class replace") exit \${STUB_TC_RC:-0} ;;
+    "filter show") [ -f "$T/tcf/\$4.\$5" ] || exit 0
+        i=\$(sed -n 's/.*to device \\(.*\\)) stolen\$/\\1/p' "$T/tcf/\$4.\$5")
+        # A filter whose device is gone shows it as *, as iproute2 does.
+        if [ -e "$T/links/\$i" ] && [ "\$(cat "$T/links/\$i")" = "\$(cat "$T/tcf/\$4.\$5.gen" 2>/dev/null)" ]; then cat "$T/tcf/\$4.\$5"; else sed "s/to device \$i)/to device *)/" "$T/tcf/\$4.\$5"; fi ;;
+    "filter del") [ "\${STUB_TC_DEL_RC:-0}" = 0 ] || exit 1; [ -f "$T/tcf/\$4.\$5" ] && rm -f "$T/tcf/\$4.\$5" "$T/tcf/\$4.\$5.gen" ;;
+    "filter add") cat "$T/links/\${@: -1}" > "$T/tcf/\$4.\$5.gen" 2>/dev/null; printf 'filter protocol all pref 47 %s\n\taction order 1: mirred (Egress Redirect to device %s) stolen\n' "\$*" "\${@: -1}" > "$T/tcf/\$4.\$5" ;;
+    *) exit 2 ;;
+esac
+STUB
+printf '#!/bin/bash\necho "modprobe $*" >> "%s/modprobe_calls"\n' "$T" > "$T/bin/modprobe"
+chmod +x "$T/bin/nft" "$T/bin/systemctl" "$T/bin/ip" "$T/bin/tc" "$T/bin/modprobe"
 
 lim() { JOINERY_LIMITS_ROOT="$R" PATH="$T/bin:$PATH" bash "$SCRIPT" "$@"; }
 spec() {  # SITE LINES...
@@ -83,6 +137,7 @@ spec evil spec_version=2 'bridge=jsnet3" accept'
 mkdir -p "$R/etc/joinery/sites/bad name" && echo bridge=jsnet9 > "$R/etc/joinery/sites/bad name/run_spec"
 mkdir -p "$R/etc/joinery/sites/nospec"
 spec plain spec_version=2 bridge=docker0
+spec odd spec_version=2 bridge=br0
 
 echo "=== The table ==="
 RS="$(lim ruleset)"
@@ -92,6 +147,7 @@ chk "each site on its own network is matched by its bridge, on the forward path"
 chk "the forward hook runs at priority -10, accepting by default" "$(grep -c 'type filter hook forward priority -10; policy accept;' <<< "$RS")" "1"
 chk "a site on Docker's default network is not matched (docker0 is shared), even one whose spec names it" "$(grep -c -E 'docker0|site_old|site_plain' <<< "$RS")" "0"
 chk "a bridge value that is not a name is passed over, never written" "$(grep -c -E 'jsnet3|site_evil' <<< "$RS")" "0"
+chk "a bridge that is not a jsnetN (one run_spec gave the site) is passed over" "$(grep -c -E 'br0|site_odd' <<< "$RS")" "0"
 chk "a directory that is not a site name is passed over" "$(grep -c 'jsnet9' <<< "$RS")" "0"
 chk "without --web-user the host's own processes are not limited" "$(grep -c -E 'skuid|hook output' <<< "$RS")" "0"
 chain_s1="$(sed -n '/chain site_s1 {/,/}/p' <<< "$RS")"
@@ -103,8 +159,8 @@ chk "every drop counts in the site's own counter" "$(grep -c 'counter name "drop
 RSW="$(lim ruleset --web-user)"
 out="$(sed -n '/chain output {/,/}/p' <<< "$RSW")"
 chk "--web-user: the web server's user on the output path, loopback accepted first" \
-    "$(grep -o -E 'hook output priority -10|oifname "lo" accept|meta skuid "www-data" jump web_user' <<< "$out" | tr '\n' '|')" \
-    "hook output priority -10|oifname \"lo\" accept|meta skuid \"www-data\" jump web_user|"
+    "$(grep -o -E 'hook output priority -10|oifname "lo" accept|meta skuid "www-data" meta mark set meta mark \| 0x10000000 jump web_user' <<< "$out" | tr '\n' '|')" \
+    "hook output priority -10|oifname \"lo\" accept|meta skuid \"www-data\" meta mark set meta mark | 0x10000000 jump web_user|"
 chk "the web server's user gets the same three drops and its own counter" \
     "$(sed -n '/chain web_user {/,/}/p' <<< "$RSW" | grep -c 'counter name "drops_web_user" drop')" "3"
 
@@ -118,10 +174,10 @@ out="$(lim apply 2>&1)"; rc=$?
 chk "apply: exit 0" "$rc" "0"
 chk "the table is loaded in one transaction" "$(calls '^nft -f -$')" "1"
 chk "the status says on, which sites, and which are not covered" \
-    "$(status_key state)|$(status_key sites)|$(status_key uncovered)|$(status_key web_user)" "on|s1 s2|evil old plain|no"
+    "$(status_key state)|$(status_key sites)|$(status_key uncovered)|$(status_key web_user)" "on|s1 s2|evil odd old plain|no"
 chk "the counters' since is a time" "$([[ "$(status_key since)" =~ ^[0-9]{10}$ ]] && echo yes)" "yes"
-chk "a site still on Docker's default network is named, with the way to move it" \
-    "$(grep -c "not limited, still on Docker's default network: evil old plain (move_site_to_own_network.sh" <<< "$out")" "1"
+chk "a site not on a network of its own is named, with the way to move one off Docker's default network" \
+    "$(grep -c "not limited, not on a jsnetN network of their own: evil odd old plain (move_site_to_own_network.sh moves a site off Docker's default network)" <<< "$out")" "1"
 since1="$(status_key since)"
 out="$(lim apply 2>&1)"
 chk "a run that would change nothing replaces nothing" "$(calls '^nft -f -$')|$out" "1|outbound limits: unchanged"
@@ -156,6 +212,76 @@ chk "nft refusing with no table in force: refused nft_refused, no since" \
 lim apply > /dev/null 2>&1
 chk "the next run that nft takes puts it right" "$(status_key state)|$(status_key sites)" "on|s1 s2 s4"
 
+echo "=== The speed ceiling ==="
+ifbs() { ls "$T/links" | grep '^jifb' | tr '\n' ' '; }
+chk "each site's bridge sends what the site sends to an ifb of its own (clsact ingress, matchall)" \
+    "$(cat "$T/tcf/jsnet1.ingress" "$T/tcf/jsnet2.ingress" "$T/tcf/jsnet4.ingress" | grep -c -E 'filter add dev jsnet([124]) ingress protocol all pref 47 matchall action mirred egress redirect dev jifb\1$')" "3"
+chk "each ifb holds its site to 200 Mbit/s, fq_codel under it" \
+    "$(grep -c -E '^qdisc (htb 1: root|fq_codel 10: parent 1:10) ' "$T/tcq/jifb1")|$(grep -q 'tc class replace dev jifb1 parent 1: classid 1:10 htb rate 200mbit ceil 200mbit quantum 60000' "$T/tc_calls" && echo held)" "2|held"
+chk "an ifb only for each site on its own network, none for the host without --web-user" "$(ifbs)" "jifb1 jifb2 jifb4 "
+chk "status: the ceiling in force" "$(status_key ceiling_mbit)|$(lim status | grep -c 'sending at 200 Mbit/s at most')" "200|1"
+: > "$T/tc_calls"; : > "$T/ip_calls"
+lim apply > /dev/null 2>&1
+chk "a run with it all in force adds and removes nothing, and holds each class to the figure" \
+    "$(grep -c -E '^ip link (add|del)|^tc (qdisc (add|replace)|filter (add|del))' "$T/ip_calls" "$T/tc_calls" | awk -F: '{ s += $2 } END { print s }')|$(grep -c '^tc class replace' "$T/tc_calls")" "0|3"
+rm -f "$T/tcq/jsnet1" "$T/tcf/jsnet1.ingress"; : > "$T/tc_calls"
+lim apply > /dev/null 2>&1
+chk "a bridge made again (a rebuild) gets its part back on the next run, and only it" \
+    "$(grep -c 'redirect dev jifb1$' "$T/tcf/jsnet1.ingress")|$(grep -c -E '^tc (qdisc add|filter add)' "$T/tc_calls")" "1|2"
+rm -f "$R/etc/joinery/sites/s2/run_spec" "$T/links/jsnet2" "$T/tcq/jsnet2" "$T/tcf/jsnet2.ingress"*
+lim apply > /dev/null 2>&1
+chk "a site removed with its network: its ifb is removed" "$(ifbs)|$(grep -c jsnet2 "$R/run/joinery/outbound_limits.shaped")" "jifb1 jifb4 |0"
+: > "$T/all_calls"
+rm -f "$R/etc/joinery/sites/s4/run_spec"
+lim apply > /dev/null 2>&1
+chk "a site no longer limited whose bridge stays: its filter is taken out before its ifb" \
+    "$(grep -n -E '^tc filter del dev jsnet4 ingress pref 47$|^ip link del dev jifb4$' "$T/all_calls" | cut -d: -f2 | tr '\n' '|')|$(ifbs)" \
+    "tc filter del dev jsnet4 ingress pref 47|ip link del dev jifb4||jifb1 "
+spec s4 spec_version=2 bridge=jsnet4
+out="$(lim apply --web-user 2>&1)"
+chk "--web-user: each public interface sends the web server's marked packets to one ifb (clsact egress, fw)" \
+    "$(grep -c 'filter add dev eth0 egress protocol all pref 47 handle 0x10000000/0x10000000 fw action mirred egress redirect dev jifbweb$' "$T/tcf/eth0.egress")|$(grep -c 'eth0 egress jifbweb' "$R/run/joinery/outbound_limits.shaped")" "1|1"
+chk "one ifb for the web server's user, at the same figure" \
+    "$(ifbs)|$(grep -c 'tc class replace dev jifbweb parent 1: classid 1:10 htb rate 200mbit ceil 200mbit' "$T/tc_calls")" "jifb1 jifb4 jifbweb |1"
+lim apply > /dev/null 2>&1
+chk "without it again: the interface's filter and the ifb are gone" "$([ -f "$T/tcf/eth0.egress" ] && echo filter)|$(ifbs)" "|jifb1 jifb4 "
+STUB_TC_RC=1 JOINERY_LIMITS_ROOT="$R" PATH="$T/bin:$PATH" bash "$SCRIPT" apply > /dev/null 2> "$T/err"; rc=$?
+chk "tc refusing the ceiling: exit 1, the connection limits stay on, the status says which part is missing" \
+    "$rc|$(status_key state)|$(status_key reason)|$(status_key ceiling_mbit)|$(grep -c 'tc refused the speed ceiling on jsnet1' "$T/err")" "1|on|ceiling_failed||1"
+chk "status says the ceiling is not in force everywhere" "$(lim status | grep -c 'the speed ceiling is not in force everywhere')" "1"
+lim apply > /dev/null 2>&1
+chk "the next run tc takes puts it right" "$(status_key reason)|$(status_key ceiling_mbit)" "|200"
+rm -f "$T/links/jifb1" "$T/tcq/jifb1"
+out="$(lim apply 2>&1)"
+chk "s1's ifb lost (its filter now shows to device *): the next run makes it again and points the filter at it" \
+    "$(ls "$T/links/jifb1" > /dev/null 2>&1 && echo ifb)|$(grep -c 'to device jifb1) stolen' "$T/tcf/jsnet1.ingress")|$(grep -c 'speed ceiling put in force on jsnet1' <<< "$out")|$(grep -c 'outbound limits: unchanged' <<< "$out")" "ifb|1|1|1"
+rm -f "$T/links/jsnet1"
+lim apply > /dev/null 2>&1; rc=$?
+chk "a bridge missing at the moment of a run (Docker starting) is passed over, not a failure" "$rc|$(status_key reason)" "0|"
+touch "$T/links/jsnet1"; lim apply > /dev/null 2>&1
+chk "and gets its part when it is back" "$(grep -c 'to device jifb1) stolen' "$T/tcf/jsnet1.ingress")" "1"
+rm -f "$R/etc/joinery/sites/s4/run_spec"
+STUB_TC_DEL_RC=1 JOINERY_LIMITS_ROOT="$R" PATH="$T/bin:$PATH" bash "$SCRIPT" apply > /dev/null 2> "$T/err"; rc=$?
+chk "a filter that will not come off keeps its ifb and its line, and the run fails saying so" \
+    "$rc|$(ls "$T/links/jifb4" > /dev/null 2>&1 && echo ifb)|$(grep -c '^jsnet4 ingress jifb4$' "$R/run/joinery/outbound_limits.shaped")|$(grep -c 'would not take the speed ceiling off jsnet4' "$T/err")|$(status_key reason)" \
+    "1|ifb|1|1|ceiling_failed"
+lim apply > /dev/null 2>&1
+chk "the next run takes it off: filter, then ifb, then the clsact left empty" \
+    "$(ls "$T/links/jifb4" 2> /dev/null)|$(grep -c jsnet4 "$R/run/joinery/outbound_limits.shaped")|$(grep -c clsact "$T/tcq/jsnet4")|$(status_key reason)" "|0|0|"
+spec s4 spec_version=2 bridge=jsnet4
+lim apply --web-user > /dev/null 2>&1
+STUB_NO_ROUTE=1 JOINERY_LIMITS_ROOT="$R" PATH="$T/bin:$PATH" bash "$SCRIPT" apply --web-user > /dev/null 2> "$T/err"; rc=$?
+chk "--web-user with no default route: the web server's user's ceiling stays where it was, and the run fails saying why" \
+    "$rc|$(grep -c 'redirect dev jifbweb$' "$T/tcf/eth0.egress")|$(ls "$T/links/jifbweb" > /dev/null 2>&1 && echo ifb)|$(status_key reason)|$(grep -c 'no default route' "$T/err")" \
+    "1|1|ifb|ceiling_failed|1"
+lim apply --web-user > /dev/null 2>&1
+chk "the route back: on, the ceiling in force" "$(status_key reason)|$(status_key ceiling_mbit)" "|200"
+lim apply > /dev/null 2>&1
+chk "without --web-user again: eth0's filter and its now-empty clsact are gone" "$([ -f "$T/tcf/eth0.egress" ] && echo filter)|$(grep -c clsact "$T/tcq/eth0")|$(ls "$T/links/jifbweb" 2> /dev/null)" "|0|"
+
+chk "no command's output is piped into grep -q (it stops at a match, the writer dies of SIGPIPE, and pipefail fails a check that held)" \
+    "$(grep -c -E '\| *grep -q' "$SCRIPT")" "0"
+
 echo "=== The resolver ==="
 for good in "nameserver 127.0.0.53" "nameserver ::1" $'nameserver 127.0.0.1\nnameserver ::1'; do
     printf '%s\n' "$good" > "$R/etc/resolv.conf"
@@ -166,6 +292,7 @@ printf 'nameserver 127.0.0.53\nnameserver 8.8.8.8\n' > "$R/etc/resolv.conf"
 lim apply > /dev/null 2> "$T/err"; rc=$?
 chk "an outside resolver: refused, exit 1, the reason in the status" "$rc|$(status_key state)|$(status_key reason)" "1|refused|resolver_not_loopback"
 chk "and the table is removed, so no site's lookups are dropped" "$([ -f "$T/nft_table" ] && echo present || echo gone)" "gone"
+chk "and the ceiling with it" "$(ls "$T/links" | grep -c '^jifb')|$(ls "$T/tcf" | wc -l)|$([ -f "$R/run/joinery/outbound_limits.shaped" ] && echo listed)" "0|0|"
 chk "the refusal names the resolver and the way out" "$(grep -c "8.8.8.8).*Point /etc/resolv.conf at the local resolver" "$T/err")" "1"
 chk "a refused run has no since" "$(status_key since)" ""
 printf 'nameserver 2001:4860:4860::8888\n' > "$R/etc/resolv.conf"
@@ -182,6 +309,7 @@ echo "=== On and off ==="
 echo '{"ceiling_mbit": 300}' > "$R/etc/joinery/outbound_limits.json"
 lim off > /dev/null 2>&1; rc=$?
 chk "off: exit 0, status off, the table removed" "$rc|$(status_key state)|$([ -f "$T/nft_table" ] && echo present || echo gone)" "0|off|gone"
+chk "off takes the ceiling out too" "$(ls "$T/links" | grep -c '^jifb')|$(ls "$T/tcf" | wc -l)" "0|0"
 chk "off keeps what else the host file holds" "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("enabled"), d.get("ceiling_mbit"))' "$R/etc/joinery/outbound_limits.json")" "False 300"
 lim apply > /dev/null 2>&1
 chk "a later run (the timer) leaves them off" "$(status_key state)|$([ -f "$T/nft_table" ] && echo present || echo gone)" "off|gone"

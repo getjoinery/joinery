@@ -4,7 +4,9 @@
 `machine_transfer`, `outbound_transfer_meter`; running on dev). WP2 built
 2026-10-06 (gates `site_run_spec`, `host_housekeeping`; proven live on a
 scratch Linode). WP3 built 2026-10-06 (gates `outbound_limits`, `host_report`,
-`job_result_processor`; proven live on two scratch Linodes). WP4–WP5 not built. Every mechanism they rely on was tried by hand on two scratch Nanodes
+`job_result_processor`; proven live on two scratch Linodes). WP4 built
+2026-10-06 (gate `outbound_limits`; proven live on two scratch Linodes). WP5
+not built. Every mechanism they rely on was tried by hand on two scratch Nanodes
 on 2026-10-06; the results are in § Measured on scratch boxes and the work
 packages below. Split out of
 `site_outbound_limits`, which keeps what only a multi-tenant host needs (a
@@ -533,26 +535,33 @@ reports what the unit did (the `state=` it wrote).
 
 ### WP4 — A speed ceiling per site
 
-On every install. Docker has no bandwidth flag, so this is traffic shaping
-(`tc`).
+Built 2026-10-06 (gate `outbound_limits` 97; proven live on two scratch
+Linodes, both deleted). On every install. Docker has no bandwidth flag, so
+this is traffic shaping (`tc`), written by the WP3 unit (`outbound_limits.sh`
+1.1) on every run beside its table.
 
 **The ceiling holds everything the site sends.** Visitors reach a container
 site through the host's proxy, so a visitor's Drive download leaves the
 machine from the proxy, not from the site's subnet. Shaping the machine's
 public interface by source subnet would miss it. Instead, for a container
 site the ceiling sits where the site's traffic enters the host: on the site's
-bridge, with the bridge's incoming traffic redirected to an `ifb` device that
-carries an HTB class for the site. Replies to the proxy and connections the
-site opens itself both pass through it, over both families.
+bridge (`jsnetN`), whose incoming traffic is redirected (`clsact` ingress,
+`matchall`, `mirred`) to an `ifb` device of its own (`jifbN`) carrying an HTB
+class at the ceiling with `fq_codel` under it. Replies to the proxy and
+connections the site opens itself both pass through it, over both families.
 
 For a bare-metal site, the web server sends visitors' downloads itself. The
-host marks packets from the web server's user on the output path and shapes
-the mark on the public interface (an HTB root on it, the mark to the site's
-class by an `fw` filter, everything else to an unshaped default class).
-Apache's replies to visitors carry the web server's user too: a connection
-Apache accepts belongs to the worker that took it, and only the opening
-handshake goes out as root (measured: 9,190 packets of a download as
-`www-data`, 2 as root).
+unit's table marks what the web server's user sends (one bit, `0x10000000`,
+or-ed into the mark, after the loopback accept), and each interface a default
+route leaves by, IPv4 or IPv6, redirects marked packets (`clsact` egress,
+`fw` with that mask) to one `ifb`, `jifbweb`, with the same class. So one
+ceiling covers every public interface, and nothing else on the machine passes
+through any of it: the interface's own queue is left as it was. This replaces
+the HTB root on the public interface tried by hand (§ Measured), which put the
+machine's own traffic through an HTB class too. Apache's replies to visitors
+carry the web server's user: a connection Apache accepts belongs to the
+worker that took it, and only the opening handshake goes out as root
+(measured: 9,190 packets of a download as `www-data`, 2 as root).
 
 The host's own reads of a container site's database through its
 loopback-published port also cross the bridge and are shaped. They are an
@@ -563,13 +572,83 @@ tried and works, but a hacked site could send anything from port 5432.
 - The ceiling is **200 Mbit/s**. A multi-tenant box's sites get the box's
   lower figure (`site_outbound_limits`). A site's admin can lower it from the
   settings page; raising it or turning it off takes a command on the server
-  (WP5).
+  (WP5). Until WP5 the figure is the unit's built-in one, and
+  `joinery-limits off` (or `--no-outbound-limits`) turns it off with the
+  rest.
 - The machine's own traffic (the host agent, its updates, the proxy itself)
   is never shaped.
 - Traffic to the site (uploads by visitors) is inbound, free, and not shaped.
 
 The ceiling does not keep a machine inside its allowance; WP1 does that by
 telling someone. The ceiling bounds what a runaway costs while they look.
+
+**As built:**
+
+- Every run checks each part and adds only what is missing: a bridge made
+  again by a rebuild has lost its `clsact`, and the next run (at most five
+  minutes, or at once from `install.sh site`) puts it back. A run with it all
+  in force changes nothing; the class's rate is re-stated in place, which
+  does not touch its queue.
+- What the unit put in force is listed in
+  `/run/joinery/outbound_limits.shaped`. A line no longer wanted (a site
+  removed or moved, `--web-user` gone) is taken out filter first, so nothing
+  is ever redirected to a device that is gone, then its `ifb`. Off, an
+  outside resolver, and nft refusing with no table in force take it all out.
+- Our filters carry preference 47. `ifb` is loaded with `numifbs=0`, so it
+  makes no spare devices.
+- A site's run spec must name a `jsnetN` bridge to be limited at all; any
+  other bridge is passed over like Docker's default network and named by
+  `joinery-limits status`.
+- `tc` refusing any part: the connection limits stay in force, the status
+  says `state=on reason=ceiling_failed` with no `ceiling_mbit`, the unit
+  fails (the host report lists it), and the node page (`overview` 1.48) says
+  the ceiling is not in force for every site. The next run that `tc` takes
+  puts it right.
+- The status file carries `ceiling_mbit`; `joinery-limits status` prints it,
+  and a run says on which device it put a part in force.
+- A device is removed only once no filter is seen sending to it; a filter
+  that will not come off keeps its line, its `ifb` and a failed run until a
+  later run takes it off. A filter whose `ifb` was lost shows
+  `to device *)` (mirred never finds a device again by name) and the next run
+  makes the `ifb` and the filter again. `clsact` left holding nothing in
+  either direction is removed.
+- A bridge missing at the moment of a run (Docker making its networks again
+  as it starts) is passed over without failing; the next run, or the site's
+  own start, puts its part on.
+- With `--web-user` and no default route, the web server's user's ceiling
+  stays on the interfaces it was on and the run fails (`ceiling_failed`)
+  until a route is back, rather than taking it off.
+- Every check reads `tc`'s output whole before matching: piped into
+  `grep -q` under `pipefail`, `tc` died of SIGPIPE at random on a live box
+  and a part in force was refused as a re-add.
+- Reviewed by reviewer1 2026-10-06 (VALID; F1-F6 all made); the fixes and 40
+  runs in a row were proven on real `tc` on a third scratch Nanode (deleted).
+
+**Live, 2026-10-06** (A: `install.sh docker`, sites s1 and s2, a host Apache
+proxy in front of s1; B: `install.sh server`, a 600 MB file served by
+Apache; both release 0.8.462 with this work laid over it; Mbit/s of payload,
+IPv4 / IPv6; HTB counts packet headers, so 200 on the wire reads about 190):
+
+| What | Result |
+|---|---|
+| s1's own upload | 190.3 / 188.6 |
+| visitor download from s1 through the host proxy | 188.4 / 188.5 |
+| straight to the published port | 188.8 / 186.2 |
+| the host A's own upload, meanwhile untouched | 2,206 / 2,017 |
+| s1's pages during its own saturating upload | 23–27 ms, against 19–20 idle |
+| s1 and s2 at once | 190.6 and 188.1, each its own ceiling |
+| a visitor download and s1's own upload at once | 97.1 + 104.9: one ceiling between them |
+| the host's upload while s1 saturates | 2,087, s1 still at 179.5 |
+| visitor download from B's Apache | 190.1 / 187.1 |
+| `www-data`'s own upload on B | 190.9 / 188.5 |
+| root's upload on B | 1,104 / 984; 937 while `www-data` saturated |
+| `www-data` over loopback | 3,841, not shaped |
+| a bridge's `clsact` removed by hand | unshaped (2,524) until the unit ran, then 191.5 |
+| a run with it in force | the same `ifb`, its counters carried on |
+| `joinery-limits off`, then `on` | 2,346 unshaped, then 191.5 |
+| `remove_account.sh s2` | its `ifb` gone, s1's kept |
+| an `ingress` qdisc on s1's bridge (tc refuses `clsact`) | unit failed, `reason=ceiling_failed`, the host report and failed units say so; put right on the next run |
+| both machines rebooted | ceiling back at boot: 191.8 (s1), 191.4 (`www-data`); root 1,191 |
 
 ### WP5 — Where the figures live, and surviving reboots
 
@@ -759,17 +838,18 @@ data" promise is).
 | an existing site on the default network is moved by `move_site_to_own_network.sh` | it answers throughout over both families, and visitors' addresses still reach it through the proxy (seen live, WP2; `site_run_spec`) |
 | a site's network is missing, different, or its slot is taken by a route | made again as the spec says, refused while a container uses it, passed over (`site_run_spec`) |
 | the table for a machine's sites (WP3) | each site on its own network by its bridge, none on `docker0`; the web server's user only on bare metal, loopback first; UDP, then the cap, then the rate; an unchanged run replaces nothing; a replace keeps the counts; an outside resolver refuses and removes the table; the host file turns it off and on (`outbound_limits`) |
+| the speed ceiling for a machine's sites (WP4) | each site's bridge to an `ifb` of its own at 200 Mbit/s; with `--web-user`, each public interface's marked packets to one; a run with it in force changes nothing; a rebuilt bridge gets its part back; a site gone takes its filter out before its `ifb`; tc refusing leaves the connection limits on and says so; off and an outside resolver take it out (`outbound_limits`) |
 | the host report and the plane read the drops (WP3) | each site's count, none where not limited, unknown without root; the drops between two reports, through a container restart, from zero after a reboot (`host_report`, `job_result_processor`) |
 | a site opens 1,000 connections a second to outside addresses, container and bare-metal | it gets about the rate limit; the rest are dropped and counted (seen live, WP3) |
 | the same site opens connections over IPv4 and IPv6 at once | together they get the one rate limit, not twice it (seen live, WP3) |
 | a site holds connections open past the cap | new ones are refused; its pages still answer visitors (seen live, WP3) |
 | a site sends UDP to an outside address, and DNS straight to an outside resolver, over each family | all dropped and counted; its own name lookups still work (seen live, WP3) |
 | the host's `/etc/resolv.conf` is pointed at an outside resolver | the unit refuses to write the rules and says why in the host report (seen live, WP3) |
-| a visitor downloads a large file from a managed site | it arrives at about 200 Mbit/s |
-| a site's visitor download and its own upload at once | together they stay at the ceiling |
+| a visitor downloads a large file from a managed site | it arrives at about 200 Mbit/s (seen live, WP4: 188 through the proxy, 190 from bare metal) |
+| a site's visitor download and its own upload at once | together they stay at the ceiling (seen live, WP4) |
 | a site takes a full backup to B2 | it finishes with no drops |
-| the host reboots, and a site is rebuilt and rebased | its limits and ceiling are back |
-| the host agent under a site's flood | the machine's own traffic is unaffected |
+| the host reboots, and a site is rebuilt and rebased | its limits and ceiling are back (reboot and a bridge made again seen live, WP4; rebuild and rebase in the live verification queue) |
+| the host agent under a site's flood | the machine's own traffic is unaffected (seen live, WP4: the host at 2,087 Mbit/s while a site saturated its ceiling) |
 
 ## Docs to update when this lands
 

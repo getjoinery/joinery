@@ -428,20 +428,29 @@ Every install limits what its sites can open toward the outside, so a hacked plu
 - **New connections:** 20 a second, in bursts of up to 100. An opening over the rate is dropped, and the site's own TCP sends it again a second later, so a short burst is slowed rather than refused. Only a sustained one fails.
 - **Connections open at once:** 256.
 - **UDP:** none. A site's only UDP is its name lookups, and those go to the host's own resolver, never out as the site's packets. Nothing in the platform uses UDP for anything else, and a container keeps time from the host's clock.
+- **Speed:** 200 Mbit/s for everything the site sends, its visitors' downloads included. A month flat out at that speed is about 65 TB, so a runaway site's cost is bounded while someone looks; the transfer watch is what says it is happening.
 
 One limit covers IPv4 and IPv6 together. The limits are a firewall table of their own, `joinery_limits` (nftables, `inet`), beside Docker's rules and the multi-tenant walls. A packet any of them drops is dropped.
 
 - **On a Docker host,** each site is matched by its own network's bridge (`jsnetN`, see [Each site's network](#each-sites-network)), on the traffic the host forwards from it.
 - **On a bare-metal server,** everything the web server's user (`www-data`) opens is limited as one, except over loopback, so the site's own database and the local resolver are never touched.
-- **What is not limited:** connections a site's visitors open to it, the replies to them, and the machine's own traffic (the host agent, updates, the host's proxy).
+- **What is not limited:** connections a site's visitors open to it, and the machine's own traffic (the host agent, updates, the host's proxy). The replies to visitors count toward the site's speed only.
 
-`install.sh docker` and `install.sh server` install the limits as the host's `joinery-limits` unit, run at boot after Docker and every five minutes by `joinery-limits.timer`. `install.sh site`, `move_site_to_own_network.sh` and `remove_account.sh` run the unit when a site arrives, moves or goes. A run that would change nothing leaves the table as it is. A run that changes it replaces it in one step and carries each site's drop count over.
+The speed is held by traffic shaping (`tc`), where the site's traffic is its own:
+
+- **On a Docker host,** a visitor's download leaves the machine from the host's proxy, not from the site's network, so the ceiling sits where the site's traffic enters the host. What arrives on the site's bridge is redirected to a device of its own (`ifb`, `jifbN` for `jsnetN`) that holds it to the ceiling. Replies to the proxy and connections the site opens itself both pass through it. So do the host's own reads of the site's database over its loopback-published port.
+- **On a bare-metal server,** the firewall table marks what the web server's user sends, and each interface a default route leaves by redirects the marked packets to one device, `jifbweb`. Apache's replies to visitors carry its user, so downloads are held to the ceiling. Nothing else on the machine passes through it.
+- **Uploads to a site** are inbound and are never shaped.
+
+Each device queues fairly (`fq_codel`), so a site's pages stay quick while it sends at its ceiling.
+
+`install.sh docker` and `install.sh server` install the limits as the host's `joinery-limits` unit, run at boot after Docker and every five minutes by `joinery-limits.timer`. `install.sh site`, `move_site_to_own_network.sh` and `remove_account.sh` run the unit when a site arrives, moves or goes. A run that would change nothing leaves the table as it is. A run that changes it replaces it in one step and carries each site's drop count over. Every run puts back any part of the speed ceiling that is missing, such as a site's bridge made again by a rebuild, and takes out what belongs to a site that is gone. If `tc` refuses part of the ceiling, the connection limits stay in force, the unit fails, and the node page says the ceiling is not in force for every site.
 
 The limits depend on the host's resolver being a loopback address, which it is on Ubuntu (`systemd-resolved`, `127.0.0.53`). Were `/etc/resolv.conf` to name an outside resolver, Docker would forward a container's lookups from the site's own network, and dropping its UDP would break them. So the unit checks first. It refuses with the reason, removes its table and fails, and the host report shows the limits as not in force.
 
 ```bash
 sudo joinery-limits status   # what is in force, for which sites, and each one's drops
-sudo joinery-limits off      # every limit off on this machine, UDP drop included
+sudo joinery-limits off      # every limit off on this machine, UDP drop and speed ceiling included
 sudo joinery-limits on
 ```
 
