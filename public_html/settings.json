@@ -904,7 +904,7 @@
       "group": "files",
       "label": "Most memory one photo may take to decode (MB)",
       "type": "number",
-      "helptext": "Making a photo's sizes unpacks it into pixels, which costs 4 bytes a pixel and, for a progressive JPEG, up to 10. A photo estimated above this is saved as uploaded but gets no sizes, and the uploader is told. 160 MB admits a 24-megapixel progressive JPEG; a site in a 256 MB container should not go higher."
+      "helptext": "Making a photo's sizes unpacks it into pixels, which costs 4 bytes a pixel and, for a progressive JPEG, up to 10. A photo estimated above this is saved as uploaded but gets no sizes, and the uploader is told. The site never allows more than its own memory can spare (its budget less PostgreSQL's share and 128 MB), so this is a cap: 160 MB admits a 24-megapixel progressive JPEG on a site with 512 MB or more."
     },
     {
       "name": "analytics_retention_days",

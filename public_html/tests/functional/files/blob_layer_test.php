@@ -23,6 +23,7 @@
  *
  * Self-cleaning: every fixture File is permanently deleted in finally.
  *
+ * @version 1.4.1 - a signal-killed decoder child records nothing
  * @version 1.4.0 - one decode, upright variants, untouched original, refusal record
  * @version 1.3.0
  */
@@ -426,8 +427,27 @@ try {
 	$br->clear_variant_refusal();
 	check($fr->resize() === true && !(new FileBlob((int)$br->key, true))->is_variant_refused(), 'refused: clearing the record (what regenerate does) retries and succeeds, clearing it');
 
+	// A decoder child killed by a signal (the kernel's OOM killer) is a
+	// transient refusal: nothing is recorded, so the next attempt decodes.
+	$scratch = harness_scratch_dir('blob_layer');
+	$killer = $scratch . '/djpeg_killed.sh';
+	file_put_contents($killer, "#!/bin/sh\nkill -9 \$\$\n");
+	chmod($killer, 0755);
+	ImageDecoder::set_djpeg_for_tests($killer);
+	$kim = imagecreatetruecolor(3000, 2000);   // 3000 wide: shrunk to 6/8, so the child runs
+	imagesetpixel($kim, 1, 1, imagecolorallocate($kim, random_int(0, 255), random_int(0, 255), random_int(0, 255)));
+	ob_start(); imagejpeg($kim, null, 80); $kjpeg = ob_get_clean(); unset($kim);
+	$ft = $track(File::createFromBytes($kjpeg, 'killed_' . bin2hex(random_bytes(4)) . '.jpg', 'image/jpeg', 1, array()));
+	$bt = $ft->_blob();
+	check($ft->resize() === false, 'killed: resize returns false');
+	check($ft->variant_refusal() === null && !(new FileBlob((int)$bt->key, true))->is_variant_refused(), 'killed: nothing is recorded on the blob');
+	ImageDecoder::set_djpeg_for_tests('');
+	check($ft->resize() === true, 'killed: the next attempt (here, without djpeg) succeeds');
+	ImageDecoder::set_djpeg_for_tests(null);
+
 } finally {
 	ImageDecoder::set_ceiling_for_tests(null);
+	ImageDecoder::set_djpeg_for_tests(null);
 	foreach ($made as $f) {
 		if ($f && $f->key) {
 			$reload = new File((int)$f->key, true);

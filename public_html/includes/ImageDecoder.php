@@ -39,6 +39,16 @@
  *   }
  *   unset($decoded); // frees the pixels
  *
+ * The ceiling is the smaller of the setting and what this machine can spare:
+ * its memory budget (the container's cgroup limit, or the machine's total)
+ * less PostgreSQL's share and the 128 MB the rest of a site needs, the same
+ * split sysadmin_tools/_memory_plan.sh sizes PHP-FPM by. A 256 MB site thus
+ * refuses a 24-megapixel progressive JPEG (about 150 MB) rather than risk the
+ * kernel killing something; a 512 MB site takes it.
+ *
+ * @version 1.1 - the ceiling follows the machine's memory budget (the setting caps it); a decoder
+ *                child killed by a signal is reported as out of memory and left retryable, not
+ *                recorded as damage
  * @version 1.0
  */
 
@@ -47,6 +57,8 @@ class ImageDecodeRefused extends RuntimeException {
 	public $estimate_mb = null;
 	/** @var int|null the ceiling it was measured against */
 	public $ceiling_mb = null;
+	/** @var bool true when the same decode may well succeed later (the site was out of memory just then) */
+	public $transient = false;
 }
 
 class ImageDecoded {
@@ -78,7 +90,16 @@ class ImageDecoder {
 	/** How much of a JPEG's head is scanned for the progressive marker. */
 	const HEADER_SCAN_BYTES = 65536;
 
+	/** The memory plan's split, mirrored from sysadmin_tools/_memory_plan.sh (a test pins them equal). */
+	const PLAN_BASE_MB = 128;
+	const PLAN_SHARED_BUFFERS_MIN_MB = 64;
+	const PLAN_SHARED_BUFFERS_MAX_MB = 2048;
+
+	/** The least a site ever gets, so a shrunk phone photo (about 15 MB) still works on a tiny box. */
+	const ROOM_FLOOR_MB = 24;
+
 	private static $ceiling_override = null;
+	private static $budget_override = null;
 	private static $djpeg_override = null;
 	private static $djpeg_missing_logged = false;
 	/** Test hook: how many times pixels were actually produced this process. */
@@ -89,6 +110,11 @@ class ImageDecoder {
 		self::$ceiling_override = $mb;
 	}
 
+	/** Test hook: the machine's memory budget in MB instead of reading it. Pass null to restore. */
+	public static function set_budget_for_tests($mb) {
+		self::$budget_override = $mb;
+	}
+
 	/** Test hook: a djpeg path, '' to pretend it is absent. Pass null to restore. */
 	public static function set_djpeg_for_tests($path) {
 		self::$djpeg_override = $path;
@@ -96,12 +122,18 @@ class ImageDecoder {
 	}
 
 	/**
-	 * The most memory one decode may take, in MB.
+	 * The most memory one decode may take, in MB: the setting, or less when
+	 * the machine has less to spare (decode_room_mb()).
 	 */
 	public static function ceiling_mb() {
 		if (self::$ceiling_override !== null) {
 			return (int)self::$ceiling_override;
 		}
+		return min(self::setting_mb(), self::decode_room_mb());
+	}
+
+	/** The operator's cap, image_decode_max_mb. */
+	public static function setting_mb() {
 		$mb = 0;
 		if (class_exists('Globalvars')) {
 			try {
@@ -111,6 +143,52 @@ class ImageDecoder {
 			}
 		}
 		return $mb > 0 ? $mb : self::DEFAULT_MAX_MB;
+	}
+
+	/**
+	 * What this machine can spare for one decode: its budget less PostgreSQL's
+	 * share and the base the rest of the site needs, never under ROOM_FLOOR_MB.
+	 * The same split _memory_plan.sh sizes PHP-FPM by, so the decode takes
+	 * what the plan gave PHP and no more.
+	 */
+	public static function decode_room_mb() {
+		$budget = self::memory_budget_mb();
+		if ($budget === null) {
+			return PHP_INT_MAX;
+		}
+		$shared = (int)floor($budget / 5);
+		$shared = max(self::PLAN_SHARED_BUFFERS_MIN_MB, min(self::PLAN_SHARED_BUFFERS_MAX_MB, $shared));
+		return max(self::ROOM_FLOOR_MB, $budget - $shared - self::PLAN_BASE_MB);
+	}
+
+	/**
+	 * The machine's memory budget in MB: a container's cgroup limit when it
+	 * has one below the host's total, otherwise the host's total. Null when
+	 * neither can be read.
+	 */
+	public static function memory_budget_mb() {
+		if (self::$budget_override !== null) {
+			return self::$budget_override === false ? null : (int)self::$budget_override;
+		}
+		$total = null;
+		$meminfo = @file_get_contents('/proc/meminfo');
+		if ($meminfo !== false && preg_match('/^MemTotal:\s+(\d+)/m', $meminfo, $m)) {
+			$total = (int)floor((int)$m[1] / 1024);
+		}
+		foreach (array('/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes') as $path) {
+			if (!is_readable($path)) {
+				continue;
+			}
+			$limit = trim((string)@file_get_contents($path));
+			if (ctype_digit($limit)) {
+				$mb = (int)floor((int)$limit / 1048576);
+				if ($total === null || $mb < $total) {
+					return $mb;
+				}
+			}
+			break;
+		}
+		return $total;
 	}
 
 	/**
@@ -161,9 +239,12 @@ class ImageDecoder {
 		$estimate_mb = (int)ceil($bytes / 1048576);
 		$ceiling = self::ceiling_mb();
 		if ($estimate_mb > $ceiling) {
+			$bound = (self::$ceiling_override === null && $ceiling < self::setting_mb())
+				? 'this site\'s memory allows ' . $ceiling . ' MB'
+				: 'the limit is ' . $ceiling . ' MB';
 			$e = new ImageDecodeRefused(sprintf(
-				'This photo is too large to make sizes from (about %d MB to decode%s, the limit is %d MB). It was saved as uploaded.',
-				$estimate_mb, $info['progressive'] ? ', progressive JPEG' : '', $ceiling));
+				'This photo is too large to make sizes from (about %d MB to decode%s, %s). It was saved as uploaded.',
+				$estimate_mb, $info['progressive'] ? ', progressive JPEG' : '', $bound));
 			$e->estimate_mb = $estimate_mb;
 			$e->ceiling_mb = $ceiling;
 			throw $e;
@@ -362,11 +443,24 @@ class ImageDecoder {
 			fclose($pipes[2]);
 			proc_close($proc);
 			$exit = (int)$status['exitcode'];
+			$why = trim($stderr);
+			if (!empty($status['signaled'])) {
+				// Killed, not failed: the kernel's OOM killer, or the limit above
+				// (which glibc may report as a signal). The photo is fine and the
+				// site may well have the memory next time, so this is not recorded.
+				error_log('ImageDecoder: djpeg killed by signal ' . (int)$status['termsig'] . ' on ' . basename($path) . ($why !== '' ? ': ' . $why : ''));
+				$e = new ImageDecodeRefused('The site ran out of memory while making sizes for this photo; it will be tried again later.');
+				$e->transient = true;
+				throw $e;
+			}
 			if ($exit !== 0 || !is_file($tmp) || filesize($tmp) < 54) {
-				$why = trim($stderr);
 				error_log('ImageDecoder: djpeg exit ' . $exit . ' on ' . basename($path) . ($why !== '' ? ': ' . $why : ''));
-				throw new ImageDecodeRefused('The image could not be decoded' . ($exit === 137 || stripos($why, 'memory') !== false
-					? ' within ' . $ceiling_mb . ' MB' : '; the file may be damaged') . '.');
+				if (stripos($why, 'memory') !== false) {
+					$e = new ImageDecodeRefused('This photo needs more than ' . $ceiling_mb . ' MB to decode, more than this site can spare. It was saved as uploaded.');
+					$e->ceiling_mb = $ceiling_mb;
+					throw $e;
+				}
+				throw new ImageDecodeRefused('The image could not be decoded; the file may be damaged.');
 			}
 			$image = @imagecreatefrombmp($tmp);
 			if (!$image) {
