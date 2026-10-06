@@ -1395,6 +1395,53 @@ try { JobCommandBuilder::build_decommission_node($decom_v2); } catch (Exception 
 check(strpos($inflight_msg, 'already has a site removal') !== false,
 	'a host with a removal pending refuses a second dispatch', $inflight_msg);
 
+// The container name is editable on a row. A removed row naming the container
+// of a live site on the same host refuses; a removed row beside another
+// removed row of the same name does not.
+list($host_c, $host_c_node) = jcb_host_with_agent();
+$shared_live = jcb_decom_victim($host_c, array('mgn_container_name' => 'decomshared', 'mgn_name' => 'HarnessTest Shared live'));
+$shared_old = jcb_decom_victim($host_c, array('mgn_container_name' => 'decomshared',
+	'mgn_delete_time' => gmdate('Y-m-d H:i:s')));
+$shared_msg = '';
+try { JobCommandBuilder::build_decommission_node($shared_old); } catch (Exception $e) { $shared_msg = $e->getMessage(); }
+check(strpos($shared_msg, "belongs to the live site 'HarnessTest Shared live'") !== false,
+	'a row naming a live site\'s container on the same host refuses, naming that site', $shared_msg);
+$gone_a = jcb_decom_victim($host_c, array('mgn_container_name' => 'decomgone',
+	'mgn_delete_time' => gmdate('Y-m-d H:i:s')));
+$gone_b = jcb_decom_victim($host_c, array('mgn_container_name' => 'decomgone',
+	'mgn_delete_time' => gmdate('Y-m-d H:i:s')));
+$gone_env = null;
+try { $gone_env = JobCommandBuilder::build_decommission_node($gone_b); } catch (Exception $e) { $gone_env = $e->getMessage(); }
+check(is_array($gone_env) && ($gone_env['params']['site'] ?? '') === 'decomgone',
+	'two removed rows of one container do not block each other', is_array($gone_env) ? '' : (string)$gone_env);
+list($host_d, $host_d_node) = jcb_host_with_agent();
+$other_host = jcb_decom_victim($host_d, array('mgn_container_name' => 'decomshared'));
+$other_env = null;
+try { $other_env = JobCommandBuilder::build_decommission_node($other_host); } catch (Exception $e) { $other_env = $e->getMessage(); }
+check(is_array($other_env), 'the same container name on another host does not block',
+	is_array($other_env) ? '' : (string)$other_env);
+// The claimant is found whatever its case or spacing, and with no host recorded.
+$case_live = jcb_decom_victim($host_c, array('mgn_container_name' => ' DecomCase ', 'mgn_name' => 'HarnessTest Case live'));
+$case_old = jcb_decom_victim($host_c, array('mgn_container_name' => 'decomcase',
+	'mgn_delete_time' => gmdate('Y-m-d H:i:s')));
+$case_msg = '';
+try { JobCommandBuilder::build_decommission_node($case_old); } catch (Exception $e) { $case_msg = $e->getMessage(); }
+check(strpos($case_msg, "belongs to the live site 'HarnessTest Case live'") !== false,
+	'a live claimant spelled with other case or spaces still refuses', $case_msg);
+$loose_live = jcb_node(array('mgn_container_name' => 'decomloose', 'mgn_name' => 'HarnessTest Loose live'));
+$loose_old = jcb_decom_victim($host_c, array('mgn_container_name' => 'decomloose',
+	'mgn_delete_time' => gmdate('Y-m-d H:i:s')));
+$loose_msg = '';
+try { JobCommandBuilder::build_decommission_node($loose_old); } catch (Exception $e) { $loose_msg = $e->getMessage(); }
+check(strpos($loose_msg, "belongs to the live site 'HarnessTest Loose live'") !== false,
+	'a live claimant with no host recorded refuses too', $loose_msg);
+// remove_account.sh refuses a name not starting with a letter or digit; so does dispatch.
+$lead = jcb_decom_victim($host_c, array('mgn_container_name' => '_decomlead'));
+$lead_msg = '';
+try { JobCommandBuilder::build_decommission_node($lead); } catch (Exception $e) { $lead_msg = $e->getMessage(); }
+check(strpos($lead_msg, 'starting with a letter or digit') !== false,
+	'a site name starting with _ refuses at dispatch, not on the host', $lead_msg);
+
 // The old machine of a switch-over (state retired): its own Backups page is
 // unreachable once the domain points at the new server, so the host's proof
 // that the domain left stands in for the approval (site_copy.md WP14). Every
