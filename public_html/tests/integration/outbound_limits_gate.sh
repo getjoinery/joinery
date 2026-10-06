@@ -382,7 +382,7 @@ chk "install.sh site brings a new container under the limits once it starts" \
 chk "the move script refreshes once every move is done" \
     "$(grep -B3 '^exit "\$status"$' "$ROOT/maintenance_scripts/sysadmin_tools/move_site_to_own_network.sh" | grep -c '^run_spec_limits_refresh$')" "1"
 chk "remove_account.sh refreshes after the run spec is gone" \
-    "$(awk '/rm -f "\/etc\/joinery\/sites\/\$\{SITE_NAME\}\/run_spec"/ { f = 1 } f && /systemctl start joinery-limits.service/ { print "after"; exit }' "$ROOT/maintenance_scripts/sysadmin_tools/remove_account.sh")" "after"
+    "$(awk '/for mark in held suspended run_spec; do/ { m = 1 } /=== Removing Docker site ===/ { d = 1 } d && /^    clear_site_marks$/ { f = 1 } m && f && /systemctl start joinery-limits.service/ { print "after"; exit }' "$ROOT/maintenance_scripts/sysadmin_tools/remove_account.sh")" "after"
 
 echo
 echo "outbound_limits gate: $passed passed, $failed failed"

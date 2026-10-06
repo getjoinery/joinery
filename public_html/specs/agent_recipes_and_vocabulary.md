@@ -378,6 +378,16 @@ diagnosis was reconstructed from job rows on the management node. Incident:
 | Whether the kernel had said "no space left on device" | Nothing; the journal was 33 hours old by the time anyone asked | `host_report` carries `kernel_events_24h`: three counts, OOM / ENOSPC / I/O error — **BUILT** (platform, no agent release: `host_report.sh` is a script word) |
 | How much room a writer actually has | `total - used`, which quietly includes the root reserve — 2.4 GiB on that node | `host_report` carries `disk.avail_bytes` and `disk.inodes_used_pct` — **BUILT** |
 | To clear the failed unit once it was understood | Nothing; it will keep being named until someone logs in or the box reboots | `reset_failed_unit {unit}` (operate, same closed list, starts and stops nothing) — **BUILT** (agent 1.41.0), with a *Clear* button beside the failed unit |
+
+**2026-10-06, removing getjoinery's old container from docker-prod.** The removal
+reached for the volumes of two sibling sites (getjoinery_developers_*, getjoinery_orgs_*)
+by a name-prefix match; remove_account.sh 2.10 fixed it and now removes only a container
+install.sh made. Deciding that rule needed each container's image and mounts, and whether
+the host keeps run specs, so the operator opened a read-only SSH session to docker-prod.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Each container's image, its mounts (type, volume name), and whether its run spec exists | Read-only SSH: `docker inspect` per container, `ls /etc/joinery/sites` | `host_report` carries, per container, `image`, `mounts` (type and volume name, never a bind source path) and `run_spec` (present or not), so the plane can show a container that install.sh did not make before anyone removes it (platform, no agent release: `host_report.sh` is a script word) |
 | To be told the disk was filling before it filled | Nothing. Four days of warning sat unread in stored host reports | The plane-side notice over stored samples (floor **and** slope, § 2 of the spec) was **dropped by the owner 2026-09-22**: disk space is the operator's responsibility and a daily notice is noise. What was built is the node's own floor: recipe `disk_headroom` (check-only, `Recipe.NoRepair`: 10% or 5 GiB available, a case on the first failing check) — **BUILT** (agent 1.41.0) |
 | Whether a user's Mark as spam reached the spam filter on jeremytunnell (10-03) — the correction rows and the size of the learned corpus | Read-only SSH and a PHP query against `iem_inbound_email_messages` and `ibt_inbound_bayes_tokens`; the cron log only said Taught 0, which cannot tell a correction already taught apart from one never recorded | `spam_learning_status` (observe, no parameters): counts only, never a subject or address — corrections recorded, taught, pending clear, pending sealed, skipped as IMAP-polled in the last 7 days, corpus token count and newest token time, and the two policy switches |
 

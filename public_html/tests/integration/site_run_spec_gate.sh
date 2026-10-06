@@ -596,8 +596,10 @@ chk "remove_account removes the network the spec names, and checks it is gone" \
     "$(grep -c 's/^network=//p' "$REMOVE")|$(grep -c 'docker network rm "$SITE_NETWORK"' "$REMOVE")|$(grep -c 'Docker network still present' "$REMOVE")" "1|1|1"
 export PATH="$OLDPATH"; unset STUB_CALLS
 unset JOINERY_SITE_STATE_ROOT
-want_rm="rm -f \"$(run_spec_path SITEX | sed 's/SITEX/${SITE_NAME}/')\""
-chk "remove_account removes the file run_spec_path names" "$(grep -cF "$want_rm" "$REMOVE")" "1"
+# remove_account.sh clears <SITES_STATE>/<site>/run_spec among its marks.
+ra_spec="$(sed -n 's/^SITES_STATE="\$FS\(.*\)"$/\1/p' "$REMOVE")/SITEX/run_spec"
+chk "remove_account removes the file run_spec_path names" \
+    "$([ "$ra_spec" = "$(run_spec_path SITEX)" ] && grep -c '^    for mark in held suspended run_spec; do$' "$REMOVE")" "1"
 
 echo "RESULT: ${passed} passed, ${failed} failed"
 [ "$failed" -eq 0 ]

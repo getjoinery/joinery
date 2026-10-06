@@ -8,6 +8,11 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.100 - build_decommission_node refuses a container another live site row on the same
+ *                 host (or on no recorded host) names, compared without case or spaces: the
+ *                 container name is editable on a row, so a retired row must not reach a live
+ *                 site's container; the site name must start with a letter or digit, as
+ *                 remove_account.sh requires
  * @version 1.99 - build_suspended_page: a site's suspended page on its host's proxy (agent 1.61.0,
  *                 multi_tenant_docker_hosts WP8)
  * @version 1.98 - install_state_color: a site held stopped is grey (multi_tenant_docker_hosts WP7)
@@ -3561,9 +3566,10 @@ class JobCommandBuilder {
 	 * The site name remove_account.sh operates on: the Docker container name for a
 	 * containerized node, or the project directory name (the parent of the web root)
 	 * for a bare-metal node. Both map to /var/www/html/<site>, the container, the
-	 * ${site}_* volumes, the ${site}.conf vhost, and the ${site} database — the
-	 * naming convention install.sh established. Derived from node fields only, never
-	 * from operator input, so it cannot be steered at a different site.
+	 * ${site}_<name> volumes (its own fifteen, never a prefix match), the ${site}.conf vhost, and the ${site} database — the
+	 * naming convention install.sh established. Derived from node fields; the
+	 * container name is one an operator can edit, so build_decommission_node also
+	 * refuses a container that another live site row on the same host names.
 	 */
 	public static function decommission_site_name($node) {
 		$container = trim((string)$node->get('mgn_container_name'));
@@ -3664,12 +3670,35 @@ class JobCommandBuilder {
 		}
 
 		$site = self::decommission_site_name($node);
-		// The agent's own wire pattern, applied at build time so a legacy
-		// container name the host would refuse fails here, with the reason.
-		if (!preg_match('/^[a-z0-9_-]{1,50}$/', $site)) {
+		// The host's own name rule (remove_account.sh, inside the agent's wire
+		// pattern), applied at build time so a legacy container name the host
+		// would refuse fails here, with the reason.
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $site)) {
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' derives the site name '{$site}', which is not in the "
-				. "shape the host agent accepts (lowercase letters, digits, _ and -, at most 50)."
+				. "shape the host agent accepts (lowercase letters, digits, _ and -, starting with a "
+				. "letter or digit, at most 50)."
+			);
+		}
+
+		// The container name is editable on a row. A retired row whose name was
+		// changed (or mistyped) to a live site's container would otherwise reach
+		// it: the host's moved proof passes for any container whose domain
+		// answers elsewhere, such as a copy still waiting for its switch-over.
+		$db = DbConnector::get_instance()->get_db_link();
+		$cq = $db->prepare(
+			"SELECT mgn_name FROM mgn_managed_nodes
+			 WHERE (mgn_mgh_managed_host_id = ? OR mgn_mgh_managed_host_id IS NULL)
+			   AND LOWER(TRIM(mgn_container_name)) = ?
+			   AND mgn_managed_node_id <> ? AND mgn_delete_time IS NULL
+			 ORDER BY mgn_managed_node_id LIMIT 1");
+		$cq->execute([(int)$node->get('mgn_mgh_managed_host_id'), $site, (int)$node->key]);
+		$claimant = $cq->fetchColumn();
+		if ($claimant !== false) {
+			throw new Exception(
+				"The container '{$site}' on this host belongs to the live site '{$claimant}', not only to "
+				. "'{$node->get('mgn_name')}'. Correct the container name on whichever row is wrong before "
+				. "removing anything."
 			);
 		}
 
@@ -3727,7 +3756,6 @@ class JobCommandBuilder {
 		// own queue cannot see it — a second dispatch would otherwise pass
 		// every refusal above and run two teardowns. One removal per host at a
 		// time.
-		$db = DbConnector::get_instance()->get_db_link();
 		$hq = $db->prepare(
 			"SELECT COUNT(*) FROM mjb_management_jobs
 			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'decommission_node'

@@ -214,7 +214,7 @@ chk "remove_account.sh runs that same extraction on each vhost" "$same" "yes"
 grep -q 'for vh in "\$VIRTUALHOST_FILE" "\$LE_SSL_FILE"; do' "$ACCOUNT" && both=yes || both=no
 chk "on the site's vhost and its certbot-made SSL vhost" "$both" "yes"
 read_line=$(grep -n 'CERT_NAMES="\$CERT_NAMES"' "$ACCOUNT" | head -1 | cut -d: -f1)
-rm_line=$(grep -n 'rm -f "\$VIRTUALHOST_FILE"' "$ACCOUNT" | head -1 | cut -d: -f1)
+rm_line=$(grep -n 'rm -f "\${VIRTUALHOST_FILE:?}"' "$ACCOUNT" | head -1 | cut -d: -f1)
 bak_line=$(grep -n 'for backup in "\$VIRTUALHOST_FILE"\.\*; do' "$ACCOUNT" | head -1 | cut -d: -f1)
 call_line=$(grep -n 'bash "\$CERT_SCRIPT" "\$cert"' "$ACCOUNT" | head -1 | cut -d: -f1)
 chk "it reads the names before the vhost is removed" "$([ "$read_line" -lt "$rm_line" ] && echo yes || echo no)" "yes"
