@@ -8,6 +8,7 @@
  * Usage: php utils/regenerate_image_sizes.php
  * Or via browser: https://yoursite.com/admin/regenerate_image_sizes
  *
+ * @version 1.1.0 - clears a blob's recorded refusal before trying, and counts the ones refused again
  * @version 1.0.0
  */
 
@@ -73,6 +74,7 @@ if ($total == 0) {
 
 $processed = 0;
 $errors = 0;
+$refused = 0;
 
 // Process in batches to avoid memory issues
 $batch_size = 50;
@@ -95,9 +97,20 @@ while ($offset < $total) {
 
 		// resize() is driver-aware — it handles both local and cloud-stored
 		// rows internally. No path probing needed; if bytes are missing or
-		// undecodable, the driver / GD surfaces an exception we count.
+		// undecodable, the driver / GD surfaces an exception we count. A blob
+		// whose last decode the ceiling refused is tried again here — this is
+		// the retry after a raised image_decode_max_mb — and counted when it
+		// is refused again.
 		try {
+			$blob = $file->_blob();
+			if ($blob && $blob->key) {
+				$blob->clear_variant_refusal();
+			}
 			$file->resize('all');
+			if ($blob && $blob->key && $blob->is_variant_refused()) {
+				output("  REFUSED: " . $blob->variant_refusal(), $is_cli);
+				$refused++;
+			}
 		} catch (Exception $e) {
 			output("  ERROR: " . $e->getMessage(), $is_cli);
 			$errors++;
@@ -111,6 +124,7 @@ output("", $is_cli);
 output("=== Complete ===", $is_cli);
 output("Processed: {$processed} files", $is_cli);
 output("Errors: {$errors}", $is_cli);
+output("Refused (over image_decode_max_mb): {$refused}", $is_cli);
 
 if (!$is_cli) {
 	echo "</pre>";

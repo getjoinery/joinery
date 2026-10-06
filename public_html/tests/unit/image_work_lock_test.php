@@ -18,9 +18,10 @@
  *   - a holder killed outright releases the lock (flock dies with the process)
  *   - a wait past the limit gives up, logs it, and does the work anyway
  *   - an unopenable lock file runs the work without the lock
- *   - both decode paths take it: FileBlob's resize and UploadHandler's upload image step
- *   - UploadHandler lets go of its decoded image when it says it does
+ *   - the one decode path takes it: FileBlob::_render_sizes, once around a whole resize,
+ *     and UploadHandler decodes nothing at all
  *
+ * @version 1.1 - pins one decode under one hold per resize (specs/image_decode_memory.md)
  * @version 1.0
  */
 
@@ -96,24 +97,21 @@ check(ImageWorkLock::run(function () { return 'ran'; }) === 'ran', 'the work ran
 ini_set('error_log', $old_log);
 ImageWorkLock::set_path_for_tests($lock);
 
-section('both decode paths take the lock');
+section('the one decode path takes the lock, once around the whole resize');
+// Every pixel the platform produces comes from ImageDecoder::open() inside
+// FileBlob::_render_sizes(), which holds the lock from the decode until the
+// decoded image is freed — one hold per resize, not one per size — and
+// UploadHandler decodes nothing at all (specs/image_decode_memory.md).
 $blob_src = file_get_contents(PathHelper::getIncludePath('data/file_blobs_class.php'));
-check(preg_match('/function _generate_resized\(.*?\{\s*ImageWorkLock::run\(function \(\) use .*?\$this->_generate_resized_now\(/s', $blob_src) === 1,
-	'FileBlob::_generate_resized decodes inside ImageWorkLock::run');
-check(substr_count($blob_src, '$this->_generate_resized_now(') === 1, 'and nothing else reaches the decode around it');
+check(preg_match('/function _render_sizes\(.*?\{\s*return ImageWorkLock::run\(function \(\) use .*?ImageDecoder::open\(/s', $blob_src) === 1,
+	'FileBlob::_render_sizes decodes inside ImageWorkLock::run');
+check(substr_count($blob_src, 'ImageDecoder::open(') === 1 && substr_count($blob_src, 'ImageWorkLock::run(') === 1,
+	'and that is the only decode, under the only lock hold, in the blob class');
+check(preg_match('/\$this->_render_size\(\$decoded, /', $blob_src) === 1
+	&& strpos($blob_src, 'unset($decoded);') !== false,
+	'every size is cut from the one decoded image, which is freed before the lock is');
 $upload_src = file_get_contents(PathHelper::getIncludePath('includes/UploadHandler.php'));
-check(preg_match('/function handle_image_file\(\$file_path, \$file\) \{.*?ImageWorkLock::run\(function \(\) use .*?\$this->handle_image_file_now\(/s', $upload_src) === 1,
-	'UploadHandler::handle_image_file holds it from decode to the cached image being freed');
-check(substr_count($upload_src, '$this->handle_image_file_now(') === 1, 'and nothing else calls the unlocked body');
-
-section('the upload path frees its decoded image');
-$handler = new UploadHandler(null, false);
-$set = new ReflectionMethod('UploadHandler', 'gd_set_image_object'); $set->setAccessible(true);
-$destroy = new ReflectionMethod('UploadHandler', 'destroy_image_object'); $destroy->setAccessible(true);
-$objects = new ReflectionProperty('UploadHandler', 'image_objects'); $objects->setAccessible(true);
-$set->invoke($handler, '/tmp/x.jpg', imagecreatetruecolor(8, 8));
-check(count($objects->getValue($handler)) === 1, 'a decoded image is cached while the upload is handled');
-check($destroy->invoke($handler, '/tmp/x.jpg') === true, 'freeing it says there was one');
-check(count($objects->getValue($handler)) === 0, 'and the handler no longer holds it (a held GdImage is 92 MB at 24 MP)');
+check(!preg_match('/imagecreatefrom|imagerotate|image_objects|ImageWorkLock/', $upload_src),
+	'UploadHandler decodes nothing: no reader, no rotation, no image cache, nothing to lock');
 
 harness_finish();

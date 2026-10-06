@@ -274,7 +274,7 @@ The next container start clears it. `rebase_site_container.sh` holds the supervi
 sudo ./install.sh server
 ```
 
-Installs and configures PHP 8.3, Apache (with `mod_rewrite`), PostgreSQL, Composer, Certbot, UFW, fail2ban, SSH hardening, and unattended security updates.
+Installs and configures PHP 8.3, Apache (with `mod_rewrite`), PostgreSQL, Composer, Certbot, UFW, fail2ban, SSH hardening, and unattended security updates. Beside PHP's `gd` it installs `libjpeg-turbo-progs`, whose `djpeg` lets the site decode a large JPEG already shrunk to the sizes it needs (about 15 MB for a 24-megapixel photo instead of 92; see [Photo System](photo_system.md#how-sizes-are-made)); the same step runs inside the base image build. The package is also declared in root `composer.json` (`extra.joinery-system-packages`), so the dependency resolver installs it at every other root moment too — container start, `install.sh site`, and `upgrade.php` on a node that was installed before it was declared. Without it a site still works, decoding large JPEGs in full.
 
 #### How SSH hardening picks its account
 

@@ -252,6 +252,7 @@ $permitted = array(
 	'includes/setup_steps/mail_send.php'                      => 'receiving-domain row reconciled from the stored From address on a wizard view — the Direct records cannot be listed without it',
 	'includes/VaultAudit.php'                                 => 'vault window opened/closed, observed on whatever request noticed',
 	'includes/SecretReconciler.php'                           => 'sealed-secret reconciliation: dead secrets healed/flagged and the cached verdict written, on whatever cold request runs the reconciler',
+	'data/file_blobs_class.php'                               => 'a refused on-demand variant is recorded so the next view does not decode the same photo again',
 	'logic/oauth_callback_logic.php'                          => 'OAuth provider redirect — persisting the grant IS the request',
 	'plugins/mailbox/includes/InboundEmailRouter.php'         => 'deferred report filing at unlock — lazy processing only the owner\'s in-window secret makes possible',
 	'plugins/mailbox/includes/InboundEmailSetupCheck.php'     => 'relay status folded into the row on a setup view',
@@ -290,6 +291,26 @@ $stale = array_diff(array_keys($permitted), $found);
 check(count($stale) === 0,
 	'and every listed caller still needs to be',
 	$stale ? 'no longer writes: ' . implode(', ', $stale) : 'all still in use');
+
+section('Images are decoded only by ImageDecoder');
+
+// A decoded image costs 4 bytes a pixel outside memory_limit. ImageDecoder is
+// where that cost is estimated, bounded and shrunk (specs/image_decode_memory.md);
+// a GD reader anywhere else is a decode nothing bounds.
+$readers = array();
+foreach ($scan as $file) {
+	if ($file->getExtension() !== 'php') continue;
+	$rel = ltrim(str_replace(PathHelper::getBasePath(), '', $file->getPathname()), '/');
+	if (strpos($rel, 'specs/') === 0 || strpos($rel, 'docs/') === 0 || strpos($rel, 'vendor/') !== false) continue;
+	if (strpos($rel, 'tests/') === 0 || strpos($rel, '/tests/') !== false) continue;
+	if ($rel === 'includes/ImageDecoder.php') continue;
+	if (preg_match('/\bimagecreatefrom(jpeg|png|gif|webp|avif|bmp|string)\s*\(/', file_get_contents($file->getPathname()))) {
+		$readers[] = $rel;
+	}
+}
+sort($readers);
+check(count($readers) === 0, 'no file outside ImageDecoder calls an imagecreatefrom* reader',
+	$readers ? implode(', ', $readers) : 'none');
 
 section('Writes the server makes during a page view');
 

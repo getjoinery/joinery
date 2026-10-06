@@ -10,6 +10,16 @@
  * https://opensource.org/licenses/MIT
  */
 
+/**
+ * Joinery changes to the upstream class:
+ *
+ * @version 2.0 - Decodes nothing. The EXIF-orientation pass, the GD image cache
+ *                and the '' image version are gone: the stored original is the
+ *                uploaded bytes, and every size is cut upright by File::resize()
+ *                through ImageDecoder, once (specs/image_decode_memory.md).
+ * @version 1.x - GD-only image handling (ImageMagick retired), one decode at a
+ *                time on the site, decoded image freed after the upload step.
+ */
 class UploadHandler
 {
 
@@ -42,7 +52,6 @@ class UploadHandler
     const IMAGETYPE_JPEG = 2;
     const IMAGETYPE_PNG = 3;
 
-    protected $image_objects = array();
     protected $response = array();
 
     public function __construct($options = null, $initialize = true, $error_messages = null) {
@@ -133,19 +142,13 @@ class UploadHandler
             'min_height' => 1,
             // Set the following option to false to enable resumable uploads:
             'discard_aborted_uploads' => true,
-            // Retained for config compatibility but no longer selects an
-            // engine: image handling is GD-only (the imagick / ImageMagick-convert
-            // paths were retired to keep hostile uploads off ImageMagick's
-            // coder/delegate native-RCE surface). See create_scaled_image().
+            // Retained for config compatibility; image handling is GD-only
+            // and lives in ImageDecoder, never here (see get_image_size()).
             'image_library' => 0,
-            'image_versions' => array(
-                // The empty image version key defines options for the original image.
-                // All resizing is now handled by File::resize() via ImageSizeRegistry.
-                '' => array(
-                    // Automatically rotate images based on EXIF meta data:
-                    'auto_orient' => true
-                )
-            ),
+            // Named sub-directories of upload_dir the response reports URLs for.
+            // This class writes none: the stored original is the uploaded bytes,
+            // and every size is cut by File::resize() from ImageSizeRegistry.
+            'image_versions' => array(),
             'print_response' => true
         );
         if ($options) {
@@ -402,10 +405,9 @@ class UploadHandler
         if (($max_width || $max_height || $min_width || $min_height)
             && $this->is_valid_image_file($uploaded_file)) {
             list($img_width, $img_height) = $this->get_image_size($uploaded_file);
-            // If we are auto rotating the image by default, do the checks on
-            // the correct orientation
+            // Every size is cut upright (ImageDecoder applies the EXIF
+            // orientation), so judge the limits on the upright dimensions.
             if (
-                @$this->options['image_versions']['']['auto_orient'] &&
                 function_exists('exif_read_data') &&
                 ($exif = @exif_read_data($uploaded_file)) &&
                 (((int) @$exif['Orientation']) >= 5)
@@ -591,293 +593,16 @@ class UploadHandler
         );
     }
 
-    protected function get_scaled_image_file_paths($file_name, $version) {
-        $file_path = $this->get_upload_path($file_name);
-        if (!empty($version)) {
-            $version_dir = $this->get_upload_path(null, $version);
-            if (!is_dir($version_dir)) {
-                mkdir($version_dir, $this->options['mkdir_mode'], true);
-            }
-            $new_file_path = $version_dir.'/'.$file_name;
-        } else {
-            $new_file_path = $file_path;
-        }
-        return array($file_path, $new_file_path);
-    }
-
-    protected function gd_get_image_object($file_path, $func, $no_cache = false) {
-        if (empty($this->image_objects[$file_path]) || $no_cache) {
-            $this->gd_destroy_image_object($file_path);
-            $this->image_objects[$file_path] = $func($file_path);
-        }
-        return $this->image_objects[$file_path];
-    }
-
-    protected function gd_set_image_object($file_path, $image) {
-        $this->gd_destroy_image_object($file_path);
-        $this->image_objects[$file_path] = $image;
-    }
-
-    // Dropping the reference is what frees a decoded image: on PHP 8 a GdImage
-    // is an object, and imagedestroy() is a no-op. Kept, a 24-megapixel photo's
-    // 92 MB stayed resident through every resize after it.
-    protected function gd_destroy_image_object($file_path) {
-        $had = isset($this->image_objects[$file_path]);
-        unset($this->image_objects[$file_path]);
-        return $had;
-    }
-
-    protected function gd_imageflip($image, $mode) {
-        if (function_exists('imageflip')) {
-            return imageflip($image, $mode);
-        }
-        $new_width = $src_width = imagesx($image);
-        $new_height = $src_height = imagesy($image);
-        $new_img = imagecreatetruecolor($new_width, $new_height);
-        $src_x = 0;
-        $src_y = 0;
-        switch ($mode) {
-            case '1': // flip on the horizontal axis
-                $src_y = $new_height - 1;
-                $src_height = -$new_height;
-                break;
-            case '2': // flip on the vertical axis
-                $src_x  = $new_width - 1;
-                $src_width = -$new_width;
-                break;
-            case '3': // flip on both axes
-                $src_y = $new_height - 1;
-                $src_height = -$new_height;
-                $src_x  = $new_width - 1;
-                $src_width = -$new_width;
-                break;
-            default:
-                return $image;
-        }
-        imagecopyresampled(
-            $new_img,
-            $image,
-            0,
-            0,
-            $src_x,
-            $src_y,
-            $new_width,
-            $new_height,
-            $src_width,
-            $src_height
-        );
-        return $new_img;
-    }
-
-    protected function gd_orient_image($file_path, $src_img) {
-        if (!function_exists('exif_read_data')) {
-            return false;
-        }
-        $exif = @exif_read_data($file_path);
-        if ($exif === false) {
-            return false;
-        }
-        $orientation = (int)@$exif['Orientation'];
-        if ($orientation < 2 || $orientation > 8) {
-            return false;
-        }
-        switch ($orientation) {
-            case 2:
-                $new_img = $this->gd_imageflip(
-                    $src_img,
-                    defined('IMG_FLIP_VERTICAL') ? IMG_FLIP_VERTICAL : 2
-                );
-                break;
-            case 3:
-                $new_img = imagerotate($src_img, 180, 0);
-                break;
-            case 4:
-                $new_img = $this->gd_imageflip(
-                    $src_img,
-                    defined('IMG_FLIP_HORIZONTAL') ? IMG_FLIP_HORIZONTAL : 1
-                );
-                break;
-            case 5:
-                $tmp_img = $this->gd_imageflip(
-                    $src_img,
-                    defined('IMG_FLIP_HORIZONTAL') ? IMG_FLIP_HORIZONTAL : 1
-                );
-                $new_img = imagerotate($tmp_img, 270, 0);
-                break;
-            case 6:
-                $new_img = imagerotate($src_img, 270, 0);
-                break;
-            case 7:
-                $tmp_img = $this->gd_imageflip(
-                    $src_img,
-                    defined('IMG_FLIP_VERTICAL') ? IMG_FLIP_VERTICAL : 2
-                );
-                $new_img = imagerotate($tmp_img, 270, 0);
-                break;
-            case 8:
-                $new_img = imagerotate($src_img, 90, 0);
-                break;
-            default:
-                return false;
-        }
-        $this->gd_set_image_object($file_path, $new_img);
-        return true;
-    }
-
-    protected function gd_create_scaled_image($file_name, $version, $options) {
-        if (!function_exists('imagecreatetruecolor')) {
-            error_log('Function not found: imagecreatetruecolor');
-            return false;
-        }
-        list($file_path, $new_file_path) =
-            $this->get_scaled_image_file_paths($file_name, $version);
-        $type = strtolower(substr(strrchr($file_name, '.'), 1));
-        switch ($type) {
-            case 'jpg':
-            case 'jpeg':
-                $src_func = 'imagecreatefromjpeg';
-                $write_func = 'imagejpeg';
-                $image_quality = isset($options['jpeg_quality']) ?
-                    $options['jpeg_quality'] : 75;
-                break;
-            case 'gif':
-                $src_func = 'imagecreatefromgif';
-                $write_func = 'imagegif';
-                $image_quality = null;
-                break;
-            case 'png':
-                $src_func = 'imagecreatefrompng';
-                $write_func = 'imagepng';
-                $image_quality = isset($options['png_quality']) ?
-                    $options['png_quality'] : 9;
-                break;
-            case 'webp':
-                $src_func = 'imagecreatefromwebp';
-                $write_func = 'imagewebp';
-                $image_quality = isset($options['webp_quality']) ?
-                    $options['webp_quality'] : 80;
-                break;
-            case 'avif':
-                $src_func = 'imagecreatefromavif';
-                $write_func = 'imageavif';
-                $image_quality = isset($options['avif_quality']) ?
-                    $options['avif_quality'] : 80;
-                break;
-            default:
-                return false;
-        }
-        $src_img = $this->gd_get_image_object(
-            $file_path,
-            $src_func,
-            !empty($options['no_cache'])
-        );
-        $image_oriented = false;
-        if (!empty($options['auto_orient']) && $this->gd_orient_image(
-                $file_path,
-                $src_img
-            )) {
-            $image_oriented = true;
-            $src_img = $this->gd_get_image_object(
-                $file_path,
-                $src_func
-            );
-        }
-        $max_width = $img_width = imagesx($src_img);
-        $max_height = $img_height = imagesy($src_img);
-        if (!empty($options['max_width'])) {
-            $max_width = $options['max_width'];
-        }
-        if (!empty($options['max_height'])) {
-            $max_height = $options['max_height'];
-        }
-        $scale = min(
-            $max_width / $img_width,
-            $max_height / $img_height
-        );
-        if ($scale >= 1) {
-            if ($image_oriented) {
-                return $write_func($src_img, $new_file_path, $image_quality);
-            }
-            if ($file_path !== $new_file_path) {
-                return copy($file_path, $new_file_path);
-            }
-            return true;
-        }
-        if (empty($options['crop'])) {
-            $new_width = $img_width * $scale;
-            $new_height = $img_height * $scale;
-            $dst_x = 0;
-            $dst_y = 0;
-            $new_img = imagecreatetruecolor($new_width, $new_height);
-        } else {
-            if (($img_width / $img_height) >= ($max_width / $max_height)) {
-                $new_width = $img_width / ($img_height / $max_height);
-                $new_height = $max_height;
-            } else {
-                $new_width = $max_width;
-                $new_height = $img_height / ($img_width / $max_width);
-            }
-            $dst_x = 0 - ($new_width - $max_width) / 2;
-            $dst_y = 0 - ($new_height - $max_height) / 2;
-            $new_img = imagecreatetruecolor($max_width, $max_height);
-        }
-        // Handle transparency in GIF, PNG, WebP and AVIF images:
-        switch ($type) {
-            case 'gif':
-                imagecolortransparent($new_img, imagecolorallocate($new_img, 0, 0, 0));
-                break;
-            case 'png':
-                imagecolortransparent($new_img, imagecolorallocate($new_img, 0, 0, 0));
-                imagealphablending($new_img, false);
-                imagesavealpha($new_img, true);
-                break;
-            case 'webp':
-            case 'avif':
-                imagealphablending($new_img, false);
-                imagesavealpha($new_img, true);
-                break;
-        }
-        $success = imagecopyresampled(
-                $new_img,
-                $src_img,
-                $dst_x,
-                $dst_y,
-                0,
-                0,
-                $new_width,
-                $new_height,
-                $img_width,
-                $img_height
-            ) && $write_func($new_img, $new_file_path, $image_quality);
-        $this->gd_set_image_object($file_path, $new_img);
-        return $success;
-    }
-
-    // Image handling is GD-only. GD's decoder set is just the raster codecs
-    // (jpeg/png/gif/webp/avif) with no coders or delegates, so a malformed
-    // upload cannot reach the Ghostscript/MVG/MSL native-RCE surface that
-    // ImageMagick exposes. The former imagick / ImageMagick-convert engines
-    // have been retired; these dispatchers never select them.
+    // Image handling is GD-only (never ImageMagick, whose coders and delegates
+    // put a malformed upload on a native-RCE surface). This class decodes
+    // nothing itself: it reads only the header here, and every pixel is
+    // produced by ImageDecoder, once, when File::resize() cuts the sizes.
     protected function get_image_size($file_path) {
         if (!function_exists('getimagesize')) {
             error_log('Function not found: getimagesize');
             return false;
         }
         return @getimagesize($file_path);
-    }
-
-    protected function create_scaled_image($file_name, $version, $options) {
-        try {
-            return $this->gd_create_scaled_image($file_name, $version, $options);
-        } catch (\Exception $e) {
-            error_log($e->getMessage());
-            return false;
-        }
-    }
-
-    protected function destroy_image_object($file_path) {
-        // GD caches its decoded image under $this->image_objects; free it.
-        return $this->gd_destroy_image_object($file_path);
     }
 
     protected function imagetype($file_path) {
@@ -904,39 +629,6 @@ class UploadHandler
             return false;
         }
         return !!$this->imagetype($file_path);
-    }
-
-    protected function handle_image_file($file_path, $file) {
-        // One decode at a time on the site (ImageWorkLock): the decoded photo,
-        // and a rotated copy of it, cost their full pixel size outside PHP's
-        // memory_limit, and stay cached until the end of the method.
-        ImageWorkLock::run(function () use ($file_path, $file) {
-            $this->handle_image_file_now($file_path, $file);
-        });
-    }
-
-    protected function handle_image_file_now($file_path, $file) {
-        $failed_versions = array();
-        foreach ($this->options['image_versions'] as $version => $options) {
-            if ($this->create_scaled_image($file->name, $version, $options)) {
-                if (!empty($version)) {
-                    $file->{$version.'Url'} = $this->get_download_url(
-                        $file->name,
-                        $version
-                    );
-                } else {
-                    $file->size = $this->get_file_size($file_path, true);
-                }
-            } else {
-                $failed_versions[] = $version ? $version : 'original';
-            }
-        }
-        if (count($failed_versions)) {
-            $file->error = $this->get_error_message('image_resize')
-                .' ('.implode(', ', $failed_versions).')';
-        }
-        // Free memory:
-        $this->destroy_image_object($file_path);
     }
 
     protected function handle_file_upload($uploaded_file, $name, $size, $type, $error,
@@ -977,9 +669,6 @@ class UploadHandler
             $file_size = $this->get_file_size($file_path, $append_file);
             if ($file_size === $file->size) {
                 $file->url = $this->get_download_url($file->name);
-                if ($this->is_valid_image_file($file_path)) {
-                    $this->handle_image_file($file_path, $file);
-                }
             } else {
                 $file->size = $file_size;
                 if (!$content_range && $this->options['discard_aborted_uploads']) {

@@ -7,6 +7,7 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.29.0 - the upload row shows a file's `warning` (saved, but its sizes could not be made)
  * @version 2.28.0 - checkboxinput() takes `switch` (drawn as an on/off switch,
  *   role="switch") for the protection picker's add-ons
  * @changelog 2.27.0 - passwordinput() takes `stored` (a stored credential draws
@@ -4864,8 +4865,15 @@ JS;
                                     const file = response.files[0];
                                     console.log('Upload response file object:', file); // Debug log
                                     if (file.url) {
-                                        // Success
+                                        // Success. A warning is a file that was saved but could not have
+                                        // its sizes made (a photo over the decode ceiling): say so on the row.
                                         statusCell.innerHTML = '<span style="padding: 2px 8px; background: #28a745; color: white; border-radius: 3px; font-size: 12px;">✓ Upload successful</span>';
+                                        if (file.warning) {
+                                            const warn = document.createElement('div');
+                                            warn.style.cssText = 'margin-top: 4px; font-size: 12px; color: #856404;';
+                                            warn.textContent = file.warning;
+                                            statusCell.appendChild(warn);
+                                        }
                                         actionsCell.innerHTML = `
                                             <a href="${file.url}" target="_blank" class="button small success" title="Download file" style="padding: 4px 8px; font-size: 12px; text-decoration: none;">
                                                 ⬇️

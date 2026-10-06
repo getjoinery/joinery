@@ -899,6 +899,14 @@
       "helptext": "How many photos each kind of record may carry, as a JSON object. Example: {\"user\": 6}."
     },
     {
+      "name": "image_decode_max_mb",
+      "default": "160",
+      "group": "files",
+      "label": "Most memory one photo may take to decode (MB)",
+      "type": "number",
+      "helptext": "Making a photo's sizes unpacks it into pixels, which costs 4 bytes a pixel and, for a progressive JPEG, up to 10. A photo estimated above this is saved as uploaded but gets no sizes, and the uploader is told. 160 MB admits a 24-megapixel progressive JPEG; a site in a 256 MB container should not go higher."
+    },
+    {
       "name": "analytics_retention_days",
       "default": "90",
       "group": "logging",

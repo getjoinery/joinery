@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 2.97 - The PHP step also installs libjpeg-turbo-progs (BASE_IMAGE_VERSION 2.2): its djpeg
+#               lets the site decode a large JPEG already shrunk, at a fraction of the memory a
+#               full decode takes (specs/image_decode_memory.md WP3). Missing, the site still
+#               decodes in full.
 #VERSION 2.96 - The base image carries no Postfix (BASE_IMAGE_VERSION 2.1): a site container receives
 #               mail through a relay, and nothing in it sends through a local mail server
 #               (specs/multi_tenant_docker_hosts.md WP9). A bare-metal server keeps Postfix.
@@ -551,7 +555,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # joinery-base image tag. Bump when Dockerfile.base or do_server_setup changes
 # (Ubuntu version, PHP version, new apt packages, new system config, etc.).
 # After bumping: run './install.sh build-base' on each host, then rebuild sites.
-BASE_IMAGE_VERSION="2.1"
+BASE_IMAGE_VERSION="2.2"
 
 # Where `install.sh server` records the postgres role password it generated, and
 # where `install.sh site` looks for it on bare metal. One constant, because the
@@ -2834,6 +2838,15 @@ do_server_setup() {
         exit 1
     fi
     print_success "PHP modules verified: ${REQUIRED_MODULES[*]}"
+
+    # djpeg (libjpeg-turbo's decoder as a program) lets ImageDecoder unpack a
+    # large JPEG already shrunk to the sizes the site needs: a 24-megapixel
+    # photo costs about 15 MB that way instead of 92 MB decoded in full, which
+    # matters inside a 256 MB site container. Same library php-gd links; the
+    # decoder falls back to a full decode without it, so a failure here warns.
+    if ! apt install -y libjpeg-turbo-progs; then
+        print_warning "libjpeg-turbo-progs did not install; large JPEGs will be decoded in full (more memory per photo)"
+    fi
 
     print_success "PHP installation completed. Version: $(php -v | head -n1)"
 

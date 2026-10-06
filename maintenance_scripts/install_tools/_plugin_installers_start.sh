@@ -1032,7 +1032,7 @@ if [[ -f "${RESOLVER}" ]] && [[ "$(id -u)" == "0" ]] && command -v php >/dev/nul
             APT_UPDATED=1
         fi
         if apt-get install -y "${PRIMARY}" >/dev/null 2>&1 || apt-get install -y "${FALLBACK}" >/dev/null 2>&1; then
-            echo "plugin installers: installed declared extension package ${PRIMARY}"
+            echo "plugin installers: installed declared package ${PRIMARY}"
         else
             echo "plugin installers: WARNING - could not install ${PRIMARY} (or ${FALLBACK})" >&2
         fi

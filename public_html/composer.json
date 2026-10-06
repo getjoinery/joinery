@@ -34,5 +34,10 @@
             "php": "8.3.0"
         },
         "vendor-dir": "../vendor"
+    },
+    "extra": {
+        "joinery-system-packages": [
+            "libjpeg-turbo-progs"
+        ]
     }
 }

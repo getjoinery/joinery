@@ -17,9 +17,13 @@
  *   - copy-on-write split at refcount > 1 gives the changed file its own blob
  *   - release at refcount 0 deletes the original + variants + the blob row;
  *     a still-referenced blob survives
+ *   - resize decodes once for every size, turns an EXIF-rotated photo upright
+ *     by pixels, leaves the original as uploaded, and records a refused decode
+ *     so a thumbnail request does not try again
  *
  * Self-cleaning: every fixture File is permanently deleted in finally.
  *
+ * @version 1.4.0 - one decode, upright variants, untouched original, refusal record
  * @version 1.3.0
  */
 
@@ -352,7 +356,78 @@ try {
 		'stale-head: the overtaken content is not left referenced by nothing'
 		. (count($stale_orphans) ? ' (stranded: ' . json_encode($stale_orphans) . ')' : ''));
 
+	// =============================================================
+	section('resize decodes once, upright, and keeps the original as uploaded (specs/image_decode_memory.md)');
+	// A 3000x2000 JPEG whose EXIF says orientation 6 (phone portrait): red
+	// mark top-left of the stored pixels, which upright is top-right.
+	$oim = imagecreatetruecolor(3000, 2000);
+	imagefill($oim, 0, 0, imagecolorallocate($oim, 255, 255, 255));
+	imagefilledrectangle($oim, 0, 0, 599, 399, imagecolorallocate($oim, 255, 0, 0));
+	imagesetpixel($oim, 2999, 1999, imagecolorallocate($oim, random_int(0, 255), random_int(0, 255), random_int(0, 255)));
+	ob_start(); imagejpeg($oim, null, 90); $ojpeg = ob_get_clean(); unset($oim);
+	$tiff = "II*\0" . pack('V', 8) . pack('v', 1) . pack('v', 0x0112) . pack('v', 3) . pack('V', 1) . pack('v', 6) . "\0\0" . pack('V', 0);
+	$app1 = "Exif\0\0" . $tiff;
+	$ojpeg = substr($ojpeg, 0, 2) . "\xFF\xE1" . pack('n', strlen($app1) + 2) . $app1 . substr($ojpeg, 2);
+	$fo = $track(File::createFromBytes($ojpeg, 'orient_' . bin2hex(random_bytes(4)) . '.jpg', 'image/jpeg', 1, array()));
+	$bo = $fo->_blob();
+	ImageDecoder::$decode_count = 0;
+	check($fo->resize() === true, 'orient: resize succeeds');
+	check(ImageDecoder::$decode_count === 1, 'orient: ONE decode for every registered size', ImageDecoder::$decode_count . ' decodes');
+	check(hash('sha256', (string)$fo->read_bytes('original')) === hash('sha256', $ojpeg), 'orient: the stored original is byte-for-byte the upload (EXIF kept, nothing re-saved)');
+	// Upright the frame is 2000x3000 and the mark is its top-right 400x600.
+	// Each variant is cut from that frame with resize()'s own geometry (a crop
+	// takes the centred box of the target's aspect), so where the mark lands —
+	// or that it is cut away, as a 16:9 hero band from the middle is — follows.
+	$upright = 0; $sizes_seen = 0; $detail = array();
+	foreach (ImageSizeRegistry::get_sizes() as $key => $cfg) {
+		$vp = dirname(blob_original_path($bo)) . '/' . $key . '/' . $bo->get('fbb_stored_name');
+		if (!is_file($vp)) continue;
+		$sizes_seen++;
+		$vi = imagecreatefromjpeg($vp);
+		$w = imagesx($vi); $h = imagesy($vi);
+		$FW = 2000; $FH = 3000; $sx = 0; $sy = 0; $sw = $FW; $sh = $FH;
+		if ($cfg['crop'] && $cfg['width'] > 0 && $cfg['height'] > 0) {
+			if (($FW / $cfg['width']) < ($FH / $cfg['height'])) { $sw = $FW; $sh = (int)floor($cfg['height'] * $FW / $cfg['width']); $sy = (int)(($FH - $sh) / 2); }
+			else { $sw = (int)ceil($cfg['width'] * $FH / $cfg['height']); $sh = $FH; $sx = (int)(($FW - $sw) / 2); }
+		}
+		$mx0 = max(0.0, (1600 - $sx) / $sw); $mx1 = min(1.0, (2000 - $sx) / $sw);
+		$my0 = max(0.0, (0 - $sy) / $sh);    $my1 = min(1.0, (600 - $sy) / $sh);
+		$visible = ($mx1 - $mx0 > 0.02) && ($my1 - $my0 > 0.02);
+		$px = $visible ? ($mx0 + $mx1) / 2 : 0.95;
+		$py = $visible ? ($my0 + $my1) / 2 : 0.03;
+		$c = imagecolorat($vi, (int)($w * $px), (int)($h * $py));
+		$r = ($c >> 16) & 255; $g = ($c >> 8) & 255; $bl = $c & 255;
+		$is_red = ($r > 180 && $g < 90 && $bl < 90);
+		$ok = $visible ? $is_red : !$is_red;
+		if ($ok) $upright++;
+		$detail[] = $key . ':' . $w . 'x' . $h . ($visible ? ' mark' : ' cut') . ($ok ? '' : ' WRONG');
+		unset($vi);
+	}
+	check($sizes_seen > 0 && $upright === $sizes_seen, 'orient: every variant shows the mark where an upright frame puts it (turned by pixels, not by a tag)', implode(', ', $detail));
+
+	// A decode the ceiling refuses: the original stays, the refusal is on the
+	// blob, and a thumbnail request does not decode again.
+	ImageDecoder::set_ceiling_for_tests(1);   // a 1600x1200 PNG is 7 MB of pixels
+	$rim = imagecreatetruecolor(1600, 1200);
+	imagesetpixel($rim, 0, 0, imagecolorallocate($rim, random_int(0, 255), random_int(0, 255), random_int(0, 255)));
+	ob_start(); imagepng($rim, null, 1); $rpng = ob_get_clean(); unset($rim);
+	$fr = $track(File::createFromBytes($rpng, 'refuse_' . bin2hex(random_bytes(4)) . '.png', 'image/png', 1, array()));
+	$br = $fr->_blob();
+	ImageDecoder::$decode_count = 0;
+	check($fr->resize() === false, 'refused: resize returns false');
+	check(ImageDecoder::$decode_count === 0, 'refused: nothing was decoded');
+	check($fr->variant_refusal() !== null && strpos($fr->variant_refusal(), 'saved as uploaded') !== false, 'refused: the reason is on the file, in words', (string)$fr->variant_refusal());
+	check((new FileBlob((int)$br->key, true))->is_variant_refused(), 'refused: and recorded on the blob row');
+	check(is_file(blob_original_path($br)), 'refused: the original is kept');
+	check($fr->ensure_variant(array_key_first(ImageSizeRegistry::get_sizes())) === false && ImageDecoder::$decode_count === 0,
+		'refused: a thumbnail request neither decodes nor retries');
+	ImageDecoder::set_ceiling_for_tests(null);
+	check($fr->resize() === false, 'refused: a raised ceiling alone does not retry (the record holds)');
+	$br->clear_variant_refusal();
+	check($fr->resize() === true && !(new FileBlob((int)$br->key, true))->is_variant_refused(), 'refused: clearing the record (what regenerate does) retries and succeeds, clearing it');
+
 } finally {
+	ImageDecoder::set_ceiling_for_tests(null);
 	foreach ($made as $f) {
 		if ($f && $f->key) {
 			$reload = new File((int)$f->key, true);
