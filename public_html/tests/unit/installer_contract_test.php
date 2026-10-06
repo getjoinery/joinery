@@ -1426,7 +1426,7 @@ foreach ([
 
 // Missing packages are computed before apt is touched, so the common case (all
 // present) costs no network — this runs on every container start.
-$update_at = strpos($deps_src, "\napt-get update");   // the call, not the comment about it
+$update_at = preg_match('/\napt-get [^\n]*\bupdate\b/', $deps_src, $um, PREG_OFFSET_CAPTURE) ? $um[0][1] : false;   // the call, not the comment about it
 $missing_at = strpos($deps_src, 'if [ -z "$MISSING" ]');
 check($missing_at !== false && $update_at !== false && $missing_at < $update_at,
     'nothing missing means apt is never called');
@@ -3807,5 +3807,40 @@ check(version_compare($vi_wp6[1] ?? '0', '2.0', '>='), 'install.sh builds sites 
 check(($vi_wp6[1] ?? 'a') === ($vt_wp6[1] ?? 'b'), 'Dockerfile.template\'s default base version is install.sh\'s',
 	'the default exists for BuildKit\'s static check; a stale one names an image the host may not have');
 check((bool)preg_match('/^FROM ubuntu:26\.04$/m', $base_wp6), 'the base image is built FROM ubuntu:26.04');
+
+section('Declared packages wait for apt\'s lock (0.8.460: an upgrade lost the race to the converger\'s apt-get)');
+
+// The upgrade, the host converger (every minute) and unattended-upgrades all
+// take apt's lock; apt's default is to fail at once. Every apt-get that installs
+// a declared package carries the wait, and in upgrade.php a failed update (apt
+// does not honour the wait for its list lock) must not skip the install.
+$lock_paths = array(
+	'_install_declared_dependencies.sh' => $site_root . '/maintenance_scripts/install_tools/_install_declared_dependencies.sh',
+	'_plugin_installers_start.sh'       => $site_root . '/maintenance_scripts/install_tools/_plugin_installers_start.sh',
+	'upgrade.php'                       => $site_root . '/public_html/utils/upgrade.php',
+);
+foreach ($lock_paths as $label => $path) {
+	$src_lk = (string)file_get_contents($path);
+	$calls = 0; $bare = array();
+	foreach (preg_split('/\R/', $src_lk) as $n => $line) {
+		if (preg_match('/^\s*(#|\*|\/\/)/', $line)) continue;
+		// A call carries its flags (-y, -qq); a message that only names the command does not.
+		if (!preg_match_all('/apt-get\s+(?:(?:-o\s+\S+|"\$\{APT_LOCK_WAIT\[@\]\}")\s+)*(?:update|install)\s+-(?:y|qq)\b/', $line, $m, PREG_SET_ORDER)) continue;
+		foreach ($m as $call) {
+			$calls++;
+			$opts = $call[0];
+			if (strpos($opts, 'DPkg::Lock::Timeout') === false && strpos($opts, 'APT_LOCK_WAIT') === false) {
+				$bare[] = ($n + 1) . ': ' . trim($call[0]);
+			}
+		}
+	}
+	check($calls > 0, "{$label} runs apt-get for declared packages", 'found no apt-get update/install call to pin');
+	check(count($bare) === 0, "every apt-get update/install in {$label} waits for the lock", implode(' | ', $bare));
+}
+$upgrade_lk = (string)file_get_contents($lock_paths['upgrade.php']);
+check(strpos($upgrade_lk, "update -qq 2>&1 && (apt-get") === false && strpos($upgrade_lk, "update -qq 2>&1; (apt-get") !== false,
+	'upgrade.php installs even when apt-get update could not take its list lock');
+check(strpos($upgrade_lk, 'A plugin requiring it will refuse activation') === false,
+	'upgrade.php\'s warning does not blame a plugin for a core-declared package');
 
 harness_finish();
