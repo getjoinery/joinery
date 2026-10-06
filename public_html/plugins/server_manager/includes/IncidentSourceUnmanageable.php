@@ -10,6 +10,7 @@
  * upgrades and backups included), or a file does not match its signed release
  * (find out why before anything else). Clears when a later job verifies.
  *
+ * @version 1.2 - cleared_text() covers an edit in this site's own checkout as well as a commit
  * @version 1.1 - cleared_text() says when the file turned out to be this site's own unpublished commit
  * @version 1.0
  */
@@ -41,7 +42,7 @@ class IncidentSourceUnmanageable implements IncidentSource {
 
 	public function cleared_text(ManagedNode $node): string {
 		if ((string)$node->get('mgn_script_trust') === 'unpublished_file') {
-			return 'The file is exactly this site\'s last commit, made after its last publish; the next publish re-signs it.';
+			return 'The file was changed in this site\'s own checkout after its last publish, not through the site; the next publish re-signs it.';
 		}
 		return 'A later job verified the node\'s scripts against their signed release.';
 	}

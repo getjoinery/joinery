@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.46 - a script edited on this management node and not yet published warns as one committed does
  * @version 1.45 - the machine's outbound connection limits (host_report 1.11, node_outbound_and_transfer
  *                 WP3): on, off, or not in force and why; a site whose limits dropped packets since the
  *                 last report is amber, and a site container they do not cover says so
@@ -1415,7 +1416,7 @@
 		echo '</div>';
 		$trust = (string)$node->get('mgn_script_trust');
 		if ($trust === 'unpublished_file') {
-			echo '<div class="mt-2"><span class="badge bg-warning">A script was committed after the last publish</span></div>';
+			echo '<div class="mt-2"><span class="badge bg-warning">A script was changed here after the last publish</span></div>';
 			echo '<div class="small text-muted mt-1">The agent will not run it as root until the next publish re-signs this site\'s tree.</div>';
 			if ($node->get('mgn_script_trust_reason')) {
 				echo '<div class="small text-muted mt-1">' . htmlspecialchars((string)$node->get('mgn_script_trust_reason')) . '</div>';

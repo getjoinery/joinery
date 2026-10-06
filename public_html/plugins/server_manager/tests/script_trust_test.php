@@ -249,13 +249,15 @@ check((string)$untouched->get('mgn_script_trust') === '',
 	'an answer outside the closed set moves nothing');
 
 // ---------------------------------------------------------------------------
-section('This site\'s own commit, not yet published');
+section('This site\'s own change, not yet published');
 
 // The site that signs releases runs from the tree it signs, and its live
-// manifest is rewritten only when it publishes. A script committed in between
-// fails its hash until then. That is not tampering, and the evidence for it is
-// checked: this plane's own node, a site that re-signs its own tree, and a file
-// identical to its last commit. Anything else keeps the alarm.
+// manifest is rewritten only when it publishes. A script committed or edited in
+// between fails its hash until then. That is not tampering, and the evidence for
+// it is checked: this plane's own node, a git checkout that re-signs its own
+// tree, and a file identical to its last commit or one this process (the web
+// server, in production) can neither write nor replace. Anything else keeps the
+// alarm.
 $MODIFIED_PREFIX = 'Refused by the node: primitive "host_report" refused: file does not match its signed hash — it has been modified since release: ';
 $UNLISTED_PREFIX = 'Refused by the node: primitive "x" refused: file is not in the signed release manifest: ';
 
@@ -296,13 +298,51 @@ $self = new class { public function is_self() { return true; } };
 $stranger = st_node();
 check(TreeManifestPublisher::signsItsOwnTree($repo),
 	'this dev box builds the agent, so a site here re-signs its own tree');
-check(NodeMonitorHealth::committed_after_publish($self, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
+check(NodeMonitorHealth::changed_here_after_publish($self, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
 	'this plane\'s own committed file is its unpublished commit');
-check(NodeMonitorHealth::committed_after_publish($self, $UNLISTED_PREFIX . 'scripts/committed.sh', $repo),
+check(NodeMonitorHealth::changed_here_after_publish($self, $UNLISTED_PREFIX . 'scripts/committed.sh', $repo),
 	'and so is a committed file too new to be listed');
-check(!NodeMonitorHealth::committed_after_publish($self, $MODIFIED_PREFIX . 'scripts/edited.sh', $repo),
-	'an uncommitted edit on this plane keeps the alarm');
-check(!NodeMonitorHealth::committed_after_publish($stranger, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
+check(!NodeMonitorHealth::changed_here_after_publish($self, $MODIFIED_PREFIX . 'scripts/edited.sh', $repo),
+	'an uncommitted edit this process could have made keeps the alarm');
+
+// An edit in progress: the file and every folder up to the site root are out
+// of this process's reach, so an account on the machine made it, not the site.
+// Root reaches everything, so as root the same files keep the alarm.
+$as_root = function_exists('posix_geteuid') && posix_geteuid() === 0;
+chmod($repo . '/scripts/edited.sh', 0444);
+chmod($repo . '/scripts/untracked.sh', 0444);
+chmod($repo . '/scripts', 0555);
+chmod($repo, 0555);
+check(NodeMonitorHealth::beyond_this_process($repo, 'scripts/edited.sh') === !$as_root,
+	$as_root ? 'root can write anything, so nothing is beyond it' : 'a file and folders this process cannot write are beyond it');
+check(NodeMonitorHealth::changed_here_after_publish($self, $MODIFIED_PREFIX . 'scripts/edited.sh', $repo) === !$as_root,
+	$as_root ? 'so as root an uncommitted edit keeps the alarm' : 'so an uncommitted edit there is this site\'s own change');
+check(NodeMonitorHealth::changed_here_after_publish($self, $UNLISTED_PREFIX . 'scripts/untracked.sh', $repo) === !$as_root,
+	$as_root ? 'and so does a new file' : 'and so is a new file git does not track yet');
+check(!NodeMonitorHealth::changed_here_after_publish($stranger, $MODIFIED_PREFIX . 'scripts/edited.sh', $repo),
+	'another node never gets this reading');
+chmod($repo, 0755);
+check(!NodeMonitorHealth::beyond_this_process($repo, 'scripts/edited.sh'),
+	'a writable folder anywhere up to the site root lets the file be replaced, so it is not beyond reach');
+chmod($repo, 0555);
+chmod($repo . '/scripts/edited.sh', 0644);
+check(!NodeMonitorHealth::beyond_this_process($repo, 'scripts/edited.sh'),
+	'nor is a file this process can write');
+chmod($repo . '/scripts/edited.sh', 0444);
+chmod($repo, 0755);
+symlink('/etc/hostname', $repo . '/scripts_link');
+chmod($repo, 0555);
+check(!NodeMonitorHealth::beyond_this_process($repo, 'scripts_link'),
+	'a path that resolves outside the site is never beyond reach');
+check(!NodeMonitorHealth::beyond_this_process($repo, 'scripts/absent.sh'),
+	'nor is one that is not there');
+chmod($repo, 0755);
+chmod($repo . '/scripts', 0755);
+rename($repo . '/.git', $repo . '/.git_away');
+check(!NodeMonitorHealth::changed_here_after_publish($self, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
+	'a site that is not a git checkout keeps the alarm');
+rename($repo . '/.git_away', $repo . '/.git');
+check(!NodeMonitorHealth::changed_here_after_publish($stranger, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
 	'another node never gets this reading, whatever this checkout holds');
 
 // A site that ships an agent built with another site's key cannot re-sign its
@@ -310,7 +350,7 @@ check(!NodeMonitorHealth::committed_after_publish($stranger, $MODIFIED_PREFIX . 
 mkdir($repo . '/public_html/agent_dist', 0755, true);
 file_put_contents($repo . '/public_html/agent_dist/manifest.json', json_encode(['signing_public_key' => 'c29tZW9uZSBlbHNl']));
 check(!TreeManifestPublisher::signsItsOwnTree($repo), 'a site shipping another key does not sign its own tree');
-check(!NodeMonitorHealth::committed_after_publish($self, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
+check(!NodeMonitorHealth::changed_here_after_publish($self, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
 	'so its committed file keeps the alarm');
 exec('rm -rf -- ' . escapeshellarg($repo));
 
@@ -325,7 +365,7 @@ $pub->save();
 $pub->load();
 $health = NodeMonitorHealth::script_trust_health($pub);
 check($health['is_problem'] === false, 'an unpublished commit is not a problem');
-check(stripos($health['label'], 'committed after the last publish') !== false,
+check(stripos($health['label'], 'changed here after the last publish') !== false,
 	'and says what it is', $health['label']);
 check(!in_array((int)$pub->key, array_map(function ($p) { return (int)$p['id']; }, NodeMonitorHealth::script_trust_problems()), true),
 	'it is not listed as a node that can no longer be managed');
@@ -333,7 +373,7 @@ check((new IncidentSourceUnmanageable())->evaluate($pub) === null, 'and raises n
 check(stripos((new IncidentSourceUnmanageable())->cleared_text($pub), 'next publish') !== false,
 	'an open incident closes saying the next publish re-signs it');
 check(strpos((string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php')),
-	"self::committed_after_publish(\$node, (string)\$job->get('mjb_error_message'))") !== false,
+	"self::changed_here_after_publish(\$node, (string)\$job->get('mjb_error_message'))") !== false,
 	'a refusal is checked for this case as it is recorded');
 NodeMonitorHealth::note_script_trust($pub, st_job($pub, 'host_report', 'completed', ''));
 $pub->load();

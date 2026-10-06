@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.41 - unpublished_file also covers a file in this management node's checkout the web server cannot write
  * @version 1.40 - mgn_moved_reach_*: whether the old machine of a switch-over's domain reaches the new server,
  *                 as this management node last proved it
  * @version 1.39 - mgn_mtr_machine_transfer_id: the cloud machine the node runs on, as the daily transfer read
@@ -194,9 +195,10 @@ class ManagedNode extends SystemBase {
 		//                       problem and NOT recoverable by re-delivering a
 		//                       manifest; it means the file on disk is not the file
 		//                       that was published.
-		// 'unpublished_file'  - only on this management node: the refused file is
-		//                       exactly its last commit, made after the last
-		//                       publish, which re-signs it. Not an alarm.
+		// 'unpublished_file'  - only on this management node: the refused file was
+		//                       changed in its own checkout after the last publish
+		//                       (its last commit, or a file the web server cannot
+		//                       write), which re-signs it. Not an alarm.
 		// The first two are kept apart because the remedies are opposites — see
 		// specs/agent_manifest_trust_recovery.md.
 		'mgn_script_trust'        => array('type'=>'varchar(24)'),
