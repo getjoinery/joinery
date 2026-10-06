@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.60 - process_hold_container: what became of a switch-over's old container; host reports keep a
+ *                 container's held mark (host_report 1.10)
  * @version 1.58 - host reports keep reboot_required_since (host_report 1.8): when a pending reboot was
  *                 first asked for, a time only while one is pending (specs/multi_tenant_docker_hosts.md
  *                 WP5 item 7)
@@ -2697,6 +2699,29 @@ HTML;
 		self::process_restart($job, 'unit');
 	}
 
+	/**
+	 * A hold_container job's result (site_copy.md WP14): what became of a
+	 * switch-over's old container on its host. Facts only, from the script's
+	 * one object: done is true when the container reached the state asked for
+	 * (stopped and held, or running with the hold lifted).
+	 */
+	private static function process_hold_container($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$o = null;
+		if (is_array($data) && isset($data['output'])) {
+			$o = json_decode(trim((string)$data['output']), true);
+		}
+		$ok = (string)$job->get('mjb_status') === 'completed' && is_array($o);
+		$job->set('mjb_result', json_encode([
+			'container' => $ok ? self::host_report_name($o['container'] ?? '') : '',
+			'action'    => $ok && in_array($o['action'] ?? '', ['stop', 'start'], true) ? $o['action'] : '',
+			'done'      => $ok && ($o['done'] ?? false) === true,
+			'held'      => $ok && ($o['held'] ?? false) === true,
+			'state'     => $ok ? self::unit_journal_word($o['state'] ?? '') : '',
+		]));
+		$job->save();
+	}
+
 	/** What remove_site_certificate.sh says of each part. */
 	const CERT_REMOVAL_STATES = ['removed', 'absent', 'failed'];
 
@@ -3287,6 +3312,11 @@ HTML;
 				'health'  => self::unit_journal_word($c['health'] ?? ''),
 				'answers' => $answers,
 			];
+			// Held stopped by hold_container (host_report 1.10): a switch-over's
+			// old container, stopped on purpose until it is removed.
+			if (($c['held'] ?? false) === true) {
+				$entry['held'] = true;
+			}
 			// The site's own figures (host_report 1.7). Absent from an older
 			// node's report: kept absent, which the card reads as "not
 			// reported", never as a value.

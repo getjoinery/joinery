@@ -3,6 +3,8 @@
 # restart_container.sh - restart one of this host's Joinery containers, and say
 # what its state was before and after, as ONE JSON object on stdout.
 #
+# Version: 1.1 - a container held stopped by hold_container (/etc/joinery/sites/{site}/held) is
+#                refused: the old container of a switch-over stays stopped.
 # Version: 1.0 - the restart_container operate word of
 #                specs/agent_recipes_and_vocabulary.md (First words). A
 #                container is not a systemd unit, and service_health needs a
@@ -16,6 +18,8 @@
 #     (docker run --name "$SITENAME" -e SITENAME=...). Any other container on
 #     the machine — a database, a proxy, something the operator runs — is
 #     refused, whatever it is called.
+#   - A container held stopped (hold_container.sh) is refused, and nothing
+#     changes.
 #   - It restarts, and only restarts: no stop without a start, no rm, no
 #     exec, no pull. docker restart keeps the container, its writable layer
 #     and its volumes.
@@ -62,6 +66,13 @@ own_container() {
 
 if ! own_container "$NAME"; then
     printf 'restart_container: %s is not a container this node will restart\n' "$NAME" >&2
+    exit 2
+fi
+
+# A container hold_container stopped stays stopped until hold_container starts
+# it: the old container of a switch-over, kept until it is removed.
+if [[ -f "${RESTART_CONTAINER_ETC:-/etc}/joinery/sites/${NAME}/held" ]]; then
+    printf 'restart_container: %s is held stopped (hold_container); start it with hold_container\n' "$NAME" >&2
     exit 2
 fi
 

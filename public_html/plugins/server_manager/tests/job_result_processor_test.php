@@ -449,6 +449,12 @@ check($widened['served_certificates'] === array(array('domain' => 'a.exampleb', 
 	'a served certificate needs a name and whole days', var_export($widened['served_certificates'], true));
 check($widened['containers'] === array(array('name' => 'site1', 'state' => 'running', 'health' => 'none', 'answers' => 'no')),
 	'a container keeps its four facts; anything else in the list is dropped', var_export($widened['containers'], true));
+$held_c = JobResultProcessor::sanitise_host_report(array('containers' => array(
+	array('name' => 'old1', 'state' => 'exited', 'health' => 'none', 'answers' => 'no', 'held' => true),
+	array('name' => 'site2', 'state' => 'running', 'health' => 'none', 'answers' => 'yes', 'held' => false),
+	array('name' => 'site3', 'state' => 'running', 'health' => 'none', 'answers' => 'yes', 'held' => 'yes'))))['containers'];
+check(($held_c[0]['held'] ?? null) === true && !array_key_exists('held', $held_c[1]) && !array_key_exists('held', $held_c[2]),
+	'a container held stopped keeps its mark; false or anything but true leaves none', var_export($held_c, true));
 check(JobResultProcessor::sanitise_host_report(array('containers' => 'none'))['containers'] === 'none',
 	'a machine with no docker says none');
 check(count($capped['failed_units']) === JobResultProcessor::HOST_REPORT_MAX_LIST, 'failed units are capped at the list bound');

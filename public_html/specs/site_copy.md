@@ -1470,6 +1470,39 @@ the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44), and Phase 2's
     it is older than ten minutes, and Check again asks at once. A check refuses while a removal is
     open on the host, since both write the same probe file. A verified removal records the
     container gone.
+  - **The old container is stopped by the switch-over (owner, 2026-10-06).** Found moving
+    getjoinery: the switch-over asked the owner to tick "The old server is off" for a container
+    nobody had stopped, and that only root on its host could stop. It kept running: writes it took
+    after the backup were lost, and its scheduled tasks, its own backups among them, ran until it was
+    removed. A plain `docker stop` would not last, because `container_health` restarts a site
+    container that is not running.
+    - `hold_container` (operate, host posture, agent 1.60.0), `stop` or `start` and the site's
+      name. Stop writes `/etc/joinery/sites/<site>/held` with the restart policy the container had,
+      turns its restart off and stops it. While the mark exists, `container_health` leaves it alone,
+      `restart_container` refuses it, and Docker does not start it at boot. Start puts the policy
+      back and lifts the mark. `remove_account.sh` removes the mark with the container.
+    - The switch-over records the container and its host's node when it begins (before the rows
+      swap) and runs `hold_container stop` on the host as the start's **last** step. After the copy
+      takes the node there is no way back for a copy from backups, so a stopped container never has
+      to be started again by the switch-over, and a host that cannot stop it never holds up the
+      site, which already runs on the copy. `switch_refusals()` asks the host's agent for the word.
+    - The checkbox is gone: every press that cannot be taken back states what it does in the
+      system modal, and an old server this management node cannot reach is still the owner's to
+      turn off, said as "I have turned the old server off".
+  - **The key step opens the key page (owner, 2026-10-06).** The look link lands on the copy's home
+    page, which before the restore is an empty install whose login no password opens. The quiet
+    state answers a second look path, `/.joinery-look/<secret>/key`: the same cookie, then
+    `/copy-key`. The tab shows that one link to a copy whose release has it
+    (`COPY_KEY_LOOK_MIN_VERSION`), and the two links otherwise.
+  - **The cleanup stays on the site's Copy tab until it is done (owner, 2026-10-06).** A kept
+    switch-over's old row leaves the dashboard, and the Copy tab linked to it for a week, saying
+    "if you have not yet, remove the old container" even once it was removed. The certificate a
+    removal left (Joinerydemo's) could be reached only through that link. The tab now names the
+    old container while it is still on its host, then each certificate its host still holds for
+    the domain, with Remove it from the host, for as long as either lasts.
+  - **The old row is named for what it holds (owner, 2026-10-06).** The swap moved only machine
+    columns, so the retired row kept "Getjoinery (copy)" while holding the old container. The swap
+    now renames it: (old container) or (old server) once retired, (copy) again on the way back.
 
 ## Test plan
 

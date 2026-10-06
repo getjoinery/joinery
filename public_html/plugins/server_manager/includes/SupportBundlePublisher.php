@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.12 - carries hold_container.sh: the hold_container word, which keeps a switch-over's old container
+ *                 stopped
  * @version 1.11 - carries remove_site_certificate.sh: the remove_site_certificate word, and remove_account.sh
  *                calls it as its sibling for the removed site's certificates
  * @version 1.10 - carries rspamd_stateless.sh, which provision_relay.sh sources
@@ -144,6 +146,7 @@ class SupportBundlePublisher {
 		// own fail2ban and cron; both scripts source nothing.
 		'maintenance_scripts/sysadmin_tools/restart_unit.sh',
 		'maintenance_scripts/sysadmin_tools/restart_container.sh',
+		'maintenance_scripts/sysadmin_tools/hold_container.sh',
 		// reclaim_managed_file on a host: moves a host file aside and runs the
 		// bundled runner --machine --only=host_housekeeping.sh, which reads
 		// _host_files.sh for the files it writes when absent.

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.7 - A switch-over's old container held stopped (hold_container.sh) loses its hold mark
+#              with its run spec
 #VERSION 2.5 - The site's own network goes with its container, and a network left alone counts as
 #              a docker site still to remove (specs/node_outbound_and_transfer.md WP2)
 #VERSION 2.4 - The site's HTTPS certificates go with its vhost: every Let's Encrypt lineage and
@@ -228,6 +230,10 @@ if [ "$IS_DOCKER" = true ]; then
     else
         echo "Image joinery-${SITE_NAME}:latest does not exist or already removed"
     fi
+
+    # hold_container.sh's mark, when the old container of a switch-over was
+    # held stopped until this removal.
+    rm -f "/etc/joinery/sites/${SITE_NAME}/held"
 
     # How the container was run (_site_run_spec.sh's run_spec_path; spelled
     # here because this script ships alone and sources nothing). The rest of

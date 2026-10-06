@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.44 - a site container held stopped (a switch-over's old container) reads Held stopped, with no Restart
  * @version 1.42 - a pending reboot names when it was asked for, and is amber only once it has
  *                 waited more than a day: a multi-tenant host takes its own the night an update
  *                 asks, so a day's wait is one that did not happen (host_report 1.8)
@@ -1019,13 +1020,17 @@
 				echo '<div class="text-muted small text-uppercase mt-3 mb-1">Site containers</div>';
 				echo '<table class="table table-sm mb-0 align-middle"><tbody>';
 				foreach ($containers as $c) {
-					if ($c['state'] !== 'running') {
+					$c_held = !empty($c['held']);
+					if ($c_held) {
+						// A switch-over's old container, stopped until it is removed.
+						$ctext = 'Held stopped'; $ccls = 'secondary';
+					} elseif ($c['state'] !== 'running') {
 						$ctext = 'Not running'; $ccls = 'danger';
 					} else {
 						$ctext = 'Running'; $ccls = 'success';
 					}
 					echo '<tr><td>' . $hr_str($c['name']) . $site_figures($c) . '</td><td><span class="badge bg-' . $ccls . '">' . $hr_str($ctext) . '</span></td><td class="text-end">';
-					if ($can_restart_c) {
+					if ($can_restart_c && !$c_held) {
 						$form_id = 'nodeActionRestartContainer_' . $c['name'];
 						$confirm = 'Restart the container ' . $c['name'] . '? The site is down while it restarts; its data and volumes are kept.';
 						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'

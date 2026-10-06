@@ -17,6 +17,8 @@
  * Also the copy's page handoff (CopyKeyHandoff): the shapes it accepts, and
  * that it does nothing with no request staged.
  *
+ * @version 1.2 - a container source's old container is stopped and held on its host, last; the site's Copy tab names
+ *                 it until it and its certificate are gone (cleanup_left)
  * @version 1.1 - a container site and a management node from backups; the backups release floor
  * @version 1.0
  */
@@ -181,12 +183,12 @@ $drive = function (SiteCopy $copy, array $statuses, array $by_op) use ($finish, 
 			$job->set('mjb_status', 'completed');
 			$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
 			$job->set('mjb_output', "=== [Step 1/1] take_node_id ===\n" . json_encode(array('api_version' => '1.0',
-				'data' => array('staged' => true, 'node_id' => (int)$src->key))));
+				'data' => array('staged' => true, 'node_id' => (int)$copy->get('scp_source_node_id')))));
 			$job->save();
 			JobResultProcessor::process($job);
 			$job->load();
 			JobResultProcessor::complete_take_node_id($job);
-		} elseif (in_array($current['op'], array('copy_look', 'copy_take_key'), true)) {
+		} elseif (in_array($current['op'], array('copy_look', 'copy_take_key', 'hold_container'), true)) {
 			// As the node posts it: the word's data in the output, for this
 			// management node's own processor to read.
 			$job->set('mjb_status', $r[0]);
@@ -311,6 +313,116 @@ SiteCopyRunner::finish($copy);
 $copy->load();
 check($copy->status() === SiteCopy::STATUS_FINISHED, 'keeping the switch-over finishes it');
 check(!in_array('delete', $powered['calls'], true), 'no server was deleted');
+
+// ---------------------------------------------------------------------------
+section('A container\'s old container: stopped on its host once the copy has taken over');
+
+// A container site on a shared server, whose host has an agent of its own.
+$hnode = $mk_node('host', array('mgn_host' => '192.0.2.95', 'mgn_agent_public_key' => base64_encode(random_bytes(32)),
+	'mgn_agent_version' => '1.59.0', 'mgn_agent_primitives' => 'host_report,restart_container'));
+$mh = new ManagedHost(NULL);
+foreach (array('mgh_slug' => 'harnessscb-h-' . $tag, 'mgh_name' => 'HarnessTest SCB host', 'mgh_host' => '192.0.2.95',
+	'mgh_mgn_managed_node_id' => (int)$hnode->key) as $k => $v) {
+	$mh->set($k, $v);
+}
+$mh->save();
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $mh->key);
+$csrc = $mk_node('csrc', array('mgn_web_root' => '/var/www/html/scbtwo/public_html', 'mgn_site_url' => 'https://scb2.example.org',
+	'mgn_host' => '192.0.2.95', 'mgn_container_name' => 'scbtwo', 'mgn_mgh_managed_host_id' => (int)$mh->key,
+	'mgn_agent_public_key' => base64_encode(random_bytes(32)), 'mgn_agent_version' => '1.40.0', 'mgn_agent_primitives' => 'check_status',
+	'mgn_joinery_version' => JobCommandBuilder::COPY_FROM_BACKUPS_MIN_VERSION, 'mgn_backup_recovery_fpr' => $recovery_fpr,
+	'mgn_agent_server_manager' => 'inactive'));
+$ccopy = SiteCopyRunner::start_own_server($csrc, 1, SiteCopy::FROM_BACKUPS);
+harness_register_row('scp_site_copies', 'scp_site_copy_id', $ccopy->key);
+$ccopy_key = base64_encode(random_bytes(32));
+$ccnode = $mk_node('ccopy', array('mgn_web_root' => '/var/www/html/scbtwo/public_html', 'mgn_site_url' => 'https://scb2.example.org',
+	'mgn_host' => '198.51.100.96', 'mgn_agent_public_key' => $ccopy_key, 'mgn_agent_version' => '1.54.0',
+	'mgn_agent_primitives' => 'host_report,copy_look,copy_take_key,copy_stage,copy_restore,site_census,take_node_id,site_quiet,provision_certificate',
+	'mgn_install_state' => 'copy', 'mgn_copy_of_node_id' => (int)$csrc->key,
+	'mgn_last_host_report' => json_encode(array('disk' => array('avail_bytes' => 50 * 1024 * 1024 * 1024),
+		'memory' => array('total_bytes' => 2 * 1024 * 1024 * 1024)))));
+$ccopy->set('scp_copy_node_id', (int)$ccnode->key);
+$ccopy->save();
+$ccopy->load();
+$drive($ccopy, array(SiteCopy::STATUS_WAITING, SiteCopy::STATUS_COPYING), $run_results);
+check($ccopy->status() === SiteCopy::STATUS_DORMANT, 'the container site\'s copy is dormant', $ccopy->status() . ' ' . $ccopy->get('scp_halt_reason'));
+
+$why = implode(' | ', SiteCopyRunner::switch_refusals($ccopy));
+check(strpos($why, 'old container\'s host') !== false && strpos($why, 'hold_container') !== false,
+	'a host whose agent cannot hold the old container stopped refuses the switch-over, and says which word', $why);
+$threw = '';
+try { JobCommandBuilder::build_hold_container($hnode, 'scbtwo', 'stop'); } catch (Exception $e) { $threw = $e->getMessage(); }
+check($threw !== '', 'and no hold job is built for it');
+$hnode->set('mgn_agent_primitives', 'host_report,restart_container,hold_container');
+$hnode->save();
+check(SiteCopyRunner::switch_refusals($ccopy) === array(), 'with the word, the switch-over may start',
+	implode(' | ', SiteCopyRunner::switch_refusals($ccopy)));
+foreach (array(array('scbtwo', 'rm'), array('Scbtwo', 'stop'), array('a;b', 'start')) as $bad) {
+	$threw = '';
+	try { JobCommandBuilder::build_hold_container($hnode, $bad[0], $bad[1]); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check($threw !== '', 'a hold is built only for stop or start of a site name, not ' . implode(' ', $bad));
+}
+
+SiteCopyRunner::begin_switch($ccopy, SiteCopyRunner::METHOD_MANUAL, null, 1);
+$ccopy->load();
+$hold = $ccopy->switch_record()['hold'] ?? null;
+check($ccopy->status() === SiteCopy::STATUS_READY && is_array($hold) && count($hold) === 2
+	&& (int)($hold['host_node_id'] ?? 0) === (int)$hnode->key && ($hold['name'] ?? '') === 'scbtwo',
+	'the switch-over records the old container and its host, and nothing is stopped yet: the site still runs there',
+	$ccopy->status() . ' ' . json_encode($hold));
+
+SiteCopyRunner::move_address($ccopy, null, 1);
+$ccopy->load();
+$not_stopped = array('completed', array('output' => json_encode(array('container' => 'scbtwo', 'action' => 'stop',
+	'done' => false, 'held' => true, 'state' => 'running', 'restart' => 'no'))));
+$ops = $drive($ccopy, array(SiteCopy::STATUS_STARTING), array('hold_container:stop@host' => $not_stopped));
+check($ops === array('take_node_id@copy', 'site_quiet:off@source', 'provision_certificate@source', 'hold_container:stop@host'),
+	'the old container is stopped last: the copy takes the node, starts and gets its certificate first', json_encode($ops));
+check($ccopy->status() === SiteCopy::STATUS_HALTED && strpos((string)$ccopy->get('scp_halt_reason'), 'not stopped (it is running)') !== false,
+	'an old container its host did not stop halts the start, and says so', $ccopy->status() . ' ' . $ccopy->get('scp_halt_reason'));
+$hold_job = null;
+foreach ($ccopy->steps() as $st) {
+	if ($st['op'] === 'hold_container' && !empty($st['job_id'])) {
+		$hold_job = new ManagementJob((int)$st['job_id'], TRUE);
+	}
+}
+$hp = $hold_job ? $hold_job->get('mjb_parameters') : null;
+$hp = is_string($hp) ? json_decode($hp, true) : $hp;
+check($hold_job && (int)$hold_job->get('mjb_mgn_managed_node_id') === (int)$hnode->key
+	&& ($hp['params'] ?? $hp)['action'] === 'stop' && ($hp['params'] ?? $hp)['name'] === 'scbtwo',
+	'the hold is the host\'s job, naming the old container: the container\'s own agent is inside it', json_encode($hp));
+
+SiteCopyRunner::retry_start($ccopy);
+$ccopy->load();
+$stopped = array('completed', array('output' => json_encode(array('container' => 'scbtwo', 'action' => 'stop',
+	'done' => true, 'held' => true, 'state' => 'exited', 'restart' => 'no'))));
+$ops = $drive($ccopy, array(SiteCopy::STATUS_STARTING), array('hold_container:stop@host' => $stopped));
+check($ccopy->status() === SiteCopy::STATUS_SWITCHED && end($ops) === 'hold_container:stop@host',
+	'tried again, the old container is stopped and held, and the switch-over is done', $ccopy->status() . ' ' . json_encode($ops));
+SiteCopyRunner::finish($ccopy);
+
+// The site's Copy tab names the old container until it is removed and its
+// host holds no certificate of it (B5), however long ago the switch-over was.
+$left = SiteCopyRunner::cleanup_left((int)$csrc->key);
+$old_row = SiteCopyRunner::copy_row($ccopy, false);
+check(count($left) === 1 && (int)$left[0]['node']->key === (int)$old_row->key && $left[0]['removed'] === false,
+	'a kept switch-over names its old container, not yet removed', json_encode(array_map(function ($l) {
+		return array((int)$l['node']->key, $l['removed'], $l['certificates']); }, $left)));
+$old_row->set('mgn_moved_check_state', 'absent');
+$old_row->save();
+$hnode->set('mgn_last_status_data', json_encode(array('ssl_certificates' => array(array('name' => 'scb2.example.org'),
+	array('name' => 'scb2.example.org-0001'), array('name' => 'other.example.org')))));
+$hnode->save();
+$left = SiteCopyRunner::cleanup_left((int)$csrc->key);
+check(count($left) === 1 && $left[0]['removed'] === true && $left[0]['certificates'] === array('scb2.example.org', 'scb2.example.org-0001'),
+	'removed, it is named for the certificates its host still holds for its domain, and only those',
+	json_encode($left ? $left[0]['certificates'] : null));
+$ccopy->set('scp_update_time', gmdate('Y-m-d H:i:s', time() - 40 * 86400));
+$ccopy->save();
+check(count(SiteCopyRunner::cleanup_left((int)$csrc->key)) === 1, 'and still after forty days: unfinished cleanup does not age out');
+$hnode->set('mgn_last_status_data', json_encode(array('ssl_certificates' => array(array('name' => 'other.example.org')))));
+$hnode->save();
+check(SiteCopyRunner::cleanup_left((int)$csrc->key) === array(), 'removed, with no certificate left, nothing is named');
 
 // ---------------------------------------------------------------------------
 section('The copy\'s page handoff');

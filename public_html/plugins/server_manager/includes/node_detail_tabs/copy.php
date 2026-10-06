@@ -18,6 +18,11 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.10 - a kept switch-over's old container is named until it is removed and its host holds no
+ *                  certificate of it, with Remove it from the host here (B5); no longer for a week only
+ * @version 1.9 - the key step is one link, the copy's key look path, on a copy whose release answers it; a container
+ *                 source's old container is stopped by the switch-over, and an irreversible press asks in the system
+ *                 modal instead of a checkbox
  * @version 1.8 - a kept switch-over from a container points at Permanently Delete Site on the old row instead of
  *                 naming a server to delete (B58, site_copy.md WP14); the old row names the site by its name
  * @version 1.7 - the key step is two links at the copy's own address, opening in a new window: no hosts-file line
@@ -57,6 +62,7 @@ $copy_step_labels = array(
 	'power_cycle:copy/copy'    => 'Restart the copy\'s server on the address it holds',
 	'probe/copy'               => 'Ask for the copy\'s look link at the site\'s name',
 	'provision_certificate/source' => 'Issue the site\'s certificate on the new server',
+	'hold_container:stop/host'     => 'Stop the old container on its host, and keep it stopped',
 );
 $copy_verdict_badge = array(
 	'pending' => 'secondary', 'running' => 'primary', 'passed' => 'success', 'failed' => 'danger', 'skipped' => 'secondary',
@@ -89,13 +95,32 @@ if (!$site_copy) {
 	// ── No copy: the preflight, and the two ways to start ──
 	$ended_copy = SiteCopy::recently_ended_for_source((int)$node->key);
 	$ended_server = $ended_copy ? SiteCopyRunner::server_to_delete($ended_copy) : '';
-	$ended_container = $ended_copy ? SiteCopyRunner::old_container($ended_copy) : null;
-	if ($ended_container) {
-		echo '<div class="alert alert-light border">The last copy of this site ended ('
-			. $copy_h(strtolower($ended_copy->status_label())) . ', ' . $copy_h($ended_copy->get_local('scp_update_time', 'M j, g:i A'))
-			. '). If you have not yet, remove the old container: open <a href="/admin/server_manager/node_detail?mgn_managed_node_id='
-			. (int)$ended_container->key . '">' . $copy_h($ended_container->get('mgn_name')) . '</a> and choose '
-			. '<strong>Permanently Delete Site</strong>. Its host checks first that the domain reaches this server.</div>';
+	// A kept switch-over's old container, until it is removed and its host
+	// holds nothing of it: however long that takes.
+	foreach (SiteCopyRunner::cleanup_left((int)$node->key) as $left) {
+		$old = $left['node'];
+		$old_url = '/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$old->key;
+		$old_link = '<a href="' . $copy_h($old_url) . '">its old record</a>';
+		if (!$left['removed']) {
+			echo '<div class="alert alert-warning border">This site\'s old container is still on its host. Open ' . $old_link
+				. ' and choose <strong>Permanently Delete Site</strong>. Its host checks first that the domain reaches this server.</div>';
+			continue;
+		}
+		$old_host = '';
+		try {
+			$old_host = (string)JobCommandBuilder::decommission_host_node_for($old)->get('mgn_name');
+		} catch (Exception $e) {
+			// The name only decorates the sentence.
+		}
+		foreach ($left['certificates'] as $cert_name) {
+			echo '<div class="alert alert-warning border">This site\'s old container is removed (' . $old_link . '), but its HTTPS '
+				. 'certificate <code>' . $copy_h($cert_name) . '</code> is still on ' . $copy_h($old_host ?: 'its host')
+				. ', which keeps trying to renew it.'
+				. '<form method="post" action="' . $copy_h($old_url . '&tab=overview') . '" class="mt-2">'
+				. '<input type="hidden" name="action" value="remove_site_certificate">'
+				. '<input type="hidden" name="cert_name" value="' . $copy_h($cert_name) . '">' . SmAdminCsrf::field()
+				. '<button type="submit" class="btn btn-sm btn-outline-danger">Remove it from the host</button></form></div>';
+		}
 	}
 	if ($ended_server !== '') {
 		echo '<div class="alert alert-light border">The last copy of this site ended ('
@@ -318,20 +343,27 @@ if ($copy_steps) {
 		echo '</td><td><span class="badge bg-' . ($copy_verdict_badge[$s['verdict']] ?? 'secondary') . '">' . $copy_h($s['verdict']) . '</span></td>';
 		echo '<td>' . $copy_h($s['reason'] ?? '') . '</td></tr>';
 		if ($s['op'] === 'copy_take_key' && $s['verdict'] === 'running' && $copy_node) {
-			$domain = SiteCopyRunner::site_domain($node);
 			// The key page needs no hosts-file line: it answers at the copy's
 			// own address, the look link's cookie included (the certificate
 			// warning is the copy's placeholder, accepted once).
 			$copy_ip = (string)$copy_node->get('mgn_host');
 			$copy_ip_host = filter_var($copy_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? '[' . $copy_ip . ']' : $copy_ip;
 			$look_url = 'https://' . $copy_ip_host . $site_copy->get('scp_look_path');
-			$key_url = 'https://' . $copy_ip_host . '/copy-key';
-			echo '<tr><td colspan="4" class="table-info"><strong>Waiting for the backup\'s recovery key.</strong><ol class="mb-1">'
-				. '<li><a href="' . $copy_h($look_url) . '" target="_blank" rel="noopener">Open the copy</a> and accept the certificate '
-				. 'warning (the copy has no certificate of its own yet).</li>'
-				. '<li><a href="' . $copy_h($key_url) . '" target="_blank" rel="noopener">Open its key page</a>, check the backup and the '
-				. 'key\'s fingerprint it names, and paste the recovery key. It stays in your browser; this management node never sees it.</li>'
-				. '</ol></td></tr>';
+			$key_note = 'check the backup and the key\'s fingerprint it names, and paste the recovery key. It stays in your '
+				. 'browser; this management node never sees it.';
+			if (version_compare((string)$site_copy->get('scp_release'), JobCommandBuilder::COPY_KEY_LOOK_MIN_VERSION, '>=')) {
+				// One link: the key look path sets the look cookie and lands on
+				// the key page. The copy's home page has no accounts yet.
+				echo '<tr><td colspan="4" class="table-info"><strong>Waiting for the backup\'s recovery key.</strong> '
+					. '<a href="' . $copy_h($look_url . '/key') . '" target="_blank" rel="noopener">Open the copy\'s key page</a>, '
+					. 'accept the certificate warning (the copy has no certificate of its own yet), then ' . $key_note . '</td></tr>';
+			} else {
+				echo '<tr><td colspan="4" class="table-info"><strong>Waiting for the backup\'s recovery key.</strong><ol class="mb-1">'
+					. '<li><a href="' . $copy_h($look_url) . '" target="_blank" rel="noopener">Open the copy</a> and accept the certificate '
+					. 'warning (the copy has no certificate of its own yet). Close that page: the copy has no accounts yet.</li>'
+					. '<li><a href="' . $copy_h('https://' . $copy_ip_host . '/copy-key') . '" target="_blank" rel="noopener">Open its key '
+					. 'page</a>, ' . $key_note . '</li></ol></td></tr>';
+			}
 		}
 		if ($s['op'] === 'copy_export' && $s['verdict'] === 'running') {
 			$approve_url = rtrim((string)$node->get('mgn_site_url'), '/') . '/admin/admin_backups';
@@ -429,10 +461,18 @@ $copy_press_form = function ($action, $button, $btn_class, $confirm_label = '', 
 			}
 		}
 	}
+	$btn_opts = ['class' => 'btn ' . $btn_class];
 	if ($confirm_label !== '') {
-		$fw->checkboxinput('copy_confirm', $confirm_label, ['required' => true]);
+		// A press that cannot be taken back says what it does in the system
+		// modal, once; copy_confirm is set only by the modal's yes, and the
+		// handler refuses a press without it.
+		$fw->hiddeninput('copy_confirm', ['value' => '']);
+		$json = function ($v) { return json_encode($v, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); };
+		$btn_opts['onclick'] = 'event.preventDefault(); var f = this.closest(\'form\'); if (!f.reportValidity()) { return; } '
+			. 'JoineryModal.confirm(' . $json($confirm_label) . ', function () { f.elements[\'copy_confirm\'].value = \'1\'; f.submit(); }, '
+			. $json(['confirmLabel' => $button, 'confirmStyle' => 'warning']) . ');';
 	}
-	$fw->submitbutton('btn_' . $action, $button, ['class' => 'btn ' . $btn_class]);
+	$fw->submitbutton('btn_' . $action, $button, $btn_opts);
 	$fw->end_form();
 };
 $copy_plain_form = function ($action, $button, $btn_class) use ($base_url, $copy_h) {
@@ -465,15 +505,17 @@ $copy_records_list = function () use ($copy_switch, $copy_h) {
 if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 	$page->begin_box(['title' => 'Switch over to the copy']);
 	if ($copy_backups) {
-		// The old server is powered off by the switch-over only when this
-		// management node created it (never a container's shared server);
-		// otherwise the owner turns it off.
+		// The old server is powered off by the switch-over when this management
+		// node created it; a container is stopped on its shared server, and kept
+		// stopped, once the copy has taken over. Otherwise the owner turns it off.
 		$copy_powers_off = ($sp = IpSwapMove::provision_of($node)) && (string)$sp->get('cvp_provider') === 'linode'
 			&& !$sp->is_transferred();
+		$copy_holds = trim((string)$node->get('mgn_container_name')) !== '';
 		echo '<p>A switch-over makes the copy the site, as of the backup above: nothing is frozen and there is no final copy. '
 			. ($copy_powers_off ? 'This management node powers the old server off first. '
-				: '<strong>Turn the old server off first</strong> (for a container, stop it and turn off its restart): this '
-				. 'management node did not create it and cannot. ')
+				: ($copy_holds ? 'Once the copy has taken over, this management node stops the old container on its host and '
+					. 'keeps it stopped until you remove it. '
+				: '<strong>Turn the old server off first</strong>: this management node did not create it and cannot. '))
 			. 'Then the address moves, the copy takes over this node, starts and gets its own certificate; until then browsers '
 			. 'warn, and a proxy set to strict refuses it. You can go back until the copy takes over, not after.</p>';
 	} else {
@@ -492,7 +534,9 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 		$confirm = $copy_backups
 			? ($copy_powers_off
 				? 'Power the old server off and switch over. Anything written to it after the backup is lost.'
-				: 'The old server is off. Anything written to it after the backup is lost.')
+				: ($copy_holds
+					? 'Switch over, then stop the old container. Anything written to it after the backup is lost.'
+					: 'I have turned the old server off. Switch over: anything written to it after the backup is lost.'))
 			: 'Freeze this site now. Visitors see the maintenance page until the switch-over finishes or I go back.';
 		$any = false;
 		foreach (SiteCopyRunner::switch_methods($site_copy) as $method => $method_why) {
@@ -593,12 +637,13 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 			echo '<p>This server becomes the site again. <strong>Anything written on the new server since it started is lost</strong>: '
 				. 'its server is discarded afterwards. Keeping those writes would be a copy in the other direction.</p>';
 		} elseif ($copy_backups) {
-			echo '<p>The copy stays a dormant copy, and the old server stays off.'
+			echo '<p>The copy stays a dormant copy, and the old ' . (trim((string)$node->get('mgn_container_name')) !== ''
+					? 'container keeps running: it is stopped only once the copy has taken over.' : 'server stays off.')
 				. ($copy_method === SiteCopyRunner::METHOD_MANUAL && $copy_address_at_copy ? ' Point the DNS back yourself.' : '') . '</p>';
 		} else {
 			echo '<p>This site runs again on its own server, as before. The copy stays a dormant copy.</p>';
 		}
-		$confirm = $copy_swapped ? 'I understand that what was written on the new server since it started is lost.' : '';
+		$confirm = $copy_swapped ? 'Go back to this server. What was written on the new server since it started is lost.' : '';
 		if ($copy_method === SiteCopyRunner::METHOD_PROXIED && $copy_address_at_copy) {
 			echo '<p>The address points at the copy, so going back moves it back: enter the DNS token.</p>';
 			$copy_press_form('copy_go_back', 'Go back', 'btn-outline-danger', $confirm, array(), true);

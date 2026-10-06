@@ -14,6 +14,7 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.2 - the swapped rows are named for what they hold (B6)
  * @version 1.1 - the copy's server is the source's size
  * @version 1.0
  */
@@ -181,6 +182,8 @@ check((string)$sw_copy->get('mgn_agent_public_key') === $source_key && (string)$
 check((int)$sw_prov->get('cvp_mgn_managed_node_id') === (int)$sw_src->key, 'the provision follows its machine to the node');
 check((string)$sw_src->get('mgn_container_name') === '' && (string)$sw_copy->get('mgn_container_name') === 'scpswapsite',
 	'a container source\'s container stays with the old machine: the node is bare metal now');
+check((string)$sw_copy->get('mgn_name') === $sw_src->get('mgn_name') . ' (old container)',
+	'the retired row is named for what it holds now: the site\'s old container, not its copy', (string)$sw_copy->get('mgn_name'));
 check(JobResultProcessor::complete_take_node_id($tjob) === 0, 'a result answered once is never swapped again');
 
 SiteCopySwap::go_back($sw_src, $sw_copy);
@@ -190,6 +193,8 @@ check((string)$sw_src->get('mgn_agent_public_key') === $source_key && $sw_src->g
 	&& (int)$sw_prov->get('cvp_mgn_managed_node_id') === (int)$sw_copy->key,
 	'the way back puts both machines back, the node frozen for its owner to unfreeze');
 check((string)$sw_src->get('mgn_container_name') === 'scpswapsite', 'and the container comes back with its machine');
+check((string)$sw_copy->get('mgn_name') === $sw_src->get('mgn_name') . ' (copy)', 'and the other row is the copy again, by name',
+	(string)$sw_copy->get('mgn_name'));
 $sw_src->set('mgn_container_name', null);
 $sw_src->save();
 

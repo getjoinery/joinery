@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.97 - COPY_KEY_LOOK_MIN_VERSION: the first release whose copy answers the key look path;
+ *                 build_hold_container: a switch-over's old container stopped and kept stopped on its host
  * @version 1.96 - build_moved_site_reach: a probe on the NEW server of a switch-over, fetched over the domain;
  *                 build_decommission_node removes the old machine only after a fresh one came back;
  *                 build_remove_site_certificate (agent 1.59.0) removes the certificate a removed old container left
@@ -428,6 +430,14 @@ class JobCommandBuilder {
 	 * source's. 0.8.456 is the first release that carries it.
 	 */
 	const COPY_FROM_BACKUPS_MIN_VERSION = '0.8.456';
+
+	/**
+	 * The oldest release whose dormant copy answers its key look path,
+	 * /.joinery-look/{secret}/key: the look cookie, then the copy's /copy-key
+	 * page (_site_state.sh 1.5). A copy installed at an older release answers
+	 * only the plain look path, which lands on its home page.
+	 */
+	const COPY_KEY_LOOK_MIN_VERSION = '0.8.463';
 
 	/**
 	 * Operations the agent registers as ClassDestructive.
@@ -1842,6 +1852,31 @@ class JobCommandBuilder {
 			throw new Exception("'" . $name . "' is not a container name the node will accept.");
 		}
 		return ['primitive' => 'restart_container', 'params' => ['name' => $name]];
+	}
+
+	/**
+	 * Stop a switch-over's old container on its host and keep it stopped, or
+	 * start it again (site_copy.md WP14). Addressed to the HOST's own agent:
+	 * the container's agent lives inside what is being stopped.
+	 */
+	public static function build_hold_container($host_node, $name, $action) {
+		if (!self::has_primitive($host_node, 'hold_container')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot stop a container and keep it stopped. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['hold_container']));
+		}
+		return self::build_hold_container_primitive($name, $action);
+	}
+
+	public static function build_hold_container_primitive($name, $action) {
+		$name = (string)$name;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a container name the host will accept.");
+		}
+		if (!in_array($action, ['stop', 'start'], true)) {
+			throw new Exception("A container is held with stop or start, not '" . $action . "'.");
+		}
+		return ['primitive' => 'hold_container', 'params' => ['action' => $action, 'name' => $name]];
 	}
 
 	/**
