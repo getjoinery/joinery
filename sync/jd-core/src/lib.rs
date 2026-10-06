@@ -51,6 +51,7 @@ pub mod remote;
 pub mod round;
 pub mod scan;
 pub mod store;
+pub mod trace;
 pub mod vault;
 
 pub use execute::{

@@ -116,6 +116,9 @@ pub struct Daemon {
     /// at startup, and held for the life of the process — the alternative is
     /// touching the keychain once per file, which on macOS is a prompt.
     vault: Option<Vault>,
+    /// Where each pass's trace goes, on a soak device that asked
+    /// (`crate::passlog`). None on every user's client.
+    pass_journal: Option<crate::passlog::PassJournal>,
 }
 
 impl Daemon {
@@ -129,6 +132,7 @@ impl Daemon {
         commands: Receiver<Command>,
         custody: String,
         vault: Option<Vault>,
+        pass_journal: Option<crate::passlog::PassJournal>,
     ) -> Daemon {
         let client = Client::with_credentials(&config.base_url, credentials);
         let dirty = Arc::new(Mutex::new(DirtySet::with_default_quiet_period()));
@@ -162,6 +166,7 @@ impl Daemon {
             blocker: None,
             custody,
             vault,
+            pass_journal,
         }
     }
 
@@ -278,6 +283,7 @@ impl Daemon {
             device_name: self.config.device_name.clone(),
             conflict_suffix: 1,
             personality: self.vfs.personality(),
+            trace: self.pass_journal.is_some(),
         };
         let namer = {
             let device = self.config.device_name.clone();
@@ -298,6 +304,13 @@ impl Daemon {
         self.last_poll_ms = now_ms();
         match run_pass(&env, &ctx, DeletePolicy::Guard, &mut keys) {
             Ok(outcome) => {
+                if let Some(journal) = self.pass_journal.as_mut() {
+                    match outcome.trace.as_ref() {
+                        Some(t) => journal.write(t),
+                        None if outcome.root_unavailable => journal.write_unavailable(),
+                        None => {}
+                    }
+                }
                 self.last_pass_ms = Some(now_ms());
                 self.blocker = if outcome.root_unavailable {
                     Some(Blocker::RootUnavailable {
