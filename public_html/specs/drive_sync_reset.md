@@ -2251,6 +2251,25 @@ no named flaw is a reason to name one.
   the server should take two names one folding fleet cannot hold
   (B-CASEPAIR); a folder clash whose unheld folder has children of its own
   would still read OnlyRemote for those children.
+- **The pass journal, added 2026-10-06 (B-PASSLOG; for Mac soak run 38 and
+  rig run 1805, both still open).** Two failures showed one shape -- a folder
+  frozen for 70 to 110 seconds on one device, then one burst of operations,
+  in run 1805 one of them moving another user's file into a folder they never
+  chose -- and neither could be traced, because a device's store keeps only
+  where each record ended up. A pass now returns, when asked, what it saw and
+  decided (`jd_core::trace::PassTrace`): phase times, the server's changes by
+  id, merges, naming's verdicts, every directory's binding, the scan's
+  verdicts, the folder scan's moves and holds, every record the round passed
+  by and the line that did it, the plan, and every operation's outcome. Built
+  from values the pass already holds, never a read of its own, and collected
+  only when asked. The daemon writes it as one line per pass when
+  `JOINERY_DRIVE_PASS_JOURNAL` is set (soak devices only; names are user
+  data): directories in full on each file's first line and after a reset,
+  otherwise as they change, rotated at 64 MB. Pin
+  `a_traced_pass_plans_and_does_exactly_what_an_untraced_one_does`, red when
+  tracing touches the store. The held-directory reading of the freeze is
+  ruled out: neither device ever raised a directory disagreement. VALID
+  (public-html-41, 2026-10-06).
 - **B-RETRYWAIT, fixed 2026-10-05 (found probing Mac soak run 38): an op
   waiting for its folder waited out a timer after the folder arrived.** An
   upload into a folder with no server id yet failed as a retry and took a

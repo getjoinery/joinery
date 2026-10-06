@@ -57,7 +57,11 @@ spec:
   neighbours.
 - **Outbound traffic per site** is in the multi-tenant host's measurements
   (`multi_tenant_docker_hosts` WP1), so a site scanning
-  the internet shows up as an outlier.
+  the internet shows up as an outlier. Limits on it (a new-connection rate,
+  a UDP drop and a speed ceiling on every install) are spec
+  `node_outbound_and_transfer`; on a multi-tenant host, a lower ceiling and
+  an alert when a site passes its monthly share are spec
+  `site_outbound_limits`.
 
 **3. Find it before Linode does.**
 

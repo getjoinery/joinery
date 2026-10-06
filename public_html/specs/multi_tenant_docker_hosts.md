@@ -449,19 +449,14 @@ escalate. Every limit has to hold against that.
 
 On a multi-tenant host:
 
-1. **One private network per site, on a pinned subnet (S8).** Each site gets
-   `docker network create SITENAME_net` with a subnet the host assigns and
-   records in the site's run spec (WP0). The container is attached only to
-   that network, so a site cannot open a connection to another site's web
-   server or PostgreSQL. The proxy reaches each site through its published
-   loopback port, as now. **Three things assume the default bridge
-   (`172.17.0.0/16`) and must read the pinned subnet instead:**
-   - `RemoteIPInternalProxy` in the image (`Dockerfile.template`). Left as it
-     is, `X-Forwarded-For` from the proxy is not trusted, and every visitor
-     shows up as the gateway address. Rate limits, login IP rules and
-     analytics would then all see one address.
-   - PostgreSQL's "Docker host" line in `pg_hba`.
-   - The gateway lookup in `rebase_site_container.sh`.
+1. **One private network per site, on a pinned subnet (S8).** Every
+   container site, on any Docker host, runs on a network of its own with an
+   IPv4 subnet and a private IPv6 /64, recorded in its run spec
+   (`node_outbound_and_transfer` WP2, which also moves the three things that
+   assume the default bridge onto the site's subnet). On a multi-tenant host
+   that network is the wall: the container is attached only to it, so a site
+   cannot open a connection to another site's web server or PostgreSQL. The
+   proxy reaches each site through its published loopback port, as now.
 2. **Capabilities: keep what the image needs, drop the rest (S7).**
    `--security-opt no-new-privileges` is **not** used. The parser jail
    (`/usr/local/sbin/joinery-jail`) is setuid root, run by `www-data`, and it
@@ -509,12 +504,11 @@ On a multi-tenant host:
      on a site should be able to ask.
    
    The host's own outbound 25 is blocked in OUTPUT.
-6. **IPv4 and IPv6 alike.** No firewall script in `maintenance_scripts` calls
-   `ip6tables` today, and Docker's IPv6 is off. Containers on a multi-tenant host get **no
-   IPv6 address**. Their outbound traffic leaves over IPv4 through the host,
-   and the host's proxy serves visitors on both. Every rule above is written
-   for both `iptables` and `ip6tables` on the host, so turning IPv6 on later
-   does not open a hole.
+6. **IPv4 and IPv6 alike.** A site's container has a private address of
+   each kind and leaves through the host from the box's one IPv4 or one IPv6
+   address (`node_outbound_and_transfer` WP2, which says why and what follows
+   from it). Every rule above is written for both `iptables` and `ip6tables`
+   on the host, and the gate checks each over both.
 7. **Kernel fixes take effect promptly.** A kernel update does nothing until
    the machine reboots, and the shared kernel is the one wall left once 1–6
    are in place. A multi-tenant host reboots itself after a kernel update
@@ -755,8 +749,12 @@ box without it.
 - **Disk speed.** One site doing heavy reads and writes slows the others.
   There is no per-site I/O limit here. Cgroup I/O weights need a scheduler the
   loop device does not use. If WP1 shows this matters, it gets its own spec.
-- **Network bandwidth.** It stays on the account-wide pool, as the hosted tier
-  documents.
+- **Outbound traffic.** Connection limits, a UDP drop and a speed ceiling
+  for every install, with a transfer watch per machine, are spec
+  `node_outbound_and_transfer`. A multi-tenant box's lower per-site ceiling
+  and each site's count against its monthly share are spec
+  `site_outbound_limits`. Until then a site's outbound traffic is
+  only measured (WP1).
 
 ## Docs to update when this lands
 
