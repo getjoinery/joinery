@@ -12,7 +12,11 @@ rebase_site_container.sh 1.9, migrate_site_to_code_volumes.sh 1.2). Both run on 
 scratch Nanode the same day; the rebase-with-caps check is still to run. WP9
 built 2026-10-05 (install.sh 2.96, joinery-base 2.1, install_email.sh 2.27,
 mailbox plugin 1.134.0; test mailbox_container_mail, gate container_mail_stack).
-Nothing else is built. Split out of the starter
+WP2 items 1 and 2 built 2026-10-06 (_memory_plan.sh 1.0.0, tune_php_fpm.sh
+1.0.0, tune_postgres_memory.sh 1.4.0, _site_supervisor.sh 1.0,
+Dockerfile.template 6.0, rebase_site_container.sh 1.10, agent 1.58.0; gates
+tune_php_fpm, site_supervisor) and proven on the scratch Nanode; item 3 is
+measured and waits on the owner's Q1. Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -198,6 +202,73 @@ either way. docker-prod's sites are on 0.8.459 but have run since
 in them today. Plugin installers run at every container start, so any of them
 with the mailbox plugin active gains about 200 MB at its next restart; which
 ones have it active is still to check.
+
+**Built 2026-10-06 (items 1 and 2).** One sourced file,
+`sysadmin_tools/_memory_plan.sh`, splits the budget: PHP workers =
+(budget − `shared_buffers` − 128 MB) ÷ 40 MB, at least 2 and at most 80, and
+`max_connections` = workers + 20. `tune_php_fpm.sh` writes the pool as
+`pool.d/zz-joinery-memory.conf` (a second `[www]` section over the packaged
+one) before PHP-FPM starts; `tune_postgres_memory.sh` 1.4.0 reads the same
+plan and writes `max_connections` for a container's budget. 256 MB gives 2
+workers and 22 connections. Measured for the figures (2.1 site, 0.8.459): the
+heaviest admin page used 10 MB of PHP memory; everything that is not a PHP
+worker came to about 90 MB at rest. Item 2 is `_site_supervisor.sh`, the
+container's main process (Dockerfile.template 6.0): it starts Apache, checks
+the four every 5 seconds, and restarts one gone for three checks after killing
+what it left behind; a hold file (`/run/joinery/supervisor.hold`, cleared by
+every start) stops it fighting a deliberate stop, and
+`rebase_site_container.sh` 1.10 takes it. `--check` is the image's
+HEALTHCHECK, and agent 1.58.0's `container_health` restarts a container Docker
+calls unhealthy. On the scratch Nanode at 256 MB: each of the four, killed
+with SIGKILL, was back in 12-20 seconds and the site kept answering; a dead
+FPM master's and Apache parent's leftovers were cleared; `docker stop` took
+0.6 s and PostgreSQL's next start found a clean shutdown; with cron unable to
+start, Docker called the container unhealthy after 80 seconds while the site
+still answered, which is the case nothing caught before.
+
+**Item 3 at 256 MB (2026-10-06, scratch Nanode, 0.5 CPU, 4 concurrent page
+loads throughout, a 150 MB database and 400 MB of uploads).** Memory that
+cannot be reclaimed, at its peak:
+
+| Job | Peak | Killed for memory |
+|---|---|---|
+| `update_database` | 124 MB | none |
+| full backup (490 MB to the bucket), then an incremental with the database | 177 MB, 186 MB | none |
+| one 24-megapixel photo, every size made | 229 MB | none |
+| two such photos at once | 253 MB | one of the two |
+| in-place upgrade (792 s) | 234 MB | none |
+
+Each job fits alone; two heavy jobs at once do not. A photo's decode is about
+100 MB that PHP's `memory_limit` does not count (GD allocates outside PHP's
+own allocator), so the 40 MB a worker covers a page, not a photo. A first
+upgrade run showed the WP9 transition hazard for real: `--force-upgrade` put
+back 0.8.454's mail installer, whose `apt-get` was killed three times.
+**One decode at a time (built 2026-10-06).** `includes/ImageWorkLock.php` is a
+site-wide `flock` (`cache/image_work.lock`) taken around every image decode:
+`FileBlob::_generate_resized` (file_blobs_class 1.2.4) and
+`UploadHandler::handle_image_file`, which also frees its cached image at last
+(it never did: a 24-megapixel photo's 92 MB stayed resident through every
+resize after it; found by reviewer2). Test `image_work_lock`. On the scratch
+Nanode at 256 MB, three 24-megapixel resizes started at once queued (done at
+5, 12 and 19 s) with no kill and a peak of 217 MB. Making each decode smaller
+(a scaled JPEG decode, orientation after the downscale) is spec
+`image_decode_memory`.
+
+**Caps that add up to more than the machine (tested 2026-10-06).** Three sites
+at 384 MB on the 961 MB Nanode (1.15 GB of caps, the same 115-120% as 12 sites
+at 384 MB on a 4 GB box), mailbox off, 4 PHP workers each. One photo in each
+at once: all three finished in 10 s, free memory fell from 400 MB to 126 MB,
+the box began to swap, and page loads stayed under 0.8 s. Then two photos and
+`update_database` in each at once: the whole machine froze within two seconds.
+No site, no front-door proxy and no SSH answered for 35 minutes; the kernel
+logged no out-of-memory kill and the system journal stopped at the moment the
+jobs began; it took a reboot from the Linode API. A cap inside one container
+ends in a clean kill of one process in that site; a machine whose caps exceed
+its memory ends, in the worst case, in every site on it down until someone
+reboots it. So the sum of a box's caps stays within its memory less the host
+reserve, whatever per-site figure is chosen.
+**Open (owner, Q1):** what the starter tier sells, given that two heavy jobs
+at once do not fit in 256 MB.
 
 ### WP3 — CPU and processes
 
@@ -674,7 +745,10 @@ box without it.
   server with its own mail stack; § The receive-mode choice matches the code
   (it still described the removed choice card).
 - `docs/deploy_and_upgrade.md` (WP9, done): `joinery-base:2.1` carries no mail
-  server.
+  server. (WP2, done 2026-10-06): § PostgreSQL and PHP memory, the pool and
+  connection sizing.
+- `docs/installation.md` (WP2, done 2026-10-06): § What keeps a site running,
+  the supervisor, its health check and the hold.
 
 ## Found by the review, outside this spec's scope
 

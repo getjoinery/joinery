@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # tune_postgres_memory.sh - size PostgreSQL's memory settings from the machine
+# Version: 1.4.0 - the budget and shared_buffers come from _memory_plan.sh, shared with
+#                  tune_php_fpm.sh; a budget from a cgroup limit or --ram-mb also sets
+#                  max_connections to the PHP pool plus 20 (specs/multi_tenant_docker_hosts.md WP2)
 # Version: 1.3.0 - max_parallel_workers_per_gather scales with the CPUs: half of them, capped at
 #                  4 (1 CPU: 0, 2-3: 1, 4-5: the default 2, 6-7: 3, 8+: 4), written only
 #                  where it differs from the default, so a 4-5 CPU machine's drop-in is unchanged
@@ -51,6 +54,11 @@
 #   does the same. Give the container a limit (docker run --memory=512m) or
 #   state the budget with --ram-mb, and this tunes correctly.
 #
+#   When the budget is a container's (the cgroup limit, or --ram-mb), it also
+#   writes max_connections: the PHP pool tune_php_fpm.sh sizes from the same
+#   budget, one connection per worker, plus 20 for scheduled tasks, the agent
+#   and maintenance. The split lives in _memory_plan.sh, which both read.
+#
 #   Nothing else is touched: work_mem stays at the default and max_wal_size at
 #   the installer's small cap, a deliberate disk-space choice on tiny VPSes.
 #
@@ -94,85 +102,27 @@ for arg in "$@"; do
                 exit 1
             fi
             ;;
-        -h|--help)    sed -n '2,55p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,85p' "$0"; exit 0 ;;
         *) echo "Unknown option: $arg" >&2; exit 1 ;;
     esac
 done
 
-# ---- is this a container? --------------------------------------------------
-# Only consulted when no cgroup limit applies, to decide between "this whole
-# machine is mine" and "I cannot tell what is mine". --container states it
-# outright, for the caller that already knows (the container start command);
-# the probes are a backstop for a manual run. /.dockerenv is absent under
-# BuildKit, so it cannot be the only signal.
-in_container() {
-    [ "$IS_CONTAINER" -eq 1 ] && return 0
-    [ -f /.dockerenv ] && return 0
-    [ -f /run/.containerenv ] && return 0
-    if command -v systemd-detect-virt >/dev/null 2>&1; then
-        systemd-detect-virt --container --quiet && return 0
-    fi
-    # PID 1 in a container is not the host's init: its cgroup path names the
-    # container runtime rather than the host's own slice.
-    if [ -r /proc/1/cgroup ] && grep -qE '(docker|lxc|containerd|kubepods|podman)' /proc/1/cgroup; then
-        return 0
-    fi
-    return 1
-}
-
 # ---- how much RAM is really ours -------------------------------------------
-mem_total_mb=$(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo) / 1024 ))
-
-# The cgroup limit, in MB, when one actually applies. Empty when unlimited:
-# cgroup v2 says "max", cgroup v1 says a number larger than physical memory.
-cgroup_limit_mb() {
-    local limit
-    if [ -r /sys/fs/cgroup/memory.max ]; then
-        limit=$(cat /sys/fs/cgroup/memory.max)
-    elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
-        limit=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
-    else
-        return 0
-    fi
-    if [[ "$limit" =~ ^[0-9]+$ ]] && [ $(( limit / 1048576 )) -lt "$mem_total_mb" ]; then
-        echo $(( limit / 1048576 ))
-    fi
-}
-
-if [ -n "$RAM_MB_OVERRIDE" ]; then
-    ram_mb="$RAM_MB_OVERRIDE"
-    ram_source="--ram-mb"
-else
-    cg_mb="$(cgroup_limit_mb)"
-    if [ -n "$cg_mb" ]; then
-        ram_mb="$cg_mb"
-        ram_source="cgroup limit"
-    elif in_container; then
-        cat >&2 <<MSG
-Not sizing PostgreSQL's memory: this is a container with no memory limit.
-
-/proc/meminfo reports ${mem_total_mb} MB, but that is the HOST's memory, not this
-container's budget — every container on the host reads the same figure, so
-sizing from it hands each one a fraction of memory they all share.
-
-Give the container a limit, and this sizes itself from that:
-    docker run --memory=512m ...          (install.sh site --memory=512m)
-    docker update --memory=512m NAME      (an already running container)
-Or state the budget directly:
-    $(basename "$0") --ram-mb=512
-
-PostgreSQL keeps its packaged settings. Nothing was written.
-MSG
-        exit 3
-    else
-        ram_mb="$mem_total_mb"
-        ram_source="MemTotal"
-    fi
+# The budget and its split live in _memory_plan.sh, which tune_php_fpm.sh reads
+# too: PostgreSQL's share and the PHP pool come from the same figures.
+. "$(dirname "${BASH_SOURCE[0]}")/_memory_plan.sh"
+MEMORY_PLAN_RAM_MB="$RAM_MB_OVERRIDE"
+MEMORY_PLAN_CONTAINER="$IS_CONTAINER"
+plan_status=0
+memory_plan_budget || plan_status=$?
+if [ "$plan_status" -ne 0 ]; then
+    echo "Not sizing PostgreSQL's memory. PostgreSQL keeps its packaged settings; nothing was written." >&2
+    exit "$plan_status"
 fi
+ram_mb="$MEMORY_PLAN_MB"
+ram_source="$MEMORY_PLAN_SOURCE"
 
-shared_mb=$(( ram_mb / 5 ))
-[ "$shared_mb" -lt 64 ] && shared_mb=64
-[ "$shared_mb" -gt 2048 ] && shared_mb=2048
+shared_mb="$(memory_plan_shared_buffers "$ram_mb")"
 cache_mb=$(( ram_mb / 2 ))
 [ "$cache_mb" -lt 128 ] && cache_mb=128
 
@@ -210,13 +160,23 @@ shared_buffers = ${shared_mb}MB
 effective_cache_size = ${cache_mb}MB
 CONF
 )
+# A container's PHP pool is sized from the same budget (tune_php_fpm.sh), and
+# each worker holds at most one connection: room for the pool plus the
+# scheduled tasks, the agent and maintenance, instead of the packaged 100.
+connections=""
+if [ "$ram_source" != "MemTotal" ]; then
+    connections="$(memory_plan_max_connections "$ram_mb")"
+    content="${content}
+# $(memory_plan_php_children "$ram_mb") PHP workers plus ${MEMORY_PLAN_OTHER_CONNECTIONS} for scheduled tasks, the agent and maintenance.
+max_connections = ${connections}"
+fi
 if [ -n "$parallel_line" ]; then
     content="${content}
 # ${cpus} CPU(s): at most half of them on one query (PostgreSQL's default is 2).
 ${parallel_line}"
 fi
 
-echo "RAM available: ${ram_mb} MB (${ram_source}) -> shared_buffers ${shared_mb}MB, effective_cache_size ${cache_mb}MB; CPUs: ${cpus} -> ${per_gather} parallel worker(s) per query (${DROPIN})"
+echo "RAM available: ${ram_mb} MB (${ram_source}) -> shared_buffers ${shared_mb}MB, effective_cache_size ${cache_mb}MB${connections:+, max_connections ${connections}}; CPUs: ${cpus} -> ${per_gather} parallel worker(s) per query (${DROPIN})"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "$content"

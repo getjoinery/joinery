@@ -28,6 +28,8 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
+ * @version 1.2.4 - every resize decodes under ImageWorkLock, one image at a time on the site
+ *                  (specs/multi_tenant_docker_hosts.md WP2)
  * @version 1.2.3 - fbb_sync_last_error: why the last offload attempt did not move the blob
  * @version 1.2.2 - one private store: the driver is resolved with no visibility; a cloud blob is always
  *                  a private blob, and flipping one public pulls its bytes home before the record flips
@@ -1214,7 +1216,18 @@ class FileBlob extends SystemBase {
 		return is_file($dest_path);
 	}
 
+	/**
+	 * One decode at a time on the site (ImageWorkLock): a decoded photo costs its
+	 * full pixel size, outside PHP's memory_limit, and two at once do not fit a
+	 * small site's memory.
+	 */
 	private function _generate_resized($old_path, $new_path, $width, $height, $crop, $quality = 85) {
+		ImageWorkLock::run(function () use ($old_path, $new_path, $width, $height, $crop, $quality) {
+			$this->_generate_resized_now($old_path, $new_path, $width, $height, $crop, $quality);
+		});
+	}
+
+	private function _generate_resized_now($old_path, $new_path, $width, $height, $crop, $quality = 85) {
 		try {
 			$info = @getimagesize($old_path);
 			if ($info === false) {

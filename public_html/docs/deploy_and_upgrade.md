@@ -882,7 +882,7 @@ Cross-shape rebuilds work in both directions with no extra step: a container bac
 
 The distinction matters beyond the upgrade endpoint: any control that edits a file the upgrade replaces wholesale belongs only on a publishing instance, because on a consuming site the edit is discarded at the next upgrade. Version-controlled manifests like Joinery AI's [recipes.json](../plugins/joinery_ai/docs/overview.md#shipped-recipes) are for the same reason edited only on the publishing checkout.
 
-### PostgreSQL memory
+### PostgreSQL and PHP memory
 
 `maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh` sizes PostgreSQL from the RAM
 the machine actually owns and writes the result as `conf.d/20-joinery-memory.conf`:
@@ -890,6 +890,25 @@ the machine actually owns and writes the result as `conf.d/20-joinery-memory.con
 is idempotent, writes nothing when the drop-in already matches, and restarts the cluster
 unit (`postgresql@{version}-main`) only when it wrote. `--dry-run` prints what it would
 write; `--no-restart` writes without restarting.
+
+In a container, `tune_php_fpm.sh` sizes PHP-FPM's worker pool from the same budget, and
+PostgreSQL's `max_connections` follows the pool. The split lives in one sourced file,
+`sysadmin_tools/_memory_plan.sh`, which both tuners read:
+
+| Figure | Rule |
+|---|---|
+| PHP workers (`pm.max_children`) | (budget − `shared_buffers` − 128 MB) ÷ 40 MB, at least 2, at most 80 |
+| Spare workers | start 2, keep 1 to 3 idle, never more than the pool |
+| `max_connections` | the workers plus 20 (scheduled tasks, the agent, a backup, maintenance) |
+
+The 128 MB is everything that is not a PHP worker: PostgreSQL's own processes, Apache,
+PHP's master and opcache, cron, and the kernel memory a container is charged for. The 40 MB
+is one worker with the database connection it holds. At 256 MB that is 2 workers and 22
+connections; at 512 MB, 7 and 27; at 1 GB, 17 and 37. The pool is written as
+`pool.d/zz-joinery-memory.conf` for every PHP version installed: a second `[www]` section,
+read after the packaged `www.conf`, overrides only the lines it names. `max_connections` is
+written only for a container's budget (a cgroup limit or `--ram-mb`); a bare-metal machine
+keeps PostgreSQL's own and PHP's packaged pool.
 
 "RAM the machine owns" is the whole question, and on a shared host only the container knows
 the answer. The budget is resolved in one order, and the script skips rather than guesses:
@@ -906,9 +925,10 @@ which is not the container's to size from, and every container on that host read
 figure — eight containers each taking 20% of one host claim 160% of it. PostgreSQL keeps its
 packaged settings until the container is given a budget.
 
-**Where it runs.** On bare metal, `install.sh server` runs it during the install: that host is
-the machine. On Docker it runs from the container start command on every start, before
-PostgreSQL starts, so the value applies to the first postmaster. It is deliberately not part
+**Where it runs.** On bare metal, `install.sh server` runs `tune_postgres_memory.sh` during the
+install: that host is the machine. On Docker both tuners run from the container start command
+on every start, each before the service it sizes starts, so the values apply from the first
+process. It is deliberately not part
 of the base image — `install.sh server` is what `docker build` runs to bake that image, so a
 figure computed there would be the build host's RAM, frozen into the image and shipped to
 every container on every host — and deliberately not in `_site_init.sh`, which runs only on
