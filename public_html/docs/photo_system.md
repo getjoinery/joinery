@@ -182,9 +182,25 @@ Defined in `theme/falcon/theme.json` under `image_sizes`:
 
 Themes can override or add sizes in their own `theme.json`. The active theme's sizes are merged on top of Falcon's (which always loads as the base).
 
-### One decode at a time
+### How sizes are made
 
-Decoding a photo costs its full pixel size in memory (a 24-megapixel JPEG is about 92 MB), allocated by GD outside PHP's allocator, so `memory_limit` does not bound it. Every decode therefore runs inside `ImageWorkLock::run()`, a site-wide `flock` on `cache/image_work.lock`. `FileBlob`'s resize path holds it per decode. `UploadHandler::handle_image_file()` holds it from the decode until its cached image is freed. A second upload's decode waits its turn rather than doubling the memory. A process that dies holding the lock releases it. A decode that waits more than 60 seconds logs it and runs without the lock, so no photo is left unrotated or without its sizes. New code that decodes an image takes the lock the same way. A nested `run()` goes straight through.
+`File::resize()` (and `ensure_variant()`, which makes one size the first time it is asked for) runs on the file's blob. The blob opens its original **once** through `ImageDecoder`, cuts every registered size from that one decoded image, and frees it; the whole sequence runs inside one `ImageWorkLock::run()` hold.
+
+**`ImageDecoder`** (`includes/ImageDecoder.php`) is the only place the platform turns an image file into pixels; nothing else calls an `imagecreatefrom*` reader (`tests/unit/core_api_mechanical_test.php` pins this). `ImageDecoder::open($path, $max_w, $max_h)` returns the image upright at no more than is needed to cut `$max_w × $max_h` from it, where that pair is `ImageSizeRegistry::max_dimensions()` — the largest width and the largest height across the registered sizes — so every crop and scale comes out exactly as it would from the full image. In order:
+
+1. **The header only** — dimensions, type, EXIF orientation, and for a JPEG whether it is progressive (SOF2 marker).
+2. **The cost** — 4 bytes per decoded pixel, plus 6 per source pixel for a progressive JPEG, whose decoder keeps every coefficient until the last scan. Over the ceiling, the decode is refused before any memory is spent.
+3. **JPEG, shrunk while decoding** — the smallest `M/8` that keeps the needed size, decoded by `djpeg -scale M/8` (libjpeg-turbo's decoder as a program, the same library GD links, from `libjpeg-turbo-progs`) into a BMP that GD reads. A 24-megapixel photo costs about 15 MB this way instead of 92. The child runs under an address-space limit of the ceiling plus headroom. Without `djpeg` on the machine, logged once, the JPEG is decoded in full.
+4. **Other formats** decode in full under the same ceiling; none has a shrink-on-decode.
+5. **Upright** — EXIF orientations 2–8 are applied to the decoded, already small, image. Every variant is upright by its pixels, on every upload path.
+
+**The stored original is the uploaded bytes**, EXIF and all; nothing re-saves it. Browsers and the native apps' image stacks honour the orientation tag when they show an original. A consumer that reads raw pixels from an original must orient them itself.
+
+**The ceiling** is the setting `image_decode_max_mb` (File hosting; default 160 MB). A decode over it throws `ImageDecodeRefused` with the estimate and the limit in words; `resize()` logs it, records it in the blob's `fbb_variant_refused`, and returns false. `resize()` and `ensure_variant()` return false at once while the record is set, so a listing page does not decode the same photo on every row. The original is kept and served. The upload responses (admin uploader, Drive, entity photos) carry the reason as `warning`. `utils/regenerate_image_sizes.php` clears the record before trying each file again, which is how a raised ceiling takes effect, and counts the ones refused again.
+
+Memory, measured at 24 megapixels: a baseline JPEG opens at about 15 MB; a progressive JPEG at about 150 MB (the coefficient buffer, inside the `djpeg` child); a PNG at 92 MB. `memory_get_peak_usage()` sees none of it.
+
+**One decode at a time.** `ImageWorkLock::run()` is a site-wide `flock` on `cache/image_work.lock`. `FileBlob::_render_sizes()` holds it from the decode until the decoded image is freed, once per resize. A second upload's decode waits its turn rather than doubling the memory. A process that dies holding the lock releases it. A decode that waits more than 60 seconds logs it and runs without the lock, so no photo is left without its sizes. A nested `run()` goes straight through.
 
 ---
 

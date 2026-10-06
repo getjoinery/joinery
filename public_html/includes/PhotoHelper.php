@@ -11,6 +11,7 @@
  *   PhotoHelper::render_photo_card('grid', 'event', $id, $photos, $options);
  *   PhotoHelper::render_photo_scripts('grid', 'event', $id, $options);
  *
+ * @version 1.2.0 - an upload's `warning` (saved, but no sizes) is shown before the reload
  * @version 1.1.0
  * @see /specs/profile_picture_upload_spec.md
  */
@@ -207,6 +208,9 @@ class PhotoHelper {
 							btnUpload.disabled = false;
 							btnUpload.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-right:0.25rem; vertical-align:text-bottom;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>Upload';
 							return;
+						}
+						if (data.warning) {
+							alert(data.warning);
 						}
 						window.location.reload();
 					})

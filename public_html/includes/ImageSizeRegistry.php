@@ -6,6 +6,7 @@
  * the active public theme, and any plugin-declared sizes.
  * Themes declare sizes in their theme.json under "image_sizes".
  *
+ * @version 1.1.0 - max_dimensions(): the largest width and height any size asks for, for ImageDecoder
  * @version 1.0.0
  * @see /specs/pictures_refactor_spec.md
  */
@@ -70,6 +71,28 @@ class ImageSizeRegistry {
 	 * @param string $key Size key
 	 * @return array|null Size config or null if not found
 	 */
+	/**
+	 * The largest width and the largest height any registered size asks for:
+	 * what a decode must keep so every size, cropped or scaled, comes out as it
+	 * would from the full image (ImageDecoder::open takes this pair). A size
+	 * that constrains neither dimension wants the full image, so the answer
+	 * is then unbounded.
+	 *
+	 * @return array{width:int,height:int}
+	 */
+	public static function max_dimensions() {
+		$w = 0;
+		$h = 0;
+		foreach (self::get_sizes() as $config) {
+			if ($config['width'] <= 0 && $config['height'] <= 0) {
+				return ['width' => PHP_INT_MAX, 'height' => PHP_INT_MAX];
+			}
+			$w = max($w, (int)$config['width']);
+			$h = max($h, (int)$config['height']);
+		}
+		return ['width' => max(1, $w), 'height' => max(1, $h)];
+	}
+
 	public static function get_size($key) {
 		$sizes = self::get_sizes();
 		return isset($sizes[$key]) ? $sizes[$key] : null;

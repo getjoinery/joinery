@@ -34,6 +34,8 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.7 - the declared-packages step installs system packages (extra.joinery-system-packages,
+	 *               plugin requires.packages) beside PHP extensions, through the same resolver
 	 * @version 1.6 - a local fork (live manifest receives_upgrades=false) is downloaded and then preserved
 	 *               (DeploymentHelper::preserveReason), so the extension table says it will not upgrade
 	 *               (specs/package_replace_on_upload.md WP3)
@@ -1661,15 +1663,17 @@
 			}
 
 		// ============================================
-		// DECLARED PHP EXTENSIONS
+		// DECLARED PACKAGES
 		// ============================================
-		// The new code may declare extensions the host doesn't have yet (root
-		// composer.json ext-* / plugin requires.extensions). This is the root
-		// moment that converges existing nodes (spec plugin_dependency_installation).
+		// The new code may declare packages the host doesn't have yet: PHP
+		// extensions (root composer.json ext-* / plugin requires.extensions) and
+		// system packages beyond them (extra.joinery-system-packages / plugin
+		// requires.packages). This is the root moment that converges existing
+		// nodes (spec plugin_dependency_installation).
 		// Runs before composer validation so ComposerValidator's ext-* checks
 		// see the newly installed extensions. Failure never rolls back — the
 		// plugin activation gate is the runtime backstop.
-		out_step('Installing Declared PHP Extensions');
+		out_step('Installing Declared Packages');
 
 		$resolver_script = $live_directory . '/utils/list_dependencies.php';
 		if (!file_exists($resolver_script)) {
@@ -1699,7 +1703,7 @@
 					continue; // already installed under either name
 				}
 				if (!$is_root) {
-					out_alert('warning', 'PHP extension package ' . htmlspecialchars($apt_primary) . ' is declared but not installed',
+					out_alert('warning', 'Package ' . htmlspecialchars($apt_primary) . ' is declared but not installed',
 						'This process lacks root, so it cannot install packages. Install manually: '
 						. 'apt-get install ' . htmlspecialchars($apt_primary) . ' (or ' . htmlspecialchars($apt_fallback) . ')');
 					continue;
@@ -1710,7 +1714,7 @@
 					echo '✓ Installed ' . htmlspecialchars($apt_primary) . "<br>";
 					$installed_any = true;
 				} else {
-					out_alert('warning', 'Could not install declared extension package ' . htmlspecialchars($apt_primary),
+					out_alert('warning', 'Could not install declared package ' . htmlspecialchars($apt_primary),
 						'A plugin requiring it will refuse activation. apt output tail: '
 						. htmlspecialchars(implode(' ', array_slice($apt_out, -3))));
 				}

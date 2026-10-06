@@ -172,7 +172,10 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 			$session->get_user_id(),
 			array('fil_source' => File::SOURCE_USER_UPLOAD)
 		);
-		$file->resize();
+		if (!$file->resize() && $file->variant_refusal() !== null) {
+			// Saved, but too large to make sizes from: the row says so.
+			$thisfile->warning = $file->variant_refusal();
+		}
 
 		// Add the file ID to the response object
 		$thisfile->file_id = $file->key;

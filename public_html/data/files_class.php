@@ -45,6 +45,7 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.15.0 - variant_refusal(): why the blob's last resize was refused (specs/image_decode_memory.md)
  * @version 1.14.0
  * @changelog 1.14.0 - fil_level_attempt_time: a folder's level change passes a file that failed
  *   to convert by for a while
@@ -1807,6 +1808,16 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 		$blob = $this->_blob();
 		return $blob ? $blob->resize($size_key) : false;
+	}
+
+	/**
+	 * Why the last resize() was refused — the decode would have cost more than
+	 * image_decode_max_mb — or null. The original is stored either way; an
+	 * upload path hands this back so the person knows their photo has no sizes.
+	 */
+	function variant_refusal(){
+		$blob = $this->_blob();
+		return ($blob && $blob->key) ? $blob->variant_refusal() : null;
 	}
 
 	/**

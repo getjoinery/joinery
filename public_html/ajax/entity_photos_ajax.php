@@ -5,6 +5,7 @@
  * Manages entity photo associations (upload, delete, reorder, update_caption).
  * Does not load or know about entity models — only manages eph_entity_photos rows.
  *
+ * @version 1.1.0 - the response carries `warning` when the photo was saved but its sizes refused
  * @version 1.0.0
  * @see /specs/pictures_refactor_spec.md
  */
@@ -97,8 +98,13 @@ switch ($action) {
 			exit;
 		}
 
-		// Generate resized versions
-		$file->resize();
+		// Generate resized versions. A photo too large to decode within
+		// image_decode_max_mb is kept as uploaded, without sizes, and the
+		// response says so.
+		$warning = null;
+		if (!$file->resize() && $file->variant_refusal() !== null) {
+			$warning = $file->variant_refusal();
+		}
 
 		// Get next sort order
 		$existing = new MultiEntityPhoto(
@@ -143,6 +149,7 @@ switch ($action) {
 
 			echo json_encode([
 				'success' => true,
+				'warning' => $warning,
 				'photo' => [
 					'photo_id' => $photo->key,
 					'file_id' => $file->key,

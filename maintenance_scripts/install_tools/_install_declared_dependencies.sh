@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# _install_declared_dependencies.sh - install every PHP extension the deployed
-# source declares (root composer.json ext-* plus plugin requires.extensions),
-# resolved by utils/list_dependencies.php.
+# _install_declared_dependencies.sh - install every package the deployed
+# source declares: PHP extensions (root composer.json ext-* plus plugin
+# requires.extensions) and system packages beyond them (composer.json
+# extra.joinery-system-packages plus plugin requires.packages), resolved by
+# utils/list_dependencies.php.
 #
+# VERSION: 1.2 - system packages ride the same list (the resolver emits them
+#                as "name|name"); wording follows.
 # VERSION: 1.1 - presence is "install ok installed", not "dpkg knows the name":
 #                a removed-but-not-purged package read as present and never
 #                got reinstalled.
@@ -84,7 +88,7 @@ for spec in $SPECS; do
 done
 
 if [ -z "$MISSING" ]; then
-    say "all declared extensions present"
+    say "all declared packages present"
     exit 0
 fi
 
@@ -99,7 +103,7 @@ for spec in $MISSING; do
     elif apt-get install -y "$fallback" > /dev/null 2>&1; then
         say "installed ${fallback}"
     else
-        say "WARNING - could not install ${primary} (or ${fallback}); a plugin requiring it will refuse activation"
+        say "WARNING - could not install ${primary} (or ${fallback}); what needs it will say so when it runs"
     fi
 done
 

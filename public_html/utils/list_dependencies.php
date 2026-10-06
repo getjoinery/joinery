@@ -10,6 +10,9 @@
  *     bundled plugin's plugin.json `requires.extensions`.
  *   - Composer packages: every plugin's plugin.json `requires.composer`
  *     (core packages live directly in root composer.json and need no listing).
+ *   - System packages beyond extensions: root composer.json
+ *     `extra.joinery-system-packages` plus every plugin's `requires.packages`;
+ *     emitted by --apt only, as "name|name".
  *
  * DELIBERATELY ZERO-BOOTSTRAP: this script runs at Docker image build time,
  * where there is no database, no site config, and no framework. It parses
@@ -28,6 +31,8 @@
  * Exit codes: 0 success, 1 usage/parse error, 2 --active-only without a
  * reachable database.
  *
+ * @version 1.2 - --apt also emits declared system packages (extra.joinery-system-packages,
+ *                plugin requires.packages), so djpeg and the like converge at every root moment
  * @version 1.1 - --active-only means plg_active = 1; plg_status can read 'stale' while a plugin runs
  * @version 1.0
  */
@@ -162,6 +167,33 @@ function ld_apt_map($extensions) {
 	return $lines;
 }
 
+/**
+ * System packages the platform needs beyond PHP extensions: root composer.json
+ * `extra.joinery-system-packages` (core) plus every plugin's
+ * `requires.packages`. Plain apt package names, installed at the same root
+ * moments as extensions. A plugin whose host needs more than a package (a
+ * daemon, config under /etc) ships a `host_installer` instead.
+ */
+function ld_system_packages($public_html, $manifests) {
+	$packages = array();
+	$composer = ld_read_json($public_html . '/composer.json');
+	if (is_array($composer)) {
+		foreach (($composer['extra']['joinery-system-packages'] ?? array()) as $pkg) {
+			$packages[] = strtolower(trim((string)$pkg));
+		}
+	}
+	foreach ($manifests as $manifest) {
+		foreach (($manifest['requires']['packages'] ?? array()) as $pkg) {
+			$packages[] = strtolower(trim((string)$pkg));
+		}
+	}
+	$packages = array_values(array_unique(array_filter($packages, function ($p) {
+		return $p !== '' && preg_match('/^[a-z0-9][a-z0-9+.-]*$/', $p);
+	})));
+	sort($packages);
+	return $packages;
+}
+
 /** Plugin-declared composer packages as name => constraint (last wins on dupes). */
 function ld_composer_packages($manifests) {
 	$packages = array();
@@ -202,7 +234,15 @@ if ($active_only) {
 switch ($mode) {
 	case 'extensions':
 		$extensions = ld_extensions($public_html, $manifests);
-		$output = $as_apt ? ld_apt_map($extensions) : $extensions;
+		$output = $extensions;
+		if ($as_apt) {
+			// Declared system packages ride on the same apt line format, with
+			// no fallback name: the one name is the package.
+			$output = ld_apt_map($extensions);
+			foreach (ld_system_packages($public_html, $manifests) as $pkg) {
+				$output[] = $pkg . '|' . $pkg;
+			}
+		}
 		if ($as_json) {
 			echo json_encode($output, JSON_PRETTY_PRINT) . "\n";
 		} else {

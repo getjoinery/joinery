@@ -28,6 +28,9 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
+ * @version 1.3.0 - one decode per resize: ImageDecoder opens the original once, shrunk and upright,
+ *                  every size is cut from it under one ImageWorkLock hold, and a decode the
+ *                  ceiling refuses is recorded in fbb_variant_refused (specs/image_decode_memory.md)
  * @version 1.2.4 - every resize decodes under ImageWorkLock, one image at a time on the site
  *                  (specs/multi_tenant_docker_hosts.md WP2)
  * @version 1.2.3 - fbb_sync_last_error: why the last offload attempt did not move the blob
@@ -63,6 +66,10 @@ class FileBlob extends SystemBase {
 		'fbb_sync_failed_count' => array('type'=>'int4','is_nullable'=>false,'default'=>0,'zero_on_create'=>true),
 		'fbb_sync_last_attempt' => array('type'=>'timestamp(6)','is_nullable'=>true),
 		'fbb_sync_last_error'   => array('type'=>'varchar(255)','is_nullable'=>true),
+		// Why the last resize was refused (the decode would cost more than
+		// image_decode_max_mb), so a thumbnail request does not try again on
+		// every view. Null once a resize succeeds or regenerate clears it.
+		'fbb_variant_refused'   => array('type'=>'varchar(255)','is_nullable'=>true),
 		'fbb_create_time'       => array('type'=>'timestamp(6)','is_nullable'=>false,'default'=>'now()'),
 	);
 
@@ -1017,16 +1024,38 @@ class FileBlob extends SystemBase {
 		return true;
 	}
 
+	/**
+	 * Cut every registered size (or one, $size_key) from this blob's original.
+	 *
+	 * One decode: the original is opened once, through ImageDecoder, no larger
+	 * than the largest registered size needs, upright, and every size is
+	 * resampled from that one image under one ImageWorkLock hold. A decode the
+	 * ceiling refuses (setting image_decode_max_mb) is recorded in
+	 * fbb_variant_refused, so a later ensure_variant() does not try again on
+	 * every view; regenerate_image_sizes.php clears it to retry.
+	 *
+	 * @return bool true when the sizes were written
+	 */
 	public function resize($size_key = 'all') {
 		if (!$this->is_image()) {
 			return false;
 		}
-		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+		if ($this->is_variant_refused()) {
+			return false;
+		}
 		$sizes = ImageSizeRegistry::get_sizes();
+		$wanted = array();
+		foreach ($sizes as $key => $config) {
+			if ($size_key === 'all' || $size_key === $key) {
+				$wanted[$key] = $config;
+			}
+		}
+		if (!$wanted) {
+			return false;
+		}
 
 		if ($this->get('fbb_storage_driver') === 'cloud') {
-			$this->_resize_cloud($size_key, $sizes);
-			return true;
+			return $this->_resize_cloud($wanted);
 		}
 
 		$old_path = $this->filesystem_path('original');
@@ -1034,11 +1063,9 @@ class FileBlob extends SystemBase {
 			return false;
 		}
 		$base_dir = dirname($old_path);
-
-		foreach ($sizes as $key => $config) {
-			if ($size_key !== 'all' && $size_key !== $key) {
-				continue;
-			}
+		$name = $this->get('fbb_stored_name');
+		$dests = array();
+		foreach ($wanted as $key => $config) {
 			$dir_path = $base_dir . '/' . $key;
 			if (!is_dir($dir_path)) {
 				if (mkdir($dir_path, 0777, true)) {
@@ -1047,16 +1074,27 @@ class FileBlob extends SystemBase {
 					error_log('Failed to create resize directory: ' . $dir_path);
 				}
 			}
+			$dests[$key] = $dir_path . '/' . $name;
 		}
+		return $this->_render_sizes($old_path, $wanted, $dests, true);
+	}
 
-		foreach ($sizes as $key => $config) {
-			if ($size_key !== 'all' && $size_key !== $key) {
-				continue;
-			}
-			$new_path = $base_dir . '/' . $key . '/' . $this->get('fbb_stored_name');
-			$this->_generate_resized($old_path, $new_path, $config['width'], $config['height'], $config['crop'], $config['quality']);
+	/** The reason this blob's last resize was refused, or null. */
+	public function variant_refusal() {
+		$why = $this->get('fbb_variant_refused');
+		return ($why === null || $why === '') ? null : (string)$why;
+	}
+
+	public function is_variant_refused() {
+		return $this->variant_refusal() !== null;
+	}
+
+	/** Forget a refusal so the next resize() tries again (a raised ceiling, a regenerate). */
+	public function clear_variant_refusal() {
+		if ($this->key && $this->is_variant_refused()) {
+			self::updateColumns((int)$this->key, array('fbb_variant_refused' => null));
+			$this->set('fbb_variant_refused', null, false);
 		}
-		return true;
 	}
 
 	/**
@@ -1094,7 +1132,7 @@ class FileBlob extends SystemBase {
 		if (file_exists($path)) {
 			return $path;
 		}
-		if (!file_exists($this->filesystem_path('original'))) {
+		if ($this->is_variant_refused() || !file_exists($this->filesystem_path('original'))) {
 			return false;
 		}
 
@@ -1104,7 +1142,7 @@ class FileBlob extends SystemBase {
 		return file_exists($path) ? $path : false;
 	}
 
-	private function _resize_cloud($size_key, $sizes) {
+	private function _resize_cloud($wanted) {
 		$driver = $this->_cloud_driver();
 		if (!$driver) {
 			throw new FileBlobException('Cannot re-resize cloud blob: cloud storage driver not configured.');
@@ -1129,20 +1167,21 @@ class FileBlob extends SystemBase {
 			$driver->get($this->remote_key_for('original'), $tmp_original);
 			$content_type = $this->get('fbb_mime_type') ?: 'image/jpeg';
 
-			foreach ($sizes as $key => $config) {
-				if ($size_key !== 'all' && $size_key !== $key) {
-					continue;
-				}
+			$dests = array();
+			foreach ($wanted as $key => $config) {
 				$variant_dir = $tmp_dir . '/' . $key;
 				if (!is_dir($variant_dir)) {
 					mkdir($variant_dir, 0777, true);
 				}
-				$variant_path = $variant_dir . '/' . $name;
-				$this->_generate_resized($tmp_original, $variant_path, $config['width'], $config['height'], $config['crop'], $config['quality']);
+				$dests[$key] = $variant_dir . '/' . $name;
+			}
+			$ok = $this->_render_sizes($tmp_original, $wanted, $dests, true);
+			foreach ($dests as $key => $variant_path) {
 				if (file_exists($variant_path)) {
 					$driver->put($variant_path, $this->remote_key_for($key), $content_type);
 				}
 			}
+			return $ok;
 		} finally {
 			$cleanup();
 		}
@@ -1185,11 +1224,6 @@ class FileBlob extends SystemBase {
 	}
 
 	/**
-	 * Generate one resized variant with GD (never ImageMagick — GD's raster-only
-	 * decoder set keeps malformed uploads off the native-RCE surface). Verbatim
-	 * geometry from File's original generate_resized().
-	 */
-	/**
 	 * Render one configured size variant from an arbitrary plaintext image on
 	 * disk into an arbitrary destination, without touching this blob's stored
 	 * bytes or its variant layout.
@@ -1197,7 +1231,8 @@ class FileBlob extends SystemBase {
 	 * The sealed levels need exactly this: a Private file's thumbnail is made
 	 * once, from the plaintext, at the moment it is still in hand — and then
 	 * sealed and stored through store_encrypted_variant() rather than left in the
-	 * plaintext variant tree the resize pipeline owns.
+	 * plaintext variant tree the resize pipeline owns. A refused decode is not
+	 * recorded on the blob here: the plaintext is the caller's, not the blob's.
 	 *
 	 * @param string $src_path  a readable plaintext image
 	 * @param string $dest_path where to write the rendered variant
@@ -1205,47 +1240,81 @@ class FileBlob extends SystemBase {
 	 * @return bool true when a file was produced
 	 */
 	public function render_variant_to($src_path, $dest_path, $size_key) {
-		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
 		$sizes = ImageSizeRegistry::get_sizes();
 		if (!isset($sizes[$size_key])) {
 			return false;
 		}
-		$cfg = $sizes[$size_key];
-		$this->_generate_resized($src_path, $dest_path, $cfg['width'], $cfg['height'], $cfg['crop'],
-			isset($cfg['quality']) ? $cfg['quality'] : 85);
+		$this->_render_sizes($src_path, array($size_key => $sizes[$size_key]), array($size_key => $dest_path), false);
 		return is_file($dest_path);
 	}
 
 	/**
-	 * One decode at a time on the site (ImageWorkLock): a decoded photo costs its
-	 * full pixel size, outside PHP's memory_limit, and two at once do not fit a
-	 * small site's memory.
+	 * Decode $src_path once and write every size in $wanted to its path in
+	 * $dests, under one ImageWorkLock hold. The decoded image is at most the
+	 * largest registered size's worth of pixels (times what the M/8 shrink
+	 * steps allow), never the full photo, and it is freed before the lock is.
+	 *
+	 * @param bool $record  note a refused decode on this blob (fbb_variant_refused)
+	 * @return bool true when the sizes were written
 	 */
-	private function _generate_resized($old_path, $new_path, $width, $height, $crop, $quality = 85) {
-		ImageWorkLock::run(function () use ($old_path, $new_path, $width, $height, $crop, $quality) {
-			$this->_generate_resized_now($old_path, $new_path, $width, $height, $crop, $quality);
+	private function _render_sizes($src_path, $wanted, $dests, $record) {
+		return ImageWorkLock::run(function () use ($src_path, $wanted, $dests, $record) {
+			$max = ImageSizeRegistry::max_dimensions();
+			try {
+				$decoded = ImageDecoder::open($src_path, $max['width'], $max['height']);
+			} catch (ImageDecodeRefused $e) {
+				error_log('FileBlob resize refused for ' . basename($src_path) . ': ' . $e->getMessage());
+				if ($record) {
+					$this->_record_variant_refusal($e->getMessage());
+				}
+				return false;
+			}
+			try {
+				foreach ($wanted as $key => $config) {
+					$this->_render_size($decoded, $config, $dests[$key]);
+				}
+			} finally {
+				unset($decoded);
+			}
+			if ($record) {
+				$this->clear_variant_refusal();
+			}
+			return true;
 		});
 	}
 
-	private function _generate_resized_now($old_path, $new_path, $width, $height, $crop, $quality = 85) {
-		try {
-			$info = @getimagesize($old_path);
-			if ($info === false) {
-				error_log('FileBlob resize: unreadable image ' . basename($old_path));
-				return;
-			}
-			$type  = $info[2];
-			$src_w = $info[0];
-			$src_h = $info[1];
-			if ($src_w < 1 || $src_h < 1) {
-				return;
-			}
+	/**
+	 * A refusal is written during the request that found it, which for an
+	 * on-demand variant (ensure_variant() from serve.php) is a page view: the
+	 * one row write that stops the next view decoding the same photo again.
+	 */
+	private function _record_variant_refusal($why) {
+		if (!$this->key) {
+			return;
+		}
+		$why = substr((string)$why, 0, 255);
+		SystemBase::server_initiated_write(function () use ($why) {
+			self::updateColumns((int)$this->key, array('fbb_variant_refused' => $why));
+		});
+		$this->set('fbb_variant_refused', $why, false);
+	}
 
-			$src = self::gd_read($old_path, $type);
-			if (!$src) {
-				error_log('FileBlob resize: unsupported image type (' . $type . ') for ' . basename($old_path));
-				return;
-			}
+	/**
+	 * Resample one size from a decoded image and write it atomically. Verbatim
+	 * geometry from File's original generate_resized(): a crop takes the centred
+	 * box of the target's aspect, a scale fits inside width x height, and
+	 * neither ever enlarges.
+	 */
+	private function _render_size(ImageDecoded $decoded, $config, $new_path) {
+		$width = (int)$config['width'];
+		$height = (int)$config['height'];
+		$crop = !empty($config['crop']);
+		$quality = isset($config['quality']) ? (int)$config['quality'] : 85;
+		try {
+			$src = $decoded->image;
+			$type = $decoded->type;
+			$src_w = $decoded->width;
+			$src_h = $decoded->height;
 
 			$sx = 0; $sy = 0; $sw = $src_w; $sh = $src_h;
 			if ($crop && $width > 0 && $height > 0) {
@@ -1294,6 +1363,7 @@ class FileBlob extends SystemBase {
 			// can race to produce the very same variant file.
 			$tmp_path = $new_path . '.tmp' . getmypid() . '_' . LibraryFunctions::random_string(6);
 			self::gd_write($dst, $tmp_path, $type, $quality);
+			unset($dst);
 			if (file_exists($tmp_path)) {
 				@chmod($tmp_path, 0666);
 				if (!@rename($tmp_path, $new_path)) {
@@ -1304,17 +1374,6 @@ class FileBlob extends SystemBase {
 
 		} catch (\Throwable $e) {
 			error_log('FileBlob resize generation failed for ' . basename($new_path) . ': ' . $e->getMessage());
-		}
-	}
-
-	private static function gd_read($path, $type) {
-		switch ($type) {
-			case IMAGETYPE_JPEG: return @imagecreatefromjpeg($path);
-			case IMAGETYPE_PNG:  return @imagecreatefrompng($path);
-			case IMAGETYPE_GIF:  return @imagecreatefromgif($path);
-			case IMAGETYPE_WEBP: return function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false;
-			case IMAGETYPE_AVIF: return function_exists('imagecreatefromavif') ? @imagecreatefromavif($path) : false;
-			default:             return false;
 		}
 	}
 

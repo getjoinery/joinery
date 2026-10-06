@@ -8,6 +8,9 @@
  * creates the File — or a new FileVersion when the upload targeted an existing
  * file — recomputes usage, records the change, and clears the pending row.
  * Retry-safe via the standard Idempotency-Key machinery.
+ *
+ * @version 1.1 - the response carries `warning` when a photo was saved but its sizes refused
+ *                (specs/image_decode_memory.md)
  */
 
 function drive_upload_complete_logic(array $input): LogicResult {
@@ -132,6 +135,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		$level = DriveHelper::folder_level($folder);
 	}
 	$encrypted = ($level === ProtectionLevel::FORTRESS); // client custody
+	$warning = null;   // set when the photo was saved but its sizes were refused
 	$sealed    = ($level === ProtectionLevel::PRIVATE_);  // server custody
 
 	// Client-custody encryption payloads (docs/drive_encryption.md). Opaque here —
@@ -397,7 +401,11 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			}
 			_drive_store_encrypted_thumbnail($file, $enc_thumb_b64);
 		} elseif ($file->is_image()) {
-			$file->resize('all');
+			// A photo too large to decode within image_decode_max_mb is kept as
+			// uploaded, without sizes; the response says so.
+			if (!$file->resize('all') && $file->variant_refusal() !== null) {
+				$warning = $file->variant_refusal();
+			}
 		}
 		$up->discard();
 		DriveUsage::recompute($owner_id);
@@ -405,7 +413,11 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		DriveHelper::forget_sync_meta($file->key);
 
 		$wrapped = $encrypted ? (isset($wrapped_keys[$user_id]) ? $wrapped_keys[$user_id] : null) : null;
-		return LogicResult::render(array('ok' => true, 'file' => DriveHelper::file_export($file, null, null, $wrapped)));
+		$out = array('ok' => true, 'file' => DriveHelper::file_export($file, null, null, $wrapped));
+		if ($warning !== null) {
+			$out['warning'] = $warning;
+		}
+		return LogicResult::render($out);
 	} finally {
 		DriveHelper::quota_unlock($owner_id);
 	}
