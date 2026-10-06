@@ -89,7 +89,8 @@ document.addEventListener('DOMContentLoaded', function() {
 //   alertAsync/confirmAsync/promptAsync — the same modes as promises, for
 //   async flows: confirmAsync resolves boolean, promptAsync resolves the
 //   entered string or null on cancel/Esc. options.inputType sets the input
-//   type ('password' for passphrases).
+//   type ('password' for passphrases); options.required keeps a prompt's
+//   confirm disabled until something is typed.
 //   open(content, { buttons }) — content mode for arbitrary DOM + a custom
 //   button set; each button is { label, style, onClick(dialog), close }.
 // Form confirms: a <form data-jy-confirm="message"> gets a kit confirm modal
@@ -210,10 +211,15 @@ const JoineryModal = (() => {
         confirmBtn.onclick = () => { dialog.close(); if (onClose) onClose(); };
     }
 
+    // options.required: the confirm button stays disabled, and Enter does
+    // nothing, until the input holds more than whitespace.
     function prompt(message, onConfirm, options) {
         const opts = Object.assign({ confirmStyle: 'primary' }, options);
         const confirmBtn = _open(message, opts, true, true);
-        const submit = () => { dialog.close(); onConfirm(inputEl.value); };
+        const ready = () => !opts.required || inputEl.value.trim() !== '';
+        confirmBtn.disabled = !ready();
+        inputEl.oninput    = () => { confirmBtn.disabled = !ready(); };
+        const submit = () => { if (!ready()) return; dialog.close(); onConfirm(inputEl.value); };
         confirmBtn.onclick = submit;
         inputEl.onkeydown  = (e) => { if (e.key === 'Enter') submit(); };
     }
@@ -270,7 +276,10 @@ const JoineryModal = (() => {
             let result = null;
             const opts = Object.assign({ confirmStyle: 'primary' }, options);
             const confirmBtn = _open(message, opts, true, true);
-            const submit = () => { result = inputEl.value; dialog.close(); };
+            const ready = () => !opts.required || inputEl.value.trim() !== '';
+            confirmBtn.disabled = !ready();
+            inputEl.oninput    = () => { confirmBtn.disabled = !ready(); };
+            const submit = () => { if (!ready()) return; result = inputEl.value; dialog.close(); };
             confirmBtn.onclick = submit;
             inputEl.onkeydown  = (e) => { if (e.key === 'Enter') submit(); };
             dialog.addEventListener('close', () => resolve(result), { once: true });

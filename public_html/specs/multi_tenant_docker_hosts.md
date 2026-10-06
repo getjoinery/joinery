@@ -24,7 +24,9 @@ rebase_site_container.sh 1.11, migrate_site_to_code_volumes.sh 1.3, agent
 host_report.sh 1.8, JobResultProcessor 1.58, node overview 1.42; gate multi_tenant_host)
 and proven on the scratch Linode, including a reboot by hand (an unattended one is a live
 check); multi_tenant_host.sh 1.1 has reviewer2's fixes; install.sh 3.00 runs them on every
-`docker --multi-tenant` install (gate docker_multi_tenant). Nothing else is built. Split out of the starter
+`docker --multi-tenant` install (gate docker_multi_tenant). WP7 built 2026-10-06 (the plane half: the
+Held stopped install state, ManagedNode 1.42, JobResultProcessor 1.62, node page Hold stopped and Start;
+test hold_stopped_site; reviewer2's B1 and B2 fixed, N1 open: the host report lists 20 sites); its host half shipped with the site copy spec. Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -819,6 +821,80 @@ of an unpaid grace period or a suspension, would be undone within a tick.
   a reboot (`--restart unless-stopped` already keeps a stopped container
   down).
 
+**Built 2026-10-06.** The host half came first, with the site copy spec's
+switch-over (WP14 there, committed c017bb90, agent 1.60.0): the
+`hold_container` word (`hold_container.sh stop|start SITE`), the hold file
+`/etc/joinery/sites/{site}/held`, `held` in the host report (1.10),
+`container_health` leaving a held site alone and `restart_container`
+refusing it. The stop turns the container's restart policy off, so a reboot
+does not start it, and the start puts the recorded policy back. A word's
+contract never changes, so who and why are not sent to the host: the job that
+asked carries them (`mjb_created_by`, and the reason in `mjb_parameters`), and
+the plane reads them back (`ManagementJob::hold_words()`).
+
+This WP added the plane half:
+
+- **Held stopped** is an install state (`ManagedNode::INSTALL_STATES`
+  'held'). Like a dormant copy, a held site is not a working node, so no
+  backup, upgrade, uptime check or incident touches it, and an incident open
+  on it is cleared, saying the site is held stopped. Without this the site's
+  own node, whose agent is inside the stopped container, would raise site
+  down, agent silent and missed-backup incidents.
+- The host decides. `ManagedNode::fold_container_holds()` sets or clears the
+  state from every host report, and from each `hold_container` result at
+  once (`JobResultProcessor` 1.62). A hold placed on the host by hand is
+  followed too. A row in another install state, such as a switch-over's
+  retired old container, is left alone.
+- On the host's page, under Site containers: **Hold stopped** for a running
+  site, which asks why in the system modal, and **Start** for a held one, with
+  who held it, when and why. The held site's own page has a banner saying the
+  same, with a link to the host.
+- Test hold_stopped_site (25 checks, 7 mutations caught).
+
+Found while building it (B1, fixed): the node page's dispatcher ran only the
+actions on its list (`NodeDetailActions::$error_tab`). Ten handled actions
+were not on it, so their buttons posted and nothing happened: Restart for a
+unit and for a container, Clear, the unit journal, disk usage, file head,
+schema probe, page probe, run installer and reclaim. They are listed now, and
+node_detail_actions_csrf checks that every handled action is on the list.
+
+Proven on mt-wp5-scratch: siteb held, then the box rebooted. siteb was still
+exited, sitea healthy and the walls loaded. Start brought siteb back healthy
+with its restart policy restored, and a name that is not a site was refused.
+The agent half (two `container_health` ticks with no restart and no incident)
+needs a joined host with agent 1.60.0. It is in the live verification queue,
+with the buttons on a real host.
+
+**reviewer2's review, 2026-10-06:**
+
+- B1, fixed: who held a site was read from the newest stop alone, so a hold
+  placed by hand after a start from here named the earlier holder.
+- B2, fixed: the stop had to be done, but the script writes the hold before
+  `docker stop`, so a stop that timed out holds the site while reporting done
+  false. It showed "no hold from here is on record".
+- The fix for both: `hold_words()` reads the newest job that changed the hold,
+  a stop that left it held or a start that lifted it, and names no one after
+  a start.
+- N2, fixed: an empty reason closed the dialog without a word. The system
+  modal's prompt has a `required` option now, which keeps its confirm button
+  disabled until something is typed.
+- N3, fixed: test rows were registered for cleanup twice.
+- N5: a held site cannot be copied (the copy refuses a source that is not a
+  working site). That is intended, since its agent is stopped.
+- **N1, open:** `host_report.sh` lists at most 20 site containers (`MAX_LIST`),
+  and a host takes 50 sites (`mgh_max_sites`). For sites past the twentieth
+  there is no row on the host's card, so no Hold or Start button and no
+  per-site figures (WP1). A hold placed by hand on such a site is never
+  followed; holds placed from here still are, from the job's result.
+- Raising the cap alone is not enough. The report runs about 1 s per site
+  (2.0 s for two on mt-wp5-scratch: several `docker inspect` calls and one
+  request through PHP each), and the agent gives it one minute. So 50 sites
+  are near the limit, and a few sites that hang would fail the whole report.
+- The fix for N1: one `docker inspect` for every container, the answer
+  requests in parallel under one deadline, then a container cap of 100 (about
+  470 bytes each, inside the agent's 64 KiB script output), measured on a box
+  with 50 sites.
+
 ### WP8 — A catch-all default site on every multi-tenant host (S24)
 
 A request whose name the box does not serve falls to the first HTTPS site on
@@ -1036,3 +1112,5 @@ box without it.
   already been created. This is committed code (49fbf0f6 and earlier). It
   matters most on a box with 12 sites. Fix: a separate variable name, and a
   test with a verification due and two sites on one host.
+  **Fixed in f73b192b (2026-10-05):** the string is `$own_work`, and the test
+  fleet_backup_run_pass covers it.

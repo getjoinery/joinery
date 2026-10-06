@@ -20,8 +20,9 @@
  * (return_unproven). Without this, resolving a condition that never clears
  * would hide it for good.
  * An active incident whose node is no longer watched (removed, disabled, or
- * in an install state such as a dormant copy) is cleared, saying so. On a
- * node removed from the dashboard that holds for every source, an agent's
+ * in an install state such as a dormant copy or a site held stopped) is
+ * cleared, saying so. On a node removed from the dashboard that holds for
+ * every source, an agent's
  * case too: its agent is refused once the node is gone, so nothing would ever
  * report the case closed (clear_removed). An
  * incident whose node row is gone altogether is deleted with its timeline: a
@@ -43,6 +44,7 @@
  * each addressed to every superadmin. Notify gives each the bell, and email
  * by the signal's default (critical: on) or their own preference.
  *
+ * @version 1.6 - the not-watched words name a site held stopped (multi_tenant_docker_hosts WP7)
  * @version 1.5 - settle_cleared(): a cleared incident still new or snoozed is resolved, by nobody, saying so
  * @version 1.4 - return_unproven(): resolved and still active a day later goes back to new and notifies
  * @version 1.3 - each full pass clears every active incident, of any source, on a removed node (clear_removed)
@@ -136,7 +138,7 @@ class IncidentReconciler {
 				if (isset($watched[(int)$inc->get('inc_mgn_managed_node_id') . '|' . (string)$inc->get('inc_source')])) {
 					continue;
 				}
-				self::clear($inc, 'This node is no longer watched: it was removed or disabled, or it is being installed or is a copy.');
+				self::clear($inc, 'This node is no longer watched: it was removed or disabled, it is being installed or is a copy, or its site is held stopped.');
 				$counts['cleared']++;
 			}
 			// Last, so a condition that cleared on this pass is settled now and

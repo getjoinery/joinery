@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.42 - install state 'held' (Held stopped) and fold_container_holds(): a container site held stopped
+ *                 on its host is left alone by automation, as its host's report says (multi_tenant_docker_hosts WP7)
  * @version 1.41 - unpublished_file also covers a file in this management node's checkout the web server cannot write
  * @version 1.40 - mgn_moved_reach_*: whether the old machine of a switch-over's domain reaches the new server,
  *                 as this management node last proved it
@@ -407,7 +409,12 @@ class ManagedNode extends SystemBase {
 	 *                                quiet on its own machine (specs/site_copy.md);
 	 *   switching                  - the source of a switch-over in progress;
 	 *   retired                    - the old machine after a switch-over, kept
-	 *                                powered off for the way back.
+	 *                                powered off for the way back;
+	 *   held                       - a container site stopped on purpose and
+	 *                                kept stopped on its host (hold_container;
+	 *                                specs/multi_tenant_docker_hosts.md WP7).
+	 *                                Its host's report is the record: the state
+	 *                                follows it (fold_container_holds).
 	 */
 	const INSTALL_STATES = array(
 		'installing'     => 'Installing…',
@@ -415,7 +422,44 @@ class ManagedNode extends SystemBase {
 		'copy'           => 'Copy — dormant',
 		'switching'      => 'Switching over',
 		'retired'        => 'Retired source',
+		'held'           => 'Held stopped',
 	);
+
+	/**
+	 * Bring the held state of the site rows on a Docker host into line with
+	 * what the host says of its containers: $held maps a container name to
+	 * whether the host holds it stopped. A row whose container is held, and
+	 * which is otherwise a working site, becomes 'held'; a 'held' row whose
+	 * container is no longer held is a working site again. A row in another
+	 * install state is left alone (a switch-over's old container is held, and
+	 * its row says what the switch-over made it). A container the host did
+	 * not mention is left as it is. Returns how many rows changed.
+	 */
+	public static function fold_container_holds(ManagedNode $host_node, array $held): int {
+		if (!$held || !$host_node->key) {
+			return 0;
+		}
+		$changed = 0;
+		foreach (new MultiManagedHost(array('mgh_mgn_managed_node_id' => (int)$host_node->key, 'deleted' => false)) as $host) {
+			foreach (new MultiManagedNode(array('host_id' => (int)$host->key, 'deleted' => false)) as $row) {
+				$name = trim((string)$row->get('mgn_container_name'));
+				if ($name === '' || !array_key_exists($name, $held) || (int)$row->key === (int)$host_node->key) {
+					continue;
+				}
+				$state = trim((string)$row->get('mgn_install_state'));
+				if ($held[$name] === true && $state === '') {
+					$row->set('mgn_install_state', 'held');
+				} elseif ($held[$name] !== true && $state === 'held') {
+					$row->set('mgn_install_state', null);
+				} else {
+					continue;
+				}
+				$row->save();
+				$changed++;
+			}
+		}
+		return $changed;
+	}
 
 	/**
 	 * Is this node a working site that automation may act on? A node in any
