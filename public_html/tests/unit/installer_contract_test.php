@@ -3319,9 +3319,10 @@ foreach ($php_ranges as $r) {
 check(strpos($hk_src, 'RemoteIPTrustedProxy ${range}') !== false
 	&& strpos($hk_src, 'RemoteIPHeader X-Forwarded-For') !== false,
 	'the installer trusts X-Forwarded-For from those ranges and nothing else on a bare-metal host');
-check(strpos($hk_src, 'RemoteIPInternalProxy 172.17.0.0/16') !== false
-	&& strpos($hk_src, 'if [[ "${IN_CONTAINER}" == 1 ]]; then') !== false,
-	'and the bridge only inside a container');
+check(strpos($hk_src, 'RemoteIPInternalProxy ${gw}') !== false
+	&& strpos($hk_src, 'if [[ "${IN_CONTAINER}" == 1 ]]; then') !== false
+	&& strpos($hk_src, '172.17.0.0/16') === false,
+	'and the container\'s own gateways only inside a container, never a fixed bridge range');
 check(strpos($hk_src, 'LogFormat "%a %l %u %t') !== false, 'the combined log format records the resolved client');
 
 // The proxy vhost appends to the chain rather than replacing it: `set`

@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 60
-# covers: [maintenance_scripts/install_tools/_site_run_spec.sh, maintenance_scripts/install_tools/install.sh, maintenance_scripts/sysadmin_tools/rebase_site_container.sh, maintenance_scripts/sysadmin_tools/migrate_site_to_code_volumes.sh, maintenance_scripts/sysadmin_tools/remove_account.sh]
+# covers: [maintenance_scripts/install_tools/_site_run_spec.sh, maintenance_scripts/install_tools/install.sh, maintenance_scripts/sysadmin_tools/rebase_site_container.sh, maintenance_scripts/sysadmin_tools/migrate_site_to_code_volumes.sh, maintenance_scripts/sysadmin_tools/remove_account.sh, maintenance_scripts/sysadmin_tools/move_site_to_own_network.sh]
 #
 # A site container's limits live in its docker run arguments, so anything that
 # recreated the container from what Docker shows of it dropped them
@@ -19,7 +19,10 @@
 # process ceiling, and checks every limit (a CPU ceiling against the host's
 # CPUs) before anything stops; a failed environment read never destroys a kept copy;
 # a move prepared before specs can still roll back; and the rebuild scripts
-# check what they need before they change anything. Every docker call goes to
+# check what they need before they change anything. Every site gets a network
+# of its own, a slot nothing on the host holds, kept by every rebuild and made
+# as its spec says before any container runs on it; a running site moves to it
+# without stopping (node_outbound_and_transfer WP2). Every docker call goes to
 # a stub; the same moves on a real Docker host are live checks.
 
 set -u
@@ -153,7 +156,7 @@ chk "the spec on disk is unchanged" "$(cat "$SPECS/mysite/run_spec")" "$before"
 chk "no temporary file left" "$(ls -A "$SPECS/mysite" | grep -c '^\.run_spec')" "0"
 printf 'memory=1g --privileged\n' >> "$SPECS/mysite/run_spec"
 chk "a hand-damaged spec gives no arguments" "$(run_spec_args mysite 2>/dev/null | wc -c)" "0"
-printf '%s\n' "$before" | sed 's/^spec_version=1$/spec_version=2/' > "$SPECS/mysite/run_spec"
+printf '%s\n' "$before" | sed "s/^spec_version=.*/spec_version=$((RUN_SPEC_VERSION + 1))/" > "$SPECS/mysite/run_spec"
 chk "a newer format gives no arguments" "$(run_spec_args mysite 2>/dev/null | wc -c)" "0"
 printf '%s\n' "$before" > "$SPECS/mysite/run_spec"
 
@@ -391,6 +394,207 @@ MIG_FIT="$(code "$MIGRATE" | awk -v from="$MIG_SWAP_AT" 'NR > from && /run_spec_
 chk "migrate swap checks the spec fits this host before it changes the spec or stops anything" \
     "$([ -n "$MIG_FIT" ] && [ "$MIG_FIT" -lt "$(code "$MIGRATE" | grep -n 'run_spec_add_volume' | head -1 | cut -d: -f1)" ] \
         && [ "$MIG_FIT" -lt "$(code "$MIGRATE" | grep -n 'docker stop "$SITE"' | tail -1 | cut -d: -f1)" ] && echo yes)" "yes"
+
+echo "=== Every site gets a network of its own, recorded in its spec (node_outbound_and_transfer WP2) ==="
+# A Docker that keeps networks: $NETS/NAME holds driver|bridge|subnets|containers,
+# $CNETS/CONTAINER the networks a container is on. Everything else goes to the
+# stub above. ip and curl are stubbed too: STUB_V6ROUTE, STUB_ROUTES4, STUB_LINKS.
+NETS="$T/nets"; CNETS="$T/cnets"; mkdir -p "$NETS" "$CNETS" "$T/netbin"
+export NETS CNETS
+cat > "$T/netbin/docker" <<'STUB'
+#!/bin/bash
+echo "$*" >> "${STUB_CALLS:-/dev/null}"
+if [ "$1" = "version" ]; then echo "${STUB_DOCKER_VERSION:-29.7.2}"; exit 0; fi
+if [ "$1" = "exec" ]; then
+    case "$*" in
+        *container_gateway6*) [ -z "${STUB_OLD_CODE:-}" ]; exit ;;
+        *tcp6*)               [ -z "${STUB_NO_V6_LISTEN:-}" ]; exit ;;
+        *) exit 0 ;;
+    esac
+fi
+if [ "$1" = "ps" ]; then for c in "$CNETS"/*; do [ -f "$c" ] && echo "$(basename "$c")|joinery-$(basename "$c")"; done; exit 0; fi
+if [ "$1" = "inspect" ] && [ -f "$CNETS/${!#}" ]; then
+    case "$3" in
+        *State.Running*)            echo true ;;
+        *NetworkSettings.Networks*) for n in $(cat "$CNETS/${!#}"); do printf '%s ' "$n"; done; echo ;;
+        *Privileged*)               echo "false|$(awk '{print $1}' "$CNETS/${!#}")||0|0|0||0|0|0|0||unless-stopped|${!#}|" ;;
+        *PortBindings*)             printf '127.0.0.1|8090|80/tcp\n' ;;
+        *Mounts*)                   printf 'volume|%s_code|/var/www/html/%s/public_html|true\n' "${!#}" "${!#}" ;;
+    esac
+    exit 0
+fi
+[ "$1" = "network" ] || exec "$STUB_BASE_DOCKER" "$@"
+case "$2" in
+    ls) ls "$NETS" ;;
+    rm) [ -f "$NETS/$3" ] && [ -z "$(cut -d'|' -f4 "$NETS/$3")" ] && rm -f "$NETS/$3" ;;
+    create)
+        [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "Pool overlaps with other one on this address space" >&2; exit 1; }
+        [ -n "${STUB_CREATE_FAIL_FOR:-}" ] && [[ "$*" == *"$STUB_CREATE_FAIL_FOR"* ]] && { echo "Pool overlaps with other one on this address space" >&2; exit 1; }
+        shift 2; subs=""; bridge=""
+        while [ $# -gt 1 ]; do
+            case "$1" in --subnet) subs="$subs$2 "; shift ;; -o) bridge="${2#com.docker.network.bridge.name=}"; shift ;; --driver) shift ;; esac
+            shift
+        done
+        [ -f "$NETS/$1" ] && exit 1
+        echo "bridge|$bridge|$subs|" > "$NETS/$1" ;;
+    connect|disconnect)
+        [ -f "$NETS/$3" ] || [ "$3" = bridge ] || exit 1
+        cur=" $(cat "$CNETS/$4") "
+        if [ "$2" = connect ]; then cur="$cur $3 "; else cur="${cur/ $3 / }"; fi
+        echo $cur > "$CNETS/$4" ;;
+    inspect)
+        if [ "$3" = "-f" ]; then t="$4"; n="$5"; else t=""; n="$3"; fi
+        [ -f "$NETS/$n" ] || exit 1
+        IFS='|' read -r d b s c < "$NETS/$n"
+        case "$t" in
+            '') ;;
+            *'.Containers'*) echo "$c" ;;
+            '{{.Driver}}'*)  echo "$d|$b|$s" ;;
+            *IPAM*)          echo "$s$b" ;;
+        esac ;;
+esac
+exit 0
+STUB
+cat > "$T/netbin/ip" <<'STUB'
+#!/bin/bash
+case "$*" in
+    "-6 route show default")      echo "${STUB_V6ROUTE-default via fe80::1 dev eth0 proto ra}" ;;
+    "-o -4 route show table all") printf '%b' "${STUB_ROUTES4-default via 192.0.2.1 dev eth0\n192.0.2.0/24 dev eth0\nlocal 192.0.2.7 dev eth0 table local\n}" ;;
+    "-o -6 route show table all") printf 'default via fe80::1 dev eth0\n2600:3c03::/64 dev eth0\n' ;;
+    "-o link show")               printf '%b' "${STUB_LINKS:-1: lo: <LOOPBACK>\n2: eth0: <BROADCAST>\n}" ;;
+esac
+STUB
+printf '#!/bin/sh\necho 200\n' > "$T/netbin/curl"
+chmod +x "$T/netbin/docker" "$T/netbin/ip" "$T/netbin/curl"
+export STUB_BASE_DOCKER="$T/bin/docker"
+OLDPATH="$PATH"; export PATH="$T/netbin:$PATH"
+NETCALLS="$T/netcalls"; export STUB_CALLS="$NETCALLS"
+net_of() { run_spec_network_lines "$1" 2>"$T/net_err" | paste -sd ' '; }
+write_with_net() {  # SITE LINES
+    { run_spec_render "$1" 127.0.0.1 8090 9090 256m "" 512; printf '%s\n' "$2"; } | run_spec_write "$1"
+}
+
+L="$(run_spec_network_lines neta)"
+chk "a new site takes the lowest slot: its own network, bridge, IPv4 subnet and private IPv6 /64" "$(paste -sd ' ' <<< "$L")" \
+    "network=neta_net bridge=jsnet1 subnet=10.250.1.0/24 subnet6=fd00:250:1::/64"
+chk "the network is created at once, as the lines say" "$(cat "$NETS/neta_net" 2>/dev/null)" "bridge|jsnet1|10.250.1.0/24 fd00:250:1::/64 |"
+chk "with IPv6 and the bridge named" "$(grep -c -- 'network create --driver bridge --subnet 10.250.1.0/24 -o com.docker.network.bridge.name=jsnet1 --ipv6 --subnet fd00:250:1::/64 neta_net' "$NETCALLS")" "1"
+write_with_net neta "$L"
+chk "a second site takes the next slot" "$(net_of netb)" "network=netb_net bridge=jsnet2 subnet=10.250.2.0/24 subnet6=fd00:250:2::/64"
+write_with_net netb "$(run_spec_network_lines netb 2>/dev/null)"
+chk "a site whose spec has a network keeps it, and no new one is made" "$(net_of neta)|$(grep -c 'create.*neta_net' "$NETCALLS")" \
+    "network=neta_net bridge=jsnet1 subnet=10.250.1.0/24 subnet6=fd00:250:1::/64|1"
+rm -f "$NETS/netb_net"
+chk "a spec holds its slot even when its network is gone" "$(net_of netc | grep -o 'jsnet[0-9]*')" "jsnet3"
+rm -f "$NETS/netc_net"
+chk "a slot the host routes elsewhere (a VPN on 10.250.3.0/24), or an interface named for one, is passed over" \
+    "$(STUB_ROUTES4='10.250.3.0/24 dev wg0\n' STUB_LINKS='1: lo: <LOOPBACK>\n7: jsnet4@if2: <UP>\n' net_of netc | grep -o 'jsnet[0-9]*')" "jsnet5"
+rm -f "$NETS/netc_net"
+chk "a route covering every slot leaves none, said in plain words" \
+    "$(STUB_ROUTES4='10.0.0.0/8 dev tun0\n' net_of netd > /dev/null; grep -c 'every one of this host' "$T/net_err")" "1"
+chk "a network Docker already has under the site's name (a run that stopped early) is taken as it is" \
+    "$(echo 'bridge|jsnet9|10.250.9.0/24 |' > "$NETS/nete_net"; net_of nete)" "network=nete_net bridge=jsnet9 subnet=10.250.9.0/24 subnet6="
+chk "a network of the site's name that is not a site network is refused" \
+    "$(echo 'bridge||172.30.0.0/16 |' > "$NETS/netf_net"; net_of netf > /dev/null; grep -c 'is not one a site runs on' "$T/net_err")" "1"
+rm -f "$NETS/nete_net" "$NETS/netf_net"
+chk "a machine with no IPv6 route gets an IPv4-only network, and is told why" \
+    "$(STUB_V6ROUTE='' net_of netg | grep -o 'subnet6=[^ ]*'; grep -c 'IPv4 only: this machine has no IPv6 route out' "$T/net_err")" "subnet6=
+1"
+rm -f "$NETS/netg_net"
+chk "Docker before 27 gets IPv4 only, and the way to fix it" \
+    "$(STUB_DOCKER_VERSION=26.1.4 net_of neth | grep -o 'subnet6=[^ ]*'; grep -c 'Docker 26.1.4 is older than 27.*only-upgrade docker-ce' "$T/net_err")" "subnet6=
+1"
+rm -f "$NETS/neth_net"
+write_with_net neth "$(STUB_DOCKER_VERSION=26.1.4 run_spec_network_lines neth 2>/dev/null)"
+chk "an IPv4-only network takes its slot's IPv6 at a rebuild once Docker can carry it" \
+    "$(net_of neth | grep -o 'subnet6=[^ ]*')" "subnet6=fd00:250:$(run_spec_get neth subnet | cut -d. -f3)::/64"
+chk "the host lock is taken under the state root" "$(test -f "$SPECS/.networks.lock" && echo yes)" "yes"
+
+: > "$NETCALLS"
+A="$(args_of neta)"
+chk "the arguments put the container on its network" "$(echo "$A" | grep -c -- '--network neta_net ')" "1"
+chk "a network that matches its spec is used as it is" "$(grep -c 'network create\|network rm' "$NETCALLS")" "0"
+rm -f "$NETS/neta_net"
+A="$(args_of neta)"
+chk "a network gone missing is made again, exactly as the spec says, before the arguments are given" \
+    "$(cat "$NETS/neta_net")|$(echo "$A" | grep -c -- '--network neta_net ')" "bridge|jsnet1|10.250.1.0/24 fd00:250:1::/64 ||1"
+echo 'bridge|jsnet1|10.250.1.0/24 |' > "$NETS/neta_net"
+A="$(args_of neta)"
+chk "a network unlike its spec, with nothing attached, is recreated as the spec says" "$(cat "$NETS/neta_net")" "bridge|jsnet1|10.250.1.0/24 fd00:250:1::/64 |"
+echo 'bridge|jsnet1|10.250.1.0/24 |other' > "$NETS/neta_net"
+A="$(run_spec_args neta 2>"$T/net_err" | tr '\0' ' ')"
+chk "a network unlike its spec that a container still uses is refused by name, untouched, and no arguments are given" \
+    "$(echo -n "$A" | wc -c)|$(cat "$NETS/neta_net")|$(grep -c 'other still use it; nothing was changed' "$T/net_err")" "0|bridge|jsnet1|10.250.1.0/24 |other|1"
+echo 'bridge|jsnet1|10.250.1.0/24 |' > "$NETS/neta_net"
+A="$(STUB_CREATE_FAIL_FOR=fd00:250:1:: run_spec_args neta 2>"$T/net_err" | tr '\0' ' ')"
+chk "a network that cannot be remade as the spec says (review R2) comes back as it was, the spec says so, and the site still runs" \
+    "$(cat "$NETS/neta_net")|$(run_spec_get neta subnet6)|$(echo "$A" | grep -c -- '--network neta_net ')|$(grep -c 'keeps network neta_net as it was' "$T/net_err")" \
+    "bridge|jsnet1|10.250.1.0/24 |||1|1"
+printf 'network=neta_net\nbridge=jsnet1\nsubnet=10.250.1.0/24\nsubnet6=fd00:250:1::/64\n' | run_spec_set_network neta
+echo 'bridge|jsnet1|10.250.1.0/24 fd00:250:1::/64 |' > "$NETS/neta_net"
+chk "a spec with no network gives no --network: Docker's default, as before" "$(args_of bare | grep -c -- '--network')" "0"
+cp "$SPECS/neta/run_spec" "$T/neta_spec"
+grep -v '^bridge=' "$T/neta_spec" > "$SPECS/neta/run_spec"
+chk "a spec naming part of a network is refused" "$(args_of neta 2>"$T/net_err" | wc -c)|$(grep -c 'needs network=, bridge= and subnet= together' "$T/net_err")" "0|1"
+cp "$T/neta_spec" "$SPECS/neta/run_spec"
+for bad in 'network=bridge' 'network=-x' 'bridge=br-1234567890ab' 'bridge=jsnet1x2345678901' 'subnet=10.250.1.0' 'subnet6=fd00::1 --privileged'; do
+    chk "a network line that is not one is refused: ${bad}" "$(run_spec_check_line "$bad" && echo accepted || echo refused)" "refused"
+done
+printf 'spec_version=1\nhostname=v1site\nrestart=unless-stopped\nmemory=\ncpus=\npids_limit=\npublish=127.0.0.1:8099:80\n' | run_spec_write v1site
+printf 'network=v1site_net\nbridge=jsnet7\nsubnet=10.250.7.0/24\nsubnet6=fd00:250:7::/64\n' | run_spec_set_network v1site
+chk "a format-1 spec given a network becomes format 2 and keeps every other line" \
+    "$(run_spec_get v1site spec_version)|$(run_spec_get v1site network)|$(run_spec_list v1site publish)" "2|v1site_net|127.0.0.1:8099:80"
+
+echo "=== A container already on its own network is adopted with it; any other is refused ==="
+echo 'bridge|jsnet8|10.250.8.0/24 fd00:250:8::/64 |adopt1' > "$NETS/adopt1_net"
+echo 'adopt1_net' > "$CNETS/adopt1"
+run_spec_adopt adopt1 2>"$T/net_err"
+chk "its spec carries its network" "$(run_spec_get adopt1 network)|$(run_spec_get adopt1 bridge)|$(run_spec_get adopt1 subnet6)" "adopt1_net|jsnet8|fd00:250:8::/64"
+echo 'shared_net' > "$CNETS/adopt2"
+echo 'bridge|jsnetx|10.9.0.0/24 |adopt2' > "$NETS/shared_net"
+chk "a container on a network not its own is refused, nothing written" "$(run_spec_adopt adopt2 2>&1 | grep -c 'network shared_net')|$(run_spec_exists adopt2 && echo written)" "1|"
+echo 'bridge adopt3_net' > "$CNETS/adopt3"
+chk "a container on its default network and another is refused" "$(run_spec_adopt adopt3 2>&1 | grep -c 'networks bridge adopt3_net')" "1"
+rm -f "$CNETS"/adopt*
+
+echo "=== A running site moves to its own network without stopping (move_site_to_own_network.sh) ==="
+MOVE="$ROOT/maintenance_scripts/sysadmin_tools/move_site_to_own_network.sh"
+rm -rf "$NETS"/* "$SPECS"; mkdir -p "$SPECS"
+echo 'bridge' > "$CNETS/mover"
+: > "$NETCALLS"
+out="$(STUB_OLD_CODE=1 bash "$MOVE" mover 2>&1)"; rc=$?
+chk "a site whose code predates the gateway fix is refused before anything changes" \
+    "$rc|$(echo "$out" | grep -c 'predates the gateway fix')|$(ls "$NETS" | wc -l)|$(run_spec_exists mover && echo spec)|$(cat "$CNETS/mover")" "1|1|0||bridge"
+out="$(bash "$MOVE" mover 2>&1)"; rc=$?
+chk "it moves: recorded, its network made and in its spec, on that network alone" \
+    "$rc|$(run_spec_get mover network)|$(cat "$CNETS/mover")|$(test -f "$NETS/mover_net" && echo net)" "0|mover_net|mover_net|net"
+chk "connected before it is disconnected from the default network" \
+    "$([ "$(grep -n 'network connect mover_net mover' "$NETCALLS" | cut -d: -f1)" -lt "$(grep -n 'network disconnect bridge mover' "$NETCALLS" | cut -d: -f1)" ] && echo yes)" "yes"
+chk "then housekeeping runs inside it, for the new gateway" "$(grep -c 'exec mover bash /var/www/html/mover/maintenance_scripts/install_tools/host_housekeeping.sh mover' "$NETCALLS")" "1"
+chk "and it is checked on its port" "$(echo "$out" | grep -c 'answers on its port 8090: HTTP 200')" "1"
+chk "an Apache already listening on IPv6 is left running" "$(grep -c 'apache2ctl stop' "$NETCALLS")" "0"
+chk "a site moved earlier is settled again on a re-run: an Apache bound before it had IPv6 starts again, under the supervisor's hold, taken and given back" \
+    "$(STUB_NO_V6_LISTEN=1 bash "$MOVE" mover 2>&1 | grep -c 'started again, now listening on IPv6')|$(grep -c 'supervisor.hold' "$NETCALLS")|$(grep -c 'apache2ctl stop' "$NETCALLS")" "1|2|1"
+chk "a second run finds it moved and connects nothing" "$(bash "$MOVE" mover 2>&1 | grep -c 'on its own network already')|$(grep -c 'network connect' "$NETCALLS")" "1|1"
+echo 'bridge' > "$CNETS/stuck"
+STUB_CREATE_FAIL=1 bash "$MOVE" stuck > "$T/move_out" 2>&1; rc=$?
+chk "a network Docker will not create leaves the site where it was, spec as it was" \
+    "$rc|$(cat "$CNETS/stuck")|$(run_spec_get stuck network)" "1|bridge|"
+rm -f "$CNETS/stuck"
+echo 'bridge' > "$CNETS/second"
+chk "--all moves every site still on the default network, and passes over a moved one" \
+    "$(bash "$MOVE" --all 2>&1 | grep -c 'moved to\|on its own network already')|$(cat "$CNETS/second")" "2|second_net"
+rm -f "$CNETS"/*
+
+DF="$ROOT/maintenance_scripts/install_tools/Dockerfile.template"
+chk "the image itself trusts the host's slot ranges and the default bridge (review R1: a rebuild keeps older code)" \
+    "$(grep -c "'RemoteIPInternalProxy ${RUN_SPEC_NET4_PREFIX}.0.0/16'" "$DF")|$(grep -c "'RemoteIPInternalProxy ${RUN_SPEC_NET6_PREFIX}::/32'" "$DF")|$(grep -c "'RemoteIPInternalProxy 172.17.0.0/16'" "$DF")|$(grep -c "'RemoteIPHeader X-Forwarded-For'" "$DF")" "1|1|1|1"
+chk "install.sh gives the site its network before it stops anything" \
+    "$([ "$(grep -n 'NET_LINES="$(run_spec_network_lines "$SITENAME")"' "$INSTALL" | cut -d: -f1)" -lt "$(grep -n 'docker stop "$SITENAME"' "$INSTALL" | head -1 | cut -d: -f1)" ] && echo yes)" "yes"
+chk "install.sh writes the network lines into the spec it renders" "$(grep -cF '"$CONTAINER_PIDS")"$'"'"'\n'"'"'"$NET_LINES"' "$INSTALL")" "1"
+chk "remove_account removes the network the spec names, and checks it is gone" \
+    "$(grep -c 's/^network=//p' "$REMOVE")|$(grep -c 'docker network rm "$SITE_NETWORK"' "$REMOVE")|$(grep -c 'Docker network still present' "$REMOVE")" "1|1|1"
+export PATH="$OLDPATH"; unset STUB_CALLS
 unset JOINERY_SITE_STATE_ROOT
 want_rm="rm -f \"$(run_spec_path SITEX | sed 's/SITEX/${SITE_NAME}/')\""
 chk "remove_account removes the file run_spec_path names" "$(grep -cF "$want_rm" "$REMOVE")" "1"

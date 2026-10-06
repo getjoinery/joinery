@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.5 - The site's own network goes with its container, and a network left alone counts as
+#              a docker site still to remove (specs/node_outbound_and_transfer.md WP2)
 #VERSION 2.4 - The site's HTTPS certificates go with its vhost: every Let's Encrypt lineage and
 #              placeholder the vhost named is removed by the sibling remove_site_certificate.sh
 #              once nothing on the machine uses it, so certbot stops renewing a domain that left.
@@ -85,6 +87,8 @@ if command -v docker &> /dev/null; then
     if docker ps -a --format '{{.Names}}' | grep -qw "^${SITE_NAME}$"; then
         IS_DOCKER=true
     elif docker volume ls --format '{{.Name}}' 2>/dev/null | grep -q "^${SITE_NAME}_"; then
+        IS_DOCKER=true
+    elif docker network inspect "${SITE_NAME}_net" > /dev/null 2>&1; then
         IS_DOCKER=true
     fi
 fi
@@ -188,6 +192,18 @@ if [ "$IS_DOCKER" = true ]; then
         echo "Container removed: $SITE_NAME"
     else
         echo "WARNING: Failed to remove container"
+    fi
+
+    # The site's own network (specs/node_outbound_and_transfer.md WP2): the one
+    # its run spec names, or the one named for it when the spec is already gone.
+    SITE_NETWORK=$(sed -n 's/^network=//p' "/etc/joinery/sites/${SITE_NAME}/run_spec" 2>/dev/null | tail -1)
+    SITE_NETWORK="${SITE_NETWORK:-${SITE_NAME}_net}"
+    if docker network inspect "$SITE_NETWORK" > /dev/null 2>&1; then
+        if docker network rm "$SITE_NETWORK" > /dev/null 2>&1; then
+            echo "Network removed: $SITE_NETWORK"
+        else
+            echo "WARNING: Failed to remove network: $SITE_NETWORK"
+        fi
     fi
 
     # Remove volumes
@@ -344,6 +360,9 @@ if command -v docker &> /dev/null; then
     LEFT_VOLUMES=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep "^${SITE_NAME}_" || true)
     if [ -n "$LEFT_VOLUMES" ]; then
         LEFTOVERS="${LEFTOVERS}  - Docker volumes still present: $(echo "$LEFT_VOLUMES" | tr '\n' ' ')"$'\n'
+    fi
+    if docker network inspect "${SITE_NETWORK:-${SITE_NAME}_net}" > /dev/null 2>&1; then
+        LEFTOVERS="${LEFTOVERS}  - Docker network still present: ${SITE_NETWORK:-${SITE_NAME}_net}"$'\n'
     fi
 fi
 

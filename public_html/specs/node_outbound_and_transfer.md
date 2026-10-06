@@ -1,8 +1,9 @@
 # Outbound limits and transfer on every node
 
 **Status:** Draft, 2026-10-05. WP1 built 2026-10-06 (tests
-`machine_transfer`, `outbound_transfer_meter`; running on dev). WP2–WP5 not
-built. Every mechanism they rely on was tried by hand on two scratch Nanodes
+`machine_transfer`, `outbound_transfer_meter`; running on dev). WP2 built
+2026-10-06 (gates `site_run_spec`, `host_housekeeping`; proven live on a
+scratch Linode). WP3–WP5 not built. Every mechanism they rely on was tried by hand on two scratch Nanodes
 on 2026-10-06; the results are in § Measured on scratch boxes and the work
 packages below. Split out of
 `site_outbound_limits`, which keeps what only a multi-tenant host needs (a
@@ -175,74 +176,117 @@ stays silent: the plane watches that machine.
 
 ### WP2 — IPv6 for containers, on every Docker host
 
+**Built 2026-10-06** (gates `site_run_spec` 210, `host_housekeeping` 125;
+proven live on a scratch Linode, below).
+
 Linode charges nothing for traffic from a machine to any service in the same
 data center over IPv6, including uploads to a Linode Object Storage bucket in
 the same region. Over IPv4 the same traffic counts against the pool, and a
-bucket's own outbound traffic always counts, even to a machine beside it.
-Today a container site has no IPv6: it sits on Docker's default network,
-which is IPv4 only, so all of it would be charged.
+bucket's own outbound traffic always counts, even to a machine beside it. A
+container site on Docker's default network has no IPv6, so all of it would be
+charged.
 
-**Every container site runs on a network of its own, with an IPv4 subnet and
-a private IPv6 /64** (`fd00::/8`), both assigned by the host and recorded in
-the run spec. `docker network create --ipv6 SITENAME_net`. Its outbound
-traffic leaves through the host from the machine's one IPv4 address or its
-one IPv6 address. Docker translates both (`MASQUERADE` in `iptables` and
-`ip6tables`), with no setting in `daemon.json`. Visitors still arrive through
-the host's proxy, on both.
+**Every container site runs on a network of its own,** `SITENAME_net`, with an
+IPv4 subnet and a private IPv6 /64. The host numbers its site networks: slot
+N is `10.250.N.0/24`, `fd00:250:N::/64` and the bridge `jsnetN`. The bridge
+name is fixed so that WP3, WP4 and the multi-tenant walls
+(`multi_tenant_docker_hosts` WP5) can name a site's interface without asking
+Docker. `install.sh site` takes the lowest slot that nothing on the host
+holds: no run spec, Docker network, route (a VPN, a private network) or
+interface. Docker would refuse an overlap with its own networks, but not one
+with a route. The slot is taken by creating the network, under a host lock,
+before anything is stopped. The run spec (format 2) records it in four lines:
+`network=`, `bridge=`, `subnet=` and `subnet6=`. `run_spec_args` makes the
+network exist exactly as the spec says before it gives `--network`, so a
+rebuild, rebase or move cannot run a site onto a missing or different
+network. A different network with nothing attached is recreated. One a
+container still uses is refused by name. Adopt accepts a container already on
+its own network of that shape. `remove_account.sh` removes the network with
+the site.
 
-Measured on the drive-test VPS (Docker 29.7.2, Ubuntu 24.04), 2026-10-05: a
-container on a network with subnets `10.250.251.0/24` and
-`fd00:250:251::/64` was seen outside as the machine's IPv4 and IPv6
-addresses, and reached `us-east-1.linodeobjects.com` over IPv6 at an address
-in the machine's own data center.
+Outbound traffic leaves through the host from the machine's one IPv4 address
+or its one IPv6 address. Docker translates both (`MASQUERADE` in `iptables`
+and `ip6tables`), with no setting in `daemon.json` from Docker 27 on. A
+network is IPv4 only, and the installer says why, when any of these holds:
+- the machine has no IPv6 route out;
+- Docker is older than 27;
+- `daemon.json` sets `ip6tables` to `false`.
 
-One network per site is also what WP3 and WP4 hang off: each site's network
-is its own Linux bridge on the host, which tells one site's traffic from
-everything else. On a multi-tenant host it is also what walls sites off from
-each other (`multi_tenant_docker_hosts` WP5 item 1).
+The next rebuild after that changes gives the network its slot's IPv6.
 
-**One thing assumes the default network (`172.17.0.0/16`):**
-`RemoteIPInternalProxy`, written in two places, the image
-(`Dockerfile.template`) and `host_housekeeping.sh`'s
-`joinery-remoteip.conf`. On any other network the host proxy's requests
-arrive from that network's gateway, `X-Forwarded-For` is not trusted, and
-every visitor is logged as the gateway (seen on the scratch box: the log
-named `10.251.1.1` for a request carrying a visitor's address). fail2ban
-would then ban the gateway, which is every visitor at once. Rate limits,
-login IP rules and analytics would all see one address. The fix:
-`host_housekeeping.sh` names the container's own gateway, IPv4 and IPv6,
-read from its routes the way its PostgreSQL step already does, and the
-image's line goes.
+**The container must be told to use its IPv6** (found while building).
+glibc's default address-selection table gives a private IPv6 source
+(`fc00::/7`) a different label from a public destination. So from an `fd00:`
+address, every name with both families resolves IPv4 first, and the
+container's IPv6 goes unused. Measured on the drive-test VPS:
+- getjoinery.com and `us-east-1.linodeobjects.com` resolved IPv4 first, and
+  curl went over IPv4.
+- With a table that drops the private-address label, both went over IPv6, out
+  from the machine's own IPv6 address.
 
-Two things looked like assumptions and are not:
+`host_housekeeping.sh` writes that table to `/etc/gai.conf` in every
+container at every start. It is glibc's default without the `fc00::/7` entry.
+A container with no IPv6 is unaffected: with no IPv6 source, IPv4 comes first
+anyway.
 
-- PostgreSQL's "Docker host" line in `pg_hba` is rebuilt from the
-  container's default route at every housekeeping run, so it follows the
-  network.
-- `rebase_site_container.sh` reads the gateway from `docker inspect`, which
-  is right for a container on one network.
+**The proxy's address.** On any network but the default, the host proxy's
+requests arrive from that network's gateway. Both copies of
+`RemoteIPInternalProxy` named the default bridge (`172.17.0.0/16`): one in
+the image (`Dockerfile.template`), one in `host_housekeeping.sh`'s
+`joinery-remoteip.conf`. Behind them, every visitor was logged as the gateway.
+fail2ban would then ban every visitor at once, and rate limits, login IP rules
+and analytics would see one address.
+- `host_housekeeping.sh` 1.13 names the container's own gateways, IPv4 and
+  IPv6, read from its routes.
+- The image's own baseline (Dockerfile 6.1) trusts the host's site-network
+  ranges, `10.250.0.0/16` and `fd00:250::/32`, beside the default bridge.
+  The image is versioned apart from the site's code. A rebuild keeps the
+  site's code volume, whose `host_housekeeping.sh` may predate site networks
+  (review R1). These ranges are host-internal, and Docker keeps one site's
+  network from another's.
+- `PluginProvisioning`'s `host-gateway` no longer falls back to
+  `172.17.0.1`. A container with no default route reports the host as
+  unreachable.
 
-The run spec gains a `network=` line (today it refuses any network but the
-default), and `install.sh site` creates the network before the container.
+PostgreSQL's "Docker host" line in `pg_hba` already followed the container's
+default route. `rebase_site_container.sh` reads the gateway from `docker
+inspect`, which is right for a container on one network.
 
-**Existing sites** move at their next rebuild from the run spec. A site not
-rebuilt by the time this ships moves in a one-time pass, per site: create its
-network, `docker network connect`, `docker network disconnect bridge`, then
-run `host_housekeeping.sh` inside the container. Tried on the scratch box
-with requests every quarter second from another machine over IPv4 and IPv6:
-all 120 answered while the site moved. Published ports followed the
-container to its new network. Between the disconnect and the housekeeping
-run (0.3 s), the host's logins to the site's database were refused; the
-converger's next housekeeping run would mend that on its own, the pass just
-does not wait for it.
+**Existing sites** move at their next rebuild, or without stopping by
+`move_site_to_own_network.sh SITE` (or `--all`):
+1. It records the run spec if there is none, takes a slot and writes it into
+   the spec.
+2. It connects the container to the new network, then disconnects it from
+   Docker's default.
+3. It runs `host_housekeeping.sh` inside the container.
+4. If Apache has no IPv6 listener, it starts Apache again once, under the
+   supervisor's hold. Apache bound port 80 when the container had no IPv6, and
+   a reload keeps that socket. Docker then sends a visitor reaching a
+   published port over IPv6 to the container's IPv6 address, where nothing
+   listens. Found on the scratch box: a site moved without this restart lost
+   every IPv6 request to its published port, and IPv4 was unaffected. Sites
+   behind the host's proxy are reached over IPv4 and never saw it.
+5. It checks the site on its port.
+
+A site whose code predates `host_housekeeping.sh` 1.13 is refused before
+anything changes, because on the new network it would log every visitor as
+the gateway. A re-run finishes a move that was interrupted.
 
 **What follows from IPv6:**
 
-- Containers prefer IPv6 wherever a destination has it (getjoinery.com and
-  B2 do; Stripe, SMTP2GO and Namecheap do not today). Anything that checks
-  where a node connects from accepts its IPv6 as well as its IPv4, under the
-  IPv4-and-IPv6 rule. The agent channel keys by identity
-  (`multi_tenant_docker_hosts` S23).
+- A container's PHP, curl and every other glibc program use IPv6 wherever a
+  destination has it (getjoinery.com, B2 and Linode Object Storage do;
+  Stripe, SMTP2GO and Namecheap do not today). So backups, which PHP sends,
+  go over IPv6. The host agent is built without cgo, so Go's own resolver
+  ignores `/etc/gai.conf` and keeps IPv4 first from a private source. Its
+  traffic (host reports, release downloads) stays on IPv4, which is small. Each
+  process reads `gai.conf` once, so after a move it takes effect as processes
+  start again.
+- The management node compares a node's source address in one place: a
+  customer cloud join's approval checks it against the provider's IPv4 and
+  IPv6 for the machine (`ProvisionCustomerCloud::join_approval_check`,
+  `CustomerCloudProvision::for_machine_address`). It accepts either family.
+  The agent channel keys by identity (`multi_tenant_docker_hosts` S23).
 - A machine's IPv6 address sits in a /64 that Linode shares among many
   customers' machines, and IPv6 blocklists usually list whole /64s. With
   port 25 closed to every machine we create (`own_mail_server_sending` § 4),
@@ -250,11 +294,31 @@ does not wait for it.
   was considered and not taken: blocklists acting on the /64 would still
   treat the machine's sites as one.
 - Every firewall rule a node carries for its sites is written for both
-  families. No firewall script in `maintenance_scripts` calls `ip6tables`
-  today.
+  families. `install.sh docker`'s `DOCKER-USER` rule for the database ports
+  is added to `ip6tables` too. The multi-tenant walls are one `inet` table
+  (`multi_tenant_docker_hosts` WP5).
+- Docker 27 and later set `net.ipv6.conf.all.forwarding=1`. On Linode's
+  Ubuntu images `systemd-networkd` handles router advertisements itself, so
+  the host keeps its IPv6 route. Seen on the drive-test VPS: 6 weeks up, the
+  RA route refreshed.
 
 Bare-metal sites need nothing: the site runs on the machine's own network
 stack, which already has IPv6.
+
+**Proven live, 2026-10-06** (scratch Linode 2 GB, Ubuntu 24.04, Docker
+29.8.2, release 0.8.460 with this work laid over it; deleted afterwards):
+
+| What | Result |
+|---|---|
+| a new site | `s1_net`, slot 1, `10.250.1.0/24` and `fd00:250:1::/64`, created before the image build; the container on it alone |
+| its outbound traffic | `api64.ipify.org` saw the machine's IPv6 address; `us-east-1.linodeobjects.com` reached at a same-data-center IPv6 address; `curl -4` saw the machine's IPv4 |
+| a visitor through the proxy address, `X-Forwarded-For: 203.0.113.9` | logged as `203.0.113.9`; the proxy trusted is `10.250.1.1` and `fd00:250:1::1` |
+| the host's login to the site's database | admitted from `10.250.1.1`; `psql` from the host answered |
+| a rebuild | the same network (same Docker id), slot and addresses |
+| a running site moved, polled every 0.1 s from dev over IPv4 and IPv6 | 160 of 160 answered on each family; the move took 2.6 s including Apache's restart |
+| the same site afterwards | visitor logged from `X-Forwarded-For`; the database admits the new gateway; outbound over IPv6 |
+| `remove_account.sh` | the network went with the site; `DECOMMISSION_VERIFIED` |
+| `install.sh docker` | the database-port rule in `ip6tables` as well as `iptables` |
 
 ### WP3 — New connections and UDP
 
@@ -486,7 +550,7 @@ as the unit will write them.
 | Linode's figure, same-data-center IPv6 | not counted, in or out: 5 GB host-to-host and 3.5 GB from a container left the figure unchanged |
 | Linode's figure, same-data-center IPv4 | counted |
 | Linode's figure against the interface counter | 1 GB of payload sent over IPv4 moved the figure by 1.002 GB and `/proc/net/dev` by 1.077 GB: Linode counts about the payload, the interface counter adds the packet headers (about 7% on a bulk transfer). Two such sends moved the receiving machine's `bytes_in` by 2.004 GB |
-| Moving a running site to its own IPv4+IPv6 network | 120 of 120 requests answered over both families during the move; published ports followed; the database login from the host came back when housekeeping ran (0.3 s) |
+| Moving a running site to its own IPv4+IPv6 network | 120 of 120 requests answered over both families during the move; published ports followed; the database login from the host came back when housekeeping ran (0.3 s). Those IPv6 requests reached the site through the host's proxy, over IPv4: a published port reached over IPv6 needs Apache started again after the move (WP2) |
 | The proxy's requests after the move, before the remote-IP fix | logged as the gateway, not the visitor (WP2) |
 | Speed ceiling, container, set to 20 Mbit/s on the bridge's `ifb` | the site's own uploads 19.4 (IPv4) and 19.2 (IPv6); visitor downloads through the host proxy 19.0 and 19.0; straight to the published port 19.0 and 18.7 |
 | The same, the machine's own upload | 1,209 Mbit/s, untouched |
@@ -552,9 +616,10 @@ data" promise is).
 | `--outbound-ceiling=fast` or `--outbound-conn-rate=-1` | refused in plain words; nothing installed |
 | `install.sh site c --outbound-notice-gb=500` | the site's notice setting is 500 |
 | `sudo joinery-limits show` on each of the above | prints each site's figures and where each came from |
-| a container site connects out over IPv6 | it leaves from the machine's IPv6 address (seen by hand on the scratch box) |
-| a container site uploads to its region's Object Storage bucket | it goes over IPv6; Linode's figure for the machine does not grow by the upload (same-data-center IPv6 to another machine was seen not to count; the bucket is the case left to see) |
-| an existing site on the default network is moved by the one-time pass | it answers throughout (seen by hand), and visitors' addresses still reach it through the proxy (needs the remote-IP fix) |
+| a container site connects out over IPv6 | it leaves from the machine's IPv6 address (seen live, WP2) |
+| a container site uploads to its region's Object Storage bucket | it goes over IPv6 (the bucket was reached at a same-data-center IPv6 address, WP2); Linode's figure for the machine does not grow by the upload (same-data-center IPv6 to another machine was seen not to count; the bucket's own figure is left to see) |
+| an existing site on the default network is moved by `move_site_to_own_network.sh` | it answers throughout over both families, and visitors' addresses still reach it through the proxy (seen live, WP2; `site_run_spec`) |
+| a site's network is missing, different, or its slot is taken by a route | made again as the spec says, refused while a container uses it, passed over (`site_run_spec`) |
 | a site opens 1,000 connections a second to outside addresses, container and bare-metal | it gets about the rate limit; the rest are dropped and counted |
 | the same site opens connections over IPv4 and IPv6 at once | together they get the one rate limit, not twice it |
 | a site holds connections open past the cap | new ones are refused; its pages still answer visitors |

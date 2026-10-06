@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 2.99 - A container site runs on a network of its own, an IPv4 subnet and a private IPv6
+#               /64 (specs/node_outbound_and_transfer.md WP2): recorded in its run spec, created
+#               before anything is stopped, kept by every rebuild. install.sh docker blocks the
+#               database ports over IPv6 as well as IPv4.
 #VERSION 2.98 - install.sh docker --multi-tenant: Docker remaps user ids (userns-remap), so root in
 #               a site container is an unprivileged user on the host. Set before Docker first
 #               starts, or on a Docker host with no containers and no volumes yet; never under
@@ -2425,6 +2429,21 @@ do_docker_install() {
         netfilter-persistent save
         print_success "Postgres ports 9080-9099 blocked on $PUBLIC_IFACE (tunnels still work)"
     fi
+    # The same over IPv6, where a site's network carries it (Docker keeps a
+    # DOCKER-USER chain in ip6tables too). The interface carrying the IPv6
+    # default route can differ from the IPv4 one.
+    PUBLIC_IFACE6=$(ip -6 route | awk '/^default/ {print $5; exit}')
+    if [ -z "$PUBLIC_IFACE6" ]; then
+        print_info "No IPv6 route out - no IPv6 DOCKER-USER rule needed"
+    elif ! ip6tables -L DOCKER-USER -n > /dev/null 2>&1; then
+        print_warning "Docker keeps no IPv6 DOCKER-USER chain here - Postgres ports 9080-9099 are not blocked over IPv6"
+    elif ip6tables -C DOCKER-USER -i "$PUBLIC_IFACE6" -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP 2>/dev/null; then
+        print_success "Postgres ports 9080-9099 already blocked over IPv6 on $PUBLIC_IFACE6"
+    else
+        ip6tables -I DOCKER-USER -i "$PUBLIC_IFACE6" -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP
+        netfilter-persistent save
+        print_success "Postgres ports 9080-9099 blocked over IPv6 on $PUBLIC_IFACE6"
+    fi
 
     host_housekeeping
     install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"
@@ -4416,6 +4435,13 @@ do_site_docker() {
     fi
     # (end of the limits check)
 
+    # The site's own network (specs/node_outbound_and_transfer.md WP2): the
+    # one its spec records, or a new one, created now, so a host that cannot
+    # give one refuses here, with the site still running as it was.
+    local NET_LINES
+    NET_LINES="$(run_spec_network_lines "$SITENAME")" \
+        || { print_error "Could not give ${SITENAME} a network of its own; nothing was changed"; exit 1; }
+
     # Preflight: if a container with this SITENAME is already running, stop it
     # BEFORE the port check. Otherwise is_port_in_use sees the target's own
     # docker-proxy listener and treats $PORT as "taken by something else,"
@@ -4780,7 +4806,8 @@ EOF
     # What install.sh does not own (another published port, a volume at a
     # destination of its own) is the site's, and the rebuild keeps it.
     local RENDERED OLD_LINE
-    RENDERED="$(run_spec_render "$SITENAME" "${WEB_PUBLISH%:}" "$PORT" "$DB_PORT" "$CONTAINER_MEMORY" "$CONTAINER_CPUS" "$CONTAINER_PIDS")"
+    RENDERED="$(run_spec_render "$SITENAME" "${WEB_PUBLISH%:}" "$PORT" "$DB_PORT" "$CONTAINER_MEMORY" "$CONTAINER_CPUS" "$CONTAINER_PIDS")"$'\n'"$NET_LINES"
+    print_info "Network: $(sed -n 's/^network=//p' <<< "$NET_LINES") ($(sed -n 's/^subnet6\?=\(..*\)$/\1/p' <<< "$NET_LINES" | paste -sd ' '))"
     if [ -n "$SPEC_FOREIGN" ]; then
         printf '%s\n' "$SPEC_FOREIGN" | while IFS= read -r l; do print_info "Kept from the run spec: ${l}"; done
     fi

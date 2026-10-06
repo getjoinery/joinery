@@ -963,23 +963,27 @@ bare-metal site all three options are refused.
 
 **The run spec.** A Docker host keeps one file per site, `/etc/joinery/sites/{site}/run_spec`,
 that records how its container is run: hostname, restart policy, memory, CPU and process
-limits, published ports and volumes. It holds no secret; the environment travels as an env
+limits, published ports and volumes, and the site's own network (`network=`, `bridge=`,
+`subnet=`, `subnet6=`; see the installation guide's Each site's network). It holds no secret; the environment travels as an env
 file. Everything that creates a site container builds its `docker run` arguments from it
 (`_site_run_spec.sh`'s `run_spec_args`): `install.sh site`, `rebase_site_container.sh` (whose
 rollback recreates the old container from the copy it kept, checked before anything is
 removed) and `migrate_site_to_code_volumes.sh` (which adds its new volumes to the spec).
 Nothing rebuilds a container's arguments from `docker inspect`, which would drop its limits.
+`run_spec_args` also makes the network the spec names exist, exactly as the spec says, before
+it gives `--network`, so no caller can run a site onto a missing or different network.
 `install.sh` writes the web and database ports and the standard volumes; any other published
 port or volume in the spec is the site's own, and a rebuild keeps it.
 
 A container made before the file existed has it read from Docker once, by whichever of those
 runs first, while the container still exists. Anything a spec cannot carry (a bind mount,
-added capabilities, privileged mode, another network, extra hosts, devices, a CPU quota or
+added capabilities, privileged mode, a network other than the default or the site's own, extra hosts, devices, a CPU quota or
 set, restart retries, swap set apart from memory) stops that read with the thing named, and
 nothing is changed: recreating the container would lose it. Each line is checked when written
 and when read: a value that would not be exactly one argument, or a newer format than the
 script reads, is refused. A rebase swapped before run specs existed rolls back from the
-argument list it kept then. `remove_account.sh` removes the file with the site.
+argument list it kept then. `remove_account.sh` removes the file, and the site's network, with
+the site.
 
 ### The deploy tier
 

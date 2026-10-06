@@ -15,7 +15,10 @@
 # warns when that one repeats a section, writes the Apache remoteip
 # configuration from the one Cloudflare range list, writes the Apache jails
 # ONLY when that configuration is in place (a jail on a log naming the peer
-# would ban the edge), and a second run changes no file. Where fail2ban-client
+# would ban the edge), and a second run changes no file. In a container the
+# proxies Apache trusts are its own network's gateways, IPv4 and IPv6, and its
+# address-selection table puts IPv6 first (node_outbound_and_transfer WP2).
+# Where fail2ban-client
 # is installed, the drop-ins are also parsed by fail2ban itself.
 #
 # PostgreSQL answers only locally: a standalone server's pg_hba keeps its local
@@ -179,12 +182,28 @@ chk "apache drop-in removed" "$( [ ! -e "$R4/etc/fail2ban/jail.d/joinery-apache.
 chk "no conf-available written" "$( [ ! -e "$R4/etc/apache2" ] && echo none )" "none"
 chk "says the remoteip step was skipped" "$(echo "$out4" | grep -c 'remoteip step skipped')" "1"
 
-echo "== inside a container: the bridge is an internal proxy, fail2ban is the host's =="
+echo "== inside a container: its own gateways are internal proxies, fail2ban is the host's =="
 R5="$T/container"
-mkdir -p "$R5/etc/apache2/conf-available"
+mkdir -p "$R5/etc/apache2/conf-available" "$R5/proc/net"
 touch "$R5/.dockerenv"
-JOINERY_HOUSEKEEPING_ROOT="$R5" bash "$SCRIPT" >/dev/null 2>&1
-chk "bridge and loopback are internal proxies" "$(grep -cE '^RemoteIPInternalProxy (172\.17\.0\.0/16|127\.0\.0\.1)$' "$R5/etc/apache2/conf-available/joinery-remoteip.conf")" "2"
+# A site on its own network (node_outbound_and_transfer WP2): gateway
+# 10.250.17.1 and fd00:250:17::1, as the kernel lists them.
+printf 'Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\neth0\t00000000\t0111FA0A\t0003\t0\t0\t0\t00000000\t0\t0\t0\neth0\t0011FA0A\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n' > "$R5/proc/net/route"
+printf 'fd000250001700000000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0\n00000000000000000000000000000000 00 00000000000000000000000000000000 00 fd000250001700000000000000000001 00000400 00000001 00000000 00000003     eth0\n00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200200       lo\n' > "$R5/proc/net/ipv6_route"
+out5="$(JOINERY_HOUSEKEEPING_ROOT="$R5" bash "$SCRIPT" 2>&1)"
+chk "the network's IPv4 and IPv6 gateways and loopback are the internal proxies, nothing else" \
+    "$(sed -n 's/^RemoteIPInternalProxy //p' "$R5/etc/apache2/conf-available/joinery-remoteip.conf" | paste -sd ' ')" "10.250.17.1 fd00:250:17:0:0:0:0:1 127.0.0.1"
+chk "no Docker default bridge range is trusted" "$(grep -c '172\.17' "$R5/etc/apache2/conf-available/joinery-remoteip.conf")" "0"
+chk "the address-selection table puts IPv6 first from a private address" \
+    "$(grep -c '^label fc00::/7' "$R5/etc/gai.conf")|$(grep -c '^label ::/0 *1$' "$R5/etc/gai.conf")|$(grep -c '^label ::ffff:0:0/96 *4$' "$R5/etc/gai.conf")" "0|1|1"
+chk "says which gateways it trusts" "$(echo "$out5" | grep -c 'gateway 10.250.17.1 fd00:250:17:0:0:0:0:1 internal')" "1"
+R5b="$T/container_noroute"
+mkdir -p "$R5b/etc/apache2/conf-available"
+touch "$R5b/.dockerenv"
+out5b="$(JOINERY_HOUSEKEEPING_ROOT="$R5b" bash "$SCRIPT" 2>&1)"
+chk "a container with no route trusts only loopback, and says so" \
+    "$(sed -n 's/^RemoteIPInternalProxy //p' "$R5b/etc/apache2/conf-available/joinery-remoteip.conf" | paste -sd ' ')|$(echo "$out5b" | grep -c 'no default route')" "127.0.0.1|1"
+chk "a bare-metal host gets no address-selection table" "$( [ ! -e "$R2/etc/gai.conf" ] && echo none )" "none"
 chk "the edge ranges are trusted here too (the host appends to the chain)" "$(sed -n 's/^RemoteIPTrustedProxy //p' "$R5/etc/apache2/conf-available/joinery-remoteip.conf")" "$want_ranges"
 chk "no fail2ban directory is created" "$( [ ! -e "$R5/etc/fail2ban" ] && echo none )" "none"
 

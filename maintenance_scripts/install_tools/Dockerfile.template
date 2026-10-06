@@ -1,4 +1,8 @@
 # Joinery Docker Template
+# VERSION 6.1 - mod_remoteip's baseline trusts the host's site-network ranges (10.250.0.0/16,
+#               fd00:250::/32) beside Docker's default bridge: a site on a network of its own
+#               (specs/node_outbound_and_transfer.md WP2) is reached from that network's gateway,
+#               and a rebuild keeps a code volume whose housekeeping may not name it.
 # VERSION 6.0 - The container's main process is _site_supervisor.sh (specs/multi_tenant_docker_hosts.md
 #               WP2): it starts Apache and restarts PostgreSQL, PHP-FPM, Apache or cron when
 #               one dies, which nothing did (the kernel kills the biggest process when a
@@ -249,15 +253,22 @@ RUN cp /var/www/html/${SITENAME}/maintenance_scripts/install_tools/default_virtu
     a2dissite 000-default.conf 2>/dev/null || true && \
     a2ensite ${SITENAME}.conf
 
-# The image's baseline for mod_remoteip: trust the docker bridge gateway for
-# X-Forwarded-For. At every container start host_housekeeping.sh (a core
-# installer the start command runs before Apache) enables
-# conf-available/joinery-remoteip.conf, which adds Cloudflare's published edge
-# ranges as trusted proxies so the chain the host proxy APPENDS to is walked
-# right to left to the real client. Write the .conf BEFORE a2enmod so the
-# symlink for it is created alongside .load.
+# The image's baseline for mod_remoteip: the host's proxy, which reaches the
+# container from its network's gateway, is trusted for X-Forwarded-For. A
+# site's network is one of the host's site slots (10.250.N.0/24 and
+# fd00:250:N::/64, _site_run_spec.sh) or, before it moves, Docker's default
+# bridge; all are host-internal, and Docker keeps one site's network from
+# another's. The image carries these itself because it is versioned apart from
+# the site's code: a rebuild keeps the code volume, whose host_housekeeping.sh
+# may predate site networks. At every container start that script writes and
+# enables conf-available/joinery-remoteip.conf, which adds the container's
+# exact gateways and Cloudflare's published edge ranges, so the chain the host
+# proxy APPENDS to is walked right to left to the real client. Write the .conf
+# BEFORE a2enmod so the symlink for it is created alongside .load.
 RUN printf '%s\n' \
       'RemoteIPHeader X-Forwarded-For' \
+      'RemoteIPInternalProxy 10.250.0.0/16' \
+      'RemoteIPInternalProxy fd00:250::/32' \
       'RemoteIPInternalProxy 172.17.0.0/16' \
       'RemoteIPInternalProxy 127.0.0.1' \
       > /etc/apache2/mods-available/remoteip.conf && \

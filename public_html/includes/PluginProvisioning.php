@@ -23,6 +23,8 @@
  * (tasks/PluginHealthReport.php) and its result recorded, so a management
  * node reads it with the rest of the node's status. See recordFleetReport().
  *
+ * @version 1.3 - host-gateway in a container with no default route is unmet, not Docker's default
+ *                bridge gateway: a site runs on a network of its own (node_outbound_and_transfer WP2)
  * @version 1.2 - fleet reporting: recordFleetReport() / recordedFleetReport()
  * @version 1.1
  */
@@ -237,6 +239,9 @@ class PluginProvisioning {
         }
 
         $resolved = self::resolveHost($host);
+        if ($resolved === null) {
+            return ['state' => 'unmet', 'reason' => 'this container has no default route, so the host cannot be reached'];
+        }
 
         $errno  = 0;
         $errstr = '';
@@ -253,7 +258,8 @@ class PluginProvisioning {
     /**
      * Resolve a probe host. A literal IP/hostname passes through unchanged;
      * the `host-gateway` token resolves to whatever reaches services on the
-     * host from where this code runs.
+     * host from where this code runs, or null in a container with no default
+     * route, from which nothing reaches the host.
      */
     public static function resolveHost($host) {
         if ($host !== 'host-gateway') {
@@ -285,7 +291,8 @@ class PluginProvisioning {
             }
         }
 
-        // Conventional Docker bridge gateway as a last resort.
-        return '172.17.0.1';
+        // No default route: nothing reaches the host from here. A site runs on
+        // a network of its own, so no fixed address would be the host either.
+        return null;
     }
 }
