@@ -8,6 +8,13 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.11 - outbound_limits: whether the machine's outbound connection limits are in
+#                force (outbound_limits.sh, specs/node_outbound_and_transfer.md WP3), why
+#                not where they are not (a code), since when their counters run, and the
+#                web server's user's drops on a bare-metal machine. A reason rides with on
+#                too: the last change was refused and the table before it is in force. Each site container
+#                carries outbound_dropped: packets its limits dropped since then, or none
+#                where it is not limited. Counters only; the plane turns two into a rate.
 # Version: 1.10 - each site container says whether it is held stopped (held: hold_container's
 #                 mark, /etc/joinery/sites/{site}/held), so container_health leaves it stopped.
 # Version: 1.8 - reboot_required_since: when the pending reboot was first asked for (the
@@ -676,6 +683,55 @@ emit_served_certificates() {
 }
 
 # ---------------------------------------------------------------------------
+# Outbound limits (outbound_limits.sh). The unit writes its state into a status
+# file and its drops into named counters in nftables (drops_site_SITE,
+# drops_web_user), cumulative since the status file's since. Both are read
+# once, by limits_read, before the object is printed.
+#   state: on | off | refused (reason says why, a code) | absent (no unit on
+#   this machine) | none (inside a container, whose limits are its host's) |
+#   unknown (a status file that does not parse).
+# The counters need root; without it every drop figure is unknown.
+# ---------------------------------------------------------------------------
+LIMITS_STATE=""; LIMITS_REASON=""; LIMITS_SINCE=""; LIMITS_SITES=""; LIMITS_WEB=""
+LIMITS_COUNTS=""; LIMITS_COUNTS_READ=0
+limits_read() {
+    local f=/run/joinery/outbound_limits.status
+    if in_container; then LIMITS_STATE=none; return; fi
+    if [[ ! -f "$f" ]]; then
+        if [[ -f /etc/systemd/system/joinery-limits.service ]]; then LIMITS_STATE=unknown; else LIMITS_STATE=absent; fi
+        return
+    fi
+    LIMITS_STATE="$(sed -n 's/^state=//p' "$f" | head -1)"
+    [[ "$LIMITS_STATE" =~ ^(on|off|refused)$ ]] || LIMITS_STATE=unknown
+    LIMITS_REASON="$(sed -n 's/^reason=//p' "$f" | head -1)"
+    LIMITS_SINCE="$(sed -n 's/^since=//p' "$f" | head -1)"
+    LIMITS_SITES=" $(sed -n 's/^sites=//p' "$f" | head -1) "
+    LIMITS_WEB="$(sed -n 's/^web_user=//p' "$f" | head -1)"
+    if [[ "$LIMITS_STATE" == on ]] && LIMITS_COUNTS="$(run nft list counters table inet joinery_limits)"; then
+        LIMITS_COUNTS="$(awk '$1 == "counter" { n = $2 } $1 == "packets" && n != "" { print n "=" $2; n = "" }' <<< "$LIMITS_COUNTS")"
+        LIMITS_COUNTS_READ=1
+    fi
+}
+# The packets one counter dropped: a number, none where that sender is not
+# limited, or unknown where the counters could not be read.
+limits_dropped() {  # COUNTER_NAME LIMITED(0|1)
+    if [[ "$LIMITS_STATE" != on || "$2" != 1 ]]; then printf '"none"'; return; fi
+    [[ "$LIMITS_COUNTS_READ" == 1 ]] || { printf '"unknown"'; return; }
+    json_num_or_unknown "$(awk -F= -v n="$1" '$1 == n { print $2; exit }' <<< "$LIMITS_COUNTS")"
+}
+emit_outbound_limits() {
+    local since='"none"' reason='"none"'
+    [[ "$LIMITS_STATE" == on ]] && since="$(json_num_or_unknown "$LIMITS_SINCE")"
+    if [[ "$LIMITS_STATE" == refused ]]; then
+        reason="$(json_str "${LIMITS_REASON:-unknown}")"
+    elif [[ "$LIMITS_STATE" == on && -n "$LIMITS_REASON" ]]; then
+        reason="$(json_str "$LIMITS_REASON")"
+    fi
+    printf '{"state":"%s","reason":%s,"since":%s,"web_user_dropped":%s}' "$LIMITS_STATE" "$reason" "$since" \
+        "$(limits_dropped drops_web_user "$([[ "$LIMITS_WEB" == yes ]] && echo 1 || echo 0)")"
+}
+
+# ---------------------------------------------------------------------------
 # This host's Joinery containers: every container whose name is its SITENAME,
 # the shape install.sh creates. Each with docker's state and health, and
 # whether the site inside answers through PHP on its published web port.
@@ -720,6 +776,7 @@ container_figures() {
     printf '"cpu":{"usage_usec":%s,"limit_millicores":%s},"pids":{"current":%s,"limit":%s},"net_tx_bytes":%s' \
         "$(json_num_or_unknown "$usec")" "$(json_limit "$climit")" \
         "$(json_num_or_unknown "$pcur")" "$(json_limit "$plimit")" "$(json_num_or_unknown "$tx")"
+    printf ',"outbound_dropped":%s' "$(limits_dropped "drops_site_${c}" "$([[ "$LIMITS_SITES" == *" ${c} "* ]] && echo 1 || echo 0)")"
 }
 
 emit_containers() {
@@ -786,6 +843,7 @@ emit_containers() {
 # ---------------------------------------------------------------------------
 # The object. One line, every key, in this order.
 # ---------------------------------------------------------------------------
+limits_read
 printf '{'
 printf '"failed_units":%s,' "$(emit_failed_units)"
 printf '"expected_units":%s,' "$(emit_expected_units)"
@@ -804,6 +862,7 @@ printf '"os":%s,' "$(emit_os)"
 printf '"answers":%s,' "$(emit_answers)"
 printf '"served_certificates":%s,' "$(emit_served_certificates)"
 printf '"containers":%s,' "$(emit_containers)"
+printf '"outbound_limits":%s,' "$(emit_outbound_limits)"
 printf '"generated_at":%s' "$(date -u +%s)"
 printf '}\n'
 exit 0

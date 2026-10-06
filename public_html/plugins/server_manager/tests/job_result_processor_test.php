@@ -421,7 +421,7 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 18, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+check(!isset($capped['surprise']) && count($capped) === 19, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
 check($capped['cpus'] === 'unknown', 'a processor count that is not a count reads unknown');
 check(JobResultProcessor::sanitise_host_report(array('cpus' => 4))['cpus'] === 4, 'a processor count is kept');
 $quiet = JobResultProcessor::sanitise_host_report(array('answers' => array('apache2' => 'yes', 'php-fpm' => 'quiet', 'postgresql' => 'maybe')));
@@ -540,6 +540,66 @@ check(($rs['since_last'] ?? null) === array('seconds' => 600, 'cpu_millicores' =
 $backwards = JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'containers' => array($fig(10, 5000))));
 check(!isset(JobResultProcessor::host_report_container_rates($prev, $backwards)['containers'][0]['since_last']),
 	'a counter that went backwards with no restart gives no figure');
+
+// Outbound limits (host_report 1.11, node_outbound_and_transfer WP3): the
+// machine's state, and the packets each site's limits dropped.
+$lim = function ($since, $web = 'none', $state = 'on', $reason = 'none') {
+	return array('state' => $state, 'reason' => $reason, 'since' => $since, 'web_user_dropped' => $web);
+};
+$with_drops = function ($c, $dropped) { $c['outbound_dropped'] = $dropped; return $c; };
+$ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $lim(9000, 7)))['outbound_limits'];
+check($ol === array('state' => 'on', 'reason' => null, 'since' => 9000, 'web_user_dropped' => 7),
+	'limits in force keep their since and the web user\'s drops', var_export($ol, true));
+$ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $lim(9000, 'none', 'refused', 'resolver_not_loopback')))['outbound_limits'];
+check($ol['state'] === 'refused' && $ol['reason'] === 'resolver_not_loopback' && $ol['since'] === null,
+	'refused limits keep their reason code and no since', var_export($ol, true));
+$ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => array('state' => 'rm -rf', 'reason' => '<b>x</b>', 'since' => -1, 'web_user_dropped' => 'lots')))['outbound_limits'];
+check($ol === array('state' => 'unknown', 'reason' => null, 'since' => null, 'web_user_dropped' => 'unknown'),
+	'a state the plane does not know is unknown, and nothing else of it is kept', var_export($ol, true));
+$ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $lim(9000, 7, 'on', 'nft_refused')))['outbound_limits'];
+check($ol['state'] === 'on' && $ol['reason'] === 'nft_refused' && $ol['since'] === 9000,
+	'on with a reason keeps it: the last change was refused and the table before it is in force', var_export($ol, true));
+check(JobResultProcessor::sanitise_host_report(array())['outbound_limits'] === null
+	&& JobResultProcessor::sanitise_host_report(array('outbound_limits' => 'x'))['outbound_limits'] === 'unknown',
+	'an older node reports no limits (null); one that is not an object is unknown');
+$c_none = JobResultProcessor::sanitise_host_report(array('containers' => array($with_drops($fig(1, 1), 'none'))))['containers'][0];
+$c_bad = JobResultProcessor::sanitise_host_report(array('containers' => array($with_drops($fig(1, 1), '1;reboot'))))['containers'][0];
+check($c_none['outbound_dropped'] === 'none' && $c_bad['outbound_dropped'] === 'unknown'
+	&& !array_key_exists('outbound_dropped', $figs),
+	'a container\'s drops are a count, none (not limited) or unknown; an older node\'s carry none at all');
+
+$lp = JobResultProcessor::sanitise_host_report(array('generated_at' => 10000, 'outbound_limits' => $lim(9000, 40),
+	'containers' => array($with_drops($fig(1000000, 5000), 100))));
+$ln = JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'outbound_limits' => $lim(9000, 45),
+	'containers' => array($with_drops($fig(1000000 + 3600 * 250000, 5000 + 7200), 130))));
+$lr = JobResultProcessor::host_report_container_rates($lp, $ln);
+check(($lr['containers'][0]['since_last']['outbound_dropped'] ?? null) === 30 && ($lr['outbound_limits']['dropped_since_last'] ?? null) === 5,
+	'the same run of counters: the drops between two reports, for each site and the web user', var_export($lr['containers'][0]['since_last'] ?? null, true));
+check(json_decode(json_encode($lr), true)['containers'][0] === JobResultProcessor::sanitise_host_report(json_decode(json_encode($lr), true))['containers'][0]
+	&& JobResultProcessor::sanitise_host_report(json_decode(json_encode($lr), true))['outbound_limits']['dropped_since_last'] === 5,
+	'the drop figures survive the sanitiser when the stored report is read back');
+$lboot = JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'outbound_limits' => $lim(12000, 3),
+	'containers' => array($with_drops($fig(1000000 + 3600 * 250000, 5000 + 7200), 4))));
+$lb = JobResultProcessor::host_report_container_rates($lp, $lboot);
+check(($lb['containers'][0]['since_last']['outbound_dropped'] ?? null) === 4 && ($lb['outbound_limits']['dropped_since_last'] ?? null) === 3,
+	'counters that began again between the reports (a reboot): the count is the interval');
+$lold = JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'outbound_limits' => $lim(5000, 3),
+	'containers' => array($with_drops($fig(1000000 + 3600 * 250000, 5000 + 7200), 4))));
+$lo = JobResultProcessor::host_report_container_rates($lp, $lold);
+check(!isset($lo['containers'][0]['since_last']['outbound_dropped']) && !isset($lo['outbound_limits']['dropped_since_last'])
+	&& isset($lo['containers'][0]['since_last']['cpu_millicores']),
+	'a since older than the last report that differs from it says nothing about drops, and the rest still rates');
+$lback = JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'outbound_limits' => $lim(9000, 2),
+	'containers' => array($with_drops($fig(1000000 + 3600 * 250000, 5000 + 7200), 50))));
+$lbk = JobResultProcessor::host_report_container_rates($lp, $lback);
+check(!isset($lbk['containers'][0]['since_last']['outbound_dropped']) && !isset($lbk['outbound_limits']['dropped_since_last']),
+	'a drop counter that went backwards in the same run gives no figure');
+$lrest = JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'outbound_limits' => $lim(9000, 40),
+	'containers' => array($with_drops($fig(600 * 100000, 900, 13000), 160))));
+check((JobResultProcessor::host_report_container_rates($lp, $lrest)['containers'][0]['since_last']['outbound_dropped'] ?? null) === 60,
+	'a container restart does not restart its drops: they belong to the machine\'s limits');
+$lnolim = JobResultProcessor::host_report_container_rates(null, JobResultProcessor::sanitise_host_report(array('generated_at' => 13600, 'outbound_limits' => $lim(9000, 40))));
+check(!isset($lnolim['outbound_limits']['dropped_since_last']), 'the first report has no drops to compare');
 
 // An answer that is not the object: the columns are left alone.
 $before = $hr_node->get('mgn_last_host_report_time');

@@ -11,14 +11,15 @@ Deploy Joinery on a fresh Ubuntu 24.04 or 26.04 LTS server, either in a Docker c
 3. [Password Security](#password-security)
 4. [Docker Deployment](#docker-deployment)
 5. [Bare-Metal Deployment](#bare-metal-deployment)
-6. [SSL Certificates](#ssl-certificates)
-7. [Cloudflare Proxy Support](#cloudflare-proxy-support)
-8. [Themes and Plugins](#themes-and-plugins)
-9. [Domain Management](#domain-management)
-10. [Site Management](#site-management)
-11. [Maintenance Operations](#maintenance-operations)
-12. [Troubleshooting](#troubleshooting)
-13. [Script Reference](#script-reference)
+6. [Outbound Limits](#outbound-limits)
+7. [SSL Certificates](#ssl-certificates)
+8. [Cloudflare Proxy Support](#cloudflare-proxy-support)
+9. [Themes and Plugins](#themes-and-plugins)
+10. [Domain Management](#domain-management)
+11. [Site Management](#site-management)
+12. [Maintenance Operations](#maintenance-operations)
+13. [Troubleshooting](#troubleshooting)
+14. [Script Reference](#script-reference)
 
 ## Quick Start
 
@@ -272,6 +273,8 @@ sudo maintenance_scripts/sysadmin_tools/move_site_to_own_network.sh SITENAME   #
 
 The script records the site's run spec if it has none, creates the network, connects the container to it and disconnects it from the default network. It then runs `host_housekeeping.sh` inside the container, so Apache trusts the new gateway and PostgreSQL admits the host from it. Apache bound its port before the container had IPv6, so it is started once more, under the supervisor's hold, to answer over IPv6 too. Published ports follow the container, and visitors are answered throughout. Running it again finishes a move that was interrupted. It refuses a site whose code is older than that housekeeping step, because on the new network such a site would log every visitor as the gateway. Apply the site's update first. `remove_account.sh` removes a site's network with its container.
 
+A site's own network is also what the [outbound limits](#outbound-limits) name it by: a site still on Docker's default network shares `docker0` with every other such site and is not limited until it moves.
+
 ### What keeps a site running
 
 A container's main process is its supervisor, `_site_supervisor.sh`. It starts Apache, then checks every 5 seconds that PostgreSQL, PHP-FPM, Apache and cron are running. When a site runs out of memory, the kernel kills its biggest process. When one of the four has been gone for three checks in a row, the supervisor clears whatever it left behind (a dead PHP-FPM master's workers, a dead Apache parent's children still holding port 80) and starts it again. Each restart is a line in the site's `logs/error.log` and in `docker logs`. `docker stop` stops all four cleanly, so PostgreSQL shuts down rather than being killed.
@@ -417,6 +420,34 @@ Two separate things, which the installer keeps in agreement:
 ├── static_files/     # Generated files
 └── backups/          # Database backups
 ```
+
+## Outbound Limits
+
+Every install limits what its sites can open toward the outside, so a hacked plugin cannot turn the server into a scanner or a flood. Real use never meets these limits. For each site:
+
+- **New connections:** 20 a second, in bursts of up to 100. An opening over the rate is dropped, and the site's own TCP sends it again a second later, so a short burst is slowed rather than refused. Only a sustained one fails.
+- **Connections open at once:** 256.
+- **UDP:** none. A site's only UDP is its name lookups, and those go to the host's own resolver, never out as the site's packets. Nothing in the platform uses UDP for anything else, and a container keeps time from the host's clock.
+
+One limit covers IPv4 and IPv6 together. The limits are a firewall table of their own, `joinery_limits` (nftables, `inet`), beside Docker's rules and the multi-tenant walls. A packet any of them drops is dropped.
+
+- **On a Docker host,** each site is matched by its own network's bridge (`jsnetN`, see [Each site's network](#each-sites-network)), on the traffic the host forwards from it.
+- **On a bare-metal server,** everything the web server's user (`www-data`) opens is limited as one, except over loopback, so the site's own database and the local resolver are never touched.
+- **What is not limited:** connections a site's visitors open to it, the replies to them, and the machine's own traffic (the host agent, updates, the host's proxy).
+
+`install.sh docker` and `install.sh server` install the limits as the host's `joinery-limits` unit, run at boot after Docker and every five minutes by `joinery-limits.timer`. `install.sh site`, `move_site_to_own_network.sh` and `remove_account.sh` run the unit when a site arrives, moves or goes. A run that would change nothing leaves the table as it is. A run that changes it replaces it in one step and carries each site's drop count over.
+
+The limits depend on the host's resolver being a loopback address, which it is on Ubuntu (`systemd-resolved`, `127.0.0.53`). Were `/etc/resolv.conf` to name an outside resolver, Docker would forward a container's lookups from the site's own network, and dropping its UDP would break them. So the unit checks first. It refuses with the reason, removes its table and fails, and the host report shows the limits as not in force.
+
+```bash
+sudo joinery-limits status   # what is in force, for which sites, and each one's drops
+sudo joinery-limits off      # every limit off on this machine, UDP drop included
+sudo joinery-limits on
+```
+
+`--no-outbound-limits` on `install.sh docker` or `install.sh server` installs them off. The choice lives in `/etc/joinery/outbound_limits.json` (`"enabled": false`), which only root writes. Running the installer again keeps it.
+
+Every drop counts against the site that sent it. The host report carries each site's count, and the node page shows a site whose limits dropped anything since the last report in amber, because many dropped connections is how scanning shows. Counts start again from zero when the machine reboots.
 
 ## SSL Certificates
 

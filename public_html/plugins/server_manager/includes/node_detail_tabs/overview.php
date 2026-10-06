@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.45 - the machine's outbound connection limits (host_report 1.11, node_outbound_and_transfer
+ *                 WP3): on, off, or not in force and why; a site whose limits dropped packets since the
+ *                 last report is amber, and a site container they do not cover says so
  * @version 1.44 - a site container held stopped (a switch-over's old container) reads Held stopped, with no Restart
  * @version 1.42 - a pending reboot names when it was asked for, and is amber only once it has
  *                 waited more than a day: a multi-tenant host takes its own the night an update
@@ -780,6 +783,16 @@
 			$html .= '<div class="mt-1"><span class="badge bg-warning" title="Times the kernel killed a process in this site for running out of memory, since it started">'
 				. (int)$m['oom_kills'] . ' killed for memory</span></div>';
 		}
+		// Its outbound limits (host_report 1.11): connections opened past the
+		// rate or the cap, and UDP, dropped. Real use never meets them, so any
+		// drop is worth a look: it is how scanning and flooding show.
+		$dropped = $since['outbound_dropped'] ?? null;
+		if (is_int($dropped) && $dropped > 0) {
+			$html .= '<div class="mt-1"><span class="badge bg-warning" title="Packets this site sent past its outbound limits (new connections a second, connections open at once, any UDP), dropped on its server. Real use never meets them.">'
+				. $dropped . ' outbound packets dropped since the last report</span></div>';
+		} elseif (($c['outbound_dropped'] ?? null) === 'none' && ($c['state'] ?? '') === 'running') {
+			$html .= '<div class="small text-muted mt-1">Not under the outbound limits</div>';
+		}
 		return $html;
 	};
 
@@ -1182,6 +1195,39 @@
 				echo $bits
 					? '<div class="mt-2 text-danger small">Kernel, last 24h: ' . $hr_str(implode(', ', $bits)) . '</div>'
 					: '<div class="mt-2 text-muted small">Kernel, last 24h: nothing to report</div>';
+			}
+			// What the machine's sites may open toward the outside (host_report
+			// 1.11). A container site's own report says none: its host's says.
+			$ol = $hr['outbound_limits'] ?? null;
+			if (is_array($ol) && $ol['state'] !== 'none') {
+				$ol_words = [
+					'on'      => ['Outbound limits on', 'success', 'A rate on new connections, a cap on those open at once, and no UDP, for each site'],
+					'off'     => ['Outbound limits off', 'secondary', 'Turned off on this machine (joinery-limits on turns them on)'],
+					'refused' => ['Outbound limits not in force', 'danger', ''],
+					'absent'  => ['No outbound limits', 'secondary', 'This machine was installed before them'],
+					'unknown' => ['Outbound limits unknown', 'secondary', ''],
+				];
+				$ol_reasons = [
+					'resolver_not_loopback' => 'The machine\'s resolver is not a loopback address, so dropping UDP would break its sites\' name lookups. Point /etc/resolv.conf at the local resolver.',
+					'nft_missing'           => 'nftables is not installed.',
+					'nft_refused'           => 'nftables refused the rules: see journalctl -u joinery-limits.',
+				];
+				$w = $ol_words[$ol['state']];
+				$ol_line = ($ol['state'] === 'refused') ? ($ol_reasons[$ol['reason']] ?? 'Reason: ' . $ol['reason']) : $w[2];
+				echo '<div class="mt-2"><span class="badge bg-' . $w[1] . '">' . $hr_str($w[0]) . '</span></div>';
+				if ($ol_line !== '') {
+					echo '<div class="small text-muted">' . $hr_str($ol_line) . '</div>';
+				}
+				if ($ol['state'] === 'on' && is_string($ol['reason'] ?? null)) {
+					echo '<div class="small text-warning">The last change to them was refused ('
+						. $hr_str($ol_reasons[$ol['reason']] ?? $ol['reason'])
+						. '). The limits before it are in force; see journalctl -u joinery-limits on the machine.</div>';
+				}
+				$web_dropped = $ol['dropped_since_last'] ?? null;
+				if (is_int($web_dropped) && $web_dropped > 0) {
+					echo '<div class="mt-1"><span class="badge bg-warning" title="Packets the web server\'s user sent past the outbound limits, dropped. Real use never meets them.">'
+						. $web_dropped . ' outbound packets dropped since the last report</span></div>';
+				}
 			}
 			echo '<div class="small text-muted mt-1">Security updates last ran ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . '</div>';
 			if (is_array($hr['os'])) {

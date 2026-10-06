@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,outbound_limits,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -97,6 +97,8 @@ for u in apache2 php-fpm postgresql; do
 done
 chk "served certificates is a list or unknown" "$( t=$(jv "$T/real.json" served_certificates type); [ "$t" = list ] || [ "$(jv "$T/real.json" served_certificates)" = unknown ]; echo $? )" "0"
 chk "containers is a list, none or unknown" "$( t=$(jv "$T/real.json" containers type); v=$(jv "$T/real.json" containers); [ "$t" = list ] || [ "$v" = none ] || [ "$v" = unknown ]; echo $? )" "0"
+chk "outbound_limits names its four parts" "$(jv "$T/real.json" outbound_limits keys)" "state,reason,since,web_user_dropped"
+chk "outbound_limits is a known state" "$( case "$(jv "$T/real.json" outbound_limits.state)" in on|off|refused|absent|none|unknown) echo ok ;; esac )" "ok"
 chk "generated_at is now" "$( g=$(jv "$T/real.json" generated_at); n=$(date -u +%s); [ "$g" -le "$n" ] && [ "$g" -ge $((n-60)) ]; echo $? )" "0"
 
 echo "=== The release-upgrade cache, read as Ubuntu writes it ==="
@@ -328,7 +330,7 @@ chk "containers: state and health" "$(jv "$T/root.json" containers.0.state)/$(jv
 # network namespace of the process docker names - here the gate's own.
 int_or_none() { case "$1" in none|[0-9]*) echo ok ;; *) echo "$1" ;; esac; }
 chk "containers: a held container says so, and only it" "$(jv "$T/root.json" containers.0.held)/$(jv "$T/root.json" containers.1.held)" "false/true"
-chk "a site carries every figure key" "$(jv "$T/root.json" containers.0 keys)" "name,state,health,answers,held,started_at,memory,cpu,pids,net_tx_bytes,disk_bytes"
+chk "a site carries every figure key" "$(jv "$T/root.json" containers.0 keys)" "name,state,health,answers,held,started_at,memory,cpu,pids,net_tx_bytes,outbound_dropped,disk_bytes"
 chk "started_at is the container's start, as a Unix time" "$(jv "$T/root.json" containers.0.started_at)" "$(date -u -d 2026-09-28T18:01:15Z +%s)"
 chk "memory in use, its peak and its kill count are numbers" "$(jv "$T/root.json" containers.0.memory.used_bytes type)/$(jv "$T/root.json" containers.0.memory.peak_bytes type)/$(jv "$T/root.json" containers.0.memory.oom_kills type)" "integer/integer/integer"
 chk "the memory and process ceilings are a number or none" "$(int_or_none "$(jv "$T/root.json" containers.0.memory.limit_bytes)")/$(int_or_none "$(jv "$T/root.json" containers.0.pids.limit)")" "ok/ok"
@@ -344,6 +346,62 @@ chk "sshd allowed users and groups are lists" "$(jv "$T/root.json" sshd.allow_us
 chk "no host key or authorized-keys path from sshd -T reaches the object" "$(grep -c -E 'ssh_host_|authorized_keys' "$T/root.json")" "0"
 chk "the three events are counted from the system journal" "$(jv "$T/root.json" kernel_events_24h.oom)/$(jv "$T/root.json" kernel_events_24h.enospc)/$(jv "$T/root.json" kernel_events_24h.io_error)" "1/2/0"
 chk "journalctl's own no-entries line is not counted as an event" "$(jv "$T/root.json" kernel_events_24h.io_error)" "0"
+chk "with no limits on the machine, a site's drops are none" "$(jv "$T/root.json" containers.0.outbound_dropped)" "none"
+
+echo "=== Outbound limits (outbound_limits.sh) ==="
+# The reader alone, pointed at a scratch status file and unit: both paths are
+# fixed in the script. nft is a stub printing the counters as nft lists them.
+eval "$(sed -n -e '/^json_str() {/,/^}/p' -e '/^safe_name() {/,/^}/p' "$SCRIPT")"
+MAX_NAME=64
+eval "$(sed -n '/^LIMITS_STATE=""/,/^emit_outbound_limits() {/p' "$SCRIPT" | sed '$d')"
+eval "$(sed -n '/^emit_outbound_limits() {/,/^}/p' "$SCRIPT")"
+LS="$T/limits.status"; LU="$T/joinery-limits.service"
+eval "$(declare -f limits_read | sed -e "s#/run/joinery/outbound_limits.status#$LS#" -e "s#/etc/systemd/system/joinery-limits.service#$LU#")"
+cat > "$T/bin/nft" <<'STUB'
+#!/bin/bash
+echo "nft $*" >> "$GATE_NFT_LOG"
+[ "$*" = "list counters table inet joinery_limits" ] || exit 2
+[ -n "${GATE_NFT_FAIL:-}" ] && exit 1
+printf 'table inet joinery_limits {\n\tcounter drops_site_siteone {\n\t\tpackets 12 bytes 720\n\t}\n\tcounter drops_web_user {\n\t\tpackets 3 bytes 180\n\t}\n\tcounter drops_site_my-site {\n\t\tpackets 7 bytes 420\n\t}\n}\n'
+STUB
+chmod 755 "$T/bin/nft"; export GATE_NFT_LOG="$T/nft.log"
+lim_reset() { LIMITS_STATE=""; LIMITS_REASON=""; LIMITS_SINCE=""; LIMITS_SITES=""; LIMITS_WEB=""; LIMITS_COUNTS=""; LIMITS_COUNTS_READ=0; }
+lim_obj() { lim_reset; PATH="$T/bin:$PATH" limits_read; emit_outbound_limits; }
+lim_site() { lim_reset; PATH="$T/bin:$PATH" limits_read; limits_dropped "drops_site_$1" "$([[ "$LIMITS_SITES" == *" $1 "* ]] && echo 1 || echo 0)"; }
+in_container() { return 1; }
+rm -f "$LS" "$LU"
+chk "no unit and no status: absent" "$(lim_obj)" '{"state":"absent","reason":"none","since":"none","web_user_dropped":"none"}'
+touch "$LU"
+chk "a unit with no status yet: unknown" "$(lim_obj)" '{"state":"unknown","reason":"none","since":"none","web_user_dropped":"none"}'
+printf 'state=on\nreason=\nsince=1760000000\nsites=siteone sitetwo my-site\nuncovered=old\nweb_user=yes\n' > "$LS"
+chk "on: its since and the web user's drops, read from nft" "$(lim_obj)" '{"state":"on","reason":"none","since":1760000000,"web_user_dropped":3}'
+chk "a limited site's drops are its counter's packets" "$(lim_site siteone)" "12"
+chk "a site still on Docker's default network is none, not zero" "$(lim_site old)" '"none"'
+chk "a limited site whose counter nft does not list is unknown" "$(lim_site sitetwo)" '"unknown"'
+chk "a site name with a hyphen finds its counter (nft lists it unquoted)" "$(lim_site my-site)" "7"
+chk "a name that only begins another's is not matched" "$(lim_site site)" '"none"'
+chk "counters that cannot be read (not root) are unknown" "$(GATE_NFT_FAIL=1 lim_site siteone)" '"unknown"'
+printf 'state=on\nreason=nft_refused\nsince=1760000000\nsites=siteone\nweb_user=no\n' > "$LS"
+chk "on with a reason (the last change refused, the table before it in force) carries the reason" "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["state"], "/", $o["reason"], "/", $o["since"];')" "on/nft_refused/1760000000"
+printf 'state=on\nsince=1760000000\nsites=siteone\nweb_user=no\n' > "$LS"
+chk "a machine whose sites are containers: the web user is none" "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["web_user_dropped"];')" "none"
+printf 'state=refused\nreason=resolver_not_loopback\nsince=\nsites=siteone\n' > "$LS"
+: > "$GATE_NFT_LOG"
+chk "refused: the reason code, no since, and nft is not asked" "$(lim_obj)|$(wc -l < "$GATE_NFT_LOG")" '{"state":"refused","reason":"resolver_not_loopback","since":"none","web_user_dropped":"none"}|0'
+chk "and a site under refused limits is none" "$(lim_site siteone)" '"none"'
+printf 'state=refused\nreason=evil"code;$(reboot)\n' > "$LS"
+chk "a reason is reduced to safe characters" "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["reason"];')" "evilcodereboot"
+printf 'state=off\nsince=1\n' > "$LS"
+chk "off: no since, no drops" "$(lim_obj)" '{"state":"off","reason":"none","since":"none","web_user_dropped":"none"}'
+printf 'state=hacked\n' > "$LS"
+chk "a state it does not know is unknown" "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["state"];')" "unknown"
+printf 'state=on\nsince=soon\nsites=siteone\n' > "$LS"
+chk "a since that is not a time is unknown" "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["since"];')" "unknown"
+in_container() { return 0; }
+chk "inside a container: none (its host's report says)" "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["state"];')" "none"
+in_container() { return 1; }
+chk "nft is only ever asked to list the counters" "$(grep -o 'run nft [a-z_ ]*' "$SCRIPT" | sort -u)" "run nft list counters table inet joinery_limits"
+
 chk "no text from an event line reaches the object" "$(grep -c -E 'mandb|/var/cache/man|3420559|total-vm|Killed process' "$T/root.json")" "0"
 chk "the banned IP list never reaches the object" "$(grep -c '203.0.113.9\|198.51.100' "$T/root.json")" "0"
 # Anchored to word edges on purpose: an unanchored 'eve' also matches the key

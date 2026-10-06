@@ -3,6 +3,9 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.4 - run_spec_limits_refresh: the outbound limits (outbound_limits.sh,
+#                specs/node_outbound_and_transfer.md WP3) follow a site created, moved,
+#                rebuilt or removed, through the host's joinery-limits unit.
 # Version: 1.3 - Every site runs on a network of its own (specs/node_outbound_and_transfer.md
 #                WP2): network=, bridge=, subnet= and subnet6= lines, format 2. A slot N is
 #                10.250.N.0/24, fd00:250:N::/64 and the bridge jsnetN, taken under a host
@@ -705,4 +708,16 @@ run_spec_from_run_args() {  # RUN_ARGS_FILE SPEC_PATH ENV_PATH
     { printf 'spec_version=%s\nhostname=%s\nrestart=%s\nmemory=\ncpus=\npids_limit=\n' "$RUN_SPEC_VERSION" "$host" "$restart"
       printf '%s\n' "$lines"; } | run_spec_write_to "$2" "$2" || { rm -f "$envtmp"; return 1; }
     chmod 600 "$envtmp" && mv -f "$envtmp" "$3"
+}
+
+# The outbound limits follow this host's sites (outbound_limits.sh): a site
+# created, moved, rebuilt or removed changes which bridges are limited. Runs the
+# host's joinery-limits unit, which takes one run at a time; a host without the
+# unit has no limits to change. Never fails its caller: the unit's timer runs
+# it again within five minutes.
+run_spec_limits_refresh() {
+    [[ -f "$(run_spec_root)/etc/systemd/system/joinery-limits.service" ]] || return 0
+    systemctl start joinery-limits.service > /dev/null 2>&1 \
+        || echo "run spec: WARNING - the outbound limits did not follow this change (its timer tries again within five minutes); see: sudo joinery-limits status" >&2
+    return 0
 }
