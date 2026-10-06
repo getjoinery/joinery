@@ -28,6 +28,7 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
+ * @version 1.3.1 - a transient decode refusal (the site out of memory just then) is not recorded
  * @version 1.3.0 - one decode per resize: ImageDecoder opens the original once, shrunk and upright,
  *                  every size is cut from it under one ImageWorkLock hold, and a decode the
  *                  ceiling refuses is recorded in fbb_variant_refused (specs/image_decode_memory.md)
@@ -1264,7 +1265,9 @@ class FileBlob extends SystemBase {
 				$decoded = ImageDecoder::open($src_path, $max['width'], $max['height']);
 			} catch (ImageDecodeRefused $e) {
 				error_log('FileBlob resize refused for ' . basename($src_path) . ': ' . $e->getMessage());
-				if ($record) {
+				// A transient refusal (the site was out of memory just then) is
+				// not recorded: the next ensure_variant() or regenerate tries again.
+				if ($record && !$e->transient) {
 					$this->_record_variant_refusal($e->getMessage());
 				}
 				return false;

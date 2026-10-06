@@ -5,6 +5,9 @@
 # from the same figures and cannot drift apart
 # (specs/multi_tenant_docker_hosts.md WP2).
 #
+# Version: 1.0.1 - notes that ImageDecoder (public_html/includes/ImageDecoder.php) mirrors the
+#                  base and shared_buffers figures to size its decode ceiling; a unit test
+#                  (tests/unit/image_decoder_test.php) pins the two equal, so change both.
 # Version: 1.0.0
 #
 #   memory_plan_budget          sets MEMORY_PLAN_MB and MEMORY_PLAN_SOURCE from
@@ -27,7 +30,7 @@
 # The caller sets MEMORY_PLAN_RAM_MB (a stated budget) and MEMORY_PLAN_CONTAINER
 # (1 when the caller knows this is a container) before memory_plan_budget.
 
-MEMORY_PLAN_BASE_MB=128
+MEMORY_PLAN_BASE_MB=128          # also ImageDecoder::PLAN_BASE_MB — change both
 MEMORY_PLAN_WORKER_MB=40
 # Never fewer PHP workers than this, whatever the budget: one slow request must
 # not stop the site answering.

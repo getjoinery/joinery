@@ -24,7 +24,12 @@
  *   - PNG opens in full; a large PNG is refused by the ceiling
  *   - not an image, and a truncated JPEG, are refused with a reason, not a GD warning
  *   - ImageSizeRegistry::max_dimensions() is the pair the decoder is given
+ *   - the ceiling follows the memory budget (the plan's split, pinned to _memory_plan.sh),
+ *     under the setting as a cap; a 256 MB site refuses 24 MP progressive, takes baseline
+ *   - a child killed by a signal is out of memory and retryable; stopped by the limit is
+ *     recorded; rejecting the file is damage
  *
+ * @version 1.1 - budget-derived ceiling, signal-killed child
  * @version 1.0
  */
 
@@ -34,6 +39,7 @@ harness_boot();
 $dir = harness_scratch_dir('image_decoder');
 harness_defer(function () {
 	ImageDecoder::set_ceiling_for_tests(null);
+	ImageDecoder::set_budget_for_tests(null);
 	ImageDecoder::set_djpeg_for_tests(null);
 });
 
@@ -206,6 +212,78 @@ if ($djpeg !== null) {
 	}
 }
 ImageDecoder::set_ceiling_for_tests(160);
+
+section('the ceiling follows the memory budget, under the setting as a cap');
+ImageDecoder::set_ceiling_for_tests(null);
+$plan = (string)file_get_contents(PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/_memory_plan.sh');
+preg_match('/^MEMORY_PLAN_BASE_MB=(\d+)/m', $plan, $pb);
+check((int)($pb[1] ?? 0) === ImageDecoder::PLAN_BASE_MB, 'the base the plan reserves is the one the decoder reserves', ($pb[1] ?? '?') . ' vs ' . ImageDecoder::PLAN_BASE_MB);
+check(preg_match('/mb=\$\(\( \$1 \/ 5 \)\)/', $plan) === 1 && preg_match('/-lt 64 \]/', $plan) === 1 && preg_match('/-gt 2048 \]/', $plan) === 1,
+	'shared_buffers is a fifth of the budget, clamped 64..2048, in the plan as in the decoder');
+$cases = array(256 => 64, 384 => 180, 512 => 282, 192 => 24, 128 => 24, 8192 => 6426, 16384 => 14208);
+$got = array();
+foreach ($cases as $budget => $room) {
+	ImageDecoder::set_budget_for_tests($budget);
+	$got[$budget] = ImageDecoder::decode_room_mb();
+}
+check($got === $cases, 'room = budget - shared_buffers - 128, floor 24 (256 MB: 64, 512 MB: 282)', json_encode($got));
+ImageDecoder::set_budget_for_tests(256);
+check(ImageDecoder::ceiling_mb() === min(64, ImageDecoder::setting_mb()), 'on a 256 MB site the ceiling is the room, 64 MB, not the setting', (string)ImageDecoder::ceiling_mb());
+ImageDecoder::set_budget_for_tests(8192);
+check(ImageDecoder::ceiling_mb() === ImageDecoder::setting_mb(), 'on a big box the setting caps it', (string)ImageDecoder::ceiling_mb());
+ImageDecoder::set_budget_for_tests(false);
+check(ImageDecoder::ceiling_mb() === ImageDecoder::setting_mb(), 'with no readable budget the setting alone applies');
+ImageDecoder::set_budget_for_tests(256);
+ImageDecoder::set_djpeg_for_tests($djpeg_override);
+try {
+	ImageDecoder::open($big_prog, 1920, 1080);
+	check(false, 'a 256 MB site refuses a 24 MP progressive JPEG, naming its memory as the reason');
+} catch (ImageDecodeRefused $e) {
+	check(strpos($e->getMessage(), 'this site\'s memory allows 64 MB') !== false && !$e->transient,
+		'a 256 MB site refuses a 24 MP progressive JPEG, naming its memory as the reason', $e->getMessage());
+}
+if ($djpeg !== null) {
+	$d = ImageDecoder::open($big, 1920, 1080);
+	check($d->method === 'djpeg' && $d->width === 2250, 'and still takes a 24 MP baseline JPEG, shrunk (about 13 MB)');
+	unset($d);
+}
+ImageDecoder::set_budget_for_tests(null);
+ImageDecoder::set_ceiling_for_tests(160);
+
+section('a decoder child killed by a signal is out of memory, not damage, and retryable');
+$fake = $dir . '/djpeg_killed.sh';
+file_put_contents($fake, "#!/bin/sh\nkill -9 \$\$\n");
+chmod($fake, 0755);
+ImageDecoder::set_djpeg_for_tests($fake);
+try {
+	ImageDecoder::open($big, 1920, 1080);
+	check(false, 'a SIGKILLed child is reported as the site out of memory');
+} catch (ImageDecodeRefused $e) {
+	check($e->transient === true && strpos($e->getMessage(), 'out of memory') !== false && strpos($e->getMessage(), 'damaged') === false,
+		'a SIGKILLed child is reported as the site out of memory, transient', $e->getMessage());
+}
+$fake2 = $dir . '/djpeg_nomem.sh';
+file_put_contents($fake2, "#!/bin/sh\necho 'Insufficient memory (case 4)' >&2\nexit 1\n");
+chmod($fake2, 0755);
+ImageDecoder::set_djpeg_for_tests($fake2);
+try {
+	ImageDecoder::open($big, 1920, 1080);
+	check(false, 'a child stopped by the address-space limit is over the ceiling, recorded');
+} catch (ImageDecodeRefused $e) {
+	check($e->transient === false && strpos($e->getMessage(), 'more than this site can spare') !== false,
+		'a child stopped by the address-space limit is over the ceiling, recorded', $e->getMessage());
+}
+$fake3 = $dir . '/djpeg_broken.sh';
+file_put_contents($fake3, "#!/bin/sh\necho 'Not a JPEG file' >&2\nexit 2\n");
+chmod($fake3, 0755);
+ImageDecoder::set_djpeg_for_tests($fake3);
+try {
+	ImageDecoder::open($big, 1920, 1080);
+	check(false, 'a child that rejects the file is damage');
+} catch (ImageDecodeRefused $e) {
+	check($e->transient === false && strpos($e->getMessage(), 'damaged') !== false, 'a child that rejects the file is damage', $e->getMessage());
+}
+ImageDecoder::set_djpeg_for_tests($djpeg_override);
 
 section('other formats open in full under the same ceiling');
 $png = $dir . '/small.png';
