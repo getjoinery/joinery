@@ -7,6 +7,7 @@
  * item shows its live state with a one-click action where the platform can
  * do the work itself.
  *
+ * @version 1.9 - the hosted card names the operator token's missing scopes (ProvisioningSetup::hostedStatus)
  * @version 1.8 - the operator token's helptext names ips:read_write, for a site copy's switch by IP swap
  * @version 1.7 - the operator token's helptext names the scopes a server handover needs
  * @version 1.6 - stored credentials are locked fields with Reset (passwordinput 'stored'); the promotion code's remove box is gone
@@ -327,10 +328,32 @@ unaffected.</p>
 		<th>Can fulfil a hosted order</th>
 		<td>
 			<?= smps_badge($hosted['ready'], 'Yes', 'No', 'warning') ?>
-			— both the cloud token and the SMTP2GO key are needed. A hosted site without mail is a
+			— both the cloud token, able to create servers, and the SMTP2GO key are needed. A hosted site without mail is a
 			site whose owner cannot reset their own password.
 		</td>
 	</tr>
+	<?php if ($hosted['token_present']): ?>
+	<tr>
+		<th>Cloud token's scopes</th>
+		<td>
+			<?php if ($hosted['token_missing_scopes'] === null): ?>
+				<?= smps_badge(false, '', 'Not checked', 'secondary') ?>
+				— save this card to ask Linode what the token may do.
+			<?php elseif (!$hosted['token_missing_scopes']): ?>
+				<?= smps_badge(true, 'All present') ?>
+			<?php else: ?>
+				<?= smps_badge(false, '', 'Missing', 'warning') ?>
+				— Linode will refuse these, and what needs them fails:
+				<ul>
+				<?php foreach ($hosted['token_missing_scopes'] as $scope => $purpose): ?>
+					<li><code><?= htmlspecialchars($scope) ?></code>: <?= htmlspecialchars($purpose) ?></li>
+				<?php endforeach; ?>
+				</ul>
+				Make a Linode token with these scopes added and enter it below.
+			<?php endif; ?>
+		</td>
+	</tr>
+	<?php endif; ?>
 	<tr>
 		<th>Allowances</th>
 		<td>
@@ -357,8 +380,8 @@ echo $fw_hosted->begin_form();
 echo '<input type="hidden" name="action" value="save_hosted">';
 $fw_hosted->passwordinput('operator_cloud_token', 'Operator cloud token', [
 	'stored' => $hosted['token_present'],
-	'helptext' => 'A Linode personal access token scoped linodes:read_write, account:read_write (to hand a server to its'
-		. ' customer\'s own Linode account), firewall:read_only and volumes:read_only (the check before a handover),'
+	'helptext' => 'A Linode personal access token scoped linodes:read_write, account:read_write (the alert when the account\'s'
+		. ' transfer allowance is nearly spent, and handing a server to its customer\'s own Linode account), firewall:read_only and volumes:read_only (the check before a handover),'
 		. ' and ips:read_write (a site copy\'s switch-over by swapping two servers\' addresses).'
 		. ' It stays on this management node — no machine this plane creates ever receives it.']);
 $fw_hosted->passwordinput('hosted_smtp2go_master_key', 'SMTP2GO master API key', [

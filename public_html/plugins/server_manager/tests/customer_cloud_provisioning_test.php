@@ -24,6 +24,7 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.7 - the token's own scopes (X-OAuth-Scopes) and what a grant covers
  * @version 1.6 - the account's own name and the list of accounts a server is created on (B47)
  * @version 1.5 - reverse DNS reaches a hosted instance with the operator token, and a dead customer
  *                grant is reported as reconnect by setQuietly
@@ -502,6 +503,25 @@ class CustomerCloudProvisioningTest {
 			$this->jsonResponse(401, ['errors' => [['reason' => 'Your OAuth token is not authorized to use this endpoint.']]]),
 		]);
 		check($driver->accountName() === 'user getjoinery', 'a token without the account scope is named by its user');
+
+		section('The token\'s own scopes');
+		$driver = $this->driverWith([
+			new Response(200, ['Content-Type' => 'application/json',
+				'X-OAuth-Scopes' => 'domains:read_write linodes:read_write'], json_encode(['username' => 'getjoinery'])),
+		]);
+		check($driver->tokenScopes() === ['domains:read_write', 'linodes:read_write'],
+			'the scopes come from the X-OAuth-Scopes header');
+		$need = array_keys(ProvisioningSetup::OPERATOR_TOKEN_SCOPES);
+		check(LinodeComputeDriver::missingScopes(['domains:read_write', 'linodes:read_write'], $need)
+			=== ['account:read_write', 'firewall:read_only', 'volumes:read_only', 'ips:read_write'],
+			'the dev token of 2026-10-06 lacks account, firewall, volumes and ips');
+		check(LinodeComputeDriver::missingScopes(['*'], $need) === [], '"*" covers every scope');
+		check(LinodeComputeDriver::missingScopes(['firewall:read_write'], ['firewall:read_only']) === [],
+			'read_write covers the same area\'s read_only');
+		check(LinodeComputeDriver::missingScopes(['account:read_only'], ['account:read_write']) === ['account:read_write'],
+			'read_only does not cover read_write');
+		check(LinodeComputeDriver::missingScopes(['linodes:read_write'], ['linodes:read_only', 'ips:read_only'])
+			=== ['ips:read_only'], 'one area\'s grant covers no other area');
 	}
 
 	private function test_account_tokens() {

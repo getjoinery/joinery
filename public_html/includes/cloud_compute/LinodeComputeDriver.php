@@ -6,6 +6,8 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.12 - tokenScopes() (the scopes Linode reports for the token, from X-OAuth-Scopes) and
+ *                missingScopes(): a token short of a scope is named when it is saved, not at its first refusal
  * @version 1.11 - instanceTypes(): the shared-CPU plans with their memory and disk
  * @version 1.10 - CloudAccountIdentity: accountName() from the account's company, else the token's user
  * @version 1.9 - CloudAddressSwap: addressReport (public IPv4s, IPv6, Network Helper by the instance's
@@ -609,11 +611,48 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 	}
 
 	/**
+	 * The scopes the token holds, as Linode reports them on every response
+	 * (`X-OAuth-Scopes`): "linodes:read_write account:read_only", or "*" for
+	 * a token with every scope. Read from the token's own profile, which any
+	 * token may read.
+	 */
+	public function tokenScopes(): array {
+		$header = $this->send('GET', 'profile')->getHeaderLine('X-OAuth-Scopes');
+		return array_values(array_filter(preg_split('/[\s,]+/', trim($header)), 'strlen'));
+	}
+
+	/**
+	 * The scopes in $needed that $granted does not cover. "*" covers all of
+	 * them, and a read_write grant covers the same area's read_only.
+	 */
+	public static function missingScopes(array $granted, array $needed): array {
+		if (in_array('*', $granted, true)) {
+			return array();
+		}
+		$missing = array();
+		foreach ($needed as $scope) {
+			list($area, $level) = array_pad(explode(':', $scope, 2), 2, '');
+			if (in_array($scope, $granted, true)
+				|| ($level === 'read_only' && in_array($area . ':read_write', $granted, true))) {
+				continue;
+			}
+			$missing[] = $scope;
+		}
+		return $missing;
+	}
+
+	/**
 	 * Issue an API request; decode the JSON body. Throws CloudComputeException
 	 * with the Linode error reason on failure. A 401 is surfaced with a
 	 * distinguishable message so callers can mark the grant revoked.
 	 */
 	private function request(string $method, string $path, ?array $body = null, array $extra_headers = array()): array {
+		$decoded = json_decode((string)$this->send($method, $path, $body, $extra_headers)->getBody(), true);
+		return is_array($decoded) ? $decoded : array();
+	}
+
+	/** request()'s transport: the raw response, for a caller that needs its headers. */
+	private function send(string $method, string $path, ?array $body = null, array $extra_headers = array()) {
 		$options = array(
 			'headers' => array_merge(array(
 				'Authorization' => 'Bearer ' . $this->access_token,
@@ -639,8 +678,7 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			// secret is redacted by the caller that knows it.
 			throw new CloudComputeException('Linode API ' . $method . ' ' . $path . ' failed (0): ' . $e->getMessage(), 0, $e);
 		}
-		$decoded = json_decode((string)$response->getBody(), true);
-		return is_array($decoded) ? $decoded : array();
+		return $response;
 	}
 
 	/**
