@@ -1,7 +1,9 @@
 /**
  * Area AI panel (ai_panel.js) — the same panel docked in a host's sidebar or
  * carried by the slide-over, so both are styled from one place. jy-ui
- * vocabulary, vanilla CSS, no framework. @version 2.7.0 - action cards: neutral with a
+ * vocabulary, vanilla CSS, no framework. @version 2.8.0 - a recipe is one line: name,
+ *   switch, pencil; its progress under it while it has work
+ * @version 2.7.0 - action cards: neutral with a
  *   blue edge, padded when docked, labelled fields, the Current / Past switch
  * @version 2.6.0 - .aip-stale: the previous context's cards, dimmed, while the next load
  * @version 2.5.0 - the slide-over scrolls
@@ -398,7 +400,7 @@
 	padding-bottom: 0;
 }
 
-/* Working now: what the AI is doing, one line each. */
+/* A section's small heading (Waiting for you). */
 .aip-panel .aip-section-title {
 	margin: 0.6rem 0 0.35rem;
 	font-size: 0.8rem;
@@ -407,19 +409,6 @@
 	letter-spacing: 0.05em;
 	color: var(--jy-color-text-muted, #667085);
 }
-.aip-job {
-	display: flex;
-	flex-direction: column;
-	gap: 0.1rem;
-	padding: 0.3rem 0;
-	font-size: 0.85rem;
-}
-.aip-panel .aip-job-name { color: var(--jy-color-text, #1f2933); }
-.aip-panel .aip-job-state { font-size: 0.75rem; color: var(--jy-color-text-muted, #667085); }
-/* A run nobody is holding up reads calm; one that cannot move without the
-   person says so in the same colour their pending actions use. */
-.aip-panel .aip-job-running .aip-job-state { color: #067647; }
-.aip-panel .aip-job-waiting .aip-job-state { color: #1d63d1; }
 
 /* The two counts. Jobs in flight is progress — a plain number, no alarm. The
    blue circle is a request: something is stopped until the person answers. */
@@ -469,46 +458,85 @@
 	flex-direction: column;
 }
 
-/* Automations, one row each: name and status on the first line, what it does
-   under it, then the link that changes the status. No card, no switch, no
-   section to open first — a list of things you turn on and off. */
+/* Automations, one line each: the name, a switch, a pencil. Under it, only
+   while it has work in flight, how far along it is. No card, no section to
+   open first — a list of things you turn on and off. */
 .aip-panel .aip-recipe {
-	padding: 0.5rem 0;
+	padding: 0.4rem 0;
 	border-top: 1px solid var(--jy-color-border, #dfe3e8);
 }
+.aip-panel .aip-recipes > .aip-recipe:first-child { border-top: 0; }
 .aip-panel .aip-recipe-head {
 	display: flex;
-	align-items: baseline;
-	justify-content: space-between;
+	align-items: center;
 	gap: 0.5rem;
 }
 .aip-panel .aip-recipe-name {
-	font-size: 0.9rem;
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: 0.875rem;
 	font-weight: 600;
 	color: var(--jy-color-text, #1f2933);
-	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
-.aip-panel .aip-recipe-status {
-	flex: 0 0 auto;
-	font-size: 0.7rem;
-	font-weight: 700;
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-	color: var(--jy-color-text-muted, #667085);
-}
-.aip-panel .aip-recipe-status.is-on { color: #067647; }
-.aip-panel .aip-recipe-job,
-.aip-panel .aip-recipe-meta,
+.aip-panel .aip-recipe-progress,
 .aip-panel .aip-recipe-blocked {
 	margin: 0.1rem 0 0;
 	font-size: 0.75rem;
 	color: var(--jy-color-text-muted, #667085);
 }
-.aip-panel .aip-recipe-actions {
-	display: flex;
-	gap: 0.75rem;
-	margin: 0.25rem 0 0;
+/* A run nobody is holding up reads calm; one that cannot move without the
+   person says so in the same colour their pending actions use. */
+.aip-panel .aip-recipe-progress.aip-job-running { color: #067647; }
+.aip-panel .aip-recipe-progress.aip-job-waiting { color: #1d63d1; }
+
+/* The switch: on for the context open now, or off. */
+.aip-panel .aip-toggle {
+	position: relative;
+	flex: 0 0 auto;
+	width: 1.9rem;
+	height: 1.1rem;
+	padding: 0;
+	border: 0;
+	border-radius: 999px;
+	background: #c5ccd6;
+	cursor: pointer;
+	transition: background-color 0.15s;
 }
+.aip-panel .aip-toggle::after {
+	content: '';
+	position: absolute;
+	top: 0.15rem;
+	left: 0.15rem;
+	width: 0.8rem;
+	height: 0.8rem;
+	border-radius: 50%;
+	background: #fff;
+	box-shadow: 0 1px 2px rgba(15, 18, 24, 0.25);
+	transition: transform 0.15s;
+}
+.aip-panel .aip-toggle.is-on { background: #067647; }
+.aip-panel .aip-toggle.is-on::after { transform: translateX(0.8rem); }
+.aip-panel .aip-toggle[disabled] { opacity: 0.45; cursor: not-allowed; }
+.aip-panel .aip-toggle:focus-visible {
+	outline: 2px solid var(--jy-color-primary, #2563eb);
+	outline-offset: 2px;
+}
+
+/* The pencil to the recipe's edit page. */
+.aip-panel .aip-recipe-edit {
+	display: inline-flex;
+	flex: 0 0 auto;
+	width: 1.1rem;
+	height: 1.1rem;
+	color: var(--jy-color-text-muted, #667085);
+}
+.aip-panel .aip-recipe-edit:hover { color: var(--jy-color-primary, #2563eb); }
+.aip-panel .aip-recipe-edit svg { width: 100%; height: 100%; }
+
+/* A small text button ('more' on a clamped note). */
 .aip-panel .aip-link {
 	padding: 0;
 	border: 0;

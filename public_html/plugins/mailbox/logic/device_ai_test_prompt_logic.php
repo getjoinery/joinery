@@ -1,6 +1,6 @@
 <?php
 /**
- * API action: mailbox/device_ai_test_prompt — what the AI panel's Test button
+ * API action: mailbox/device_ai_test_prompt — what the Test button in Email settings
  * sends to the person's own model (specs/fortress_mail_device_ai.md § R7).
  *
  * POST /api/v1/action/mailbox/device_ai_test_prompt (browser session or app session key). Params:

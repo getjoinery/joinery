@@ -1,7 +1,9 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.52 — .mbx-thread-purge removed (Trash rows show the received date)
+ * Vanilla CSS, no framework. @version 2.53 — contacts pane: .mbx-contact-edit pencils, .mbx-contacts-locked;
+ *   the add/import controls and the delete button are gone (the Contacts page has them)
+ * @version 2.52 — .mbx-thread-purge removed (Trash rows show the received date)
  * @version 2.51 — .mbx-context-waiting (a slot held below a still-loading docked panel)
  * @version 2.50 — .mbx-device-search-btn (Rebuild / Remove on the device-search note)
  * @version 2.49 — .mbx-dai-link (Change / Test again in the one-line ready state)
@@ -1508,21 +1510,6 @@ button.mbx-setup-banner-btn:disabled { opacity: 0.6; cursor: default; }
 .mbx-ac-name { font-size: var(--mbx-text-base); color: #1f2933; }
 .mbx-ac-addr { font-size: var(--mbx-text-xs); color: #6b7280; }
 
-.mbx-contacts-tools {
-	display: flex;
-	gap: .5rem;
-	flex-wrap: wrap;
-	align-items: center;
-	margin: .5rem 0 1rem;
-}
-.mbx-contacts-add {
-	flex: 1 1 240px;
-	padding: .45rem .6rem;
-	border: 1px solid #cfd6dd;
-	border-radius: 6px;
-	font-size: var(--mbx-text-base);
-}
-.mbx-contacts-import { cursor: pointer; }
 .mbx-contacts-list { display: flex; flex-direction: column; }
 .mbx-contact-row {
 	display: flex;
@@ -1534,16 +1521,51 @@ button.mbx-setup-banner-btn:disabled { opacity: 0.6; cursor: default; }
 .mbx-contact-info { display: flex; flex-direction: column; flex: 1; }
 .mbx-contact-name { font-size: var(--mbx-text-base); color: #1f2933; }
 .mbx-contact-addr { font-size: var(--mbx-text-sm); color: #6b7280; }
-.mbx-contact-del {
-	background: none;
-	border: none;
+/* The pencil beside each contact, and in the pane's header: both open the
+   Contacts page (the header's on the mailbox, a row's on that contact). */
+.mbx-contact-edit {
+	display: inline-flex;
+	flex: 0 0 auto;
+	width: 1.5rem;
+	height: 1.5rem;
+	padding: .2rem;
+	border-radius: 4px;
 	color: #9aa5b1;
-	font-size: var(--mbx-text-xl);
-	line-height: 1;
-	cursor: pointer;
-	padding: 0 .4rem;
 }
-.mbx-contact-del:hover { color: #dc2626; }
+.mbx-contact-edit:hover { color: #2563eb; background: #f1f5f9; }
+.mbx-contact-edit svg { width: 100%; height: 100%; }
+.mbx-context-head .mbx-contact-edit { margin-left: auto; }
+.mbx-contacts-empty { padding: .25rem 0; font-size: var(--mbx-text-sm); color: #6b7280; }
+
+/* A sealed store with the vault shut: a quiet note and a small button, in the
+   column's own colours — locked is a normal state, not a fault. */
+.mbx-contacts-locked {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: .5rem;
+	padding: .75rem;
+	border: 1px solid #e4e7eb;
+	border-radius: 8px;
+	background: #f8fafc;
+}
+.mbx-contacts-locked-text {
+	margin: 0;
+	font-size: var(--mbx-text-sm);
+	line-height: 1.45;
+	color: #52606d;
+}
+.mbx-contacts-locked-btn {
+	padding: .3rem .8rem;
+	border: 1px solid #cbd2d9;
+	border-radius: 6px;
+	background: #fff;
+	color: #1f2933;
+	font-size: var(--mbx-text-sm);
+	font-weight: 500;
+	cursor: pointer;
+}
+.mbx-contacts-locked-btn:hover { border-color: #2563eb; color: #2563eb; }
 
 /* ── contact panel (§ Phase 5) ─────────────────────────────────────────────────
    One aside, two jobs: the open conversation's counterparty card, and — on the
@@ -1703,16 +1725,8 @@ button.mbx-setup-banner-btn:disabled { opacity: 0.6; cursor: default; }
 }
 .mbx-context-muted { color: #6b7280; }
 
-/* The contact manager inside the panel. Its controls were sized for a full pane;
-   in a 260px column they stack instead of sitting on one row, and the list scrolls
-   on its own so the add/import controls stay reachable with many contacts. */
-.mbx-context .mbx-contacts-tools {
-	flex-direction: column;
-	align-items: stretch;
-	gap: .4rem;
-	margin: 0 0 .6rem;
-}
-.mbx-context .mbx-contacts-add { flex: 1 1 auto; width: 100%; }
+/* The contacts list inside the panel scrolls on its own, so a long list does not
+   push the panels below it off the column. */
 .mbx-context .mbx-contacts-list {
 	max-height: 55vh;
 	overflow-y: auto;

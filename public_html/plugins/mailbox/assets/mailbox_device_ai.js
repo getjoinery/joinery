@@ -1,7 +1,8 @@
 /**
- * "Your AI, your model" — the AI panel section where a member names their own
- * AI model for end-to-end encrypted (Fortress) mail and tests it
- * (specs/fortress_mail_device_ai.md § R2, R7).
+ * "Your AI, your model" — AI on end-to-end encrypted (Fortress) mail, run in
+ * this browser against a model the member names (specs/fortress_mail_device_ai.md
+ * § R2, R7): the AI panel's section on the mail page, and the Email settings
+ * page where the model is named and tested.
  *
  * The browser opens Fortress mail and sends it to a model the person names.
  * Three parts say where and how:
@@ -23,7 +24,10 @@
  *
  * The page contract: window.MAILBOX_DEVICE_AI = {origin, user_id,
  * settings_url}; MailboxDeviceAi.section() returns the element the AI panel
- * docks (JoineryAiPanel.mount hostSection). The decisions — the section's
+ * docks (JoineryAiPanel.mount hostSection). The section is empty while all
+ * is well and says one line, with the fix, when the person has something to
+ * do; the address, key, model and Test live in Email settings (the settings
+ * half at the end of this file). The decisions — the section's
  * state, the call address, what a Test outcome means — are plain functions on
  * MailboxDeviceAi.logic, loaded without a page by the suite
  * (plugins/mailbox/tests/device_ai_panel_test.php).
@@ -31,30 +35,31 @@
  * The drain (R6): while the mailbox is open, its vault unlocked and the tab in
  * view, one tab at a time (navigator.locks 'jy-device-ai-drain') judges each
  * device recipe's queue through MailboxFortress.judgeEntry(), at most 200 a
- * page load, and says in the section where it stands. It stops, with the
- * model's own words, when the model does not answer usefully.
+ * page load. It stops, with the model's own words in the section, when the
+ * model does not answer usefully.
  *
  * On demand (R6): messageActions(m) is the bar under an opened Fortress
  * message — Summarize, Scan now — running the same one-item path.
  *
+ * Ready needs no click (R7): with a model saved here the drain runs on its
+ * own. Opening the page calls nothing; the model is called only when a
+ * message is waiting to be judged, which is when the browser asks to reach
+ * the person's network. A drain the model stopped is one line with Check
+ * again and a link to Email settings, naming the browser's permission when
+ * that is what stopped it; the recipe rows say how far along each one is.
+ *
  * The site's own model (R7): when the site's local provider sits on a private
- * or tailnet host, MAILBOX_DEVICE_AI.site_model names it and the section
- * offers it with one click — registerOrigin() (a passkey confirmation, the
- * same as the settings page) and the model saved here — with what the
- * operator can see said plainly to a member.
+ * or tailnet host, MAILBOX_DEVICE_AI.site_model names it and Email settings
+ * offers it with one click — registerOrigin() (a passkey confirmation) and the
+ * model saved here — with what the operator can see said plainly; on a
+ * computer with nothing saved yet for that address, the form starts filled
+ * with it.
  *
- * Ready needs no click (R7): with a model saved here the section shows one
- * line naming it, checks the model on its own once per page load (GET
- * {base}/models, the same gates Test names, which is also when the browser
- * asks to reach the person's network), and only then lets the drain run. The
- * fields, Save and Test sit behind "Change"; "Test again" runs the full Test.
- *
- * Once the check says reachable the section is compact: one muted line
- * ("Your model X at host is reachable. Change"), warnings, and the drain's
- * line only while it has something to say. The title, the custody sentence,
- * the fields, Save and Test all sit behind Change.
- *
- * Vanilla JS, jy-ui classes, no framework. @version 1.9 - the Email settings wiring lives here too (its own guarded section)
+ * Vanilla JS, jy-ui classes, no framework. @version 1.11 - no check on page load: the
+ *   model is called only when the drain has a message to judge
+ * @version 1.10 - the panel section speaks only
+ *   when something needs the person; the fields, Save and Test move to Email settings
+ * @version 1.9 - the Email settings wiring lives here too (its own guarded section)
  * @version 1.8 - compact once reachable
  * @version 1.7 - the ready state is one line and an automatic check; the fields and buttons open on Change
  * @version 1.6 - Test sends the reasoning control
@@ -165,10 +170,10 @@
 		}
 		if (r.network) {
 			if (local && r.lna === 'prompt') {
-				return { kind: 'browser_asks', text: 'Your browser asks first. Press Test again and choose Allow when it asks about devices on your network.' };
+				return { kind: 'browser_asks', text: 'Your browser asks first. Try again and choose Allow when it asks about devices on your network.' };
 			}
 			if (local && r.lna === 'denied') {
-				return { kind: 'browser_blocked', text: 'Your browser blocked this site from reaching your computer or network. Allow it in the site settings (the icon left of the address bar), then Test again.' };
+				return { kind: 'browser_blocked', text: 'Your browser blocked this site from reaching your computer or network. Allow it in the site settings (the icon left of the address bar), then try again.' };
 			}
 			if (local) {
 				return { kind: 'model_refused', text: 'Your model refused this site, or is not running. It must allow this site; see the setup notes.' };
@@ -283,21 +288,6 @@
 			+ '. Its verdicts may be unreliable.';
 	}
 
-	/**
-	 * The automatic check's outcome, as {kind, text}: r is {status, body} for
-	 * an answer to GET {base}/models, or {network: true, lna} when the fetch
-	 * itself failed. A list answered means the model can be reached and the
-	 * key is taken; anything else is what Test would say.
-	 */
-	function classifyProbe(r, local, model, host) {
-		if (r.network) return classify(r, local, model);
-		if (r.status === 401 || r.status === 403) return classify(r, local, model);
-		if (r.status >= 200 && r.status < 300) {
-			return { kind: 'ok', text: 'Reachable: ' + model + ' at ' + host + '.' };
-		}
-		return { kind: 'error', text: 'Your model answered with an error (' + r.status + '). Press Test again for the details.' };
-	}
-
 	// ---- this browser's settings ---------------------------------------------
 
 	function storeKey() {
@@ -353,212 +343,83 @@
 		return n;
 	}
 
-	function field(labelText, input) {
-		var wrap = el('label', 'mbx-dai-field');
-		wrap.appendChild(el('span', 'mbx-dai-label', labelText));
-		wrap.appendChild(input);
-		return wrap;
-	}
-
-	/** The one-click offer of the site's own model, with what the operator can see. */
-	function siteOfferBlock(site) {
-		var wrap = el('div', 'mbx-dai-site');
-		var p = el('p', 'mbx-dai-note');
-		p.appendChild(document.createTextNode('This site runs its own model, '));
-		p.appendChild(el('code', null, site.model));
-		p.appendChild(document.createTextNode(' at '));
-		p.appendChild(el('code', null, site.host));
-		p.appendChild(document.createTextNode('. ' + (site.operator ? 'It runs on hardware you operate.'
-			: 'The operator of this site runs that machine and could see mail sent to it.')));
-		wrap.appendChild(p);
-		var btn = el('button', 'btn btn-secondary btn-sm', 'Use this site\'s model');
-		btn.type = 'button';
-		var status = el('p', 'mbx-dai-note');
-		status.setAttribute('role', 'status');
-		btn.addEventListener('click', function () {
-			btn.disabled = true;
-			status.textContent = 'Saving…';
-			registerOrigin(site.origin, window.location.pathname).then(function (origin) {
-				save({ origin: origin, path: site.path || '', key: '', model: site.model });
-				window.location.reload();
-			}).catch(function (e) {
-				status.textContent = (e && e.message) || 'Could not save the address.';
-				btn.disabled = false;
-			});
-		});
-		wrap.appendChild(btn);
-		wrap.appendChild(status);
-		return wrap;
-	}
-
 	var root = null;
 
+	/**
+	 * The section says something only when the person has something to do:
+	 * a recipe on for this mailbox and no model in this browser, the drain
+	 * stopped by the model, a consent
+	 * refusal, a model graded below what a recipe asks for. Each is one line
+	 * with the way to fix it. The setup itself — the address, the key, the
+	 * model, Test — lives in Email settings, and the recipe rows above already
+	 * say what is on and how far along it is, so a healthy section is empty.
+	 */
 	function render() {
 		if (!root) return;
 		var cfg = window.MAILBOX_DEVICE_AI || {};
 		var fortress = !!(window.MailboxReader && window.MailboxReader.currentIsFortress && window.MailboxReader.currentIsFortress());
 		var st = sectionState({ origin: cfg.origin || null, fortress: fortress }, loadSaved());
-		root.hidden = st.state === 'hidden';
 		root.dataset.state = st.state;
 		root.textContent = '';
-		if (root.hidden) return;
+		if (st.state === 'hidden') { root.hidden = true; return; }
 
-		var title = el('h3', 'aip-section-title', 'Your AI, your model');
-		var note = el('p', 'mbx-dai-note',
-			'AI for this mailbox runs in this browser. Your mail is sent from here to the model you name. '
-			+ 'Joinery never sees it; whoever runs that model does. ');
-		var docs = el('a', null, 'Using your own model');
-		docs.href = DOCS_URL;
-		docs.target = '_blank';
-		docs.rel = 'noopener';
-		note.appendChild(docs);
-		// Reachable and set: nothing to do here, so nothing to read either.
-		var compact = st.state === 'ready' && !!(probe.outcome && probe.outcome.kind === 'ok');
-		root.dataset.compact = compact ? '1' : '0';
-		if (!compact) {
-			root.appendChild(title);
-			root.appendChild(note);
-		}
-
-		if (st.state === 'no_origin') {
-			var p = el('p', 'mbx-dai-note');
-			p.appendChild(document.createTextNode('First choose where your model answers. '));
-			var a = el('a', null, 'Set it up in Email settings');
-			a.href = cfg.settings_url || '/profile/mailbox/settings';
-			p.appendChild(a);
-			root.appendChild(p);
-			var offer = siteOffer({ origin: cfg.origin, site_model: cfg.site_model }, loadSaved());
-			if (offer) root.appendChild(siteOfferBlock(offer.site));
-			return;
-		}
-
-		var usable = st.usable || {};
-		var status = el('p', 'mbx-dai-status');
-		status.setAttribute('role', 'status');
-		var fieldsBox = el('div', 'mbx-dai-fields');
-		var hostName = (function () { try { return new URL(cfg.origin).host; } catch (e) { return cfg.origin; } })();
-		if (st.state === 'ready') {
-			// One line: the model, where, and the links. The rest waits behind Change.
-			var line = el('p', 'mbx-dai-note');
-			line.appendChild(document.createTextNode(compact ? 'Your model ' : 'Your model: '));
-			line.appendChild(el('code', null, usable.model));
-			line.appendChild(document.createTextNode(' at '));
-			line.appendChild(el('code', null, hostName));
-			line.appendChild(document.createTextNode(compact ? ' is reachable. ' : '. '));
-			var changeLink = el('button', 'mbx-dai-link', 'Change');
-			changeLink.type = 'button';
-			changeLink.addEventListener('click', function () { fieldsBox.hidden = !fieldsBox.hidden; });
-			line.appendChild(changeLink);
-			if (!compact) {
-				line.appendChild(document.createTextNode(' · '));
-				var testLink = el('button', 'mbx-dai-link', 'Test again');
-				testLink.type = 'button';
-				testLink.addEventListener('click', function () { testBtn.click(); });
-				line.appendChild(testLink);
-			}
-			root.appendChild(line);
-			fieldsBox.hidden = true;
-		}
-		if (compact) {
-			fieldsBox.appendChild(title);
-			fieldsBox.appendChild(note);
-		}
-		root.appendChild(fieldsBox);
-
-		var where = el('p', 'mbx-dai-note');
-		where.appendChild(document.createTextNode('Your model answers at '));
-		where.appendChild(el('code', null, cfg.origin));
-		where.appendChild(document.createTextNode(' '));
-		var change = el('a', null, 'Change the address');
-		change.href = cfg.settings_url || '/profile/mailbox/settings';
-		where.appendChild(change);
-		fieldsBox.appendChild(where);
-
-		var path = el('input', 'mbx-dai-input');
-		path.type = 'text';
-		path.placeholder = '/v1';
-		var prefill = siteOffer({ origin: cfg.origin, site_model: cfg.site_model }, loadSaved());
-		prefill = prefill && prefill.kind === 'prefill' ? prefill.site : null;
-		path.value = usable.path || (prefill ? prefill.path : '');
-		path.autocomplete = 'off';
-		var key = el('input', 'mbx-dai-input');
-		key.type = 'password';
-		key.placeholder = 'Leave empty if your model needs none';
-		key.value = usable.key || '';
-		key.autocomplete = 'off';
-		var model = el('input', 'mbx-dai-input');
-		model.type = 'text';
-		model.placeholder = 'e.g. accounts/fireworks/models/…';
-		model.value = usable.model || (prefill ? prefill.model : '');
-		model.autocomplete = 'off';
-		fieldsBox.appendChild(field('Rest of the address', path));
-		fieldsBox.appendChild(field('Key', key));
-		fieldsBox.appendChild(field('Model', model));
-
-		var actions = el('div', 'mbx-dai-actions');
-		var saveBtn = el('button', 'btn btn-secondary', 'Save in this browser');
-		saveBtn.type = 'button';
-		var testBtn = el('button', 'btn btn-primary', 'Test');
-		testBtn.type = 'button';
-		actions.appendChild(saveBtn);
-		actions.appendChild(testBtn);
-		fieldsBox.appendChild(actions);
-		(compact ? fieldsBox : root).appendChild(status);
-		root.appendChild(el('div', 'mbx-dai-infos'));
-		var drainLine = el('p', 'mbx-dai-status mbx-dai-drain', drain.status);
-		drainLine.setAttribute('role', 'status');
-		drainLine.hidden = compact && quietDrain(drain.status);
-		root.appendChild(drainLine);
 		var here = window.MailboxReader ? window.MailboxReader.currentAddress() : '';
-		if (here && drain.infoFor !== here) {
-			fetchInfo(here).then(renderInfo, function () {});
-		} else {
-			renderInfo();
-		}
-		// The check runs by itself, once, before the drain: it is where the
-		// browser asks to reach the person's network, and what says why not.
-		if (st.state === 'ready') {
-			probeOnce({ url: callUrl(cfg.origin, usable.path), key: usable.key || '', model: usable.model })
-				.then(function () { tick(); });
-		} else {
-			setTimeout(tick, 0);
+		var info = (drain.info && drain.infoFor === here) ? drain.info : null;
+		if (here && !info && drain.infoLoading !== here) {
+			drain.infoLoading = here;
+			fetchInfo(here).then(render, function () {}).then(function () {
+				if (drain.infoLoading === here) drain.infoLoading = '';
+			});
 		}
 
-		function collect() {
-			var p = normalizePath(path.value);
-			if (p === null) {
-				status.textContent = 'The rest of the address should look like /v1 or /inference/v1.';
-				return null;
+		if (st.state !== 'ready') {
+			// Nothing to run against: worth a word only when something here
+			// is waiting for a model.
+			if (info && info.recipes.length) {
+				problem(st.state === 'no_origin'
+					? 'Your AI for this mailbox runs in this browser, against a model you choose. '
+					: 'This browser does not have your AI model yet. ',
+					[settingsLink('Set it up in Email settings')]);
 			}
-			return { origin: cfg.origin, path: p, key: key.value.trim(), model: model.value.trim() };
+		} else if (drain.attention) {
+			problem(drain.status + ' ', [checkAgainLink(), settingsLink('Email settings')]);
 		}
+		if (info && info.consent_refusal) problem(info.consent_refusal, []);
+		if (info && st.usable) {
+			var warn = floorWarning(st.usable.model, info.model_reference, info.recipes);
+			if (warn) problem(warn + ' ', [settingsLink('Email settings')]);
+		}
+		root.hidden = !root.childElementCount;
 
-		saveBtn.addEventListener('click', function () {
-			var entry = collect();
-			if (!entry) return;
-			if (!save(entry)) { status.textContent = 'This browser would not keep it (private window?).'; return; }
-			probe.started = false;   // a new entry: check it again
+		if (st.state === 'ready') tick();
+	}
+
+	function problem(text, links) {
+		var p = el('p', 'mbx-dai-warn', text);
+		links.forEach(function (link, i) {
+			if (i) p.appendChild(document.createTextNode(' · '));
+			p.appendChild(link);
+		});
+		root.appendChild(p);
+	}
+
+	function settingsLink(text) {
+		var cfg = window.MAILBOX_DEVICE_AI || {};
+		var a = el('a', null, text);
+		a.href = cfg.settings_url || '/profile/mailbox/settings#your-model';
+		return a;
+	}
+
+	/** Let a drain the model stopped start over. */
+	function checkAgainLink() {
+		var b = el('button', 'mbx-dai-link', 'Check again');
+		b.type = 'button';
+		b.addEventListener('click', function () {
+			drain.stopped = false;
+			drain.attention = false;
 			render();
 		});
-
-		testBtn.addEventListener('click', function () {
-			var entry = collect();
-			if (!entry) return;
-			if (!entry.model) {
-				status.textContent = 'Enter the model name first.';
-				return;
-			}
-			save(entry);
-			testBtn.disabled = true;
-			status.textContent = 'Testing…';
-			runTest(entry).then(function (out) {
-				status.textContent = out.text;
-				root.dataset.outcome = out.kind;
-			}).catch(function (e) {
-				status.textContent = (e && e.message) || 'The test could not start.';
-				root.dataset.outcome = 'error';
-			}).then(function () { testBtn.disabled = false; });
-		});
+		return b;
 	}
 
 	function parseBody(t) {
@@ -618,64 +479,21 @@
 		});
 	}
 
-	// ---- the automatic check ---------------------------------------------------------
-
-	var probe = { started: false, outcome: null };
-
-	/** The check's line, on whatever render is current (the section re-renders
-	 *  on every unlock and mailbox change). */
-	function setProbeStatus(text, kind) {
-		var n = root && root.querySelector('.mbx-dai-status:not(.mbx-dai-drain)');
-		if (n) n.textContent = text;
-		if (root && kind) root.dataset.outcome = kind;
-	}
-
-	/** Once per page load (or per saved entry): can the model be reached with
-	 *  this key? Its outcome is the status line, kept across renders; never
-	 *  throws. */
-	function probeOnce(endpoint) {
-		if (probe.started || !endpoint.url) {
-			if (probe.outcome) setProbeStatus(probe.outcome.text, probe.outcome.kind);
-			else if (probe.started) setProbeStatus('Checking your model…');
-			return Promise.resolve();
-		}
-		probe.started = true;
-		probe.outcome = null;
-		var host = new URL(endpoint.url).hostname;
-		var local = isLocalHost(host);
-		var hostName = new URL(endpoint.url).host;
-		setProbeStatus('Checking your model…');
-		return fetch(endpoint.url.replace(/\/chat\/completions$/, '/models'), {
-			method: 'GET', headers: endpoint.key ? { Authorization: 'Bearer ' + endpoint.key } : {}, credentials: 'omit',
-		}).then(function (res) {
-			return res.text().then(function (t) { return classifyProbe({ status: res.status, body: parseBody(t) }, local, endpoint.model, hostName); });
-		}, function () {
-			return lnaState().then(function (s) { return classifyProbe({ network: true, lna: s }, local, endpoint.model, hostName); });
-		}).then(function (out) {
-			probe.outcome = out;
-			setProbeStatus(out.text, out.kind);
-			render();   // reachable collapses the section; anything else opens it
-		}, function () { /* the drain's own call says more */ });
-	}
-
 	// ---- the drain: judging new mail while the mailbox is open ------------------------
 
 	var DRAIN_CAP = 200;         // items per page load (R6)
 	var DRAIN_TICK_MS = 30000;   // how often an idle drain looks for new mail
-	var drain = { running: false, count: 0, status: '', stopped: false, info: null, infoFor: '' };
+	var drain = { running: false, count: 0, status: '', attention: false, stopped: false, info: null, infoFor: '', infoLoading: '' };
 
-	/** Drain text with nothing to act on, hidden in the compact section. */
-	function quietDrain(text) {
-		return !text || /^Up to date/.test(text);
-	}
-
-	function setDrainStatus(text) {
+	/** Where the drain stands. Only a stop the person can act on — the model
+	 *  not answering, a pass that failed — shows in the section; the rest
+	 *  (judging, up to date, paused for a locked vault) is kept for whoever
+	 *  asks, and the recipe rows already show what is left to judge. */
+	function setDrainStatus(text, attention) {
 		drain.status = text;
-		var n = root && root.querySelector('.mbx-dai-drain');
-		if (n) {
-			n.textContent = text;
-			n.hidden = root.dataset.compact === '1' && quietDrain(text);
-		}
+		var was = drain.attention;
+		drain.attention = !!attention;
+		if (was || drain.attention) render();
 	}
 
 	/** What the server says about this mailbox's device recipes (fresh nonces each time). */
@@ -710,7 +528,7 @@
 	async function drainPass(endpoint) {
 		var mailbox = window.MailboxReader.currentAddress();
 		var info = await fetchInfo(mailbox);
-		renderInfo();
+		render();
 		if (info.consent_refusal) { setDrainStatus(info.consent_refusal); return; }
 		if (!info.recipes.length) { setDrainStatus('No AI recipe is on for this mailbox.'); return; }
 		var judged = 0;
@@ -728,9 +546,16 @@
 					var out = await window.MailboxFortress.judgeEntry(page.entries[i], recipe, endpoint);
 					if (out.status === 'dropped') { setDrainStatus('Paused while your vault is locked.'); return; }
 					if (out.status === 'stop') {
-						setDrainStatus('Your model did not answer' + (out.http ? ' (' + out.http + ')' : '') + ': '
-							+ (out.reason === 'unreachable' ? 'it could not be reached.' : out.reason) + ' AI waits until it does; press Test again to check.');
 						drain.stopped = true;
+						if (out.reason === 'unreachable') {
+							// The browser's permission is the likeliest gate for a model on the person's network.
+							var lna = await lnaState();
+							var why = classify({ network: true, lna: lna }, isLocalHost(new URL(endpoint.url).hostname), endpoint.model);
+							setDrainStatus(why.text, true);
+							return;
+						}
+						setDrainStatus('Your model did not answer' + (out.http ? ' (' + out.http + ')' : '') + ': '
+							+ out.reason + ' AI waits until it does.', true);
 						return;
 					}
 					drain.count++;
@@ -754,7 +579,7 @@
 		var run = function (lock) {
 			if (lock === null) { setDrainStatus('Another tab of this mailbox is judging your mail.'); return Promise.resolve(); }
 			return drainPass(endpoint).catch(function (e) {
-				setDrainStatus('AI paused: ' + ((e && e.message) || 'something went wrong') + '.');
+				setDrainStatus('AI paused: ' + ((e && e.message) || 'something went wrong') + '.', true);
 			});
 		};
 		var done = function () { drain.running = false; };
@@ -763,31 +588,6 @@
 		} else {
 			run(true).then(done, done);
 		}
-	}
-
-	/** The lines about this mailbox's recipes, consent and model, under the settings. */
-	function renderInfo() {
-		var box = root && root.querySelector('.mbx-dai-infos');
-		if (!box) return;
-		box.textContent = '';
-		var info = drain.info;
-		var mailbox = window.MailboxReader ? window.MailboxReader.currentAddress() : '';
-		if (!info || drain.infoFor !== mailbox) return;
-		if (info.consent_refusal) { box.appendChild(el('p', 'mbx-dai-warn', info.consent_refusal)); }
-		if (info.recipes.length) {
-			// The recipe cards above already say each runs on this device: the
-			// compact section does not say it again.
-			if (root.dataset.compact !== '1') {
-				box.appendChild(el('p', 'mbx-dai-info', 'Runs on your device while this mailbox is open: '
-					+ info.recipes.map(function (r) { return r.label; }).join(', ') + '.'));
-			}
-		} else {
-			box.appendChild(el('p', 'mbx-dai-info', 'No AI recipe is on for this mailbox. Turn one on above.'));
-		}
-		var saved = loadSaved();
-		var cfg = window.MAILBOX_DEVICE_AI || {};
-		var warn = saved && saved.origin === cfg.origin ? floorWarning(saved.model, info.model_reference, info.recipes) : '';
-		if (warn) box.appendChild(el('p', 'mbx-dai-warn', warn));
 	}
 
 	// ---- on demand, in a Fortress message (R6) --------------------------------------
@@ -884,7 +684,9 @@
 		section: section,
 		messageActions: messageActions,
 		registerOrigin: registerOrigin,
-		logic: { isLocalHost: isLocalHost, normalizePath: normalizePath, callUrl: callUrl, sectionState: sectionState, siteOffer: siteOffer, classify: classify, classifyProbe: classifyProbe,
+		runTest: runTest,
+		loadSaved: loadSaved,
+		logic: { isLocalHost: isLocalHost, normalizePath: normalizePath, callUrl: callUrl, sectionState: sectionState, siteOffer: siteOffer, classify: classify,
 			gradeModel: gradeModel, paramsFromTag: paramsFromTag, floorWarning: floorWarning,
 			entryFromMessage: entryFromMessage, actionLabel: actionLabel },
 	};
@@ -903,7 +705,13 @@
  * Choosing where mail is sent needs a fresh second-factor confirmation:
  * MailboxDeviceAi.registerOrigin() (the panel half above) runs
  * the passkey confirmation here and saves again, or goes to the confirmation
- * page and back without a passkey.
+ * page and back without a passkey. Saving a new key or model for the address
+ * already registered changes only this browser, so it asks for nothing.
+ *
+ * Test ([data-device-ai-test]) sends what a real judgement sends to the model
+ * saved in this browser (MailboxDeviceAi.runTest) and says which gate stopped
+ * it, in [data-device-ai-test-note]. The page names the registered origin in
+ * its CSP, as the mail page does.
  *
  * Page contract: window.MAILBOX_DEVICE_AI = {origin, user_id, site_model};
  * the form #device-ai-host-form with its device_ai_address, device_ai_key and
@@ -913,7 +721,9 @@
  * [data-device-ai-use-site] button when the site's own model is offered —
  * one click registers its origin and keeps its path and model here.
  *
- * Vanilla JS. @version 1.3 - the form takes the key and model too, and opens on request
+ * Vanilla JS. @version 1.4 - Test lives here; a key or model change for the registered
+ *   address skips the confirmation; the site's model prefills an empty browser
+ * @version 1.3 - the form takes the key and model too, and opens on request
  * @version 1.2 - the site's own model with one click; registration shared
  * @version 1.1 - shows the whole address when this browser holds the rest
  */
@@ -992,10 +802,18 @@
 		var keyField = form ? form.querySelector('[name="device_ai_key"]') : null;
 		var modelField = form ? form.querySelector('[name="device_ai_model"]') : null;
 		var saved = savedHere();
+		var logic = window.MailboxDeviceAi && window.MailboxDeviceAi.logic;
+		var offer = logic ? logic.siteOffer(cfg, saved) : null;
 		if (saved && field && field.value === cfg.origin) {
 			if (saved.path) field.value = cfg.origin + saved.path;
 			if (keyField) keyField.value = saved.key || '';
 			if (modelField) modelField.value = saved.model || '';
+		}
+		// The site's own model is the address registered, and this browser
+		// has no model for it yet (another computer): start the form filled.
+		if (offer && offer.kind === 'prefill' && field && modelField) {
+			field.value = offer.site.origin + (offer.site.path || '');
+			if (!modelField.value) modelField.value = offer.site.model;
 		}
 		var enter = document.querySelector('[data-device-ai-enter]');
 		if (enter && box) {
@@ -1004,6 +822,13 @@
 				enter.disabled = true;
 				if (field) field.focus();
 			});
+		}
+		// An address is registered but this browser holds no model for it (a
+		// new computer, where the mail page's panel sends people): the form is
+		// what they came for.
+		if (cfg.origin && box && !(saved && String(saved.model || '').trim())) {
+			box.hidden = false;
+			if (enter) enter.disabled = true;
 		}
 		if (form) {
 			form.addEventListener('submit', function (ev) {
@@ -1016,7 +841,9 @@
 				var btn = form.querySelector('[type="submit"]');
 				if (btn) btn.disabled = true;
 				note('Saving…');
-				register(parts.origin).then(function (origin) {
+				// The same address: only what this browser keeps changes.
+				var stored = parts.origin === cfg.origin ? Promise.resolve(cfg.origin) : register(parts.origin);
+				stored.then(function (origin) {
 					keepPath(origin, parts.path, model, key);
 					window.location.href = RETURN;
 					window.location.reload();
@@ -1040,6 +867,24 @@
 					note((e && e.message) || 'Could not save the address.');
 					use.disabled = false;
 				});
+			});
+		}
+		var test = document.querySelector('[data-device-ai-test]');
+		var testNote = document.querySelector('[data-device-ai-test-note]');
+		if (test && testNote && window.MailboxDeviceAi && window.MailboxDeviceAi.runTest) {
+			test.addEventListener('click', function () {
+				var mine = savedHere();
+				testNote.hidden = false;
+				if (!mine || !String(mine.model || '').trim()) {
+					testNote.textContent = 'This browser has no model saved for this address yet. Change the model, enter it, and save.';
+					return;
+				}
+				test.disabled = true;
+				testNote.textContent = 'Testing ' + mine.model + '…';
+				window.MailboxDeviceAi.runTest({ origin: cfg.origin, path: mine.path || '', key: mine.key || '', model: mine.model })
+					.then(function (out) { testNote.textContent = out.text; },
+						function (e) { testNote.textContent = (e && e.message) || 'The test could not start.'; })
+					.then(function () { test.disabled = false; });
 			});
 		}
 		var remove = document.querySelector('[data-device-ai-remove]');

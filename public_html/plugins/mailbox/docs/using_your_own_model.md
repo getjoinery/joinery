@@ -17,18 +17,18 @@ model on a computer of your own.
    because this decides where your mail may be sent. The start of the
    address, up to the host name, is kept with your account; the rest, the key
    and the model name stay in this browser, so on another computer you enter
-   those again in the AI panel on your mail.
-2. **Open your mail.** The AI panel checks the model on its own. When it
-   can be reached, all that stays is one line, "Your model … is reachable",
-   with *Change* for the details. If your browser asks whether this site may
-   reach your computer or network, allow it. When something stopped the
-   check, the panel says what and the fix. Behind *Change*, *Test* sends the
-   security scan's real instructions with a made-up sample message, for when
-   you change something or want to check the context.
-3. **Turn the AI on for the mailbox.** In the same panel, turn on *Email
-   triage* for one-line summaries, *Email security scan* for the danger
-   check, or both. On an end-to-end encrypted mailbox each card says *Runs on
-   your device while this mailbox is open*.
+   those again in Email settings. Changing only the key or the model name
+   asks for no confirmation.
+2. **Test it.** *Test*, beside the address in the same place, sends the security
+   scan's real instructions with a made-up sample message and says whether
+   your model answered, or what stopped it.
+3. **Turn the AI on for the mailbox.** In the AI panel on your mail, switch
+   on *Email triage* for one-line summaries, *Email security scan* for the
+   danger check, or both. Your model is asked only when new mail is waiting
+   to be judged; the first time, if your browser asks whether this site may
+   reach your computer or network, allow it. While all is well the panel says
+   nothing about your model; when something needs you, it says what in one
+   line, with *Check again* and a link to Email settings.
 
 ## What you will see
 
@@ -47,8 +47,8 @@ AI. Nothing errors in the reader.
 ## The site's own model, with one click
 
 When the site you use runs its own model on hardware on its network, Email
-settings offers it first, and the AI panel offers it too: *Use this site's
-model*, naming the model and the address. One click sets the address and the
+settings offers it first: *Use this site's model*, naming the model and the
+address. One click sets the address and the
 model for you. You still
 confirm with your passkey, because that confirmation is what allows the mail
 page to send your mail there. The offer says plainly who runs that machine:

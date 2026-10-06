@@ -37,6 +37,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.29.0 - contactsPageUrl: the contacts pane's pencils open the Contacts page
  * @version 1.28.0 - mailbox_filter_match.js: mail rules run on end-to-end mail in the browser
  * @version 1.27.0 - relayPinMailboxes in the config: the mailboxes whose relay pin the browser checks
  * @version 1.26.0 - relay-sealed Fortress mail: mailbox_mime.js, the pending banner, and the
@@ -210,7 +211,9 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		// reader, so the admin mount needs no separate staff route.
 		'exportUrlBase'     => '/profile/mailbox/original',
 		'contactsUrl'       => '/api/v1/action/mailbox/contacts',
-		'contactDeleteUrl'  => '/api/v1/action/mailbox/contact_delete',
+		// The contacts pane's pencils: the Contacts page, where they are managed.
+		// Contacts are the calling person's own on either mount.
+		'contactsPageUrl'   => '/profile/mailbox/contacts',
 		'contactsImportUrl' => '/api/v1/action/mailbox/contacts_import',
 		'senderContextUrl'  => '/api/v1/action/mailbox/sender_context',
 		'directStatusUrl'   => '/api/v1/action/mailbox/direct_status',

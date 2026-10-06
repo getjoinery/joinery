@@ -8,6 +8,7 @@
  * per-session reader CSRF token the admin mount uses, so the shared AJAX
  * endpoints accept either mount.
  *
+ * @version 1.3.0 - no device_ai_site_model: Email settings is where the site's model is offered
  * @version 1.2.0 - device_ai_site_model: the site's own model, offered with one click
  * @version 1.1.0 - device_ai_origin: the member's registered model origin
  * @version 1.0.0
@@ -50,9 +51,6 @@ function profile_mailbox_logic(array $input): LogicResult {
 		// Where the member's own AI model answers, if they registered one
 		// (specs/fortress_mail_device_ai.md § R2): the page names it in its CSP.
 		'device_ai_origin'  => MailboxDeviceAiHost::originForUser((int)$session->get_user_id()),
-		// The site's own model, when a browser could call it: one click to
-		// register it, with what the operator can see said plainly (§ R7).
-		'device_ai_site_model' => MailboxDeviceAi::siteModel((int)$session->get_permission() >= 5),
 	));
 }
 ?>

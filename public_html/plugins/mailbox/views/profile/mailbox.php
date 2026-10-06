@@ -5,6 +5,8 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
+ * @version 1.16.0 - the gear lists Contacts
+ * @version 1.15.0 - the panel section no longer offers the site's own model (Email settings does)
  * @version 1.14.0 - hands the panel the site's own model to offer
  * @version 1.13.0 - loads the digest and verdict checks the drain judges with
  * @version 1.12.0 - names the member's registered model origin in the CSP and mounts
@@ -48,8 +50,8 @@ $page->public_header($hoptions, NULL);
 
 $hoptions['app'] = true;
 // The gear: everything about this mailbox that is not reading or writing mail.
-// Filters are rules the member sets for their own mailboxes; Email settings is
-// the same section the settings rail lists, where the signature is written; and
+// Contacts are managed on their own page; Filters are rules the member sets
+// for their own mailboxes; Email settings is the same section the settings rail lists, where the signature is written; and
 // importing old mail is a LINK rather than a modal because it is a multi-step
 // run — pick an archive, wait for it to be read, then choose what to bring.
 $hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown mbx-gear">'
@@ -60,6 +62,7 @@ $hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown mbx-gear
 	. '</svg></span>'
 	. '<span class="jy-btn-label">Settings</span></summary>'
 	. '<div class="jy-actions-menu">'
+	. '<a href="/profile/mailbox/contacts">Contacts</a>'
 	. '<a href="/profile/mailbox/filters">Filters</a>'
 	. '<a href="/profile/mailbox/settings">Email settings</a>'
 	. '<a href="/profile/mailbox/import">Import old mail from another provider&hellip;</a>'
@@ -106,13 +109,13 @@ if (!$has_mailboxes) {
 		echo '<script src="' . htmlspecialchars($aip_ver('ai_panel.js')) . '"></script>';
 		if ($fortress_visible) {
 			// "Your AI, your model": the section of the panel for Fortress
-			// mailboxes, where the member's own model is named and tested.
+			// mailboxes — the drain that judges mail with the member's own
+			// model, and a line when that model needs them.
 			$dai_path = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_device_ai.js');
 			echo '<script>window.MAILBOX_DEVICE_AI = ' . json_encode(array(
 				'origin'       => $device_ai_origin ?: null,
 				'user_id'      => (int)SessionControl::get_instance()->get_user_id(),
 				'settings_url' => '/profile/mailbox/settings#your-model',
-				'site_model'   => $device_ai_site_model ?? null,
 			)) . ';</script>';
 			// The digest and verdict checks the browser judges with, byte-for-byte
 			// the server's (specs/fortress_mail_device_ai.md § R5).
