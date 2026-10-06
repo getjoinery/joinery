@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.96 - build_moved_site_reach: a probe on the NEW server of a switch-over, fetched over the domain;
+ *                 build_decommission_node removes the old machine only after a fresh one came back;
+ *                 build_remove_site_certificate (agent 1.59.0) removes the certificate a removed old container left
  * @version 1.95 - FILE_HEAD_FILES (agent 1.57.0) reads rspamd's signing, rbl and options files; opendkim.conf,
  *                 opendmarc.conf and redis.conf no longer exist on any box
  * @version 1.94 - FILE_HEAD_FILES labels opendkim.conf and opendmarc.conf as absent on a box where rspamd
@@ -3577,6 +3580,9 @@ class JobCommandBuilder {
 	 * proof stands in for the approval. This plane only chooses the word; it
 	 * cannot make the proof pass. The victim needs the routing-probe route
 	 * (ProvisionPendingSsl::PROBE_MIN_CORE_VERSION) rather than the panel.
+	 * The host's proof passes for any other server answering, so this plane
+	 * also requires its own fresh proof that the domain reaches the site's
+	 * NEW server (MovedSiteCheck::new_server_refusal).
 	 */
 	public static function build_decommission_node($node, $params = []) {
 		if ($node->get('mgn_is_relay')) {
@@ -3623,6 +3629,14 @@ class JobCommandBuilder {
 					"Node '{$node->get('mgn_slug')}' runs core " . ($core === '' ? '(unknown)' : $core)
 					. ", which has no routing-probe page, so its host cannot prove the domain left it."
 				);
+			}
+			// The host proves only that the domain left the container. That it
+			// reaches the site's new server is this management node's own
+			// fresh probe, which can refuse a removal but never allow one the
+			// host's proof refuses.
+			$why_not = MovedSiteCheck::new_server_refusal($node);
+			if ($why_not !== null) {
+				throw new Exception($why_not);
 			}
 		} elseif ($core === '' || version_compare($core, self::DECOMMISSION_PANEL_MIN_CORE_VERSION, '<')) {
 			// The victim renders its own consent, so the release carrying the
@@ -3727,6 +3741,115 @@ class JobCommandBuilder {
 			);
 		}
 		return self::build_moved_site_check_primitive($host_node, ['site' => $site]);
+	}
+
+	/**
+	 * The new server of a switch-over whose old machine is $node: the row
+	 * that took over the site ($node's mgn_copy_of_node_id). Throws naming
+	 * why there is none.
+	 */
+	public static function moved_new_server_for($node) {
+		$id = (int)$node->get('mgn_copy_of_node_id');
+		$new = null;
+		if ($id) {
+			try {
+				$new = new ManagedNode($id, TRUE);
+			} catch (Exception $e) {
+				$new = null;
+			}
+		}
+		if (!$new || !$new->key || $new->get('mgn_delete_time')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' names no new server on the dashboard, so nothing can show that "
+				. "its domain reaches the site's new home."
+			);
+		}
+		return $new;
+	}
+
+	/**
+	 * The other half of where a moved domain goes: does it reach the NEW
+	 * server? A one-time token placed in the new server's web root through
+	 * its own agent (ssl_probe_place), which this management node then
+	 * fetches over the domain. The host's proof says only that the domain
+	 * left the old container; any other answer, a parking page included,
+	 * passes it. Addressed to the NEW server's node.
+	 */
+	public static function build_moved_site_reach($node, $token) {
+		if (!self::decommission_is_moved($node)) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' is not the old machine of a switch-over, so there is no new "
+				. "server to reach."
+			);
+		}
+		$new = self::moved_new_server_for($node);
+		foreach (['ssl_probe_place', 'ssl_probe_clear'] as $word) {
+			if (!self::has_primitive($new, $word)) {
+				throw new Exception(
+					"The new server '{$new->get('mgn_slug')}' cannot place a probe for the domain. "
+					. AgentVocabulary::needs_newer_agent_text($new, [$word])
+				);
+			}
+		}
+		$core = trim((string)$new->get('mgn_joinery_version'));
+		if ($core === '' || version_compare($core, ProvisionPendingSsl::PROBE_MIN_CORE_VERSION, '<')) {
+			throw new Exception(
+				"The new server '{$new->get('mgn_slug')}' runs core " . ($core === '' ? '(unknown)' : $core)
+				. ", which has no routing-probe page, so it cannot show that the domain reaches it."
+			);
+		}
+		return self::build_ssl_probe_place_primitive($new, ['token' => $token]);
+	}
+
+	/**
+	 * Remove the HTTPS certificate the old container of a switch-over left on
+	 * its host (remove_site_certificate). Its removal took the vhost and,
+	 * before remove_account.sh 2.4, left the certificate, which certbot then
+	 * kept failing to renew. Only once the container is gone, only a name the
+	 * host reports for this row's domain (MovedSiteCheck::leftover_certificates),
+	 * and never one a live site on the same host serves. The host's script
+	 * refuses one any enabled site still names. Addressed to the HOST node.
+	 */
+	public static function build_remove_site_certificate($node, $name) {
+		if (!MovedSiteCheck::applies($node) || (string)$node->get('mgn_moved_check_state') !== 'absent') {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' is not a removed old container of a switch-over, so it has no "
+				. "left-over certificate to remove."
+			);
+		}
+		$name = (string)$name;
+		if (!in_array($name, MovedSiteCheck::leftover_certificates($node), true)) {
+			throw new Exception(
+				"The host does not report a certificate named '{$name}' for this site's domain. Run a status check "
+				. "on the host and try again."
+			);
+		}
+		$host_node = self::decommission_host_node_for($node);
+		$domain = SiteCopyRunner::site_domain($node);
+		$live = new MultiManagedNode(['mgn_mgh_managed_host_id' => (int)$node->get('mgn_mgh_managed_host_id'), 'deleted' => false]);
+		foreach ($live as $other) {
+			if ((int)$other->key !== (int)$node->key && SiteCopyRunner::site_domain($other) === $domain) {
+				throw new Exception(
+					"'{$other->get('mgn_name')}' on the same host serves {$domain}, so its certificate stays."
+				);
+			}
+		}
+		if (!self::has_primitive($host_node, 'remove_site_certificate')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot remove a certificate. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['remove_site_certificate'])
+			);
+		}
+		return self::build_remove_site_certificate_primitive($host_node, ['name' => $name]);
+	}
+
+	/** The envelope, addressed to the HOST node: the certificate's name only. */
+	public static function build_remove_site_certificate_primitive($host_node, $params = []) {
+		$name = (string)($params['name'] ?? '');
+		if (!preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+(-[0-9]{4})?$/', $name)) {
+			throw new Exception('A certificate is removed by its name: a domain, with certbot\'s optional -NNNN suffix.');
+		}
+		return ['primitive' => 'remove_site_certificate', 'params' => ['name' => $name]];
 	}
 
 	/** The envelope, addressed to the HOST node: the site's name only. */

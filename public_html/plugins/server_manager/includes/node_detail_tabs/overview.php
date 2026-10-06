@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.41 - a removed old container whose host still holds its certificate offers Remove it from the host
+ * @version 1.40 - the old machine's Site line reads moved only when the domain also reaches the new server; the
+ *                 delete confirmation says so
  * @version 1.39 - Health shows the machine's outbound transfer this month against its allowance
  *                (specs/node_outbound_and_transfer.md WP1)
  * @version 1.38 - a script committed after the last publish (unpublished_file) shows as a warning, not a refusal
@@ -312,7 +315,7 @@
 						<input type="hidden" name="action" value="decommission_node">
 						<input type="hidden" name="confirm_site_name" value="<?php echo htmlspecialchars($decommission_site); ?>">
 						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode(JobCommandBuilder::decommission_is_moved($node) ? 'Permanently delete the old machine\'s site on its host? The host first checks that the domain reaches another server, and removes nothing if it does not. Then it destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : ($is_removed ? 'Permanently delete the site on the host? If it is still running there, this destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : 'Permanently delete this site? This destroys the container, its database, and every uploaded file on the host. Offsite backups are kept. This cannot be undone.')), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($decommission_site), ENT_QUOTES); ?>, function(){ document.getElementById('decommission_node_form').submit(); })">Permanently Delete Site&hellip;</button>
+						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode(JobCommandBuilder::decommission_is_moved($node) ? 'Permanently delete the old machine\'s site on its host? It needs a check from the last ten minutes that the domain reaches the new server, and the host checks again that the domain no longer reaches this container. Otherwise nothing is removed. Then it destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : ($is_removed ? 'Permanently delete the site on the host? If it is still running there, this destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : 'Permanently delete this site? This destroys the container, its database, and every uploaded file on the host. Offsite backups are kept. This cannot be undone.')), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($decommission_site), ENT_QUOTES); ?>, function(){ document.getElementById('decommission_node_form').submit(); })">Permanently Delete Site&hellip;</button>
 					</form>
 				</li>
 			<?php elseif ($decommission_site !== null && $is_removed): ?>
@@ -357,15 +360,36 @@
 		$head_url = htmlspecialchars((string)$node->get('mgn_site_url'));
 		$site_html = '<a href="' . $head_url . '" target="_blank" rel="noopener">' . htmlspecialchars((string)parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: $head_url) . ' ↗</a>';
 		if (MovedSiteCheck::applies($node)) {
-			// The old machine of a switch-over: does its domain still reach
-			// it? The host's proof, the one Permanently Delete Site enforces.
-			// The page asks again when the stored answer is stale.
+			// The old machine of a switch-over: has its domain left it, and
+			// does it reach the new server? The two proofs Permanently Delete
+			// Site needs. The page asks again when the stored answers are stale.
 			$moved_checking = MovedSiteCheck::settle($node);
 			$site_html .= '<div class="small fw-normal" id="movedCheck" data-node="' . (int)$node->key . '"'
 				. ' data-ask="' . (!$moved_checking && MovedSiteCheck::is_stale($node) ? '1' : '0') . '"'
 				. ' data-checking="' . ($moved_checking ? '1' : '0') . '">'
 				. '<div id="movedCheckLabel">' . MovedSiteCheck::label_html($node, $moved_checking, $session->get_timezone()) . '</div>'
 				. '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075 mt-1" id="movedCheckAgain">Check again</button></div>';
+			// The container is gone but its host still holds the site's
+			// certificate, which certbot keeps failing to renew.
+			$leftover_certs = MovedSiteCheck::leftover_certificates($node);
+			if ($leftover_certs) {
+				$cert_host_name = '';
+				try {
+					$cert_host_name = (string)JobCommandBuilder::decommission_host_node_for($node)->get('mgn_name');
+				} catch (Exception $e) {
+					// The name only decorates the sentence.
+				}
+				foreach ($leftover_certs as $cert_name) {
+					$site_html .= '<div class="small fw-normal mt-2"><span class="text-warning">Its HTTPS certificate '
+						. '<code>' . htmlspecialchars($cert_name) . '</code> is still on ' . htmlspecialchars($cert_host_name ?: 'its host')
+						. ', which keeps trying to renew it.</span>'
+						. '<form method="post" action="' . htmlspecialchars($base_url . '&tab=overview') . '" class="mt-1">'
+						. '<input type="hidden" name="action" value="remove_site_certificate">'
+						. '<input type="hidden" name="cert_name" value="' . htmlspecialchars($cert_name) . '">' . SmAdminCsrf::field()
+						. '<button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075">Remove it from the host</button>'
+						. '</form></div>';
+				}
+			}
 		}
 		$fact('Site', $site_html);
 		if (MovedSiteCheck::applies($node)) {

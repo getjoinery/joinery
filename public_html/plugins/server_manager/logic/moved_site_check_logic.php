@@ -3,11 +3,13 @@
  * server_manager/moved_site_check — where the old machine of a switch-over's
  * domain goes, beside its site on the node page (specs/site_copy.md WP14).
  *
- * Folds a finished check onto the row, files a new one on the host when the
- * stored answer is stale or the operator asks (force), and returns the label
- * the page shows. The page calls it on open and polls it while a check runs.
+ * Folds finished checks onto the row, files new ones when the stored answers
+ * are stale or the operator asks (force) — the host's (has the domain left the
+ * old container?) and the new server's (does the domain reach it?) — and
+ * returns the label the page shows. The page calls it on open and polls it while a check runs.
  * Superadmin only (floor 10).
  *
+ * @version 1.1.0 - also asks whether the domain reaches the new server (MovedSiteCheck 1.1)
  * @version 1.0.0
  */
 
@@ -49,7 +51,7 @@ function moved_site_check_logic(array $input): LogicResult {
 
 function moved_site_check_logic_descriptor(): array {
 	return [
-		'description' => 'Show, and when stale ask the host again, whether the old machine of a switch-over still holds its domain.',
+		'description' => 'Show, and when stale ask again, whether the old machine of a switch-over\'s domain has left it and reaches the new server.',
 		'mutates'     => true,
 		'requires_session' => true,
 		'auth'        => ['min_user_permission' => 10],

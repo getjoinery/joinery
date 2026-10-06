@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.4 - The site's HTTPS certificates go with its vhost: every Let's Encrypt lineage and
+#              placeholder the vhost named is removed by the sibling remove_site_certificate.sh
+#              once nothing on the machine uses it, so certbot stops renewing a domain that left.
+#              The site's certbot-made <site>-le-ssl.conf and its vhost backups
+#              (<site>.conf.<suffix>) go with its vhost
 #VERSION 2.3 - The site's run spec on the Docker host goes with its container (specs/
 #              multi_tenant_docker_hosts.md WP0)
 #VERSION 2.2 - Self-verifying: after removal the script re-probes (container, volumes, vhost,
@@ -66,6 +71,8 @@ fi
 SITE_ROOT="/var/www/html/$SITE_NAME"
 TEST_SITE_ROOT="/var/www/html/${SITE_NAME}_test"
 VIRTUALHOST_FILE="/etc/apache2/sites-available/$SITE_NAME.conf"
+# The SSL vhost certbot's Apache installer wrote beside it on older installs.
+LE_SSL_FILE="/etc/apache2/sites-available/$SITE_NAME-le-ssl.conf"
 
 IS_DOCKER=false
 IS_BAREMETAL=false
@@ -83,9 +90,21 @@ if command -v docker &> /dev/null; then
 fi
 
 # Check for bare-metal installation
-if [ -d "$SITE_ROOT" ] || [ -f "$VIRTUALHOST_FILE" ]; then
+if [ -d "$SITE_ROOT" ] || [ -f "$VIRTUALHOST_FILE" ] || [ -f "$LE_SSL_FILE" ]; then
     IS_BAREMETAL=true
 fi
+
+# The certificates the vhost serves with, read before the vhost goes: each
+# Let's Encrypt lineage (/etc/letsencrypt/live/<name>/) and placeholder
+# directory (/etc/ssl/joinery/<domain>) it names. Names only; the sibling
+# script re-validates each and refuses one another enabled site still uses.
+CERT_NAMES=""
+for vh in "$VIRTUALHOST_FILE" "$LE_SSL_FILE"; do
+    [ -f "$vh" ] || continue
+    CERT_NAMES="$CERT_NAMES"$'\n'$( { grep -oE '/etc/letsencrypt/live/[a-z0-9.-]+/' "$vh" | cut -d/ -f5
+                    grep -oE '/etc/ssl/joinery/[a-z0-9.-]+' "$vh" | cut -d/ -f5; } 2>/dev/null )
+done
+CERT_NAMES=$(printf '%s\n' "$CERT_NAMES" | grep -v '^$' | sort -u)
 
 if [ "$IS_DOCKER" = false ] && [ "$IS_BAREMETAL" = false ]; then
     # Nothing to remove. This is idempotent success, not an error: a decommission
@@ -126,7 +145,13 @@ if [ "$IS_BAREMETAL" = true ]; then
     echo "  - Website files: $SITE_ROOT"
     echo "  - Test site files: $TEST_SITE_ROOT"
     echo "  - Apache virtual host: $VIRTUALHOST_FILE"
+    if [ -f "$LE_SSL_FILE" ]; then
+        echo "  - Apache SSL virtual host: $LE_SSL_FILE"
+    fi
     echo "  - PostgreSQL database: $SITE_NAME"
+    for cert in $CERT_NAMES; do
+        echo "  - HTTPS certificate: $cert"
+    done
 fi
 
 echo ""
@@ -218,6 +243,9 @@ if [ "$IS_BAREMETAL" = true ]; then
     else
         echo "Virtual host file does not exist, skipping Apache disable"
     fi
+    if [ -f "$LE_SSL_FILE" ]; then
+        a2dissite "$SITE_NAME-le-ssl.conf" 2>/dev/null || echo "SSL site was not enabled or already disabled"
+    fi
 
     # Test Apache configuration
     echo "Testing Apache configuration..."
@@ -255,6 +283,34 @@ if [ "$IS_BAREMETAL" = true ]; then
     else
         echo "Virtual host file $VIRTUALHOST_FILE does not exist"
     fi
+    if [ -f "$LE_SSL_FILE" ]; then
+        rm -f "$LE_SSL_FILE"
+        echo "Removed: $LE_SSL_FILE"
+    fi
+    # The vhost's backups (render_vhost.sh's .before-render.<time>, .bak, .new).
+    for backup in "$VIRTUALHOST_FILE".*; do
+        [ -f "$backup" ] || continue
+        rm -f "$backup"
+        echo "Removed: $backup"
+    done
+
+    # Remove the certificates the vhost named, now that no vhost serves with
+    # them: certbot stops renewing a domain that has left this machine.
+    if [ -n "$CERT_NAMES" ]; then
+        echo "Removing HTTPS certificates..."
+        CERT_SCRIPT="$(dirname "$0")/remove_site_certificate.sh"
+        for cert in $CERT_NAMES; do
+            if [ -f "$CERT_SCRIPT" ]; then
+                if ! result=$(bash "$CERT_SCRIPT" "$cert" 2>&1); then
+                    echo "  WARNING: certificate $cert kept: $result"
+                else
+                    echo "  $result"
+                fi
+            else
+                echo "  WARNING: certificate $cert kept: remove_site_certificate.sh is not beside this script"
+            fi
+        done
+    fi
 
     # Remove PostgreSQL database
     echo "Removing PostgreSQL database..."
@@ -291,9 +347,11 @@ if command -v docker &> /dev/null; then
     fi
 fi
 
-if [ -f "$VIRTUALHOST_FILE" ]; then
-    LEFTOVERS="${LEFTOVERS}  - Virtual host still present: $VIRTUALHOST_FILE"$'\n'
-fi
+for vh in "$VIRTUALHOST_FILE" "$LE_SSL_FILE"; do
+    if [ -f "$vh" ]; then
+        LEFTOVERS="${LEFTOVERS}  - Virtual host still present: $vh"$'\n'
+    fi
+done
 
 if [ -d "$SITE_ROOT" ]; then
     LEFTOVERS="${LEFTOVERS}  - Web root still present: $SITE_ROOT"$'\n'
