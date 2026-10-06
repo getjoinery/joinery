@@ -58,6 +58,8 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.8 - account_driver(): a connected account's driver, shared with MachineTransferWatch,
+ *                which reads without marking a failed refresh
  * @version 2.7 - Clone is retired (site_copy.md WP9): no from_backup install, no source arming
  *                (arm_clone_source, release_clone_source, CLONE_ARM_TTL_DAYS) and no clone key
  * @version 2.6 - the region falls back to us-east
@@ -675,6 +677,19 @@ class ProvisionCustomerCloud {
 
 		$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');
 		$account = $account_id ? new CustomerCloudAccount($account_id, TRUE) : null;
+		return self::account_driver($account);
+	}
+
+	/**
+	 * The compute driver for a connected cloud account, refreshing its token
+	 * where the provider issues refresh tokens: ['driver' => provider|null,
+	 * 'reason' => why not, 'park' => whether its owner has to re-grant]. A
+	 * failed refresh marks the account refresh_failed when $mark_failed: the
+	 * provisioning pipeline, which then asks the owner to re-grant. A
+	 * read-only caller passes false, so a passing outage at the provider
+	 * never parks an account.
+	 */
+	public static function account_driver($account, bool $mark_failed = true): array {
 		if (!$account || !$account->key || $account->get('cca_status') !== 'active') {
 			return ['driver' => null, 'reason' => 'Account link missing or not active.', 'park' => true];
 		}
@@ -693,8 +708,10 @@ class ProvisionCustomerCloud {
 		try {
 			$fresh = $client->ensureFresh($provider_class, $token);
 		} catch (OAuth2Exception $e) {
-			$account->set('cca_status', 'refresh_failed');
-			$account->save();
+			if ($mark_failed) {
+				$account->set('cca_status', 'refresh_failed');
+				$account->save();
+			}
 			return ['driver' => null, 'reason' => 'Token refresh failed: ' . $e->getMessage(), 'park' => true];
 		}
 

@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.39 - mgn_mtr_machine_transfer_id: the cloud machine the node runs on, as the daily transfer read
+ *                matched it (specs/node_outbound_and_transfer.md WP1)
  * @version 1.38 - mgn_script_trust may read unpublished_file (this management node's own commit, not yet published)
  * @version 1.37 - mgn_moved_check_*: where the old machine of a switch-over's domain goes, as its host last
  *                 checked (moved_site_check), shown beside its site
@@ -100,6 +102,7 @@ class ManagedNode extends SystemBase {
 	protected static $foreign_key_actions = [
 		'mgn_mgh_managed_host_id' => ['action' => 'null'],
 		'mgn_bkt_backup_target_id' => ['action' => 'null'],
+		'mgn_mtr_machine_transfer_id' => ['action' => 'null'],
 	];
 
 	public static $field_specifications = array(
@@ -362,6 +365,12 @@ class ManagedNode extends SystemBase {
 		'mgn_agent_server_manager' => array('type'=>'varchar(8)'),
 
 		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+
+		// The cloud machine this node runs on, as MachineTransferWatch last
+		// matched it by address: its month's transfer is on that row. Several
+		// sites on one server point at one row. Empty when the plane holds no
+		// credential for the machine's account.
+		'mgn_mtr_machine_transfer_id' => array('type'=>'int8'),
 		'mgn_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mgn_update_time'         => array('type'=>'timestamp(6)'),
 		'mgn_delete_time'         => array('type'=>'timestamp(6)'),

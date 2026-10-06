@@ -39,6 +39,7 @@
     "tier_gating": "Tier gating",
     "dns": "DNS",
     "joinery_direct": "Joinery Direct",
+    "outbound": "Outbound transfer",
     "email_identity": "Sender identity",
     "email_delivery": "Email delivery",
     "email_module": "Email module",
@@ -1531,6 +1532,21 @@
       "label": "Largest single piece (bytes)",
       "type": "number",
       "helptext": "The biggest one attachment or body may be. This is what actually bounds memory, because a piece is sealed in one go: nothing larger than this is ever held at once, no matter how large the whole message is."
+    },
+    {
+      "name": "outbound_monthly_notice_gb",
+      "default": "1000",
+      "group": "outbound",
+      "label": "Tell me when this server has sent more than this in a month (GB)",
+      "type": "number",
+      "validation": {"min": 0},
+      "helptext": "Most hosting providers charge for outbound transfer past a monthly allowance, often 1 TB on a small plan. Past this figure the admin pages say so and the superadmins get one email that month. Set it a little under your plan's allowance; 0 turns the notice off, and empty means 1000. The count is this machine's own (every byte sent, packet headers included), so it runs a few percent above most providers' figures. Where we host the site on our own account, we watch the machine instead and this stays silent."
+    },
+    {
+      "name": "outbound_transfer_month",
+      "default": "",
+      "managed": true,
+      "helptext": "What this server has sent this month, as the Outbound Transfer Count task adds it up from the machine's own counters: the month, the bytes, when counting began, last month's total, and the counters' last reading. Written by OutboundTransferMeter; never edited."
     },
     {
       "name": "joinery_direct_max_total_bytes",

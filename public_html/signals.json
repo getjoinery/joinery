@@ -78,5 +78,24 @@
             "body_template": "{feature}: a stored secret cannot be decrypted here. Re-enter it, or acknowledge a re-mint, on the secrets health page.",
             "link_template": "{link}"
         }
+    },
+    "site.outbound_transfer_high": {
+        "label": "This server sent more than its monthly figure",
+        "description": "What this server has sent this month passed the figure its owner set (outbound_monthly_notice_gb). Most providers bill outbound transfer past an allowance. Raised once a month, the first time the count passes the figure; never on a site the operator hosts on its own account.",
+        "category": "System",
+        "payload": {
+            "sent": "What the server has sent this month, in words",
+            "since": "When counting began this month",
+            "detail": "The whole sentence: how much, and where to check the allowance",
+            "recipients": "Superadmin user ids"
+        },
+        "notify": {
+            "ntf_type": "system",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "This server has sent {sent} this month",
+            "body_template": "{detail}",
+            "link_template": "/admin/admin_settings"
+        }
     }
 }
