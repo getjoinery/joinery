@@ -4,6 +4,13 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.13 - In a container, the internal proxy Apache trusts is the container's own
+#                gateway, IPv4 and IPv6, read from its routes: a site on a network of its own
+#                (specs/node_outbound_and_transfer.md WP2) is reached from that network's
+#                gateway, not Docker's default bridge, and every visitor was logged as it.
+#                A container's /etc/gai.conf labels a private IPv6 source like a global one,
+#                so the container uses IPv6 where a destination has it: glibc's default table
+#                puts IPv4 first from an fd00::/8 address.
 # Version: 1.12 - Postfix's queue exists wherever Postfix is installed. A container's Postfix
 #                never started, so it had none, and every sendmail call (cron mailing a
 #                job's output) waited forever: one stuck cron, sendmail and postdrop per
@@ -218,6 +225,30 @@ if [[ -d "${APACHE_DIR}" ]]; then
         fi
     fi
 fi
+# A container's gateways, the addresses the host's proxy reaches it from: the
+# next hop of its IPv4 and of its IPv6 default route. A site on a network of
+# its own has that network's gateways, not Docker's default bridge.
+container_gateway4() {
+    local hex
+    hex="$(awk 'NR > 1 && $2 == "00000000" { print $3; exit }' "${FS_ROOT}/proc/net/route" 2>/dev/null)"
+    [[ "${hex}" =~ ^[0-9A-Fa-f]{8}$ && "${hex}" != 00000000 ]] || return 1
+    printf '%d.%d.%d.%d' "0x${hex:6:2}" "0x${hex:4:2}" "0x${hex:2:2}" "0x${hex:0:2}"
+}
+container_gateway6() {
+    local hex
+    hex="$(awk '$1 == "00000000000000000000000000000000" && $2 == "00" && $5 != "00000000000000000000000000000000" && $10 != "lo" { print $5; exit }' \
+        "${FS_ROOT}/proc/net/ipv6_route" 2>/dev/null)"
+    [[ "${hex}" =~ ^[0-9a-fA-F]{32}$ ]] || return 1
+    printf '%s:%s:%s:%s:%s:%s:%s:%s' "${hex:0:4}" "${hex:4:4}" "${hex:8:4}" "${hex:12:4}" "${hex:16:4}" "${hex:20:4}" "${hex:24:4}" "${hex:28:4}" \
+        | sed -E 's/(^|:)0{1,3}([0-9a-fA-F])/\1\2/g'
+}
+GATEWAYS=""
+if [[ "${IN_CONTAINER}" == 1 ]]; then
+    GATEWAYS="$(container_gateway4) $(container_gateway6)"
+    GATEWAYS="$(echo ${GATEWAYS})"
+    [[ -n "${GATEWAYS}" ]] || warn "no default route in ${FS_ROOT}/proc/net/route or ipv6_route, so no proxy in front of this container is trusted and Apache logs the proxy"
+fi
+
 if [[ -d "${APACHE_DIR}" && "${FAILED}" == 0 ]]; then
     CANDIDATE="$(mktemp)"
     {
@@ -233,8 +264,10 @@ if [[ -d "${APACHE_DIR}" && "${FAILED}" == 0 ]]; then
         echo "<IfModule remoteip_module>"
         echo "RemoteIPHeader X-Forwarded-For"
         if [[ "${IN_CONTAINER}" == 1 ]]; then
-            echo "# The host's proxy reaches this container over the Docker bridge."
-            echo "RemoteIPInternalProxy 172.17.0.0/16"
+            echo "# The host's proxy reaches this container from its network's gateway."
+            for gw in ${GATEWAYS}; do
+                echo "RemoteIPInternalProxy ${gw}"
+            done
             echo "RemoteIPInternalProxy 127.0.0.1"
         fi
         while IFS= read -r range; do
@@ -253,7 +286,7 @@ if [[ -d "${APACHE_DIR}" && "${FAILED}" == 0 ]]; then
     fi
     if install_file "${APACHE_CONF}" "${CANDIDATE}"; then
         APACHE_CHANGED=1
-        say "wrote ${APACHE_CONF} ($(grep -c '^RemoteIPTrustedProxy' "${APACHE_CONF}") trusted edge ranges$([[ "${IN_CONTAINER}" == 1 ]] && echo ', container bridge internal'))"
+        say "wrote ${APACHE_CONF} ($(grep -c '^RemoteIPTrustedProxy' "${APACHE_CONF}") trusted edge ranges$([[ "${IN_CONTAINER}" == 1 ]] && echo ", gateway ${GATEWAYS:-none} internal"))"
     fi
     rm -f "${CANDIDATE}"
 
@@ -636,10 +669,7 @@ pg_is_loopback_rule() {  # $1 address field, $2 the field after it
     return 1
 }
 pg_container_gateway() {
-    local hex
-    hex="$(awk 'NR > 1 && $2 == "00000000" { print $3; exit }' "${FS_ROOT}/proc/net/route" 2>/dev/null)"
-    [[ "${hex}" =~ ^[0-9A-Fa-f]{8}$ ]] || return 1
-    printf '%d.%d.%d.%d' "0x${hex:6:2}" "0x${hex:4:2}" "0x${hex:2:2}" "0x${hex:0:2}"
+    container_gateway4
 }
 PG_ACCESS_FILE="${SITE_ROOT}/config/postgres_access.conf"
 if [[ -f "${PG_ACCESS_FILE}" ]]; then
@@ -801,6 +831,35 @@ if [[ -f "${POSTFIX_CF}" && -x "${FS_ROOT}/usr/sbin/postdrop" ]]; then
             warn "Postfix's queue in ${QUEUE_DIR} is missing and could not be created - anything that sends through sendmail waits forever"
         fi
     fi
+fi
+
+# --- 8. A container uses IPv6 wherever a destination has it --------------------
+# A site's network gives its container a private IPv6 address (fd00::/8), and
+# the host carries it out from the machine's own IPv6 address, where traffic
+# to the same data center is not charged (specs/node_outbound_and_transfer.md
+# WP2). glibc's default address-selection table labels a private source apart
+# from a public destination, and so lists IPv4 first for every name that has
+# both: the container's IPv6 would go unused. This table is glibc's own default
+# without the private-address entry, so a private source matches a public
+# destination and IPv6 comes first. A container without IPv6 is unaffected:
+# with no IPv6 source, IPv4 comes first anyway.
+if [[ "${IN_CONTAINER}" == 1 ]]; then
+    GAI_CONF="${FS_ROOT}/etc/gai.conf"
+    CANDIDATE="$(mktemp)"
+    {
+        echo "# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive."
+        echo "# The container's private IPv6 address is carried out as the machine's own,"
+        echo "# so it is labelled like a public one: IPv6 first where a name has both."
+        echo "label ::1/128       0"
+        echo "label ::/0          1"
+        echo "label 2002::/16     2"
+        echo "label ::/96         3"
+        echo "label ::ffff:0:0/96 4"
+    } > "${CANDIDATE}"
+    if install_file "${GAI_CONF}" "${CANDIDATE}"; then
+        say "wrote ${GAI_CONF}: IPv6 first where a destination has it"
+    fi
+    rm -f "${CANDIDATE}"
 fi
 
 if [[ "${FAILED}" == 1 ]]; then

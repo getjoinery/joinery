@@ -3,6 +3,15 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.3 - Every site runs on a network of its own (specs/node_outbound_and_transfer.md
+#                WP2): network=, bridge=, subnet= and subnet6= lines, format 2. A slot N is
+#                10.250.N.0/24, fd00:250:N::/64 and the bridge jsnetN, taken under a host
+#                lock by creating the network (run_spec_network_lines). run_spec_args makes
+#                the network the spec names exist, with exactly its subnets, before it gives
+#                --network, so no creator can run a site onto a missing or different one. IPv6
+#                only where the host has an IPv6 route and Docker NATs it (27 or later).
+#                Adopt accepts a container on its own network of that shape. A network that
+#                cannot be remade as the spec says comes back as it was, spec and all.
 # Version: 1.2 - Every site container runs with --cap-drop=ALL and the six capabilities a
 #                site needs (RUN_SPEC_CAPS, WP5 item 2). They are the platform's, not the
 #                site's, so they are not spec lines: run_spec_args adds them for every
@@ -38,6 +47,10 @@
 #   pids_limit=512       empty: no ceiling
 #   publish=127.0.0.1:8087:80       one line per published port; [v6]:h:c and /udp allowed
 #   volume=mysite_code:/var/www/html/mysite/public_html    one line per volume, :ro allowed
+#   network=mysite_net   the site's own network; with no network line, Docker's default
+#   bridge=jsnet17       its bridge on the host, which the outbound limits name
+#   subnet=10.250.17.0/24
+#   subnet6=fd00:250:17::/64     empty: the network is IPv4 only
 #
 # A test points /etc at a fixture with JOINERY_SITE_STATE_ROOT, and only an
 # unprivileged run may, the same rule as _site_state.sh.
@@ -45,7 +58,19 @@
 # Sourced, never executed:  . "${TOOLS_DIR}/_site_run_spec.sh"
 # Functions only; sourcing it runs nothing.
 
-RUN_SPEC_VERSION=1
+RUN_SPEC_VERSION=2
+
+# Every site network on a host comes from one slot N, 1 to 254: the subnets
+# 10.250.N.0/24 and fd00:250:N::/64 and the bridge jsnetN. One private /64 per
+# site; its traffic leaves through the host from the machine's own IPv6 address
+# (Docker's NAT), where same-data-center traffic is not charged.
+RUN_SPEC_NET4_PREFIX="10.250"
+RUN_SPEC_NET6_PREFIX="fd00:250"
+RUN_SPEC_BRIDGE_PREFIX="jsnet"
+RUN_SPEC_NET_SLOTS=254
+# The Docker release from which an IPv6 network's traffic is NATed out without
+# a setting in daemon.json (ip6tables on by default).
+RUN_SPEC_DOCKER_IPV6_MAJOR=27
 
 # The suffix of every volume a site owns, and where it mounts under the site
 # root (or absolute, for the ones outside it). install.sh's ALL_SITE_VOLUMES is
@@ -208,6 +233,10 @@ run_spec_check_line() {  # LINE
         pids_limit)   [[ -z "$v" || "$v" =~ ^[1-9][0-9]*$ ]] ;;
         publish)      [[ "$v" =~ ^((([0-9]{1,3}\.){3}[0-9]{1,3}|\[[0-9A-Fa-f:.]+\]):)?[0-9]{1,5}:[0-9]{1,5}(/(tcp|udp))?$ ]] ;;
         volume)       [[ "$v" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*:/[A-Za-z0-9_./-]+(:(ro|rw))?$ ]] ;;
+        network)      [[ "$v" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ && "$v" != bridge && "$v" != host && "$v" != none ]] ;;
+        bridge)       [[ "$v" =~ ^[a-z][a-z0-9]{0,14}$ ]] ;;
+        subnet)       [[ "$v" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]] ;;
+        subnet6)      [[ -z "$v" || "$v" =~ ^[0-9a-f:]+/[0-9]{1,3}$ ]] ;;
         *)            false ;;
     esac
 }
@@ -281,7 +310,7 @@ run_spec_foreign_lines() {  # SITE
 
 # A spec file whole: every line one argument, and a format this script reads.
 run_spec_check_file() {  # PATH
-    local line v
+    local line v k
     [[ -f "$1" ]] || { echo "run spec: none at ${1}" >&2; return 1; }
     while IFS= read -r line; do
         [[ -z "$line" || "$line" == \#* ]] && continue
@@ -291,18 +320,211 @@ run_spec_check_file() {  # PATH
     if [[ -z "$v" || "$v" -gt "$RUN_SPEC_VERSION" ]]; then
         echo "run spec: ${1} is format '${v:-none}'; this script reads up to ${RUN_SPEC_VERSION}" >&2; return 1
     fi
+    # A network is its name, its bridge and its IPv4 subnet together, or none.
+    v=0
+    for k in network bridge subnet; do grep -q "^${k}=." "$1" && v=$((v + 1)); done
+    if [[ "$v" != 0 && "$v" != 3 ]] || { [[ "$v" == 0 ]] && grep -q '^subnet6=.' "$1"; }; then
+        echo "run spec: ${1} names part of a network; it needs network=, bridge= and subnet= together" >&2; return 1
+    fi
+}
+
+# --- The site's own network ---------------------------------------------------
+
+# Why a new site network on this host gets no IPv6, in plain words, or nothing
+# when it does: the machine has no IPv6 route out, Docker is too old to carry a
+# container's IPv6 out on its own, or daemon.json turned that off.
+run_spec_net_no_ipv6_reason() {
+    local version
+    if [[ -z "$(ip -6 route show default 2>/dev/null)" ]]; then
+        echo "this machine has no IPv6 route out"; return 0
+    fi
+    version="$(docker version -f '{{.Server.Version}}' 2>/dev/null)"
+    if [[ ! "$version" =~ ^([0-9]+)\. ]] || (( BASH_REMATCH[1] < RUN_SPEC_DOCKER_IPV6_MAJOR )); then
+        echo "Docker ${version:-of unknown version} is older than ${RUN_SPEC_DOCKER_IPV6_MAJOR}, the first to carry a container's IPv6 out on its own (apt-get install --only-upgrade docker-ce, then rebuild the site)"
+        return 0
+    fi
+    if grep -qsE '"ip6tables"[[:space:]]*:[[:space:]]*false' "$(run_spec_root)/etc/docker/daemon.json"; then
+        echo "/etc/docker/daemon.json sets ip6tables to false, so Docker would not carry a container's IPv6 out"
+    fi
+}
+
+# Docker's account of network NAME as spec lines, when it has the shape of a
+# site network: a bridge its creator named, one IPv4 subnet and at most one
+# IPv6. Says why and returns 1 otherwise.
+run_spec_network_read() {  # NAME
+    local out driver bridge subnets s v4="" v6="" n4=0 n6=0
+    out="$(docker network inspect -f '{{.Driver}}|{{index .Options "com.docker.network.bridge.name"}}|{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$1" 2>/dev/null)" \
+        || { echo "run spec: Docker has no network $1" >&2; return 1; }
+    IFS='|' read -r driver bridge subnets <<< "$out"
+    for s in $subnets; do
+        if [[ "$s" == *:* ]]; then v6="$s"; n6=$((n6 + 1)); else v4="$s"; n4=$((n4 + 1)); fi
+    done
+    if [[ "$driver" != bridge || -z "$bridge" || "$n4" != 1 || "$n6" -gt 1 ]]; then
+        echo "run spec: network $1 is not one a site runs on (driver '${driver}', bridge name '${bridge}', subnets '${subnets% }'): a site network is a bridge its creator named, with one IPv4 subnet and at most one IPv6" >&2
+        return 1
+    fi
+    printf 'network=%s\nbridge=%s\nsubnet=%s\nsubnet6=%s\n' "$1" "$bridge" "$v4" "$v6"
+}
+
+# Create the network the spec lines on stdin describe.
+run_spec_network_create() {  # < network lines
+    local lines name bridge subnet subnet6 out args
+    lines="$(cat)"
+    name="$(sed -n 's/^network=//p' <<< "$lines")"; bridge="$(sed -n 's/^bridge=//p' <<< "$lines")"
+    subnet="$(sed -n 's/^subnet=//p' <<< "$lines")"; subnet6="$(sed -n 's/^subnet6=//p' <<< "$lines")"
+    args=(network create --driver bridge --subnet "$subnet" -o "com.docker.network.bridge.name=${bridge}")
+    [[ -n "$subnet6" ]] && args+=(--ipv6 --subnet "$subnet6")
+    out="$(docker "${args[@]}" "$name" 2>&1)" \
+        || { echo "run spec: Docker would not create network ${name} (${subnet}${subnet6:+ and ${subnet6}}, bridge ${bridge}): ${out}" >&2; return 1; }
+}
+
+# The lowest slot whose subnets and bridge nothing on this host holds: no run
+# spec, Docker network, route or interface. Docker refuses a subnet that
+# overlaps another of its networks, but not one the host routes elsewhere (a
+# VPN, a private network), which the host would then lose.
+run_spec_net_free_slot() {
+    local spec net
+    command -v python3 > /dev/null \
+        || { echo "run spec: choosing a free network for a site needs python3, which this host does not have" >&2; return 1; }
+    {
+        for spec in "$(run_spec_root)"/etc/joinery/sites/*/run_spec; do
+            [[ -f "$spec" ]] && sed -n 's/^\(bridge\|subnet\|subnet6\)=\(..*\)$/\2/p' "$spec"
+        done
+        for net in $(docker network ls -q 2>/dev/null); do
+            docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}{{index .Options "com.docker.network.bridge.name"}}' "$net" 2>/dev/null
+        done
+        { ip -o -4 route show table all; ip -o -6 route show table all; } 2>/dev/null \
+            | awk '{ t = $1; if (t ~ /^(local|broadcast|unreachable|blackhole|prohibit|anycast|multicast|throw|nat|unicast)$/) t = $2; print t }'
+        ip -o link show 2>/dev/null | awk -F': ' '{ sub(/@.*/, "", $2); print $2 }'
+    } | python3 -c '
+import ipaddress, sys
+p4, p6, bp, slots = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+nets, names = [], set()
+for tok in sys.stdin.read().split():
+    try:
+        n = ipaddress.ip_network(tok, strict=False)
+        if n.prefixlen > 0:
+            nets.append(n)
+    except ValueError:
+        names.add(tok)
+for i in range(1, slots + 1):
+    mine = (ipaddress.ip_network("%s.%d.0/24" % (p4, i)), ipaddress.ip_network("%s:%d::/64" % (p6, i)))
+    if bp + str(i) in names or any(n.version == m.version and n.overlaps(m) for n in nets for m in mine):
+        continue
+    print(i)
+    sys.exit(0)
+sys.exit(1)
+' "$RUN_SPEC_NET4_PREFIX" "$RUN_SPEC_NET6_PREFIX" "$RUN_SPEC_BRIDGE_PREFIX" "$RUN_SPEC_NET_SLOTS" \
+        || { echo "run spec: every one of this host's ${RUN_SPEC_NET_SLOTS} site networks (${RUN_SPEC_NET4_PREFIX}.N.0/24) is taken or overlaps a route" >&2; return 1; }
+}
+
+# The network lines for SITE's spec, for install.sh. A spec that has them keeps
+# them; a network made IPv4 only takes its slot's IPv6 at a rebuild once the
+# host can carry it. A network Docker already has under the site's name (a run
+# that stopped before it wrote the spec) is taken as it is. Otherwise the lowest
+# free slot, whose network is created here, under the host's lock, so two
+# installs never take one slot.
+run_spec_network_lines() {  # SITE
+    local site="$1" name="${1}_net" lines reason lock fd n v6=""
+    if [[ -n "$(run_spec_get "$site" network)" ]]; then
+        lines="$(printf 'network=%s\nbridge=%s\nsubnet=%s\nsubnet6=%s\n' "$(run_spec_get "$site" network)" \
+            "$(run_spec_get "$site" bridge)" "$(run_spec_get "$site" subnet)" "$(run_spec_get "$site" subnet6)")"
+        if [[ -z "$(run_spec_get "$site" subnet6)" ]]; then
+            reason="$(run_spec_net_no_ipv6_reason)"
+            n="$(run_spec_get "$site" subnet | sed -n "s/^${RUN_SPEC_NET4_PREFIX//./\\.}\.\([0-9]\{1,3\}\)\.0\/24$/\1/p")"
+            if [[ -z "$reason" && -n "$n" ]]; then
+                lines="$(sed "s/^subnet6=\$/subnet6=${RUN_SPEC_NET6_PREFIX}:${n}::\/64/" <<< "$lines")"
+            elif [[ -n "$reason" ]]; then
+                echo "run spec: ${site}'s network stays IPv4 only: ${reason}" >&2
+            fi
+        fi
+        printf '%s\n' "$lines"
+        return 0
+    fi
+    if docker network inspect "$name" > /dev/null 2>&1; then
+        run_spec_network_read "$name"
+        return
+    fi
+    lock="$(run_spec_root)/etc/joinery/sites/.networks.lock"
+    mkdir -p "$(dirname "$lock")" && exec {fd}> "$lock" \
+        || { echo "run spec: cannot open ${lock}" >&2; return 1; }
+    if ! flock -w 120 "$fd"; then
+        exec {fd}>&-; echo "run spec: another install has held ${lock} for two minutes" >&2; return 1
+    fi
+    if ! n="$(run_spec_net_free_slot)"; then exec {fd}>&-; return 1; fi
+    reason="$(run_spec_net_no_ipv6_reason)"
+    if [[ -n "$reason" ]]; then
+        echo "run spec: ${site}'s network is IPv4 only: ${reason}" >&2
+    else
+        v6="${RUN_SPEC_NET6_PREFIX}:${n}::/64"
+    fi
+    lines="$(printf 'network=%s\nbridge=%s%s\nsubnet=%s.%s.0/24\nsubnet6=%s\n' "$name" "$RUN_SPEC_BRIDGE_PREFIX" "$n" "$RUN_SPEC_NET4_PREFIX" "$n" "$v6")"
+    if ! printf '%s\n' "$lines" | run_spec_network_create; then exec {fd}>&-; return 1; fi
+    exec {fd}>&-
+    printf '%s\n' "$lines"
+}
+
+# Make the network SITE's spec names exist with exactly the spec's bridge and
+# subnets. One that differs is recreated when no container is attached to it (a
+# rebuild has removed the site's container by now); one a container still uses
+# is refused by name, never changed under it. A spec with no network has
+# nothing to make.
+run_spec_ensure_network() {  # SITE
+    local site="$1" name want have attached
+    name="$(run_spec_get "$site" network)"
+    [[ -n "$name" ]] || return 0
+    want="$(printf 'network=%s\nbridge=%s\nsubnet=%s\nsubnet6=%s\n' "$name" "$(run_spec_get "$site" bridge)" \
+        "$(run_spec_get "$site" subnet)" "$(run_spec_get "$site" subnet6)")"
+    if docker network inspect "$name" > /dev/null 2>&1; then
+        have="$(run_spec_network_read "$name" 2>/dev/null)"
+        [[ "$have" == "$want" ]] && return 0
+        attached="$(docker network inspect -f '{{range $id, $c := .Containers}}{{$c.Name}} {{end}}' "$name" 2>/dev/null)" || attached="(unknown)"
+        if [[ -n "$attached" ]]; then
+            echo "run spec: network ${name} is not what ${site}'s run spec says ($(grep -v '^network=' <<< "$want" | paste -sd ' ')), and ${attached% } still use it; nothing was changed. Stop what uses it, then run this again" >&2
+            return 1
+        fi
+        docker network rm "$name" > /dev/null 2>&1 \
+            || { echo "run spec: could not remove network ${name} to make it what ${site}'s run spec says" >&2; return 1; }
+        # A rebuild has removed the site's container by now, so a network that
+        # cannot be made as the spec says must not leave it with none: the one
+        # it had comes back, the spec says so, and the next rebuild tries again.
+        if ! printf '%s\n' "$want" | run_spec_network_create; then
+            if [[ -n "$have" ]] && printf '%s\n' "$have" | run_spec_network_create \
+                && printf '%s\n' "$have" | run_spec_set_network "$site"; then
+                echo "run spec: ${site} keeps network ${name} as it was ($(grep -v '^network=' <<< "$have" | paste -sd ' ')); the next rebuild tries again" >&2
+                return 0
+            fi
+            return 1
+        fi
+        return 0
+    fi
+    printf '%s\n' "$want" | run_spec_network_create
+}
+
+# Put SITE on the network the lines on stdin describe, keeping every other line.
+run_spec_set_network() {  # SITE < network lines
+    local p lines
+    p="$(run_spec_path "$1")" || return 1
+    [[ -f "$p" ]] || { echo "run spec: ${1} has none to change" >&2; return 1; }
+    lines="$(cat)"
+    { grep -v -e '^#' -e '^network=' -e '^bridge=' -e '^subnet=' -e '^subnet6=' "$p" \
+        | sed "s/^spec_version=.*/spec_version=${RUN_SPEC_VERSION}/"; printf '%s\n' "$lines"; } | run_spec_write "$1"
 }
 
 # The `docker run` arguments the spec describes, NUL-separated (read them with
 # mapfile -d ''), ending before the environment and the image, which are the
 # caller's. A spec that fails its own check, or was written by a newer format,
-# gives nothing and returns 1.
+# gives nothing and returns 1. The network the spec names exists, as the spec
+# says, by the time this returns.
 run_spec_args() {  # SITE
     local site="$1" p v
     p="$(run_spec_path "$site")" || return 1
     run_spec_check_file "$p" || return 1
     run_spec_fits_host "$p" || return 1
+    run_spec_ensure_network "$site" || return 1
     printf '%s\0' --name "$site" --hostname "$(run_spec_get "$site" hostname)"
+    v="$(run_spec_get "$site" network)"
+    [[ -n "$v" ]] && printf '%s\0' --network "$v"
     v="$(run_spec_get "$site" restart)"
     [[ -n "$v" && "$v" != "no" ]] && printf '%s\0' --restart "$v"
     v="$(run_spec_get "$site" memory)"
@@ -347,11 +569,12 @@ run_spec_remove() {  # SITE
 # Docker's record of it. This reads them once, while it still exists, and
 # writes the spec every later rebuild reads. Never used once a spec exists.
 # Anything a spec cannot carry (a bind mount, a capability beyond RUN_SPEC_CAPS,
-# another network, swap set apart from memory...) is refused by name, never
+# a network other than its own, swap set apart from memory...) is refused by name, never
 # dropped: the spec is permanent, so a silent loss here would be a loss for good.
 run_spec_adopt() {  # SITE
     local site="$1" mem swap cpus nano pids restart retries hip hport cport proto type name dest rw
     local priv netmode caps capdrop cap extra_caps="" kept_out="" nhosts ndev quota cpuset problems="" host_config ports mounts hostname
+    local networks netlines=""
     run_spec_exists "$site" && return 0
     docker inspect "$site" > /dev/null 2>&1 || { echo "run spec: no container ${site} to adopt" >&2; return 1; }
     # Every read must succeed: a template Docker cannot execute prints nothing,
@@ -360,7 +583,9 @@ run_spec_adopt() {  # SITE
     host_config="$(docker inspect -f '{{.HostConfig.Privileged}}|{{.HostConfig.NetworkMode}}|{{range .HostConfig.CapAdd}}{{.}} {{end}}|{{if .HostConfig.ExtraHosts}}{{len .HostConfig.ExtraHosts}}{{else}}0{{end}}|{{if .HostConfig.Devices}}{{len .HostConfig.Devices}}{{else}}0{{end}}|{{.HostConfig.CpuQuota}}|{{.HostConfig.CpusetCpus}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}|{{.HostConfig.MemorySwap}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{if .HostConfig.PidsLimit}}{{.HostConfig.PidsLimit}}{{end}}|{{.HostConfig.RestartPolicy.Name}}|{{.Config.Hostname}}|{{range .HostConfig.CapDrop}}{{.}} {{end}}' "$site")" \
         && ports="$(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$site")" \
         && mounts="$(docker inspect -f '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$site")" \
+        && networks="$(docker inspect -f '{{range $n, $c := .NetworkSettings.Networks}}{{$n}} {{end}}' "$site")" \
         || { echo "run spec: could not read ${site}'s settings from Docker; nothing was changed" >&2; return 1; }
+    networks="${networks% }"
     IFS='|' read -r priv netmode caps nhosts ndev quota cpuset retries swap mem nano pids restart hostname capdrop <<< "$host_config"
     if [[ ! "$priv" =~ ^(true|false)$ || -z "$hostname" || ! "$mem" =~ ^[0-9]+$ || ! "$nano" =~ ^[0-9]+$ \
           || ! "$quota" =~ ^-?[0-9]+$ || ! "$retries" =~ ^[0-9]+$ ]]; then
@@ -368,7 +593,18 @@ run_spec_adopt() {  # SITE
         return 1
     fi
     [[ "$priv" == "true" ]] && problems="${problems}; privileged"
-    case "$netmode" in ''|default|bridge) ;; *) problems="${problems}; network ${netmode}" ;; esac
+    # Docker's default network, or the site's own network alone.
+    case "$netmode" in
+        ''|default|bridge)
+            [[ -z "$networks" || "$networks" == bridge ]] || problems="${problems}; networks ${networks}" ;;
+        "${site}_net")
+            if [[ "$networks" != "${site}_net" ]]; then
+                problems="${problems}; networks ${networks}"
+            elif ! netlines="$(run_spec_network_read "${site}_net" 2>&1)"; then
+                problems="${problems}; ${netlines#run spec: }"; netlines=""
+            fi ;;
+        *) problems="${problems}; network ${netmode}" ;;
+    esac
     # Docker names a capability with or without CAP_; a rebuild gives the six
     # whatever the container held, so only one beyond them would be lost.
     for cap in $caps; do
@@ -419,6 +655,7 @@ run_spec_adopt() {  # SITE
             [[ "$type" == "volume" && -n "$name" ]] || continue
             printf 'volume=%s:%s%s\n' "$name" "$dest" "$([[ "$rw" == false ]] && echo ':ro')"
         done <<< "$mounts"
+        [[ -z "$netlines" ]] || printf '%s\n' "$netlines"
     } | run_spec_write "$site"
 }
 
