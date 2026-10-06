@@ -221,7 +221,8 @@ chk "installed again over a returned 000-default: it is off, and an unknown name
 echo "=== the default site stays the default after the host is installed ==="
 HK="$ROOT/maintenance_scripts/install_tools/host_housekeeping.sh"
 INSTALL="$ROOT/maintenance_scripts/install_tools/install.sh"
-HK9="$(awk '/^# --- 9\. /,/^if \[\[ "\$\{FAILED\}" == 1 \]\]; then$/' "$HK")"
+# Section 9 alone: from its header to the next section's, or to the run's end.
+HK9="$(awk '/^# --- 9\. / { f = 1 } f && (/^# --- [0-9]+\. / && !/^# --- 9\. / || /^if \[\[ "\$\{FAILED\}" == 1 \]\]; then$/) { exit } f' "$HK")"
 chk "housekeeping installs it again, on a host (not a container) whose proxy has it" \
     "$(printf '%s\n' "$HK9" | grep -c 'IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${APACHE_DIR}/sites-available/000-joinery-no-site.conf" ]]')" "1"
 chk "by running proxy_default_site.sh install beside itself" "$(printf '%s\n' "$HK9" | grep -c 'bash "${SCRIPT_DIR}/proxy_default_site.sh" install')" "1"

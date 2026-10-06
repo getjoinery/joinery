@@ -43,14 +43,14 @@ try {
 	// A throwaway node and a second node to prove the query does not leak across
 	// node boundaries.
 	$n = new ManagedNode(NULL);
-	$n->set('mgn_name', 'zz-latest-test-node');
+	$n->set('mgn_name', 'HarnessTest zz-latest-test-node');
 	$n->set('mgn_slug', 'zz-latest-test-' . getmypid());
 	$n->set('mgn_host', '203.0.113.10');
 	$n->save();
 	$node_id = (int)$n->key;
 
 	$other = new ManagedNode(NULL);
-	$other->set('mgn_name', 'zz-latest-test-other');
+	$other->set('mgn_name', 'HarnessTest zz-latest-test-other');
 	$other->set('mgn_slug', 'zz-latest-other-' . getmypid());
 	$other->set('mgn_host', '203.0.113.11');
 	$other->save();

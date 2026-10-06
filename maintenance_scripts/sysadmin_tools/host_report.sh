@@ -8,6 +8,11 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.12 - outbound_limits carries the figures in force (node_outbound_and_transfer WP5):
+#                figures (the machine's ceiling_mbit, conn_rate, conn_burst, open_conns, and
+#                set_by, plane where the management node set them), web_ceiling_mbit (the web
+#                server's user's ceiling in force), and sites (each limited site's figures in
+#                force). A ceiling is a number, or none.
 # Version: 1.11 - outbound_limits: whether the machine's outbound connection limits are in
 #                force (outbound_limits.sh, specs/node_outbound_and_transfer.md WP3), why
 #                not where they are not (a code), since when their counters run, and the
@@ -693,6 +698,7 @@ emit_served_certificates() {
 # The counters need root; without it every drop figure is unknown.
 # ---------------------------------------------------------------------------
 LIMITS_STATE=""; LIMITS_REASON=""; LIMITS_SINCE=""; LIMITS_SITES=""; LIMITS_WEB=""
+LIMITS_FILE_LINES=""
 LIMITS_COUNTS=""; LIMITS_COUNTS_READ=0
 limits_read() {
     local f=/run/joinery/outbound_limits.status
@@ -707,6 +713,7 @@ limits_read() {
     LIMITS_SINCE="$(sed -n 's/^since=//p' "$f" | head -1)"
     LIMITS_SITES=" $(sed -n 's/^sites=//p' "$f" | head -1) "
     LIMITS_WEB="$(sed -n 's/^web_user=//p' "$f" | head -1)"
+    LIMITS_FILE_LINES="$(head -c 65536 "$f")"
     if [[ "$LIMITS_STATE" == on ]] && LIMITS_COUNTS="$(run nft list counters table inet joinery_limits)"; then
         LIMITS_COUNTS="$(awk '$1 == "counter" { n = $2 } $1 == "packets" && n != "" { print n "=" $2; n = "" }' <<< "$LIMITS_COUNTS")"
         LIMITS_COUNTS_READ=1
@@ -719,16 +726,42 @@ limits_dropped() {  # COUNTER_NAME LIMITED(0|1)
     [[ "$LIMITS_COUNTS_READ" == 1 ]] || { printf '"unknown"'; return; }
     json_num_or_unknown "$(awk -F= -v n="$1" '$1 == n { print $2; exit }' <<< "$LIMITS_COUNTS")"
 }
+# One status key's value from the limits status file.
+limits_key() { sed -n "s/^$1=//p" <<< "$LIMITS_FILE_LINES" | head -1; }
+# A ceiling: a number of Mbit/s, or none.
+json_ceiling() {
+    if [[ "$1" =~ ^[1-9][0-9]{0,5}$ ]]; then printf '%s' "$1"; else printf '"none"'; fi
+}
+# The figures in force: the machine's, the web server's user's ceiling, and
+# each limited site's (SITE:CEILING:RATE:BURST:OPEN in the status file).
+limits_figures() {
+    local set_by='""' entry site c r b o first=1
+    [[ "$(limits_key set_by)" == plane ]] && set_by='"plane"'
+    printf '"figures":{"ceiling_mbit":%s,"conn_rate":%s,"conn_burst":%s,"open_conns":%s,"set_by":%s}' \
+        "$(json_ceiling "$(limits_key ceiling_mbit)")" "$(json_num_or_unknown "$(limits_key conn_rate)")" \
+        "$(json_num_or_unknown "$(limits_key conn_burst)")" "$(json_num_or_unknown "$(limits_key open_conns)")" "$set_by"
+    printf ',"web_ceiling_mbit":%s,"sites":{' "$(json_ceiling "$(limits_key web_ceiling_mbit)")"
+    for entry in $(limits_key site_figures); do
+        IFS=: read -r site c r b o <<< "$entry"
+        [[ "$site" =~ ^[A-Za-z0-9_-]{1,50}$ ]] || continue
+        (( first )) || printf ','
+        first=0
+        printf '%s:{"ceiling_mbit":%s,"conn_rate":%s,"conn_burst":%s,"open_conns":%s}' "$(json_str "$site")" \
+            "$(json_ceiling "$c")" "$(json_num_or_unknown "$r")" "$(json_num_or_unknown "$b")" "$(json_num_or_unknown "$o")"
+    done
+    printf '}'
+}
 emit_outbound_limits() {
-    local since='"none"' reason='"none"'
+    local since='"none"' reason='"none"' figures=''
     [[ "$LIMITS_STATE" == on ]] && since="$(json_num_or_unknown "$LIMITS_SINCE")"
     if [[ "$LIMITS_STATE" == refused ]]; then
         reason="$(json_str "${LIMITS_REASON:-unknown}")"
     elif [[ "$LIMITS_STATE" == on && -n "$LIMITS_REASON" ]]; then
         reason="$(json_str "$LIMITS_REASON")"
     fi
-    printf '{"state":"%s","reason":%s,"since":%s,"web_user_dropped":%s}' "$LIMITS_STATE" "$reason" "$since" \
-        "$(limits_dropped drops_web_user "$([[ "$LIMITS_WEB" == yes ]] && echo 1 || echo 0)")"
+    [[ "$LIMITS_STATE" == on ]] && figures=",$(limits_figures)"
+    printf '{"state":"%s","reason":%s,"since":%s,"web_user_dropped":%s%s}' "$LIMITS_STATE" "$reason" "$since" \
+        "$(limits_dropped drops_web_user "$([[ "$LIMITS_WEB" == yes ]] && echo 1 || echo 0)")" "$figures"
 }
 
 # ---------------------------------------------------------------------------

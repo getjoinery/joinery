@@ -43,7 +43,7 @@ if (!IncidentAnalyst::available()) {
 }
 
 $node = new ManagedNode(NULL);
-$node->set('mgn_name', 'Analysis test');
+$node->set('mgn_name', 'HarnessTest incident analysis');
 $node->set('mgn_slug', 'harnesstest-ana-' . bin2hex(random_bytes(3)));
 $node->set('mgn_host', '192.0.2.45');
 $node->set('mgn_ssh_user', 'root');

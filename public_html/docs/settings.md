@@ -212,6 +212,19 @@ so far beside the figure. A site the operator hosts on its own account
 (`hosted_plan_state` trial, subscribed, grace or shutdown) stays silent: the
 management node watches that machine from the provider's figure.
 
+`outbound_speed_ceiling_mbit` (Admin → Settings → Outbound transfer, empty by
+default) is the site's own speed ceiling, and it can only slow the site down.
+The machine holds every site to the lower of root's figure and this one
+(`maintenance_scripts/install_tools/outbound_limits.sh`): the machine's
+`joinery-limits` unit reads it from the site with
+`utils/outbound_site_ceiling.php` and takes only a whole number, so a value
+the site's own code writes cannot raise anything. The unit tells the site
+what is in force in `/run/joinery/outbound_limits.site`, and
+`OutboundCeiling` words it on the settings page: the server's figure, the one
+in force, and how to go higher, which is a command on the server or, where
+someone else hosts the site, a question for them. See
+[Installation § The figures](installation.md#the-figures).
+
 ### Settings a management node writes
 
 A deployment somebody else looks after carries settings its own admins do not

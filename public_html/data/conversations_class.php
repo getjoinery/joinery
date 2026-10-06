@@ -8,7 +8,8 @@
  * the realtime NOTIFY live here because messaging is core and several consumers
  * (the messenger UI, the iOS member app, the AI participant) share these rows.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - cnv_create_time is stamped when the row is made; it was left empty
  * @changelog 1.3 - two levels (standard / private) plus the Nothing-leaves-
  *   unsealed add-on (cnv_sealed_exits_only), one-way like the level.
  * @changelog 1.2 - review remediation: protection level one-way at the column
@@ -69,7 +70,7 @@ class Conversation extends SystemBase {
 		// message text in any notification, no unencrypted federation. One-way
 		// like the level (set() refuses turning it off).
 		'cnv_sealed_exits_only' => array('type' => 'bool', 'is_nullable' => false, 'default' => false),
-		'cnv_create_time'     => array('type' => 'timestamp(6)'),
+		'cnv_create_time'     => array('type' => 'timestamp(6)', 'default' => 'now()'),
 		'cnv_update_time'     => array('type' => 'timestamp(6)'),
 		'cnv_delete_time'     => array('type' => 'timestamp(6)'),
 	);

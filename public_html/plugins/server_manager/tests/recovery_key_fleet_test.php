@@ -55,7 +55,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nod
  */
 function rkf_node(array $fields = array(), $recovery = null) {
 	$node = new ManagedNode(NULL);
-	$node->set('mgn_name', 'Fixture');
+	$node->set('mgn_name', 'HarnessTest recovery key fleet');
 	$node->set('mgn_slug', 'fixture');
 	$node->set('mgn_host', '192.0.2.10');
 	$node->set('mgn_web_root', '/var/www/html/fixture/public_html');

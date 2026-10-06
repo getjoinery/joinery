@@ -261,6 +261,13 @@ function harness_boot(array $overrides = array()) {
 		// in memory unless the suite says otherwise.
 		CloudStoreInventory::$test_hooks['record'] = array();
 
+		// Nor ring a superadmin's bell. An incident pass a suite runs over its
+		// fixture nodes tells every superadmin on the site, the real people
+		// among them. A suite about the bell stands in with its own recorder.
+		if (class_exists('IncidentReconciler')) {
+			IncidentReconciler::$dispatch = function ($signal, $payload) {};
+		}
+
 		// A `parallel: true` suite runs beside other suites, so it must share
 		// nothing that is written. It sends no mail and makes no fixtures, so
 		// the cleanup passes below — which delete from the shared test inbox
@@ -798,6 +805,7 @@ function harness_cleanup_stale_fixtures() {
 		array('Product', 'pro_products', 'pro_name', 'pro_create_time', 'HarnessTest %'),
 		array('BookingType', 'bty_booking_types', 'bty_name', 'bty_create_time', 'HarnessTest %'),
 		array('ManagedNode', 'mgn_managed_nodes', 'mgn_name', 'mgn_create_time', 'HarnessTest %'),
+		array('Recipe', 'rcp_recipes', 'rcp_name', 'rcp_create_time', 'HarnessTest %'),
 		array('Question', 'qst_questions', 'qst_question', 'qst_create_time', 'HarnessTest %'),
 	);
 	foreach ($families as $f) {

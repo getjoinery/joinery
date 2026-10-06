@@ -30,9 +30,16 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSched
  * has to give the same answer for the sealed half of the same recipe
  * (specs/recipe_run_scheduling.md).
  *
- * @version 1.1.0
+ * A test's recipes (Recipe::is_fixture_name()) are never scheduled: the suite
+ * runs them itself, and a scheduled run would send its fixture mail to a real
+ * model and outlive the recipe the suite deletes under it.
+ *
+ * @version 1.2.0 - a test's recipes are never scheduled
  */
 class RecipeDispatcher implements ScheduledTaskInterface {
+
+    /** A suite about scheduling itself puts its own recipes in scope. */
+    public static $fixtures_in_scope = false;
 
     /** Reap rows older than this many seconds in 'running'. Should be larger
      *  than RecipeRunner::WALL_CLOCK_SECONDS (90s) plus a safety margin. */
@@ -162,6 +169,7 @@ class RecipeDispatcher implements ScheduledTaskInterface {
         $inserted = 0;
 
         foreach ($recipes as $recipe) {
+            if (!self::$fixtures_in_scope && Recipe::is_fixture_name((string)$recipe->get('rcp_name'))) continue;
             // A recipe whose WHOLE binding is sealed cannot run from cron at
             // all — this process holds no unlock window and never will
             // (specs/in_window_deferred_work.md). It runs in slices inside its

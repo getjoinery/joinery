@@ -16,7 +16,9 @@
  *
  * See docs/signals.md and docs/notifications.md.
  *
- * @version 2.1
+ * @version 2.2
+ * @changelog 2.2 - A recipient deleted since the recipients were read gets
+ *   nothing on either channel.
  * @changelog 2.1 - Placeholder users (system, deleted) are never recipients on
  *   either channel.
  */
@@ -128,6 +130,12 @@ class Notify {
 			// owns has nobody to tell, and mail to their placeholder address
 			// would leave the building addressed to a stranger's domain.
 			if (User::is_placeholder($uid)) {
+				continue;
+			}
+			// Nor is a user deleted since the recipients were read: their
+			// deletion already took their notifications, so a row written
+			// now would outlive them.
+			if (!User::check_if_exists($uid)) {
 				continue;
 			}
 

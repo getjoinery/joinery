@@ -26,6 +26,7 @@
  *
  * Run: php tests/run.php db --filter=recipe_queued_writes
  *
+ * @version 1.1 - outside a test process no recipe takes a fixture name
  * @version 1.0
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -48,7 +49,7 @@ $title_marker = 'zzqw-' . $suffix;
 
 $mk_recipe = function (array $tools, array $models, string $name) use ($owner_uid) {
 	$r = new Recipe(NULL);
-	$r->set('rcp_name', $name);
+	$r->set('rcp_name', 'HarnessTest ' . $name);
 	$r->set('rcp_mode', 'agent');
 	$r->set('rcp_prompt', 'test prompt');
 	$r->set('rcp_owner_user_id', $owner_uid);
@@ -110,7 +111,7 @@ check($ctx->queuesWrites() === true, 'a tainted agent recipe queues its writes')
 check($ctx->executesInline('set_workspace') === true, 'its own workspace stays inline');
 check($ctx->executesInline('remember') === false, 'remember does not');
 $prov = $ctx->writeProvenance();
-check(strpos($prov, 'recipe queued writes test') === 0 && strpos($prov, 'run #' . (int)$run->key) !== false
+check(strpos($prov, 'recipe HarnessTest queued writes test') === 0 && strpos($prov, 'run #' . (int)$run->key) !== false
 	&& strpos($prov, 'reads content written by other people') !== false,
 	'provenance names the recipe, the run, and the outside-content clause', $prov);
 
@@ -165,11 +166,11 @@ check(count($mems) === 1, 'one memory exists now');
 $mem = $mems[0] ?? [];
 check(($mem['mem_source'] ?? '') === AiMemory::SOURCE_AI && (int)($mem['mem_owner_user_id'] ?? 0) === $owner_uid, 'saved by ai, owned by the recipe owner');
 $mp = (string)($mem['mem_provenance'] ?? '');
-check(strpos($mp, 'recipe queued writes test') === 0 && strpos($mp, 'approved by you') !== false
+check(strpos($mp, 'recipe HarnessTest queued writes test') === 0 && strpos($mp, 'approved by you') !== false
 	&& strpos($mp, 'reads content written by other people') !== false,
 	'the memory says which recipe, that you approved it, and that the recipe reads outside content', $mp);
 $recall = (new RecallTool())->execute(['ids' => [(int)$mem['mem_memory_id']]], $ctx);
-check(is_string($recall) && strpos($recall, 'from recipe queued writes test') !== false, 'recall shows the provenance line', is_string($recall) ? $recall : json_encode($recall));
+check(is_string($recall) && strpos($recall, 'from recipe HarnessTest queued writes test') !== false, 'recall shows the provenance line', is_string($recall) ? $recall : json_encode($recall));
 
 section('A declined proposal writes nothing');
 $prov_llm2 = new ScriptedLlmProvider([$turn1, FakeLlmProvider::textResponse('Done.')]);
@@ -180,5 +181,18 @@ check(count($pending2) === 1, 'a second run queues a second proposal');
 $row2 = ActionQueue::resolve((int)$pending2[0]->key, $owner_uid, 'decline');
 check((string)$row2->get('aqa_status') === AiQueuedAction::STATUS_DECLINED, 'declined');
 check(count($memories_titled($title_marker)) === 1, 'still only the approved memory');
+
+section('Outside a test process no recipe takes a fixture name');
+// It would never be scheduled. A plain PHP process stands for an operator.
+$probe_name = 'HarnessTest operator ' . bin2hex(random_bytes(3));
+$probe = PHP_BINARY . ' -r ' . escapeshellarg('require ' . var_export(PathHelper::getIncludePath('includes/PathHelper.php'), true) . ';'
+	. ' $r = new Recipe(NULL); $r->set("rcp_name", ' . var_export($probe_name, true) . '); $r->set("rcp_mode", "agent");'
+	. ' $r->set("rcp_prompt", "x"); $r->set("rcp_owner_user_id", ' . (int)$owner_uid . ');'
+	. ' try { $r->save(); echo "saved ", $r->key; } catch (Throwable $e) { echo "refused: ", $e->getMessage(); }') . ' 2>&1';
+$probe_out = (string)shell_exec($probe);
+$probe_rows = $db->prepare('SELECT rcp_recipe_id FROM rcp_recipes WHERE rcp_name = ?');
+$probe_rows->execute(array($probe_name));
+foreach ($probe_rows->fetchAll(PDO::FETCH_COLUMN) as $leaked) { harness_register_row('rcp_recipes', 'rcp_recipe_id', (int)$leaked); }
+check(strpos($probe_out, "refused: A recipe's name may not start 'HarnessTest '") !== false, 'refused, in plain words', $probe_out);
 
 harness_finish();

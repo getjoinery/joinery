@@ -52,7 +52,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 $node = new ManagedNode(NULL);
-$node->set('mgn_name', 'Incident triage test');
+$node->set('mgn_name', 'HarnessTest incident triage');
 $node->set('mgn_slug', 'harnesstest-inc-' . bin2hex(random_bytes(3)));
 $node->set('mgn_host', '192.0.2.42');
 $node->set('mgn_ssh_user', 'root');

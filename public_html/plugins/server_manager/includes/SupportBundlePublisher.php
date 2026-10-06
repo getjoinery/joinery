@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.14 - carries outbound_limits.sh and _site_run_spec.sh: the outbound_limits word, and host
+ *                 housekeeping's refresh of the installed joinery-limits (node_outbound_and_transfer WP5)
  * @version 1.13 - carries suspended_page.sh: the suspended_page word, which shows a site's suspended page on
  *                 its host's proxy; and proxy_default_site.sh with _placeholder_cert.sh, which
  *                 host_housekeeping.sh runs on a host whose proxy has the default site
@@ -153,6 +155,12 @@ class SupportBundlePublisher {
 		// suspended_page: a site's suspended page on the host's proxy. Sources
 		// nothing.
 		'maintenance_scripts/sysadmin_tools/suspended_page.sh',
+		// outbound_limits: the word that sets a host's outbound figures, and
+		// what host_housekeeping.sh refreshes the installed joinery-limits from.
+		// It sources the run spec helper beside it to write a site's own
+		// figures, and install copies the helper beside the installed script.
+		'maintenance_scripts/install_tools/outbound_limits.sh',
+		'maintenance_scripts/install_tools/_site_run_spec.sh',
 		// reclaim_managed_file on a host: moves a host file aside and runs the
 		// bundled runner --machine --only=host_housekeeping.sh, which reads
 		// _host_files.sh for the files it writes when absent.

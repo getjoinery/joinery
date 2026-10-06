@@ -7,8 +7,10 @@
 # timeout: 120
 # covers: [maintenance_scripts/install_tools/outbound_limits.sh, maintenance_scripts/install_tools/_site_run_spec.sh]
 #
-# outbound_limits.sh (node_outbound_and_transfer WP3, WP4) writes one nftables
-# table limiting what each site opens toward the outside, and a speed ceiling.
+# outbound_limits.sh (node_outbound_and_transfer WP3, WP4, WP5) writes one
+# nftables table limiting what each site opens toward the outside, and a speed
+# ceiling, at figures root sets for the machine and each site, which a site's
+# own setting can only lower.
 # Driven unprivileged against a scratch root (JOINERY_LIMITS_ROOT) with nft,
 # systemctl, ip and tc stubbed on PATH:
 # the table names each site on its own network by its bridge and passes over
@@ -263,7 +265,7 @@ chk "and gets its part when it is back" "$(grep -c 'to device jifb1) stolen' "$T
 rm -f "$R/etc/joinery/sites/s4/run_spec"
 STUB_TC_DEL_RC=1 JOINERY_LIMITS_ROOT="$R" PATH="$T/bin:$PATH" bash "$SCRIPT" apply > /dev/null 2> "$T/err"; rc=$?
 chk "a filter that will not come off keeps its ifb and its line, and the run fails saying so" \
-    "$rc|$(ls "$T/links/jifb4" > /dev/null 2>&1 && echo ifb)|$(grep -c '^jsnet4 ingress jifb4$' "$R/run/joinery/outbound_limits.shaped")|$(grep -c 'would not take the speed ceiling off jsnet4' "$T/err")|$(status_key reason)" \
+    "$rc|$(ls "$T/links/jifb4" > /dev/null 2>&1 && echo ifb)|$(grep -c '^jsnet4 ingress jifb4 200$' "$R/run/joinery/outbound_limits.shaped")|$(grep -c 'would not take the speed ceiling off jsnet4' "$T/err")|$(status_key reason)" \
     "1|ifb|1|1|ceiling_failed"
 lim apply > /dev/null 2>&1
 chk "the next run takes it off: filter, then ifb, then the clsact left empty" \
@@ -350,6 +352,204 @@ lim bogus > /dev/null 2>&1; rc=$?
 chk "an unknown command is refused" "$rc" "1"
 lim apply --everything > /dev/null 2>&1; rc=$?
 chk "an unknown option is refused" "$rc" "1"
+
+echo "=== The figures (WP5) ==="
+# docker: a site's own ceiling comes from $T/own/SITE (what the site prints);
+# what a site is told lands in $T/told/SITE. runuser: a bare-metal site's own
+# ceiling from $T/bare_own/SITE.
+mkdir -p "$T/own" "$T/told" "$T/bare_own"
+cat > "$T/bin/docker" <<STUB
+#!/bin/bash
+echo "docker \$*" >> "$T/docker_calls"
+if [ "\$1 \$2 \$3" = "exec -u www-data" ]; then cat "$T/own/\$4" 2>/dev/null; exit 0; fi
+if [ "\$1 \$2 \$3 \$4" = "exec -i -u root" ]; then cat > "$T/told/\$5"; exit 0; fi
+exit 1
+STUB
+cat > "$T/bin/runuser" <<STUB
+#!/bin/bash
+echo "runuser \$*" >> "$T/runuser_calls"
+site="\$(sed -n 's|.*/var/www/html/\([^/]*\)/public_html/utils/outbound_site_ceiling.php.*|\1|p' <<< "\$*")"
+cat "$T/bare_own/\$site" 2>/dev/null; exit 0
+STUB
+chmod +x "$T/bin/docker" "$T/bin/runuser"
+cls() { grep "tc class replace dev $1 " "$T/tc_calls" | tail -1 | grep -o 'rate [0-9]*mbit' | head -1; }
+chain_of() { sed -n "/chain $1 {/,/}/p" "$T/nft_loaded"; }
+: > "$T/tc_calls"
+lim apply > /dev/null 2>&1
+chk "no host file and no site figures: the built-in ones (200 Mbit/s; 20 a second, bursts to 100; 256 open)" \
+    "$(cls jifb1)|$(status_key conn_rate)/$(status_key conn_burst)/$(status_key open_conns)|$(status_key set_by)" "rate 200mbit|20/100/256|"
+chk "each site is told root's figure and the one in force" "$(tr '\n' ' ' < "$T/told/s1")" "state=on host_ceiling_mbit=200 ceiling_mbit=200 set_by= "
+chk "a site not on a network of its own is told the limits do not cover it" "$(head -1 "$T/told/old")" "state=uncovered"
+
+echo '{"ceiling_mbit": 300, "conn_rate": 40, "conn_burst": 120, "open_conns": 512, "set_by": "plane"}' > "$R/etc/joinery/outbound_limits.json"
+: > "$T/tc_calls"
+lim apply > /dev/null 2>&1
+chk "the host file's figures: each site's class, chain and the status" \
+    "$(cls jifb1)|$(chain_of site_s1 | grep -o -E 'ct count over [0-9]+|limit rate over [0-9]+/second burst [0-9]+' | tr '\n' '|')$(status_key ceiling_mbit)|$(status_key set_by)" \
+    "rate 300mbit|ct count over 512|limit rate over 40/second burst 120|300|plane"
+chk "the web server's user takes the machine's figures" "$(chain_of web_user | grep -c 'limit rate over 40/second burst 120')|$(cls jifbweb)" "1|rate 300mbit"
+chk "a site is told the management node set them" "$(grep -c '^set_by=plane$' "$T/told/s1")" "1"
+
+echo '{"ceiling_mbit": "fast", "conn_rate": 0, "open_conns": true}' > "$R/etc/joinery/outbound_limits.json"
+: > "$T/tc_calls"
+lim apply > /dev/null 2> "$T/err"
+chk "a figure that is not one: the built-in one stands, with a warning naming it" \
+    "$(cls jifb1)|$(status_key conn_rate)|$(status_key open_conns)|$(grep -c -E 'has a (ceiling_mbit|conn_rate|open_conns) that is not a figure' "$T/err")" "rate 200mbit|20|256|3"
+
+echo '{"ceiling_mbit": "off"}' > "$R/etc/joinery/outbound_limits.json"
+lim apply > /dev/null 2>&1
+chk "the machine's ceiling off: no ifb anywhere, no mark on the web server's user, the connection limits on" \
+    "$(ls "$T/links" | grep -c '^jifb')|$(grep -c 'meta mark set' "$T/nft_loaded")|$(status_key state)|$(status_key ceiling_mbit)" "0|0|on|"
+rm -f "$R/etc/joinery/outbound_limits.json"
+
+spec s1 spec_version=2 network=s1_net bridge=jsnet1 subnet=10.250.1.0/24 outbound_ceiling=50 outbound_conn_rate=5
+spec s4 spec_version=2 bridge=jsnet4 outbound_ceiling=off
+: > "$T/tc_calls"
+lim apply > /dev/null 2>&1
+chk "a site's own figures in its run spec: its class and its chain; the rest keep the machine's" \
+    "$(cls jifb1)|$(chain_of site_s1 | grep -c 'limit rate over 5/second burst 100')|$(cls jifbweb)" "rate 50mbit|1|rate 200mbit"
+chk "a site whose own ceiling is off has no ifb, and is still limited" "$(ls "$T/links/jifb4" 2>/dev/null)|$(grep -c 'jump site_s4' "$T/nft_loaded")" "|1"
+chk "the status lists each site's figures in force" "$(status_key site_figures)" "s1:50:5:100:256 s4:-:20:100:256"
+spec s1 spec_version=2 network=s1_net bridge=jsnet1 subnet=10.250.1.0/24 outbound_ceiling=fast
+lim apply > /dev/null 2> "$T/err"
+chk "a run spec figure that is not one: the machine's stands, with a warning" "$(status_key site_figures | cut -d' ' -f1)|$(grep -c "s1's run spec has outbound_ceiling=fast" "$T/err")" "s1:200:20:100:256|1"
+spec s1 spec_version=2 network=s1_net bridge=jsnet1 subnet=10.250.1.0/24
+spec s4 spec_version=2 bridge=jsnet4
+
+echo "30" > "$T/own/s1"
+: > "$T/tc_calls"
+lim apply > /dev/null 2>&1
+chk "a site's own lower ceiling (read inside it as the web server's user) holds it lower" \
+    "$(cls jifb1)|$(grep -c 'docker exec -u www-data s1 timeout 20 php /var/www/html/s1/public_html/utils/outbound_site_ceiling.php' "$T/docker_calls")|$(tr '\n' ' ' < "$T/told/s1")" \
+    "rate 30mbit|$(grep -c 'exec -u www-data s1 ' "$T/docker_calls")|state=on host_ceiling_mbit=200 ceiling_mbit=30 set_by= "
+echo "900" > "$T/own/s1"
+: > "$T/tc_calls"
+lim apply > /dev/null 2>&1
+chk "a site asking for more than root's figure gets root's: it can tighten, never loosen" "$(cls jifb1)|$(grep -c '^ceiling_mbit=200$' "$T/told/s1")" "rate 200mbit|1"
+for junk in '30; reboot' '0' '-5' '2000000' 'thirty'; do
+    printf '%s\n' "$junk" > "$T/own/s1"; : > "$T/tc_calls"
+    lim apply > /dev/null 2>&1
+    chk "what a site prints is untrusted: '$junk' is nothing" "$(cls jifb1)" "rate 200mbit"
+done
+rm -f "$T/own/s1"
+
+B="$R/var/www/html"
+mkdir -p "$B/bm1/config" "$B/bm1/public_html/utils" "$B/bm2/config" "$B/bm2/public_html/utils" "$B/notasite"
+touch "$B/bm1/config/Globalvars_site.php" "$B/bm1/public_html/utils/outbound_site_ceiling.php" "$B/bm2/config/Globalvars_site.php" "$B/bm2/public_html/utils/outbound_site_ceiling.php"
+echo 60 > "$T/bare_own/bm1"; echo 25 > "$T/bare_own/bm2"
+: > "$T/tc_calls"
+lim apply --web-user > /dev/null 2>&1
+chk "bare metal: the lowest of the machine's sites' own ceilings holds the web server's user, run as that user" \
+    "$(cls jifbweb)|$(status_key web_ceiling_mbit)|$(grep -c 'runuser -u www-data -- timeout 20 php' "$T/runuser_calls")" "rate 25mbit|25|2"
+chk "the bare-metal sites are told, on the host" "$(tr '\n' ' ' < "$R/run/joinery/outbound_limits.site")" "state=on host_ceiling_mbit=200 ceiling_mbit=25 set_by= "
+chk "status says a site asked for less" "$(lim status | grep -c "sending at 25 Mbit/s at most (a site asked for less)")" "1"
+rm -rf "$B"
+lim apply --web-user > /dev/null 2>&1
+
+# Every outcome is told, so a site never shows a figure left from an earlier run.
+echo '{"enabled": false}' > "$R/etc/joinery/outbound_limits.json"
+lim apply --web-user > /dev/null 2>&1
+chk "the limits off: every site is told so, with no figure in force, and the bare-metal sites too" \
+    "$(tr '\n' ' ' < "$T/told/s1")|$(head -1 "$T/told/old")|$(head -1 "$R/run/joinery/outbound_limits.site")" "state=off host_ceiling_mbit= ceiling_mbit= set_by= |state=off|state=off"
+rm -f "$R/etc/joinery/outbound_limits.json"
+printf 'nameserver 8.8.8.8\n' > "$R/etc/resolv.conf"
+lim apply --web-user > /dev/null 2>&1
+chk "the limits refused (an outside resolver): every site is told so" "$(head -1 "$T/told/s1")|$(head -1 "$R/run/joinery/outbound_limits.site")" "state=refused|state=refused"
+echo "nameserver 127.0.0.53" > "$R/etc/resolv.conf"
+STUB_TC_RC=1 JOINERY_LIMITS_ROOT="$R" PATH="$T/bin:$PATH" bash "$SCRIPT" apply --web-user > /dev/null 2>&1
+chk "tc refusing the ceiling: each site is told, after the attempt, with root's figure and none in force" "$(tr '\n' ' ' < "$T/told/s1")" "state=ceiling_failed host_ceiling_mbit=200 ceiling_mbit= set_by= "
+lim apply --web-user > /dev/null 2>&1
+chk "and on again once tc takes it" "$(head -1 "$T/told/s1")|$(sed -n 's/^ceiling_mbit=//p' "$T/told/s1")" "state=on|200"
+
+echo "=== Setting the figures ==="
+: > "$T/systemctl_calls"
+out="$(lim set --ceiling=500 --conn-rate=30 2>&1)"; rc=$?
+chk "set: the machine's figures in the host file, the unit run, and shown" \
+    "$rc|$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("ceiling_mbit"), d.get("conn_rate"), d.get("set_by"))' "$R/etc/joinery/outbound_limits.json")|$(grep -c 'start joinery-limits.service' "$T/systemctl_calls")|$(status_key ceiling_mbit)|$(grep -c 'speed ceiling: 500 Mbit/s' <<< "$out")" \
+    "0|500 30 None|1|500|1"
+lim set --ceiling=400 --by=plane > /dev/null 2>&1
+chk "set --by=plane: the management node set them, and the other figures stay" \
+    "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("ceiling_mbit"), d.get("conn_rate"), d.get("set_by"))' "$R/etc/joinery/outbound_limits.json")" "400 30 plane"
+lim conn-rate default > /dev/null 2>&1
+chk "a later change by hand clears 'set by the management node'; default takes a figure back to the built-in one" \
+    "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("ceiling_mbit"), d.get("conn_rate"), d.get("set_by"))' "$R/etc/joinery/outbound_limits.json")|$(status_key conn_rate)" "400 None None|20"
+lim ceiling 80 --site=s1 > /dev/null 2>&1; rc=$?
+chk "ceiling --site: the site's run spec carries it, through the run spec helper, and it is in force" \
+    "$rc|$(grep -c '^outbound_ceiling=80$' "$R/etc/joinery/sites/s1/run_spec")|$(grep -c '^bridge=jsnet1$' "$R/etc/joinery/sites/s1/run_spec")|$(status_key site_figures | cut -d' ' -f1)" "0|1|1|s1:80:20:100:256"
+lim ceiling default --site=s1 > /dev/null 2>&1
+chk "default --site: the line is gone and the machine's figure holds" "$(grep -c '^outbound_' "$R/etc/joinery/sites/s1/run_spec")|$(status_key site_figures | cut -d' ' -f1)" "0|s1:400:20:100:256"
+for bad in "set" "set --ceiling=0" "set --ceiling=fast" "set --conn-rate=off" "set --open-conns=-3" "ceiling 50 --site=nosuch" "ceiling 50 --site=../etc" "apply --ceiling=50" "status --site=s1"; do
+    lim $bad > /dev/null 2>&1; rc=$?
+    chk "refused: joinery-limits $bad" "$rc" "1"
+done
+chk "a refused set wrote nothing" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("ceiling_mbit"))' "$R/etc/joinery/outbound_limits.json")" "400"
+out="$(lim show 2>&1)"
+chk "show: the machine's figures and each site's" "$(grep -c -E '^  speed ceiling: 400 Mbit/s$|^  new connections: 20 a second, bursts to 100; 256 open at once$|^  s1: ceiling 400 Mbit/s' <<< "$out")" "3"
+rm -f "$R/etc/joinery/outbound_limits.json"
+
+echo "=== Refresh (host housekeeping) ==="
+: > "$T/systemctl_calls"
+out="$(lim refresh 2>&1)"
+chk "the installed copy current: nothing written, nothing run" "$out|$(wc -l < "$T/systemctl_calls")" "outbound limits: installed copy current|0"
+sed -i 's/^# Version: .*/# Version: 1.1/' "$R/usr/local/sbin/joinery-limits"
+out="$(lim refresh 2>&1)"
+chk "an older installed copy: brought up to this one, and the unit run" \
+    "$(cmp -s "$SCRIPT" "$R/usr/local/sbin/joinery-limits" && echo same)|$(grep -c 'brought up to this release' <<< "$out")|$(grep -c -E '^systemctl (daemon-reload|start joinery-limits.service)$' "$T/systemctl_calls")" "same|1|2"
+chk "the run spec helper is installed beside it" "$(cmp -s "$HELPER" "$R/usr/local/lib/joinery-limits/_site_run_spec.sh" && echo same)" "same"
+sed -i 's/^# Version: .*/# Version: 9.9/' "$R/usr/local/sbin/joinery-limits"; : > "$T/systemctl_calls"
+out="$(lim refresh 2>&1)"; lim ceiling 300 > /dev/null 2>&1
+chk "a newer installed copy (another site's tree, a newer bundle) is never taken back, by refresh or by a figure set" \
+    "$(script_v="$(sed -n 's/^# Version: //p' "$R/usr/local/sbin/joinery-limits")"; echo "$script_v")|$out|$(grep -c daemon-reload "$T/systemctl_calls")" "9.9|outbound limits: installed copy current|0"
+cp "$SCRIPT" "$R/usr/local/sbin/joinery-limits"
+echo "# a hand edit at the same version" >> "$R/usr/local/sbin/joinery-limits"
+chk "a copy at the same version is current, so two trees at one release never flap" "$(lim refresh 2>&1)" "outbound limits: installed copy current"
+cp "$SCRIPT" "$R/usr/local/sbin/joinery-limits"
+sed -i 's/^# Version: [0-9.]*/# Version: 1.0/' "$R/usr/local/lib/joinery-limits/_site_run_spec.sh"
+out="$(lim refresh 2>&1)"
+chk "a release that changes only the run spec helper brings the helper's copy up to it" \
+    "$(cmp -s "$HELPER" "$R/usr/local/lib/joinery-limits/_site_run_spec.sh" && echo same)|$(grep -c 'brought up to this release' <<< "$out")" "same|1"
+rm -f "$R/etc/joinery/outbound_limits.json"
+lim install --by=plane > /dev/null 2>&1
+chk "install --by=plane with no figure records that the management node installed it" \
+    "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("set_by"))' "$R/etc/joinery/outbound_limits.json")|$(status_key set_by)" "plane|plane"
+lim install > /dev/null 2>&1
+chk "a reinstall without it leaves that as it was" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("set_by"))' "$R/etc/joinery/outbound_limits.json")" "plane"
+rm -f "$R/etc/joinery/outbound_limits.json"; lim apply > /dev/null 2>&1
+NR="$T/noroot"; mkdir -p "$NR"
+chk "a machine without the unit is left alone" "$(JOINERY_LIMITS_ROOT="$NR" PATH="$T/bin:$PATH" bash "$SCRIPT" refresh 2>&1)|$(ls "$NR")" "outbound limits: not installed on this machine|"
+HK="$ROOT/maintenance_scripts/install_tools/host_housekeeping.sh"
+chk "host housekeeping runs refresh where the unit is installed, and only outside a container" \
+    "$(awk '/^# --- 10\. The outbound limits run this release/,/^fi$/' "$HK" | grep -o -E 'IN_CONTAINER.. == 0|joinery-limits.service|outbound_limits.sh" refresh' | wc -l)" "3"
+chk "the host's support bundle carries the script and the helper it sources" \
+    "$(grep -c -E "'maintenance_scripts/install_tools/(outbound_limits|_site_run_spec)\.sh'," "$ROOT/public_html/plugins/server_manager/includes/SupportBundlePublisher.php")" "2"
+
+echo "=== install.sh's figures ==="
+chk "docker and server take the figure flags, and pass them to the install" \
+    "$(awk '/^do_docker_install\(\) \{/,/^}$/' "$INSTALL" | grep -c 'consume_outbound_flag')|$(awk '/^do_server\(\) \{/,/^}$/' "$INSTALL" | grep -c 'consume_outbound_flag')|$(awk '/^outbound_limits_install\(\) \{/,/^}$/' "$INSTALL" | grep -c 'OUTBOUND_FIGURE_ARGS')" "1|1|1"
+( set +u
+  print_error() { echo "ERR $*"; }
+  eval "$(awk '/^consume_outbound_flag\(\) \{/,/^}$/' "$INSTALL")"
+  OUTBOUND_FIGURE_ARGS=()
+  for a in --outbound-ceiling=150 --outbound-ceiling=off --outbound-conn-rate=default --outbound-open-conns=300 --outbound-set-by=plane; do consume_outbound_flag "$a"; done
+  echo "${OUTBOUND_FIGURE_ARGS[*]}" > "$T/obf"
+  ( consume_outbound_flag --outbound-ceiling=fast ) > "$T/obf_bad" 2>&1; echo "rc=$?" >> "$T/obf_bad"
+  consume_outbound_flag --memory=1g; echo "notours=$?" >> "$T/obf_bad" )
+chk "install.sh turns its flags into the script's, the management node's mark too" "$(cat "$T/obf")" "--ceiling=150 --ceiling=off --conn-rate=default --open-conns=300 --by=plane"
+chk "and refuses one that is not a figure, in plain words; another flag is not its" "$(grep -c 'is not a speed ceiling' "$T/obf_bad")|$(grep -c 'rc=1' "$T/obf_bad")|$(grep -c 'notours=1' "$T/obf_bad")" "1|1|1"
+chk "a container site keeps its own figures across a rebuild, and a given one replaces its line" \
+    "$(grep -c 'SPEC_OUTBOUND="$(run_spec_outbound_lines "$SITENAME")"' "$INSTALL")|$(grep -c '\[ -z "$SPEC_OUTBOUND" \] || printf' "$INSTALL")" "1|1"
+chk "a bare-metal site's figures are refused: they are the machine's" "$(grep -c 'a bare-metal site shares the machine' "$INSTALL")" "1"
+chk "--outbound-notice-gb reaches the site's first start: exported, carried into a container, and written as the setting" \
+    "$(grep -c -E '^    JOINERY_OUTBOUND_NOTICE_GB$|export JOINERY_OUTBOUND_NOTICE_GB=' "$INSTALL")|$(grep -c -E "UPDATE stg_settings SET stg_value = .\\$\{JOINERY_OUTBOUND_NOTICE_GB\}. WHERE stg_name = 'outbound_monthly_notice_gb'" "$ROOT/maintenance_scripts/install_tools/_site_init.sh")" "2|1"
+(
+  export JOINERY_SITE_STATE_ROOT="$T/rs"; mkdir -p "$T/rs/etc/joinery/sites/x"
+  . "$HELPER"
+  printf 'spec_version=2\nhostname=x\noutbound_ceiling=off\noutbound_conn_rate=40\n' | run_spec_write x && echo written
+  printf 'spec_version=2\nhostname=x\noutbound_ceiling=0\n' | run_spec_write x 2>/dev/null || echo refused
+  printf 'spec_version=2\nhostname=x\noutbound_open_conns=lots\n' | run_spec_write x 2>/dev/null || echo refused
+  run_spec_outbound_lines x | tr '\n' ' '
+) > "$T/rs_out"
+chk "the run spec takes a site's own figures, and refuses one that is not" "$(tr '\n' '|' < "$T/rs_out")" "written|refused|refused|outbound_ceiling=off outbound_conn_rate=40 "
 
 echo "=== The run spec helper's refresh ==="
 : > "$T/systemctl_calls"

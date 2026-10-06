@@ -48,7 +48,7 @@ harness_boot();
 /** An unsaved node carrying just the columns routing consults. */
 function artifact_test_node($version, $vocabulary) {
 	$node = new ManagedNode(NULL);
-	$node->set('mgn_name', 'Artifact channel test');
+	$node->set('mgn_name', 'HarnessTest artifact channel');
 	$node->set('mgn_slug', 'artifact-channel-test');
 	// A paired agent: the public key is what has_agent_channel() reads.
 	$node->set('mgn_agent_public_key', base64_encode(str_repeat("\x01", 32)));

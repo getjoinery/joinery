@@ -56,7 +56,7 @@ $suffix = getmypid();
 $buyer = make_user('MdwBuyer');
 
 $node = new ManagedNode(NULL);
-$node->set('mgn_name', 'mdw-test-' . $suffix);
+$node->set('mgn_name', 'HarnessTest mdw-test-' . $suffix);
 $node->set('mgn_slug', 'mdw-test-' . $suffix);
 $node->set('mgn_host', '198.51.100.30');
 $node->set('mgn_ssh_user', 'root');

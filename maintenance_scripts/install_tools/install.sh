@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 3.03 - The outbound limits' figures are settable at install time
+#               (specs/node_outbound_and_transfer.md WP5): --outbound-ceiling=MBIT|off,
+#               --outbound-conn-rate=N, --outbound-conn-burst=N and --outbound-open-conns=N set
+#               the machine's own on docker and server (the host file) and a container site's own
+#               on site (its run spec, kept by a rebuild like --memory). site also takes
+#               --outbound-notice-gb=N, the monthly notice setting's first figure.
 #VERSION 3.02 - install.sh docker --multi-tenant installs Apache and the proxy's default site,
 #               which answers a name no site on the host claims with a plain page and a
 #               certificate of its own (proxy_default_site.sh; specs/multi_tenant_docker_hosts.md
@@ -507,11 +513,13 @@
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
-#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--no-outbound-limits]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
+#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
 #                       --multi-tenant: root in a container is not root on the host (userns-remap); a fresh host only
 #                       --no-outbound-limits: no connection limits and no UDP drop for this host's sites
+#                       OUTBOUND FIGURES: --outbound-ceiling=MBIT|off --outbound-conn-rate=N
+#                       --outbound-conn-burst=N --outbound-open-conns=N (the machine's own; server takes them too)
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
-#   ./install.sh server [--allow-unsupported-os] [--no-outbound-limits]  # One-time: set up bare-metal server
+#   ./install.sh server [--allow-unsupported-os] [--no-outbound-limits] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
 #   ./install.sh list                                # List existing sites
 #
@@ -610,6 +618,7 @@ SITE_INIT_ENV_INPUTS=(
     JOINERY_MAIL_API_KEY JOINERY_MAIL_PROVIDER JOINERY_MAIL_FROM
     JOINERY_BACKUP_BUCKET JOINERY_BACKUP_KEY_ID JOINERY_BACKUP_KEY
     JOINERY_BACKUP_PROVIDER JOINERY_BACKUP_REGION JOINERY_BACKUP_ENDPOINT
+    JOINERY_OUTBOUND_NOTICE_GB
 )
 
 # This script's own version, read from the newest #VERSION header above rather
@@ -663,6 +672,48 @@ CONTAINER_PIDS=""
 CONTAINER_PIDS_GIVEN=0
 CONTAINER_PIDS_DEFAULT=512
 CONTAINER_PIDS_FLOOR=128
+
+# --outbound-ceiling=MBIT|off, --outbound-conn-rate=N, --outbound-conn-burst=N,
+# --outbound-open-conns=N: the outbound limits' figures (outbound_limits.sh,
+# specs/node_outbound_and_transfer.md WP5). On docker and server they are the
+# machine's own, written to /etc/joinery/outbound_limits.json; on site, that
+# container site's own, kept in its run spec as --memory is: a rebuild without
+# the flag keeps the figure, and default takes it back to the machine's. None
+# given: the built-in figures (200 Mbit/s; 20 a second, bursts to 100; 256
+# open), so an owner who never thinks about bandwidth is protected anyway.
+# Held as the flags outbound_limits.sh takes.
+OUTBOUND_FIGURE_ARGS=()
+# --outbound-notice-gb=N (site): the monthly notice setting's figure
+# (outbound_monthly_notice_gb), a site setting rather than a limit.
+OUTBOUND_NOTICE_GB=""
+
+# Takes one outbound figure flag into OUTBOUND_FIGURE_ARGS, refusing a value
+# that is not one in plain words. 1 when ARG is not such a flag.
+consume_outbound_flag() {  # ARG
+    local name value kind
+    # The management node that creates the machine says so (JobCommandBuilder):
+    # the figures are its, and each site's settings page sends the admin to it.
+    if [ "$1" = "--outbound-set-by=plane" ]; then
+        OUTBOUND_FIGURE_ARGS+=("--by=plane")
+        return 0
+    fi
+    case "$1" in
+        --outbound-ceiling=*)    name=ceiling;    kind=ceiling ;;
+        --outbound-conn-rate=*)  name=conn-rate;  kind=count ;;
+        --outbound-conn-burst=*) name=conn-burst; kind=count ;;
+        --outbound-open-conns=*) name=open-conns; kind=count ;;
+        *) return 1 ;;
+    esac
+    value="${1#*=}"
+    if [ "$kind" = ceiling ]; then
+        [[ "$value" == off || "$value" == default || "$value" =~ ^[1-9][0-9]{0,5}$ ]] \
+            || { print_error "--outbound-ceiling=${value} is not a speed ceiling: a whole number of Mbit/s (200), off, or default"; exit 1; }
+    else
+        [[ "$value" == default || "$value" =~ ^[1-9][0-9]{0,6}$ ]] \
+            || { print_error "--outbound-${name}=${value} is not a figure: a whole number (20), or default"; exit 1; }
+    fi
+    OUTBOUND_FIGURE_ARGS+=("--${name}=${value}")
+}
 
 # Global flags are honoured wherever they appear: `install.sh docker -y` and
 # `install.sh -y docker` mean the same thing. Subcommands route stray
@@ -2331,6 +2382,7 @@ do_docker_install() {
             --node-name=*) NODE_NAME="${arg#--node-name=}" ;;
             --multi-tenant) MULTI_TENANT=1 ;;
             --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
+            --outbound-*) consume_outbound_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
         esac
     done
@@ -2505,14 +2557,16 @@ do_docker_install() {
 #==============================================================================
 
 # What each site may open toward the outside: a rate on new connections, a cap
-# on those open at once, and no UDP (specs/node_outbound_and_transfer.md WP3).
-# A machine nobody configured carries them; --no-outbound-limits turns them
-# off. A machine where they cannot be put in force still installs: the unit
-# says why in the host report, and its timer tries again.
+# on those open at once, and no UDP (specs/node_outbound_and_transfer.md WP3),
+# and how fast it may send (WP4), at the figures OUTBOUND_FIGURE_ARGS gives
+# (WP5). A machine nobody configured carries them; --no-outbound-limits turns
+# them off. A machine where they cannot be put in force still installs: the
+# unit says why in the host report, and its timer tries again.
 outbound_limits_install() {  # WEB_USER(0|1) OFF(0|1)
     local args=()
     [ "$1" -eq 1 ] && args+=(--web-user)
     [ "$2" -eq 1 ] && args+=(--off)
+    args+=("${OUTBOUND_FIGURE_ARGS[@]+"${OUTBOUND_FIGURE_ARGS[@]}"}")
     print_step "Setting outbound connection limits..."
     if bash "$SCRIPT_DIR/outbound_limits.sh" install "${args[@]}"; then
         # What the unit did, not what was asked: an owner's earlier off stands.
@@ -2535,6 +2589,7 @@ do_server() {
     for arg in "$@"; do
         case "$arg" in
             --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
+            --outbound-ceiling=*|--outbound-conn-rate=*|--outbound-conn-burst=*|--outbound-open-conns=*|--outbound-set-by=plane) consume_outbound_flag "$arg" ;;
             *) rest+=("$arg") ;;
         esac
     done
@@ -3784,6 +3839,16 @@ do_site_create() {
                 ADMIN_EMAIL="${1#*=}"
                 shift
                 ;;
+            --outbound-ceiling=*|--outbound-conn-rate=*|--outbound-conn-burst=*|--outbound-open-conns=*)
+                consume_outbound_flag "$1"
+                shift
+                ;;
+            --outbound-notice-gb=*)
+                OUTBOUND_NOTICE_GB="${1#*=}"
+                [[ "$OUTBOUND_NOTICE_GB" =~ ^[0-9]{1,6}$ ]] \
+                    || { print_error "--outbound-notice-gb=${OUTBOUND_NOTICE_GB} is not a number of GB (1000; 0 turns the notice off)"; exit 1; }
+                shift
+                ;;
             --admin-email)
                 ADMIN_EMAIL="$2"
                 shift 2
@@ -3860,6 +3925,13 @@ do_site_create() {
                 echo "  --pids-limit=N         Ceiling on the container's processes and threads."
                 echo "                         512 for a new site, at least 128. A rebuild keeps"
                 echo "                         it; none lifts it."
+                echo "  --outbound-ceiling=MBIT|off  The container's own speed ceiling; and"
+                echo "  --outbound-conn-rate=N, --outbound-conn-burst=N, --outbound-open-conns=N"
+                echo "                         its own connection limits. Absent: the machine's"
+                echo "                         (200 Mbit/s; 20 a second, bursts to 100; 256 open)."
+                echo "                         A rebuild keeps them; default takes one back."
+                echo "  --outbound-notice-gb=N Tell the admins past N GB sent in a month (1000;"
+                echo "                         0 turns it off). A setting the site can change."
                 echo ""
                 echo "Automation:"
                 echo "  -y / --yes     Auto-accept: remove existing container, keep volumes"
@@ -4049,6 +4121,12 @@ do_site_create() {
         print_error "--memory, --cpus and --pids-limit limit a site container; a bare-metal site has none. Leave them out, or install the site in Docker"
         exit 1
     fi
+    # A bare-metal site sends as the web server's user, which every site on the
+    # machine shares: its outbound figures are the machine's.
+    if [ "$MODE" = "bare-metal" ] && [ "${#OUTBOUND_FIGURE_ARGS[@]}" -gt 0 ]; then
+        print_error "--outbound-* figures on a site are a container site's own; a bare-metal site shares the machine's. Set those with install.sh server --outbound-..., or sudo joinery-limits ceiling MBIT. Nothing was changed"
+        exit 1
+    fi
 
     # Resolve a password nobody supplied, now that the mode is known.
     #
@@ -4172,6 +4250,9 @@ do_site_create() {
     # the finished site records it as the place its upgrades come from.
     if [ -n "$ADMIN_EMAIL" ]; then
         export JOINERY_ADMIN_EMAIL="$ADMIN_EMAIL"
+    fi
+    if [ -n "$OUTBOUND_NOTICE_GB" ]; then
+        export JOINERY_OUTBOUND_NOTICE_GB="$OUTBOUND_NOTICE_GB"
     fi
     export UPGRADE_SERVER
 
@@ -4490,7 +4571,7 @@ do_site_docker() {
     fi
     # A limit given on the command line wins; one not given is the spec's, and
     # a new site (no spec) gets the default process ceiling.
-    local SPEC_FOREIGN=""
+    local SPEC_FOREIGN="" SPEC_OUTBOUND=""
     if run_spec_exists "$SITENAME"; then
         docker inspect "$SITENAME" > /dev/null 2>&1 \
             || print_info "${SITENAME} has a run spec but no container; its limits apply: $(run_spec_path "$SITENAME")"
@@ -4498,6 +4579,7 @@ do_site_docker() {
         [ "$CONTAINER_CPUS_GIVEN" -eq 1 ] || CONTAINER_CPUS="$(run_spec_get "$SITENAME" cpus)"
         [ "$CONTAINER_PIDS_GIVEN" -eq 1 ] || CONTAINER_PIDS="$(run_spec_get "$SITENAME" pids_limit)"
         SPEC_FOREIGN="$(run_spec_foreign_lines "$SITENAME")"
+        SPEC_OUTBOUND="$(run_spec_outbound_lines "$SITENAME")"
     elif [ "$CONTAINER_PIDS_GIVEN" -eq 0 ]; then
         CONTAINER_PIDS="$CONTAINER_PIDS_DEFAULT"
     fi
@@ -4535,6 +4617,16 @@ do_site_docker() {
     if [ "$CONTAINER_PIDS_GIVEN" -eq 1 ] && [ -n "$CONTAINER_PIDS" ] && [ "$CONTAINER_PIDS" -lt "$CONTAINER_PIDS_FLOOR" ]; then
         refuse_limit 1 pids-limit pids_limit "$CONTAINER_PIDS" "below ${CONTAINER_PIDS_FLOOR}: an idle site already runs 54 to 75 processes and threads, so it would not start"
     fi
+    # The site's own outbound figures (outbound_limits.sh, WP5): the spec's,
+    # with each one given on the command line in its place; default removes it.
+    local OB_FLAG OB_KEY OB_VAL
+    for OB_FLAG in "${OUTBOUND_FIGURE_ARGS[@]+"${OUTBOUND_FIGURE_ARGS[@]}"}"; do
+        OB_KEY="${OB_FLAG%%=*}"; OB_KEY="outbound_${OB_KEY#--}"; OB_KEY="${OB_KEY//-/_}"; OB_VAL="${OB_FLAG#*=}"
+        SPEC_OUTBOUND="$(grep -v "^${OB_KEY}=" <<< "$SPEC_OUTBOUND" || true)"
+        if [ "$OB_VAL" != default ]; then
+            if [ -n "$SPEC_OUTBOUND" ]; then SPEC_OUTBOUND="${SPEC_OUTBOUND}"$'\n'"${OB_KEY}=${OB_VAL}"; else SPEC_OUTBOUND="${OB_KEY}=${OB_VAL}"; fi
+        fi
+    done
     # (end of the limits check)
 
     # The site's own network (specs/node_outbound_and_transfer.md WP2): the
@@ -4922,7 +5014,8 @@ EOF
                 || print_warning "Not kept from the run spec: ${OLD_LINE}"
         done < "$(run_spec_path "$SITENAME")"
     fi
-    { printf '%s\n' "$RENDERED"; [ -z "$SPEC_FOREIGN" ] || printf '%s\n' "$SPEC_FOREIGN"; } \
+    [ -z "$SPEC_OUTBOUND" ] || print_info "Outbound figures of its own: $(printf '%s' "$SPEC_OUTBOUND" | sed 's/^outbound_//' | paste -sd ' ')"
+    { printf '%s\n' "$RENDERED"; [ -z "$SPEC_FOREIGN" ] || printf '%s\n' "$SPEC_FOREIGN"; [ -z "$SPEC_OUTBOUND" ] || printf '%s\n' "$SPEC_OUTBOUND"; } \
         | run_spec_write "$SITENAME" \
         || { print_error "Could not write ${SITENAME}'s run spec"; exit 1; }
     local RUN_ARGS=()
@@ -5450,6 +5543,11 @@ show_help() {
     echo "Docker and Server Command Options:"
     echo "  --no-outbound-limits   No limits on the connections sites open, and no"
     echo "                         UDP drop (sudo joinery-limits on turns them on)"
+    echo "  --outbound-ceiling=MBIT|off  The machine's speed ceiling per site (200)"
+    echo "  --outbound-conn-rate=N, --outbound-conn-burst=N, --outbound-open-conns=N"
+    echo "                         New connections a second (20), the burst above it"
+    echo "                         (100), and connections open at once (256). Later:"
+    echo "                         sudo joinery-limits ceiling 500, sudo joinery-limits show"
     echo ""
     echo "Site Command Options:"
     echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"

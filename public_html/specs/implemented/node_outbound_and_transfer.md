@@ -6,7 +6,9 @@
 scratch Linode). WP3 built 2026-10-06 (gates `outbound_limits`, `host_report`,
 `job_result_processor`; proven live on two scratch Linodes). WP4 built
 2026-10-06 (gate `outbound_limits`; proven live on two scratch Linodes). WP5
-not built. Every mechanism they rely on was tried by hand on two scratch Nanodes
+built 2026-10-06 (gates `outbound_limits`, `host_report`; tests
+`job_command_builder`, `job_result_processor`, `outbound_ceiling`; agent
+1.62.0); its live checks are in the live verification queue. Every mechanism they rely on was tried by hand on two scratch Nanodes
 on 2026-10-06; the results are in § Measured on scratch boxes and the work
 packages below. Split out of
 `site_outbound_limits`, which keeps what only a multi-tenant host needs (a
@@ -44,8 +46,8 @@ This spec gives every install:
 | Connection rate and UDP drop (WP3) | every install | a scanner crawls; floods and reflection attacks are gone |
 | Speed ceiling (WP4) | every install | a runaway site costs a bounded amount while someone looks |
 
-Our own nodes are the one exception: left unlimited, with a switch on the
-node page to turn the limits on (WP5).
+Every node starts with the limits on, our own included; the node page turns
+them off on a node that should run without them (WP5).
 
 No feature is switched off. Every limit leaves a site's real use — its
 owner's mail, calendar and Drive, its pages, its backups — untouched.
@@ -652,35 +654,41 @@ IPv4 / IPv6; HTB counts packet headers, so 200 on the wire reads about 190):
 
 ### WP5 — Where the figures live, and surviving reboots
 
-Already built with WP3:
-- the unit, its timer and the boot run;
-- the host file with its `enabled` key;
-- `--no-outbound-limits` and `joinery-limits on|off|status`;
-- the run from `install.sh site`, the move script and `remove_account.sh`.
+**Built 2026-10-06** (gates `outbound_limits` 147, `host_report`; tests
+`job_command_builder`, `job_result_processor`, `outbound_ceiling`; agent
+1.62.0). Not yet run on a real machine: the checks are in the live
+verification queue.
 
-WP5 adds the figures, the per-site lines in the run spec, the rest of the
-flags and commands, and the site setting.
+Already built with WP3: the unit, its timer and the boot run; the host file
+with its `enabled` key; `--no-outbound-limits` and `joinery-limits
+on|off|status`; the run from `install.sh site`, the move script and
+`remove_account.sh`.
 
 **A site can tighten its limits, never loosen them.** Anything the site's
 settings page can write, the site's own code can write too: a plugin running
 as `www-data` has the same database access. A ceiling the site could raise
 would be lifted by the very hacked plugin it exists to slow. So every
-loosening comes from outside the site, and the site's own setting only
-counts when it is lower.
+loosening comes from outside the site, and the site's own setting only counts
+when it is lower.
 
 **The highest figures live where only root writes,** at two levels:
 
-- **The machine's defaults,** in a host file (`/etc/joinery/outbound_limits.json`).
-  With no file, the unit's built-in defaults apply: 200 Mbit/s, 20 new
-  connections a second with bursts to 100, and 256 open at once.
-- **A site's own figures,** where its other caps are kept: a container
-  site's run spec, beside `--memory`, `--cpus` and `--pids-limit`, so a
-  rebuild, rebase or move keeps them; a bare-metal site's entry in the host
-  file. A site with none uses the machine's defaults.
+- **The machine's defaults,** in the host file
+  (`/etc/joinery/outbound_limits.json`: `ceiling_mbit`, a number or `"off"`;
+  `conn_rate`, `conn_burst`, `open_conns`; `set_by`). With none, the
+  built-in figures: 200 Mbit/s, 20 new connections a second with bursts to
+  100, and 256 open at once.
+- **A container site's own,** in its run spec beside `--memory`, `--cpus`
+  and `--pids-limit` (`outbound_ceiling`, `outbound_conn_rate`,
+  `outbound_conn_burst`, `outbound_open_conns`), so a rebuild, rebase or move
+  keeps them. A site with none uses the machine's. On bare metal every site
+  sends as the web server's user, so the machine's figures are the sites':
+  there is no per-site entry, and `install.sh site --bare-metal` refuses the
+  flags.
 
-**Every figure is settable at install time.** The flags are the same on
-`install.sh server`, `install.sh docker` (the machine's defaults, written to
-the host file) and `install.sh site` (that site's own figures):
+**Every figure is settable at install time,** with the same flags on
+`install.sh docker` and `install.sh server` (the machine's, written to the
+host file) and `install.sh site` (that container site's own):
 
 | Flag | Sets | Default |
 |---|---|---|
@@ -691,36 +699,40 @@ the host file) and `install.sh site` (that site's own figures):
 | `--no-outbound-limits` | every limit off, UDP drop included | — |
 
 `install.sh site` also takes `--outbound-notice-gb=N`, which seeds the site's
-monthly notice setting (WP1); it is a site setting, not a limit, so the
-machine-level commands do not take it. The flags are validated like
-`--memory`: a whole number, or `off` where offered, refused in plain words
+monthly notice setting (WP1). The flags are validated like `--memory`: a
+whole number, `off` where offered, or `default`, refused in plain words
 otherwise. An install with no flags gets every limit at its default, which is
 the point: an owner who never thinks about bandwidth is protected anyway.
 
 **After install,** `joinery-limits` changes the same figures without a
 reinstall: `sudo joinery-limits ceiling 500`, `sudo joinery-limits ceiling
-off --site=SITENAME`, `sudo joinery-limits show`. It writes the host file, or
-the site's run spec through the same path `install.sh site` uses, and runs
-the unit.
+off --site=SITENAME`, `sudo joinery-limits set --conn-rate=40 ...`, `sudo
+joinery-limits show`. It writes the host file, or the site's run spec through
+the helper `install.sh site` uses, and runs the unit.
 
 **Who sets them follows who pays the bill:**
 
 | Install | Who sets the figures |
 |---|---|
 | Self-hosted | the owner: install flags, then `joinery-limits` |
-| Managed by the plane, on our provider account | the plane, from plane settings in `plugins/server_manager/plugin.json`: it passes the flags when it provisions the node, and runs `joinery-limits` through the host agent when they change |
+| Managed by the plane | the plane: a machine it creates is installed with the figures in its provisioning settings (`plugins/server_manager/plugin.json`); afterwards the node page sets a machine's own, or one container site's, through the host agent |
 | Multi-tenant box | the plane, from the box's columns (`site_outbound_limits`), by the same two paths |
-| Our own nodes | provisioned with `--no-outbound-limits`; the node page's switch turns the limits on |
+
+Every node starts with the limits on, our own included (owner, 2026-10-06).
+The node page's switch shows what the machine has, as its host report says,
+and turns them off or on there. Nothing on the plane records whose node it
+is, and nothing changes a running machine's figures by itself: a change to
+the provisioning settings reaches new machines only.
 
 **The site's own setting**, declared in `settings.json`:
-`outbound_speed_ceiling_mbit` (default empty, meaning the host's figure).
-The unit applies whichever is lower, the host's figure or the site's, so a
-value written by the site's code can only slow the site down. The settings
-page shows the host's figure, lets the admin set a lower one, and to go
-higher shows the exact command to run on the server, with plain words on what
-it risks: a site that is hacked, or suddenly popular, can then run up the
-provider's bill as fast as the machine's link allows. On a managed or
-multi-tenant node it says the figure is set by the host instead.
+`outbound_speed_ceiling_mbit` (default empty, meaning the host's figure). The
+unit applies whichever is lower, the host's figure or the site's, so a value
+written by the site's code can only slow the site down. The settings page
+shows the host's figure and the one in force; to go higher it shows the exact
+command to run on the server, with plain words on what it risks: a site that
+is hacked, or suddenly popular, can then run up the provider's bill as fast
+as the machine's link allows. Where the plane set the figures, or someone
+else hosts the site, it says to ask whoever hosts it instead.
 
 The connection rate, burst and open-connection cap are not offered on the
 settings page: real use never meets them. An owner who knows why changes them
@@ -731,28 +743,68 @@ with the install flags or `joinery-limits`.
 behind it; the notice informs the owner, and the guards are the ceiling and
 the connection limits, which the site cannot loosen.
 
-**The unit.** One host-side unit writes the nftables table and the `tc`
-classes, from the host file, and from each site's run spec: its network and
-its own figures. It
-reads each site's own ceiling from the site (`docker exec` on a Docker host,
-the site directly on bare metal) and treats what comes back as untrusted: a
-whole number, or nothing, and applied only when lower than the host's figure.
-It runs:
+**The unit** reads each site's own ceiling from the site (`docker exec` as
+the web server's user on a Docker host, the same user on the host for bare
+metal) and treats what comes back as untrusted: a whole number, or nothing,
+and applied only when lower than the host's figure. A site cannot ask the
+host to run anything; the host reads. It runs at boot after Docker; whenever
+a site is created, rebuilt or removed; when `joinery-limits` or the plane
+changes the figures; and every five minutes on its timer, so an admin's lower
+ceiling takes effect within minutes. Before writing anything it checks that
+the host's resolver is a loopback address (WP3).
 
-- at boot after Docker;
-- whenever a site is created, rebuilt or removed (`install.sh site`, the
-  rebase and move scripts, `remove_account.sh`);
-- when the plane's figures change;
-- when `joinery-limits` changes the host file;
-- every five minutes on a timer, so an admin's lower ceiling takes effect
-  within minutes. A site cannot ask the host to run anything; the host
-  reads.
+**As built:**
 
-Before writing anything it checks that the host's resolver is a loopback
-address (WP3). It replaces its own table whole each time, so a run leaves no
-rule from a removed site behind. None of the table, the `tc` classes or the
-`ifb` devices survives a reboot, so the unit is what puts them back.
-`install.sh` installs it on every install, server or Docker.
+- `outbound_limits.sh` 1.2: `load_machine_figures` (the host file, a figure
+  that is not one passed over with a warning), `site_figures` (a run spec's
+  own, else the machine's), the site's own ceiling read with
+  `utils/outbound_site_ceiling.php` (`container_own_ceiling`,
+  `bare_own_ceiling`, the lowest of the machine's bare-metal sites) and
+  lowered into it (`lower_ceiling`). Each site's chain carries its own
+  figures; each `ifb`'s class its own ceiling (the shaped list records
+  `DEV DIR IFB MBIT`, and a changed figure changes the class in place); a
+  site whose own ceiling is off has no `ifb` and keeps its connection limits.
+- Every run tells every site its outcome in `/run/joinery/outbound_limits.site`
+  (inside its container through `docker exec -u root`; on the host for bare
+  metal): `state` (`on`, `off`, `refused`, `ceiling_failed`, or `uncovered`
+  for a site not on a network of its own), `host_ceiling_mbit`,
+  `ceiling_mbit`, `set_by`. The file survives the container's restarts, so
+  an outcome left untold would show a ceiling long gone (review B1). A site
+  is told after the ceiling is put in force, not before. `OutboundCeiling`
+  words it beside the setting on the settings page.
+- New commands: `set`, `ceiling`, `conn-rate`, `conn-burst`, `open-conns`
+  (each with `--site=` and, from the plane, `--by=plane`; `default` removes a
+  figure), `show`, and `refresh`. A change by hand clears `set_by`.
+- The status file adds `conn_rate`, `conn_burst`, `open_conns`, `set_by`,
+  `web_ceiling_mbit` and `site_figures`; `host_report.sh` 1.12 carries them
+  as `figures`, `web_ceiling_mbit` and `sites`, and the plane keeps them
+  (`JobResultProcessor` 1.63).
+- The installed copy follows each release: `install` copies the run spec
+  helper beside it (`/usr/local/lib/joinery-limits/`), and host housekeeping
+  1.15 runs `refresh` on every converge where the unit exists, which rewrites
+  the copies and runs the unit only when its own `# Version:`, or the
+  helper's, is newer than the installed copy's. Only forward: a bare-metal machine runs housekeeping
+  from each site's tree, and two sites at different releases would otherwise
+  swap the copy on every converge; a figure set from an older bundle does not
+  take a newer copy back either (review B3). Before this, nothing
+  carried a newer `outbound_limits.sh` to a machine already installed; WP4's
+  ceiling reached a running machine only through a reinstall.
+- `install.sh` 3.03: the flags (`consume_outbound_flag`), the site's figures
+  kept across a rebuild (`run_spec_outbound_lines`, `_site_run_spec.sh`
+  1.5), `--outbound-notice-gb` through `JOINERY_OUTBOUND_NOTICE_GB`
+  (`_site_init.sh` 3.11).
+- A machine the plane creates records that the plane set its figures:
+  `JobCommandBuilder::outbound_install_flags()` always adds
+  `--outbound-set-by=plane`, which install.sh passes on as `--by=plane`, and
+  `install` writes `set_by` even with no figure of its own (review B2).
+  Otherwise the site's settings page would tell its admin to run a command
+  on a machine they cannot reach.
+- The agent's `outbound_limits` word (1.62.0, a machine word running the
+  shipped script with argv composed from validated params), in the host
+  support bundle with the helper it sources; `JobCommandBuilder` 1.101
+  (`build_outbound_limits`, `outbound_install_flags`); the node page's
+  Machine tile (overview 1.49) shows the figures, **Turn limits off/on** and
+  **Set the figures**.
 
 ## Measured on scratch boxes, 2026-10-06
 
@@ -823,14 +875,16 @@ data" promise is).
 | a machine uses three times its daily allowance in a day (driver mocked) | the incident opens on the node that speaks for the machine and names the others (`machine_transfer`) |
 | a machine passes its proportional allowance, then its full one (driver mocked) | on pace, then the allowance passed, critical (`machine_transfer`) |
 | a self-hosted site sends past its monthly notice figure, across a container restart | the month's total survives the restart; the dashboard notice shows and one email goes to its admins (`outbound_transfer_meter`, fake counters; a real restart is in the live verification queue) |
-| a self-hosted admin sets the ceiling to 50 | within five minutes the ceiling is 50 Mbit/s |
-| the site's code writes 0, then 10000, then text, into its ceiling setting | the ceiling stays at the host's 200 Mbit/s each time |
-| the owner runs `sudo joinery-limits ceiling 500`, then `off` | the ceiling is 500 Mbit/s at once, then gone; the settings page shows each |
-| a managed site's admin opens the ceiling setting | it shows the plane's figure as set by the host; a lower figure applies, a higher one changes nothing |
+| a self-hosted admin sets the ceiling to 50 | within five minutes the ceiling is 50 Mbit/s (`outbound_limits`, stubbed; live in the queue) |
+| the site's code writes 0, then 10000, then text, into its ceiling setting | the ceiling stays at the host's 200 Mbit/s each time (`outbound_limits`) |
+| the owner runs `sudo joinery-limits ceiling 500`, then `off` | the ceiling is 500 Mbit/s at once, then gone; the settings page shows each (`outbound_limits`, `outbound_ceiling`; live in the queue) |
+| a managed site's admin opens the ceiling setting | it shows the plane's figure as set by the host; a lower figure applies, a higher one changes nothing (`outbound_ceiling`; live in the queue) |
+| the node page turns a machine's limits off, then sets a site's ceiling | the job runs the word; the next host report shows them off, then the site's figure (`job_command_builder`; live in the queue) |
+| a machine installed with an older `outbound_limits.sh` is upgraded | host housekeeping brings the installed copy up to the release and runs the unit (`outbound_limits`; live in the queue) |
 | a fresh self-hosted install, never configured | the connection rate, UDP drop and 200 Mbit/s ceiling are all in force |
-| `install.sh docker --outbound-ceiling=300`, then `install.sh site a` and `install.sh site b --outbound-ceiling=50` | site a at 300, site b at 50; b's figure is in its run spec and survives a rebuild and a rebase |
+| `install.sh docker --outbound-ceiling=300`, then `install.sh site a` and `install.sh site b --outbound-ceiling=50` | site a at 300, site b at 50; b's figure is in its run spec and survives a rebuild and a rebase (flags and run spec in `outbound_limits`; live in the queue) |
 | `install.sh server --no-outbound-limits` | no limit and no UDP drop on the machine |
-| `--outbound-ceiling=fast` or `--outbound-conn-rate=-1` | refused in plain words; nothing installed |
+| `--outbound-ceiling=fast` or `--outbound-conn-rate=-1` | refused in plain words; nothing installed (`outbound_limits`) |
 | `install.sh site c --outbound-notice-gb=500` | the site's notice setting is 500 |
 | `sudo joinery-limits show` on each of the above | prints each site's figures and where each came from |
 | a container site connects out over IPv6 | it leaves from the machine's IPv6 address (seen live, WP2) |
@@ -860,5 +914,5 @@ data" promise is).
   `outbound_monthly_notice_gb`; `docs/installation.md`: the `--outbound-*`
   install flags, `joinery-limits`, and the host file.
 - `plugins/server_manager/docs/overview.md`: the per-machine transfer watch
-  and its alerts, the plane's figures, the drop counter, and the switch for
-  our own nodes.
+  and its alerts, the plane's figures, the drop counter, and the node page's
+  switch.

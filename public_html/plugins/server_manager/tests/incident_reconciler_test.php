@@ -33,10 +33,15 @@
  *     an agent's case too, saying so; a live node's are left alone;
  *   - a node that goes takes its incidents and their timelines with it, by
  *     its model or (at the next pass) by raw SQL, and its deletion waits for
- *     a running pass.
+ *     a running pass;
+ *   - a full pass leaves a test's fixture nodes alone, and a harness process
+ *     rings no bell unless its suite stands in; every node a test names
+ *     carries the fixture prefix.
  *
  * Run: php plugins/server_manager/tests/incident_reconciler_test.php
  *
+ * @version 1.5 - a full pass leaves fixture nodes alone, removed nodes kept in it; fixture node names carry the
+ *                prefix, and outside a test process no node takes it
  * @version 1.4 - a cleared incident nobody had settled is resolved (settle_cleared)
  * @version 1.3 - an unproven fix goes back to new after a day (return_unproven); Looking is gone
  * @version 1.2 - a removed node's incidents, of any source, are cleared
@@ -50,7 +55,7 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 $node = new ManagedNode(NULL);
-$node->set('mgn_name', 'Reconciler test');
+$node->set('mgn_name', 'HarnessTest reconciler');
 $node->set('mgn_slug', 'harnesstest-rec-' . bin2hex(random_bytes(3)));
 $node->set('mgn_host', '192.0.2.43');
 $node->set('mgn_ssh_user', 'root');
@@ -70,6 +75,7 @@ $node_id = (int)$node->key;
 $main = DbConnector::get_instance()->get_db_link();
 $main->query('SELECT pg_advisory_lock(' . IncidentReconciler::LOCK_KEY . ')');
 
+$booted_dispatch = IncidentReconciler::$dispatch;
 $signals = array();
 IncidentReconciler::$dispatch = function ($signal, $payload) use (&$signals) { $signals[] = array($signal, $payload); };
 
@@ -336,7 +342,7 @@ section('A node that goes takes its incidents and their timelines with it (site_
 
 $down_node = function (string $tag) use ($site_down) {
 	$n = new ManagedNode(NULL);
-	$n->set('mgn_name', 'Reconciler test ' . $tag);
+	$n->set('mgn_name', 'HarnessTest reconciler ' . $tag);
 	$n->set('mgn_slug', 'harnesstest-rec-' . $tag . '-' . bin2hex(random_bytes(3)));
 	$n->set('mgn_host', '192.0.2.44');
 	$n->set('mgn_ssh_user', 'root');
@@ -411,7 +417,7 @@ $other = new PDO('pgsql:host=localhost port=5432 dbname=' . $settings->get_setti
 	$settings->get_setting('dbusername'), $settings->get_setting('dbpassword'));
 $other->query('SELECT pg_advisory_lock(' . IncidentReconciler::LOCK_KEY . ')');
 $waits = new ManagedNode(NULL);
-$waits->set('mgn_name', 'Reconciler test waits');
+$waits->set('mgn_name', 'HarnessTest reconciler waits');
 $waits->set('mgn_slug', 'harnesstest-rec-waits-' . bin2hex(random_bytes(3)));
 $waits->set('mgn_host', '192.0.2.45');
 $waits->set('mgn_ssh_user', 'root');
@@ -435,5 +441,54 @@ $q = $main->prepare('SELECT count(*) FROM mgn_managed_nodes WHERE mgn_managed_no
 $q->execute(array((int)$waits->key));
 check((int)$q->fetchColumn() === 0, 'and goes through once the pass is done');
 
-IncidentReconciler::$dispatch = null;
+section('A full pass leaves a test\'s fixture nodes alone');
+check($booted_dispatch !== null, 'A harness process rings no superadmin\'s bell until its suite stands in');
+// Disabled, so the scheduled pass opens nothing on it while it exists.
+$plain = new ManagedNode(NULL);
+$plain->set('mgn_name', 'Reconciler plain ' . bin2hex(random_bytes(3)));
+$plain->set('mgn_slug', 'harnesstest-rec-plain-' . bin2hex(random_bytes(3)));
+$plain->set('mgn_host', '192.0.2.46');
+$plain->set('mgn_ssh_user', 'root');
+$plain->set('mgn_enabled', false);
+$plain->save();
+$plain->load();
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $plain->key);
+$full = IncidentReconciler::full_pass_nodes();
+check(!in_array($node_id, $full, true) && in_array((int)$plain->key, $full, true),
+	'A node named HarnessTest is outside a full pass; any other is in it');
+$plain->soft_delete();
+check(in_array((int)$plain->key, IncidentReconciler::full_pass_nodes(), true),
+	'A removed node stays in a full pass, so its cleared incidents are still settled');
+check(ManagedNode::is_fixture_name('HarnessTest x') && !ManagedNode::is_fixture_name('harnesstest x')
+	&& !ManagedNode::is_fixture_name('Site HarnessTest'), 'A fixture name starts with the prefix exactly');
+
+// Outside a test process no node takes the name: nothing would watch it, and
+// the harness deletes such rows. A plain PHP process stands for an operator.
+$probe_name = 'HarnessTest operator ' . bin2hex(random_bytes(3));
+$probe = PHP_BINARY . ' -r ' . escapeshellarg('require ' . var_export(PathHelper::getIncludePath('includes/PathHelper.php'), true) . ';'
+	. ' $n = new ManagedNode(NULL); $n->set("mgn_name", ' . var_export($probe_name, true) . '); $n->set("mgn_slug", "harnesstest-op-' . bin2hex(random_bytes(3)) . '");'
+	. ' $n->set("mgn_host", "192.0.2.47"); $n->set("mgn_ssh_user", "root");'
+	. ' try { $n->save(); echo "saved ", $n->key; } catch (Throwable $e) { echo "refused: ", $e->getMessage(); }') . ' 2>&1';
+$probe_out = (string)shell_exec($probe);
+$probe_rows = $main->prepare('SELECT mgn_managed_node_id FROM mgn_managed_nodes WHERE mgn_name = ?');
+$probe_rows->execute(array($probe_name));
+foreach ($probe_rows->fetchAll(PDO::FETCH_COLUMN) as $leaked) { harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', (int)$leaked); }
+check(strpos($probe_out, "refused: A node's name may not start 'HarnessTest '") !== false,
+	'Outside a test process a node is not created with a fixture name', $probe_out);
+
+// Every node a test saves is named with the prefix, or the scheduled pass
+// rings every superadmin about it and a killed run's leftover is never reclaimed.
+$root = PathHelper::getIncludePath('');
+$unnamed = array();
+$files = array_merge(glob($root . 'tests/*/*.php'), glob($root . 'tests/*/*/*.php'), glob($root . 'plugins/*/tests/*.php'));
+foreach ($files as $file) {
+	foreach (file($file) as $i => $line) {
+		if (preg_match("/(set\\('mgn_name',|'mgn_name' => )/", $line, $m) && strpos($line, 'HarnessTest ') === false
+			&& !($file === __FILE__ && strpos($line, 'Reconciler plain') !== false)) {
+			$unnamed[] = substr($file, strlen($root)) . ':' . ($i + 1);
+		}
+	}
+}
+check(count($unnamed) === 0, 'Every node a test names starts HarnessTest', implode(', ', $unnamed));
+
 harness_finish();

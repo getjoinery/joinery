@@ -440,7 +440,7 @@ Two separate things, which the installer keeps in agreement:
 
 ## Outbound Limits
 
-Every install limits what its sites can open toward the outside, so a hacked plugin cannot turn the server into a scanner or a flood. Real use never meets these limits. For each site:
+Every install limits what its sites can open toward the outside, so a hacked plugin cannot turn the server into a scanner or a flood. Real use never meets these limits. For each site, at the built-in figures (see [The figures](#the-figures) to change them):
 
 - **New connections:** 20 a second, in bursts of up to 100. An opening over the rate is dropped, and the site's own TCP sends it again a second later, so a short burst is slowed rather than refused. Only a sustained one fails.
 - **Connections open at once:** 256.
@@ -467,11 +467,51 @@ The limits depend on the host's resolver being a loopback address, which it is o
 
 ```bash
 sudo joinery-limits status   # what is in force, for which sites, and each one's drops
+sudo joinery-limits show     # each figure, the machine's and each site's
 sudo joinery-limits off      # every limit off on this machine, UDP drop and speed ceiling included
 sudo joinery-limits on
 ```
 
 `--no-outbound-limits` on `install.sh docker` or `install.sh server` installs them off. The choice lives in `/etc/joinery/outbound_limits.json` (`"enabled": false`), which only root writes. Running the installer again keeps it.
+
+The installed `joinery-limits` is a copy of `outbound_limits.sh`. Host housekeeping, which runs on every converge, brings the copy up to the release on the machine when that release's is newer, and runs the unit then, so an upgrade carries the limits' new behaviour without a reinstall. It never takes a copy back to an older release.
+
+### The figures
+
+The figures live where only root writes, at two levels:
+
+- **The machine's,** in `/etc/joinery/outbound_limits.json`: `ceiling_mbit` (a number, or `"off"`), `conn_rate`, `conn_burst` and `open_conns`. A figure the file does not hold is the built-in one.
+- **A container site's own,** in its run spec beside `--memory` (`outbound_ceiling`, `outbound_conn_rate`, `outbound_conn_burst`, `outbound_open_conns`), so a rebuild, rebase or move keeps them. A site with none has the machine's. On bare metal every site sends as the web server's user, so the machine's figures are the sites'.
+
+A figure that is not one (a hand edit) is passed over for the one below it, with a warning in the unit's journal.
+
+Set them at install time:
+
+| Flag | Sets | Built in |
+|---|---|---|
+| `--outbound-ceiling=MBIT` or `=off` | the speed ceiling | 200 |
+| `--outbound-conn-rate=N` | new connections a second | 20 |
+| `--outbound-conn-burst=N` | the burst above it | 100 |
+| `--outbound-open-conns=N` | connections open at once | 256 |
+
+On `install.sh docker` and `install.sh server` they are the machine's. On `install.sh site` they are that container site's own, and a rebuild without the flag keeps the figure; `default` takes one back to the machine's. A bare-metal site refuses them. `install.sh site` also takes `--outbound-notice-gb=N`, the first figure of the site's monthly transfer notice (`outbound_monthly_notice_gb`), a setting the site's admin can change.
+
+Change them later without a reinstall:
+
+```bash
+sudo joinery-limits ceiling 500                  # the machine's ceiling
+sudo joinery-limits ceiling off --site=mysite    # one container site's
+sudo joinery-limits conn-rate default            # back to the built-in figure
+sudo joinery-limits set --ceiling=300 --open-conns=512 --site=mysite
+```
+
+Each writes the host file, or the site's run spec through the same helper `install.sh site` uses, and runs the unit.
+
+**A site can lower its speed ceiling, never raise it.** Anything the site's settings page can write, the site's own code can write too, so a ceiling the site could raise would be lifted by the hacked plugin it exists to slow. The site's own setting, `outbound_speed_ceiling_mbit` (Settings, Outbound transfer), counts only when it is lower than root's figure. On every run the unit reads it from the site as the web server's user (inside the container, or on the host for a bare-metal site) with `utils/outbound_site_ceiling.php`, and takes only a whole number from what comes back. On bare metal the lowest of the machine's sites holds them all, since they share one ceiling. Every run then tells each site its outcome in `/run/joinery/outbound_limits.site` (on, off, not in force, the ceiling refused, or not covered because the site is not on a network of its own) and the figures in force, and the settings page shows them. To go higher it shows the command to run on the server and what that risks. Where someone else hosts the site, it says to ask them.
+
+The connection figures are not on the settings page. Real use never meets them; an owner who knows why changes them with the flags or `joinery-limits`.
+
+On a machine its management node manages, the node page turns the limits on or off and sets the figures, the machine's or one container site's, through the host agent's `outbound_limits` word. A machine the management node creates is installed with the figures in its provisioning settings, and with `--outbound-set-by=plane`, so its sites' settings pages say the figures are set by whoever hosts them.
 
 Every drop counts against the site that sent it. The host report carries each site's count, and the node page shows a site whose limits dropped anything since the last report in amber, because many dropped connections is how scanning shows. Counts start again from zero when the machine reboots.
 

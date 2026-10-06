@@ -6,7 +6,8 @@
  * a reaction that arrived from another instance over Joinery Direct has no local
  * user row and is attributed to the sending address instead.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - msr_create_time is stamped when the row is made; it was left empty
  */
 
 
@@ -43,7 +44,7 @@ class MessageReaction extends SystemBase {
 		'msr_usr_user_id'    => array('type' => 'int4', 'is_nullable' => true),
 		'msr_remote_address' => array('type' => 'varchar(255)', 'is_nullable' => true),
 		'msr_emoji'          => array('type' => 'varchar(32)', 'is_nullable' => false),
-		'msr_create_time'    => array('type' => 'timestamp(6)'),
+		'msr_create_time'    => array('type' => 'timestamp(6)', 'default' => 'now()'),
 	);
 
 	/**

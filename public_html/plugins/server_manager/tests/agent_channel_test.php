@@ -59,7 +59,7 @@ $db = DbConnector::get_instance()->get_db_link();
 /** A throwaway node, permanently removed at the end. */
 function agent_channel_node($slug) {
 	$node = new ManagedNode(NULL);
-	$node->set('mgn_name', 'Agent channel test ' . $slug);
+	$node->set('mgn_name', 'HarnessTest agent channel ' . $slug);
 	$node->set('mgn_slug', $slug);
 	$node->set('mgn_host', '127.0.0.1');
 	$node->set('mgn_uptime_enabled', false);

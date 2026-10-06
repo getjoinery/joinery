@@ -4,6 +4,10 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.15 - On a machine with the outbound limits installed, every run brings the installed
+#                joinery-limits up to this release's outbound_limits.sh (and the run spec helper
+#                beside it), and runs the unit when it changed: an upgrade delivers the limits'
+#                new behaviour without a reinstall (specs/node_outbound_and_transfer.md WP5).
 # Version: 1.14 - On a host whose proxy has the default site (proxy_default_site.sh), every run
 #                installs it again, so it stays the default for a name no site claims: Ubuntu's
 #                000-default turned back on is turned off, and a site that loads ahead of it
@@ -880,6 +884,22 @@ if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${APACHE_DIR}/sites-
         printf '%s\n' "${PDS_OUT}" | grep -v -e '^default site: unchanged' -e ': answers$' | sed 's/^/housekeeping: /'
     else
         warn "the proxy's default site: $(printf '%s' "${PDS_OUT}" | tail -3 | tr '\n' ' ')"
+        FAILED=1
+    fi
+fi
+
+# --- 10. The outbound limits run this release's script ------------------------
+# install.sh installs the limits (outbound_limits.sh) as a copy in
+# /usr/local/sbin, run by the joinery-limits unit; nothing else would bring that
+# copy up to a newer release. On a machine that has the unit, every run
+# rewrites the copy where it differs and runs the unit then (refresh). A
+# machine without the unit is left alone: installing the limits is install.sh's.
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${FS_ROOT}/etc/systemd/system/joinery-limits.service" \
+        && -f "${SCRIPT_DIR}/outbound_limits.sh" ]]; then
+    if OBL_OUT="$(bash "${SCRIPT_DIR}/outbound_limits.sh" refresh 2>&1)"; then
+        printf '%s\n' "${OBL_OUT}" | grep -v 'installed copy current$' | sed '/^$/d; s/^/housekeeping: /'
+    else
+        warn "the outbound limits: $(printf '%s' "${OBL_OUT}" | tail -3 | tr '\n' ' ')"
         FAILED=1
     fi
 fi

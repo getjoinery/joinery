@@ -57,7 +57,7 @@ if (session_status() === PHP_SESSION_NONE) {
 section('The table is here and a case round-trips');
 
 $node = new ManagedNode(NULL);
-$node->set('mgn_name', 'Case intake test');
+$node->set('mgn_name', 'HarnessTest case intake');
 $node->set('mgn_slug', 'harnesstest-case-' . bin2hex(random_bytes(3)));
 $node->set('mgn_host', '192.0.2.41');
 $node->set('mgn_ssh_user', 'root');

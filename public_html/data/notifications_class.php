@@ -4,7 +4,8 @@
  *
  * In-app notification system for user-facing events.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - ntf_create_time is stamped when the row is made; it was left empty
  */
 
 class NotificationException extends SystemBaseException {}
@@ -73,7 +74,7 @@ class Notification extends SystemBase {
 		'ntf_is_read'               => array('type' => 'bool', 'default' => false),
 		'ntf_read_time'             => array('type' => 'timestamp(6)'),
 		'ntf_source_usr_user_id'    => array('type' => 'int4'),
-		'ntf_create_time'           => array('type' => 'timestamp(6)'),
+		'ntf_create_time'           => array('type' => 'timestamp(6)', 'default' => 'now()'),
 		'ntf_delete_time'           => array('type' => 'timestamp(6)'),
 	);
 

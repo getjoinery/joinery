@@ -54,7 +54,7 @@ const RESTORE_OPS = ['restore_database', 'restore_project', 'restore_chain'];
  */
 function rpg_node(array $fields = array()) {
 	$node = new ManagedNode(NULL);
-	$node->set('mgn_name', 'Restore Gate Node');
+	$node->set('mgn_name', 'HarnessTest restore gate node');
 	$node->set('mgn_slug', 'restore-gate');
 	$node->set('mgn_host', '192.0.2.10');
 	$node->set('mgn_ssh_user', 'root');

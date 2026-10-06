@@ -14,7 +14,8 @@
  * adding a member wraps the key to them, removing a member deletes their row,
  * and a vault key rotation re-wraps their rows to the new public key.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - ckg_create_time is stamped when the row is made; it was left empty
  */
 
 
@@ -46,7 +47,7 @@ class ConversationKeyGrant extends SystemBase {
 		// The member's VAULT key generation at wrap time. A key rotation drains
 		// exactly the rows sitting on the generation it is retiring.
 		'ckg_key_generation'      => array('type' => 'int4', 'is_nullable' => false, 'default' => 0),
-		'ckg_create_time'         => array('type' => 'timestamp(6)'),
+		'ckg_create_time'         => array('type' => 'timestamp(6)', 'default' => 'now()'),
 	);
 
 	/**

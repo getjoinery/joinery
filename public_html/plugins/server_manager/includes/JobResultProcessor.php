@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.63 - host reports keep the outbound limits' figures in force (host_report 1.12): the machine's,
+ *                 who set them, the web server's user's ceiling and each limited site's
  * @version 1.62 - a site row's held state follows its host (ManagedNode::fold_container_holds): from every host
  *                 report, and from a hold_container result, which also updates the host's last report
  *                 (specs/multi_tenant_docker_hosts.md WP7)
@@ -3424,8 +3426,10 @@ HTML;
 	/**
 	 * The machine's outbound connection limits (host_report 1.11): their state,
 	 * the reason code where they were refused, since when their counters run,
-	 * and the web server's user's drops on a bare-metal machine. The plane's
-	 * own figure, dropped_since_last, is kept when a stored report is read back.
+	 * and the web server's user's drops on a bare-metal machine. While on, the
+	 * figures in force (host_report 1.12): the machine's (figures), the web
+	 * server's user's ceiling, and each limited site's. The plane's own figure,
+	 * dropped_since_last, is kept when a stored report is read back.
 	 */
 	private static function host_report_outbound_limits($v) {
 		if (!is_array($v)) { return 'unknown'; }
@@ -3443,10 +3447,30 @@ HTML;
 			'since'            => ($state === 'on') ? self::host_report_count($v['since'] ?? null) : null,
 			'web_user_dropped' => self::host_report_limit($v['web_user_dropped'] ?? null),
 		];
+		if ($state === 'on' && is_array($v['figures'] ?? null)) {
+			$out['figures'] = self::host_report_limit_figures($v['figures']);
+			$out['figures']['set_by'] = (($v['figures']['set_by'] ?? '') === 'plane') ? 'plane' : '';
+			$out['web_ceiling_mbit'] = self::host_report_limit($v['web_ceiling_mbit'] ?? null);
+			$out['sites'] = [];
+			foreach (array_slice((array)($v['sites'] ?? []), 0, self::HOST_REPORT_MAX_LIST, true) as $site => $f) {
+				$name = self::host_report_name((string)$site);
+				if ($name !== '' && is_array($f)) { $out['sites'][$name] = self::host_report_limit_figures($f); }
+			}
+		}
 		if (is_int($v['dropped_since_last'] ?? null) && $v['dropped_since_last'] >= 0) {
 			$out['dropped_since_last'] = $v['dropped_since_last'];
 		}
 		return $out;
+	}
+
+	/** One sender's outbound figures: a ceiling in Mbit/s (or none), and the three connection figures. */
+	private static function host_report_limit_figures(array $f) {
+		return [
+			'ceiling_mbit' => self::host_report_limit($f['ceiling_mbit'] ?? null),
+			'conn_rate'    => self::host_report_count($f['conn_rate'] ?? null),
+			'conn_burst'   => self::host_report_count($f['conn_burst'] ?? null),
+			'open_conns'   => self::host_report_count($f['open_conns'] ?? null),
+		];
 	}
 
 	/** A ceiling: a count, the string none (no ceiling set), or unknown. */

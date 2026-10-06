@@ -56,7 +56,7 @@ $node_id = null;
 try {
 	// A node with full SSH config so the accept path's builder can succeed.
 	$n = new ManagedNode(NULL);
-	$n->set('mgn_name', 'zz-csrf-test-node');
+	$n->set('mgn_name', 'HarnessTest zz-csrf-test-node');
 	$n->set('mgn_slug', 'zz-csrf-test-' . getmypid());
 	$n->set('mgn_host', '203.0.113.20');
 	$n->set('mgn_ssh_user', 'root');

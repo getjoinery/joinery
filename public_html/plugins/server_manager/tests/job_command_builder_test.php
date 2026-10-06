@@ -1594,6 +1594,53 @@ foreach (array(array('', 'show'), array('Starter7', 'show'), array('../x', 'show
 	check($s_msg !== '', "the envelope refuses '{$bad[0]}' '{$bad[1]}'");
 }
 
+// outbound_limits: a machine's outbound limits on or off, or their figures
+// set, the machine's or one container site's (node_outbound_and_transfer WP5).
+list($host_ol, $host_ol_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,outbound_limits'));
+foreach (array('on', 'off') as $act) {
+	$oenv = JobCommandBuilder::build_outbound_limits($host_ol_node, array('action' => $act, 'ceiling' => ''));
+	check(($oenv['primitive'] ?? '') === 'outbound_limits' && ($oenv['params'] ?? null) === array('action' => $act),
+		"outbound_limits {$act} carries only the action", json_encode($oenv));
+}
+$oenv = JobCommandBuilder::build_outbound_limits($host_ol_node, array('action' => 'set', 'ceiling' => ' 500 ',
+	'conn_rate' => '', 'conn_burst' => 'default', 'open_conns' => '512', 'site' => 'starter7'));
+check(($oenv['params'] ?? null) === array('action' => 'set', 'ceiling' => '500', 'conn_burst' => 'default', 'open_conns' => '512', 'site' => 'starter7'),
+	'outbound_limits set carries the figures given, trimmed, an empty one left out, and the site', json_encode($oenv));
+$oenv = JobCommandBuilder::build_outbound_limits($host_ol_node, array('action' => 'set', 'ceiling' => 'off'));
+check(($oenv['params'] ?? null) === array('action' => 'set', 'ceiling' => 'off'), 'a ceiling may be off, for the machine', json_encode($oenv));
+list($host_nool, $host_nool_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status'));
+$o_msg = '';
+try { JobCommandBuilder::build_outbound_limits($host_nool_node, array('action' => 'off')); } catch (Exception $e) { $o_msg = $e->getMessage(); }
+check(strpos($o_msg, 'outbound_limits') !== false, 'an agent without outbound_limits refuses, naming it', $o_msg);
+foreach (array(array('action' => 'toggle'), array('action' => 'set'), array('action' => 'set', 'ceiling' => '', 'site' => 'starter7'),
+		array('action' => 'set', 'ceiling' => '0'), array('action' => 'set', 'ceiling' => '200mbit'), array('action' => 'set', 'conn_rate' => 'off'),
+		array('action' => 'set', 'open_conns' => '1;reboot'), array('action' => 'set', 'ceiling' => '200', 'site' => '../x'),
+		array('action' => 'set', 'ceiling' => '200', 'site' => 'Starter7')) as $bad) {
+	$o_msg = '';
+	try { JobCommandBuilder::build_outbound_limits_primitive($bad); } catch (Exception $e) { $o_msg = $e->getMessage(); }
+	check($o_msg !== '', 'the envelope refuses ' . json_encode($bad));
+}
+// A machine this plane creates is installed with the plane's figures.
+harness_set_setting_mem('server_manager_outbound_ceiling_mbit', '150');
+harness_set_setting_mem('server_manager_outbound_conn_rate', '30');
+harness_set_setting_mem('server_manager_outbound_conn_burst', ' ');
+harness_set_setting_mem('server_manager_outbound_open_conns', 'lots');
+check(JobCommandBuilder::outbound_install_flags() === ' --outbound-ceiling=150 --outbound-conn-rate=30 --outbound-set-by=plane',
+	'the plane\'s figures become install.sh flags, saying the plane set them; an empty one or one that is not a figure is left out', JobCommandBuilder::outbound_install_flags());
+$ol_metal_cmd = jcb_ssh_steps(JobCommandBuilder::build_install_node($metal_target, array(
+	'mode' => 'fresh', 'sitename' => 'metalsite', 'domain' => 'metal.example.com', 'docker_mode' => 'bare-metal')))[0]['cmd'];
+check(strpos($ol_metal_cmd, './install.sh -y -q server --outbound-ceiling=150 --outbound-conn-rate=30 --outbound-set-by=plane;') !== false,
+	'install.sh server gets them', $ol_metal_cmd);
+$ol_boot_cmd = implode("\n", array_column(jcb_ssh_steps(JobCommandBuilder::build_install_node($boot_target, array(
+	'mode' => 'bare', 'sitename' => 'olboot', 'docker_mode' => 'docker'))), 'cmd'));
+check(preg_match("#install\\.sh -y -q docker --management-node=\\S+ --node-name='olboot' --outbound-ceiling=150 --outbound-conn-rate=30 --outbound-set-by=plane#", $ol_boot_cmd) === 1,
+	'and install.sh docker', $ol_boot_cmd);
+harness_set_setting_mem('server_manager_outbound_ceiling_mbit', 'off');
+check(JobCommandBuilder::outbound_install_flags() === ' --outbound-ceiling=off --outbound-conn-rate=30 --outbound-set-by=plane', 'a ceiling of off is passed as off');
+foreach (array('server_manager_outbound_ceiling_mbit', 'server_manager_outbound_conn_rate', 'server_manager_outbound_conn_burst', 'server_manager_outbound_open_conns') as $ol_name) {
+	harness_set_setting_mem($ol_name, '');
+}
+
 // moved_site_check: the same proof, removing nothing, addressed to the host
 // like the removal. Only for the old machine of a switch-over.
 list($host_mc, $host_mc_node) = jcb_host_with_agent(array(

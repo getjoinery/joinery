@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.11 - JOINERY_OUTBOUND_NOTICE_GB (install.sh site --outbound-notice-gb) is the
+#                 monthly outbound notice's figure, outbound_monthly_notice_gb
+#                 (specs/node_outbound_and_transfer.md WP5)
 # VERSION: 3.10 - The Clone path is gone: no --clone-from, --clone-key or JOINERY_CLONE_KEY, and
 #                 no clone block; a site moves to a new server by a site copy (specs/site_copy.md WP9)
 # VERSION: 3.9 - A bare-metal install runs update_database once, after the plugin bundle, so a
@@ -104,6 +107,8 @@
 #   JOINERY_BACKUP_KEY_ID    (utils/install_backup_target.php), with
 #   JOINERY_BACKUP_KEY       JOINERY_BACKUP_PROVIDER (b2 default, s3, linode)
 #                            and JOINERY_BACKUP_REGION alongside
+#   JOINERY_OUTBOUND_NOTICE_GB  the monthly outbound notice's figure in GB
+#                            (outbound_monthly_notice_gb; 0 turns it off)
 
 set -e
 set +H  # Disable history expansion (prevents ! in passwords from being interpreted)
@@ -519,6 +524,20 @@ if [ -n "${UPGRADE_SERVER:-}" ]; then
         2>/dev/null || true
 
     log "Upgrades will come from $UPGRADE_SOURCE_VALUE"
+fi
+
+# The monthly outbound notice's figure (install.sh site --outbound-notice-gb).
+# A setting, not a limit: the site's admin can change it later.
+if [[ "${JOINERY_OUTBOUND_NOTICE_GB:-}" =~ ^[0-9]{1,6}$ ]]; then
+    psql -U postgres -d "$SITENAME" -q -c \
+        "UPDATE stg_settings SET stg_value = '${JOINERY_OUTBOUND_NOTICE_GB}' WHERE stg_name = 'outbound_monthly_notice_gb';" \
+        2>/dev/null || true
+    psql -U postgres -d "$SITENAME" -q -c \
+        "INSERT INTO stg_settings (stg_name, stg_value)
+         SELECT 'outbound_monthly_notice_gb', '${JOINERY_OUTBOUND_NOTICE_GB}'
+         WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'outbound_monthly_notice_gb');" \
+        2>/dev/null || true
+    log "Monthly outbound notice: past ${JOINERY_OUTBOUND_NOTICE_GB} GB"
 fi
 
 # =============================================================================

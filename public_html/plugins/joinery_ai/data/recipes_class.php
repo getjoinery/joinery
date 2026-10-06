@@ -114,6 +114,37 @@ class Recipe extends SystemBase {
     const MODE_AGENT    = 'agent';
     const MODE_PIPELINE = 'pipeline';
 
+    /** What every recipe a test makes is named with. */
+    const FIXTURE_NAME_PREFIX = 'HarnessTest ';
+
+    /** Is this a recipe a test made (tests/lib/harness.php), not one anyone uses? */
+    public static function is_fixture_name(string $name): bool {
+        return strncmp($name, self::FIXTURE_NAME_PREFIX, strlen(self::FIXTURE_NAME_PREFIX)) === 0;
+    }
+
+    /**
+     * A recipe named as a test's fixture is never scheduled. So outside a test
+     * process (harness_boot marks it with JOINERY_TEST_FAST_HASH) no recipe
+     * is created or renamed into that name, or it would silently never run.
+     * A row already so named saves as before.
+     */
+    function save($debug = false) {
+        $name = (string)$this->get('rcp_name');
+        if (self::is_fixture_name($name) && !(PHP_SAPI === 'cli' && defined('JOINERY_TEST_FAST_HASH'))) {
+            $was = '';
+            if ($this->key) {
+                $q = DbConnector::get_instance()->get_db_link()->prepare('SELECT rcp_name FROM rcp_recipes WHERE rcp_recipe_id = ?');
+                $q->execute(array((int)$this->key));
+                $was = (string)$q->fetchColumn();
+            }
+            if (!self::is_fixture_name($was)) {
+                throw new DisplayableUserException("A recipe's name may not start '" . self::FIXTURE_NAME_PREFIX
+                    . "': that name marks the test suites' own recipes, which are never scheduled.");
+            }
+        }
+        return parent::save($debug);
+    }
+
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 10) {
             throw new SystemAuthenticationError(

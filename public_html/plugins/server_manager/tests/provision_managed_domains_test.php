@@ -165,7 +165,7 @@ $buyer = make_user('PmdBuyer');
 $suffix = getmypid();
 
 $node = new ManagedNode(NULL);
-$node->set('mgn_name', 'pmd-test-' . $suffix);
+$node->set('mgn_name', 'HarnessTest pmd-test-' . $suffix);
 $node->set('mgn_slug', 'pmd-test-' . $suffix);
 $node->set('mgn_host', '198.51.100.20');
 $node->set('mgn_ssh_user', 'root');
@@ -575,7 +575,7 @@ check(trim((string)$share_a->get('rdm_dns_mail_time')) !== '', 'and stamps');
 section('A node whose agent lacks the primitive is told so, and retried');
 
 $bare_node = new ManagedNode(NULL);
-$bare_node->set('mgn_name', 'pmd-bare-' . $suffix);
+$bare_node->set('mgn_name', 'HarnessTest pmd-bare-' . $suffix);
 $bare_node->set('mgn_slug', 'pmd-bare-' . $suffix);
 $bare_node->set('mgn_host', '198.51.100.21');
 $bare_node->set('mgn_web_root', '/var/www/html/pmdbare/public_html');

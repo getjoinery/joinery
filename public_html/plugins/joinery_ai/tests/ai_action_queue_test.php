@@ -392,7 +392,7 @@ if ($aq_window_capable) {
 	// schedule recipe's shape: a calendar entry read from protected mail,
 	// with notes well past the guard's 64-character floor.
 	$recipe = new Recipe(NULL);
-	$recipe->set('rcp_name', 'queue test sealed approval ' . gmdate('His'));
+	$recipe->set('rcp_name', 'HarnessTest queue sealed approval ' . gmdate('His'));
 	$recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
 	$recipe->set('rcp_pipeline_job', 'email_schedule');
 	$recipe->set('rcp_owner_user_id', $owner_id);

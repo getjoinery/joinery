@@ -44,6 +44,9 @@
  * each addressed to every superadmin. Notify gives each the bell, and email
  * by the signal's default (critical: on) or their own preference.
  *
+ * @version 1.7 - a full pass leaves test fixture nodes alone (ManagedNode::is_fixture_name()): their
+ *                incidents rang every superadmin's bell, and a suite's own incidents were cleared under it.
+ *                Removed nodes stay in it, so their cleared incidents are still settled
  * @version 1.6 - the not-watched words name a site held stopped (multi_tenant_docker_hosts WP7)
  * @version 1.5 - settle_cleared(): a cleared incident still new or snoozed is resolved, by nobody, saying so
  * @version 1.4 - return_unproven(): resolved and still active a day later goes back to new and notifies
@@ -82,7 +85,7 @@ class IncidentReconciler {
 
 	/**
 	 * One pass. $sources and $node_ids narrow it (tests); by default every
-	 * registered source and every node. Returns counts:
+	 * registered source and every node but a test's fixtures. Returns counts:
 	 * opened, reopened, refreshed, cleared, removed, and busy when another
 	 * pass holds the lock.
 	 */
@@ -97,6 +100,7 @@ class IncidentReconciler {
 			if ($node_ids === null) {
 				$counts['removed'] = self::remove_nodeless();
 				$counts['cleared'] += self::clear_removed();
+				$node_ids = self::full_pass_nodes();
 			}
 			$sources = $sources ?? IncidentSources::all();
 			if (count($sources) === 0) {
@@ -370,6 +374,27 @@ class IncidentReconciler {
 		}
 		ksort($d);
 		return json_encode($d);
+	}
+
+	/**
+	 * The nodes a full pass covers: every node but a test's fixtures. A suite
+	 * makes its nodes on the live database and runs the pass over them itself;
+	 * the scheduled pass would otherwise open incidents on them, ringing every
+	 * superadmin's bell, and clear the ones the suite opened.
+	 *
+	 * Removed (soft-deleted) nodes are in it: clear_removed() clears their
+	 * incidents first, and settle_cleared() and return_unproven() must still
+	 * reach those, or a removed node's cleared incident would wait in Needs you
+	 * for good. The node loop passes over a removed node itself.
+	 */
+	public static function full_pass_nodes(): array {
+		$ids = array();
+		foreach (new MultiManagedNode(array()) as $node) {
+			if (!ManagedNode::is_fixture_name((string)$node->get('mgn_name'))) {
+				$ids[] = (int)$node->key;
+			}
+		}
+		return $ids;
 	}
 
 	/** Active incidents of these sources (optionally on these nodes). */

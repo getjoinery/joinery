@@ -38,7 +38,7 @@ $created_by = 1;
 
 try {
 	$n = new ManagedNode(NULL);
-	$n->set('mgn_name', 'zz-rerun-test-node');
+	$n->set('mgn_name', 'HarnessTest zz-rerun-test-node');
 	$n->set('mgn_slug', 'zz-rerun-test-' . getmypid());
 	$n->set('mgn_host', '203.0.113.20');
 	$n->save();

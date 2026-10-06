@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.43 - is_fixture_name(): a node a test made, which the scheduled incident pass leaves alone; outside a
+ *                 test process no node is created or renamed with that name (the harness reclaims such rows)
  * @version 1.42 - install state 'held' (Held stopped) and fold_container_holds(): a container site held stopped
  *                 on its host is left alone by automation, as its host's report says (multi_tenant_docker_hosts WP7)
  * @version 1.41 - unpublished_file also covers a file in this management node's checkout the web server cannot write
@@ -470,6 +472,38 @@ class ManagedNode extends SystemBase {
 	 */
 	public function is_operational(): bool {
 		return self::is_operational_from($this);
+	}
+
+	/** What every node a test makes is named with; the harness reclaims a killed run's by it too. */
+	const FIXTURE_NAME_PREFIX = 'HarnessTest ';
+
+	/** Is this a node a test made (tests/lib/harness.php), not a site anyone runs? */
+	public static function is_fixture_name(string $name): bool {
+		return strncmp($name, self::FIXTURE_NAME_PREFIX, strlen(self::FIXTURE_NAME_PREFIX)) === 0;
+	}
+
+	/**
+	 * A node named as a test's fixture is never watched by the incident pass,
+	 * and the test harness deletes one an hour old as a killed run's leftover,
+	 * on whatever deployment it runs. So outside a test process (harness_boot
+	 * marks it with JOINERY_TEST_FAST_HASH) no node is created or renamed into
+	 * that name. A row already so named saves as before.
+	 */
+	function save($debug = false) {
+		$name = (string)$this->get('mgn_name');
+		if (self::is_fixture_name($name) && !(PHP_SAPI === 'cli' && defined('JOINERY_TEST_FAST_HASH'))) {
+			$was = '';
+			if ($this->key) {
+				$q = DbConnector::get_instance()->get_db_link()->prepare('SELECT mgn_name FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?');
+				$q->execute(array((int)$this->key));
+				$was = (string)$q->fetchColumn();
+			}
+			if (!self::is_fixture_name($was)) {
+				throw new DisplayableUserException("A node's name may not start '" . self::FIXTURE_NAME_PREFIX
+					. "': that name marks the test suites' own nodes, which nothing watches and the tests delete.");
+			}
+		}
+		return parent::save($debug);
 	}
 
 	/** The rule is_operational() applies, over anything that answers get() for the column. */

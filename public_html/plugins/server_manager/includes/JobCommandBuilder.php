@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.101 - build_outbound_limits: turn a machine's outbound limits on or off, or set their figures,
+ *                  the machine's or one container site's (agent 1.62.0, node_outbound_and_transfer WP5)
  * @version 1.100 - build_decommission_node refuses a container another live site row on the same
  *                 host (or on no recorded host) names, compared without case or spaces: the
  *                 container name is editable on a row, so a retired row must not reach a live
@@ -1911,6 +1913,87 @@ class JobCommandBuilder {
 			throw new Exception("A suspended page is shown or cleared, not '" . $action . "'.");
 		}
 		return ['primitive' => 'suspended_page', 'params' => ['action' => $action, 'name' => $name]];
+	}
+
+	/**
+	 * The outbound limits' figures a machine this plane creates is installed
+	 * with (node_outbound_and_transfer WP5): install.sh docker and server
+	 * flags from the plane's provisioning settings, each left out when empty
+	 * or not a figure (install.sh's own default then holds), and always
+	 * --outbound-set-by=plane: the figures are this plane's, so each site's
+	 * settings page sends its admin here rather than to a shell on a machine
+	 * they cannot reach. A leading space per flag.
+	 */
+	public static function outbound_install_flags() {
+		$settings = Globalvars::get_instance();
+		$flags = '';
+		foreach ([
+			'server_manager_outbound_ceiling_mbit' => ['--outbound-ceiling=', '/^([1-9][0-9]{0,5}|off)$/'],
+			'server_manager_outbound_conn_rate'    => ['--outbound-conn-rate=', '/^[1-9][0-9]{0,6}$/'],
+			'server_manager_outbound_conn_burst'   => ['--outbound-conn-burst=', '/^[1-9][0-9]{0,6}$/'],
+			'server_manager_outbound_open_conns'   => ['--outbound-open-conns=', '/^[1-9][0-9]{0,6}$/'],
+		] as $name => list($flag, $pattern)) {
+			$v = trim((string)$settings->get_setting($name, true, true));
+			if (preg_match($pattern, $v)) {
+				$flags .= ' ' . $flag . $v;
+			}
+		}
+		return $flags . ' --outbound-set-by=plane';
+	}
+
+	/**
+	 * Turn a machine's outbound limits on or off, or set their figures
+	 * (node_outbound_and_transfer WP5): the machine's own, or one container
+	 * site's. Addressed to the agent of the machine that holds the limits: a
+	 * Docker host's own agent, or a bare-metal site's, which is the machine's.
+	 *
+	 * $params: action (on|off|set); for set, any of ceiling (Mbit/s, off or
+	 * default), conn_rate, conn_burst, open_conns (a whole number or default),
+	 * and site (a container site on this host). Empty figures are left out.
+	 */
+	public static function build_outbound_limits($node, array $params) {
+		if (!self::has_primitive($node, 'outbound_limits')) {
+			throw new Exception(
+				"The agent on '{$node->get('mgn_slug')}' cannot change its outbound limits. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['outbound_limits']));
+		}
+		return self::build_outbound_limits_primitive($params);
+	}
+
+	public static function build_outbound_limits_primitive(array $params) {
+		$action = (string)($params['action'] ?? '');
+		if (!in_array($action, ['on', 'off', 'set'], true)) {
+			throw new Exception("Outbound limits are turned on, off, or set; not '" . $action . "'.");
+		}
+		$out = ['action' => $action];
+		if ($action !== 'set') {
+			return ['primitive' => 'outbound_limits', 'params' => $out];
+		}
+		$words = [
+			'ceiling'    => ['/^([1-9][0-9]{0,5}|off|default)$/', 'a speed ceiling: a whole number of Mbit/s, off, or default'],
+			'conn_rate'  => ['/^([1-9][0-9]{0,6}|default)$/', 'new connections a second: a whole number, or default'],
+			'conn_burst' => ['/^([1-9][0-9]{0,6}|default)$/', 'the burst above the rate: a whole number, or default'],
+			'open_conns' => ['/^([1-9][0-9]{0,6}|default)$/', 'connections open at once: a whole number, or default'],
+		];
+		foreach ($words as $name => list($pattern, $what)) {
+			$v = trim((string)($params[$name] ?? ''));
+			if ($v === '') { continue; }
+			if (!preg_match($pattern, $v)) {
+				throw new Exception("'" . $v . "' is not " . $what . '.');
+			}
+			$out[$name] = $v;
+		}
+		if (count($out) === 1) {
+			throw new Exception('Give at least one figure to set: the speed ceiling, the connection rate, the burst, or the connections open at once.');
+		}
+		$site = trim((string)($params['site'] ?? ''));
+		if ($site !== '') {
+			if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $site)) {
+				throw new Exception("'" . $site . "' is not a site name the host will accept.");
+			}
+			$out['site'] = $site;
+		}
+		return ['primitive' => 'outbound_limits', 'params' => $out];
 	}
 
 	/**
@@ -4768,7 +4851,8 @@ class JobCommandBuilder {
 			// not "localhost"). A bare instance is exactly this and nothing
 			// more; the machine's node IS the host, so it takes the site name.
 			$host_name = ($mode === 'bare') ? $sitename : $sitename . '-host';
-			$lines[] = "./install.sh -y -q docker --management-node={$plane_url_esc} --node-name=" . escapeshellarg($host_name);
+			$lines[] = "./install.sh -y -q docker --management-node={$plane_url_esc} --node-name=" . escapeshellarg($host_name)
+				. self::outbound_install_flags();
 			if ($mode !== 'bare') {
 				// No --no-ssl: install.sh writes the universal proxy vhost,
 				// tries for a certificate, and arms the host's retry timer when
@@ -4810,7 +4894,7 @@ class JobCommandBuilder {
 			         . " test -n \"\$POSTGRES_PASSWORD\" || { echo 'FATAL: could not generate a postgres password'; exit 1; };"
 			         . ' echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password;'
 			         . ' export POSTGRES_PASSWORD;'
-			         . ' ./install.sh -y -q server;'
+			         . ' ./install.sh -y -q server' . self::outbound_install_flags() . ';'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
 			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$copy_flags}";

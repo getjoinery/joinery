@@ -3,6 +3,11 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.5 - A site's own outbound figures (outbound_limits.sh, specs/node_outbound_and_transfer.md
+#                WP5): outbound_ceiling (Mbit/s or off), outbound_conn_rate, outbound_conn_burst and
+#                outbound_open_conns, each empty or absent for the machine's. Not run arguments: the
+#                host's joinery-limits unit reads them. run_spec_outbound_lines gives a site's for
+#                install.sh to keep across a rebuild.
 # Version: 1.4 - run_spec_limits_refresh: the outbound limits (outbound_limits.sh,
 #                specs/node_outbound_and_transfer.md WP3) follow a site created, moved,
 #                rebuilt or removed, through the host's joinery-limits unit.
@@ -54,6 +59,9 @@
 #   bridge=jsnet17       its bridge on the host, which the outbound limits name
 #   subnet=10.250.17.0/24
 #   subnet6=fd00:250:17::/64     empty: the network is IPv4 only
+#   outbound_ceiling=100 the site's own speed ceiling in Mbit/s, or off; absent: the machine's
+#   outbound_conn_rate=20, outbound_conn_burst=100, outbound_open_conns=256
+#                        the site's own connection figures; absent: the machine's
 #
 # A test points /etc at a fixture with JOINERY_SITE_STATE_ROOT, and only an
 # unprivileged run may, the same rule as _site_state.sh.
@@ -240,6 +248,9 @@ run_spec_check_line() {  # LINE
         bridge)       [[ "$v" =~ ^[a-z][a-z0-9]{0,14}$ ]] ;;
         subnet)       [[ "$v" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]] ;;
         subnet6)      [[ -z "$v" || "$v" =~ ^[0-9a-f:]+/[0-9]{1,3}$ ]] ;;
+        outbound_ceiling)   [[ -z "$v" || "$v" == off || "$v" =~ ^[1-9][0-9]{0,5}$ ]] ;;
+        outbound_conn_rate|outbound_conn_burst|outbound_open_conns)
+                      [[ -z "$v" || "$v" =~ ^[1-9][0-9]{0,6}$ ]] ;;
         *)            false ;;
     esac
 }
@@ -309,6 +320,15 @@ run_spec_foreign_lines() {  # SITE
         dest="${v#*:}"; dest="${dest%:ro}"; dest="${dest%:rw}"
         [[ "$std" == *" ${dest} "* ]] || printf 'volume=%s\n' "$v"
     done < <(run_spec_list "$site" volume)
+}
+
+# SITE's own outbound figures, as the lines its spec holds (the host's
+# joinery-limits unit reads them). install.sh site keeps them across a rebuild.
+run_spec_outbound_lines() {  # SITE
+    local p
+    p="$(run_spec_path "$1")" || return 1
+    [[ -f "$p" ]] || return 0
+    grep -E '^outbound_(ceiling|conn_rate|conn_burst|open_conns)=.' "$p" || true
 }
 
 # A spec file whole: every line one argument, and a format this script reads.
