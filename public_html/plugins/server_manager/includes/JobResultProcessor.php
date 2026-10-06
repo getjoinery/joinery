@@ -5,6 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.57 - process_remove_site_certificate: what the host removed of a left-over certificate, then a
+ *                 status check so its certificate list is current
+ * @version 1.56 - process_moved_site_reach: the probe on a switch-over's new server, fetched over the domain
+ *                 (MovedSiteCheck::finish_reach)
  * @version 1.55 - host reports keep each site container's figures (host_report 1.7: memory, peak,
  *                 limit, out-of-memory kills, CPU, processes, bytes sent, disk), and
  *                 host_report_container_rates() turns two reports into each container's CPU and
@@ -2690,6 +2694,56 @@ HTML;
 		self::process_restart($job, 'unit');
 	}
 
+	/** What remove_site_certificate.sh says of each part. */
+	const CERT_REMOVAL_STATES = ['removed', 'absent', 'failed'];
+
+	/**
+	 * A remove_site_certificate job's result: what the host did with the
+	 * certificate's Let's Encrypt lineage and its placeholder. A part the
+	 * host could not remove fails the job. Either way a status check follows
+	 * on the host, so the certificate list the old row's page reads shows the
+	 * certificate as it now stands.
+	 */
+	private static function process_remove_site_certificate($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
+		$part = function ($v) {
+			return in_array($v, self::CERT_REMOVAL_STATES, true) ? $v : 'failed';
+		};
+		if (is_array($decoded) && isset($decoded['name'])) {
+			$result = [
+				'read'        => true,
+				'name'        => preg_replace('/[^a-z0-9.-]/', '', (string)$decoded['name']),
+				'letsencrypt' => $part($decoded['letsencrypt'] ?? ''),
+				'placeholder' => $part($decoded['placeholder'] ?? ''),
+			];
+			if ($job->get('mjb_status') === 'completed'
+					&& ($result['letsencrypt'] === 'failed' || $result['placeholder'] === 'failed')) {
+				$job->set('mjb_status', 'failed');
+				$job->set('mjb_error_message', 'The host could not remove every part of the certificate '
+					. "(Let's Encrypt: {$result['letsencrypt']}, placeholder: {$result['placeholder']}).");
+			}
+		} else {
+			$result = ['read' => false];
+		}
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+
+		$node_id = (int)$job->get('mjb_mgn_managed_node_id');
+		if ($node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				if (!ManagementJob::activeOrRecentForNode($node_id, 'check_status', 60)) {
+					ManagementJob::createFromBuild($node_id, 'check_status',
+						JobCommandBuilder::build_check_status($node), null, $job->get('mjb_created_by'));
+				}
+			} catch (Exception $e) {
+				// The removal is recorded; the list refreshes at the next status check.
+			}
+		}
+	}
+
 	/** A restart_container job's result, the same shape for a container. */
 	private static function process_restart_container($job) {
 		self::process_restart($job, 'container');
@@ -3601,6 +3655,27 @@ HTML;
 			}
 		}
 		$job->set('mjb_result', json_encode(['state' => $state, 'detail' => $detail, 'names' => $names]));
+		$job->save();
+	}
+
+	/**
+	 * moved_site_reach: the probe is on the new server of a switch-over;
+	 * MovedSiteCheck fetches it over the domain and folds the answer onto the
+	 * old machine's row.
+	 */
+	private static function process_moved_site_reach($job) {
+		// The agent's result and a page poll often fold the same job at the
+		// same moment. Folding has side effects (a fetch, a clear job), so
+		// whoever claims the empty result runs it; the other returns.
+		$db = DbConnector::get_instance()->get_db_link();
+		$claim = $db->prepare("UPDATE mjb_management_jobs SET mjb_result = ?
+			WHERE mjb_management_job_id = ? AND mjb_result IS NULL");
+		$claim->execute([json_encode(['state' => 'checking']), (int)$job->key]);
+		if ($claim->rowCount() === 0) {
+			$job->load();
+			return;
+		}
+		$job->set('mjb_result', json_encode(MovedSiteCheck::finish_reach($job)));
 		$job->save();
 	}
 

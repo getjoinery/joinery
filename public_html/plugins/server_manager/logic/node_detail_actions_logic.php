@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.43 - remove_site_certificate: the certificate a removed old container left on its host
+ * @version 1.42 - decommission_node on the old machine of a switch-over says the new server was reached first
  * @version 1.41 - decommission_node on the old machine of a switch-over says the host proves the domain left
  *                 instead of asking for the site's approval (site_copy.md WP14)
  * @version 1.40 - a switch-over that is ready at once moves the proxied address in the same request: the
@@ -152,6 +154,7 @@ class NodeDetailActions {
 		'save_node'                => 'overview',
 		'delete_node'              => 'overview',
 		'decommission_node'        => 'overview',
+		'remove_site_certificate'  => 'overview',
 		'purge_node'               => 'overview',
 		'copy_new_server'          => 'copy',
 		'copy_own_server'          => 'copy',
@@ -954,10 +957,27 @@ class NodeDetailActions {
 				$node->save();
 				$session->save_message(new DisplayMessage(
 					JobCommandBuilder::decommission_is_moved($node)
-						? 'Permanent deletion started. The host first checks that the domain reaches another server, '
-							. 'and removes nothing if it still reaches this site or cannot be reached.'
+						? 'Permanent deletion started. The domain was seen reaching the new server; the host now checks '
+							. 'that it no longer reaches this site, and removes nothing if it still does or cannot be reached.'
 						: 'Permanent deletion started. The site must approve its own removal on its Backups page; '
 							. 'the record is removed once the host verifies the site gone.', 'Success',
+					$page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return self::jobUrl($job);
+			}
+
+			case 'remove_site_certificate': {
+				// The certificate a removed old container left on its host. The
+				// builder refuses anything but a name the host reports for this
+				// row's domain that no live site there serves.
+				$name = trim((string)($_POST['cert_name'] ?? ''));
+				$built = JobCommandBuilder::build_remove_site_certificate($node, $name);
+				$host_node = JobCommandBuilder::decommission_host_node_for($node);
+				$job = ManagementJob::createFromBuild($host_node->key, 'remove_site_certificate', $built,
+					['victim_node_id' => (int)$node->key], $uid);
+				$session->save_message(new DisplayMessage(
+					"Removing the certificate {$name} from {$host_node->get('mgn_name')}. The host keeps it if any "
+						. 'enabled site there still uses it.', 'Success',
 					$page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return self::jobUrl($job);

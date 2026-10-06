@@ -1399,10 +1399,28 @@ check(strpos($inflight_msg, 'already has a site removal') !== false,
 // unreachable once the domain points at the new server, so the host's proof
 // that the domain left stands in for the approval (site_copy.md WP14). Every
 // other row on the same host keeps the approval.
+/**
+ * The new server of a switch-over for $victim, with this plane's proof that
+ * the domain reaches it: $reach_state recorded $age seconds ago.
+ */
+function jcb_moved_new_server($victim, $reach_state = 'reached', $age = 0, array $new_fields = array()) {
+	$new = jcb_node(array_merge(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
+		'mgn_joinery_version'  => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION,
+	), $new_fields));
+	$victim->set('mgn_copy_of_node_id', $new->key);
+	$victim->set('mgn_moved_reach_state', $reach_state);
+	$victim->set('mgn_moved_reach_detail', $reach_state === 'reached' ? '' : 'https://x answered 200 without the probe.');
+	$victim->set('mgn_moved_reach_time', gmdate('Y-m-d H:i:s', time() - $age));
+	$victim->save();
+	return $new;
+}
+
 list($host_m) = jcb_host_with_agent(array(
 	'mgn_agent_primitives' => 'check_status,decommission_site,decommission_moved_site'));
 $decom_retired = jcb_decom_victim($host_m, array('mgn_container_name' => 'decomsite10',
 	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+$decom_retired_new = jcb_moved_new_server($decom_retired);
 $menv = JobCommandBuilder::build_decommission_node($decom_retired);
 check(($menv['primitive'] ?? '') === 'decommission_moved_site' && ($menv['params'] ?? null) === array('site' => 'decomsite10'),
 	'a retired container routes as decommission_moved_site with only the site name', json_encode($menv));
@@ -1423,12 +1441,100 @@ try { JobCommandBuilder::build_decommission_node($decom_retired3); } catch (Exce
 check(strpos($probe_msg, 'routing-probe') !== false,
 	'an old machine below the routing-probe release refuses: its host could not prove anything', $probe_msg);
 
+// The host's proof passes for ANY other server answering. The removal also
+// needs this plane's fresh proof that the domain reaches the NEW server.
+$gate_cases = array(
+	'no proof that the domain reaches the new server' => array(null, 0),
+	'the domain answered from some other server'      => array('elsewhere', 0),
+	'the domain could not be told'                    => array('unsure', 0),
+	'a proof older than ten minutes'                  => array('reached', MovedSiteCheck::STALE_SECONDS + 5),
+);
+$gi = 20;
+foreach ($gate_cases as $label => $case) {
+	$gv = jcb_decom_victim($host_m, array('mgn_container_name' => 'decomsite' . $gi++,
+		'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+	if ($case[0] !== null) {
+		jcb_moved_new_server($gv, $case[0], $case[1]);
+	}
+	$g_msg = '';
+	try { JobCommandBuilder::build_decommission_node($gv); } catch (Exception $e) { $g_msg = $e->getMessage(); }
+	check(strpos($g_msg, "reach the site's new server") !== false, 'the old machine is not removed on ' . $label, $g_msg);
+}
+
+// moved_site_reach: a probe placed on the NEW server, through its own agent.
+$reach_token = JobCommandBuilder::mint_ssl_probe_token();
+$renv = JobCommandBuilder::build_moved_site_reach($decom_retired, $reach_token);
+check(($renv['primitive'] ?? '') === 'ssl_probe_place' && ($renv['params'] ?? null) === array('token' => $reach_token),
+	'the reach check places the one-time token with ssl_probe_place', json_encode($renv));
+check((int)JobCommandBuilder::moved_new_server_for($decom_retired)->key === (int)$decom_retired_new->key,
+	'addressed to the row that took over the site');
+$r_msg = '';
+try { JobCommandBuilder::build_moved_site_reach($decom_live, $reach_token); } catch (Exception $e) { $r_msg = $e->getMessage(); }
+check(strpos($r_msg, 'not the old machine of a switch-over') !== false, 'a live site has no new server to reach', $r_msg);
+$orphan = jcb_decom_victim($host_m, array('mgn_container_name' => 'decomsite30',
+	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+$r_msg = '';
+try { JobCommandBuilder::build_moved_site_reach($orphan, $reach_token); } catch (Exception $e) { $r_msg = $e->getMessage(); }
+check(strpos($r_msg, 'names no new server') !== false, 'an old machine with no new server on record refuses', $r_msg);
+$mute_new_victim = jcb_decom_victim($host_m, array('mgn_container_name' => 'decomsite31',
+	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+jcb_moved_new_server($mute_new_victim, 'reached', 0, array('mgn_agent_primitives' => 'check_status'));
+$r_msg = '';
+try { JobCommandBuilder::build_moved_site_reach($mute_new_victim, $reach_token); } catch (Exception $e) { $r_msg = $e->getMessage(); }
+check(strpos($r_msg, 'ssl_probe_place') !== false, 'a new server whose agent cannot place the probe refuses, naming the word', $r_msg);
+
+// remove_site_certificate: the certificate a removed old container left on
+// its host. Only once the container is gone, only a name the host reports for
+// the row's domain, never one a live site on the same host serves.
+list($host_cert, $host_cert_node) = jcb_host_with_agent(array(
+	'mgn_agent_primitives' => 'check_status,decommission_site,decommission_moved_site,remove_site_certificate'));
+$host_cert_node->set('mgn_last_status_data', json_encode(array('ssl_certificates' => array(
+	array('name' => 'gone.example.com'), array('name' => 'gone.example.com-0001'),
+	array('name' => 'other.example.com'), array('name' => 'kept.example.com')))));
+$host_cert_node->save();
+$cert_victim = jcb_decom_victim($host_cert, array('mgn_container_name' => 'decomsite40', 'mgn_install_state' => 'retired',
+	'mgn_site_url' => 'https://gone.example.com', 'mgn_moved_check_state' => 'absent'));
+check(MovedSiteCheck::leftover_certificates($cert_victim) === array('gone.example.com', 'gone.example.com-0001'),
+	'the host\'s certificates for the removed row\'s domain, and only those', json_encode(MovedSiteCheck::leftover_certificates($cert_victim)));
+$cenv = JobCommandBuilder::build_remove_site_certificate($cert_victim, 'gone.example.com');
+check(($cenv['primitive'] ?? '') === 'remove_site_certificate' && ($cenv['params'] ?? null) === array('name' => 'gone.example.com'),
+	'routes as remove_site_certificate with only the certificate name', json_encode($cenv));
+$c_msg = '';
+try { JobCommandBuilder::build_remove_site_certificate($cert_victim, 'other.example.com'); } catch (Exception $e) { $c_msg = $e->getMessage(); }
+check(strpos($c_msg, 'does not report a certificate') !== false, 'another site\'s certificate is refused', $c_msg);
+$cert_present = jcb_decom_victim($host_cert, array('mgn_container_name' => 'decomsite41', 'mgn_install_state' => 'retired',
+	'mgn_site_url' => 'https://gone.example.com', 'mgn_moved_check_state' => 'moved'));
+$c_msg = '';
+try { JobCommandBuilder::build_remove_site_certificate($cert_present, 'gone.example.com'); } catch (Exception $e) { $c_msg = $e->getMessage(); }
+check(strpos($c_msg, 'not a removed old container') !== false && MovedSiteCheck::leftover_certificates($cert_present) === array(),
+	'nothing is offered while the container is still on the host', $c_msg);
+$kept_victim = jcb_decom_victim($host_cert, array('mgn_container_name' => 'decomsite42', 'mgn_install_state' => 'retired',
+	'mgn_site_url' => 'https://kept.example.com', 'mgn_moved_check_state' => 'absent'));
+jcb_decom_victim($host_cert, array('mgn_container_name' => 'decomsite43', 'mgn_site_url' => 'https://kept.example.com'));
+$c_msg = '';
+try { JobCommandBuilder::build_remove_site_certificate($kept_victim, 'kept.example.com'); } catch (Exception $e) { $c_msg = $e->getMessage(); }
+check(strpos($c_msg, 'serves kept.example.com') !== false, 'a certificate a live site on the same host serves is kept', $c_msg);
+list($host_nocert, $host_nocert_node) = jcb_host_with_agent();
+$host_nocert_node->set('mgn_last_status_data', json_encode(array('ssl_certificates' => array(array('name' => 'gone.example.com')))));
+$host_nocert_node->save();
+$nocert_victim = jcb_decom_victim($host_nocert, array('mgn_container_name' => 'decomsite44', 'mgn_install_state' => 'retired',
+	'mgn_site_url' => 'https://gone.example.com', 'mgn_moved_check_state' => 'absent'));
+$c_msg = '';
+try { JobCommandBuilder::build_remove_site_certificate($nocert_victim, 'gone.example.com'); } catch (Exception $e) { $c_msg = $e->getMessage(); }
+check(strpos($c_msg, 'remove_site_certificate') !== false, 'a host agent without the word refuses, naming it', $c_msg);
+foreach (array('', 'Gone.example.com', '../x', 'gone.example.com/x', '*.example.com') as $bad) {
+	$c_msg = '';
+	try { JobCommandBuilder::build_remove_site_certificate_primitive($host_cert_node, array('name' => $bad)); } catch (Exception $e) { $c_msg = $e->getMessage(); }
+	check($c_msg !== '', "the envelope refuses '{$bad}'");
+}
+
 // moved_site_check: the same proof, removing nothing, addressed to the host
 // like the removal. Only for the old machine of a switch-over.
 list($host_mc, $host_mc_node) = jcb_host_with_agent(array(
 	'mgn_agent_primitives' => 'check_status,decommission_site,decommission_moved_site,moved_site_check'));
 $mc_victim = jcb_decom_victim($host_mc, array('mgn_container_name' => 'decomsite14',
 	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+jcb_moved_new_server($mc_victim);
 $mcenv = JobCommandBuilder::build_moved_site_check($mc_victim);
 check(($mcenv['primitive'] ?? '') === 'moved_site_check' && ($mcenv['params'] ?? null) === array('site' => 'decomsite14'),
 	'the old machine of a switch-over is checked as moved_site_check with only the site name', json_encode($mcenv));

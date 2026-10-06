@@ -418,7 +418,7 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 17, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+check(!isset($capped['surprise']) && count($capped) === 18, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
 check($capped['cpus'] === 'unknown', 'a processor count that is not a count reads unknown');
 check(JobResultProcessor::sanitise_host_report(array('cpus' => 4))['cpus'] === 4, 'a processor count is kept');
 $quiet = JobResultProcessor::sanitise_host_report(array('answers' => array('apache2' => 'yes', 'php-fpm' => 'quiet', 'postgresql' => 'maybe')));
@@ -803,6 +803,152 @@ JobResultProcessor::process($mjd);
 $mvictim->load();
 check($mvictim->get('mgn_moved_check_state') === 'absent' && !MovedSiteCheck::is_stale($mvictim),
 	'a verified removal of the old machine records its container gone, and that is never asked again');
+
+section('moved_site_reach: the domain must reach the NEW server, not just any other');
+
+$rnew = jrp_node(array('mgn_name' => 'Reach New Server', 'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
+	'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+$rvictim = jrp_node(array('mgn_container_name' => 'reachrp', 'mgn_install_state' => 'retired',
+	'mgn_site_url' => 'https://reach.example.com', 'mgn_copy_of_node_id' => $rnew->key,
+	'mgn_moved_check_state' => 'moved', 'mgn_moved_check_detail' => 'reach.example.com: answered 200 from another server.',
+	'mgn_moved_check_time' => gmdate('Y-m-d H:i:s')));
+$rvictim->soft_delete();
+
+/** File a reach job through the real path, finish it, and fetch with $answer (status, body, error). */
+function jrp_reach($new, $victim, $answer, $status = 'completed', $error = '') {
+	$token = JobCommandBuilder::mint_ssl_probe_token();
+	$job = ManagementJob::createFromBuild($new->key, MovedSiteCheck::REACH_JOB_TYPE,
+		JobCommandBuilder::build_ssl_probe_place_primitive($new, array('token' => $token)),
+		array('victim_node_id' => (int)$victim->key, 'domain' => 'reach.example.com'), 1);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
+	$job->set('mjb_status', $status);
+	if ($error !== '') { $job->set('mjb_error_message', $error); }
+	$job->save();
+	$GLOBALS['jrp_reach_url'] = '';
+	MovedSiteCheck::$fetcher = function ($url) use ($answer, $token) {
+		$GLOBALS['jrp_reach_url'] = $url;
+		return array('status' => $answer[0], 'body' => str_replace('{token}', $token, $answer[1]), 'error' => $answer[2] ?? '');
+	};
+	JobResultProcessor::process($job);
+	MovedSiteCheck::$fetcher = null;
+	$victim->load();
+	return $job;
+}
+function jrp_reach_clears($new) {
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare("SELECT mjb_management_job_id FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ?");
+	$q->execute(array((int)$new->key, MovedSiteCheck::REACH_CLEAR_JOB_TYPE));
+	$ids = $q->fetchAll(PDO::FETCH_COLUMN);
+	foreach ($ids as $id) { harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $id); }
+	return count($ids);
+}
+
+$rfirst = jrp_reach($rnew, $rvictim, array(200, "{token}\n"));
+check($rvictim->get('mgn_moved_reach_state') === 'reached' && MovedSiteCheck::new_server_refusal($rvictim) === null,
+	'the token placed on the new server coming back over the domain is a pass that allows the removal',
+	json_encode(array($rvictim->get('mgn_moved_reach_state'), $rvictim->get('mgn_moved_reach_detail'))));
+check(preg_match('#^https://reach\.example\.com/sm-ssl-probe\.txt\?moved=[a-f0-9]{16}$#', $GLOBALS['jrp_reach_url']) === 1,
+	'fetched over https at the domain, with a fresh query string', $GLOBALS['jrp_reach_url']);
+check(jrp_reach_clears($rnew) === 1, 'the new server\'s probe file is emptied after the fetch');
+// The agent's result and a page poll fold the same job at once: one fold.
+$rtwin = new ManagementJob($rfirst->key, TRUE);
+$rtwin->set('mjb_result', null);   // as a second request read it, before the first saved
+JobResultProcessor::process($rtwin);
+check(jrp_reach_clears($rnew) === 1, 'a job folded twice at once fetches and clears once');
+$rlabel = MovedSiteCheck::label_html($rvictim, false, 'UTC');
+check(strpos($rlabel, 'text-success') !== false && strpos($rlabel, 'Moved: the domain reaches Reach New Server') !== false,
+	'the page says moved, naming the new server, only now', $rlabel);
+
+jrp_reach($rnew, $rvictim, array(200, '<html>This domain is parked</html>'));
+check($rvictim->get('mgn_moved_reach_state') === 'elsewhere' && MovedSiteCheck::new_server_refusal($rvictim) !== null,
+	'another server answering without the token is NOT the new server, and the removal waits',
+	(string)$rvictim->get('mgn_moved_reach_state'));
+$rlabel = MovedSiteCheck::label_html($rvictim, false, 'UTC');
+check(strpos($rlabel, 'text-success') === false && strpos($rlabel, 'left this container but does not reach Reach New Server') !== false
+	&& strpos($rlabel, 'some other server') !== false,
+	'the page says the domain left but does not reach the new server, and what it answered', $rlabel);
+
+jrp_reach($rnew, $rvictim, array(502, 'Bad gateway'));
+check($rvictim->get('mgn_moved_reach_state') === 'unsure', 'a 5xx could be the new server failing: unsure');
+jrp_reach($rnew, $rvictim, array(0, '', 'Could not resolve host'));
+check($rvictim->get('mgn_moved_reach_state') === 'unsure'
+	&& strpos((string)$rvictim->get('mgn_moved_reach_detail'), 'did not answer') !== false,
+	'no answer is unsure, with why');
+$before_clears = jrp_reach_clears($rnew);
+jrp_reach($rnew, $rvictim, array(200, '{token}'), 'failed', 'Refused by the node: no web root');
+check($rvictim->get('mgn_moved_reach_state') === 'failed'
+	&& strpos((string)$rvictim->get('mgn_moved_reach_detail'), 'no web root') !== false
+	&& jrp_reach_clears($rnew) === $before_clears,
+	'a probe that could not be placed is failed, says why, and fetches nothing');
+
+// A check a newer one replaced does not speak for the row: the newer token
+// has replaced its own on the new server.
+$rold = jrp_reach($rnew, $rvictim, array(200, '{token}'));
+$rnewer = ManagementJob::createFromBuild($rnew->key, MovedSiteCheck::REACH_JOB_TYPE,
+	JobCommandBuilder::build_ssl_probe_place_primitive($rnew, array('token' => JobCommandBuilder::mint_ssl_probe_token())),
+	array('victim_node_id' => (int)$rvictim->key, 'domain' => 'reach.example.com'), 1);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $rnewer->key);
+$rvictim->set('mgn_moved_reach_state', 'unsure');
+$rvictim->save();
+$rold->set('mjb_result', null);
+$rold->save();
+JobResultProcessor::process($rold);
+$rvictim->load();
+check($rvictim->get('mgn_moved_reach_state') === 'unsure'
+	&& (json_decode((string)$rold->get('mjb_result'), true)['state'] ?? '') === 'superseded',
+	'a superseded check records on itself only');
+
+jrp_reach_clears($rnew);   // registers the clear jobs filed since, for cleanup
+
+// A stale pass no longer allows the removal.
+$rvictim->set('mgn_moved_reach_state', 'reached');
+$rvictim->set('mgn_moved_reach_time', gmdate('Y-m-d H:i:s', time() - MovedSiteCheck::STALE_SECONDS - 5));
+$rvictim->save();
+check(MovedSiteCheck::new_server_refusal($rvictim) !== null && MovedSiteCheck::is_stale($rvictim),
+	'a pass older than ten minutes is asked again and allows nothing');
+
+section('remove_site_certificate: what the host removed, then a fresh certificate list');
+
+$chost = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32))));
+/** File a remove_site_certificate job and finish it with the script's object (or raw text). */
+function jrp_cert_removal($host, $object, $status = 'completed') {
+	$job = ManagementJob::createFromBuild($host->key, 'remove_site_certificate',
+		JobCommandBuilder::build_remove_site_certificate_primitive($host, array('name' => 'gone.example.com')),
+		array('victim_node_id' => 1), 1);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
+	$job->set('mjb_status', $status);
+	$text = is_array($object) ? json_encode($object) : (string)$object;
+	$job->set('mjb_output', json_encode(array('api_version' => 1, 'data' => array('output' => $text . "\n"))));
+	$job->save();
+	JobResultProcessor::process($job);
+	$job->load();
+	return $job;
+}
+function jrp_status_jobs($host) {
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare("SELECT mjb_management_job_id FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'check_status'");
+	$q->execute(array((int)$host->key));
+	$ids = $q->fetchAll(PDO::FETCH_COLUMN);
+	foreach ($ids as $id) { harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $id); }
+	return count($ids);
+}
+
+$cj = jrp_cert_removal($chost, array('name' => 'gone.example.com', 'letsencrypt' => 'removed', 'placeholder' => 'removed'));
+$cr = json_decode((string)$cj->get('mjb_result'), true);
+check($cj->get('mjb_status') === 'completed' && ($cr['letsencrypt'] ?? '') === 'removed' && ($cr['placeholder'] ?? '') === 'removed',
+	'a removal records each part', json_encode($cr));
+check(jrp_status_jobs($chost) === 1, 'and a status check follows on the host, so its certificate list is current');
+jrp_cert_removal($chost, array('name' => 'gone.example.com', 'letsencrypt' => 'absent', 'placeholder' => 'removed'));
+check(jrp_status_jobs($chost) === 1, 'one status check at a time, not one per removal');
+
+$cj = jrp_cert_removal($chost, array('name' => 'gone.example.com', 'letsencrypt' => 'failed', 'placeholder' => 'removed'));
+check($cj->get('mjb_status') === 'failed' && strpos((string)$cj->get('mjb_error_message'), "Let's Encrypt: failed") !== false,
+	'a part the host could not remove fails the job, saying which', (string)$cj->get('mjb_error_message'));
+$cj = jrp_cert_removal($chost, array('name' => 'gone.example.com', 'letsencrypt' => 'gone!', 'placeholder' => 'absent'));
+check((json_decode((string)$cj->get('mjb_result'), true)['letsencrypt'] ?? '') === 'failed',
+	'a state the script does not print is never read as removed');
+$cj = jrp_cert_removal($chost, 'not json');
+check((json_decode((string)$cj->get('mjb_result'), true)['read'] ?? null) === false, 'output that is not the object is recorded unread');
 
 section('A never-measured recovery-key state asks for a report, like a carried one');
 

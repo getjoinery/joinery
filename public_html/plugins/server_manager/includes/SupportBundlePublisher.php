@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.11 - carries remove_site_certificate.sh: the remove_site_certificate word, and remove_account.sh
+ *                calls it as its sibling for the removed site's certificates
  * @version 1.10 - carries rspamd_stateless.sh, which provision_relay.sh sources
  * @version 1.9 - carries reclaim_managed_file.sh and _host_files.sh (host_housekeeping.sh sources it)
  * @version 1.8 - carries restart_unit.sh and restart_container.sh: the repairs of service_health and
@@ -117,6 +119,10 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/install.sh',
 		// decommission_site (self-verifying; sources nothing).
 		'maintenance_scripts/sysadmin_tools/remove_account.sh',
+		// remove_site_certificate, and what remove_account.sh runs as its
+		// sibling for each certificate the removed site's vhost named.
+		// Sources nothing.
+		'maintenance_scripts/sysadmin_tools/remove_site_certificate.sh',
 		// host_report (sources nothing, reads nothing from its caller): the
 		// machine as one bounded object, which a Docker host has as much as
 		// a site does.

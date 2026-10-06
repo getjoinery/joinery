@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.40 - mgn_moved_reach_*: whether the old machine of a switch-over's domain reaches the new server,
+ *                 as this management node last proved it
  * @version 1.39 - mgn_mtr_machine_transfer_id: the cloud machine the node runs on, as the daily transfer read
  *                matched it (specs/node_outbound_and_transfer.md WP1)
  * @version 1.38 - mgn_script_trust may read unpublished_file (this management node's own commit, not yet published)
@@ -149,6 +151,13 @@ class ManagedNode extends SystemBase {
 		'mgn_moved_check_state'  => array('type'=>'varchar(16)'),
 		'mgn_moved_check_detail' => array('type'=>'varchar(500)'),
 		'mgn_moved_check_time'   => array('type'=>'timestamp(6)'),
+		// The other half: whether the domain reaches the NEW server, as this
+		// management node last proved it (a probe placed on the new server
+		// through its agent, fetched over the domain). state: reached |
+		// elsewhere | unsure | failed. The removal needs a fresh 'reached'.
+		'mgn_moved_reach_state'  => array('type'=>'varchar(16)'),
+		'mgn_moved_reach_detail' => array('type'=>'varchar(500)'),
+		'mgn_moved_reach_time'   => array('type'=>'timestamp(6)'),
 
 		// This management node's backup policy for this node — the manager profile.
 		// A blob rather than a column each because it is read whole, written
