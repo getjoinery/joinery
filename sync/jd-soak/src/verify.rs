@@ -1214,6 +1214,118 @@ pub fn check_stores(devices: &[(String, std::path::PathBuf)], personality: &Pers
     }
 }
 
+/// Every name the server holds more than once on this device's volume, read
+/// against the device's own store and disk.
+///
+/// Two server names that differ only in case (or in normal form) are one name
+/// on a volume that folds them. The engine's answer is that the device holds
+/// one of them and keeps every other as an unsyncable clash, surfaced to the
+/// user. The tree comparison accepts a device holding any one of them
+/// (`tree::diff`), so this is the check that the rest are accounted for:
+/// exactly one member's record synced, its own bytes standing at that name on
+/// the disk, and every other member's record unsyncable as a clash. A device
+/// that held one and dropped the other without a word would otherwise read
+/// green everywhere.
+pub fn clash_findings(
+    db: &Path,
+    local: &LocalTree,
+    server: &ServerTree,
+    personality: &Personality,
+    excluded: &[String],
+) -> Result<Vec<String>, rusqlite::Error> {
+    use rusqlite::{Connection, OpenFlags, OptionalExtension};
+    let excluded: Vec<String> = excluded.iter().map(|p| tree::key_for(p.trim_end_matches('/'), personality)).collect();
+    let mut groups: BTreeMap<String, Vec<(crate::server::Entity, String)>> = BTreeMap::new();
+    for (path, e) in server.live_paths() {
+        groups.entry(tree::key_for(&path, personality)).or_default().push((e, path));
+    }
+    groups.retain(|key, members| {
+        members.len() > 1 && !excluded.iter().any(|x| key == x || key.starts_with(&format!("{x}/")))
+    });
+    if groups.is_empty() {
+        return Ok(Vec::new());
+    }
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    conn.busy_timeout(Duration::from_secs(5))?;
+    let mut findings = Vec::new();
+    for (key, members) in &groups {
+        let mut rows = Vec::new();
+        for (e, path) in members {
+            let row: Option<(String, Option<String>, Option<String>)> = conn
+                .query_row(
+                    "SELECT local_status, unsyncable_reason, remote_content_sha256 FROM entries
+                      WHERE entity_type = ?1 AND server_id = ?2",
+                    rusqlite::params![if e.is_folder { "folder" } else { "file" }, e.id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            rows.push((e, path, row));
+        }
+        let state = || {
+            rows.iter()
+                .map(|(e, path, row)| match row {
+                    Some((status, reason, _)) => format!("{} {path} {status}{}", e.id, reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default()),
+                    None => format!("{} {path} has no record", e.id),
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let held: Vec<_> = rows.iter().filter(|(_, _, row)| row.as_ref().is_some_and(|r| r.0 == "synced")).collect();
+        let parked = |row: &Option<(String, Option<String>, Option<String>)>| {
+            row.as_ref().is_some_and(|(status, reason, _)| {
+                status == "unsyncable"
+                    && reason.as_deref().is_some_and(|r| r.starts_with("case_clash:") || r.starts_with("unicode_clash:"))
+            })
+        };
+        let [(held_entity, _, Some((_, _, held_sha)))] = held.as_slice() else {
+            findings.push(format!("{key}: the server holds {} names this volume holds as one, and not exactly one is held: {}", rows.len(), state()));
+            continue;
+        };
+        let stands = local.entries.get(key).is_some_and(|l| {
+            l.is_dir == held_entity.is_folder && (l.is_dir || l.sha256.is_some() && l.sha256 == *held_sha)
+        });
+        if !stands {
+            findings.push(format!("{key}: the held name's own content is not what stands on the disk: {}", state()));
+        }
+        let unaccounted: Vec<_> = rows.iter().filter(|(e, _, row)| e.id != held_entity.id && !parked(row)).collect();
+        if !unaccounted.is_empty() {
+            findings.push(format!("{key}: a name this volume cannot hold beside the held one is not kept as a clash: {}", state()));
+        }
+    }
+    Ok(findings)
+}
+
+/// Every device, one verdict: clashes held one and surfaced the rest.
+pub fn check_clashes(
+    devices: &[(String, std::path::PathBuf)],
+    trees: &BTreeMap<String, LocalTree>,
+    server: &ServerTree,
+    personality: &Personality,
+    excluded: &BTreeMap<String, Vec<String>>,
+) -> Verdict {
+    let mut findings = Vec::new();
+    let mut unread = Vec::new();
+    let none = Vec::new();
+    for (name, db) in devices {
+        let Some(local) = trees.get(name) else { continue };
+        match clash_findings(db, local, server, personality, excluded.get(name).unwrap_or(&none)) {
+            Ok(found) => findings.extend(found.into_iter().map(|f| format!("{name}: {f}"))),
+            Err(e) => unread.push(format!("{name}: {e}")),
+        }
+    }
+    if !unread.is_empty() && findings.is_empty() {
+        return Verdict::fail("clashes-surfaced", format!("could not read: {}", unread.join("; ")));
+    }
+    if findings.is_empty() {
+        Verdict::pass("clashes-surfaced", "every name the server holds twice on this volume is held once and surfaced as a clash otherwise".to_string())
+    } else {
+        Verdict::fail(
+            "clashes-surfaced",
+            format!("{} finding(s): {}", findings.len(), findings.iter().take(10).cloned().collect::<Vec<_>>().join("; ")),
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 4 — ciphertext never materializes
 // ---------------------------------------------------------------------------
@@ -1808,6 +1920,7 @@ pub fn settle(
     verdicts.push(check_custody(records, &placements));
     let stores: Vec<(String, std::path::PathBuf)> = fleet.devices.iter().map(|d| (d.name.clone(), d.state_db())).collect();
     verdicts.push(check_stores(&stores, personality));
+    verdicts.push(check_clashes(&stores, &trees, &server_tree, personality, excluded));
     verdicts.push(check_issues_honest(&statuses));
 
     // Asked last, so the window it covers is the whole audit and not a slice of
@@ -1841,6 +1954,69 @@ pub fn settle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Run 40's clash: the server holds DOC-4.TXT (a's) and doc-4.txt (b's)
+    /// in Projects; this device's store holds `rows` for them and its disk
+    /// holds `on_disk` at that name.
+    fn clash(rows: &[(i64, &str, Option<&str>, &str)], on_disk: Option<&str>, p: &Personality) -> Vec<String> {
+        let dir = std::env::temp_dir().join(format!("jd-clash-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE entries (entity_type TEXT, server_id INTEGER, local_status TEXT, unsyncable_reason TEXT, remote_content_sha256 TEXT)",
+        )
+        .unwrap();
+        for (id, status, reason, sha) in rows {
+            conn.execute(
+                "INSERT INTO entries VALUES ('file', ?1, ?2, ?3, ?4)",
+                rusqlite::params![id, status, reason, sha],
+            )
+            .unwrap();
+        }
+        drop(conn);
+        let entity = |id: i64, name: &str, parent: Option<i64>, sha: Option<&str>| crate::server::Entity {
+            id,
+            is_folder: sha.is_none(),
+            name: name.into(),
+            parent_id: parent,
+            deleted: false,
+            encrypted: false,
+            sha256: sha.map(String::from),
+            size: 3,
+        };
+        let mut server = ServerTree::default();
+        server.folders.insert(1, entity(1, "Projects", None, None));
+        server.files.insert(2, entity(2, "DOC-4.TXT", Some(1), Some("a's")));
+        server.files.insert(3, entity(3, "doc-4.txt", Some(1), Some("b's")));
+        let mut local = LocalTree::default();
+        if let Some(sha) = on_disk {
+            local.entries.insert(
+                tree::key_for("Projects/DOC-4.TXT", p),
+                tree::Local { path: "Projects/DOC-4.TXT".into(), is_dir: false, sha256: Some(sha.into()), size: 3 },
+            );
+        }
+        let found = clash_findings(&db, &local, &server, p, &[]).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        found
+    }
+
+    #[test]
+    fn a_clash_held_once_and_kept_as_a_clash_otherwise_is_accounted_for() {
+        let mac = Personality::macos();
+        let parked = Some("case_clash:DOC-4.TXT");
+        // Run 40, as each device left it.
+        assert_eq!(clash(&[(2, "synced", None, "a's"), (3, "unsyncable", parked, "b's")], Some("a's"), &mac), Vec::<String>::new());
+        // The other name with no record at all: dropped without a word.
+        assert_eq!(clash(&[(2, "synced", None, "a's")], Some("a's"), &mac).len(), 1);
+        // Both held: two files on a disk that holds one.
+        assert_eq!(clash(&[(2, "synced", None, "a's"), (3, "synced", None, "b's")], Some("a's"), &mac).len(), 1);
+        // The held record's bytes are not what stands at the name.
+        assert_eq!(clash(&[(2, "synced", None, "a's"), (3, "unsyncable", parked, "b's")], Some("b's"), &mac).len(), 1);
+        // Where the disk tells the names apart there is no clash to account for.
+        assert!(clash(&[(2, "synced", None, "a's"), (3, "synced", None, "b's")], Some("a's"), &Personality::linux()).is_empty());
+    }
     use crate::journal::Record;
     use crate::server::Entity;
     use serde_json::json;

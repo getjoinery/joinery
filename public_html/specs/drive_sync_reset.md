@@ -2232,6 +2232,25 @@ no named flaw is a reason to name one.
   red without the change with run 38's message. VALID (public-html-41,
   2026-10-05). Open from the same run: device-b planned nothing inside the
   folder for about two minutes after adopting it (B-HOLD38, untraced).
+- **Soak audited-green false positive, fixed 2026-10-05 (Mac soak run 40,
+  client `7574909c`).** Device-a case-renamed its `doc-4.txt` to `DOC-4.TXT`
+  and device-b's own `doc-4.txt` arrived after; the server, comparing names
+  case-sensitively, holds both, a pair no case-insensitive disk can hold.
+  Each device held its own and kept the other as an unsyncable clash, as
+  designed. The tree comparison filed the server's names by the volume's
+  comparison form into one entry, so the later name stood in for both and
+  device-a was judged against device-b's bytes. Server names are now grouped
+  by that form and a device agrees by holding any member; a new verdict,
+  `clashes-surfaced`, makes the exact tie from each device's store: exactly
+  one member held, its own bytes at the name, every other member unsyncable
+  as a clash. Without it a device that held one name and dropped the other
+  would read green everywhere. Run 40's real stores pass it. Pins
+  `a_case_clash_on_the_server_is_judged_by_the_name_the_device_holds` and
+  `a_clash_held_once_and_kept_as_a_clash_otherwise_is_accounted_for`, red
+  without their change. VALID (public-html-41, 2026-10-05). Open: whether
+  the server should take two names one folding fleet cannot hold
+  (B-CASEPAIR); a folder clash whose unheld folder has children of its own
+  would still read OnlyRemote for those children.
 - **B-RETRYWAIT, fixed 2026-10-05 (found probing Mac soak run 38): an op
   waiting for its folder waited out a timer after the folder arrived.** An
   upload into a folder with no server id yet failed as a retry and took a
