@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.62 - a site row's held state follows its host (ManagedNode::fold_container_holds): from every host
+ *                 report, and from a hold_container result, which also updates the host's last report
+ *                 (specs/multi_tenant_docker_hosts.md WP7)
  * @version 1.61 - host reports keep outbound_limits and each container's outbound_dropped (host_report
  *                 1.11, specs/node_outbound_and_transfer.md WP3); host_report_container_rates() adds the
  *                 packets each site's outbound limits dropped between two reports
@@ -2707,6 +2710,10 @@ HTML;
 	 * switch-over's old container on its host. Facts only, from the script's
 	 * one object: done is true when the container reached the state asked for
 	 * (stopped and held, or running with the hold lifted).
+	 *
+	 * What the host said is also its newest word on that container, so it is
+	 * written into the host's last report and the site's row follows it now,
+	 * not at the next report (multi_tenant_docker_hosts WP7).
 	 */
 	private static function process_hold_container($job) {
 		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
@@ -2715,14 +2722,44 @@ HTML;
 			$o = json_decode(trim((string)$data['output']), true);
 		}
 		$ok = (string)$job->get('mjb_status') === 'completed' && is_array($o);
-		$job->set('mjb_result', json_encode([
+		$result = [
 			'container' => $ok ? self::host_report_name($o['container'] ?? '') : '',
 			'action'    => $ok && in_array($o['action'] ?? '', ['stop', 'start'], true) ? $o['action'] : '',
 			'done'      => $ok && ($o['done'] ?? false) === true,
 			'held'      => $ok && ($o['held'] ?? false) === true,
 			'state'     => $ok ? self::unit_journal_word($o['state'] ?? '') : '',
-		]));
+		];
+		$job->set('mjb_result', json_encode($result));
 		$job->save();
+
+		if ($result['container'] === '' || !$job->get('mjb_mgn_managed_node_id')) {
+			return;
+		}
+		try {
+			$host = new ManagedNode((int)$job->get('mjb_mgn_managed_node_id'), TRUE);
+		} catch (Exception $e) {
+			return;
+		}
+		if (!$host->key) {
+			return;
+		}
+		$report = json_decode((string)$host->get('mgn_last_host_report'), true);
+		if (is_array($report) && is_array($report['containers'] ?? null)) {
+			foreach ($report['containers'] as $i => $c) {
+				if (is_array($c) && ($c['name'] ?? '') === $result['container']) {
+					$report['containers'][$i]['state'] = $result['state'];
+					if ($result['held']) {
+						$report['containers'][$i]['held'] = true;
+					} else {
+						unset($report['containers'][$i]['held']);
+					}
+					$host->set('mgn_last_host_report', json_encode($report));
+					$host->save();
+					break;
+				}
+			}
+		}
+		ManagedNode::fold_container_holds($host, [$result['container'] => $result['held']]);
 	}
 
 	/** What remove_site_certificate.sh says of each part. */
@@ -3138,6 +3175,14 @@ HTML;
 				$node->set('mgn_last_host_report', json_encode($report));
 				$node->set('mgn_last_host_report_time', $read_at);
 				$node->save();
+				// Each site row's held state follows what its host says.
+				if (is_array($report['containers'] ?? null)) {
+					$held = [];
+					foreach ($report['containers'] as $c) {
+						$held[$c['name']] = !empty($c['held']);
+					}
+					ManagedNode::fold_container_holds($node, $held);
+				}
 			} catch (Exception $e) {
 				// The node record is gone or unreadable; the job result below
 				// still records what the node said.

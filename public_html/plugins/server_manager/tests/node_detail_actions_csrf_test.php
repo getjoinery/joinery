@@ -9,15 +9,19 @@
  * NodeDetailActions — CSRF is enforced on every node-detail POST action.
  *
  * The property under test: the dispatch validates the SmAdminCsrf token once,
- * before any handler runs, so a POST without a valid token is rejected for all
- * 18 actions (redirected back with no side effect), and a POST with the token
+ * before any handler runs, so a POST without a valid token is rejected for every
+ * action (redirected back with no side effect), and a POST with the token
  * is accepted (the handler runs). This is the 1.0 hardening acceptance "CSRF
  * enforced on every plugin POST", now covered at the single dispatch point.
  *
  * Throwaway node + any job rows are created and permanently removed in cleanup.
  *
+ * Every action run() handles must be on that list: one that is not is posted
+ * and ignored, and the page just re-renders.
+ *
  * Run: php plugins/server_manager/tests/node_detail_actions_csrf_test.php
  *
+ * @version 1.1 - every handled action is on the dispatch list
  * @version 1.0
  */
 
@@ -74,6 +78,18 @@ try {
 	// Establish a known session token (mints it if absent).
 	if (session_status() !== PHP_SESSION_ACTIVE) { @session_start(); }
 	$token = SmAdminCsrf::token();
+
+	// -----------------------------------------------------------------------
+	section('every action the page handles is on the dispatch list');
+	// -----------------------------------------------------------------------
+
+	// dispatch() runs only the actions on its list; one handled in run() but
+	// missing from it is posted and silently ignored (ten were, from 09-22).
+	$src = file_get_contents(PathHelper::getIncludePath('plugins/server_manager/logic/node_detail_actions_logic.php'));
+	preg_match_all("/^\t\t\tcase '([a-z_]+)':/m", $src, $m);
+	$unlisted = array_values(array_diff($m[1], $ALL_ACTIONS));
+	check(count($m[1]) > 30 && !$unlisted, 'every action run() handles is one dispatch() runs',
+		$unlisted ? 'not listed: ' . implode(', ', $unlisted) : count($m[1]) . ' handled');
 
 	// -----------------------------------------------------------------------
 	section('every action is rejected without a valid CSRF token');

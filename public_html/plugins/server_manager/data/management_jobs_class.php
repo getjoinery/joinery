@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.32 - hold_words(): who held a container stopped, when and why, from the newest job that changed
+ *                 the hold (multi_tenant_docker_hosts WP7)
  * @version 1.31 - decommission_moved_site's claim budget: the teardown and the host's proof, no approval wait
  *                 (site_copy.md WP14)
  * @version 1.30 - copy_take_key's claim budget: the owner's hour at the copy's own page inside it
@@ -754,6 +756,58 @@ class ManagementJob extends SystemBase {
 			return null;
 		}
 		return new ManagementJob($row['mjb_management_job_id'], TRUE);
+	}
+
+	/**
+	 * Who held a container stopped on its host, when, and why, in one
+	 * sentence (multi_tenant_docker_hosts WP7). The host keeps only the hold
+	 * itself; the job that asked for it carries the person and the reason
+	 * they gave, or the switch-over that asked.
+	 *
+	 * Read from the newest job here that changed the hold: a stop the host
+	 * says left it held (held, whether or not the container had stopped yet:
+	 * the hold is written before the stop), or a start that lifted it. When
+	 * that is a start, a hold seen now was placed on the host by hand, and
+	 * nothing here says who placed it: ''. '' too when no such job is on
+	 * record. Holds and starts made on the host by hand are invisible here.
+	 */
+	static function hold_words($host_node_id, $name) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT mjb_management_job_id FROM mjb_management_jobs
+			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'hold_container'
+			   AND mjb_status = 'completed' AND mjb_delete_time IS NULL
+			   AND mjb_parameters->>'name' = ?
+			   AND ((mjb_parameters->>'action' = 'stop' AND mjb_result->>'held' = 'true')
+			     OR (mjb_parameters->>'action' = 'start' AND mjb_result->>'held' = 'false'))
+			 ORDER BY mjb_management_job_id DESC LIMIT 1"
+		);
+		$q->execute([(int)$host_node_id, (string)$name]);
+		$id = $q->fetchColumn();
+		if (!$id) {
+			return '';
+		}
+		$job = new ManagementJob((int)$id, TRUE);
+		$params = $job->get('mjb_parameters');
+		$params = is_array($params) ? $params : json_decode((string)$params, true);
+		$params = is_array($params) ? $params : [];
+		if (($params['action'] ?? '') !== 'stop') {
+			return '';
+		}
+		$when = $job->get_local('mjb_completed_time', 'M j, Y');
+		if (!empty($params['site_copy_id'])) {
+			return 'Stopped on ' . $when . ' by the switch-over of site copy #' . (int)$params['site_copy_id']
+				. ': this is the old container, kept stopped until it is removed.';
+		}
+		$by = 'someone no longer on record';
+		if ((int)$job->get('mjb_created_by')) {
+			$user = new User((int)$job->get('mjb_created_by'), TRUE);
+			if ($user->key) {
+				$by = trim($user->display_name()) ?: (string)$user->get('usr_email');
+			}
+		}
+		$reason = trim((string)($params['reason'] ?? ''));
+		return 'Held by ' . $by . ' on ' . $when . ($reason !== '' ? ': ' . $reason : '.');
 	}
 
 	/**

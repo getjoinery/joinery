@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.47 - a site container on a host can be held stopped, with the reason why, and started again; a held
+ *                 site's own page says who held it, when and why (multi_tenant_docker_hosts WP7)
  * @version 1.46 - a script edited on this management node and not yet published warns as one committed does
  * @version 1.45 - the machine's outbound connection limits (host_report 1.11, node_outbound_and_transfer
  *                 WP3): on, off, or not in force and why; a site whose limits dropped packets since the
@@ -705,6 +707,28 @@
 		echo '<div class="alert alert-secondary"><div><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
 			. 'This is the old server of a site that has moved. It is kept, quiet, for the way back. Removing it from the dashboard '
 			. 'does not delete the server; delete that at its provider.</div></div>';
+	} elseif ($install_state === 'held') {
+		// Stopped on purpose on its host (multi_tenant_docker_hosts WP7). Who,
+		// when and why come from the job that asked; it is started again from
+		// the host's own page, whose agent holds it.
+		$held_host = null;
+		if ((int)$node->get('mgn_mgh_managed_host_id')) {
+			try {
+				$held_host = (new ManagedHost((int)$node->get('mgn_mgh_managed_host_id'), TRUE))->host_node();
+			} catch (Exception $e) {
+				$held_host = null;
+			}
+		}
+		$held_words = $held_host ? ManagementJob::hold_words((int)$held_host->key, trim((string)$node->get('mgn_container_name'))) : '';
+		echo '<div class="alert alert-secondary"><div><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
+			. 'This site\'s container is stopped on its server, on purpose, and stays stopped through reboots until it is started again. '
+			. 'Its data is kept. Nothing watches, backs up or upgrades it meanwhile, and no incident is raised for it.'
+			. ($held_words !== '' ? ' ' . htmlspecialchars($held_words) : '')
+			. ($held_host
+				? ' Start it from <a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$held_host->key . '" class="alert-link">'
+					. htmlspecialchars((string)$held_host->get('mgn_name')) . '</a>, under Site containers.'
+				: '')
+			. '</div></div>';
 	}
 
 
@@ -1031,19 +1055,50 @@
 			$containers = $hr['containers'] ?? null;
 			if (is_array($containers) && $containers) {
 				$can_restart_c = JobCommandBuilder::has_primitive($node, 'restart_container');
+				$can_hold_c = JobCommandBuilder::has_primitive($node, 'hold_container');
 				echo '<div class="text-muted small text-uppercase mt-3 mb-1">Site containers</div>';
 				echo '<table class="table table-sm mb-0 align-middle"><tbody>';
+				// A small posted form for one container, behind the system modal.
+				$container_form = function ($form_id, $fields) use ($hr_str, $base_url) {
+					$out = '<form id="' . $hr_str($form_id) . '" method="post" action="'
+						. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>';
+					foreach ($fields as $k => $v) {
+						$out .= '<input type="hidden" name="' . $hr_str($k) . '" value="' . $hr_str($v) . '">';
+					}
+					return $out . SmAdminCsrf::field() . '</form>';
+				};
 				foreach ($containers as $c) {
 					$c_held = !empty($c['held']);
+					$held_words = '';
 					if ($c_held) {
-						// A switch-over's old container, stopped until it is removed.
+						// Stopped on purpose, and kept stopped: no restart by Docker
+						// or container_health, and nothing on this plane watches it.
 						$ctext = 'Held stopped'; $ccls = 'secondary';
+						$held_words = ManagementJob::hold_words((int)$node->key, (string)$c['name']);
+						$held_words = '<div class="small text-muted">'
+							. htmlspecialchars($held_words !== '' ? $held_words : 'Held on the server itself; no hold from here is on record.') . '</div>';
 					} elseif ($c['state'] !== 'running') {
 						$ctext = 'Not running'; $ccls = 'danger';
 					} else {
 						$ctext = 'Running'; $ccls = 'success';
 					}
-					echo '<tr><td>' . $hr_str($c['name']) . $site_figures($c) . '</td><td><span class="badge bg-' . $ccls . '">' . $hr_str($ctext) . '</span></td><td class="text-end">';
+					echo '<tr><td>' . $hr_str($c['name']) . $site_figures($c) . '</td><td><span class="badge bg-' . $ccls . '">' . $hr_str($ctext) . '</span>' . $held_words . '</td><td class="text-end">';
+					if ($can_hold_c && $c_held) {
+						$form_id = 'nodeActionStartContainer_' . $c['name'];
+						$confirm = 'Start ' . $c['name'] . ' again? It is a working site from then on: Docker restarts it, and it is watched, backed up and upgraded like any other.';
+						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+								. json_encode($form_id) . ').submit(); })') . '">Start</button>';
+						echo $container_form($form_id, ['action' => 'hold_container', 'op' => 'start', 'name' => $c['name']]);
+					} elseif ($can_hold_c && $c['state'] === 'running') {
+						$form_id = 'nodeActionHoldContainer_' . $c['name'];
+						$ask = 'Hold ' . $c['name'] . ' stopped? The site goes down and stays down, through reboots, until it is started here; '
+							. 'its data and volumes are kept. Nothing watches, backs up or upgrades it meanwhile. Why is it held? (shown on its page)';
+						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075 me-1"'
+							. ' onclick="' . $hr_str('JoineryModal.prompt(' . json_encode($ask) . ', function(why){ var f = document.getElementById('
+								. json_encode($form_id) . '); f.elements.reason.value = why; f.submit(); }, {required: true, confirmLabel: ' . json_encode('Hold stopped') . ', confirmStyle: ' . json_encode('danger') . '})') . '">Hold stopped</button>';
+						echo $container_form($form_id, ['action' => 'hold_container', 'op' => 'stop', 'name' => $c['name'], 'reason' => '']);
+					}
 					if ($can_restart_c && !$c_held) {
 						$form_id = 'nodeActionRestartContainer_' . $c['name'];
 						$confirm = 'Restart the container ' . $c['name'] . '? The site is down while it restarts; its data and volumes are kept.';

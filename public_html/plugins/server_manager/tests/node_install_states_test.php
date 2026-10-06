@@ -45,8 +45,8 @@ function nis_node(?string $state, bool $save = false) {
 $not_working = array_keys(ManagedNode::INSTALL_STATES);
 
 section('The list of states');
-check($not_working === array('installing', 'install_failed', 'copy', 'switching', 'retired'),
-	'the five install states, installs\' and the site copy\'s', implode(',', $not_working));
+check($not_working === array('installing', 'install_failed', 'copy', 'switching', 'retired', 'held'),
+	'the six install states: installs\', the site copy\'s, and a site held stopped', implode(',', $not_working));
 check(nis_node(null)->is_operational() && nis_node('')->is_operational(), 'a node with no install state is a working node');
 foreach ($not_working as $state) {
 	$node = nis_node($state);
@@ -99,7 +99,7 @@ check(preg_match('/if \(!\$node->is_operational\(\)\)\s*\{\s*continue;/', $task)
 section('The status dot');
 $colours = array();
 foreach ($not_working as $state) { $colours[$state] = JobCommandBuilder::status_color_for_node(nis_node($state), null, false); }
-check($colours === array('installing' => 'info', 'install_failed' => 'danger', 'copy' => 'info', 'switching' => 'info', 'retired' => 'secondary'),
-	'installing, copy and switching blue; a failed install red; a retired source grey', json_encode($colours));
+check($colours === array('installing' => 'info', 'install_failed' => 'danger', 'copy' => 'info', 'switching' => 'info', 'retired' => 'secondary', 'held' => 'secondary'),
+	'installing, copy and switching blue; a failed install red; a retired source and a held site grey', json_encode($colours));
 
 harness_finish();

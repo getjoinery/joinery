@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.98 - install_state_color: a site held stopped is grey (multi_tenant_docker_hosts WP7)
  * @version 1.97 - COPY_KEY_LOOK_MIN_VERSION: the first release whose copy answers the key look path;
  *                 build_hold_container: a switch-over's old container stopped and kept stopped on its host
  * @version 1.96 - build_moved_site_reach: a probe on the NEW server of a switch-over, fetched over the domain;
@@ -823,12 +824,13 @@ class JobCommandBuilder {
 	 */
 	/**
 	 * The colour of a node in an install state, for its status dot and its
-	 * fleet-list badge alike: a failed install red, a retired source grey,
-	 * every other state blue.
+	 * fleet-list badge alike: a failed install red, a retired source and a
+	 * site held stopped grey, every other state blue.
 	 */
 	public static function install_state_color($install_state): string {
 		if ($install_state === 'install_failed') return 'danger';
 		if ($install_state === 'retired')        return 'secondary';
+		if ($install_state === 'held')           return 'secondary';
 		return 'info';
 	}
 

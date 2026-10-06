@@ -19,6 +19,10 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.45 - hold_container: hold a site on this host stopped, with the reason why, or start it again
+ *                 (multi_tenant_docker_hosts WP7); every handled action is on the dispatch list: restart,
+ *                 clear, the journal, disk, file, schema and page reads, run installer and reclaim were
+ *                 posted and ignored
  * @version 1.44 - the switch-over and the way back are confirmed in the system modal, not a checkbox
  * @version 1.43 - remove_site_certificate: the certificate a removed old container left on its host
  * @version 1.42 - decommission_node on the old machine of a switch-over says the new server was reached first
@@ -135,6 +139,17 @@ class NodeDetailActions {
 		'host_converge'            => 'overview',
 		'site_log'                 => 'overview',
 		'log_table_tail'           => 'overview',
+		'unit_journal'             => 'overview',
+		'disk_usage'               => 'overview',
+		'reset_failed_unit'        => 'overview',
+		'restart_unit'             => 'overview',
+		'restart_container'        => 'overview',
+		'hold_container'           => 'overview',
+		'run_installer'            => 'overview',
+		'file_head'                => 'overview',
+		'schema_probe'             => 'overview',
+		'reclaim_managed_file'     => 'overview',
+		'page_probe'               => 'overview',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
 		'restore_chain'            => 'backups',
@@ -266,6 +281,25 @@ class NodeDetailActions {
 			case 'restart_container': {
 				$built = JobCommandBuilder::build_restart_container($node, (string)($_POST['name'] ?? ''));
 				$job = ManagementJob::createFromBuild($node->key, 'restart_container', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'hold_container': {
+				// A site on this host stopped and kept stopped, or started
+				// again (multi_tenant_docker_hosts WP7). The reason stays on
+				// the job here; the host is told only stop or start.
+				$op = (string)($_POST['op'] ?? '');
+				$record = null;
+				if ($op === 'stop') {
+					$reason = trim(preg_replace('/\s+/', ' ', (string)($_POST['reason'] ?? '')));
+					if ($reason === '') {
+						self::fail($session, $page_regex, 'Say why the site is held stopped; the reason is shown on its page until it is started again.');
+						return $base_url . '&tab=overview';
+					}
+					$record = ['reason' => mb_substr($reason, 0, 200)];
+				}
+				$built = JobCommandBuilder::build_hold_container($node, (string)($_POST['name'] ?? ''), $op);
+				$job = ManagementJob::createFromBuild($node->key, 'hold_container', $built, $record, $uid);
 				return self::jobUrl($job);
 			}
 
