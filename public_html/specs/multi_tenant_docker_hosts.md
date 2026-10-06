@@ -22,8 +22,9 @@ rebase_site_container.sh 1.11, migrate_site_to_code_volumes.sh 1.3, agent
 1.58.1; gates site_run_spec, docker_multi_tenant) and run on scratch Linodes. WP5 items
 4, 5 and 7, with the walls of items 1 and 6, built 2026-10-06 (multi_tenant_host.sh 1.0,
 host_report.sh 1.8, JobResultProcessor 1.58, node overview 1.42; gate multi_tenant_host)
-and proven on the scratch Linode, reboot included. They are not yet called from install.sh
-(waits on node_outbound_and_transfer WP2). Nothing else is built. Split out of the starter
+and proven on the scratch Linode, including a reboot by hand (an unattended one is a live
+check); multi_tenant_host.sh 1.1 has reviewer2's fixes; install.sh 3.00 runs them on every
+`docker --multi-tenant` install (gate docker_multi_tenant). Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -459,8 +460,9 @@ On a multi-tenant host:
 1. **One private network per site, on a pinned subnet (S8).** Every
    container site, on any Docker host, runs on a network of its own with an
    IPv4 subnet and a private IPv6 /64, recorded in its run spec
-   (`node_outbound_and_transfer` WP2, which also moves the three things that
-   assume the default bridge onto the site's subnet). On a multi-tenant host
+   (`node_outbound_and_transfer` WP2, which also fixes the one thing that
+   assumes the default bridge, the proxy address Apache trusts). On a
+   multi-tenant host
    that network is the wall: the container is attached only to it, so a site
    cannot open a connection to another site's web server or PostgreSQL. The
    proxy reaches each site through its published loopback port, as now.
@@ -643,16 +645,49 @@ On a multi-tenant host:
    `reboot_required` turns amber when a box has gone more than a day without
    taking a pending reboot.
 
-**Items 4, 5 and 7, and the walls of 1 and 6: built 2026-10-06, not yet wired
-into `install.sh`.** All of it is one file, `multi_tenant_host.sh`
-(install_tools, 1.0). `install` puts a root-owned copy at
-`/usr/local/sbin/joinery-site-walls` and starts `joinery-site-walls.service`,
-which loads the walls at every boot, before Docker. It also writes the reboot
-policy. The ruleset is checked by `nft -c` before anything is written.
-`install.sh docker --multi-tenant` gets one call to it once
-`node_outbound_and_transfer` WP2 lands. Until then that session holds
-`install.sh` and `host_housekeeping.sh`, and the installation guide is updated
-with the call.
+**Items 4, 5 and 7, and the walls of 1 and 6: built 2026-10-06.** All of it
+is one file, `multi_tenant_host.sh` (install_tools, 1.0). `install` puts a
+root-owned copy at `/usr/local/sbin/joinery-site-walls` and starts
+`joinery-site-walls.service`, which loads the walls at every boot, before
+Docker. It also writes the reboot policy. The ruleset is checked by `nft -c`
+before anything is written. `install.sh docker --multi-tenant` (install.sh
+3.00) runs it on both paths, after the remap check: a fresh Docker install, and
+a host that already has Docker. A host whose walls fail to install is refused
+before its agent joins. Run on the scratch Linode the same day: its walls were
+removed and the real `install.sh docker --multi-tenant -y` put them back. The
+probe gave the same result as before, `check` passed, and a second run
+rewrote nothing. The fresh-Docker path is pinned by the docker_multi_tenant
+gate and is a live check on a new box. The installation guide describes both
+(installation.md, One-time setup).
+
+**reviewer2's review, 2026-10-06, fixed in multi_tenant_host.sh 1.1:**
+- B1. The walls failed open at boot: `Before=` is ordering only, so if the
+  walls failed to load, Docker started every site without them and nothing
+  noticed. Now a drop-in gives `docker.service` an `ExecStartPre` that runs
+  `joinery-site-walls assert`, so Docker refuses to start, and docker.service
+  shows as failed in the host report. It is not `Requires=`, because install
+  restarts the walls unit, and a required unit's restart restarts Docker and
+  every site with it.
+- B2. The stock timer's `Persistent=true` made up a missed run at boot. On a
+  cloud image with an old stamp, that meant an update, and now a reboot, in the
+  day or in the middle of `install.sh`. The drop-in sets `Persistent=false`.
+- N1. The drop-in turns on the nightly run itself (`APT::Periodic`). install
+  adds unattended-upgrades if it is missing, and install and `check` ask
+  `apt-config` what apt will actually do.
+- N2. A re-run reloads the walls only when they changed or are missing, so
+  their drop counts survive.
+- N3. AWS's IPv6 metadata address is dropped beside Linode's.
+- N4. `nftables.service` flushes the whole ruleset at start, reload and stop. A
+  drop-in loads the walls again after each.
+
+Proven on the scratch Linode:
+- the upgrade through the real `install.sh`;
+- Docker refusing to start with the tables deleted, with the reason in its
+  journal: it reached its start limit and ended `failed` (docker.service and
+  docker.socket in the failed units), then started once the walls were back;
+- the walls surviving `nftables` start and stop;
+- drop counts unchanged across a re-run;
+- after a reboot, the walls loaded at 11 s and both sites healthy.
 
 - **The walls are rules on the site bridges, not one rule per site.** They
   match `docker0` (a site not yet moved to a network of its own) and

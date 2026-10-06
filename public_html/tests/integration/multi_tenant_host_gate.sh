@@ -13,8 +13,10 @@
 # (specs/multi_tenant_docker_hosts.md WP5 items 1, 4, 5, 6 and 7). This gate
 # pins the ruleset rule by rule, the boot unit, the reboot policy and its
 # window, that a ruleset nft refuses installs nothing, and that `check` says
-# what is missing. nft, systemctl and apt-get are stubs; what the rules do to
-# real packets is a live check.
+# what is missing. Docker refuses to start without the walls, a reload keeps
+# their counts unless something changed, and a missed night is not made up.
+# nft, systemctl, apt-config and apt-get are stubs; what the rules do to real
+# packets is a live check.
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -71,7 +73,7 @@ has "to another site on docker0: dropped" "$S3" '^oifname "docker0" counter drop
 has "to another site's own network: dropped" "$S3" '^oifname "jsnet\*" counter drop$'
 has "port 25 anywhere: dropped" "$S3" '^tcp dport 25 counter drop$'
 has "metadata over IPv4: dropped" "$S3" '^ip daddr 169\.254\.169\.254 counter drop$'
-has "metadata over IPv6: dropped" "$S3" '^ip6 daddr fd00:a9fe:a9fe::1 counter drop$'
+has "metadata over IPv6, Linode's and AWS's: dropped" "$S3" '^ip6 daddr \{ fd00:a9fe:a9fe::1, fd00:ec2::254 \} counter drop$'
 hasnt "nothing here accepts" "$S3" 'accept'
 
 echo "=== across one bridge ==="
@@ -98,7 +100,20 @@ echo "systemctl $*" >> "$STUB_T/calls"
 [ "$1" = "is-enabled" ] && exit "${STUB_ENABLED_RC:-0}"
 exit 0
 STUB
-chmod +x "$T/bin/nft" "$T/bin/systemctl"
+# apt-config answers as apt would with the reboot drop-in read, unless
+# STUB_APT_OFF says something later in apt.conf.d turned it off.
+cat > "$T/bin/apt-config" <<'STUB'
+#!/bin/bash
+if [ -f "$JOINERY_MT_ROOT/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot" ] && [ -z "${STUB_APT_OFF:-}" ]; then
+    echo "UU='1'"; echo "AR='true'"
+fi
+STUB
+cat > "$T/bin/apt-get" <<'STUB'
+#!/bin/bash
+echo "apt-get $*" >> "$STUB_T/calls"
+STUB
+printf '#!/bin/bash\n' > "$T/bin/unattended-upgrade"
+chmod +x "$T/bin/nft" "$T/bin/systemctl" "$T/bin/apt-config" "$T/bin/apt-get" "$T/bin/unattended-upgrade"
 export PATH="$T/bin:$PATH" STUB_T="$T" JOINERY_MT_ROOT="$T/root"
 calls() { cat "$T/calls" 2>/dev/null | tr '\n' '|'; }
 
@@ -114,7 +129,16 @@ has "unit: loads the walls" "$UNIT" '^ExecStart=/usr/local/sbin/joinery-site-wal
 has "unit: before Docker starts" "$UNIT" '^Before=.*docker\.service'
 has "unit: stays active" "$UNIT" '^RemainAfterExit=yes$'
 has "unit: at every boot" "$UNIT" '^WantedBy=multi-user\.target$'
+hasnt "unit: no Requires or BindsTo (a walls restart must not restart Docker)" "$UNIT" '^(Requires|BindsTo|PartOf)='
+DD="$(cat "$T/root/etc/systemd/system/docker.service.d/joinery-site-walls.conf" 2>/dev/null)"
+chk "Docker's start asserts the walls first" "$(printf '%s\n' "$DD" | grep -v '^#' | tr '\n' '|')" \
+    "[Service]|ExecStartPre=/usr/local/sbin/joinery-site-walls assert|"
+ND="$(cat "$T/root/etc/systemd/system/nftables.service.d/joinery-site-walls.conf" 2>/dev/null)"
+chk "nftables.service's flush is followed by the walls, at start, reload and stop" "$(printf '%s\n' "$ND" | grep -v '^#' | tr '\n' '|')" \
+    "[Service]|ExecStartPost=/usr/local/sbin/joinery-site-walls walls|ExecReload=/usr/local/sbin/joinery-site-walls walls|ExecStopPost=/usr/local/sbin/joinery-site-walls walls|"
 REB="$(cat "$T/root/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot" 2>/dev/null)"
+has "updates: run every night" "$REB" '^APT::Periodic::Unattended-Upgrade "1";$'
+has "updates: lists refreshed" "$REB" '^APT::Periodic::Update-Package-Lists "1";$'
 has "reboot: on" "$REB" '^Unattended-Upgrade::Automatic-Reboot "true";$'
 has "reboot: even with someone logged in" "$REB" '^Unattended-Upgrade::Automatic-Reboot-WithUsers "true";$'
 has "reboot: as soon as the update needs it" "$REB" '^Unattended-Upgrade::Automatic-Reboot-Time "now";$'
@@ -125,14 +149,39 @@ chk "timer: the stock time is cleared, then one time in UTC" \
     "$(printf '%s\n' "$TIM" | grep '^OnCalendar=' | tr '\n' '|')" "OnCalendar=|OnCalendar=*-*-* 05:30 UTC|"
 start=$(printf '%s\n' "$TIM" | sed -n 's/^OnCalendar=\*-\*-\* \([0-9][0-9]\):\([0-9][0-9]\) UTC$/\1 \2/p' | awk '{print $1*60+$2}')
 spread=$(printf '%s\n' "$TIM" | sed -n 's/^RandomizedDelaySec=\([0-9]*\)m$/\1/p')
+has "timer: a missed night is not made up at boot" "$TIM" '^Persistent=false$'
 chk "the window opens after the backup window ends (05:00 UTC)" "$([ "${start:-0}" -ge 300 ] && echo yes)" "yes"
 chk "and closes before the next one opens (03:00 UTC)" "$([ $(( ${start:-0} + ${spread:-1440} )) -le 1620 ] && echo yes)" "yes"
 
 echo "=== install again: nothing differs ==="
 : > "$T/calls"
+out="$(bash "$MTH" install 2>&1)"
+chk "no daemon-reload, no restarts: the walls and their drop counts are kept" "$(calls)" \
+    "nft -c -f -|systemctl enable joinery-site-walls.service|nft list table inet joinery_site_walls|nft list table bridge joinery_site_walls|"
+has "and says so" "$out" '^site walls: unchanged and loaded'
+: > "$T/calls"
+STUB_NFT_LIST_RC=1 bash "$MTH" install > /dev/null 2>&1
+chk "nothing differs but the walls are gone (flushed): they are loaded again" "$(calls)" \
+    "nft -c -f -|systemctl enable joinery-site-walls.service|nft list table inet joinery_site_walls|systemctl restart joinery-site-walls.service|"
+
+rm -f "$T/root/etc/systemd/system/docker.service.d/joinery-site-walls.conf"; : > "$T/calls"
 bash "$MTH" install > /dev/null 2>&1
-chk "no reload, no timer restart; the walls are reloaded" "$(calls)" \
-    "nft -c -f -|systemctl enable joinery-site-walls.service|systemctl restart joinery-site-walls.service|"
+chk "only Docker's drop-in differs: systemd re-reads it, the walls are not reloaded" "$(calls)" \
+    "nft -c -f -|systemctl daemon-reload|systemctl enable joinery-site-walls.service|nft list table inet joinery_site_walls|nft list table bridge joinery_site_walls|"
+
+echo "=== apt that will not reboot is refused ==="
+out="$(STUB_APT_OFF=1 bash "$MTH" install 2>&1)"; rc=$?
+chk "exit non-zero" "$([ "$rc" -ne 0 ] && echo yes)" "yes"
+has "names apt-config" "$out" 'apt does not run unattended upgrades with a reboot'
+
+echo "=== assert: what Docker runs before it starts ==="
+bash "$MTH" assert > /dev/null 2>&1; rc=$?
+chk "walls loaded: exit 0" "$rc" "0"
+out="$(STUB_NFT_LIST_RC=1 bash "$MTH" assert 2>&1)"; rc=$?
+chk "walls missing: exit 1, so Docker does not start" "$rc" "1"
+has "and says why" "$out" 'Docker does not start'
+: > "$T/calls"; STUB_NFT_LIST_RC=1 bash "$MTH" assert > /dev/null 2>&1
+chk "assert only reads" "$(calls | tr '|' '\n' | grep -vc '^nft list table')" "0"
 
 echo "=== a ruleset nft refuses installs nothing ==="
 rm -rf "$T/root"; : > "$T/calls"
@@ -151,6 +200,13 @@ chk "walls not loaded: exit 1" "$rc" "1"
 has "names it" "$out" '^walls: NOT loaded$'
 out="$(STUB_ENABLED_RC=1 bash "$MTH" check)"; rc=$?
 chk "unit not enabled: exit 1" "$rc" "1"
+mv "$T/root/etc/systemd/system/docker.service.d/joinery-site-walls.conf" "$T/dd"
+out="$(bash "$MTH" check)"; rc=$?
+chk "Docker would start without the walls: exit 1" "$rc" "1"
+has "names it" "$out" '^walls at boot: NOT kept'
+mv "$T/dd" "$T/root/etc/systemd/system/docker.service.d/joinery-site-walls.conf"
+out="$(STUB_APT_OFF=1 bash "$MTH" check)"; rc=$?
+chk "apt will not run or reboot: exit 1" "$rc:$(printf '%s\n' "$out" | grep -c '^reboot after updates: NOT set$')" "1:1"
 rm -f "$T/root/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot"
 out="$(bash "$MTH" check)"; rc=$?
 chk "reboot policy missing: exit 1" "$rc" "1"
