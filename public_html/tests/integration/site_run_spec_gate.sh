@@ -68,7 +68,7 @@ if [ "$#" -lt 3 ]; then   # `docker inspect NAME`: it exists, unless named absen
     exit 0
 fi
 case "$3" in
-    *Privileged*)              echo "${STUB_HOSTCONFIG:-false|default|0|0|0|0||0|268435456}|268435456|1500000000|512|unless-stopped|oldsite" ;;
+    *Privileged*)              echo "${STUB_HOSTCONFIG:-false|default||0|0|0||0|268435456}|268435456|1500000000|512|unless-stopped|oldsite|${STUB_CAPDROP:-}" ;;
     *PortBindings*)            printf "${STUB_PORTS:-127.0.0.1|8090|80/tcp\n127.0.0.1|9090|5432/tcp\n}" ;;
     *Mounts*)                  printf "${STUB_MOUNTS:-volume|oldsite_code|/var/www/html/oldsite/public_html|true\nvolume|oldsite_postgres|/var/lib/postgresql|true\n}" ;;
     *Config.Env*)
@@ -100,11 +100,15 @@ chk "web port on 127.0.0.1" "$(echo "$A" | grep -c -- '-p 127.0.0.1:8087:80 ')" 
 chk "database port on 127.0.0.1" "$(echo "$A" | grep -c -- '-p 127.0.0.1:9087:5432 ')" "1"
 chk "fifteen volumes" "$(echo "$A" | grep -o -- '-v mysite_' | wc -l)" "15"
 chk "no environment and no image" "$(echo "$A" | grep -c -- '-e \|--env\|joinery-mysite')" "0"
+chk "every capability dropped, then exactly the six a site needs" \
+    "$(echo "$A" | grep -o -- '--cap-[a-z]*=[A-Z_]*' | paste -sd ' ')" \
+    "--cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=SETUID --cap-add=SETGID --cap-add=KILL"
 
 echo "=== No limits means no limit arguments; a site with no domain answers on every interface ==="
 run_spec_render bare "" 8088 9088 "" "" "" | run_spec_write bare
 A="$(args_of bare)"
 chk "no memory, cpus or pids argument" "$(echo "$A" | grep -c -- '--memory\|--cpus\|--pids')" "0"
+chk "the capabilities are the platform's, not a limit: a spec with none still drops them" "$(echo "$A" | grep -c -- '--cap-drop=ALL ')" "1"
 chk "web port on every interface" "$(echo "$A" | grep -c -- '-p 8088:80 ')" "1"
 
 echo "=== Docker's own forms are accepted; what Docker refuses is refused ==="
@@ -187,11 +191,21 @@ STUB_PORTS='::1|8090|80/tcp\n|5353|53/udp\n' STUB_MOUNTS='volume|oldsite_code|/v
 chk "IPv6 and udp bindings carried as they are" "$(run_spec_list oldsite publish | paste -sd ' ')" "[::1]:8090:80 5353:53/udp"
 chk "a read-only volume stays read-only" "$(run_spec_list oldsite volume)" "oldsite_code:/var/www/html/oldsite/public_html:ro"
 rm -f "$SPECS/oldsite/run_spec"
+STUB_HOSTCONFIG='false|default|CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_KILL |0|0|0||0|268435456' run_spec_adopt oldsite 2> "$T/err"; rc=$?
+chk "a container already holding the six is read, as Docker names them" "$rc|$(test -f "$SPECS/oldsite/run_spec" && echo written)" "0|written"
+chk "and no capability line is written: the six are not the site's" "$(grep -c -i 'cap' "$SPECS/oldsite/run_spec")" "0"
+rm -f "$SPECS/oldsite/run_spec"
+STUB_CAPDROP='ALL CAP_NET_RAW ' run_spec_adopt oldsite 2> "$T/err"; rc=$?
+chk "a container that dropped ALL, or one the site is not given, is read" "$rc|$(test -f "$SPECS/oldsite/run_spec" && echo written)" "0|written"
+rm -f "$SPECS/oldsite/run_spec"
+STUB_CAPDROP='CAP_KILL MKNOD ' run_spec_adopt oldsite 2> "$T/err"; rc=$?
+chk "a container that dropped one of the six is refused, not given it back" \
+    "$rc|$(test -f "$SPECS/oldsite/run_spec" && echo written)|$(grep -c 'dropped capabilities a site is given (KILL)' "$T/err")" "1||1"
 for c in "bind:volume|oldsite_code|/x|true\nbind||/srv/data|true\n:a bind mount at /srv/data" \
-         "cap:|true|default|0|0|0|0||0|268435456:privileged" \
-         "net:|false|host|0|0|0|0||0|268435456:network host" \
-         "swap:|false|default|0|0|0|0||0|536870912:docker update --memory-swap=268435456 oldsite" \
-         "caps:|false|default|2|0|0|0||0|268435456:added capabilities"; do
+         "cap:|true|default||0|0|0||0|268435456:privileged" \
+         "net:|false|host||0|0|0||0|268435456:network host" \
+         "swap:|false|default||0|0|0||0|536870912:docker update --memory-swap=268435456 oldsite" \
+         "caps:|false|default|CAP_CHOWN CAP_NET_ADMIN SYS_ADMIN |0|0|0||0|268435456:added capabilities (NET_ADMIN, SYS_ADMIN)"; do
     kind="${c%%:*}"; rest="${c#*:}"; want="${rest##*:}"; val="${rest%:*}"
     if [ "$kind" = bind ]; then
         STUB_MOUNTS="$val" run_spec_adopt oldsite 2> "$T/err"; rc=$?
@@ -235,7 +249,7 @@ chk "and nothing is written" "$(ls "$T/work" | grep -c 'run_spec\|^env$')" "0"
 
 echo "=== A rebuild keeps the recorded limits, and checks every limit before anything stops ==="
 # The block install.sh runs before it removes a container, run against the stub.
-BLOCK="$(awk '/^    \. "\$SCRIPT_DIR\/_site_run_spec\.sh"$/,/^    # \(end of the limits check\)$/' "$INSTALL")"
+BLOCK="$(awk '/^do_site_docker\(\) \{$/,/^}$/' "$INSTALL" | awk '/^    \. "\$SCRIPT_DIR\/_site_run_spec\.sh"$/,/^    # \(end of the limits check\)$/')"
 chk "install.sh's spec block is findable" "$(printf '%s\n' "$BLOCK" | grep -c 'end of the limits check')" "1"
 DEFAULTS="$(grep '^CONTAINER_PIDS_DEFAULT=\|^CONTAINER_PIDS_FLOOR=' "$INSTALL")"
 rebuild() {  # SITE MEMORY MEMORY_GIVEN [CPUS CPUS_GIVEN [PIDS PIDS_GIVEN]]

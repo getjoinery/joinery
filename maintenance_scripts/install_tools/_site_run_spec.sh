@@ -3,6 +3,13 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.2 - Every site container runs with --cap-drop=ALL and the six capabilities a
+#                site needs (RUN_SPEC_CAPS, WP5 item 2). They are the platform's, not the
+#                site's, so they are not spec lines: run_spec_args adds them for every
+#                site, and a rebuild of an older container picks them up. Adopt accepts a
+#                container holding those six and refuses, by name, any capability beyond them.
+#                run_spec_docker_remaps_ids says whether the host's Docker remaps user ids. Adopt
+#                also refuses a container that dropped one of the six, which a rebuild would give back.
 # Version: 1.1 - --cpus and --pids-limit (WP3): run_spec_norm_pids, and a CPU ceiling
 #                is checked against the CPUs Docker counts, since it refuses one above them,
 #                by every builder of run arguments (run_spec_args) and by run_spec_fits_host,
@@ -64,6 +71,18 @@ RUN_SPEC_VOLUMES=(
 # The container ports install.sh publishes itself: the web server and the
 # database. Every other published port is the site's own, and a rebuild keeps it.
 RUN_SPEC_OWN_PORTS="80 5432"
+
+# The only capabilities a site container holds; every other is dropped. Each
+# was measured as needed (specs/multi_tenant_docker_hosts.md WP5 item 2):
+# CHOWN, DAC_OVERRIDE and FOWNER for the ownership and mode fixes at container
+# start and PostgreSQL's own files; SETUID and SETGID for su, cron's jobs as
+# www-data, PHP-FPM's workers and the parser jail; KILL for the supervisor,
+# which clears what a dead service left running under another user. Two that
+# are dropped fail quietly rather than loudly: without SETFCAP a package's
+# setcap leaves its binary without the capability, and without FSETID a setgid
+# bit on a file whose group root is not in is cleared. Nothing declared today
+# needs either (WP5 item 2).
+RUN_SPEC_CAPS=(CHOWN DAC_OVERRIDE FOWNER SETUID SETGID KILL)
 
 run_spec_root() {
     if [[ "$(id -u)" != "0" && -n "${JOINERY_SITE_STATE_ROOT:-}" ]]; then
@@ -131,6 +150,17 @@ run_spec_host_cpus() {
     n="$(docker info -f '{{.NCPU}}' 2>/dev/null)"
     [[ "$n" =~ ^[1-9][0-9]*$ ]] || return 1
     echo "$n"
+}
+
+# Whether this host's Docker remaps user ids (userns-remap): 0 it does, 1 it
+# does not, 2 Docker did not say. Under remapping a container's root is an
+# unprivileged user on the host, and a file written into a volume from the host
+# keeps the host's ids, which are not its owners inside the container.
+run_spec_docker_remaps_ids() {
+    local opts
+    opts="$(docker info -f '{{range .SecurityOptions}}{{.}} {{end}}' 2>/dev/null)" || return 2
+    [[ -n "$opts" ]] || return 2
+    [[ " ${opts}" == *" name=userns "* ]]
 }
 
 # Whether this host can give a CPU ceiling: Docker refuses --cpus above the
@@ -283,6 +313,8 @@ run_spec_args() {  # SITE
     [[ -n "$v" ]] && printf '%s\0' "--cpus=${v}"
     v="$(run_spec_get "$site" pids_limit)"
     [[ -n "$v" ]] && printf '%s\0' "--pids-limit=${v}"
+    printf '%s\0' --cap-drop=ALL
+    for v in "${RUN_SPEC_CAPS[@]}"; do printf '%s\0' "--cap-add=${v}"; done
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -p "$v"; done < <(run_spec_list "$site" publish)
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -v "$v"; done < <(run_spec_list "$site" volume)
     return 0
@@ -314,22 +346,22 @@ run_spec_remove() {  # SITE
 # A container created before run specs existed has its arguments only in
 # Docker's record of it. This reads them once, while it still exists, and
 # writes the spec every later rebuild reads. Never used once a spec exists.
-# Anything a spec cannot carry (a bind mount, added capabilities, another
-# network, swap set apart from memory...) is refused by name, never dropped:
-# the spec is permanent, so a silent loss here would be a loss for good.
+# Anything a spec cannot carry (a bind mount, a capability beyond RUN_SPEC_CAPS,
+# another network, swap set apart from memory...) is refused by name, never
+# dropped: the spec is permanent, so a silent loss here would be a loss for good.
 run_spec_adopt() {  # SITE
     local site="$1" mem swap cpus nano pids restart retries hip hport cport proto type name dest rw
-    local priv netmode ncap nhosts ndev quota cpuset problems="" host_config ports mounts hostname
+    local priv netmode caps capdrop cap extra_caps="" kept_out="" nhosts ndev quota cpuset problems="" host_config ports mounts hostname
     run_spec_exists "$site" && return 0
     docker inspect "$site" > /dev/null 2>&1 || { echo "run spec: no container ${site} to adopt" >&2; return 1; }
     # Every read must succeed: a template Docker cannot execute prints nothing,
     # and empty fields would read as no limit. A list Docker leaves unset is
-    # nil, which len refuses, so each len is guarded.
-    host_config="$(docker inspect -f '{{.HostConfig.Privileged}}|{{.HostConfig.NetworkMode}}|{{if .HostConfig.CapAdd}}{{len .HostConfig.CapAdd}}{{else}}0{{end}}|{{if .HostConfig.ExtraHosts}}{{len .HostConfig.ExtraHosts}}{{else}}0{{end}}|{{if .HostConfig.Devices}}{{len .HostConfig.Devices}}{{else}}0{{end}}|{{.HostConfig.CpuQuota}}|{{.HostConfig.CpusetCpus}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}|{{.HostConfig.MemorySwap}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{if .HostConfig.PidsLimit}}{{.HostConfig.PidsLimit}}{{end}}|{{.HostConfig.RestartPolicy.Name}}|{{.Config.Hostname}}' "$site")" \
+    # nil, which len refuses, so each len is guarded (range over nil is empty).
+    host_config="$(docker inspect -f '{{.HostConfig.Privileged}}|{{.HostConfig.NetworkMode}}|{{range .HostConfig.CapAdd}}{{.}} {{end}}|{{if .HostConfig.ExtraHosts}}{{len .HostConfig.ExtraHosts}}{{else}}0{{end}}|{{if .HostConfig.Devices}}{{len .HostConfig.Devices}}{{else}}0{{end}}|{{.HostConfig.CpuQuota}}|{{.HostConfig.CpusetCpus}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}|{{.HostConfig.MemorySwap}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{if .HostConfig.PidsLimit}}{{.HostConfig.PidsLimit}}{{end}}|{{.HostConfig.RestartPolicy.Name}}|{{.Config.Hostname}}|{{range .HostConfig.CapDrop}}{{.}} {{end}}' "$site")" \
         && ports="$(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$site")" \
         && mounts="$(docker inspect -f '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$site")" \
         || { echo "run spec: could not read ${site}'s settings from Docker; nothing was changed" >&2; return 1; }
-    IFS='|' read -r priv netmode ncap nhosts ndev quota cpuset retries swap mem nano pids restart hostname <<< "$host_config"
+    IFS='|' read -r priv netmode caps nhosts ndev quota cpuset retries swap mem nano pids restart hostname capdrop <<< "$host_config"
     if [[ ! "$priv" =~ ^(true|false)$ || -z "$hostname" || ! "$mem" =~ ^[0-9]+$ || ! "$nano" =~ ^[0-9]+$ \
           || ! "$quota" =~ ^-?[0-9]+$ || ! "$retries" =~ ^[0-9]+$ ]]; then
         echo "run spec: Docker's account of ${site} was not in the expected form ('${host_config:0:120}'); nothing was changed" >&2
@@ -337,7 +369,21 @@ run_spec_adopt() {  # SITE
     fi
     [[ "$priv" == "true" ]] && problems="${problems}; privileged"
     case "$netmode" in ''|default|bridge) ;; *) problems="${problems}; network ${netmode}" ;; esac
-    [[ "${ncap:-0}" == 0 ]] || problems="${problems}; added capabilities"
+    # Docker names a capability with or without CAP_; a rebuild gives the six
+    # whatever the container held, so only one beyond them would be lost.
+    for cap in $caps; do
+        cap="$(printf '%s' "${cap#[Cc][Aa][Pp]_}" | tr 'a-z' 'A-Z')"
+        [[ " ${RUN_SPEC_CAPS[*]} " == *" ${cap} "* ]] || extra_caps="${extra_caps}, ${cap}"
+    done
+    [[ -z "$extra_caps" ]] || problems="${problems}; added capabilities (${extra_caps#, })"
+    # One of the six dropped on purpose would be granted back by the rebuild.
+    for cap in $capdrop; do
+        cap="$(printf '%s' "${cap#[Cc][Aa][Pp]_}" | tr 'a-z' 'A-Z')"
+        [[ "$cap" == "ALL" ]] && continue
+        [[ " ${RUN_SPEC_CAPS[*]} " == *" ${cap} "* ]] || continue
+        kept_out="${kept_out}, ${cap}"
+    done
+    [[ -z "$kept_out" ]] || problems="${problems}; dropped capabilities a site is given (${kept_out#, })"
     [[ "${nhosts:-0}" == 0 ]] || problems="${problems}; extra hosts"
     [[ "${ndev:-0}" == 0 ]] || problems="${problems}; devices"
     [[ "${quota:-0}" == 0 ]] || problems="${problems}; a CPU quota"

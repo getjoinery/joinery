@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 2.98 - install.sh docker --multi-tenant: Docker remaps user ids (userns-remap), so root in
+#               a site container is an unprivileged user on the host. Set before Docker first
+#               starts, or on a Docker host with no containers and no volumes yet; never under
+#               existing sites (specs/multi_tenant_docker_hosts.md WP5 item 3). Docker's apt key is
+#               written with gpg --batch --yes, so a host that once had Docker can install it again.
+#               daemon.json is merged as JSON by one helper (docker_daemon_json_set); the BuildKit
+#               policy no longer edits it with sed.
 #VERSION 2.97 - The PHP step also installs libjpeg-turbo-progs (BASE_IMAGE_VERSION 2.2): its djpeg
 #               lets the site decode a large JPEG already shrunk, at a fraction of the memory a
 #               full decode takes (specs/image_decode_memory.md WP3). Missing, the site still
@@ -481,7 +488,8 @@
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
-#   ./install.sh docker [--management-node=URL] [--node-name=NAME]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
+#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
+#                       --multi-tenant: root in a container is not root on the host (userns-remap); a fresh host only
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
 #   ./install.sh server [--allow-unsupported-os]     # One-time: set up bare-metal server
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
@@ -2183,14 +2191,101 @@ install_docker_host_agent() {
     fi
 }
 
+# --- Docker daemon settings, and multi-tenant hosts --------------------------
+# daemon.json is merged as JSON, one top-level key at a time, never edited as
+# text: a key set is replaced whole, every other key is kept, and a file that is
+# not a JSON object is refused and left as it was.
+docker_daemon_json_set() {  # KEY JSON_VALUE
+    local DAEMON_JSON="/etc/docker/daemon.json"
+    mkdir -m 0755 -p /etc/docker
+    python3 - "$DAEMON_JSON" "$1" "$2" <<'PY'
+import json, os, sys
+p, key, value = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+d = {}
+if os.path.exists(p) and os.path.getsize(p) > 0:
+    try:
+        with open(p) as f:
+            d = json.load(f)
+    except ValueError as e:
+        sys.exit("%s: %s" % (p, e))
+    if not isinstance(d, dict):
+        sys.exit("%s does not hold a JSON object" % p)
+d[key] = value
+tmp = p + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+os.replace(tmp, p)
+PY
+}
+
+# Docker's user-namespace remapping (userns-remap) runs every container's ids
+# as a range of unprivileged host ids (100000 and up), so root in a site
+# container owns nothing on the host (specs/multi_tenant_docker_hosts.md WP5
+# item 3). It is daemon-wide, and turning it on moves Docker's data under
+# /var/lib/docker/<uid>.<gid>, out of sight of every existing container, volume
+# and image; so it is set only before Docker's first start or on a Docker host
+# that has none of them yet.
+
+docker_daemon_json_set_userns_remap() {
+    if ! docker_daemon_json_set userns-remap '"default"'; then
+        print_error "Could not set userns-remap in /etc/docker/daemon.json (is it valid JSON?)"
+        return 1
+    fi
+    print_success "daemon.json: userns-remap on (root in a container is not root on this host)"
+}
+
+# The running daemon remaps ids, or this says so and fails.
+docker_assert_remaps_ids() {
+    . "$SCRIPT_DIR/_site_run_spec.sh"
+    local remaps=0
+    run_spec_docker_remaps_ids || remaps=$?
+    case "$remaps" in
+        0) print_success "Docker remaps user ids: container root is $(sed -n 's/^dockremap:\([0-9]*\):.*/uid \1/p' /etc/subuid | head -1) on this host"; return 0 ;;
+        1) print_error "Docker is running without user-namespace remapping, which --multi-tenant needs" ;;
+        *) print_error "Docker did not say whether it remaps user ids" ;;
+    esac
+    return 1
+}
+
+# --multi-tenant on a host that already has Docker: nothing to do if it
+# remaps; turned on if Docker holds no container, volume or image; refused
+# otherwise, since remapping would leave them under the old root for good.
+docker_multi_tenant_existing() {
+    . "$SCRIPT_DIR/_site_run_spec.sh"
+    local remaps=0
+    run_spec_docker_remaps_ids || remaps=$?
+    case "$remaps" in
+        0) print_success "Docker already remaps user ids"; return 0 ;;
+        2) print_error "Docker did not say whether it remaps user ids; nothing was changed"; return 1 ;;
+    esac
+    local containers volumes images
+    containers="$(docker ps -aq | wc -l)"
+    volumes="$(docker volume ls -q | wc -l)"
+    images="$(docker images -aq | wc -l)"
+    if [ "$containers" -ne 0 ] || [ "$volumes" -ne 0 ]; then
+        print_error "--multi-tenant needs a Docker host with no sites yet: this one has ${containers} container(s) and ${volumes} volume(s), which remapping would leave behind. Nothing was changed. Build a new host with install.sh docker --multi-tenant and move the sites onto it."
+        return 1
+    fi
+    if [ "$images" -ne 0 ]; then
+        print_error "--multi-tenant would strand this host's ${images} image(s) under Docker's old root, where nothing removes them. Nothing was changed. Remove them first (docker system prune -a), then run this again; joinery-base is rebuilt on the first site."
+        return 1
+    fi
+    docker_daemon_json_set_userns_remap || return 1
+    systemctl restart docker || { print_error "Docker did not restart with userns-remap"; return 1; }
+    docker_assert_remaps_ids
+}
+
 do_docker_install() {
     local MGMT_NODE_URL=""
     local NODE_NAME=""
+    local MULTI_TENANT=0
     local arg
     for arg in "$@"; do
         case "$arg" in
             --management-node=*) MGMT_NODE_URL="${arg#--management-node=}" ;;
             --node-name=*) NODE_NAME="${arg#--node-name=}" ;;
+            --multi-tenant) MULTI_TENANT=1 ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
         esac
     done
@@ -2221,6 +2316,9 @@ do_docker_install() {
             print_success "Docker daemon started"
         else
             print_success "Docker daemon is running"
+        fi
+        if [ "$MULTI_TENANT" -eq 1 ]; then
+            docker_multi_tenant_existing || exit 1
         fi
         # Do NOT exit here: an existing Docker host still needs its
         # housekeeping and its host agent installed and (if a URL was given)
@@ -2256,6 +2354,12 @@ do_docker_install() {
         fi
     fi
 
+    # Set before the package installs: it starts the daemon, and remapping
+    # must be on from that first start.
+    if [ "$MULTI_TENANT" -eq 1 ]; then
+        docker_daemon_json_set_userns_remap || exit 1
+    fi
+
     print_step "Installing Docker..."
 
     # Update packages
@@ -2264,9 +2368,11 @@ do_docker_install() {
     # Install prerequisites
     apt-get install -y ca-certificates curl gnupg lsb-release
 
-    # Add Docker's GPG key
+    # Add Docker's GPG key. --batch --yes: a key left by an earlier Docker
+    # install is replaced, where gpg would otherwise ask on a terminal there is
+    # none of and stop the install.
     mkdir -m 0755 -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
 
     # Add Docker repository
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
@@ -2290,8 +2396,12 @@ do_docker_install() {
         else
             print_warning "Docker installed but daemon is not running"
         fi
+        if [ "$MULTI_TENANT" -eq 1 ]; then
+            docker_assert_remaps_ids || exit 1
+        fi
     else
         print_error "Docker installation failed"
+        [ "$MULTI_TENANT" -eq 1 ] && print_info "/etc/docker/daemon.json keeps userns-remap, so a later Docker install on this host comes up remapped"
         exit 1
     fi
 
@@ -2365,24 +2475,11 @@ host_housekeeping() {
         local DAEMON_JSON="/etc/docker/daemon.json"
         if [ -f "$DAEMON_JSON" ] && grep -q '"builder"' "$DAEMON_JSON"; then
             print_info "daemon.json already has builder config — skipping"
-        else
-            if [ -f "$DAEMON_JSON" ]; then
-                # Merge into existing daemon.json — insert before closing brace
-                sed -i 's/}$/,"builder":{"gc":{"enabled":true,"defaultKeepStorage":"2GB"}}}/' "$DAEMON_JSON"
-            else
-                tee "$DAEMON_JSON" > /dev/null << 'EOF'
-{
-  "builder": {
-    "gc": {
-      "enabled": true,
-      "defaultKeepStorage": "2GB"
-    }
-  }
-}
-EOF
-            fi
+        elif docker_daemon_json_set builder '{"gc":{"enabled":true,"defaultKeepStorage":"2GB"}}'; then
             systemctl reload docker 2>/dev/null || true
             print_success "Docker BuildKit GC: auto-prune to 2GB"
+        else
+            print_warning "Could not add the BuildKit GC policy to ${DAEMON_JSON} (is it valid JSON?)"
         fi
 
         # --- Orphaned build dir scan ---

@@ -2,6 +2,9 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.11 - rollback hands PostgreSQL's log directory back inside a container of the old
+#                 image, by name: the host-side chown wrote the container's ids, which are not
+#                 the owners on a host that remaps user ids (userns-remap, WP5 item 3).
 # Version: 1.10 - stop_site_writes holds the container's supervisor (_site_supervisor.sh,
 #                 specs/multi_tenant_docker_hosts.md WP2) before it stops PHP-FPM and cron,
 #                 so neither is started again while the database is dumped.
@@ -726,13 +729,14 @@ if [ "$STAGE" = "rollback" ]; then
     [ "${#ARGS[@]}" -gt 0 ] || die "${SITE}'s run spec gave no arguments; the copy is still in ${BACKUP_VOL}"
     # The new image's start command handed PostgreSQL's log directory to its own
     # postgres user; the old image's has other ids and predates that handoff, so
-    # its server could not write its log and would not start. Hand it back.
+    # its server could not write its log and would not start. Hand it back, by
+    # name, inside a container of the old image: a chown from the host would
+    # write the container's ids, which are not its owners on a host that remaps
+    # user ids (userns-remap, specs/multi_tenant_docker_hosts.md WP5).
     LOG_VOL="$(run_spec_list "$SITE" volume | sed -n 's#^\([^:]*\):/var/log/postgresql$#\1#p' | head -1)"
     if [ -n "$LOG_VOL" ]; then
-        OLD_UID="$(docker run --rm --entrypoint id "$KEEP_IMAGE" -u postgres)"
-        OLD_GID="$(docker run --rm --entrypoint id "$KEEP_IMAGE" -g postgres)"
-        chown "0:${OLD_GID}" "$(vol_mp "$LOG_VOL")" && chmod 1775 "$(vol_mp "$LOG_VOL")"
-        find "$(vol_mp "$LOG_VOL")" -maxdepth 1 -type f -name '*.log' -exec chown "${OLD_UID}:4" {} +
+        docker run --rm -v "${LOG_VOL}:/pglog" --entrypoint bash "$KEEP_IMAGE" -c \
+            'chown root:postgres /pglog && chmod 1775 /pglog && find /pglog -maxdepth 1 -type f -name "*.log" -exec chown postgres:adm {} +'
     fi
     say "Recreating ${SITE} on ${KEEP_IMAGE} with its old arguments"
     docker run -d "${ARGS[@]}" --env-file "${WORK}/env" "$KEEP_IMAGE" > /dev/null

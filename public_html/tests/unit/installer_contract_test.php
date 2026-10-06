@@ -3584,9 +3584,11 @@ section('The base image build carries every file install.sh loads (specs/fleet_u
 
 $install_b13 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
 $base_b13    = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.base');
-// do_site_docker never runs inside the base build, so what it loads
-// (_site_run_spec.sh) is not the base image's to carry.
-$server_b13 = preg_replace('/^do_site_docker\(\) \{.*?^\}$/ms', '', $install_b13);
+// do_site_docker and the two Docker-host checks do_docker_install calls never
+// run inside the base build, so what they load (_site_run_spec.sh) is not the
+// base image's to carry. Named exactly: anything else that loads a helper is
+// assumed to run there.
+$server_b13 = preg_replace('/^(do_site_docker|docker_assert_remaps_ids|docker_multi_tenant_existing)\(\) \{.*?^\}$/ms', '', $install_b13);
 preg_match_all('#^\s*\.\s+"\$SCRIPT_DIR/([A-Za-z0-9_.-]+)"#m', $server_b13, $m_b13);
 $loaded_b13 = array_values(array_unique($m_b13[1]));
 check(in_array('_host_files.sh', $loaded_b13, true), 'install.sh loads _host_files.sh (so the check below has something to hold)');
