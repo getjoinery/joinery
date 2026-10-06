@@ -202,16 +202,20 @@ pub fn diff(
         .iter()
         .map(|p| key_for(p.trim_end_matches('/'), personality))
         .collect();
-    let remote: BTreeMap<String, (bool, Option<String>, String)> = server
-        .live_paths()
-        .into_iter()
-        .map(|(path, e)| {
-            (
-                key_for(&path, personality),
-                (e.is_folder, e.sha256.clone(), path),
-            )
-        })
-        .collect();
+    // Grouped by the name this volume compares them under. Two server names
+    // that differ only in case (or in normal form) are one name on a volume
+    // that folds them: a device can hold one of them, and holds the others as
+    // unsyncable clashes, which the engine reports and `issues-honest` checks.
+    // Keyed to one entry, the later name stood in for both: the device was
+    // judged against the other file's bytes, and the name it could not hold
+    // was never asked about (Mac soak run 40).
+    let mut remote: BTreeMap<String, Vec<(bool, Option<String>, String)>> = BTreeMap::new();
+    for (path, e) in server.live_paths() {
+        remote
+            .entry(key_for(&path, personality))
+            .or_default()
+            .push((e.is_folder, e.sha256.clone(), path));
+    }
 
     let is_excluded = |key: &str| {
         excluded
@@ -224,37 +228,51 @@ pub fn diff(
         if is_excluded(key) {
             continue;
         }
-        match remote.get(key) {
-            None => out.push(Difference::OnlyLocal {
+        let Some(members) = remote.get(key) else {
+            out.push(Difference::OnlyLocal {
+                path: entry.path.clone(),
+            });
+            continue;
+        };
+        // The device agrees when what stands at the name is ANY member's: the
+        // same kind and, for a file, that member's bytes. A folding disk's
+        // spelling is not an identity -- the user may case-rename the held
+        // file, and the server compares case-sensitively -- so the exact tie
+        // between a record, its bytes and the clash it keeps is checked from
+        // the device's store (`verify::clash_findings`). A server file with
+        // no content hash at all is not a disagreement about content -- there
+        // is nothing to disagree with; it is reported by the walk.
+        let agrees = members.iter().any(|(is_folder, sha, _)| {
+            *is_folder == entry.is_dir
+                && (entry.is_dir
+                    || match (entry.sha256.as_ref(), sha.as_ref()) {
+                        (Some(l), Some(r)) => l == r,
+                        _ => true,
+                    })
+        });
+        if agrees {
+            continue;
+        }
+        let same_kind = members.iter().find(|(is_folder, _, _)| *is_folder == entry.is_dir);
+        match (same_kind, entry.sha256.as_ref()) {
+            (Some((_, Some(r), _)), Some(l)) => out.push(Difference::ContentDiffers {
+                path: entry.path.clone(),
+                local: l.clone(),
+                remote: r.clone(),
+            }),
+            _ => out.push(Difference::KindDiffers {
                 path: entry.path.clone(),
             }),
-            Some((is_folder, sha, _)) => {
-                if *is_folder != entry.is_dir {
-                    out.push(Difference::KindDiffers {
-                        path: entry.path.clone(),
-                    });
-                } else if !entry.is_dir {
-                    match (entry.sha256.as_ref(), sha.as_ref()) {
-                        (Some(l), Some(r)) if l != r => out.push(Difference::ContentDiffers {
-                            path: entry.path.clone(),
-                            local: l.clone(),
-                            remote: r.clone(),
-                        }),
-                        // A server file with no content hash at all is not a
-                        // disagreement about content — there is nothing to
-                        // disagree with. It is reported by the walk, not here.
-                        _ => {}
-                    }
-                }
-            }
         }
     }
-    for (key, (_, _, path)) in &remote {
+    for (key, members) in &remote {
         if is_excluded(key) {
             continue;
         }
         if !local.entries.contains_key(key) {
-            out.push(Difference::OnlyRemote { path: path.clone() });
+            for (_, _, path) in members {
+                out.push(Difference::OnlyRemote { path: path.clone() });
+            }
         }
     }
     out
@@ -445,6 +463,42 @@ mod tests {
         let sensitive = Personality::linux();
         let tree = walk_local(&bed.0, &sensitive).unwrap();
         assert!(!diff(&tree, &remote, &sensitive, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_case_clash_on_the_server_is_judged_by_the_name_the_device_holds() {
+        // Mac soak run 40: the server holds DOC-4.TXT and doc-4.txt in one
+        // folder, a pair no case-insensitive disk can hold together. Each
+        // device holds one and reports the other unsyncable. Keyed to one
+        // entry, the device's DOC-4.TXT was judged against doc-4.txt's bytes.
+        let remote = server(vec![
+            folder(1, "Projects", None),
+            file(2, "DOC-4.TXT", Some(1), &sha_of("a's")),
+            file(3, "doc-4.txt", Some(1), &sha_of("b's")),
+        ]);
+        let mac = Personality::macos();
+        for (name, body) in [("DOC-4.TXT", "a's"), ("doc-4.txt", "b's")] {
+            let bed = Bed::new("clash");
+            bed.write(&format!("Projects/{name}"), body);
+            let tree = walk_local(&bed.0, &mac).unwrap();
+            assert_eq!(diff(&tree, &remote, &mac, &[]), vec![], "holding {name}");
+        }
+        // Bytes that are neither name's are a disagreement still.
+        let bed = Bed::new("clash-wrong");
+        bed.write("Projects/DOC-4.TXT", "something else");
+        let tree = walk_local(&bed.0, &mac).unwrap();
+        assert!(matches!(diff(&tree, &remote, &mac, &[]).as_slice(), [Difference::ContentDiffers { .. }]));
+        // Holding neither, both are missing.
+        let bed = Bed::new("clash-none");
+        bed.mkdir("Projects");
+        let tree = walk_local(&bed.0, &mac).unwrap();
+        assert_eq!(diff(&tree, &remote, &mac, &[]).len(), 2);
+        // Where the disk tells them apart, they are two files.
+        let linux = Personality::linux();
+        let bed = Bed::new("clash-linux");
+        bed.write("Projects/DOC-4.TXT", "a's");
+        let tree = walk_local(&bed.0, &linux).unwrap();
+        assert_eq!(diff(&tree, &remote, &linux, &[]), vec![Difference::OnlyRemote { path: "Projects/doc-4.txt".into() }]);
     }
 
     #[test]
