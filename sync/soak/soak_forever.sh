@@ -104,6 +104,13 @@ freeze_evidence() {
     # the state database says where the file ended up, and only these say how.
     cp /soak/device-a/home/logs/daemon.log "$dest/device-a-daemon.log" 2>/dev/null
     cp /soak/device-b/home/logs/daemon.log "$dest/device-b-daemon.log" 2>/dev/null
+    # The pass journal says what each pass saw and decided, the pass before a
+    # burst included. Up to 128MB a device, so compressed.
+    for d in a b; do
+        for f in /soak/device-$d/home/logs/passes.jsonl*; do
+            [ -f "$f" ] && gzip -c "$f" > "$dest/device-$d-$(basename "$f").gz"
+        done
+    done
     cp "/soak/run$run.log" "$dest/run.log" 2>/dev/null
     tar czf "$dest/bundles.tar.gz" -C /soak bundles 2>/dev/null
     du -sh "$dest" 2>/dev/null | awk '{print "  frozen: "$1}'

@@ -121,6 +121,9 @@ After=network-online.target
 Type=simple
 User=soak-%i
 Environment=JOINERY_DRIVE_HOME=$BASE/device-%i/home
+# The per-pass decision journal (logs/passes.jsonl). Soak devices only: it
+# records file names, so no user's client turns it on.
+Environment=JOINERY_DRIVE_PASS_JOURNAL=1
 ExecStart=$BIN_DIR/joinery-drive daemon
 # The supervisor the chaos matrix depends on. A killed daemon has to come back
 # on its own, or a kill is not a fault the client recovers from — it is a device
