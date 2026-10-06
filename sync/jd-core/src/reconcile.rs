@@ -153,6 +153,10 @@ pub struct Context {
     /// personality means the ordering stage plans two moves into one slot on
     /// every Mac and every PC, and the second one silently replaces the first.
     pub personality: jd_vfs::Personality,
+    /// Record what the pass saw and decided (`crate::trace::PassTrace`).
+    /// Off unless a soak device asks: it costs a walk of every directory per
+    /// pass, and it holds file names.
+    pub trace: bool,
 }
 
 /// Work out what to do with one entry.
@@ -567,6 +571,7 @@ mod tests {
             device_name: "MacBook".into(),
             conflict_suffix: 1,
             personality: jd_vfs::Personality::linux(),
+            trace: false,
         }
     }
 

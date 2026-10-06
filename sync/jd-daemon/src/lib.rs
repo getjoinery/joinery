@@ -19,6 +19,7 @@ pub mod config;
 pub mod daemon;
 pub mod health;
 pub mod link;
+pub mod passlog;
 
 pub use config::{Config, ConfigError};
 pub use daemon::{Command, Daemon, Shared, Snapshot};

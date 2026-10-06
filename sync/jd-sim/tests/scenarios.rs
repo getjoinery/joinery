@@ -18206,3 +18206,58 @@ fn a_kill_after_an_op_waited_finds_it_untouched() {
     world.pass(b);
     assert!(world.server.files().iter().any(|f| f.name == "doc-1.txt" && !f.trashed));
 }
+
+// ---- the pass trace changes nothing it records -------------------------------
+
+/// Two devices doing what the soak's failures did: a same-named file on
+/// both sides, a folder renamed and its old name rebuilt, files moved and
+/// edited. Returns, per pass, the plan and every op's outcome.
+fn passes_of_a_busy_world(trace: bool) -> (Vec<String>, usize) {
+    let world = World::of(9_890, &[("a", jd_sim::scenario::Platform::Linux), ("b", jd_sim::scenario::Platform::Linux)]);
+    world.trace_passes.store(trace, std::sync::atomic::Ordering::Relaxed);
+    let (a, b) = (world.device("a"), world.device("b"));
+    let mut record = Vec::new();
+    let mut traced = 0;
+    let pass = |d: &jd_sim::Device, record: &mut Vec<String>, traced: &mut usize| {
+        let out = world.pass(d);
+        if let Some(t) = &out.trace {
+            *traced += t.dirs.len() + t.plan.len() + t.ops.len() + t.skips.len() + t.verdicts.len();
+        }
+        record.push(format!("{} {:?} {:?}", d.name, out.round.plan.ops, out.exec));
+    };
+    a.fs.user_mkdir("F");
+    a.fs.user_mkdir("F/Sub");
+    for p in [a, b, a, b] {
+        pass(p, &mut record, &mut traced);
+    }
+    a.fs.user_write("F/x.txt", b"a's x");
+    a.fs.user_write("F/Sub/y.txt", b"a's y");
+    pass(a, &mut record, &mut traced);
+    b.fs.user_write("F/x.txt", b"b's x");
+    pass(b, &mut record, &mut traced);
+    b.fs.user_rename("F", "F (24)");
+    b.fs.user_write("F/z.txt", b"b's z in a new F");
+    a.fs.user_rename("F/Sub/y.txt", "F/y.txt");
+    a.fs.user_write("F/y.txt", b"a's y, edited");
+    for _ in 0..8 {
+        pass(a, &mut record, &mut traced);
+        pass(b, &mut record, &mut traced);
+    }
+    (record, traced)
+}
+
+/// A pass asked for its trace plans and does exactly what it does unasked:
+/// the trace is built from values the pass already holds, never a read of
+/// its own. Same world, same seed, trace off and on: every pass's plan and
+/// every op's outcome equal.
+#[test]
+fn a_traced_pass_plans_and_does_exactly_what_an_untraced_one_does() {
+    let (plain, none) = passes_of_a_busy_world(false);
+    let (traced, recorded) = passes_of_a_busy_world(true);
+    assert_eq!(none, 0, "no trace unless asked");
+    assert!(recorded > 0, "the traced run recorded nothing");
+    assert_eq!(plain.len(), traced.len());
+    for (n, (p, t)) in plain.iter().zip(&traced).enumerate() {
+        assert_eq!(p, t, "pass {n} differs with the trace on");
+    }
+}

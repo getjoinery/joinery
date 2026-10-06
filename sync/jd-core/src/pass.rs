@@ -54,6 +54,8 @@ pub struct PassOutcome {
     pub root_unavailable: bool,
     /// What this filesystem could and could not be asked to hold.
     pub naming: crate::naming::NamingOutcome,
+    /// What the pass saw and decided, when the caller asked (`Context::trace`).
+    pub trace: Option<crate::trace::PassTrace>,
 }
 
 impl PassOutcome {
@@ -84,6 +86,9 @@ pub fn run_pass(
         out.root_unavailable = true;
         return Ok(out);
     }
+    // Values only, from here to the end of the pass: nothing below reads the
+    // store or the disk for it.
+    let mut trace = ctx.trace.then(|| crate::trace::PassTrace::started((env.now_ms)()));
 
     // ---- what this volume says a file's identity is -------------------------
     //
@@ -117,6 +122,18 @@ pub fn run_pass(
 
     // ---- what the server did ------------------------------------------------
     let (fresh, next_cursor, reset) = poll_remote(env)?;
+    if let Some(t) = trace.as_mut() {
+        t.reset = reset;
+        for (id, state) in &fresh {
+            t.remote.push((
+                crate::trace::name(*id),
+                format!(
+                    "{:?}/{} head={} deleted={}",
+                    state.placement.parent, state.placement.name, state.head_change_id, state.deleted
+                ),
+            ));
+        }
+    }
     out.reset = reset;
     out.remote_changes = fresh.len();
     for (id, state) in &fresh {
@@ -135,7 +152,11 @@ pub fn run_pass(
     // standing tells the user to look at something that has already resolved,
     // and the only way they could clear it is by hand.
     let mut still_stranded = false;
-    if sweep_stranded_entries(env)? > 0 {
+    let stranded = sweep_stranded_entries(env)?;
+    if let Some(t) = trace.as_mut() {
+        t.stranded = stranded;
+    }
+    if stranded > 0 {
         // An entry the server knows about, with no way back to the root, is a
         // hole in this store's picture rather than a wrong entry: the folder it
         // sits in still exists, we have just lost our record of it. Re-deriving
@@ -215,8 +236,13 @@ pub fn run_pass(
     //
     // Before naming, because naming is what turns this into a deadlock: it sees
     // two entries claiming one name and refuses the real one.
-    merge_duplicate_folders(env)?;
-    merge_duplicate_files(env)?;
+    let merged_folders = merge_duplicate_folders(env)?;
+    let merged_files = merge_duplicate_files(env)?;
+    if let Some(t) = trace.as_mut() {
+        for (from, into) in merged_folders.iter().chain(&merged_files) {
+            t.merges.push((crate::trace::name(*from), crate::trace::name(*into)));
+        }
+    }
 
     // ---- what each entry is called here -------------------------------------
     //
@@ -325,6 +351,16 @@ pub fn run_pass(
     let strong_volume = env.vfs.personality().stable_file_identity;
     let awaiting = awaiting_bytes(env)?;
     let scan = pair_files(&known, &observed, &awaiting, strong_volume);
+    if let Some(t) = trace.as_mut() {
+        for (id, change) in &scan.changes {
+            if !matches!(change, LocalChange::Unchanged) {
+                t.verdicts.push((crate::trace::name(*id), format!("{change:?}")));
+            }
+        }
+        for file in &scan.created {
+            t.verdicts.push((file.path.clone(), "created".into()));
+        }
+    }
     adopt_own_files(env, &known, &observed)?;
     bind_own_files(env, &scan, strong_volume)?;
     forget_what_a_save_superseded(env, &scan)?;
@@ -382,6 +418,17 @@ pub fn run_pass(
     point_paths_at_the_folders_whose_directories_they_are(env, &dir_identity, &mut folder_ids)?;
     note_the_tie_breaks_of_the_folders(env, &folder_ids, &dir_tie_breaks, &tie_breaks)?;
     lift_parks_whose_directories_came_home(env, &folders, &dir_identity, &folder_ids)?;
+    if let Some(t) = trace.as_mut() {
+        for (id, to) in &folders.moves {
+            t.folders.push((crate::trace::name(*id), format!("moved to {:?}/{}", to.parent, to.name)));
+        }
+        for (id, path) in &folders.deferred {
+            t.folders.push((crate::trace::name(*id), format!("found under an unbound directory at {path}")));
+        }
+        for dir in &folders.held {
+            t.folders.push((dir.clone(), "held".into()));
+        }
+    }
 
     // The recorded paths of the folders not yet on this disk in their own
     // right, keyed the way the disk keys names. A directory is matched to
@@ -418,6 +465,9 @@ pub fn run_pass(
         // not a new folder, and not adopted as one while the disagreement is
         // unresolved.
         if folders.held.contains(dir) || folders.held.iter().any(|h| dir.starts_with(&format!("{h}/"))) {
+            if let Some(t) = trace.as_mut() {
+                t.skip_path(dir, line!(), "directory held");
+            }
             continue;
         }
         let matched = match folder_ids.get(dir) {
@@ -459,6 +509,9 @@ pub fn run_pass(
             continue;
         }
         let Some(placement) = placement_of(dir, &folder_ids) else {
+            if let Some(t) = trace.as_mut() {
+                t.skip_path(dir, line!(), "directory with no placement");
+            }
             continue;
         };
         let id = EntityId::folder(env.store.next_provisional_id()?);
@@ -531,10 +584,25 @@ pub fn run_pass(
     // rule a record carries (`specs/drive_file_ownership.md`). One at a
     // download's slot waits for that download (`waits_for_a_download`), which
     // settles the two by identity when it lands.
+    if let Some(t) = trace.as_mut() {
+        let mut dirs: Vec<&String> = dirs_on_disk.iter().collect();
+        dirs.sort();
+        for dir in dirs {
+            let bound = match folder_ids.get(dir.as_str()) {
+                Some(id) => format!("folder:{id}"),
+                None if folders.held.contains(dir.as_str()) => "held".to_string(),
+                None => "unbound".to_string(),
+            };
+            t.dirs.push((dir.clone(), bound));
+        }
+    }
     for file in &scan.created {
         let Some(placement) = placement_of(&file.path, &folder_ids) else {
             // Its folder is not tracked yet. Nothing is lost: the folder gets an
             // identity above on this pass or the next, and the file follows.
+            if let Some(t) = trace.as_mut() {
+                t.skip_path(&file.path, line!(), "created file with no placement");
+            }
             continue;
         };
         // A new file saved in a vault under the name a held file still holds
@@ -646,6 +714,9 @@ pub fn run_pass(
     }
 
     // ---- what each side did, per entry --------------------------------------
+    if let Some(t) = trace.as_mut() {
+        t.scan_ended_ms = (env.now_ms)();
+    }
     let mut inputs: Vec<RoundInput> = Vec::new();
     let resolve = |path: &str| placement_of(path, &folder_ids);
     // Anything already in the journal is spoken for. Deciding about it again
@@ -733,7 +804,18 @@ pub fn run_pass(
 
     let sealed_names_at_risk = sealed_names_this_disk_cannot_vouch_for(env, &observed)?;
     let mut names_held: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
+    // A record the round passes by, and the line of the `continue` that does
+    // it: what a trace says about a record that got no plan (`PassTrace`).
+    macro_rules! declined {
+        ($id:expr) => {{
+            if let Some(t) = trace.as_mut() {
+                t.skip($id, line!());
+            }
+            continue;
+        }};
+    }
     for mut entry in all_entries(env)? {
+        let traced_id = entry.id;
         // A file never uploaded follows its own file: where the scan found it
         // is where it is (the reset's T1-C). Its placement is where it stands
         // now, and whether it goes up sealed is decided again from there. The
@@ -779,14 +861,14 @@ pub fn run_pass(
         // forgot it by that belief while the file lived on, owned by nobody
         // (plain2 75223; `specs/drive_file_ownership.md`).
         if busy.contains(&entry.id) {
-            continue;
+            declined!(traced_id);
         }
         // An arrival naming left unjudged because the name it wants is held
         // by a busy entry waits the same pass its verdict waits: planned now,
         // its move would land on the holder's directory before the holder's
         // own op has said where that directory goes.
         if out.naming.pending.contains(&entry.id) {
-            continue;
+            declined!(traced_id);
         }
         // Nothing on the server, and now nothing on the disk either: there is
         // no third place for it to be, so it is forgotten.
@@ -861,7 +943,7 @@ pub fn run_pass(
                 // means everything inside it too, or its children are left
                 // pointing at a parent that is not there any more.
                 env.store.delete_subtree(entry.id)?;
-                continue;
+                declined!(traced_id);
             }
         }
         // A file saved where a download is due waits for it: not sent while
@@ -877,7 +959,7 @@ pub fn run_pass(
             && entry.id.entity_type == EntityType::File
             && relative_path(env, &entry)?.is_some_and(|p| awaiting.contains(&p))
         {
-            continue;
+            declined!(traced_id);
         }
         // A vault parked on a weak volume follows its own directory when the
         // user renames or moves it (a5's D3 ruling, 2026-09-29): the local
@@ -896,7 +978,7 @@ pub fn run_pass(
                 moved.local_name = None;
                 env.store.put_entry(&moved)?;
             }
-            continue;
+            declined!(traced_id);
         }
         // The same for a file moved from one place under a parked vault to
         // another: its record follows it there, the local placement only.
@@ -922,7 +1004,7 @@ pub fn run_pass(
                     moved.synced_placement = Some(to);
                     moved.local_name = None;
                     env.store.put_entry(&moved)?;
-                    continue;
+                    declined!(traced_id);
                 }
             }
         }
@@ -946,7 +1028,7 @@ pub fn run_pass(
                 .parent
                 .is_some_and(|p| parked_without_a_directory.contains(&p)))
         {
-            continue;
+            declined!(traced_id);
         }
         // A name this filesystem cannot hold. There is no local file, so there
         // is nothing to compare and nothing to transfer — the entry waits,
@@ -1069,7 +1151,7 @@ pub fn run_pass(
                         ),
                         (env.now_ms)() as i64,
                     )?;
-                    continue;
+                    declined!(traced_id);
                 }
             }
             // No agreement to put it back to, or the agreement is itself a
@@ -1089,7 +1171,7 @@ pub fn run_pass(
             )?;
         }
         if matches!(entry.status, LocalStatus::Unsyncable(_)) && !entry.remote_deleted {
-            continue;
+            declined!(traced_id);
         }
         // Wearing a scratch name on the server, with no agreed placement here
         // to read in its place (see `observed_remote`): some device is
@@ -1098,7 +1180,7 @@ pub fn run_pass(
         // walk cannot see it and the next pass reads it as deleted (the
         // reset's C11). It waits for the park to end.
         if entry.waiting_on_a_park() {
-            continue;
+            declined!(traced_id);
         }
         // An encrypted file with no key for it here. Same shape as above and for
         // a sharper reason: falling through would decide about it in the
@@ -1118,7 +1200,7 @@ pub fn run_pass(
             && entry.id.entity_type == EntityType::Folder
             && entry.synced_placement.is_some();
         if entry.status == LocalStatus::PendingKey && !entry.remote_deleted && !locked_folder {
-            continue;
+            declined!(traced_id);
         }
         // Bytes this device has already proven it cannot open: they arrived
         // exactly as the server described them and still failed their
@@ -1170,7 +1252,7 @@ pub fn run_pass(
             };
             if !alive {
                 follow_the_server(env, &entry)?;
-                continue;
+                declined!(traced_id);
             }
             for mut claimant in all_entries(env)?
                 .into_iter()
@@ -1181,7 +1263,7 @@ pub fn run_pass(
             }
         }
         if !entry.remote_deleted && written_off.contains(&entry.id) {
-            continue;
+            declined!(traced_id);
         }
 
         // Something created here that the server has not named yet. There is no
@@ -1193,7 +1275,7 @@ pub fn run_pass(
             // The sweep above has already forgotten every provisional entry
             // with nothing behind it, so there is a file here.
             let Some(path) = relative_path(env, &entry)? else {
-                continue;
+                declined!(traced_id);
             };
             // Written in a vault and carried out of it before it was ever
             // sent: the same file, so held as a sealed file taken out of its
@@ -1201,7 +1283,7 @@ pub fn run_pass(
             // until it goes back.
             if held_and_never_sent(env, &entry)? {
                 say_it_was_never_sent(env, &entry)?;
-                continue;
+                declined!(traced_id);
             }
             // Carrying a held record's disk identity: very likely that held
             // file, moved and edited in one pass (scan rule 4 reads it as a
@@ -1222,7 +1304,7 @@ pub fn run_pass(
                     let going = !held_file_stands(env, &held, &observed)?
                         || env.store.entities_with_open_ops()?.contains(&held.id);
                     if !in_a_vault || going {
-                        continue;
+                        declined!(traced_id);
                     }
                 }
             }
@@ -1231,7 +1313,7 @@ pub fn run_pass(
             if !entry.is_encrypted && sealed_names_at_risk.contains(&jd_vfs::comparison_key(&entry.remote.name, &env.vfs.personality())) {
                 say_a_sealed_name_is_held(env, &entry, &entry.remote.name)?;
                 names_held.insert(entry.id);
-                continue;
+                declined!(traced_id);
             }
             let content = observed.iter().find(|o| o.path == path).map(|o| ContentId {
                 sha256: o.sha256.clone(),
@@ -1245,7 +1327,7 @@ pub fn run_pass(
                 remote: Delta::None,
                 depth,
             });
-            continue;
+            declined!(traced_id);
         }
 
         let mut local = match scan.change_for(entry.id) {
@@ -1258,7 +1340,7 @@ pub fn run_pass(
         // is not read as the user deleting the vault until the key is back
         // and its contents can be accounted for, as before.
         if locked_folder && !entry.remote_deleted && matches!(local, Delta::Deleted) {
-            continue;
+            declined!(traced_id);
         }
         // A plain folder renamed here onto a name the server still gives to a
         // vault parked on this weak disk (a5's ruling on the D3 follow,
@@ -1316,7 +1398,7 @@ pub fn run_pass(
                                 (env.now_ms)() as i64,
                             )?;
                         }
-                        continue;
+                        declined!(traced_id);
                     }
                 }
                 // Its own directory back at its agreed name, by the directory's
@@ -1342,7 +1424,7 @@ pub fn run_pass(
                     let mut home = entry.clone();
                     home.local_name = None;
                     env.store.put_entry(&home)?;
-                    continue;
+                    declined!(traced_id);
                 }
                 Delta::None if !waiting.is_empty() => {
                     let target = entry
@@ -1351,7 +1433,7 @@ pub fn run_pass(
                         .zip(agreed_parent)
                         .map(|(name, parent)| Placement { parent, name });
                     match target {
-                        Some(to) if server_still_agrees && parked_vault_holding(env, &to)?.is_some() => continue,
+                        Some(to) if server_still_agrees && parked_vault_holding(env, &to)?.is_some() => declined!(traced_id),
                         Some(to) => {
                             for issue in waiting {
                                 env.store.dismiss_issue(issue.issue_id)?;
@@ -1545,7 +1627,7 @@ pub fn run_pass(
                      nothing is moved or converted until the folder scan reads it right",
                     (env.now_ms)() as i64,
                 )?;
-                continue;
+                declined!(traced_id);
             }
             // A sealed FILE on its way out is held (owner decision D1): the
             // user's move stands on this disk -- the record's agreed placement
@@ -1556,14 +1638,14 @@ pub fn run_pass(
             if crossing == Crossing::OutOfReach && entry.id.entity_type == EntityType::File {
                 let to = match &local {
                     Delta::Moved { to } | Delta::MovedAndEdited { to, .. } => to.clone(),
-                    _ => continue,
+                    _ => declined!(traced_id),
                 };
                 let mut held = entry.clone();
                 held.synced_placement = Some(to);
                 held.local_name = None;
                 env.store.put_entry(&held)?;
                 say_it_is_held(env, &held)?;
-                continue;
+                declined!(traced_id);
             }
             if crossing == Crossing::OutOfReach {
                 // A vault folder on its way out. Say so, once, and do not plan
@@ -1612,7 +1694,7 @@ pub fn run_pass(
                     }
                 }
                 env.store.raise_issue(Some(entry.id), "withdrawn", &detail, (env.now_ms)() as i64)?;
-                continue;
+                declined!(traced_id);
             }
             // A record never sent has no server copy for a claimant to hold
             // and replace, and it has already crossed: the follow above made
@@ -1621,7 +1703,7 @@ pub fn run_pass(
             // raw move, two records competed for one name inside the vault,
             // each vetoing the other's upload for ever (plat3 75400).
             if entry.id.is_provisional() && entry.id.entity_type == EntityType::File {
-                continue;
+                declined!(traced_id);
             }
             {
                 // The conversion is a claimant: a record in the vault that owns
@@ -1662,7 +1744,7 @@ pub fn run_pass(
                 // from: only a move can cross an edge, so this always matches.
                 let to = match &local {
                     Delta::Moved { to } | Delta::MovedAndEdited { to, .. } => to,
-                    _ => continue,
+                    _ => declined!(traced_id),
                 };
                 // Only a PLAINTEXT entry can get here: `crossing_a_vault_edge`
                 // answers Convert only for a move INTO a vault, and an
@@ -1705,11 +1787,11 @@ pub fn run_pass(
                         let source = Entry { own_file: None, ..entry.clone() };
                         env.store.put_entry(&source)?;
                         follow_the_server(env, &source)?;
-                        continue;
+                        declined!(traced_id);
                     }
                 }
                 follow_the_server(env, &entry)?;
-                continue;
+                declined!(traced_id);
             }
         }
         // Measured from the agreement, using the freshest remote state we hold.
@@ -1745,7 +1827,7 @@ pub fn run_pass(
                         moved.local_name = None;
                         env.store.put_entry(&moved)?;
                         say_it_is_held(env, &moved)?;
-                        continue;
+                        declined!(traced_id);
                     }
                 }
                 // Read as deleted while a new file carrying this record's disk
@@ -1769,7 +1851,7 @@ pub fn run_pass(
                                 } else {
                                     say_it_waits(env, &entry, &name)?;
                                 }
-                                continue;
+                                declined!(traced_id);
                             }
                         }
                     }
@@ -1781,7 +1863,7 @@ pub fn run_pass(
                         let mut home = entry.clone();
                         home.synced_placement = Some(entry.remote.clone());
                         env.store.put_entry(&home)?;
-                        continue;
+                        declined!(traced_id);
                     }
                 }
                 let mut agreed_there = entry.clone();
@@ -1816,12 +1898,12 @@ pub fn run_pass(
                     let depth = depth_for(env, &entry)?;
                     inputs.push(RoundInput { entry: agreed_there, local, remote, depth });
                 }
-                continue;
+                declined!(traced_id);
             }
         }
         let remote = remote_delta(&entry, &observed_remote(&entry));
         if local.is_none() && remote.is_none() {
-            continue;
+            declined!(traced_id);
         }
         let depth = depth_for(env, &entry)?;
         inputs.push(RoundInput {
@@ -1871,6 +1953,12 @@ pub fn run_pass(
         .map(|op| op.entity.server_id)
         .collect();
     out.round = run_round(inputs, synced_total, ctx, policy, &parents, &trash_already_queued);
+    if let Some(t) = trace.as_mut() {
+        t.round_ended_ms = (env.now_ms)();
+        for op in &out.round.plan.ops {
+            t.plan.push((crate::trace::name(op.entity), format!("{:?}", op.action)));
+        }
+    }
     for (id, issue) in &out.round.issues {
         env.store.raise_issue(
             Some(*id),
@@ -1941,13 +2029,26 @@ pub fn run_pass(
         journal(env.store, &freeing, key_for)?;
     }
     journal(env.store, &out.round.plan, key_for)?;
-    out.exec = run_queued(env)?;
+    out.exec = match trace.as_mut() {
+        Some(t) => crate::execute::run_queued_with(env, &mut |op, outcome| {
+            t.ops.push((op.op_id, op.kind.clone(), crate::trace::name(op.entity), format!("{outcome:?}")));
+        })?,
+        None => run_queued(env)?,
+    };
 
     // The cursor moves only now, once everything the batch implied is durably
     // in the journal. A cursor advanced any earlier is a change the server will
     // never mention again and nothing local knows to ask about.
     if next_cursor > env.store.cursor()? {
         env.store.set_cursor(next_cursor)?;
+    }
+    if let Some(mut t) = trace {
+        for (id, why) in &out.naming.unsyncable {
+            t.unsyncable.push((crate::trace::name(*id), format!("{why:?}")));
+        }
+        t.recovered = out.naming.recovered.iter().map(|id| crate::trace::name(*id)).collect();
+        t.ended_ms = (env.now_ms)();
+        out.trace = Some(t);
     }
     Ok(out)
 }
@@ -6584,8 +6685,8 @@ fn sweep_stranded_entries(env: &ExecEnv) -> Result<usize, ExecError> {
 /// Iterated because merging a parent re-points its children, which can expose a
 /// pair one level down. Bounded, because a repair that could loop is worse than
 /// one that waits for the next pass.
-fn merge_duplicate_folders(env: &ExecEnv) -> Result<usize, ExecError> {
-    let mut merged = 0;
+fn merge_duplicate_folders(env: &ExecEnv) -> Result<Vec<(EntityId, EntityId)>, ExecError> {
+    let mut merged = Vec::new();
     for _ in 0..8 {
         let entries = all_entries(env)?;
         let mut real: HashMap<(Option<i64>, String), i64> = HashMap::new();
@@ -6603,10 +6704,10 @@ fn merge_duplicate_folders(env: &ExecEnv) -> Result<usize, ExecError> {
             if let Some(&id) = real.get(&(e.remote.parent, e.remote.name.clone())) {
                 env.store.merge_folder(e.id, EntityId::folder(id))?;
                 crate::execute::redirect_queued_parent(env, e.id.server_id, id)?;
+                merged.push((e.id, EntityId::folder(id)));
                 this_round += 1;
             }
         }
-        merged += this_round;
         if this_round == 0 {
             break;
         }
@@ -6637,7 +6738,7 @@ fn merge_duplicate_folders(env: &ExecEnv) -> Result<usize, ExecError> {
 ///
 /// Not iterated. Merging a file re-points nothing, so one pass over the pairs
 /// finds all of them.
-fn merge_duplicate_files(env: &ExecEnv) -> Result<usize, ExecError> {
+fn merge_duplicate_files(env: &ExecEnv) -> Result<Vec<(EntityId, EntityId)>, ExecError> {
     let entries = all_entries(env)?;
     let replaced: std::collections::HashSet<EntityId> = entries
         .iter()
@@ -6650,7 +6751,7 @@ fn merge_duplicate_files(env: &ExecEnv) -> Result<usize, ExecError> {
             real.insert((e.remote.parent, e.remote.name.clone()), e.id.server_id);
         }
     }
-    let mut merged = 0;
+    let mut merged = Vec::new();
     for e in &entries {
         if e.id.entity_type != EntityType::File || !e.id.is_provisional() {
             continue;
@@ -6755,7 +6856,7 @@ fn merge_duplicate_files(env: &ExecEnv) -> Result<usize, ExecError> {
             // By name alone, and before the disk is read: the real entry takes
             // the provisional's file only if it has no file of its own here.
             env.store.merge_file(e.id, EntityId::file(id), r.own_file.is_none())?;
-            merged += 1;
+            merged.push((e.id, EntityId::file(id)));
         }
     }
     Ok(merged)

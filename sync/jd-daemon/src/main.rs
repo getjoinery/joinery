@@ -246,7 +246,13 @@ fn cmd_daemon() -> Result<(), String> {
     });
 
     let custody = secrets.custody().describe().to_string();
-    Daemon::new(config, store, vfs, credentials, shared, rx, custody, vault).run();
+    // Said either way, so an archive with no journal in it is provably off.
+    let pass_journal = jd_daemon::passlog::PassJournal::from_env(&paths.logs);
+    match &pass_journal {
+        Some(j) => eprintln!("pass journal: on -> {}", j.path().display()),
+        None => eprintln!("pass journal: off"),
+    }
+    Daemon::new(config, store, vfs, credentials, shared, rx, custody, vault, pass_journal).run();
     Ok(())
 }
 

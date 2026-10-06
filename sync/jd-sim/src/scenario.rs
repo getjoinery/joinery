@@ -61,6 +61,10 @@ pub const MAX_PASSES_ENCRYPTED: usize = 2_000;
 
 /// A situation: a server, a clock, and the computers attached to it.
 pub struct World {
+    /// Ask every pass for its trace (`jd_core::trace::PassTrace`), returned in
+    /// its outcome. On when `JD_TRACE` is set, so a probe prints the same
+    /// record a soak device writes; a test turns it on and off itself.
+    pub trace_passes: std::sync::atomic::AtomicBool,
     /// How many passes [`World::settle`] gives the fleet before calling it
     /// stuck. `MAX_PASSES` by default; a vault world raises it to
     /// [`MAX_PASSES_ENCRYPTED`]. `SETTLE_PASSES` overrides either, which is how
@@ -258,6 +262,7 @@ impl World {
             })
             .collect();
         World {
+            trace_passes: std::sync::atomic::AtomicBool::new(std::env::var("JD_TRACE").is_ok()),
             settle_passes: std::env::var("SETTLE_PASSES")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -714,6 +719,7 @@ impl World {
             // testing exactly the disagreement this field exists for, and a
             // hardcoded personality here would quietly erase it.
             personality: jd_vfs::Vfs::personality(&device.fs),
+            trace: self.trace_passes.load(std::sync::atomic::Ordering::Relaxed),
         };
         let now = device.now();
         let e: ExecEnv = env(device, &now);

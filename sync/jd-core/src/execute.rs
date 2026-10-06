@@ -302,6 +302,11 @@ fn read_place(params: &Value) -> Result<Placement, ExecError> {
 
 /// Run every queued op whose backoff has elapsed, in journal order.
 pub fn run_queued(env: &ExecEnv) -> Result<ExecReport, ExecError> {
+    run_queued_with(env, &mut |_, _| {})
+}
+
+/// `run_queued`, telling `seen` how each op it ran ended (a pass's trace).
+pub fn run_queued_with(env: &ExecEnv, seen: &mut dyn FnMut(&Op, &OpOutcome)) -> Result<ExecReport, ExecError> {
     let now = (env.now_ms)() as i64;
     let mut report = ExecReport::default();
 
@@ -319,7 +324,9 @@ pub fn run_queued(env: &ExecEnv) -> Result<ExecReport, ExecError> {
             report.deferred += 1;
             continue;
         }
-        match run_one(env, &op)? {
+        let outcome = run_one(env, &op)?;
+        seen(&op, &outcome);
+        match outcome {
             OpOutcome::Done => report.done += 1,
             OpOutcome::Withdrawn(_) => report.withdrawn += 1,
             OpOutcome::Overtaken(_) => report.overtaken += 1,

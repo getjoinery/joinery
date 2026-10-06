@@ -333,6 +333,7 @@ mod tests {
             device_name: "PC".into(),
             conflict_suffix: 1,
             personality: jd_vfs::Personality::linux(),
+            trace: false,
         }
     }
 
