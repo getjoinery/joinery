@@ -34,6 +34,9 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.8 - the declared-packages step waits up to five minutes for apt's lock, and a failed
+	 *               apt-get update no longer skips the install (an upgrade lost the race to the
+	 *               host converger's own apt-get on two nodes, 0.8.460)
 	 * @version 1.7 - the declared-packages step installs system packages (extra.joinery-system-packages,
 	 *               plugin requires.packages) beside PHP extensions, through the same resolver
 	 * @version 1.6 - a local fork (live manifest receives_upgrades=false) is downloaded and then preserved
@@ -1708,14 +1711,21 @@
 						. 'apt-get install ' . htmlspecialchars($apt_primary) . ' (or ' . htmlspecialchars($apt_fallback) . ')');
 					continue;
 				}
-				exec('apt-get update -qq 2>&1 && (apt-get install -y ' . escapeshellarg($apt_primary) . ' 2>&1'
-					. ' || apt-get install -y ' . escapeshellarg($apt_fallback) . ' 2>&1)', $apt_out, $apt_return);
+				// apt waits up to five minutes for the package lock instead of failing at
+				// once: the host converger installs the same declared packages every
+				// minute, and unattended-upgrades holds the lock too. apt honours the wait
+				// for install but not for update's list lock, so an update that fails is
+				// not allowed to skip the install.
+				$apt_out = [];
+				exec('apt-get -o DPkg::Lock::Timeout=300 update -qq 2>&1; (apt-get -o DPkg::Lock::Timeout=300 install -y '
+					. escapeshellarg($apt_primary) . ' 2>&1'
+					. ' || apt-get -o DPkg::Lock::Timeout=300 install -y ' . escapeshellarg($apt_fallback) . ' 2>&1)', $apt_out, $apt_return);
 				if ($apt_return === 0) {
 					echo '✓ Installed ' . htmlspecialchars($apt_primary) . "<br>";
 					$installed_any = true;
 				} else {
 					out_alert('warning', 'Could not install declared package ' . htmlspecialchars($apt_primary),
-						'A plugin requiring it will refuse activation. apt output tail: '
+						'What needs it says so when it runs; the host converger tries again every minute. apt output tail: '
 						. htmlspecialchars(implode(' ', array_slice($apt_out, -3))));
 				}
 			}

@@ -5,6 +5,10 @@
 # extra.joinery-system-packages plus plugin requires.packages), resolved by
 # utils/list_dependencies.php.
 #
+# VERSION: 1.3 - apt waits up to five minutes for the package lock instead of failing at once
+#                (APT_LOCK_WAIT): an upgrade's install lost to the converger's own apt-get, or
+#                to unattended-upgrades, and the package stayed missing. A failed warning names
+#                apt's last line.
 # VERSION: 1.2 - system packages ride the same list (the resolver emits them
 #                as "name|name"); wording follows.
 # VERSION: 1.1 - presence is "install ok installed", not "dpkg knows the name":
@@ -92,18 +96,24 @@ if [ -z "$MISSING" ]; then
     exit 0
 fi
 
+# Every apt call waits for the package lock: the host converger, an upgrade and
+# unattended-upgrades all take it, and apt's default is to fail at once. apt
+# honours the wait for install, not for update's list lock, so a failed update
+# is only noted: whoever holds that lock is refreshing the lists.
+APT_LOCK_WAIT=(-o DPkg::Lock::Timeout=300)
+
 say "missing:${MISSING}"
-apt-get update -qq 2>/dev/null || say "WARNING - apt-get update failed; trying the installs anyway"
+apt-get "${APT_LOCK_WAIT[@]}" update -qq 2>/dev/null || say "WARNING - apt-get update failed; trying the installs anyway"
 
 for spec in $MISSING; do
     primary="${spec%%|*}"
     fallback="${spec##*|}"
-    if apt-get install -y "$primary" > /dev/null 2>&1; then
+    if out="$(apt-get "${APT_LOCK_WAIT[@]}" install -y "$primary" 2>&1)"; then
         say "installed ${primary}"
-    elif apt-get install -y "$fallback" > /dev/null 2>&1; then
+    elif out="$(apt-get "${APT_LOCK_WAIT[@]}" install -y "$fallback" 2>&1)"; then
         say "installed ${fallback}"
     else
-        say "WARNING - could not install ${primary} (or ${fallback}); what needs it will say so when it runs"
+        say "WARNING - could not install ${primary} (or ${fallback}): $(printf '%s\n' "$out" | grep -v '^\s*$' | tail -1); the host converger tries again every minute"
     fi
 done
 

@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.25 - The declared-package install waits up to five minutes for apt's lock instead of
+#                failing at once while an upgrade or unattended-upgrades holds it.
 # Version: 2.24 - A plugin's host installer runs when the plugin is switched on (plg_active = 1).
 #                It read plg_status = 'active', and a running plugin whose status said
 #                'stale' (absent from the upgrade source's manifest) never had its installer
@@ -1027,11 +1029,14 @@ if [[ -f "${RESOLVER}" ]] && [[ "$(id -u)" == "0" ]] && command -v php >/dev/nul
         if pkg_installed "${PRIMARY}" || pkg_installed "${FALLBACK}"; then
             continue
         fi
+        # apt waits for the package lock rather than failing at once: an upgrade
+        # and this converger run apt-get at the same moment (_install_declared_dependencies.sh).
         if [[ "${APT_UPDATED}" == "0" ]]; then
-            apt-get update -qq >/dev/null 2>&1 || true
+            apt-get -o DPkg::Lock::Timeout=300 update -qq >/dev/null 2>&1 || true
             APT_UPDATED=1
         fi
-        if apt-get install -y "${PRIMARY}" >/dev/null 2>&1 || apt-get install -y "${FALLBACK}" >/dev/null 2>&1; then
+        if apt-get -o DPkg::Lock::Timeout=300 install -y "${PRIMARY}" >/dev/null 2>&1 \
+            || apt-get -o DPkg::Lock::Timeout=300 install -y "${FALLBACK}" >/dev/null 2>&1; then
             echo "plugin installers: installed declared package ${PRIMARY}"
         else
             echo "plugin installers: WARNING - could not install ${PRIMARY} (or ${FALLBACK})" >&2
