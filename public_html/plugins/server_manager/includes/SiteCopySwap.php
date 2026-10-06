@@ -17,7 +17,9 @@
  *                    retired row and returns to `switching` (its owner unfreezes
  *                    it); the other row becomes `copy` again.
  *
- * Only machine columns move. Everything that describes the site — name, slug,
+ * Only machine columns move, and the other row's name follows what it holds
+ * (the site's name with (copy), (old container) or (old server)). Everything
+ * that describes the site — name, slug,
  * site URL, web root, backup policy, what the site's status check reported —
  * stays on the node, because the site is the same site on either machine.
  *
@@ -27,6 +29,8 @@
  * A swap made anywhere else would leave the copy signing as itself against a
  * row that no longer holds its key.
  *
+ * @version 1.2 - the other row is renamed with what it holds: (old container) or (old server) once retired,
+ *                (copy) again on the way back; it kept (copy) on the old machine (B6)
  * @version 1.1 - the container name and Docker host move with the machine: a container source's copy is bare metal
  * @version 1.0
  */
@@ -94,6 +98,18 @@ class SiteCopySwap {
 	}
 
 	/**
+	 * The other row's name says what it now holds: the copy, or the site's
+	 * old machine once the copy has taken over. Read after the machine
+	 * columns moved, so a container is named by the row that has it now.
+	 */
+	private static function other_name(ManagedNode $node, ManagedNode $other, string $other_state): string {
+		if ($other_state !== 'retired') {
+			return $node->get('mgn_name') . ' (copy)';
+		}
+		return $node->get('mgn_name') . (trim((string)$other->get('mgn_container_name')) !== '' ? ' (old container)' : ' (old server)');
+	}
+
+	/**
 	 * Swap the machine columns and the provision links of two rows and set
 	 * their states, in one transaction.
 	 */
@@ -116,6 +132,7 @@ class SiteCopySwap {
 			}
 			$node->set('mgn_install_state', $node_state);
 			$other->set('mgn_install_state', $other_state);
+			$other->set('mgn_name', self::other_name($node, $other, $other_state));
 			$node->save();
 			$other->save();
 

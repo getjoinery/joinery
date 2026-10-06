@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.44 - the switch-over and the way back are confirmed in the system modal, not a checkbox
  * @version 1.43 - remove_site_certificate: the certificate a removed old container left on its host
  * @version 1.42 - decommission_node on the old machine of a switch-over says the new server was reached first
  * @version 1.41 - decommission_node on the old machine of a switch-over says the host proves the domain left
@@ -752,7 +753,7 @@ class NodeDetailActions {
 				// form and goes out of scope with it.
 				if ($action === 'copy_switch') {
 					if (empty($_POST['copy_confirm'])) {
-						self::fail($session, $page_regex, 'Tick the box to start the switch-over; nothing was done.');
+						self::fail($session, $page_regex, 'The switch-over was not confirmed; nothing was done.');
 						return $copy_url;
 					}
 					$method = (string)($_POST['copy_method'] ?? '');
@@ -788,8 +789,8 @@ class NodeDetailActions {
 				if ($action === 'copy_go_back') {
 					$copy_row = SiteCopyRunner::copy_row($site_copy, true);
 					if ($copy_row && trim((string)$copy_row->get('mgn_install_state')) === 'retired' && empty($_POST['copy_confirm'])) {
-						self::fail($session, $page_regex, 'Tick the box: going back loses what was written on the new server '
-							. 'since it started. Nothing was done.');
+						self::fail($session, $page_regex, 'Going back was not confirmed: it loses what was written on the new '
+							. 'server since it started. Nothing was done.');
 						return $copy_url;
 					}
 					SiteCopyRunner::go_back($site_copy, self::copy_dns_driver($node, false));

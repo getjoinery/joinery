@@ -268,7 +268,9 @@ chmod 755 "$T/bin"/*
 mkdir -p "$T/vol/one_data" "$T/vol/one_uploads"
 head -c 100000 /dev/zero > "$T/vol/one_data/db"; head -c 300000 /dev/zero > "$T/vol/one_uploads/photo"
 export GATE_PID=$$ GATE_VOL="$T/vol"
-PATH="$T/bin:$PATH" bash "$SCRIPT" > "$T/root.json" 2> "$T/root.err"; rc=$?
+# sitetwo is held stopped by hold_container (a switch-over's old container).
+mkdir -p "$T/etc/joinery/sites/sitetwo"; printf 'restart=unless-stopped\n' > "$T/etc/joinery/sites/sitetwo/held"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" bash "$SCRIPT" > "$T/root.json" 2> "$T/root.err"; rc=$?
 chk "stubbed run: exit 0" "$rc" "0"
 chk "stubbed run: a JSON object" "$(jv "$T/root.json" "" type)" "object"
 chk "failed units are capped at 20" "$(jv "$T/root.json" failed_units count)" "20"
@@ -325,7 +327,8 @@ chk "containers: state and health" "$(jv "$T/root.json" containers.0.state)/$(jv
 # A site's figures (multi_tenant_docker_hosts WP1), read from the cgroup and
 # network namespace of the process docker names - here the gate's own.
 int_or_none() { case "$1" in none|[0-9]*) echo ok ;; *) echo "$1" ;; esac; }
-chk "a site carries every figure key" "$(jv "$T/root.json" containers.0 keys)" "name,state,health,answers,started_at,memory,cpu,pids,net_tx_bytes,disk_bytes"
+chk "containers: a held container says so, and only it" "$(jv "$T/root.json" containers.0.held)/$(jv "$T/root.json" containers.1.held)" "false/true"
+chk "a site carries every figure key" "$(jv "$T/root.json" containers.0 keys)" "name,state,health,answers,held,started_at,memory,cpu,pids,net_tx_bytes,disk_bytes"
 chk "started_at is the container's start, as a Unix time" "$(jv "$T/root.json" containers.0.started_at)" "$(date -u -d 2026-09-28T18:01:15Z +%s)"
 chk "memory in use, its peak and its kill count are numbers" "$(jv "$T/root.json" containers.0.memory.used_bytes type)/$(jv "$T/root.json" containers.0.memory.peak_bytes type)/$(jv "$T/root.json" containers.0.memory.oom_kills type)" "integer/integer/integer"
 chk "the memory and process ceilings are a number or none" "$(int_or_none "$(jv "$T/root.json" containers.0.memory.limit_bytes)")/$(int_or_none "$(jv "$T/root.json" containers.0.pids.limit)")" "ok/ok"

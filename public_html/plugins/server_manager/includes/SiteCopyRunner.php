@@ -88,14 +88,20 @@
  * the key or what it opens), copy_stage, copy_restore and the copy's census,
  * judged alone. Its switch-over freezes nothing and has no final copy: the
  * source's server is powered off when this management node created it, the
- * address moves, and the copy starts. There is no way back once it has taken
- * the node: the site it would go back to is dead.
+ * address moves, and the copy starts. A container source's old container is
+ * stopped on its host, and kept stopped until it is removed, once the copy
+ * has taken the site (hold_container, WP14). There is no way back once it has
+ * taken the node: the site it would go back to is dead.
  *
  * Local steps (a provider call, a probe, the row swap back) take no agent job.
  * A press that lays them out starts a short worker (utils/advance_site_copy.php)
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.10 - cleanup_left(): each kept switch-over's old container not yet removed, or removed with its
+ *                 certificate still on its host, for as long as that lasts (B5);
+ *                 a container source's old container is stopped and held on its host as the switch-over's last
+ *                 step (hold_container, site_copy.md WP14); the host's agent must have the word to start
  * @version 1.9 - server_to_delete never names the copy's provision for a row that has a machine of its own: after a
  *                 kept switch-over from a container that provision is the live site's (B58); old_container() names a
  *                 container source's old row, removed from its host (site_copy.md WP14)
@@ -157,6 +163,9 @@ class SiteCopyRunner {
 		'probe'           => 5,
 		// A copy from backups' certificate, once the address points at it.
 		'provision_certificate' => 30,
+		// A container source's old container, stopped on its host once the
+		// copy has taken the site.
+		'hold_container'  => 15,
 	);
 
 	/** Steps this management node does itself, with no agent job. */
@@ -786,6 +795,32 @@ class SiteCopyRunner {
 		return $node;
 	}
 
+	/**
+	 * What kept switch-overs of this site still leave on an old container's
+	 * host (site_copy.md B5): each old container not yet removed, and each one
+	 * removed whose host still holds its certificate. Newest first, one entry
+	 * per old container: array('node' => the old row, 'removed' => bool,
+	 * 'certificates' => names). Nothing is listed once its cleanup is done,
+	 * however long ago the switch-over was.
+	 */
+	public static function cleanup_left(int $source_id): array {
+		$out = array();
+		foreach (new MultiSiteCopy(array('source_node_id' => $source_id, 'status' => SiteCopy::STATUS_FINISHED, 'deleted' => false),
+				array('scp_site_copy_id' => 'DESC')) as $copy) {
+			$old = self::old_container($copy);
+			if (!$old) {
+				continue;
+			}
+			$removed = (string)$old->get('mgn_moved_check_state') === 'absent';
+			$certificates = $removed ? MovedSiteCheck::leftover_certificates($old) : array();
+			if ($removed && !$certificates) {
+				continue;
+			}
+			$out[] = array('node' => $old, 'removed' => $removed, 'certificates' => $certificates);
+		}
+		return $out;
+	}
+
 	/** Move every live copy along. What the scheduled task calls. */
 	public static function advance_all(): int {
 		$moved = 0;
@@ -945,7 +980,16 @@ class SiteCopyRunner {
 			self::fail_step($copy, $steps, $pos, $e->getMessage());
 			return false;
 		}
-		$target = $step['on'] === 'source' ? $source : $node;
+		if ($step['on'] === 'host') {
+			try {
+				$target = self::hold_host($copy);
+			} catch (Exception $e) {
+				self::fail_step($copy, $steps, $pos, $e->getMessage());
+				return false;
+			}
+		} else {
+			$target = $step['on'] === 'source' ? $source : $node;
+		}
 
 		if (in_array($step['op'], self::LOCAL_STEPS, true)) {
 			// Steps with no job: done here (a provider call, a probe, the rows
@@ -1042,6 +1086,9 @@ class SiteCopyRunner {
 				return JobCommandBuilder::build_copy_take_key($node, self::key_request($source, (string)$copy->get('scp_chain_id')));
 			case 'provision_certificate':
 				return JobCommandBuilder::build_provision_certificate($source, array('domain' => self::site_domain($source)));
+			case 'hold_container':
+				return JobCommandBuilder::build_hold_container(self::hold_host($copy),
+					(string)($copy->switch_record()['hold']['name'] ?? ''), (string)($step['arg'] ?? ''));
 		}
 		throw new SiteCopyException("unknown step {$op}");
 	}
@@ -1186,6 +1233,13 @@ class SiteCopyRunner {
 				$r = json_decode((string)$job->get('mjb_result'), true);
 				return (is_array($r) && (string)($r['chain_id'] ?? '') === (string)$copy->get('scp_chain_id')) ? null
 					: 'the copy took no key for chain ' . $copy->get('scp_chain_id');
+			case 'hold_container':
+				$r = json_decode((string)$job->get('mjb_result'), true);
+				if (is_array($r) && !empty($r['done']) && ($r['action'] ?? '') === ($step['arg'] ?? '')) {
+					return null;
+				}
+				return 'the old container was not ' . (($step['arg'] ?? '') === 'start' ? 'started' : 'stopped')
+					. (is_array($r) && ($r['state'] ?? '') !== '' ? ' (it is ' . $r['state'] . ')' : '');
 		}
 		return null;
 	}
@@ -1400,6 +1454,20 @@ class SiteCopyRunner {
 		if ($missing) {
 			$why[] = 'The copy: ' . AgentVocabulary::needs_newer_agent_text($node, $missing);
 		}
+		if ($copy->from_backups()) {
+			try {
+				$hold = self::old_container_hold($source);
+				if ($hold) {
+					$host = new ManagedNode($hold['host_node_id'], TRUE);
+					if (!JobCommandBuilder::has_primitive($host, 'hold_container')) {
+						$why[] = 'The old container\'s host, which stops it once the copy has taken over: '
+							. AgentVocabulary::needs_newer_agent_text($host, array('hold_container'));
+					}
+				}
+			} catch (Exception $e) {
+				$why[] = $e->getMessage();
+			}
+		}
 		if ((string)$source->get('mgn_joinery_version') !== (string)$copy->get('scp_release')) {
 			$why[] = 'The site now runs release ' . $source->get('mgn_joinery_version') . ', and the copy was installed at '
 				. $copy->get('scp_release') . '. Discard the copy and copy again.';
@@ -1485,6 +1553,17 @@ class SiteCopyRunner {
 				if (isset($record['power'])) {
 					$template[] = array('op' => 'power_off', 'on' => 'source', 'arg' => 'source');
 				}
+				// A container source shares its server: its old container is
+				// stopped on its host, and kept stopped, once the copy has
+				// taken the site (start_steps()).
+				try {
+					$hold = self::old_container_hold($source);
+				} catch (Exception $e) {
+					throw new SiteCopyException('Nothing was changed: ' . $e->getMessage());
+				}
+				if ($hold) {
+					$record['hold'] = $hold;
+				}
 			} else {
 				$template = self::FREEZE_STEPS;
 			}
@@ -1513,8 +1592,46 @@ class SiteCopyRunner {
 		$steps[] = array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'off');
 		if ($copy->from_backups()) {
 			$steps[] = array('op' => 'provision_certificate', 'on' => 'source');
+			// Last, so an old container its host cannot stop never holds up
+			// the site, which already runs on the copy.
+			if (is_array($copy->switch_record()['hold'] ?? null)) {
+				$steps[] = array('op' => 'hold_container', 'on' => 'host', 'arg' => 'stop');
+			}
 		}
 		return $steps;
+	}
+
+	/**
+	 * Where a container source's old container is held stopped once its copy
+	 * from backups has taken the site (site_copy.md WP14): its host's node and
+	 * the container's name, recorded when the switch-over begins, before the
+	 * node rows swap. Null for a source that is not a container; throws when
+	 * the source is a container whose host this management node cannot reach.
+	 */
+	public static function old_container_hold(ManagedNode $source): ?array {
+		$name = trim((string)$source->get('mgn_container_name'));
+		if ($name === '') {
+			return null;
+		}
+		$host = JobCommandBuilder::decommission_host_node_for($source);
+		return array('host_node_id' => (int)$host->key, 'name' => $name);
+	}
+
+	/** The host node a hold step is addressed to, as the switch-over recorded it. */
+	private static function hold_host(SiteCopy $copy): ManagedNode {
+		$hold = $copy->switch_record()['hold'] ?? null;
+		if (!is_array($hold) || empty($hold['host_node_id'])) {
+			throw new SiteCopyException('the switch-over recorded no old container to stop');
+		}
+		try {
+			$host = new ManagedNode((int)$hold['host_node_id'], TRUE);
+		} catch (Exception $e) {
+			$host = null;
+		}
+		if (!$host || !$host->key || $host->get('mgn_delete_time')) {
+			throw new SiteCopyException('the old container\'s host has no node record any more');
+		}
+		return $host;
 	}
 
 	/**

@@ -8,6 +8,8 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.10 - each site container says whether it is held stopped (held: hold_container's
+#                 mark, /etc/joinery/sites/{site}/held), so container_health leaves it stopped.
 # Version: 1.8 - reboot_required_since: when the pending reboot was first asked for (the
 #                birth time of /var/run/reboot-required, which each later update rewrites in
 #                place; its change time where the filesystem keeps no birth time), or null
@@ -722,7 +724,7 @@ container_figures() {
 
 emit_containers() {
     local names c site state health port headers answers n=0 i src sum bytes path
-    local -a sites=() states=() healths=() answered=() figures=() srcs=()
+    local -a sites=() states=() healths=() answered=() figures=() srcs=() helds=()
     local -A src_site=() disk=() missing=()
     command -v docker >/dev/null 2>&1 || { printf '"none"'; return; }
     names="$(run docker ps -a --format '{{.Names}}')" || { printf '"unknown"'; return; }
@@ -742,6 +744,9 @@ emit_containers() {
             if printf '%s\n' "$headers" | grep -q -i '^x-joinery-version:'; then answers=yes; else answers=no; fi
         fi
         sites+=("$c"); states+=("${state:-unknown}"); healths+=("${health:-unknown}"); answered+=("$answers")
+        # Held stopped by hold_container (a switch-over's old container): not
+        # running is what it should be, and container_health leaves it alone.
+        if [[ -f "${HOST_REPORT_ETC:-/etc}/joinery/sites/${c}/held" ]]; then helds+=(true); else helds+=(false); fi
         figures+=("$(container_figures "$c" "${state:-unknown}")")
         # The site's data is its named volumes; a bind mount can name any
         # path on the server, and is never walked.
@@ -771,9 +776,9 @@ emit_containers() {
         sum=""
         (( ${missing[$c]:-1} == 0 )) && sum="${disk[$c]:-}"
         (( i == 0 )) || printf ','
-        printf '{"name":%s,"state":%s,"health":%s,"answers":"%s",%s,"disk_bytes":%s}' \
+        printf '{"name":%s,"state":%s,"health":%s,"answers":"%s","held":%s,%s,"disk_bytes":%s}' \
             "$(json_str "$c")" "$(json_str "${states[$i]}")" "$(json_str "${healths[$i]}")" "${answered[$i]}" \
-            "${figures[$i]}" "$(json_num_or_unknown "$sum")"
+            "${helds[$i]}" "${figures[$i]}" "$(json_num_or_unknown "$sum")"
     done
     printf ']'
 }

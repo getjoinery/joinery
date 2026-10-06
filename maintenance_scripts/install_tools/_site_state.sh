@@ -3,6 +3,9 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.5 - /.joinery-look/{secret}/key sets the look cookie and lands on /copy-key: a copy
+#               waiting for its recovery key is opened at its key page, not at a home page that
+#               has no accounts yet. Both look paths are matched exactly.
 # Version: 1.4 - the firewall rule lets the web user and Postfix answer a connection someone else
 #               opened (ct direction reply). It rejected every packet they sent off the machine,
 #               replies included, so no visitor reached a quiet site at all: not its 503, not the
@@ -23,7 +26,9 @@
 #     the web server starts, by joinery-site-state.service;
 #   * Apache answers every request 503, from a drop-in in conf-enabled. Under
 #     `copy` a per-copy secret cookie lets the owner look; the path
-#     /.joinery-look/{secret} sets it. Under `switchover` everyone gets the
+#     /.joinery-look/{secret} sets it and lands on the site's home page, and
+#     /.joinery-look/{secret}/key sets it and lands on the copy's key page
+#     (/copy-key). Under `switchover` everyone gets the
 #     maintenance page;
 #   * the site's cron file, and certbot's if there is one, are held in
 #     {state dir}/held and nothing writes them back; certbot's timer is off;
@@ -206,11 +211,15 @@ ss_render_apache() {
     echo "# answers 503: a <Location> here is merged after every vhost's <Directory>."
     if [[ "${reason}" == "copy" ]]; then
         cat <<EOF
-<Location "${SS_LOOK_PREFIX}${secret}">
+<LocationMatch "^/\\.joinery-look/${secret}\$">
     Header always set Set-Cookie "${SS_COOKIE}=${secret}; Path=/; HttpOnly; SameSite=Lax"
     Redirect 303 /
-</Location>
-<LocationMatch "^/(?!\\.joinery-look/${secret}\$)">
+</LocationMatch>
+<LocationMatch "^/\\.joinery-look/${secret}/key\$">
+    Header always set Set-Cookie "${SS_COOKIE}=${secret}; Path=/; HttpOnly; SameSite=Lax"
+    Redirect 303 /copy-key
+</LocationMatch>
+<LocationMatch "^/(?!\\.joinery-look/${secret}(?:/key)?\$)">
     <If "! %{HTTP_COOKIE} =~ /(?:^|;\\s*)${SS_COOKIE}=${secret}(?:;|\$)/">
         Header always set Retry-After "3600"
         Redirect 503
