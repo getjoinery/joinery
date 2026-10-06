@@ -8,6 +8,12 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.8 - reboot_required_since: when the pending reboot was first asked for (the
+#                birth time of /var/run/reboot-required, which each later update rewrites in
+#                place; its change time where the filesystem keeps no birth time), or null
+#                with none pending. A multi-tenant host reboots itself the night an update
+#                asks, so one pending for more than a day is one that did not happen
+#                (specs/multi_tenant_docker_hosts.md WP5 item 7).
 # Version: 1.7 - Each site container carries its own figures (specs/multi_tenant_docker_hosts.md
 #                WP1): memory in use, its peak, its limit and how many times the kernel
 #                killed a process in it for memory; CPU used and its ceiling; processes
@@ -464,6 +470,17 @@ emit_reboot_required() {
     elif [[ -d /var/run ]]; then printf 'false'
     else printf '"unknown"'; fi
 }
+# When the pending reboot was first asked for. /run is a tmpfs, emptied at boot,
+# and the update hook rewrites the file in place (>), so its birth time is the
+# first request since the last boot; %W is 0 where no birth time is kept, and
+# the change time stands in.
+emit_reboot_required_since() {
+    local f=/var/run/reboot-required t
+    [[ -e "$f" ]] || { printf 'null'; return; }
+    t="$(run stat -c %W "$f")" || t=""
+    if [[ ! "$t" =~ ^[1-9][0-9]*$ ]]; then t="$(run stat -c %Z "$f")" || t=""; fi
+    json_num_or_unknown "$t"
+}
 emit_unattended_upgrades_last_run() {
     local stamp=/var/lib/apt/periodic/unattended-upgrades-stamp t
     if [[ -e "$stamp" ]] && t="$(run stat -c %Y "$stamp")"; then
@@ -776,6 +793,7 @@ printf '"memory":%s,' "$(emit_memory)"
 printf '"swap":%s,' "$(emit_swap)"
 printf '"cpus":%s,' "$(emit_cpus)"
 printf '"reboot_required":%s,' "$(emit_reboot_required)"
+printf '"reboot_required_since":%s,' "$(emit_reboot_required_since)"
 printf '"unattended_upgrades_last_run":%s,' "$(emit_unattended_upgrades_last_run)"
 printf '"os":%s,' "$(emit_os)"
 printf '"answers":%s,' "$(emit_answers)"

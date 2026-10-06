@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.42 - a pending reboot names when it was asked for, and is amber only once it has
+ *                 waited more than a day: a multi-tenant host takes its own the night an update
+ *                 asks, so a day's wait is one that did not happen (host_report 1.8)
  * @version 1.41 - a removed old container whose host still holds its certificate offers Remove it from the host
  * @version 1.40 - the old machine's Site line reads moved only when the domain also reaches the new server; the
  *                 delete confirmation says so
@@ -1106,7 +1109,12 @@
 			echo '<div><div class="border rounded p-3 h-100">';
 			echo '<div class="text-muted small text-uppercase mb-2">Machine</div>';
 			if ($hr['reboot_required'] === true) {
-				echo '<div><span class="badge bg-warning">Reboot required</span></div>';
+				// A report from before host_report 1.8 says no time, and reads as overdue.
+				$reboot_since = $hr['reboot_required_since'] ?? 'unknown';
+				$reboot_overdue = !is_int($reboot_since) || $reboot_since < time() - 86400;
+				echo '<div><span class="badge bg-' . ($reboot_overdue ? 'warning' : 'secondary') . '">Reboot required</span>'
+					. (is_int($reboot_since) ? ' <span class="small text-muted">asked for ' . $hr_str($hr_when($reboot_since)) . '</span>' : '')
+					. '</div>';
 			} elseif ($hr['reboot_required'] === false) {
 				echo '<div><span class="badge bg-success">No reboot pending</span></div>';
 			}
