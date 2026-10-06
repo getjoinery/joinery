@@ -2,6 +2,8 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.12 - the image's locales are read whole before a database's is looked for in them, so
+#                 the match cannot be lost to SIGPIPE under pipefail
 # Version: 1.11 - rollback hands PostgreSQL's log directory back inside a container of the old
 #                 image, by name: the host-side chown wrote the container's ids, which are not
 #                 the owners on a host that remaps user ids (userns-remap, WP5 item 3).
@@ -444,9 +446,13 @@ if [ "$STAGE" = "prepare" ]; then
     IFS=$'\t' read -r ENC COLL CTYPE < <(printf '%s\n' "SELECT pg_encoding_to_char(encoding), datcollate, datctype FROM pg_database WHERE datname = '${DB}'" | psql_in postgres)
     [ -n "${ENC:-}" ] || die "database ${DB} not found in ${SITE}"
     LOCALES="$(docker run --rm --entrypoint locale "$BASE" -a 2>/dev/null)"
+    # Normalised whole before matching: a loop piped into grep -qx, which stops
+    # at its first match, dies of SIGPIPE on its next line, and pipefail calls
+    # a locale the image has missing.
+    LOCALES_NORM="$(printf '%s\n' "$LOCALES" | while read -r l; do norm_locale "$l"; done)"
     for loc in "$COLL" "$CTYPE"; do
         case "$(norm_locale "$loc")" in c|posix|c.utf8) continue ;; esac
-        printf '%s\n' "$LOCALES" | while read -r l; do norm_locale "$l"; done | grep -qx "$(norm_locale "$loc")" \
+        grep -qx -- "$(norm_locale "$loc")" <<< "$LOCALES_NORM" \
             || die "database ${DB} uses locale ${loc}, which ${BASE} does not have"
     done
 

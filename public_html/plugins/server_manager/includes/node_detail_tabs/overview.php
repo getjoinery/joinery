@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.48 - the outbound limits include each site's speed ceiling (node_outbound_and_transfer WP4); a
+ *                 machine where tc refused part of it says so
  * @version 1.47 - a site container on a host can be held stopped, with the reason why, and started again; a held
  *                 site's own page says who held it, when and why (multi_tenant_docker_hosts WP7)
  * @version 1.46 - a script edited on this management node and not yet published warns as one committed does
@@ -1252,12 +1254,12 @@
 					? '<div class="mt-2 text-danger small">Kernel, last 24h: ' . $hr_str(implode(', ', $bits)) . '</div>'
 					: '<div class="mt-2 text-muted small">Kernel, last 24h: nothing to report</div>';
 			}
-			// What the machine's sites may open toward the outside (host_report
+			// What the machine's sites may open toward the outside, and how fast they send (host_report
 			// 1.11). A container site's own report says none: its host's says.
 			$ol = $hr['outbound_limits'] ?? null;
 			if (is_array($ol) && $ol['state'] !== 'none') {
 				$ol_words = [
-					'on'      => ['Outbound limits on', 'success', 'A rate on new connections, a cap on those open at once, and no UDP, for each site'],
+					'on'      => ['Outbound limits on', 'success', 'A rate on new connections, a cap on those open at once, no UDP, and a speed ceiling, for each site'],
 					'off'     => ['Outbound limits off', 'secondary', 'Turned off on this machine (joinery-limits on turns them on)'],
 					'refused' => ['Outbound limits not in force', 'danger', ''],
 					'absent'  => ['No outbound limits', 'secondary', 'This machine was installed before them'],
@@ -1274,7 +1276,10 @@
 				if ($ol_line !== '') {
 					echo '<div class="small text-muted">' . $hr_str($ol_line) . '</div>';
 				}
-				if ($ol['state'] === 'on' && is_string($ol['reason'] ?? null)) {
+				if ($ol['state'] === 'on' && ($ol['reason'] ?? null) === 'ceiling_failed') {
+					echo '<div class="small text-warning">The speed ceiling is not in force for every site: tc refused part of it. '
+						. 'The connection limits are in force; see journalctl -u joinery-limits on the machine.</div>';
+				} elseif ($ol['state'] === 'on' && is_string($ol['reason'] ?? null)) {
 					echo '<div class="small text-warning">The last change to them was refused ('
 						. $hr_str($ol_reasons[$ol['reason']] ?? $ol['reason'])
 						. '). The limits before it are in force; see journalctl -u joinery-limits on the machine.</div>';

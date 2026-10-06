@@ -2,10 +2,11 @@
 #
 # outbound_limits.sh - what each site on this machine may open toward the
 # outside: a rate on new connections, a cap on connections open at once, and
-# no UDP at all (node_outbound_and_transfer WP3). Real use never meets them;
-# they stop a hacked plugin turning the server into a scanner or a flood.
+# no UDP at all (node_outbound_and_transfer WP3), and how fast it may send
+# (WP4). Real use never meets them; they stop a hacked plugin turning the
+# server into a scanner or a flood, and bound what a runaway site costs.
 #
-# Version: 1.0
+# Version: 1.1
 #
 #   outbound_limits.sh install [--web-user] [--off]
 #                         Root. Copies this script to /usr/local/sbin/joinery-limits,
@@ -31,7 +32,8 @@
 # (jsnetN, node_outbound_and_transfer WP2), read from its run spec, on the
 # host's forward path: what the site sends out through the host. A site still
 # on Docker's default network shares docker0 with every other such site and is
-# not limited; status names it, and move_site_to_own_network.sh moves it. With
+# not limited, nor is one whose run spec names any bridge but a jsnetN; status
+# names it, and move_site_to_own_network.sh moves it. With
 # --web-user, everything the web server's user (www-data) opens on the host's
 # output path is limited as one, loopback apart, so its own database and the
 # local resolver are never touched.
@@ -48,6 +50,29 @@
 # carry the site name unquoted: nft's names take letters, digits, _ - . and /,
 # which covers every site name ([A-Za-z0-9_-], behind a letter prefix), and it
 # lists them back unquoted, which is how host_report.sh finds them.
+#
+# THE SPEED CEILING (WP4). Everything a site sends, CEILING_MBIT at most, over
+# both families together. A visitor's download from a container site leaves
+# the machine from the host's proxy, not from the site's subnet, so the
+# ceiling sits where the site's traffic enters the host: the bridge's incoming
+# traffic is redirected (tc clsact ingress, matchall, mirred) to an ifb device
+# of its own, jifbN for jsnetN, whose HTB class holds it to the ceiling with
+# fq_codel under it, so the site's pages stay quick while it saturates. On
+# bare metal the web server sends visitors' downloads itself, and its replies
+# carry its user: the table marks what the web server's user sends
+# (WEB_MARK, one bit, or-ed into the mark), and each interface a default
+# route leaves by redirects marked packets (clsact egress, fw) to one ifb,
+# jifbweb, so one ceiling covers every interface. Nothing else on the machine
+# passes through any of it: the host agent, updates and the proxy are never
+# shaped. Traffic to a site (uploads) is inbound and not shaped. Every run
+# puts back whatever is missing (a rebuilt bridge loses its clsact) and leaves
+# alone what is in force; what it put in force is listed in
+# outbound_limits.shaped, and a line no longer wanted is taken out filter
+# first, its device only once no filter is seen sending to it, so nothing is
+# ever redirected to a device that is gone; clsact left holding nothing is
+# removed. A bridge missing at the moment of a run is passed over (it carries
+# nothing). With no default route, the web server's user's ceiling stays
+# where it was and the run fails. Our filters carry preference SHAPE_PREF.
 #
 # THE RESOLVER. A site's name lookups never leave as its own UDP only while the
 # host's resolver is a loopback address: Docker (20.10 and later; WP2 already
@@ -66,8 +91,11 @@
 # STATUS. /run/joinery/outbound_limits.status, key=value lines read by
 # host_report.sh: state (on, off, refused), reason (a code), since (when the
 # counters began), sites (limited), uncovered (on Docker's default network),
-# web_user (yes or no). state=on with reason=nft_refused: the last change was
-# refused and the table before it, with its sites and counters, is in force.
+# web_user (yes or no), ceiling_mbit (the ceiling in force, empty for none).
+# state=on with reason=nft_refused: the last change was refused and the table
+# before it, with its sites and counters, is in force. state=on with
+# reason=ceiling_failed: the connection limits are in force and the speed
+# ceiling is not, or not everywhere (tc refused part of it).
 
 set -uo pipefail
 
@@ -80,7 +108,11 @@ TABLE="joinery_limits"
 CONN_RATE=20
 CONN_BURST=100
 OPEN_CONNS=256
+CEILING_MBIT=200
 WEB_USER="www-data"
+WEB_MARK="0x10000000"
+WEB_IFB="jifbweb"
+SHAPE_PREF=47
 
 # Tests point these into a scratch directory.
 ROOT="${JOINERY_LIMITS_ROOT:-}"
@@ -93,6 +125,7 @@ RESOLV_CONF="${ROOT}/etc/resolv.conf"
 RUN_DIR="${ROOT}/run/joinery"
 STATUS_FILE="${RUN_DIR}/outbound_limits.status"
 APPLIED_FILE="${RUN_DIR}/outbound_limits.applied"
+SHAPED_FILE="${RUN_DIR}/outbound_limits.shaped"
 LOCK_FILE="${RUN_DIR}/outbound_limits.lock"
 
 say() { printf '%s\n' "$*"; }
@@ -156,7 +189,7 @@ resolver_is_loopback() {
 }
 
 # Each container site with a network of its own, as SITE BRIDGE lines; each
-# site still on Docker's default network, as SITE alone after a "-" line.
+# site without one (Docker's default network), as SITE alone after a "-" line.
 container_sites() {
     local spec site bridge
     local -a uncovered=()
@@ -165,8 +198,9 @@ container_sites() {
         site="$(basename "$(dirname "$spec")")"
         [[ "$site" =~ ^[A-Za-z0-9_-]{1,50}$ ]] || continue
         bridge="$(sed -n 's/^bridge=//p' "$spec" | tail -1)"
-        # docker0 is every default-network site's at once, never one site's.
-        if [[ "$bridge" =~ ^[a-z][a-z0-9]{0,14}$ && "$bridge" != docker0 ]]; then
+        # A site's own network is a jsnetN (run_spec); docker0 is every
+        # default-network site's at once, never one site's.
+        if [[ "$bridge" =~ ^jsnet[0-9]{1,3}$ ]]; then
             echo "$site $bridge"
         else
             uncovered+=("$site")
@@ -221,7 +255,11 @@ table_body() {  # WEB_USER(0|1) [COUNTS]
     if [[ "$web" == 1 ]]; then
         printf '\tchain output {\n\t\ttype filter hook output priority -10; policy accept;\n'
         printf '\t\toifname "lo" accept\n'
-        printf '\t\tmeta skuid "%s" jump web_user\n' "$WEB_USER"
+        if [[ -n "$CEILING_MBIT" ]]; then
+            printf '\t\tmeta skuid "%s" meta mark set meta mark | %s jump web_user\n' "$WEB_USER" "$WEB_MARK"
+        else
+            printf '\t\tmeta skuid "%s" jump web_user\n' "$WEB_USER"
+        fi
         printf '\t}\n'
         sender_chain web_user drops_web_user
     fi
@@ -249,7 +287,123 @@ remove_table() {
     rm -f "$APPLIED_FILE"
 }
 
-# write_status STATE REASON [SITES UNCOVERED WEB_USER]
+# --- the speed ceiling -----------------------------------------------------------
+
+# The interfaces the machine's default routes leave by, IPv4 and IPv6.
+public_interfaces() {
+    { ip -4 route show default; ip -6 route show default; } 2> /dev/null \
+        | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") print $(i + 1) }' \
+        | grep -E '^[A-Za-z0-9_.-]{1,15}$' | sort -u
+}
+
+# Where the ceiling goes, as DEV DIRECTION IFB lines: each site's bridge
+# (SITE BRIDGE lines on stdin) and, with WEB_USER, each public interface.
+shape_plan() {  # WEB_USER(0|1)
+    local site bridge dev
+    [[ -n "$CEILING_MBIT" ]] || return 0
+    while read -r site bridge; do
+        [[ -n "$bridge" ]] && echo "${bridge} ingress jifb${bridge#jsnet}"
+    done
+    if [[ "$1" == 1 ]]; then
+        for dev in $(public_interfaces); do echo "${dev} egress ${WEB_IFB}"; done
+    fi
+}
+
+# Whether COMMAND's output holds a line matching the extended regex PATTERN.
+# The output is read whole first: piped into grep -q, which stops at its first
+# match, tc is killed writing the rest and pipefail calls the pipeline failed.
+shows() {  # PATTERN COMMAND...
+    local pattern="$1" out
+    shift
+    out="$("$@" 2> /dev/null)"
+    grep -qE -- "$pattern" <<< "$out"
+}
+
+# Puts one line of the plan in force, leaving alone what already is. Every
+# step but the class's rate is checked first: HTB, clsact and matchall refuse
+# a replace of themselves, and the class's replace changes it in place. A
+# filter whose device was lost shows "to device *)" and is put back against
+# the new one: mirred never finds a device again by name.
+shape_one() {  # DEV DIRECTION IFB
+    local dev="$1" dir="$2" ifb="$3"
+    local -a match=(matchall)
+    [[ "$dir" == egress ]] && match=(handle "${WEB_MARK}/${WEB_MARK}" fw)
+    # A bridge not there at this moment (Docker making its networks again as
+    # it starts) carries nothing; the next run, or the site's own start, puts
+    # its part on.
+    ip link show dev "$dev" > /dev/null 2>&1 || return 0
+    if ! ip link show dev "$ifb" > /dev/null 2>&1; then
+        # Loaded by hand, ifb would make two spare devices of its own.
+        [[ -d /sys/module/ifb ]] || modprobe -q ifb numifbs=0 2> /dev/null
+        ip link add "$ifb" type ifb || return 1
+    fi
+    ip link set dev "$ifb" up || return 1
+    shows '^qdisc htb 1: root' tc qdisc show dev "$ifb" \
+        || tc qdisc replace dev "$ifb" root handle 1: htb default 10 || return 1
+    tc class replace dev "$ifb" parent 1: classid 1:10 htb rate "${CEILING_MBIT}mbit" ceil "${CEILING_MBIT}mbit" quantum 60000 || return 1
+    shows '^qdisc fq_codel 10: parent 1:10 ' tc qdisc show dev "$ifb" \
+        || tc qdisc replace dev "$ifb" parent 1:10 handle 10: fq_codel || return 1
+    shows '^qdisc clsact ' tc qdisc show dev "$dev" || tc qdisc add dev "$dev" clsact || return 1
+    if ! redirects_to "$dev" "$dir" "$ifb"; then
+        tc filter del dev "$dev" "$dir" pref "$SHAPE_PREF" 2> /dev/null
+        tc filter add dev "$dev" "$dir" protocol all pref "$SHAPE_PREF" "${match[@]}" \
+            action mirred egress redirect dev "$ifb" || return 1
+        say "outbound limits: speed ceiling put in force on ${dev}"
+    fi
+}
+
+# Whether DEV still sends anything to IFB at our preference.
+redirects_to() {  # DEV DIRECTION IFB
+    shows "to device ${3}\\)" tc filter show dev "$1" "$2" pref "$SHAPE_PREF"
+}
+
+# Brings the ceiling to PLAN (empty: none anywhere). 1 when tc refused any of
+# it, putting it in force or taking it out.
+shape() {  # PLAN
+    local plan="$1" old dev dir ifb failed=0 keep="" stuck=""
+    old="$(cat "$SHAPED_FILE" 2> /dev/null)"
+    # What is no longer wanted: the filters first, then each device no wanted
+    # line uses. A device is removed only once no filter is seen sending to
+    # it, so nothing is ever redirected to a device that is gone: a filter
+    # that will not come off keeps its line and its device, and the next run
+    # tries again.
+    while read -r dev dir ifb; do
+        [[ -n "$ifb" ]] || continue
+        grep -qxF "${dev} ${dir} ${ifb}" <<< "$plan" && continue
+        ip link show dev "$dev" > /dev/null 2>&1 || continue
+        tc filter del dev "$dev" "$dir" pref "$SHAPE_PREF" 2> /dev/null
+        if redirects_to "$dev" "$dir" "$ifb"; then
+            keep+="${dev} ${dir} ${ifb}"$'\n'; stuck+=" ${ifb} "; failed=1
+            echo "joinery-limits: tc would not take the speed ceiling off ${dev}" >&2
+            continue
+        fi
+        # clsact this unit added, now holding nothing in either direction.
+        if [[ -z "$(tc filter show dev "$dev" ingress 2> /dev/null)$(tc filter show dev "$dev" egress 2> /dev/null)" ]]; then
+            tc qdisc del dev "$dev" clsact 2> /dev/null
+        fi
+    done <<< "$old"
+    while read -r dev dir ifb; do
+        [[ -n "$ifb" ]] || continue
+        awk -v i="$ifb" '$3 == i { f = 1 } END { exit !f }' <<< "$plan" && continue
+        [[ "$stuck" == *" ${ifb} "* ]] && continue
+        ip link show dev "$ifb" > /dev/null 2>&1 && ip link del dev "$ifb"
+    done <<< "$old"
+    mkdir -p "$RUN_DIR"
+    if [[ -z "$plan$keep" ]]; then
+        rm -f "$SHAPED_FILE"
+        return 0
+    fi
+    # Listed before it is written, so a line half put in force is taken out
+    # by the run that no longer wants it.
+    { [[ -z "$plan" ]] || printf '%s\n' "$plan"; printf '%s' "$keep"; } > "$SHAPED_FILE"
+    while read -r dev dir ifb; do
+        [[ -n "$ifb" ]] || continue
+        shape_one "$dev" "$dir" "$ifb" || { failed=1; echo "joinery-limits: tc refused the speed ceiling on ${dev}" >&2; }
+    done <<< "$plan"
+    return "$failed"
+}
+
+# write_status STATE REASON [SITES UNCOVERED WEB_USER CEILING_MBIT]
 write_status() {
     local since=""
     mkdir -p "$RUN_DIR"
@@ -268,6 +422,7 @@ write_status() {
         echo "sites=${3:-}"
         echo "uncovered=${4:-}"
         echo "web_user=${5:-no}"
+        echo "ceiling_mbit=${6:-}"
         echo "applied_at=$(date -u +%s)"
     } > "${STATUS_FILE}.tmp" && chmod 644 "${STATUS_FILE}.tmp" && mv -f "${STATUS_FILE}.tmp" "$STATUS_FILE"
 }
@@ -278,61 +433,93 @@ unit_has_web_user() {
 }
 
 do_apply() {  # WEB_USER(0|1)
-    local web="$1" body want sites uncovered line
+    local web="$1" body want sites uncovered line pairs webw unchanged=0
     need_root apply
     # A hand run without the flag on a machine whose unit has it keeps it.
     unit_has_web_user && web=1
-    command -v nft > /dev/null 2>&1 || { write_status refused nft_missing; die "nft is not installed; no limits are in force"; }
+    webw="$([[ $web == 1 ]] && echo yes || echo no)"
     mkdir -p "$RUN_DIR"
     exec 9> "$LOCK_FILE"
     flock -w 60 9 || die "another run holds ${LOCK_FILE}"
+    if ! command -v nft > /dev/null 2>&1; then
+        shape ""
+        write_status refused nft_missing
+        die "nft is not installed; no limits are in force"
+    fi
 
     if ! limits_enabled; then
         remove_table || die "could not remove the limits table"
+        local unshaped=1
+        shape "" || unshaped=0
         write_status off off
         say "outbound limits: off on this machine (${HOST_FILE})"
+        (( unshaped )) || die "part of the speed ceiling would not come off (see above); the next run tries again"
         return 0
     fi
     if ! resolver_is_loopback; then
         remove_table
+        shape ""
         write_status refused resolver_not_loopback
         die "the host's resolver is not a loopback address ($(resolvers | paste -sd ' ')): dropping a site's UDP would break its name lookups, so no limits are in force. Point /etc/resolv.conf at the local resolver (systemd-resolved, 127.0.0.53) and run this again"
     fi
 
-    sites=""; uncovered=""
+    sites=""; uncovered=""; pairs=""
     local past=0
     while IFS= read -r line; do
         if [[ "$line" == "-" ]]; then past=1; continue; fi
         [[ -n "$line" ]] || continue
-        if (( past )); then uncovered+="${uncovered:+ }${line}"; else sites+="${sites:+ }${line%% *}"; fi
+        if (( past )); then uncovered+="${uncovered:+ }${line}"; else sites+="${sites:+ }${line%% *}"; pairs+="${line}"$'\n'; fi
     done <<< "$(container_sites)"
 
     want="$(ruleset "$web")"
     if [[ -f "$APPLIED_FILE" ]] && [[ "$(cat "$APPLIED_FILE")" == "$want" ]] \
             && nft list table inet "$TABLE" > /dev/null 2>&1; then
-        write_status on "" "$sites" "$uncovered" "$([[ $web == 1 ]] && echo yes || echo no)"
-        say "outbound limits: unchanged"
-        return 0
+        unchanged=1
+    else
+        body="$(ruleset "$web" "$(current_counts)")"
     fi
-    body="$(ruleset "$web" "$(current_counts)")"
-    if ! printf '%s\n' "$body" | nft -f -; then
+    if (( ! unchanged )) && ! printf '%s\n' "$body" | nft -f -; then
         # The table before this change is still in force, its counters still
         # running: the status keeps saying so, with its sites and its since, so
-        # a site's drops are neither hidden nor counted twice. The unit fails,
-        # which the host report names, and the next run tries again.
+        # a site's drops are neither hidden nor counted twice; its ceiling is
+        # left as it was too. The unit fails, which the host report names, and
+        # the next run tries again.
         if [[ -f "$STATUS_FILE" ]] && grep -qx 'state=on' "$STATUS_FILE" \
                 && nft list table inet "$TABLE" > /dev/null 2>&1; then
             write_status on nft_refused "$(sed -n 's/^sites=//p' "$STATUS_FILE")" \
-                "$(sed -n 's/^uncovered=//p' "$STATUS_FILE")" "$(sed -n 's/^web_user=//p' "$STATUS_FILE")"
+                "$(sed -n 's/^uncovered=//p' "$STATUS_FILE")" "$(sed -n 's/^web_user=//p' "$STATUS_FILE")" \
+                "$(sed -n 's/^ceiling_mbit=//p' "$STATUS_FILE")"
         else
+            shape ""
             write_status refused nft_refused "$sites" "$uncovered"
         fi
         die "nft refused the limits; the table is as it was"
     fi
-    printf '%s\n' "$want" > "$APPLIED_FILE"
-    write_status on "" "$sites" "$uncovered" "$([[ $web == 1 ]] && echo yes || echo no)"
+    (( unchanged )) || printf '%s\n' "$want" > "$APPLIED_FILE"
+
+    # The ceiling is checked on every run, changed table or not: a site's
+    # bridge made again by a rebuild has lost its part.
+    local plan noroute=0
+    plan="$(shape_plan "$web" <<< "$pairs")"
+    # With no default route this moment, the web server's user's ceiling stays
+    # on the interfaces it was on rather than coming off, and the run fails
+    # until a route is back.
+    if [[ "$web" == 1 && -n "$CEILING_MBIT" ]] && ! grep -q ' egress ' <<< "$plan"; then
+        noroute=1
+        plan="$(printf '%s\n%s\n' "$plan" "$(grep ' egress ' "$SHAPED_FILE" 2> /dev/null)" | sed '/^$/d')"
+    fi
+    if ! shape "$plan" || (( noroute )); then
+        write_status on ceiling_failed "$sites" "$uncovered" "$webw" ""
+        (( noroute )) && die "the machine has no default route: the web server's user's speed ceiling stays on the interfaces it was on until a route is back; the connection limits are in force"
+        die "the speed ceiling is not in force everywhere (see above); the connection limits are"
+    fi
+    write_status on "" "$sites" "$uncovered" "$webw" "$CEILING_MBIT"
+    if (( unchanged )); then
+        say "outbound limits: unchanged"
+        return 0
+    fi
     say "outbound limits: in force for ${sites:-no container site}$([[ $web == 1 ]] && echo " and the web server's user (${WEB_USER})")"
-    [[ -z "$uncovered" ]] || say "outbound limits: not limited, still on Docker's default network: ${uncovered} (move_site_to_own_network.sh moves them)"
+    [[ -z "$uncovered" ]] || say "outbound limits: not limited, not on a jsnetN network of their own: ${uncovered} (move_site_to_own_network.sh moves a site off Docker's default network)"
     return 0
 }
 
@@ -341,7 +528,7 @@ do_apply() {  # WEB_USER(0|1)
 unit_text() {  # WEB_USER(0|1)
     cat <<EOF
 [Unit]
-Description=Joinery: outbound connection limits for this machine's sites (outbound_limits.sh)
+Description=Joinery: outbound limits and speed ceiling for this machine's sites (outbound_limits.sh)
 After=docker.service systemd-resolved.service network-online.target
 
 [Service]
@@ -356,7 +543,7 @@ EOF
 timer_text() {
     cat <<'EOF'
 [Unit]
-Description=Joinery: keep the outbound connection limits in force (outbound_limits.sh)
+Description=Joinery: keep the outbound limits in force (outbound_limits.sh)
 
 [Timer]
 OnBootSec=2min
@@ -416,7 +603,7 @@ do_onoff() {  # true|false
 }
 
 do_status() {
-    local state reason sites uncovered web site counts c
+    local state reason sites uncovered web ceiling site counts c
     if [[ ! -f "$STATUS_FILE" ]]; then
         say "outbound limits: not applied since boot"
         return 1
@@ -426,9 +613,14 @@ do_status() {
     sites="$(sed -n 's/^sites=//p' "$STATUS_FILE")"
     uncovered="$(sed -n 's/^uncovered=//p' "$STATUS_FILE")"
     web="$(sed -n 's/^web_user=//p' "$STATUS_FILE")"
+    ceiling="$(sed -n 's/^ceiling_mbit=//p' "$STATUS_FILE")"
     case "$state" in
-        on)  say "outbound limits: on (${CONN_RATE} new connections a second, bursts to ${CONN_BURST}; ${OPEN_CONNS} open at once; no UDP)"
-             [[ -z "$reason" ]] || say "  the last change was refused (${reason}): the table before it is in force; see journalctl -u ${UNIT_NAME}" ;;
+        on)  say "outbound limits: on (${CONN_RATE} new connections a second, bursts to ${CONN_BURST}; ${OPEN_CONNS} open at once; no UDP; $([[ -n "$ceiling" ]] && echo "sending at ${ceiling} Mbit/s at most" || echo "no speed ceiling"))"
+             case "$reason" in
+                 "") ;;
+                 ceiling_failed) say "  the speed ceiling is not in force everywhere (tc refused part of it); see journalctl -u ${UNIT_NAME}" ;;
+                 *) say "  the last change was refused (${reason}): the table before it is in force; see journalctl -u ${UNIT_NAME}" ;;
+             esac ;;
         off) say "outbound limits: off on this machine"; return 0 ;;
         *)   say "outbound limits: NOT in force (${reason})"; return 1 ;;
     esac
@@ -442,7 +634,7 @@ do_status() {
         say "  the web server's user (${WEB_USER}): limited, ${c%%:*} packets dropped"
     fi
     for site in $uncovered; do
-        say "  ${site}: NOT limited - on Docker's default network (move_site_to_own_network.sh ${site})"
+        say "  ${site}: NOT limited - not on a jsnetN network of its own (move_site_to_own_network.sh ${site} moves it off Docker's default network)"
     done
     return 0
 }
