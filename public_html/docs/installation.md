@@ -235,7 +235,21 @@ Each site container can be given limits, so one site cannot use up the machine:
 | `--cpus=N` | CPU, in cores (`1.0` is at most one core) | none |
 | `--pids-limit=N` | processes and threads together; at least 128 | 512 for a new site |
 
-Under load, sites already share the CPU evenly, whatever their ceilings. The limits are recorded in the site's run spec, so a rebuild keeps them; give an option again to change one, or `none` to lift it. A limit is refused before anything stops if Docker would refuse it, such as a CPU ceiling above the machine's CPUs. A bare-metal site has no container, so the options are refused there. See [Deploy and Upgrade](deploy_and_upgrade.md) for the run spec and how PostgreSQL sizes itself from the memory budget.
+Under load, sites already share the CPU evenly, whatever their ceilings. The limits are recorded in the site's run spec, so a rebuild keeps them; give an option again to change one, or `none` to lift it. A limit is refused before anything stops if Docker would refuse it, such as a CPU ceiling above the machine's CPUs. A bare-metal site has no container, so the options are refused there. With a memory budget, PostgreSQL, PHP's worker pool and the database connections between them are sized from it at every start. See [Deploy and Upgrade](deploy_and_upgrade.md) for the run spec and the sizing.
+
+### What keeps a site running
+
+A container's main process is its supervisor, `_site_supervisor.sh`. It starts Apache, then checks every 5 seconds that PostgreSQL, PHP-FPM, Apache and cron are running. When a site runs out of memory, the kernel kills its biggest process. When one of the four has been gone for three checks in a row, the supervisor clears whatever it left behind (a dead PHP-FPM master's workers, a dead Apache parent's children still holding port 80) and starts it again. Each restart is a line in the site's `logs/error.log` and in `docker logs`. `docker stop` stops all four cleanly, so PostgreSQL shuts down rather than being killed.
+
+The container's health check runs `_site_supervisor.sh --check`. A service the supervisor cannot bring back turns the container **unhealthy** after about 90 seconds; the host agent's `container_health` then restarts the container. This catches the case a page probe cannot: a dead cron leaves the site answering while its scheduled tasks stop.
+
+A script that stops one of the four on purpose takes the hold first, and the supervisor restarts nothing while it is there:
+
+```bash
+mkdir -p /run/joinery && echo "who and why" > /run/joinery/supervisor.hold
+```
+
+The next container start clears it. `rebase_site_container.sh` holds the supervisor while it moves a database.
 
 ### Volume mounts
 

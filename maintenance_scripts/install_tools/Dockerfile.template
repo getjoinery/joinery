@@ -1,4 +1,13 @@
 # Joinery Docker Template
+# VERSION 6.0 - The container's main process is _site_supervisor.sh (specs/multi_tenant_docker_hosts.md
+#               WP2): it starts Apache and restarts PostgreSQL, PHP-FPM, Apache or cron when
+#               one dies, which nothing did (the kernel kills the biggest process when a
+#               container runs out of memory), and stops all four cleanly on docker stop.
+#               A HEALTHCHECK runs its --check. PHP-FPM's pool is sized from the memory
+#               budget before it starts (sysadmin_tools/tune_php_fpm.sh). A code volume
+#               older than either keeps the previous behaviour: Apache in the foreground.
+#               BASE_IMAGE_VERSION's default follows install.sh 2.97 to 2.2 (a base with djpeg,
+#               libjpeg-turbo-progs: spec image_decode_memory).
 # VERSION 5.9 - BASE_IMAGE_VERSION's default follows install.sh to 2.1 (a base with no mail stack).
 # VERSION 5.8 - No clone options: CLONE_FROM and JOINERY_CLONE_KEY are not read (site_copy.md WP9).
 # VERSION 5.7 - The vhost render substitutes no address: the template has had no {{SERVER_IP}} since
@@ -142,7 +151,7 @@
 #
 # Usage:
 #   docker build \
-#     --build-arg BASE_IMAGE_VERSION=2.1 \
+#     --build-arg BASE_IMAGE_VERSION=2.2 \
 #     --build-arg SITENAME=clientsite \
 #     --build-arg DOMAIN_NAME=client.example.com \
 #     -t joinery-clientsite .
@@ -172,7 +181,7 @@
 # BASE_IMAGE_VERSION must be declared before FROM so it can be used in FROM.
 # Default matches the version install.sh always passes via --build-arg; the
 # default only exists to satisfy BuildKit's static-evaluation check.
-ARG BASE_IMAGE_VERSION=2.1
+ARG BASE_IMAGE_VERSION=2.2
 FROM joinery-base:${BASE_IMAGE_VERSION}
 
 # Build arguments (customizable per deployment)
@@ -258,6 +267,15 @@ RUN printf '%s\n' \
 # Expose ports
 EXPOSE 80 5432
 
+# The container is healthy while PostgreSQL, PHP-FPM, Apache and cron all run
+# (_site_supervisor.sh --check). The supervisor restarts one that dies within
+# about 15 seconds, so the check only fails for one that will not come back;
+# after three failures 30 seconds apart Docker marks the container unhealthy
+# and the host agent's container_health restarts it. A code volume older than
+# the supervisor has no check to run and counts as healthy.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD f="/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_site_supervisor.sh"; [ ! -f "$f" ] || bash "$f" --check
+
 # Use bash for CMD (required for set +H to disable history expansion)
 SHELL ["/bin/bash", "-c"]
 
@@ -341,6 +359,8 @@ CMD set +H && \
     service cron start && \
     FPM_SERVICE="$(basename "$(ls -1 /etc/init.d/php*-fpm 2>/dev/null | sort -V | tail -1)")" && \
     if [ -z "${FPM_SERVICE}" ] || [ "${FPM_SERVICE}" = "." ]; then echo "FATAL: no php-fpm init script under /etc/init.d"; exit 1; fi && \
+    (bash "/var/www/html/${SITENAME}/maintenance_scripts/sysadmin_tools/tune_php_fpm.sh" --no-restart --container || true) && \
     service "${FPM_SERVICE}" start && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_plugin_installers_start.sh" "${SITENAME}" || true && \
-    apache2ctl -D FOREGROUND
+    SUPERVISOR="/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_site_supervisor.sh" && \
+    if [ -f "${SUPERVISOR}" ]; then exec bash "${SUPERVISOR}" "${SITENAME}"; else exec apache2ctl -D FOREGROUND; fi

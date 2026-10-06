@@ -618,9 +618,13 @@ class UploadHandler
         $this->image_objects[$file_path] = $image;
     }
 
+    // Dropping the reference is what frees a decoded image: on PHP 8 a GdImage
+    // is an object, and imagedestroy() is a no-op. Kept, a 24-megapixel photo's
+    // 92 MB stayed resident through every resize after it.
     protected function gd_destroy_image_object($file_path) {
-        $image = (isset($this->image_objects[$file_path])) ? $this->image_objects[$file_path] : null ;
-        return (bool)$image;
+        $had = isset($this->image_objects[$file_path]);
+        unset($this->image_objects[$file_path]);
+        return $had;
     }
 
     protected function gd_imageflip($image, $mode) {
@@ -903,6 +907,15 @@ class UploadHandler
     }
 
     protected function handle_image_file($file_path, $file) {
+        // One decode at a time on the site (ImageWorkLock): the decoded photo,
+        // and a rotated copy of it, cost their full pixel size outside PHP's
+        // memory_limit, and stay cached until the end of the method.
+        ImageWorkLock::run(function () use ($file_path, $file) {
+            $this->handle_image_file_now($file_path, $file);
+        });
+    }
+
+    protected function handle_image_file_now($file_path, $file) {
         $failed_versions = array();
         foreach ($this->options['image_versions'] as $version => $options) {
             if ($this->create_scaled_image($file->name, $version, $options)) {

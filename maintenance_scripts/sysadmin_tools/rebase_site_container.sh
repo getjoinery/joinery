@@ -2,6 +2,9 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.10 - stop_site_writes holds the container's supervisor (_site_supervisor.sh,
+#                 specs/multi_tenant_docker_hosts.md WP2) before it stops PHP-FPM and cron,
+#                 so neither is started again while the database is dumped.
 # Version: 1.9 - prepare, swap and rollback check the run spec against the CPUs Docker counts
 #                before anything stops (run_spec_fits_host). swap removed the container and
 #                the database volume before install.sh refused the ceiling, and rollback's
@@ -342,15 +345,18 @@ restore_host_vhosts() {
 }
 
 # Stop everything in the container that writes to the site's database, and
-# leave the container running: Apache is its main process, so stopping Apache
-# ends the container, and the restart policy starts it again with every writer
-# back. PHP-FPM (every web request), cron (the site's tasks, and the agent's
-# supervisor), the agent, and Postfix (inbound mail is delivered into the
-# database) are what write. With PHP-FPM down, Apache answers 503.
+# leave the container running: stopping its main process ends the container,
+# and the restart policy starts it again with every writer back. PHP-FPM (every
+# web request), cron (the site's tasks, and the agent's supervisor), the agent,
+# and Postfix (inbound mail is delivered into the database) are what write.
+# With PHP-FPM down, Apache answers 503. The container's supervisor
+# (_site_supervisor.sh) is held first, or it would start PHP-FPM and cron again;
+# the docker restart that ends a move, or a rollback, clears the hold.
 stop_site_writes() {
     local started
     started="$(docker inspect -f '{{.State.StartedAt}}' "$SITE")"
     docker exec "$SITE" bash -c '
+        mkdir -p /run/joinery && echo "rebase_site_container.sh: the site'"'"'s writes are stopped for a move" > /run/joinery/supervisor.hold
         for s in /etc/init.d/php*-fpm; do [ -e "$s" ] && service "$(basename "$s")" stop; done
         service cron stop; service postfix stop; pkill -x joinery-agent; true' > /dev/null 2>&1 || true
     if [ "$(docker inspect -f '{{.State.Running}} {{.State.StartedAt}}' "$SITE")" != "true ${started}" ]; then

@@ -182,6 +182,10 @@ Defined in `theme/falcon/theme.json` under `image_sizes`:
 
 Themes can override or add sizes in their own `theme.json`. The active theme's sizes are merged on top of Falcon's (which always loads as the base).
 
+### One decode at a time
+
+Decoding a photo costs its full pixel size in memory (a 24-megapixel JPEG is about 92 MB), allocated by GD outside PHP's allocator, so `memory_limit` does not bound it. Every decode therefore runs inside `ImageWorkLock::run()`, a site-wide `flock` on `cache/image_work.lock`. `FileBlob`'s resize path holds it per decode. `UploadHandler::handle_image_file()` holds it from the decode until its cached image is freed. A second upload's decode waits its turn rather than doubling the memory. A process that dies holding the lock releases it. A decode that waits more than 60 seconds logs it and runs without the lock, so no photo is left unrotated or without its sizes. New code that decodes an image takes the lock the same way. A nested `run()` goes straight through.
+
 ---
 
 ## PhotoHelper
