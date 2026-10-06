@@ -177,7 +177,7 @@ The container is not a security boundary, and a site is not a sealed appliance t
 - **The sites share a network.** Containers run on Docker's default bridge, so each one can reach the others, the host, and whatever else the host can reach. One site's code can open a connection to another site's PostgreSQL.
 - **The host is part of the site.** HTTPS terminates on the host's Apache, which proxies to the container over plain HTTP on loopback. The certificate, the proxy vhost and the site's DNS all live outside the container.
 - **`docker` access is access to every site.** Site data lives in named volumes on the host, `docker exec` opens a root shell in any container, and membership of the `docker` group is equivalent to root on the machine.
-- **Containers take Docker's defaults.** No user-namespace remapping, no read-only root filesystem, no dropped capabilities. Processes start as root inside the container; Apache and PHP-FPM drop their workers to `www-data`.
+- **Root in a container holds six capabilities.** Every site container runs with `--cap-drop=ALL` and only what a site needs back: CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID and KILL. So it cannot open raw sockets, create device nodes or change the container's firewall. There is no read-only root filesystem, and no user-namespace remapping unless the host was built with `install.sh docker --multi-tenant`. Processes start as root inside the container; Apache and PHP-FPM drop their workers to `www-data`.
 - **A site's ports answer on the host itself.** A site with a domain publishes its web port on `127.0.0.1`, where the host proxy reaches it, so the proxy — HTTPS, the redirect to it, and the host's fail2ban — is the only way in. A site installed with no domain, or with `--no-ssl`, has no proxy: its web port is its only way in and answers on every interface, and since Docker's forwarding rules are consulted before UFW's, a UFW rule does not close it. The database port publishes on `127.0.0.1` (see [PostgreSQL access](#postgresql-access)), and `install.sh docker` adds a `DOCKER-USER` rule dropping ports 9080-9099 arriving on the public interface.
 
 `install.sh docker` installs the host's own agent (siteless, joining the management node given with `--management-node=URL --node-name=NAME`); it is the only moment a host agent is installed, and a host built before that step existed gets its agent by running the same command once from a current release tree. `install.sh docker` also does the host's housekeeping: fail2ban (see [fail2ban and the real client address](#fail2ban-and-the-real-client-address)), a 100M cap on the system journal, Docker BuildKit garbage collection, 1G of encrypted swap, apport off, and cleared failed-login logs. It does not configure UFW on a Docker host — the UFW rules in this guide belong to bare-metal server setup.
@@ -191,6 +191,12 @@ sudo ./install.sh docker
 ```
 
 Checks for Docker, installs Docker CE if missing, starts the daemon, verifies it's operational.
+
+```bash
+sudo ./install.sh docker --multi-tenant
+```
+
+For a host that will carry sites belonging to different people. Docker remaps user ids (`userns-remap`), so root inside a site container is an unprivileged user on the host (uid 100000 and up), and the files in every site's volumes are owned by those ids. It is set before Docker first starts. On a host that already has Docker it is turned on only when Docker holds no container and no volume, since remapping moves Docker's data under `/var/lib/docker/100000.100000` and would leave existing sites behind. A host that already remaps is left as it is. Every site on the host shares the one range, so this protects the host from a site, not one site from another.
 
 ### Create a site
 
@@ -235,7 +241,7 @@ Each site container can be given limits, so one site cannot use up the machine:
 | `--cpus=N` | CPU, in cores (`1.0` is at most one core) | none |
 | `--pids-limit=N` | processes and threads together; at least 128 | 512 for a new site |
 
-Under load, sites already share the CPU evenly, whatever their ceilings. The limits are recorded in the site's run spec, so a rebuild keeps them; give an option again to change one, or `none` to lift it. A limit is refused before anything stops if Docker would refuse it, such as a CPU ceiling above the machine's CPUs. A bare-metal site has no container, so the options are refused there. With a memory budget, PostgreSQL, PHP's worker pool and the database connections between them are sized from it at every start. See [Deploy and Upgrade](deploy_and_upgrade.md) for the run spec and the sizing.
+Under load, sites already share the CPU evenly, whatever their ceilings. The limits are recorded in the site's run spec, so a rebuild keeps them; give an option again to change one, or `none` to lift it. A limit is refused before anything stops if Docker would refuse it, such as a CPU ceiling above the machine's CPUs. A bare-metal site has no container, so the options are refused there. With a memory budget, PostgreSQL, PHP's worker pool and the database connections between them are sized from it at every start. The capabilities above are not a limit and not in the run spec: every rebuild applies them to every site. See [Deploy and Upgrade](deploy_and_upgrade.md) for the run spec and the sizing.
 
 ### What keeps a site running
 

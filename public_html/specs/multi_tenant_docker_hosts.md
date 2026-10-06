@@ -16,7 +16,10 @@ WP2 items 1 and 2 built 2026-10-06 (_memory_plan.sh 1.0.0, tune_php_fpm.sh
 1.0.0, tune_postgres_memory.sh 1.4.0, _site_supervisor.sh 1.0,
 Dockerfile.template 6.0, rebase_site_container.sh 1.10, agent 1.58.0; gates
 tune_php_fpm, site_supervisor) and proven on the scratch Nanode; item 3 is
-measured, and the owner set the starter budget at 256 MB (2026-10-06). Nothing else is built. Split out of the starter
+measured, and the owner set the starter budget at 256 MB (2026-10-06). WP5
+items 2 and 3 built 2026-10-06 (_site_run_spec.sh 1.2, install.sh 2.98,
+rebase_site_container.sh 1.11, migrate_site_to_code_volumes.sh 1.3, agent
+1.58.1; gates site_run_spec, docker_multi_tenant) and run on scratch Linodes. Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -470,12 +473,64 @@ On a multi-tenant host:
    - `nft` in `_site_state.sh` (NET_ADMIN)
 
    Start from `--cap-drop=ALL`, add back exactly what a test shows each of
-   these needs, and prove the jail still jails in the gate. **First check
-   whether the jail works in today's containers at all.** Docker's default
-   seccomp profile refuses `unshare` without SYS_ADMIN, so it may already be
-   failing, or failing open, on every container site. User-namespace
+   these needs, and prove the jail still jails in the gate. User-namespace
    remapping (item 3) is what makes the remaining capabilities harmless to
    the host.
+
+   **The jail in a container (checked 2026-10-06, scratch Nanode, 0.8.460).**
+   Under Docker's defaults the `parser_jail` gate passes in full (19/19, as
+   `www-data`). The jail gets no network namespace of its own there, since
+   `unshare` needs SYS_ADMIN, and the jailed command sees the container's
+   network. It still cannot use it: the seccomp filter refuses `socket`,
+   `socketpair`, `connect` and `bind`, and the command inherits only stdin,
+   stdout and stderr (an outbound fetch from inside fails). The jail needs
+   **SETUID and SETGID** and nothing else: with those two added to
+   `--cap-drop=ALL` every check matches the default. With neither, the
+   launcher refuses (exit 125, `setgroups`), and `DocumentText` reports a
+   failed parse, never an unjailed one.
+
+   **What a whole site needs (measured 2026-10-06, same box).** The site's own
+   container, on its own volumes and run spec, started under each set and
+   probed: healthy, a page served, the supervisor's check, the jail gate, cron
+   running the scheduled task as `www-data`, a package install after
+   `apt-get update`, and the postmaster killed and brought back.
+
+   | Set | Result |
+   |---|---|
+   | Docker's default | everything passes (the control) |
+   | `--cap-drop=ALL` | exits at start: chmod and mkdir refused, Apache never starts |
+   | ALL, then CHOWN DAC_OVERRIDE FOWNER SETUID SETGID KILL | everything passes, same as the default |
+   | the six, less CHOWN | unhealthy: PHP-FPM down, page 503, jail 7/19 |
+   | less DAC_OVERRIDE | exits at start: PostgreSQL's memory file cannot be written |
+   | less FOWNER | unhealthy: PostgreSQL does not start, page 500 |
+   | less SETUID or SETGID | unhealthy: `su` refused, PostgreSQL does not start |
+   | less KILL | passes, but root cannot signal another user's process, which is how the supervisor clears what a dead service left (`kill_leftovers`) |
+   | ALL plus the six plus NET_BIND_SERVICE | the same as without it: Docker opens the low ports to every user in the container's network, so Apache binds 80 regardless |
+
+   So a site runs with `--cap-drop=ALL` and exactly **CHOWN, DAC_OVERRIDE,
+   FOWNER, SETUID, SETGID, KILL**. It drops, from Docker's default, FSETID,
+   MKNOD, NET_RAW (no raw sockets, so no forged packets onto the bridge),
+   SETFCAP, SETPCAP, NET_BIND_SERVICE, SYS_CHROOT and AUDIT_WRITE. NET_ADMIN
+   is not in Docker's default either, so `nft` already fails in today's
+   containers. Nothing needs it: a site is frozen for a copy only on a machine
+   (`site_copy`: a copy of a running container site is refused). Not yet run
+   under the six: an agent-run upgrade (the box's site has no agent); the gate
+   below covers it.
+
+   **Built 2026-10-06, for every container site, not only on multi-tenant
+   hosts:** no site needs what is dropped, wherever it runs.
+   `_site_run_spec.sh` 1.2 holds the six as `RUN_SPEC_CAPS`, and
+   `run_spec_args`, the one builder of a site's run arguments (install,
+   rebase, the code-volume move), adds `--cap-drop=ALL` and the six for every
+   site. They are the platform's, not the site's, so they are not spec lines:
+   a site installed before this gets them at its next rebuild. Adopt reads the
+   capabilities Docker records (`CAP_CHOWN` and so on) and refuses, by name,
+   only one beyond the six. The `site_run_spec` gate pins the arguments and
+   both sides of adopt (164 checks; four mutations caught). On the scratch
+   Nanode: `capsite` recreated through the new builder came up healthy with a
+   bounding set of exactly the six (`CapBnd` 0xeb), the jail gate passed 19/19,
+   cron ran, and PostgreSQL came back after a kill. Adopt read that container
+   back identically, and refused a real container holding NET_ADMIN, naming it.
 3. **Root in the container is not root on the host.** Docker's
    user-namespace remapping (`userns-remap` in `daemon.json`) is on for
    multi-tenant hosts. It is a daemon-wide switch, so
@@ -484,6 +539,71 @@ On a multi-tenant host:
    volume-seeding steps in install.sh (`docker run ... tar -x -p`) and the
    rebase script's host-side copies (WP4 item 5) must be proven to still
    produce a working site. WP4's disk limit depends on this item (S5).
+
+   **Built 2026-10-06.** `install.sh docker --multi-tenant` (install.sh 2.98)
+   writes `"userns-remap": "default"` into `daemon.json` (merged, never
+   clobbered; a broken file is refused) before the Docker package starts the
+   daemon, then checks the daemon reports `name=userns`. On a host that already
+   has Docker it does nothing if Docker remaps, turns it on and restarts Docker
+   only when Docker holds no container and no volume, and otherwise refuses,
+   naming the counts, with nothing changed. `run_spec_docker_remaps_ids`
+   (`_site_run_spec.sh`) is the one test of "does this host remap", and
+   "Docker did not say" is never read as "no".
+
+   What writes into a volume from the host, checked one by one:
+   - install.sh's seeding runs `tar` inside a container, and its two host-side
+     reads (`site_database_majors`, `code_volume_is_populated`) only read: fine.
+   - the rebase's `cp -a` between volumes keeps the remapped owners: fine. Its
+     rollback chowned PostgreSQL's log directory from the host with the old
+     image's container ids, which under remapping are not the owners (B2): it
+     now does that inside a container of the old image, by name
+     (rebase_site_container.sh 1.11).
+   - the code-volume move `docker cp -a`s into each volume's host directory,
+     which writes container ids (B3). A remapping host is always built fresh,
+     so its sites are born on code volumes; the move refuses on one
+     (migrate_site_to_code_volumes.sh 1.3).
+   - the host agent's site removal read the victim's config at the fixed path
+     `/var/lib/docker/volumes/...`, which under remapping is
+     `/var/lib/docker/100000.100000/volumes/...` (B4): it now asks the daemon
+     for its root (`docker info`, a clean absolute path or a refusal), agent
+     1.58.1. The host report already takes each volume's path from Docker.
+   - Found on the way (B5): `install.sh docker` could not install Docker on a
+     machine that once had it, since `gpg --dearmor` stopped to ask about the
+     old key with no terminal. It now writes the key with `--batch --yes`.
+
+   Gate `docker_multi_tenant` (25 checks, stubbed Docker and systemctl; four
+   mutations caught). **On a fresh 2 GB Linode, Ubuntu 26.04.1, Docker 29.8
+   (2026-10-06):** Docker removed entirely (its old apt key left in place),
+   then `install.sh -y docker --multi-tenant`: daemon up under remapping,
+   container root uid 100000; run again, "already remaps". `sitea` installed at
+   256 MB, then rebuilt, then `siteb` beside it: each healthy, the six
+   capabilities, PID 1 is uid 100000 on the host, volume files owned by
+   100000+ ids (`www-data` is 100033), page served, jail 19/19, a package
+   install, cron running, PostgreSQL back after a kill. The host report
+   measured each site's memory, processes and disk.
+
+   **The limit, stated.** Docker's remapping is one range for the whole
+   daemon, so every site's root is the same host uid. It keeps a site from the
+   host: a process that escapes its container is uid 100000, which owns no host
+   file. It does not keep one site from another: that uid owns every site's
+   volumes. Between sites the walls are the container's own (namespaces,
+   separate volumes) and items 1 and 4, and past those the shared kernel
+   ("Deferred: a separate kernel per site").
+
+   **Reviewed by reviewer2 2026-10-06 (F1-F9).** F1, a blocker: the move's
+   remap check ran bare under `set -e`, so on every host that does not remap
+   it ended the script with nothing said; the check's result is now caught
+   (same idiom in install.sh's two), and the gate runs the real script against
+   the stub (proven on a real non-remapping host: past the check, into
+   prepare). F2: images also refuse the switch on an existing host, since
+   remapping strands them under the old root. F3: the BuildKit policy's `sed`
+   edit of `daemon.json` is gone; one helper merges every key as JSON. F5:
+   adopt refuses a container that dropped one of the six. F6: the agent's
+   refusal carries Docker's own error. F8: the installer test exempts exactly
+   the functions that load the run-spec helper. F9: a failed Docker install
+   says `daemon.json` keeps the setting. F4 (SETFCAP and FSETID fail quietly)
+   is noted in `_site_run_spec.sh` and the plugin guide; nothing declared needs
+   either. F7: no change. Gates: docker_multi_tenant 31, site_run_spec 166.
 4. **The host's own services are out of reach (S6).** Traffic from a
    container to the host's own addresses (the bridge gateway, the public IP,
    other networks' gateways) passes through the host's **INPUT** chain, not
@@ -709,7 +829,10 @@ A gate on a scratch box, with three small sites on a multi-tenant host:
 | site A connects to the host's address | refused, apart from the proxy's reply path and the public 80/443; checked over IPv4 and IPv6 |
 | site A asks the cloud metadata address | refused |
 | a visitor loads a page | the site logs the visitor's real address, not the gateway |
-| the parser jail runs a parse | it runs inside its own network namespace |
+| the parser jail runs a parse | it cannot open a socket, and runs as the jail user |
+| a site runs with only the six capabilities, and its agent upgrades it | the upgrade and its package installs succeed; the site is healthy after |
+| a site on a `--multi-tenant` host is rolled back from a rebase | the old PostgreSQL writes its log and starts |
+| the host agent removes a site on a `--multi-tenant` host | it reads the site's config under Docker's remapped root and asks its operator |
 | the host reboots | pool mounted, every allowance enforced, every site back up, a site held stopped still stopped |
 | the pool fails to mount at boot | Docker does not start |
 | a site sends mail to an outside mail server on port 25 | dropped at the box; mail through SMTP2GO still works |

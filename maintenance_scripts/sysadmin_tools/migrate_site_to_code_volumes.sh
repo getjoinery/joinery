@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # migrate_site_to_code_volumes.sh — move a site's code onto named volumes.
 #
+# Version: 1.3 - Refuses on a host whose Docker remaps user ids: docker cp into a volume's host
+#                directory writes the container's ids, not their remapped owners (WP5 item 3).
 # Version: 1.2 - The run spec is checked against the CPUs Docker counts before anything stops
 #                (run_spec_fits_host): a CPU ceiling above them was refused by Docker only
 #                after the old container was removed.
@@ -62,6 +64,18 @@ say()  { echo "[$(date -u +%H:%M:%S)] $*"; }
 die()  { echo "FATAL: $*" >&2; exit 1; }
 
 docker inspect "$SITE" > /dev/null 2>&1 || die "no container named ${SITE}"
+# The trees are copied out with docker cp into each volume's host directory,
+# which writes the container's own ids. Under user-namespace remapping those
+# are not the files' owners inside the container. A remapping host is always
+# built fresh (install.sh docker --multi-tenant), so its sites were born on
+# code volumes and have nothing to move.
+# Caught, not tested bare: under set -e a 1 (no remapping, this script's every
+# host) would end the script here with nothing said.
+REMAPS=0; run_spec_docker_remaps_ids || REMAPS=$?
+case "$REMAPS" in
+    0) die "this host's Docker remaps user ids (userns-remap); its sites are born on code volumes, and this move cannot copy onto one" ;;
+    2) die "Docker did not say whether it remaps user ids; nothing was changed" ;;
+esac
 
 # Count files in a tree inside the container, and in a volume on the host.
 count_in_container() { docker exec "$SITE" find "$1" -type f 2>/dev/null | wc -l; }
