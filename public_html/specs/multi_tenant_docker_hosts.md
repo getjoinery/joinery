@@ -16,7 +16,7 @@ WP2 items 1 and 2 built 2026-10-06 (_memory_plan.sh 1.0.0, tune_php_fpm.sh
 1.0.0, tune_postgres_memory.sh 1.4.0, _site_supervisor.sh 1.0,
 Dockerfile.template 6.0, rebase_site_container.sh 1.10, agent 1.58.0; gates
 tune_php_fpm, site_supervisor) and proven on the scratch Nanode; item 3 is
-measured and waits on the owner's Q1. Nothing else is built. Split out of the starter
+measured, and the owner set the starter budget at 256 MB (2026-10-06). Nothing else is built. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -254,6 +254,29 @@ Nanode at 256 MB, three 24-megapixel resizes started at once queued (done at
 (a scaled JPEG decode, orientation after the downscale) is spec
 `image_decode_memory`.
 
+**The budget sweep on 0.8.460 (2026-10-06).** Scratch Nanode, base 2.2 with
+`djpeg`, one decode at a time and the scaled decode (spec `image_decode_memory`),
+0.5 CPU, 4 concurrent page loads, the same data. Peak memory that cannot be
+reclaimed, and kills:
+
+| Budget | Idle | 24 MP photo (plain / portrait) | Backup + photo | `update_database` | Upgrade + photo |
+|---|---|---|---|---|---|
+| 256 MB | 44 | 104 / 126, none | 158, none | 112, none | 206, none |
+| 192 MB | 45 | 110 / 125, none | 150, none | 129, none | 187, none |
+| 160 MB | 45 | 109 / 126, none | 149, none | 107, none | 157, **killed: the upgrade failed and rolled back, schema ahead of code** |
+| 128 MB | 63 | 117, **portrait killed** | **backup killed** | 121, none | **killed, upgrade failed** |
+
+At 256 MB the one kill was a 24 MP progressive JPEG decode (about 180 MB with
+its PHP worker) beside other photos. `image_decode_memory`'s follow-up
+(9567eea4) sizes the decode ceiling from the site's budget (budget −
+`shared_buffers` − 128 MB, capped at `image_decode_max_mb`): a 256 MB site's
+ceiling is 64 MB, so it refuses such a photo with a plain message instead, and
+a decode the kernel kills is retried later rather than recorded as damaged.
+At 384 MB the ceiling is 160 MB, the cap, and the photo decodes. 192 MB is the smallest budget where every job
+finished, but its upgrade peaked 5 MB under the cap; 256 MB holds every job
+with 50 MB to spare. A failed upgrade under memory pressure leaving the schema
+ahead of the code is its own risk, apart from the budget.
+
 **Caps that add up to more than the machine (tested 2026-10-06).** Three sites
 at 384 MB on the 961 MB Nanode (1.15 GB of caps, the same 115-120% as 12 sites
 at 384 MB on a 4 GB box), mailbox off, 4 PHP workers each. One photo in each
@@ -267,8 +290,11 @@ ends in a clean kill of one process in that site; a machine whose caps exceed
 its memory ends, in the worst case, in every site on it down until someone
 reboots it. So the sum of a box's caps stays within its memory less the host
 reserve, whatever per-site figure is chosen.
-**Open (owner, Q1):** what the starter tier sells, given that two heavy jobs
-at once do not fit in 256 MB.
+**Decided (owner, 2026-10-06): a starter site's budget is 256 MB.** Every job
+in the sweep finished there with about 50 MB to spare. Photo resizes queue one
+at a time (`ImageWorkLock`), and a photo too big for the decode ceiling is
+refused with a plain message, not killed. This matches the starter tier's
+12 × 256 MB per 4 GB box.
 
 ### WP3 — CPU and processes
 
