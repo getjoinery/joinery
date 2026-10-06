@@ -53,7 +53,7 @@ class FakeMachineAccount implements CloudMachineTransfer {
 $suffix = bin2hex(random_bytes(3));
 $make_node = function (string $name, string $host, int $mgh = 0) use ($suffix) {
 	$n = new ManagedNode(NULL);
-	$n->set('mgn_name', $name);
+	$n->set('mgn_name', 'HarnessTest ' . $name);
 	$n->set('mgn_slug', 'harnesstest-mtr-' . strtolower(preg_replace('/[^a-z0-9]/i', '', $name)) . '-' . $suffix);
 	$n->set('mgn_host', $host);
 	$n->set('mgn_ssh_user', 'root');

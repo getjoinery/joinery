@@ -1661,3 +1661,13 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "DELETE FROM ssr_sealed_secret_registry WHERE ssr_locator = 'cvp_customer_cloud_provisions.cvp_clone_key_sealed'";
 	$migrations[] = $migration;
+
+	// A notification was saved with no create time, so the feed sorted the
+	// oldest first and read retention never aged one out. The model now
+	// stamps it; the ones already written take the time of this upgrade.
+	$migration = array();
+	$migration['database_version'] = '208';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM ntf_notifications WHERE ntf_create_time IS NULL) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE ntf_notifications SET ntf_create_time = now() AT TIME ZONE 'UTC' WHERE ntf_create_time IS NULL";
+	$migrations[] = $migration;

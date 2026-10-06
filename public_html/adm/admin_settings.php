@@ -394,14 +394,22 @@
 			'mobile_apps',
 		), array('heading_level' => 'h5'));
 
-		// The figure sits beside what this server has sent so far.
+		// The figure sits beside what this server has sent so far, and the
+		// ceiling beside what the server holds the site to.
 		$outbound_month = OutboundTransferMeter::month();
+		$outbound_site = file_exists('/.dockerenv') ? basename(dirname(rtrim(PathHelper::getIncludePath(''), '/'))) : '';
 		SettingsFieldRenderer::renderGroups($formwriter, array('outbound'), array(
 			'heading_level' => 'h5',
-			'field_options' => array(OutboundTransferMeter::NOTICE_SETTING => array(
-				'helptext_append' => ' So far this month: ' . OutboundTransferMeter::gb($outbound_month['sent_bytes'])
-					. ' since ' . gmdate('F j', $outbound_month['since']) . '.',
-			)),
+			'field_options' => array(
+				OutboundTransferMeter::NOTICE_SETTING => array(
+					'helptext_append' => ' So far this month: ' . OutboundTransferMeter::gb($outbound_month['sent_bytes'])
+						. ' since ' . gmdate('F j', $outbound_month['since']) . '.',
+				),
+				OutboundCeiling::SETTING => array(
+					'helptext_append' => OutboundCeiling::helptext_append(OutboundCeiling::told(),
+						OutboundTransferMeter::operator_hosted(), $outbound_site),
+				),
+			),
 		));
 
 		// A bucket is set up where it is proved before it is stored: the cloud

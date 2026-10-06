@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.49 - the outbound limits' figures in force, who set them, and each site whose own differ; the
+ *                 limits turned on or off, and their figures set, from here (node_outbound_and_transfer WP5)
  * @version 1.48 - the outbound limits include each site's speed ceiling (node_outbound_and_transfer WP4); a
  *                 machine where tc refused part of it says so
  * @version 1.47 - a site container on a host can be held stopped, with the reason why, and started again; a held
@@ -1288,6 +1290,71 @@
 				if (is_int($web_dropped) && $web_dropped > 0) {
 					echo '<div class="mt-1"><span class="badge bg-warning" title="Packets the web server\'s user sent past the outbound limits, dropped. Real use never meets them.">'
 						. $web_dropped . ' outbound packets dropped since the last report</span></div>';
+				}
+				// The figures in force (host_report 1.12): the machine's, then each
+				// site whose own differ (its run spec, or its own lower ceiling).
+				$ol_fig_words = function ($f) {
+					$c = is_int($f['ceiling_mbit'] ?? null) ? $f['ceiling_mbit'] . ' Mbit/s at most' : 'no speed ceiling';
+					return $c . '; ' . ($f['conn_rate'] ?? '?') . ' new connections a second, bursts to ' . ($f['conn_burst'] ?? '?')
+						. '; ' . ($f['open_conns'] ?? '?') . ' open at once';
+				};
+				if ($ol['state'] === 'on' && is_array($ol['figures'] ?? null)) {
+					$ol_machine = $ol['figures'];
+					echo '<div class="small text-muted">Each site: ' . $hr_str($ol_fig_words($ol_machine))
+						. ($ol_machine['set_by'] === 'plane' ? ' (set from this management node)' : ' (set on the machine)') . '.</div>';
+					foreach ((array)($ol['sites'] ?? []) as $ol_site => $ol_f) {
+						$ol_same = ($ol_f['ceiling_mbit'] === $ol_machine['ceiling_mbit'] && $ol_f['conn_rate'] === $ol_machine['conn_rate']
+							&& $ol_f['conn_burst'] === $ol_machine['conn_burst'] && $ol_f['open_conns'] === $ol_machine['open_conns']);
+						if (!$ol_same) {
+							echo '<div class="small text-muted">' . $hr_str($ol_site) . ': ' . $hr_str($ol_fig_words($ol_f)) . '.</div>';
+						}
+					}
+					$ol_web = $ol['web_ceiling_mbit'] ?? 'none';
+					if (is_int($ol_web) && $ol_web !== $ol_machine['ceiling_mbit']) {
+						echo '<div class="small text-muted">The web server\'s user: ' . $ol_web . ' Mbit/s at most (a site asked for less).</div>';
+					}
+				}
+				// On or off, and the figures, from here (node_outbound_and_transfer
+				// WP5). The machine's own state is the switch: nothing on this
+				// plane records it.
+				if (in_array($ol['state'], ['on', 'off', 'refused'], true)) {
+					if (JobCommandBuilder::has_primitive($node, 'outbound_limits')) {
+						$ol_on = ($ol['state'] !== 'off');
+						$ol_form_id = 'nodeActionOutboundLimits';
+						$ol_confirm = $ol_on
+							? 'Turn the outbound limits off on this machine? Its sites can then open connections freely, send UDP, and send as fast as the link allows: a hacked site can run up the provider\'s bill and draw abuse reports. They stay off until turned on here or on the machine.'
+							: 'Turn the outbound limits on for this machine? Each site gets the speed ceiling and the connection limits at the figures shown.';
+						echo '<div class="mt-1"><button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($ol_confirm) . ', function(){ document.getElementById('
+								. json_encode($ol_form_id) . ').submit(); })') . '">' . ($ol_on ? 'Turn limits off' : 'Turn limits on') . '</button></div>';
+						echo '<form id="' . $hr_str($ol_form_id) . '" method="post" action="'
+							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+							. '<input type="hidden" name="action" value="outbound_limits">'
+							. '<input type="hidden" name="op" value="' . ($ol_on ? 'off' : 'on') . '">'
+							. SmAdminCsrf::field() . '</form>';
+						echo '<details class="mt-1"><summary class="small text-muted" style="cursor:pointer;">Set the figures</summary>';
+						$ol_sites = ['' => 'Every site on this machine (the machine\'s figures)'];
+						foreach (array_keys((array)($ol['sites'] ?? [])) as $ol_site) { $ol_sites[$ol_site] = $ol_site . ' only'; }
+						$fw_ol = $page->getFormWriter('outbound_limits_form', ['action' => $base_url . '&tab=overview']);
+						$fw_ol->begin_form();
+						$fw_ol->hiddeninput('action', '', ['id' => 'outbound_limits_action', 'value' => 'outbound_limits']);
+						$fw_ol->hiddeninput('op', '', ['id' => 'outbound_limits_op', 'value' => 'set']);
+						$fw_ol->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'outbound_limits_csrf', 'value' => SmAdminCsrf::token()]);
+						if (count($ol_sites) > 1) {
+							$fw_ol->dropinput('site', 'For', ['options' => $ol_sites]);
+						}
+						$fw_ol->textinput('ceiling', 'Speed ceiling (Mbit/s)', ['placeholder' => '200', 'maxlength' => 7,
+							'helptext' => 'A whole number, off for none, or default for the one below it (a site\'s: the machine\'s; the machine\'s: 200). A site\'s own setting can still lower it.']);
+						$fw_ol->textinput('conn_rate', 'New connections a second', ['placeholder' => '20', 'maxlength' => 7]);
+						$fw_ol->textinput('conn_burst', 'Burst above that', ['placeholder' => '100', 'maxlength' => 7]);
+						$fw_ol->textinput('open_conns', 'Open at once', ['placeholder' => '256', 'maxlength' => 7,
+							'helptext' => 'Leave a figure empty to keep it. Real use never meets these; they bound a hacked site.']);
+						$fw_ol->submitbutton('btn_outbound_limits', 'Set figures', ['class' => 'btn btn-sm btn-outline-secondary']);
+						$fw_ol->end_form();
+						echo '</details>';
+					} else {
+						echo AgentVocabulary::needs_newer_agent_html($node, ['outbound_limits']);
+					}
 				}
 			}
 			echo '<div class="small text-muted mt-1">Security updates last ran ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . '</div>';

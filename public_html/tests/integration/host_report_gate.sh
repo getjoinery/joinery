@@ -365,7 +365,7 @@ echo "nft $*" >> "$GATE_NFT_LOG"
 printf 'table inet joinery_limits {\n\tcounter drops_site_siteone {\n\t\tpackets 12 bytes 720\n\t}\n\tcounter drops_web_user {\n\t\tpackets 3 bytes 180\n\t}\n\tcounter drops_site_my-site {\n\t\tpackets 7 bytes 420\n\t}\n}\n'
 STUB
 chmod 755 "$T/bin/nft"; export GATE_NFT_LOG="$T/nft.log"
-lim_reset() { LIMITS_STATE=""; LIMITS_REASON=""; LIMITS_SINCE=""; LIMITS_SITES=""; LIMITS_WEB=""; LIMITS_COUNTS=""; LIMITS_COUNTS_READ=0; }
+lim_reset() { LIMITS_STATE=""; LIMITS_REASON=""; LIMITS_SINCE=""; LIMITS_SITES=""; LIMITS_WEB=""; LIMITS_COUNTS=""; LIMITS_COUNTS_READ=0; LIMITS_FILE_LINES=""; }
 lim_obj() { lim_reset; PATH="$T/bin:$PATH" limits_read; emit_outbound_limits; }
 lim_site() { lim_reset; PATH="$T/bin:$PATH" limits_read; limits_dropped "drops_site_$1" "$([[ "$LIMITS_SITES" == *" $1 "* ]] && echo 1 || echo 0)"; }
 in_container() { return 1; }
@@ -374,7 +374,15 @@ chk "no unit and no status: absent" "$(lim_obj)" '{"state":"absent","reason":"no
 touch "$LU"
 chk "a unit with no status yet: unknown" "$(lim_obj)" '{"state":"unknown","reason":"none","since":"none","web_user_dropped":"none"}'
 printf 'state=on\nreason=\nsince=1760000000\nsites=siteone sitetwo my-site\nuncovered=old\nweb_user=yes\n' > "$LS"
-chk "on: its since and the web user's drops, read from nft" "$(lim_obj)" '{"state":"on","reason":"none","since":1760000000,"web_user_dropped":3}'
+chk "on: its since and the web user's drops, read from nft" "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["state"], "/", $o["reason"], "/", $o["since"], "/", $o["web_user_dropped"];')" "on/none/1760000000/3"
+chk "a status file from before the figures: each figure unknown or none, no site" \
+    "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo json_encode($o["figures"]), "|", json_encode($o["sites"]), "|", $o["web_ceiling_mbit"];')" \
+    '{"ceiling_mbit":"none","conn_rate":"unknown","conn_burst":"unknown","open_conns":"unknown","set_by":""}|[]|none'
+printf 'state=on\nreason=\nsince=1760000000\nsites=siteone my-site\nweb_user=yes\nceiling_mbit=300\nconn_rate=40\nconn_burst=120\nopen_conns=512\nset_by=plane\nweb_ceiling_mbit=25\nsite_figures=siteone:50:40:120:512 my-site:-:5:100:256 bad"name:1:1:1:1\n' > "$LS"
+chk "on with figures (WP5): the machine's, who set them, the web server's user's ceiling, each site's in force" \
+    "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo json_encode($o["figures"]), "|", $o["web_ceiling_mbit"], "|", json_encode($o["sites"]);')" \
+    '{"ceiling_mbit":300,"conn_rate":40,"conn_burst":120,"open_conns":512,"set_by":"plane"}|25|{"siteone":{"ceiling_mbit":50,"conn_rate":40,"conn_burst":120,"open_conns":512},"my-site":{"ceiling_mbit":"none","conn_rate":5,"conn_burst":100,"open_conns":256}}'
+printf 'state=on\nreason=\nsince=1760000000\nsites=siteone sitetwo my-site\nuncovered=old\nweb_user=yes\n' > "$LS"
 chk "a limited site's drops are its counter's packets" "$(lim_site siteone)" "12"
 chk "a site still on Docker's default network is none, not zero" "$(lim_site old)" '"none"'
 chk "a limited site whose counter nft does not list is unknown" "$(lim_site sitetwo)" '"unknown"'
@@ -392,7 +400,7 @@ chk "and a site under refused limits is none" "$(lim_site siteone)" '"none"'
 printf 'state=refused\nreason=evil"code;$(reboot)\n' > "$LS"
 chk "a reason is reduced to safe characters" "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["reason"];')" "evilcodereboot"
 printf 'state=off\nsince=1\n' > "$LS"
-chk "off: no since, no drops" "$(lim_obj)" '{"state":"off","reason":"none","since":"none","web_user_dropped":"none"}'
+chk "off: no since, no drops, no figures" "$(lim_obj)" '{"state":"off","reason":"none","since":"none","web_user_dropped":"none"}'
 printf 'state=hacked\n' > "$LS"
 chk "a state it does not know is unknown" "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["state"];')" "unknown"
 printf 'state=on\nsince=soon\nsites=siteone\n' > "$LS"

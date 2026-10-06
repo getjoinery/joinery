@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.18",
+  "version": "1.30.19",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -239,6 +239,38 @@
       "group": "provisioning",
       "label": "Customer cloud image",
       "type": "text"
+    },
+    {
+      "name": "server_manager_outbound_ceiling_mbit",
+      "default": "200",
+      "group": "provisioning",
+      "label": "New machines: speed ceiling per site (Mbit/s)",
+      "type": "text",
+      "helptext": "Each machine this management node creates is installed with this speed ceiling for each of its sites (install.sh --outbound-ceiling): a whole number of Mbit/s, or off. A machine's own figures are changed on its node page afterwards; this does not change a machine already running."
+    },
+    {
+      "name": "server_manager_outbound_conn_rate",
+      "default": "20",
+      "group": "provisioning",
+      "label": "New machines: new connections a second, per site",
+      "type": "text",
+      "helptext": "install.sh --outbound-conn-rate for each machine this management node creates."
+    },
+    {
+      "name": "server_manager_outbound_conn_burst",
+      "default": "100",
+      "group": "provisioning",
+      "label": "New machines: burst above that, per site",
+      "type": "text",
+      "helptext": "install.sh --outbound-conn-burst for each machine this management node creates."
+    },
+    {
+      "name": "server_manager_outbound_open_conns",
+      "default": "256",
+      "group": "provisioning",
+      "label": "New machines: connections open at once, per site",
+      "type": "text",
+      "helptext": "install.sh --outbound-open-conns for each machine this management node creates."
     },
     {
       "name": "server_manager_hosted_regions",

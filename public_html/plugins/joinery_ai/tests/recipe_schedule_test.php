@@ -26,6 +26,7 @@
  *
  * Run: php tests/run.php safe --filter=recipe_schedule
  *
+ * @version 1.1 - a test's recipes are named as fixtures, which the dispatcher never schedules
  * @version 1.0
  */
 
@@ -42,7 +43,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJob
 function rs_recipe(string $frequency, bool $enabled = true,
 		?string $time_utc = null, ?int $dow = null): Recipe {
 	$recipe = new Recipe(NULL);
-	$recipe->set('rcp_name', 'schedule fixture');
+	$recipe->set('rcp_name', 'HarnessTest schedule fixture');
 	$recipe->set('rcp_enabled', $enabled);
 	$recipe->set('rcp_schedule_frequency', $frequency);
 	$recipe->set('rcp_schedule_time', $time_utc);
@@ -193,6 +194,24 @@ try {
 	foreach (RecipeSchedule::CLOCK_FREQUENCIES as $clock) {
 		check(RecipeSchedule::isClockFrequency($clock) === true, "$clock is a clock frequency");
 	}
+
+	section('A test\'s recipes are never scheduled');
+	check(Recipe::is_fixture_name('HarnessTest fdai 1a2b3c') && !Recipe::is_fixture_name('harnesstest x')
+		&& !Recipe::is_fixture_name('Triage HarnessTest'), 'a fixture name starts with the prefix exactly');
+	// Every recipe a test names carries it, or the live dispatcher sends the
+	// suite's fixture mail to a real model and the run outlives its recipe.
+	$root = PathHelper::getIncludePath('');
+	$unnamed = array();
+	$files = array_merge(glob($root . 'tests/*/*.php'), glob($root . 'tests/*/*/*.php'), glob($root . 'plugins/*/tests/*.php'));
+	foreach ($files as $file) {
+		if (strpos($file, '/tests/tools/') !== false) continue;   // operator tools, not suites
+		foreach (file($file) as $i => $line) {
+			if (strpos($line, "set('rcp_name',") !== false && strpos($line, 'HarnessTest ') === false) {
+				$unnamed[] = substr($file, strlen($root)) . ':' . ($i + 1);
+			}
+		}
+	}
+	check(count($unnamed) === 0, 'Every recipe a test names starts HarnessTest', implode(', ', $unnamed));
 
 } catch (Throwable $e) {
 	check(false, 'unexpected exception', get_class($e) . ': ' . $e->getMessage()

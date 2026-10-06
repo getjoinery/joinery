@@ -6,7 +6,8 @@
  * (user, signal) the user has explicitly configured — absence of a row means
  * defaults apply. Two meaningful booleans: subscribe/mute and also-email-me.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - ntp_create_time is stamped when the row is made; it was left empty
  */
 
 class NotificationPreferenceException extends SystemBaseException {}
@@ -48,7 +49,7 @@ class NotificationPreference extends SystemBase {
 		'ntp_signal_name'   => array('type' => 'varchar(100)', 'required' => true),
 		'ntp_subscribed'    => array('type' => 'bool', 'default' => true),
 		'ntp_email_enabled' => array('type' => 'bool', 'default' => false),
-		'ntp_create_time'   => array('type' => 'timestamp(6)'),
+		'ntp_create_time'   => array('type' => 'timestamp(6)', 'default' => 'now()'),
 		'ntp_delete_time'   => array('type' => 'timestamp(6)'),
 	);
 

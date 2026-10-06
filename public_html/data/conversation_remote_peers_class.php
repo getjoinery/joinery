@@ -14,7 +14,8 @@
  * A message from such a peer carries msg_remote_sender_address and no
  * msg_usr_user_id_sender; display resolves the name through this table.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - crp_create_time is stamped when the row is made; it was left empty
  */
 
 
@@ -41,7 +42,7 @@ class ConversationRemotePeer extends SystemBase {
 		'crp_address'      => array('type' => 'varchar(255)', 'is_nullable' => false),
 		'crp_domain'       => array('type' => 'varchar(255)', 'is_nullable' => false),
 		'crp_display_name' => array('type' => 'varchar(255)', 'is_nullable' => true),
-		'crp_create_time'  => array('type' => 'timestamp(6)'),
+		'crp_create_time'  => array('type' => 'timestamp(6)', 'default' => 'now()'),
 		'crp_delete_time'  => array('type' => 'timestamp(6)'),
 	);
 

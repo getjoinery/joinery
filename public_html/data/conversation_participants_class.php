@@ -4,7 +4,8 @@
  *
  * Tracks who is in each conversation, their read status, and mute preferences.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - cnp_create_time is stamped when the row is made; it was left empty
  * @changelog 1.1 - cnp_is_admin: group membership and the group name are an
  *   admin's to manage (specs/implemented/joinery_messenger.md).
  */
@@ -62,7 +63,7 @@ class ConversationParticipant extends SystemBase {
 		// Group admins manage membership and the group name. The creator is one;
 		// a 1:1 conversation has no meaningful admin and ignores this.
 		'cnp_is_admin'                    => array('type' => 'bool', 'default' => false),
-		'cnp_create_time'                 => array('type' => 'timestamp(6)'),
+		'cnp_create_time'                 => array('type' => 'timestamp(6)', 'default' => 'now()'),
 		'cnp_delete_time'                 => array('type' => 'timestamp(6)'),
 	);
 

@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.46 - outbound_limits: turn this machine's outbound limits on or off, or set their figures
+ *                 (node_outbound_and_transfer WP5)
  * @version 1.45 - hold_container: hold a site on this host stopped, with the reason why, or start it again
  *                 (multi_tenant_docker_hosts WP7); every handled action is on the dispatch list: restart,
  *                 clear, the journal, disk, file, schema and page reads, run installer and reclaim were
@@ -145,6 +147,7 @@ class NodeDetailActions {
 		'restart_unit'             => 'overview',
 		'restart_container'        => 'overview',
 		'hold_container'           => 'overview',
+		'outbound_limits'          => 'overview',
 		'run_installer'            => 'overview',
 		'file_head'                => 'overview',
 		'schema_probe'             => 'overview',
@@ -300,6 +303,22 @@ class NodeDetailActions {
 				}
 				$built = JobCommandBuilder::build_hold_container($node, (string)($_POST['name'] ?? ''), $op);
 				$job = ManagementJob::createFromBuild($node->key, 'hold_container', $built, $record, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'outbound_limits': {
+				// The machine's outbound limits on or off, or their figures
+				// set, the machine's or one container site's
+				// (node_outbound_and_transfer WP5).
+				$built = JobCommandBuilder::build_outbound_limits($node, [
+					'action'     => (string)($_POST['op'] ?? ''),
+					'ceiling'    => (string)($_POST['ceiling'] ?? ''),
+					'conn_rate'  => (string)($_POST['conn_rate'] ?? ''),
+					'conn_burst' => (string)($_POST['conn_burst'] ?? ''),
+					'open_conns' => (string)($_POST['open_conns'] ?? ''),
+					'site'       => (string)($_POST['site'] ?? ''),
+				]);
+				$job = ManagementJob::createFromBuild($node->key, 'outbound_limits', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

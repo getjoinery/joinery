@@ -66,7 +66,7 @@ $grant->save();
 harness_register_row('ieg_inbound_email_mailbox_grants', 'ieg_inbound_email_mailbox_grant_id', (int)$grant->key);
 
 $recipe = new Recipe(NULL);
-$recipe->set('rcp_name', "email-schedule-draft-test-{$suffix}");
+$recipe->set('rcp_name', "HarnessTest email-schedule-draft-{$suffix}");
 $recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
 $recipe->set('rcp_pipeline_job', 'email_schedule');
 $recipe->set('rcp_owner_user_id', $owner_uid);

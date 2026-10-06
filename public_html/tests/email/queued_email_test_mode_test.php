@@ -20,10 +20,13 @@
  *    IS WRITTEN, with the real recipient carried in the subject; a row already
  *    at the trap is not prefixed twice; test mode with no trap writes the row
  *    DELETED; test mode off leaves the row alone
- *  - Notify never delivers to the system or deleted user, on either channel
+ *  - Notify never delivers to the system or deleted user, on either channel,
+ *    nor to a user deleted since the recipients were read; a notification
+ *    carries the time it was made
  *
  * Run: php tests/run.php test-db --filter=queued_email_test_mode
  *
+ * @version 1.2 - a recipient deleted before the dispatch gets nothing; the notification has a create time
  * @version 1.1 - the Notify section finds its own rows by the title marker, not by a
  *   high-water mark on shared tables: under parallel lanes the mark swept in (and
  *   deleted) another suite's notifications and counted its queued mail as ours
@@ -136,9 +139,24 @@ try {
 		$person->load();
 		harness_register_user($person);
 
+		// A recipient deleted after the list was read: the incident pass reads
+		// every superadmin, and a suite's fixture superadmin can go before the
+		// rows are written. Its deletion took its notifications already.
+		// Not registered for teardown: it is deleted here.
+		$gone = new User(NULL);
+		$gone->set('usr_first_name', 'HarnessTest');
+		$gone->set('usr_last_name', 'NotifyGone');
+		$gone->set('usr_email', harness_fixture_email('notify_gone_' . LibraryFunctions::random_string(6)));
+		$gone->set('usr_password', User::GeneratePassword('TestPassword_notify'));
+		$gone->set('usr_permission', 0);
+		$gone->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+		$gone->save();
+		$gone_id = (int)$gone->key;
+		$gone->permanent_delete();
+
 		$title_marker = 'HarnessTest notify ' . LibraryFunctions::random_string(6);
 		$decl    = SignalBus::signals()[$signal];
-		$payload = array('recipients' => array(User::USER_SYSTEM, User::USER_DELETED, (int)$person->key));
+		$payload = array('recipients' => array(User::USER_SYSTEM, User::USER_DELETED, $gone_id, (int)$person->key));
 		// Fill every declared payload field with the marker so the rendered
 		// title carries it whichever field the template uses.
 		foreach (array_keys($decl['payload'] ?? array()) as $field) {
@@ -152,7 +170,7 @@ try {
 
 		SignalBus::dispatch($signal, $payload);
 
-		$ntf = $db->prepare('SELECT ntf_usr_user_id, ntf_notification_id FROM ntf_notifications WHERE ntf_title LIKE ?');
+		$ntf = $db->prepare('SELECT ntf_usr_user_id, ntf_notification_id, ntf_create_time FROM ntf_notifications WHERE ntf_title LIKE ?');
 		$ntf->execute(array($like));
 		$ntf_rows  = $ntf->fetchAll(PDO::FETCH_ASSOC);
 		$ntf_users = array_map(function ($r) { return (int)$r['ntf_usr_user_id']; }, $ntf_rows);
@@ -167,6 +185,10 @@ try {
 			'the person got an in-app notification (the signal was live)', json_encode($ntf_users));
 		check(!in_array(User::USER_SYSTEM, $ntf_users, true) && !in_array(User::USER_DELETED, $ntf_users, true),
 			'placeholder users got no in-app notification', json_encode($ntf_users));
+		check(!in_array($gone_id, $ntf_users, true),
+			'a user deleted before the dispatch got no in-app notification', json_encode($ntf_users));
+		check(count($ntf_rows) > 0 && count(array_filter($ntf_rows, function ($r) { return $r['ntf_create_time'] === null; })) === 0,
+			'each notification carries the time it was made', json_encode($ntf_rows));
 		check(count($equ_rows) === 1, 'exactly one email was queued — the person\'s', json_encode($equ_rows));
 		// And, being queued under test mode, it is already at the trap.
 		check(count($equ_rows) === 1 && strcasecmp($equ_rows[0]['equ_to'], $trap) === 0,

@@ -47,7 +47,7 @@ require_once(__DIR__ . '/lib/fortress_fixture.php');
 
 function fdai_recipe(int $owner_id, string $job_id, string $address): Recipe {
 	$recipe = new Recipe(NULL);
-	$recipe->set('rcp_name', 'fdai test ' . bin2hex(random_bytes(3)));
+	$recipe->set('rcp_name', 'HarnessTest fdai ' . bin2hex(random_bytes(3)));
 	$recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
 	$recipe->set('rcp_pipeline_job', $job_id);
 	$recipe->set('rcp_source_config', json_encode(array('mailbox_aliases' => array($address))));

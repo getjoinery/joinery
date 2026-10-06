@@ -128,7 +128,7 @@ function iw_message(int $domain_id, int $alias_id, string $subject, string $body
 
 function iw_recipe(int $owner_id, string $job_id, string $address): Recipe {
 	$recipe = new Recipe(NULL);
-	$recipe->set('rcp_name', 'iw test ' . bin2hex(random_bytes(3)));
+	$recipe->set('rcp_name', 'HarnessTest iw ' . bin2hex(random_bytes(3)));
 	$recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
 	$recipe->set('rcp_pipeline_job', $job_id);
 	$recipe->set('rcp_source_config', json_encode(array('mailbox_aliases' => array($address))));
@@ -268,8 +268,11 @@ try {
 	check((string)(new RecipeRun(intval($run->key), TRUE))->get('rcr_status') === RecipeRun::STATUS_PENDING,
 		'and leaves the row untouched rather than failing it');
 
+	// Its recipe is a fixture, which a scheduled tick leaves alone; this tick is about it.
+	RecipeDispatcher::$fixtures_in_scope = true;
 	$dispatcher = new RecipeDispatcher();
 	$result = $dispatcher->run(array());
+	RecipeDispatcher::$fixtures_in_scope = false;
 	check(($result['status'] ?? '') === 'success', 'the dispatcher tick still succeeds', json_encode($result));
 
 	$db = DbConnector::get_instance()->get_db_link();

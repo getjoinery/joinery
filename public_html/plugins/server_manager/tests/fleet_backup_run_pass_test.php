@@ -42,7 +42,7 @@ harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $host->key);
 /** A container site on the fixture host, past install, holding a proven recovery key. */
 function fbrp_node(string $slug, int $host_id, array $extra) {
 	$node = new ManagedNode(NULL);
-	$node->set('mgn_name', $slug);
+	$node->set('mgn_name', 'HarnessTest ' . $slug);
 	$node->set('mgn_slug', $slug);
 	$node->set('mgn_host', '198.51.100.60');
 	$node->set('mgn_ssh_user', 'root');

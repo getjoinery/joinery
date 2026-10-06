@@ -162,21 +162,26 @@ echo "== restore_project.sh opens encrypted archives =="
 RESTORE_PROJ="$TOOLS/restore_project.sh"
 
 # A project-shaped backup directory, encrypted the way backup_project.sh writes.
-STAGE="$WORK/stage/mysite-2026-01-01-000000"
+# The site's name is this run's own: the restore reads /var/www/html/SITE, so a
+# fixed name meets whatever a machine happens to hold there (dev had a
+# root-owned directory under a fixed test name, and the dry run refused to
+# lock inside it).
+SITE="harnesstest-keyfile-$$"
+STAGE="$WORK/stage/${SITE}-2026-01-01-000000"
 mkdir -p "$STAGE/project_files" "$STAGE/apache_config"
 echo "Backup Information" > "$STAGE/backup_info.txt"
 echo "site content" > "$STAGE/project_files/index.php"
-( cd "$WORK/stage" && tar -czf - mysite-2026-01-01-000000 \
+( cd "$WORK/stage" && tar -czf - "${SITE}-2026-01-01-000000" \
     | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 -out "$WORK/proj.tar.gz.enc" ) 3< "$RUN_KEY"
 
-OUT=$(bash "$RESTORE_PROJ" mysite "$WORK/proj.tar.gz.enc" --dry-run --key-file "$RUN_KEY" 2>&1)
+OUT=$(bash "$RESTORE_PROJ" "$SITE" "$WORK/proj.tar.gz.enc" --dry-run --key-file "$RUN_KEY" 2>&1)
 RC=$?
 chk "encrypted archive opens with --key-file" "$([ $RC -eq 0 ] && echo yes || echo no)" "yes"
 chk "and its contents are seen" "$(echo "$OUT" | grep -ci 'Backup info file found')" "1"
 
 WRONG="$WORK/wrong.key"
 printf '%s' "$(head -c 32 /dev/urandom | base64)" > "$WRONG"
-OUT=$(bash "$RESTORE_PROJ" mysite "$WORK/proj.tar.gz.enc" --dry-run --key-file "$WRONG" 2>&1)
+OUT=$(bash "$RESTORE_PROJ" "$SITE" "$WORK/proj.tar.gz.enc" --dry-run --key-file "$WRONG" 2>&1)
 RC=$?
 chk "a wrong key fails the restore" "$([ $RC -ne 0 ] && echo yes || echo no)" "yes"
 chk "and says the key may be wrong" "$(echo "$OUT" | grep -ci 'key may be wrong')" "1"
@@ -184,7 +189,7 @@ chk "and says the key may be wrong" "$(echo "$OUT" | grep -ci 'key may be wrong'
 # Detection reads the openssl magic, not the name: a renamed archive still
 # opens, which is what stops extension-sniffing from becoming load-bearing.
 cp "$WORK/proj.tar.gz.enc" "$WORK/renamed.bin"
-OUT=$(bash "$RESTORE_PROJ" mysite "$WORK/renamed.bin" --dry-run --key-file "$RUN_KEY" 2>&1)
+OUT=$(bash "$RESTORE_PROJ" "$SITE" "$WORK/renamed.bin" --dry-run --key-file "$RUN_KEY" 2>&1)
 chk "a renamed encrypted archive still opens" "$(echo "$OUT" | grep -ci 'Backup info file found')" "1"
 
 # An encrypted archive with no key at all must say so plainly rather than
@@ -195,8 +200,8 @@ chk "no key available is reported as such" "$(echo "$OUT" | grep -ci 'encrypted 
 chk "and the restore stops" "$([ $RC -ne 0 ] && echo yes || echo no)" "yes"
 
 # Plaintext archives keep working unchanged.
-( cd "$WORK/stage" && tar -czf "$WORK/proj.tar.gz" mysite-2026-01-01-000000 )
-OUT=$(bash "$RESTORE_PROJ" mysite "$WORK/proj.tar.gz" --dry-run 2>&1)
+( cd "$WORK/stage" && tar -czf "$WORK/proj.tar.gz" "${SITE}-2026-01-01-000000" )
+OUT=$(bash "$RESTORE_PROJ" "$SITE" "$WORK/proj.tar.gz" --dry-run 2>&1)
 chk "plaintext archives still restore" "$(echo "$OUT" | grep -ci 'Backup info file found')" "1"
 
 echo

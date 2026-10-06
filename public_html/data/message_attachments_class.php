@@ -8,7 +8,8 @@
  * key. Same shape the inbound-mail attachment manifest established, so the two
  * read alike.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - msa_create_time is stamped when the row is made; it was left empty
  */
 
 
@@ -44,7 +45,7 @@ class MessageAttachment extends SystemBase {
 		// bytes: a conversation raised to Private after the fact re-seals its
 		// history one file at a time.
 		'msa_is_sealed'      => array('type' => 'bool', 'default' => false, 'is_nullable' => false),
-		'msa_create_time'    => array('type' => 'timestamp(6)'),
+		'msa_create_time'    => array('type' => 'timestamp(6)', 'default' => 'now()'),
 		'msa_delete_time'    => array('type' => 'timestamp(6)'),
 	);
 

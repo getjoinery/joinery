@@ -35,7 +35,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/tasks/RunNodeUpt
 $tag = substr(md5(uniqid('', true)), 0, 6);
 function srt_node($tag, $suffix, array $fields) {
 	$node = new ManagedNode(NULL);
-	$node->set('mgn_name', "harnesstest status refresh $suffix $tag");
+	$node->set('mgn_name', "HarnessTest status refresh $suffix $tag");
 	$node->set('mgn_slug', "harnesstest-srt-$suffix-$tag");
 	$node->set('mgn_host', '127.0.0.1');
 	$node->set('mgn_enabled', true);

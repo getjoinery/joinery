@@ -103,7 +103,7 @@ ok('test alias appears in the option list', array_key_exists($address, $options)
 // --- 3. validateConfig(): grant required ------------------------------------
 section("3. validateConfig");
 $recipe = new Recipe(NULL);
-$recipe->set('rcp_name', "email-security-scan-test-{$suffix}");
+$recipe->set('rcp_name', "HarnessTest email-security-scan-{$suffix}");
 $recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
 $recipe->set('rcp_pipeline_job', 'email_security_scan');
 $recipe->set('rcp_owner_user_id', $owner_uid);

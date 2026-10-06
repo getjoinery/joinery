@@ -562,6 +562,26 @@ check($ol['state'] === 'on' && $ol['reason'] === 'nft_refused' && $ol['since'] =
 check(JobResultProcessor::sanitise_host_report(array())['outbound_limits'] === null
 	&& JobResultProcessor::sanitise_host_report(array('outbound_limits' => 'x'))['outbound_limits'] === 'unknown',
 	'an older node reports no limits (null); one that is not an object is unknown');
+// The figures in force (host_report 1.12, WP5): the machine's, who set them,
+// the web server's user's ceiling, and each limited site's.
+$with_figs = $lim(9000, 7);
+$with_figs['figures'] = array('ceiling_mbit' => 300, 'conn_rate' => 40, 'conn_burst' => 120, 'open_conns' => 512, 'set_by' => 'plane');
+$with_figs['web_ceiling_mbit'] = 25;
+$with_figs['sites'] = array('s1' => array('ceiling_mbit' => 'none', 'conn_rate' => 5, 'conn_burst' => 100, 'open_conns' => 256),
+	'<b>' => array('ceiling_mbit' => 1), 's2' => 'x');
+$ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $with_figs))['outbound_limits'];
+check(($ol['figures'] ?? null) === array('ceiling_mbit' => 300, 'conn_rate' => 40, 'conn_burst' => 120, 'open_conns' => 512, 'set_by' => 'plane')
+	&& ($ol['web_ceiling_mbit'] ?? null) === 25
+	&& ($ol['sites'] ?? null) === array('s1' => array('ceiling_mbit' => 'none', 'conn_rate' => 5, 'conn_burst' => 100, 'open_conns' => 256),
+		'b' => array('ceiling_mbit' => 1, 'conn_rate' => 'unknown', 'conn_burst' => 'unknown', 'open_conns' => 'unknown')),
+	'limits in force keep their figures: the machine\'s, who set them, the web server\'s user\'s ceiling, and each site\'s, names cleaned and an entry that is not one dropped', var_export($ol, true));
+$with_figs['figures']['set_by'] = '<script>';
+$with_figs['figures']['ceiling_mbit'] = '200; reboot';
+$ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $with_figs))['outbound_limits'];
+check($ol['figures']['set_by'] === '' && $ol['figures']['ceiling_mbit'] === 'unknown', 'a set_by but plane is nothing; a figure that is not one is unknown', var_export($ol['figures'], true));
+$with_figs['state'] = 'off';
+$ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $with_figs))['outbound_limits'];
+check(!array_key_exists('figures', $ol) && !array_key_exists('sites', $ol), 'limits off carry no figures', var_export($ol, true));
 $c_none = JobResultProcessor::sanitise_host_report(array('containers' => array($with_drops($fig(1, 1), 'none'))))['containers'][0];
 $c_bad = JobResultProcessor::sanitise_host_report(array('containers' => array($with_drops($fig(1, 1), '1;reboot'))))['containers'][0];
 check($c_none['outbound_dropped'] === 'none' && $c_bad['outbound_dropped'] === 'unknown'
@@ -880,7 +900,7 @@ check($mvictim->get('mgn_moved_check_state') === 'absent' && !MovedSiteCheck::is
 
 section('moved_site_reach: the domain must reach the NEW server, not just any other');
 
-$rnew = jrp_node(array('mgn_name' => 'Reach New Server', 'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
+$rnew = jrp_node(array('mgn_name' => 'HarnessTest Reach New Server', 'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
 	'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
 $rvictim = jrp_node(array('mgn_container_name' => 'reachrp', 'mgn_install_state' => 'retired',
 	'mgn_site_url' => 'https://reach.example.com', 'mgn_copy_of_node_id' => $rnew->key,
@@ -930,7 +950,7 @@ $rtwin->set('mjb_result', null);   // as a second request read it, before the fi
 JobResultProcessor::process($rtwin);
 check(jrp_reach_clears($rnew) === 1, 'a job folded twice at once fetches and clears once');
 $rlabel = MovedSiteCheck::label_html($rvictim, false, 'UTC');
-check(strpos($rlabel, 'text-success') !== false && strpos($rlabel, 'Moved: the domain reaches Reach New Server') !== false,
+check(strpos($rlabel, 'text-success') !== false && strpos($rlabel, 'Moved: the domain reaches HarnessTest Reach New Server') !== false,
 	'the page says moved, naming the new server, only now', $rlabel);
 
 jrp_reach($rnew, $rvictim, array(200, '<html>This domain is parked</html>'));
@@ -938,7 +958,7 @@ check($rvictim->get('mgn_moved_reach_state') === 'elsewhere' && MovedSiteCheck::
 	'another server answering without the token is NOT the new server, and the removal waits',
 	(string)$rvictim->get('mgn_moved_reach_state'));
 $rlabel = MovedSiteCheck::label_html($rvictim, false, 'UTC');
-check(strpos($rlabel, 'text-success') === false && strpos($rlabel, 'left this container but does not reach Reach New Server') !== false
+check(strpos($rlabel, 'text-success') === false && strpos($rlabel, 'left this container but does not reach HarnessTest Reach New Server') !== false
 	&& strpos($rlabel, 'some other server') !== false,
 	'the page says the domain left but does not reach the new server, and what it answered', $rlabel);
 

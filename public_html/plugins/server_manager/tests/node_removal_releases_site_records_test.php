@@ -42,7 +42,7 @@ $buyer = make_user('NodeRemoval');
 
 function nr_node(string $name, bool $register = true) {
 	$node = new ManagedNode(NULL);
-	$node->set('mgn_name', $name);
+	$node->set('mgn_name', 'HarnessTest ' . $name);
 	$node->set('mgn_slug', $name);
 	$node->set('mgn_host', '198.51.100.40');
 	$node->set('mgn_ssh_user', 'root');
@@ -165,7 +165,7 @@ $p = nr_fresh($pending);
 $w = nr_fresh($wiring);
 check($p->get('rdm_status') === RegisteredDomain::STATUS_FAILED && (string)$p->get('rdm_delete_time') === '',
 	'a name not yet bought is parked, and kept');
-check(strpos((string)$p->get('rdm_error'), 'Not bought: its site nr-site-' . $suffix . ' was removed from the dashboard on ' . gmdate('Y-m-d')) === 0,
+check(strpos((string)$p->get('rdm_error'), 'Not bought: its site HarnessTest nr-site-' . $suffix . ' was removed from the dashboard on ' . gmdate('Y-m-d')) === 0,
 	'with the reason, and what a person decides', (string)$p->get('rdm_error'));
 check($w->get('rdm_status') === RegisteredDomain::STATUS_FAILED && (string)$w->get('rdm_delete_time') === '',
 	'a name bought but not wired up is parked, and kept');

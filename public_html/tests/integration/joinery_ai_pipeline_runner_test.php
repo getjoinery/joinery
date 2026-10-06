@@ -137,7 +137,7 @@ echo "owner_uid=$owner_uid\n\n";
 /** Build a fresh throwaway Recipe + running RecipeRun bound to the fixture job. */
 function make_recipe_and_run(int $owner_uid, int $max_iterations, int $token_budget): array {
     $recipe = new Recipe(NULL);
-    $recipe->set('rcp_name', 'pipeline-fixture-test ' . gmdate('His') . '-' . mt_rand(1000, 9999));
+    $recipe->set('rcp_name', 'HarnessTest pipeline-fixture ' . gmdate('His') . '-' . mt_rand(1000, 9999));
     $recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
     $recipe->set('rcp_pipeline_job', 'test_fixture_job');
     $recipe->set('rcp_owner_user_id', $owner_uid);

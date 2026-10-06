@@ -34,7 +34,7 @@ $signals = array();
 IncidentReconciler::$dispatch = function ($signal, $payload) use (&$signals) { $signals[] = $signal; };
 
 $node = new ManagedNode(NULL);
-$node->set('mgn_name', 'Incident sources test');
+$node->set('mgn_name', 'HarnessTest incident sources');
 $node->set('mgn_slug', 'harnesstest-src-' . bin2hex(random_bytes(3)));
 $node->set('mgn_host', '192.0.2.44');
 $node->set('mgn_ssh_user', 'root');

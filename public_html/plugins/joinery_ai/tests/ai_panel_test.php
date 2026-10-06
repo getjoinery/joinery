@@ -109,7 +109,7 @@ function aip_message(int $domain_id, int $alias_id, string $subject, string $off
 function aip_recipe(int $owner_id, array $addresses, bool $enabled = true,
 		bool $tainted_ok = true): Recipe {
 	$recipe = new Recipe(NULL);
-	$recipe->set('rcp_name', 'aip test ' . bin2hex(random_bytes(3)));
+	$recipe->set('rcp_name', 'HarnessTest aip ' . bin2hex(random_bytes(3)));
 	$recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
 	$recipe->set('rcp_pipeline_job', 'email_triage');
 	$recipe->set('rcp_source_config', array('mailbox_aliases' => $addresses));

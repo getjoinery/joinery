@@ -120,7 +120,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_
 // An unpaired node has no route, and no key is minted for it: the provision
 // re-asks every tick until the agent pairs, and a key per tick would churn.
 $unpaired = new ManagedNode(NULL);
-$unpaired->set('mgn_name', 'fleet unpaired');
+$unpaired->set('mgn_name', 'HarnessTest fleet unpaired');
 $unpaired->set('mgn_slug', 'harnesstest-fleet-unpaired-' . substr(md5(uniqid('', true)), 0, 6));
 $unpaired->set('mgn_host', '192.0.2.40');
 $unpaired->set('mgn_uptime_enabled', false);
@@ -139,7 +139,7 @@ check($after === $before, 'and mints no key for it');
 
 // A paired node reporting fleet_enroll gets one job carrying the three values.
 $paired = new ManagedNode(NULL);
-$paired->set('mgn_name', 'fleet paired');
+$paired->set('mgn_name', 'HarnessTest fleet paired');
 $paired->set('mgn_slug', 'harnesstest-fleet-paired-' . substr(md5(uniqid('', true)), 0, 6));
 $paired->set('mgn_host', '192.0.2.41');
 $paired->set('mgn_uptime_enabled', false);
