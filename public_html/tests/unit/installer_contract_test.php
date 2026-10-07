@@ -1678,6 +1678,10 @@ check(strpos($fix_perms_src_s10, '"$SITE_ROOT/config/tree_owner"') !== false
 // The FILE, not the words. PluginManager::tree_owner_name() reads who owns
 // public_html to tell an operator which account to install as, and the pages
 // that print that command mention it — none of them touch the record.
+// One reader is named: ReleaseCommit, which a root publish uses to run git as
+// the account that owns the repository. Every line of it that names the record
+// may only read it; a reader that gained a write would fail here like any file.
+$tree_owner_readers = array('includes/ReleaseCommit.php');
 $php_writers = array();
 foreach (array('includes', 'adm', 'utils', 'api', 'ajax', 'data', 'logic') as $dir) {
     $base = PathHelper::getIncludePath($dir);
@@ -1685,13 +1689,25 @@ foreach (array('includes', 'adm', 'utils', 'api', 'ajax', 'data', 'logic') as $d
     $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base));
     foreach ($it as $f) {
         if (!$f->isFile() || substr($f->getFilename(), -4) !== '.php') continue;
-        if (preg_match('~[\'"]config/tree_owner|tree_owner[\'"]\s*\)~', (string)file_get_contents($f->getPathname()))) {
-            $php_writers[] = $f->getPathname();
+        $src = (string)file_get_contents($f->getPathname());
+        if (!preg_match('~[\'"]config/tree_owner|tree_owner[\'"]\s*\)~', $src)) continue;
+        $rel = substr($f->getPathname(), strlen(PathHelper::getIncludePath('')));
+        if (in_array(ltrim($rel, '/'), $tree_owner_readers, true)) {
+            $naming = preg_grep('~[\'"]config/tree_owner|tree_owner[\'"]\s*\)~', explode("\n", $src));
+            $only_reads = true;
+            foreach ($naming as $line) {
+                if (!preg_match('~\bfile_get_contents\s*\(~', $line)
+                    || preg_match('~\b(file_put_contents|fopen|touch|rename|unlink|copy|chmod|chown|chgrp|symlink|link|exec|shell_exec|system|passthru|proc_open|popen)\s*\(~', $line)) {
+                    $only_reads = false;
+                }
+            }
+            if ($only_reads) continue;
         }
+        $php_writers[] = $f->getPathname();
     }
 }
 check(empty($php_writers),
-    'no PHP anywhere names the config/tree_owner file, so nothing on the web side can create or change it',
+    'no PHP names the config/tree_owner file except to read it in ReleaseCommit, so nothing on the web side can create or change it',
     implode(', ', $php_writers));
 
 // --- the runner: assert, refuse, then run -------------------------------

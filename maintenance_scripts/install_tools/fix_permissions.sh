@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 4.6 - config/release_statement_key (the P-256 key that signs every
+#              release statement written to the public log) is pinned 600
+#              root:root beside agent_signing_key and pruned from the config/
+#              data sweep, which would otherwise hand it to the web user 0770
+#              within a minute of it being minted (spec release_transparency).
 #VERSION 4.5 - Every sweep sets the mode before the owner. Owner first left each entry, between the
 #              two walks, owned by its new owner at its old mode: a 0700 directory or 0600 file
 #              handed to www-data before the chmod reached it could be read by nobody in the
@@ -230,6 +235,7 @@ PINNED=(
     "$SITE_ROOT/config/relay_pull_key"
     "$SITE_ROOT/config/backup_site_key"
     "$SITE_ROOT/config/agent_signing_key"
+    "$SITE_ROOT/config/release_statement_key"
     "$SITE_ROOT/config/admin_credentials.txt"
 )
 
@@ -452,6 +458,16 @@ if [ -f "$SIGNING_KEY" ]; then
     echo "  Pinning key $SIGNING_KEY to 600 root:root..."
     chown root:root "$SIGNING_KEY"
     chmod 600 "$SIGNING_KEY"
+fi
+
+# The release statement key signs the statement every release writes to the
+# public log. Same reader, same reason as the agent signing key: only a root
+# publish uses it. Exists only on the publishing box.
+STATEMENT_KEY="$SITE_ROOT/config/release_statement_key"
+if [ -f "$STATEMENT_KEY" ]; then
+    echo "  Pinning key $STATEMENT_KEY to 600 root:root..."
+    chown root:root "$STATEMENT_KEY"
+    chmod 600 "$STATEMENT_KEY"
 fi
 
 # The install-time admin password, for whoever can already reach the server as
