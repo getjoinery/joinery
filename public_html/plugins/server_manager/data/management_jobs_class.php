@@ -2,6 +2,10 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.33 - activeOrRecentForNode: a job the node answered inside the window is cover whatever the
+ *                 answer. A refused or failed one counted for nothing, so the hourly refresh asked dev for
+ *                 a host_report every minute for five days (923 refusals, 10-02..10-07) — a repeat a minute
+ *                 later gets the same answer
  * @version 1.32 - hold_words(): who held a container stopped, when and why, from the newest job that changed
  *                 the hold (multi_tenant_docker_hosts WP7)
  * @version 1.31 - decommission_moved_site's claim budget: the teardown and the host's proof, no approval wait
@@ -862,13 +866,22 @@ class ManagementJob extends SystemBase {
 		);
 	}
 
+	/**
+	 * Is there already a $type job for this node that makes queueing another
+	 * pointless: one still open, or one the node answered inside the last
+	 * $recent_seconds? The answer counts whether it was a result, a failure or
+	 * a refusal — a node that refused a script a minute ago refuses it again
+	 * now, and asking every minute only fills the job table. A cancelled job
+	 * was never answered and is no cover.
+	 */
 	static function activeOrRecentForNode($node_id, $type, $recent_seconds) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
 			"SELECT 1 FROM mjb_management_jobs
 			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
 			   AND (mjb_status IN ('pending', 'running')
-			        OR (mjb_status = 'completed' AND mjb_completed_time >= ?))
+			        OR (mjb_status IN ('completed', 'failed')
+			            AND COALESCE(mjb_completed_time, mjb_update_time) >= ?))
 			 LIMIT 1"
 		);
 		$q->execute([

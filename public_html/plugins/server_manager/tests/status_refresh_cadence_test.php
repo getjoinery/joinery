@@ -20,6 +20,7 @@
  * that way while its agent had not been asked for days (the plugin checks
  * never reached the dashboard).
  *
+ * @version 1.2 - a refused or failed answer inside the window is cover; a cancelled job is not
  * @version 1.1 - the probe-stamped node still gets its check_status; a node with a recently
  *                completed check_status job gets none
  */
@@ -107,5 +108,35 @@ check(srt_jobs($host_fresh) === 1 && srt_jobs($host_fresh, 'host_report') === 0,
 check(srt_jobs($host_never) === 1 && srt_jobs($host_never, 'host_report') === 1, 'a node that never reported its host gets one, and its fresh status none');
 $queued = $task->refresh_status_facts(array($both_stale, $host_fresh, $host_never), gmdate('Y-m-d H:i:s'));
 check($queued === 0, 'the window dedupes host reports too', "queued=$queued");
+
+section('A refused or failed answer inside the window is cover too');
+// Dev 2026-10-02..07: the agent refused host_report.sh (edited after the last
+// publish), the stamp never advanced, and only completed jobs counted as
+// cover — so the hourly refresh asked again every cron minute, 923 times.
+$refused = srt_node($tag, 'refused', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'check_status,host_report',
+	'mgn_last_status_check' => $stale_at, 'mgn_last_host_report_time' => $stale_at));
+$refused_job = ManagementJob::createFromBuild($refused->key, 'host_report', JobCommandBuilder::build_host_report_primitive($refused), null, null);
+$refused_job->set('mjb_status', 'failed');
+$refused_job->set('mjb_agent_outcome', 'refused');
+$refused_job->set('mjb_error_message', 'Refused by the node: file does not match its signed hash');
+$refused_job->set('mjb_completed_time', gmdate('Y-m-d H:i:s', time() - 60));
+$refused_job->save();
+$queued = $task->refresh_status_facts(array($refused), gmdate('Y-m-d H:i:s'));
+check($queued === 1, 'only the check_status is queued; the host_report refused a minute ago is not asked again', "queued=$queued");
+check(srt_jobs($refused, 'host_report') === 1, 'the refused node still has exactly one host_report job');
+// Once the window has passed, the question is asked again — once.
+$refused_job->set('mjb_completed_time', gmdate('Y-m-d H:i:s', time() - RunNodeUptimeChecks::STATUS_REFRESH_SECONDS - 60));
+$refused_job->save();
+$queued = $task->refresh_status_facts(array($refused), gmdate('Y-m-d H:i:s'));
+check($queued === 1, 'a refusal older than the window earns one new host_report', "queued=$queued");
+check(srt_jobs($refused, 'host_report') === 2, 'the refused node now has two host_report jobs');
+// A cancelled job was never answered; it is no cover.
+$cancelled = srt_node($tag, 'cancelled', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'host_report',
+	'mgn_last_host_report_time' => $stale_at));
+$cancelled_job = ManagementJob::createFromBuild($cancelled->key, 'host_report', JobCommandBuilder::build_host_report_primitive($cancelled), null, null);
+$cancelled_job->set('mjb_status', 'cancelled');
+$cancelled_job->save();
+$queued = $task->refresh_status_facts(array($cancelled), gmdate('Y-m-d H:i:s'));
+check($queued === 1, 'a cancelled host_report is no cover: the node is asked', "queued=$queued");
 
 harness_finish();
