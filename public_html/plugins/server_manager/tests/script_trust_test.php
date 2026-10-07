@@ -367,9 +367,7 @@ $health = NodeMonitorHealth::script_trust_health($pub);
 check($health['is_problem'] === false, 'an unpublished commit is not a problem');
 check(stripos($health['label'], 'changed here after the last publish') !== false,
 	'and says what it is', $health['label']);
-check(!in_array((int)$pub->key, array_map(function ($p) { return (int)$p['id']; }, NodeMonitorHealth::script_trust_problems()), true),
-	'it is not listed as a node that can no longer be managed');
-check((new IncidentSourceUnmanageable())->evaluate($pub) === null, 'and raises no incident');
+check((new IncidentSourceUnmanageable())->evaluate($pub) === null, 'it raises no incident');
 check(stripos((new IncidentSourceUnmanageable())->cleared_text($pub), 'next publish') !== false,
 	'an open incident closes saying the next publish re-signs it');
 check(strpos((string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php')),
@@ -380,7 +378,7 @@ $pub->load();
 check($pub->get('mgn_script_trust') === 'ok', 'the job type completing after the publish clears it');
 
 // ---------------------------------------------------------------------------
-section('What the dashboard is told');
+section('What the operator is told');
 
 $bad = st_node();
 NodeMonitorHealth::note_script_trust($bad, st_job($bad, 'apply_update', 'refused', $MANIFEST_BAD_KEY));
@@ -399,7 +397,7 @@ $health = NodeMonitorHealth::script_trust_health($tampered);
 check(stripos($health['detail'], 're-delivering a manifest') !== false,
 	'a modified file is reported as NOT fixed by re-delivering a manifest', $health['detail']);
 
-// detail is escaped whole by the dashboard, so it must be plain text — a health
+// detail is escaped whole by every page that shows it, so it must be plain text — a health
 // line that smuggles markup either renders as literal tags or, worse, does not.
 foreach ([$MANIFEST_BAD_KEY, $FILE_MODIFIED] as $i => $msg) {
 	$n = st_node();
@@ -415,12 +413,13 @@ $ok = st_node();
 $health = NodeMonitorHealth::script_trust_health($ok);
 check($health['is_problem'] === false, 'a node with no trust state is not a problem');
 
-// Compared as ints on purpose: a freshly saved model hands back a string key
-// while one loaded through a collection hands back an int, and a strict
-// comparison across the two silently reports every node as absent.
-$listed = array_map('intval', array_column(NodeMonitorHealth::script_trust_problems(), 'id'));
-check(in_array((int)$bad->key, $listed, true), 'an untrusted node reaches the dashboard list');
-check(!in_array((int)$ok->key, $listed, true), 'a healthy node does not');
-check(!in_array((int)$node->key, $listed, true), 'and neither does one that has recovered');
+$source = new IncidentSourceUnmanageable();
+$raised = $source->evaluate($bad);
+check($raised !== null && $raised['severity'] === IncidentRecord::SEVERITY_CRITICAL,
+	'an untrusted node raises a critical incident', json_encode($raised));
+check($raised !== null && $raised['detail']['What it means'] === NodeMonitorHealth::script_trust_health($bad)['detail'],
+	'carrying the same words the node page shows');
+check($source->evaluate($ok) === null, 'a healthy node does not');
+check($source->evaluate($node) === null, 'and neither does one that has recovered');
 
 harness_finish();
