@@ -3,7 +3,9 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.29 - a node in any install state (copy, switching, retired among them) is badged with its
+ * @version 1.30 - no banners for broken monitoring, backups from here not happening, or a node that can no
+ *                 longer be managed: each is an incident, triaged in the one inbox
+ * @version 1.29 -a node in any install state (copy, switching, retired among them) is badged with its
  *                 words and never polled for its status (ManagedNode::is_operational())
  * @version 1.28 - each node row shows its agent version, how far behind the agent this management node
  *                 ships, and a below-minimum badge under AgentVocabulary::FLOOR
@@ -217,22 +219,11 @@ $inflight_provisions = new MultiCustomerCloudProvision([
 ], ['cvp_customer_cloud_provision_id' => 'DESC']);
 $inflight_provisions->load();
 
-// Nodes whose uptime monitoring cannot currently conclude up or down.
+// Recovery not set up on this management node. A node's own trouble (broken
+// monitoring, backups from here not happening, a node that can no longer be
+// managed) is an incident, raised in the one inbox where it can be triaged.
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
-$monitor_problems = NodeMonitorHealth::problems();
 $recovery_problems = NodeMonitorHealth::backup_recovery_problems();
-
-// Nodes whose backups THIS management node takes are failing or have stopped.
-// Deliberately not "nodes without backups": whether a site backs itself up is
-// that site's business under its own key, and a node with fleet backups
-// switched off was switched off on purpose. What stops a node falling through
-// unnoticed is that fleet backups default to on, not a detector for indecision.
-$fleet_backup_problems = NodeMonitorHealth::fleet_backup_problems();
-
-// Nodes whose agent can no longer verify the scripts it would run as root. Read
-// off the node columns, which the channel endpoint stamps as each refusal
-// arrives — no probing and no job scan on a page view.
-$script_trust_problems = NodeMonitorHealth::script_trust_problems();
 
 // Agents asking to join. A join is approved on the API Keys tab of the node
 // it belongs to, and that node may not exist yet (a machine that joins before
@@ -352,24 +343,6 @@ if ($agent_online) {
 	<?php endif; ?>
 </div>
 
-<?php // Nodes whose monitoring cannot report up or down. Surfaced here because a
-      // broken check is silent everywhere else — the node simply never alerts,
-      // which is indistinguishable from never having had a problem. ?>
-<?php if (!empty($monitor_problems)): ?>
-<div class="alert alert-warning" role="alert">
-	<strong>Monitoring not reporting on <?php echo count($monitor_problems); ?> node<?php echo count($monitor_problems) === 1 ? '' : 's'; ?>.</strong>
-	These nodes cannot raise a down alert until fixed.
-	<ul class="mb-0 mt-2">
-		<?php foreach ($monitor_problems as $p): ?>
-			<li>
-				<a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$p['id']; ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
-				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
-			</li>
-		<?php endforeach; ?>
-	</ul>
-</div>
-<?php endif; ?>
-
 <?php // Backup recovery is not set up, so encrypted backups cannot run.
       // A backup you cannot restore is as silent as monitoring that cannot alert,
       // so it is surfaced the same way. ?>
@@ -388,26 +361,6 @@ if ($agent_online) {
 				<?php if (!empty($p['link'])): ?>
 					<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link">Set it up</a>.
 				<?php endif; ?>
-			</li>
-		<?php endforeach; ?>
-	</ul>
-</div>
-<?php endif; ?>
-
-<?php // A node whose agent can no longer verify the scripts it would run as
-      // root refuses every script primitive at once. First on the board because
-      // it is not one more failing job: the node cannot be repaired through the
-      // agent at all, since the upgrade that would fix it is refused by the same
-      // check, and its failing backups below are a symptom of this. ?>
-<?php if (!empty($script_trust_problems)): ?>
-<div class="alert alert-danger" role="alert">
-	<strong>Nodes that can no longer be managed.</strong>
-	<ul class="mb-0 mt-2">
-		<?php foreach ($script_trust_problems as $p): ?>
-			<li>
-				<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
-				&mdash; <strong><?php echo htmlspecialchars($p['health']['label']); ?>.</strong>
-				<?php echo htmlspecialchars($p['health']['detail']); ?>
 			</li>
 		<?php endforeach; ?>
 	</ul>
@@ -490,30 +443,6 @@ if ($agent_online) {
 			</form>
 		</span>
 	<?php endforeach; ?>
-</div>
-<?php endif; ?>
-
-<?php // Backups this management node takes are not happening. Its own runs, its
-      // own backup storage, its own responsibility — which is why this is an alarm.
-      // Two shapes land here and both belong: runs that fail or stop landing,
-      // and nodes that cannot be backed up at all because they hold no verified
-      // recovery key. The second is not fixable from here, and the line says so
-      // rather than reading as something an operator here forgot. ?>
-<?php if (!empty($fleet_backup_problems)): ?>
-<div class="alert alert-warning" role="alert">
-	<strong>Backups taken from here are not happening.</strong>
-	<ul class="mb-0 mt-2">
-		<?php foreach ($fleet_backup_problems as $p): ?>
-			<li>
-				<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
-				&mdash; <strong><?php echo htmlspecialchars($p['health']['label']); ?>.</strong>
-				<?php echo htmlspecialchars($p['health']['detail']); ?>
-				<?php if (!empty($p['health']['job_id'])): ?>
-					<a href="/admin/server_manager/job_detail?job_id=<?php echo (int)$p['health']['job_id']; ?>" class="alert-link">See the failed job.</a>
-				<?php endif; ?>
-			</li>
-		<?php endforeach; ?>
-	</ul>
 </div>
 <?php endif; ?>
 

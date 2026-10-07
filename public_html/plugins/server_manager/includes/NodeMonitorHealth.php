@@ -8,11 +8,13 @@
  * look identical to never-checked ones, so the failure hides.
  *
  * Every surface that reports monitoring state uses this class, so the
- * dashboard, the node detail page and the uptime task cannot disagree.
+ * incidents, the node detail page and the uptime task cannot disagree.
  *
- * It also surfaces backup recovery problems (backup_recovery_problems), in the
- * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
+ * It also reports backup recovery problems on this management node
+ * (backup_recovery_problems), which the dashboard shows.
  *
+ * @version 1.23 - problems(), fleet_backup_problems() and script_trust_problems() are gone with the
+ *                dashboard banners they fed; each condition is an incident (IncidentSource*)
  * @version 1.22 - unpublished_file also covers an edit in progress on this management node: a refused file
  *                in its checkout that the web server cannot write (changed_here_after_publish)
  * @version 1.21 - unpublished_file: on this management node, a refused file that is exactly its
@@ -250,32 +252,9 @@ class NodeMonitorHealth {
 	}
 
 	/**
-	 * Evaluate every enabled node and return only those needing attention.
-	 * Used by the dashboard to surface broken monitoring where it is seen.
-	 */
-	public static function problems(): array {
-		$nodes = new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC'], 1000, 0);
-		$nodes->load();
-
-		$problems = [];
-		foreach ($nodes as $node) {
-			$health = self::evaluate($node);
-			if (!$health['is_problem']) { continue; }
-			$problems[] = [
-				'node'   => $node,
-				'slug'   => $node->get('mgn_slug'),
-				'name'   => $node->get('mgn_name'),
-				'id'     => $node->key,
-				'health' => $health,
-			];
-		}
-		return $problems;
-	}
-
-	/**
-	 * Backup recovery problems, in the same shape as problems() so the dashboard
-	 * renders them identically. A backup you cannot restore is as silent as
-	 * monitoring that cannot alert, so it is surfaced the same way.
+	 * Backup recovery problems on this management node, for the dashboard. A
+	 * backup you cannot restore is as silent as monitoring that cannot alert, so
+	 * it is surfaced where the operator lands.
 	 *
 	 * Two things can be wrong:
 	 *   - recovery was never set up, in which case no node can take an encrypted
@@ -384,44 +363,6 @@ class NodeMonitorHealth {
 			return true;
 		}
 		return false;
-	}
-
-	/**
-	 * Nodes whose backups THIS management node takes are not working.
-	 *
-	 * The alarm is "my backups of this node are broken", not "this node is
-	 * unprotected". Whether a site also backs itself up is that site's business,
-	 * under its own key, and this management node is not in a position to judge it:
-	 * a site taking no copies of its own is exercising a choice, and one taking
-	 * plenty is no reason to stop taking mine.
-	 *
-	 * A node with fleet backups switched off produces nothing here either. What
-	 * stops a node falling through unnoticed is the DEFAULT — fleet backups are
-	 * on for a node nobody has decided about — not a detector for indecision.
-	 */
-	public static function fleet_backup_problems(): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupPolicy.php'));
-
-		$problems = [];
-		// The same eligibility list the scheduler dispatches from — shared so a
-		// node this monitor watches is always a node that scheduler could reach.
-		foreach (FleetBackupPolicy::eligible_nodes() as $node) {
-			$policy = FleetBackupPolicy::for_node($node);
-			if (empty($policy['enabled'])) continue;   // somebody's decision
-
-			$health = self::fleet_backup_health($node, $policy);
-			if (!$health['is_problem']) continue;
-
-			$problems[] = [
-				'node'   => $node,
-				'slug'   => $node->get('mgn_slug'),
-				'name'   => $node->get('mgn_name'),
-				'id'     => $node->key,
-				'link'   => '/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$node->key . '&tab=backups',
-				'health' => $health,
-			];
-		}
-		return $problems;
 	}
 
 	/**
@@ -676,34 +617,6 @@ class NodeMonitorHealth {
 			if (self::classify_script_trust((string)$message) !== null) { return true; }
 		}
 		return false;
-	}
-
-	/**
-	 * Nodes that can no longer run script primitives, in the shape problems()
-	 * returns so the dashboard renders them beside everything else.
-	 *
-	 * This is its own surface rather than a line on the backup card because it is
-	 * not a backup problem. Backups are one of the things it breaks; upgrades,
-	 * certificate provisioning and restores are the others, and a node in this
-	 * state cannot be repaired through the agent at all.
-	 */
-	public static function script_trust_problems(): array {
-		$nodes = new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC'], 1000, 0);
-
-		$problems = [];
-		foreach ($nodes as $node) {
-			$state = (string)$node->get('mgn_script_trust');
-			if ($state !== 'untrusted_manifest' && $state !== 'untrusted_file') { continue; }
-			$problems[] = [
-				'node'   => $node,
-				'slug'   => $node->get('mgn_slug'),
-				'name'   => $node->get('mgn_name'),
-				'id'     => $node->key,
-				'link'   => '/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$node->key,
-				'health' => self::script_trust_health($node),
-			];
-		}
-		return $problems;
 	}
 
 	/** Where one node's script trust stands, phrased for someone who has to act. */
