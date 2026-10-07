@@ -175,11 +175,13 @@ $pair = sodium_crypto_sign_keypair();
 $pub = base64_encode(sodium_crypto_sign_publickey($pair));
 file_put_contents($site . '/maintenance_scripts/install_tools/release_keys/release/one.pub', $pub . "\n");
 file_put_contents($site . '/maintenance_scripts/install_tools/release_keys/release/junk.pub', "not-a-key\n");
-file_put_contents($site . '/maintenance_scripts/install_tools/release_keys/log/log2025-1.rekor.sigstore.dev.pub', base64_encode(random_bytes(32)) . "\n");
+$log_spki = base64_encode(TransparencyProof::ED25519_SPKI_PREFIX . random_bytes(32));
+file_put_contents($site . '/maintenance_scripts/install_tools/release_keys/log/log2025-1.rekor.sigstore.dev.pub', $log_spki . "\n");
+file_put_contents($site . '/maintenance_scripts/install_tools/release_keys/log/junk.example.pub', base64_encode(random_bytes(32)) . "\n");
 $lists = AgentDistPublisher::repoKeyLists($site);
 check($lists['release_keys'] === array($pub), 'release keys: the well-formed key, the junk file ignored', json_encode($lists['release_keys']));
-check(count($lists['log_keys']) === 1 && $lists['log_keys'][0]['origin'] === 'log2025-1.rekor.sigstore.dev',
-	'log keys carry the origin from the file name', json_encode($lists['log_keys']));
+check($lists['log_keys'] === array(array('origin' => 'log2025-1.rekor.sigstore.dev', 'key' => $log_spki)),
+	'log keys carry the origin from the file name; a file that is not an Ed25519 key is not shipped', json_encode($lists['log_keys']));
 
 $refused = null;
 try { AgentDistPublisher::assertOwnKeyListed($site, base64_encode(random_bytes(32))); } catch (Exception $e) { $refused = $e->getMessage(); }

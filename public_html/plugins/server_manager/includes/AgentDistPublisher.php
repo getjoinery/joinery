@@ -25,6 +25,8 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.1 - log_keys read through ReleaseLogClient::repoLogKeys(): only an Ed25519 key in
+ *                SubjectPublicKeyInfo form is listed, the same rule the log client pins by
  * @version 2.0 - manifest.json carries release_keys and log_keys, read from the repository's
  *                release_keys/ directory; the publisher refuses to sign with a key not listed
  *                there (specs/release_transparency.md D5). signing_public_key stays for the
@@ -289,15 +291,13 @@ class AgentDistPublisher {
 				$release[] = base64_encode($raw);
 			}
 		}
+		// One rule for what a log key is, shared with the log client's pin
+		// check: a file the publisher would not pin is never shipped either.
 		$log = array();
-		foreach (glob($base . '/log/*.pub') ?: array() as $file) {
-			$b64 = trim((string)file_get_contents($file));
-			if ($b64 !== '' && base64_decode($b64, true) !== false) {
-				$log[] = array('origin' => basename($file, '.pub'), 'key' => $b64);
-			}
+		foreach (ReleaseLogClient::repoLogKeys($full_site_dir) as $origin => $der) {
+			$log[] = array('origin' => $origin, 'key' => base64_encode($der));
 		}
 		sort($release);
-		usort($log, function ($a, $b) { return strcmp($a['origin'], $b['origin']); });
 		return array('release_keys' => $release, 'log_keys' => $log);
 	}
 
