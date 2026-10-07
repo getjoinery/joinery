@@ -8,6 +8,10 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.14 - outbound_limits carries the figures while the limits are off too: what turning
+#                them on brings back (outbound_limits.sh 1.3 keeps them in its status). Each
+#                site's figures carry set_by: plane where the management node set the machine's
+#                or that site's own (the status's site_set_by).
 # Version: 1.12 - outbound_limits carries the figures in force (node_outbound_and_transfer WP5):
 #                figures (the machine's ceiling_mbit, conn_rate, conn_burst, open_conns, and
 #                set_by, plane where the management node set them), web_ceiling_mbit (the web
@@ -732,11 +736,14 @@ limits_key() { sed -n "s/^$1=//p" <<< "$LIMITS_FILE_LINES" | head -1; }
 json_ceiling() {
     if [[ "$1" =~ ^[1-9][0-9]{0,5}$ ]]; then printf '%s' "$1"; else printf '"none"'; fi
 }
-# The figures in force: the machine's, the web server's user's ceiling, and
-# each limited site's (SITE:CEILING:RATE:BURST:OPEN in the status file).
+# The figures in force (off: what turning the limits on brings back): the
+# machine's, the web server's user's ceiling, and each limited site's
+# (SITE:CEILING:RATE:BURST:OPEN in the status file), plane where the
+# management node set the machine's or that site's own (site_set_by).
 limits_figures() {
-    local set_by='""' entry site c r b o first=1
+    local set_by='""' entry site c r b o first=1 site_by by_sites
     [[ "$(limits_key set_by)" == plane ]] && set_by='"plane"'
+    by_sites=" $(limits_key site_set_by) "
     printf '"figures":{"ceiling_mbit":%s,"conn_rate":%s,"conn_burst":%s,"open_conns":%s,"set_by":%s}' \
         "$(json_ceiling "$(limits_key ceiling_mbit)")" "$(json_num_or_unknown "$(limits_key conn_rate)")" \
         "$(json_num_or_unknown "$(limits_key conn_burst)")" "$(json_num_or_unknown "$(limits_key open_conns)")" "$set_by"
@@ -746,8 +753,10 @@ limits_figures() {
         [[ "$site" =~ ^[A-Za-z0-9_-]{1,50}$ ]] || continue
         (( first )) || printf ','
         first=0
-        printf '%s:{"ceiling_mbit":%s,"conn_rate":%s,"conn_burst":%s,"open_conns":%s}' "$(json_str "$site")" \
-            "$(json_ceiling "$c")" "$(json_num_or_unknown "$r")" "$(json_num_or_unknown "$b")" "$(json_num_or_unknown "$o")"
+        site_by="$set_by"
+        [[ "$by_sites" == *" ${site} "* ]] && site_by='"plane"'
+        printf '%s:{"ceiling_mbit":%s,"conn_rate":%s,"conn_burst":%s,"open_conns":%s,"set_by":%s}' "$(json_str "$site")" \
+            "$(json_ceiling "$c")" "$(json_num_or_unknown "$r")" "$(json_num_or_unknown "$b")" "$(json_num_or_unknown "$o")" "$site_by"
     done
     printf '}'
 }
@@ -759,7 +768,11 @@ emit_outbound_limits() {
     elif [[ "$LIMITS_STATE" == on && -n "$LIMITS_REASON" ]]; then
         reason="$(json_str "$LIMITS_REASON")"
     fi
-    [[ "$LIMITS_STATE" == on ]] && figures=",$(limits_figures)"
+    # Off, only from a status that keeps them (1.3 writes site_set_by): an
+    # older one left the ceiling empty, which would read as none.
+    if [[ "$LIMITS_STATE" == on ]] || { [[ "$LIMITS_STATE" == off ]] && grep -q '^site_set_by=' <<< "$LIMITS_FILE_LINES"; }; then
+        figures=",$(limits_figures)"
+    fi
     printf '{"state":"%s","reason":%s,"since":%s,"web_user_dropped":%s%s}' "$LIMITS_STATE" "$reason" "$since" \
         "$(limits_dropped drops_web_user "$([[ "$LIMITS_WEB" == yes ]] && echo 1 || echo 0)")" "$figures"
 }

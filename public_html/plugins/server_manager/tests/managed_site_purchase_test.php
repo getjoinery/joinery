@@ -205,6 +205,10 @@ MspStubRegistrar::$available = true;
 $r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('cvp_sitename' => '9bad name')), $buyer);
 check($r['row'] === null && stripos(implode(' ', $r['errors']), 'site name') !== false,
 	'a site name that cannot be a folder and database name is refused');
+$r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('cvp_sitename' => 'x')), $buyer);
+check($r['row'] === null && stripos(implode(' ', $r['errors']), 'site name') !== false,
+	'a one-letter site name is refused (Docker takes no such container name)');
+check(ManagedSiteDraft::default_sitename('x.com') === 'site_x', 'a one-letter domain label defaults to site_<label>');
 $r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('cvp_domain' => str_repeat('a', 47) . '.com')), $buyer);
 check($r['row'] === null && stripos(implode(' ', $r['errors']), 'too long') !== false,
 	'a domain whose slug would not fit the slug column is refused with a sentence, not a crash',

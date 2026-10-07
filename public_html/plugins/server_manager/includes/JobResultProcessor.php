@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.65 - host reports keep the outbound limits' figures while they are off too (what turning them
+ *                 on brings back), and each site's set_by (host_report 1.14)
  * @version 1.63 - host reports keep the outbound limits' figures in force (host_report 1.12): the machine's,
  *                 who set them, the web server's user's ceiling and each limited site's
  * @version 1.62 - a site row's held state follows its host (ManagedNode::fold_container_holds): from every host
@@ -3428,7 +3430,9 @@ HTML;
 	 * the reason code where they were refused, since when their counters run,
 	 * and the web server's user's drops on a bare-metal machine. While on, the
 	 * figures in force (host_report 1.12): the machine's (figures), the web
-	 * server's user's ceiling, and each limited site's. The plane's own figure,
+	 * server's user's ceiling, and each limited site's, each with set_by
+	 * (host_report 1.14); while off, the same figures as what turning them on
+	 * brings back. The plane's own figure,
 	 * dropped_since_last, is kept when a stored report is read back.
 	 */
 	private static function host_report_outbound_limits($v) {
@@ -3447,9 +3451,8 @@ HTML;
 			'since'            => ($state === 'on') ? self::host_report_count($v['since'] ?? null) : null,
 			'web_user_dropped' => self::host_report_limit($v['web_user_dropped'] ?? null),
 		];
-		if ($state === 'on' && is_array($v['figures'] ?? null)) {
+		if (($state === 'on' || $state === 'off') && is_array($v['figures'] ?? null)) {
 			$out['figures'] = self::host_report_limit_figures($v['figures']);
-			$out['figures']['set_by'] = (($v['figures']['set_by'] ?? '') === 'plane') ? 'plane' : '';
 			$out['web_ceiling_mbit'] = self::host_report_limit($v['web_ceiling_mbit'] ?? null);
 			$out['sites'] = [];
 			foreach (array_slice((array)($v['sites'] ?? []), 0, self::HOST_REPORT_MAX_LIST, true) as $site => $f) {
@@ -3463,13 +3466,14 @@ HTML;
 		return $out;
 	}
 
-	/** One sender's outbound figures: a ceiling in Mbit/s (or none), and the three connection figures. */
+	/** One sender's outbound figures: a ceiling in Mbit/s (or none), the three connection figures, and who set them (plane or ''). */
 	private static function host_report_limit_figures(array $f) {
 		return [
 			'ceiling_mbit' => self::host_report_limit($f['ceiling_mbit'] ?? null),
 			'conn_rate'    => self::host_report_count($f['conn_rate'] ?? null),
 			'conn_burst'   => self::host_report_count($f['conn_burst'] ?? null),
 			'open_conns'   => self::host_report_count($f['open_conns'] ?? null),
+			'set_by'       => (($f['set_by'] ?? '') === 'plane') ? 'plane' : '',
 		];
 	}
 

@@ -3,6 +3,9 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.7 - outbound_set_by=plane: the management node set the site's own outbound
+#                figures (joinery-limits set --site --by=plane), so the site is told to ask
+#                whoever hosts it; kept across a rebuild with the figures.
 # Version: 1.5 - A site's own outbound figures (outbound_limits.sh, specs/node_outbound_and_transfer.md
 #                WP5): outbound_ceiling (Mbit/s or off), outbound_conn_rate, outbound_conn_burst and
 #                outbound_open_conns, each empty or absent for the machine's. Not run arguments: the
@@ -62,6 +65,7 @@
 #   outbound_ceiling=100 the site's own speed ceiling in Mbit/s, or off; absent: the machine's
 #   outbound_conn_rate=20, outbound_conn_burst=100, outbound_open_conns=256
 #                        the site's own connection figures; absent: the machine's
+#   outbound_set_by=plane        the management node set those figures; absent: root on the machine
 #
 # A test points /etc at a fixture with JOINERY_SITE_STATE_ROOT, and only an
 # unprivileged run may, the same rule as _site_state.sh.
@@ -251,6 +255,7 @@ run_spec_check_line() {  # LINE
         outbound_ceiling)   [[ -z "$v" || "$v" == off || "$v" =~ ^[1-9][0-9]{0,5}$ ]] ;;
         outbound_conn_rate|outbound_conn_burst|outbound_open_conns)
                       [[ -z "$v" || "$v" =~ ^[1-9][0-9]{0,6}$ ]] ;;
+        outbound_set_by)    [[ -z "$v" || "$v" == plane ]] ;;
         *)            false ;;
     esac
 }
@@ -328,7 +333,7 @@ run_spec_outbound_lines() {  # SITE
     local p
     p="$(run_spec_path "$1")" || return 1
     [[ -f "$p" ]] || return 0
-    grep -E '^outbound_(ceiling|conn_rate|conn_burst|open_conns)=.' "$p" || true
+    grep -E '^outbound_(ceiling|conn_rate|conn_burst|open_conns|set_by)=.' "$p" || true
 }
 
 # A spec file whole: every line one argument, and a format this script reads.

@@ -313,6 +313,11 @@ lim off > /dev/null 2>&1; rc=$?
 chk "off: exit 0, status off, the table removed" "$rc|$(status_key state)|$([ -f "$T/nft_table" ] && echo present || echo gone)" "0|off|gone"
 chk "off takes the ceiling out too" "$(ls "$T/links" | grep -c '^jifb')|$(ls "$T/tcf" | wc -l)" "0|0"
 chk "off keeps what else the host file holds" "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("enabled"), d.get("ceiling_mbit"))' "$R/etc/joinery/outbound_limits.json")" "False 300"
+chk "off, the status keeps the figures turning them on brings back (the machine's, each site's) and says site_set_by" \
+    "$(status_key ceiling_mbit)|$(status_key site_figures | tr ' ' '\n' | grep -c '^s1:300:')|$(grep -c '^site_set_by=' "$R/run/joinery/outbound_limits.status")|$(status_key since)" "300|1|1|"
+out="$(lim show 2>&1)"
+chk "show while off: the figures, marked not in force, and nothing called in force" \
+    "$(grep -c 'not in force now' <<< "$out")|$(grep -c -E ', in force |ceiling in force' <<< "$out")|$(grep -c 's1: ceiling 300 Mbit/s' <<< "$out")" "1|0|1"
 lim apply > /dev/null 2>&1
 chk "a later run (the timer) leaves them off" "$(status_key state)|$([ -f "$T/nft_table" ] && echo present || echo gone)" "off|gone"
 lim on > /dev/null 2>&1
@@ -426,6 +431,12 @@ echo "900" > "$T/own/s1"
 : > "$T/tc_calls"
 lim apply > /dev/null 2>&1
 chk "a site asking for more than root's figure gets root's: it can tighten, never loosen" "$(cls jifb1)|$(grep -c '^ceiling_mbit=200$' "$T/told/s1")" "rate 200mbit|1"
+echo "40" > "$T/own/s1"
+out="$(lim apply 2>&1)"
+chk "a run that moves only a ceiling (the table as it was) says what is in force, never unchanged" \
+    "$(grep -c 'outbound limits: speed ceiling now in force: s1 40 Mbit/s, s4 200 Mbit/s' <<< "$out")|$(grep -c 'outbound limits: unchanged' <<< "$out")" "1|0"
+out="$(lim apply 2>&1)"
+chk "and the run after it, changing nothing, says unchanged" "$(grep -c 'outbound limits: unchanged' <<< "$out")" "1"
 for junk in '30; reboot' '0' '-5' '2000000' 'thirty'; do
     printf '%s\n' "$junk" > "$T/own/s1"; : > "$T/tc_calls"
     lim apply > /dev/null 2>&1
@@ -478,6 +489,14 @@ chk "ceiling --site: the site's run spec carries it, through the run spec helper
     "$rc|$(grep -c '^outbound_ceiling=80$' "$R/etc/joinery/sites/s1/run_spec")|$(grep -c '^bridge=jsnet1$' "$R/etc/joinery/sites/s1/run_spec")|$(status_key site_figures | cut -d' ' -f1)" "0|1|1|s1:80:20:100:256"
 lim ceiling default --site=s1 > /dev/null 2>&1
 chk "default --site: the line is gone and the machine's figure holds" "$(grep -c '^outbound_' "$R/etc/joinery/sites/s1/run_spec")|$(status_key site_figures | cut -d' ' -f1)" "0|s1:400:20:100:256"
+out="$(lim ceiling 80 --site=s1 --by=plane 2>&1)"
+chk "a site's own set --by=plane: its run spec says so, the status names it, it alone is told the management node set them, and show says so" \
+    "$(grep -c '^outbound_set_by=plane$' "$R/etc/joinery/sites/s1/run_spec")|$(status_key site_set_by)|$(grep -c '^set_by=plane$' "$T/told/s1")|$(grep -c '^set_by=$' "$T/told/s4")|$(grep -c 's1: ceiling 80 Mbit/s.*(its own figures, set by the management node)' <<< "$out")" \
+    "1|s1|1|1|1"
+lim ceiling 90 --site=s1 > /dev/null 2>&1
+chk "the same site's own set by hand on the machine: no longer the management node's" \
+    "$(grep -c '^outbound_set_by=' "$R/etc/joinery/sites/s1/run_spec")|$(status_key site_set_by)|$(grep -c '^set_by=$' "$T/told/s1")" "0||1"
+lim ceiling default --site=s1 > /dev/null 2>&1
 for bad in "set" "set --ceiling=0" "set --ceiling=fast" "set --conn-rate=off" "set --open-conns=-3" "ceiling 50 --site=nosuch" "ceiling 50 --site=../etc" "apply --ceiling=50" "status --site=s1"; do
     lim $bad > /dev/null 2>&1; rc=$?
     chk "refused: joinery-limits $bad" "$rc" "1"
@@ -544,12 +563,27 @@ chk "--outbound-notice-gb reaches the site's first start: exported, carried into
 (
   export JOINERY_SITE_STATE_ROOT="$T/rs"; mkdir -p "$T/rs/etc/joinery/sites/x"
   . "$HELPER"
-  printf 'spec_version=2\nhostname=x\noutbound_ceiling=off\noutbound_conn_rate=40\n' | run_spec_write x && echo written
+  printf 'spec_version=2\nhostname=x\noutbound_ceiling=off\noutbound_conn_rate=40\noutbound_set_by=plane\n' | run_spec_write x && echo written
   printf 'spec_version=2\nhostname=x\noutbound_ceiling=0\n' | run_spec_write x 2>/dev/null || echo refused
   printf 'spec_version=2\nhostname=x\noutbound_open_conns=lots\n' | run_spec_write x 2>/dev/null || echo refused
+  printf 'spec_version=2\nhostname=x\noutbound_set_by=someone\n' | run_spec_write x 2>/dev/null || echo refused
   run_spec_outbound_lines x | tr '\n' ' '
 ) > "$T/rs_out"
-chk "the run spec takes a site's own figures, and refuses one that is not" "$(tr '\n' '|' < "$T/rs_out")" "written|refused|refused|outbound_ceiling=off outbound_conn_rate=40 "
+chk "the run spec takes a site's own figures and who set them, refuses one that is not, and keeps all of them for a rebuild" \
+    "$(tr '\n' '|' < "$T/rs_out")" "written|refused|refused|refused|outbound_ceiling=off outbound_conn_rate=40 outbound_set_by=plane "
+# install.sh site's own lines for the spec: the block that folds the figure flags in, run as written.
+ob_fold() {  # SPEC_OUTBOUND FLAGS...
+    ( set +u; SPEC_OUTBOUND="$1"; shift; OUTBOUND_FIGURE_ARGS=("$@")
+      eval "$(awk '/# The site.s own outbound figures \(outbound_limits.sh, WP5\)/,/# \(end of the limits check\)/' "$INSTALL" | sed 's/^    local .*//')"
+      printf '%s' "$SPEC_OUTBOUND" | sort | tr '\n' ' ' )
+}
+chk "install.sh site takes --outbound-set-by=plane on its command line" \
+    "$(grep -A1 -- '--outbound-ceiling=\*|--outbound-conn-rate=\*|--outbound-conn-burst=\*|--outbound-open-conns=\*|--outbound-set-by=plane)$' "$INSTALL" | grep -c 'consume_outbound_flag "\$1"')" "1"
+chk "install.sh site --outbound-set-by=plane writes outbound_set_by=plane, a line the run spec takes" \
+    "$(ob_fold 'outbound_conn_rate=40' --ceiling=50 --by=plane)" "outbound_ceiling=50 outbound_conn_rate=40 outbound_set_by=plane "
+chk "a figure given by hand drops the management node's mark; a rebuild giving none keeps it" \
+    "$(ob_fold $'outbound_ceiling=50\noutbound_set_by=plane' --ceiling=60)|$(ob_fold $'outbound_ceiling=50\noutbound_set_by=plane')" \
+    "outbound_ceiling=60 |outbound_ceiling=50 outbound_set_by=plane "
 
 echo "=== The run spec helper's refresh ==="
 : > "$T/systemctl_calls"
@@ -582,7 +616,7 @@ chk "install.sh site brings a new container under the limits once it starts" \
 chk "the move script refreshes once every move is done" \
     "$(grep -B3 '^exit "\$status"$' "$ROOT/maintenance_scripts/sysadmin_tools/move_site_to_own_network.sh" | grep -c '^run_spec_limits_refresh$')" "1"
 chk "remove_account.sh refreshes after the run spec is gone" \
-    "$(awk '/for mark in held suspended run_spec; do/ { m = 1 } /=== Removing Docker site ===/ { d = 1 } d && /^    clear_site_marks$/ { f = 1 } m && f && /systemctl start joinery-limits.service/ { print "after"; exit }' "$ROOT/maintenance_scripts/sysadmin_tools/remove_account.sh")" "after"
+    "$(awk '/for mark in held suspended run_spec[ ;]/ { m = 1 } /=== Removing Docker site ===/ { d = 1 } d && /^    clear_site_marks$/ { f = 1 } m && f && /systemctl start joinery-limits.service/ { print "after"; exit }' "$ROOT/maintenance_scripts/sysadmin_tools/remove_account.sh")" "after"
 
 echo
 echo "outbound_limits gate: $passed passed, $failed failed"

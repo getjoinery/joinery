@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.102 - install_node refuses a one-letter site name: Docker takes no such container name
  * @version 1.101 - build_outbound_limits: turn a machine's outbound limits on or off, or set their figures,
  *                  the machine's or one container site's (agent 1.62.0, node_outbound_and_transfer WP5)
  * @version 1.100 - build_decommission_node refuses a container another live site row on the same
@@ -4742,9 +4743,10 @@ class JobCommandBuilder {
 			$copy_flags = ' --dormant --copy-of=' . $copy_of . ' --copy-of-key=' . escapeshellarg($copy_key);
 		}
 		// The site name becomes a container name, a directory and a database
-		// name on the target, so it is a shape, not an escaped string.
-		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $sitename)) {
-			throw new Exception("install_node: site name '{$sitename}' is not a plain slug (lowercase letters, digits, _ and -).");
+		// name on the target, so it is a shape, not an escaped string; install.sh
+		// refuses the same shape (Docker takes no one-letter container name).
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{1,49}$/', $sitename)) {
+			throw new Exception("install_node: site name '{$sitename}' is not a plain slug (2 to 50 lowercase letters, digits, _ and -).");
 		}
 		if ($mode !== 'bare') {
 			if ($domain === '' || !preg_match('/^[a-z0-9.-]+$/', $domain)) {
