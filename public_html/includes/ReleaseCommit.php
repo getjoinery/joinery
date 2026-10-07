@@ -23,10 +23,21 @@
  * For the agent repository every untracked, un-ignored file blocks: all of it
  * is source.
  *
+ * What SHIPS from the joinery repository is narrower than what sits on disk:
+ * a file git knows (tracked, or untracked and not ignored - the second kind
+ * is a blocker above, so at build time it is always the first), or one of the
+ * few files publish builds itself (D2: the agent bundle, the relay sealer
+ * binaries, the license copies, each release statement). An ignored file is
+ * never shipped, whatever directory it sits in: a screenshot left in
+ * public_html, a stray build output beside its source, a local test corpus.
+ * knownFiles() and joineryFileShips() are that rule; the manifest builder,
+ * the component tree hash and the archive listing all read it.
+ *
  * "On the remote" means the commit is an ancestor of origin/main after a fetch.
  * Nothing here commits, pushes or stages: the owner does that, with the command
  * this class prints (D-E).
  *
+ * @version 1.1 - knownFiles() and joineryFileShips(): only a file git knows, or one publish builds, ships
  * @version 1.0
  */
 
@@ -37,6 +48,17 @@ class ReleaseCommit {
 
 	/** Repository-root-relative files that ship from the joinery repository root. */
 	const JOINERY_SHIP_FILES = array('LICENSE.md', 'LICENSE-BUSINESS.md');
+
+	/**
+	 * Repository-relative directories whose files publish builds and ships
+	 * though no commit holds them (spec release_transparency D2): the agent
+	 * bundle and the relay sealer binaries. Each is checked by the release
+	 * statement's own record of it, not by the commit.
+	 */
+	const JOINERY_GENERATED_DIRS = array('public_html/agent_dist/', 'public_html/plugins/mailbox/provisioning/bin/');
+
+	/** Repository-relative files publish writes into the core: the root license files, copied in. */
+	const JOINERY_GENERATED_FILES = array('public_html/LICENSE.md', 'public_html/LICENSE-BUSINESS.md');
 
 	/**
 	 * Run git in a repository. The repository is read with safe.directory set,
@@ -163,6 +185,49 @@ class ReleaseCommit {
 		}
 		sort($blockers);
 		return $blockers;
+	}
+
+	/**
+	 * Every file git does not ignore: the tracked files, and untracked ones no
+	 * ignore rule covers. Keys are repository-relative paths.
+	 *
+	 * @return array<string,bool>|null null when git failed
+	 */
+	public static function knownFiles($repo_root) {
+		$r = self::git($repo_root, array('ls-files', '-z', '--cached', '--others', '--exclude-standard'));
+		if ($r['exit'] !== 0) {
+			return null;
+		}
+		// exec() splits on newlines; a path may hold one, so the lines are
+		// joined back before splitting on the NULs git separates paths with.
+		$known = array();
+		foreach (explode("\0", implode("\n", $r['out'])) as $path) {
+			if ($path !== '') {
+				$known[$path] = true;
+			}
+		}
+		return $known;
+	}
+
+	/**
+	 * Whether a file ships from the joinery repository: git knows it, or
+	 * publish builds it. Pure, so the rule can be asserted directly.
+	 *
+	 * @param string $rel   repository-relative path (equally, relative to a staged core)
+	 * @param array  $known from knownFiles()
+	 */
+	public static function joineryFileShips($rel, array $known) {
+		$rel = ltrim(str_replace('\\', '/', $rel), '/');
+		if (isset($known[$rel]) || in_array($rel, self::JOINERY_GENERATED_FILES, true)
+			|| basename($rel) === PackageSignature::STATEMENT_NAME) {
+			return true;
+		}
+		foreach (self::JOINERY_GENERATED_DIRS as $dir) {
+			if (strpos($rel, $dir) === 0) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** The files that stop the agent repository from being a release: all of them. */

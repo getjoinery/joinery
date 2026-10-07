@@ -9,12 +9,13 @@ Globalvars_site.php
 .claude/
 .playwright-mcp/
 *.bak
-*.png
 *.log
 
-# Images that are part of the source, not uploaded content: the shipped UI
-# icons and the screenshots the docs embed.
-!/assets/images/**
+# Screenshots taken while working land at the top of public_html and are never
+# source. Images anywhere below it (theme and plugin assets) are source and are
+# committed: publish ships only files git knows.
+/*.png
+
 /cache
 /theme-sources
 

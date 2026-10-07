@@ -20,12 +20,16 @@
  * gate lands, this check is the one that must be flipped — the gate should
  * arrive as an intentional behavior change, not an accident.
  *
- * Declared tier db (not safe): a download regenerates the server-side
- * archive cache under static_files/ when the source tree is newer.
+ * Only publish builds an archive: a version with none is a 404, and asking
+ * never cuts one from the live directory. The fixture's archive is written
+ * here and removed with it.
+ *
+ * Declared tier db (not safe): it writes a fixture theme into the live tree.
  *
  * Run: php plugins/server_manager/tests/plugin_distribution_anonymous_test.php
  *
- * @version 1.2.0
+ * @version 1.3.0 - a download serves only the published archive; the fixture archive is cleaned from the
+ *                 directory the endpoint reads, not the static_files_dir setting
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -98,10 +102,10 @@ if (!is_dir($fixture_dir)) {
 if ($fixture_made) {
 	// Remove the fixture however this test ends — a stray theme directory
 	// would show up on the admin Themes page long after the run, and the
-	// download below leaves a cached archive that stays fetchable on its own
-	// once the directory is gone.
-	$fixture_archive = Globalvars::get_instance()->get_setting('static_files_dir')
-		. '/themes/audience_fixture_theme-1.0.0.tar.gz';
+	// archive written below would stay fetchable on its own once the
+	// directory is gone. The endpoint reads archives from the site root's
+	// static_files/, so that is where it goes.
+	$fixture_archive = PathHelper::getSiteRoot() . '/static_files/themes/audience_fixture_theme-1.0.0.tar.gz';
 	register_shutdown_function(function () use ($fixture_dir, $fixture_manifest, $fixture_archive) {
 		@unlink($fixture_manifest);
 		@rmdir($fixture_dir);
@@ -166,12 +170,26 @@ if ($fixture_made) {
 		check(true, 'no root node named on this site — the origin rule is inert here');
 	}
 
-	// Listing visibility is not access control: the download stays open by
-	// name, which is what clone/restore reconciliation depends on.
+	// Only publish builds an archive. The fixture has never been published,
+	// so it is not served, and asking must not tar the live directory into
+	// static_files/ under its version's name.
+	@unlink($fixture_archive);
+	$r = harness_request('GET', '/admin/server_manager/publish_theme?download=audience_fixture_theme',
+		array('accept' => null, 'timeout' => 120));
+	check($r['status'] === 404, 'a version with no published archive is not served', 'status ' . $r['status']);
+	check(!is_file($fixture_archive), 'and asking does not cut one from the live directory');
+
+	// Listing visibility is not access control: once published, the download
+	// stays open by name, which is what clone/restore reconciliation depends on.
+	exec(sprintf('tar -czf %s -C %s audience_fixture_theme 2>&1', escapeshellarg($fixture_archive),
+		escapeshellarg(dirname($fixture_dir))), $tar_out, $tar_exit);
+	check($tar_exit === 0 && is_file($fixture_archive), 'fixture archive written where publish puts archives');
+	$published_bytes = (string)@file_get_contents($fixture_archive);
 	$r = harness_request('GET', '/admin/server_manager/publish_theme?download=audience_fixture_theme',
 		array('accept' => null, 'timeout' => 120));
 	check($r['status'] === 200, 'an unlisted theme still downloads by name (deliberate)',
 		'status ' . $r['status']);
+	check($r['body'] === $published_bytes, 'and what is served is the published archive, byte for byte');
 }
 
 // ---------------------------------------------------------------------------

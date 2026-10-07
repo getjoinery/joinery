@@ -149,7 +149,15 @@ anything it:
 4. Records both commits on the release row (`upg_core_commit`,
    `upg_agent_commit`).
 
-Every byte in an archive is then derivable from those commits:
+Every byte in an archive is then derivable from those commits. What ships is
+a file git knows or one publish builds itself (`ReleaseCommit::joineryFileShips()`):
+the agent bundle under `public_html/agent_dist/`, the relay sealer binaries
+under the mailbox plugin's `provisioning/bin/`, the license files copied into
+`public_html/`, and each release statement. A file git ignores never ships,
+wherever it sits: the manifests list only shipping files, the component tree
+hashes that decide version bumps read only them, and every archive is cut
+from its own manifest's listing (`TreeManifestPublisher::archiveMembers()`)
+rather than from a directory. The rest is generated deterministically:
 
 - **Install SQL** — `create_install_sql.php` writes no timestamp, passes a
   fixed `--restrict-key` to `pg_dump`, seeds the admin row with the locked
@@ -174,8 +182,8 @@ listed, and `agent_dist/manifest.json` carries the three lists
 (`release_keys`, `statement_keys`, `log_keys`) beside `signing_public_key`, so
 a rotation is a commit diff.
 
-Tests: `tests/unit/release_commit_test.php` (the clean-tree rule, the
-toolchain pin, the key lists) and `tests/core/install_sql_deterministic_test.php`
+Tests: `tests/unit/release_commit_test.php` (the clean-tree rule, what
+ships and the archive cut from its manifest, the toolchain pin, the key lists) and `tests/core/install_sql_deterministic_test.php`
 (two runs of the generator, byte-identical).
 
 #### The release statement and the public log
@@ -496,28 +504,22 @@ These conditions stop a publish before anything is written — no VERSION change
 
 ### publish_theme.php
 
-**Location:** `plugins/server_manager/includes/publish_theme.php`
-**Access:** Requires the Server Manager plugin to be active. Superadmin only (permission level 10).
+**Location:** `plugins/server_manager/includes/publish_theme.php`, served at `/admin/server_manager/publish_theme` (and the legacy `utils/publish_theme.php`). No session is asked for: the catalog and the downloads are public.
 
 ```
-# Publish a single theme
-https://yoursite.com/admin/server_manager/publish_theme?type=theme&name=falcon&version=1.0.0
-
-# Publish a single plugin
-https://yoursite.com/admin/server_manager/publish_theme?type=plugin&name=bookings&version=2.1.0
-
-# List available themes (used by marketplace and upgrade.php)
+# Catalog, read by the marketplace and upgrade.php (&site=DOMAIN scopes audience-limited entries)
 https://yoursite.com/admin/server_manager/publish_theme?list=themes
+https://yoursite.com/admin/server_manager/publish_theme?list=plugins
+
+# The published archive of a theme or plugin, at the version its live manifest names
+https://yoursite.com/admin/server_manager/publish_theme?download=falcon
+https://yoursite.com/admin/server_manager/publish_theme?download=bookings&type=plugin
+
+# Redirect to the newest core archive
+https://yoursite.com/admin/server_manager/publish_theme?core
 ```
 
-> **Note:** The legacy location `utils/publish_theme.php` still exists for backward compatibility during the Phase 1 transition.
-
-**Features:**
-- Publishes individual themes or plugins independently of core
-- Allows different versioning for themes/plugins vs core
-- Useful for third-party theme/plugin distribution
-- Validates theme.json/plugin.json exists before packaging
-- Serves catalog listings for the marketplace and `upgrade.php`
+A download serves the archive `publish_upgrade.php` wrote to `static_files/themes/` or `static_files/plugins/`, byte for byte. Only publish builds an archive; a version with no published archive is a 404, and the endpoint never cuts one from the live directory.
 
 ---
 
