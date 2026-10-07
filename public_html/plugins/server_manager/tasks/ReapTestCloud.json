@@ -1,0 +1,7 @@
+{
+  "name": "Reap Test Cloud",
+  "description": "Every hour, deletes servers and unattached storage volumes older than the age limit (setting, default 24 hours) on the cloud account this site's operator token reaches. It runs only when that account's company name is exactly \"Joinery test (disposable)\", read from the provider on every run; on any other account it deletes nothing and Reconcile Incidents opens an incident naming the account it found. Anything tagged keep at the provider is spared, and so is a server at a live managed node's address (listed as held). Turn it on by hand, on a site whose operator token is for a test-only account; Provisioning Setup previews what the next run would delete.",
+  "activate_on_install": false,
+  "default_frequency": "hourly",
+  "config_fields": {}
+}

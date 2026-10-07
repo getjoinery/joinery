@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.26",
+  "version": "1.30.27",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -537,6 +537,20 @@
       "type": "text",
       "label": "Backup storage referral URL",
       "helptext": "Where a customer who outgrows its backup storage opens their own bucket. Shown on their banner only when that allowance is near."
+    },
+    {
+      "name": "server_manager_test_cloud_max_age_hours",
+      "default": "24",
+      "group": "provisioning",
+      "label": "Test-account cleanup: age limit (hours)",
+      "type": "number",
+      "helptext": "The Reap Test Cloud task deletes test servers and unattached volumes older than this. It runs only on a cloud account whose company name is \"Joinery test (disposable)\"."
+    },
+    {
+      "name": "server_manager_test_cloud_cleanup",
+      "default": "",
+      "managed": true,
+      "helptext": "The test-account cleanup's last outcome, as JSON. Written by the Reap Test Cloud task; read by Provisioning Setup and the test-cloud-cleanup incident."
     },
     {
       "name": "server_manager_release_log_watch",

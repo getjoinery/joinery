@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.49 - adopt_cloud_server: record the running cloud server a joined node runs on
+ *                 (test_cloud_account_and_prod_management WP9)
  * @version 1.48 - copy_new_server passes the ticked root SSH keys and the fingerprints shown (specs/site_copy.md WP15)
  * @version 1.47 - site_limits: change a site's memory, CPU ceiling and disk allowance on this host
  *                 (multi_tenant_docker_hosts WP6)
@@ -170,6 +172,7 @@ class NodeDetailActions {
 		'run_plugin_installers'    => 'overview',
 		'restart_agent'            => 'api_keys',
 		'set_reverse_dns'          => 'overview',
+		'adopt_cloud_server'       => 'overview',
 		'save_api_credential'      => 'api_keys',
 		'approve_join'             => 'api_keys',
 		'reject_join'              => 'api_keys',
@@ -726,6 +729,18 @@ class NodeDetailActions {
 					$session->save_message(new DisplayMessage(
 						$msg, 'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 					));
+				}
+				return $base_url . '&tab=overview';
+			}
+
+			case 'adopt_cloud_server': {
+				try {
+					$provision = CloudServerAdoption::adopt($node, (int)$uid, trim((string)($_POST['expect_instance'] ?? '')));
+					self::ok($session, $page_regex, 'Adopted the server ' . $provision->get('cvp_instance_id')
+						. ' (' . $provision->get('cvp_instance_ip') . ', ' . $provision->get('cvp_region') . ') as provision #'
+						. (int)$provision->key . '. Reverse DNS and an IP-swap switch-over can reach it from here.');
+				} catch (CloudServerAdoptionException $e) {
+					self::fail($session, $page_regex, 'Not adopted. ' . $e->getMessage());
 				}
 				return $base_url . '&tab=overview';
 			}

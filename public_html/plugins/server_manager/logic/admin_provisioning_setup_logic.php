@@ -6,6 +6,8 @@
  * POST actions delegate to ProvisioningSetup and redirect back with a
  * session message; GET renders the live status of every checklist item.
  *
+ * @version 1.8 - the test-account cleanup card: its task, last run, scopes, and a preview on request
+ *   (test_cloud_account_and_prod_management WP3)
  * @version 1.7 - saving the hosted card records the operator token's scopes and names any it lacks
  * @version 1.6 - saving the hosted card reads the operator token's account name (server_manager_operator_cloud_account)
  * @version 1.5 - credentials go through FormWriterV2Base::process_secretinput(); the promotion code's
@@ -152,7 +154,31 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 		return LogicResult::redirect($page_url);
 	}
 
+	// The test-account cleanup's preview asks the provider, so only on request.
+	$cleanup_preview = null;
+	if (!empty($input['cleanup_preview'])) {
+		$driver = TestCloudCleanup::driver();
+		if ($driver === null) {
+			$cleanup_preview = array('error' => 'No operator cloud token is set on this site.');
+		} else {
+			try {
+				$cleanup_preview = TestCloudCleanup::plan($driver,
+					MachineTransferWatch::node_addresses(array('MachineTransferWatch', 'resolve')),
+					time(), TestCloudCleanup::max_age_hours());
+			} catch (CloudComputeException $e) {
+				$cleanup_preview = array('error' => 'The account could not be listed: ' . $e->getMessage());
+			}
+		}
+	}
+
 	return LogicResult::render(array(
 		'status' => ProvisioningSetup::status(),
+		'cleanup' => array(
+			'task'           => TestCloudCleanup::taskRow(),
+			'state'          => TestCloudCleanup::state(),
+			'max_age_hours'  => TestCloudCleanup::max_age_hours(),
+			'missing_scopes' => TestCloudCleanup::missing_scopes(),
+			'preview'        => $cleanup_preview,
+		),
 	));
 }

@@ -7,6 +7,7 @@
  * item shows its live state with a one-click action where the platform can
  * do the work itself.
  *
+ * @version 1.10 - the test-account cleanup card (test_cloud_account_and_prod_management WP3)
  * @version 1.9 - the hosted card names the operator token's missing scopes (ProvisioningSetup::hostedStatus)
  * @version 1.8 - the operator token's helptext names ips:read_write, for a site copy's switch by IP swap
  * @version 1.7 - the operator token's helptext names the scopes a server handover needs
@@ -35,6 +36,7 @@ $shared = $status['shared_hosts'];
 $agent = $status['agent'];
 $domains = $status['domains'];
 $hosted = $status['hosted'];
+$cleanup = $page_vars['cleanup'];
 
 function smps_badge(bool $ok, string $ok_label = 'OK', string $bad_label = 'Missing', string $bad_color = 'warning'): string {
 	return $ok
@@ -446,6 +448,101 @@ and nothing is attached to the product by hand. The reference you pick decides
 </ul>
 <p>For <strong>shared-host</strong> products, attach the domain question as a
 requirement instead.</p>
+
+<hr>
+
+<h4>11. Test-account cleanup</h4>
+<p>Only for a site whose operator token is for a cloud account kept for testing. Every hour the
+<strong>Reap Test Cloud</strong> task deletes servers and unattached volumes older than
+<?= (int)$cleanup['max_age_hours'] ?> hours (setting <code><?= htmlspecialchars(TestCloudCleanup::MAX_AGE_SETTING) ?></code>).
+It runs only when the account's company name, in the provider's account settings, is exactly
+<code><?= htmlspecialchars(TestCloudCleanup::COMPANY) ?></code>; on any other account it deletes nothing and opens an
+incident. Tag a server or volume <code><?= htmlspecialchars(TestCloudCleanup::KEEP_TAG) ?></code> at the provider to
+spare it. A server at a managed node's address is never deleted.</p>
+<table class="table table-sm svm-status-table">
+	<tr>
+		<th>Task</th>
+		<td>
+			<?php if ($cleanup['task'] && $cleanup['task']['active']): ?>
+				<?= smps_badge(true, 'On') ?>
+			<?php else: ?>
+				<?= smps_badge(false, '', 'Off', 'secondary') ?> — after a preview below, turn on Reap Test Cloud under
+				<a href="/admin/admin_scheduled_tasks">Scheduled Tasks</a>.
+			<?php endif; ?>
+		</td>
+	</tr>
+	<?php if ($cleanup['missing_scopes']): ?>
+	<tr>
+		<th>Cloud token's scopes</th>
+		<td>
+			<?= smps_badge(false, '', 'Missing', 'warning') ?> — a run needs these as well:
+			<ul>
+			<?php foreach ($cleanup['missing_scopes'] as $scope => $purpose): ?>
+				<li><code><?= htmlspecialchars($scope) ?></code>: <?= htmlspecialchars($purpose) ?></li>
+			<?php endforeach; ?>
+			</ul>
+		</td>
+	</tr>
+	<?php endif; ?>
+	<tr>
+		<th>Last run</th>
+		<td>
+			<?php $cs = $cleanup['state']; ?>
+			<?php if (!$cs): ?>
+				None yet.
+			<?php elseif ($cs['outcome'] === 'ran'): ?>
+				<?= htmlspecialchars($cs['time']) ?> UTC on <strong><?= htmlspecialchars($cs['account']) ?></strong>:
+				deleted <?= count($cs['deleted_instances']) ?> server(s)<?= $cs['deleted_instances'] ? ' (' . htmlspecialchars(implode(', ', $cs['deleted_instances'])) . ')' : '' ?>
+				and <?= count($cs['deleted_volumes']) ?> volume(s)<?= $cs['deleted_volumes'] ? ' (' . htmlspecialchars(implode(', ', $cs['deleted_volumes'])) . ')' : '' ?>;
+				<?= (int)$cs['kept'] ?> kept by tag.
+				<?php if ($cs['held']): ?><br>Held, at a managed node's address: <?= htmlspecialchars(implode('; ', $cs['held'])) ?>.<?php endif; ?>
+				<?php if ($cs['failures']): ?><br><span class="text-danger">Failed: <?= htmlspecialchars(implode('; ', $cs['failures'])) ?></span><?php endif; ?>
+			<?php else: ?>
+				<?= smps_badge(false, '', $cs['outcome'] === 'refused' ? 'Refused' : 'Failed', 'danger') ?>
+				<?= htmlspecialchars($cs['time']) ?> UTC — nothing deleted. <?= htmlspecialchars($cs['reason']) ?>
+			<?php endif; ?>
+		</td>
+	</tr>
+</table>
+<?php $cp = $cleanup['preview']; ?>
+<?php if ($cp === null): ?>
+	<p><a class="btn btn-sm btn-outline-secondary" href="/admin/server_manager/provisioning_setup?cleanup_preview=1#cleanup">Preview the next run</a>
+	— asks the provider; deletes nothing.</p>
+<?php else: ?>
+	<div id="cleanup" class="mb-3">
+	<?php if (isset($cp['error'])): ?>
+		<?= smps_badge(false, '', 'Could not preview', 'danger') ?> <?= htmlspecialchars($cp['error']) ?>
+	<?php elseif (!$cp['safe']): ?>
+		<?= smps_badge(false, '', 'Safety catch fails', 'danger') ?> <?= htmlspecialchars($cp['reason']) ?>
+	<?php else: ?>
+		<p><?= smps_badge(true, 'Safety catch passes') ?> Account <strong><?= htmlspecialchars($cp['account']) ?></strong>.
+		The next run would delete <?= count($cp['instances']) ?> server(s) and <?= count($cp['volumes']) ?> volume(s);
+		<?= (int)$cp['kept'] ?> past the age are kept by tag.</p>
+		<?php if ($cp['instances'] || $cp['volumes'] || $cp['held']): ?>
+		<table class="table table-sm">
+			<thead><tr><th>Would</th><th>What</th><th>Label</th><th>Age</th><th>Addresses</th></tr></thead>
+			<tbody>
+			<?php foreach ($cp['instances'] as $i): ?>
+				<tr><td>Delete</td><td>Server <?= htmlspecialchars($i['id']) ?></td><td><?= htmlspecialchars($i['label']) ?></td>
+					<td><?= (int)$i['age_hours'] ?> h</td><td><?= htmlspecialchars(implode(', ', $i['addresses'])) ?></td></tr>
+			<?php endforeach; ?>
+			<?php foreach ($cp['volumes'] as $v): ?>
+				<tr><td>Delete</td><td>Volume <?= htmlspecialchars($v['id']) ?></td><td><?= htmlspecialchars($v['label']) ?></td>
+					<td><?= (int)$v['age_hours'] ?> h</td><td>unattached</td></tr>
+			<?php endforeach; ?>
+			<?php foreach ($cp['held'] as $h): ?>
+				<tr><td>Hold</td><td>Server <?= htmlspecialchars($h['id']) ?></td><td><?= htmlspecialchars($h['label']) ?></td>
+					<td><?= (int)$h['age_hours'] ?> h</td><td><?= htmlspecialchars(implode(', ', $h['addresses'])) ?> — node #<?= htmlspecialchars(implode(', #', $h['node_ids'])) ?></td></tr>
+			<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php endif; ?>
+		<?php if ($cp['volume_error'] !== ''): ?>
+			<p class="text-danger">Volumes could not be listed: <?= htmlspecialchars($cp['volume_error']) ?></p>
+		<?php endif; ?>
+	<?php endif; ?>
+	</div>
+<?php endif; ?>
 
 <?php
 $page->end_box();

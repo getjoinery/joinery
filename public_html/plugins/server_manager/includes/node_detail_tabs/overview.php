@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.52 - a node with no record of its cloud server has Adopt cloud server where Reverse DNS would be
+ *                (test_cloud_account_and_prod_management WP9)
  * @version 1.51 - a Docker host's Site containers has Change a site's limits (memory, CPU ceiling, disk
  *                 allowance) where its agent has site_limits (multi_tenant_docker_hosts WP6); a host with a
  *                 disk pool shows it as a gauge of its own, Docker disk pool (reviewer2 B2)
@@ -2002,6 +2004,42 @@
 			$fw_rdns->end_form();
 			$page->end_box();
 		}
+	} elseif (!CloudServerAdoption::refusals($node)) {
+		// ── Cloud server panel: a node that joined from elsewhere has no record
+		// of its server, so reverse DNS and an IP swap cannot reach it. ──
+		// The daily transfer watch's match is shown when it has one; the
+		// adoption itself asks the provider again and refuses a different answer.
+		$adopt_seen = null;
+		if ((int)$node->get('mgn_mtr_machine_transfer_id')) {
+			$adopt_seen = new MachineTransfer((int)$node->get('mgn_mtr_machine_transfer_id'), TRUE);
+			if (!$adopt_seen->key || (string)$adopt_seen->get('mtr_provider') !== 'linode') {
+				$adopt_seen = null;
+			}
+		}
+		$page->begin_box(['title' => 'Cloud server']);
+		echo '<p class="text-muted small mb-2">This management node has no record of the cloud server this node runs on, so its '
+			. 'reverse DNS and an IP-swap switch-over are not available here. Adopting the server records it, when it is on '
+			. 'the operator\'s cloud account or a connected one. Nothing on the server changes.</p>';
+		if ($adopt_seen) {
+			echo '<p class="small mb-2">The daily transfer watch matched it to <strong>' . htmlspecialchars((string)$adopt_seen->get('mtr_label'))
+				. '</strong> (instance ' . htmlspecialchars((string)$adopt_seen->get('mtr_instance_id')) . ', '
+				. htmlspecialchars((string)$adopt_seen->get('mtr_region')) . ', '
+				. htmlspecialchars(CloudServerAdoption::account_name((string)$adopt_seen->get('mtr_account'))) . ').</p>';
+			$adopt_question = 'Adopt ' . $adopt_seen->get('mtr_label') . ' (instance ' . $adopt_seen->get('mtr_instance_id')
+				. ') as this node\'s cloud server? The provider is asked again first; a different answer adopts nothing.';
+		} else {
+			$adopt_question = 'Find this node\'s server by its address on the cloud accounts this management node holds, and adopt it '
+				. 'if exactly one matches?';
+		}
+		?>
+		<form method="post" action="<?php echo $base_url; ?>&amp;tab=overview" id="adopt_cloud_server_form" style="margin:0;">
+			<input type="hidden" name="action" value="adopt_cloud_server">
+			<input type="hidden" name="expect_instance" value="<?php echo htmlspecialchars($adopt_seen ? (string)$adopt_seen->get('mtr_instance_id') : ''); ?>">
+			<?php echo SmAdminCsrf::field(); ?>
+			<button type="button" class="btn btn-sm btn-outline-primary" onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode($adopt_question), ENT_QUOTES); ?>, function(){ document.getElementById('adopt_cloud_server_form').submit(); })">Adopt cloud server</button>
+		</form>
+		<?php
+		$page->end_box();
 	}
 
 	// Recent jobs for this node
