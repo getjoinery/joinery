@@ -49,6 +49,8 @@
  * here is that rule. vendor/ is excluded at the site root only: a plugin's
  * Composer tree ships with the plugin and is listed (specs/package_signing.md WP0).
  *
+ * @version 1.5 - restamp(): put new files (the release statement) into a signed manifest and sign it
+ *                again, without walking the tree; render() is the one body format
  * @version 1.4 - signsItsOwnTree(): authority()'s answer without minting a key, for a reader
  * @version 1.3 - republish_artifact(): a site that republishes what it received stages each artifact from
  *                exactly the files its received manifest lists, each hash-checked as it is copied
@@ -345,12 +347,59 @@ class TreeManifestPublisher {
 			$entries[$rel] = $hash;
 		}
 
-		ksort($entries);
+		return self::render($entries);
+	}
 
+	/** The manifest body for path => sha256 entries: the header, then one line per file, sorted by path. */
+	public static function render(array $entries) {
+		ksort($entries);
 		$body = "# Joinery release manifest — sha256 of every shipped file, paths relative to the site root.\n"
 		      . "# Signed with the release key; the agent verifies against the key compiled into its binary.\n";
 		foreach ($entries as $rel => $hash) {
 			$body .= $hash . '  ' . $rel . "\n";
+		}
+		return $body;
+	}
+
+	/**
+	 * List files in the signed manifest already in $dir, and sign it again:
+	 * each named file's line is added, or replaced when the manifest already
+	 * lists that path. Every other line is kept as it is, so the result is
+	 * what write() would produce with those files present. The tree is not
+	 * walked again; that is the point, since what was already listed is what
+	 * the release statement records.
+	 *
+	 * @param string $dir    Directory holding RELEASE_MANIFEST(.sig)
+	 * @param array  $keys   From AgentDistPublisher::ensureKeys()
+	 * @param array  $files  site-root-relative path => absolute path of the file on disk
+	 * @return string the new manifest body
+	 * @throws Exception when the manifest is unreadable or the signature does not verify
+	 */
+	public static function restamp($dir, array $keys, array $files) {
+		$manifest_path = rtrim($dir, '/') . '/' . self::MANIFEST_NAME;
+		$entries = PackageSignature::parse((string)@file_get_contents($manifest_path));
+		if (!is_array($entries) || $entries === array()) {
+			throw new Exception('there is no manifest at ' . $manifest_path . ' to add files to');
+		}
+		foreach ($files as $rel => $abs) {
+			$rel = ltrim(str_replace('\\', '/', (string)$rel), '/');
+			if (self::excluded($rel)) {
+				throw new Exception($rel . ' is on a path no manifest lists, so it cannot be added to one');
+			}
+			$hash = is_file($abs) ? hash_file('sha256', $abs) : false;
+			if ($hash === false) {
+				throw new Exception('could not hash ' . $rel);
+			}
+			$entries[$rel] = $hash;
+		}
+		$body = self::render($entries);
+		$signature = sodium_crypto_sign_detached($body, $keys['secret']);
+		if (!sodium_crypto_sign_verify_detached($signature, $body, $keys['public'])) {
+			throw new Exception('the tree manifest signature does not verify against its own public key');
+		}
+		if (file_put_contents($manifest_path, $body) === false
+			|| file_put_contents(rtrim($dir, '/') . '/' . self::SIGNATURE_NAME, base64_encode($signature) . "\n") === false) {
+			throw new Exception('could not write ' . $manifest_path);
 		}
 		return $body;
 	}

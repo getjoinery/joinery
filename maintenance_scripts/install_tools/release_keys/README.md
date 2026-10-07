@@ -16,9 +16,13 @@ log/<origin>.pub     one checkpoint key per transparency-log origin, base64
 
 The publisher refuses to build when its own signing key is not listed under
 `release/`, and refuses to log a statement when its statement key is not
-listed under `statement/`. It refuses to log at all while Sigstore's trusted
+listed under `statement/`. The first logged publish mints the statement key
+(`config/release_statement_key`) and writes its public half here as
+`statement/joinery-<id>.pub`, to be committed with that release; after that a
+statement key is only ever added by hand, and signs only once a release
+logged under the old key has installed it. It refuses to log at all while Sigstore's trusted
 root gives a log a different key than `log/` pins, or lists a future log whose
 key is not here yet: every node must hold a log's key before the first release
 logged on it. `agent_dist/manifest.json` carries these lists (`release_keys`,
-`log_keys`), and a node's `config/release_verify_keys` and
-`config/transparency_log_keys` are derived from them and from nothing else.
+`statement_keys`, `log_keys`), and a node's key files are derived from them
+and from nothing else.

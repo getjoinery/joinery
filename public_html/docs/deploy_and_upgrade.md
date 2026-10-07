@@ -167,15 +167,95 @@ Every byte in an archive is then derivable from those commits:
   tarball.
 
 **Release keys live in the repository.** `maintenance_scripts/install_tools/release_keys/release/*.pub`
-holds every Ed25519 release public key, and `release_keys/log/<origin>.pub`
-every transparency-log checkpoint key. The publisher refuses to sign with a
-key not listed under `release/`, and `agent_dist/manifest.json` carries both
-lists (`release_keys`, `log_keys`) beside `signing_public_key`, so a rotation
-is a commit diff.
+holds every Ed25519 release public key, `release_keys/statement/*.pub` every
+P-256 release statement key, and `release_keys/log/<origin>.pub` every
+transparency-log checkpoint key. The publisher refuses to sign with a key not
+listed, and `agent_dist/manifest.json` carries the three lists
+(`release_keys`, `statement_keys`, `log_keys`) beside `signing_public_key`, so
+a rotation is a commit diff.
 
 Tests: `tests/unit/release_commit_test.php` (the clean-tree rule, the
 toolchain pin, the key lists) and `tests/core/install_sql_deterministic_test.php`
 (two runs of the generator, byte-identical).
+
+#### The release statement and the public log
+
+Every release the publishing site authors is written to Sigstore's public
+Rekor log before it ships, as one signed **release statement**: the version,
+both commits, the Go toolchain and compressor versions, the hash of every
+artifact's manifest, every agent binary's raw sha256, the support bundle and
+relay sealer hashes, and every key the release installs.
+
+- **Before anything is written**, publish asks Sigstore which log is live
+  (`ReleaseLogClient::discover()`: four fetches from Sigstore's TUF CDN). It
+  refuses when the live log's key is not pinned under `release_keys/log/`,
+  when the last logged release did not install it, or when Sigstore lists a
+  future log whose key is not pinned yet. Each refusal names the file to add.
+  A future log whose key Sigstore has not published yet is printed, not
+  refused; the watch below tracks it. It also refuses when a release row newer
+  than the last logged one carries no statement: a publish that stopped
+  between logging and recording, to be deleted on the Publish page first.
+- **The statement key** is `config/release_statement_key` (P-256, 0600,
+  root's). The first logged publish mints it and writes its public half to
+  `release_keys/statement/joinery-<id>.pub`, which the commit check then asks
+  for. After that it is never minted again: a key the last logged release did
+  not install is refused, and a lost key is restored from the site backup.
+- **After every manifest is signed**, the statement is signed (a DSSE
+  envelope) and logged as a `hashedrekord` entry. The log's answer — leaf,
+  inclusion proof, checkpoint — is checked against the log's pinned key before
+  it is kept (`ReleaseStatementPublisher::log()`), and recorded at once in
+  `rle_release_log_entries` (`ReleaseLogEntry`), which is never cleared. A
+  version found there is spent: version auto-detect skips it and an explicit
+  one is refused, so one number never has two statements.
+- **Into every artifact**: `RELEASE_STATEMENT` (JSON: the envelope, the log
+  entry, and `key_chain`, every earlier statement that introduced a key) is
+  written to `public_html/` and `public_html/agent_dist/` in the core, and to
+  each plugin's and theme's own directory. Each manifest is then signed again
+  listing it (`TreeManifestPublisher::restamp()`), and only then are archives
+  tarred. The statement records each manifest *without* its
+  `RELEASE_STATEMENT` line (`PackageSignature::statementSubject()`), which is
+  also what anyone regenerating the manifest from the commit gets. Every line
+  left out must hash to the statement itself (`PackageSignature::statementLines()`):
+  publish refuses a `RELEASE_STATEMENT` anywhere else before logging, and
+  checks each line's hash after. The publisher's own live manifest is restamped
+  last, listing every statement written into the tree. Publish then runs a
+  node's check on the result, walking the key chain from genesis, before
+  tarring.
+- **Kept** on the release row (`upg_release_statement`). The newest row
+  holding one says which keys nodes hold, for the next publish.
+- A republishing site writes no statement: the one it received is a listed
+  file, carried like any other. `RELEASE_STATEMENT` is gitignored and left
+  out of the component tree hash, so it never makes a commit dirty or bumps a
+  version.
+
+A log that cannot be reached means no publish; there is no flag to skip it.
+A publish that fails after logging prints the log index of the statement it
+did not ship, so the entry has a record.
+
+**Watching for Sigstore's log changeover.** Sigstore moves to a new log about
+once a year and lists it months ahead. Every node must receive the new log's
+key from a release logged before the changeover. The **Watch Release Log**
+task (hourly; it asks Sigstore once a day, and every hour while anything is
+wrong) runs the same discovery and stores its conclusion in the
+`server_manager_release_log_watch` setting. Reconcile Incidents raises, on
+this node only:
+
+- `plane:release_log` — a future log whose key nodes do not hold yet: not
+  published by Sigstore, not pinned here, or pinned but not yet shipped by a
+  logged release (warning; critical inside 30 days of the changeover), or any
+  other reason a publish would be refused (critical);
+- `plane:release_log_blind` — the watch cannot conclude: Sigstore unreachable
+  or answering in a format the client cannot read, no conclusion for three
+  days, or the task missing or turned off (warning; critical after two weeks).
+  A run that cannot conclude never clears `plane:release_log`.
+
+Tests: `tests/unit/release_log_client_test.php` (discovery, the shard rules,
+the recorded log answer), `tests/unit/release_statement_test.php` (the
+listed statement, the payload, the key chain and its walk, the statement key,
+logging end to end against a log built in the test, the watch and its
+incidents, the publisher's order) and
+`plugins/server_manager/tests/release_log_entries_test.php` (the record of
+logged statements, spent versions, the unfinished-row guard).
 
 ### Distribution Architecture
 

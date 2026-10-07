@@ -25,6 +25,8 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.2 - manifest.json carries statement_keys, the P-256 release statement keys under
+ *                release_keys/statement/, read by the rule the publisher signs statements by
  * @version 2.1 - log_keys read through ReleaseLogClient::repoLogKeys(): only an Ed25519 key in
  *                SubjectPublicKeyInfo form is listed, the same rule the log client pins by
  * @version 2.0 - manifest.json carries release_keys and log_keys, read from the repository's
@@ -131,10 +133,9 @@ class AgentDistPublisher {
 				// site sign" is read, not inferred, from here on.
 				$keys = self::ensureKeys($full_site_dir . '/config');
 				$key_lists = self::assertOwnKeyListed($full_site_dir, $keys['public_b64']);
-				$wanted = array('signing_public_key' => $keys['public_b64'],
-					'release_keys' => $key_lists['release_keys'], 'log_keys' => $key_lists['log_keys']);
-				$current = array('signing_public_key' => $manifest['signing_public_key'] ?? null,
-					'release_keys' => $manifest['release_keys'] ?? null, 'log_keys' => $manifest['log_keys'] ?? null);
+				$wanted = array('signing_public_key' => $keys['public_b64']) + $key_lists;
+				$current = array();
+				foreach ($wanted as $k => $v) { $current[$k] = $manifest[$k] ?? null; }
 				if ($current !== $wanted) {
 					// The key lists come from the repository, so a key added
 					// there ships in the next release whether or not the agent
@@ -211,8 +212,7 @@ class AgentDistPublisher {
 
 			$manifest_json = json_encode(
 				array('version' => $agent_version, 'go_toolchain' => $go_toolchain, 'binaries' => $binaries,
-				      'signing_public_key' => $keys['public_b64'],
-				      'release_keys' => $key_lists['release_keys'], 'log_keys' => $key_lists['log_keys']),
+				      'signing_public_key' => $keys['public_b64']) + $key_lists,
 				JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
 			);
 			if (file_put_contents($staging . '/manifest.json', $manifest_json . "\n") === false) {
@@ -274,12 +274,13 @@ class AgentDistPublisher {
 
 	/**
 	 * The key lists the repository publishes (specs/release_transparency.md
-	 * D5): every Ed25519 release key under release_keys/release/ and every
-	 * checkpoint key under release_keys/log/, read from the tree so that a
-	 * rotation is a commit diff. The bundle manifest carries both lists; a
-	 * node's key files are derived from them.
+	 * D5): every Ed25519 release key under release_keys/release/, every P-256
+	 * statement key under release_keys/statement/ and every checkpoint key
+	 * under release_keys/log/, read from the tree so that a rotation is a
+	 * commit diff. The bundle manifest carries the three lists; a node's key
+	 * files are derived from them.
 	 *
-	 * @return array{release_keys:string[], log_keys:array<array{origin:string,key:string}>}
+	 * @return array{release_keys:string[], statement_keys:string[], log_keys:array<array{origin:string,key:string}>}
 	 */
 	public static function repoKeyLists($full_site_dir) {
 		$base = rtrim($full_site_dir, '/') . '/maintenance_scripts/install_tools/release_keys';
@@ -291,14 +292,17 @@ class AgentDistPublisher {
 				$release[] = base64_encode($raw);
 			}
 		}
-		// One rule for what a log key is, shared with the log client's pin
-		// check: a file the publisher would not pin is never shipped either.
+		// One rule for what a statement or log key is, shared with the log
+		// client: a file the publisher would not sign by or pin is never
+		// shipped either.
+		$statement = array_map('base64_encode', ReleaseLogClient::repoStatementKeys($full_site_dir));
 		$log = array();
 		foreach (ReleaseLogClient::repoLogKeys($full_site_dir) as $origin => $der) {
 			$log[] = array('origin' => $origin, 'key' => base64_encode($der));
 		}
 		sort($release);
-		return array('release_keys' => $release, 'log_keys' => $log);
+		sort($statement);
+		return array('release_keys' => $release, 'statement_keys' => $statement, 'log_keys' => $log);
 	}
 
 	/**

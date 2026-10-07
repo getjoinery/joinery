@@ -1,0 +1,7 @@
+{
+  "name": "Watch Release Log",
+  "description": "On the site that publishes releases, asks Sigstore once a day (every hour while something is wrong) whether the next release can still be logged on its public Rekor log. Sigstore moves to a new log about once a year and lists it months ahead; every node must be given the new log's key by a release logged before the changeover, or no release reaches any node again. Reconcile Incidents turns the answer into an incident on this node: the next log's key not yet pinned (critical in its last 30 days), any other reason a publish would be refused, or the watch itself unable to see Sigstore.",
+  "activate_on_install": true,
+  "default_frequency": "hourly",
+  "config_fields": {}
+}

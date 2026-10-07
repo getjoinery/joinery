@@ -61,9 +61,15 @@ section('Every source is registered');
 
 $names = array_keys(IncidentSources::all());
 foreach (array('plane:site_down', 'plane:backup_failed', 'plane:backups_stopped', 'plane:backup_unverified', 'plane:failed_units',
-	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer') as $want) {
+	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer',
+	'plane:release_log', 'plane:release_log_blind') as $want) {
 	check(in_array($want, $names, true), $want . ' is registered');
 }
+
+// The release-log watch belongs to this management node's own node only
+// (its conditions are release_statement_test's).
+check((new IncidentSourceReleaseLog())->evaluate($node) === null && (new IncidentSourceReleaseLogBlind())->evaluate($node) === null,
+	'The release-log sources say nothing about any other node');
 
 // ---------------------------------------------------------------------------
 section('Failed units');

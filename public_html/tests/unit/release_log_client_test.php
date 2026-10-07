@@ -101,7 +101,7 @@ section('Discovery from the recorded TUF CDN');
 $client = new ReleaseLogClient($pins, $pins, rl_transport($fx), $now);
 $shard = $client->discover();
 check($shard['url'] === $shard_url && $shard['origin'] === $origin, 'the live shard is log2025-1', json_encode(array($shard['url'], $shard['origin'])));
-check($shard['key'] === $log_key && $shard['ahead'] === array() && $shard['genesis'] === false, 'its key is the pinned one, nodes hold it, nothing is queued ahead');
+check($shard['key'] === $log_key && $shard['ahead'] === array() && $shard['waiting'] === array() && $shard['genesis'] === false, 'its key is the pinned one, nodes hold it, nothing is queued ahead');
 
 $sc_path = 'targets/0f5f38554e29e770d4d5d6f0e1b51fcbf84f61dc6934530a09b7a901eaad5bee.signing_config_rekor_v2.v0.2.json';
 $tr_path = 'targets/6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66.trusted_root.json';
@@ -186,8 +186,9 @@ $r = rl_refusal(function () use ($both, $pins, $sc_ahead, $tr_ahead) { (new Rele
 check($r !== null && strpos($r, 'not yet shipped') !== false && strpos($r, 'Publish once on the old log first') !== false,
 	'a live shard pinned in this commit but not shipped by an earlier release: refused, every node would refuse it', (string)$r);
 
-$r = rl_refusal(function () use ($both, $pins, $now, $sc_ahead, $tr) { (new ReleaseLogClient($both, $pins, null, $now))->chooseShard($sc_ahead, $tr); });
-check($r !== null && strpos($r, 'does not yet publish') !== false, 'a future shard the trusted root has no key for: refused', (string)$r);
+$s = (new ReleaseLogClient($pins, $pins, null, $now))->chooseShard($sc_ahead, $tr);
+check($s['origin'] === $origin && $s['ahead'] === array() && $s['waiting'] === array(array('origin' => $next, 'start' => strtotime('2027-01-01T00:00:00Z'))),
+	'a future shard the trusted root has no key for yet: not refused (nobody can act on it), reported as waiting for the watch', json_encode($s['waiting']));
 
 // ---------------------------------------------------------------------------
 section('The recorded log answer');
@@ -265,7 +266,7 @@ section('Submitting');
 $sent = null;
 $post = function ($url, $body) use (&$sent, $response) { $sent = array($url, json_decode($body, true)); return array('status' => 201, 'body' => $response); };
 $client = new ReleaseLogClient($pins, $pins, rl_transport($fx, $post), $now);
-$got = $client->submit($shard, $envelope, $statement_der);
+$got = $client->submitEntry($shard, $envelope, $statement_der);
 $pae = TransparencyProof::pae($envelope['payloadType'], base64_decode($envelope['payload']));
 $hr = $sent[1]['hashedRekordRequestV002'] ?? array();
 check($sent[0] === $shard_url . '/api/v2/log/entries', 'it posts to the live shard\'s v2 entries endpoint', (string)$sent[0]);
@@ -278,10 +279,10 @@ check($got === $entry, 'and returns the verified entry');
 $client = new ReleaseLogClient($pins, $pins, rl_transport($fx, function () {
 	return array('status' => 400, 'body' => '{"code":3,"message":"invalid type, must be hashedrekord","details":[]}');
 }), $now);
-$r = rl_refusal(function () use ($client, $shard, $envelope, $statement_der) { $client->submit($shard, $envelope, $statement_der); });
+$r = rl_refusal(function () use ($client, $shard, $envelope, $statement_der) { $client->submitEntry($shard, $envelope, $statement_der); });
 check($r !== null && strpos($r, 'refused the statement (HTTP 400): invalid type, must be hashedrekord') !== false, 'a refusal carries the log\'s own words', (string)$r);
 
-$r = rl_refusal(function () use ($client, $shard, $envelope, $log_key) { $client->submit($shard, $envelope, $log_key); });
+$r = rl_refusal(function () use ($client, $shard, $envelope, $log_key) { $client->submitEntry($shard, $envelope, $log_key); });
 check($r !== null && strpos($r, 'not a P-256 key') !== false, 'an Ed25519 statement key is refused before anything is sent', (string)$r);
 
 $client = new ReleaseLogClient($pins, $pins, function ($m, $u) { throw new ReleaseLogException("cannot reach {$u}: timed out"); }, $now);

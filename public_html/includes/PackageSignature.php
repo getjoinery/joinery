@@ -30,6 +30,10 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.2 - STATEMENT_NAME, statementSubject() and statementLines(): the release statement is a
+ *                listed file, and what it records for a manifest is that manifest without its
+ *                statement lines, each of which must be that statement
+ *                (spec release_transparency, D-F)
  * @version 1.1 - trustedListing() and droppedPaths(): the files one signed release shipped and the next
  *                does not, which an upgrade removes from maintenance_scripts/
  * @version 1.0
@@ -39,6 +43,15 @@ class PackageSignature {
 	/** The manifest and its detached signature, at the root of each artifact. */
 	const MANIFEST_NAME  = 'RELEASE_MANIFEST';
 	const SIGNATURE_NAME = 'RELEASE_MANIFEST.sig';
+
+	/**
+	 * The release statement (spec release_transparency, D4): the public log's
+	 * record of the release, in every artifact beside its manifest. It is an
+	 * ordinary listed file, so a verifier that has never heard of it sees a
+	 * signed file with a matching hash. It cannot be outside the listing: every
+	 * verifier refuses a file the manifest does not list.
+	 */
+	const STATEMENT_NAME = 'RELEASE_STATEMENT';
 
 	/** Where a node keeps the public keys it verifies against, under the site root. */
 	const KEYS_FILE = 'config/release_verify_keys';
@@ -370,6 +383,47 @@ class PackageSignature {
 			$out[$path] = $m[1];
 		}
 		return $out;
+	}
+
+	/**
+	 * What a release statement records for a manifest: the sha256 (hex) of its
+	 * body with every line listing a RELEASE_STATEMENT removed, every other
+	 * byte as it is.
+	 *
+	 * A manifest lists its artifact's statement and the statement records the
+	 * manifest, so one of them has to leave the other out. The statement is
+	 * written after the manifest it describes; the manifest is then signed again
+	 * with the statement's line in it. Removing that line gives back exactly the
+	 * bytes the statement recorded, and also exactly what anyone regenerating
+	 * the manifest from the public commit gets, since no commit holds a
+	 * statement.
+	 */
+	public static function statementSubject(string $body): string {
+		$kept = array();
+		foreach (explode("\n", $body) as $line) {
+			if (preg_match('/^[0-9a-f]{64}\s+(\S.*)$/', $line, $m) && basename(str_replace('\\', '/', $m[1])) === self::STATEMENT_NAME) {
+				continue;
+			}
+			$kept[] = $line;
+		}
+		return hash('sha256', implode("\n", $kept));
+	}
+
+	/**
+	 * The lines statementSubject() leaves out: path => sha256 of every listed
+	 * RELEASE_STATEMENT. Leaving them out is safe only when each one is the
+	 * statement being verified, so a verifier checks every hash here equals
+	 * sha256 of that statement's bytes. Otherwise a signed manifest could list
+	 * other bytes under the name, at any depth, and ship them unlogged.
+	 */
+	public static function statementLines(string $body): array {
+		$lines = array();
+		foreach (explode("\n", $body) as $line) {
+			if (preg_match('/^([0-9a-f]{64})\s+(\S.*)$/', $line, $m) && basename(str_replace('\\', '/', $m[2])) === self::STATEMENT_NAME) {
+				$lines[str_replace('\\', '/', $m[2])] = $m[1];
+			}
+		}
+		return $lines;
 	}
 
 	/** The longest directory prefix every listed path shares ('' when none). */
