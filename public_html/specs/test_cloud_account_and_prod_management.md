@@ -1,8 +1,11 @@
 # Test cloud account, and production management on getjoinery
 
 **Status:** Draft, 2026-10-06; checks C1–C4 answered 2026-10-07, adding
-WP9. Built: WP1 (committed), WP3 and WP9 (2026-10-07, uncommitted,
-server_manager 1.30.27). The rest is operator steps.
+WP9. Built: WP1, WP3 and WP9 (committed). WP2 done 2026-10-07: dev holds
+the test account's token, Delete Old Test Servers is on and its first run
+passed the safety catch. WP4 step 1 done (getjoinery's live token, all
+permissions present). Open: WP4 steps 2–5, WP5–WP7; getjoinery needs a
+release with server_manager 1.30.28 before it can adopt its own server.
 
 ## What this does
 
@@ -74,7 +77,8 @@ fail on the first sold site.
 
 1. The owner creates a personal access token in the test account with the
    permissions WP1 lists, and sets the account's **company name** to
-   `Joinery test (disposable)` under Linode Account Settings (WP3 reads it).
+   `Joinery Test disposable` under Linode Account Settings (WP3 reads it;
+   Linode refuses parentheses in the field).
 2. Close hosted trials 61 and 74 and remove the "probe-test" join request.
    Otherwise HostedTrialWatch acts on them on 2026-10-19 with a token that
    cannot see their (already deleted) servers.
@@ -87,6 +91,13 @@ getjoinery and Joinerydemo are affected (their provision rows name
 live-account Linodes); both move to getjoinery (WP4, WP6, WP9). jeremytunnell-vps is unaffected
 because it uses the owner's own account. Scratch boxes that sessions create
 from dev's token land in the test account with no change on their side.
+
+**Copies of production sites wait for WP6.** From the swap until getjoinery
+manages the fleet, dev does not copy a production site to a new server: the
+new server would be made in the test account, and a switch-over by IP swap
+cannot reach the live one. A copy onto a server the operator set up, switched
+over by DNS, uses no token and still works. Copies of test sites work and land
+in the test account.
 
 WP2 does not depend on WP4–WP6 and can go first.
 
@@ -108,7 +119,7 @@ older than the same limit.
 
 **The safety catch is a property of the account, not of the site.** The
 task runs only when the token's Linode account has the company name
-`Joinery test (disposable)`, which it reads on every run. The live account never
+`Joinery Test disposable`, which it reads on every run. The live account never
 carries that name. So a live token pasted onto dev by mistake, or the task
 turned on at getjoinery, deletes nothing: the run stops and opens an
 incident naming the account it found. There is no "this is a test site"
@@ -127,7 +138,7 @@ task.
   - `listVolumes()` and `deleteVolume()`;
   - `listInstances()` now carries tags.
 - `TestCloudCleanup`: the plan, the run, the stored outcome and the
-  incident condition. The task is `ReapTestCloud`: hourly, off at install,
+  incident condition. The task is `DeleteOldTestServers`: hourly, off at install,
   turned on by hand under Scheduled Tasks.
 - Incident source `plane:test_cloud_cleanup`, on the management node's own
   node.

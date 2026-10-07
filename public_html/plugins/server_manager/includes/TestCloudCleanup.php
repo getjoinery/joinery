@@ -15,16 +15,17 @@
  * the address of a live managed node here (it is listed as held, so the
  * operator tags it or removes the node first).
  *
+ * @version 1.1 - the company name Linode accepts: Joinery Test disposable (it refuses parentheses)
  * @version 1.0
  */
 
 class TestCloudCleanup {
 
 	/** The account company name that marks a cloud account as disposable. */
-	const COMPANY = 'Joinery test (disposable)';
+	const COMPANY = 'Joinery Test disposable';
 	/** A provider-side tag that spares a server or volume. */
 	const KEEP_TAG = 'keep';
-	const TASK_CLASS = 'ReapTestCloud';
+	const TASK_CLASS = 'DeleteOldTestServers';
 	const STATE_SETTING = 'server_manager_test_cloud_cleanup';
 	const MAX_AGE_SETTING = 'server_manager_test_cloud_max_age_hours';
 	const DEFAULT_MAX_AGE_HOURS = 24;
@@ -213,7 +214,7 @@ class TestCloudCleanup {
 					'Account found' => (string)($state['account'] ?? '') !== '' ? $state['account'] : '(no company name)',
 					'Why'           => (string)($state['reason'] ?? ''),
 					'What it means' => 'Nothing was deleted. Either this site holds a live account\'s token, or the test account\'s '
-						. 'company name was changed. Turn the Reap Test Cloud task off here, or set the company name to "'
+						. 'company name was changed. Turn the Delete Old Test Servers task off here, or set the company name to "'
 						. self::COMPANY . '" in the test account\'s settings.',
 					'Checked'       => (string)($state['time'] ?? '') . ' UTC',
 				),

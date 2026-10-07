@@ -855,9 +855,9 @@ key file, and `config/` on the management node contains none.
 
 ### Test-account cleanup
 
-A management node whose operator token is for a cloud account kept for testing cleans that account up on its own. The **Reap Test Cloud** task (`TestCloudCleanup`) runs hourly and is off until turned on under Scheduled Tasks. It deletes servers, and storage volumes attached to nothing, that are older than `server_manager_test_cloud_max_age_hours` (default 24).
+A management node whose operator token is for a cloud account kept for testing cleans that account up on its own. The **Delete Old Test Servers** task (`TestCloudCleanup`) runs hourly and is off until turned on under Scheduled Tasks. It deletes servers, and storage volumes attached to nothing, that are older than `server_manager_test_cloud_max_age_hours` (default 24).
 
-**The safety catch is the account's own name.** Every run reads the account's company name from the provider (`CloudAccountCleanup::accountCompany()`; on Linode, Account Settings, which needs `account:read_only`). It deletes only when the name is exactly `Joinery test (disposable)`. On any other account, or when the name cannot be read, it deletes nothing. It then records the refusal, and `plane:test_cloud_cleanup` opens on this management node's own node, naming the account it found. The incident clears when a run passes or the task is turned off. A live token pasted here, or the task turned on at a production management node, therefore deletes nothing. No site setting can make an account count as disposable.
+**The safety catch is the account's own name.** Every run reads the account's company name from the provider (`CloudAccountCleanup::accountCompany()`; on Linode, Account Settings, which needs `account:read_only`). It deletes only when the name is exactly `Joinery Test disposable`. On any other account, or when the name cannot be read, it deletes nothing. It then records the refusal, and `plane:test_cloud_cleanup` opens on this management node's own node, naming the account it found. The incident clears when a run passes or the task is turned off. A live token pasted here, or the task turned on at a production management node, therefore deletes nothing. No site setting can make an account count as disposable.
 
 **Never deleted:**
 - anything tagged `keep` at the provider (any case);
