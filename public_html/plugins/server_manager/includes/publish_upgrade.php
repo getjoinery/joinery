@@ -778,7 +778,25 @@
 		// Publish never commits or pushes. A tree that is not committed and on
 		// the public remote is refused with the command the owner runs; the
 		// next publish finds it clean and builds. There is no --allow-dirty.
-		$component_plan = publish_plan_components($full_site_dir, $republish, 'publish_output');
+		//
+		// What ships is what git knows plus what publish builds
+		// (ReleaseCommit::joineryFileShips()): the manifests, the component
+		// tree hashes and the archives are all cut by that one rule, so a file
+		// git ignores - a screenshot, a stray build output, a local corpus -
+		// never reaches a node however it got into the tree. A republishing
+		// site ships its received listings instead and needs no rule.
+		$ships = null;
+		if (!$republish) {
+			$known_files = ReleaseCommit::knownFiles($full_site_dir);
+			if ($known_files === null) {
+				publish_output("\nRefusing to publish {$version} — the core repository at {$full_site_dir} could not be read by git, so what ships cannot be told from what is only on this disk.");
+				exit(1);
+			}
+			$ships = function ($rel) use ($known_files) {
+				return ReleaseCommit::joineryFileShips($rel, $known_files);
+			};
+		}
+		$component_plan = publish_plan_components($full_site_dir, $republish, 'publish_output', $ships);
 		$release_commits = array('core' => null, 'agent' => null);
 		if (!$republish) {
 			$agent_src = AgentDistPublisher::sourcePath();
@@ -995,7 +1013,7 @@
 				$manifest_authority = TreeManifestPublisher::authority($full_site_dir);
 				publish_output($manifest_authority['reason']);
 				$staged_manifest = TreeManifestPublisher::publish_artifact(
-					$core_temp_dir, $core_temp_dir, $manifest_authority, $full_site_dir);
+					$core_temp_dir, $core_temp_dir, $manifest_authority, $full_site_dir, $ships);
 				publish_output($staged_manifest['carried']
 					? "Core tree manifest carried forward as received ({$staged_manifest['files']} files)"
 					: "Core tree manifest signed ({$staged_manifest['files']} files)");
@@ -1023,7 +1041,7 @@
 
 		// Archives are built last, from trees that hold the release statement.
 		$pending_archives = array(array('label' => 'core', 'archive' => $core_output_location,
-			'base' => $core_temp_dir, 'member' => '.', 'stage' => $core_temp_dir));
+			'base' => $core_temp_dir, 'member' => '.', 'root' => '', 'stage' => $core_temp_dir));
 
 		// Store the version info in the database (using core filename)
 		$upgrade = new Upgrade(NULL);
@@ -1137,12 +1155,12 @@
 						$theme_stage . '/' . $theme_name, 'public_html/theme/' . $theme_name, $manifest_authority);
 					$theme_tar_base = $theme_stage;
 				} else {
-					$unlisted = publish_unlisted_members($theme_dir, $full_site_dir);
+					$unlisted = publish_unlisted_members($theme_dir, $full_site_dir, $ships);
 					if ($unlisted) {
 						throw new Exception('it holds ' . implode(', ', $unlisted) . ', on a path no manifest lists, so it would ship unverified; '
 							. 'move or remove it');
 					}
-					TreeManifestPublisher::publish_artifact($theme_dir, $full_site_dir, $manifest_authority);
+					TreeManifestPublisher::publish_artifact($theme_dir, $full_site_dir, $manifest_authority, null, $ships);
 					if ($logs_release) {
 						$statement_subjects['theme/' . $theme_name] = PackageSignature::statementSubject(
 							(string)file_get_contents($theme_dir . '/' . PackageSignature::MANIFEST_NAME));
@@ -1158,7 +1176,7 @@
 
 			if ($theme_stage !== null) { $publish_stages[] = $theme_stage; }
 			$pending_archives[] = array('label' => $theme_name, 'archive' => $themes_dir . '/' . $theme_name . '-' . $theme_version . '.tar.gz',
-				'base' => $theme_tar_base, 'member' => $theme_name, 'stage' => $theme_stage,
+				'base' => $theme_tar_base, 'member' => $theme_name, 'root' => 'public_html/theme/' . $theme_name, 'stage' => $theme_stage,
 				'statement_dir' => $republish ? null : $theme_dir, 'statement_rel' => 'public_html/theme/' . $theme_name . '/' . PackageSignature::STATEMENT_NAME,
 				'subject' => 'theme/' . $theme_name);
 			publish_output("- {$theme_name}-{$theme_version}: manifest signed");
@@ -1223,12 +1241,12 @@
 						$plugin_stage . '/' . $plugin_name, 'public_html/plugins/' . $plugin_name, $manifest_authority);
 					$plugin_tar_base = $plugin_stage;
 				} else {
-					$unlisted = publish_unlisted_members($plugin_dir, $full_site_dir);
+					$unlisted = publish_unlisted_members($plugin_dir, $full_site_dir, $ships);
 					if ($unlisted) {
 						throw new Exception('it holds ' . implode(', ', $unlisted) . ', on a path no manifest lists, so it would ship unverified; '
 							. 'move or remove it');
 					}
-					TreeManifestPublisher::publish_artifact($plugin_dir, $full_site_dir, $manifest_authority);
+					TreeManifestPublisher::publish_artifact($plugin_dir, $full_site_dir, $manifest_authority, null, $ships);
 					if ($logs_release) {
 						$statement_subjects['plugin/' . $plugin_name] = PackageSignature::statementSubject(
 							(string)file_get_contents($plugin_dir . '/' . PackageSignature::MANIFEST_NAME));
@@ -1244,7 +1262,7 @@
 
 			if ($plugin_stage !== null) { $publish_stages[] = $plugin_stage; }
 			$pending_archives[] = array('label' => $plugin_name, 'archive' => $plugins_dir . '/' . $plugin_name . '-' . $plugin_version . '.tar.gz',
-				'base' => $plugin_tar_base, 'member' => $plugin_name, 'stage' => $plugin_stage,
+				'base' => $plugin_tar_base, 'member' => $plugin_name, 'root' => 'public_html/plugins/' . $plugin_name, 'stage' => $plugin_stage,
 				'statement_dir' => $republish ? null : $plugin_dir, 'statement_rel' => 'public_html/plugins/' . $plugin_name . '/' . PackageSignature::STATEMENT_NAME,
 				'subject' => 'plugin/' . $plugin_name);
 			publish_output("- {$plugin_name}-{$plugin_version}: manifest signed");
@@ -1371,19 +1389,24 @@
 		// Build the archives
 		// =====================================================
 		publish_output("\nCreating archives...");
-		// Nothing on a path no manifest lists rides in an archive: a node checks
-		// a fresh archive for exactly that and refuses it (release_transparency
-		// B6). A plugin or theme is tarred from its live directory; anything
-		// there on such a path other than git's own files was refused above
-		// (publish_unlisted_members), so these drop only .git and .gitignore.
-		$tar_excludes = '';
-		foreach (array_merge(PackageSignature::EXCLUDED_SEGMENTS, array('.gitignore')) as $excluded_name) {
-			$tar_excludes .= ' --exclude=' . escapeshellarg($excluded_name);
-		}
+		// An archive carries exactly what its manifest lists, plus the manifest
+		// and its signature (and, in the core, the config template no manifest
+		// covers): TreeManifestPublisher::archiveMembers(). A plugin or theme is tarred from
+		// its live directory, which may hold files git ignores; they are not
+		// listed, so they do not ship. A node checks a fresh archive for any
+		// member on a path no manifest lists and refuses it (B6).
 		foreach ($pending_archives as $pending) {
 			$output = [];
-			exec(sprintf('tar -czf %s%s -C %s %s 2>&1', escapeshellarg($pending['archive']), $tar_excludes,
-				escapeshellarg($pending['base']), escapeshellarg($pending['member'])), $output, $exit_code);
+			$exit_code = 1;
+			$members = TreeManifestPublisher::archiveMembers($pending['base'], $pending['member'], $pending['root']);
+			$member_list = $members === null ? false : tempnam(sys_get_temp_dir(), 'joinery_members_');
+			if ($member_list !== false && file_put_contents($member_list, implode("\0", $members) . "\0") !== false) {
+				exec(sprintf('tar -czf %s --null --no-recursion -C %s -T %s 2>&1', escapeshellarg($pending['archive']),
+					escapeshellarg($pending['base']), escapeshellarg($member_list)), $output, $exit_code);
+			} elseif ($members === null) {
+				$output[] = 'its manifest could not be read';
+			}
+			if ($member_list !== false) { @unlink($member_list); }
 			if ($pending['stage'] !== null) { exec('rm -rf ' . escapeshellarg($pending['stage'])); }
 
 			if ($exit_code !== 0 || !file_exists($pending['archive']) || filesize($pending['archive']) == 0) {
@@ -1689,7 +1712,7 @@
 	 *
 	 * @return array{baseline:array, themes:array, plugins:array, bumped:string[], warnings:string[]}
 	 */
-	function publish_plan_components($full_site_dir, $republish, $out) {
+	function publish_plan_components($full_site_dir, $republish, $out, $ships = null) {
 		// Baseline = the most recent prior release row carrying a parseable,
 		// non-empty component snapshot. Rows without one (an aborted publish,
 		// every row from before snapshots existed) are skipped, so the baseline
@@ -1723,7 +1746,7 @@
 					$plan[$kind][$name] = array('version' => $current_version, 'tree_hash' => $last['tree_hash'] ?? null, 'skipped' => true);
 					continue;
 				}
-				$tree_hash = component_tree_hash($dir, $k['manifest']);
+				$tree_hash = component_tree_hash($dir, $k['manifest'], $ships, $full_site_dir);
 				if ($last === null) {
 					// Rule 1.
 				} elseif (version_compare($current_version, $last['version'], '>')) {
@@ -1749,9 +1772,11 @@
 	 * the like. Such a file would ship unverified, or, with the archive
 	 * excludes, not ship at all; neither is right, so the publish refuses and
 	 * names it. Git's own files (.git, .gitignore) are development debris and
-	 * are left out of the archive quietly. Paths relative to $dir.
+	 * are left out of the archive quietly. With $ships, only a file it accepts
+	 * counts: one git ignores (a runtime cache) was never going to ship. Paths
+	 * relative to $dir.
 	 */
-	function publish_unlisted_members($dir, $site_root) {
+	function publish_unlisted_members($dir, $site_root, $ships = null) {
 		$found = array();
 		$dir = rtrim($dir, '/');
 		$rii = new RecursiveIteratorIterator(
@@ -1764,13 +1789,19 @@
 			if (!PackageSignature::excluded($rel)) continue;
 			if (in_array('.git', explode('/', $sub), true) || basename($sub) === '.gitignore') continue;
 			if ($sub === PackageSignature::MANIFEST_NAME || $sub === PackageSignature::SIGNATURE_NAME) continue;
+			if ($ships !== null && !$ships($rel)) continue;
 			$found[] = $sub;
 		}
 		sort($found);
 		return $found;
 	}
 
-	function component_tree_hash($dir, $manifest_filename = null) {
+	/**
+	 * @param callable|null $ships     fn(string $rel): bool (ReleaseCommit::joineryFileShips()), asked
+	 *                                 with the path relative to $site_root; a file it refuses is not hashed
+	 * @param string|null   $site_root what $ships's paths are relative to
+	 */
+	function component_tree_hash($dir, $manifest_filename = null, $ships = null, $site_root = null) {
 		$entries = array();
 		$rii = new RecursiveIteratorIterator(
 			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
@@ -1786,10 +1817,12 @@
 			// any .gitignore, at any depth.
 			if (in_array('.git', explode('/', $rel), true)) continue;
 			if (basename($rel) === '.gitignore') continue;
+			// What does not ship cannot change the component.
+			if ($ships !== null && !$ships(ltrim(substr($abs, strlen(rtrim((string)$site_root, '/'))), '/'))) continue;
 
 			// The signed release manifest is excluded from the hash but still
-			// SHIPS — the archives tar the whole directory, so exclusion here
-			// costs nothing at delivery.
+			// SHIPS — every archive carries its manifest beside what it lists,
+			// so exclusion here costs nothing at delivery.
 			//
 			// Excluding it is not tidiness, it is the only correct option, and
 			// the reason cannot be seen from the code: this hash decides whether

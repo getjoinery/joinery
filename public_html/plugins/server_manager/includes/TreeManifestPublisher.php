@@ -49,6 +49,9 @@
  * here is that rule. vendor/ is excluded at the site root only: a plugin's
  * Composer tree ships with the plugin and is listed (specs/package_signing.md WP0).
  *
+ * @version 1.6 - archiveMembers(): an archive carries exactly what its manifest lists; build(), write()
+ *                and publish_artifact() take $ships: on the publishing box only a file the
+ *                repository knows, or one publish builds, is listed (ReleaseCommit::joineryFileShips())
  * @version 1.5 - restamp(): put new files (the release statement) into a signed manifest and sign it
  *                again, without walking the tree; render() is the one body format
  * @version 1.4 - signsItsOwnTree(): authority()'s answer without minting a key, for a reader
@@ -138,11 +141,12 @@ class TreeManifestPublisher {
 	 * @param array  $authority     From authority()
 	 * @param string|null $received_dir Where the received manifest lives when it is not
 	 *                              $artifact_dir itself (the site root, for the staged core)
+	 * @param callable|null $ships  fn(string $rel): bool, which files may be listed (see build())
 	 * @return array ['files' => int, 'manifest' => path, 'carried' => bool]
 	 */
-	public static function publish_artifact($artifact_dir, $site_root, array $authority, $received_dir = null) {
+	public static function publish_artifact($artifact_dir, $site_root, array $authority, $received_dir = null, $ships = null) {
 		if ($authority['may_sign']) {
-			$r = self::write($artifact_dir, $site_root, $authority['keys']);
+			$r = self::write($artifact_dir, $site_root, $authority['keys'], $ships);
 			$r['carried'] = false;
 			return $r;
 		}
@@ -272,11 +276,12 @@ class TreeManifestPublisher {
 	 * @param string $dir        Directory to walk (the artifact's own tree)
 	 * @param string $site_root  Root the recorded paths are relative to
 	 * @param array  $keys       ['secret' => ..., 'public' => ...] from AgentDistPublisher::ensureKeys()
+	 * @param callable|null $ships fn(string $rel): bool, which files may be listed (see build())
 	 * @return array ['files' => int, 'manifest' => path]
 	 * @throws Exception when the manifest cannot be written or does not verify
 	 */
-	public static function write($dir, $site_root, array $keys) {
-		$body = self::build($dir, $site_root);
+	public static function write($dir, $site_root, array $keys, $ships = null) {
+		$body = self::build($dir, $site_root, $ships);
 
 		$manifest_path  = rtrim($dir, '/') . '/' . self::MANIFEST_NAME;
 		$signature_path = rtrim($dir, '/') . '/' . self::SIGNATURE_NAME;
@@ -307,8 +312,17 @@ class TreeManifestPublisher {
 	 * fields, a 64-character lowercase hex hash first. Sorted so the same tree
 	 * always produces byte-identical output, which is what lets a publish that
 	 * changed nothing leave the artifact alone.
+	 *
+	 * $ships, when given, is asked about every file left after the exclusion
+	 * rule, by site-root-relative path, and a file it refuses is not listed.
+	 * The publisher passes ReleaseCommit::joineryFileShips(): a file git
+	 * ignores is not in the release, and the archive carries exactly what its
+	 * manifest lists, so it does not ship either. Null lists every file, which
+	 * is right for a live tree the agent checks in place.
+	 *
+	 * @param callable|null $ships fn(string $rel): bool
 	 */
-	public static function build($dir, $site_root) {
+	public static function build($dir, $site_root, $ships = null) {
 		$site_root = rtrim($site_root, '/');
 		$entries = array();
 
@@ -339,6 +353,7 @@ class TreeManifestPublisher {
 			$abs = $file->getPathname();
 			$rel = ltrim(str_replace('\\', '/', substr($abs, strlen($site_root))), '/');
 			if (self::excluded($rel)) continue;
+			if ($ships !== null && !$ships($rel)) continue;
 
 			$hash = hash_file('sha256', $abs);
 			if ($hash === false) {
@@ -348,6 +363,53 @@ class TreeManifestPublisher {
 		}
 
 		return self::render($entries);
+	}
+
+	/**
+	 * The member list for one archive, from the manifest at its top: every
+	 * listed file, the manifest and its signature, each parent directory, and
+	 * for the core the config template (outside every manifest) and the empty
+	 * theme/ and plugins/ directories a core install expects. Paths relative
+	 * to $base, sorted. Null when the manifest cannot be read.
+	 *
+	 * @param string $base   the directory tar runs in
+	 * @param string $member '.' for the core, else the plugin or theme name
+	 * @param string $root   the site-root-relative path $member stands for: '' for the core
+	 */
+	public static function archiveMembers($base, $member, $root) {
+		$top = rtrim($base, '/') . '/' . $member;
+		$listed = PackageSignature::parse((string)@file_get_contents($top . '/' . PackageSignature::MANIFEST_NAME));
+		if ($listed === null || $listed === array()) {
+			return null;
+		}
+		$prefix = $root === '' ? '' : $root . '/';
+		$files = array(PackageSignature::MANIFEST_NAME, PackageSignature::SIGNATURE_NAME);
+		foreach (array_keys($listed) as $path) {
+			if ($prefix !== '' && strpos($path, $prefix) !== 0) {
+				return null;
+			}
+			$files[] = substr($path, strlen($prefix));
+		}
+		$dirs = array();
+		if ($member === '.') {
+			if (is_file($top . '/config/default_Globalvars_site.php')) {
+				$files[] = 'config/default_Globalvars_site.php';
+			}
+			$dirs['public_html/theme'] = true;
+			$dirs['public_html/plugins'] = true;
+		}
+		foreach ($files as $file) {
+			for ($d = dirname($file); $d !== '.' && $d !== '' && $d !== '/'; $d = dirname($d)) {
+				$dirs[$d] = true;
+			}
+		}
+		$members = array($member);
+		foreach (array_merge(array_keys($dirs), $files) as $rel) {
+			$members[] = $member . '/' . $rel;
+		}
+		$members = array_values(array_unique($members));
+		sort($members, SORT_STRING);
+		return $members;
 	}
 
 	/** The manifest body for path => sha256 entries: the header, then one line per file, sorted by path. */

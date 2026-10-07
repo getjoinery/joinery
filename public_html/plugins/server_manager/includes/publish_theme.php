@@ -16,7 +16,7 @@
  *   ?download=name&type=plugin - Download a plugin archive
  *   ?core              - Redirect to core archive download
  *
- * Version: 1.5.0
+ * Version: 1.6.0 - serves only the archive publish built; never cuts one from the live directory
  */
 
 // When loaded via route, core classes are pre-loaded.
@@ -158,54 +158,17 @@ if (isset($_GET['download'])) {
     $archive_filename = $item_name . '-' . $version . '.tar.gz';
     $archive_path = $archive_dir . '/' . $archive_filename;
 
-    // Check if archive exists and is newer than source
-    $need_regenerate = false;
-    if (!file_exists($archive_path)) {
-        $need_regenerate = true;
-    } else {
-        // Check if source is newer than archive
-        $archive_time = filemtime($archive_path);
-        $source_time = get_newest_file_time($source_dir);
-        if ($source_time > $archive_time) {
-            $need_regenerate = true;
-        }
-    }
-
-    // Generate archive if needed
-    if ($need_regenerate) {
-        // Ensure archive directory exists
-        if (!is_dir($archive_dir)) {
-            mkdir($archive_dir, 0755, true);
-        }
-
-        // Unlink existing archive so tar can always create a fresh one even if the
-        // old file is owned by another user (archive dir is world-writable).
-        if (file_exists($archive_path)) {
-            @unlink($archive_path);
-        }
-
-        // Create tar.gz with just the item directory
-        $parent_dir = dirname($source_dir);
-        $tar_cmd = sprintf(
-            'tar -czf %s -C %s %s 2>&1',
-            escapeshellarg($archive_path),
-            escapeshellarg($parent_dir),
-            escapeshellarg($item_name)
-        );
-
-        $output = [];
-        $exit_code = 0;
-        exec($tar_cmd, $output, $exit_code);
-
-        if ($exit_code !== 0 || !file_exists($archive_path)) {
-            http_response_code(500);
-            echo json_encode(['error' => 'Failed to create archive', 'details' => implode("\n", $output)]);
-            exit;
-        }
-
-        // Make the new archive world-writable so subsequent regenerations by other
-        // users (e.g. CLI publish runs) can overwrite it.
-        @chmod($archive_path, 0666);
+    // Only publish builds an archive: it carries exactly what its signed
+    // manifest lists, and the release statement records that manifest. A
+    // tarball cut here from the live directory would carry whatever sits in
+    // it - an uncommitted edit, an ignored file - under a manifest that does
+    // not describe it, and would replace the published archive for this
+    // version. A version with no published archive is not available.
+    if (!is_file($archive_path)) {
+        http_response_code(404);
+        header('Content-Type: application/json');
+        echo json_encode(['error' => ucfirst($type) . ' ' . $item_name . ' ' . $version . ' has not been published here']);
+        exit;
     }
 
     // Serve the archive
@@ -266,25 +229,3 @@ echo json_encode([
         '?core' => 'Redirect to core archive',
     ]
 ]);
-
-/**
- * Get the newest modification time of any file in a directory (recursive)
- */
-function get_newest_file_time($dir) {
-    $newest = 0;
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::SELF_FIRST
-    );
-
-    foreach ($iterator as $file) {
-        if ($file->isFile()) {
-            $mtime = $file->getMTime();
-            if ($mtime > $newest) {
-                $newest = $mtime;
-            }
-        }
-    }
-
-    return $newest;
-}

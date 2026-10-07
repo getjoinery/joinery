@@ -4,9 +4,11 @@
 code survey the same day; revised the same day after reviewer2's design review
 (verdict NOT VALID as first written; B1–B7 and Q1–Q7 folded in, then B8, B9,
 Q8, Q9 from the re-review; reviewer2 VALID 2026-10-07 with those folded in).
-WP2 built and released (0.8.465). WP1's live test changed D4's key: see D-C.
-WP1 committed (8e14752a). WP3 built 2026-10-07, uncommitted: where the
-statement goes changed, see D-F. Stands on `implemented/package_signing.md` and
+WP2 built and released (0.8.465). WP3-WP5 committed; 0.8.466 was the
+genesis logged release (log2025-1 index 142718338). WP1's live test changed D4's key: see D-C.
+WP1 committed (8e14752a). Where the statement goes changed while WP3 was
+built, see D-F. WP6 under way: what ships was found wider than the commit and
+cut back first (D2). Stands on `implemented/package_signing.md` and
 `implemented/agent_release_channel.md`; independent of any disk-encryption
 work.
 
@@ -129,6 +131,25 @@ not today:
 
 `config/` and `vendor/` stay outside the manifest; a node's config is its own
 and there is no vendor directory under the site root.
+
+**Only what git knows, or publish builds, ships (found in WP6's survey,
+2026-10-07).** The first logged release, 0.8.466, broke the rule above: its
+core archive carried 196 working screenshots from the top of `public_html/`
+(one a user list with names and email addresses), a local email-test corpus
+and its four scripts, all ignored by git; its themes carried 209 images the
+`*.png` ignore rule had kept out of every commit; the mailbox plugin carried a
+stray `relay-sealer` build beside its source. Publish copied directories, and
+the clean-tree check (D1) cannot see an ignored file. And the catalog's
+download endpoint cut a fresh tarball from the live directory whenever a file
+there was newer than the published archive, replacing it. Fixed: a file ships
+when git knows it or publish builds it (`ReleaseCommit::joineryFileShips()`;
+the built set is the agent bundle, the relay sealer binaries, the license
+copies and the statements); the manifests and the component tree hashes read
+only those, and every archive is cut from its own manifest's listing
+(`TreeManifestPublisher::archiveMembers()`); the download endpoint serves only
+the published archive. The ignore rule covers top-level screenshots only, so
+theme images are committed. Owner, 2026-10-07: the older archives stay where
+they are.
 
 **A fresh archive carries nothing the manifest does not cover (B6).**
 `PackageSignature::verify()` gains a `fresh_archive` mode, used by
@@ -629,7 +650,10 @@ a tree with a statement key requires the log for every update after it. The
 first 1.64.0 bundle is built by the next publish (genesis or later); a
 genesis build happens after the statement key is committed, so it carries it.
 
-**WP6 — The customer's view.** `utils/verify_release.php`;
+**WP6 — The customer's view.** First, what ships was cut back to what git
+knows (D2, found in this package's survey; `ReleaseCommit` 1.1,
+`TreeManifestPublisher` 1.6, `publish_theme.php` 1.6.0, `release_commit` test
+78). Then: `utils/verify_release.php`;
 `/admin/admin_release_provenance`, listing sideloaded extensions apart (D7); the public releases page on getjoinery
 with the trusted-root comparison; the upgrade source serving archives
 publicly for the verifier.
