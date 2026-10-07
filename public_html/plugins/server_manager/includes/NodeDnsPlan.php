@@ -13,6 +13,10 @@
  * still has a human at the publish step. What it no longer has is a copy-paste
  * step.
  *
+ * @version 1.1 - the site's name gets an A record for the machine's IPv4 and an AAAA record for
+ *                its IPv6, each where the machine has one (the IPv4-and-IPv6 rule). A site on
+ *                a shared host has no provision of its own, so it takes its host's addresses
+ *                (specs/multi_tenant_docker_hosts.md S23).
  * @version 1.0
  */
 
@@ -28,20 +32,30 @@ class NodeDnsPlan {
 	 */
 	public static function forNode($node): ?DnsRecordPlan {
 		$domain = self::siteDomain($node);
-		$ip = self::publicIp($node);
-		if ($domain === '' || $ip === '') {
+		$addresses = self::publicAddresses($node);
+		if ($domain === '' || ($addresses['A'] === '' && $addresses['AAAA'] === '')) {
 			return null;
 		}
 
 		$plan = new DnsRecordPlan($domain, 'server_manager');
-		$plan->addRecord(
-			filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'AAAA' : 'A',
-			$domain,
-			$ip,
-			null,
-			null,
-			'Points ' . $domain . ' at this node. Certificate issuance waits on this record.'
-		);
+		self::addAddressRecords($plan, $domain, $addresses,
+			'Points ' . $domain . ' at this node. Certificate issuance waits on this record.');
+		return $plan;
+	}
+
+	/**
+	 * An A record for the IPv4 and an AAAA record for the IPv6, each where
+	 * there is one. A dual-stack visitor reaches the site over either, so a
+	 * name with only one of them leaves the other family unanswered.
+	 *
+	 * @param array{A:string,AAAA:string} $addresses as publicAddresses() returns them
+	 */
+	public static function addAddressRecords(DnsRecordPlan $plan, string $name, array $addresses, string $note): DnsRecordPlan {
+		foreach (['A', 'AAAA'] as $type) {
+			if (($addresses[$type] ?? '') !== '') {
+				$plan->addRecord($type, $name, $addresses[$type], null, null, $note);
+			}
+		}
 		return $plan;
 	}
 
@@ -59,20 +73,48 @@ class NodeDnsPlan {
 	}
 
 	/**
-	 * The node's public address: the one its cloud provision recorded when it
-	 * was born, else the connection host when that is itself an address. A
-	 * hostname in mgn_host is deliberately not resolved — publishing a record
-	 * derived from a lookup of the name being published is circular.
+	 * The node's public address: its IPv4 where it has one, else its IPv6, or
+	 * '' with neither. See publicAddresses().
 	 */
 	public static function publicIp($node): string {
+		$addresses = self::publicAddresses($node);
+		return $addresses['A'] !== '' ? $addresses['A'] : $addresses['AAAA'];
+	}
+
+	/**
+	 * The machine's public addresses, one of each family: what its cloud
+	 * provision recorded when it was born, else the connection host where that
+	 * is itself an address. A site on a shared host has no provision of its
+	 * own, so its host's node's provision answers for it. A hostname in
+	 * mgn_host is deliberately not resolved — publishing a record derived from
+	 * a lookup of the name being published is circular.
+	 *
+	 * @return array{A:string,AAAA:string} each '' where there is none
+	 */
+	public static function publicAddresses($node): array {
+		$out = ['A' => '', 'AAAA' => ''];
+		$candidates = [];
 		$provision = NodeReverseDns::provisionForNode($node);
-		if ($provision) {
-			$ip = trim((string)$provision->get('cvp_instance_ip'));
-			if ($ip !== '') {
-				return $ip;
+		if (!$provision && (int)$node->get('mgn_mgh_managed_host_id') > 0) {
+			$host = new ManagedHost((int)$node->get('mgn_mgh_managed_host_id'), TRUE);
+			$host_node = $host->key ? $host->host_node() : null;
+			if ($host_node) {
+				$provision = NodeReverseDns::provisionForNode($host_node);
 			}
 		}
-		$host = trim((string)$node->get('mgn_host'));
-		return filter_var($host, FILTER_VALIDATE_IP) ? $host : '';
+		if ($provision) {
+			$candidates[] = (string)$provision->get('cvp_instance_ip');
+			$candidates[] = (string)$provision->get('cvp_instance_ipv6');
+		}
+		$candidates[] = (string)$node->get('mgn_host');
+		foreach ($candidates as $a) {
+			$a = CustomerCloudProvision::normalize_address(preg_replace('#/\d+$#', '', trim($a)));
+			if (filter_var($a, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+				$out['A'] = $out['A'] !== '' ? $out['A'] : $a;
+			} elseif (filter_var($a, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
+				$out['AAAA'] = $out['AAAA'] !== '' ? $out['AAAA'] : $a;
+			}
+		}
+		return $out;
 	}
 }

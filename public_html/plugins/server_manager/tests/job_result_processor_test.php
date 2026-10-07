@@ -421,7 +421,7 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 19, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+check(!isset($capped['surprise']) && count($capped) === 20, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
 check($capped['cpus'] === 'unknown', 'a processor count that is not a count reads unknown');
 check(JobResultProcessor::sanitise_host_report(array('cpus' => 4))['cpus'] === 4, 'a processor count is kept');
 $quiet = JobResultProcessor::sanitise_host_report(array('answers' => array('apache2' => 'yes', 'php-fpm' => 'quiet', 'postgresql' => 'maybe')));
@@ -457,6 +457,29 @@ check(($held_c[0]['held'] ?? null) === true && !array_key_exists('held', $held_c
 	'a container held stopped keeps its mark; false or anything but true leaves none', var_export($held_c, true));
 check(JobResultProcessor::sanitise_host_report(array('containers' => 'none'))['containers'] === 'none',
 	'a machine with no docker says none');
+// A Docker host's disk pool (host_report 1.15): its figures kept, none kept,
+// anything else unknown, an older report's absence kept absent (null).
+$dp = JobResultProcessor::sanitise_host_report(array('disk_pool' => array('used_bytes' => 5, 'total_bytes' => 10, 'avail_bytes' => 4, 'prjquota' => true, 'evil' => '<b>')))['disk_pool'];
+check($dp === array('used_bytes' => 5, 'total_bytes' => 10, 'avail_bytes' => 4, 'prjquota' => true),
+	'a disk pool keeps its figures and quota state, nothing else', var_export($dp, true));
+check(JobResultProcessor::sanitise_host_report(array('disk_pool' => 'none'))['disk_pool'] === 'none'
+	&& JobResultProcessor::sanitise_host_report(array('disk_pool' => 'rm -rf'))['disk_pool'] === 'unknown'
+	&& JobResultProcessor::sanitise_host_report(array())['disk_pool'] === null,
+	'no pool is none, a stranger value unknown, an older report null');
+// A multi-tenant host takes 50 sites; the report lists up to 100 (host_report
+// 1.13), each with its outbound figures.
+$many = array(); $many_figs = array();
+for ($i = 1; $i <= 120; $i++) {
+	$many[] = array('name' => sprintf('site%03d', $i), 'state' => 'running', 'health' => 'none', 'answers' => 'yes');
+	$many_figs[sprintf('site%03d', $i)] = array('ceiling_mbit' => 200, 'conn_rate' => 40, 'conn_burst' => 120, 'open_conns' => 512);
+}
+$many = JobResultProcessor::sanitise_host_report(array('containers' => $many, 'outbound_limits' => array(
+	'state' => 'on', 'since' => 1, 'web_user_dropped' => 'none', 'figures' => array(), 'sites' => $many_figs)));
+check(JobResultProcessor::HOST_REPORT_MAX_SITES === 100 && count($many['containers']) === 100
+	&& $many['containers'][99]['name'] === 'site100' && count($many['outbound_limits']['sites']) === 100
+	&& array_key_last($many['outbound_limits']['sites']) === 'site100',
+	'a host\'s sites are kept up to 100, the first hundred, in its containers and its outbound figures',
+	count($many['containers']) . '/' . count($many['outbound_limits']['sites']));
 check(count($capped['failed_units']) === JobResultProcessor::HOST_REPORT_MAX_LIST, 'failed units are capped at the list bound');
 check($capped['failed_units'][0] === 'scriptalert1script.service' && $capped['failed_units'][1] === 'abrm-rf',
 	'unit names are reduced to safe characters', var_export(array_slice($capped['failed_units'], 0, 2), true));

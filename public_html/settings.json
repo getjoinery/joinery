@@ -2549,7 +2549,7 @@
     {
       "name": "api_agent_rate_limit_requests",
       "default": "6000",
-      "helptext": "Max agent-channel requests per window per IP (own bucket, not the general API limit). Counts every request on the channel except a successful claim — the steady-state poll — so a healthy fleet uses almost none of it and a flood of refused or malformed requests fills it.",
+      "helptext": "Max agent-channel requests per window, counted per node for requests a node's signature proves, and per IP for the rest (joins, missing or wrong signatures, unknown paths). Its own buckets, not the general API limit. Counts every request on the channel except a successful claim — the steady-state poll — so a healthy agent uses almost none of it. An address over its limit still lets in a request whose signature verifies, so sites sharing an address are not cut off by a neighbour.",
       "group": "api_rate_limits",
       "label": "Max agent channel requests per window",
       "type": "number",
@@ -2571,7 +2571,7 @@
     {
       "name": "api_agent_artifact_rate_limit_requests",
       "default": "240",
-      "helptext": "Max agent artifact BODY fetches per window per IP — the agent binary and the support bundle, which are megabytes each. The small manifest fetches are metered by the general agent-channel limit instead. Sized for a fleet behind one address rather than for one machine, because the counter is per IP and a NAT'd fleet shares one: a machine fetches about once per release.",
+      "helptext": "Max agent artifact BODY fetches per window per node — the agent binary and the support bundle, which are megabytes each. The small manifest fetches are metered by the general agent-channel limit instead. A machine fetches about once per release.",
       "group": "api_rate_limits",
       "label": "Max agent artifact downloads per window",
       "type": "number",

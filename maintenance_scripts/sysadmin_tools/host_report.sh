@@ -8,6 +8,16 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.15 - a host's sites are listed up to 100 (MAX_SITES), not 20: a multi-tenant
+#                host takes 50 (specs/multi_tenant_docker_hosts.md WP7 N1). To fit the agent's
+#                minute, every container is read by ONE docker inspect, and every running
+#                site is asked whether it answers at the same time, so the report costs its
+#                slowest site rather than the sum. outbound_limits.sites is capped the same.
+#                disk_pool: on a host whose /var/lib/docker is a disk pool of its own
+#                (docker_disk_pool.sh, WP4), that filesystem's figures, which the root disk's
+#                never show: the pool's file is allocated whole; "none" where it is not a
+#                mount of its own (reviewer2 B2). A docker inspect that answers nothing (it
+#                timed out, say) makes the containers "unknown", not an empty list (N5).
 # Version: 1.14 - outbound_limits carries the figures while the limits are off too: what turning
 #                them on brings back (outbound_limits.sh 1.3 keeps them in its status). Each
 #                site's figures carry set_by: plane where the management node set the machine's
@@ -93,7 +103,7 @@
 #     string "unknown" for that key, never an error for the whole report, and
 #     the exit code is 0 whenever the object was printed. Run as an ordinary
 #     user it still prints the object, with unknowns where root was needed.
-#   - Every list is capped here (20 failed units, 20 jails) and every string
+#   - Every list is capped here (20 failed units, 20 jails, 100 sites) and every string
 #     is capped and reduced to a safe character set, so the agent's output cap
 #     is never the thing that bounds this report and nothing a unit or jail
 #     was named can break the JSON.
@@ -122,6 +132,7 @@ export LC_ALL=C
 
 CMD_TIMEOUT=10          # seconds per external command
 MAX_LIST=20             # failed units, jails
+MAX_SITES=100           # site containers, and the sites in outbound_limits
 MAX_NAME=64             # characters kept of any unit or jail name
 
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -324,6 +335,22 @@ emit_disk() {
         "\"$(printf '%s' "$WEB_ROOT" | tr -cd 'A-Za-z0-9._/-' | head -c 200)\"" \
         "$(json_num_or_unknown "${used:-}")" "$(json_num_or_unknown "${total:-}")" \
         "$(json_num_or_unknown "${avail:-}")" "$(json_num_or_unknown "${ipct:-}")"
+}
+
+# A Docker host's disk pool (docker_disk_pool.sh): /var/lib/docker as a
+# filesystem of its own, whose figures the root disk never shows, since the
+# pool's file is allocated whole. "none" where /var/lib/docker is not a mount
+# of its own.
+emit_disk_pool() {
+    local mp="${HOST_REPORT_DOCKER_DIR:-/var/lib/docker}" fstype opts line used total avail
+    read -r fstype opts < <(run findmnt -n -o FSTYPE,OPTIONS --mountpoint "$mp") || true
+    [[ -n "${fstype:-}" ]] || { printf '"none"'; return; }
+    line="$(run df -B1 --output=used,size,avail "$mp" | tail -n 1)"
+    read -r used total avail <<< "$line"
+    printf '{"path":"%s","fstype":%s,"prjquota":%s,"used_bytes":%s,"total_bytes":%s,"avail_bytes":%s}' \
+        "$(printf '%s' "$mp" | tr -cd 'A-Za-z0-9._/-' | head -c 200)" "$(json_str "$fstype")" \
+        "$([[ ",${opts:-}," == *",prjquota,"* ]] && echo true || echo false)" \
+        "$(json_num_or_unknown "${used:-}")" "$(json_num_or_unknown "${total:-}")" "$(json_num_or_unknown "${avail:-}")"
 }
 
 meminfo_kb() { awk -v k="$1" '$1==k":" {print $2; exit}' /proc/meminfo 2>/dev/null; }
@@ -741,7 +768,7 @@ json_ceiling() {
 # (SITE:CEILING:RATE:BURST:OPEN in the status file), plane where the
 # management node set the machine's or that site's own (site_set_by).
 limits_figures() {
-    local set_by='""' entry site c r b o first=1 site_by by_sites
+    local set_by='""' entry site c r b o first=1 n=0 site_by by_sites
     [[ "$(limits_key set_by)" == plane ]] && set_by='"plane"'
     by_sites=" $(limits_key site_set_by) "
     printf '"figures":{"ceiling_mbit":%s,"conn_rate":%s,"conn_burst":%s,"open_conns":%s,"set_by":%s}' \
@@ -749,10 +776,12 @@ limits_figures() {
         "$(json_num_or_unknown "$(limits_key conn_burst)")" "$(json_num_or_unknown "$(limits_key open_conns)")" "$set_by"
     printf ',"web_ceiling_mbit":%s,"sites":{' "$(json_ceiling "$(limits_key web_ceiling_mbit)")"
     for entry in $(limits_key site_figures); do
+        (( n < MAX_SITES )) || break
         IFS=: read -r site c r b o <<< "$entry"
         [[ "$site" =~ ^[A-Za-z0-9_-]{1,50}$ ]] || continue
         (( first )) || printf ','
         first=0
+        n=$((n+1))
         site_by="$set_by"
         [[ "$by_sites" == *" ${site} "* ]] && site_by='"plane"'
         printf '%s:{"ceiling_mbit":%s,"conn_rate":%s,"conn_burst":%s,"open_conns":%s,"set_by":%s}' "$(json_str "$site")" \
@@ -789,11 +818,10 @@ emit_outbound_limits() {
 # namespace through the PID docker names. Each counter is cumulative since the
 # container started (started_at), so the plane turns two reports into a rate.
 # A container that is not running has none of them: every key says unknown.
-container_figures() {
-    local c="$1" state="$2" pid="" started="" started_at="" cgpath="" cg="" tx=""
+container_figures() {  # NAME STATE PID STARTED_AT, the last two as docker inspect printed them
+    local c="$1" state="$2" pid="$3" started="$4" started_at="" cgpath="" cg="" tx=""
     local used="" peak="" mlimit="" ooms="" usec="" climit="" pcur="" plimit=""
     if [[ "$state" == "running" ]]; then
-        read -r pid started <<< "$(run docker inspect -f '{{.State.Pid}} {{.State.StartedAt}}' "$c")"
         [[ "$pid" =~ ^[1-9][0-9]*$ ]] || pid=""
         if [[ "$started" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9:]+)$ ]]; then
             started_at="$(run date -u -d "$started" +%s)"
@@ -825,40 +853,87 @@ container_figures() {
     printf ',"outbound_dropped":%s' "$(limits_dropped "drops_site_${c}" "$([[ "$LIMITS_SITES" == *" ${c} "* ]] && echo 1 || echo 0)")"
 }
 
+# What one docker inspect prints for each container, on one line, |-separated:
+# its name, its SITENAME entry, state, health, the PID and start time its
+# figures are read through, its published web port, and its named volumes'
+# sources. The environment is filtered inside docker, so no other variable (a
+# password) ever reaches this script.
+#
+# Every part of it must run against docker's typed container, not its raw JSON.
+# docker runs a template that fails on the typed one again on the raw JSON, and
+# there a container that never started has no Health key (the template fails,
+# and the site drops out of the list) and a PID of a million or more prints as
+# 1e+06. So the web port is found by ranging over the port map: indexing it by
+# the string "80/tcp" fails on the typed map, whose keys are not strings.
+INSPECT_FORMAT='{{.Name}}|{{range .Config.Env}}{{if eq (index (split . "=") 0) "SITENAME"}}{{.}}{{end}}{{end}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.State.Pid}}|{{.State.StartedAt}}|{{range $p, $b := .NetworkSettings.Ports}}{{if eq (printf "%s" $p) "80/tcp"}}{{range $i, $x := $b}}{{if eq $i 0}}{{$x.HostPort}}{{end}}{{end}}{{end}}{{end}}|{{range .Mounts}}{{if eq .Type "volume"}}{{.Source}} {{end}}{{end}}'
+
+# Whether each running site answers through PHP: serve.php's header on its
+# published port. Every site is asked at once, so a host's report costs its
+# slowest site (curl's --max-time bounds each), not the sum of them. Reads
+# "NAME PORT" lines; prints "NAME yes|no" lines, in whatever order they finish.
+probe_sites() {
+    local c port
+    while read -r c port; do
+        [[ -n "$c" ]] || continue
+        {
+            if run curl -s --max-time 8 -o /dev/null -D - "http://127.0.0.1:${port}/" | grep -q -i '^x-joinery-version:'; then
+                printf '%s yes\n' "$c"
+            else
+                printf '%s no\n' "$c"
+            fi
+        } < /dev/null &
+    done
+    wait
+}
+
 emit_containers() {
-    local names c site state health port headers answers n=0 i src sum bytes path
+    local names c site state health pid started port vols answers n=0 i src sum bytes path
     local -a sites=() states=() healths=() answered=() figures=() srcs=() helds=()
-    local -A src_site=() disk=() missing=()
+    local -A src_site=() disk=() missing=() reply=() ports=()
     command -v docker >/dev/null 2>&1 || { printf '"none"'; return; }
     names="$(run docker ps -a --format '{{.Names}}')" || { printf '"unknown"'; return; }
-    for c in $names; do
-        (( n < MAX_LIST )) || break
-        [[ "$c" =~ ^[a-z0-9_-]{1,50}$ ]] || continue
-        site="$(run docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | awk -F= '$1=="SITENAME" {print $2; exit}')"
-        [[ "$site" == "$c" ]] || continue
-        state="$(run docker inspect -f '{{.State.Status}}' "$c")"
-        health="$(run docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$c")"
-        answers=unknown
-        port="$(run docker port "$c" 80/tcp | awk -F: 'NR==1 {print $NF}')"
-        if [[ "$state" != "running" ]]; then
-            answers=no
-        elif [[ "$port" =~ ^[0-9]+$ ]]; then
-            headers="$(run curl -s --max-time 8 -o /dev/null -D - "http://127.0.0.1:${port}/")"
-            if printf '%s\n' "$headers" | grep -q -i '^x-joinery-version:'; then answers=yes; else answers=no; fi
-        fi
-        sites+=("$c"); states+=("${state:-unknown}"); healths+=("${health:-unknown}"); answered+=("$answers")
+    names="$(grep -E '^[a-z0-9_-]{1,50}$' <<< "$names")"
+    [[ -n "$names" ]] || { printf '[]'; return; }
+    # One read for every container. Nothing back (it timed out, or docker
+    # stopped answering) is unknown, never a host with no sites.
+    local inspected
+    # shellcheck disable=SC2086  # the names are checked above: one word each
+    inspected="$(run docker inspect -f "$INSPECT_FORMAT" $names)"
+    [[ -n "$inspected" ]] || { printf '"unknown"'; return; }
+    while IFS='|' read -r c site state health pid started port vols; do
+        (( n < MAX_SITES )) || break
+        c="${c#/}"
+        [[ "$c" =~ ^[a-z0-9_-]{1,50}$ && "$site" == "SITENAME=$c" ]] || continue
+        sites+=("$c"); states+=("${state:-unknown}"); healths+=("${health:-unknown}")
+        [[ "$state" == "running" && "$port" =~ ^[0-9]{1,5}$ ]] && ports[$c]="$port"
         # Held stopped by hold_container (a switch-over's old container): not
         # running is what it should be, and container_health leaves it alone.
         if [[ -f "${HOST_REPORT_ETC:-/etc}/joinery/sites/${c}/held" ]]; then helds+=(true); else helds+=(false); fi
-        figures+=("$(container_figures "$c" "${state:-unknown}")")
+        figures+=("$(container_figures "$c" "${state:-unknown}" "$pid" "$started")")
         # The site's data is its named volumes; a bind mount can name any
         # path on the server, and is never walked.
         missing[$c]=0
-        while IFS= read -r src; do
+        for src in $vols; do
             [[ "$src" =~ ^/[A-Za-z0-9._/-]+$ && "$src" != *..* ]] || continue
             srcs+=("$src"); src_site[$src]="$c"; missing[$c]=$(( ${missing[$c]} + 1 ))
-        done <<< "$(run docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Source}}{{println}}{{end}}{{end}}' "$c")"
+        done
         n=$((n+1))
+    done <<< "$inspected"
+
+    if (( ${#ports[@]} > 0 )); then
+        while read -r c answers; do
+            [[ -n "${ports[$c]:-}" ]] && reply[$c]="$answers"
+        done <<< "$(for c in "${!ports[@]}"; do printf '%s %s\n' "$c" "${ports[$c]}"; done | probe_sites)"
+    fi
+    for i in "${!sites[@]}"; do
+        c="${sites[$i]}"
+        # Stopped: it does not answer. Running with no published web port:
+        # there is nothing to ask, so unknown.
+        if [[ "${states[$i]}" != "running" ]]; then answers=no
+        elif [[ -n "${ports[$c]:-}" ]]; then answers="${reply[$c]:-no}"
+        else answers=unknown
+        fi
+        answered+=("$answers")
     done
 
     # Disk: ONE du over every site's volumes, under the one command timeout, so
@@ -898,6 +973,7 @@ printf '"ssh_auth_failures_24h":%s,' "$(emit_ssh_auth_failures)"
 printf '"kernel_events_24h":%s,' "$(emit_kernel_events)"
 printf '"sshd":%s,' "$(emit_sshd)"
 printf '"disk":%s,' "$(emit_disk)"
+printf '"disk_pool":%s,' "$(emit_disk_pool)"
 printf '"memory":%s,' "$(emit_memory)"
 printf '"swap":%s,' "$(emit_swap)"
 printf '"cpus":%s,' "$(emit_cpus)"

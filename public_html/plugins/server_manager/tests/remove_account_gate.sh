@@ -168,12 +168,20 @@ echo "getjoinery_postgres_pg16" >> "$D/volumes"
 echo "joinery-getjoinery:pre-rebase-pg16" >> "$D/images"
 mkdir -p "$T/fs/root/rebase/getjoinery" "$T/fs/root/rebase/getjoinery_orgs"
 touch "$T/fs/etc/joinery/sites/getjoinery/held" "$T/fs/etc/joinery/sites/getjoinery/suspended"
+# Its disk allowance on a disk pool (docker_disk_pool.sh), beside a neighbour's
+# whose name begins with getjoinery's.
+touch "$T/fs/etc/joinery/sites/getjoinery/disk_allowance"
+printf 'joinery_getjoinery:1000000001\njoinery_getjoinery_backups:1000000002\njoinery_getjoinery_deploy:1000000003\njoinery_getjoinery_developers:1000000004\n' > "$T/fs/etc/projid"
+printf '1000000001:/v/getjoinery_uploads\n1000000001:/v/getjoinery_code\n1000000002:/v/getjoinery_backups\n1000000003:/v/getjoinery_deploy\n1000000004:/v/getjoinery_developers_uploads\n' > "$T/fs/etc/projects"
 cp "$T/fs/etc/apache2/sites-available/getjoinery.conf" "$T/fs/etc/apache2/sites-available/getjoinery.conf.before-render.1"
 out="$(run getjoinery)"; rc=$?
 chk "A: getjoinery removal verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED getjoinery$')" "1"
 chk "A: exit 0" "$rc" "0"
-chk "A: none of getjoinery's volumes left" "$(grep -cE '^getjoinery_[a-z_]+$' "$D/volumes" | tr -d ' ')" "45"
-chk "A: getjoinery's own fifteen gone" "$(for v in $mine; do grep -xF "getjoinery_$v" "$D/volumes"; done | wc -l | tr -d ' ')" "0"
+chk "A: none of getjoinery's volumes left" "$(grep -cE '^getjoinery_[a-z_]+$' "$D/volumes" | tr -d ' ')" "48"
+chk "A: getjoinery's own sixteen gone" "$(for v in $mine; do grep -xF "getjoinery_$v" "$D/volumes"; done | wc -l | tr -d ' ')" "0"
+chk "A: its disk allowance's projects and mark go; the neighbour's stay" \
+    "$(cut -d: -f1 "$T/fs/etc/projid" | paste -sd,)|$(cut -d: -f1 "$T/fs/etc/projects" | sort -u | paste -sd,)|$(there /etc/joinery/sites/getjoinery/disk_allowance)" \
+    "joinery_getjoinery_developers|1000000004|no"
 chk "A: the rebase's kept database gone" "$(grep -cxF getjoinery_postgres_pg16 "$D/volumes")" "0"
 chk "A: no docker call names a sibling" "$(grep -cE 'getjoinery_(developers|orgs|test)' "$D/log")" "0"
 chk "A: siblings' containers all there" "$(grep -cE '^getjoinery_(developers|orgs|test)$' "$D/containers")" "3"
@@ -300,7 +308,7 @@ for case in image bind foreign rollback; do
         chk "I: $case: refused (exit 1)" "$rc" "1"
         chk "I: $case: says it is not install.sh's" "$(echo "$out" | grep -c "is not one install.sh made")" "1"
         chk "I: $case: container, volumes and vhost untouched" \
-            "$(grep -cxF handmade "$D/containers")|$(grep -c '^handmade_' "$D/volumes" | tr -d ' ')|$(there /etc/apache2/sites-available/handmade.conf)" "1|15|yes"
+            "$(grep -cxF handmade "$D/containers")|$(grep -c '^handmade_' "$D/volumes" | tr -d ' ')|$(there /etc/apache2/sites-available/handmade.conf)" "1|16|yes"
         chk "I: $case: nothing was stopped or removed" "$(grep -cE '^(stop|rm|volume rm|network rm|rmi) ' "$D/log")" "0"
     fi
 done

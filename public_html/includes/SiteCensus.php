@@ -54,7 +54,7 @@ class SiteCensus {
 	const NAMED_EXCLUDES = array('backups', 'vendor', 'node_modules', 'target', '.git', 'logs', 'cache', 'tmp', 'sessions');
 
 	/** Paths, relative to the site root, each machine keeps as its own. */
-	const OWN_PATHS = array('config/Globalvars_site.php', 'config/backup_site_key', 'config/backup-ledger', 'uploads/upgrades');
+	const OWN_PATHS = array('config/Globalvars_site.php', 'config/backup_site_key', 'config/backup-ledger', 'uploads/upgrades', 'deploy');
 
 	/** Tables a backup run writes on the source after its dump. */
 	const OWN_TABLES = array('bkh_backup_history');

@@ -417,6 +417,8 @@ If ANY step fails → Automatic rollback
 └── uploads/upgrades/         # Downloaded packages (client sites)
 ```
 
+A container site has a `deploy` volume, mounted at `/var/www/html/{site}/deploy/`. Where it exists, an upgrade keeps its staging (`deploy/upgrades/`), the previous code (`deploy/public_html_last/`) and a failed deployment's code (`deploy/public_html_failed_*`) there instead, and checks for 500 MB free there. The volume is outside the site's disk allowance on a shared host, so a site at its allowance can still be upgraded, and none of it lands on the container's capped writable layer (`DeploymentHelper::deployRoot()`; `utils/upgrade.php` applies the same rule itself, since it updates ahead of that class).
+
 **Archive Naming Convention:**
 - `joinery-core-X.XX.upg.zip` - Core application (no themes/plugins)
 - `theme-{name}-X.XX.upg.zip` - Individual theme archive

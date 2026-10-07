@@ -1,6 +1,6 @@
 # Multi-tenant Docker hosts: limits and isolation for many sites on one box
 
-**Status:** Draft, 2026-10-04. WP1 built 2026-10-05 and released in 0.8.459
+**Status:** Implemented 2026-10-07: every work package is built, reviewed (reviewer2 VALID on the last, N1/S23/WP4/WP6) and run on scratch Linodes; what is left to verify on a live host is in the live verification queue, and N2 (existing proxy vhosts are never rendered again) is a to-do of its own. Drafted 2026-10-04. WP1 built 2026-10-05 and released in 0.8.459
 (host_report.sh 1.7, JobResultProcessor 1.55, node overview 1.37,
 stats_handler 1.4); docker-prod has reported per-site figures since, so the
 week of measurement ends about 2026-10-12. The agent half (check_status
@@ -26,11 +26,17 @@ and proven on the scratch Linode, including a reboot by hand (an unattended one 
 check); multi_tenant_host.sh 1.1 has reviewer2's fixes; install.sh 3.00 runs them on every
 `docker --multi-tenant` install (gate docker_multi_tenant). WP7 built 2026-10-06 (the plane half: the
 Held stopped install state, ManagedNode 1.42, JobResultProcessor 1.62, node page Hold stopped and Start;
-test hold_stopped_site; reviewer2's B1 and B2 fixed, N1 open: the host report lists 20 sites); its host half shipped with the site copy spec. WP8
+test hold_stopped_site; reviewer2's B1 and B2 fixed; N1, the host report listing 20 sites, fixed 2026-10-07 in host_report.sh 1.15); its host half shipped with the site copy spec. WP8
 built 2026-10-06 (proxy_default_site.sh 1.0, default_proxy_vhost.conf 1.05, suspended_page.sh 1.0,
 install.sh 3.02, remove_account.sh 2.9, host_housekeeping.sh 1.14, agent 1.61.0 suspended_page,
 JobCommandBuilder 1.99; gate proxy_default_site) and proven on the scratch Linode; reviewer2 VALID, N2 open
-(existing proxy vhosts are never rendered again). Nothing else is built. Split out of the starter
+(existing proxy vhosts are never rendered again). S23 built 2026-10-07 (the agent channel's limit
+per node, Direct's lookup cap 240, a site's name with A and AAAA records). WP4 built 2026-10-07
+(docker_disk_pool.sh 1.0, install.sh 3.05 --disk-pool and site --disk, the deploy volume,
+DiskAllowance; gates docker_disk_pool, disk_allowance) and its XFS behaviour proven by hand on the
+scratch Linode, then run on a new host (mt-wp4-scratch). WP6 built 2026-10-07 (site_limits.sh,
+install.sh site-limits, agent 1.63.0 site_limits, Change a site's limits) and run on that host.
+Every work package is built; what is left is in the live verification queue. Split out of the starter
 tier spec. Reviewed by public-html-d7 the same day; its findings (S-numbers)
 are folded in.
 
@@ -376,7 +382,7 @@ rest is the OS, logs and headroom.
 (`ALL_SITE_VOLUMES` in install.sh, all named `SITENAME_*`). `install.sh site
 --disk=SIZE` does the following:
 
-1. Gives all of that site's volume directories except `backups` **one shared
+1. Gives all of that site's volume directories except `backups` and `deploy` **one shared
    XFS project ID**, so the allowance covers the site's whole footprint, not
    each volume separately. The ID and paths are recorded in `/etc/projects`
    and `/etc/projid`, so they survive a reboot.
@@ -446,6 +452,69 @@ that wall:
   logs and system writes can use that headroom. It is there so PostgreSQL
   never hits the wall first.
 - The banner warns at 80% and urges at 95%.
+
+**Built 2026-10-07, and run on a new host (mt-wp4-scratch, 2026-10-07):**
+
+- `install_tools/docker_disk_pool.sh` 1.0: `create SIZE` (refused with Docker
+  on the host, a non-empty `/var/lib/docker`, or under 4 GB left beside it;
+  fallocate, `mkfs.xfs -n ftype=1`, fstab `loop,prjquota,nofail`,
+  `RequiresMountsFor=/var/lib/docker` drop-ins for docker and containerd, a
+  `joinery-docker-pool-dio.service` turning direct I/O on), `check`,
+  `allow SITE SIZE` (one project over every volume but backups and deploy,
+  numbered from 1,000,000,000, hard limit the allowance plus 10%; backups and
+  deploy a project each with no limit; the allowance written to the site's
+  `config/disk_allowance` and `/etc/joinery/sites/SITE/disk_allowance`),
+  `release SITE`, `show SITE`.
+- install.sh 3.05: `docker --disk-pool=SIZE` (needs `--multi-tenant`; made
+  after the remap is set and before Docker's package starts the daemon; a host
+  Docker is on without a pool is refused); `site --disk=SIZE` (refused without
+  a pool, kept in the run spec as `disk=`, set once the volumes exist, `none`
+  releases it). `_site_run_spec.sh` 1.8: `disk=`, `run_spec_norm_disk`, a site
+  with an allowance runs with `--storage-opt size=1G`; every site has a
+  `deploy` volume (also install.sh `ALL_SITE_VOLUMES`, remove_account.sh).
+- S11, S12: an upgrade stages, keeps the previous code and a failed
+  deployment's code in the deploy volume where there is one
+  (`DeploymentHelper::deployRoot()` 1.x, upgrade.php inline), and checks its
+  500 MB free there. backup_files.sh and SiteCensus leave `deploy/` out.
+  A site made before this has no deploy volume until it is installed again;
+  until then the old paths are used.
+- S13: `DiskAllowance` (new): the allowance from `config/disk_allowance`, its
+  use from statfs of `uploads/`. Refuses an upload (UploadHandler 2.1,
+  FileUpload::space_refusal 1.2.0) and stored mail (InboundEmailRouter 1.49:
+  deferred with 75, logged once a window; storeMessage throws on every other
+  path) at the allowance. stats_handler 1.5 reports the disk as use out of the
+  allowance, so the banner's 80% warning reads the allowance, and
+  HostedPlanNotice 1.2 urges at 95% (hosted_tier 112).
+- remove_account.sh 2.11 removes the site's projects and its allowance mark.
+- Gates: docker_disk_pool 36 (4 mutations caught); disk_allowance 13;
+  site_run_spec 212; remove_account 74; docker_multi_tenant 37.
+- Proven by hand on mt-wp5-scratch (a 1 GB XFS loop file, 2026-10-07): the
+  mount with prjquota, direct I/O on the loop device, df on a project
+  directory showing its limit across two directories, writes stopping at the
+  limit with ENOSPC while a directory outside it kept writing. Docker's
+  overlay2 there (userns-remap turns off containerd's image store) keeps
+  everything under /var/lib/docker.
+- **Run on a new Ubuntu 26.04 Linode, 2026-10-07:** `install.sh -y docker
+  --multi-tenant --disk-pool=30G` made the pool before Docker (overlay2 on
+  xfs, prjquota, direct I/O on the loop device); `site sitea --disk=1G
+  --memory=512m` gave the container `--storage-opt size=1G`, a deploy volume,
+  three projects, and the site sees 1.2G (the hard limit) on uploads, 30G on
+  deploy and 1.0G on its layer. Filled to 108%: a chunked upload and a stored
+  message refused in plain words, the status check reads 108% of 1G,
+  PostgreSQL took 20,000 rows in the headroom and the site still answered;
+  deleting the files made room again. A raw write past the app stopped at the
+  hard limit, and there PostgreSQL warned it could not write: what the app's
+  refusal is for. Rebooted with the fstab line pointing at a missing file: the
+  host booted, docker and containerd failed on the dependency, nothing was
+  written to /var/lib/docker on the root disk; with the line back, a reboot
+  brought the pool, the direct I/O unit, Docker and the site back on their
+  own. Found and fixed there: a capped site's uploads were measured by the
+  whole-disk 1 GB reserve as well, which would refuse a small allowance
+  outright; the allowance is now the measure (FileUpload::space_refusal,
+  drive_list's available figure; disk_allowance 14).
+- In the live verification queue: an upgrade of a site at its allowance
+  (staging and the previous code in the deploy volume), which needs a release
+  newer than the site's.
 
 ### WP5 — Walling sites off from each other
 
@@ -795,6 +864,32 @@ These are not leaks, but each must be dealt with:
   (`NodeDnsPlan`). A site's domain on a multi-tenant host needs both, pointing at the box's IPv4
   and IPv6, under the IPv4-and-IPv6 rule.
 
+**Built 2026-10-07:**
+
+- **The agent channel's limit is per agent** (AgentChannelEndpoint 1.33,
+  RequestLogger 1.5, request_logs `rql_key`, apiv1.php 2.22). A request a
+  node's signature proves counts toward that node's own bucket
+  (`api_agent_node`, keyed `node:ID`); one that proves no node (a join, a
+  missing or wrong signature, an unknown path) toward its address's
+  (`api_agent`). The check moved from apiv1.php into the endpoint, so an
+  address over its limit refuses only what proves no node: a neighbour whose
+  signature verifies still gets in. A refused request is not recorded, so a
+  bucket drains. Same setting, 6,000 an hour, now per node. Test
+  agent_channel_metering 39 (signed and unsigned requests over HTTP; an
+  address and a node each driven over the limit).
+- **Joinery Direct's peer lookup cap is 240 a minute** (DirectCapability
+  1.3), not 60: up to 100 sites on one address, each needing a lookup and a
+  refresh after a key rotation. Kept per connecting address, since the
+  sending domain is the sender's choice.
+- **A site's name gets an A and an AAAA record** (NodeDnsPlan 1.1,
+  ProvisionManagedDomains 1.8), each where the machine has that address,
+  from its cloud provision; a site on a shared host takes its host's
+  node's provision. A registered domain's apex and www get both. Test
+  node_dns_plan 8; provision_managed_domains 105. An IP swap still refuses a
+  site whose AAAA names the old server (IPv6 addresses do not move), and
+  says to remove the record or point it at the copy's IPv6.
+- The neighbours' blocklisting is `hosted_abuse_response`'s.
+
 
 ### WP6 — Changing a site's caps later
 
@@ -810,6 +905,25 @@ a rebuild:
 writes the run spec (WP0). It is reached from the plane through a new
 host-agent word, and offered on the node page as **Change limits** for a site
 on a multi-tenant host.
+
+**Built 2026-10-07:** `sysadmin_tools/site_limits.sh` 1.0 (SITE MEMORY CPUS
+DISK, each a figure, none or keep): docker update for memory (swap held to
+it) and CPU, docker_disk_pool.sh allow or release for the disk, the run spec
+for each, and a restart when the memory changed. It refuses what install.sh
+site would, a CPU ceiling above the host's, an allowance with no pool, and
+lifting a running container's memory or CPU: Docker refuses to lift memory
+live, and keeps a CPU ceiling in the container's configuration and puts it
+back at the next start (seen on the box), so lifting either is a rebuild's.
+`install.sh site-limits` (3.05) runs it; agent 1.63.0 `site_limits` operate
+machine word; JobCommandBuilder 1.103 build_site_limits; node page 1.51
+**Change a site's limits** under Site containers; node_detail_actions 1.47;
+SupportBundlePublisher 1.15 ships site_limits.sh and docker_disk_pool.sh.
+Gates: site_limits 21 (3 mutations caught), job_command_builder 467. Run on
+mt-wp4-scratch: 512m/none/1G to 768m/0.5/2G (restarted, cgroup and allowance
+followed), keep for all changes nothing, CPU 0.5 to 0.75 to 1.0 live, disk 1G
+to 3G (df showed 3.4G at once), each refusal. The plane's path (the word on a
+joined host) is in the live verification queue: it needs agent 1.63.0
+published.
 
 ### WP7 — Stop and start that stay stopped (S1)
 
@@ -885,19 +999,21 @@ with the buttons on a real host.
 - N3, fixed: test rows were registered for cleanup twice.
 - N5: a held site cannot be copied (the copy refuses a source that is not a
   working site). That is intended, since its agent is stopped.
-- **N1, open:** `host_report.sh` lists at most 20 site containers (`MAX_LIST`),
-  and a host takes 50 sites (`mgh_max_sites`). For sites past the twentieth
-  there is no row on the host's card, so no Hold or Start button and no
-  per-site figures (WP1). A hold placed by hand on such a site is never
-  followed; holds placed from here still are, from the job's result.
-- Raising the cap alone is not enough. The report runs about 1 s per site
-  (2.0 s for two on mt-wp5-scratch: several `docker inspect` calls and one
-  request through PHP each), and the agent gives it one minute. So 50 sites
-  are near the limit, and a few sites that hang would fail the whole report.
-- The fix for N1: one `docker inspect` for every container, the answer
-  requests in parallel under one deadline, then a container cap of 100 (about
-  470 bytes each, inside the agent's 64 KiB script output), measured on a box
-  with 50 sites.
+- **N1, fixed 2026-10-07** (host_report.sh 1.15, JobResultProcessor 1.66, server_manager
+  1.30.21): the report lists up to 100 site containers (`MAX_SITES`,
+  `HOST_REPORT_MAX_SITES`), and the outbound figures up to 100 sites. One
+  `docker inspect` reads every container, and every running site is asked
+  whether it answers at the same time, so the report costs its slowest site.
+  The template runs against docker's typed container: docker reruns a failing
+  template on the raw JSON, where a never-started container has no Health key
+  and dropped out of the list, and a PID of a million or more prints as
+  1e+06. Gate host_report 159 (120 stand-in sites answering in 2 s each:
+  the first 100 listed, one inspect, done in about 5 s; the largest 100
+  entries fit 64 KiB with 4 KiB spare); job_result_processor 291. On
+  mt-wp5-scratch with 52 sites (50 small stand-ins): all listed, each
+  answering, with memory and disk figures, in about 7 s, where the old
+  script took the same 7 s to list 20; a never-started container is listed,
+  and no environment value reaches the object.
 
 ### WP8 — A catch-all default site on every multi-tenant host (S24)
 
@@ -1103,6 +1219,54 @@ active in a container, so no release ordering is needed today. The full chain
 (a signed release's installer run by the container start) is in the live
 verification queue: a hand-copied plugin fails the release manifest check, so
 the start skipped it on the box.
+
+### reviewer2's review of N1, S23, WP4 and WP6 (2026-10-07)
+
+NOT VALID on first pass: 3 B, 6 N. Its three named risks (the agent channel's
+limit moving into the endpoint, a pool that fails to mount at boot, upgrade.php
+on a site with no deploy volume) were read and traced clean. Fixed:
+
+- **B1:** releasing an allowance left `config/disk_allowance` in the site's
+  config volume; with the project's limit gone the site sees the whole pool
+  and refused everything. docker_disk_pool.sh 1.1 `release` removes both
+  copies (`allowance_files_write`, shared with `allow`); DiskAllowance 1.1
+  treats an allowance whose disk is far larger than it (the pool) as none.
+  On the box: released, the site saw 30G and read no allowance; set again,
+  35% of 1G.
+- **B2:** a pooled host's pool was never measured (the root disk never shows
+  it). host_report.sh 1.15 `disk_pool` (the pool's own figures and whether
+  project quotas are on), JobResultProcessor 1.66 keeps it, the node page
+  shows a Docker disk pool gauge, agent 1.63.0's disk_headroom holds the pool
+  to the same floor (either failing fails). `allow` refuses an allowance that,
+  with every other site's limit, would promise more than the pool holds (on
+  the box: 40G on a 30G pool refused, naming the figures).
+- **B3:** stored mail stopped at the allowance on one path of three. The
+  guard is now the one write every path shares: InboundEmailMessage 1.43
+  save() refuses a new row (MailboxAtDiskAllowance). MailboxStoreDeclined is
+  the parent of it and MailboxSealTargetMissing, and every caller defers on
+  it: the router (main and spam-held stores, 75, logged once a window), the
+  IMAP feed (cursor held), Direct (delivery held), an import (entry held).
+- **N1:** artifact bodies are counted per node too. **N2:** the address's
+  bucket is asked only for a request that proves no node, so the healthy
+  poll costs one count. **N4:** rebase_site_container.sh 1.13 rollback puts the
+  recreated database volume back in the allowance. **N5:** a docker inspect
+  that answers nothing makes the containers "unknown", not an empty list.
+- **Kept:** N3 (an address over its limit answers a wrong key with 429, not
+  401: the address condition is itself abnormal), N6 (the 95% urge applies to
+  every allowance the plane sends, mail too, which is wanted).
+- Gates after: docker_disk_pool 38, disk_allowance 18, host_report 165,
+  job_result_processor 294, agent_channel_metering 39, agent go test all.
+
+Re-review 2026-10-07: **VALID**, nothing blocks commit. Its notes: N7 (release
+removed the allowance files only when /etc/projid existed) and N8 (the
+over-commit refusal's figures in MB) fixed in docker_disk_pool.sh 1.1. Kept:
+at the allowance an IMAP sync still fetches each message before save()
+refuses it (bandwidth, not correctness). N9, for the owner: the agent holds
+the pool to the same 10% / 5 GiB floor as a root disk, so a host whose sites
+really use most of a fully allotted pool carries a standing disk_headroom
+case. Kept as is: the hard limits do not cover images or each container's
+1 GB layer, so the pool's free space is still the figure that says it can
+run out.
 
 ## Host-agent words this needs
 

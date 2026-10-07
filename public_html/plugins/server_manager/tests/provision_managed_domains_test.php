@@ -429,6 +429,8 @@ check(strpos($web, 'A pmd-dns-' . $suffix . '.com -> 198.51.100.20') !== false,
 	'the apex points at the box', $web);
 check(strpos($web, 'A www.pmd-dns-' . $suffix . '.com -> 198.51.100.20') !== false,
 	'and so does www', $web);
+check(strpos($web, 'AAAA ') === false,
+	'a server with no IPv6 gets no AAAA record (NodeDnsPlan::publicAddresses names one only where it has one)', $web);
 
 $before = count($reconciler->published);
 check(pmd_tick($phase, $row) === 0, 'the mail tick takes no step yet — it asks the node');

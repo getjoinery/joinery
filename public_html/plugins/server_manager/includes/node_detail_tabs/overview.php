@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.51 - a Docker host's Site containers has Change a site's limits (memory, CPU ceiling, disk
+ *                 allowance) where its agent has site_limits (multi_tenant_docker_hosts WP6); a host with a
+ *                 disk pool shows it as a gauge of its own, Docker disk pool (reviewer2 B2)
  * @version 1.50 - while the outbound limits are off, the figures turning them on brings back (and the
  *                 site picker in Set the figures); a site whose own figures this management node set says so
  * @version 1.49 - the outbound limits' figures in force, who set them, and each site whose own differ; the
@@ -854,6 +857,16 @@
 				? htmlspecialchars($status_data['disk_used'] . ' of ' . $status_data['disk_total'] . ' used · ' . ($status_data['disk_available'] ?? '?') . ' free') : '';
 			$gauge('Disk', $pct, $gauge_class($pct), $pct . '%', $line);
 		}
+		// A Docker host's disk pool (host_report 1.15): /var/lib/docker on a
+		// filesystem of its own, which the root disk above never shows filling.
+		$dp = $hr['disk_pool'] ?? null;
+		if (is_array($dp) && is_int($dp['total_bytes']) && $dp['total_bytes'] > 0 && is_int($dp['used_bytes'])) {
+			$pct = (int)round($dp['used_bytes'] * 100 / $dp['total_bytes']);
+			$free = is_int($dp['avail_bytes']) ? $dp['avail_bytes'] : $dp['total_bytes'] - $dp['used_bytes'];
+			$class = ($free < $dp['total_bytes'] * 0.10) ? 'bg-danger' : $gauge_class($pct);
+			$gauge('Docker disk pool', $pct, $class, $pct . '%', $size($dp['used_bytes']) . ' of ' . $size($dp['total_bytes']) . ' used · <strong>' . $size($free) . ' free</strong>'
+				. ($dp['prjquota'] ? '' : ' · <span class="text-danger">project quotas are off: no site\'s allowance holds</span>'), '');
+		}
 
 		// Memory
 		if ($hr && $have($hr['memory']) && $hr['memory']['total_bytes'] > 0) {
@@ -1120,6 +1133,29 @@
 					echo '</td></tr>';
 				}
 				echo '</tbody></table>';
+				// A site's limits changed without a rebuild (multi_tenant_docker_hosts
+				// WP6): memory and CPU on the running container, the disk allowance
+				// on the host's disk pool.
+				if (JobCommandBuilder::has_primitive($node, 'site_limits')) {
+					$sl_sites = [];
+					foreach ($containers as $c) { if (empty($c['held'])) { $sl_sites[$c['name']] = $c['name']; } }
+					if ($sl_sites) {
+						echo '<details class="mt-1"><summary class="small text-muted" style="cursor:pointer;">Change a site\'s limits</summary>';
+						$fw_sl = $page->getFormWriter('site_limits_form', ['action' => $base_url . '&tab=overview']);
+						$fw_sl->begin_form();
+						$fw_sl->hiddeninput('action', '', ['id' => 'site_limits_action', 'value' => 'site_limits']);
+						$fw_sl->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'site_limits_csrf', 'value' => SmAdminCsrf::token()]);
+						$fw_sl->dropinput('name', 'Site', ['options' => $sl_sites]);
+						$fw_sl->textinput('memory', 'Memory', ['placeholder' => '512m', 'maxlength' => 8,
+							'helptext' => 'Restarts the site, so PostgreSQL and PHP size themselves to it.']);
+						$fw_sl->textinput('cpus', 'CPU ceiling (cores)', ['placeholder' => '1.0', 'maxlength' => 8]);
+						$fw_sl->textinput('disk', 'Disk allowance', ['placeholder' => '4g', 'maxlength' => 8,
+							'helptext' => 'Only on a host with a disk pool; none takes it away. Leave a field empty to keep it. A memory limit or CPU ceiling is lifted by rebuilding the site (install.sh site --memory=none).']);
+						$fw_sl->submitbutton('btn_site_limits', 'Change limits', ['class' => 'btn btn-sm btn-outline-secondary']);
+						$fw_sl->end_form();
+						echo '</details>';
+					}
+				}
 			}
 			echo '</div></div>';
 		} elseif (!empty($status_data['postgres_status']) || !empty($status_data['cron_last_run'])) {

@@ -12,6 +12,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * assembled bytes into a File (or a new FileVersion) and deletes the row. Stale
  * rows + part-files are swept by the retention sweep (see $retention_policy).
  *
+ * @version 1.2.0 - space_refusal() also refuses past the site's disk allowance (DiskAllowance)
  * @version 1.1.0
  */
 class FileUpload extends SystemBase {
@@ -84,6 +85,13 @@ class FileUpload extends SystemBase {
 		$uploads = (string)Globalvars::get_instance()->get_setting('upload_dir');
 		if ($uploads !== '') {
 			$paths[] = $uploads;
+		}
+		// A site on a shared host has an allowance of its own, and it is the
+		// measure: the disk it sees is the allowance plus 10% kept for the
+		// database and logs, so the whole-disk reserve below would refuse it
+		// long before its allowance is used (DiskAllowance).
+		if (DiskAllowance::state() !== null) {
+			return DiskAllowance::refusal(max(0, (int)$expected_bytes));
 		}
 		return DiskSpace::shortfallMessage(max(0, (int)$expected_bytes), $paths);
 	}

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 2.11 - A site's disk allowance goes with it (docker_disk_pool.sh, specs/
+#               multi_tenant_docker_hosts.md WP4): its projects leave /etc/projid and
+#               /etc/projects, and its disk_allowance mark goes; its volumes include deploy
 #VERSION 2.10 - Touches nothing of another site: volumes are its own fifteen by exact name
 #               (install.sh's ALL_SITE_VOLUMES) plus a rebase's kept database, never every volume
 #               starting with its name (removing getjoinery reached for getjoinery_developers_*
@@ -128,9 +131,9 @@ fi
 # The suffix of every volume a site owns: install.sh's ALL_SITE_VOLUMES and
 # _site_run_spec.sh's RUN_SPEC_VOLUMES, spelled here because this script ships
 # alone and sources nothing (remove_account_gate checks the three agree).
-SITE_VOLUME_SUFFIXES="code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs agent"
+SITE_VOLUME_SUFFIXES="code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs agent deploy"
 
-# A site's volumes that exist, one per line, by exact name: its fifteen, and
+# A site's volumes that exist, one per line, by exact name: its sixteen, and
 # the old database rebase_site_container.sh keeps until a rebase finishes
 # (<site>_postgres_pg<major>). Never a prefix match: another site may be named
 # <site>_<word> (getjoinery_developers beside getjoinery), and its volumes start
@@ -249,12 +252,29 @@ fi
 # script's, and rm -f on it would stop the run. The rest of the site's state
 # directory is not this script's to remove.
 clear_site_marks() {
-    local mark path
-    for mark in held suspended run_spec; do
+    local mark path f
+    for mark in held suspended run_spec disk_allowance; do
         path="${SITES_STATE:?}/${SITE_NAME:?}/${mark}"
         if [ -f "$path" ] || [ -L "$path" ]; then
             rm -f "$path"
         fi
+    done
+    # The site's XFS projects on a disk pool (docker_disk_pool.sh): the
+    # allowance's and its own backups and deploy volumes', by exact name. Each
+    # is joinery_<site> or joinery_<site>_<volume>, so another site whose name
+    # begins with this one's keeps its own.
+    local projid="${SITES_STATE%/joinery/sites}/projid" projects="${SITES_STATE%/joinery/sites}/projects" ids name
+    [ -f "$projid" ] || return 0
+    ids=""
+    for name in "joinery_${SITE_NAME}" "joinery_${SITE_NAME}_backups" "joinery_${SITE_NAME}_deploy"; do
+        ids="$ids $(awk -F: -v n="$name" '$1 == n { print $2 }' "$projid")"
+    done
+    for f in "$projid" "$projects"; do
+        [ -f "$f" ] || continue
+        awk -F: -v ids=" $ids " -v site="$SITE_NAME" '
+            FILENAME ~ /projid$/ && ($1 == "joinery_" site || $1 == "joinery_" site "_backups" || $1 == "joinery_" site "_deploy") { next }
+            FILENAME ~ /projects$/ && index(ids, " " $1 " ") { next }
+            { print }' "$f" > "${f}.tmp.$$" && mv -f "${f}.tmp.$$" "$f"
     done
 }
 

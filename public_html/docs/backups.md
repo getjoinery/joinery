@@ -459,8 +459,9 @@ the data increments. A directory the data archive leaves out (`vendor/`,
 `cache/`, …) can be recreated without re-basing anything.
 
 The data archive leaves out `public_html/`, `public_html_*` (an upgrade's
-rollback and failed trees) and `uploads/upgrades/` (its staging area, which
-holds a whole code tree mid-upgrade). These three are anchored to the site
+rollback and failed trees), `uploads/upgrades/` (its staging area, which
+holds a whole code tree mid-upgrade) and `deploy/` (a container's deploy
+volume, which holds all three). These are anchored to the site
 directory, so a `public_html` deeper in the tree — a worktree under `sync/`,
 say — is data and is archived. A code archive is rooted at `public_html` and
 extracts into the site directory, after the data.

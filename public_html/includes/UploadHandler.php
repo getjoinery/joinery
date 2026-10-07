@@ -13,6 +13,7 @@
 /**
  * Joinery changes to the upstream class:
  *
+ * @version 2.1 - refuses an upload past the site's disk allowance on a shared host (DiskAllowance)
  * @version 2.0 - Decodes nothing. The EXIF-orientation pass, the GD image cache
  *                and the '' image version are gone: the stored original is the
  *                uploaded bytes, and every size is cut upright by File::resize()
@@ -384,6 +385,13 @@ class UploadHandler
                 $file->size > $this->options['max_file_size'])
         ) {
             $file->error = $this->get_error_message('max_file_size');
+            return false;
+        }
+        // A site on a shared host stops taking uploads at its disk allowance
+        // (DiskAllowance), before the disk itself refuses every write.
+        $no_room = DiskAllowance::refusal((int)$file_size);
+        if ($no_room !== '') {
+            $file->error = $no_room;
             return false;
         }
         if ($this->options['min_file_size'] &&

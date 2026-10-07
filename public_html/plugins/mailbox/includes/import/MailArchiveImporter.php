@@ -408,7 +408,7 @@ class MailArchiveImporter {
 					}
 				}
 				$counts[$outcome]++;
-			} catch (MailboxSealTargetMissing $e) {
+			} catch (MailboxStoreDeclined $e) {
 				// The mailbox cannot seal right now, so the store REFUSED — and
 				// declining always means "try again later", never a recorded
 				// failure (specs/mailbox_connect_flow.md § E). The entry stays

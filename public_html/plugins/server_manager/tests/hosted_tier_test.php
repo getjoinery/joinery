@@ -422,6 +422,9 @@ check(HostedPlanNotice::level('subscribed', 200, $near) === 'soon',
 	'an allowance at 84% warns even when nothing is due');
 check(HostedPlanNotice::level('subscribed', 200, $over) === 'urgent',
 	'an allowance actually exceeded is urgent');
+check(HostedPlanNotice::level('subscribed', 200, array(array('label' => 'Disk', 'percent' => 95))) === 'urgent'
+	&& HostedPlanNotice::level('subscribed', 200, array(array('label' => 'Disk', 'percent' => 94))) === 'soon',
+	'at 95% it urges: a site at its disk allowance stops taking uploads and mail');
 check(HostedPlanNotice::level('grace', 20, $quiet) === 'soon',
 	'a failed payment is never calm');
 check(HostedPlanNotice::level('grace', 3, $quiet) === 'urgent',

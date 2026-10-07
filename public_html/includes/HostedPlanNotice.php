@@ -29,6 +29,9 @@
  * nothing: with no hosted_plan_state there is no notice, which is what keeps a
  * self-hosted install silent.
  *
+ * @version 1.2 - an allowance at 95% is urgent, not only one past 100%: a site that reaches its disk
+ *                allowance stops taking uploads and stored mail (DiskAllowance), so the notice
+ *                urges before that (specs/multi_tenant_docker_hosts.md WP4)
  * @version 1.1 - the services state: a self-hosted site renting mail and backup storage
  *                (specs/services_phase2_platform.md §9)
  * @version 1.0
@@ -57,6 +60,8 @@ class HostedPlanNotice {
 
 	/** Percentage of an allowance at which its line turns into a warning. */
 	const ALLOWANCE_WARN_PERCENT = 80;
+	/** Percentage at which the notice urges: near enough that the next upload may be refused. */
+	const ALLOWANCE_URGE_PERCENT = 95;
 
 	/** Days left in a trial or grace period before the notice sharpens. */
 	const URGENT_DAYS = 7;
@@ -183,7 +188,7 @@ class HostedPlanNotice {
 			return 'soon';
 		}
 		foreach ($allowances as $a) {
-			if ($a['percent'] >= 100) { return 'urgent'; }
+			if ($a['percent'] >= self::ALLOWANCE_URGE_PERCENT) { return 'urgent'; }
 		}
 		if ($days !== null && $days <= self::URGENT_DAYS) {
 			return 'soon';

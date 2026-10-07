@@ -229,6 +229,22 @@ It then runs `install_tools/proxy_default_site.sh install`, which gives the host
 - certbot's challenge rule loads ahead of the switch, so a suspended site's certificate still renews.
 - Removing the site removes its mark.
 
+**A disk allowance per site.** Docker on an ordinary cloud disk cannot cap one container's disk, so one site could fill the disk for all of them. A new host made with `--disk-pool` can:
+
+```bash
+sudo ./install.sh docker --multi-tenant --disk-pool=68G
+```
+
+`install_tools/docker_disk_pool.sh create` runs before Docker is installed. It allocates a file of that size on the root disk (fully, so the pool never promises space the disk lacks), formats it XFS and mounts it at `/var/lib/docker` with project quotas, through `/etc/fstab`. The loop device reads the file with direct I/O. The mount carries `nofail`, so a pool that fails to mount does not stop the host booting, and Docker and containerd require it (`RequiresMountsFor=/var/lib/docker`), so they do not start without it. At least 4 GB of the root disk is left beside the pool; on an 80 GB box the pool is about 68 GB. A host Docker is already on cannot be given a pool, and `--disk-pool` needs `--multi-tenant`: without user-namespace remapping, a site could move its own files out of its allowance.
+
+`install.sh site SITENAME ... --disk=4G` then gives the site its allowance, and a site install with `--disk` on a host without a pool is refused:
+
+- All of the site's volumes but `backups` and `deploy` share one XFS project, so the allowance covers its whole footprint. `backups` (fleet backups stage there) and `deploy` (an upgrade's staging and the previous code) are each a project of their own, outside the allowance, so a full site can still be backed up and upgraded.
+- The project's hard limit is the allowance plus 10%. The site itself stops taking uploads and stored mail at the allowance (`DiskAllowance`), naming what is used and the way out, and inbound mail is deferred so senders retry. The 10% above is left for the database, logs and system writes, so PostgreSQL never meets the wall first.
+- The container's writable layer is capped at 1 GB (`--storage-opt size=1G`): packages and temporary files only.
+- The allowance is the run spec's `disk=` line, so a rebuild keeps it; `--disk=none` lifts it. The host writes it to the site's `config/disk_allowance`, and the site's status check reports its disk as its use out of the allowance. `df` on any of the site's volumes shows the hard limit.
+- Site projects are numbered from 1,000,000,000 (`/etc/projid`, `/etc/projects`), far above the numbers Docker gives its own layer quotas. Removing the site removes its projects.
+
 ### Create a site
 
 ```bash
@@ -271,8 +287,9 @@ Each site container can be given limits, so one site cannot use up the machine:
 | `--memory=SIZE` | memory, in Docker's syntax (`512m`, `1G`); swap is held to the same figure | none |
 | `--cpus=N` | CPU, in cores (`1.0` is at most one core) | none |
 | `--pids-limit=N` | processes and threads together; at least 128 | 512 for a new site |
+| `--disk=SIZE` | disk, over all of the site's volumes but `backups` and `deploy` (`4G`, `500M`; at least 100M); only on a host with a disk pool, see above | none |
 
-Under load, sites already share the CPU evenly, whatever their ceilings. The limits are recorded in the site's run spec, so a rebuild keeps them; give an option again to change one, or `none` to lift it. A limit is refused before anything stops if Docker would refuse it, such as a CPU ceiling above the machine's CPUs. A bare-metal site has no container, so the options are refused there. With a memory budget, PostgreSQL, PHP's worker pool and the database connections between them are sized from it at every start. The capabilities above are not a limit and not in the run spec: every rebuild applies them to every site. See [Deploy and Upgrade](deploy_and_upgrade.md) for the run spec and the sizing.
+Under load, sites already share the CPU evenly, whatever their ceilings. The limits are recorded in the site's run spec, so a rebuild keeps them; give an option again to change one, or `none` to lift it. `install.sh site-limits SITENAME [--memory=SIZE] [--cpus=N] [--disk=SIZE]` changes memory, CPU and the disk allowance on the running site without a rebuild (`sysadmin_tools/site_limits.sh`, the host agent's `site_limits` word, the node page's **Change a site's limits**); a flag left out keeps that limit, a memory change restarts the site, and lifting a memory limit or CPU ceiling takes a rebuild. A limit is refused before anything stops if Docker would refuse it, such as a CPU ceiling above the machine's CPUs. A bare-metal site has no container, so the options are refused there. With a memory budget, PostgreSQL, PHP's worker pool and the database connections between them are sized from it at every start. The capabilities above are not a limit and not in the run spec: every rebuild applies them to every site. See [Deploy and Upgrade](deploy_and_upgrade.md) for the run spec and the sizing.
 
 ### Each site's network
 

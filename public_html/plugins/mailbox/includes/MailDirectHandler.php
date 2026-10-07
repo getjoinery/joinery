@@ -81,7 +81,7 @@ class MailDirectHandler implements DirectKindHandler {
 		$router = new InboundEmailRouter();
 		try {
 			$router->storeDirectMessage($assembled['meta'], $assembled['parts'], $alias, $domain, $recipient, $gate_accepted);
-		} catch (MailboxSealTargetMissing $e) {
+		} catch (MailboxStoreDeclined $e) {
 			// A protected mailbox with nobody to seal to. Storing it in plaintext
 			// would break the mailbox's one promise silently, so the delivery is
 			// HELD with its parts instead — the framework's existing "not now"

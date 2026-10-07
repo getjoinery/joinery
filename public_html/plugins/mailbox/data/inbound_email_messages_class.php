@@ -106,6 +106,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.43 - save() refuses a new row at the site's disk allowance (MailboxAtDiskAllowance)
  * @version 1.42 - iem_spam_synced_time: the correction a two-way IMAP feed last carried to the
  *   source's Junk folder (ImapSyncer::pushSpam)
  * @version 1.41 - spamReasonText(); spam learning in core: iem_train_verdict, iem_learned_tokenizer, iem_spam_reason,
@@ -202,6 +203,21 @@ class InboundEmailMessageException extends SystemBaseException {}
 class MailboxBrowserSealedException extends RuntimeException {}
 
 class InboundEmailMessage extends SystemBase {
+
+	/**
+	 * A new message row is refused while this site is at its disk allowance on
+	 * a shared host (DiskAllowance, specs/multi_tenant_docker_hosts.md WP4): the
+	 * one write every way mail arrives shares (the router, the IMAP feed, Direct,
+	 * an import). Each caller defers on MailboxStoreDeclined, so the message
+	 * waits at its source and lands once room is made. An existing row saves.
+	 */
+	function save($debug = false) {
+		if (!$this->key && DiskAllowance::isFull()) {
+			throw new MailboxAtDiskAllowance('This site is at its disk allowance; the message is not stored');
+		}
+		return parent::save($debug);
+	}
+
 	public static $prefix = 'iem';
 	public static $tablename = 'iem_inbound_email_messages';
 	public static $pkey_column = 'iem_inbound_email_message_id';

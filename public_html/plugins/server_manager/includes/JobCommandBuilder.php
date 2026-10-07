@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.103 - build_site_limits: change a site's memory, CPU ceiling and disk allowance on its
+ *                  host without a rebuild (multi_tenant_docker_hosts WP6)
  * @version 1.102 - install_node refuses a one-letter site name: Docker takes no such container name
  * @version 1.101 - build_outbound_limits: turn a machine's outbound limits on or off, or set their figures,
  *                  the machine's or one container site's (agent 1.62.0, node_outbound_and_transfer WP5)
@@ -1889,6 +1891,49 @@ class JobCommandBuilder {
 			throw new Exception("A container is held with stop or start, not '" . $action . "'.");
 		}
 		return ['primitive' => 'hold_container', 'params' => ['action' => $action, 'name' => $name]];
+	}
+
+	/**
+	 * Change one of a host's sites' limits without rebuilding it
+	 * (multi_tenant_docker_hosts WP6): its memory, its CPU ceiling and its disk
+	 * allowance, each a value, none to lift it, or keep (an empty field) to
+	 * leave it. Addressed to the HOST's own agent, which runs site_limits.sh;
+	 * the host checks each value again, and refuses what install.sh site
+	 * would.
+	 */
+	public static function build_site_limits($host_node, $name, $memory, $cpus, $disk) {
+		if (!self::has_primitive($host_node, 'site_limits')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot change a site's limits. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['site_limits']));
+		}
+		return self::build_site_limits_primitive($name, $memory, $cpus, $disk);
+	}
+
+	public static function build_site_limits_primitive($name, $memory, $cpus, $disk) {
+		$name = (string)$name;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{1,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a site name the host will accept.");
+		}
+		$values = array();
+		foreach (array(
+				'memory' => array($memory, '/^[0-9]{1,6}[bkmg]?$/', 'a memory size (512m, 1g)'),
+				'cpus'   => array($cpus, '/^([0-9]{1,3}(\.[0-9]{1,3})?|\.[0-9]{1,3})$/', 'a CPU ceiling in cores (0.5, 1.0)'),
+				'disk'   => array($disk, '/^[0-9]{1,6}[mgt]$/', 'a disk size (500m, 4g)'),
+			) as $key => $spec) {
+			$v = strtolower(trim((string)$spec[0]));
+			if ($v === '' || $v === 'keep') {
+				$values[$key] = 'keep';
+			} elseif ($v === 'none' || preg_match($spec[1], $v)) {
+				$values[$key] = $v;
+			} else {
+				throw new Exception("'" . mb_substr((string)$spec[0], 0, 32) . "' is not " . $spec[2] . ", none, or empty to keep it.");
+			}
+		}
+		if ($values === array('memory' => 'keep', 'cpus' => 'keep', 'disk' => 'keep')) {
+			throw new Exception('Give at least one limit to change.');
+		}
+		return ['primitive' => 'site_limits', 'params' => ['name' => $name] + $values];
 	}
 
 	/**
