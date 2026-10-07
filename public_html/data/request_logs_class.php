@@ -53,6 +53,10 @@ class RequestLog extends SystemBase {
 		'rql_note'           => array('type'=>'varchar(255)'),
 		'rql_api_key_type'   => array('type'=>'varchar(16)'),
 		'rql_response_ms'    => array('type'=>'int4'),
+		// The caller a limit is counted for, where it is neither an address
+		// nor a user: an agent's node ('node:123'), which shares its address
+		// with the other sites on a multi-tenant host.
+		'rql_key'            => array('type'=>'varchar(64)'),
 		'rql_create_time'    => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
@@ -60,12 +64,13 @@ class RequestLog extends SystemBase {
 
 	/**
 	 * Every API request asks "how many rows for this feature and this address
-	 * (or this user) in the last window?" before it does anything else. These
-	 * are the two indexes that answer it without reading the table.
+	 * (or this user, or this key) in the last window?" before it does anything
+	 * else. These are the indexes that answer it without reading the table.
 	 */
 	public static $index_specifications = array(
 		array('columns' => array('rql_feature', 'rql_ip_address', 'rql_create_time')),
 		array('columns' => array('rql_feature', 'rql_usr_user_id', 'rql_create_time')),
+		array('columns' => array('rql_feature', 'rql_key', 'rql_create_time')),
 	);
 }
 

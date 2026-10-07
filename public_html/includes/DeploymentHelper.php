@@ -824,6 +824,22 @@ class DeploymentHelper {
     // ============================================
 
     /**
+     * Where an upgrade keeps its staging, the previous code (public_html_last)
+     * and a failed deployment's code: a container's deploy volume, mounted at
+     * SITE_DIR/deploy, where there is one; the site directory otherwise. The
+     * volume is outside the site's disk allowance, so a site at its limit can
+     * still be upgraded, and the previous code stays off the container's
+     * capped writable layer (specs/multi_tenant_docker_hosts.md WP4 S11).
+     * utils/upgrade.php applies the same rule inline, since it updates itself
+     * ahead of this class.
+     */
+    public static function deployRoot($site_dir) {
+        $site_dir = rtrim((string)$site_dir, '/');
+        $deploy = $site_dir . '/deploy';
+        return (is_dir($deploy) && is_writable($deploy)) ? $deploy : $site_dir;
+    }
+
+    /**
      * Rollback to previous deployment
      * @param string $target_site Site name (e.g., 'joinerytest')
      * @param bool $preserve_failed Save failed deployment for debugging
@@ -849,7 +865,8 @@ class DeploymentHelper {
         }
 
         $public_html = "/var/www/html/$target_site/public_html";
-        $backup_dir = "/var/www/html/$target_site/public_html_last";
+        $deploy_root = self::deployRoot("/var/www/html/$target_site");
+        $backup_dir = "$deploy_root/public_html_last";
 
         // Hard requirement: backup must exist. Without it nothing meaningful
         // can be rolled back to.
@@ -868,7 +885,7 @@ class DeploymentHelper {
         // directory itself, because public_html is commonly a Docker bind
         // mount and rename()/mv across filesystems would fail.
         if ($preserve_failed && is_dir($public_html)) {
-            $failed_dir = "/var/www/html/$target_site/public_html_failed_" . date('Ymd_His');
+            $failed_dir = "$deploy_root/public_html_failed_" . date('Ymd_His');
             if ($verbose) {
                 echo "  Preserving failed deployment to: $failed_dir\n";
             }

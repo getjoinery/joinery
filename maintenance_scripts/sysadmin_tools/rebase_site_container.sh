@@ -2,6 +2,8 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.13 - rollback puts the recreated database volume back in the site's disk allowance
+#                (docker_disk_pool.sh allow, multi_tenant_docker_hosts WP4; reviewer2 N4)
 # Version: 1.12 - the image's locales are read whole before a database's is looked for in them, so
 #                 the match cannot be lost to SIGPIPE under pipefail
 # Version: 1.11 - rollback hands PostgreSQL's log directory back inside a container of the old
@@ -733,6 +735,14 @@ if [ "$STAGE" = "rollback" ]; then
     fi
     mapfile -d '' ARGS < <(run_spec_args "$SITE")
     [ "${#ARGS[@]}" -gt 0 ] || die "${SITE}'s run spec gave no arguments; the copy is still in ${BACKUP_VOL}"
+    # A recreated volume carries no XFS project, so the database would sit
+    # outside the site's disk allowance until its next install; it joins it
+    # again here (docker_disk_pool.sh, specs/multi_tenant_docker_hosts.md WP4).
+    DISK_ALLOW="$(run_spec_get "$SITE" disk)"
+    if [ -n "$DISK_ALLOW" ]; then
+        bash "${TOOLS_DIR}/../install_tools/docker_disk_pool.sh" allow "$SITE" "$DISK_ALLOW" > /dev/null \
+            || say "WARNING: ${SITE}'s database is outside its disk allowance; run: bash ${TOOLS_DIR}/../install_tools/docker_disk_pool.sh allow ${SITE} ${DISK_ALLOW}"
+    fi
     # The new image's start command handed PostgreSQL's log directory to its own
     # postgres user; the old image's has other ids and predates that handoff, so
     # its server could not write its log and would not start. Hand it back, by

@@ -101,7 +101,7 @@ chk "cpus" "$(echo "$A" | grep -c -- '--cpus=1.0 ')" "1"
 chk "pids limit" "$(echo "$A" | grep -c -- '--pids-limit=512 ')" "1"
 chk "web port on 127.0.0.1" "$(echo "$A" | grep -c -- '-p 127.0.0.1:8087:80 ')" "1"
 chk "database port on 127.0.0.1" "$(echo "$A" | grep -c -- '-p 127.0.0.1:9087:5432 ')" "1"
-chk "fifteen volumes" "$(echo "$A" | grep -o -- '-v mysite_' | wc -l)" "15"
+chk "sixteen volumes" "$(echo "$A" | grep -o -- '-v mysite_' | wc -l)" "16"
 chk "no environment and no image" "$(echo "$A" | grep -c -- '-e \|--env\|joinery-mysite')" "0"
 chk "every capability dropped, then exactly the six a site needs" \
     "$(echo "$A" | grep -o -- '--cap-[a-z]*=[A-Z_]*' | paste -sd ' ')" \
@@ -164,7 +164,7 @@ echo "=== One key changes, every other line is kept; a volume is added once ==="
 run_spec_set mysite memory 512m
 chk "memory changed" "$(run_spec_get mysite memory)" "512m"
 chk "cpus kept" "$(run_spec_get mysite cpus)" "1.0"
-chk "volumes kept" "$(run_spec_list mysite volume | wc -l)" "15"
+chk "volumes kept" "$(run_spec_list mysite volume | wc -l)" "16"
 run_spec_add_volume mysite mysite_extra /var/www/html/mysite/extra
 run_spec_add_volume mysite mysite_extra /var/www/html/mysite/extra
 chk "added once" "$(run_spec_list mysite volume | grep -c ':/var/www/html/mysite/extra$')" "1"
@@ -599,7 +599,7 @@ unset JOINERY_SITE_STATE_ROOT
 # remove_account.sh clears <SITES_STATE>/<site>/run_spec among its marks.
 ra_spec="$(sed -n 's/^SITES_STATE="\$FS\(.*\)"$/\1/p' "$REMOVE")/SITEX/run_spec"
 chk "remove_account removes the file run_spec_path names" \
-    "$([ "$ra_spec" = "$(run_spec_path SITEX)" ] && grep -c '^    for mark in held suspended run_spec; do$' "$REMOVE")" "1"
+    "$([ "$ra_spec" = "$(run_spec_path SITEX)" ] && grep -c '^    for mark in held suspended run_spec disk_allowance; do$' "$REMOVE")" "1"
 
 echo "RESULT: ${passed} passed, ${failed} failed"
 [ "$failed" -eq 0 ]

@@ -1576,6 +1576,27 @@ foreach (array('', 'Gone.example.com', '../x', 'gone.example.com/x', '*.example.
 	check($c_msg !== '', "the envelope refuses '{$bad}'");
 }
 
+// site_limits: a site's limits changed on its host without a rebuild
+// (multi_tenant_docker_hosts WP6). An empty field is keep; at least one changes.
+list($host_sl, $host_sl_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,site_limits'));
+$slenv = JobCommandBuilder::build_site_limits($host_sl_node, 'starter7', '768M', '', ' 4G ');
+check(($slenv['primitive'] ?? '') === 'site_limits'
+	&& ($slenv['params'] ?? null) === array('name' => 'starter7', 'memory' => '768m', 'cpus' => 'keep', 'disk' => '4g'),
+	'site_limits routes the site and three figures, an empty one as keep, lower-cased and trimmed', json_encode($slenv));
+check(JobCommandBuilder::build_site_limits_primitive('a-1', 'keep', '0.5', 'none')['params'] === array('name' => 'a-1', 'memory' => 'keep', 'cpus' => '0.5', 'disk' => 'none'),
+	'none and keep pass as words');
+list($host_nosl, $host_nosl_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status'));
+$sl_msg = '';
+try { JobCommandBuilder::build_site_limits($host_nosl_node, 'starter7', '1g', '', ''); } catch (Exception $e) { $sl_msg = $e->getMessage(); }
+check(strpos($sl_msg, 'site_limits') !== false, 'a host agent without site_limits refuses, naming it', $sl_msg);
+foreach (array(array('', '1g', '', ''), array('Starter7', '1g', '', ''), array('a;b', '1g', '', ''),
+		array('starter7', '', '', ''), array('starter7', 'keep', 'keep', 'keep'), array('starter7', '1 g', '', ''),
+		array('starter7', '', '1;reboot', ''), array('starter7', '', '', '4'), array('starter7', '', '', '-4g')) as $bad) {
+	$sl_msg = '';
+	try { JobCommandBuilder::build_site_limits_primitive($bad[0], $bad[1], $bad[2], $bad[3]); } catch (Exception $e) { $sl_msg = $e->getMessage(); }
+	check($sl_msg !== '', "the envelope refuses " . json_encode($bad));
+}
+
 // suspended_page: a site's suspended page on its host's proxy, addressed to
 // the host's own agent, and only by a site name and show or clear.
 list($host_sus, $host_sus_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,hold_container,suspended_page'));

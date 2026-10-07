@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.66 - host reports keep up to 100 site containers and 100 sites' outbound figures
+ *                 (HOST_REPORT_MAX_SITES, host_report 1.15), not 20: a multi-tenant host takes 50;
+ *                 disk_pool: a Docker host's disk pool (host_report 1.15), its figures or none
  * @version 1.65 - host reports keep the outbound limits' figures while they are off too (what turning them
  *                 on brings back), and each site's set_by (host_report 1.14)
  * @version 1.63 - host reports keep the outbound limits' figures in force (host_report 1.12): the machine's,
@@ -3204,6 +3207,8 @@ HTML;
 	/** Caps mirroring the script's own (MAX_LIST, MAX_NAME): the plane's copy of the bound. */
 	const HOST_REPORT_MAX_LIST = 20;
 	const HOST_REPORT_MAX_NAME = 64;
+	/** Site containers, and the sites in outbound_limits (the script's MAX_SITES). */
+	const HOST_REPORT_MAX_SITES = 100;
 
 	/**
 	 * Rebuild a host report from what the node sent, keeping only what the
@@ -3211,7 +3216,7 @@ HTML;
 	 *
 	 * The shape it returns is the shape the Host card renders and the only
 	 * shape mgn_last_host_report ever holds: every key present, lists capped at
-	 * HOST_REPORT_MAX_LIST, names reduced to [A-Za-z0-9._@:-] and capped at
+	 * HOST_REPORT_MAX_LIST (sites at HOST_REPORT_MAX_SITES), names reduced to [A-Za-z0-9._@:-] and capped at
 	 * HOST_REPORT_MAX_NAME, numbers non-negative integers, and the string
 	 * unknown wherever the node said nothing usable. A hostile node can lie
 	 * about its host; it cannot put anything but these keys and these kinds of
@@ -3296,6 +3301,9 @@ HTML;
 			'kernel_events_24h'            => self::host_report_kernel_events($in['kernel_events_24h'] ?? null),
 			'sshd'                         => $sshd,
 			'disk'                         => $disk,
+			// A Docker host's disk pool, /var/lib/docker on a filesystem of its
+			// own (host_report 1.15): the root disk never shows it filling.
+			'disk_pool'                    => array_key_exists('disk_pool', $in) ? self::host_report_disk_pool($in['disk_pool']) : null,
 			'memory'                       => self::host_report_gauge($in['memory'] ?? null),
 			'swap'                         => self::host_report_gauge($in['swap'] ?? null),
 			// Processors, for reading the load average against (host_report 1.6).
@@ -3355,7 +3363,7 @@ HTML;
 		if ($v === 'none') { return 'none'; }
 		if (!is_array($v)) { return 'unknown'; }
 		$out = [];
-		foreach (array_slice(array_values($v), 0, self::HOST_REPORT_MAX_LIST) as $c) {
+		foreach (array_slice(array_values($v), 0, self::HOST_REPORT_MAX_SITES) as $c) {
 			if (!is_array($c)) { continue; }
 			$name = self::host_report_name($c['name'] ?? '');
 			if ($name === '') { continue; }
@@ -3455,7 +3463,7 @@ HTML;
 			$out['figures'] = self::host_report_limit_figures($v['figures']);
 			$out['web_ceiling_mbit'] = self::host_report_limit($v['web_ceiling_mbit'] ?? null);
 			$out['sites'] = [];
-			foreach (array_slice((array)($v['sites'] ?? []), 0, self::HOST_REPORT_MAX_LIST, true) as $site => $f) {
+			foreach (array_slice((array)($v['sites'] ?? []), 0, self::HOST_REPORT_MAX_SITES, true) as $site => $f) {
 				$name = self::host_report_name((string)$site);
 				if ($name !== '' && is_array($f)) { $out['sites'][$name] = self::host_report_limit_figures($f); }
 			}
@@ -3652,6 +3660,16 @@ HTML;
 	}
 
 	/** {used_bytes, total_bytes}, each a count or unknown. */
+	/** A disk pool's figures, the string none, or unknown. */
+	private static function host_report_disk_pool($v) {
+		if ($v === 'none') { return 'none'; }
+		if (!is_array($v)) { return 'unknown'; }
+		return self::host_report_gauge($v) + [
+			'avail_bytes' => self::host_report_count($v['avail_bytes'] ?? null),
+			'prjquota'    => ($v['prjquota'] ?? null) === true,
+		];
+	}
+
 	private static function host_report_gauge($v) {
 		$v = is_array($v) ? $v : [];
 		return [

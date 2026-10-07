@@ -308,7 +308,7 @@ BASE="$(basename "$PROJECT_DIR")"
 # its own. The by-name exclusions after them stay unanchored on purpose.
 if [ "$PART" = "data" ]; then
     TAR_ARGS+=(--anchored --exclude="${BASE}/public_html" --exclude="${BASE}/public_html_*"
-               --exclude="${BASE}/uploads/upgrades" --no-anchored)
+               --exclude="${BASE}/uploads/upgrades" --exclude="${BASE}/deploy" --no-anchored)
 fi
 
 for x in "${NAMED_EXCLUDES[@]}"; do

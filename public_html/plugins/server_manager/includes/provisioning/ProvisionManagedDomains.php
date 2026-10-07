@@ -38,6 +38,8 @@
  * has four states rather than one call: waiting for an answer is a state the
  * phase already knew how to be in, because an unstamped step is simply retried.
  *
+ * @version 1.8 - a domain's apex and www get an A record and an AAAA record where the server has
+ *                both addresses (NodeDnsPlan::publicAddresses), not one record of one family
  * @version 1.7 - a mail record set with no MX for the domain is published but not stamped, so the
  *                step comes back for it (a site container prescribes none until it has a relay)
  * @version 1.6 - the PTR step closes when the customer's cloud grant is dead instead of retrying
@@ -146,7 +148,7 @@ class ProvisionManagedDomains {
 		}
 
 		if (!$row->get('rdm_dns_bootstrap_time')) {
-			return $this->bootstrap_dns($row, $node, $ip);
+			return $this->bootstrap_dns($row, $node);
 		}
 		if (!$row->get('rdm_dns_mail_time')) {
 			return $this->mail_dns($row, $node);
@@ -409,14 +411,15 @@ class ProvisionManagedDomains {
 	 * publishing it is also what unblocks ProvisionPendingSsl — the buyer
 	 * never touches DNS and never sees a certificate error.
 	 */
-	private function bootstrap_dns($row, $node, string $ip): int {
+	private function bootstrap_dns($row, $node): int {
 		$domain = (string)$row->get('rdm_domain');
-		$type = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'AAAA' : 'A';
+		// Both families, where the server has both.
+		$addresses = NodeDnsPlan::publicAddresses($node);
 
 		$plan = new DnsRecordPlan($domain, 'server_manager');
-		$plan->addRecord($type, $domain, $ip, null, null,
+		NodeDnsPlan::addAddressRecords($plan, $domain, $addresses,
 			'Points ' . $domain . ' at this site\'s server.');
-		$plan->addRecord($type, 'www.' . $domain, $ip, null, null,
+		NodeDnsPlan::addAddressRecords($plan, 'www.' . $domain, $addresses,
 			'Points www.' . $domain . ' at the same server.');
 
 		// The node's own site-domain record, when the box was named for this

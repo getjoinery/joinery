@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.15 - carries site_limits.sh and docker_disk_pool.sh: the site_limits word, which changes a
+ *                 site's memory, CPU ceiling and disk allowance on its host (multi_tenant_docker_hosts WP6)
  * @version 1.14 - carries outbound_limits.sh and _site_run_spec.sh: the outbound_limits word, and host
  *                 housekeeping's refresh of the installed joinery-limits (node_outbound_and_transfer WP5)
  * @version 1.13 - carries suspended_page.sh: the suspended_page word, which shows a site's suspended page on
@@ -155,6 +157,11 @@ class SupportBundlePublisher {
 		// suspended_page: a site's suspended page on the host's proxy. Sources
 		// nothing.
 		'maintenance_scripts/sysadmin_tools/suspended_page.sh',
+		// site_limits: a site's memory, CPU ceiling and disk allowance changed
+		// without a rebuild. Sources the run spec helper (below), and runs the
+		// disk pool's script for the allowance.
+		'maintenance_scripts/sysadmin_tools/site_limits.sh',
+		'maintenance_scripts/install_tools/docker_disk_pool.sh',
 		// outbound_limits: the word that sets a host's outbound figures, and
 		// what host_housekeeping.sh refreshes the installed joinery-limits from.
 		// It sources the run spec helper beside it to write a site's own

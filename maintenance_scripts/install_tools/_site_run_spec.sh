@@ -3,6 +3,13 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.8 - disk= : the site's disk allowance (4G) on a host with a disk pool
+#                (docker_disk_pool.sh, specs/multi_tenant_docker_hosts.md WP4), empty or absent
+#                for none. Not a run argument: the allowance is an XFS project on the site's
+#                volumes. A site with one runs with its writable layer capped too
+#                (--storage-opt size=RUN_SPEC_LAYER_SIZE), which Docker takes only on the pool.
+#                run_spec_norm_disk checks a value. Every site has a deploy volume (SITE/deploy):
+#                an upgrade's staging and the previous code, outside the allowance.
 # Version: 1.7 - outbound_set_by=plane: the management node set the site's own outbound
 #                figures (joinery-limits set --site --by=plane), so the site is told to ask
 #                whoever hosts it; kept across a rebuild with the figures.
@@ -62,6 +69,7 @@
 #   bridge=jsnet17       its bridge on the host, which the outbound limits name
 #   subnet=10.250.17.0/24
 #   subnet6=fd00:250:17::/64     empty: the network is IPv4 only
+#   disk=4G              the site's disk allowance on the host's disk pool; empty or absent: none
 #   outbound_ceiling=100 the site's own speed ceiling in Mbit/s, or off; absent: the machine's
 #   outbound_conn_rate=20, outbound_conn_burst=100, outbound_open_conns=256
 #                        the site's own connection figures; absent: the machine's
@@ -106,11 +114,16 @@ RUN_SPEC_VOLUMES=(
     "apache_logs:/var/log/apache2"
     "pg_logs:/var/log/postgresql"
     "agent:/etc/joinery-agent"
+    "deploy:deploy"
 )
 
 # The container ports install.sh publishes itself: the web server and the
 # database. Every other published port is the site's own, and a rebuild keeps it.
 RUN_SPEC_OWN_PORTS="80 5432"
+
+# A site with a disk allowance has its container's writable layer capped too:
+# packages and temporary files only, since everything else is on a volume.
+RUN_SPEC_LAYER_SIZE="1G"
 
 # The only capabilities a site container holds; every other is dropped. Each
 # was measured as needed (specs/multi_tenant_docker_hosts.md WP5 item 2):
@@ -235,6 +248,17 @@ run_spec_norm_pids() {  # VALUE
     printf '%d' "$((10#$v))"
 }
 
+# A disk allowance: a whole number of M, G or T, at least 100M; empty for none.
+run_spec_norm_disk() {  # VALUE
+    local v="${1^^}"
+    case "$v" in ''|NONE|0) return 0 ;; esac
+    [[ "$v" =~ ^([0-9]{1,6})([MGT])$ ]] || return 1
+    local n=$((10#${BASH_REMATCH[1]})) u="${BASH_REMATCH[2]}"
+    [[ "$u" != M ]] || (( n >= 100 )) || return 1
+    (( n > 0 )) || return 1
+    printf '%d%s' "$n" "$u"
+}
+
 # A spec's lines, checked one by one: a value that would not be one docker
 # argument, or a key nobody writes, is refused with the line named.
 run_spec_check_line() {  # LINE
@@ -246,6 +270,7 @@ run_spec_check_line() {  # LINE
         memory)       [[ -z "$v" || "$v" =~ ^[0-9]+[bkmg]?$ ]] ;;
         cpus)         [[ -z "$v" ]] || { [[ "$v" =~ ^([0-9]+(\.[0-9]*)?|\.[0-9]+)$ ]] && awk -v n="$v" 'BEGIN { exit !(n >= 0.01) }'; } ;;
         pids_limit)   [[ -z "$v" || "$v" =~ ^[1-9][0-9]*$ ]] ;;
+        disk)         [[ -z "$v" || "$v" =~ ^[1-9][0-9]*[MGT]$ ]] ;;
         publish)      [[ "$v" =~ ^((([0-9]{1,3}\.){3}[0-9]{1,3}|\[[0-9A-Fa-f:.]+\]):)?[0-9]{1,5}:[0-9]{1,5}(/(tcp|udp))?$ ]] ;;
         volume)       [[ "$v" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*:/[A-Za-z0-9_./-]+(:(ro|rw))?$ ]] ;;
         network)      [[ "$v" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ && "$v" != bridge && "$v" != host && "$v" != none ]] ;;
@@ -563,6 +588,8 @@ run_spec_args() {  # SITE
     [[ -n "$v" ]] && printf '%s\0' "--cpus=${v}"
     v="$(run_spec_get "$site" pids_limit)"
     [[ -n "$v" ]] && printf '%s\0' "--pids-limit=${v}"
+    v="$(run_spec_get "$site" disk)"
+    [[ -n "$v" ]] && printf '%s\0' --storage-opt "size=${RUN_SPEC_LAYER_SIZE}"
     printf '%s\0' --cap-drop=ALL
     for v in "${RUN_SPEC_CAPS[@]}"; do printf '%s\0' "--cap-add=${v}"; done
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -p "$v"; done < <(run_spec_list "$site" publish)

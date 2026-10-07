@@ -83,6 +83,10 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.49 - stores nothing at the site's disk allowance (DiskAllowance): the message is deferred
+ *                 for retry on every path, the spam-held copy included, and the deferral logged once
+ *                 a window like the store cap. MailboxStoreDeclined is the parent of every "try again
+ *                 later" refusal (MailboxSealTargetMissing, MailboxAtDiskAllowance) its callers catch
  * @version 1.48 - forwards reach only destinations whose owner confirmed them (ForwardConfirmation);
  *   a mailbox or catch-all whose level does not offer forwarding stores instead; the catch-all
  *   forward is held as spam like the alias forward; logTransaction() keeps the ids it wrote for
@@ -197,6 +201,22 @@ require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declare
 class InboundStoreCollisionException extends RuntimeException {}
 
 /**
+ * A store declined for now, for a reason the message did not cause and a
+ * later attempt may not meet: every caller treats it as "try again later"
+ * (Postfix tempfails, the webhook answers non-2xx, the IMAP feed leaves the
+ * message on the source, a Direct sender keeps it, an import holds the entry).
+ */
+class MailboxStoreDeclined extends RuntimeException {}
+
+/**
+ * This site is at its disk allowance on a shared host (DiskAllowance): no new
+ * message row is written until room is made (specs/multi_tenant_docker_hosts.md
+ * WP4). Thrown by InboundEmailMessage::save() for a new row, the one write
+ * every way mail arrives shares.
+ */
+class MailboxAtDiskAllowance extends MailboxStoreDeclined {}
+
+/**
  * A mailbox that seals content could not produce a key to seal to
  * (specs/mailbox_connect_flow.md § E).
  *
@@ -214,7 +234,8 @@ class InboundStoreCollisionException extends RuntimeException {}
  * that makes a future bypass — or a vault that fails to load at delivery time —
  * loud and recoverable instead of a silent leak.
  */
-class MailboxSealTargetMissing extends RuntimeException {}
+class MailboxSealTargetMissing extends MailboxStoreDeclined {}
+
 
 class InboundEmailRouter {
 
@@ -419,7 +440,9 @@ class InboundEmailRouter {
 				try {
 					$saved = $this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
 					$held_id = $saved['message'] ? intval($saved['message']->key) : null;
-				} catch (MailboxSealTargetMissing $e) {
+				} catch (MailboxAtDiskAllowance $e) {
+					return $this->deferAtDiskAllowance($parsed, $alias, $envelope_recipient, $domain);
+				} catch (MailboxStoreDeclined $e) {
 					// Declining always means "try again later", on every path —
 					// including this one. Returning 0 here would tell the sender's
 					// queue the message was delivered while no row exists anywhere:
@@ -598,6 +621,12 @@ class InboundEmailRouter {
 		// throttled to at most one row per domain per window so the retries do
 		// not spam the transaction log (the transient-DB path below stays
 		// silent for the same reason).
+		// A site on a shared host at its disk allowance stores nothing more
+		// (DiskAllowance): deferred, so the sender retries and the message
+		// stores once room is made. Logged at most once a window, like the cap.
+		if (DiskAllowance::isFull()) {
+			return $this->deferAtDiskAllowance($parsed, $alias, $envelope_recipient, $domain);
+		}
 		$cap = intval($this->settings->get_setting('mailbox_max_per_window'));
 		if ($cap > 0) {
 			$window = intval($this->settings->get_setting('mailbox_forwarding_rate_limit_window')) ?: 3600;
@@ -623,7 +652,9 @@ class InboundEmailRouter {
 				$saved['message'] ? intval($saved['message']->key) : null
 			);
 			return 0;
-		} catch (MailboxSealTargetMissing $e) {
+		} catch (MailboxAtDiskAllowance $e) {
+			return $this->deferAtDiskAllowance($parsed, $alias, $envelope_recipient, $domain);
+		} catch (MailboxStoreDeclined $e) {
 			// A protected mailbox with nobody to seal to. Deferring is right (the
 			// sender retries and the mail lands once it is repaired), but unlike a
 			// transient DB blip this will not fix itself, and the sender's queue
@@ -675,7 +706,27 @@ class InboundEmailRouter {
 	 *                                       when it was sent, not when it was read in
 	 *   is_read / is_starred / is_archived (bool) source state carried across
 	 */
+	/**
+	 * A message deferred because this site is at its disk allowance
+	 * (DiskAllowance): the sender retries, and it stores once room is made.
+	 * Logged at most once a window per domain, like the store cap, so the
+	 * retries write nothing into the database's headroom.
+	 */
+	private function deferAtDiskAllowance($parsed, $alias, $envelope_recipient, $domain): int {
+		$window = intval($this->settings->get_setting('mailbox_forwarding_rate_limit_window')) ?: 3600;
+		if (!$this->storeCapLoggedInWindow($domain->key, $window)) {
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_STORE_CAPPED, $envelope_recipient, null,
+				'This site is at its disk allowance; deferring for retry', $domain->key);
+		}
+		return 75;
+	}
+
 	public function storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth = null, $content_spam = null, array $options = array()) {
+		// Before any work: InboundEmailMessage::save() refuses the new row at
+		// the allowance anyway, on every path that stores.
+		if (DiskAllowance::isFull()) {
+			throw new MailboxAtDiskAllowance('This site is at its disk allowance; the message is not stored');
+		}
 		if ($auth === null) {
 			$auth = $this->readAuthResults($raw_email);
 		}

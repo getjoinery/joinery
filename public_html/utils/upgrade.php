@@ -565,9 +565,18 @@
 		return $handle;
 	}
 
-	$stage_location = $full_site_dir.'/uploads/upgrades/';
+	// A container's deploy volume (SITE/deploy) holds the staging, the previous
+	// code and a failed deployment's code: it is outside the site's disk
+	// allowance, so a site at its limit can still be upgraded, and none of it
+	// lands on the container's capped writable layer
+	// (specs/multi_tenant_docker_hosts.md WP4 S11, S12). The same rule as
+	// DeploymentHelper::deployRoot(), inline because this file updates itself
+	// ahead of that class.
+	$deploy_root = (is_dir($full_site_dir.'/deploy') && is_writable($full_site_dir.'/deploy'))
+		? $full_site_dir.'/deploy' : $full_site_dir;
+	$stage_location = ($deploy_root !== $full_site_dir) ? $deploy_root.'/upgrades/' : $full_site_dir.'/uploads/upgrades/';
 	$live_directory = $full_site_dir. '/public_html';
-	$backup_directory = $full_site_dir. '/public_html_last';
+	$backup_directory = $deploy_root. '/public_html_last';
 	$stage_directory = $stage_location. 'public_html';
 
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
@@ -889,8 +898,9 @@
 			}
 		}
 
-		// Check disk space before download (require at least 500MB free)
-		$free_space = disk_free_space($full_site_dir.'/uploads/');
+		// Check disk space before download (require at least 500MB free), where
+		// the upgrade writes: the deploy volume, or uploads/ without one.
+		$free_space = disk_free_space(rtrim($stage_location, '/') === $full_site_dir.'/uploads/upgrades' ? $full_site_dir.'/uploads/' : $deploy_root);
 		$min_required = 500 * 1024 * 1024; // 500MB
 		if ($free_space !== false && $free_space < $min_required) {
 			$free_mb = round($free_space / 1024 / 1024);
@@ -2182,7 +2192,8 @@
 		// rollback keeps the broken tree for diagnosis, but a completed newer
 		// deploy ends that usefulness — and each tree parks a full site copy
 		// on disk forever otherwise. Rollback safety lives in public_html_last.
-		foreach (glob($full_site_dir . '/public_html_failed_*', GLOB_ONLYDIR) as $old_failed_dir) {
+		foreach (array_unique(array_merge(glob($full_site_dir . '/public_html_failed_*', GLOB_ONLYDIR) ?: array(),
+				glob($deploy_root . '/public_html_failed_*', GLOB_ONLYDIR) ?: array())) as $old_failed_dir) {
 			exec('rm -rf ' . escapeshellarg($old_failed_dir) . ' 2>&1', $fr_out, $fr_exit);
 			if ($fr_exit === 0) {
 				if ($verbose) upgrade_echo('✓ Removed preserved failed deployment: ' . htmlspecialchars(basename($old_failed_dir)) . '<br>');

@@ -7,6 +7,8 @@
  * from SSH output, so the two transports populate mgn_last_status_data
  * identically.
  *
+ * @version 1.5 - disk figures on a site with a disk allowance are its use out of the allowance
+ *                (DiskAllowance), not the disk it sees (the allowance plus 10%)
  * @version 1.4 - memory inside a container is the site's own cgroup's (in use out of its limit),
  *                not the shared server's /proc/meminfo (specs/multi_tenant_docker_hosts.md S15)
  * @version 1.3 - site_domain: the site's own domain (webDir), the key the agent's check_status reports
@@ -34,6 +36,15 @@ function stats_handler($request) {
 	$disk_free  = @disk_free_space($web_root);
 	if ($disk_total && $disk_free !== false) {
 		$used = $disk_total - $disk_free;
+		// A site on a shared host is measured against its own disk allowance,
+		// which is what it may use: the disk it sees is the allowance plus the
+		// 10% kept for the database and logs (DiskAllowance).
+		$allowance = DiskAllowance::state();
+		if ($allowance !== null && $allowance['used'] !== null) {
+			$used = $allowance['used'];
+			$disk_total = $allowance['allowance'];
+			$disk_free = max(0, $disk_total - $used);
+		}
 		$result['disk_usage_percent'] = intval(round($used * 100 / $disk_total));
 		$result['disk_total']         = _mgmt_stats_format_size($disk_total);
 		$result['disk_used']          = _mgmt_stats_format_size($used);

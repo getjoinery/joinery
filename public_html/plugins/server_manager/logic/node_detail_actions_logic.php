@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.47 - site_limits: change a site's memory, CPU ceiling and disk allowance on this host
+ *                 (multi_tenant_docker_hosts WP6)
  * @version 1.46 - outbound_limits: turn this machine's outbound limits on or off, or set their figures
  *                 (node_outbound_and_transfer WP5)
  * @version 1.45 - hold_container: hold a site on this host stopped, with the reason why, or start it again
@@ -147,6 +149,7 @@ class NodeDetailActions {
 		'restart_unit'             => 'overview',
 		'restart_container'        => 'overview',
 		'hold_container'           => 'overview',
+		'site_limits'              => 'overview',
 		'outbound_limits'          => 'overview',
 		'run_installer'            => 'overview',
 		'file_head'                => 'overview',
@@ -303,6 +306,15 @@ class NodeDetailActions {
 				}
 				$built = JobCommandBuilder::build_hold_container($node, (string)($_POST['name'] ?? ''), $op);
 				$job = ManagementJob::createFromBuild($node->key, 'hold_container', $built, $record, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'site_limits': {
+				// A site on this host given new limits without a rebuild
+				// (multi_tenant_docker_hosts WP6). An empty field keeps that limit.
+				$built = JobCommandBuilder::build_site_limits($node, (string)($_POST['name'] ?? ''),
+					(string)($_POST['memory'] ?? ''), (string)($_POST['cpus'] ?? ''), (string)($_POST['disk'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'site_limits', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

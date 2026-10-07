@@ -5,7 +5,10 @@
  * General-purpose: works for API calls, login attempts, registration,
  * password resets, or any site feature that needs logging or throttling.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - a limit can be keyed to any caller (rql_key, log option 'key'): the agent
+ *   channel counts each node's requests by its node, since a multi-tenant host's sites share
+ *   one address (specs/multi_tenant_docker_hosts.md S23)
  * @changelog 1.4 - rate_limit_state(): the count, whether it is within the limit, and how
  *   long until it is not — so a 429 can say when to try again; a limit can be keyed to a
  *   user (rql_usr_user_id) instead of the address
@@ -48,6 +51,7 @@ class RequestLogger {
 		if (isset($options['status_code'])) $log->set('rql_status_code', $options['status_code']);
 		if (isset($options['error_type']))  $log->set('rql_error_type', $options['error_type']);
 		if (isset($options['response_ms'])) $log->set('rql_response_ms', $options['response_ms']);
+		if (isset($options['key']))         $log->set('rql_key', substr((string)$options['key'], 0, 64));
 		if (self::$api_key_type !== null)   $log->set('rql_api_key_type', self::$api_key_type);
 		// A page_probe request is logged as a probe, never as the throwaway
 		// viewer's own activity: the viewer is deleted when the probe returns.
@@ -109,16 +113,20 @@ class RequestLogger {
 	 * Keyed to the address by default; pass $user_id to key the count to a
 	 * signed-in user instead (rows carry rql_usr_user_id), which is the right
 	 * scope for a browser session — several people behind one address are
-	 * not one caller.
+	 * not one caller. Or pass $key to key it to any other caller the rows were
+	 * logged with (the log option 'key'), such as an agent's node.
 	 *
 	 * @return array{allowed:bool,count:int,retry_after:int}
 	 */
-	public static function rate_limit_state($feature, $max_requests, $window_seconds, $success_filter = null, $user_id = null) {
+	public static function rate_limit_state($feature, $max_requests, $window_seconds, $success_filter = null, $user_id = null, $key = null) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$window_seconds = max(1, intval($window_seconds));
 		$max_requests = max(1, intval($max_requests));
 
-		if ($user_id !== null) {
+		if ($key !== null) {
+			$key_sql = 'rql_key = ?';
+			$key = substr((string)$key, 0, 64);
+		} elseif ($user_id !== null) {
 			$key_sql = 'rql_usr_user_id = ?';
 			$key = intval($user_id);
 		} else {

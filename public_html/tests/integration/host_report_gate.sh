@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,outbound_limits,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,disk_pool,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,outbound_limits,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -249,21 +249,23 @@ STUB
 cat > "$T/bin/docker" <<'STUB'
 #!/bin/bash
 # Four containers: two of ours (name = SITENAME), one planted with a
-# SITENAME that is not its name, one with none at all.
+# SITENAME that is not its name, one with none at all. inspect answers the
+# report's one line per container, for every name it is handed at once.
+echo "docker $1" >> "${GATE_DOCKER_LOG:-/dev/null}"
 case "$1 $2" in
     "ps -a") printf 'siteone\nsitetwo\nimpostor\npostgres\nEvil;Name\n' ;;
     "inspect -f")
-        case "$3" in
-            *Config.Env*) case "$4" in siteone) echo SITENAME=siteone ;; sitetwo) echo SITENAME=sitetwo ;; impostor) echo SITENAME=siteone ;; *) echo PATH=/bin ;; esac ;;
-            *State.Status*) case "$4" in siteone) echo running ;; *) echo running ;; esac ;;
-            *State.Health*) echo none ;;
-            # siteone's process is the gate's own, so its cgroup and network
-            # namespace are real files to read; sitetwo has no process.
-            *State.Pid*) case "$4" in siteone) echo "$GATE_PID 2026-09-28T18:01:15.123456789Z" ;; *) echo "0 0001-01-01T00:00:00Z" ;; esac ;;
-            *Mounts*) case "$4" in siteone) printf '%s\n%s\n' "$GATE_VOL/one_data" "$GATE_VOL/one_uploads" ;; esac ;;
-        esac ;;
-    "port siteone") echo "0.0.0.0:8081" ;;
-    "port sitetwo") echo "0.0.0.0:8082" ;;
+        shift 3
+        for c in "$@"; do
+            case "$c" in
+                # siteone's process is the gate's own, so its cgroup and network
+                # namespace are real files to read; sitetwo has no process.
+                siteone)  echo "/siteone|SITENAME=siteone|running|none|$GATE_PID|2026-09-28T18:01:15.123456789Z|8081|$GATE_VOL/one_data $GATE_VOL/one_uploads " ;;
+                sitetwo)  echo "/sitetwo|SITENAME=sitetwo|running|none|0|0001-01-01T00:00:00Z|8082|" ;;
+                impostor) echo "/impostor|SITENAME=siteone|running|none|0|0001-01-01T00:00:00Z|8083|" ;;
+                *)        echo "/$c||running|none|0|0001-01-01T00:00:00Z||" ;;
+            esac
+        done ;;
 esac
 STUB
 chmod 755 "$T/bin"/*
@@ -353,6 +355,7 @@ echo "=== Outbound limits (outbound_limits.sh) ==="
 # fixed in the script. nft is a stub printing the counters as nft lists them.
 eval "$(sed -n -e '/^json_str() {/,/^}/p' -e '/^safe_name() {/,/^}/p' "$SCRIPT")"
 MAX_NAME=64
+eval "$(grep '^MAX_SITES=' "$SCRIPT")"
 eval "$(sed -n '/^LIMITS_STATE=""/,/^emit_outbound_limits() {/p' "$SCRIPT" | sed '$d')"
 eval "$(sed -n '/^emit_outbound_limits() {/,/^}/p' "$SCRIPT")"
 LS="$T/limits.status"; LU="$T/joinery-limits.service"
@@ -391,6 +394,9 @@ chk "off (1.14): the figures turning them on brings back, and no since" \
 printf 'state=off\nreason=off\nsince=\nsites=\nceiling_mbit=\nconn_rate=40\nset_by=\nsite_figures=\n' > "$LS"
 chk "off from an older status (no site_set_by, its ceiling left empty): no figures, rather than none for the ceiling" \
     "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["state"], "|", array_key_exists("figures", $o) ? "figures" : "";')" "off|"
+printf 'state=on\nsince=1760000000\nsites=\nsite_figures=%s\n' "$(for i in $(seq 1 120); do printf 'site%03d:50:40:120:512 ' "$i"; done)" > "$LS"
+chk "a host's sites' figures are capped at 100, the first hundred" \
+    "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo count($o["sites"]), "/", array_key_last($o["sites"]);')" "100/site100"
 printf 'state=on\nreason=\nsince=1760000000\nsites=siteone sitetwo my-site\nuncovered=old\nweb_user=yes\n' > "$LS"
 chk "a limited site's drops are its counter's packets" "$(lim_site siteone)" "12"
 chk "a site still on Docker's default network is none, not zero" "$(lim_site old)" '"none"'
@@ -432,6 +438,72 @@ sed -i 's/for i in $(seq 1 25); do echo "broken$i.service loaded failed failed B
 PATH="$T/bin:$PATH" bash "$SCRIPT" > "$T/root2.json" 2>/dev/null
 chk "a hostile unit name is reduced to safe characters" "$(jv "$T/root2.json" failed_units.0)" "evilnamerebootb.service"
 chk "and the object still parses" "$(jv "$T/root2.json" "" type)" "object"
+
+echo "=== 120 sites: the first 100 listed, one docker inspect, every site asked at once ==="
+# Each site takes 2 s to answer: asked one after another, 100 would take 200 s,
+# three times the minute the agent gives the report.
+mkdir -p "$T/many"
+cat > "$T/many/docker" <<'STUB'
+#!/bin/bash
+echo "docker $1" >> "$GATE_DOCKER_LOG"
+case "$1 $2" in
+    # Names at the 50-character limit, each read through a live process, so
+    # every figure is a number: the largest entry a site can make.
+    "ps -a") for i in $(seq 1 120); do printf 'site%03d-%s\n' "$i" "$(printf 'x%.0s' $(seq 1 42))"; done ;;
+    "inspect -f")
+        shift 3
+        for c in "$@"; do echo "/$c|SITENAME=$c|running|healthy|$GATE_PID|2026-09-28T18:01:15.123456789Z|$(( 9000 + 10#${c:4:3} ))|"; done ;;
+esac
+STUB
+cat > "$T/many/curl" <<'STUB'
+#!/bin/bash
+case "$*" in
+    *127.0.0.1:9[0-9][0-9][0-9]/*) sleep 2; printf 'HTTP/1.1 200 OK\r\nX-Joinery-Version: 0.8.470\r\n\r\n' ;;
+    *) exec "$GATE_BIN/curl" "$@" ;;
+esac
+STUB
+chmod 755 "$T/many"/*
+export GATE_DOCKER_LOG="$T/docker.log" GATE_BIN="$T/bin"; : > "$GATE_DOCKER_LOG"
+start=$(date +%s)
+PATH="$T/many:$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" bash "$SCRIPT" > "$T/many.json" 2>/dev/null; rc=$?
+elapsed=$(( $(date +%s) - start ))
+chk "120 sites: exit 0, a JSON object" "$rc/$(jv "$T/many.json" "" type)" "0/object"
+chk "120 sites: the first 100 are listed" "$(jv "$T/many.json" containers count)/$(jv "$T/many.json" containers.0.name | cut -c1-7)/$(jv "$T/many.json" containers.99.name | cut -c1-7)" "100/site001/site100"
+chk "120 sites: each one answers" "$(php -r '$o=json_decode(file_get_contents($argv[1]),true); echo count(array_filter($o["containers"], fn($c) => $c["answers"] === "yes"));' "$T/many.json")" "100"
+chk "120 sites: docker inspect runs once, for all of them" "$(grep -c '^docker inspect' "$GATE_DOCKER_LOG")" "1"
+chk "120 sites answering in 2 s each: the report took the slowest, not the sum (${elapsed}s)" "$( [ "$elapsed" -lt 20 ]; echo $? )" "0"
+# The largest a host's sites can make the report: 100 such entries, plus 100
+# sites' outbound figures (122 bytes each at the longest name), must stay
+# under the agent's 64 KiB with room for the rest of the report.
+many_bytes=$(( $(wc -c < "$T/many.json") + 100 * 123 ))
+chk "100 sites at the longest name, every figure a number: the report fits the agent's 64 KiB with 4 KiB to spare (${many_bytes} bytes)" "$( [ "$many_bytes" -lt 61440 ]; echo $? )" "0"
+
+echo "=== A Docker host's disk pool, and an inspect that answers nothing ==="
+# The pool is a filesystem of its own at /var/lib/docker: its figures, which
+# the root disk never shows (reviewer2 B2). Here a real directory stands in,
+# with findmnt saying it is a mount.
+mkdir -p "$T/pooldir" "$T/poolbin"
+cat > "$T/poolbin/findmnt" <<STUB
+#!/bin/bash
+[ "\${@: -1}" = "$T/pooldir" ] && echo "xfs rw,relatime,prjquota"
+exit 0
+STUB
+chmod 755 "$T/poolbin/findmnt"
+eval "$(sed -n -e '/^json_str() {/,/^}/p' -e '/^safe_name() {/,/^}/p' -e '/^run() {/p' -e '/^emit_disk_pool() {/,/^}/p' "$SCRIPT")"
+CMD_TIMEOUT=10
+pool="$(PATH="$T/poolbin:$PATH" HOST_REPORT_DOCKER_DIR="$T/pooldir" emit_disk_pool)"
+chk "a pool at /var/lib/docker: its own figures, xfs, with project quotas" \
+    "$(php -r '$o=json_decode($argv[1],true); echo $o["fstype"], "/", var_export($o["prjquota"], true), "/", is_int($o["total_bytes"]) && is_int($o["avail_bytes"]) ? "figures" : "none";' "$pool")" "xfs/true/figures"
+chk "no mount of its own: none" "$(PATH="$T/poolbin:$PATH" HOST_REPORT_DOCKER_DIR="$T/elsewhere" emit_disk_pool)" '"none"'
+# A docker inspect that answers nothing (timed out) is unknown, never no sites.
+cat > "$T/poolbin/docker" <<'STUB'
+#!/bin/bash
+[ "$1 $2" = "ps -a" ] && printf 'siteone\nsitetwo\n'
+exit 1
+STUB
+chmod 755 "$T/poolbin/docker"
+PATH="$T/poolbin:$T/bin:$PATH" bash "$SCRIPT" > "$T/noinspect.json" 2>/dev/null
+chk "an inspect that answers nothing: containers unknown, not an empty list (N5)" "$(jv "$T/noinspect.json" containers)" "unknown"
 
 echo "=== A command that hangs costs its key, not the report ==="
 cat > "$T/bin/fail2ban-client" <<'STUB'
@@ -481,10 +553,17 @@ chk "journalctl appears twice, under run both times" "$(grep -c 'run journalctl 
 chk "the event read filters in journalctl (-g) over the system journal" "$(grep -c 'run journalctl --system --since "24 hours ago" --no-pager -o cat -g' "$SCRIPT")" "1"
 chk "no kernel-ring read is left" "$(grep -c 'journalctl --system -k' "$SCRIPT")" "0"
 chk "the list cap is 20" "$(grep -c '^MAX_LIST=20' "$SCRIPT")" "1"
+chk "the site cap is 100" "$(grep -c '^MAX_SITES=100' "$SCRIPT")" "1"
+# docker reruns a template that fails on its typed container against the raw
+# JSON, where a never-started container has no Health key and drops out of the
+# list (seen on docker 29.8, 2026-10-07). Indexing the port map by a string is
+# what fails on the typed one.
+chk "the inspect template never indexes the port map (it would fail on docker's typed container)" "$(grep '^INSPECT_FORMAT=' "$SCRIPT" | grep -c 'index .NetworkSettings')" "0"
+chk "the environment is filtered to SITENAME inside docker" "$(grep -cF '0) "SITENAME"}}{{.}}{{end}}' "$SCRIPT")" "1"
 chk "the name cap is 64" "$(grep -c '^MAX_NAME=64' "$SCRIPT")" "1"
 chk "sshd is invoked once, read-only (-T)" "$(grep -o 'run sshd[^)]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run sshd -T "
 chk "openssl only reads: s_client and x509 -noout" "$(grep -o 'run openssl [a-z_0-9]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run openssl s_client run openssl x509 "
-chk "no docker verb but ps, inspect and port" "$(grep -o 'run docker [a-z]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run docker inspect run docker port run docker ps "
+chk "no docker verb but ps and inspect" "$(grep -o 'run docker [a-z]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run docker inspect run docker ps "
 chk "du runs once, summarising (-s), under the command timeout" "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c '\bdu ')/$(grep -c 'run du -s -B1 -- ' "$SCRIPT")" "1/1"
 chk "a container's figures come from its cgroup, never from docker stats or exec" "$(grep -c -E 'docker (stats|exec)' "$SCRIPT")" "0"
 chk "curl is only ever asked for headers, body discarded" "$(grep -c 'run curl' "$SCRIPT")/$(grep 'run curl' "$SCRIPT" | grep -c -- '-o /dev/null -D -')" "3/3"

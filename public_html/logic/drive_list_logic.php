@@ -207,12 +207,19 @@ function drive_list_logic(array $input): LogicResult {
 		$totals = DriveUsage::site_totals();
 		$upload_dir = (string)$settings->get_setting('upload_dir');
 		$free = DiskSpace::leastFreeBytes(array($upload_dir !== '' ? $upload_dir : '/'));
+		$available = ($free === null) ? null : max(0, $free - DiskSpace::DEFAULT_FLOOR_BYTES);
+		// A site on a shared host has an allowance of its own, and what is left
+		// of it is what can still be stored (DiskAllowance).
+		$allowance = DiskAllowance::state();
+		if ($allowance !== null) {
+			$available = ($allowance['used'] === null) ? null : max(0, $allowance['allowance'] - $allowance['used']);
+		}
 		$site_storage = array(
 			'bytes_used'      => $totals['bytes_total'],
 			'bytes_local'     => $totals['bytes_local'],
 			'bytes_cloud'     => $totals['bytes_cloud'],
 			'files'           => $totals['files'],
-			'bytes_available' => ($free === null) ? null : max(0, $free - DiskSpace::DEFAULT_FLOOR_BYTES),
+			'bytes_available' => $available,
 		);
 	}
 

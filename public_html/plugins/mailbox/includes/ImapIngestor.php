@@ -1024,7 +1024,7 @@ class ImapIngestor {
 				if (isset($knownFailures[$uid])) {
 					InboundImapIngestFailure::clear($folderId, $serverUidValidity, $uid);
 				}
-			} catch (InboundStoreCollisionException | MailboxSealTargetMissing $e) {
+			} catch (InboundStoreCollisionException | MailboxStoreDeclined $e) {
 				// Not faults of this message: a concurrent store that resolves on the
 				// next pass, or a sealing mailbox with no key to seal to — which must
 				// hold the mail on the source until one exists, never skip it. The

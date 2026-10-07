@@ -26,7 +26,10 @@
  * so it is not the SSRF surface SafeHttpClient addresses — the concern here is
  * the VOLUME of attacker-driven lookups.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - the peer lookup cap is 240 a minute, not 60: a multi-tenant host's sites share
+ *   one address, and 100 of them each sending for the first time, or after a key rotation, is
+ *   200 lookups (specs/multi_tenant_docker_hosts.md S23)
  * @changelog 1.2 - decode Cloudflare's _dc-srv SRV-target rewrite back to the domain, so a proxied colocated site stays deliverable
  * @changelog 1.1 - lookup() takes $fresh: a member-triggered re-check resolves past the cache (callers rate-limit)
  */
@@ -49,8 +52,16 @@ class DirectCapability {
 	/** How long "this domain does not speak Direct" is remembered. */
 	const NEGATIVE_TTL_SECONDS = 900;
 
-	/** Peer-keyed cap on resolver work, for the pre-authentication receive path. */
-	const PEER_LOOKUP_LIMIT  = 60;
+	/**
+	 * Peer-keyed cap on resolver work, for the pre-authentication receive path.
+	 * Keyed by the connecting address, because the sending domain is the
+	 * attacker's choice. Sized for a multi-tenant host, whose sites (up to 100)
+	 * share one address: each new sender costs one lookup, and a rotated key
+	 * one more, so 240 a minute lets all of them through at once. Only a lookup
+	 * that misses the cache counts, and over the cap a cached record is still
+	 * served.
+	 */
+	const PEER_LOOKUP_LIMIT  = 240;
 	const PEER_LOOKUP_WINDOW = 60;
 
 	/** @var array<string,array|null> request-scoped memo on top of the row cache */

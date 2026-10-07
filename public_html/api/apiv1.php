@@ -2,7 +2,9 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.21
+ * @version 2.22
+ * @changelog 2.22 - The agent channel's limit is checked by the endpoint, per node for what a
+ *   node's signature proves and per address for the rest, not here per address for everything.
  * @changelog 2.21 - api_error() and a logic action's error envelope carry
  *   `error_ref` ({id, hash, report_url}) when an error was recorded on this
  *   request (ErrorReference).
@@ -350,22 +352,18 @@ if ((string)$settings->get_setting('api_require_https', false, true) !== '0') {
 // Agent channel (/api/v1/agent/*): the node-posture job source of the server
 // manager's agent (specs/agent_on_node_architecture.md §3.1). Dispatched here —
 // before the general API rate limiter — because it is machine traffic with its
-// own profile: a fleet of nodes polling from one NAT'd address would otherwise
-// exhaust a per-IP budget sized for human clients and go silent, which is
-// exactly the failure the channel exists to make visible. It gets its own
-// bucket instead, so abnormal agent volume is still bounded and still legible
-// (§3.5.6, reads are loud).
+// own profile: a fleet of nodes polling from one NAT'd address, or a
+// multi-tenant host's sites on one box, would otherwise exhaust a per-IP
+// budget sized for human clients and go silent, which is exactly the failure
+// the channel exists to make visible. The endpoint meters itself instead, per
+// node for what a node's signature proves and per address for the rest
+// (AgentChannelEndpoint::dispatchPreAuth), so abnormal agent volume is still
+// bounded and still legible (§3.5.6, reads are loud).
 //
 // Its credential is not an API key: the node signs with a keypair it generated
 // and kept, and this plane holds only the public half. So it authenticates
 // itself, before the key-header requirement below.
 if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'agent') {
-	$agent_limit  = (int)($settings->get_setting('api_agent_rate_limit_requests') ?: 6000);
-	$agent_window = (int)($settings->get_setting('api_agent_rate_limit_window') ?: 3600);
-	$agent_state = RequestLogger::rate_limit_state('api_agent', $agent_limit, $agent_window);
-	if (!$agent_state['allowed']) {
-		api_rate_limited($agent_state, 'This address', $agent_limit, $agent_window, 'agent channel requests');
-	}
 	if (!class_exists('AgentChannelEndpoint')) {
 		// The server_manager plugin is absent or inactive, so this route does
 		// not exist here. Indistinguishable from any other unknown path.

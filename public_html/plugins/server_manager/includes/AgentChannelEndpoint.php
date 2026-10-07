@@ -41,6 +41,12 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.33 - the channel's limit is counted per agent: a request a node's signature proves goes
+ *                 in that node's own bucket (api_agent_node), and only one that proves no node goes
+ *                 in its address's (api_agent). A multi-tenant host's sites share an address, so
+ *                 one site's misbehaving agent no longer silences the rest: an address over its
+ *                 limit still lets in a request whose signature verifies (multi_tenant_docker_hosts S23).
+ *                 Artifact body fetches are counted per node too.
  * @version 1.32 - a take_node_id result's swap is made before the site copy it belongs to moves on, so the
  *                 switch-over judges the step by the swap (site_copy.md WP7a)
  * @version 1.31 - job_status: a node waiting for its operator's approval asks whether the job is still
@@ -245,17 +251,41 @@ class AgentChannelEndpoint {
 	/** Suggested poll cadence. The agent clamps it to its own compiled range. */
 	const SUGGESTED_POLL_INTERVAL = 15;
 
+	/** The endpoints a node's signature authenticates. join and join_status prove no node. */
+	const SIGNED_ENDPOINTS = ['claim', 'result', 'leave', 'quiet', 'artifact', 'job_status'];
+
+	/** The node this request's signature proved, once it has; 0 before. */
+	private static $signed_node = 0;
+	/** The address's bucket: false until asked, then its state when over its limit, else null. */
+	private static $address_over = false;
+	/** True when the proved node's own bucket refused this request. */
+	private static $node_over = false;
+
 	/**
 	 * Dispatch a /api/v1/agent/* request. Always exits.
+	 *
+	 * The channel is metered in two buckets, each sized by
+	 * api_agent_rate_limit_requests over api_agent_rate_limit_window. A request
+	 * a node's signature proves counts toward that node's own bucket
+	 * (api_agent_node, keyed node:ID); one that proves no node (a join, a
+	 * missing or wrong signature, an unknown path) counts toward its
+	 * address's (api_agent). A multi-tenant host's sites, and a fleet behind
+	 * one NAT, share an address, so an address over its limit refuses only
+	 * what proves no node: a neighbour whose signature verifies still gets in.
+	 * A refused request is not recorded, so a bucket drains while it is over.
 	 */
 	public static function dispatchPreAuth($url_segments) {
 		$endpoint = strtolower($url_segments[3] ?? '');
+		self::$signed_node = 0;
+		self::$node_over = false;
+		// The address's bucket is asked only where it decides something: a
+		// request that proves no node. A signed request's own bucket is its
+		// node's, so the healthy poll costs one count, not two.
+		self::$address_over = false;
 
-		// Meter the channel. apiv1.php refuses when the api_agent bucket is
-		// over its limit, and this is what fills the bucket — recorded at
-		// shutdown so the one row per request carries the outcome, whichever
-		// api_error()/api_success() exit ended it. The healthy poll is the one
-		// request left out: see meterOutcome().
+		// Meter the channel: recorded at shutdown so the one row per request
+		// carries the outcome, whichever api_error()/api_success() exit ended
+		// it. The healthy poll is the one request left out: see meterOutcome().
 		register_shutdown_function(function () use ($endpoint) {
 			$code = http_response_code();
 			$code = is_int($code) ? $code : 200;
@@ -263,9 +293,24 @@ class AgentChannelEndpoint {
 				return;
 			}
 			$action = preg_replace('/[^a-z0-9_]/', '', $endpoint);
-			RequestLogger::log('api_agent', substr($action !== '' ? $action : '(none)', 0, 40),
-				$code < 400, ['status_code' => $code]);
+			$action = substr($action !== '' ? $action : '(none)', 0, 40);
+			if (self::$signed_node > 0) {
+				if (!self::$node_over) {
+					RequestLogger::log('api_agent_node', $action, $code < 400,
+						['status_code' => $code, 'key' => 'node:' . self::$signed_node]);
+				}
+				return;
+			}
+			if (self::addressOver() === null) {
+				RequestLogger::log('api_agent', $action, $code < 400, ['status_code' => $code]);
+			}
 		});
+
+		// Over the address's limit, only a signed endpoint is let as far as
+		// its signature check; anything else proves no node and stops here.
+		if (!in_array($endpoint, self::SIGNED_ENDPOINTS, true) && self::addressOver() !== null) {
+			self::refuse_address();
+		}
 
 		if (strtoupper($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 			api_error('The agent channel accepts POST only.', 'ActionError', 405);
@@ -273,7 +318,7 @@ class AgentChannelEndpoint {
 
 		// Resolve the endpoint BEFORE reading a body. An unknown path is a 404
 		// about the path, not a complaint about whatever was sent to it.
-		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result', 'leave', 'quiet', 'artifact', 'job_status'], true)) {
+		if (!in_array($endpoint, array_merge(['join', 'join_status'], self::SIGNED_ENDPOINTS), true)) {
 			api_error('Unknown agent endpoint.', 'ActionError', 404);
 		}
 
@@ -324,6 +369,41 @@ class AgentChannelEndpoint {
 	 */
 	public static function meterOutcome($endpoint, $status_code) {
 		return !(in_array($endpoint, array('claim', 'job_status'), true) && (int)$status_code < 400);
+	}
+
+	/** The channel's limit, per node and per address, over rate_window() seconds. */
+	public static function rate_limit(): int {
+		return (int)(Globalvars::get_instance()->get_setting('api_agent_rate_limit_requests') ?: 6000);
+	}
+
+	public static function rate_window(): int {
+		return (int)(Globalvars::get_instance()->get_setting('api_agent_rate_limit_window') ?: 3600);
+	}
+
+	/** The address's bucket state when it is over its limit, else null; read once. */
+	private static function addressOver() {
+		if (self::$address_over === false) {
+			$state = RequestLogger::rate_limit_state('api_agent', self::rate_limit(), self::rate_window());
+			self::$address_over = $state['allowed'] ? null : $state;
+		}
+		return self::$address_over;
+	}
+
+	/** Refuse a request that proves no node, from an address over its limit. Exits. */
+	private static function refuse_address() {
+		api_rate_limited(self::addressOver(), 'This address', self::rate_limit(), self::rate_window(),
+			'agent channel requests that no node signed');
+	}
+
+	/**
+	 * Refuse a request whose signature proves no node: 401, or 429 when its
+	 * address is over its limit. Exits.
+	 */
+	private static function refuse_unsigned($message) {
+		if (self::addressOver() !== null) {
+			self::refuse_address();
+		}
+		api_error($message, 'AuthenticationError', 401);
 	}
 
 	// ==================================================================
@@ -835,13 +915,13 @@ class AgentChannelEndpoint {
 		$signature = base64_decode((string)($headers['x_joinery_agent_signature'] ?? ''), true);
 
 		if ($node_id <= 0 || $timestamp === '' || $nonce === '' || $signature === false) {
-			api_error('This endpoint requires a signed agent request.', 'AuthenticationError', 401);
+			self::refuse_unsigned('This endpoint requires a signed agent request.');
 		}
 		if (strlen($nonce) > 64 || strlen($timestamp) > 20) {
-			api_error('Malformed signature headers.', 'AuthenticationError', 401);
+			self::refuse_unsigned('Malformed signature headers.');
 		}
 		if (strlen($signature) !== SODIUM_CRYPTO_SIGN_BYTES) {
-			api_error('Malformed request signature.', 'AuthenticationError', 401);
+			self::refuse_unsigned('Malformed request signature.');
 		}
 
 		// A clock bound is what stands in for a nonce store: a captured request
@@ -850,33 +930,40 @@ class AgentChannelEndpoint {
 		// result lands on a job that is no longer running and is refused below.
 		if (!ctype_digit($timestamp)
 			|| abs(time() - (int)$timestamp) > self::MAX_CLOCK_SKEW_SECONDS) {
-			api_error('That request is too far from this plane\'s clock. Check the node\'s time.',
-				'AuthenticationError', 401);
+			self::refuse_unsigned('That request is too far from this plane\'s clock. Check the node\'s time.');
 		}
 
 		try {
 			$node = new ManagedNode($node_id, TRUE);
 		} catch (Exception $e) {
-			api_error('Unknown node.', 'AuthenticationError', 401);
+			self::refuse_unsigned('Unknown node.');
 		}
 		if ($node->get('mgn_delete_time')) {
-			api_error('Unknown node.', 'AuthenticationError', 401);
+			self::refuse_unsigned('Unknown node.');
 		}
 
 		$stored_key = (string)$node->get('mgn_agent_public_key');
 		if ($stored_key === '') {
-			api_error('This node has not paired an agent with this plane.', 'AuthenticationError', 401);
+			self::refuse_unsigned('This node has not paired an agent with this plane.');
 		}
 		$public_key = base64_decode($stored_key, true);
 		if ($public_key === false || strlen($public_key) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
-			api_error('This node\'s stored agent key is unusable. Re-pair the agent.',
-				'AuthenticationError', 401);
+			self::refuse_unsigned('This node\'s stored agent key is unusable. Re-pair the agent.');
 		}
 
 		$message = "joinery-agent-v1\nPOST\n{$path}\n{$node_id}\n{$timestamp}\n{$nonce}\n{$raw_body_hash}";
 		if (!sodium_crypto_sign_verify_detached($signature, $message, $public_key)) {
-			api_error('That request did not verify against this node\'s agent key.',
-				'AuthenticationError', 401);
+			self::refuse_unsigned('That request did not verify against this node\'s agent key.');
+		}
+
+		// The signature proves the node: its requests count toward its own
+		// bucket, never its address's.
+		self::$signed_node = (int)$node->key;
+		$own = RequestLogger::rate_limit_state('api_agent_node', self::rate_limit(), self::rate_window(),
+			null, null, 'node:' . (int)$node->key);
+		if (!$own['allowed']) {
+			self::$node_over = true;
+			api_rate_limited($own, 'This node\'s agent', self::rate_limit(), self::rate_window(), 'agent channel requests');
 		}
 
 		return $node;
@@ -2071,22 +2158,23 @@ class AgentChannelEndpoint {
 	 *
 	 * The manifest fetches are cheap and happen on a minutes clock; the bodies
 	 * are megabytes and should happen about once per release. So the bucket is
-	 * on the bodies, sized for a fleet of machines behind one address rather
-	 * than for one machine — RequestLogger counts per IP, and a NAT'd fleet
-	 * shares an address.
+	 * on the bodies, and counted per node (rql_key node:ID): a NAT'd fleet and a
+	 * multi-tenant host's sites share an address.
 	 *
 	 * The row is written whether or not the fetch is allowed, which is what
 	 * makes the bucket fill at all and what makes abnormal volume visible after
 	 * the fact rather than only in the moment.
 	 */
 	private static function meter_artifact_body($node, $kind) {
-		RequestLogger::log('api_agent_artifact', $kind . ' node ' . (int)$node->key, true);
+		// Per node, like the channel: a multi-tenant host's sites share one
+		// address, and a hundred of them fetching one release is a hundred bodies.
+		RequestLogger::log('api_agent_artifact', $kind . ' node ' . (int)$node->key, true, ['key' => 'node:' . (int)$node->key]);
 
 		$settings = Globalvars::get_instance();
 		$limit  = (int)($settings->get_setting('api_agent_artifact_rate_limit_requests') ?: 240);
 		$window = (int)($settings->get_setting('api_agent_artifact_rate_limit_window') ?: 3600);
-		if (!RequestLogger::check_rate_limit('api_agent_artifact', $limit, $window)) {
-			api_error('Artifact fetches from this address are over their limit. The agent will retry.',
+		if (!RequestLogger::rate_limit_state('api_agent_artifact', $limit, $window, null, null, 'node:' . (int)$node->key)['allowed']) {
+			api_error('Artifact fetches by this node are over their limit. The agent will retry.',
 				'RateLimitError', 429);
 		}
 	}

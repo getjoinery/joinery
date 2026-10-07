@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 3.05 - install.sh site-limits SITENAME [--memory] [--cpus] [--disk] changes a site's limits
+#               without a rebuild (sysadmin_tools/site_limits.sh, WP6). install.sh docker --disk-pool=SIZE puts /var/lib/docker on a disk pool of its own
+#               (docker_disk_pool.sh: an XFS file system with project quotas, in a file of SIZE
+#               on the root disk), before Docker's first start, so each site's disk can be
+#               capped (specs/multi_tenant_docker_hosts.md WP4). With --multi-tenant only, and on
+#               a host Docker is not on yet.
 #VERSION 3.04 - site refuses a name that is not 2 to 50 of a-z, 0-9, _ and - (starting with a
 #               letter or digit) before doing anything: Docker takes no one-letter container
 #               name, so site a built its image and then failed at docker run. A site's own
@@ -520,6 +526,8 @@
 # Usage:
 #   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
 #                       --multi-tenant: root in a container is not root on the host (userns-remap); a fresh host only
+#                       --disk-pool=SIZE: /var/lib/docker on an XFS pool of SIZE (68G) with project quotas, so each
+#                                         site's disk can be capped (site --disk); with --multi-tenant, a fresh host only
 #                       --no-outbound-limits: no connection limits and no UDP drop for this host's sites
 #                       OUTBOUND FIGURES: --outbound-ceiling=MBIT|off --outbound-conn-rate=N
 #                       --outbound-conn-burst=N --outbound-open-conns=N (the machine's own; server takes them too)
@@ -527,6 +535,7 @@
 #   ./install.sh server [--allow-unsupported-os] [--no-outbound-limits] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
 #   ./install.sh list                                # List existing sites
+#   ./install.sh site-limits SITENAME [--memory=SIZE] [--cpus=N] [--disk=SIZE]  # Change a site's limits, no rebuild
 #
 # Global Options:
 #   -y, --yes     Auto-accept all prompts (non-interactive mode)
@@ -677,6 +686,14 @@ CONTAINER_PIDS=""
 CONTAINER_PIDS_GIVEN=0
 CONTAINER_PIDS_DEFAULT=512
 CONTAINER_PIDS_FLOOR=128
+
+# --disk=SIZE: the site's disk allowance (4G), over all of its volumes but
+# backups and deploy, on a host with a disk pool (install.sh docker
+# --disk-pool, docker_disk_pool.sh). Refused on a host without one: a cap that
+# silently does nothing is worse than none. Kept in the run spec like --memory;
+# none lifts it.
+CONTAINER_DISK=""
+CONTAINER_DISK_GIVEN=0
 
 # --outbound-ceiling=MBIT|off, --outbound-conn-rate=N, --outbound-conn-burst=N,
 # --outbound-open-conns=N: the outbound limits' figures (outbound_limits.sh,
@@ -2379,6 +2396,7 @@ do_docker_install() {
     local MGMT_NODE_URL=""
     local NODE_NAME=""
     local MULTI_TENANT=0
+    local DISK_POOL=""
     local arg
     local NO_OUTBOUND_LIMITS=0
     for arg in "$@"; do
@@ -2386,6 +2404,7 @@ do_docker_install() {
             --management-node=*) MGMT_NODE_URL="${arg#--management-node=}" ;;
             --node-name=*) NODE_NAME="${arg#--node-name=}" ;;
             --multi-tenant) MULTI_TENANT=1 ;;
+            --disk-pool=*) DISK_POOL="${arg#--disk-pool=}" ;;
             --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
             --outbound-*) consume_outbound_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
@@ -2397,6 +2416,14 @@ do_docker_install() {
     # Check if running as root
     if [ "$EUID" -ne 0 ]; then
         print_error "This command must be run as root (use sudo)"
+        exit 1
+    fi
+
+    # A site's disk cap is only a cap where root in its container is not root
+    # on the host: the owner of a file can move it out of its project
+    # (chattr -p), and a site's own processes own its uploads.
+    if [ -n "$DISK_POOL" ] && [ "$MULTI_TENANT" -ne 1 ]; then
+        print_error "--disk-pool needs --multi-tenant: without user-namespace remapping a site could move its own files out of its disk allowance"
         exit 1
     fi
 
@@ -2418,6 +2445,16 @@ do_docker_install() {
             print_success "Docker daemon started"
         else
             print_success "Docker daemon is running"
+        fi
+        # The pool goes under Docker before its first start: here, only a host
+        # that already has one passes.
+        if [ -n "$DISK_POOL" ]; then
+            if bash "$SCRIPT_DIR/docker_disk_pool.sh" check; then
+                print_success "/var/lib/docker is on the disk pool"
+            else
+                print_error "--disk-pool must be made before Docker is installed, and Docker is already on this host. Build a new host with install.sh docker --multi-tenant --disk-pool=SIZE and move the sites onto it."
+                exit 1
+            fi
         fi
         if [ "$MULTI_TENANT" -eq 1 ]; then
             docker_multi_tenant_existing || exit 1
@@ -2462,6 +2499,14 @@ do_docker_install() {
     # must be on from that first start.
     if [ "$MULTI_TENANT" -eq 1 ]; then
         docker_daemon_json_set_userns_remap || exit 1
+    fi
+
+    # The pool too: the package starts the daemon, which would make
+    # /var/lib/docker on the root disk, with no disk limits.
+    if [ -n "$DISK_POOL" ]; then
+        print_step "Making the disk pool: ${DISK_POOL} for /var/lib/docker..."
+        bash "$SCRIPT_DIR/docker_disk_pool.sh" create "$DISK_POOL" || exit 1
+        print_success "/var/lib/docker is an XFS pool with project quotas (docker_disk_pool.sh)"
     fi
 
     print_step "Installing Docker..."
@@ -2555,6 +2600,36 @@ do_docker_install() {
     else
         print_success "Docker installation complete!"
     fi
+}
+
+#==============================================================================
+# SITE LIMITS - a site's memory, CPU ceiling and disk allowance changed without a
+# rebuild (sysadmin_tools/site_limits.sh, the site_limits agent word;
+# specs/multi_tenant_docker_hosts.md WP6). A flag left out keeps that limit.
+#==============================================================================
+
+do_site_limits() {
+    local site="" memory=keep cpus=keep disk=keep arg
+    for arg in "$@"; do
+        case "$arg" in
+            --memory=*) memory="${arg#--memory=}" ;;
+            --cpus=*)   cpus="${arg#--cpus=}" ;;
+            --disk=*)   disk="${arg#--disk=}" ;;
+            -*) consume_global_flag "$arg" || { print_error "Unknown option for site-limits: $arg"; exit 1; } ;;
+            *) [ -z "$site" ] && site="$arg" || { print_error "site-limits takes one site name"; exit 1; } ;;
+        esac
+    done
+    if [ -z "$site" ] || [ "$memory$cpus$disk" = "keepkeepkeep" ]; then
+        print_error "usage: install.sh site-limits SITENAME [--memory=SIZE] [--cpus=N] [--disk=SIZE]"
+        exit 1
+    fi
+    [ "$EUID" -eq 0 ] || { print_error "This command must be run as root (use sudo)"; exit 1; }
+    local out rc=0
+    out="$(bash "$SCRIPT_DIR/../sysadmin_tools/site_limits.sh" "$site" "$memory" "$cpus" "$disk")" || rc=$?
+    [ "$rc" -eq 0 ] || exit "$rc"
+    printf '%s\n' "$out"
+    [[ "$out" == *'"done":true'* ]] || { print_error "${site}'s limits were not all changed; the object above says why"; exit 1; }
+    print_success "${site}'s limits are changed and recorded in its run spec"
 }
 
 #==============================================================================
@@ -3783,6 +3858,14 @@ do_site_create() {
                 CONTAINER_PIDS="${1#*=}"; CONTAINER_PIDS_GIVEN=1
                 shift
                 ;;
+            --disk=*)
+                CONTAINER_DISK="${1#*=}"; CONTAINER_DISK_GIVEN=1
+                shift
+                ;;
+            --disk)
+                CONTAINER_DISK="$2"; CONTAINER_DISK_GIVEN=1
+                shift 2
+                ;;
             --pids-limit)
                 CONTAINER_PIDS="$2"; CONTAINER_PIDS_GIVEN=1
                 shift 2
@@ -4128,8 +4211,8 @@ do_site_create() {
 
     # A limit bounds a container. A bare-metal site has none to bound, and a
     # limit asked for and silently not applied is worse than being told.
-    if [ "$MODE" = "bare-metal" ] && [ $((CONTAINER_MEMORY_GIVEN + CONTAINER_CPUS_GIVEN + CONTAINER_PIDS_GIVEN)) -gt 0 ]; then
-        print_error "--memory, --cpus and --pids-limit limit a site container; a bare-metal site has none. Leave them out, or install the site in Docker"
+    if [ "$MODE" = "bare-metal" ] && [ $((CONTAINER_MEMORY_GIVEN + CONTAINER_CPUS_GIVEN + CONTAINER_PIDS_GIVEN + CONTAINER_DISK_GIVEN)) -gt 0 ]; then
+        print_error "--memory, --cpus, --pids-limit and --disk limit a site container; a bare-metal site has none. Leave them out, or install the site in Docker"
         exit 1
     fi
     # A bare-metal site sends as the web server's user, which every site on the
@@ -4295,7 +4378,7 @@ CODE_VOLUMES=(
 ALL_SITE_VOLUMES=(
     code vendor scripts
     postgres uploads storage config backups static
-    logs cache sessions apache_logs pg_logs agent
+    logs cache sessions apache_logs pg_logs agent deploy
 )
 
 # Delete every volume belonging to a site. Irreversible: this is the database,
@@ -4589,6 +4672,7 @@ do_site_docker() {
         [ "$CONTAINER_MEMORY_GIVEN" -eq 1 ] || CONTAINER_MEMORY="$(run_spec_get "$SITENAME" memory)"
         [ "$CONTAINER_CPUS_GIVEN" -eq 1 ] || CONTAINER_CPUS="$(run_spec_get "$SITENAME" cpus)"
         [ "$CONTAINER_PIDS_GIVEN" -eq 1 ] || CONTAINER_PIDS="$(run_spec_get "$SITENAME" pids_limit)"
+        [ "$CONTAINER_DISK_GIVEN" -eq 1 ] || CONTAINER_DISK="$(run_spec_get "$SITENAME" disk)"
         SPEC_FOREIGN="$(run_spec_foreign_lines "$SITENAME")"
         SPEC_OUTBOUND="$(run_spec_outbound_lines "$SITENAME")"
     elif [ "$CONTAINER_PIDS_GIVEN" -eq 0 ]; then
@@ -4627,6 +4711,16 @@ do_site_docker() {
         || refuse_limit "$CONTAINER_PIDS_GIVEN" pids-limit pids_limit "$PIDS_IN" "not a number of processes (512; none for no ceiling)"
     if [ "$CONTAINER_PIDS_GIVEN" -eq 1 ] && [ -n "$CONTAINER_PIDS" ] && [ "$CONTAINER_PIDS" -lt "$CONTAINER_PIDS_FLOOR" ]; then
         refuse_limit 1 pids-limit pids_limit "$CONTAINER_PIDS" "below ${CONTAINER_PIDS_FLOOR}: an idle site already runs 54 to 75 processes and threads, so it would not start"
+    fi
+    [ "$CONTAINER_DISK_GIVEN" -eq 1 ] && [ -z "$CONTAINER_DISK" ] \
+        && { print_error "--disk was given with no value. Give one, or none to lift the allowance. Nothing was changed"; exit 1; }
+    local DISK_IN="$CONTAINER_DISK"
+    CONTAINER_DISK="$(run_spec_norm_disk "$DISK_IN")" \
+        || refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$DISK_IN" "not a disk size (4G, 500M; at least 100M; none for no allowance)"
+    # A disk allowance is an XFS project on the disk pool. Without one here it
+    # would not hold, and is refused rather than ignored.
+    if [ -n "$CONTAINER_DISK" ] && ! bash "$SCRIPT_DIR/docker_disk_pool.sh" check; then
+        refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$CONTAINER_DISK" "an allowance this host cannot hold: it has no disk pool (install.sh docker --multi-tenant --disk-pool=SIZE makes one on a new host)"
     fi
     # The site's own outbound figures (outbound_limits.sh, WP5): the spec's,
     # with each one given on the command line in its place; default removes it.
@@ -5032,7 +5126,7 @@ EOF
         done < "$(run_spec_path "$SITENAME")"
     fi
     [ -z "$SPEC_OUTBOUND" ] || print_info "Outbound figures of its own: $(printf '%s' "$SPEC_OUTBOUND" | sed 's/^outbound_//' | paste -sd ' ')"
-    { printf '%s\n' "$RENDERED"; [ -z "$SPEC_FOREIGN" ] || printf '%s\n' "$SPEC_FOREIGN"; [ -z "$SPEC_OUTBOUND" ] || printf '%s\n' "$SPEC_OUTBOUND"; } \
+    { printf '%s\n' "$RENDERED"; [ -z "$CONTAINER_DISK" ] || printf 'disk=%s\n' "$CONTAINER_DISK"; [ -z "$SPEC_FOREIGN" ] || printf '%s\n' "$SPEC_FOREIGN"; [ -z "$SPEC_OUTBOUND" ] || printf '%s\n' "$SPEC_OUTBOUND"; } \
         | run_spec_write "$SITENAME" \
         || { print_error "Could not write ${SITENAME}'s run spec"; exit 1; }
     local RUN_ARGS=()
@@ -5053,6 +5147,14 @@ EOF
     fi
     # The host's outbound limits take in the site's network (WP3).
     run_spec_limits_refresh
+    # The site's disk allowance, now its volumes exist (docker_disk_pool.sh,
+    # WP4); none takes a former one away.
+    if [ -n "$CONTAINER_DISK" ]; then
+        bash "$SCRIPT_DIR/docker_disk_pool.sh" allow "$SITENAME" "$CONTAINER_DISK" \
+            || { print_error "${SITENAME} is running, but its disk allowance of ${CONTAINER_DISK} could not be set. Run: bash ${SCRIPT_DIR}/docker_disk_pool.sh allow ${SITENAME} ${CONTAINER_DISK}"; exit 1; }
+    elif bash "$SCRIPT_DIR/docker_disk_pool.sh" check; then
+        bash "$SCRIPT_DIR/docker_disk_pool.sh" release "$SITENAME" || true
+    fi
 
     # Create host-side logs directory for reverse proxy (used by manage_domain.sh)
     # Container has its own /var/www/html/{site}/ but host needs logs dir for proxy
@@ -5667,6 +5769,10 @@ case "${1:-}" in
     list)
         shift
         do_list "$@"
+        ;;
+    site-limits)
+        shift
+        do_site_limits "$@"
         ;;
     --help|-h|"")
         show_help
