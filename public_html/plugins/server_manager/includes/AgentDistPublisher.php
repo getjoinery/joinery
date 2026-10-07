@@ -25,6 +25,9 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.3 - each binary is built with the repository's statement and log keys compiled in, which hold
+ *                its own self-updates to the public log (release_transparency WP5); manifest.json
+ *                records them as baked_keys, the build inputs a verifier needs to rebuild the binary
  * @version 2.2 - manifest.json carries statement_keys, the P-256 release statement keys under
  *                release_keys/statement/, read by the rule the publisher signs statements by
  * @version 2.1 - log_keys read through ReleaseLogClient::repoLogKeys(): only an Ed25519 key in
@@ -177,7 +180,7 @@ class AgentDistPublisher {
 			$binaries = array();
 			foreach (self::ARCHES as $arch) {
 				$raw_path = $staging . '/joinery-agent-linux-' . $arch;
-				self::buildBinary($go, $src, $arch, $agent_version, $keys['public_b64'], $raw_path);
+				self::buildBinary($go, $src, $arch, $agent_version, $keys['public_b64'], $key_lists, $raw_path);
 
 				$raw = file_get_contents($raw_path);
 				if ($raw === false || strlen($raw) < 1024 * 1024) {
@@ -212,7 +215,11 @@ class AgentDistPublisher {
 
 			$manifest_json = json_encode(
 				array('version' => $agent_version, 'go_toolchain' => $go_toolchain, 'binaries' => $binaries,
-				      'signing_public_key' => $keys['public_b64']) + $key_lists,
+				      'signing_public_key' => $keys['public_b64'],
+				      // What the binaries above were built with. The lists beside
+				      // them follow release_keys/ on every publish; these stay as
+				      // built until the agent is rebuilt.
+				      'baked_keys' => array('statement_keys' => $key_lists['statement_keys'], 'log_keys' => $key_lists['log_keys'])) + $key_lists,
 				JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
 			);
 			if (file_put_contents($staging . '/manifest.json', $manifest_json . "\n") === false) {
@@ -430,15 +437,33 @@ class AgentDistPublisher {
 		return $found !== '' ? $found : null;
 	}
 
-	/** Cross-compile one arch with the version and update public key baked in. */
-	private static function buildBinary($go, $src, $arch, $version, $public_b64, $out_path) {
+	/**
+	 * The release-log keys a binary is built with, as its two -X values: the
+	 * statement keys comma-separated, the log keys as origin:key pairs
+	 * (releaselog.go). A binary holding both requires the public log of its
+	 * own next update.
+	 *
+	 * @return array{statement:string, log:string}
+	 */
+	public static function bakedKeyFlags(array $key_lists) {
+		$log = array();
+		foreach ($key_lists['log_keys'] ?? array() as $pair) {
+			$log[] = $pair['origin'] . ':' . $pair['key'];
+		}
+		return array('statement' => implode(',', $key_lists['statement_keys'] ?? array()), 'log' => implode(',', $log));
+	}
+
+	/** Cross-compile one arch with the version, update public key and release-log keys baked in. */
+	private static function buildBinary($go, $src, $arch, $version, $public_b64, array $key_lists, $out_path) {
 		// Persistent caches so repeat publishes are fast and root/user1 runs
 		// do not depend on either account's home directory.
 		$cache_root = '/var/tmp/joinery-agent-build';
 		@mkdir($cache_root . '/gocache', 0777, true);
 		@mkdir($cache_root . '/gomodcache', 0777, true);
 
-		$ldflags = sprintf('-X main.version=%s -X main.updatePubKeyB64=%s', $version, $public_b64);
+		$baked = self::bakedKeyFlags($key_lists);
+		$ldflags = sprintf('-X main.version=%s -X main.updatePubKeyB64=%s -X main.releaseStatementKeysB64=%s -X main.releaseLogKeysB64=%s',
+			$version, $public_b64, $baked['statement'], $baked['log']);
 		$cmd = sprintf(
 			'cd %s && env HOME=%s GOCACHE=%s GOMODCACHE=%s GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=%s %s build -buildvcs=false -trimpath -ldflags %s -o %s . 2>&1',
 			escapeshellarg($src),

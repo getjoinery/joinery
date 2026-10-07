@@ -254,10 +254,21 @@ check(AgentChannelEndpoint::validation_error(
 	'a node that could name a file could name any file; the plane names it from its own manifest');
 
 $kinds = AgentChannelEndpoint::ARTIFACT_KINDS;
-check($kinds === ['agent_manifest', 'agent_binary', 'bundle_manifest', 'bundle_body', 'release_manifest'],
-	'the artifact kinds are exactly the five the agent asks for',
+check($kinds === ['agent_manifest', 'agent_binary', 'agent_statement', 'bundle_manifest', 'bundle_body', 'release_manifest'],
+	'the artifact kinds are exactly the six the agent asks for',
 	'the agent and the plane agree by convention here, the way the primitive vocabulary does; '
 	. 'a kind on one side and not the other is a request that silently 400s: ' . implode(',', $kinds));
+// Where the agent's source is on this box, its compiled-in list is read and
+// compared, so the convention is checked rather than trusted.
+$agent_remote = @file_get_contents(rtrim(AgentDistPublisher::sourcePath(), '/') . '/remote.go');
+if ($agent_remote !== false && preg_match_all('/^\s*artifactKind\w+\s*=\s*"([a-z_]+)"/m', $agent_remote, $m)) {
+	$agent_kinds = $m[1];
+	$plane_kinds = $kinds;
+	sort($agent_kinds);
+	sort($plane_kinds);
+	check($agent_kinds === $plane_kinds, 'and they are exactly the kinds the agent source on this box names',
+		'agent: ' . implode(',', $agent_kinds));
+}
 
 // release_manifest is the one kind whose whole purpose is to reach a node that
 // can do nothing else. A node in that state names an artifact and a version;

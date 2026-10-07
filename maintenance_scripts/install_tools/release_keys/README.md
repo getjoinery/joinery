@@ -26,3 +26,10 @@ key is not here yet: every node must hold a log's key before the first release
 logged on it. `agent_dist/manifest.json` carries these lists (`release_keys`,
 `statement_keys`, `log_keys`), and a node's key files are derived from them
 and from nothing else.
+
+The agent is built with `statement/` and `log/` compiled in, and an agent
+holding both requires the public log of every later self-update. A fork that
+publishes its own releases without logging them removes `statement/` and
+`log/` from its tree before its first agent build; a fork's nodes that ever
+ran an agent built with this repository's keys keep them in
+`/etc/joinery-agent/`, and are reinstalled from the fork's own build.
