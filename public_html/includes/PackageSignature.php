@@ -17,7 +17,14 @@
  * refusal says WHY — a stranger's archive, a byte changed in transit, a file
  * smuggled in beside a signed set, a node with no key to check against.
  *
- * It reads nothing outside $dir and the key file. It does not know what a
+ * ON A NODE THAT REQUIRES THE LOG (config/release_log_required, and no
+ * config/release_log_optional), `signed` is not enough: the package must also
+ * carry a release statement that is in Sigstore's public log, checked offline
+ * against the statement keys and log checkpoint keys the node already holds
+ * (config/release_statement_keys, config/transparency_log_keys), never a key
+ * read from the package. Anything less is `unlogged`.
+ *
+ * It reads nothing outside $dir and the key files. It does not know what a
  * plugin is, does not read the database, and does not care who is asking:
  * the callers (utils/upgrade.php, utils/install_extension.php, the host
  * converger through utils/verify_package.php) decide what a verdict means for
@@ -30,6 +37,11 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.3 - the release log (spec release_transparency, D5, D6, WP4): on a node that requires it,
+ *                `signed` also needs a release statement in the public log, else `unlogged`; the
+ *                key chain is walked in memory and what it proves is returned as keys_proven for a
+ *                root caller to persist (persistProvenKeys); a fresh archive refuses any member on
+ *                a path no manifest lists (`fresh`)
  * @version 1.2 - STATEMENT_NAME, statementSubject() and statementLines(): the release statement is a
  *                listed file, and what it records for a manifest is that manifest without its
  *                statement lines, each of which must be that statement
@@ -56,6 +68,18 @@ class PackageSignature {
 	/** Where a node keeps the public keys it verifies against, under the site root. */
 	const KEYS_FILE = 'config/release_verify_keys';
 
+	/** The P-256 statement keys a node holds: one base64 SubjectPublicKeyInfo per line. */
+	const STATEMENT_KEYS_FILE = 'config/release_statement_keys';
+
+	/** The log checkpoint keys a node holds: "<origin> <base64 SubjectPublicKeyInfo>" per line. */
+	const LOG_KEYS_FILE = 'config/transparency_log_keys';
+
+	/** Present: this node installs only logged releases (D6). Written by root, never removed. */
+	const LOG_REQUIRED_FILE = 'config/release_log_required';
+
+	/** Present, and root's: a fork owner's opt-out, created by hand. Nothing writes it. */
+	const LOG_OPTIONAL_FILE = 'config/release_log_optional';
+
 	/**
 	 * The verdicts. `signed` is the only one that installs without a warning;
 	 * the rest are the sentence in PackageVerdict::$detail.
@@ -68,6 +92,7 @@ class PackageSignature {
 	const EXTRA_FILE   = 'extra_file';    // a file is present that the manifest does not list
 	const MISSING_FILE = 'missing_file';  // a listed file is absent
 	const UNREADABLE   = 'unreadable';    // the manifest or signature is not the format we write
+	const UNLOGGED     = 'unlogged';      // signed by a key we trust, but not shown to be in the public log
 
 	/**
 	 * Paths never listed, matched against the site-root-relative path.
@@ -112,6 +137,112 @@ class PackageSignature {
 	/** The node's key file. */
 	public static function keysPath(): string {
 		return PathHelper::getSiteRoot() . '/' . self::KEYS_FILE;
+	}
+
+	/**
+	 * The node's release-log settings, as verify() takes them in its 'log'
+	 * option: whether the log is required, and the statement and checkpoint
+	 * keys held. A key file or an opt-out that someone other than root or the
+	 * tree owner could have written is not trusted: a key file is read as
+	 * empty, an opt-out as absent.
+	 *
+	 * @return array{required:bool, statement_keys:string[], log_keys:array<string,string[]>}
+	 */
+	public static function nodeLog(?string $site_root = null): array {
+		$root = rtrim($site_root ?? PathHelper::getSiteRoot(), '/');
+		$optional = $root . '/' . self::LOG_OPTIONAL_FILE;
+		$statement = $root . '/' . self::STATEMENT_KEYS_FILE;
+		$log = $root . '/' . self::LOG_KEYS_FILE;
+		return array(
+			'required'       => is_file($root . '/' . self::LOG_REQUIRED_FILE)
+				&& !(is_file($optional) && self::keyFileRefusal($optional) === ''),
+			'statement_keys' => (is_file($statement) && self::keyFileRefusal($statement) === '') ? self::readStatementKeys($statement) : array(),
+			'log_keys'       => (is_file($log) && self::keyFileRefusal($log) === '') ? self::readLogKeys($log) : array(),
+		);
+	}
+
+	/** The P-256 statement keys in a key file, as DER. Any other kind is skipped (D5). */
+	public static function readStatementKeys(string $path): array {
+		$keys = array();
+		foreach (preg_split('/\r\n|\r|\n/', (string)@file_get_contents($path)) as $line) {
+			$line = trim($line);
+			if ($line === '' || $line[0] === '#') {
+				continue;
+			}
+			$der = base64_decode($line, true);
+			if ($der !== false && TransparencyProof::isP256($der) && !in_array($der, $keys, true)) {
+				$keys[] = $der;
+			}
+		}
+		return $keys;
+	}
+
+	/**
+	 * The checkpoint keys in a key file: origin => DER[]. An origin may hold
+	 * more than one: a log's key can rotate in place, and the file only grows.
+	 * Lines that are not "<origin> <Ed25519 SubjectPublicKeyInfo>" are skipped.
+	 */
+	public static function readLogKeys(string $path): array {
+		$keys = array();
+		foreach (preg_split('/\r\n|\r|\n/', (string)@file_get_contents($path)) as $line) {
+			$line = trim($line);
+			if ($line === '' || $line[0] === '#' || !preg_match('/^([a-z0-9.-]+)\s+(\S+)$/', $line, $m)) {
+				continue;
+			}
+			$der = base64_decode($m[2], true);
+			if ($der === false) {
+				continue;
+			}
+			try {
+				TransparencyProof::ed25519Raw($der);
+			} catch (TransparencyProofException $e) {
+				continue;
+			}
+			if (!in_array($der, $keys[$m[1]] ?? array(), true)) {
+				$keys[$m[1]][] = $der;
+			}
+		}
+		return $keys;
+	}
+
+	/**
+	 * Append keys a verdict proved (PackageVerdict::$keys_proven) to the
+	 * node's key files. For the root callers only - upgrade.php,
+	 * install_extension.php, the converger - after a verdict that installs:
+	 * verify() never writes (B9). Append-only, nothing removed; a key already
+	 * held is not written twice. Returns the lines added.
+	 */
+	public static function persistProvenKeys(array $keys_proven, ?string $site_root = null): array {
+		$root = rtrim($site_root ?? PathHelper::getSiteRoot(), '/');
+		$added = array();
+		$plan = array(
+			self::STATEMENT_KEYS_FILE => array_map('base64_encode', $keys_proven['statement'] ?? array()),
+			self::LOG_KEYS_FILE       => array(),
+		);
+		foreach ($keys_proven['log'] ?? array() as $origin => $ders) {
+			foreach ((array)$ders as $der) {
+				$plan[self::LOG_KEYS_FILE][] = $origin . ' ' . base64_encode($der);
+			}
+		}
+		foreach ($plan as $rel => $lines) {
+			if (!$lines) {
+				continue;
+			}
+			$path = $root . '/' . $rel;
+			$have = is_file($path) ? array_map('trim', preg_split('/\r\n|\r|\n/', (string)file_get_contents($path))) : array();
+			$new = array_values(array_diff($lines, $have));
+			if (!$new) {
+				continue;
+			}
+			$existing = is_file($path) ? (string)file_get_contents($path) : '';
+			$body = rtrim($existing, "\n") . ($existing !== '' ? "\n" : '') . implode("\n", $new) . "\n";
+			if (@file_put_contents($path, $body) === false) {
+				throw new RuntimeException('could not write ' . $path);
+			}
+			@chmod($path, 0644);
+			foreach ($new as $line) { $added[] = $rel . ': ' . $line; }
+		}
+		return $added;
 	}
 
 	/**
@@ -211,13 +342,28 @@ class PackageSignature {
 	 * be $dir's own name — a package whose manifest describes some other
 	 * directory is not this package.
 	 *
+	 * Two options:
+	 *  - 'fresh' => true: $dir is an archive just unpacked, not a live tree. A
+	 *    live tree legitimately holds cache, uploads and the like on paths no
+	 *    manifest lists, so the walk skips them; an archive has no reason to,
+	 *    and any such member is `extra_file` (B6). The one allowance is the
+	 *    core archive's config/default_Globalvars_site.php, which must be the
+	 *    exact bytes of the listed install_tools copy.
+	 *  - 'log' => nodeLog()'s shape: whether the release log is required and
+	 *    the keys to check it with. Default: the node's own, when $keys_file
+	 *    is the node's own; when a key file is handed in (a test, a gate's
+	 *    throwaway key) the log is not required unless 'log' says so.
+	 *
 	 * @param string      $dir       The unpacked artifact: its RELEASE_MANIFEST is at $dir/RELEASE_MANIFEST
 	 * @param string|null $keys_file The key file; the node's own when null
+	 * @param array       $opts      'fresh' (bool), 'log' (see nodeLog())
 	 */
-	public static function verify(string $dir, ?string $keys_file = null): PackageVerdict {
+	public static function verify(string $dir, ?string $keys_file = null, array $opts = array()): PackageVerdict {
 		$dir = rtrim($dir, '/');
 		$own_keys = ($keys_file === null);
 		$keys_file = $keys_file ?? self::keysPath();
+		$fresh = !empty($opts['fresh']);
+		$log = $opts['log'] ?? ($own_keys ? self::nodeLog() : array('required' => false, 'statement_keys' => array(), 'log_keys' => array()));
 
 		if (!is_dir($dir)) {
 			return new PackageVerdict(self::UNREADABLE, 'there is no directory at ' . $dir . ' to verify');
@@ -286,6 +432,10 @@ class PackageSignature {
 				continue;
 			}
 			if (self::excluded($rel)) {
+				if ($fresh && !self::freshAllowance($sub, $rel, $listed, $entry->getPathname())) {
+					return new PackageVerdict(self::EXTRA_FILE, 'a file is present that the manifest does not list: ' . $sub
+						. ' (a path no manifest lists, which an archive has no reason to carry)', $root, $verified_by, $sub);
+				}
 				continue;
 			}
 			if (!isset($listed[$rel])) {
@@ -308,8 +458,162 @@ class PackageSignature {
 			}
 		}
 
-		return new PackageVerdict(self::SIGNED,
+		$signed = new PackageVerdict(self::SIGNED,
 			count($listed) . ' file(s) verified', $root, $verified_by, null, count($listed));
+		if (self::statementLines($body) === array() && empty($log['required'])) {
+			return $signed;
+		}
+		$logged = self::checkLogged($dir, $prefix, $body, $log);
+		if ($logged['ok']) {
+			$signed->detail .= ', logged publicly at ' . $logged['origin'] . ' index ' . $logged['index'];
+			$signed->log = array('origin' => $logged['origin'], 'index' => $logged['index'], 'version' => $logged['version']);
+			$signed->keys_proven = $logged['keys_proven'];
+			return $signed;
+		}
+		if (!empty($log['required'])) {
+			return new PackageVerdict(self::UNLOGGED, 'signed by a key this machine trusts, but not shown to be in the public log: '
+				. $logged['why'], $root, $verified_by, null, count($listed));
+		}
+		return $signed;
+	}
+
+	/**
+	 * Whether an excluded member may stand in a fresh archive: the manifest
+	 * and signature at its top, and the core's config template when it is the
+	 * listed install_tools copy byte for byte.
+	 */
+	private static function freshAllowance(string $sub, string $rel, array $listed, string $abs): bool {
+		if ($sub === self::MANIFEST_NAME || $sub === self::SIGNATURE_NAME) {
+			return true;
+		}
+		if ($rel === 'config/default_Globalvars_site.php') {
+			$template = $listed['maintenance_scripts/install_tools/default_Globalvars_site.php'] ?? null;
+			$hash = @hash_file('sha256', $abs);
+			return $template !== null && $hash !== false && hash_equals($template, $hash);
+		}
+		return false;
+	}
+
+	/**
+	 * D5's four checks on a package whose listing is already verified and
+	 * whose files already match it: the statement it lists, its envelope, its
+	 * leaf, its checkpoint, its inclusion proof, and that it records this
+	 * manifest. Reads only $dir and the keys in $log; walks the key chain in
+	 * memory, and returns what the walk proved without writing it (B9).
+	 *
+	 * @return array{ok:bool, why:string, origin:?string, index:?int, version:?string, keys_proven:array}
+	 */
+	private static function checkLogged(string $dir, string $prefix, string $body, array $log): array {
+		$fail = function ($why) {
+			return array('ok' => false, 'why' => $why, 'origin' => null, 'index' => null, 'version' => null, 'keys_proven' => array());
+		};
+		$lines = self::statementLines($body);
+		if ($lines === array()) {
+			return $fail('the package carries no ' . self::STATEMENT_NAME);
+		}
+		if (count(array_unique($lines)) !== 1) {
+			return $fail('the package lists more than one ' . self::STATEMENT_NAME . ', and they differ');
+		}
+		$first = (string)array_key_first($lines);
+		if ($prefix !== '' && strpos($first, $prefix) !== 0) {
+			return $fail('the statement is listed outside the package');
+		}
+		$bytes = @file_get_contents($dir . '/' . substr($first, strlen($prefix)));
+		// Every line statementSubject() leaves out must be this statement (B1).
+		if ($bytes === false || !hash_equals(reset($lines), hash('sha256', $bytes))) {
+			return $fail('the listed statement is not the file in the package');
+		}
+		$doc = json_decode($bytes, true);
+		if (!is_array($doc) || !is_array($doc['envelope'] ?? null) || !is_array($doc['entry'] ?? null)) {
+			return $fail('the statement is not the format the publisher writes');
+		}
+
+		$held_statement = array_values($log['statement_keys'] ?? array());
+		$held_log = $log['log_keys'] ?? array();
+		if ($held_statement === array() || $held_log === array()) {
+			return $fail('this machine holds no statement key or no log key to check a statement with');
+		}
+
+		// The chain, forward from what this machine holds: a link that
+		// verifies under the keys held so far adds the keys it installs; one
+		// that does not adds nothing.
+		$statement = $held_statement;
+		$logs = $held_log;
+		foreach (is_array($doc['key_chain'] ?? null) ? $doc['key_chain'] : array() as $link) {
+			if (!is_array($link['envelope'] ?? null) || !is_array($link['entry'] ?? null)) {
+				continue;
+			}
+			if (self::entryVerifies($link['envelope'], $link['entry'], $statement, $logs) !== '') {
+				continue;
+			}
+			$installed = self::payloadKeys($link['envelope']);
+			foreach ($installed['statement'] as $der) {
+				if (!in_array($der, $statement, true)) { $statement[] = $der; }
+			}
+			foreach ($installed['log'] as $origin => $ders) {
+				foreach ($ders as $der) {
+					if (!in_array($der, $logs[$origin] ?? array(), true)) { $logs[$origin][] = $der; }
+				}
+			}
+		}
+
+		$why = self::entryVerifies($doc['envelope'], $doc['entry'], $statement, $logs);
+		if ($why !== '') {
+			return $fail($why);
+		}
+		$payload = json_decode((string)base64_decode((string)$doc['envelope']['payload'], true), true);
+		$artifacts = is_array($payload['artifacts'] ?? null) ? $payload['artifacts'] : array();
+		if (!in_array(self::statementSubject($body), array_values($artifacts), true)) {
+			return $fail('the logged statement does not record this package');
+		}
+
+		$proven = array('statement' => array_values(array_diff($statement, $held_statement)), 'log' => array());
+		foreach ($logs as $origin => $ders) {
+			$new = array_values(array_filter($ders, function ($der) use ($held_log, $origin) {
+				return !in_array($der, $held_log[$origin] ?? array(), true);
+			}));
+			if ($new) { $proven['log'][$origin] = $new; }
+		}
+		return array('ok' => true, 'why' => '', 'origin' => (string)$doc['entry']['log_origin'], 'index' => (int)$doc['entry']['log_index'],
+			'version' => isset($payload['version']) ? (string)$payload['version'] : null, 'keys_proven' => $proven);
+	}
+
+	/** '' when the entry verifies against one of the held keys for its log, else why not. */
+	private static function entryVerifies(array $envelope, array $entry, array $statement_keys, array $log_keys): string {
+		$origin = (string)($entry['log_origin'] ?? '');
+		$why = "the statement is logged on {$origin}, a log this machine holds no key for";
+		foreach ($log_keys[$origin] ?? array() as $der) {
+			try {
+				TransparencyProof::verifyEntry($envelope, $entry, $statement_keys, array($origin => $der));
+				return '';
+			} catch (TransparencyProofException $e) {
+				$why = $e->getMessage();
+			}
+		}
+		return $why;
+	}
+
+	/** The statement and log keys a statement's payload installs, P-256 and Ed25519 only: {statement: DER[], log: origin => DER[]}. */
+	private static function payloadKeys(array $envelope): array {
+		$payload = json_decode((string)base64_decode((string)($envelope['payload'] ?? ''), true), true);
+		$keys = is_array($payload['keys_installed'] ?? null) ? $payload['keys_installed'] : array();
+		$out = array('statement' => array(), 'log' => array());
+		foreach (is_array($keys['statement_keys'] ?? null) ? $keys['statement_keys'] : array() as $b64) {
+			$der = base64_decode((string)$b64, true);
+			if ($der !== false && TransparencyProof::isP256($der)) { $out['statement'][] = $der; }
+		}
+		foreach (is_array($keys['log_keys'] ?? null) ? $keys['log_keys'] : array() as $pair) {
+			$der = base64_decode((string)($pair['key'] ?? ''), true);
+			$origin = (string)($pair['origin'] ?? '');
+			if ($der === false || !preg_match('/^[a-z0-9.-]+$/', $origin)) { continue; }
+			try {
+				TransparencyProof::ed25519Raw($der);
+				if (!in_array($der, $out['log'][$origin] ?? array(), true)) { $out['log'][$origin][] = $der; }
+			} catch (TransparencyProofException $e) {
+				continue;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -485,6 +789,14 @@ class PackageVerdict {
 	public $file;
 	/** @var int Files verified, on `signed`. */
 	public $files;
+	/** @var array|null {origin, index, version} of the public log entry, when the package was shown to be logged. */
+	public $log = null;
+	/**
+	 * @var array Keys the key chain proved that the node did not hold:
+	 *            {statement: DER[], log: origin => DER[]}. verify() never writes
+	 *            them; a root caller persists them after installing (B9).
+	 */
+	public $keys_proven = array();
 
 	public function __construct(string $verdict, string $detail, string $root = '',
 			?string $key = null, ?string $file = null, int $files = 0) {

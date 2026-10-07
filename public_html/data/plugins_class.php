@@ -60,8 +60,10 @@ class Plugin extends SystemBase {
 	    'plg_receives_upgrades' => array('type'=>'bool', 'default'=>true),
 	    'plg_is_system' => array('type'=>'bool', 'default'=>false),
 	    // Who built the files root installed: 'signed' (our release key
-	    // verified them) or 'unsigned' (installed on the owner's acknowledgement
-	    // of the warning). Set by root at install from the verdict, never by a
+	    // verified them, and the public release log where the node requires
+	    // it), 'unsigned' (installed on the owner's acknowledgement of the
+	    // warning), or 'unlogged' (signed by us but not in the public log;
+	    // the same acknowledgement and restrictions, release_transparency D6). Set by root at install from the verdict, never by a
 	    // page; NULL on a row that predates the record (specs/package_signing.md WP3).
 	    'plg_trust' => array('type'=>'varchar(16)', 'is_nullable'=>true),
 	    'plg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),

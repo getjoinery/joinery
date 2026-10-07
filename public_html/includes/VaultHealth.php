@@ -22,6 +22,8 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.9 - the unsigned row also lists extensions recorded 'unlogged' (signed by us, not in the
+ *                public release log), installed on the same acknowledgement
  * @version 1.8 - the unsigned row lists page themes only; a style theme has nothing
  *                that runs (specs/style_themes.md WP4)
  * @version 1.7 - a ninth row: the unsigned plugins and themes present, by
@@ -88,12 +90,16 @@ class VaultHealth {
 		if ($unsigned === null) {
 			$unsigned = ['plugins' => [], 'themes' => []];
 			try {
-				foreach (new MultiPlugin(['plg_trust' => 'unsigned']) as $p) {
-					$unsigned['plugins'][] = (string)$p->get('plg_name');
-				}
-				foreach (new MultiTheme(['thm_trust' => 'unsigned']) as $t) {
-					if ($t->is_style()) { continue; }
-					$unsigned['themes'][] = (string)$t->get('thm_name');
+				// 'unlogged' is signed by us but not in the public release log:
+				// installed on the same acknowledgement, listed the same way.
+				foreach (array('unsigned', 'unlogged') as $trust) {
+					foreach (new MultiPlugin(['plg_trust' => $trust]) as $p) {
+						$unsigned['plugins'][] = (string)$p->get('plg_name');
+					}
+					foreach (new MultiTheme(['thm_trust' => $trust]) as $t) {
+						if ($t->is_style()) { continue; }
+						$unsigned['themes'][] = (string)$t->get('thm_name');
+					}
 				}
 			} catch (\Throwable $e) {
 				return ['key' => $key, 'label' => $label, 'state' => 'unknown',

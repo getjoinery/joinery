@@ -37,6 +37,7 @@
  * the URL, which carries only a request id or a staged directory name that
  * is checked against staging.
  *
+ * @version 1.3 - the warning is the verdict's: an unlogged package gets the unlogged words
  * @version 1.2 - "This plugin is active" reads plg_active (Plugin::is_active()), not plg_status
  * @version 1.1 - the replace panel: upload() returns a pending outcome for an
  *                installed name, pending()/replace_html()/confirmReplace()/
@@ -295,7 +296,7 @@ class PackageInstallPage {
 			'staged_dir' => $staged_dir,
 			// A refused replacement is still a replacement once acknowledged.
 			'replace'    => (($args['replace'] ?? false) === true),
-			'warning'    => PackageAcknowledgement::warning(),
+			'warning'    => PackageAcknowledgement::warning($verdict),
 		);
 	}
 

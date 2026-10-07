@@ -15,10 +15,17 @@
  * config/release_verify_keys — the gate hands it a throwaway key; nothing on
  * a real box passes it. Reads nothing but the directory and the key file.
  *
+ * On a node that requires the release log (config/release_log_required),
+ * `signed` also needs the package's release statement in the public log;
+ * anything less is `unlogged`, and the host installer does not run. Keys the
+ * statement's key chain proves are appended to the node's key files when
+ * this runs as root, the converger being one of the root callers B9 names.
+ *
  * The publishing-box exemption (a box that holds config/agent_signing_key
  * trusts its own tree) is the converger's decision, not this tool's: this
  * answers the question about bytes and nothing else.
  *
+ * @version 1.1 - the release log: `unlogged`, and proven keys persisted by root
  * @version 1.0
  */
 
@@ -46,4 +53,14 @@ if ($dir === '') {
 
 $verdict = PackageSignature::verify($dir, $keys_file);
 echo 'verdict: ' . $verdict->line() . "\n";
+if ($verdict->signed() && $verdict->keys_proven && $keys_file === null
+		&& function_exists('posix_geteuid') && posix_geteuid() === 0) {
+	try {
+		foreach (PackageSignature::persistProvenKeys($verdict->keys_proven) as $line) {
+			echo 'key proven by the release log chain: ' . $line . "\n";
+		}
+	} catch (Throwable $e) {
+		fwrite(STDERR, 'warning: ' . $e->getMessage() . "\n");
+	}
+}
 exit($verdict->signed() ? 0 : 1);

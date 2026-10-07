@@ -63,8 +63,10 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
 
         'thm_is_system' => array('type'=>'bool', 'default'=>false),
 
-        // Who built the files root installed: 'signed' or 'unsigned' (installed
-        // on the owner's acknowledgement of the warning). Set by root at install
+        // Who built the files root installed: 'signed', 'unsigned' (installed
+        // on the owner's acknowledgement of the warning) or 'unlogged' (signed
+        // by us but not in the public release log; the same acknowledgement,
+        // release_transparency D6). Set by root at install
         // from the verdict; NULL on a row that predates the record
         // (specs/package_signing.md WP3, R5).
         'thm_trust' => array('type'=>'varchar(16)', 'is_nullable'=>true),

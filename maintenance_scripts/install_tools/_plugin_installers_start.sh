@@ -3,6 +3,10 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.26 - A host installer runs only out of a package that is also in the public release log
+#                where the node requires it (verify_package.php's `unlogged`); the key writer it
+#                calls also writes the statement and log keys and switches the requirement on
+#                (release_transparency D5, D6).
 # Version: 2.25 - The declared-package install waits up to five minutes for apt's lock instead of
 #                failing at once while an upgrade or unattended-upgrades holds it.
 # Version: 2.24 - A plugin's host installer runs when the plugin is switched on (plg_active = 1).
@@ -700,10 +704,13 @@ run_core_installer() {
 # own file. The ownership refusal above says root PUT it there; this says WE
 # BUILT it: utils/verify_package.php checks the plugin directory against its
 # signed listing and the keys in config/release_verify_keys
-# (specs/package_signing.md WP5). A plugin installed on the owner's
-# acknowledgement of the unsigned warning stays installed and active - it
-# simply never has a script run as root out of its directory, and the log
-# says so on every converge.
+# (specs/package_signing.md WP5) and, on a node that requires the release log,
+# finds its release statement in the public log (release_transparency D5; a
+# package signed by us but not logged is `unlogged`). A plugin installed on the
+# owner's acknowledgement of the unsigned or unlogged warning stays installed
+# and active - it simply never has a script run as root out of its directory,
+# and the log says so on every converge. So does a plugin kept from before the
+# log existed that never took an upgrade: it carries no statement.
 #
 # The publishing box is the one exemption: it holds the secret half of the
 # release key, every plugin there is the source the archives are built from,

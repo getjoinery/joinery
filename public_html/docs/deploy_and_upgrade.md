@@ -370,9 +370,15 @@ The two distribution flags on the plugin's manifest govern the distribution pipe
 
 #### What root verifies before a deploy
 
-Every archive the publisher ships carries a signed listing of its files: `RELEASE_MANIFEST` (the sha256 of every shipped file, paths relative to the site root) and `RELEASE_MANIFEST.sig`, an Ed25519 signature over it. A node holds the public key(s) in `config/release_verify_keys` — root's, 0644, one base64 key per line — written by the host converger on every tick from the agent bundle's `manifest.json` in the tree (`signing_public_key`), and by `install.sh` from `<upgrade source>/utils/upgrade?serve-verify-key=1` on a box whose tree ships no bundle. The upgrade writes it from the same bundle when it finds none.
+Every archive the publisher ships carries a signed listing of its files: `RELEASE_MANIFEST` (the sha256 of every shipped file, paths relative to the site root) and `RELEASE_MANIFEST.sig`, an Ed25519 signature over it. A node holds the public key(s) in `config/release_verify_keys` — root's, 0644, one base64 key per line — written by the host converger on every tick from the agent bundle's `manifest.json` in the tree (`signing_public_key` and `release_keys`), and by `install.sh` from `<upgrade source>/utils/upgrade?serve-verify-key=1` on a box whose tree ships no bundle. The upgrade writes it from the same bundle when it finds none.
 
-`PackageSignature::verify()` (`includes/PackageSignature.php`) reads the pair back and answers with one verdict. `signed` means the signature verifies against a key in the file, every file present is listed with a matching hash, and every listed file is present. Everything else is its own verdict with a sentence: `unsigned` (no manifest or signature), `unknown_key` (signed by a key this node does not hold), `no_keys` (no usable key on this node), `tampered` (a file's bytes differ from its signed hash), `extra_file` (a file, or a symlink, beside the signed set), `missing_file`, `unreadable` (not the format the publisher writes, or a manifest describing a different directory). Paths a manifest never lists — `.git`, `cache`, `logs`, `uploads`, `backups`, `specs`, `.claude`, `node_modules` anywhere; `config` and `vendor` at the site root only; `.gitignore` and the manifest pair themselves — are neither required nor counted against a package. A plugin's own `vendor/` and `config/` are listed and checked.
+`PackageSignature::verify()` (`includes/PackageSignature.php`) reads the pair back and answers with one verdict. `signed` means the signature verifies against a key in the file, every file present is listed with a matching hash, and every listed file is present. Everything else is its own verdict with a sentence: `unsigned` (no manifest or signature), `unknown_key` (signed by a key this node does not hold), `no_keys` (no usable key on this node), `tampered` (a file's bytes differ from its signed hash), `extra_file` (a file, or a symlink, beside the signed set), `missing_file`, `unreadable` (not the format the publisher writes, or a manifest describing a different directory). Paths a manifest never lists — `.git`, `cache`, `logs`, `uploads`, `backups`, `specs`, `.claude`, `node_modules` anywhere; `config` and `vendor` at the site root only; `.gitignore` and the manifest pair themselves — are neither required nor counted against a package in a live tree. A plugin's own `vendor/` and `config/` are listed and checked.
+
+**A fresh archive** (staging during an upgrade, an upload, a marketplace download) is checked with `fresh`: a file on one of those paths is `extra_file`, since an archive has no reason to carry one. The one allowance is the core archive's `config/default_Globalvars_site.php`, which must be the listed `maintenance_scripts/install_tools/default_Globalvars_site.php` byte for byte. The publisher tars every archive without those paths.
+
+**The release log.** A node that holds `config/release_log_required` installs only releases written to Sigstore's public log: `signed` also needs the package's `RELEASE_STATEMENT` to verify offline against keys the node already holds — `config/release_statement_keys` (P-256, one base64 key per line) and `config/transparency_log_keys` (`<origin> <base64 key>` per line). The statement's envelope, its log entry, the log's checkpoint and the inclusion proof are all checked, the statement must record this manifest (`PackageSignature::statementSubject()`), and every `RELEASE_STATEMENT` the manifest lists must be that statement. Anything less is `unlogged`. The statement's `key_chain` is walked in memory from the keys held, so a node that missed the release carrying a new key still verifies; the keys the walk proves come back on the verdict (`keys_proven`) and the root callers — the upgrade, `install_extension.php`, `verify_package.php` — append them to the key files (`PackageSignature::persistProvenKeys()`). The verifier itself never writes. The release-log checks live in `includes/TransparencyProof.php`, which is not in the self-update set (the re-run after a self-update is one-shot); a node whose live tree lacks it loads the staged copy, as root, only after its sha256 matches the core archive's signed listing. An upgrade that keeps a plugin with a host installer and no release statement (a local fork from before the log) says in its transcript that the installer will not run on a node that requires the log.
+
+The host converger writes both key files from the bundle's `statement_keys` and `log_keys`, and creates `config/release_log_required` once it holds a key of each kind — never before, since a node required to check the log with nothing to check it by would refuse every release. It never removes the file. A fork owner publishing their own releases opts out by creating `config/release_log_optional` by hand; nothing writes it, and the verifier ignores one that anyone but root or the tree owner could have written. All four files are pinned root:root 0644 by `fix_permissions.sh`.
 
 The upgrade verifies at every point where bytes would otherwise move from the archive into the live tree, and before anything reads them:
 
@@ -380,7 +386,7 @@ The upgrade verifies at every point where bytes would otherwise move from the ar
 - the **staged core again on the re-run** after a self-update, because staging lives under `uploads/` and could have changed in between;
 - **each theme and plugin archive**, after its extraction into staging, with the listing required to describe exactly `public_html/theme/<name>` or `public_html/plugins/<name>`.
 
-Any verdict but `signed` aborts with `Upgrade refused: … verdict: <name>: <why>` and nothing is deployed. `upgrade_source` therefore chooses where a verified archive is fetched from and nothing more: pointing it elsewhere gets a refused upgrade, not somebody else's code running as root. The origin (`root_node`) upgrades from nothing and aborts before any of this. The same verifier gates `install_extension.php` — a marketplace download is verified in a root-owned working directory before it replaces `plugins/<name>`, and a staged upload after the copy out of staging. A plugin that is not in the upgrade source's catalog installs by name from the files already on disk only when they verify; the publishing box, which holds `config/agent_signing_key`, trusts its own tree.
+Any verdict but `signed` — `unlogged` included — aborts with `Upgrade refused: … verdict: <name>: <why>` and nothing is deployed. `upgrade_source` therefore chooses where a verified archive is fetched from and nothing more: pointing it elsewhere gets a refused upgrade, not somebody else's code running as root. The origin (`root_node`) upgrades from nothing and aborts before any of this. The same verifier gates `install_extension.php` — a marketplace download is verified in a root-owned working directory before it replaces `plugins/<name>`, and a staged upload after the copy out of staging. A plugin that is not in the upgrade source's catalog installs by name from the files already on disk only when they verify; the publishing box, which holds `config/agent_signing_key`, trusts its own tree.
 
 #### Deployment self-update (read before editing `upgrade.php`)
 
@@ -403,6 +409,8 @@ Any that differ are copied to live immediately and the pipeline re-executes from
 Calling a newly added core method from `upgrade.php` is the specific way this breaks, and it breaks hard: the re-run hits an undefined method and aborts *before* it can deliver the file that defines it. Every retry aborts identically, and the node needs files copied in by hand.
 
 Two things guard against it. `isUpgradeServer()` lives on `DeploymentHelper` rather than a general core helper, so `upgrade.php`'s dependency travels with it. And `upgrade.php` calls it behind `method_exists()`, so a site that somehow reaches the re-run with an older helper degrades to "not an upgrade server" for one pass instead of fataling. Write new call sites the same way: **guard any deployment-set call whose target was added in the same release.**
+
+**The re-run is one-shot, which constrains the set itself.** The first pass runs the old release's list and the re-run runs the new one; if the re-run finds a file still differing, it refuses to run again. So a file can join the set only in a release that does not also change it (the re-run must find it identical). `includes/TransparencyProof.php`, the release-log checks the verifier calls, is outside the set for that reason: on the re-run the verifier uses the live copy, or loads the staged one only after its hash matches the signed listing. Until it joins the set, a release must not change `TransparencyProof`'s methods in a way the new `PackageSignature` relies on — the re-run would call the old file and fail on every node.
 
 **Dashboard surfaces (Server Manager):**
 
@@ -809,7 +817,8 @@ copies the staged directory into a temporary directory of its own, and asks
   queued the request. Root copies them into the tree and runs the database
   half (tables, migrations, the row) as it does for a marketplace install. The
   row records `plg_trust = 'signed'` (`thm_trust` for a theme).
-- **anything else** — the request fails with exit 3 and the verdict in its
+- **anything else** — `unlogged` (signed by our release key but not shown to
+  be in the public release log) included — the request fails with exit 3 and the verdict in its
   transcript, the staged bytes stay where they are, and the request panel on
   the Plugins or Themes page opens **the warning**: installing an unsigned
   package is extremely dangerous; it gets everything the site has, including
@@ -829,7 +838,11 @@ copies the staged directory into a temporary directory of its own, and asks
   back to root when it cannot); root then records `plg_trust = 'unsigned'`,
   writes an `unsigned_package_installed` event-log row, and emails every
   superadmin the name, version, approver, time and address with the warning
-  repeated. The plugin's `host_installer` is never run
+  repeated. A package whose verdict was `unlogged` takes the same path with
+  its own warning ("signed by Joinery but not in the public release log …")
+  and is recorded `plg_trust` / `thm_trust` = `'unlogged'`, with an
+  **Unlogged** badge. Refusing it outright would gain nothing: removing its
+  signature makes the same bytes `unsigned`. The plugin's `host_installer` is never run
   ([the converger skips it](#a-host-installer-runs-only-out-of-a-package-we-built)),
   the page shows an **Unsigned** badge for as long as the row exists, and the
   health panel lists it.

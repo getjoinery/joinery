@@ -202,6 +202,8 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 // red: nothing in it runs.
                                 if ($theme && !$is_style && (string)$theme->get('thm_trust') === 'unsigned') {
                                     $badges[] = '<span class="badge bg-danger" title="Not built by Joinery; installed on a superadmin\'s acknowledgement of the warning.">Unsigned</span>';
+                                } elseif ($theme && !$is_style && (string)$theme->get('thm_trust') === 'unlogged') {
+                                    $badges[] = '<span class="badge bg-danger" title="Signed by Joinery but not in the public release log; installed on a superadmin\'s acknowledgement of the warning.">Unlogged</span>';
                                 }
                                 $type_badge = implode(' ', $badges);
 

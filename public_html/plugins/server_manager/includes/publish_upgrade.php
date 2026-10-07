@@ -1137,6 +1137,11 @@
 						$theme_stage . '/' . $theme_name, 'public_html/theme/' . $theme_name, $manifest_authority);
 					$theme_tar_base = $theme_stage;
 				} else {
+					$unlisted = publish_unlisted_members($theme_dir, $full_site_dir);
+					if ($unlisted) {
+						throw new Exception('it holds ' . implode(', ', $unlisted) . ', on a path no manifest lists, so it would ship unverified; '
+							. 'move or remove it');
+					}
 					TreeManifestPublisher::publish_artifact($theme_dir, $full_site_dir, $manifest_authority);
 					if ($logs_release) {
 						$statement_subjects['theme/' . $theme_name] = PackageSignature::statementSubject(
@@ -1218,6 +1223,11 @@
 						$plugin_stage . '/' . $plugin_name, 'public_html/plugins/' . $plugin_name, $manifest_authority);
 					$plugin_tar_base = $plugin_stage;
 				} else {
+					$unlisted = publish_unlisted_members($plugin_dir, $full_site_dir);
+					if ($unlisted) {
+						throw new Exception('it holds ' . implode(', ', $unlisted) . ', on a path no manifest lists, so it would ship unverified; '
+							. 'move or remove it');
+					}
 					TreeManifestPublisher::publish_artifact($plugin_dir, $full_site_dir, $manifest_authority);
 					if ($logs_release) {
 						$statement_subjects['plugin/' . $plugin_name] = PackageSignature::statementSubject(
@@ -1361,9 +1371,18 @@
 		// Build the archives
 		// =====================================================
 		publish_output("\nCreating archives...");
+		// Nothing on a path no manifest lists rides in an archive: a node checks
+		// a fresh archive for exactly that and refuses it (release_transparency
+		// B6). A plugin or theme is tarred from its live directory; anything
+		// there on such a path other than git's own files was refused above
+		// (publish_unlisted_members), so these drop only .git and .gitignore.
+		$tar_excludes = '';
+		foreach (array_merge(PackageSignature::EXCLUDED_SEGMENTS, array('.gitignore')) as $excluded_name) {
+			$tar_excludes .= ' --exclude=' . escapeshellarg($excluded_name);
+		}
 		foreach ($pending_archives as $pending) {
 			$output = [];
-			exec(sprintf('tar -czf %s -C %s %s 2>&1', escapeshellarg($pending['archive']),
+			exec(sprintf('tar -czf %s%s -C %s %s 2>&1', escapeshellarg($pending['archive']), $tar_excludes,
 				escapeshellarg($pending['base']), escapeshellarg($pending['member'])), $output, $exit_code);
 			if ($pending['stage'] !== null) { exec('rm -rf ' . escapeshellarg($pending['stage'])); }
 
@@ -1722,6 +1741,33 @@
 			}
 		}
 		return $plan;
+	}
+
+	/**
+	 * Files in a live plugin or theme directory on a path no manifest lists
+	 * (PackageSignature::excluded): a cache, logs or node_modules directory and
+	 * the like. Such a file would ship unverified, or, with the archive
+	 * excludes, not ship at all; neither is right, so the publish refuses and
+	 * names it. Git's own files (.git, .gitignore) are development debris and
+	 * are left out of the archive quietly. Paths relative to $dir.
+	 */
+	function publish_unlisted_members($dir, $site_root) {
+		$found = array();
+		$dir = rtrim($dir, '/');
+		$rii = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+			RecursiveIteratorIterator::SELF_FIRST);
+		foreach ($rii as $file) {
+			if ($file->isDir()) continue;
+			$sub = ltrim(substr($file->getPathname(), strlen($dir)), '/');
+			$rel = ltrim(substr($file->getPathname(), strlen(rtrim($site_root, '/'))), '/');
+			if (!PackageSignature::excluded($rel)) continue;
+			if (in_array('.git', explode('/', $sub), true) || basename($sub) === '.gitignore') continue;
+			if ($sub === PackageSignature::MANIFEST_NAME || $sub === PackageSignature::SIGNATURE_NAME) continue;
+			$found[] = $sub;
+		}
+		sort($found);
+		return $found;
 	}
 
 	function component_tree_hash($dir, $manifest_filename = null) {

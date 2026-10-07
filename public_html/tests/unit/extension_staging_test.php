@@ -140,7 +140,7 @@ section('Root verifies the package before it moves it (specs/package_signing.md 
 // The copy into root's working directory is the last thing that happens before
 // the question "who built this?" is asked, and the answer decides whether the
 // bytes go anywhere at all.
-$verify_at = strpos($installer, 'install_extension_verify($dir, $tree_rel . $staged_name)');
+$verify_at = strpos($installer, 'install_extension_verify($dir, $tree_rel . $staged_name, true)');
 $move_at   = strpos($installer, 'install_extension_copy_tree($dir, $target)');
 check($verify_at !== false && $copy_at !== false && $copy_at < $verify_at,
 	'the staged copy is verified after it is copied out of staging');
@@ -169,7 +169,7 @@ check(strpos($register_fn, 'receives_upgrades') === false || strpos($register_fn
 	'the register step writes no fork flag onto the row itself: the sync carries the manifest\'s value');
 // The by-name form fetches into a working directory and verifies THERE; the
 // live plugins/<name> is replaced only by a package that said `signed`.
-check(strpos($pm, 'PackageSignature::verify($fetched)') !== false
+check(strpos($pm, "PackageSignature::verify(\$fetched, null, array('fresh' => true))") !== false
 	&& strpos($pm, 'throw new PackageUnverifiedException($verdict)') !== false,
 	'a marketplace download is verified in a working directory and refused outright when it is not ours');
 check(strpos($pm, '$phar->extractTo($plugins_root') === false,

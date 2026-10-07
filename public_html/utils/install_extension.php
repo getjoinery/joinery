@@ -55,6 +55,10 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.7 - the release log (spec release_transparency, D6, WP4): a staged package is verified
+ *                as a fresh archive; a package signed by us but not shown to be logged is
+ *                `unlogged`, handled like unsigned and recorded plg_trust/thm_trust = 'unlogged';
+ *                keys a verified package's chain proves are persisted, by root
  * @version 1.6 - --replace from the dispatcher; the transcript says what was
  *                replaced and the event log has a package_replaced row; an
  *                uploaded plugin or theme is marked a local fork in its live
@@ -142,14 +146,42 @@ $tree_rel = ($type === 'theme' ? 'public_html/theme/' : 'public_html/plugins/');
  * back. A signed package must also describe the directory it is about to
  * become: a theme archive verified as a plugin is still not a plugin.
  */
-function install_extension_verify(string $dir, string $expected_rel): PackageVerdict {
-	$verdict = PackageSignature::verify($dir);
+function install_extension_verify(string $dir, string $expected_rel, bool $fresh = false): PackageVerdict {
+	// A package about to go into the tree is an archive, not a live tree:
+	// nothing on a path no manifest lists may ride along (B6).
+	$verdict = PackageSignature::verify($dir, null, array('fresh' => $fresh));
 	if ($verdict->signed() && $verdict->root !== $expected_rel) {
 		$verdict = new PackageVerdict(PackageSignature::UNREADABLE,
 			'the manifest describes ' . $verdict->root . ', not ' . $expected_rel, $verdict->root, $verdict->key);
 	}
 	echo 'verdict: ' . $verdict->line() . "\n";
 	return $verdict;
+}
+
+/**
+ * The trust value a package that did not verify is installed under: 'unlogged'
+ * for one signed by a key we trust but not shown to be in the public log,
+ * 'unsigned' for everything else. Both carry the same restrictions (D6).
+ */
+function install_extension_restricted_trust(PackageVerdict $verdict): string {
+	return $verdict->verdict === PackageSignature::UNLOGGED ? 'unlogged' : 'unsigned';
+}
+
+/**
+ * Keys a verified package's key chain proved, written to the node's key files
+ * by root (B9: the verifier only reads). Not root, nothing written.
+ */
+function install_extension_persist_keys(PackageVerdict $verdict): void {
+	if (!$verdict->keys_proven || !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+		return;
+	}
+	try {
+		foreach (PackageSignature::persistProvenKeys($verdict->keys_proven) as $line) {
+			echo "key proven by the release log chain: $line\n";
+		}
+	} catch (Throwable $e) {
+		fwrite(STDERR, 'warning: ' . $e->getMessage() . "\n");
+	}
 }
 
 /**
@@ -391,12 +423,12 @@ function install_extension_record_unsigned(string $type, string $name, string $v
 	} else {
 		fwrite(STDERR, "warning: no database row for $type '$name' to record $column on\n");
 	}
-	if ($trust !== 'unsigned') {
+	if ($trust === 'signed') {
 		return;
 	}
 
 	$site = (string)Globalvars::get_instance()->get_setting('webDir');
-	$note = "type=$type kind=$kind name=$name version=$version"
+	$note = "type=$type kind=$kind name=$name version=$version trust=$trust"
 		. ($kind === 'style' ? ' installed_without_warning=yes' : ' approved_by=' . $approver['who']
 			. ' ip=' . $approver['ip'] . ' at=' . $approver['at'])
 		. ' verdict=' . $verdict_line;
@@ -415,13 +447,14 @@ function install_extension_record_unsigned(string $type, string $name, string $v
 		return;
 	}
 
-	$subject = "An unsigned $type was installed on $site: $name $version";
-	$body = "An unsigned $type was installed on $site.\n\n"
+	$what = $trust === 'unlogged' ? "$type signed by Joinery but not in the public release log" : "unsigned $type";
+	$subject = "An $what was installed on $site: $name $version";
+	$body = "An $what was installed on $site.\n\n"
 		. "$type: $name\nversion: $version\napproved by: " . $approver['who']
 		. "\nhow: " . $approver['how'] . "\nwhen: " . $approver['at'] . "\nfrom: " . $approver['ip']
 		. "\nverdict: $verdict_line\n\n"
-		. PackageAcknowledgement::warning() . "\n\n"
-		. "It is listed with an Unsigned badge on the admin " . ($type === 'plugin' ? 'Plugins' : 'Themes')
+		. PackageAcknowledgement::warning($trust === 'unlogged' ? PackageSignature::UNLOGGED : '') . "\n\n"
+		. "It is listed with an " . ($trust === 'unlogged' ? 'Unlogged' : 'Unsigned') . " badge on the admin " . ($type === 'plugin' ? 'Plugins' : 'Themes')
 		. " page. If nobody you know approved this, deactivate it and change every superadmin's password.\n";
 	$sent = 0;
 	foreach (new MultiUser(array('permission_range' => array(10, 10), 'deleted' => FALSE)) as $admin) {
@@ -572,7 +605,7 @@ try {
 
 		// Root's own copy, checked and not yet read for anything but its
 		// manifest name: this is the moment to ask who built it.
-		$verdict = install_extension_verify($dir, $tree_rel . $staged_name);
+		$verdict = install_extension_verify($dir, $tree_rel . $staged_name, true);
 		$verdict_line = $verdict->line();
 		// The kind is decided after the verdict and before anything moves: a
 		// style theme holds nothing that runs, so the unsigned warning has
@@ -580,19 +613,25 @@ try {
 		// ours is refused unless the owner acknowledged the warning.
 		$kind = install_extension_kind($type, $dir);
 		if (!$verdict->signed()) {
+			// Signed by us but not shown to be logged is no better than
+			// unsigned: handled the same, recorded as what it is (D6).
+			$restricted = install_extension_restricted_trust($verdict);
 			if ($kind === 'style') {
-				$trust = 'unsigned';
-				echo "unsigned style theme: nothing in it runs, so it installs without the warning\n";
+				$trust = $restricted;
+				echo "$restricted style theme: nothing in it runs, so it installs without the warning\n";
 			} elseif (!$acknowledged) {
 				fwrite(STDERR, "install_extension: refusing to install an unverified $type ($verdict->verdict).\n"
-					. "This package was not built by Joinery. " . PackageAcknowledgement::warning() . "\n"
+					. ($restricted === 'unlogged' ? '' : "This package was not built by Joinery. ")
+					. PackageAcknowledgement::warning($verdict->verdict) . "\n"
 					. "To install it anyway, answer the warning on the admin page, or re-run this command with --acknowledged.\n");
 				install_extension_rmtree($work);
 				exit(EXIT_UNVERIFIED);
 			} else {
-				$trust = 'unsigned';
-				echo "unsigned $type: installing on the owner's acknowledgement, under the unsigned restrictions\n";
+				$trust = $restricted;
+				echo "$restricted $type: installing on the owner's acknowledgement, under the unsigned restrictions\n";
 			}
+		} else {
+			install_extension_persist_keys($verdict);
 		}
 
 		$target = $dest_parent . '/' . $staged_name;
@@ -720,12 +759,13 @@ try {
 						// A style theme never needed acknowledging.
 						$existing = $type === 'plugin' ? Plugin::get_by_plugin_name($name) : Theme::get_by_theme_name($name);
 						$trust_column = $type === 'plugin' ? 'plg_trust' : 'thm_trust';
+						$restricted = install_extension_restricted_trust($verdict);
 						if ($kind === 'style') {
-							$trust = 'unsigned';
-							echo "unsigned style theme: nothing in it runs, so it installs without the warning\n";
-						} elseif ($existing && (string)$existing->get($trust_column) === 'unsigned') {
-							$trust = 'unsigned';
-							echo "unsigned $type: previously acknowledged; installing under the unsigned restrictions\n";
+							$trust = $restricted;
+							echo "$restricted style theme: nothing in it runs, so it installs without the warning\n";
+						} elseif ($existing && in_array((string)$existing->get($trust_column), array('unsigned', 'unlogged'), true)) {
+							$trust = (string)$existing->get($trust_column);
+							echo "$trust $type: previously acknowledged; installing under the unsigned restrictions\n";
 						} else {
 							fwrite(STDERR, "install_extension: refusing to install an unverified $type from disk ($verdict->verdict). "
 								. "A package that is not ours is installed by uploading it, where the warning can be answered.\n");
@@ -744,7 +784,7 @@ try {
 	// Files are in place, verified and owned. For a signed package this is the
 	// part that was never the problem; for an unsigned one it is plugin code
 	// (migrations), and root does not run it.
-	if ($trust === 'unsigned') {
+	if ($trust !== 'signed') {
 		install_extension_register_as_web_user($type, $name);
 		if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
 			install_extension_register($type, $name, $manager);

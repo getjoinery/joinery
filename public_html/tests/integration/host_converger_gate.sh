@@ -311,6 +311,41 @@ chk "and keeps the old one" "$(grep -cxF "$KEY_A" "$KEYS")" "1"
 printf '{"version":"1.2","signing_public_key":"not-a-key"}\n' > "$T/public_html/agent_dist/manifest.json"
 JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" >/dev/null 2>&1
 chk "a malformed bundle key is not written" "$(wc -l < "$KEYS")" "2"
+
+echo "== the release log's keys, and the switch that requires it (release_transparency D5, D6) =="
+# The statement and log keys come from the same manifest, appended like the
+# release key. config/release_log_required is created once both files hold a
+# key and never before, and never over a fork's release_log_optional.
+SKEYS="$T/config/release_statement_keys"
+LKEYS="$T/config/transparency_log_keys"
+REQ="$T/config/release_log_required"
+OPT="$T/config/release_log_optional"
+rm -f "$SKEYS" "$LKEYS" "$REQ" "$OPT"
+P256="$(php -r '$k = openssl_pkey_new(array("private_key_type" => OPENSSL_KEYTYPE_EC, "curve_name" => "prime256v1")); $d = openssl_pkey_get_details($k); echo preg_replace("/-----[^-]+-----|\s+/", "", $d["key"]);')"
+ED_SPKI="$(php -r 'echo base64_encode(hex2bin("302a300506032b6570032100") . random_bytes(32));')"
+printf '{"version":"1.3","signing_public_key":"%s","release_keys":["%s"],"statement_keys":[],"log_keys":[]}\n' "$KEY_A" "$KEY_A" > "$T/public_html/agent_dist/manifest.json"
+JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" >/dev/null 2>&1
+chk "no statement or log key yet: the log is not required" "$(test -f "$REQ" && echo written || echo none)" "none"
+printf '{"version":"1.4","signing_public_key":"%s","release_keys":["%s"],"statement_keys":["%s","%s"],"log_keys":[{"origin":"log2025-1.rekor.sigstore.dev","key":"%s"}]}\n' \
+    "$KEY_A" "$KEY_A" "$P256" "$ED_SPKI" "$ED_SPKI" > "$T/public_html/agent_dist/manifest.json"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "the statement key file holds the P-256 key" "$(cat "$SKEYS" 2>/dev/null)" "$P256"
+chk "and not the Ed25519 key listed beside it" "$(grep -c "$ED_SPKI" "$SKEYS")" "0"
+chk "the log key file holds origin and key" "$(cat "$LKEYS" 2>/dev/null)" "log2025-1.rekor.sigstore.dev $ED_SPKI"
+chk "with keys to check by, the log is required" "$(test -f "$REQ" && echo written || echo none)" "written"
+chk "and the run says so" "$(echo "$out" | grep -c "release log: config/release_log_required written")" "1"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "a second tick writes nothing new" "$(echo "$out" | grep -c "release key:\|release log:")" "0"
+printf '{"version":"1.5","signing_public_key":"%s","statement_keys":[],"log_keys":[]}\n' "$KEY_A" > "$T/public_html/agent_dist/manifest.json"
+JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" >/dev/null 2>&1
+chk "a later bundle without them removes nothing: keys kept" "$(wc -l < "$SKEYS")" "1"
+chk "and the requirement stays: a release can only tighten" "$(test -f "$REQ" && echo written || echo none)" "written"
+rm -f "$REQ"
+touch "$OPT"
+JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" >/dev/null 2>&1
+chk "a fork's release_log_optional: the requirement is not created" "$(test -f "$REQ" && echo written || echo none)" "none"
+chk "and the opt-out is left as the owner made it" "$(test -f "$OPT" && echo kept || echo gone)" "kept"
+rm -f "$SKEYS" "$LKEYS" "$REQ" "$OPT"
 # The runner as it really runs, without root: it must not write the file.
 cp "$TOOLS/_host_files.sh" "$T/maintenance_scripts/install_tools/_host_files.sh"
 rm -f "$KEYS"

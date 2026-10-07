@@ -1889,13 +1889,25 @@ check(strpos($wrk, 'agent_dist/manifest.json') !== false
     && strpos($wrk, 'signing_public_key') !== false,
     'from the agent bundle\'s manifest in the tree',
     'root-owned, installed by root, and the key the agent binary was built to verify against');
-check(strpos($wrk, 'grep -qxF "${key}" "${keys_file}"') !== false
-    && strpos($wrk, '>> "${keys_file}"') !== false,
+$app = substr($hostfiles_wp1, (int)strpos($hostfiles_wp1, '_host_files_append_key_lines() {'));
+$app = substr($app, 0, (int)strpos($app, "\n}\n"));
+check(strpos($app, 'grep -qxF "${line}" "${file}"') !== false
+    && strpos($app, '>> "${file}"') !== false,
     'appending a key the file lacks, never replacing one',
     'a key from an earlier bundle survives a channel change');
 check(strpos($wrk, '[[ "$(id -u)" == "0" ]] || return 0') !== false, 'and only as root');
-check(strpos($wrk, 'chown root:root "${keys_file}"') !== false && strpos($wrk, 'chmod 644 "${keys_file}"') !== false,
+check(strpos($app, 'chown root:root "${file}"') !== false && strpos($app, 'chmod 644 "${file}"') !== false,
     'root:root 0644: the pool reads it, only root changes which keys count');
+// The release log (release_transparency D5, D6): the statement and log keys
+// come from the same manifest, and the requirement switches on only once the
+// node holds keys to check the log with, and never over a fork's opt-out.
+check(strpos($wrk, 'config/release_statement_keys') !== false && strpos($wrk, 'config/transparency_log_keys') !== false
+    && strpos($wrk, 'statement_keys') !== false && strpos($wrk, 'log_keys') !== false,
+    'the statement and log key files are written from the bundle\'s statement_keys and log_keys');
+check(strpos($wrk, '-s "${site_root}/config/release_statement_keys" && -s "${site_root}/config/transparency_log_keys"') !== false
+    && strpos($wrk, '! -f "${site_root}/config/release_log_optional"') !== false,
+    'release_log_required is created only once both key files hold a key, and never over release_log_optional');
+check(strpos($wrk, 'rm ') === false && strpos($wrk, 'rm -') === false, 'and the writer never removes a file');
 
 // B17: a fresh site installs its plugin bundle before the converger first
 // runs, so the key has to be there already, or every package is refused.

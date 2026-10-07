@@ -34,6 +34,10 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.9 - the release log (spec release_transparency, WP4): every archive is verified as a
+	 *                fresh archive, and on a node that requires the log, `signed` needs a public log
+	 *                entry too (`unlogged` refuses); keys the release's chain proves are persisted;
+	 *                TransparencyProof is loaded from staging when the live tree lacks it
 	 * @version 1.8 - the declared-packages step waits up to five minutes for apt's lock, and a failed
 	 *               apt-get update no longer skips the install (an upgrade lost the race to the
 	 *               host converger's own apt-get on two nodes, 0.8.460)
@@ -355,6 +359,7 @@
 	// staging has it, and it is loaded from there for that run, said out loud.
 	// That is the same trust the old upgrade.php just placed in the archive
 	// when it copied the deployment files out of it and re-ran.
+	//
 	function upgrade_verifier_ready($stage_directory) {
 		if (class_exists('PackageSignature')) {
 			return true;
@@ -366,6 +371,34 @@
 			return class_exists('PackageSignature', false);
 		}
 		return false;
+	}
+
+	// TransparencyProof, the release-log checks the verifier calls, is NOT in
+	// the self-update set: adding a file to that set makes the re-run find one
+	// more file to copy, and the re-run is one-shot. So a node that has the new
+	// verifier but not yet its helper loads the helper from staging, for this
+	// run only. Staging is under uploads/, which the web user can write, and
+	// this runs as root - so, unlike the verifier itself (which a node without
+	// one has nothing to check with), the helper is checked first: its bytes
+	// must be the ones the release's signed listing names, under a key this
+	// node holds. Called after the key file is ensured.
+	function upgrade_proof_ready($stage_location, $stage_directory) {
+		if (class_exists('TransparencyProof')) {
+			return;
+		}
+		$staged = rtrim($stage_directory, '/') . '/includes/TransparencyProof.php';
+		if (!is_file($staged)) {
+			return;   // a release from before the log; the verifier never reaches for it
+		}
+		$listing = PackageSignature::trustedListing(rtrim($stage_location, '/'));
+		$listed = is_array($listing) ? ($listing['public_html/includes/TransparencyProof.php'] ?? null) : null;
+		$hash = @hash_file('sha256', $staged);
+		if ($listed === null || $hash === false || !hash_equals($listed, $hash)) {
+			upgrade_abort('Upgrade refused: the staged release-log checker does not match the release',
+				'includes/TransparencyProof.php in staging is not the file the release\'s signed listing names, '
+				. 'so it is not loaded. Nothing has been deployed.');
+		}
+		require_once($staged);
 	}
 
 	// The release verification key file, when this node has none yet: the same
@@ -395,8 +428,13 @@
 	// transcript's record of why: a stranger's archive, a byte changed, a file
 	// beside the signed set, a node with no key. Nothing in staging is copied
 	// anywhere before this has said `signed`.
+	//
+	// Staging holds archives as unpacked, never a live tree, so the check is
+	// the fresh-archive one: a member on a path no manifest lists is refused.
+	// On a node that requires the release log, `signed` also means the
+	// release's statement is in the public log (`unlogged` otherwise).
 	function upgrade_verify_staged($dir, $expected_root, $label) {
-		$verdict = PackageSignature::verify($dir);
+		$verdict = PackageSignature::verify($dir, null, array('fresh' => true));
 		if ($verdict->signed() && $verdict->root !== $expected_root) {
 			$verdict = new PackageVerdict(PackageSignature::UNREADABLE,
 				'the manifest describes ' . $verdict->root . ', not ' . ($expected_root === '' ? 'a site root' : $expected_root),
@@ -406,9 +444,22 @@
 			upgrade_abort('Upgrade refused: the ' . $label . ' did not verify',
 				'verdict: ' . htmlspecialchars($verdict->line()) . '<br>'
 				. 'Nothing has been deployed. The archive came from the configured upgrade source; '
-				. 'if that is the right place, the archive there is not one our release key signed.');
+				. ($verdict->verdict === PackageSignature::UNLOGGED
+					? 'it is signed with our release key, but this machine installs only releases written to the public log, and this one is not shown to be.'
+					: 'if that is the right place, the archive there is not one our release key signed.'));
 		}
-		upgrade_echo(htmlspecialchars($label) . ' verified: ' . (int)$verdict->files . ' files signed<br>');
+		// Keys the release's chain proved, written by root (the verifier only reads).
+		if ($verdict->keys_proven && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+			try {
+				foreach (PackageSignature::persistProvenKeys($verdict->keys_proven) as $line) {
+					upgrade_echo('Key proven by the release log chain: ' . htmlspecialchars($line) . '<br>');
+				}
+			} catch (Throwable $e) {
+				upgrade_echo('Warning: ' . htmlspecialchars($e->getMessage()) . '<br>');
+			}
+		}
+		upgrade_echo(htmlspecialchars($label) . ' verified: ' . (int)$verdict->files . ' files signed'
+			. ($verdict->log ? ', logged at ' . htmlspecialchars($verdict->log['origin']) . ' index ' . (int)$verdict->log['index'] : '') . '<br>');
 	}
 
 	// A tree that cannot be given its ownership and modes does not get to run.
@@ -1103,6 +1154,7 @@
 		// verified one by one as they are extracted, further down.
 		if (upgrade_verifier_ready($stage_directory)) {
 			upgrade_ensure_verify_keys($full_site_dir, $live_directory);
+			upgrade_proof_ready($stage_location, $stage_directory);
 			upgrade_verify_staged($stage_location, '', 'core archive');
 		} else {
 			upgrade_abort('Upgrade refused: no verifier',
@@ -1230,6 +1282,7 @@
 					. 'so the archive cannot be verified. Nothing has been deployed.');
 			}
 			upgrade_ensure_verify_keys($full_site_dir, $live_directory);
+			upgrade_proof_ready($stage_location, $stage_directory);
 			upgrade_verify_staged($stage_location, '', 'staged core archive');
 		}
 
@@ -1400,6 +1453,23 @@
 		if ($result['success']) {
 			echo "✓ Themes: {$result['themes_copied']} preserved, {$result['themes_skipped']} will update from staging<br>";
 			echo "✓ Plugins: {$result['plugins_copied']} preserved, {$result['plugins_skipped']} will update from staging<br>";
+			// A plugin kept as it was from before releases were logged carries no
+			// release statement, so on a node that installs only logged releases
+			// the converger will not run its host installer (release_transparency
+			// D6). Said here, where a person reads it, not only in the
+			// converger's log.
+			foreach (glob(rtrim($stage_directory, '/') . '/plugins/*/plugin.json') ?: array() as $staged_json) {
+				$staged_plugin = dirname($staged_json);
+				$staged_manifest = json_decode((string)@file_get_contents($staged_json), true);
+				if (!is_array($staged_manifest) || empty($staged_manifest['host_installer'])) {
+					continue;
+				}
+				$listing = (string)@file_get_contents($staged_plugin . '/' . PackageSignature::MANIFEST_NAME);
+				if (PackageSignature::statementLines($listing) === array()) {
+					upgrade_echo('⚠ ' . htmlspecialchars(basename($staged_plugin)) . ' carries no release statement; on a machine that installs '
+						. 'only logged releases its host installer will not run until it takes an upgrade.<br>');
+				}
+			}
 		} else {
 			$lines = [];
 			foreach ($result['errors'] as $error) {

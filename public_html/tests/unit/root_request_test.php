@@ -81,7 +81,7 @@ check(strpos($package_case, "preg_match('~^[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-
 check(strpos($package_case, "\$args['acknowledged']") === false && strpos($package_case, "\$args['approved") === false,
 	'the request cannot claim the acknowledgement was checked; only the dispatcher says so');
 $installer = (string)file_get_contents(PathHelper::getIncludePath('utils/install_extension.php'));
-$verify_at = strpos($installer, 'install_extension_verify($dir, $tree_rel . $staged_name)');
+$verify_at = strpos($installer, 'install_extension_verify($dir, $tree_rel . $staged_name, true)');
 $move_at   = strpos($installer, 'install_extension_copy_tree($dir, $target)');
 check($verify_at !== false && $move_at !== false && $verify_at < $move_at,
 	'the installer verifies the staged copy before it moves it');
