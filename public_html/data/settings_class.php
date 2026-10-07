@@ -61,8 +61,19 @@ private function _check_for_duplicate_setting() {
 		return NULL;
 	}		
 
+	/**
+	 * A saved row drops its name from Globalvars' memo, so a read later in
+	 * the same process sees what was written. Without this, a page that saves
+	 * a credential and then checks it reads the value from before the save.
+	 */
+	function save($debug = false) {
+		$result = parent::save($debug);
+		Globalvars::get_instance()->forget_setting((string)$this->get('stg_name'));
+		return $result;
+	}
+
 	function prepare() {
-		
+
 		//CHECK FOR DUPLICATES
 		if(!$this->key){
 			if($this->_check_for_duplicate_setting()){

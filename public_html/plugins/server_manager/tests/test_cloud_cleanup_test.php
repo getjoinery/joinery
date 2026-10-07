@@ -18,6 +18,7 @@
  *
  * Run: php plugins/server_manager/tests/test_cloud_cleanup_test.php
  *
+ * @version 1.1 - the company name Linode accepts: Joinery Test disposable (it refuses parentheses)
  * @version 1.0
  */
 
@@ -77,8 +78,8 @@ Setting::put(TestCloudCleanup::MAX_AGE_SETTING, '24');
 
 $suffix = bin2hex(random_bytes(3));
 $node = new ManagedNode(NULL);
-$node->set('mgn_name', 'HarnessTest reap ' . $suffix);
-$node->set('mgn_slug', 'harnesstest-reap-' . $suffix);
+$node->set('mgn_name', 'HarnessTest cleanup ' . $suffix);
+$node->set('mgn_slug', 'harnesstest-cleanup-' . $suffix);
 $node->set('mgn_host', '192.0.2.41');
 $node->set('mgn_ssh_user', 'root');
 $node->set('mgn_enabled', true);
@@ -86,8 +87,8 @@ $node->save();
 $node->load();
 harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
 $node6 = new ManagedNode(NULL);
-$node6->set('mgn_name', 'HarnessTest reap6 ' . $suffix);
-$node6->set('mgn_slug', 'harnesstest-reap6-' . $suffix);
+$node6->set('mgn_name', 'HarnessTest cleanup6 ' . $suffix);
+$node6->set('mgn_slug', 'harnesstest-cleanup6-' . $suffix);
 $node6->set('mgn_host', '2001:db8::42');
 $node6->set('mgn_ssh_user', 'root');
 $node6->set('mgn_enabled', true);
@@ -148,7 +149,7 @@ $blank = $fresh_account();
 $blank->company = '';
 check(!TestCloudCleanup::plan($blank, $nodes, $now, 24)['safe'], 'an empty company name is not safe');
 $near = $fresh_account();
-$near->company = 'joinery test (disposable)';
+$near->company = 'joinery test disposable';
 check(!TestCloudCleanup::plan($near, $nodes, $now, 24)['safe'], 'the name must match exactly, case included');
 $blind = $fresh_account();
 $blind->company_fails = true;

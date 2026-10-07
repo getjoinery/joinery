@@ -453,7 +453,7 @@ requirement instead.</p>
 
 <h4>11. Test-account cleanup</h4>
 <p>Only for a site whose operator token is for a cloud account kept for testing. Every hour the
-<strong>Reap Test Cloud</strong> task deletes servers and unattached volumes older than
+<strong>Delete Old Test Servers</strong> task deletes servers and unattached volumes older than
 <?= (int)$cleanup['max_age_hours'] ?> hours (setting <code><?= htmlspecialchars(TestCloudCleanup::MAX_AGE_SETTING) ?></code>).
 It runs only when the account's company name, in the provider's account settings, is exactly
 <code><?= htmlspecialchars(TestCloudCleanup::COMPANY) ?></code>; on any other account it deletes nothing and opens an
@@ -466,7 +466,7 @@ spare it. A server at a managed node's address is never deleted.</p>
 			<?php if ($cleanup['task'] && $cleanup['task']['active']): ?>
 				<?= smps_badge(true, 'On') ?>
 			<?php else: ?>
-				<?= smps_badge(false, '', 'Off', 'secondary') ?> — after a preview below, turn on Reap Test Cloud under
+				<?= smps_badge(false, '', 'Off', 'secondary') ?> — after a preview below, turn on Delete Old Test Servers under
 				<a href="/admin/admin_scheduled_tasks">Scheduled Tasks</a>.
 			<?php endif; ?>
 		</td>
