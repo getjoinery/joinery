@@ -32,6 +32,8 @@
  * gate exists to be more than. Same rule as resetting another admin's factors
  * (adm/logic/admin_user_logic.php).
  *
+ * @version 1.2 - warning() says which case it is: a package signed by Joinery but not in the public log
+ *                gets its own words (spec release_transparency, D6)
  * @version 1.1 - the acknowledgement names its marker row, so root reads one
  *                row rather than scanning every step-up (review round 1, R4)
  * @version 1.0
@@ -165,7 +167,13 @@ class PackageAcknowledgement {
 	}
 
 	/** The warning, in the owner's words. One place, so the page, the email and the transcript agree. */
-	public static function warning(): string {
+	public static function warning(string $verdict = ''): string {
+		if ($verdict === PackageSignature::UNLOGGED || strpos($verdict, PackageSignature::UNLOGGED . ':') === 0) {
+			return 'This package is signed by Joinery but is not in the public release log. Every release Joinery ships is '
+				. 'logged publicly, so this is the shape of a build Joinery was made to produce in secret. Do not install it '
+				. 'unless you know exactly where it came from. Once installed it has access to everything on this site, '
+				. 'including all mail, every user\'s data and every setting, and it can change any of them.';
+		}
 		return 'Installing an unsigned package is extremely dangerous. It was not built by Joinery and nobody has '
 			. 'checked what it does. Once installed it has access to everything on this site, including all mail, '
 			. 'every user\'s data and every setting, and it can change any of them.';

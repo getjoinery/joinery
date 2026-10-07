@@ -212,6 +212,8 @@ $page->begin_box(array('altlinks' => $altlinks));
                     // the badge stays for as long as the row does.
                     if ((string)$plugin['plugin']->get('plg_trust') === 'unsigned') {
                         $status_cell .= ' <span class="badge bg-danger" title="Not built by Joinery; installed on a superadmin\'s acknowledgement of the warning. Its host installer is never run as root.">Unsigned</span>';
+                    } elseif ((string)$plugin['plugin']->get('plg_trust') === 'unlogged') {
+                        $status_cell .= ' <span class="badge bg-danger" title="Signed by Joinery but not in the public release log; installed on a superadmin\'s acknowledgement of the warning. Its host installer is never run as root.">Unlogged</span>';
                     }
 
                     // Check if this is the active theme provider

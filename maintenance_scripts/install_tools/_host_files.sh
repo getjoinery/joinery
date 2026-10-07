@@ -3,6 +3,10 @@
 # converge, and the repair of reclaim_managed_file). Functions only; sourcing
 # it runs nothing.
 #
+# Version: 1.4 - host_files_write_release_verify_keys() also writes config/release_statement_keys and
+#                config/transparency_log_keys from the bundle's lists, takes release_keys as
+#                well as signing_public_key, and creates config/release_log_required once the
+#                node holds keys to check the log with (spec release_transparency, D5, D6).
 # Version: 1.3 - host_files_heal_renewal_confs(): certbot's renewal configs, healed for every
 #                lineage the machine renews through Apache (from render_vhost.sh, which
 #                healed only the name its vhost carried and never ran on a Docker host's
@@ -112,45 +116,119 @@ host_files_heal_renewal_confs() {  # $1 the letsencrypt directory
     return 0
 }
 
-# The release verification key (specs/package_signing.md WP1). Root puts code on
-# a box only after PackageSignature has matched the package against the keys in
-# config/release_verify_keys. The key comes from the agent bundle's manifest in
-# the tree: root-owned, installed by root, and the same key the agent binary was
-# built to verify against. Written when absent, appended when the bundle carries
-# a key the file lacks, never replaced - a key from an earlier bundle survives a
-# channel change, so the packages signed under it keep verifying. root:root 0644
-# so the pool can read it and nobody but root can write it (PackageSignature
-# refuses a key file anyone else could have written). The converger calls it on
-# every tick; _site_init.sh calls it before a fresh site installs its plugin
-# bundle, whose packages are verified against it.
+# The release verification keys (specs/package_signing.md WP1) and the release
+# log's keys (spec release_transparency, D5, D6). Root puts code on a box only
+# after PackageSignature has matched the package against the keys in
+# config/release_verify_keys and, where the log is required, found its release
+# statement in the public log by the keys in config/release_statement_keys and
+# config/transparency_log_keys. All three come from the agent bundle's manifest
+# in the tree: root-owned, installed by root, derived from the repository's
+# release_keys/ and nothing else (release_keys, statement_keys, log_keys; the
+# release file also takes signing_public_key, the key the agent binary was
+# built with). Each is written when absent and appended when the bundle
+# carries a line the file lacks, never replaced - a key from an earlier bundle
+# survives, so what was signed or logged under it keeps verifying. root:root
+# 0644 so the pool can read them and nobody but root can write them
+# (PackageSignature refuses a key file anyone else could have written).
+#
+# config/release_log_required (D6) is created here once the node holds a
+# statement key and a log key, never before: a node required to check the log
+# with no key to check it by would refuse every release. It is never removed,
+# and not created when config/release_log_optional exists - a fork owner's
+# opt-out, which nothing writes. Monotone: a release can only tighten.
+#
+# The converger calls this on every tick; _site_init.sh calls it before a
+# fresh site installs its plugin bundle, whose packages are verified against
+# these keys.
+_host_files_append_key_lines() {  # $1 file, $2 label, then the lines
+    local file="$1" label="$2" line added=0
+    shift 2
+    for line in "$@"; do
+        [[ -n "${line}" ]] || continue
+        if [[ -f "${file}" ]] && grep -qxF "${line}" "${file}" 2>/dev/null; then
+            continue
+        fi
+        if printf '%s\n' "${line}" >> "${file}" 2>/dev/null; then
+            added=$((added + 1))
+        else
+            echo "release key: WARNING - could not write ${file}" >&2
+            return 0
+        fi
+    done
+    if [[ -f "${file}" ]]; then
+        # Asserted every time, so a sweep that loosened it is undone here
+        # rather than at the next converge.
+        chown root:root "${file}" 2>/dev/null || true
+        chmod 644 "${file}" 2>/dev/null || true
+    fi
+    if (( added > 0 )); then
+        echo "release key: config/$(basename "${file}") carries ${added} new ${label} from the agent bundle"
+    fi
+    return 0
+}
+
 host_files_write_release_verify_keys() {  # $1 the site root
     local site_root="$1"
     [[ "$(id -u)" == "0" ]] || return 0
     local manifest="${site_root}/public_html/agent_dist/manifest.json"
-    local keys_file="${site_root}/config/release_verify_keys"
     [[ -f "${manifest}" ]] || return 0
-    command -v php >/dev/null 2>&1 || return 0
-    local key
-    key="$(php -r '
-        $m = json_decode((string)@file_get_contents($argv[1]), true);
-        $k = is_array($m) ? trim((string)($m["signing_public_key"] ?? "")) : "";
-        $raw = $k !== "" ? base64_decode($k, true) : false;
-        echo ($raw !== false && strlen($raw) === 32) ? base64_encode($raw) : "";
-    ' "${manifest}" 2>/dev/null || true)"
-    [[ -n "${key}" ]] || return 0
-    if [[ -f "${keys_file}" ]] && grep -qxF "${key}" "${keys_file}" 2>/dev/null; then
-        # Already carried. Only the mode is asserted, so a sweep that loosened
-        # it is undone here rather than at the next converge.
-        chown root:root "${keys_file}" 2>/dev/null || true
-        chmod 644 "${keys_file}" 2>/dev/null || true
-        return 0
-    fi
     [[ -d "${site_root}/config" ]] || return 0
-    if printf '%s\n' "${key}" >> "${keys_file}" 2>/dev/null; then
-        chown root:root "${keys_file}" 2>/dev/null || true
-        chmod 644 "${keys_file}" 2>/dev/null || true
-        echo "release key: config/release_verify_keys carries the agent bundle's signing key"
-    else
-        echo "release key: WARNING - could not write ${keys_file}" >&2
+    command -v php >/dev/null 2>&1 || return 0
+    local lines
+    lines="$(php -r '
+        $m = json_decode((string)@file_get_contents($argv[1]), true);
+        if (!is_array($m)) { exit(0); }
+        $release = array();
+        foreach (array_merge(array((string)($m["signing_public_key"] ?? "")), is_array($m["release_keys"] ?? null) ? $m["release_keys"] : array()) as $k) {
+            $raw = base64_decode(trim((string)$k), true);
+            if ($raw !== false && strlen($raw) === 32) { $release[base64_encode($raw)] = true; }
+        }
+        foreach (array_keys($release) as $k) { echo "R " . $k . "\n"; }
+        foreach (is_array($m["statement_keys"] ?? null) ? $m["statement_keys"] : array() as $k) {
+            $der = base64_decode(trim((string)$k), true);
+            $pem = $der === false ? "" : "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END PUBLIC KEY-----\n";
+            $key = $pem === "" ? false : @openssl_pkey_get_public($pem);
+            $d = $key === false ? false : openssl_pkey_get_details($key);
+            if ($d && ($d["type"] ?? null) === OPENSSL_KEYTYPE_EC && ($d["ec"]["curve_name"] ?? "") === "prime256v1") {
+                echo "S " . base64_encode($der) . "\n";
+            }
+        }
+        foreach (is_array($m["log_keys"] ?? null) ? $m["log_keys"] : array() as $p) {
+            $origin = (string)($p["origin"] ?? "");
+            $der = base64_decode(trim((string)($p["key"] ?? "")), true);
+            if (preg_match("/^[a-z0-9.-]+$/", $origin) && $der !== false && strlen($der) === 44) {
+                echo "L " . $origin . " " . base64_encode($der) . "\n";
+            }
+        }
+    ' "${manifest}" 2>/dev/null || true)"
+    [[ -n "${lines}" ]] || return 0
+
+    local -a release=() statement=() log=()
+    local kind rest
+    while IFS=' ' read -r kind rest; do
+        case "${kind}" in
+            R) release+=("${rest}") ;;
+            S) statement+=("${rest}") ;;
+            L) log+=("${rest}") ;;
+        esac
+    done <<< "${lines}"
+
+    _host_files_append_key_lines "${site_root}/config/release_verify_keys" "release key(s)" "${release[@]+"${release[@]}"}"
+    _host_files_append_key_lines "${site_root}/config/release_statement_keys" "statement key(s)" "${statement[@]+"${statement[@]}"}"
+    _host_files_append_key_lines "${site_root}/config/transparency_log_keys" "log key(s)" "${log[@]+"${log[@]}"}"
+
+    local required="${site_root}/config/release_log_required"
+    if [[ ! -f "${required}" && ! -f "${site_root}/config/release_log_optional" ]] \
+       && [[ -s "${site_root}/config/release_statement_keys" && -s "${site_root}/config/transparency_log_keys" ]]; then
+        if : > "${required}" 2>/dev/null; then
+            chown root:root "${required}" 2>/dev/null || true
+            chmod 644 "${required}" 2>/dev/null || true
+            echo "release log: config/release_log_required written - this machine now installs only releases in the public log"
+        else
+            echo "release log: WARNING - could not write ${required}" >&2
+        fi
+    elif [[ -f "${required}" ]]; then
+        chown root:root "${required}" 2>/dev/null || true
+        chmod 644 "${required}" 2>/dev/null || true
     fi
 }

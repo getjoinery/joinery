@@ -40,7 +40,7 @@ check(substr_count($package_case, "' --replace'") === 1, 'there is one place --r
 
 section('The installer sets a live copy aside only after the verdict and the acknowledgement');
 
-$verify_at   = strpos($installer, 'install_extension_verify($dir, $tree_rel . $staged_name)');
+$verify_at   = strpos($installer, 'install_extension_verify($dir, $tree_rel . $staged_name, true)');
 $refuse_at   = strpos($installer, 'exit(EXIT_UNVERIFIED);');
 $aside_at    = strpos($installer, "\$keep = \$target . '.replaced.' . gmdate('YmdHis');");
 $rename_at   = strpos($installer, '@rename($target, $keep)');

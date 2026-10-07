@@ -14,6 +14,8 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
  * utils/install_extension.php. refreshFromUpstream(), installFromZip() and
  * installFromTarGz() refuse at the door when called under the web server.
  *
+ * @version 1.4 - a downloaded package is verified as a fresh archive, with the release log where the
+ *                node requires it; a key its chain proves is persisted when root runs this
  * @version 1.3 - the fork model (specs/package_replace_on_upload.md WP3):
  *                isLocalFork() reads the live manifest, refreshFromUpstream()
  *                refuses to put the catalog copy over a fork and says the way
@@ -415,7 +417,7 @@ abstract class AbstractExtensionManager {
 
         // Who built it. Only `signed`, describing this very directory, goes on.
         $expected_root = 'public_html/' . $this->extension_dir . '/' . $name;
-        $verdict = PackageSignature::verify($fetched);
+        $verdict = PackageSignature::verify($fetched, null, array('fresh' => true));
         if ($verdict->signed() && $verdict->root !== $expected_root) {
             $verdict = new PackageVerdict(PackageSignature::UNREADABLE,
                 'the manifest describes ' . $verdict->root . ', not ' . $expected_root,
@@ -424,6 +426,15 @@ abstract class AbstractExtensionManager {
         if (!$verdict->signed()) {
             $rmtree($work);
             throw new PackageUnverifiedException($verdict);
+        }
+        // Keys its release-log chain proved go to the node's key files - by
+        // root only: the verifier never writes them (B9).
+        if ($verdict->keys_proven && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            try {
+                PackageSignature::persistProvenKeys($verdict->keys_proven);
+            } catch (Throwable $e) {
+                error_log('refreshFromUpstream: ' . $e->getMessage());
+            }
         }
 
         // Verified: replace the live directory with the verified copy. Copy,

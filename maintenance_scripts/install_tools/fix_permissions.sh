@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 4.7 - config/release_statement_keys, transparency_log_keys, release_log_required and
+#              release_log_optional are pinned root:root 0644 and pruned from the config/ sweep
+#              (release_transparency D5, D6)
 #VERSION 4.6 - config/release_statement_key (the P-256 key that signs every
 #              release statement written to the public log) is pinned 600
 #              root:root beside agent_signing_key and pruned from the config/
@@ -232,6 +235,10 @@ PINNED=(
     # Root's alone for the same reason: PackageSignature refuses a key file
     # anyone but root or the tree owner could have written.
     "$SITE_ROOT/config/release_verify_keys"
+    "$SITE_ROOT/config/release_statement_keys"
+    "$SITE_ROOT/config/transparency_log_keys"
+    "$SITE_ROOT/config/release_log_required"
+    "$SITE_ROOT/config/release_log_optional"
     "$SITE_ROOT/config/relay_pull_key"
     "$SITE_ROOT/config/backup_site_key"
     "$SITE_ROOT/config/agent_signing_key"
@@ -488,6 +495,18 @@ if [ -f "$VERIFY_KEYS" ]; then
     chown root:root "$VERIFY_KEYS" 2>/dev/null || true
     chmod 644 "$VERIFY_KEYS"
 fi
+
+# The release log's keys, and the switch that requires it (release_transparency
+# D5, D6): root's for the same reason. A statement or log key file anyone else
+# can write is a file anyone else can add a key to, and the verifier ignores an
+# opt-out it cannot trust to be root's.
+for LOG_FILE in release_statement_keys transparency_log_keys release_log_required release_log_optional; do
+    if [ -f "$SITE_ROOT/config/$LOG_FILE" ]; then
+        echo "  Pinning $SITE_ROOT/config/$LOG_FILE to 644 root:root..."
+        chown root:root "$SITE_ROOT/config/$LOG_FILE" 2>/dev/null || true
+        chmod 644 "$SITE_ROOT/config/$LOG_FILE"
+    fi
+done
 
 # --- Record who owns this tree -----------------------------------------------
 # The host converger runs as root every few minutes and asserts the executable
