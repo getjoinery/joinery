@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.23",
+  "version": "1.30.24",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -537,6 +537,12 @@
       "type": "text",
       "label": "Backup storage referral URL",
       "helptext": "Where a customer who outgrows its backup storage opens their own bucket. Shown on their banner only when that allowance is near."
+    },
+    {
+      "name": "server_manager_release_log_watch",
+      "default": "",
+      "managed": true,
+      "helptext": "The release-log watch's last conclusion about Sigstore's public log, as JSON. Written by the Watch Release Log task; read by the release-log incidents."
     },
     {
       "name": "server_manager_hosted_transfer_alerted_time",

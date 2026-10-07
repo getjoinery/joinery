@@ -43,6 +43,11 @@ class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	    // D1): null on a row from before publish required a committed tree.
 	    'upg_core_commit' => array('type'=>'varchar(40)', 'is_nullable'=>true),
 	    'upg_agent_commit' => array('type'=>'varchar(40)', 'is_nullable'=>true),
+	    // The release statement this release was logged with, the RELEASE_STATEMENT
+	    // file's JSON (spec release_transparency, D4): null before releases were
+	    // logged, and on a republished release, which carries the one it received.
+	    // The newest row holding one is what nodes hold now, for the next publish.
+	    'upg_release_statement' => array('type'=>'text', 'is_nullable'=>true),
 	    'upg_keep' => array('type'=>'bool', 'default'=>false),
 	    'upg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);

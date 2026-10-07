@@ -36,6 +36,9 @@
  * it, so discovery refuses while any listed future shard's key is not in the
  * shipping set - the window in which the old shard still takes writes and the
  * key can be added, committed and shipped by a release logged on the old one.
+ * A future shard whose key Sigstore's trusted root does not publish yet is
+ * not refused: nobody can act on it, and refusing would only stop releases.
+ * It comes back as `waiting`, which the daily watch raises as an incident.
  *
  * HTTP. Plain curl, not SafeHttpClient: every destination is Sigstore's
  * fixed CDN host or a log URL read from a hash-checked Sigstore document, never
@@ -48,10 +51,38 @@
  * checkpoint are all present and all pass TransparencyProof::verifyEntry().
  * There is no "log later": a log that cannot be reached is an exception.
  *
+ * WHY A REFUSAL HAPPENED is in its class, for the daily watch that reads it
+ * (spec release_transparency, O6): ReleaseLogBlindException when Sigstore
+ * could not be reached or read, ReleaseLogShardAheadException when a listed
+ * future shard is the problem, plain ReleaseLogException for every other rule.
+ *
+ * @version 1.1 - ReleaseLogBlindException and ReleaseLogShardAheadException, so the watch can tell
+ *                "cannot see Sigstore" and "the next log is coming" from the other refusals; a future
+ *                shard whose key Sigstore has not published yet is reported (waiting), not refused;
+ *                submit() is submitEntry()
  * @version 1.0
  */
 
 class ReleaseLogException extends Exception {}
+
+/** Sigstore could not be reached, or answered with something this client cannot read. */
+class ReleaseLogBlindException extends ReleaseLogException {}
+
+/** A future shard Sigstore lists cannot be logged on when it goes live: its key is not pinned. */
+class ReleaseLogShardAheadException extends ReleaseLogException {
+
+	/** @var string the future shard's origin */
+	public $origin;
+
+	/** @var int unix time the shard takes over */
+	public $starts_at;
+
+	public function __construct($message, $origin, $starts_at) {
+		parent::__construct($message);
+		$this->origin = $origin;
+		$this->starts_at = $starts_at;
+	}
+}
 
 class ReleaseLogClient {
 
@@ -107,7 +138,7 @@ class ReleaseLogClient {
 	public function log($payload, $statement_key_pem) {
 		$shard = $this->discover();
 		$envelope = self::signEnvelope($payload, $statement_key_pem);
-		$entry = $this->submit($shard, $envelope, self::publicDer($statement_key_pem));
+		$entry = $this->submitEntry($shard, $envelope, self::publicDer($statement_key_pem));
 		return array('envelope' => $envelope, 'entry' => $entry, 'shard' => $shard);
 	}
 
@@ -120,21 +151,21 @@ class ReleaseLogClient {
 		$timestamp = $this->fetchJson(self::TUF_BASE . '/timestamp.json');
 		$snap_v = $timestamp['signed']['meta']['snapshot.json']['version'] ?? null;
 		if (!is_int($snap_v)) {
-			throw new ReleaseLogException('Sigstore TUF timestamp.json names no snapshot version');
+			throw new ReleaseLogBlindException('Sigstore TUF timestamp.json names no snapshot version');
 		}
 		$snapshot = $this->fetchJson(self::TUF_BASE . "/{$snap_v}.snapshot.json");
 		$targets_v = $snapshot['signed']['meta']['targets.json']['version'] ?? null;
 		if (!is_int($targets_v)) {
-			throw new ReleaseLogException("Sigstore TUF {$snap_v}.snapshot.json names no targets version");
+			throw new ReleaseLogBlindException("Sigstore TUF {$snap_v}.snapshot.json names no targets version");
 		}
 		$targets = $this->fetchJson(self::TUF_BASE . "/{$targets_v}.targets.json");
 		$config = json_decode($this->fetchTarget($targets, self::SIGNING_CONFIG_TARGET), true);
 		$root   = json_decode($this->fetchTarget($targets, self::TRUSTED_ROOT_TARGET), true);
 		if (!is_array($config) || ($config['mediaType'] ?? null) !== self::SIGNING_CONFIG_TYPE) {
-			throw new ReleaseLogException('Sigstore\'s signing config is not the ' . self::SIGNING_CONFIG_TYPE . ' format');
+			throw new ReleaseLogBlindException('Sigstore\'s signing config is not the ' . self::SIGNING_CONFIG_TYPE . ' format');
 		}
 		if (!is_array($root) || !is_array($root['tlogs'] ?? null)) {
-			throw new ReleaseLogException('Sigstore\'s trusted root lists no logs');
+			throw new ReleaseLogBlindException('Sigstore\'s trusted root lists no logs');
 		}
 		return $this->chooseShard($config, $root);
 	}
@@ -143,9 +174,11 @@ class ReleaseLogClient {
 	 * The shard rules, on an already-fetched signing config and trusted root.
 	 * Live: API v2, validity started and not ended; the newest if several.
 	 * Ahead: API v2, validity not yet started. Every live and ahead shard's
-	 * checkpoint key must be in Sigstore's trusted root, be Ed25519, and equal
-	 * the pin in the shipping set; the live shard's must also be held (unless
-	 * genesis). A validity time that does not parse is refused, start or end.
+	 * checkpoint key must be Ed25519 and equal the pin in the shipping set;
+	 * the live shard's must also be held (unless genesis). An ahead shard
+	 * whose key the trusted root does not publish yet is returned in
+	 * `waiting`, not refused. A validity time that does not parse is refused,
+	 * start or end.
 	 */
 	public function chooseShard(array $config, array $root) {
 		$live = null;
@@ -155,7 +188,7 @@ class ReleaseLogClient {
 			$start = self::time($svc['validFor']['start'] ?? null);
 			$end   = isset($svc['validFor']['end']) ? self::time($svc['validFor']['end']) : null;
 			if ($start === null || (isset($svc['validFor']['end']) && $end === null)) {
-				throw new ReleaseLogException("Sigstore's signing config gives {$svc['url']} a validFor "
+				throw new ReleaseLogBlindException("Sigstore's signing config gives {$svc['url']} a validFor "
 					. ($start === null ? 'start' : 'end') . ' that is not a time');
 			}
 			if ($start > $this->now) {
@@ -169,13 +202,20 @@ class ReleaseLogClient {
 		if ($live === null) {
 			throw new ReleaseLogException('Sigstore\'s signing config names no Rekor v' . self::REKOR_API_MAJOR . ' log that is taking entries now');
 		}
-		foreach ($ahead as $next) {
+		$waiting = array();
+		foreach ($ahead as $i => $next) {
+			$next_origin = self::originOf($next['url']);
 			$key = $this->rootKey($root, $next['url'], $next['start']);
 			if ($key === null) {
-				throw new ReleaseLogException("Sigstore lists a future log {$next['url']}, but its trusted root does not yet publish that log's key; "
-					. 'every node must hold the key before the log goes live, so publishing waits until Sigstore publishes it');
+				$waiting[] = array('origin' => $next_origin, 'start' => $next['start']);
+				unset($ahead[$i]);
+				continue;
 			}
-			$this->assertShipping(self::originOf($next['url']), $key, "the next log, {$next['url']}, takes over later");
+			try {
+				$this->assertShipping($next_origin, $key, "the next log, {$next['url']}, takes over on " . gmdate('Y-m-d', $next['start']));
+			} catch (ReleaseLogException $e) {
+				throw new ReleaseLogShardAheadException($e->getMessage(), $next_origin, $next['start']);
+			}
 		}
 		$origin = self::originOf($live['url']);
 		$key = $this->rootKey($root, $live['url'], $this->now);
@@ -195,7 +235,11 @@ class ReleaseLogClient {
 			}
 		}
 		return array('url' => rtrim($live['url'], '/'), 'origin' => $origin, 'key' => $key,
-			'ahead' => array_map(function ($n) { return self::originOf($n['url']); }, $ahead),
+			'ahead' => array_values(array_map(function ($n) { return self::originOf($n['url']); }, $ahead)),
+			'ahead_detail' => array_values(array_map(function ($n) use ($root) {
+				return array('origin' => self::originOf($n['url']), 'start' => $n['start'], 'key' => $this->rootKey($root, $n['url'], $n['start']));
+			}, $ahead)),
+			'waiting' => $waiting,
 			'genesis' => $this->held === null);
 	}
 
@@ -207,7 +251,7 @@ class ReleaseLogClient {
 	 * @param string $statement_der  the statement key's public DER
 	 * @return array the entry (see TransparencyProof)
 	 */
-	public function submit(array $shard, array $envelope, $statement_der) {
+	public function submitEntry(array $shard, array $envelope, $statement_der) {
 		if (!TransparencyProof::isP256($statement_der)) {
 			throw new ReleaseLogException('the statement key is not a P-256 key, the only form the log accepts for this entry');
 		}
@@ -410,7 +454,7 @@ class ReleaseLogClient {
 		$err = curl_error($ch);
 		curl_close($ch);
 		if ($out === false) {
-			throw new ReleaseLogException("cannot reach {$url}: {$err}; a release is not published without its log entry");
+			throw new ReleaseLogBlindException("cannot reach {$url}: {$err}; a release is not published without its log entry");
 		}
 		return array('status' => $status, 'body' => (string)$out);
 	}
@@ -420,7 +464,7 @@ class ReleaseLogClient {
 	private function fetch($url) {
 		$res = call_user_func($this->transport, 'GET', $url, null);
 		if ($res['status'] !== 200) {
-			throw new ReleaseLogException("fetching {$url} answered HTTP {$res['status']}");
+			throw new ReleaseLogBlindException("fetching {$url} answered HTTP {$res['status']}");
 		}
 		return (string)$res['body'];
 	}
@@ -428,7 +472,7 @@ class ReleaseLogClient {
 	private function fetchJson($url) {
 		$doc = json_decode($this->fetch($url), true);
 		if (!is_array($doc)) {
-			throw new ReleaseLogException("{$url} is not JSON");
+			throw new ReleaseLogBlindException("{$url} is not JSON");
 		}
 		return $doc;
 	}
@@ -438,11 +482,11 @@ class ReleaseLogClient {
 		$meta = $targets['signed']['targets'][$name] ?? null;
 		$sha = $meta['hashes']['sha256'] ?? null;
 		if (!is_string($sha) || !preg_match('/^[0-9a-f]{64}$/', $sha)) {
-			throw new ReleaseLogException("Sigstore's TUF targets do not name {$name}");
+			throw new ReleaseLogBlindException("Sigstore's TUF targets do not name {$name}");
 		}
 		$bytes = $this->fetch(self::TUF_BASE . "/targets/{$sha}.{$name}");
 		if (!hash_equals($sha, hash('sha256', $bytes)) || (isset($meta['length']) && strlen($bytes) !== $meta['length'])) {
-			throw new ReleaseLogException("Sigstore's {$name} does not match the hash its TUF targets file names");
+			throw new ReleaseLogBlindException("Sigstore's {$name} does not match the hash its TUF targets file names");
 		}
 		return $bytes;
 	}

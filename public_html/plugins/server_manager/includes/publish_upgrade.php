@@ -137,7 +137,14 @@
 				$cli_major = $cli_major ?? $m[1];
 				$cli_minor = $cli_minor ?? $m[2];
 				$cli_patch = $cli_patch ?? ($prepared->count() > 0 ? $m[3] + 1 : $m[3]);
-				if ($prepared->count() === 0) {
+				// A number whose statement reached the public log is spent even
+				// when its publish failed after logging: one number, one
+				// statement (ReleaseLogEntry).
+				while (class_exists('ReleaseLogEntry') && ReleaseLogEntry::versionLogged("{$cli_major}.{$cli_minor}.{$cli_patch}")) {
+					echo "{$cli_major}.{$cli_minor}.{$cli_patch} was logged publicly by a publish that did not finish, so it is not used again.\n";
+					$cli_patch++;
+				}
+				if ($prepared->count() === 0 && "{$cli_major}.{$cli_minor}.{$cli_patch}" === $current) {
 					echo "VERSION names {$current}, which has no release yet: publishing it rather than the next number.\n";
 				}
 			} else {
@@ -148,6 +155,9 @@
 					$cli_major = $cli_major ?? $last->get('upg_major_version');
 					$cli_minor = $cli_minor ?? $last->get('upg_minor_version');
 					$cli_patch = $cli_patch ?? ($last->get('upg_patch_version') + 1);
+					while (class_exists('ReleaseLogEntry') && ReleaseLogEntry::versionLogged("{$cli_major}.{$cli_minor}.{$cli_patch}")) {
+						$cli_patch++;
+					}
 				} else {
 					$cli_major = $cli_major ?? 0;
 					$cli_minor = $cli_minor ?? 8;
@@ -323,6 +333,13 @@
 			publish_output("Version {$version_major}.{$version_minor}.{$version_patch} already exists. Please use a different version number.");
 			exit(1);
 		}
+		// One number, one public statement: a version whose statement was logged
+		// by a publish that then failed is spent (ReleaseLogEntry).
+		if (class_exists('ReleaseLogEntry') && ReleaseLogEntry::versionLogged("{$version_major}.{$version_minor}.{$version_patch}")) {
+			publish_output("Version {$version_major}.{$version_minor}.{$version_patch} was already written to the public log by a publish that did not finish. "
+				. 'A number is logged once; publish the next one.');
+			exit(1);
+		}
 
 		// Use form-provided version consistently for both archive and SQL filenames
 		$version = $version_major . '.' . $version_minor . '.' . $version_patch;
@@ -481,6 +498,60 @@
 		}
 
 		// =====================================================
+		// The public log this release will be written to
+		// =====================================================
+		// Every release this site authors is logged on Sigstore's public Rekor
+		// log before it ships, as one signed release statement (spec
+		// release_transparency, D4). Asked here, before anything is written: a
+		// log that cannot be reached, or a log whose key nodes do not hold, is a
+		// reason to publish nothing, and its refusal says which key file to add
+		// so that it can go into the same commit as the release.
+		//
+		// A republishing site writes no statement: the one it received is a
+		// listed file in every archive, carried like any other. Nor does a site
+		// that cannot sign its own manifests, since the statement goes into them.
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentDistPublisher.php'));
+		$logs_release = !$republish && TreeManifestPublisher::signsItsOwnTree($full_site_dir);
+		$previous_statement = null;
+		$statement_key = null;
+		$log_client = null;
+		$log_shard = null;
+		if ($logs_release) {
+			publish_output("\nAsking Sigstore which public log this release goes to...");
+			$unfinished = ReleaseStatementPublisher::unfinished();
+			if ($unfinished) {
+				publish_output("\nRefusing to publish {$version} — release " . implode(', ', $unfinished) . ' carries no release statement, though an earlier release was logged.');
+				publish_output('That is a publish that stopped between logging its statement and recording it. Its archives may be installable, so the');
+				publish_output('keys nodes hold cannot be known from here. Delete that release on the Publish page (its log entry stays on record in');
+				publish_output('rle_release_log_entries, and its number is not used again), then publish. Nothing has been written.');
+				exit(1);
+			}
+			try {
+				$previous_statement = ReleaseStatementPublisher::previous();
+				$held_keys = ReleaseStatementPublisher::held($previous_statement);
+				$log_client = new ReleaseLogClient(ReleaseLogClient::repoLogKeys($full_site_dir), $held_keys['log']);
+				$log_shard = $log_client->discover();
+				$statement_key = ReleaseStatementPublisher::statementKey($full_site_dir, $previous_statement);
+			} catch (Exception $e) {
+				publish_output("\nRefusing to publish {$version} — this release cannot be logged: " . $e->getMessage() . '.');
+				publish_output('A release missing from the public log is one nodes are built to refuse, so none is published without it. Nothing has been written.');
+				exit(1);
+			}
+			publish_output("Public log: {$log_shard['origin']}" . ($log_shard['ahead'] ? ' (next, pinned: ' . implode(', ', $log_shard['ahead']) . ')' : ''));
+			foreach ($log_shard['waiting'] as $waiting) {
+				publish_output("Sigstore lists a future log, {$waiting['origin']}, from " . gmdate('Y-m-d', $waiting['start'])
+					. ', but has not published its key yet. Its key must ship in a release before then; the Watch Release Log incident tracks it.');
+			}
+			if ($log_shard['genesis']) {
+				publish_output('This is the first logged release (genesis): nodes take its keys on first install, as they take the release key.');
+			}
+			publish_output('Release statement key: ' . substr(TransparencyProof::keyId($statement_key['der']), 0, 12)
+				. ($statement_key['listed'] !== null ? ' — its public half was written to ' . $statement_key['listed'] . ' to be committed with this release' : ''));
+		} elseif (!$republish) {
+			publish_output("\nRelease statement: not written — this site cannot sign its own manifests, so it carries the ones it received.");
+		}
+
+		// =====================================================
 		// Bundle the management agent artifact (release channel)
 		// =====================================================
 		// Runs here — before the VERSION file, the core archive, the release
@@ -514,6 +585,23 @@
 				. ", and the rebuild failed. Publishing now would ship an agent known to be stale.");
 			publish_output("Fix the agent build and publish again. Nothing has been written.");
 			exit(1);
+		}
+
+		// The keys the release statement will name are the keys the bundle
+		// manifest gives nodes: one source (release_keys/), checked here while
+		// nothing else has been written.
+		$keys_installed = null;
+		if ($logs_release) {
+			$keys_installed = AgentDistPublisher::repoKeyLists($full_site_dir);
+			$bundle_manifest = AgentDistPublisher::readManifest($full_site_dir . '/public_html/agent_dist');
+			foreach ($keys_installed as $list => $keys) {
+				if (($bundle_manifest[$list] ?? null) !== $keys) {
+					publish_output("\nRefusing to publish {$version} — agent_dist/manifest.json's {$list} is not release_keys/ in this tree"
+						. " ({$agent_bundle['message']}), so the keys nodes would be given are not the keys the release statement names.");
+					publish_output('Fix the agent bundle and publish again. Nothing else has been written.');
+					exit(1);
+				}
+			}
 		}
 
 		// =====================================================
@@ -748,6 +836,15 @@
 			publish_output("ERROR: Failed to create core temp directory");
 			exit(1);
 		}
+		// Every staged tree is tarred only once the release statement is in it,
+		// after the plugin and theme loops, so a refusal anywhere in between
+		// must not leave them behind. Removed on any exit.
+		$publish_stages = array($core_temp_dir);
+		register_shutdown_function(function () use (&$publish_stages) {
+			foreach ($publish_stages as $stage) {
+				if (is_dir($stage)) { exec('rm -rf ' . escapeshellarg($stage)); }
+			}
+		});
 
 		// Create directory structure
 		mkdir($core_temp_dir . '/public_html', 0755, true);
@@ -911,24 +1008,22 @@
 			}
 		}
 
-		// Create core tar.gz archive
-		$tar_cmd = sprintf(
-			'tar -czf %s -C %s . 2>&1',
-			escapeshellarg($core_output_location),
-			escapeshellarg($core_temp_dir)
-		);
-		exec($tar_cmd, $output, $exit_code);
-
-		// Clean up temp directory
-		exec('rm -rf ' . escapeshellarg($core_temp_dir));
-
-		if (!file_exists($core_output_location) || filesize($core_output_location) == 0) {
-			publish_output("ERROR: Failed to create core archive");
-			exit(1);
+		// What the release statement records for each artifact: its manifest
+		// as signed here, without any RELEASE_STATEMENT line
+		// (PackageSignature::statementSubject). A stale statement copied in
+		// from the live tree is replaced, and its line restamped, below.
+		$statement_subjects = array();
+		if ($logs_release) {
+			if (!$manifest_authority['may_sign']) {
+				publish_output("ERROR: this site was found able to sign its manifests and now is not ({$manifest_authority['reason']}). Nothing has been published.");
+				exit(1);
+			}
+			$statement_subjects['core'] = PackageSignature::statementSubject((string)file_get_contents($core_temp_dir . '/' . PackageSignature::MANIFEST_NAME));
 		}
 
-		$core_size_mb = round(filesize($core_output_location) / 1048576, 2);
-		publish_output("Core archive created: $core_filename ({$core_size_mb} MB)");
+		// Archives are built last, from trees that hold the release statement.
+		$pending_archives = array(array('label' => 'core', 'archive' => $core_output_location,
+			'base' => $core_temp_dir, 'member' => '.', 'stage' => $core_temp_dir));
 
 		// Store the version info in the database (using core filename)
 		$upgrade = new Upgrade(NULL);
@@ -1043,6 +1138,10 @@
 					$theme_tar_base = $theme_stage;
 				} else {
 					TreeManifestPublisher::publish_artifact($theme_dir, $full_site_dir, $manifest_authority);
+					if ($logs_release) {
+						$statement_subjects['theme/' . $theme_name] = PackageSignature::statementSubject(
+							(string)file_get_contents($theme_dir . '/' . PackageSignature::MANIFEST_NAME));
+					}
 				}
 			} catch (Exception $e) {
 				if ($theme_stage !== null) { exec('rm -rf ' . escapeshellarg($theme_stage)); }
@@ -1052,31 +1151,12 @@
 				exit(1);
 			}
 
-			$theme_archive = $themes_dir . '/' . $theme_name . '-' . $theme_version . '.tar.gz';
-
-			// Create tar.gz with just the theme directory
-			$tar_cmd = sprintf(
-				'tar -czf %s -C %s %s 2>&1',
-				escapeshellarg($theme_archive),
-				escapeshellarg($theme_tar_base),
-				escapeshellarg($theme_name)
-			);
-			$output = [];
-			exec($tar_cmd, $output, $exit_code);
-			if ($theme_stage !== null) { exec('rm -rf ' . escapeshellarg($theme_stage)); }
-
-			if ($exit_code !== 0 || !file_exists($theme_archive) || filesize($theme_archive) == 0) {
-				// A partial file must not sit in static_files under the current
-				// version's name — a node would download it as genuine.
-				@unlink($theme_archive);
-				publish_output("ERROR: Failed to create archive for {$theme_name}: " . implode(' | ', array_slice($output, -3)));
-				publish_output("A release must carry every archive it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");
-				$upgrade->permanent_delete();
-				exit(1);
-			}
-
-			$theme_size_kb = round(filesize($theme_archive) / 1024, 1);
-			publish_output("- {$theme_name}-{$theme_version}.tar.gz ({$theme_size_kb} KB)");
+			if ($theme_stage !== null) { $publish_stages[] = $theme_stage; }
+			$pending_archives[] = array('label' => $theme_name, 'archive' => $themes_dir . '/' . $theme_name . '-' . $theme_version . '.tar.gz',
+				'base' => $theme_tar_base, 'member' => $theme_name, 'stage' => $theme_stage,
+				'statement_dir' => $republish ? null : $theme_dir, 'statement_rel' => 'public_html/theme/' . $theme_name . '/' . PackageSignature::STATEMENT_NAME,
+				'subject' => 'theme/' . $theme_name);
+			publish_output("- {$theme_name}-{$theme_version}: manifest signed");
 		}
 
 		// =====================================================
@@ -1139,6 +1219,10 @@
 					$plugin_tar_base = $plugin_stage;
 				} else {
 					TreeManifestPublisher::publish_artifact($plugin_dir, $full_site_dir, $manifest_authority);
+					if ($logs_release) {
+						$statement_subjects['plugin/' . $plugin_name] = PackageSignature::statementSubject(
+							(string)file_get_contents($plugin_dir . '/' . PackageSignature::MANIFEST_NAME));
+					}
 				}
 			} catch (Exception $e) {
 				if ($plugin_stage !== null) { exec('rm -rf ' . escapeshellarg($plugin_stage)); }
@@ -1148,31 +1232,161 @@
 				exit(1);
 			}
 
-			$plugin_archive = $plugins_dir . '/' . $plugin_name . '-' . $plugin_version . '.tar.gz';
+			if ($plugin_stage !== null) { $publish_stages[] = $plugin_stage; }
+			$pending_archives[] = array('label' => $plugin_name, 'archive' => $plugins_dir . '/' . $plugin_name . '-' . $plugin_version . '.tar.gz',
+				'base' => $plugin_tar_base, 'member' => $plugin_name, 'stage' => $plugin_stage,
+				'statement_dir' => $republish ? null : $plugin_dir, 'statement_rel' => 'public_html/plugins/' . $plugin_name . '/' . PackageSignature::STATEMENT_NAME,
+				'subject' => 'plugin/' . $plugin_name);
+			publish_output("- {$plugin_name}-{$plugin_version}: manifest signed");
+		}
 
-			// Create tar.gz with just the plugin directory
-			$tar_cmd = sprintf(
-				'tar -czf %s -C %s %s 2>&1',
-				escapeshellarg($plugin_archive),
-				escapeshellarg($plugin_tar_base),
-				escapeshellarg($plugin_name)
-			);
-			$output = [];
-			exec($tar_cmd, $output, $exit_code);
-			if ($plugin_stage !== null) { exec('rm -rf ' . escapeshellarg($plugin_stage)); }
-
-			if ($exit_code !== 0 || !file_exists($plugin_archive) || filesize($plugin_archive) == 0) {
-				// A partial file must not sit in static_files under the current
-				// version's name — a node would download it as genuine.
-				@unlink($plugin_archive);
-				publish_output("ERROR: Failed to create archive for {$plugin_name}: " . implode(' | ', array_slice($output, -3)));
-				publish_output("A release must carry every archive it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");
+		// =====================================================
+		// The release statement (spec release_transparency, D4, D-F)
+		// =====================================================
+		// Every manifest is signed. The statement records each one, every
+		// binary's hash and every key this release installs; it is signed with
+		// the statement key and written to the public log, whose answer is
+		// checked before it is kept. Then it goes into every artifact as
+		// RELEASE_STATEMENT, each manifest is signed again listing it, and only
+		// then is anything tarred. Logging comes this late so nothing that can
+		// still fail runs after a log entry exists.
+		$statement_bytes = null;
+		if ($logs_release) {
+			$agent_dist_dir = $full_site_dir . '/public_html/agent_dist';
+			try {
+				// A RELEASE_STATEMENT anywhere but where this publish writes one
+				// would be left out of what the statement records and ship
+				// unlogged. Refused here, before the log: after it, the
+				// number would be spent.
+				$expected_statements = array(array($core_temp_dir, array('public_html/' . PackageSignature::STATEMENT_NAME,
+					'public_html/agent_dist/' . PackageSignature::STATEMENT_NAME)));
+				foreach ($pending_archives as $pending) {
+					if (!empty($pending['statement_dir'])) {
+						$expected_statements[] = array($pending['statement_dir'], array($pending['statement_rel']));
+					}
+				}
+				foreach ($expected_statements as list($dir, $allowed)) {
+					$stray = array_diff(array_keys(PackageSignature::statementLines(
+						(string)file_get_contents($dir . '/' . PackageSignature::MANIFEST_NAME))), $allowed);
+					if ($stray) {
+						throw new Exception('the manifest lists ' . implode(', ', $stray) . ', a file named like the release statement where none belongs; remove it from the tree');
+					}
+				}
+				$bundle_manifest = AgentDistPublisher::readManifest($agent_dist_dir);
+				$payload = ReleaseStatementPublisher::payload(array(
+					'version'        => $version,
+					'core_commit'    => $release_commits['core'],
+					'agent_commit'   => $release_commits['agent'],
+					'go_toolchain'   => $bundle_manifest['go_toolchain'] ?? null,
+					'compressors'    => ReleaseStatementPublisher::compressors(),
+					'artifacts'      => $statement_subjects + ReleaseStatementPublisher::binaryArtifacts($full_site_dir),
+					'keys_installed' => $keys_installed,
+				));
+				publish_output("\nLogging the release statement on {$log_shard['origin']}...");
+				$statement_bytes = ReleaseStatementPublisher::log($log_client, $log_shard, $payload, $statement_key['pem'], $previous_statement);
+			} catch (Exception $e) {
+				publish_output("\nRefusing to publish {$version} — the release statement could not be logged: " . $e->getMessage() . '.');
+				publish_output("Removing the release row for {$version}; nothing has been archived.");
 				$upgrade->permanent_delete();
 				exit(1);
 			}
+			$logged = json_decode($statement_bytes, true)['entry'];
+			// On record before anything else can fail: the log keeps the entry
+			// whatever happens next, and this row is what accounts for it.
+			try {
+				ReleaseLogEntry::record($version, $statement_bytes);
+			} catch (\Throwable $e) {
+				publish_output("\nERROR: {$logged['log_origin']} index {$logged['log_index']} holds the statement for {$version}, and recording it failed: " . $e->getMessage());
+				publish_output("This line is its only record; keep it. Removing the release row for {$version}.");
+				$upgrade->permanent_delete();
+				exit(1);
+			}
+			publish_output("Logged publicly: {$logged['log_origin']} index {$logged['log_index']} (proof and checkpoint verified; recorded in rle_release_log_entries)");
 
-			$plugin_size_kb = round(filesize($plugin_archive) / 1024, 1);
-			publish_output("- {$plugin_name}-{$plugin_version}.tar.gz ({$plugin_size_kb} KB)");
+			// Into every artifact, each manifest signed again listing it.
+			$statement_name = PackageSignature::STATEMENT_NAME;
+			$placements = array(
+				array('dir' => $core_temp_dir, 'subject' => 'core', 'files' => array(
+					"public_html/{$statement_name}" => "{$core_temp_dir}/public_html/{$statement_name}",
+					"public_html/agent_dist/{$statement_name}" => "{$core_temp_dir}/public_html/agent_dist/{$statement_name}")),
+			);
+			// This site's own live tree, last, so its manifest lists every
+			// statement this publish wrote into it with the bytes now on disk.
+			$live_files = array(
+				"public_html/{$statement_name}" => "{$full_site_dir}/public_html/{$statement_name}",
+				"public_html/agent_dist/{$statement_name}" => "{$agent_dist_dir}/{$statement_name}");
+			foreach ($pending_archives as $pending) {
+				if (!empty($pending['statement_dir'])) {
+					$placements[] = array('dir' => $pending['statement_dir'], 'subject' => $pending['subject'],
+						'files' => array($pending['statement_rel'] => $pending['statement_dir'] . '/' . $statement_name));
+					$live_files[$pending['statement_rel']] = $pending['statement_dir'] . '/' . $statement_name;
+				}
+			}
+			$placements[] = array('dir' => $full_site_dir, 'subject' => null, 'files' => $live_files);
+			$statement_sha = hash('sha256', $statement_bytes);
+			try {
+				foreach ($placements as $place) {
+					foreach ($place['files'] as $abs) {
+						if (file_put_contents($abs, $statement_bytes) === false) {
+							throw new Exception('could not write ' . $abs);
+						}
+					}
+					$body = TreeManifestPublisher::restamp($place['dir'], $manifest_authority['keys'], $place['files']);
+					if ($place['subject'] === null) {
+						continue;
+					}
+					if (PackageSignature::statementSubject($body) !== $statement_subjects[$place['subject']]) {
+						throw new Exception("{$place['subject']} changed on disk while the release was being logged");
+					}
+					// Every line the subject leaves out must be this statement:
+					// any other file under the name would ship unlogged.
+					foreach (PackageSignature::statementLines($body) as $rel => $sha) {
+						if ($sha !== $statement_sha) {
+							throw new Exception("{$place['subject']} lists {$rel}, which is not this release's statement; remove it from the tree");
+						}
+					}
+				}
+				ReleaseStatementPublisher::verifyDocument($statement_bytes, $keys_installed, $statement_subjects);
+			} catch (Exception $e) {
+				publish_output("\nERROR: the logged statement could not be placed in the release: " . $e->getMessage());
+				publish_output("{$logged['log_origin']} index {$logged['log_index']} holds a statement for {$version} that was never shipped; this line is its record.");
+				publish_output("Removing the release row for {$version}. The number is spent now that it is logged: once the cause is fixed, the next publish takes the one after it.");
+				$upgrade->permanent_delete();
+				exit(1);
+			}
+			publish_output('Release statement placed in ' . count($placements) . ' trees, each manifest signed again listing it');
+		}
+
+		// =====================================================
+		// Build the archives
+		// =====================================================
+		publish_output("\nCreating archives...");
+		foreach ($pending_archives as $pending) {
+			$output = [];
+			exec(sprintf('tar -czf %s -C %s %s 2>&1', escapeshellarg($pending['archive']),
+				escapeshellarg($pending['base']), escapeshellarg($pending['member'])), $output, $exit_code);
+			if ($pending['stage'] !== null) { exec('rm -rf ' . escapeshellarg($pending['stage'])); }
+
+			if ($exit_code !== 0 || !file_exists($pending['archive']) || filesize($pending['archive']) == 0) {
+				// A partial file must not sit in static_files under the current
+				// version's name — a node would download it as genuine.
+				@unlink($pending['archive']);
+				publish_output("ERROR: Failed to create archive for {$pending['label']}: " . implode(' | ', array_slice($output, -3)));
+				if ($statement_bytes !== null) {
+					publish_output("{$logged['log_origin']} index {$logged['log_index']} holds a statement for {$version} that was never shipped; this line is its record.");
+				}
+				publish_output("A release must carry every archive it promises. Removing the release row for {$version}; "
+					. ($statement_bytes !== null
+						? 'the number is spent now that it is logged, so once the cause is fixed the next publish takes the one after it.'
+						: 'this version can be republished once the cause is fixed.'));
+				$upgrade->permanent_delete();
+				exit(1);
+			}
+			$size = filesize($pending['archive']);
+			publish_output('- ' . basename($pending['archive']) . ' (' . ($size >= 1048576 ? round($size / 1048576, 2) . ' MB' : round($size / 1024, 1) . ' KB') . ')');
+		}
+		if ($statement_bytes !== null) {
+			$upgrade->set('upg_release_statement', $statement_bytes);
 		}
 
 		// Persist the accumulated component snapshot onto this release row. Done
@@ -1542,7 +1756,11 @@
 			// which changes plugin.json, which changes the manifest, which
 			// changes the tree hash, which bumps the version at the next publish,
 			// forever.
-			if (basename($rel) === 'RELEASE_MANIFEST' || basename($rel) === 'RELEASE_MANIFEST.sig') continue;
+			//
+			// The release statement is excluded for the same reason, more so:
+			// it is new in every release, so hashing it would bump every
+			// component every time.
+			if (in_array(basename($rel), array('RELEASE_MANIFEST', 'RELEASE_MANIFEST.sig', 'RELEASE_STATEMENT'), true)) continue;
 
 			if ($manifest_filename !== null && $rel === $manifest_filename) {
 				$decoded = json_decode(file_get_contents($abs), true);
