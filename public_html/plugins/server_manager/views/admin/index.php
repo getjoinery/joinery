@@ -3,6 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.31 - the agent status bar names an update refused as unlogged (release_transparency WP5)
  * @version 1.30 - no banners for broken monitoring, backups from here not happening, or a node that can no
  *                 longer be managed: each is an incident, triaged in the one inbox
  * @version 1.29 -a node in any install state (copy, switching, retired among them) is badged with its
@@ -278,6 +279,9 @@ if ($agent_online) {
 	$bundled      = $agent->get('ahb_bundled_version');
 	if ($update_state === 'verify_failed') {
 		$agent_update_alert = "Agent update to v{$bundled} REFUSED: the shipped artifact failed checksum or signature verification. The agent will not retry until a corrected release is published.";
+		$agent_update_class = 'danger';
+	} elseif ($update_state === 'unlogged') {
+		$agent_update_alert = "Agent update to v{$bundled} REFUSED: the binary carries the release signature, but its release is not shown to be in the public log, and this machine installs only releases it can see there. Publish a logged release; the agent checks again when it changes.";
 		$agent_update_class = 'danger';
 	} elseif ($update_state === 'fetch_failed') {
 		$agent_update_alert = "Agent update to v{$bundled} could not be fetched yet (the artifact was unreadable or the request timed out — common while a publish is still writing it). The agent retries on its next check.";

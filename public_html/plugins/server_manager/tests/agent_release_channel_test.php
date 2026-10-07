@@ -119,6 +119,35 @@ check($decompressed === $fake_binary, 'gz artifact decompresses back to the sign
 check(hash('sha256', $decompressed) === $read['binaries']['linux-amd64']['sha256'], 'manifest sha256 matches the decompressed bytes');
 
 // ---------------------------------------------------------------------------
+section('Release-log keys compiled into the binary: the form releaselog.go reads');
+
+// Two -X values: statement keys comma-separated, log keys origin:key. The
+// agent splits on ',' then on the first ':' - base64 has no ',' or ':' and an
+// origin has neither, so the pair cannot be read two ways.
+$flags = AgentDistPublisher::bakedKeyFlags(array(
+	'statement_keys' => array('AAA=', 'BBB='),
+	'log_keys'       => array(array('origin' => 'log2025-1.rekor.sigstore.dev', 'key' => 'CC+/=='), array('origin' => 'log2026-1.rekor.sigstore.dev', 'key' => 'DD==')),
+));
+check($flags['statement'] === 'AAA=,BBB=', 'statement keys are comma-separated base64', $flags['statement']);
+check($flags['log'] === 'log2025-1.rekor.sigstore.dev:CC+/==,log2026-1.rekor.sigstore.dev:DD==', 'log keys are origin:key pairs', $flags['log']);
+$none = AgentDistPublisher::bakedKeyFlags(array('statement_keys' => array(), 'log_keys' => array()));
+check($none === array('statement' => '', 'log' => ''), 'no keys bakes nothing: the binary updates on its signature alone');
+$no_space = true;
+foreach (AgentDistPublisher::bakedKeyFlags(AgentDistPublisher::repoKeyLists(PathHelper::getSiteRoot())) as $value) {
+	$no_space = $no_space && strpbrk($value, " \t'\"") === false;
+}
+check($no_space, 'the repository\'s own keys make -X values with no space or quote, so -ldflags reads each as one value');
+// go build ignores -X for a name it does not find, so a renamed variable would
+// build a binary holding no keys without a word. Where the source is on this
+// box, the names the build sets are the names it declares.
+$agent_source = @file_get_contents(rtrim(AgentDistPublisher::sourcePath(), '/') . '/releaselog.go');
+if ($agent_source !== false) {
+	check(preg_match('/^\s*releaseStatementKeysB64\s*=\s*""/m', $agent_source) === 1
+		&& preg_match('/^\s*releaseLogKeysB64\s*=\s*""/m', $agent_source) === 1,
+		'the agent source declares the two variables the build sets');
+}
+
+// ---------------------------------------------------------------------------
 section('Source version parsing and carry-forward inputs');
 
 $src_dir = $tmp_root . '/agent_src';

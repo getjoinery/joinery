@@ -41,6 +41,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.34 - the artifact endpoint serves agent_statement, the release statement beside the agent
+ *                manifest, so a machine with no site tree can check its next binary against the
+ *                public log (release_transparency WP5)
  * @version 1.33 - the channel's limit is counted per agent: a request a node's signature proves goes
  *                 in that node's own bucket (api_agent_node), and only one that proves no node goes
  *                 in its address's (api_agent). A multi-tenant host's sites share an address, so
@@ -166,6 +169,7 @@ class AgentChannelEndpoint {
 	// numbers from its own side.
 	const MAX_REQUEST_BODY = 262144;  // 256 KiB — node → plane
 	const MAX_JOB_BODY     = 65536;   // 64 KiB — plane → node
+	const MAX_STATEMENT_BYTES = 1048576; // 1 MiB — the release statement, as the agent caps it (releaselog.go)
 
 	// The most a claim may carry, to an agent that reports reading that much
 	// (claim_bytes; agentMaxClaimBody). A long backup chain's signed links do
@@ -239,7 +243,7 @@ class AgentChannelEndpoint {
 	 * names one of these and nothing else, so nothing it sends is ever resolved
 	 * as a path on this plane.
 	 */
-	const ARTIFACT_KINDS = ['agent_manifest', 'agent_binary', 'bundle_manifest', 'bundle_body',
+	const ARTIFACT_KINDS = ['agent_manifest', 'agent_binary', 'agent_statement', 'bundle_manifest', 'bundle_body',
 		'release_manifest'];
 
 	/** Chunk size for streaming an artifact out. Bounds this plane's memory, not the transfer. */
@@ -2089,6 +2093,9 @@ class AgentChannelEndpoint {
 			case 'agent_manifest':
 				self::serve_agent_manifest($dist_dir);
 				break;
+			case 'agent_statement':
+				self::serve_agent_statement($dist_dir);
+				break;
 			case 'agent_binary':
 				self::meter_artifact_body($node, $kind);
 				self::serve_agent_binary($dist_dir, (string)($in['platform'] ?? ''));
@@ -2199,6 +2206,29 @@ class AgentChannelEndpoint {
 			api_error('This plane\'s agent manifest is larger than an agent will read.', 'ActionError', 500);
 		}
 		api_success(['manifest' => $raw], '', 200);
+	}
+
+	/**
+	 * The release statement beside the agent manifest: the public log's record
+	 * of what this release shipped, which a machine that holds the log's keys
+	 * checks before it installs a binary. Served as the publisher's own bytes,
+	 * for the reason the manifest is. This plane cannot make one: it is signed
+	 * with a key the plane does not hold and must be in a log the plane does
+	 * not run, so serving it vouches for nothing.
+	 *
+	 * Its own kind, not a field of the manifest's answer, because a statement
+	 * grows with every key ever rotated and the manifest's answer is read
+	 * under a job's 64 KiB cap. A plane with none answers with an empty one.
+	 */
+	private static function serve_agent_statement($dist_dir) {
+		$raw = @file_get_contents($dist_dir . '/' . PackageSignature::STATEMENT_NAME);
+		if ($raw === false) {
+			api_success(['statement' => ''], '', 200);
+		}
+		if (strlen($raw) > self::MAX_STATEMENT_BYTES) {
+			api_error('This plane\'s release statement is larger than an agent will read.', 'ActionError', 500);
+		}
+		api_success(['statement' => $raw], '', 200);
 	}
 
 	/**
