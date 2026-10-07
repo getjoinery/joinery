@@ -567,21 +567,25 @@ check(JobResultProcessor::sanitise_host_report(array())['outbound_limits'] === n
 $with_figs = $lim(9000, 7);
 $with_figs['figures'] = array('ceiling_mbit' => 300, 'conn_rate' => 40, 'conn_burst' => 120, 'open_conns' => 512, 'set_by' => 'plane');
 $with_figs['web_ceiling_mbit'] = 25;
-$with_figs['sites'] = array('s1' => array('ceiling_mbit' => 'none', 'conn_rate' => 5, 'conn_burst' => 100, 'open_conns' => 256),
-	'<b>' => array('ceiling_mbit' => 1), 's2' => 'x');
+$with_figs['sites'] = array('s1' => array('ceiling_mbit' => 'none', 'conn_rate' => 5, 'conn_burst' => 100, 'open_conns' => 256, 'set_by' => 'plane'),
+	'<b>' => array('ceiling_mbit' => 1, 'set_by' => 'someone'), 's2' => 'x');
 $ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $with_figs))['outbound_limits'];
 check(($ol['figures'] ?? null) === array('ceiling_mbit' => 300, 'conn_rate' => 40, 'conn_burst' => 120, 'open_conns' => 512, 'set_by' => 'plane')
 	&& ($ol['web_ceiling_mbit'] ?? null) === 25
-	&& ($ol['sites'] ?? null) === array('s1' => array('ceiling_mbit' => 'none', 'conn_rate' => 5, 'conn_burst' => 100, 'open_conns' => 256),
-		'b' => array('ceiling_mbit' => 1, 'conn_rate' => 'unknown', 'conn_burst' => 'unknown', 'open_conns' => 'unknown')),
-	'limits in force keep their figures: the machine\'s, who set them, the web server\'s user\'s ceiling, and each site\'s, names cleaned and an entry that is not one dropped', var_export($ol, true));
+	&& ($ol['sites'] ?? null) === array('s1' => array('ceiling_mbit' => 'none', 'conn_rate' => 5, 'conn_burst' => 100, 'open_conns' => 256, 'set_by' => 'plane'),
+		'b' => array('ceiling_mbit' => 1, 'conn_rate' => 'unknown', 'conn_burst' => 'unknown', 'open_conns' => 'unknown', 'set_by' => '')),
+	'limits in force keep their figures: the machine\'s and each site\'s, who set each (plane or nothing), the web server\'s user\'s ceiling, names cleaned and an entry that is not one dropped', var_export($ol, true));
 $with_figs['figures']['set_by'] = '<script>';
 $with_figs['figures']['ceiling_mbit'] = '200; reboot';
 $ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $with_figs))['outbound_limits'];
 check($ol['figures']['set_by'] === '' && $ol['figures']['ceiling_mbit'] === 'unknown', 'a set_by but plane is nothing; a figure that is not one is unknown', var_export($ol['figures'], true));
 $with_figs['state'] = 'off';
 $ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $with_figs))['outbound_limits'];
-check(!array_key_exists('figures', $ol) && !array_key_exists('sites', $ol), 'limits off carry no figures', var_export($ol, true));
+check(($ol['figures']['conn_rate'] ?? null) === 40 && array_keys($ol['sites'] ?? array()) === array('s1', 'b') && $ol['since'] === null,
+	'limits off keep the figures turning them on brings back, and no since (host_report 1.14)', var_export($ol, true));
+$with_figs['state'] = 'refused';
+$ol = JobResultProcessor::sanitise_host_report(array('outbound_limits' => $with_figs))['outbound_limits'];
+check(!array_key_exists('figures', $ol) && !array_key_exists('sites', $ol), 'limits refused carry no figures', var_export($ol, true));
 $c_none = JobResultProcessor::sanitise_host_report(array('containers' => array($with_drops($fig(1, 1), 'none'))))['containers'][0];
 $c_bad = JobResultProcessor::sanitise_host_report(array('containers' => array($with_drops($fig(1, 1), '1;reboot'))))['containers'][0];
 check($c_none['outbound_dropped'] === 'none' && $c_bad['outbound_dropped'] === 'unknown'

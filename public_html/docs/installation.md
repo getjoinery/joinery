@@ -480,8 +480,10 @@ The installed `joinery-limits` is a copy of `outbound_limits.sh`. Host housekeep
 
 The figures live where only root writes, at two levels:
 
-- **The machine's,** in `/etc/joinery/outbound_limits.json`: `ceiling_mbit` (a number, or `"off"`), `conn_rate`, `conn_burst` and `open_conns`. A figure the file does not hold is the built-in one.
-- **A container site's own,** in its run spec beside `--memory` (`outbound_ceiling`, `outbound_conn_rate`, `outbound_conn_burst`, `outbound_open_conns`), so a rebuild, rebase or move keeps them. A site with none has the machine's. On bare metal every site sends as the web server's user, so the machine's figures are the sites'.
+- **The machine's,** in `/etc/joinery/outbound_limits.json`: `ceiling_mbit` (a number, or `"off"`), `conn_rate`, `conn_burst` and `open_conns`, and `set_by` (`"plane"` when a management node set them). A figure the file does not hold is the built-in one.
+- **A container site's own,** in its run spec beside `--memory` (`outbound_ceiling`, `outbound_conn_rate`, `outbound_conn_burst`, `outbound_open_conns`, and `outbound_set_by=plane` when a management node set them), so a rebuild, rebase or move keeps them. A site with none has the machine's. On bare metal every site sends as the web server's user, so the machine's figures are the sites'.
+
+A site is told a management node set its figures when it set the machine's or that site's own; a site's own figures changed by hand on the machine drop the mark. While the limits are off, `joinery-limits show` and the host report keep the figures that turning them on puts back.
 
 A figure that is not one (a hand edit) is passed over for the one below it, with a warning in the unit's journal.
 

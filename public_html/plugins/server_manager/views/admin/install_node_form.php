@@ -11,6 +11,9 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.14 - a site name is 2 to 50 characters (install.sh refuses one letter); a one-character slug
+ *                 (a bare install's site name) becomes node-<slug>; a long display name's slug is cut to fit
+ *                 the 50-character slug column with its collision suffix
  * @version 1.13 - connected accounts named as the provider names them; an expired connection is not offered (B47)
  * @version 1.12 - the Clone install type is gone (site_copy.md WP9): a site on a new server is a copy, made
  *                 from the source node's Copy tab
@@ -57,8 +60,8 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		if (!$is_bare) {
 			if (!$sitename) {
 				$field_errors['sitename'] = 'Site name is required.';
-			} elseif (!preg_match('/^[a-z0-9_]+$/', $sitename)) {
-				$field_errors['sitename'] = 'Lowercase letters, numbers, and underscores only.';
+			} elseif (!preg_match('/^[a-z0-9_]{2,50}$/', $sitename)) {
+				$field_errors['sitename'] = 'Lowercase letters, numbers, and underscores only, 2 to 50 of them.';
 			}
 			if ($docker_mode !== 'docker' && $docker_mode !== 'bare-metal') {
 				$field_errors['docker_mode'] = 'Choose Docker or Bare-metal.';
@@ -97,7 +100,14 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			// Generate slug from display name; append counter if collision
 			$base_slug = strtolower(trim($_POST['mgn_name']));
 			$base_slug = preg_replace('/[^a-z0-9]+/', '-', $base_slug);
-			$base_slug = trim($base_slug, '-') ?: 'node';
+			// The slug columns (mgn_slug, cvp_slug) are 50 characters; room is
+			// left for the collision suffix below.
+			$base_slug = trim(substr(trim($base_slug, '-'), 0, 45), '-') ?: 'node';
+			// A bare install's site name is this slug, and install_node refuses
+			// a one-letter one (Docker takes no such container name).
+			if (strlen($base_slug) < 2) {
+				$base_slug = 'node-' . $base_slug;
+			}
 			$slug      = $base_slug;
 			$counter   = 2;
 			$existing_check = new MultiManagedNode(['slug' => $slug, 'deleted' => false]);

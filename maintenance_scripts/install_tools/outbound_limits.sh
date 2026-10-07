@@ -7,7 +7,7 @@
 # them; they stop a hacked plugin turning the server into a scanner or a
 # flood, and bound what a runaway site costs.
 #
-# Version: 1.2
+# Version: 1.3
 #
 #   outbound_limits.sh install [--web-user] [--off] [FIGURES] [--by=plane]
 #                         Root. Copies this script to /usr/local/sbin/joinery-limits
@@ -51,8 +51,10 @@
 # (ceiling_mbit, a number or "off"; conn_rate, conn_burst, open_conns; set_by,
 # "plane" when the management node set them). A container site's own, in its
 # run spec beside its other caps (outbound_ceiling, outbound_conn_rate,
-# outbound_conn_burst, outbound_open_conns), so a rebuild, rebase or move keeps
-# them. A figure that is not one (a hand edit) is passed over for the one
+# outbound_conn_burst, outbound_open_conns, and outbound_set_by=plane when the
+# management node set them), so a rebuild, rebase or move keeps them. A site
+# is told the management node set its figures when it set the machine's or
+# that site's own; a site's own set by hand on the machine drops the mark. A figure that is not one (a hand edit) is passed over for the one
 # below it, with a warning. On bare metal every site shares the web server's
 # user, so the machine's figures are the sites'.
 #
@@ -135,7 +137,10 @@
 # web_user (yes or no), ceiling_mbit (the machine's ceiling, empty for none),
 # conn_rate, conn_burst, open_conns (the machine's), set_by, web_ceiling_mbit
 # (the web server's user's ceiling in force), site_figures (each limited
-# site's SITE:CEILING:RATE:BURST:OPEN in force, - for no ceiling).
+# site's SITE:CEILING:RATE:BURST:OPEN in force, - for no ceiling), site_set_by
+# (the sites in site_figures whose own figures the management node set).
+# state=off keeps the machine's figures and site_figures as configured: what
+# turning the limits on puts in force (a site's own lower setting aside).
 # state=on with reason=nft_refused: the last change was refused and the table
 # before it, with its sites and counters, is in force. state=on with
 # reason=ceiling_failed: the connection limits are in force and the speed
@@ -274,11 +279,47 @@ site_figures() {  # SITE
     echo "$c $r $b $o"
 }
 
+# Who set SITE's figures: plane where the management node set its own (its run
+# spec says so) or the machine's (the host file says so); else empty.
+site_set_by() {  # SITE
+    if [[ "$SET_BY" == plane ]]; then
+        echo plane
+    elif grep -qx 'outbound_set_by=plane' "${SITES_DIR}/$1/run_spec" 2> /dev/null; then
+        echo plane
+    fi
+}
+
+# Each container site's figures from root, as the status's site_figures
+# (SITE:CEILING:RATE:BURST:OPEN): what turning the limits on would put in
+# force, a site's own lower setting aside. load_machine_figures first.
+configured_site_figures() {
+    local line out="" c r b o
+    while IFS= read -r line; do
+        [[ "$line" == "-" ]] && break
+        [[ -n "$line" ]] || continue
+        read -r c r b o <<< "$(site_figures "${line%% *}")"
+        out+="${out:+ }${line%% *}:${c}:${r}:${b}:${o}"
+    done <<< "$(container_sites)"
+    echo "$out"
+}
+
 # The lower of a ceiling (- for none) and a site's own figure (empty for none).
 lower_ceiling() {  # CEILING OWN
     if [[ -z "$2" ]]; then echo "$1"
     elif [[ "$1" == "-" ]] || (( $2 < $1 )); then echo "$2"
     else echo "$1"; fi
+}
+
+# The ceilings in force, in words: stdin "SITE BRIDGE IN_FORCE" lines, and the
+# web server's user's (empty: not limited here; -: no ceiling).
+ceilings_in_force() {  # WEB_IN_FORCE
+    local site bridge f out=""
+    while read -r site bridge f; do
+        [[ -n "$site" ]] || continue
+        out+="${out:+, }${site} $([[ "$f" == "-" ]] && echo none || echo "${f} Mbit/s")"
+    done
+    [[ -z "$1" ]] || out+="${out:+, }the web server's user $([[ "$1" == "-" ]] && echo none || echo "${1} Mbit/s")"
+    echo "${out:-none}"
 }
 
 # What a site's own setting asks for: a whole number of Mbit/s, or nothing.
@@ -323,13 +364,13 @@ bare_own_ceiling() {
 # every site, whatever its outcome, so what a site says is never left over
 # from an earlier run: the file lives in the container's own layer and
 # survives its restarts.
-told_text() {  # STATE HOST_CEILING(- none) IN_FORCE(- none)
-    printf 'state=%s\nhost_ceiling_mbit=%s\nceiling_mbit=%s\nset_by=%s\n' "$1" "${2#-}" "${3#-}" "${SET_BY:-}"
+told_text() {  # STATE HOST_CEILING(- none) IN_FORCE(- none) [SET_BY, default the machine's]
+    printf 'state=%s\nhost_ceiling_mbit=%s\nceiling_mbit=%s\nset_by=%s\n' "$1" "${2#-}" "${3#-}" "${4-${SET_BY:-}}"
 }
 
 tell_container() {  # SITE STATE HOST_CEILING IN_FORCE
     command -v docker > /dev/null 2>&1 || return 0
-    told_text "$2" "$3" "$4" | timeout 30 docker exec -i -u root "$1" sh -c \
+    told_text "$2" "$3" "$4" "$(site_set_by "$1")" | timeout 30 docker exec -i -u root "$1" sh -c \
         "mkdir -p /run/joinery && chmod 755 /run/joinery && cat > ${SITE_TOLD}.tmp && chmod 644 ${SITE_TOLD}.tmp && mv -f ${SITE_TOLD}.tmp ${SITE_TOLD}" \
         > /dev/null 2>&1
 }
@@ -668,6 +709,9 @@ write_status() {
         echo "set_by=${SET_BY:-}"
         echo "web_ceiling_mbit=${web_ceiling}"
         echo "site_figures=${7:-}"
+        echo "site_set_by=$(for e in ${7:-}; do
+            grep -qx 'outbound_set_by=plane' "${SITES_DIR}/${e%%:*}/run_spec" 2> /dev/null && printf '%s ' "${e%%:*}"
+        done | sed 's/ $//')"
         echo "applied_at=$(date -u +%s)"
     } > "${STATUS_FILE}.tmp" && chmod 644 "${STATUS_FILE}.tmp" && mv -f "${STATUS_FILE}.tmp" "$STATUS_FILE"
 }
@@ -698,7 +742,7 @@ do_apply() {  # WEB_USER(0|1)
         remove_table || die "could not remove the limits table"
         local unshaped=1
         shape "" || unshaped=0
-        write_status off off
+        write_status off off "" "" "$webw" 1 "$(configured_site_figures)"
         tell_everyone off "$web"
         say "outbound limits: off on this machine (${HOST_FILE})"
         (( unshaped )) || die "part of the speed ceiling would not come off (see above); the next run tries again"
@@ -780,7 +824,8 @@ do_apply() {  # WEB_USER(0|1)
         fi
     }
 
-    local plan noroute=0
+    local plan noroute=0 shaped_before
+    shaped_before="$(cat "$SHAPED_FILE" 2> /dev/null)"
     plan="$(shape_plan "$web_mbit" <<< "$shaped_sites")"
     # With no default route this moment, the web server's user's ceiling stays
     # on the interfaces it was on rather than coming off, and the run fails
@@ -798,7 +843,13 @@ do_apply() {  # WEB_USER(0|1)
     write_status on "" "$sites" "$uncovered" "$webw" 1 "$figures" "${web_in_force#-}"
     tell_sites on
     if (( unchanged )); then
-        say "outbound limits: unchanged"
+        # The table is as it was; a ceiling may still have moved (a site's own
+        # setting, or a figure set), and that is a change the run says.
+        if [[ "$(cat "$SHAPED_FILE" 2> /dev/null)" == "$shaped_before" ]]; then
+            say "outbound limits: unchanged"
+        else
+            say "outbound limits: speed ceiling now in force: $(ceilings_in_force "$web_in_force" <<< "$shaped_sites")"
+        fi
         return 0
     fi
     say "outbound limits: in force for ${sites:-no container site}$([[ $web == 1 ]] && echo " and the web server's user (${WEB_USER})")"
@@ -847,8 +898,9 @@ write_machine_figures() {  # BY(plane|empty)
 }
 
 # Writes the given figures into SITE's run spec, through the helper install.sh
-# site uses.
-write_site_figures() {  # SITE
+# site uses, with who set them: outbound_set_by=plane for the management node,
+# none for root on the machine.
+write_site_figures() {  # SITE BY(plane|empty)
     local lib p lines
     [[ "$1" =~ ^[A-Za-z0-9_-]{1,50}$ ]] || die "'${1:0:60}' is not a site name"
     lib="$(spec_lib)" || die "the run spec helper (_site_run_spec.sh) is not beside this script; run it from the release, or install it again"
@@ -866,6 +918,8 @@ write_site_figures() {  # SITE
         lines="$(grep -v "^${key}=" <<< "$lines")"
         [[ "$val" == default ]] || lines+=$'\n'"${key}=${val}"
     done
+    lines="$(grep -v '^outbound_set_by=' <<< "$lines")"
+    [[ "${2:-}" == plane ]] && lines+=$'\n'"outbound_set_by=plane"
     printf '%s\n' "$lines" | run_spec_write "$1" || die "could not write $1's run spec"
 }
 
@@ -887,7 +941,7 @@ do_set() {  # BY
     any_figures || die "set needs a figure: --ceiling=MBIT|off, --conn-rate=N, --conn-burst=N or --open-conns=N"
     check_figures
     if [[ -n "$F_SITE" ]]; then
-        write_site_figures "$F_SITE"
+        write_site_figures "$F_SITE" "$1"
         say "outbound limits: ${F_SITE}'s own figures saved"
     else
         write_machine_figures "$1"
@@ -898,9 +952,11 @@ do_set() {  # BY
 }
 
 do_show() {
-    local c r b o site line spec own_c
+    local c r b o site line spec own_c on=0
     load_machine_figures 2> /dev/null
-    say "outbound limits on this machine$([[ "$SET_BY" == plane ]] && echo ", set by the management node"):"
+    # What is in force is only the status's while the limits are on.
+    grep -qx 'state=on' "$STATUS_FILE" 2> /dev/null && on=1
+    say "outbound limits on this machine$([[ "$SET_BY" == plane ]] && echo ", set by the management node")$( (( on )) || echo " (not in force now: sudo joinery-limits status)"):"
     say "  speed ceiling: $([[ -n "$M_CEILING" ]] && echo "${M_CEILING} Mbit/s" || echo "none")$([[ "$M_CEILING" == "$DEF_CEILING" ]] && echo " (built in)")"
     say "  new connections: ${M_RATE} a second, bursts to ${M_BURST}; ${M_OPEN} open at once"
     while IFS= read -r line; do
@@ -908,12 +964,13 @@ do_show() {
         site="${line%% *}"
         read -r c r b o <<< "$(site_figures "$site" 2> /dev/null)"
         spec="${SITES_DIR}/${site}/run_spec"
-        own_c="$(grep -c '^outbound_' "$spec" 2> /dev/null)"
-        line="$(sed -n 's/^site_figures=//p' "$STATUS_FILE" 2> /dev/null | tr ' ' '\n' | grep "^${site}:" | cut -d: -f2)"
-        say "  ${site}: ceiling $([[ "$c" == "-" ]] && echo none || echo "${c} Mbit/s")${line:+, in force ${line/#-/none}$([[ "$line" != "-" ]] && echo " Mbit/s")}; ${r}/s, bursts to ${b}; ${o} open$([[ "${own_c:-0}" -gt 0 ]] && echo " (its own figures)")"
+        own_c="$(grep -c -E '^outbound_(ceiling|conn_rate|conn_burst|open_conns)=' "$spec" 2> /dev/null)"
+        line=""
+        (( on )) && line="$(sed -n 's/^site_figures=//p' "$STATUS_FILE" 2> /dev/null | tr ' ' '\n' | grep "^${site}:" | cut -d: -f2)"
+        say "  ${site}: ceiling $([[ "$c" == "-" ]] && echo none || echo "${c} Mbit/s")${line:+, in force ${line/#-/none}$([[ "$line" != "-" ]] && echo " Mbit/s")}; ${r}/s, bursts to ${b}; ${o} open$([[ "${own_c:-0}" -gt 0 ]] && echo " (its own figures$(grep -qx 'outbound_set_by=plane' "$spec" 2> /dev/null && echo ", set by the management node"))")"
     done <<< "$(container_sites)"
     line="$(sed -n 's/^web_ceiling_mbit=//p' "$STATUS_FILE" 2> /dev/null)"
-    unit_has_web_user && say "  the web server's user: ceiling in force ${line:-none}$([[ -n "$line" ]] && echo " Mbit/s")"
+    (( on )) && unit_has_web_user && say "  the web server's user: ceiling in force ${line:-none}$([[ -n "$line" ]] && echo " Mbit/s")"
     return 0
 }
 

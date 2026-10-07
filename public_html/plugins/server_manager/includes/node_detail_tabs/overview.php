@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.50 - while the outbound limits are off, the figures turning them on brings back (and the
+ *                 site picker in Set the figures); a site whose own figures this management node set says so
  * @version 1.49 - the outbound limits' figures in force, who set them, and each site whose own differ; the
  *                 limits turned on or off, and their figures set, from here (node_outbound_and_transfer WP5)
  * @version 1.48 - the outbound limits include each site's speed ceiling (node_outbound_and_transfer WP4); a
@@ -1298,19 +1300,23 @@
 					return $c . '; ' . ($f['conn_rate'] ?? '?') . ' new connections a second, bursts to ' . ($f['conn_burst'] ?? '?')
 						. '; ' . ($f['open_conns'] ?? '?') . ' open at once';
 				};
-				if ($ol['state'] === 'on' && is_array($ol['figures'] ?? null)) {
+				// Off, the same figures are what turning them on brings back (host_report 1.14).
+				if (in_array($ol['state'], ['on', 'off'], true) && is_array($ol['figures'] ?? null)) {
 					$ol_machine = $ol['figures'];
-					echo '<div class="small text-muted">Each site: ' . $hr_str($ol_fig_words($ol_machine))
-						. ($ol_machine['set_by'] === 'plane' ? ' (set from this management node)' : ' (set on the machine)') . '.</div>';
+					$ol_lead = ($ol['state'] === 'off') ? 'When turned on, each site: ' : 'Each site: ';
+					echo '<div class="small text-muted">' . $ol_lead . $hr_str($ol_fig_words($ol_machine))
+						. (($ol_machine['set_by'] ?? '') === 'plane' ? ' (set from this management node)' : ' (set on the machine)') . '.</div>';
 					foreach ((array)($ol['sites'] ?? []) as $ol_site => $ol_f) {
 						$ol_same = ($ol_f['ceiling_mbit'] === $ol_machine['ceiling_mbit'] && $ol_f['conn_rate'] === $ol_machine['conn_rate']
 							&& $ol_f['conn_burst'] === $ol_machine['conn_burst'] && $ol_f['open_conns'] === $ol_machine['open_conns']);
 						if (!$ol_same) {
-							echo '<div class="small text-muted">' . $hr_str($ol_site) . ': ' . $hr_str($ol_fig_words($ol_f)) . '.</div>';
+							$ol_site_by = (($ol_f['set_by'] ?? '') === 'plane' && ($ol_machine['set_by'] ?? '') !== 'plane')
+								? ' (set from this management node)' : '';
+							echo '<div class="small text-muted">' . $hr_str($ol_site) . ': ' . $hr_str($ol_fig_words($ol_f)) . $ol_site_by . '.</div>';
 						}
 					}
 					$ol_web = $ol['web_ceiling_mbit'] ?? 'none';
-					if (is_int($ol_web) && $ol_web !== $ol_machine['ceiling_mbit']) {
+					if ($ol['state'] === 'on' && is_int($ol_web) && $ol_web !== $ol_machine['ceiling_mbit']) {
 						echo '<div class="small text-muted">The web server\'s user: ' . $ol_web . ' Mbit/s at most (a site asked for less).</div>';
 					}
 				}

@@ -21,6 +21,8 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.3 - a site name is at least 2 characters (install.sh refuses one letter: Docker takes no such
+ *                container name); a one-letter domain label defaults to site_<label>
  * @version 1.2 - the region falls back to us-east
  * @version 1.1 - a domain whose slug would not fit the node slug column is refused with a sentence; the
  *                freeze on a cart line is read through ManagedSiteRequirement::frozen_from()
@@ -79,7 +81,7 @@ class ManagedSiteDraft {
 	const MANAGED_REF = 1;
 
 	/** What a site's internal name may look like: the install directory and database name. */
-	const SITENAME_REGEX = '/^[a-z][a-z0-9_]{0,49}$/';
+	const SITENAME_REGEX = '/^[a-z][a-z0-9_]{1,49}$/';
 
 	/** The node slug column (cvp_slug, mgn slug) is varchar(50); a slug is the domain with dots as dashes. */
 	const SLUG_MAX_LENGTH = 50;
@@ -181,7 +183,7 @@ class ManagedSiteDraft {
 		$label = explode('.', strtolower(trim($domain)))[0] ?? '';
 		$label = preg_replace('/[^a-z0-9_]/', '_', $label);
 		$label = preg_replace('/_+/', '_', trim($label, '_'));
-		if ($label === '' || !preg_match('/^[a-z]/', $label)) {
+		if (strlen($label) < 2 || !preg_match('/^[a-z]/', $label)) {
 			$label = 'site' . ($label === '' ? '' : '_' . $label);
 		}
 		return substr($label, 0, 50);
@@ -264,7 +266,7 @@ class ManagedSiteDraft {
 		}
 		if ($sitename !== '' && !preg_match(self::SITENAME_REGEX, $sitename)) {
 			$errors[] = 'The site name is used internally as a folder and database name: letters, digits '
-				. 'and underscores only, starting with a letter, up to 50 characters.';
+				. 'and underscores only, starting with a letter, 2 to 50 characters.';
 		}
 
 		$regions = self::regions();

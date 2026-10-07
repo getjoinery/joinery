@@ -2431,6 +2431,21 @@ check(preg_match('/-q\|--quiet\)\s*\n\s*QUIET_MODE=1/', $install_src) === 1,
     'the site subcommand accepts trailing -q/--quiet');
 check(preg_match('/Unknown option for site/', $install_src) === 1,
     'and stops on a flag its loop does not know');
+// Docker takes no one-letter container name: site a once built its whole
+// image and then failed at docker run.
+$name_rule = '^[a-z0-9][a-z0-9_-]{1,49}$';
+foreach (array('a' => false, 'sa' => true, 'my-site_2' => true, 'MySite' => false, '-x' => false, str_repeat('s', 51) => false) as $name => $ok) {
+    check((preg_match('/' . $name_rule . '/', $name) === 1) === $ok, "the site name rule " . ($ok ? 'takes' : 'refuses') . " '{$name}'");
+}
+check(strpos($install_src, '[[ "$SITENAME" =~ ' . $name_rule . ' ]]') !== false,
+    'site refuses a name outside that rule before anything is installed');
+// A bare install's site name is the node slug the Install form derives from
+// the display name; one character would be refused after the machine is made.
+$form_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/views/admin/install_node_form.php'));
+check(preg_match('/if \(strlen\(\$base_slug\) < 2\) \{\s*\$base_slug = \'node-\' \. \$base_slug;/', $form_src) === 1,
+    'the Install form pads a one-character slug, so a bare install never gets a one-letter site name');
+check(strpos($form_src, "trim(substr(trim(\$base_slug, '-'), 0, 45), '-') ?: 'node'") !== false,
+    'and cuts a long one to fit the 50-character slug column with its collision suffix');
 
 
 section('The health probe reports reachability, not liveness');

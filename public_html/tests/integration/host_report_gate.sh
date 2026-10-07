@@ -381,7 +381,16 @@ chk "a status file from before the figures: each figure unknown or none, no site
 printf 'state=on\nreason=\nsince=1760000000\nsites=siteone my-site\nweb_user=yes\nceiling_mbit=300\nconn_rate=40\nconn_burst=120\nopen_conns=512\nset_by=plane\nweb_ceiling_mbit=25\nsite_figures=siteone:50:40:120:512 my-site:-:5:100:256 bad"name:1:1:1:1\n' > "$LS"
 chk "on with figures (WP5): the machine's, who set them, the web server's user's ceiling, each site's in force" \
     "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo json_encode($o["figures"]), "|", $o["web_ceiling_mbit"], "|", json_encode($o["sites"]);')" \
-    '{"ceiling_mbit":300,"conn_rate":40,"conn_burst":120,"open_conns":512,"set_by":"plane"}|25|{"siteone":{"ceiling_mbit":50,"conn_rate":40,"conn_burst":120,"open_conns":512},"my-site":{"ceiling_mbit":"none","conn_rate":5,"conn_burst":100,"open_conns":256}}'
+    '{"ceiling_mbit":300,"conn_rate":40,"conn_burst":120,"open_conns":512,"set_by":"plane"}|25|{"siteone":{"ceiling_mbit":50,"conn_rate":40,"conn_burst":120,"open_conns":512,"set_by":"plane"},"my-site":{"ceiling_mbit":"none","conn_rate":5,"conn_burst":100,"open_conns":256,"set_by":"plane"}}'
+printf 'state=on\nreason=\nsince=1760000000\nsites=siteone my-site\nceiling_mbit=200\nconn_rate=20\nconn_burst=100\nopen_conns=256\nset_by=\nsite_figures=siteone:80:20:100:256 my-site:200:20:100:256\nsite_set_by=siteone\n' > "$LS"
+chk "the machine's set on it, one site's own set from the management node (1.14): only that site says plane" \
+    "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["figures"]["set_by"], "|", $o["sites"]["siteone"]["set_by"], "|", $o["sites"]["my-site"]["set_by"];')" "|plane|"
+printf 'state=off\nreason=off\nsince=\nsites=\nceiling_mbit=300\nconn_rate=40\nconn_burst=100\nopen_conns=256\nset_by=\nsite_figures=siteone:50:40:100:256\nsite_set_by=\n' > "$LS"
+chk "off (1.14): the figures turning them on brings back, and no since" \
+    "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["state"], "|", $o["since"], "|", $o["figures"]["ceiling_mbit"], "|", $o["sites"]["siteone"]["ceiling_mbit"];')" "off|none|300|50"
+printf 'state=off\nreason=off\nsince=\nsites=\nceiling_mbit=\nconn_rate=40\nset_by=\nsite_figures=\n' > "$LS"
+chk "off from an older status (no site_set_by, its ceiling left empty): no figures, rather than none for the ceiling" \
+    "$(lim_obj | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["state"], "|", array_key_exists("figures", $o) ? "figures" : "";')" "off|"
 printf 'state=on\nreason=\nsince=1760000000\nsites=siteone sitetwo my-site\nuncovered=old\nweb_user=yes\n' > "$LS"
 chk "a limited site's drops are its counter's packets" "$(lim_site siteone)" "12"
 chk "a site still on Docker's default network is none, not zero" "$(lim_site old)" '"none"'

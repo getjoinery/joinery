@@ -383,6 +383,7 @@ check(strpos($metal_cmd, "test -n \"\$POSTGRES_PASSWORD\"") !== false && strpos(
 foreach (array(
 	'a shell sitename'      => array('sitename' => $PAYLOAD, 'domain' => 'x.example.com', 'docker_mode' => 'docker'),
 	'an uppercase sitename' => array('sitename' => 'MySite', 'domain' => 'x.example.com', 'docker_mode' => 'docker'),
+	'a one-letter sitename (Docker takes no such container name)' => array('sitename' => 'a', 'domain' => 'x.example.com', 'docker_mode' => 'docker'),
 	'a shell domain'        => array('sitename' => 'site', 'domain' => $SUBSHELL, 'docker_mode' => 'docker'),
 	'no domain'             => array('sitename' => 'site', 'domain' => '', 'docker_mode' => 'docker'),
 	'an unknown docker_mode'=> array('sitename' => 'site', 'domain' => 'x.example.com', 'docker_mode' => 'kvm'),
