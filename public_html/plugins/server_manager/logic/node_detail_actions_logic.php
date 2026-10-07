@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.48 - copy_new_server passes the ticked root SSH keys and the fingerprints shown (specs/site_copy.md WP15)
  * @version 1.47 - site_limits: change a site's memory, CPU ceiling and disk allowance on this host
  *                 (multi_tenant_docker_hosts WP6)
  * @version 1.46 - outbound_limits: turn this machine's outbound limits on or off, or set their figures
@@ -784,6 +785,8 @@ class NodeDetailActions {
 						'account' => (string)($_POST['copy_account'] ?? ''),
 						'region'  => (string)($_POST['copy_region'] ?? ''),
 						'type'    => (string)($_POST['copy_type'] ?? ''),
+						'carry_root_keys'  => !empty($_POST['copy_carry_root_keys']),
+						'key_fingerprints' => (string)($_POST['copy_key_fingerprints'] ?? ''),
 					], $uid, $copy_from);
 					self::ok($session, $page_regex, 'The new server is being created. Its install takes a few minutes; '
 						. 'the copy starts once its agent has joined.');

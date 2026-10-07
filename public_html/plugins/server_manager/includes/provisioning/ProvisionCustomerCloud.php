@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.9 - the retire job puts the provision's cvp_root_ssh_keys on root (none: root login off)
  * @version 2.8 - account_driver(): a connected account's driver, shared with MachineTransferWatch,
  *                which reads without marking a failed refresh
  * @version 2.7 - Clone is retired (site_copy.md WP9): no from_backup install, no source arming
@@ -769,7 +770,7 @@ class ProvisionCustomerCloud {
 				return 0;
 			}
 			ManagementJob::createJob($node->key, 'retire_install_password',
-				JobCommandBuilder::build_retire_install_password($node),
+				JobCommandBuilder::build_retire_install_password($node, (string)$provision->get('cvp_root_ssh_keys')),
 				['provision_id' => (int)$provision->key], null);
 			$provision->set('cvp_install_password', 'retiring');
 			$provision->set('cvp_error', null);

@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.104 - build_retire_install_password($node, $root_keys): root login is off (PermitRootLogin no) unless keys are
+ *                 given, which are put in root's authorized_keys and keep key login (specs/site_copy.md WP15)
  * @version 1.103 - build_site_limits: change a site's memory, CPU ceiling and disk allowance on its
  *                  host without a rebuild (multi_tenant_docker_hosts WP6)
  * @version 1.102 - install_node refuses a one-letter site name: Docker takes no such container name
@@ -4988,14 +4990,26 @@ class JobCommandBuilder {
 	 * provision pipeline erases it — this step's own check (sshd -T) is the
 	 * first half of that proof, the refused probe is the second.
 	 */
-	public static function build_retire_install_password($node) {
+	public static function build_retire_install_password($node, $root_keys = '') {
+		$keys = self::root_key_lines($root_keys);
+		$login = $keys ? 'prohibit-password' : 'no';
+		// sshd -T prints prohibit-password under its older name.
+		$effective = $keys ? '(without|prohibit)-password' : 'no';
 		$lines = [];
 		$lines[] = 'set -eo pipefail';
+		if ($keys) {
+			// The keys travel base64 so nothing in them can be read as shell.
+			$lines[] = 'install -d -m 700 /root/.ssh';
+			$lines[] = 'touch /root/.ssh/authorized_keys';
+			$lines[] = 'chmod 600 /root/.ssh/authorized_keys';
+			$lines[] = "base64 -d <<<'" . base64_encode(implode("\n", $keys)) . "' | while IFS= read -r k; do"
+				. ' grep -qxF -- "$k" /root/.ssh/authorized_keys || printf \'%s\\n\' "$k" >> /root/.ssh/authorized_keys; done';
+		}
 		$lines[] = 'install -d -m 755 /etc/ssh/sshd_config.d';
 		$lines[] = "printf '%s\\n'"
 			. " '# Written by the management node when it retired this machine install password.'"
 			. " '# The machine is reached through its Joinery agent; nothing logs in over SSH with a password.'"
-			. " 'PasswordAuthentication no' 'KbdInteractiveAuthentication no' 'PermitRootLogin prohibit-password' 'MaxAuthTries 3'"
+			. " 'PasswordAuthentication no' 'KbdInteractiveAuthentication no' 'PermitRootLogin " . $login . "' 'MaxAuthTries 3'"
 			. ' > /etc/ssh/sshd_config.d/00-joinery-agent-managed.conf';
 		$lines[] = 'sshd -t';
 		$lines[] = 'systemctl restart ssh';
@@ -5004,12 +5018,31 @@ class JobCommandBuilder {
 		// fails with 141 whenever grep quits at its first match, which read
 		// as "sshd still accepts passwords" on a box that had just stopped.
 		$lines[] = 'cfg=$(sshd -T 2>/dev/null || true)';
-		$lines[] = 'if [ "$(grep -ci "^passwordauthentication no" <<<"$cfg")" -gt 0 ] && [ "$(grep -ci "^kbdinteractiveauthentication no" <<<"$cfg")" -gt 0 ]; then echo INSTALL_PASSWORD_RETIRED; else echo "RETIRE_FAILED=sshd still accepts passwords"; echo "--- effective:"; grep -iE "^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin|usepam) " <<<"$cfg"; echo "--- where set:"; grep -nHiE "^\\s*(PasswordAuthentication|KbdInteractiveAuthentication|ChallengeResponseAuthentication|Include|Match)\\b" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null; exit 1; fi';
+		$lines[] = 'if [ "$(grep -ci "^passwordauthentication no" <<<"$cfg")" -gt 0 ] && [ "$(grep -ci "^kbdinteractiveauthentication no" <<<"$cfg")" -gt 0 ] && [ "$(grep -ciE "^permitrootlogin ' . $effective . '$" <<<"$cfg")" -gt 0 ]; then echo INSTALL_PASSWORD_RETIRED; else echo "RETIRE_FAILED=sshd still accepts passwords or root login is not ' . $login . '"; echo "--- effective:"; grep -iE "^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin|usepam) " <<<"$cfg"; echo "--- where set:"; grep -nHiE "^\\s*(PasswordAuthentication|KbdInteractiveAuthentication|ChallengeResponseAuthentication|PermitRootLogin|Include|Match)\\b" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null; exit 1; fi';
 
 		return [
 			['type' => 'ssh', 'label' => 'Retire the install password: the machine stops accepting it',
 				'cmd' => implode("\n", $lines), 'timeout' => 900],
 		];
+	}
+
+	/**
+	 * The authorized_keys lines in $text that are safe to install: a bare public
+	 * key (type, key, optional comment) and nothing else. A line with options
+	 * (command=, from=, restrict) or anything unreadable is dropped, never
+	 * installed without its options.
+	 *
+	 * @return string[]
+	 */
+	public static function root_key_lines($text) {
+		$out = [];
+		foreach (preg_split('/\R/', (string)$text) as $line) {
+			$line = trim($line);
+			if ($line !== '' && preg_match('/^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+\/=]+(?: [A-Za-z0-9._@:+=,\/ -]{0,100})?$/', $line)) {
+				$out[$line] = $line;
+			}
+		}
+		return array_values($out);
 	}
 
 }

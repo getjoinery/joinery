@@ -1504,6 +1504,8 @@ the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44), and Phase 2's
     columns, so the retired row kept "Getjoinery (copy)" while holding the old container. The swap
     now renames it: (old container) or (old server) once retired, (copy) again on the way back.
 
+- **WP15 — Root SSH keys travel with a copy, when ticked (owner, 2026-10-07).** Its own spec: `root_ssh_login_and_keys`.
+
 ## Test plan
 
 **In the gate (db tier unless marked).** Each group tests one piece alone.

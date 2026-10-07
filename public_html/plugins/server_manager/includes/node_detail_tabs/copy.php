@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.11 - the source's root SSH keys are listed by fingerprint with a tick to carry them to the copy (WP15)
  * @version 1.10 - a kept switch-over's old container is named until it is removed and its host holds no
  *                  certificate of it, with Remove it from the host here (B5); no longer for a week only
  * @version 1.9 - the key step is one link, the copy's key look path, on a copy whose release answers it; a container
@@ -247,6 +248,27 @@ if (!$site_copy) {
 		} else {
 			$fw->textinput('copy_type', 'Instance type', ['required' => true, 'value' => $copy_same,
 				'helptext' => 'Linode\'s plan list did not answer. A plan id such as g6-standard-2.']);
+		}
+		// The source's root SSH keys: shown by fingerprint, carried only when ticked.
+		$copy_keys = SiteCopyRunner::source_root_keys($node);
+		$copy_carry = array();
+		if ($copy_keys['known'] && $copy_keys['keys']) {
+			echo '<p><strong>Root SSH keys on this site\'s server</strong></p><ul>';
+			foreach ($copy_keys['keys'] as $k) {
+				echo '<li><code>' . $copy_h($k['fingerprint']) . '</code>' . ($k['comment'] !== '' ? ' ' . $copy_h($k['comment']) : '')
+					. ($k['carry'] ? '' : ' — has restrictions, not carried') . '</li>';
+				if ($k['carry']) {
+					$copy_carry[] = $k['fingerprint'];
+				}
+			}
+			echo '</ul>';
+			if ($copy_carry) {
+				$fw->hiddeninput('copy_key_fingerprints', ['value' => implode(',', $copy_carry)]);
+				$fw->checkboxinput('copy_carry_root_keys', 'Carry these SSH keys to the copy (not recommended)', [
+					'helptext' => 'Without this the copy has no root SSH keys and root cannot log in; it is reached through its agent.']);
+			}
+		} elseif (!$copy_keys['known']) {
+			echo '<p class="small text-muted">This site\'s server has not reported its root SSH keys, so none can be carried; the copy will have none.</p>';
 		}
 		$fw->submitbutton('btn_copy_new', 'Create the server and copy');
 		$fw->end_form();

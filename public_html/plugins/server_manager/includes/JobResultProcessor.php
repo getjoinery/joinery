@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.67 - host reports keep root_ssh (host_report 1.16): root's public keys and fingerprints; only bare keys are carryable
  * @version 1.66 - host reports keep up to 100 site containers and 100 sites' outbound figures
  *                 (HOST_REPORT_MAX_SITES, host_report 1.15), not 20: a multi-tenant host takes 50;
  *                 disk_pool: a Docker host's disk pool (host_report 1.15), its figures or none
@@ -3300,6 +3301,8 @@ HTML;
 			'ssh_auth_failures_24h'        => self::host_report_count($in['ssh_auth_failures_24h'] ?? null),
 			'kernel_events_24h'            => self::host_report_kernel_events($in['kernel_events_24h'] ?? null),
 			'sshd'                         => $sshd,
+			// Root's authorized keys, public halves and fingerprints (host_report 1.16); null from an older node.
+			'root_ssh'                     => array_key_exists('root_ssh', $in) ? self::host_report_root_ssh($in['root_ssh']) : null,
 			'disk'                         => $disk,
 			// A Docker host's disk pool, /var/lib/docker on a filesystem of its
 			// own (host_report 1.15): the root disk never shows it filling.
@@ -3320,6 +3323,34 @@ HTML;
 			'outbound_limits'              => array_key_exists('outbound_limits', $in) ? self::host_report_outbound_limits($in['outbound_limits']) : null,
 			'generated_at'                 => self::host_report_count($in['generated_at'] ?? null),
 		];
+	}
+
+	/**
+	 * Root's SSH keys as the plane keeps them: at most HOST_REPORT_MAX_LIST, each with a SHA256
+	 * fingerprint, and the key itself only when it is a bare, well-formed public key (carry true).
+	 * A hostile node can name keys; the install step re-checks every line before using it.
+	 */
+	private static function host_report_root_ssh($v) {
+		if (!is_array($v) || !isset($v['keys']) || !is_array($v['keys'])) { return 'unknown'; }
+		$types = 'ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com';
+		$keys = [];
+		foreach (array_slice(array_values($v['keys']), 0, self::HOST_REPORT_MAX_LIST) as $k) {
+			if (!is_array($k)) { continue; }
+			$fp = (isset($k['fingerprint']) && is_string($k['fingerprint']) && preg_match('/^SHA256:[A-Za-z0-9+\/]{43}$/', $k['fingerprint']))
+				? $k['fingerprint'] : 'unknown';
+			$type = is_string($k['type'] ?? null) ? $k['type'] : '';
+			$key = is_string($k['key'] ?? null) ? $k['key'] : '';
+			$carry = ($k['carry'] ?? false) === true && $fp !== 'unknown' && strlen($key) <= 2048
+				&& preg_match('/^(?:' . $types . ')$/', $type) && preg_match('/^[A-Za-z0-9+\/=]+$/', $key);
+			$keys[] = [
+				'fingerprint' => $fp,
+				'carry'       => (bool)$carry,
+				'type'        => $carry ? $type : '',
+				'key'         => $carry ? $key : '',
+				'comment'     => $carry ? self::host_report_name($k['comment'] ?? '') : '',
+			];
+		}
+		return ['keys' => $keys];
 	}
 
 	/** A list of names, capped and sanitised, or the string unknown. */

@@ -348,6 +348,27 @@ check($node->get('mgn_joinery_version') === '2.14.3',
 	var_export($node->get('mgn_joinery_version'), true));
 
 // ---------------------------------------------------------------------------
+section('host_report: root_ssh keeps fingerprints, and carries only well-formed bare keys (WP15)');
+$wp15_fp = 'SHA256:' . str_repeat('A', 43);
+$wp15_in = array('root_ssh' => array('keys' => array(
+	array('fingerprint' => $wp15_fp, 'carry' => true, 'type' => 'ssh-ed25519', 'key' => 'AAAAC3NzaC1lZDI1NTE5AAAAIPyy+kqQ21YuiI+qWRCicmjdsq8hkABB6c3m50p31z4N', 'comment' => 'jeremy@laptop'),
+	array('fingerprint' => $wp15_fp, 'carry' => true, 'type' => 'ssh-ed25519', 'key' => "AAAA\nssh-rsa evil", 'comment' => ''),
+	array('fingerprint' => 'not-a-fingerprint', 'carry' => true, 'type' => 'ssh-rsa', 'key' => 'AAAB', 'comment' => ''),
+	array('fingerprint' => $wp15_fp, 'carry' => false, 'type' => '', 'key' => '', 'comment' => ''),
+)));
+$wp15_out = JobResultProcessor::sanitise_host_report($wp15_in)['root_ssh'];
+check($wp15_out['keys'][0]['carry'] === true && $wp15_out['keys'][0]['comment'] === 'jeremy@laptop',
+	'a well-formed bare key is carryable');
+check($wp15_out['keys'][1]['carry'] === false && $wp15_out['keys'][1]['key'] === '',
+	'a key with anything but base64 in it is listed, not carried');
+check($wp15_out['keys'][2]['carry'] === false && $wp15_out['keys'][2]['fingerprint'] === 'unknown',
+	'a key with no real fingerprint is not carried');
+check($wp15_out['keys'][3]['carry'] === false && $wp15_out['keys'][3]['fingerprint'] === $wp15_fp,
+	'a restricted key shows its fingerprint and is not carried');
+check(JobResultProcessor::sanitise_host_report(array())['root_ssh'] === null
+	&& JobResultProcessor::sanitise_host_report(array('root_ssh' => 'x'))['root_ssh'] === 'unknown',
+	'an older node reports none; junk reads unknown');
+
 section('host_report: the object lands in its own two columns, capped on intake');
 
 // What the agent posts for a script primitive: its envelope, with the script's
@@ -421,7 +442,7 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 20, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
+check(!isset($capped['surprise']) && count($capped) === 21, 'unknown keys are dropped and every known key is present', var_export(array_keys($capped), true));
 check($capped['cpus'] === 'unknown', 'a processor count that is not a count reads unknown');
 check(JobResultProcessor::sanitise_host_report(array('cpus' => 4))['cpus'] === 4, 'a processor count is kept');
 $quiet = JobResultProcessor::sanitise_host_report(array('answers' => array('apache2' => 'yes', 'php-fpm' => 'quiet', 'postgresql' => 'maybe')));

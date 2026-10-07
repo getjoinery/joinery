@@ -307,6 +307,28 @@ check(strpos($why, 'already has a dormant copy') !== false, 'a copy row made by 
 $stray->soft_delete();
 
 // ---------------------------------------------------------------------------
+section('The source\'s root SSH keys travel only as the operator saw them (WP15)');
+
+$wp15_fp1 = 'SHA256:' . str_repeat('B', 43);
+$wp15_fp2 = 'SHA256:' . str_repeat('C', 43);
+$wp15_n = new ManagedNode($src->key, TRUE);
+check(SiteCopyRunner::source_root_keys($wp15_n)['known'] === false, 'a source that has not reported its keys: none known, none carried');
+$wp15_n->set('mgn_last_host_report', json_encode(array('root_ssh' => array('keys' => array(
+	array('fingerprint' => $wp15_fp1, 'carry' => true, 'type' => 'ssh-ed25519', 'key' => 'AAAAC3Nza', 'comment' => 'me'),
+	array('fingerprint' => $wp15_fp2, 'carry' => false, 'type' => '', 'key' => '', 'comment' => ''))))));
+$wp15_r = SiteCopyRunner::source_root_keys($wp15_n);
+check($wp15_r['known'] === true && count($wp15_r['keys']) === 2 && $wp15_r['keys'][1]['carry'] === false,
+	'the report is read back with each key\'s fingerprint and whether it can be carried');
+$wp15_carry = new ReflectionMethod('SiteCopyRunner', 'carried_key_lines');
+$wp15_carry->setAccessible(true);
+check($wp15_carry->invoke(null, $wp15_n, array()) === '', 'unticked: nothing is carried');
+check($wp15_carry->invoke(null, $wp15_n, array('carry_root_keys' => true, 'key_fingerprints' => $wp15_fp1)) === 'ssh-ed25519 AAAAC3Nza me',
+	'ticked with the fingerprints shown: the bare key is carried, the restricted one is not');
+$wp15_threw = '';
+try { $wp15_carry->invoke(null, $wp15_n, array('carry_root_keys' => true, 'key_fingerprints' => $wp15_fp2)); } catch (Exception $e) { $wp15_threw = $e->getMessage(); }
+check(strpos($wp15_threw, 'changed since you looked') !== false, 'keys that differ from the ones shown are refused', $wp15_threw);
+
+// ---------------------------------------------------------------------------
 section('A copy onto a server the owner brings');
 
 $copy = SiteCopyRunner::start_own_server($src, null);

@@ -11,6 +11,8 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.15 - 'Keep root SSH login (not recommended)' with the public keys to put on root; unticked, root login is off
+ *                 (specs/site_copy.md WP15)
  * @version 1.14 - a site name is 2 to 50 characters (install.sh refuses one letter); a one-character slug
  *                 (a bare install's site name) becomes node-<slug>; a long display name's slug is cut to fit
  *                 the 50-character slug column with its collision suffix
@@ -65,6 +67,21 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			}
 			if ($docker_mode !== 'docker' && $docker_mode !== 'bare-metal') {
 				$field_errors['docker_mode'] = 'Choose Docker or Bare-metal.';
+			}
+		}
+
+		// Root SSH login is off unless asked for; asked for, it takes the keys given here.
+		$root_ssh_keys = '';
+		if (!empty($_POST['keep_root_login'])) {
+			$typed = trim((string)($_POST['root_ssh_keys'] ?? ''));
+			$kept = JobCommandBuilder::root_key_lines($typed);
+			$wanted = count(array_filter(array_map('trim', preg_split('/\R/', $typed)), function ($l) { return $l !== ''; }));
+			if (!$kept) {
+				$field_errors['root_ssh_keys'] = 'Paste at least one public key (ssh-ed25519 AAAA… name) to keep root login.';
+			} elseif (count($kept) !== $wanted) {
+				$field_errors['root_ssh_keys'] = 'Every line must be a plain public key (type, key, optional name). Lines with options such as command= or from= are not accepted.';
+			} else {
+				$root_ssh_keys = implode("\n", $kept);
 			}
 		}
 
@@ -139,6 +156,9 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_instance_type',  trim($_POST['cloud_instance_type']));
 				$provision->set('cvp_docker_mode',    $is_bare ? 'docker' : $docker_mode); // a bare instance IS a Docker host; the builder refuses any other shape for it
 				$provision->set('cvp_install_mode',   $mode);
+				if ($root_ssh_keys !== '') {
+					$provision->set('cvp_root_ssh_keys', $root_ssh_keys);
+				}
 				$provision->prepare();
 				$provision->save();
 
@@ -262,6 +282,14 @@ $formwriter->textinput('domain', 'Domain', [
 	'placeholder' => 'e.g., orgs.getjoinery.com',
 	'helptext'    => 'Domain only — no http:// or https://. The new site\'s own domain. A certificate is issued during the install when DNS already points here, otherwise on its own once it does.',
 	'pattern'     => '^(?!https?://).+',
+]);
+
+$formwriter->checkboxinput('keep_root_login', 'Keep root SSH login (not recommended)', [
+	'helptext' => 'Off by default: the new server is reached through its agent and root cannot log in over SSH.',
+]);
+$formwriter->textbox('root_ssh_keys', 'Public keys for root', [
+	'rows'     => 3,
+	'helptext' => 'One per line. Used only when "Keep root SSH login" is ticked.',
 ]);
 
 echo '<p class="text-muted">To put an existing site on a new server, use <strong>Copy</strong> on that site\'s node page.</p>';
