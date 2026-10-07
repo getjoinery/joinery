@@ -15,6 +15,7 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.7 - operatorTokenGrantedScopes(): the recorded grant itself, for the test-account cleanup card
  * @version 1.6 - the operator token's scopes: recordOperatorTokenScopes() reads them from the provider when the
  *                hosted card is saved, hostedStatus() names each scope it lacks and what that scope is for
  * @version 1.5 - the service account is found by its id (server_manager_provisioning_service_user_id),
@@ -571,14 +572,26 @@ class ProvisioningSetup {
 	 * path reads as unchecked, never as the old token's answer.
 	 */
 	public static function operatorTokenMissingScopes(): ?array {
+		$granted = self::operatorTokenGrantedScopes();
+		if ($granted === null) {
+			return null;
+		}
+		$missing = LinodeComputeDriver::missingScopes($granted, array_keys(self::OPERATOR_TOKEN_SCOPES));
+		return array_intersect_key(self::OPERATOR_TOKEN_SCOPES, array_flip($missing));
+	}
+
+	/**
+	 * The scopes the provider last reported for the token now set, or null
+	 * when this token has not been checked.
+	 */
+	public static function operatorTokenGrantedScopes(): ?array {
 		$record = json_decode(trim(self::readSetting(self::OPERATOR_TOKEN_SCOPES_SETTING)), true);
 		$token = trim(self::readSecret('server_manager_operator_cloud_token'));
 		if (!is_array($record) || !is_array($record['scopes'] ?? null) || $token === ''
 			|| !hash_equals(self::tokenFingerprint($token), (string)($record['token'] ?? ''))) {
 			return null;
 		}
-		$missing = LinodeComputeDriver::missingScopes($record['scopes'], array_keys(self::OPERATOR_TOKEN_SCOPES));
-		return array_intersect_key(self::OPERATOR_TOKEN_SCOPES, array_flip($missing));
+		return array_values(array_map('strval', $record['scopes']));
 	}
 
 	/** 16 hex characters of the token's SHA-256: enough to tell tokens apart, nothing to use. */

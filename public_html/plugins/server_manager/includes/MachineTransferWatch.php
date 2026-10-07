@@ -16,6 +16,8 @@
  * passed. One node speaks for each machine, so a server of twelve sites raises
  * one incident.
  *
+ * @version 1.2 - accounts(), node_addresses() and nodes_on() are public: adopting a node's cloud server
+ *                and the test-account cleanup match by the same rule (test_cloud_account_and_prod_management)
  * @version 1.1 - review R2-R5: a node is on one machine (host match over a join's report, newest of
  *                equals; only the newest join counts); the link is a one-column update; a read never
  *                parks a connected account; a new month's first figure no lower than last month's is held
@@ -253,7 +255,7 @@ class MachineTransferWatch {
 	 * those it could not use. A connected account whose grant has expired is
 	 * skipped silently: the accounts page already asks its owner to reconnect.
 	 */
-	private static function accounts(): array {
+	public static function accounts(): array {
 		$accounts = array();
 		$problems = array();
 		$token = ProvisionCustomerCloud::operator_compute_token();
@@ -285,7 +287,7 @@ class MachineTransferWatch {
 	 * machine knows its own addresses. Only the newest approved join counts:
 	 * an older one may name a machine the site has since left.
 	 */
-	private static function node_addresses(callable $resolve): array {
+	public static function node_addresses(callable $resolve): array {
 		$hosts = array();
 		foreach (new MultiManagedHost(array('deleted' => false)) as $host) {
 			$hosts[(int)$host->key] = $host;
@@ -326,7 +328,7 @@ class MachineTransferWatch {
 	}
 
 	/** The nodes this instance's addresses match: [node id => MATCH_HOST or MATCH_JOIN]. */
-	private static function nodes_on(array $instance, array $nodes): array {
+	public static function nodes_on(array $instance, array $nodes): array {
 		$mine = array();
 		foreach (array_merge((array)($instance['ipv4_public'] ?? array()), array((string)($instance['ipv6'] ?? ''))) as $a) {
 			if (($b = IpAddress::binary((string)$a)) !== null) {

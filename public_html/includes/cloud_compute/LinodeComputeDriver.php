@@ -6,6 +6,9 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.14 - CloudAccountCleanup: accountCompany() (the account's company field alone), listVolumes(),
+ *                deleteVolume(); listInstances() carries each instance's tags
+ *                (specs/test_cloud_account_and_prod_management.md WP3)
  * @version 1.13 - CloudMachineTransfer: listInstances() (every page) and getInstanceTransfer(); Linode's
  *                figure leaves out same-data-center IPv6 in both directions (measured 2026-10-06)
  * @version 1.12 - tokenScopes() (the scopes Linode reports for the token, from X-OAuth-Scopes) and
@@ -44,7 +47,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
-class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer {
+class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer, CloudAccountCleanup {
 
 	const API_BASE = 'https://api.linode.com/v4/';
 
@@ -240,6 +243,7 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 					}
 				}
 				$row['created'] = self::utc((string)($instance['created'] ?? ''));
+				$row['tags'] = array_values(array_map('strval', (array)($instance['tags'] ?? array())));
 				unset($row['ip']);
 				$out[] = $row;
 			}
@@ -649,6 +653,38 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			return $company;
 		}
 		return $company !== '' ? $company . ' (user ' . $user . ')' : 'user ' . $user;
+	}
+
+	/**
+	 * The account's company field as set in Account Settings, '' when empty.
+	 * Needs account:read_only; a token without it throws rather than answer.
+	 */
+	public function accountCompany(): string {
+		return trim((string)($this->request('GET', 'account')['company'] ?? ''));
+	}
+
+	public function listVolumes(): array {
+		$out = array();
+		$page = 1;
+		do {
+			$result = $this->request('GET', 'volumes?page_size=500&page=' . $page);
+			foreach ((array)($result['data'] ?? array()) as $volume) {
+				$out[] = array(
+					'id'          => (string)($volume['id'] ?? ''),
+					'label'       => (string)($volume['label'] ?? ''),
+					'created'     => self::utc((string)($volume['created'] ?? '')),
+					'attached_to' => isset($volume['linode_id']) && $volume['linode_id'] !== null ? (string)$volume['linode_id'] : '',
+					'tags'        => array_values(array_map('strval', (array)($volume['tags'] ?? array()))),
+				);
+			}
+			$pages = (int)($result['pages'] ?? 1);
+			$page++;
+		} while ($page <= $pages);
+		return $out;
+	}
+
+	public function deleteVolume(string $volume_id): void {
+		$this->request('DELETE', 'volumes/' . rawurlencode($volume_id));
 	}
 
 	/**

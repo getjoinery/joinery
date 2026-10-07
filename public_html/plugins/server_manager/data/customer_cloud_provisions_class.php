@@ -39,6 +39,8 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.16 - install mode 'adopted': a running server this plane did not create, recorded by Adopt cloud
+ *                 server so reverse DNS and an IP-swap switch-over reach it (test_cloud_account_and_prod_management WP9)
  * @version 1.15 - cvp_root_ssh_keys: the public keys put on the machine's root account when its install password
  *                 retires (a copy that carries its source's keys, or an install that keeps root login); empty = no
  *                 root login (specs/site_copy.md WP15)
@@ -115,7 +117,7 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_instance_type'          => array('type'=>'varchar(50)'),
 		'cvp_mgn_managed_node_id'            => array('type'=>'int8'),
 		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker', 'allowed_values'=>array('docker', 'bare-metal')),
-		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'bare', 'copy')),
+		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'bare', 'copy', 'adopted')),
 		'cvp_source_node_id'         => array('type'=>'int8'),
 		// A copy's install: the release it is installed at, its source's exact
 		// release (vendor/ never travels in a backup). Empty for every other mode.
@@ -235,7 +237,7 @@ class CustomerCloudProvision extends SystemBase {
 			throw new CustomerCloudProvisionException("Unknown docker mode '{$docker_mode}'.");
 		}
 		$install_mode = $this->get('cvp_install_mode') ?: 'fresh';
-		if (!in_array($install_mode, array('fresh', 'bare', 'copy'), true)) {
+		if (!in_array($install_mode, array('fresh', 'bare', 'copy', 'adopted'), true)) {
 			throw new CustomerCloudProvisionException("Unknown install mode '{$install_mode}'.");
 		}
 		// A dormant copy: of a node, on bare metal, at a release, made by an admin.
@@ -251,6 +253,16 @@ class CustomerCloudProvision extends SystemBase {
 			}
 			if ($origin !== 'admin') {
 				throw new CustomerCloudProvisionException('Copy provisions must be admin-origin.');
+			}
+		}
+		// An adopted server was running before this plane knew it: an admin
+		// recorded it against a node, and nothing installs on it.
+		if ($install_mode === 'adopted') {
+			if ($origin !== 'admin') {
+				throw new CustomerCloudProvisionException('Adopted provisions must be admin-origin.');
+			}
+			if ($docker_mode !== 'bare-metal') {
+				throw new CustomerCloudProvisionException('An adopted server is a whole machine, so bare metal.');
 			}
 		}
 		// A bare instance (no site install) has no order to fulfill — it exists

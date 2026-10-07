@@ -14,6 +14,8 @@
  *   ip     string  first public IPv4, '' until assigned
  *   label  string  provider-side label
  *
+ * @version 1.7 - CloudAccountCleanup: an account's own company name, its volumes, and deleting one; each
+ *                listed instance carries its tags (specs/test_cloud_account_and_prod_management.md WP3)
  * @version 1.6 - CloudMachineTransfer: an account's instances and each one's transfer this month
  *                (specs/node_outbound_and_transfer.md WP1)
  * @version 1.5 - CloudAccountIdentity: the provider's own name for the account a token reaches
@@ -86,7 +88,9 @@ interface CloudComputeProvider {
 
 	/**
 	 * Delete an instance. Used only for cleaning up a failed provision that
-	 * this pipeline itself created — never for customer-initiated teardown.
+	 * this pipeline itself created, and by the test-account cleanup on an
+	 * account whose own name says it is disposable — never for
+	 * customer-initiated teardown.
 	 * @throws CloudComputeException on any API failure.
 	 */
 	public function deleteInstance(string $instance_id): void;
@@ -252,6 +256,7 @@ interface CloudMachineTransfer {
 	 *   ipv4_public  string[]  every public IPv4
 	 *   ipv6         string    the instance's own IPv6, or ''
 	 *   created      string    UTC 'Y-m-d H:i:s'
+	 *   tags         string[]  the provider-side tags
 	 *
 	 * @throws CloudComputeException
 	 */
@@ -282,4 +287,35 @@ interface CloudAccountIdentity {
 	 * @throws CloudComputeException when the token cannot read it
 	 */
 	public function accountName(): string;
+}
+
+/**
+ * Optional capability: what the test-account cleanup needs beyond listing and
+ * deleting instances (specs/test_cloud_account_and_prod_management.md WP3).
+ * The caller asks `instanceof CloudAccountCleanup`.
+ */
+interface CloudAccountCleanup {
+
+	/**
+	 * The account's own company (organization) name exactly as its owner set
+	 * it at the provider, '' when none is set. The cleanup's safety catch
+	 * compares it to a fixed name, so this never falls back to anything else.
+	 *
+	 * @throws CloudComputeException when the token cannot read the account
+	 */
+	public function accountCompany(): string;
+
+	/**
+	 * Every storage volume on the account:
+	 *   id, label    string
+	 *   created      string    UTC 'Y-m-d H:i:s'
+	 *   attached_to  string    the instance id it is attached to, or ''
+	 *   tags         string[]
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function listVolumes(): array;
+
+	/** Delete a volume that is attached to nothing. @throws CloudComputeException */
+	public function deleteVolume(string $volume_id): void;
 }
