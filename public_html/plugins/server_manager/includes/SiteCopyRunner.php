@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.11 - source_root_keys(): the root SSH keys the source's last host report lists; start_new_server carries them to
+ *                 the copy (cvp_root_ssh_keys) when asked and the fingerprints the operator saw still match (WP15)
  * @version 1.10 - cleanup_left(): each kept switch-over's old container not yet removed, or removed with its
  *                 certificate still on its host, for as long as that lasts (B5);
  *                 a container source's old container is stopped and held on its host as the switch-over's last
@@ -372,6 +374,62 @@ class SiteCopyRunner {
 		return ($p && (string)$p->get('cvp_provider') === 'linode') ? trim((string)$p->get('cvp_instance_type')) : '';
 	}
 
+	/**
+	 * The root SSH keys the source's last host report lists (host_report 1.16).
+	 * known=false: the machine has not reported them (an older report, or none).
+	 * keys: every key with its fingerprint; carry=true marks the bare keys a copy can take,
+	 * a key with options is listed but never carried.
+	 *
+	 * @return array{known:bool, keys:array<int,array{fingerprint:string,carry:bool,type:string,key:string,comment:string}>}
+	 */
+	public static function source_root_keys(ManagedNode $source): array {
+		$report = json_decode((string)$source->get('mgn_last_host_report'), true);
+		$keys = (is_array($report) && isset($report['root_ssh']) && is_array($report['root_ssh']))
+			? ($report['root_ssh']['keys'] ?? null) : null;
+		if (!is_array($keys)) {
+			return array('known' => false, 'keys' => array());
+		}
+		$out = array();
+		foreach ($keys as $k) {
+			if (is_array($k) && isset($k['fingerprint'])) {
+				$out[] = array('fingerprint' => (string)$k['fingerprint'], 'carry' => !empty($k['carry']),
+					'type' => (string)($k['type'] ?? ''), 'key' => (string)($k['key'] ?? ''),
+					'comment' => (string)($k['comment'] ?? ''));
+			}
+		}
+		return array('known' => true, 'keys' => $out);
+	}
+
+	/**
+	 * The authorized_keys text for the keys of the source the operator ticked, or ''.
+	 * The tick carries the fingerprints it showed; if the source's keys have changed since the
+	 * page was drawn the copy is refused rather than carrying keys nobody looked at.
+	 */
+	private static function carried_key_lines(ManagedNode $source, array $opts): string {
+		if (empty($opts['carry_root_keys'])) {
+			return '';
+		}
+		$report = self::source_root_keys($source);
+		$lines = array();
+		$now = array();
+		foreach ($report['keys'] as $k) {
+			if ($k['carry']) {
+				$now[] = $k['fingerprint'];
+				$lines[] = trim($k['type'] . ' ' . $k['key'] . ' ' . $k['comment']);
+			}
+		}
+		sort($now);
+		$shown = array_values(array_filter(array_map('trim', explode(',', (string)($opts['key_fingerprints'] ?? '')))));
+		sort($shown);
+		if (!$report['known'] || !$lines) {
+			throw new SiteCopyException('The source has reported no root SSH keys to carry.');
+		}
+		if ($now !== $shown) {
+			throw new SiteCopyException('The source\'s root SSH keys changed since you looked. Reload the Copy tab and check them again.');
+		}
+		return implode("\n", $lines);
+	}
+
 	/** The memory the source's machine reports, in bytes, or 0 when it has not said. */
 	public static function source_memory_bytes(ManagedNode $source): int {
 		$report = json_decode((string)$source->get('mgn_last_host_report'), true);
@@ -475,7 +533,7 @@ class SiteCopyRunner {
 	 * install mode copy, at the source's release, on the operator's cloud
 	 * account (account 'operator') or a connected one (its id).
 	 *
-	 * @param array $opts account, region, type
+	 * @param array $opts account, region, type, carry_root_keys (bool), key_fingerprints (comma list the operator saw)
 	 */
 	public static function start_new_server(ManagedNode $source, array $opts, $user_id, string $from = SiteCopy::FROM_SOURCE): SiteCopy {
 		self::refuse_start($source, $from);
@@ -528,6 +586,10 @@ class SiteCopyRunner {
 		$provision->set('cvp_install_mode', 'copy');
 		$provision->set('cvp_source_node_id', (int)$source->key);
 		$provision->set('cvp_release', (string)$source->get('mgn_joinery_version'));
+		$carried = self::carried_key_lines($source, $opts);
+		if ($carried !== '') {
+			$provision->set('cvp_root_ssh_keys', $carried);
+		}
 		$provision->prepare();
 		$provision->save();
 

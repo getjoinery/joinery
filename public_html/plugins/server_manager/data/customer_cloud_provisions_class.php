@@ -39,6 +39,9 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.15 - cvp_root_ssh_keys: the public keys put on the machine's root account when its install password
+ *                 retires (a copy that carries its source's keys, or an install that keeps root login); empty = no
+ *                 root login (specs/site_copy.md WP15)
  * @version 1.14 - install mode from_backup, cvp_clone_key_sealed and cvp_backup_source are gone with the
  *                 retired Clone (site_copy.md WP9)
  * @version 1.13 - is_sold(): a site somebody bought (order or buyer origin, not bare), the one rule for
@@ -125,6 +128,8 @@ class CustomerCloudProvision extends SystemBase {
 		// NULL means either a pre-keyless provision or a provision whose install
 		// password has been retired.
 		'cvp_root_pass_sealed'       => array('type'=>'text'),
+		// Public keys (one authorized_keys line each) the retire step puts on root. Empty: root login is turned off.
+		'cvp_root_ssh_keys'          => array('type'=>'text'),
 		// The install password's lifecycle. held: the machine accepts it and
 		// this row holds it (from the moment it is sealed, through the install,
 		// until every agent the install put on the machine has been admitted).

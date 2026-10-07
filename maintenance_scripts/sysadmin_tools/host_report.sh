@@ -8,6 +8,12 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.16 - root_ssh: the public keys in root's authorized_keys, each with its SHA256 fingerprint,
+#                so a copy of this machine can carry them (specs/site_copy.md WP15). A key line is
+#                carried only when it is a bare key (type, key, comment): a line with options
+#                (command=, from=, restrict) is listed with its fingerprint and carry:false, because
+#                carrying it without its options would widen what it allows. Public keys only; capped
+#                at 20 keys. "unknown" where root's file cannot be read.
 # Version: 1.15 - a host's sites are listed up to 100 (MAX_SITES), not 20: a multi-tenant
 #                host takes 50 (specs/multi_tenant_docker_hosts.md WP7 N1). To fit the agent's
 #                minute, every container is read by ONE docker inspect, and every running
@@ -312,6 +318,45 @@ emit_sshd() {
         printf ',"pubkey_authentication":"unknown","kbd_interactive_authentication":"unknown","max_auth_tries":"unknown"'
         printf ',"ports":"unknown","allow_users":"unknown","allow_groups":"unknown"}'
     fi
+}
+
+# ---------------------------------------------------------------------------
+# root's authorized keys: public halves and fingerprints, so a copy can carry them.
+# A line is carried (carry:true) only when it is a bare key; one with options is
+# listed with its fingerprint and carry:false, never rewritten without them.
+# ---------------------------------------------------------------------------
+KEY_TYPE_RE='^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)$'
+emit_root_ssh() {
+    local dir="${HOST_REPORT_ROOT_SSH_DIR:-/root/.ssh}" file line type blob comment fp n=0 first=1 carry
+    file="$dir/authorized_keys"
+    # Readable: read it. Unreadable as root: there is no file, so no keys. Unreadable as anyone
+    # else: it could not be read, which is not the same as none.
+    if [[ ! -r "$file" ]]; then
+        if [[ "$(id -u)" == 0 ]]; then printf '{"keys":[]}'; else printf '"unknown"'; fi
+        return
+    fi
+    printf '{"keys":['
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ "$line" =~ ^[[:space:]]*($|#) ]] && continue
+        (( n < MAX_LIST )) || break
+        fp="$(printf '%s\n' "$line" | run ssh-keygen -lf /dev/stdin -E sha256 | awk 'NR==1{print $2}')"
+        fp="${fp//[^A-Za-z0-9+\/:=]/}"
+        carry=false; type=""; blob=""; comment=""
+        read -r type blob comment <<<"$line"
+        if [[ "$type" =~ $KEY_TYPE_RE && "$blob" =~ ^[A-Za-z0-9+/=]+$ && -n "$fp" ]]; then
+            carry=true
+            comment="$(safe_name "$comment")"
+        else
+            type=""; blob=""; comment=""
+        fi
+        (( first )) || printf ','
+        first=0
+        printf '{"fingerprint":"%s","carry":%s,"type":"%s","key":"%s","comment":"%s"}' \
+            "${fp:-unknown}" "$carry" "$type" "$blob" "$comment"
+        n=$((n+1))
+    done < "$file"
+    printf ']}'
 }
 
 # ---------------------------------------------------------------------------
@@ -972,6 +1017,7 @@ printf '"fail2ban_jails":%s,' "$(emit_fail2ban_jails)"
 printf '"ssh_auth_failures_24h":%s,' "$(emit_ssh_auth_failures)"
 printf '"kernel_events_24h":%s,' "$(emit_kernel_events)"
 printf '"sshd":%s,' "$(emit_sshd)"
+printf '"root_ssh":%s,' "$(emit_root_ssh)"
 printf '"disk":%s,' "$(emit_disk)"
 printf '"disk_pool":%s,' "$(emit_disk_pool)"
 printf '"memory":%s,' "$(emit_memory)"

@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,disk,disk_pool,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,outbound_limits,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,outbound_limits,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -274,7 +274,11 @@ head -c 100000 /dev/zero > "$T/vol/one_data/db"; head -c 300000 /dev/zero > "$T/
 export GATE_PID=$$ GATE_VOL="$T/vol"
 # sitetwo is held stopped by hold_container (a switch-over's old container).
 mkdir -p "$T/etc/joinery/sites/sitetwo"; printf 'restart=unless-stopped\n' > "$T/etc/joinery/sites/sitetwo/held"
-PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" bash "$SCRIPT" > "$T/root.json" 2> "$T/root.err"; rc=$?
+# Root's authorized keys (host_report 1.16): a bare key, the same key with options, junk, and a comment line.
+mkdir -p "$T/rootssh"
+ssh-keygen -q -t ed25519 -N '' -C 'gate@key' -f "$T/rootssh/k1"
+{ cat "$T/rootssh/k1.pub"; echo "# a note"; echo "command=\"/bin/true\" $(cat "$T/rootssh/k1.pub")"; echo "not a key"; } > "$T/rootssh/authorized_keys"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/root.json" 2> "$T/root.err"; rc=$?
 chk "stubbed run: exit 0" "$rc" "0"
 chk "stubbed run: a JSON object" "$(jv "$T/root.json" "" type)" "object"
 chk "failed units are capped at 20" "$(jv "$T/root.json" failed_units count)" "20"
@@ -341,6 +345,11 @@ chk "bytes sent is a number" "$(jv "$T/root.json" containers.0.net_tx_bytes type
 chk "disk is the sum of the site's volumes, measured" "$(jv "$T/root.json" containers.0.disk_bytes)" "$(( $(du -s -B1 "$T/vol/one_data" | cut -f1) + $(du -s -B1 "$T/vol/one_uploads" | cut -f1) ))"
 chk "a site with no process says unknown for every figure" "$(jv "$T/root.json" containers.1.started_at)/$(jv "$T/root.json" containers.1.memory.used_bytes)/$(jv "$T/root.json" containers.1.cpu.usage_usec)/$(jv "$T/root.json" containers.1.net_tx_bytes)" "unknown/unknown/unknown/unknown"
 chk "a site with no volumes has no disk figure" "$(jv "$T/root.json" containers.1.disk_bytes)" "unknown"
+chk "root_ssh lists each key line with its fingerprint" "$(jv "$T/root.json" root_ssh.keys count)" "3"
+chk "a bare key is carried, with its type, key and comment" "$(jv "$T/root.json" root_ssh.keys.0.carry)/$(jv "$T/root.json" root_ssh.keys.0.type)/$(jv "$T/root.json" root_ssh.keys.0.comment)" "true/ssh-ed25519/gate@key"
+chk "a key line with options is listed, never carried" "$(jv "$T/root.json" root_ssh.keys.1.carry)/$(jv "$T/root.json" root_ssh.keys.1.key)" "false/"
+chk "a line that is not a key has no fingerprint and is not carried" "$(jv "$T/root.json" root_ssh.keys.2.carry)/$(jv "$T/root.json" root_ssh.keys.2.fingerprint)" "false/unknown"
+chk "unreadable keys read unknown, not none" "$(HOST_REPORT_ROOT_SSH_DIR="$T/nonexistent" bash "$SCRIPT" 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["root_ssh"])')" "unknown"
 chk "sshd carries the compiled keys, in order" "$(jv "$T/root.json" sshd keys)" "password_authentication,permit_root_login,pubkey_authentication,kbd_interactive_authentication,max_auth_tries,ports,allow_users,allow_groups"
 chk "sshd auth methods and tries" "$(jv "$T/root.json" sshd.pubkey_authentication)/$(jv "$T/root.json" sshd.kbd_interactive_authentication)/$(jv "$T/root.json" sshd.max_auth_tries)" "yes/no/6"
 chk "sshd ports are every port line" "$(jv "$T/root.json" sshd.ports)" '["22","2222"]'
