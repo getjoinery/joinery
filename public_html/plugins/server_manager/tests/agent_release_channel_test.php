@@ -155,6 +155,12 @@ $make_site = function ($label, $bundled_version) use ($tmp_root) {
 	$dist = $site . '/public_html/agent_dist';
 	mkdir($dist, 0777, true);
 	mkdir($site . '/config', 0777, true);
+	// A publishing site lists its own release key in the repository
+	// (specs/release_transparency.md D5); the publisher refuses to sign with
+	// one that is not listed, so the fixture mints the key and lists it.
+	$fixture_keys = AgentDistPublisher::ensureKeys($site . '/config');
+	mkdir($site . '/maintenance_scripts/install_tools/release_keys/release', 0777, true);
+	file_put_contents($site . '/maintenance_scripts/install_tools/release_keys/release/site.pub', $fixture_keys['public_b64'] . "\n");
 	if ($bundled_version !== null) {
 		file_put_contents($dist . '/manifest.json', json_encode(array(
 			'version'  => $bundled_version,
@@ -196,6 +202,8 @@ check(($after_b['signing_public_key'] ?? '') === $own_pub_b,
 	'skipped stamps the missing signing_public_key with this site\'s key');
 check($after_b['version'] === '2.0.0' && $after_b['binaries'] === json_decode($before_b, true)['binaries'],
 	'and changes nothing else in the manifest');
+check(($after_b['release_keys'] ?? null) === array($own_pub_b) && ($after_b['log_keys'] ?? null) === array(),
+	'skipped carries the repository key lists into the manifest', json_encode($after_b['release_keys'] ?? null));
 check(AgentDistPublisher::bundleSigningKey($site_b) === $own_pub_b,
 	'bundleSigningKey() reads it back');
 $stamped_b = file_get_contents($dist_b . '/manifest.json');

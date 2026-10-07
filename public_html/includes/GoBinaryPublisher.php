@@ -31,6 +31,10 @@
  * publish() never throws — a broken build must not abort an unrelated platform
  * publish by exception; it reports a status and the caller decides.
  *
+ * @version 1.1 - the build is pinned to the toolchain go.mod names: assertToolchain()
+ *                refuses any other Go, and GOTOOLCHAIN=local keeps go from fetching
+ *                one. A reproducible binary needs one compiler, not "a" compiler
+ *                (specs/release_transparency.md D3)
  * @version 1.0 - generalised from the relay sealer's publisher
  *
  * Test seam: $go_locator, so the no-toolchain refusal can be exercised without
@@ -147,6 +151,7 @@ abstract class GoBinaryPublisher {
 				// a consumer with nothing to run.
 				throw new Exception('Go toolchain not found (install golang-go on the publishing box)');
 			}
+			$say($label . ': toolchain ' . static::assertToolchain($go, $src));
 
 			$staging = $bin . '.staging';
 			static::rrmdir($staging);
@@ -250,6 +255,42 @@ abstract class GoBinaryPublisher {
 		return null;
 	}
 
+	/**
+	 * The toolchain a Go source tree is pinned to: the `toolchain goX.Y.Z`
+	 * line of its go.mod. Null when the line is absent.
+	 */
+	public static function pinnedToolchain($src) {
+		$mod = @file_get_contents(rtrim($src, '/') . '/go.mod');
+		if ($mod === false || !preg_match('/^toolchain\s+(go\d+\.\d+(?:\.\d+)?)\s*$/m', $mod, $m)) {
+			return null;
+		}
+		return $m[1];
+	}
+
+	/**
+	 * Refuse to build with anything but the pinned toolchain. Go itself only
+	 * refuses an OLDER compiler than go.mod asks for and silently accepts a
+	 * newer one, so the version is compared exactly here: two publishers with
+	 * different compilers would ship two different binaries for one commit,
+	 * and a verifier rebuilding from the commit could match neither.
+	 *
+	 * @return string the toolchain version, e.g. "go1.22.2"
+	 */
+	public static function assertToolchain($go, $src) {
+		$pinned = static::pinnedToolchain($src);
+		if ($pinned === null) {
+			throw new Exception('go.mod in ' . $src . ' has no toolchain line; add "toolchain goX.Y.Z" so the build is reproducible');
+		}
+		$reported = trim((string)shell_exec('env GOTOOLCHAIN=local ' . escapeshellarg($go) . ' version 2>/dev/null'));
+		if (!preg_match('/^go version (go\S+) /', $reported, $m)) {
+			throw new Exception('could not read the Go version from ' . $go);
+		}
+		if ($m[1] !== $pinned) {
+			throw new Exception("go.mod pins {$pinned} but {$go} is {$m[1]}; install {$pinned} on the publishing box (or move the pin, deliberately)");
+		}
+		return $pinned;
+	}
+
 	/** Locate the Go toolchain. */
 	public static function findGo() {
 		if (static::$go_locator !== null) {
@@ -300,7 +341,7 @@ abstract class GoBinaryPublisher {
 		@mkdir($cache_root . '/gomodcache', 0777, true);
 
 		$cmd = sprintf(
-			'cd %s && env HOME=%s GOCACHE=%s GOMODCACHE=%s CGO_ENABLED=0 GOOS=linux GOARCH=%s %s build -buildvcs=false -trimpath -ldflags %s -o %s . 2>&1',
+			'cd %s && env HOME=%s GOCACHE=%s GOMODCACHE=%s GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=%s %s build -buildvcs=false -trimpath -ldflags %s -o %s . 2>&1',
 			escapeshellarg($src),
 			escapeshellarg($cache_root),
 			escapeshellarg($cache_root . '/gocache'),

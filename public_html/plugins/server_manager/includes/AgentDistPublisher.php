@@ -25,6 +25,15 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.0 - manifest.json carries release_keys and log_keys, read from the repository's
+ *                release_keys/ directory; the publisher refuses to sign with a key not listed
+ *                there (specs/release_transparency.md D5). signing_public_key stays for the
+ *                converger that reads it today
+ * @version 1.9 - the build refuses any Go but the one the agent's go.mod pins
+ *                (GoBinaryPublisher::assertToolchain, GOTOOLCHAIN=local), and
+ *                manifest.json records which (go_toolchain), so a verifier
+ *                rebuilding from the commit uses the same compiler
+ *                (specs/release_transparency.md D3)
  * @version 1.8 - manifest.json records the public key the bundle was built with (signing_public_key),
  *                stamped onto an unchanged bundle too where the source is here, and bundleSigningKey()
  *                reads it back: it is how a publish knows whether this site may sign a tree manifest
@@ -118,11 +127,20 @@ class AgentDistPublisher {
 				// source was built here, with this site's key. Say so in the
 				// manifest if it predates the record, so the answer to "may this
 				// site sign" is read, not inferred, from here on.
-				if (empty($manifest['signing_public_key'])) {
-					$keys = self::ensureKeys($full_site_dir . '/config');
-					$manifest['signing_public_key'] = $keys['public_b64'];
+				$keys = self::ensureKeys($full_site_dir . '/config');
+				$key_lists = self::assertOwnKeyListed($full_site_dir, $keys['public_b64']);
+				$wanted = array('signing_public_key' => $keys['public_b64'],
+					'release_keys' => $key_lists['release_keys'], 'log_keys' => $key_lists['log_keys']);
+				$current = array('signing_public_key' => $manifest['signing_public_key'] ?? null,
+					'release_keys' => $manifest['release_keys'] ?? null, 'log_keys' => $manifest['log_keys'] ?? null);
+				if ($current !== $wanted) {
+					// The key lists come from the repository, so a key added
+					// there ships in the next release whether or not the agent
+					// itself was rebuilt.
+					foreach ($wanted as $k => $v) { $manifest[$k] = $v; }
 					file_put_contents($dist_dir . '/manifest.json',
 						json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+					$say('Agent artifact: manifest.json key lists refreshed from release_keys/');
 				}
 				$msg = "Agent artifact: v{$agent_version} already bundled - unchanged";
 				$say($msg);
@@ -134,7 +152,8 @@ class AgentDistPublisher {
 			$rebuild_required = true;
 
 			$keys = self::ensureKeys($full_site_dir . '/config');
-			$say("Agent artifact: building v{$agent_version} (was " . ($bundled_version ?: 'none') . ") - signing key read from config/agent_signing_key");
+			$key_lists = self::assertOwnKeyListed($full_site_dir, $keys['public_b64']);
+			$say("Agent artifact: building v{$agent_version} (was " . ($bundled_version ?: 'none') . ") - signing key read from config/agent_signing_key, listed in release_keys/");
 
 			$go = self::findGo();
 			if ($go === null) {
@@ -143,6 +162,8 @@ class AgentDistPublisher {
 				// broken box, not a reason to ship the old agent.
 				throw new Exception('Go toolchain not found');
 			}
+			$go_toolchain = GoBinaryPublisher::assertToolchain($go, $src);
+			$say("Agent artifact: toolchain {$go_toolchain}");
 
 			$staging = $dist_dir . '.staging';
 			self::rrmdir($staging);
@@ -187,8 +208,9 @@ class AgentDistPublisher {
 			}
 
 			$manifest_json = json_encode(
-				array('version' => $agent_version, 'binaries' => $binaries,
-				      'signing_public_key' => $keys['public_b64']),
+				array('version' => $agent_version, 'go_toolchain' => $go_toolchain, 'binaries' => $binaries,
+				      'signing_public_key' => $keys['public_b64'],
+				      'release_keys' => $key_lists['release_keys'], 'log_keys' => $key_lists['log_keys']),
 				JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
 			);
 			if (file_put_contents($staging . '/manifest.json', $manifest_json . "\n") === false) {
@@ -246,6 +268,51 @@ class AgentDistPublisher {
 		$settings = Globalvars::get_instance();
 		$configured = $settings->get_setting('server_manager_agent_source_path');
 		return $configured ?: self::DEFAULT_SOURCE_PATH;
+	}
+
+	/**
+	 * The key lists the repository publishes (specs/release_transparency.md
+	 * D5): every Ed25519 release key under release_keys/release/ and every
+	 * checkpoint key under release_keys/log/, read from the tree so that a
+	 * rotation is a commit diff. The bundle manifest carries both lists; a
+	 * node's key files are derived from them.
+	 *
+	 * @return array{release_keys:string[], log_keys:array<array{origin:string,key:string}>}
+	 */
+	public static function repoKeyLists($full_site_dir) {
+		$base = rtrim($full_site_dir, '/') . '/maintenance_scripts/install_tools/release_keys';
+		$release = array();
+		foreach (glob($base . '/release/*.pub') ?: array() as $file) {
+			$b64 = trim((string)file_get_contents($file));
+			$raw = $b64 !== '' ? base64_decode($b64, true) : false;
+			if ($raw !== false && strlen($raw) === SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+				$release[] = base64_encode($raw);
+			}
+		}
+		$log = array();
+		foreach (glob($base . '/log/*.pub') ?: array() as $file) {
+			$b64 = trim((string)file_get_contents($file));
+			if ($b64 !== '' && base64_decode($b64, true) !== false) {
+				$log[] = array('origin' => basename($file, '.pub'), 'key' => $b64);
+			}
+		}
+		sort($release);
+		usort($log, function ($a, $b) { return strcmp($a['origin'], $b['origin']); });
+		return array('release_keys' => $release, 'log_keys' => $log);
+	}
+
+	/**
+	 * Refuse to sign with a key the repository does not publish. The lists are
+	 * what every node will trust; a key missing from them would verify today
+	 * and be invisible to anyone reading the commit.
+	 */
+	public static function assertOwnKeyListed($full_site_dir, $own_public_b64) {
+		$lists = self::repoKeyLists($full_site_dir);
+		if (!in_array($own_public_b64, $lists['release_keys'], true)) {
+			throw new Exception('this site\'s signing key is not listed in maintenance_scripts/install_tools/release_keys/release/; '
+				. 'add its public half there (one base64 line, any name .pub) and commit it, so the key a node trusts is the key the repository shows');
+		}
+		return $lists;
 	}
 
 	/** Parse the agent's own version out of main.go. */
@@ -369,7 +436,7 @@ class AgentDistPublisher {
 
 		$ldflags = sprintf('-X main.version=%s -X main.updatePubKeyB64=%s', $version, $public_b64);
 		$cmd = sprintf(
-			'cd %s && env HOME=%s GOCACHE=%s GOMODCACHE=%s CGO_ENABLED=0 GOOS=linux GOARCH=%s %s build -buildvcs=false -trimpath -ldflags %s -o %s . 2>&1',
+			'cd %s && env HOME=%s GOCACHE=%s GOMODCACHE=%s GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=%s %s build -buildvcs=false -trimpath -ldflags %s -o %s . 2>&1',
 			escapeshellarg($src),
 			escapeshellarg($cache_root),
 			escapeshellarg($cache_root . '/gocache'),
