@@ -7,6 +7,10 @@ composer.phar
 *.sql
 *.sql.gz
 *.sql.gz.enc
+# The install SQL a release ships is generated deterministically at publish
+# (utils/create_install_sql.php) and committed with VERSION, so the commit a
+# release names holds every byte the archive carries (specs/release_transparency.md D2).
+!maintenance_scripts/install_tools/joinery-install.sql.gz
 *.bak
 
 # Site-specific config (from membership)

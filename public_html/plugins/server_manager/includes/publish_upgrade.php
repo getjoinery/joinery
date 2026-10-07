@@ -126,9 +126,20 @@
 				$cli_minor = $cli_minor ?? $rm[2];
 				$cli_patch = $cli_patch ?? $rm[3];
 			} elseif ($current !== '' && preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $current, $m)) {
+				// A VERSION with no release row names a release that was prepared
+				// and not yet published: the previous publish wrote it, refused
+				// because the tree was not committed, and the owner has since
+				// committed it (specs/release_transparency.md D1). Publish THAT
+				// version; bumping again would mint a number for every retry.
+				$prepared = new MultiUpgrade(
+					array('major_version' => $m[1], 'minor_version' => $m[2], 'patch_version' => $m[3]), array(), 1);
+				$prepared->load();
 				$cli_major = $cli_major ?? $m[1];
 				$cli_minor = $cli_minor ?? $m[2];
-				$cli_patch = $cli_patch ?? ($m[3] + 1);
+				$cli_patch = $cli_patch ?? ($prepared->count() > 0 ? $m[3] + 1 : $m[3]);
+				if ($prepared->count() === 0) {
+					echo "VERSION names {$current}, which has no release yet: publishing it rather than the next number.\n";
+				}
 			} else {
 				$latest = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1);
 				$latest->load();
@@ -667,6 +678,63 @@
 		}
 
 		// =====================================================
+		// A release is a commit (specs/release_transparency.md D1, D-E)
+		// =====================================================
+		// Everything this publish writes INTO the tree has now been written:
+		// VERSION, the install SQL, the rebuilt launcher binaries, and - decided
+		// here, before the check, so they ship committed rather than dirtying
+		// the tree after the fact - the plugin and theme version bumps. From
+		// this point the publish reads the tree and never writes it, so the
+		// commit the check names is the commit the archives are built from.
+		//
+		// Publish never commits or pushes. A tree that is not committed and on
+		// the public remote is refused with the command the owner runs; the
+		// next publish finds it clean and builds. There is no --allow-dirty.
+		$component_plan = publish_plan_components($full_site_dir, $republish, 'publish_output');
+		$release_commits = array('core' => null, 'agent' => null);
+		if (!$republish) {
+			$agent_src = AgentDistPublisher::sourcePath();
+			$repos = array(
+				'core'  => array('root' => $full_site_dir, 'blockers' => ReleaseCommit::joineryBlockers($full_site_dir)),
+				'agent' => array('root' => $agent_src,
+					'blockers' => (is_dir($agent_src . '/.git') ? ReleaseCommit::agentBlockers($agent_src) : null)),
+			);
+			$refused = false;
+			foreach ($repos as $name => $repo) {
+				if ($repo['blockers'] === null) {
+					publish_output("\nRefusing to publish {$version} — the {$name} repository at {$repo['root']} could not be read by git"
+						. ($name === 'agent' ? ' (a release names the agent commit it was built from, so the agent source must be a checkout on the publishing box)' : '') . '.');
+					$refused = true;
+					continue;
+				}
+				if (!empty($repo['blockers'])) {
+					publish_output("\nRefusing to publish {$version} — the {$name} repository is not committed. These files would ship uncommitted:");
+					foreach ($repo['blockers'] as $path) {
+						publish_output("  - {$path}");
+					}
+					publish_output('Commit them (publish never commits for you), then publish again:');
+					publish_output('  ' . ReleaseCommit::commitCommand($repo['root'], $repo['blockers'], 'Release ' . $version));
+					$refused = true;
+					continue;
+				}
+				$head = ReleaseCommit::head($repo['root']);
+				$remote = $head === null ? array('on_remote' => false, 'reason' => 'no HEAD commit') : ReleaseCommit::onRemote($repo['root'], $head);
+				if (!$remote['on_remote']) {
+					publish_output("\nRefusing to publish {$version} — the {$name} repository's commit is not on the public remote: {$remote['reason']}.");
+					publish_output("  cd " . escapeshellarg($repo['root']) . ' && git push origin main');
+					$refused = true;
+					continue;
+				}
+				$release_commits[$name] = $head;
+				publish_output("{$name} commit {$head} is committed and public");
+			}
+			if ($refused) {
+				publish_output("\nNothing has been built. VERSION and the install SQL were written so they can be committed with the release.");
+				exit(1);
+			}
+		}
+
+		// =====================================================
 		// Create CORE archive (no themes or plugins)
 		// =====================================================
 		publish_output("Creating core archive...");
@@ -869,6 +937,8 @@
 		$upgrade->set('upg_patch_version', $version_patch);
 		$upgrade->set('upg_name', $core_filename);
 		$upgrade->set('upg_release_notes', $_REQUEST['release_notes']);
+		$upgrade->set('upg_core_commit', $release_commits['core']);
+		$upgrade->set('upg_agent_commit', $release_commits['agent']);
 		$upgrade->prepare();
 		$upgrade->save();
 
@@ -897,28 +967,13 @@
 		// compare against a half-written or absent snapshot. If none is found, the
 		// run re-baselines: every component hits "no last entry" (rule 1) and is
 		// recorded as-is with no bump.
-		$baseline_state = array('themes' => array(), 'plugins' => array());
-		$prior_releases = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1000, 0);
-		$prior_releases->load();
-		foreach ($prior_releases as $prior) {
-			if ($prior->key == $upgrade->key) continue; // skip the row we just created
-			$raw = $prior->get('upg_component_state');
-			if (empty($raw)) continue;
-			$decoded = json_decode($raw, true);
-			if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) continue;
-			$baseline_state = array(
-				'themes'  => $decoded['themes']  ?? array(),
-				'plugins' => $decoded['plugins'] ?? array(),
-			);
-			break;
-		}
-
-		// Accumulated snapshot for this release, written onto the new row after
-		// both archive loops complete. Auto-bumped manifests and regression
-		// warnings are reported in the publish summary.
+		// The baseline and every version decision were made by
+		// publish_plan_components() before the commit check; the loops below
+		// read the plan and never decide again.
+		$baseline_state = $component_plan['baseline'];
 		$new_state = array('themes' => array(), 'plugins' => array());
-		$bumped_components = array();
-		$publish_warnings = array();
+		$bumped_components = $component_plan['bumped'];
+		$publish_warnings = $component_plan['warnings'];
 
 		// =====================================================
 		// Create individual THEME archives
@@ -966,33 +1021,8 @@
 				continue;
 			}
 
-			$theme_version = $theme_data['version'] ?? '1.0.0';
-
-			// Version integrity: read manifest -> compute hash -> decide -> (maybe) bump.
-			$current_hash = component_tree_hash($theme_dir, 'theme.json');
-			$last = $baseline_state['themes'][$theme_name] ?? null;
-			if ($last === null) {
-				// Rule 1: no baseline entry (first publish under this system or a
-				// new component). Record as-is, no bump.
-			} elseif (version_compare($theme_version, $last['version'], '>')) {
-				// Rule 2: author bumped deliberately. Respect and record.
-			} elseif (version_compare($theme_version, $last['version'], '<')) {
-				// Rule 3: version went backward. Record/archive as-is, but warn.
-				$publish_warnings[] = "theme {$theme_name}: version went backward ({$last['version']} -> {$theme_version}); recorded and archived as-is";
-				publish_output("- WARNING: {$theme_name} version went backward: {$last['version']} -> {$theme_version}");
-			} elseif ($republish) {
-				// A republished release carries the versions it arrived with:
-				// a bump here would edit theme.json under its own manifest.
-			} else {
-				// Rule 4: equal version. Compare hashes.
-				if (!isset($last['tree_hash']) || $last['tree_hash'] !== $current_hash) {
-					// Content changed without a bump — auto patch-bump the manifest.
-					$new_version = component_bump_manifest_version($theme_json, $theme_version);
-					publish_output("- {$theme_name}: content changed since {$theme_version}, auto-bumped to {$new_version}");
-					$bumped_components[] = "{$theme_name} ({$theme_version} -> {$new_version})";
-					$theme_version = $new_version;
-				}
-			}
+			$theme_version = $component_plan['themes'][$theme_name]['version'];
+			$current_hash = $component_plan['themes'][$theme_name]['tree_hash'];
 			$new_state['themes'][$theme_name] = array('version' => $theme_version, 'tree_hash' => $current_hash);
 
 			// Per-artifact signed manifest (component G): written into the LIVE
@@ -1092,32 +1122,8 @@
 				continue;
 			}
 
-			$plugin_version = $plugin_data['version'] ?? '1.0.0';
-
-			// Version integrity: read manifest -> compute hash -> decide -> (maybe) bump.
-			$current_hash = component_tree_hash($plugin_dir, 'plugin.json');
-			$last = $baseline_state['plugins'][$plugin_name] ?? null;
-			if ($last === null) {
-				// Rule 1: no baseline entry. Record as-is, no bump.
-			} elseif (version_compare($plugin_version, $last['version'], '>')) {
-				// Rule 2: author bumped deliberately. Respect and record.
-			} elseif (version_compare($plugin_version, $last['version'], '<')) {
-				// Rule 3: version went backward. Record/archive as-is, but warn.
-				$publish_warnings[] = "plugin {$plugin_name}: version went backward ({$last['version']} -> {$plugin_version}); recorded and archived as-is";
-				publish_output("- WARNING: {$plugin_name} version went backward: {$last['version']} -> {$plugin_version}");
-			} elseif ($republish) {
-				// A republished release carries the versions it arrived with:
-				// a bump here would edit plugin.json under its own manifest.
-			} else {
-				// Rule 4: equal version. Compare hashes.
-				if (!isset($last['tree_hash']) || $last['tree_hash'] !== $current_hash) {
-					// Content changed without a bump — auto patch-bump the manifest.
-					$new_version = component_bump_manifest_version($plugin_json, $plugin_version);
-					publish_output("- {$plugin_name}: content changed since {$plugin_version}, auto-bumped to {$new_version}");
-					$bumped_components[] = "{$plugin_name} ({$plugin_version} -> {$new_version})";
-					$plugin_version = $new_version;
-				}
-			}
+			$plugin_version = $component_plan['plugins'][$plugin_name]['version'];
+			$current_hash = $component_plan['plugins'][$plugin_name]['tree_hash'];
 			$new_state['plugins'][$plugin_name] = array('version' => $plugin_version, 'tree_hash' => $current_hash);
 
 			// Per-artifact signed manifest (component G) — same shape and same
@@ -1432,6 +1438,78 @@
 	 * @param string|null $manifest_filename Top-level manifest name to version-strip
 	 * @return string Lowercase hex sha256
 	 */
+	/**
+	 * Every theme's and plugin's version decision for this release, made once,
+	 * BEFORE the commit check, so an auto-bump is committed with the release
+	 * (specs/release_transparency.md D1). The rules are the ones the archive
+	 * loops applied in place until this function took them over:
+	 *
+	 *   1. no baseline entry (first publish, or a new component): record as-is
+	 *   2. version above the baseline: the author bumped; respect it
+	 *   3. version below the baseline: warn, record as-is
+	 *   4. version equal, tree hash changed: auto patch-bump the manifest
+	 *      (never on a republishing site, whose manifests arrived signed)
+	 *
+	 * Components skipped by the archive loops (included_in_publish=false,
+	 * deprecated) are decided too, as "carry the baseline entry", so the
+	 * loops read one map and decide nothing.
+	 *
+	 * @return array{baseline:array, themes:array, plugins:array, bumped:string[], warnings:string[]}
+	 */
+	function publish_plan_components($full_site_dir, $republish, $out) {
+		// Baseline = the most recent prior release row carrying a parseable,
+		// non-empty component snapshot. Rows without one (an aborted publish,
+		// every row from before snapshots existed) are skipped, so the baseline
+		// is never half-written. None found: every component is rule 1.
+		$baseline = array('themes' => array(), 'plugins' => array());
+		$prior_releases = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1000, 0);
+		$prior_releases->load();
+		foreach ($prior_releases as $prior) {
+			$raw = $prior->get('upg_component_state');
+			if (empty($raw)) continue;
+			$decoded = json_decode($raw, true);
+			if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) continue;
+			$baseline = array('themes' => $decoded['themes'] ?? array(), 'plugins' => $decoded['plugins'] ?? array());
+			break;
+		}
+
+		$plan = array('baseline' => $baseline, 'themes' => array(), 'plugins' => array(), 'bumped' => array(), 'warnings' => array());
+		$kinds = array(
+			'themes'  => array('dir' => $full_site_dir . '/public_html/theme',   'manifest' => 'theme.json',  'label' => 'theme'),
+			'plugins' => array('dir' => $full_site_dir . '/public_html/plugins', 'manifest' => 'plugin.json', 'label' => 'plugin'),
+		);
+		foreach ($kinds as $kind => $k) {
+			foreach (glob($k['dir'] . '/*/' . $k['manifest']) ?: array() as $manifest_path) {
+				$dir = dirname($manifest_path);
+				$name = basename($dir);
+				$data = json_decode((string)file_get_contents($manifest_path), true);
+				$skipped = (($data['included_in_publish'] ?? true) === false) || !empty($data['deprecated']);
+				$current_version = $data['version'] ?? '1.0.0';
+				$last = $baseline[$kind][$name] ?? null;
+				if ($skipped) {
+					$plan[$kind][$name] = array('version' => $current_version, 'tree_hash' => $last['tree_hash'] ?? null, 'skipped' => true);
+					continue;
+				}
+				$tree_hash = component_tree_hash($dir, $k['manifest']);
+				if ($last === null) {
+					// Rule 1.
+				} elseif (version_compare($current_version, $last['version'], '>')) {
+					// Rule 2.
+				} elseif (version_compare($current_version, $last['version'], '<')) {
+					$plan['warnings'][] = "{$k['label']} {$name}: version went backward ({$last['version']} -> {$current_version}); recorded and archived as-is";
+					call_user_func($out, "- WARNING: {$name} version went backward: {$last['version']} -> {$current_version}");
+				} elseif (!$republish && (!isset($last['tree_hash']) || $last['tree_hash'] !== $tree_hash)) {
+					$new_version = component_bump_manifest_version($manifest_path, $current_version);
+					call_user_func($out, "- {$name}: content changed since {$current_version}, auto-bumped to {$new_version}");
+					$plan['bumped'][] = "{$name} ({$current_version} -> {$new_version})";
+					$current_version = $new_version;
+				}
+				$plan[$kind][$name] = array('version' => $current_version, 'tree_hash' => $tree_hash, 'skipped' => false);
+			}
+		}
+		return $plan;
+	}
+
 	function component_tree_hash($dir, $manifest_filename = null) {
 		$entries = array();
 		$rii = new RecursiveIteratorIterator(

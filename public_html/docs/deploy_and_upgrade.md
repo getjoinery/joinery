@@ -124,6 +124,59 @@ docker exec SITENAME cat /var/www/html/SITENAME/public_html/VERSION
 cat ARCHIVE_ROOT/public_html/VERSION
 ```
 
+### A release is a commit
+
+`publish_upgrade.php` builds only from a committed, pushed tree, so a release
+is a public commit anyone can regenerate the archives from. Before it builds
+anything it:
+
+1. Writes the files a release generates — `public_html/VERSION`, the install
+   SQL at `maintenance_scripts/install_tools/joinery-install.sql.gz`, any
+   rebuilt launcher binaries, and the patch bumps of every theme or plugin
+   whose content changed since the last release (`plugin.json` / `theme.json`).
+2. Checks both repositories — the platform at the site root and the agent
+   source at `server_manager_agent_source_path` — with `ReleaseCommit`. A tree
+   is clean when no tracked file is modified or deleted and no untracked file
+   sits on a path that ships (anything the release manifest would list:
+   `public_html/` and `maintenance_scripts/` minus `specs/`, `uploads/`,
+   `cache/`, `logs/`, `backups/`, `.claude/`). The commit must be an ancestor
+   of `origin/main` after a fetch.
+3. Refuses, naming every blocking file and printing the `git add … && git
+   commit … && git push` line, when either tree is dirty or unpushed. Publish
+   never commits or pushes. On the next run the generated files are
+   unchanged, the tree is clean, and the build proceeds; a `VERSION` that
+   names a version with no release row is published as-is rather than bumped.
+4. Records both commits on the release row (`upg_core_commit`,
+   `upg_agent_commit`).
+
+Every byte in an archive is then derivable from those commits:
+
+- **Install SQL** — `create_install_sql.php` writes no timestamp, passes a
+  fixed `--restrict-key` to `pg_dump`, seeds the admin row with the locked
+  marker `!` (no plaintext ever existed; `_site_init.sh` sets the real
+  password), and compresses with `gzip -n`. Two runs against one schema are
+  one byte string, and the file is committed.
+- **Go binaries** (agent, relay sealer, parser-jail launcher) — each `go.mod`
+  pins `toolchain goX.Y.Z`; the builders refuse any other compiler, older or
+  newer (`GoBinaryPublisher::assertToolchain`), and run with
+  `GOTOOLCHAIN=local` so Go never fetches one. With `-trimpath`,
+  `CGO_ENABLED=0` and `-buildvcs=false` a build is bit-identical across
+  machines. `agent_dist/manifest.json` records the toolchain.
+- **Support bundle** — `tar --sort=name --mtime=@0 --owner=0 --group=0
+  --numeric-owner`, normalised modes, `gzip -n`: one staging tree, one
+  tarball.
+
+**Release keys live in the repository.** `maintenance_scripts/install_tools/release_keys/release/*.pub`
+holds every Ed25519 release public key, and `release_keys/log/<origin>.pub`
+every transparency-log checkpoint key. The publisher refuses to sign with a
+key not listed under `release/`, and `agent_dist/manifest.json` carries both
+lists (`release_keys`, `log_keys`) beside `signing_public_key`, so a rotation
+is a commit diff.
+
+Tests: `tests/unit/release_commit_test.php` (the clean-tree rule, the
+toolchain pin, the key lists) and `tests/core/install_sql_deterministic_test.php`
+(two runs of the generator, byte-identical).
+
 ### Distribution Architecture
 
 Updates are distributed as separate archives:
@@ -218,7 +271,7 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --verbose
 - **The quiet state** — a site is quiet while root's `/etc/joinery/sites/<site>/state` exists, holding `quiet copy` (a dormant copy; only `install.sh site --dormant --copy-of=ID` writes it) or `quiet switchover` (a source frozen for a switch-over; only `sysadmin_tools/site_quiet.sh on`, the agent's `site_quiet` word, writes it). The runner reads it first, right after taking the lock, whatever mode it was given: while it exists, the runner asserts the quiet measures, records `quiet-copy` or `quiet-switchover` in `host_converger.last`, keeps no converge stamp, and runs no installer, core or plugin, and no root request. The measures are the machine's, in `install_tools/_site_state.sh`, and no line of the site's own code asks about them: (1) the nftables table `inet joinery_site_state` rejects every outgoing connection from the web user and from Postfix's own client except over loopback, loaded from `/etc/joinery/sites/<site>/quiet.nft` by `joinery-site-state.service` at boot (before Apache, cron and Postfix) and again on every run, so a table deleted by hand is back within the minute — root is not blocked, so the agent, a backup run and a restore still reach storage, and the site census (`site_census`, run as root) asks the file bucket about a sample of offloaded files; (2) `conf-enabled/joinery-quiet-<site>.conf` answers every request on every host with a 503 — under `copy`, a secret cookie (set by `/.joinery-look/<secret>`, the secret in `look_secret`, root-only) lets the owner look, and under `switchover` everyone gets the maintenance page; (3) the site's `/etc/cron.d` file, and certbot's if there is one, move into `held/` and nothing writes them back; (4) certbot's timer is off; (5) every Postfix `smtpd` service answers 4xx (`smtpd_client_restrictions=defer` on its master.cf entry), so senders keep their mail and retry. `held/` records what quiet took away — the cron files as they were, whether certbot's timer was on, each smtpd service's own setting — and clearing puts back exactly that. `site_quiet.sh off` clears `quiet switchover`, and clears `quiet copy` only with `--copy-promoted`, which the agent passes only once the machine holds the node id recorded in `copy_of`. Once the state file is gone, a run that finds the measures still in place clears them, and with no stamp the first run after the state clears converges in full: the cron file is written if none came back, and every installer runs. One bare-metal site per machine, so a quiet site is a quiet machine.
 - **A machine with no site** — `_plugin_installers_start.sh --machine` is the runner on a host that has no site tree: a Docker host, a relay. Its root is the agent's verified support bundle (`/opt/joinery-agent/tree`, whose layout is a site root's; `--site-root=` overrides it for a fixture), its name is `host` (so root's lock is `/run/joinery/host-installers.host.lock`), and its set is `HOST_INSTALLERS` — `host_housekeeping.sh` and `install_host_converger.sh`, each called as `<installer> --machine ROOT`. Nothing a site has and a bundle does not runs: no ownership assertion, no permissions pass, no secrets, no release keys, no PHP extensions, no plugin installers, no certificate summary, no root requests. `--when-changed` hashes the bundle's stamp beside the tree instead of `VERSION`, and root keeps the stamp and last-run record under `/var/lib/joinery/host`, which a bundle refresh does not replace. `--only=` under `--machine` names a host installer only; a site name is refused with exit 2. The mode is an argument, never derived from where the copy lives. The machine's timer (`install_host_converger.sh --machine ROOT`) runs the entry point with `--when-changed --machine --site-root=ROOT`, logs to `/var/log/joinery/host_converger.log`, has no path unit (no web user queues a root request there), and leaves a unit a site already owns alone. This is the path an agent's `host_converge` word takes on a siteless machine, and what the agent runs once on its own when a new support bundle lands.
 - **Graceful handling of missing archives** — if a theme or plugin archive returns 404, the upgrade warns and skips it instead of aborting. The core upgrade and all other themes/plugins proceed normally. A summary of skipped items is shown at the end.
-- **Post-deploy smoke test** — after the new code is in place and migrations have run, the **`deploy` test tier** runs against it. A failure restores `public_html_last` and preserves the broken tree for diagnosis. This is the first thing in the pipeline that reads a line of the code being installed: `publish_upgrade.php` builds its archive from whatever is on the publisher's disk at that moment, half-finished edits included. The tier takes a couple of seconds, is entirely reads, and asks only whether the code runs on this machine — every deployable PHP file compiles, the core classes load, the database answers, the declarative manifests parse, and the site returns a page over HTTP. See [The deploy tier](#the-deploy-tier) below for why it is not `safe`. The rollback returns the code but **not** the schema, because migrations ran first; schema changes are additive so the previous code normally runs against them, but the output says plainly that this is a recovery rather than a clean undo, and the node should be upgraded forward rather than left there.
+- **Post-deploy smoke test** — after the new code is in place and migrations have run, the **`deploy` test tier** runs against it. A failure restores `public_html_last` and preserves the broken tree for diagnosis. This is the first thing on the node that reads a line of the code being installed. The tier takes a couple of seconds, is entirely reads, and asks only whether the code runs on this machine — every deployable PHP file compiles, the core classes load, the database answers, the declarative manifests parse, and the site returns a page over HTTP. See [The deploy tier](#the-deploy-tier) below for why it is not `safe`. The rollback returns the code but **not** the schema, because migrations ran first; schema changes are additive so the previous code normally runs against them, but the output says plainly that this is a recovery rather than a clean undo, and the node should be upgraded forward rather than left there.
 - **Site-root `maintenance_scripts/`** — the core archive carries `install_tools/` and `sysadmin_tools/` alongside `public_html/`, and the upgrade syncs them into the site root after the deploy swap and before `fix_permissions.sh` runs, so a release applies as one piece rather than with its own tooling a version behind. The sync compares by content (`rsync --checksum`), because the staged files carry the publishing box's timestamps while the node keeps its own and a same-size edit can otherwise look unchanged. It does not delete wholesale: a node can legitimately hold scripts the archive does not ship. What it removes is exactly the files a release stopped shipping — each `maintenance_scripts/` path the previous release's signed `RELEASE_MANIFEST` (still at the site root when the sync runs) lists and the new one does not. Two scripts retired before signed manifests existed, `install_tools/deploy.sh` and `install_tools/_reconcile_stock_assets.sh`, are removed by name for now. A file no release listed is local and stays. The removal runs after the release has passed its deploy tier, so an upgrade that rolls back removes nothing. `*.sh` are made executable afterwards. A failed sync is a warning, not an abort — `public_html` is already live — and it says explicitly that the node's backup, restore and permission scripts are still the previous version.
 
 **Plugin refresh scope:** the upgrade download loop iterates **plugins present on disk** (every `plugins/*/plugin.json`) that the source publishes, plus every plugin whose manifest says `is_system: true`, and attempts an archive fetch for each. Plugins published by the source succeed; plugins not in the source's catalog 404 at the upgrade endpoint (they were never packaged because they have `included_in_publish: false` — see [Extension Distribution Flags](#extension-distribution-flags) below) and are skipped via the warning path above. Uninstalling a plugin marks its row `uninstalled` and root removes its directory, so an uninstalled plugin is not re-downloaded on subsequent upgrades — the operator's removal sticks, and a sync that finds no directory registers nothing. Conversely, a new upstream plugin won't auto-appear on existing sites; the operator gets it via the admin Plugins page (install a plugin already on disk) or a plugin upload.

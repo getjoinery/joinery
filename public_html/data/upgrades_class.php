@@ -39,6 +39,10 @@ class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	    'upg_name' => array('type'=>'varchar(64)', 'required'=>true),
 	    'upg_release_notes' => array('type'=>'text'),
 	    'upg_component_state' => array('type'=>'text'),
+	    // The public commits a release was built from (specs/release_transparency.md
+	    // D1): null on a row from before publish required a committed tree.
+	    'upg_core_commit' => array('type'=>'varchar(40)', 'is_nullable'=>true),
+	    'upg_agent_commit' => array('type'=>'varchar(40)', 'is_nullable'=>true),
 	    'upg_keep' => array('type'=>'bool', 'default'=>false),
 	    'upg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
