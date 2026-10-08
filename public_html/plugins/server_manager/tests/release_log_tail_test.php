@@ -17,7 +17,7 @@
  *    bytes, is unaccounted for, once, and stops counting when the ledger holds it
  *  - an entry under another key, or one that only mentions ours, is not ours
  *  - the time budget stops a run, and the next carries on
- *  - a checkpoint signed by another key is refused and reported
+ *  - a checkpoint signed by another key, or smaller than one already seen, is refused and reported
  *  - blind: task missing, a log not read up to date for a day (warning), a week (critical)
  *  - the log keys releases installed, checked against a trusted root: a key
  *    the root lists for that log passes, another key or another log's does not;
@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php safe --filter=release_log_tail
  *
+ * @version 1.2 - a checkpoint smaller than one already seen
  * @version 1.1 - the log keys releases installed, checked against Sigstore's trusted root
  * @version 1.0
  */
@@ -143,6 +144,10 @@ $refused = ReleaseLogTail::read($reader, $state, array($ours), $keys, $ledger, $
 check($refused['logs'][$origin]['next'] === $before && strpos((string)$refused['last_error'], $origin) !== false,
 	'a checkpoint signed by another key is refused, and the run says so', (string)$refused['last_error']);
 $signer = $log_pair;
+$size = 1500;
+$shrunk = ReleaseLogTail::read($reader, $resumed, array($ours), $keys, $ledger, $t0 + 3700, $far);
+check($shrunk['logs'][$origin] === $resumed['logs'][$origin] && strpos((string)$shrunk['last_error'], 'never shrinks') !== false,
+	'a smaller checkpoint than one already seen is refused, and the log is not called caught up', (string)$shrunk['last_error']);
 
 section('Blind');
 

@@ -25,6 +25,7 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.5 - a source version that is not X.Y.Z refuses the publish (VERSION_PATTERN)
  * @version 2.4 - manifest.json records source_commit, the agent commit the binaries were built from.
  *                A bundle whose recorded commit is not the source's HEAD is rebuilt and compared:
  *                the same bytes record HEAD, different bytes at the same version refuse the publish,
@@ -82,6 +83,9 @@ class AgentDistPublisher {
 	/** A rebuild was required and did not happen. The bundle is stale. */
 	const STATUS_FAILED = 'failed';
 
+	/** The only shape an agent version takes: three numbers. */
+	const VERSION_PATTERN = '/^[0-9]+\.[0-9]+\.[0-9]+$/';
+
 	/**
 	 * Bundle (or carry forward) the agent artifact. Never throws — a broken
 	 * agent build must not abort a platform publish; problems are reported
@@ -132,6 +136,14 @@ class AgentDistPublisher {
 				$msg = "Agent artifact: WARNING - could not read agent version from {$src}/main.go; carrying forward" . ($bundled_version ? " v{$bundled_version}" : ' nothing');
 				$say($msg);
 				return $result(self::STATUS_CARRIED, $msg, null, $bundled_version);
+			}
+
+			if (!preg_match(self::VERSION_PATTERN, $agent_version)) {
+				// Nodes and the management node compare agent versions as
+				// X.Y.Z, and a claim naming any other shape is refused.
+				$msg = "Agent artifact: version '{$agent_version}' in {$src}/main.go is not X.Y.Z (three numbers); set it to X.Y.Z and publish again";
+				$say($msg);
+				return $result(self::STATUS_FAILED, $msg, $agent_version, $bundled_version);
 			}
 
 			if ($agent_version === $bundled_version && self::artifactsPresent($dist_dir, $manifest)) {
