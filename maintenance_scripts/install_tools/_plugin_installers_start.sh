@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.27 - A --when-changed tick does nothing while the site's upgrade holds uploads/.upgrade.lock:
+#                the upgrade runs the installers itself once its tree is finished.
 # Version: 2.26 - A host installer runs only out of a package that is also in the public release log
 #                where the node requires it (verify_package.php's `unlogged`); the key writer it
 #                calls also writes the statement and log keys and switches the requirement on
@@ -480,6 +482,22 @@ fi
 # is on this inode, and a rename would leave every later run locking a file
 # nobody holds. flock is independent of content, so truncating is safe.
 printf '%s\n%s\n' "$$" "$(date -u +%s)" > "${LOCK_FILE}" 2>/dev/null || true
+
+# --- Not while the site upgrades ---------------------------------------------
+# upgrade.php holds uploads/.upgrade.lock from before it swaps the new tree in
+# until it has set the tree's permissions, run its gates and run these same
+# installers itself. A tick in between converges a tree that is half done: it
+# found a fresh 770 public_html, judged the parser jail unable to read it, and
+# its ACL grant left public_html and vendor group-writable after
+# fix_permissions.sh had finished, so the deploy gate rolled the upgrade back.
+# The upgrade's own installer run is not --when-changed and never waits here
+# (it holds the lock this would wait on). The tick after the upgrade converges.
+if [[ "${WHEN_CHANGED}" == "1" && "${MACHINE}" == "0" && -e "${SITE_ROOT}/uploads/.upgrade.lock" ]]; then
+    if ! flock -n 8 8<"${SITE_ROOT}/uploads/.upgrade.lock"; then
+        echo "host installers: ${SITENAME} is upgrading - leaving this tick to the upgrade"
+        exit 0
+    fi
+fi
 
 # --- The converge record ------------------------------------------------------
 # The stamp and the record of the last run live in cache/, root-owned, readable
