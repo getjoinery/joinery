@@ -16,6 +16,8 @@
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql.gz (default)
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql (with --no-compress)
  *
+ * @version 1.5 - each seed table's rows in primary-key order (PgDumpRowOrder), so a row
+ *                updated on the publishing site does not show as a change
  * @version 1.4 - deterministic output: no timestamp line, a fixed pg_dump restrict
  *                key, a locked ("!") seed admin hash, gzip -n. The same schema
  *                yields the same bytes, so the file can be committed and compared
@@ -319,6 +321,16 @@ foreach ($essential_tables as $table) {
         echo "   Skipping table '$table' (no data or export failed)\n";
         continue;
     }
+
+    // pg_dump writes rows in on-disk order, which an update changes; key order
+    // keeps a row merely updated here from showing as a change in the file.
+    $key_q = $dblink->prepare(
+        "SELECT a.attname FROM pg_index i
+         JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+         WHERE i.indrelid = :table::regclass AND i.indisprimary
+         ORDER BY array_position(i.indkey::int2[], a.attnum)");
+    $key_q->execute([':table' => 'public.' . $table]);
+    $table_output = PgDumpRowOrder::sort($table_output, $key_q->fetchAll(PDO::FETCH_COLUMN));
 
     file_put_contents($table_file, $table_output);
     $data_files[$table] = $table_file;
