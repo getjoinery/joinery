@@ -49,6 +49,8 @@
  * and a prune empties the node's prefix — so the broker's ledger, its stale
  * runs and its chain retention do not apply.
  *
+ * @version 1.4 - a draining space is released only by a run finished with something stored since the active
+ *                space was (re)opened
  * @version 1.3 - reconcile, retention and the lapse prune work space by space against each space's own
  *                target; pruned ledger rows are kept with their cause; a draining space is kept whole until
  *                the active one holds a finished run, then retired once empty
@@ -622,14 +624,24 @@ class ServiceTenantWatch {
 		return $pruned;
 	}
 
-	/** Has the space taken a run that finished? A space that has not holds no complete chain yet. */
+	/**
+	 * Has the space, since it became active, taken a run that finished with
+	 * something stored? A space that has not holds no complete chain yet: an
+	 * empty run, or one from an earlier time the tenant was here, proves
+	 * nothing about now.
+	 */
 	public static function holds_finished_run(?StorageSpace $space): bool {
 		if ($space === null) {
 			return false;
 		}
-		$runs = new MultiShelfRun(array('space_id' => (int)$space->key, 'state' => ShelfRun::STATE_FINISHED,
-			'deleted' => false), array('svr_shelf_run_id' => 'DESC'), 1);
-		return count($runs) > 0;
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT 1 FROM svr_shelf_runs r
+			WHERE r.svr_sps_storage_space_id = ? AND r.svr_state = 'finished' AND r.svr_delete_time IS NULL
+			  AND r.svr_create_time >= ?
+			  AND EXISTS (SELECT 1 FROM svo_shelf_objects o WHERE o.svo_svr_shelf_run_id = r.svr_shelf_run_id
+			              AND o.svo_completed_time IS NOT NULL AND o.svo_delete_time IS NULL)
+			LIMIT 1");
+		$q->execute(array((int)$space->key, (string)$space->get('sps_opened_time')));
+		return (bool)$q->fetchColumn();
 	}
 
 	/** A draining space whose ledger and listing are both empty is retired. 1 when it was. */

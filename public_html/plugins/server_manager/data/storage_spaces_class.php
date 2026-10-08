@@ -22,6 +22,8 @@
  * Exactly one owner column is set: a Managed node, or a customer of backup
  * storage (a service tenant).
  *
+ * @version 1.1 - a space given back to its owner is stamped opened again, so evidence from before does not
+ *                release the space it replaced; drain_owner() for an owner that leaves
  * @version 1.0
  */
 
@@ -67,6 +69,8 @@ class StorageSpace extends SystemBase {
 		'sps_svt_service_tenant_id' => array('type'=>'int8'),
 		'sps_state'                 => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'active',
 			'allowed_values'=>array('active', 'draining', 'retired')),
+		// When the space was opened, or last became active again: only evidence
+		// newer than this (a verify, a finished run) speaks for what it holds.
 		'sps_opened_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'sps_draining_time'         => array('type'=>'timestamp(6)'),
 		'sps_retired_time'          => array('type'=>'timestamp(6)'),
@@ -196,6 +200,16 @@ class StorageSpace extends SystemBase {
 		return trim((string)$row->get('svt_slug'));
 	}
 
+	/**
+	 * Now, to the microsecond, as the database stamps a job or a run: the
+	 * evidence compared against sps_opened_time is that precise, and a job
+	 * sent earlier in the same second must not count as later.
+	 */
+	private static function now_precise(): string {
+		$t = microtime(true);
+		return gmdate('Y-m-d H:i:s', (int)$t) . sprintf('.%06d', (int)round(($t - floor($t)) * 1000000) % 1000000);
+	}
+
 	public static function valid_folder(string $folder): bool {
 		return (bool)preg_match('/^[A-Za-z0-9_-]+$/', $folder);
 	}
@@ -216,17 +230,23 @@ class StorageSpace extends SystemBase {
 		$this->save();
 	}
 
+	/**
+	 * Does the whole folder hold nothing, every profile included? False when
+	 * it cannot be listed: a space is never taken for empty on no answer.
+	 */
+	public function is_empty(): bool {
+		try {
+			list($target, $creds, $bucket) = $this->reach();
+			return count(S3Signer::list($creds, $bucket, $this->base(), 1)) === 0;
+		} catch (\Throwable $e) {
+			return false;
+		}
+	}
+
 	/** A draining space with nothing left in it. */
 	public function retire(): void {
 		$this->set('sps_state', self::STATE_RETIRED);
 		$this->set('sps_retired_time', gmdate('Y-m-d H:i:s'));
-		$this->save();
-	}
-
-	private function activate(): void {
-		$this->set('sps_state', self::STATE_ACTIVE);
-		$this->set('sps_draining_time', null);
-		$this->set('sps_retired_time', null);
 		$this->save();
 	}
 
@@ -392,7 +412,10 @@ class StorageSpace extends SystemBase {
 			$space->set('sps_bkt_backup_target_id', (int)$target->key);
 			$space->set('sps_base_key', $base);
 			$space->set($column, $owner_id);
-			$space->set('sps_opened_time', gmdate('Y-m-d H:i:s'));
+			$space->set('sps_opened_time', self::now_precise());
+		} elseif ($state === self::STATE_ACTIVE && !$space->is_active()) {
+			// Given back: what it held before says nothing about what it holds now.
+			$space->set('sps_opened_time', self::now_precise());
 		}
 		$space->set('sps_state', $state);
 		$space->set('sps_draining_time', $state === self::STATE_DRAINING ? gmdate('Y-m-d H:i:s') : null);
@@ -429,6 +452,19 @@ class StorageSpace extends SystemBase {
 		} catch (\Throwable $e) {
 			if ($own && $db->inTransaction()) { $db->rollBack(); }
 			throw $e;
+		}
+		return $space;
+	}
+
+	/**
+	 * An owner that leaves (a node removed from the dashboard, a customer who
+	 * released the service): its active space stops taking backups and keeps
+	 * what it holds, as a draining space. Returns the space, or null.
+	 */
+	public static function drain_owner(string $kind, int $owner_id): ?StorageSpace {
+		$space = self::active_for($kind, $owner_id);
+		if ($space) {
+			$space->drain();
 		}
 		return $space;
 	}

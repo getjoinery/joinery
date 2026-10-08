@@ -17,6 +17,7 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.2 - a draining space's refusal says its backups age out or are deleted from Stored Backups
  * @version 3.1 - no two targets share a name (a node's chain follows its target's name); holdings() reads the management node's storage spaces (active and draining owners); the folder
  *                is stored in one form (normalise_prefix(), prefix()) (specs/storage_targets.md WP4, S11)
  * @version 3.0 - holdings(), location_refusal(), disable_refusal(), delete_refusal(): a target's location is
@@ -268,7 +269,8 @@ class BackupTarget extends SystemBase {
 			$why[] = self::backs_up($h['active']);
 		}
 		if ($h['draining']) {
-			$why[] = 'it still holds older backups of ' . self::name_list($h['draining']) . ', kept until they age out';
+			$why[] = 'it still holds older backups of ' . self::name_list($h['draining'])
+				. ' (they age out, or are deleted from its Stored Backups)';
 		}
 		if ($h['stored'] > 0) {
 			$why[] = $h['stored'] . ' backup' . ($h['stored'] === 1 ? ' is' : 's are') . ' still stored in it, and retention prunes them there';

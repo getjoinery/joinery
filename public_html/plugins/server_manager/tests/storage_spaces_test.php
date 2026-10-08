@@ -291,14 +291,88 @@ $run->set('svr_base_key', $tb->base() . 'site/');
 $run->set('svr_state', ShelfRun::STATE_FINISHED);
 $run->save();
 harness_register_row('svr_shelf_runs', 'svr_shelf_run_id', $run->key);
+check(!ServiceTenantWatch::holds_finished_run(new StorageSpace($tb->key, TRUE)),
+	'a finished run that stored nothing does not release the old space');
+$yl->set('svo_svr_shelf_run_id', (int)$run->key);
+$yl->save();
 $tenant = new ServiceTenant($tenant->key, TRUE);
 $tenant->set('svt_reconciled_time', gmdate('Y-m-d H:i:s'));
 $tenant->save();
 $watch->watch($tenant, gmdate('Y-m-d H:i:s'));
-check(!$has('spa', $x_key), 'once the new space holds a finished run, the old chain is pruned from its own bucket');
+check(!$has('spa', $x_key), 'once the new space holds a finished run with something stored, the old chain is pruned from its own bucket');
 check($has('spb', $y_key), 'the new chain stays');
 $xr = new ShelfObject($x->key, TRUE);
 check($xr->get('svo_pruned_time') !== null && (string)$xr->get('svo_pruned_cause') === 'retention', 'its ledger row is kept, marked pruned by retention');
 check((new StorageSpace($ta->key, TRUE))->is_retired(), 'and the emptied space is retired');
+
+// ── Review fixes (reviewer1, 10-08) ─────────────────────────────────────
+section('A run opened before a move writes nothing into the old space');
+$open_run = ShelfBroker::beginRun($tenant, 'site', 'chain-20260301_000000', array(array('name' => 'chain-20260301_000000/db', 'bytes' => 1)));
+harness_register_row('svr_shelf_runs', 'svr_shelf_run_id', (int)$open_run['run_id']);
+$tc = $track(StorageSpace::move(StorageSpace::OWNER_TENANT, (int)$tenant->key, $a));
+$why = '';
+try { ShelfBroker::sign($tenant, (int)$open_run['run_id'], 'chain-20260301_000000/db', 'put', array('bytes' => 1)); }
+catch (ShelfBrokerException $e) { $why = $e->getMessage(); }
+check(strpos($why, 'moved to another target') !== false, 'a write for a run whose space is now draining is refused', $why);
+check(StorageSpace::active_for(StorageSpace::OWNER_TENANT, (int)$tenant->key)->get('sps_opened_time')
+	>= (new StorageSpace($tb->key, TRUE))->get('sps_draining_time'),
+	'a space given back to its owner is stamped opened again');
+
+section('One space that cannot be read does not stop the listing');
+$bad = $make_target('Bad', 'spbad');
+DbConnector::get_instance()->get_db_link()->prepare("UPDATE bkt_backup_targets SET bkt_credentials = ? WHERE bkt_backup_target_id = ?")
+	->execute(array(json_encode(array('enc' => 'v1.sodium.not-a-sealed-value')), (int)$bad->key));
+$put('spb', $tb->base() . 'site/chain-20260201_000000/more', 'm');
+$bad_space = $track(StorageSpace::adopt(new BackupTarget($bad->key, TRUE), 't' . (int)$tenant->key, StorageSpace::OWNER_TENANT, (int)$tenant->key));
+$listed = ShelfBroker::listPrefix(new ServiceTenant($tenant->key, TRUE));
+$errs = array_filter($listed['spaces'], function ($sp) { return !empty($sp['error']); });
+$keys = array_column($listed['objects'], 'key');
+check(count($errs) === 1 && in_array('site/chain-20260201_000000/more', $keys, true),
+	'the unreadable space is named, and the others still list', json_encode($listed['spaces']));
+
+section('Retention reads every space newest first');
+$node3 = $make_node('Three');
+$n3a = $track(StorageSpace::open($a, StorageSpace::OWNER_NODE, (int)$node3->key, (string)$node3->get('mgn_slug')));
+$n3b = $track(StorageSpace::move(StorageSpace::OWNER_NODE, (int)$node3->key, $b));
+$n3a = new StorageSpace($n3a->key, TRUE);
+$a35 = 'chain-' . gmdate('Ymd_His', time() - 35 * 86400);
+$b45 = 'chain-' . gmdate('Ymd_His', time() - 45 * 86400);
+$b01 = 'chain-' . gmdate('Ymd_His', time() - 86400);
+$put('spa', $n3a->base() . 'manager/' . $a35 . '/manifest.json', '{}');
+$put('spb', $n3b->base() . 'manager/' . $b45 . '/manifest.json', '{}');
+$put('spb', $n3b->base() . 'manager/' . $b01 . '/manifest.json', '{}');
+$put('spa', $n3a->base() . 'site/chain-20260101_000000/manifest.json', '{}');
+$v3 = new ManagementJob(NULL);
+$v3->set('mjb_mgn_managed_node_id', (int)$node3->key);
+$v3->set('mjb_job_type', 'verify_backup');
+$v3->set('mjb_status', 'completed');
+$v3->set('mjb_commands', array());
+$v3->set('mjb_parameters', json_encode(array('chain_id' => $b01, 'space_id' => (int)$n3b->key, 'profile' => 'manager')));
+$v3->set('mjb_result', json_encode(array('verify_status' => 'pass', 'level' => 2)));
+$v3->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$v3->save();
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $v3->key);
+$r3 = FleetBackupRetention::prune($node3, 30);
+check($has('spa', $n3a->base() . 'manager/' . $a35 . '/manifest.json'), 'the newest point before the window is kept, though it is in the old space', $r3['error']);
+check(!$has('spb', $n3b->base() . 'manager/' . $b45 . '/manifest.json'), 'an older one in the active space goes');
+
+section('Evidence from before a space was given back does not release anything');
+StorageSpace::move(StorageSpace::OWNER_NODE, (int)$node3->key, $a);
+StorageSpace::move(StorageSpace::OWNER_NODE, (int)$node3->key, $b);
+check(!FleetBackupRetention::active_verified($node3, StorageSpace::active_for(StorageSpace::OWNER_NODE, (int)$node3->key)),
+	'a verify from an earlier time on the target does not count once the node comes back to it');
+
+section('A space is retired only once its whole folder is empty');
+$deleted3 = NodeBackupShelf::prune(new ManagedNode($node3->key, TRUE));
+$n3a = new StorageSpace($n3a->key, TRUE);
+check(!$has('spa', $n3a->base() . 'manager/' . $a35 . '/manifest.json') && $n3a->is_draining(),
+	'emptying takes our backups but keeps the space while the site\'s own are beside them', (string)$deleted3);
+
+section('A node removed from the dashboard takes no new backups');
+$node2 = new ManagedNode($node2->key, TRUE);
+$node2->soft_delete();
+check(StorageSpace::active_for(StorageSpace::OWNER_NODE, (int)$node2->key) === null, 'its active space drains');
+check(!in_array($node2->get('mgn_name'), StorageSpace::holdings_of((int)$a->key)['active'], true),
+	'and no target names it as backing up there');
 
 harness_finish();

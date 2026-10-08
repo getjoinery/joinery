@@ -22,6 +22,8 @@
  * what lets a switch-on undo exactly what this did and never an operator's own
  * deliberate off.
  *
+ * @version 1.3 - prune() throws on a delete the provider refused, and retires a draining space only once its
+ *                whole folder is empty
  * @version 1.2 - prune() empties what this management node took in each of the node's storage spaces
  *                ({space}/manager/), never a site's own backups beside them (S22)
  * @version 1.1 - prune() is quiet about a target it cannot reach and throws on a listing that fails, as the
@@ -138,11 +140,15 @@ class NodeBackupShelf {
 				if ($key === '' || strpos($key, $base) !== 0) { continue; }
 				$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
 				$status = (int)($resp['status'] ?? 0);
-				if (($status >= 200 && $status < 300) || $status === 404) {
-					$deleted++;
+				if (($status < 200 || $status >= 300) && $status !== 404) {
+					// Half emptied is not emptied: nothing is recorded as pruned.
+					throw new RuntimeException('HTTP ' . $status . ' deleting ' . $key . ' after ' . $deleted . ' deleted');
 				}
+				$deleted++;
 			}
-			if ($space->is_draining()) {
+			// Retired only when nothing at all is left: a site's own backups
+			// beside ours keep the folder claimed.
+			if ($space->is_draining() && $space->is_empty()) {
 				$space->retire();
 			}
 		}

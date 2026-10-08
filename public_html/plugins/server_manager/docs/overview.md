@@ -1444,8 +1444,8 @@ Every stored backup on this management node is in a **storage space** (`sps_stor
 | State | Meaning |
 |---|---|
 | `active` | takes the owner's new backups; an owner has at most one |
-| `draining` | the owner was moved elsewhere: read, restored and pruned only, kept whole until the owner's active space holds a verified chain (a node) or a finished run (a customer), then aged out by the owner's normal retention |
-| `retired` | a draining space with nothing left in it |
+| `draining` | the owner was moved elsewhere, removed from the dashboard (a node) or released the service (a customer): read, restored and pruned only, takes no write, kept whole until the owner's active space holds a chain a verify has passed (a node) or a finished run with something stored (a customer) since it became active, then aged out by the owner's normal retention |
+| `retired` | a draining space whose whole folder is empty |
 
 On one target no live space's folder equals or contains another's, so a customer `t5` and a node slugged `t5` can never list, prune or adopt each other's objects. The target's folder is stored in one form (`BackupTarget::normalise_prefix()`), and no two targets share a name: a node's chain follows the name of the target it is sent to (below).
 
@@ -1536,7 +1536,7 @@ Below it, a **Stored Backups** panel lists the target's objects directly from th
 - **older backups, aging out** — a draining space owns it
 - **unclaimed** — no space claims it (left by an earlier switch, or a deleted node, which is named). **Adopt as older backups of** gives it to a node or a customer as a draining space, so its backups are listable, restorable and pruned again
 
-Delete acts through `S3Signer` from the management node: a single object (guarded so the key must sit under the target's own prefix), or a whole site's prefix (type-to-confirm the slug). This is the deliberate path for erasing a retired site's offsite backups — deleting a node never touches them.
+Delete acts through `S3Signer` from the management node: a single object (guarded so the key must sit under the target's own prefix), or a whole folder (type-to-confirm the slug; not offered, and refused, for the folder an owner's new backups go to — move the owner first). This is the deliberate path for erasing a retired site's offsite backups — deleting a node never touches them.
 
 ## Retiring a node
 

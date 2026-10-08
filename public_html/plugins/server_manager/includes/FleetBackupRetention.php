@@ -22,6 +22,8 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.9 - prune() orders every space's points newest first before the window is applied; a draining space
+ *                is released only by a verify sent after the active space was (re)opened
  * @version 1.8 - prune() works across every storage space of the node, each point deleted from its own space's
  *                target; a draining space is kept whole until the active space holds a verified chain, then ages
  *                out and is retired once empty; newest_landed() reads one space (specs/storage_targets.md WP4)
@@ -154,6 +156,9 @@ class FleetBackupRetention {
 					$points[] = array('item' => $id . '|' . $name, 'time' => self::start_time_of($name));
 				}
 			}
+			// surplus() reads its points newest first: the first one before the
+			// window is the one kept. Across spaces that order is not given.
+			usort($points, function ($x, $y) { return $y['time'] <=> $x['time'] ?: strcmp($y['item'], $x['item']); });
 			$surplus_items = array_flip(BackupRunner::surplus($points, $keep_days, $now));
 			$result['kept'] = count($points) - count($surplus_items);
 
@@ -233,7 +238,9 @@ class FleetBackupRetention {
 				$left++;
 				if ($id === $active) { $result['objects'][] = $obj; }
 			}
-			if ($left === 0 && $sp['space']->is_draining() && !$hold_draining) {
+			// Retired only once the whole folder is empty: a site's own backups
+			// beside ours keep it claimed.
+			if ($left === 0 && $sp['space']->is_draining() && !$hold_draining && $sp['space']->is_empty()) {
 				$sp['space']->retire();
 				$result['retired']++;
 			}
@@ -243,9 +250,11 @@ class FleetBackupRetention {
 	}
 
 	/**
-	 * Does the node's active space hold a chain a verify has passed? The
-	 * verify job names the space it read (space_id); a pass for any chain
-	 * there means the space holds a complete restore point of its own.
+	 * Does the node's active space hold a chain a verify has passed since it
+	 * became active? The verify job names the space it read (space_id); a
+	 * pass for a chain there, sent after the space was (re)opened, means the
+	 * space holds a complete restore point of its own. A pass from an earlier
+	 * time the node backed up there says nothing about now.
 	 */
 	public static function active_verified($node, ?StorageSpace $active) {
 		if ($active === null) {
@@ -254,9 +263,9 @@ class FleetBackupRetention {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare("SELECT mjb_parameters, mjb_result FROM mjb_management_jobs
 			WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'verify_backup' AND mjb_status = 'completed'
-			  AND mjb_delete_time IS NULL
+			  AND mjb_delete_time IS NULL AND mjb_create_time >= ?
 			ORDER BY mjb_management_job_id DESC LIMIT 50");
-		$q->execute(array((int)$node->key));
+		$q->execute(array((int)$node->key, (string)$active->get('sps_opened_time')));
 		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 			$params = json_decode((string)$row['mjb_parameters'], true);
 			$res = json_decode((string)$row['mjb_result'], true);

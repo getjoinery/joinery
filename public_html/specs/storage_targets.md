@@ -1,8 +1,13 @@
 # Storage targets — every stored object knows where it lives
 
 **Status:** Building — 2026-10-08. No open owner decisions; build order in §10.
-WP1–WP3 committed (7b6d7f0b). WP4 built, uncommitted (test `storage_spaces`; dev migrated by `sm_015`,
-19 node spaces). A browser look at the target forms, the node Move form, Who backs up here and Adopt
+WP1–WP3 committed (7b6d7f0b). WP4 committed (3e90d348; dev migrated by `sm_015`, 19 node spaces). The reviewer1 review
+of WP1–WP4 (10-08) is fixed, uncommitted: retention orders points newest first across spaces;
+a draining space is released only by evidence (a passed verify, a finished run with something
+stored) newer than the active space's latest opening; a removed node's or released customer's
+space drains; a draining space takes no write; one unreadable space no longer stops shelf_list;
+a space is retired only when its whole folder is empty; Delete all is refused on an active
+space's folder. A browser look at the target forms, the node Move form, Who backs up here and Adopt
 is owed. WP4 notes, decided while building:
 - A node's chain follows the **name** of the target the management node sends: a run to a target of
   another name starts a new chain (`BackupRunner` 1.28), so target names are unique. Until WP5 gives

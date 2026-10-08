@@ -463,6 +463,11 @@ return [
 					$open((int)$n['mgn_bkt_backup_target_id'], trim((string)$n['mgn_slug']), 'sps_mgn_managed_node_id',
 						(int)$n['mgn_managed_node_id']);
 				}
+			} elseif ((int)$dblink->query("SELECT count(*) FROM mgn_managed_nodes WHERE mgn_delete_time IS NULL")->fetchColumn() > 0) {
+				// Nothing says where these nodes backed up: none is given a space,
+				// so none is backed up from here until it is moved to a target.
+				error_log('sm_015: mgn_managed_nodes has no mgn_bkt_backup_target_id column, so no node was given a '
+					. 'storage space. Move each node to a backup target on its Backups tab.');
 			}
 
 			$tenants_ready = $dblink->query("SELECT to_regclass('svt_service_tenants') IS NOT NULL")->fetchColumn();
@@ -482,7 +487,8 @@ return [
 					$dblink->exec("UPDATE $table SET {$p}_sps_storage_space_id = s.sps_storage_space_id
 						FROM sps_storage_spaces s
 						WHERE {$p}_sps_storage_space_id IS NULL AND s.sps_svt_service_tenant_id = {$p}_svt_service_tenant_id
-						  AND s.sps_state IN ('active', 'draining') AND $key LIKE s.sps_base_key || '%'");
+						  AND s.sps_state IN ('active', 'draining')
+						  AND left($key, length(s.sps_base_key)) = s.sps_base_key");
 				}
 			}
 		},

@@ -51,6 +51,8 @@
  * stays readable where it is until retention prunes it. A ledger row whose
  * object is gone is kept, with its time and cause.
  *
+ * @version 1.5 - a draining space takes no write, even for a run opened before the move; one space that
+ *                cannot be read no longer stops shelf_list listing the others
  * @version 1.4 - every link is signed in the run's or the read's storage space; a chain left in a draining
  *                space is not extended; an abort is made against the object's own space and a row is kept,
  *                marked pruned, once its object is gone; unpaid tenants read nothing
@@ -273,7 +275,14 @@ class ShelfBroker {
 		}
 		$run = self::openRun($row, $run_id);
 		$key = (string)$run->get('svr_base_key') . $name;
-		list($target, $creds, $bucket) = self::reach(self::runSpace($run));
+		$space = self::runSpace($run);
+		if (!$space->is_active()) {
+			// Moved while the run was open: a space that is draining takes
+			// nothing new. The site starts the run again, in its new space.
+			throw new ShelfBrokerException('This site\'s backups were moved to another target while this run was open; '
+				. 'nothing more is stored in the old place. Start the run again.');
+		}
+		list($target, $creds, $bucket) = self::reach($space);
 
 		switch ($operation) {
 			case 'put':
@@ -332,14 +341,23 @@ class ShelfBroker {
 		$spaces = array();
 		$prefix = '';
 		foreach (StorageSpace::of_owner(StorageSpace::OWNER_TENANT, (int)$row->key) as $space) {
-			list($target, $creds, $bucket) = self::reach($space);
 			$base = $space->base();
 			if ($space->is_active()) {
 				$prefix = $base;
 			}
+			// One space that cannot be reached is said, and the others still list.
+			try {
+				list($target, $creds, $bucket) = $space->reach();
+				$listing = S3Signer::list($creds, $bucket, $base . $sub);
+			} catch (\Throwable $e) {
+				$spaces[] = array('space_id' => (int)$space->key, 'state' => (string)$space->get('sps_state'),
+					'target' => '', 'error' => 'This part of backup storage cannot be read right now.');
+				error_log('ShelfBroker: listing ' . $space->describe() . ' failed: ' . $e->getMessage());
+				continue;
+			}
 			$spaces[] = array('space_id' => (int)$space->key, 'state' => (string)$space->get('sps_state'),
 				'target' => (string)$target->get('bkt_name'));
-			foreach (S3Signer::list($creds, $bucket, $base . $sub) as $object) {
+			foreach ($listing as $object) {
 				$key = (string)($object['key'] ?? '');
 				if (strpos($key, $base) !== 0) {
 					continue; // the listing is scoped, but the boundary is asserted, not assumed
